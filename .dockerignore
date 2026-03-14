@@ -1,9 +1,23 @@
-/node_modules
-/npm-debug.log
-.env
-.env.*
-!.env.example
+# Dependencies
+node_modules
+npm-debug.log
 scripts/local_dev_helpers/node_modules
 scripts/local_dev_helpers/package-lock.json
 src/platforms/web/frontend/node_modules
 src/platforms/web/frontend/dist
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Dev/CI files not needed in image
+.git
+.github
+.claude
+research
+tests
+*.md
+deploy.sh
+docker-compose.yml
+Caddyfile
