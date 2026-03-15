@@ -1,0 +1,101 @@
+# Noema Production — Docker Compose
+#
+# This file declares all containers. deploy.sh orchestrates the
+# lifecycle (pull, keystore decrypt, health check, rollback).
+#
+# Usage from deploy.sh:
+#   ETHEREUM_SIGNER_PRIVATE_KEY="..." docker compose -f docker-compose.prod.yml up -d bot
+#   docker compose -f docker-compose.prod.yml up -d worker training sweeper
+#   docker compose -f docker-compose.prod.yml up -d staging
+#   docker compose -f docker-compose.prod.yml up -d caddy
+
+x-common: &common
+  image: ghcr.io/monygroupcorp/noema:${VERSION:-latest}
+  restart: unless-stopped
+  env_file: .env
+  networks:
+    - hyperbot
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges
+
+services:
+  bot:
+    <<: *common
+    container_name: hyperbotcontained
+    environment:
+      - ETHEREUM_SIGNER_PRIVATE_KEY=${ETHEREUM_SIGNER_PRIVATE_KEY:-}
+      - MAINTENANCE_MODE_FILE=/var/run/hyperbot/maintenance.flag
+      - COLLECTION_EXPORT_PROCESSING_ENABLED=false
+    volumes:
+      - /var/run/hyperbot:/var/run/hyperbot
+    networks:
+      hyperbot:
+        aliases:
+          - hyperbot
+
+  worker:
+    <<: *common
+    container_name: hyperbotworker
+    command: ["node", "worker.js"]
+    environment:
+      - COLLECTION_EXPORT_PROCESSING_ENABLED=true
+    networks:
+      hyperbot:
+        aliases:
+          - hyperbot-worker
+
+  training:
+    <<: *common
+    container_name: hyperbottraining
+    command: ["node", "scripts/workers/vastaiTrainingWorker.js"]
+    environment:
+      - VASTAI_SSH_KEY_PATH=${CONTAINER_SSH_KEY_PATH:-/home/node/.ssh/vastai/id_ed25519}
+    volumes:
+      - ${VASTAI_SSH_KEY_DIR:-/dev/null}:/home/node/.ssh/vastai:ro
+    networks:
+      hyperbot:
+        aliases:
+          - hyperbot-training
+
+  sweeper:
+    <<: *common
+    container_name: hyperbotsweeper
+    command: ["/bin/sh", "-c", "while true; do sleep ${SWEEPER_INTERVAL_SECONDS:-900}; node scripts/workers/instanceSweeper.js || true; done"]
+    networks:
+      hyperbot:
+        aliases:
+          - hyperbot-sweeper
+
+  staging:
+    <<: *common
+    container_name: hyperbot-staging
+    image: ghcr.io/monygroupcorp/noema:staging
+    env_file: .env.staging
+    networks:
+      hyperbot:
+        aliases:
+          - hyperbot-staging
+
+  caddy:
+    image: caddy:latest
+    container_name: caddy_proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - hyperbot
+
+networks:
+  hyperbot:
+    name: hyperbot_network
+
+volumes:
+  caddy_data:
+  caddy_config:

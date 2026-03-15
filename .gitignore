@@ -66,9 +66,10 @@ scripts/tool_registry.generated.json
 # Docker
 .stationthis/
 
-# Shell scripts in root (except deploy)
+# Shell scripts in root (except deploy scripts)
 /*.sh
 !deploy.sh
+!deploy-staging.sh
 
 # Old cruft
 agent_prompts/
