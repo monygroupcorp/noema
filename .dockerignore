@@ -19,5 +19,7 @@ research
 tests
 *.md
 deploy.sh
+deploy-staging.sh
 docker-compose.yml
+docker-compose.prod.yml
 Caddyfile
