@@ -141,7 +141,9 @@ class CreditService {
         this.eventDeduplicationService,
         this.creditLedgerDb,
         this.contractConfig,
-        this.logger
+        this.logger,
+        this.userCoreDb,
+        this.internalApiClient
       );
     } else {
       this.eventWebhookProcessor = null;
