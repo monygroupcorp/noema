@@ -378,6 +378,18 @@ class CreditLedgerDB extends BaseDB {
   }
 
   /**
+   * Finds a referral vault by its on-chain referral key (bytes32 keccak256 hash).
+   * @param {string} referralKey - The bytes32 referral key
+   * @returns {Promise<Object|null>} The vault document or null if not found
+   */
+  async findReferralVaultByKey(referralKey) {
+    return this.findOne({
+      referral_key: referralKey,
+      type: 'REFERRAL_VAULT'
+    });
+  }
+
+  /**
    * Gets all active referral vaults owned by a user's master account.
    * @param {string} masterAccountId - The master account ID from userCore
    * @returns {Promise<Array>} Array of vault documents
@@ -459,15 +471,58 @@ class CreditLedgerDB extends BaseDB {
   }
 
   /**
-   * Updates the referral volume and rewards for a vault.
-   * @param {string} vaultAddress - The address of the vault
+   * Aggregates referral payment stats by token for a given referral key.
+   * Queries confirmed ledger entries that used this referral key.
+   * @param {string} referralKey - The bytes32 referral key
+   * @returns {Promise<Array<{tokenAddress: string, totalVolume: string, totalReferralEarned: string, depositCount: number}>>}
+   */
+  async getReferralDashboardStats(referralKey) {
+    this.logger.debug(`[CreditLedgerDB] Getting referral dashboard stats for key: ${referralKey}`);
+    try {
+      const stats = await this.aggregate([
+        {
+          $match: {
+            referral_key: referralKey,
+            status: 'CONFIRMED',
+            referral_amount_wei: { $exists: true, $ne: '0' }
+          }
+        },
+        {
+          $group: {
+            _id: '$token_address',
+            totalVolume: { $sum: { $toLong: '$deposit_amount_wei' } },
+            totalReferralEarned: { $sum: { $toLong: '$referral_amount_wei' } },
+            depositCount: { $sum: 1 }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            tokenAddress: '$_id',
+            totalVolume: { $toString: '$totalVolume' },
+            totalReferralEarned: { $toString: '$totalReferralEarned' },
+            depositCount: '$depositCount'
+          }
+        }
+      ]);
+      this.logger.debug(`[CreditLedgerDB] Found referral stats for ${stats.length} tokens for key ${referralKey}`);
+      return stats;
+    } catch (error) {
+      this.logger.error(`[CreditLedgerDB] Error getting referral dashboard stats for key ${referralKey}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Updates the referral volume and rewards for a vault, looked up by referral key.
+   * @param {string} referralKey - The bytes32 referral key
    * @param {string} additionalVolumeWei - Additional volume in wei to add
    * @param {string} rewardsWei - Rewards in wei to add
    * @returns {Promise<Object>} The result of the update operation
    */
-  async updateReferralVaultStats(vaultAddress, additionalVolumeWei, rewardsWei) {
+  async updateReferralVaultStats(referralKey, additionalVolumeWei, rewardsWei) {
     return this.updateOne(
-      { vault_address: vaultAddress, type: 'REFERRAL_VAULT' },
+      { referral_key: referralKey, type: 'REFERRAL_VAULT' },
       {
         $inc: {
           total_referral_volume_wei: additionalVolumeWei,
