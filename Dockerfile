@@ -32,8 +32,8 @@ COPY . .
 COPY --from=frontend-builder /frontend/dist ./src/platforms/web/frontend/dist
 
 # Create necessary directories and set permissions before switching user
-RUN mkdir -p tmp output storage/media \
-    && chown -R node:node tmp output storage
+RUN mkdir -p tmp output storage/media logs \
+    && chown -R node:node tmp output storage logs
 
 # Set user after all root-level operations are done
 USER node
