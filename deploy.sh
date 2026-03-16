@@ -227,9 +227,8 @@ ensure_network() {
 
 start_caddy() {
   if docker ps --format '{{.Names}}' | grep -q "^${CADDY_CONTAINER}$"; then
-    # Caddy already running — reload config
+    # Caddy already running with bind-mounted Caddyfile — just reload
     log "Reloading Caddy config..."
-    docker cp "${CADDYFILE_PATH}" "${CADDY_CONTAINER}":/etc/caddy/Caddyfile
     docker exec "${CADDY_CONTAINER}" caddy reload --config /etc/caddy/Caddyfile >> "${LOG_FILE}" 2>&1 || true
     return
   fi
