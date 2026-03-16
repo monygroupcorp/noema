@@ -412,9 +412,7 @@ if [[ -z "${PRIVATE_KEY}" ]]; then
   exit 1
 fi
 
-# 5. Stop existing containers
-log "Stopping application container..."
-stop_container_if_exists "${APP_CONTAINER}"
+# 5. Stop worker containers if requested (before app blue-green swap)
 if [[ "${DEPLOY_WORKER_FLAG}" == "1" ]]; then
   stop_container_if_exists "${WORKER_CONTAINER}"
 fi
@@ -427,58 +425,57 @@ fi
 ensure_network
 start_caddy
 
-# 7. Start new application container
-run_logged "Starting application container (${IMAGE})..." docker run -d \
+# 7. Blue-green: start new container alongside old
+NEW_CONTAINER="${APP_CONTAINER}-new"
+NEW_ALIAS="${CONTAINER_ALIAS}-new"
+stop_container_if_exists "${NEW_CONTAINER}"
+
+run_logged "Starting new container (${IMAGE})..." docker run -d \
   --env ETHEREUM_SIGNER_PRIVATE_KEY="${PRIVATE_KEY}" \
   --env MAINTENANCE_MODE_FILE="${MAINT_FLAG}" \
   --env COLLECTION_EXPORT_PROCESSING_ENABLED=false \
   --env-file "${ENV_FILE}" \
   --network "${NETWORK_NAME}" \
-  --network-alias "${CONTAINER_ALIAS}" \
+  --network-alias "${NEW_ALIAS}" \
   --restart unless-stopped \
   -v "${MAINT_DIR}:${MAINT_DIR}" \
-  --name "${APP_CONTAINER}" \
+  --name "${NEW_CONTAINER}" \
   --cap-drop ALL \
   --security-opt no-new-privileges \
   "${IMAGE}"
 
-# 8. Health check — rollback on failure
-if ! health_check_app; then
-  log "Health check failed; collecting container logs..."
-  docker logs "${APP_CONTAINER}" 2>&1 | tail -n 200 >> "${LOG_FILE}" || true
-  log "Attempting rollback..."
-  stop_container_if_exists "${APP_CONTAINER}"
-
-  # Try the previous version tag if available
-  ROLLBACK_IMAGE="${REGISTRY}:previous"
-  if docker image inspect "${ROLLBACK_IMAGE}" >/dev/null 2>&1; then
-    run_logged "Starting rollback container (${ROLLBACK_IMAGE})..." docker run -d \
-      --env ETHEREUM_SIGNER_PRIVATE_KEY="${PRIVATE_KEY}" \
-      --env MAINTENANCE_MODE_FILE="${MAINT_FLAG}" \
-      --env-file "${ENV_FILE}" \
-      --network "${NETWORK_NAME}" \
-      --network-alias "${CONTAINER_ALIAS}" \
-      --restart unless-stopped \
-      -v "${MAINT_DIR}:${MAINT_DIR}" \
-      --name "${APP_CONTAINER}" \
-      --cap-drop ALL \
-      --security-opt no-new-privileges \
-      "${ROLLBACK_IMAGE}"
-    log "Rollback container started. Deploy FAILED."
-  else
-    log "No rollback image available. Deploy FAILED."
-  fi
+# 8. Health check new container — old keeps serving traffic
+if ! health_check_app "${NEW_CONTAINER}" "${NEW_ALIAS}"; then
+  log "Health check failed on new container; old container still serving."
+  docker logs "${NEW_CONTAINER}" 2>&1 | tail -n 200 >> "${LOG_FILE}" || true
+  stop_container_if_exists "${NEW_CONTAINER}"
   unset PRIVATE_KEY
+  disable_maintenance
+  log "Deploy ABORTED. No downtime occurred."
   exit 1
 fi
 
-# 9. Clear private key from memory
+# 9. Swap: disconnect old, reconnect new with production alias
+log "Swapping traffic to new container..."
+if docker ps --format '{{.Names}}' | grep -q "^${APP_CONTAINER}$"; then
+  docker network disconnect "${NETWORK_NAME}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1 || true
+fi
+docker network disconnect "${NETWORK_NAME}" "${NEW_CONTAINER}" >> "${LOG_FILE}" 2>&1
+docker network connect --alias "${CONTAINER_ALIAS}" "${NETWORK_NAME}" "${NEW_CONTAINER}" >> "${LOG_FILE}" 2>&1
+log "Traffic swapped to new container."
+
+# 10. Stop old container and rename new
+stop_container_if_exists "${APP_CONTAINER}"
+docker rename "${NEW_CONTAINER}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1
+log "Container renamed to ${APP_CONTAINER}."
+
+# 11. Clear private key from memory
 unset PRIVATE_KEY
 
-# 10. Disable maintenance
+# 12. Disable maintenance
 disable_maintenance
 
-# 11. Ensure workers are running
+# 13. Ensure workers are running
 ensure_worker_running
 ensure_training_worker_running
 ensure_sweeper_running
@@ -487,10 +484,10 @@ if [[ "${DEPLOY_WORKER_FLAG}" == "1" ]]; then
   resume_worker
 fi
 
-# 12. Tag current image as 'previous' for future rollbacks
+# 14. Tag current image as 'previous' for future rollbacks
 docker tag "${IMAGE}" "${REGISTRY}:previous" >> "${LOG_FILE}" 2>&1 || true
 
-# 13. Cleanup dangling images
+# 15. Cleanup dangling images
 docker image prune -f >> "${LOG_FILE}" 2>&1 || true
 
 log "Deployment complete. Recent app logs:"
