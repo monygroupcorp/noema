@@ -8,6 +8,7 @@
  *
  * All deposits are final (non-refundable). Points are awarded immediately.
  */
+const { ethers } = require('ethers');
 const { getFundingRate } = require('../tokenConfig');
 const tokenDecimalService = require('../../tokenDecimalService');
 
@@ -103,6 +104,11 @@ class DepositProcessorService {
     // Mark as processed for deduplication
     if (this.eventDeduplicationService) {
       this.eventDeduplicationService.markProcessed(transactionHash);
+    }
+
+    // Update referral vault running totals if this payment used a referral
+    if (referralKey && referralKey !== ethers.ZeroHash && referralAmount && BigInt(referralAmount) > 0n) {
+      await this._updateReferralStats(referralKey, amountStr, referralAmount.toString());
     }
   }
 
@@ -343,6 +349,27 @@ class DepositProcessorService {
 
     // Reuse NFT flow with the token address
     await this.processNftDepositEvent({ from, token, tokenId: id }, transactionHash, blockNumber, logIndex);
+  }
+
+  /**
+   * Updates referral vault running totals when a payment includes a referral split.
+   * @param {string} referralKey - The bytes32 referral key
+   * @param {string} amount - Total payment amount in wei
+   * @param {string} referralAmount - Referral split amount in wei
+   * @private
+   */
+  async _updateReferralStats(referralKey, amount, referralAmount) {
+    try {
+      await this.creditLedgerDb.updateReferralVaultStats(
+        referralKey,
+        amount,
+        referralAmount
+      );
+      this.logger.debug(`[DepositProcessorService] Updated referral stats for key ${referralKey}: volume +${amount}, reward +${referralAmount}`);
+    } catch (err) {
+      // Non-fatal — don't fail the deposit if stats update fails
+      this.logger.warn(`[DepositProcessorService] Failed to update referral vault stats for key ${referralKey}:`, err.message);
+    }
   }
 
   /**
