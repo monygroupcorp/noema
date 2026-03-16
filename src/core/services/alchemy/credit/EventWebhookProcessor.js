@@ -17,7 +17,9 @@ class EventWebhookProcessor {
     eventDeduplicationService,
     creditLedgerDb,
     contractConfig,
-    logger
+    logger,
+    userCoreDb = null,
+    internalApiClient = null
   ) {
     this.ethereumService = ethereumService;
     this.depositProcessorService = depositProcessorService;
@@ -25,6 +27,8 @@ class EventWebhookProcessor {
     this.creditLedgerDb = creditLedgerDb;
     this.contractConfig = contractConfig;
     this.logger = logger || console;
+    this.userCoreDb = userCoreDb;
+    this.internalApiClient = internalApiClient;
   }
 
   /**
@@ -114,25 +118,55 @@ class EventWebhookProcessor {
   }
 
   /**
-   * Tracks a referral registration event for analytics.
+   * Tracks a referral registration event by storing the vault record with account linkage.
    * @param {object} decodedLog - Decoded ReferralRegistered event
    * @param {string} txHash - Transaction hash
    * @private
    */
   async _trackReferralRegistration(decodedLog, txHash) {
     const { key, name, owner } = decodedLog;
-    this.logger.info(`[EventWebhookProcessor] Referral registered: name="${name}", key=${key}, owner=${owner}, tx=${txHash}`);
+    const ownerAddress = (owner || '').toLowerCase();
+    this.logger.info(`[EventWebhookProcessor] Referral registered: name="${name}", key=${key}, owner=${ownerAddress}, tx=${txHash}`);
 
-    // Store in credit ledger for tracking
+    // Resolve owner wallet to master account ID
+    let masterAccountId = null;
+    if (this.userCoreDb) {
+      try {
+        const user = await this.userCoreDb.findOne({ 'wallets.address': ownerAddress });
+        if (user) masterAccountId = user._id;
+      } catch (err) {
+        this.logger.warn(`[EventWebhookProcessor] userCoreDb lookup failed for ${ownerAddress}:`, err.message);
+      }
+    }
+    if (!masterAccountId && this.internalApiClient) {
+      try {
+        const response = await this.internalApiClient.get(`/internal/v1/data/wallets/lookup?address=${ownerAddress}`);
+        masterAccountId = response.data.masterAccountId || null;
+      } catch (err) {
+        if (err.response?.status !== 404) {
+          this.logger.warn(`[EventWebhookProcessor] Wallet lookup API failed for ${ownerAddress}:`, err.message);
+        }
+      }
+    }
+
+    // Check if already stored (idempotency — webhook may re-deliver)
+    const existing = await this.creditLedgerDb.findReferralVaultByKey(key);
+    if (existing) {
+      this.logger.debug(`[EventWebhookProcessor] Referral key ${key} already stored, skipping.`);
+      return;
+    }
+
     try {
       await this.creditLedgerDb.createReferralVault({
         vault_name: name,
         referral_key: key,
-        owner_address: owner,
-        creation_tx_hash: txHash,
+        owner_address: ownerAddress,
+        master_account_id: masterAccountId,
+        registration_tx_hash: txHash,
+        status: 'ACTIVE',
       });
+      this.logger.info(`[EventWebhookProcessor] Stored referral vault: name="${name}", owner=${ownerAddress}, masterAccountId=${masterAccountId}`);
     } catch (error) {
-      // May already exist if re-processing
       this.logger.warn(`[EventWebhookProcessor] Failed to store referral registration (may be duplicate):`, error.message);
     }
   }
