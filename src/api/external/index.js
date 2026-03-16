@@ -182,12 +182,7 @@ function initializeExternalApi(dependencies) {
   }
 
   // Mount the Referral Vault API router (Protected by JWT or API key)
-  // Ensure longRunningApiClient is available for salt mining operations
-  const referralVaultDependencies = {
-    ...dependencies,
-    longRunningApiClient: dependencies.longRunningApiClient
-  };
-  const referralVaultApi = createReferralVaultApi(referralVaultDependencies);
+  const referralVaultApi = createReferralVaultApi(dependencies);
   if (referralVaultApi) {
     externalApiRouter.use('/referral-vault', authenticateUserOrApiKey, referralVaultApi);
     logger.debug('External Referral Vault API router mounted at /referral-vault. (JWT or API key protected)');

@@ -1,123 +1,101 @@
 const express = require('express');
-const { createLogger } = require('../../utils/logger');
-const contractUtils = require('../../core/services/alchemy/contractUtils');
 const { ethers } = require('ethers');
+const { createLogger } = require('../../utils/logger');
+const creditVaultAbi = require('../../core/contracts/abis/creditVault.json');
+const { getCreditVaultAddress } = require('../../core/services/alchemy/foundationConfig');
 
 const logger = createLogger('ReferralVaultApi');
-const NATIVE_ETH_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 function createReferralVaultApi(dependencies) {
-  const { internalApiClient, longRunningApiClient, priceFeedService, creditServices = {}, ethereumServices = {}, creditService: legacyCredit, ethereumService: legacyEth } = dependencies;
+  const { ethereumServices = {}, ethereumService: legacyEth, priceFeedService, creditServices = {}, creditService: legacyCredit } = dependencies;
 
-  // Debug logging for dependencies
-  logger.debug('[ReferralVaultApi] Dependencies check:', {
-    internalApiClient: !!internalApiClient,
-    longRunningApiClient: !!longRunningApiClient,
-    priceFeedService: !!priceFeedService,
-    creditServices: Object.keys(creditServices),
-    ethereumServices: Object.keys(ethereumServices)
-  });
-
-  // Multichain service resolver
   const getChainServices = (cid = '1') => ({
-    creditService: creditServices[cid] || legacyCredit,
     ethereumService: ethereumServices[cid] || legacyEth,
+    creditService: creditServices[cid] || legacyCredit,
   });
 
-  // Default to mainnet services
-  const { creditService, ethereumService } = getChainServices('1');
-
-  if (!internalApiClient) {
-    throw new Error('[ReferralVaultApi] internalApiClient dependency missing');
-  }
   const router = express.Router();
-  // All contract config comes from creditService
-  const contractConfig = creditService && creditService.contractConfig;
 
-  // Debug log for missing dependencies
-  logger.debug('[ReferralVaultApi] Dependency check:', {
-    ethereumService: !!ethereumService,
-    priceFeedService: !!priceFeedService,
-    creditService: !!creditService,
-    contractConfig: !!contractConfig,
-    contractConfigAddress: contractConfig && contractConfig.address,
-    contractConfigAbi: contractConfig && Array.isArray(contractConfig.abi) && contractConfig.abi.length
-  });
+  /**
+   * GET /check-name?name=coolname&chainId=1
+   * Reads referralOwner(keccak256(name)) on-chain. Returns availability.
+   */
+  router.get('/check-name', async (req, res) => {
+    const { name, chainId: queryChainId } = req.query;
+    const chainId = String(queryChainId || '1');
 
-  if (!ethereumService || !priceFeedService || !creditService || !contractConfig) {
-    //throw new Error('ReferralVaultApi: Missing one or more required services or contract configuration. (creditService is the canonical source for contract config)');
-    logger.debug('[ReferralVaultApi] Missing one or more required services or contract configuration. (creditService is the canonical source for contract config)');
-  }
-
-  // Endpoint to check if a vault name is available
-  router.post('/check-name', async (req, res) => {
-    const { name } = req.body;
-    const userId = req.user?.userId;
-
-    if (!userId) {
-      return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'User not authenticated.' } });
-    }
     if (!name || name.length < 4 || !/^[a-zA-Z0-9_-]+$/.test(name)) {
-      return res.status(400).json({ error: { code: 'INVALID_NAME', message: 'Name must be at least 4 characters long and contain only letters, numbers, underscores, or dashes.' } });
+      return res.status(400).json({ error: { code: 'INVALID_NAME', message: 'Name must be at least 4 characters and contain only letters, numbers, underscores, or dashes.' } });
     }
 
     try {
-      // This internal endpoint will need to be created.
-      const response = await internalApiClient.get(`/internal/v1/data/ledger/vaults/by-name/${name}`);
-      // If the request succeeds, it means a vault was found.
-      res.status(200).json({ isAvailable: false });
-    } catch (error) {
-      if (error.response && error.response.status === 404) {
-        // 404 means the name was not found, so it's available.
-        res.status(200).json({ isAvailable: true });
-      } else {
-        logger.error('[ReferralVaultApi] /check-name failed:', error);
-        res.status(500).json({ error: { code: 'INTERNAL_SERVER_ERROR', message: 'Error checking name availability.' } });
+      const { ethereumService } = getChainServices(chainId);
+      const vaultAddress = getCreditVaultAddress(chainId);
+      const referralKey = ethers.keccak256(ethers.toUtf8Bytes(name));
+
+      const owner = await ethereumService.read(vaultAddress, creditVaultAbi, 'referralOwner', referralKey);
+      const isAvailable = owner === ethers.ZeroAddress;
+
+      const result = { name, referralKey, isAvailable };
+      if (!isAvailable) {
+        result.currentOwner = owner;
       }
+      res.json(result);
+    } catch (error) {
+      logger.error('[ReferralVaultApi] /check-name failed:', error);
+      res.status(500).json({ error: { code: 'INTERNAL_SERVER_ERROR', message: 'Error checking name availability.' } });
     }
   });
 
-  // Endpoint to create a new referral vault
-  router.post('/create', async (req, res) => {
-    const { name } = req.body;
-    const userId = req.user?.userId;
+  /**
+   * POST /register
+   * Returns calldata for CreditVault.register(name). User's wallet submits the tx.
+   */
+  router.post('/register', async (req, res) => {
+    const { name, userWalletAddress, chainId: bodyChainId } = req.body;
+    const chainId = String(bodyChainId || '1');
 
-     if (!userId) {
-      return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'User not authenticated.' } });
-    }
     if (!name || name.length < 4 || !/^[a-zA-Z0-9_-]+$/.test(name)) {
-      return res.status(400).json({ error: { code: 'INVALID_NAME', message: 'Invalid name provided.' } });
+      return res.status(400).json({ error: { code: 'INVALID_NAME', message: 'Name must be at least 4 characters and contain only letters, numbers, underscores, or dashes.' } });
     }
-    
+    if (!userWalletAddress || !ethers.isAddress(userWalletAddress)) {
+      return res.status(400).json({ error: { code: 'INVALID_ADDRESS', message: 'Valid userWalletAddress is required.' } });
+    }
+
     try {
-        logger.debug(`[ReferralVaultApi] Creating referral code "${name}" for user ${userId}`);
+      const { ethereumService } = getChainServices(chainId);
+      const vaultAddress = getCreditVaultAddress(chainId);
+      const referralKey = ethers.keccak256(ethers.toUtf8Bytes(name));
 
-        const response = await internalApiClient.post(`/internal/v1/data/actions/create-referral-vault`, {
-            masterAccountId: userId,
-            vaultName: name
-        });
-        
-        logger.debug(`[ReferralVaultApi] Successfully created vault "${name}" for user ${userId}`);
-        // The internal endpoint will return the new vault details upon success.
-        res.status(201).json(response.data);
+      // Check on-chain availability
+      const existingOwner = await ethereumService.read(vaultAddress, creditVaultAbi, 'referralOwner', referralKey);
+      if (existingOwner !== ethers.ZeroAddress) {
+        return res.status(409).json({ error: { code: 'NAME_TAKEN', message: 'This referral name is already registered on-chain.' } });
+      }
 
-    } catch(error) {
-        // Log a clean, structured error instead of the massive Axios object
-        logger.error('[ReferralVaultApi] /create call to internal API failed.', {
-            status: error.response?.status,
-            method: error.config?.method,
-            url: error.config?.url,
-            responseData: error.response?.data,
-            errorMessage: error.message,
-            errorCode: error.code
-        });
+      // Build calldata
+      const iface = new ethers.Interface(creditVaultAbi);
+      const data = iface.encodeFunctionData('register', [name]);
 
-        const errPayload = error.response?.data || { error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create referral vault.' } };
-        res.status(error.response?.status || 500).json(errPayload);
+      res.json({
+        registerTx: {
+          from: userWalletAddress,
+          to: vaultAddress,
+          data,
+        },
+        referralKey,
+        name,
+      });
+    } catch (error) {
+      logger.error('[ReferralVaultApi] /register failed:', error);
+      res.status(500).json({ error: { code: 'INTERNAL_SERVER_ERROR', message: 'Error preparing registration transaction.' } });
     }
   });
 
-  // List the authenticated user's vaults
+  /**
+   * GET /my-vaults
+   * Returns all referral vaults owned by the authenticated user.
+   */
   router.get('/my-vaults', async (req, res) => {
     const userId = req.user?.userId;
     if (!userId) {
@@ -125,160 +103,81 @@ function createReferralVaultApi(dependencies) {
     }
 
     try {
-      const response = await internalApiClient.get(`/internal/v1/data/ledger/vaults/by-master-account/${userId}`);
-      res.json({ vaults: response.data.vaults || [] });
+      const { creditService } = getChainServices('1');
+      const vaults = await creditService.creditLedgerDb.findReferralVaultsByMasterAccount(userId);
+      res.json({ vaults: vaults || [] });
     } catch (error) {
-      if (error.response && error.response.status === 404) {
-        return res.json({ vaults: [] });
-      }
-      logger.error('[ReferralVaultApi] /my-vaults failed:', { status: error.response?.status, message: error.message });
+      logger.error('[ReferralVaultApi] /my-vaults failed:', error);
       res.status(500).json({ error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to fetch vaults.' } });
     }
   });
 
-  router.get('/:vaultAddress/dashboard', async (req, res) => {
-    const { vaultAddress } = req.params;
-    logger.debug(`[ReferralVaultApi] GET /:vaultAddress/dashboard for vault: ${vaultAddress}`);
+  /**
+   * GET /:name/dashboard
+   * Returns referral earnings dashboard for a named referral vault.
+   */
+  router.get('/:name/dashboard', async (req, res) => {
+    const { name } = req.params;
+
+    if (!name || name.length < 4 || !/^[a-zA-Z0-9_-]+$/.test(name)) {
+      return res.status(400).json({ error: { code: 'INVALID_NAME', message: 'Invalid referral name.' } });
+    }
 
     try {
-      // 1. Get historical stats from the internal API
-      const response = await internalApiClient.get(`/internal/v1/data/ledger/vaults/${vaultAddress}/stats`);
-      const historicalStats = response.data.stats;
+      const { creditService } = getChainServices('1');
+      const referralKey = ethers.keccak256(ethers.toUtf8Bytes(name));
 
-      // 2. Enrich with on-chain data and prices
+      // Find the vault record
+      const vault = await creditService.creditLedgerDb.findReferralVaultByKey(referralKey);
+      if (!vault) {
+        return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Referral vault not found.' } });
+      }
+
+      // Aggregate payment stats from ledger
+      const tokenStats = await creditService.creditLedgerDb.getReferralDashboardStats(referralKey);
+
+      // Enrich with price data for USD values
       const enrichedStats = await Promise.all(
-        historicalStats.map(async (stat) => {
-          const { tokenAddress, totalDeposits, totalAdjustedGrossUsd } = stat;
-
-          // a. Get token metadata
-          let symbol = 'N/A', decimals = 18, iconUrl = null, name = '';
-          if (tokenAddress.toLowerCase() === NATIVE_ETH_ADDRESS) {
-            // Native ETH: hardcode metadata
-            symbol = 'ETH';
-            decimals = 18;
-            name = 'Ethereum';
-            iconUrl = null;
-          } else {
-            try {
-              const meta = await priceFeedService.getMetadata(tokenAddress);
-              symbol = meta.symbol;
-              decimals = meta.decimals;
-              name = meta.name;
-              iconUrl = meta.logo || null;
-            } catch (e) {
-              logger.warn(`[ReferralVaultApi] Could not fetch metadata for token ${tokenAddress}`, e.message);
-            }
-          }
-
-          // b. Get on-chain withdrawable balance (userOwned)
-          let currentWithdrawable = '0';
-          try {
-            const custodyKey = contractUtils.getCustodyKey(vaultAddress, tokenAddress);
-            const packedAmount = await ethereumService.read(contractConfig.address, contractConfig.abi, 'custody', custodyKey);
-            const { userOwned } = contractUtils.splitCustodyAmount(packedAmount);
-            currentWithdrawable = userOwned.toString();
-          } catch (e) {
-            logger.error(`[ReferralVaultApi] Could not fetch on-chain custody for ${tokenAddress} in vault ${vaultAddress}`, e);
-          }
-
-          // c. Get current price
+        tokenStats.map(async (stat) => {
           let price = 0;
+          let symbol = stat.tokenAddress === '0x0000000000000000000000000000000000000000' ? 'ETH' : 'UNKNOWN';
           try {
-            price = await priceFeedService.getPriceInUsd(tokenAddress);
+            if (priceFeedService) {
+              price = await priceFeedService.getPriceInUsd(stat.tokenAddress);
+              if (symbol === 'UNKNOWN') {
+                const meta = await priceFeedService.getMetadata(stat.tokenAddress);
+                symbol = meta?.symbol || 'UNKNOWN';
+              }
+            }
           } catch (e) {
-            logger.warn(`[ReferralVaultApi] Could not fetch price for token ${tokenAddress}`, e.message);
+            logger.warn(`[ReferralVaultApi] Price/metadata fetch failed for ${stat.tokenAddress}:`, e.message);
           }
-          
-          const toFloat = (val) => parseFloat(ethers.formatUnits(val, decimals));
 
           return {
-            tokenAddress,
+            ...stat,
             symbol,
-            decimals,
-            iconUrl,
-            name,
-            totalDeposits,
-            totalDepositsUsd: totalAdjustedGrossUsd,
-            currentWithdrawable,
-            currentWithdrawableUsd: toFloat(currentWithdrawable) * price,
+            currentPriceUsd: price,
           };
         })
       );
 
       res.json({
-        vaultAddress,
+        name: vault.vault_name,
+        referralKey,
+        ownerAddress: vault.owner_address,
+        totals: {
+          referralVolumeWei: vault.total_referral_volume_wei || '0',
+          referralRewardsWei: vault.total_referral_rewards_wei || '0',
+        },
         tokens: enrichedStats,
       });
-
     } catch (error) {
-      logger.error(`[ReferralVaultApi] Failed to get dashboard data for vault ${vaultAddress}:`, error);
-      if (error.response && error.response.status === 404) {
-        return res.status(404).json({ error: { message: 'Vault not found or has no confirmed deposits.' } });
-      }
-      res.status(500).json({ error: { message: 'An internal error occurred while fetching vault data.' } });
-    }
-  });
-
-  // Create a withdrawal request for a vault
-  router.post('/:vaultAddress/withdraw', async (req, res) => {
-    const userId = req.user?.userId;
-    const { vaultAddress } = req.params;
-    const { tokenAddress } = req.body;
-
-    if (!userId) {
-      return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'User not authenticated.' } });
-    }
-    if (!tokenAddress) {
-      return res.status(400).json({ error: { code: 'MISSING_TOKEN', message: 'tokenAddress is required.' } });
-    }
-
-    try {
-      // Look up the vault to verify ownership
-      const vaultRes = await internalApiClient.get(`/internal/v1/data/ledger/vaults/by-address/${vaultAddress}`);
-      const vault = vaultRes.data;
-
-      if (!vault || vault.master_account_id?.toString() !== userId.toString()) {
-        return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'You do not own this vault.' } });
-      }
-
-      // Get on-chain withdrawable balance
-      let collateralAmountWei = '0';
-      try {
-        const custodyKey = contractUtils.getCustodyKey(vaultAddress, tokenAddress);
-        const packedAmount = await ethereumService.read(contractConfig.address, contractConfig.abi, 'custody', custodyKey);
-        const { userOwned } = contractUtils.splitCustodyAmount(packedAmount);
-        collateralAmountWei = userOwned.toString();
-      } catch (e) {
-        logger.error(`[ReferralVaultApi] Could not read on-chain balance for withdraw:`, e);
-        return res.status(500).json({ error: { code: 'CHAIN_READ_FAILED', message: 'Could not read on-chain balance.' } });
-      }
-
-      if (BigInt(collateralAmountWei) === 0n) {
-        return res.status(400).json({ error: { code: 'ZERO_BALANCE', message: 'Nothing to withdraw for this token.' } });
-      }
-
-      // Create withdrawal request via internal ledger
-      const requestId = `wr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const response = await internalApiClient.post('/internal/v1/data/ledger/withdrawals', {
-        request_tx_hash: requestId,
-        request_block_number: 0,
-        vault_account: vaultAddress,
-        user_address: vault.owner_address,
-        token_address: tokenAddress,
-        master_account_id: userId,
-        collateral_amount_wei: collateralAmountWei,
-      });
-
-      res.status(201).json(response.data);
-    } catch (error) {
-      logger.error('[ReferralVaultApi] /withdraw failed:', { status: error.response?.status, message: error.message });
-      const status = error.response?.status || 500;
-      const errPayload = error.response?.data || { error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create withdrawal request.' } };
-      res.status(status).json(errPayload);
+      logger.error(`[ReferralVaultApi] /${name}/dashboard failed:`, error);
+      res.status(500).json({ error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to fetch dashboard data.' } });
     }
   });
 
   return router;
 }
 
-module.exports = { createReferralVaultApi }; 
+module.exports = { createReferralVaultApi };
