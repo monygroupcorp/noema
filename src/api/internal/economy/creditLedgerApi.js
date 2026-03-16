@@ -145,20 +145,21 @@ function createCreditLedgerApi(services, logger) {
     }
   });
 
-  // POST /ledger/vaults - Create a new referral vault
+  // POST /ledger/vaults - Create a new referral vault record
   router.post('/vaults', async (req, res) => {
     const requestId = uuidv4();
-    const { vault_address, owner_address, master_account_id, creation_tx_hash, salt } = req.body;
+    const { vault_name, referral_key, owner_address, master_account_id, registration_tx_hash } = req.body;
 
     logger.info(`[creditLedgerApi] POST /ledger/vaults - RequestId: ${requestId}`, { body: req.body });
 
     try {
       const vault = await creditLedgerDb.createReferralVault({
-        vault_address,
+        vault_name,
+        referral_key,
         owner_address,
         master_account_id,
-        creation_tx_hash,
-        salt
+        registration_tx_hash,
+        status: 'ACTIVE',
       });
 
       res.status(201).json({ vault, requestId });
@@ -185,25 +186,6 @@ function createCreditLedgerApi(services, logger) {
     }
   });
 
-  // GET /ledger/vaults/by-address/:address - Get a vault by its address
-  router.get('/vaults/by-address/:address', async (req, res) => {
-    const { address } = req.params;
-    const requestId = uuidv4();
-
-    logger.info(`[creditLedgerApi] GET /ledger/vaults/by-address/${address} - RequestId: ${requestId}`);
-
-    try {
-      const vault = await creditLedgerDb.findReferralVaultByAddress(address);
-      if (!vault) {
-        return res.status(404).json({ error: { message: 'Vault not found', requestId } });
-      }
-      res.json({ vault, requestId });
-    } catch (error) {
-      logger.error(`[creditLedgerApi] Error finding vault:`, error);
-      res.status(500).json({ error: { message: 'Failed to find vault', details: error.message, requestId } });
-    }
-  });
-
   // GET /ledger/vaults/by-master-account/:masterAccountId - Get all vaults for a master account
   router.get('/vaults/by-master-account/:masterAccountId', async (req, res) => {
     const { masterAccountId } = req.params;
@@ -217,22 +199,6 @@ function createCreditLedgerApi(services, logger) {
     } catch (error) {
       logger.error(`[creditLedgerApi] Error finding vaults:`, error);
       res.status(500).json({ error: { message: 'Failed to find vaults', details: error.message, requestId } });
-    }
-  });
-
-  // GET /ledger/vaults/:vaultAddress/stats - Get aggregated token statistics for a vault
-  router.get('/vaults/:vaultAddress/stats', async (req, res) => {
-    const { vaultAddress } = req.params;
-    const requestId = uuidv4();
-
-    logger.info(`[creditLedgerApi] GET /ledger/vaults/${vaultAddress}/stats - RequestId: ${requestId}`);
-
-    try {
-      const stats = await creditLedgerDb.getVaultTokenStats(vaultAddress);
-      res.json({ stats, requestId });
-    } catch (error) {
-      logger.error(`[creditLedgerApi] Error getting vault stats for ${vaultAddress}:`, error);
-      res.status(500).json({ error: { message: 'Failed to get vault stats', details: error.message, requestId } });
     }
   });
 
