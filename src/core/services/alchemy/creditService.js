@@ -12,10 +12,8 @@ const tokenDecimalService = require('../tokenDecimalService');
 // Import extracted services
 const EventDeduplicationService = require('./credit/EventDeduplicationService');
 const DepositNotificationService = require('./credit/DepositNotificationService');
-const ReferralRewardService = require('./credit/ReferralRewardService');
 const AdminOperationsService = require('./credit/AdminOperationsService');
 const DepositProcessorService = require('./credit/DepositProcessorService');
-const ReferralVaultService = require('./credit/ReferralVaultService');
 const EventWebhookProcessor = require('./credit/EventWebhookProcessor');
 const CreditWorker = require('./credit/CreditWorker');
 const { WebhookEventQueueDb } = require('../db/alchemy/webhookEventQueueDb');
@@ -117,10 +115,7 @@ class CreditService {
     // 2. Deposit Notification Service
     this.depositNotificationService = new DepositNotificationService(this.webSocketService, this.logger);
 
-    // 3. Referral Reward Service
-    this.referralRewardService = new ReferralRewardService(this.creditLedgerDb, this.logger);
-
-    // 4. Admin Operations Service
+    // 3. Admin Operations Service
     this.adminOperationsService = new AdminOperationsService(this.ethereumService, this.logger);
 
     // 5. Deposit Processor Service (CreditVault — quote-matching + live pricing)
@@ -138,19 +133,7 @@ class CreditService {
       this.walletLinkingService
     );
 
-    // 6. Referral Vault Service
-    this.referralVaultService = new ReferralVaultService(
-      this.ethereumService,
-      this.creditLedgerDb,
-      this.saltMiningService,
-      this.internalApiClient,
-      this.depositNotificationService,
-      this.contractConfig,
-      this.logger,
-      this.userCoreDb
-    );
-
-    // 7. Event Webhook Processor (CreditVault — simplified routing)
+    // 6. Event Webhook Processor (CreditVault — simplified routing)
     if (!this.disableWebhookActions) {
       this.eventWebhookProcessor = new EventWebhookProcessor(
         this.ethereumService,
@@ -285,13 +268,6 @@ class CreditService {
   }
 
   /**
-   * Checks for vault deployments that have been pending for too long and marks them as failed.
-   */
-  async checkStaleVaultDeployments() {
-    return await this.referralVaultService.checkStaleDeployments();
-  }
-
-  /**
    * Handles all events received from an Alchemy webhook.
    * Enqueues the event for processing by the worker (fire-and-forget for fast response).
    * @param {object} webhookPayload - The raw webhook payload
@@ -347,13 +323,6 @@ class CreditService {
   }
 
   /**
-   * Creates a new referral vault account for a user.
-   */
-  async createReferralVault(ownerAddress) {
-    return await this.referralVaultService.createVault(ownerAddress);
-  }
-
-  /**
    * Estimates the gas cost in USD for a deposit transaction.
    */
   async estimateDepositGasCostInUsd({ type, assetAddress, amount, userWalletAddress, tokenId }) {
@@ -397,20 +366,6 @@ class CreditService {
       this.logger.error('[CreditService] Failed to estimate deposit gas cost:', err);
       throw err;
     }
-  }
-
-  /**
-   * Deploys a new referral vault, records it, and returns the vault data.
-   */
-  async deployReferralVault(details) {
-    return await this.referralVaultService.deployVault(details);
-  }
-
-  /**
-   * Finalizes a vault deployment after the on-chain transaction is confirmed.
-   */
-  async finalizeVaultDeployment(txHash, vaultAddress) {
-    return await this.referralVaultService.finalizeDeployment(txHash, vaultAddress);
   }
 
   /**
@@ -458,7 +413,13 @@ class CreditService {
     if (spellMeta && spellMeta.creatorId) {
       const creatorSharePts = Math.floor(pointsNeeded * creatorSharePct);
       try {
-        await this.routeReferralOrCreatorShare(spellMeta.creatorId, creatorSharePts, { spellId });
+        await this.creditLedgerDb.createRewardCreditEntry({
+          masterAccountId: spellMeta.creatorId,
+          points: creatorSharePts,
+          rewardType: 'SPELL_CREATOR_SHARE',
+          description: `Creator share credited directly (${creatorSharePts} pts).`,
+          relatedItems: { spellId },
+        });
       } catch (err) {
         this.logger.error('[CreditService] Failed to route creator share:', err);
       }
@@ -467,13 +428,6 @@ class CreditService {
     const { v4: uuidv4 } = require('uuid');
     const creditTxId = uuidv4();
     return { creditTxId, pointsCharged: pointsNeeded };
-  }
-
-  /**
-   * Routes a point reward to the creator's referral vault if it exists, otherwise directly to the creator.
-   */
-  async routeReferralOrCreatorShare(creatorAccountId, points, meta = {}) {
-    return await this.referralRewardService.routeReward(creatorAccountId, points, meta);
   }
 
   /**
