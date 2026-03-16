@@ -28,6 +28,7 @@ const BatchZipService = require('./batch/BatchZipService');
 // Import new Alchemy/Ethereum services
 const EthereumService = require('./alchemy/ethereumService');
 const CreditService = require('./alchemy/creditService');
+const { getCreditVaultAddress } = require('./alchemy/foundationConfig');
 const PriceFeedService = require('./alchemy/priceFeedService');
 const NftPriceService = require('./alchemy/nftPriceService');
 const DexService = require('./alchemy/dexService');
