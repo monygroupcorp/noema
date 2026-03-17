@@ -1,14 +1,15 @@
-import { Component, h } from '@monygroupcorp/microact';
+import { Component, h, eventBus } from '@monygroupcorp/microact';
 import { Modal, Loader, ModalError } from './Modal.js';
-import { CopyButton, AsyncButton, EmptyState, ConfirmInline } from './ModalKit.js';
+import { CopyButton, AsyncButton, EmptyState } from './ModalKit.js';
 import { fetchJson, postWithCsrf } from '../../lib/api.js';
-import { shortenAddress, formatUnits } from '../../lib/format.js';
+import { shortenAddress } from '../../lib/format.js';
+import { WalletService } from '@monygroupcorp/micro-web3';
 import { websocketClient } from '../ws.js';
 
 // ── Views ──────────────────────────────────────────────────
 
 const VIEW = { LIST: 'list', DETAIL: 'detail', CREATE: 'create' };
-const CREATE_STEP = { NAME: 1, REVIEW: 2, DEPLOYING: 3, RECEIPT: 4 };
+const CREATE_STEP = { NAME: 1, REVIEW: 2, SIGNING: 3, RECEIPT: 4 };
 
 /**
  * VaultModal — unified referral vault management.
@@ -30,32 +31,69 @@ export class VaultModal extends Component {
       dashboard: null,
       dashLoading: false,
       dashError: null,
-      confirmWithdraw: false,
-      withdrawing: false,
-      withdrawResult: null,
       // Create
       createStep: CREATE_STEP.NAME,
       createName: '',
       nameAvailable: false,
       nameChecking: false,
       createError: null,
-      deploying: false,
-      deployMessage: null,
-      deployTxHash: null,
-      deployedAddress: null,
+      registering: false,
+      registerMessage: null,
+      // Wallet
+      walletAddress: null,
+      walletConnecting: false,
     };
     this._nameDebounce = null;
     this._wsHandler = null;
+    this._walletService = new WalletService(eventBus);
   }
 
-  didMount() {
+  get _provider() {
+    return this._walletService.provider || window.ethereum || null;
+  }
+
+  async didMount() {
+    await this._walletService.initialize();
     this._fetchVaults();
     this._wsHandler = (evt) => this._onVaultUpdate(evt);
     websocketClient.on('referralVaultUpdate', this._wsHandler);
+
+    // Auto-detect connected wallet
+    await this._refreshWallet();
+
     this.registerCleanup(() => {
       websocketClient.off('referralVaultUpdate', this._wsHandler);
       clearTimeout(this._nameDebounce);
+      this._walletService.destroy();
     });
+  }
+
+  async _refreshWallet() {
+    const p = this._provider;
+    if (!p) return;
+    try {
+      const accounts = await p.request({ method: 'eth_accounts' });
+      if (accounts && accounts[0]) {
+        this.setState({ walletAddress: accounts[0] });
+      }
+    } catch (err) {
+      // Wallet not connected — that's fine
+    }
+  }
+
+  async _connectWallet() {
+    const p = this._provider;
+    if (!p) {
+      this.setState({ createError: 'No wallet detected. Please install MetaMask or another browser wallet.' });
+      return;
+    }
+    this.setState({ walletConnecting: true, createError: null });
+    try {
+      const accounts = await p.request({ method: 'eth_requestAccounts' });
+      this.setState({ walletAddress: accounts[0], walletConnecting: false });
+    } catch (err) {
+      this.setState({ createError: 'Wallet connection rejected.', walletConnecting: false });
+    }
   }
 
   // ── Data fetching ────────────────────────────────────────
@@ -64,7 +102,9 @@ export class VaultModal extends Component {
     this.setState({ vaultsLoading: true, vaultsError: null });
     try {
       const data = await fetchJson('/api/v1/referral-vault/my-vaults');
-      this.setState({ vaults: data.vaults || [], vaultsLoading: false });
+      // Filter to only vaults with a referral_key (on-chain registrations)
+      const vaults = (data.vaults || []).filter(v => v.referral_key);
+      this.setState({ vaults, vaultsLoading: false });
     } catch (err) {
       this.setState({ vaultsError: err.message, vaultsLoading: false });
     }
@@ -77,46 +117,19 @@ export class VaultModal extends Component {
       dashLoading: true,
       dashError: null,
       dashboard: null,
-      confirmWithdraw: false,
-      withdrawing: false,
-      withdrawResult: null,
     });
     try {
-      const data = await fetchJson(`/api/v1/referral-vault/${vault.vault_address}/dashboard`);
+      const data = await fetchJson(`/api/v1/referral-vault/${encodeURIComponent(vault.vault_name)}/dashboard`);
       this.setState({ dashboard: data, dashLoading: false });
     } catch (err) {
       this.setState({ dashError: err.message, dashLoading: false });
     }
   }
 
-  // ── Withdraw ─────────────────────────────────────────────
-
-  async _withdrawAll(tokens) {
-    const { selectedVault } = this.state;
-    this.setState({ withdrawing: true, withdrawResult: null });
-    const errors = [];
-    for (const token of tokens) {
-      try {
-        const res = await postWithCsrf(`/api/v1/referral-vault/${selectedVault.vault_address}/withdraw`, { tokenAddress: token.tokenAddress });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          errors.push(`${token.symbol}: ${data.error?.message || res.status}`);
-        }
-      } catch (err) {
-        errors.push(`${token.symbol}: ${err.message}`);
-      }
-    }
-    if (errors.length > 0) {
-      this.setState({ withdrawing: false, withdrawResult: `Errors: ${errors.join('; ')}` });
-    } else {
-      this.setState({ withdrawing: false, confirmWithdraw: false, withdrawResult: 'Withdrawal request submitted. Processing may take a few minutes.' });
-    }
-  }
-
   // ── Create flow ──────────────────────────────────────────
 
   _onNameInput(e) {
-    const name = e.target.value.trim();
+    const name = e.target.value.replace(/[^a-zA-Z0-9_-]/g, '');
     this.setState({ createName: name, nameAvailable: false, createError: null });
     clearTimeout(this._nameDebounce);
     if (name.length > 3) {
@@ -127,9 +140,7 @@ export class VaultModal extends Component {
   async _checkName(name) {
     this.setState({ nameChecking: true });
     try {
-      const res = await postWithCsrf('/api/v1/referral-vault/check-name', { name });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || 'Check failed.');
+      const data = await fetchJson(`/api/v1/referral-vault/check-name?name=${encodeURIComponent(name)}`);
       if (this.state.createName === name) {
         this.setState({ nameAvailable: data.isAvailable, nameChecking: false });
       }
@@ -138,40 +149,64 @@ export class VaultModal extends Component {
     }
   }
 
-  async _deploy() {
-    this.setState({ createStep: CREATE_STEP.DEPLOYING, deploying: true, createError: null, deployMessage: 'Mining a valid salt...' });
+  async _register() {
+    const { createName, walletAddress } = this.state;
+    if (!walletAddress) {
+      this.setState({ createError: 'Please connect your wallet first.' });
+      return;
+    }
+
+    this.setState({ createStep: CREATE_STEP.SIGNING, registering: true, createError: null, registerMessage: 'Preparing registration...' });
     try {
-      const res = await postWithCsrf('/api/v1/referral-vault/create', { name: this.state.createName });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || 'Failed to create vault.');
-      this.setState({
-        deployTxHash: data.deployment_tx_hash,
-        deployedAddress: data.vault_address,
-        deployMessage: 'Transaction sent! Waiting for confirmation...',
-        deploying: false,
+      // 1. Get calldata from backend
+      const res = await postWithCsrf('/api/v1/referral-vault/register', {
+        name: createName,
+        userWalletAddress: walletAddress,
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error?.message || 'Failed to prepare registration.');
+
+      // 2. Prompt wallet to sign the transaction
+      this.setState({ registerMessage: 'Please confirm the transaction in your wallet...' });
+      const p = this._provider;
+      if (!p) throw new Error('Wallet disconnected.');
+
+      const txHash = await p.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from: data.registerTx.from,
+          to: data.registerTx.to,
+          data: data.registerTx.data,
+        }],
+      });
+
+      this.setState({
+        registerMessage: 'Transaction submitted! Waiting for on-chain confirmation...',
+        registering: false,
+      });
+
+      // 3. Wait for the ReferralRegistered webhook to confirm
+      // The websocket handler _onVaultUpdate will transition to RECEIPT
+      this._pendingTxHash = txHash;
+
     } catch (err) {
-      this.setState({ createError: err.message, createStep: CREATE_STEP.REVIEW, deploying: false });
+      const msg = err.code === 4001 ? 'Transaction rejected in wallet.' : err.message;
+      this.setState({ createError: msg, createStep: CREATE_STEP.REVIEW, registering: false, registerMessage: null });
     }
   }
 
-  _onVaultUpdate({ status, reason, txHash }) {
-    if (this.state.view !== VIEW.CREATE || this.state.createStep !== CREATE_STEP.DEPLOYING) return;
-    if (txHash && txHash !== this.state.deployTxHash) return;
-    if (status === 'active') {
-      this.setState({ createStep: CREATE_STEP.RECEIPT, deploying: false });
-    } else if (status === 'failed') {
-      this.setState({ createError: reason || 'Deployment failed.', deployMessage: null, deploying: false, createStep: CREATE_STEP.REVIEW });
+  _onVaultUpdate({ status }) {
+    if (this.state.view !== VIEW.CREATE || this.state.createStep !== CREATE_STEP.SIGNING) return;
+    if (status === 'active' || status === 'ACTIVE') {
+      this.setState({ createStep: CREATE_STEP.RECEIPT, registering: false, registerMessage: null });
     }
   }
 
   _goToCreatedVault() {
     this._fetchVaults();
-    if (this.state.deployedAddress) {
-      this._fetchDashboard({
-        vault_name: this.state.createName,
-        vault_address: this.state.deployedAddress,
-      });
+    const name = this.state.createName;
+    if (name) {
+      this._fetchDashboard({ vault_name: name });
     } else {
       this._resetCreate();
       this.setState({ view: VIEW.LIST });
@@ -185,10 +220,8 @@ export class VaultModal extends Component {
       nameAvailable: false,
       nameChecking: false,
       createError: null,
-      deploying: false,
-      deployMessage: null,
-      deployTxHash: null,
-      deployedAddress: null,
+      registering: false,
+      registerMessage: null,
     });
   }
 
@@ -221,27 +254,24 @@ export class VaultModal extends Component {
     if (vaults.length === 0) {
       return h(EmptyState, {
         icon: '\uD83C\uDFE6',
-        message: 'You don\'t have any referral vaults yet. Create one to start earning rewards when others use your referral code.',
-        action: 'Create Your First Vault',
+        message: 'You don\'t have any referral codes yet. Register one to start earning rewards when others use your code.',
+        action: 'Register Referral Code',
         onAction: this.bind(this._goCreate),
       });
     }
 
     return h('div', null,
       h('div', { className: 'vm-list-header' },
-        h(AsyncButton, { variant: 'secondary', onclick: this.bind(this._goCreate), label: '+ New Vault' })
+        h(AsyncButton, { variant: 'secondary', onclick: this.bind(this._goCreate), label: '+ New Code' })
       ),
       ...vaults.map(v =>
         h('div', {
-          className: `vm-card${v.status === 'ACTIVE' ? '' : ' vm-card--pending'}`,
-          key: v.vault_address,
+          className: 'vm-card',
+          key: v.referral_key || v._id,
           onclick: () => this._fetchDashboard(v),
         },
           h('div', { className: 'vm-card-name' }, v.vault_name || '(unnamed)'),
-          h('div', { className: 'vm-card-addr' }, shortenAddress(v.vault_address)),
-          v.status && v.status !== 'ACTIVE'
-            ? h('span', { className: 'vm-card-badge' }, v.status.replace(/_/g, ' '))
-            : null
+          h('div', { className: 'vm-card-addr' }, v.owner_address ? shortenAddress(v.owner_address) : ''),
         )
       )
     );
@@ -250,18 +280,17 @@ export class VaultModal extends Component {
   // ── Render: Detail ───────────────────────────────────────
 
   _renderDetail() {
-    const { selectedVault, dashboard, dashLoading, dashError, confirmWithdraw, withdrawing, withdrawResult } = this.state;
+    const { selectedVault, dashboard, dashLoading, dashError } = this.state;
 
     return h('div', null,
-      h('button', { className: 'vm-back', onclick: this.bind(this._goList) }, '\u2190 All Vaults'),
+      h('button', { className: 'vm-back', onclick: this.bind(this._goList) }, '\u2190 All Codes'),
 
       // Vault header
       h('div', { className: 'vm-detail-header' },
         h('h3', { className: 'vm-detail-name' }, selectedVault.vault_name || '(unnamed)'),
         h('div', { className: 'vm-detail-row' },
-          h('span', { className: 'vm-detail-label' }, 'Address'),
-          h('code', { className: 'vm-detail-mono' }, shortenAddress(selectedVault.vault_address)),
-          h(CopyButton, { text: selectedVault.vault_address })
+          h('span', { className: 'vm-detail-label' }, 'Owner'),
+          h('code', { className: 'vm-detail-mono' }, selectedVault.owner_address ? shortenAddress(selectedVault.owner_address) : 'Unknown'),
         ),
         h('div', { className: 'vm-detail-row' },
           h('span', { className: 'vm-detail-label' }, 'Referral Link'),
@@ -271,79 +300,67 @@ export class VaultModal extends Component {
       ),
 
       // Dashboard body
-      dashLoading ? h(Loader, { message: 'Loading vault stats...' }) : null,
+      dashLoading ? h(Loader, { message: 'Loading stats...' }) : null,
       dashError ? h('div', null,
         ModalError({ message: dashError }),
         h(AsyncButton, { variant: 'secondary', onclick: () => this._fetchDashboard(selectedVault), label: 'Retry' })
       ) : null,
 
+      // Totals
+      dashboard && dashboard.totals
+        ? h('div', { className: 'vm-totals' },
+          h('div', { className: 'vm-total-item' },
+            h('span', null, 'Total Volume'),
+            h('span', null, this._formatWei(dashboard.totals.referralVolumeWei))
+          ),
+          h('div', { className: 'vm-total-item' },
+            h('span', null, 'Total Earned'),
+            h('span', { className: 'vm-total-earned' }, this._formatWei(dashboard.totals.referralRewardsWei))
+          )
+        )
+        : null,
+
+      // Token breakdown
       dashboard && dashboard.tokens && dashboard.tokens.length > 0
         ? h('div', { className: 'vm-tokens' },
           ...dashboard.tokens.map(token => this._renderToken(token))
         )
         : null,
 
-      dashboard && (!dashboard.tokens || dashboard.tokens.length === 0)
-        ? h('div', { className: 'vm-no-tokens' }, 'No deposit history for this vault yet.')
+      dashboard && (!dashboard.tokens || dashboard.tokens.length === 0) && !dashLoading
+        ? h('div', { className: 'vm-no-tokens' }, 'No referral payments received yet.')
         : null,
-
-      // Withdraw section
-      dashboard && dashboard.tokens && dashboard.tokens.some(t => BigInt(t.currentWithdrawable) > 0n)
-        ? this._renderWithdrawSection()
-        : null,
-
-      withdrawResult
-        ? h('div', { className: `vm-withdraw-result${withdrawResult.startsWith('Error') ? ' vm-withdraw-result--err' : ''}` }, withdrawResult)
-        : null
     );
+  }
+
+  _formatWei(weiStr) {
+    if (!weiStr || weiStr === '0') return '0';
+    try {
+      const val = Number(BigInt(weiStr)) / 1e18;
+      return val < 0.0001 ? '<0.0001 ETH' : `${val.toFixed(4)} ETH`;
+    } catch {
+      return weiStr;
+    }
   }
 
   _renderToken(token) {
-    const { symbol, iconUrl, decimals, currentWithdrawable, currentWithdrawableUsd, totalDepositsUsd } = token;
-    const formatted = parseFloat(formatUnits(currentWithdrawable, decimals)).toFixed(6);
-    const hasBalance = BigInt(currentWithdrawable) > 0n;
-
     return h('div', { className: 'vm-token', key: token.tokenAddress },
       h('div', { className: 'vm-token-head' },
-        iconUrl ? h('img', { src: iconUrl, className: 'vm-token-icon', alt: symbol }) : h('div', { className: 'vm-token-icon vm-token-icon--placeholder' }),
-        h('span', { className: 'vm-token-symbol' }, symbol)
+        h('span', { className: 'vm-token-symbol' }, token.symbol || 'Unknown')
       ),
       h('div', { className: 'vm-token-stat' },
-        h('span', null, 'Withdrawable'),
-        h('span', { className: hasBalance ? 'vm-token-val--has' : '' }, `${formatted} (~$${currentWithdrawableUsd.toFixed(2)})`)
+        h('span', null, 'Volume'),
+        h('span', null, this._formatWei(token.totalVolume))
       ),
       h('div', { className: 'vm-token-stat' },
-        h('span', null, 'Total Deposits'),
-        h('span', null, `~$${totalDepositsUsd.toFixed(2)}`)
-      )
+        h('span', null, 'Earned'),
+        h('span', { className: 'vm-token-val--has' }, this._formatWei(token.totalReferralEarned))
+      ),
+      h('div', { className: 'vm-token-stat' },
+        h('span', null, 'Deposits'),
+        h('span', null, String(token.depositCount))
+      ),
     );
-  }
-
-  _renderWithdrawSection() {
-    const { confirmWithdraw, withdrawing, dashboard } = this.state;
-
-    if (!confirmWithdraw) {
-      return h('div', { className: 'vm-withdraw' },
-        h(AsyncButton, {
-          variant: 'primary',
-          onclick: () => this.setState({ confirmWithdraw: true }),
-          label: 'Withdraw All',
-        })
-      );
-    }
-
-    // Withdraw all tokens that have balance
-    const tokensWithBalance = dashboard.tokens.filter(t => BigInt(t.currentWithdrawable) > 0n);
-    const summary = tokensWithBalance.map(t =>
-      `${parseFloat(formatUnits(t.currentWithdrawable, t.decimals)).toFixed(4)} ${t.symbol}`
-    ).join(', ');
-
-    return h(ConfirmInline, {
-      message: `Withdraw ${summary}? A withdrawal request will be created and processed shortly.`,
-      confirmLabel: withdrawing ? 'Submitting...' : 'Withdraw',
-      onCancel: () => this.setState({ confirmWithdraw: false }),
-      onConfirm: () => this._withdrawAll(tokensWithBalance),
-    });
   }
 
   // ── Render: Create ───────────────────────────────────────
@@ -353,35 +370,52 @@ export class VaultModal extends Component {
     switch (createStep) {
       case CREATE_STEP.NAME: return this._renderCreateName();
       case CREATE_STEP.REVIEW: return this._renderCreateReview();
-      case CREATE_STEP.DEPLOYING: return this._renderCreateDeploying();
+      case CREATE_STEP.SIGNING: return this._renderCreateSigning();
       case CREATE_STEP.RECEIPT: return this._renderCreateReceipt();
       default: return h('div', { style: 'display:none' });
     }
   }
 
   _renderCreateName() {
-    const { createName, nameChecking, nameAvailable } = this.state;
-    let statusCls = '', statusText = 'Enter a name (4+ characters).';
-    if (nameChecking) { statusCls = 'vm-status--checking'; statusText = 'Checking...'; }
+    const { createName, nameChecking, nameAvailable, walletAddress } = this.state;
+    let statusCls = '', statusText = 'Enter a name (4+ characters, letters/numbers/dashes/underscores).';
+    if (nameChecking) { statusCls = 'vm-status--checking'; statusText = 'Checking on-chain...'; }
     else if (createName.length > 3 && nameAvailable) { statusCls = 'vm-status--ok'; statusText = `"${createName}" is available!`; }
-    else if (createName.length > 3) { statusCls = 'vm-status--bad'; statusText = `"${createName}" is unavailable.`; }
+    else if (createName.length > 3) { statusCls = 'vm-status--bad'; statusText = `"${createName}" is taken.`; }
 
     return h('div', null,
       h('button', { className: 'vm-back', onclick: this.bind(this._goList) }, '\u2190 Back'),
-      h('p', { style: 'color:var(--text-secondary);font-size:var(--fs-md);margin:12px 0' }, 'Create a unique code name for your referral vault. When someone uses your code, their contribution goes to your vault and you earn 5% rewards.'),
+      h('p', { style: 'color:var(--text-secondary);font-size:var(--fs-md);margin:12px 0' }, 'Register a referral code on-chain. When someone uses your code in a payment, you earn a share of the transaction.'),
+
+      // Wallet connection
+      !walletAddress
+        ? h('div', { className: 'vm-wallet-prompt' },
+          h(AsyncButton, {
+            variant: 'secondary',
+            onclick: this.bind(this._connectWallet),
+            label: this.state.walletConnecting ? 'Connecting...' : 'Connect Wallet',
+            disabled: this.state.walletConnecting,
+          })
+        )
+        : h('div', { className: 'vm-wallet-connected' },
+          h('span', null, 'Wallet: '),
+          h('code', null, shortenAddress(walletAddress))
+        ),
+
       h('div', { className: 'vm-form' },
-        h('label', null, 'Vault Code Name'),
+        h('label', null, 'Referral Code Name'),
         h('input', {
           type: 'text',
           value: createName,
-          placeholder: "e.g., crypto-king",
+          placeholder: 'e.g., crypto-king',
           oninput: this.bind(this._onNameInput),
+          onkeydown: (e) => e.stopPropagation(),
         }),
         h('div', { className: `vm-status ${statusCls}` }, statusText)
       ),
       h('div', { className: 'vm-nav' },
         h(AsyncButton, {
-          disabled: !nameAvailable || nameChecking,
+          disabled: !nameAvailable || nameChecking || !walletAddress,
           onclick: () => this.setState({ createStep: CREATE_STEP.REVIEW, createError: null }),
           label: 'Next',
         })
@@ -393,33 +427,32 @@ export class VaultModal extends Component {
     return h('div', null,
       h('button', { className: 'vm-back', onclick: () => this.setState({ createStep: CREATE_STEP.NAME }) }, '\u2190 Back'),
       h('div', { className: 'vm-review' },
-        h('p', null, 'You are about to create a referral vault:'),
-        h('p', null, h('strong', null, 'Code Name: '), this.state.createName),
-        h('p', null, 'This will deploy a new contract. The address will start with 0x1152.')
+        h('p', null, 'You are about to register:'),
+        h('p', null, h('strong', null, 'Code: '), this.state.createName),
+        h('p', null, h('strong', null, 'Wallet: '), shortenAddress(this.state.walletAddress)),
+        h('p', { style: 'font-size:var(--fs-sm);color:var(--text-label);margin-top:12px' }, 'This will send a transaction to register your referral code on-chain. You will be prompted to sign in your wallet.')
       ),
       h('div', { className: 'vm-nav' },
         h(AsyncButton, { variant: 'secondary', onclick: () => this.setState({ createStep: CREATE_STEP.NAME }), label: 'Back' }),
-        h(AsyncButton, { onclick: this.bind(this._deploy), label: 'Confirm & Deploy' })
+        h(AsyncButton, { onclick: this.bind(this._register), label: 'Register On-Chain' })
       )
     );
   }
 
-  _renderCreateDeploying() {
-    const { deployMessage, deployTxHash } = this.state;
+  _renderCreateSigning() {
+    const { registerMessage } = this.state;
     return h('div', { className: 'vm-deploy' },
-      h(Loader, { message: deployMessage }),
-      deployTxHash ? h('p', { style: 'font-size:var(--fs-xs);color:var(--text-label);word-break:break-all;margin-top:8px' }, `Tx: ${deployTxHash}`) : null
+      h(Loader, { message: registerMessage })
     );
   }
 
   _renderCreateReceipt() {
     return h('div', { className: 'vm-receipt' },
-      h('h3', null, 'Deployment Successful!'),
-      h('p', null, 'Your referral vault is now active.'),
-      h('p', null, h('strong', null, 'Name: '), this.state.createName),
-      h('p', { className: 'vm-receipt-addr' }, this.state.deployedAddress),
+      h('h3', null, 'Registration Successful!'),
+      h('p', null, 'Your referral code is now active on-chain.'),
+      h('p', null, h('strong', null, 'Code: '), this.state.createName),
       h('div', { className: 'vm-nav' },
-        h(AsyncButton, { onclick: this.bind(this._goToCreatedVault), label: 'View Vault' })
+        h(AsyncButton, { onclick: this.bind(this._goToCreatedVault), label: 'View Dashboard' })
       )
     );
   }
@@ -432,10 +465,8 @@ export class VaultModal extends Component {
       .vm-list-header { display: flex; justify-content: flex-end; margin-bottom: 12px; }
       .vm-card { background: var(--surface-2); border: var(--border-width) solid var(--border); border-radius: 0; padding: 14px 16px; margin-bottom: 8px; cursor: pointer; transition: border-color var(--dur-interact) var(--ease); }
       .vm-card:hover { border-color: var(--border-hover); }
-      .vm-card--pending { opacity: 0.6; }
       .vm-card-name { font-weight: 600; font-size: var(--fs-lg); color: var(--text-primary); margin-bottom: 4px; }
       .vm-card-addr { font-family: var(--ff-mono); font-size: var(--fs-xs); color: var(--text-secondary); }
-      .vm-card-badge { display: inline-block; font-size: var(--fs-xs); color: var(--accent-dim); background: var(--accent-glow); padding: 2px 8px; border-radius: 0; margin-top: 6px; text-transform: uppercase; letter-spacing: var(--ls-wide); }
 
       /* Detail */
       .vm-back { background: none; border: none; color: var(--accent); cursor: pointer; font-size: var(--fs-base); padding: 0; margin-bottom: 16px; }
@@ -446,12 +477,17 @@ export class VaultModal extends Component {
       .vm-detail-label { color: var(--text-secondary); min-width: 90px; }
       .vm-detail-mono { font-family: var(--ff-mono); color: var(--text-primary); font-size: var(--fs-xs); }
 
+      /* Totals */
+      .vm-totals { display: flex; gap: 16px; margin-bottom: 16px; }
+      .vm-total-item { flex: 1; background: var(--surface-2); border: var(--border-width) solid var(--border); padding: 14px; display: flex; flex-direction: column; gap: 4px; }
+      .vm-total-item span:first-child { font-size: var(--fs-sm); color: var(--text-secondary); }
+      .vm-total-item span:last-child { font-size: var(--fs-lg); font-weight: 600; color: var(--text-primary); }
+      .vm-total-earned { color: var(--accent) !important; }
+
       /* Tokens */
       .vm-tokens { margin-bottom: 16px; }
       .vm-token { border: var(--border-width) solid var(--border); border-radius: 0; padding: 14px; margin-bottom: 8px; }
       .vm-token-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-      .vm-token-icon { width: 24px; height: 24px; border-radius: 50%; }
-      .vm-token-icon--placeholder { background: var(--surface-3); }
       .vm-token-symbol { font-weight: 600; font-size: var(--fs-lg); color: var(--text-primary); }
       .vm-token-stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: var(--fs-base); }
       .vm-token-stat span:first-child { color: var(--text-secondary); }
@@ -459,12 +495,10 @@ export class VaultModal extends Component {
       .vm-token-val--has { color: var(--accent) !important; font-weight: 600; }
       .vm-no-tokens { color: var(--text-secondary); font-size: var(--fs-md); padding: 20px 0; text-align: center; }
 
-      /* Withdraw */
-      .vm-withdraw { margin-top: 16px; display: flex; justify-content: flex-end; }
-      .vm-withdraw-result { margin-top: 12px; padding: 10px 14px; border-radius: 0; font-size: var(--fs-base); color: var(--accent); background: var(--accent-glow); border: var(--border-width) solid var(--accent-border); }
-      .vm-withdraw-result--err { color: var(--danger); background: var(--danger-dim); border-color: var(--danger); }
-
       /* Create */
+      .vm-wallet-prompt { margin: 12px 0; }
+      .vm-wallet-connected { font-size: var(--fs-base); color: var(--text-secondary); margin: 12px 0; }
+      .vm-wallet-connected code { color: var(--accent); font-family: var(--ff-mono); font-size: var(--fs-xs); }
       .vm-form { margin: 16px 0; }
       .vm-form label { display: block; margin-bottom: 8px; color: var(--text-secondary); font-weight: 600; font-size: var(--fs-base); }
       .vm-form input { width: 100%; padding: 10px 14px; background: var(--surface-1); border: var(--border-width) solid var(--border); border-radius: 0; color: var(--text-primary); font-size: var(--fs-md); box-sizing: border-box; outline: none; }
@@ -479,24 +513,23 @@ export class VaultModal extends Component {
       .vm-deploy { text-align: center; padding: 24px 0; }
       .vm-receipt { text-align: center; }
       .vm-receipt h3 { color: var(--accent); margin-bottom: 12px; }
-      .vm-receipt-addr { font-family: var(--ff-mono); font-size: var(--fs-base); color: var(--accent); word-break: break-all; }
     `;
   }
 
   // ── Main render ──────────────────────────────────────────
 
   render() {
-    const { view, createStep, createError, dashError } = this.state;
+    const { view, createStep, createError } = this.state;
 
     const titles = {
-      [VIEW.LIST]: 'Referral Vaults',
-      [VIEW.DETAIL]: null, // detail has its own header
+      [VIEW.LIST]: 'Referral Codes',
+      [VIEW.DETAIL]: null,
       [VIEW.CREATE]: {
-        [CREATE_STEP.NAME]: 'Create Vault',
+        [CREATE_STEP.NAME]: 'Register Referral Code',
         [CREATE_STEP.REVIEW]: 'Review',
-        [CREATE_STEP.DEPLOYING]: 'Deploying...',
+        [CREATE_STEP.SIGNING]: 'Registering...',
         [CREATE_STEP.RECEIPT]: 'Success',
-      }[createStep] || 'Create Vault',
+      }[createStep] || 'Register Referral Code',
     };
 
     const title = titles[view];

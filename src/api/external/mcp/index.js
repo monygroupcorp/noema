@@ -542,30 +542,13 @@ async function handleMethod(method, params, context) {
     }
 
     case 'referral-vault/create': {
+      // Referral registration is now fully on-chain via CreditVault.register().
+      // MCP clients cannot submit wallet transactions, so this action returns
+      // guidance on how to register via the web UI or direct contract call.
       requireApiKey(apiKey);
-      const { name: vaultName } = params || {};
-      if (!vaultName || vaultName.length < 4 || !/^[a-zA-Z0-9_-]+$/.test(vaultName)) {
-        const err = new Error('Name must be at least 4 characters and contain only letters, numbers, underscores, or dashes.');
-        err.code = -32602;
-        throw err;
-      }
-      const vaultUserInfo = await resolveUserFromApiKey(apiKey, internalApiClient);
-      try {
-        const response = await internalApiClient.post('/internal/v1/data/actions/create-referral-vault', {
-          masterAccountId: vaultUserInfo.masterAccountId,
-          vaultName
-        });
-        return { content: [{ type: 'text', text: JSON.stringify(response.data) }] };
-      } catch (error) {
-        const status = error.response?.status;
-        const msg = error.response?.data?.error?.message || error.response?.data?.message || error.message;
-        let code = -32603;
-        if (status === 409) code = -32005; // conflict / already exists
-        if (status === 400) code = -32602;
-        const err = new Error(msg);
-        err.code = code;
-        throw err;
-      }
+      const err = new Error('Referral registration is now on-chain. Use the web UI at /referral-vault or call CreditVault.register(name) directly from your wallet.');
+      err.code = -32601; // method not found
+      throw err;
     }
 
     case 'referral-vault/list': {
