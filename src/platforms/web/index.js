@@ -56,7 +56,8 @@ function initializeWebPlatform(services, options = {}) {
       'http://app.localhost:5173',
       'https://noema.art',
       'https://www.noema.art',
-      'https://app.noema.art'
+      'https://app.noema.art',
+      'https://staging.noema.art'
     ],
     credentials: true
   }));
@@ -125,7 +126,7 @@ function initializeWebPlatform(services, options = {}) {
       }
 
       const isAppSubdomain = (req) => {
-        return req.hostname.startsWith('app.');
+        return req.hostname.startsWith('app.') || req.hostname.startsWith('staging.');
       };
 
       // --- Page Routes ---
