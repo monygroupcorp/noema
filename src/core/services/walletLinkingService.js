@@ -1,7 +1,12 @@
-const crypto = require('crypto');
 const { createLogger } = require('../../utils/logger');
 const { generateApiKey } = require('./apiKeyService');
 const { ObjectId } = require('mongodb');
+
+/** Random wei amount between 0.0001000–0.0009999 ETH, capped at 7 decimal places. */
+function generateMagicAmountWei() {
+  const randomPart = Math.floor(1000 + Math.random() * 9000);
+  return (BigInt(randomPart) * 100000000000n).toString();
+}
 
 /**
  * @class WalletLinkingService
@@ -40,13 +45,12 @@ class WalletLinkingService {
 
     // 2. Generate a unique magic amount. This needs to be genuinely unique for pending requests.
     // A simple loop with retries can handle the rare case of a collision.
+    // Amounts are multiples of 10^11 wei so formatEther shows at most 7 decimal places.
     let magicAmountWei;
     let isUnique = false;
     let attempts = 0;
     while (!isUnique && attempts < 10) {
-      // Generate a random amount, e.g., between 0.001 and 0.0001 ETH, ensuring it's unique
-      const randomPart = Math.floor(10000000000000 + Math.random() * 90000000000000); // e.g., 0.00010000... to 0.00099999...
-      magicAmountWei = randomPart.toString();
+      magicAmountWei = generateMagicAmountWei();
       
       const existingRequest = await this.walletLinkingRequestDb.findPendingRequestByAmount(magicAmountWei, tokenAddress);
       if (!existingRequest) {
@@ -159,8 +163,7 @@ class WalletLinkingService {
     const tokenAddress = process.env.WRAPPED_NATIVE_TOKEN_ADDRESS || '0x0000000000000000000000000000000000000000';
     const expiresInSeconds = 900;
 
-    const randomBuffer = crypto.randomBytes(6);
-    const magicAmountWei = BigInt('0x' + randomBuffer.toString('hex')).toString();
+    const magicAmountWei = generateMagicAmountWei();
 
     const linkingRequest = await this.walletLinkingRequestDb.createRequest({
       masterAccountId,
