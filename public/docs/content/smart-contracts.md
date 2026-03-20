@@ -23,6 +23,7 @@ CreditVault is live on mainnet and Base. The source and technical documentation 
 |------|---------|
 | `points` | Off-chain credits issued when a deposit is confirmed |
 | `deposit` | Any ETH or token transfer to the CreditVault address |
+| `referral` | On-chain name registration via `register(name)` — deposits using `pay(token, amount, referralKey)` or `payETH(referralKey)` are automatically split between the protocol and the referrer |
 
 For flow diagrams, event specifications, and security notes, see the README in the repository.
 

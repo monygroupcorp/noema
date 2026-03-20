@@ -568,7 +568,7 @@ function createAdminApi(dependencies) {
 
       // Get balances for each chartered vault
       const charteredVaultsWithBalances = await Promise.all(
-        charteredVaults.map(async (vault) => {
+        charteredVaults.filter(vault => vault.vault_address).map(async (vault) => {
           const vaultAddress = vault.vault_address;
           const vaultAddrLower = vaultAddress.toLowerCase();
           const vaultBalances = await Promise.all(

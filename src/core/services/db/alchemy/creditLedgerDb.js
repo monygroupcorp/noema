@@ -172,9 +172,19 @@ class CreditLedgerDB extends BaseDB {
         { depositor_address: 1, token_address: 1, deposit_amount_wei: 1, status: 1 },
         { partialFilterExpression: { status: 'QUOTED' } }
       );
-      this.logger.info('[CreditLedgerDB] Quote indexes ensured');
+      // Index for referral dashboard aggregations (queries by referral_key on confirmed entries)
+      await collection.createIndex(
+        { referral_key: 1, status: 1 },
+        { partialFilterExpression: { referral_key: { $exists: true } } }
+      );
+      // Index for referral vault lookup by key
+      await collection.createIndex(
+        { referral_key: 1, type: 1 },
+        { partialFilterExpression: { type: 'REFERRAL_VAULT' } }
+      );
+      this.logger.info('[CreditLedgerDB] Quote and referral indexes ensured');
     } catch (error) {
-      this.logger.error('[CreditLedgerDB] Failed to create quote indexes:', error);
+      this.logger.error('[CreditLedgerDB] Failed to create indexes:', error);
     }
   }
 
@@ -332,12 +342,12 @@ class CreditLedgerDB extends BaseDB {
   /**
    * Records a new referral vault in the ledger.
    * @param {object} vaultDetails - Details of the referral vault
-   * @param {string} vaultDetails.vaultName - The unique code name for the vault
-   * @param {string} vaultDetails.vault_address - The address of the created vault
-   * @param {string} vaultDetails.owner_address - The address that owns the vault
+   * @param {string} vaultDetails.vault_name - The referral name
+   * @param {string} vaultDetails.referral_key - The bytes32 keccak256 hash of the name
+   * @param {string} vaultDetails.owner_address - The wallet address that registered the referral
    * @param {string} vaultDetails.master_account_id - The master account ID from userCore
-   * @param {string} vaultDetails.creation_tx_hash - The transaction hash where the vault was created
-   * @param {string} vaultDetails.salt - The salt used to create the vault
+   * @param {string} vaultDetails.registration_tx_hash - The transaction hash of the ReferralRegistered event
+   * @param {string} vaultDetails.status - Initial status (e.g., 'ACTIVE')
    * @returns {Promise<Object>} The created vault document
    */
   async createReferralVault(vaultDetails) {
@@ -359,8 +369,9 @@ class CreditLedgerDB extends BaseDB {
    * @returns {Promise<Object|null>} The vault document or null if not found.
    */
   async findReferralVaultByName(vaultName) {
+    // Query both field names: vault_name (current) and vaultName (legacy)
     return this.findOne({
-      vault_name: vaultName,
+      $or: [{ vault_name: vaultName }, { vaultName: vaultName }],
       type: 'REFERRAL_VAULT'
     });
   }
@@ -426,7 +437,7 @@ class CreditLedgerDB extends BaseDB {
    */
   async findReferralVaultByTxHash(txHash) {
     return this.findOne({
-      deployment_tx_hash: txHash,
+      registration_tx_hash: txHash,
       type: 'REFERRAL_VAULT'
     });
   }
@@ -449,7 +460,7 @@ class CreditLedgerDB extends BaseDB {
         {
           $group: {
             _id: "$token_address",
-            totalDeposits: { $sum: { $toLong: "$deposit_amount_wei" } },
+            totalDeposits: { $sum: { $toDecimal: "$deposit_amount_wei" } },
             totalAdjustedGrossUsd: { $sum: "$adjusted_gross_deposit_usd" }
           }
         },
@@ -490,8 +501,8 @@ class CreditLedgerDB extends BaseDB {
         {
           $group: {
             _id: '$token_address',
-            totalVolume: { $sum: { $toLong: '$deposit_amount_wei' } },
-            totalReferralEarned: { $sum: { $toLong: '$referral_amount_wei' } },
+            totalVolume: { $sum: { $toDecimal: '$deposit_amount_wei' } },
+            totalReferralEarned: { $sum: { $toDecimal: '$referral_amount_wei' } },
             depositCount: { $sum: 1 }
           }
         },
@@ -514,23 +525,57 @@ class CreditLedgerDB extends BaseDB {
   }
 
   /**
-   * Updates the referral volume and rewards for a vault, looked up by referral key.
+   * Updates referral vault running totals with optimistic concurrency control.
+   * Uses BigInt for arithmetic (no overflow) and checks the old values in the
+   * update filter so concurrent writes don't clobber each other.
    * @param {string} referralKey - The bytes32 referral key
    * @param {string} additionalVolumeWei - Additional volume in wei to add
    * @param {string} rewardsWei - Rewards in wei to add
-   * @returns {Promise<Object>} The result of the update operation
+   * @returns {Promise<Object|null>} The result of the update operation
    */
   async updateReferralVaultStats(referralKey, additionalVolumeWei, rewardsWei) {
-    return this.updateOne(
-      { referral_key: referralKey, type: 'REFERRAL_VAULT' },
+    const vault = await this.findOne({ referral_key: referralKey, type: 'REFERRAL_VAULT' });
+    if (!vault) {
+      this.logger.warn(`[CreditLedgerDB] updateReferralVaultStats: vault not found for key ${referralKey}`);
+      return null;
+    }
+
+    const oldVolume = vault.total_referral_volume_wei || '0';
+    const oldRewards = vault.total_referral_rewards_wei || '0';
+    const newVolume = (BigInt(oldVolume) + BigInt(additionalVolumeWei)).toString();
+    const newRewards = (BigInt(oldRewards) + BigInt(rewardsWei)).toString();
+
+    // Optimistic lock: only update if totals haven't changed since our read
+    const result = await this.updateOne(
       {
-        $inc: {
-          total_referral_volume_wei: additionalVolumeWei,
-          total_referral_rewards_wei: rewardsWei
-        },
-        $set: { updatedAt: new Date() }
+        referral_key: referralKey,
+        type: 'REFERRAL_VAULT',
+        total_referral_volume_wei: oldVolume,
+        total_referral_rewards_wei: oldRewards
+      },
+      {
+        $set: {
+          total_referral_volume_wei: newVolume,
+          total_referral_rewards_wei: newRewards,
+          updatedAt: new Date()
+        }
       }
     );
+
+    // If another write raced us, retry once
+    if (result.matchedCount === 0) {
+      this.logger.debug(`[CreditLedgerDB] updateReferralVaultStats: concurrent update detected for key ${referralKey}, retrying`);
+      const retryVault = await this.findOne({ referral_key: referralKey, type: 'REFERRAL_VAULT' });
+      if (!retryVault) return null;
+      const retryVolume = (BigInt(retryVault.total_referral_volume_wei || '0') + BigInt(additionalVolumeWei)).toString();
+      const retryRewards = (BigInt(retryVault.total_referral_rewards_wei || '0') + BigInt(rewardsWei)).toString();
+      return this.updateOne(
+        { referral_key: referralKey, type: 'REFERRAL_VAULT' },
+        { $set: { total_referral_volume_wei: retryVolume, total_referral_rewards_wei: retryRewards, updatedAt: new Date() } }
+      );
+    }
+
+    return result;
   }
 
   /**

@@ -123,12 +123,12 @@ function createAuthApi(dependencies) {
           if (!existingPreference) {
             logger.info(`[AuthApi] User ${user._id} has no preferred fund. Attempting to migrate referral code: ${referralCode}`);
             const vault = await creditLedgerDb.findReferralVaultByName(referralCode);
-            if (vault && vault.vault_address) {
-              const preferenceValue = { vaultName: vault.vaultName, vaultAddress: vault.vault_address, referralCode: referralCode };
+            if (vault) {
+              const preferenceValue = { vaultName: vault.vault_name, referralKey: vault.referral_key, referralCode: referralCode };
               await userPreferencesDb.setPreferenceByKey(user._id.toString(), 'preferredCharteredFund', preferenceValue);
-              logger.info(`[AuthApi] Successfully set preferredCharteredFund for user ${user._id} to vault ${vault.vaultName} (${vault.vault_address})`);
+              logger.info(`[AuthApi] Successfully set preferredCharteredFund for user ${user._id} to vault ${vault.vault_name} (key=${vault.referral_key})`);
             } else {
-              logger.warn(`[AuthApi] Referral code ${referralCode} provided during login for user ${user._id} is invalid or has no vault address. Skipping preference update.`);
+              logger.warn(`[AuthApi] Referral code ${referralCode} provided during login for user ${user._id} not found. Skipping preference update.`);
             }
           } else {
             logger.info(`[AuthApi] User ${user._id} already has a preferred fund. Ignoring new referral code ${referralCode}.`);

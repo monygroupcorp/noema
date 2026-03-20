@@ -273,14 +273,22 @@ async function buyPointsReplyHandler(bot, message, context, deps = {}) {
       const res = await internal.client.get(`/internal/v1/data/points/charter/${encodeURIComponent(code)}`);
       const charter = res.data;
 
-      const depositAddress = charter?.address;
-      if (!depositAddress) throw new Error('missing address');
+      if (!charter?.code) throw new Error('invalid charter');
 
+      // CreditVault: deposit address stays the same (single contract).
+      // Referral rewards only apply via payETH(referralKey) on the web app —
+      // direct ETH transfers cannot include a referral key on-chain.
       const newTextLines = originalMsg.text.split('\n');
-      // Replace deposit address line (assume line index 3 from initial messages)
-      if (newTextLines.length >= 4) newTextLines[3] = depositAddress;
-      // Append referral
-      if (!newTextLines.includes('Referral code applied ✅')) newTextLines.splice(4, 0, 'Referral code applied ✅');
+      // Remove any previous referral lines
+      for (let i = newTextLines.length - 1; i >= 0; i--) {
+        if (newTextLines[i].includes('Referral code') || newTextLines[i].includes('referral rewards require')) {
+          newTextLines.splice(i, 1);
+        }
+      }
+      // Insert referral confirmation after deposit address
+      const addrIdx = newTextLines.findIndex(l => l.startsWith('0x'));
+      const insertAt = addrIdx !== -1 ? addrIdx + 1 : 4;
+      newTextLines.splice(insertAt, 0, `Referral code "${code}" applied ✅`, 'Note: referral rewards require purchasing via noema.art');
 
       const edited = await bot.editMessageText(newTextLines.join('\n'), { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [[{ text: 'Ⓧ Cancel', callback_data: 'buy:cancel' }]] } });
       logger.info('[BuyPoints] Referral edit complete', { original: messageId, edited: edited?.message_id });
