@@ -9,6 +9,7 @@ Self-hosted AI generation infrastructure with on-chain credit system. Deploy AI 
 - **Multi-platform deployment** – Telegram bot, Discord bot, and Web interface from one codebase
 - **Tool Registry** – Add new AI workflows via JSON definitions, auto-generates commands and UI
 - **On-chain credits** – Ethereum-based credit system with deposits, spending, and price feeds
+- **Referral system** – On-chain referral codes via CreditVault with automatic payment splitting and earnings dashboards
 - **ComfyUI integration** – Orchestrates ComfyUI workflows with sync, webhook, and polling strategies
 - **Real-time updates** – WebSocket notifications for generation progress and completion
 - **LoRA resolution** – Automatic trigger word detection and model loading

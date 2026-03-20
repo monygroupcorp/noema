@@ -782,14 +782,16 @@ module.exports = function pointsApi(dependencies) {
 
     /**
      * @route GET /internal/v1/points/charter/:code
-     * @description Get referral vault information by charter code
+     * @description Get referral vault information by charter code.
+     * CreditVault model: all deposits go to the single CreditVault contract.
+     * The referral key (keccak256 of the name) is passed in pay/payETH calldata.
      * @access Internal
      */
     router.get('/charter/:code', async (req, res, next) => {
         try {
             const { code } = req.params;
             logger.info(`[pointsApi] /charter/${code} called`);
-            
+
             if (!code) {
                 return res.status(400).json({ message: 'Charter code is required.' });
             }
@@ -799,10 +801,17 @@ module.exports = function pointsApi(dependencies) {
                 return res.status(404).json({ message: 'Charter not found.' });
             }
 
+            // CreditVault: deposit address is always the CreditVault contract,
+            // not an individual vault address. Referral is encoded via referralKey
+            // in the pay()/payETH() calldata on the web frontend.
+            const depositAddress = getCreditVaultAddress('1');
+            const referralKey = vault.referral_key || ethers.keccak256(ethers.toUtf8Bytes(code));
+
             res.json({
                 code,
-                address: vault.vault_address,
-                vaultName: vault.vaultName,
+                address: depositAddress,
+                referralKey,
+                vaultName: vault.vault_name,
                 masterAccountId: vault.master_account_id
             });
         } catch (error) {

@@ -66,12 +66,19 @@ async function createCreditLedgerIndexes() {
     );
     console.log('✓ Created unique compound index on vault_name + type');
     
+    // CreditVault: referral key indexes for dashboard aggregations and vault lookup
     await collection.createIndex(
-      { vault_address: 1, type: 1 },
-      { background: true, name: 'idx_vault_address_type' }
+      { referral_key: 1, status: 1 },
+      { background: true, name: 'idx_referral_key_status', partialFilterExpression: { referral_key: { $exists: true } } }
     );
-    console.log('✓ Created compound index on vault_address + type');
-    
+    console.log('✓ Created compound index on referral_key + status');
+
+    await collection.createIndex(
+      { referral_key: 1, type: 1 },
+      { background: true, name: 'idx_referral_key_type', partialFilterExpression: { type: 'REFERRAL_VAULT' } }
+    );
+    console.log('✓ Created compound index on referral_key + type');
+
     await collection.createIndex(
       { master_account_id: 1, type: 1, is_active: 1 },
       { background: true, name: 'idx_master_type_active' }
@@ -85,12 +92,12 @@ async function createCreditLedgerIndexes() {
     );
     console.log('✓ Created compound index on vault_account + status');
     
-    // Additional: Index for finding by creation transaction hash
+    // Index for finding referral vaults by registration transaction hash
     await collection.createIndex(
-      { creation_tx_hash: 1, type: 1 },
-      { background: true, name: 'idx_creation_tx_hash_type' }
+      { registration_tx_hash: 1, type: 1 },
+      { background: true, name: 'idx_registration_tx_hash_type', partialFilterExpression: { type: 'REFERRAL_VAULT' } }
     );
-    console.log('✓ Created compound index on creation_tx_hash + type');
+    console.log('✓ Created compound index on registration_tx_hash + type');
     
     console.log('\n✅ All credit_ledger indexes created successfully!');
     

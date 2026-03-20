@@ -10,6 +10,8 @@
 
 | Document | Description |
 |---|---|
+| [Referral Vault CreditVault Migration](plans/2026-03-16-referral-vault-creditvault-migration.md) | Migration from Foundation.sol vaults to CreditVault-native referral system |
+| [Referral Vault Implementation](plans/2026-03-16-referral-vault-implementation.md) | API endpoints, event handling, and dashboard for referral codes |
 | [VastAI Service Harness](plans/2026-02-02-vastai-service-harness-design.md) | Original vastai inference harness design (superseded by GPU Compute Platform above) |
 | [VastAI Implementation Plan](plans/2026-02-02-vastai-service-harness-implementation.md) | Phase-by-phase implementation details for the vastai harness |
 

@@ -1,50 +1,100 @@
 # Referral System
 
-NOEMA's referral program lets you earn passive Generation Credits by inviting new users. When someone funds their account through your referral link, 5% of their deposit is credited to your Referral Vault automatically.
+NOEMA's referral program lets you earn passive income by inviting new users. Register a human-readable name on-chain, share your link, and earn a percentage of every deposit made using your referral code — paid directly to your wallet in the same transaction.
 
 ---
 
 ## How It Works
 
-Your referral link points to a unique **vault smart contract** deployed on-chain in your name. Any deposit routed through the vault triggers the 5% rebate — the funding fee that would otherwise go entirely to the protocol is split, with your share streamed to you.
+Your referral code is registered on the **CreditVault** smart contract. When someone makes a deposit using your code, the contract automatically splits the payment: the protocol receives the majority, and your share is transferred directly to your wallet. No withdrawal step, no delays — it's trustless and instant.
 
-| Platform | How to Share | How It Applies |
+The referral split is configured in basis points (bps) on-chain. The default is set by the protocol and applies to all new registrations.
+
+| Platform | How to Share | Referral Split |
 |----------|-------------|----------------|
-| Web | `noema.art/r/<your-vault-name>` | New user lands on onboarding with your code pre-applied |
-| API | `?ref=<vaultAddress>` query param | Programmatic deposits tagged to your vault |
-| Telegram | `/ref` command | Coming soon |
-| Discord | `/ref` slash command | Coming soon |
+| Web | `noema.art/ref/<your-code>` | On-chain split via `payETH(referralKey)` — full referral rewards |
+| Telegram | Reply with your code during `/buypoints` | Code is recognized; on-chain split requires web purchase |
 
 ---
 
-## Creating a Vault (Web)
+## Registering a Referral Code
 
-1. **Open the account menu** — click your avatar or credit balance in the top-right corner
-2. **Select "Add Referral Vault"**
-3. **Choose a name** — this becomes part of your link: `noema.art/r/<name>`
-4. **Confirm deployment** — NOEMA deploys your vault on-chain; a small gas fee is deducted from your credits
-5. **Share your link** — anyone who funds through it earns you 5% of their deposit, indefinitely
+### Via the Web App
+
+1. Navigate to the referral section in your account
+2. Choose a unique name (4+ characters, alphanumeric with dashes/underscores)
+3. Confirm the on-chain `register(name)` transaction from your wallet
+4. Your name is now permanently registered — share `noema.art/ref/<name>`
+
+### Via the API
+
+1. **Check availability:**
+   ```
+   GET /api/v1/referral-vault/check-name?name=alice&chainId=1
+   ```
+   Returns `{ name, referralKey, isAvailable }`.
+
+2. **Get registration calldata:**
+   ```
+   POST /api/v1/referral-vault/register
+   { "name": "alice", "userWalletAddress": "0x...", "chainId": "1" }
+   ```
+   Returns unsigned transaction data for your wallet to submit.
 
 ---
 
-## API Usage
+## Tracking Earnings
 
-Attach your vault to any deposit programmatically using the `ref` query parameter:
+### Dashboard API
 
 ```
-POST /api/v1/deposits?ref=<vaultAddress>
-{
-  "asset": "ETH",
-  "amount": "0.5"
-}
+GET /api/v1/referral-vault/alice/dashboard
 ```
 
-The response includes a `referralRebate` field confirming the amount credited to your vault.
+Returns:
+- Total referral volume and rewards (cumulative wei)
+- Per-token breakdown with deposit counts
+- Current USD valuations
+
+### My Vaults
+
+```
+GET /api/v1/referral-vault/my-vaults
+```
+
+Returns all referral codes registered to your account (requires authentication).
 
 ---
 
-## Stacking Earnings
+## Smart Contract Details
 
-Referral Vaults are the first layer of NOEMA's incentive stack. Combine them with Spell publishing and model contributions to earn up to an additional 19% on top of your 5% deposit rebate — up to 24% total of every deposit your network generates.
+All referral operations happen on the **CreditVault** contract:
 
-See [Tokenomics](#tokenomics) for the full breakdown.
+```
+CreditVault — 0x00000001152D633eb2AC3Cf91eac9994aEEFc021 (Ethereum Mainnet, Base)
+```
+
+- **`register(name)`** — Claims a referral name. Computes `referralKey = keccak256(name)` and stores `referralOwner[key] = msg.sender`.
+- **`pay(token, amount, referralKey)`** / **`payETH(referralKey)`** — Splits payment: `referralAmount = amount * referralBps / 10000` goes to the referrer, remainder to the protocol.
+- **`setAddress(key, newAddress)`** — Change where your referral earnings are sent (owner only).
+- **`transferName(key, newOwner)`** — Transfer ownership of a referral name.
+
+The referral split, payout address, and ownership are all on-chain and verifiable by anyone.
+
+---
+
+## How Referral Links Work
+
+When someone visits `noema.art/ref/alice`:
+1. The referral code is stored in a browser cookie (90-day TTL)
+2. On login, the code is saved as a user preference
+3. On purchase, the code is converted to `referralKey = keccak256("alice")` and encoded into the deposit transaction calldata
+4. The CreditVault contract splits the payment on-chain
+
+---
+
+## Limitations
+
+- **Direct ETH transfers** (e.g., from Telegram) cannot include a referral key. Referral splits only apply to deposits made through `pay()` or `payETH()` on the web app.
+- **Names are per-chain** — a name registered on Ethereum Mainnet is independent from Base.
+- **Names are permanent** — once registered, a name cannot be deleted (only transferred).

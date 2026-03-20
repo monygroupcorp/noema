@@ -6,7 +6,7 @@ const { FOUNDATION_ADDRESSES, CREDIT_VAULT_ADDRESSES, getFoundationAddress } = r
 
 const contracts = {
   // LEGACY: Foundation.sol factory (chartered fund deployment via charterFund / CREATE2).
-  // Retained for legacy SaltMiningService and ReferralVaultService only.
+  // Retained for legacy SaltMiningService only.
   // TODO: Remove when CreateX migration is complete.
   foundation: {
     abi: foundationAbi,
