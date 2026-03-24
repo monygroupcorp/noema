@@ -384,25 +384,6 @@ async function startApp() {
           }
         }
         
-        // Refresh ComfyUI workflows and re-register bot commands every 6 hours so
-        // new workflows added to ComfyUI Deploy appear without a redeploy.
-        const WorkflowCacheManager = require('./src/core/services/comfydeploy/workflowCacheManager');
-        const WORKFLOW_REFRESH_MS = parseInt(process.env.WORKFLOW_REFRESH_INTERVAL_MS || '') || 6 * 60 * 60 * 1000;
-        setInterval(async () => {
-          logger.info('[App] Periodic workflow refresh starting...');
-          try {
-            await WorkflowCacheManager.getInstance().initialize();
-            if (platforms.telegram) await platforms.telegram.setupCommands();
-            if (platforms.discord && typeof platforms.discord.setupCommands === 'function') {
-              await platforms.discord.setupCommands();
-            }
-            logger.info('[App] Periodic workflow refresh complete.');
-          } catch (err) {
-            logger.error('[App] Periodic workflow refresh failed:', err.message);
-          }
-        }, WORKFLOW_REFRESH_MS);
-        logger.info(`[App] Workflow auto-refresh scheduled every ${WORKFLOW_REFRESH_MS / 3600000}h.`);
-
         // Then start Discord...
         
       } catch (webError) {
@@ -415,7 +396,27 @@ async function startApp() {
     logger.info('\n===========================================');
     logger.info('| StationThis application is now running! |');
     logger.info('===========================================\n');
-    
+
+    // Refresh ComfyUI workflows and re-register bot commands every 6 hours so
+    // new workflows added to ComfyUI Deploy appear without a redeploy.
+    // Placed after full startup to avoid interfering with platform initialization.
+    const WorkflowCacheManager = require('./src/core/services/comfydeploy/workflowCacheManager');
+    const WORKFLOW_REFRESH_MS = parseInt(process.env.WORKFLOW_REFRESH_INTERVAL_MS || '') || 6 * 60 * 60 * 1000;
+    setInterval(async () => {
+      logger.info('[App] Periodic workflow refresh starting...');
+      try {
+        await WorkflowCacheManager.getInstance().initialize();
+        if (platforms.telegram) await platforms.telegram.setupCommands();
+        if (platforms.discord && typeof platforms.discord.setupCommands === 'function') {
+          await platforms.discord.setupCommands();
+        }
+        logger.info('[App] Periodic workflow refresh complete.');
+      } catch (err) {
+        logger.error('[App] Periodic workflow refresh failed:', err.message);
+      }
+    }, WORKFLOW_REFRESH_MS);
+    logger.info(`[App] Workflow auto-refresh scheduled every ${WORKFLOW_REFRESH_MS / 3600000}h.`);
+
     // Return components for external access
     return {
       services,
