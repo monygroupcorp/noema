@@ -49,19 +49,11 @@ const { handleBatchMediaSync } = require('./commands/batchCommand');
 function createTelegramBot(dependencies, token, options = {}) {
   const { logger = console, commandRegistry } = dependencies;
 
-  // Start without polling — we clear the pending update queue first to avoid
-  // replaying messages that arrived during a blue-green deploy overlap.
-  const bot = new TelegramBot(token, { polling: false });
+  const bot = new TelegramBot(token, {
+    polling: options.polling !== false,
+    ...options
+  });
   const botStartupTime = Date.now();
-
-  if (options.polling !== false) {
-    bot.deleteWebhook({ drop_pending_updates: true })
-      .then(() => bot.startPolling())
-      .catch(err => {
-        logger.warn('[Bot] Could not clear pending updates on startup, starting polling anyway:', err.message);
-        bot.startPolling();
-      });
-  }
 
   // --- Initialize Dispatchers ---
   const callbackQueryDispatcher = new CallbackQueryDispatcher(logger);
