@@ -6,7 +6,7 @@ set -euo pipefail
 #
 # Usage:
 #   ./release.sh           # push current branch, show release-please PR
-#   ./release.sh --merge   # push + merge the release-please PR (triggers Docker build)
+#   ./release.sh --merge   # push + wait for PR + merge (one fell swoop)
 #   ./release.sh --status  # show PR status without pushing
 # ------------------------------------------------------------------
 
@@ -38,24 +38,38 @@ if [[ "${STATUS_ONLY}" == "0" ]]; then
   fi
   echo "Pushing ${CURRENT_BRANCH} to origin..."
   git push origin "${CURRENT_BRANCH}"
-  echo "Pushed. Waiting for release-please to queue..."
-  sleep 5
+  echo "Pushed."
 fi
 
+# Poll for the release-please PR.
+# After a push, CI takes ~30-60s to create/update it.
 echo ""
 echo "Looking for release-please PR..."
-PR_JSON=$(gh pr list \
-  --repo "${REPO}" \
-  --state open \
-  --search "release-please" \
-  --json number,title,url \
-  --limit 1)
+MAX_WAIT=120
+POLL_INTERVAL=5
+ELAPSED=0
+PR_COUNT=0
+PR_JSON=""
 
-PR_COUNT=$(echo "${PR_JSON}" | python3 -c "import json,sys; print(len(json.loads(sys.stdin.read())))" 2>/dev/null || echo "0")
+while [[ "${PR_COUNT}" == "0" && "${ELAPSED}" -lt "${MAX_WAIT}" ]]; do
+  PR_JSON=$(gh pr list \
+    --repo "${REPO}" \
+    --state open \
+    --search "release-please" \
+    --json number,title,url \
+    --limit 1)
+  PR_COUNT=$(echo "${PR_JSON}" | python3 -c "import json,sys; print(len(json.loads(sys.stdin.read())))" 2>/dev/null || echo "0")
+  if [[ "${PR_COUNT}" == "0" ]]; then
+    printf "  waiting for release-please CI... (%ds)\r" "${ELAPSED}"
+    sleep "${POLL_INTERVAL}"
+    ELAPSED=$((ELAPSED + POLL_INTERVAL))
+  fi
+done
+echo ""
 
 if [[ "${PR_COUNT}" == "0" ]]; then
-  echo "No open release-please PR found."
-  echo "It may not exist yet (CI takes ~30s) or everything is already released."
+  echo "No release-please PR appeared after ${MAX_WAIT}s."
+  echo "All changes may already be released, or CI may have failed."
   exit 0
 fi
 
@@ -63,7 +77,6 @@ PR_NUMBER=$(echo "${PR_JSON}" | python3 -c "import json,sys; d=json.loads(sys.st
 PR_TITLE=$(echo "${PR_JSON}" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print(d[0]['title'])")
 PR_URL=$(echo "${PR_JSON}" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print(d[0]['url'])")
 
-echo ""
 echo "=== Release PR ========================================="
 echo "  #${PR_NUMBER}: ${PR_TITLE}"
 echo "  ${PR_URL}"
