@@ -1096,7 +1096,8 @@ function createDiscordBot(dependencies, token, options = {}) {
   // Return client and bot object for compatibility
   return {
     client,
-    bot: client // Alias for compatibility
+    bot: client, // Alias for compatibility
+    setupCommands: setupDynamicCommandsWhenReady
   };
 }
 

@@ -70,6 +70,7 @@ scripts/tool_registry.generated.json
 /*.sh
 !deploy.sh
 !deploy-staging.sh
+!release.sh
 
 # Old cruft
 agent_prompts/
