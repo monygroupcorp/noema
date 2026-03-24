@@ -36,6 +36,18 @@ if [[ "${STATUS_ONLY}" == "0" ]]; then
     read -rp "Push anyway? [y/N] " confirm
     [[ "${confirm}" =~ ^[Yy]$ ]] || exit 0
   fi
+  # Sync with remote before pushing to avoid rejected pushes
+  if git fetch origin "${CURRENT_BRANCH}" 2>/dev/null && \
+     ! git merge-base --is-ancestor "origin/${CURRENT_BRANCH}" HEAD 2>/dev/null; then
+    echo "Remote has changes not in local branch. Rebasing..."
+    if git diff --quiet && git diff --cached --quiet; then
+      git pull --rebase origin "${CURRENT_BRANCH}"
+    else
+      git stash
+      git pull --rebase origin "${CURRENT_BRANCH}"
+      git stash pop
+    fi
+  fi
   echo "Pushing ${CURRENT_BRANCH} to origin..."
   git push origin "${CURRENT_BRANCH}"
   echo "Pushed."
