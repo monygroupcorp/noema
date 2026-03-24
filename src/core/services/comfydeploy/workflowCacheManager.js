@@ -938,10 +938,18 @@ class WorkflowCacheManager {
       
       // Mark as initialized *after* all steps succeed
       this.isInitialized = true;
-      this._hasInitializedOnce = true; 
+      this._hasInitializedOnce = true;
       this.cache.lastUpdated = Date.now(); // Ensure timestamp is set after full successful init
 
       this.logger.info(`[WorkflowCacheManager] Cache initialized in ${Date.now() - _tTotal}ms. ${this.cache.workflows.length} tools, ${this.cache.deployments.length} deployments, ${this.cache.machines.length} machines.`);
+
+      // Start background refresh timer on first successful init only.
+      // This keeps workflow data current without requiring a redeploy.
+      if (!this._refreshTimer) {
+        const intervalMs = parseInt(process.env.WORKFLOW_REFRESH_INTERVAL_MS || '') || 6 * 60 * 60 * 1000;
+        this._refreshTimer = setInterval(() => this.refreshInBackground(), intervalMs);
+        this.logger.info(`[WorkflowCacheManager] Auto-refresh scheduled every ${intervalMs / 3600000}h.`);
+      }
 
       return this.cache.workflows; // Return the populated cache data
     } catch (error) {
