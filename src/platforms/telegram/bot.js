@@ -49,14 +49,19 @@ const { handleBatchMediaSync } = require('./commands/batchCommand');
 function createTelegramBot(dependencies, token, options = {}) {
   const { logger = console, commandRegistry } = dependencies;
 
-  const bot = new TelegramBot(token, {
-    polling: options.polling !== false,
-    ...options
-  });
-
-  // Track bot startup time to filter old messages
+  // Start without polling — we clear the pending update queue first to avoid
+  // replaying messages that arrived during a blue-green deploy overlap.
+  const bot = new TelegramBot(token, { polling: false });
   const botStartupTime = Date.now();
-  const MESSAGE_AGE_LIMIT_MS = 15 * 60 * 1000; // 15 minutes in milliseconds
+
+  if (options.polling !== false) {
+    bot.deleteWebhook({ drop_pending_updates: true })
+      .then(() => bot.startPolling())
+      .catch(err => {
+        logger.warn('[Bot] Could not clear pending updates on startup, starting polling anyway:', err.message);
+        bot.startPolling();
+      });
+  }
 
   // --- Initialize Dispatchers ---
   const callbackQueryDispatcher = new CallbackQueryDispatcher(logger);
@@ -141,12 +146,8 @@ function createTelegramBot(dependencies, token, options = {}) {
 
       if (!message.caption) return;
 
-      // Filter out old messages (older than 2 minutes from bot startup)
-      const messageTime = message.date * 1000; // Convert Telegram timestamp to milliseconds
-      const messageAge = Date.now() - messageTime;
-
-      if (messageAge > MESSAGE_AGE_LIMIT_MS) {
-        logger.debug(`[Bot] Ignoring old photo message (age: ${Math.round(messageAge / 1000)}s, limit: ${MESSAGE_AGE_LIMIT_MS / 1000}s)`);
+      if (message.date * 1000 < botStartupTime) {
+        logger.debug(`[Bot] Ignoring pre-startup photo message`);
         return;
       }
 
@@ -194,8 +195,7 @@ function createTelegramBot(dependencies, token, options = {}) {
 
       if (!message.caption) return;
 
-      const messageTime = message.date * 1000;
-      if (Date.now() - messageTime > MESSAGE_AGE_LIMIT_MS) return;
+      if (message.date * 1000 < botStartupTime) return;
 
       const fullDependencies = { ...dependencies, replyContextManager };
 
@@ -215,12 +215,8 @@ function createTelegramBot(dependencies, token, options = {}) {
     try {
       if (!message.text) return;
 
-      // Filter out old messages (older than 2 minutes from bot startup)
-      const messageTime = message.date * 1000; // Convert Telegram timestamp to milliseconds
-      const messageAge = Date.now() - messageTime;
-      
-      if (messageAge > MESSAGE_AGE_LIMIT_MS) {
-        logger.debug(`[Bot] Ignoring old message (age: ${Math.round(messageAge / 1000)}s, limit: ${MESSAGE_AGE_LIMIT_MS / 1000}s)`);
+      if (message.date * 1000 < botStartupTime) {
+        logger.debug(`[Bot] Ignoring pre-startup message`);
         return;
       }
 
