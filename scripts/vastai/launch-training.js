@@ -963,9 +963,9 @@ async function main() {
     expandHome(args.configOutput || path.join(localJobRoot, 'config', path.basename(templatePath)))
   );
 
-  // Sample at the final step (steps - 1 for 0-indexed training)
-  // With skip_first_sample: true, this ensures samples only at the trained model
-  const sampleEvery = Math.max(1, steps - 1);
+  // Sample at the final step. With skip_first_sample: true, ai-toolkit skips step 0
+  // and produces exactly one sample set at step N (the final saved model state).
+  const sampleEvery = steps;
 
   // Save checkpoint at least once before the final sample/completion
   // For short runs (<250 steps), save at halfway point to ensure we have a checkpoint
@@ -1370,19 +1370,14 @@ async function main() {
           // Model uploaded - set URL immediately so nothing downstream can block it
           hfModelUrl = `https://huggingface.co/${hfRepoId}`;
 
-          // Upload samples if they exist (ai-toolkit creates samples/step_N/*.png)
+          // Upload samples if they exist (ai-toolkit creates samples/step_N/*.jpg)
           log('Looking for sample images...');
-          // Debug: show output directory structure
-          const outputDir = `${remoteDir}/output`;
-          const lsCmd = `ls -laR ${outputDir} 2>/dev/null | head -100`;
-          const lsOutput = await ssh.exec(lsCmd);
-          logVerbose(`Output directory structure:\n${lsOutput}`);
 
-          // Search entire output directory for samples (ai-toolkit may put them in different locations)
-          const findSamplesCmd = `find ${outputDir} -name "*.png" -o -name "*.jpg" 2>/dev/null | sort`;
+          // Search specifically in the samples directory to avoid picking up unrelated images
+          const findSamplesCmd = `find "${remoteSamplesDir}" -name "*.png" -o -name "*.jpg" 2>/dev/null | sort`;
           const sampleFilesRaw = await ssh.exec(findSamplesCmd);
           const sampleFiles = sampleFilesRaw.trim().split('\n').filter(f => f && (f.endsWith('.png') || f.endsWith('.jpg')));
-          logVerbose(`Sample search in ${outputDir}: found ${sampleFiles.length} image files`);
+          log(`Found ${sampleFiles.length} sample images in ${remoteSamplesDir}`);
           if (sampleFiles.length > 0) {
             logVerbose(`Sample files: ${sampleFiles.join(', ')}`);
           }
