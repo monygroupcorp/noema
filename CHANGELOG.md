@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.3.10](https://github.com/monygroupcorp/noema/compare/v4.3.9...v4.3.10) (2026-03-25)
+
+
+### Bug Fixes
+
+* settings apiFetchLimit ReferenceError and 402 insufficient funds message ([e3e62c4](https://github.com/monygroupcorp/noema/commit/e3e62c4fabc07d01f837c286622351463edf18d0))
+
 ## [4.3.9](https://github.com/monygroupcorp/noema/compare/v4.3.8...v4.3.9) (2026-03-25)
 
 
