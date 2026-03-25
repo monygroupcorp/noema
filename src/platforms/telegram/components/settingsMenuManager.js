@@ -106,7 +106,7 @@ async function getMostFrequentlyUsedTools(masterAccountId, dependencies) {
     try {
         const apiClient = getApiClient(dependencies);
         const response = await apiClient.get(`/internal/v1/data/generations/users/${masterAccountId}/most-frequent-tools`, {
-            params: { limit: apiFetchLimit }
+            params: { limit }
         });
 
         const rawFrequentTools = response.data && response.data.frequentTools ? response.data.frequentTools : [];

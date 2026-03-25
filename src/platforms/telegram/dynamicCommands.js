@@ -442,14 +442,17 @@ async function setupDynamicCommands(commandRegistry, dependencies) {
         } catch (err) {
             let userMessage = 'Sorry, something went wrong while starting the task.';
             // Provide more specific feedback for common credit-related issues
-            if (err instanceof ExecutionError && err.payload && err.payload.error) {
-              const { code, message } = err.payload.error;
+            const errPayload = (err instanceof ExecutionError && err.payload?.error)
+              ? err.payload.error
+              : err.response?.data?.error;
+            if (errPayload) {
+              const { code, message, details } = errPayload;
               switch (code) {
                 case 'INSUFFICIENT_FUNDS':
-                  if (err.payload.error.details?.poolAvailable != null) {
-                    userMessage = `The group pool has ${err.payload.error.details.poolAvailable} points but this requires ${err.payload.error.details.required}. Fund the pool with /groupsettings or purchase personal points with /buypoints.`;
+                  if (details?.poolAvailable != null) {
+                    userMessage = `The group pool has ${details.poolAvailable} points but this requires ${details.required}. Fund the pool with /groupsettings or purchase personal points with /buypoints.`;
                   } else {
-                    userMessage = 'You do not have enough points to run this. Purchase more with /buypoints or view your balance with /account.';
+                    userMessage = `You need ${details?.required ?? 'more'} points but only have ${details?.available ?? 'fewer'}. Purchase more with /buypoints or view your balance with /account.`;
                   }
                   break;
                 case 'WALLET_NOT_FOUND':
