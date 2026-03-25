@@ -6,17 +6,19 @@ const MAX_AGE_DAYS = 90;
 function referralHandler(req, res, next) {
   let referralCode = null;
 
-  // 1. Check for /ref/:code or /:spell/ref/:code
+  // 1. Check for /ref/:code, /referral/:code, or /:spell/ref/:code
   const pathParts = req.path.split('/').filter(p => p);
-  const refIndex = pathParts.indexOf('ref');
+  const refIndex = pathParts.findIndex(p => p === 'ref' || p === 'referral');
 
   if (refIndex !== -1 && refIndex + 1 < pathParts.length) {
     referralCode = pathParts[refIndex + 1];
-    
-    // Clean the URL by redirecting
+
+    // Redirect to the path before the /ref(erral)/ segment
+    const refSegment = pathParts[refIndex]; // 'ref' or 'referral'
     const originalPath = req.path;
-    const newPath = originalPath.substring(0, originalPath.indexOf('/ref/'));
-    
+    const cutAt = originalPath.indexOf(`/${refSegment}/`);
+    const newPath = cutAt > 0 ? originalPath.substring(0, cutAt) : '/';
+
     res.cookie(REFERRAL_COOKIE_NAME, referralCode, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -25,7 +27,7 @@ function referralHandler(req, res, next) {
       ...(process.env.NODE_ENV === 'production' && { domain: '.noema.art' })
     });
 
-    return res.redirect(newPath || '/');
+    return res.redirect(newPath);
   }
 
   // 2. Check for query parameter ?ref=code

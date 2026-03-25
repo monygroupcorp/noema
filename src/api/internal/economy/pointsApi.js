@@ -466,7 +466,8 @@ module.exports = function pointsApi(dependencies) {
     router.post('/purchase', purchaseRateLimiter, async (req, res, next) => {
         const requestId = generateRequestId();
         try {
-            const { quoteId, type, assetAddress, amount, tokenId, userWalletAddress, referralCode, chainId: bodyChainId } = req.body;
+            const { quoteId, type, assetAddress, amount, tokenId, userWalletAddress, referralCode: bodyReferralCode, chainId: bodyChainId } = req.body;
+            const referralCode = bodyReferralCode || req.cookies?.referral_code || null;
             const chainId = String(bodyChainId || '1');
 
             // Validate chain ID
