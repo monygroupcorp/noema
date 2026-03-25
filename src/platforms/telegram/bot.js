@@ -245,7 +245,30 @@ function createTelegramBot(dependencies, token, options = {}) {
     }
   });
 
-  bot.on('polling_error', (error) => logger.error('Telegram polling error:', error));
+  // Polling watchdog: restart bot client after 5 consecutive polling errors
+  let consecutivePollingErrors = 0;
+  bot.on('polling_error', (error) => {
+    consecutivePollingErrors++;
+    logger.error(`Telegram polling error (${consecutivePollingErrors} consecutive):`, error);
+    if (consecutivePollingErrors >= 5) {
+      logger.error('[Bot] 5 consecutive polling errors — restarting polling...');
+      consecutivePollingErrors = 0;
+      bot.stopPolling().then(() => {
+        setTimeout(() => {
+          bot.startPolling().then(() => {
+            logger.info('[Bot] Polling restarted successfully.');
+          }).catch(err => logger.error('[Bot] Failed to restart polling:', err));
+        }, 5000);
+      }).catch(err => logger.error('[Bot] Failed to stop polling before restart:', err));
+    }
+  });
+
+  // Verify token and connectivity at startup
+  bot.getMe().then(me => {
+    logger.info(`[Bot] Polling active. Bot identity confirmed: @${me.username} (id=${me.id})`);
+  }).catch(err => {
+    logger.error(`[Bot] CRITICAL: getMe() failed at startup — token invalid or Telegram unreachable: ${err.message}`);
+  });
 
   logger.debug('Telegram bot configured and ready with dispatcher architecture.');
   
