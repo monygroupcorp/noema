@@ -299,7 +299,7 @@ export class TrainingStudio extends Component {
         if (!res.ok) throw new Error('Create failed');
       } else {
         const res = await fetchWithCsrf(`/api/v1/datasets/${encodeURIComponent(formValues._id)}`, {
-          method: 'PUT', body: { name: formValues.name, description: formValues.description, tags: formValues.tags, visibility: formValues.visibility },
+          method: 'PUT', body: { name: formValues.name, description: formValues.description, tags: formValues.tags, visibility: formValues.visibility, images: formValues.images },
         });
         if (!res.ok) throw new Error('Update failed');
       }
@@ -328,7 +328,8 @@ export class TrainingStudio extends Component {
         if (!signRes.ok) throw new Error('Failed to get signed URL');
         const { signedUrl, permanentUrl } = await signRes.json();
         const raw = await file.arrayBuffer();
-        await fetch(signedUrl, { method: 'PUT', body: raw });
+        const putRes = await fetch(signedUrl, { method: 'PUT', body: raw });
+        if (!putRes.ok) throw new Error(`Storage upload failed (${putRes.status})`);
         urls.push(permanentUrl);
         this.setState({ uploadProgress: ((i + 1) / imageFiles.length) });
       }
@@ -979,10 +980,14 @@ export class TrainingStudio extends Component {
         h('button', { className: `ts-upload-tab${uploadMethod === 'urls' ? ' ts-upload-tab--active' : ''}`, onclick: () => this.setState({ uploadMethod: 'urls' }) }, 'Image URLs'),
       ),
       uploadMethod === 'upload' ? h('div', { className: 'ts-upload-area' },
-        h('input', {
-          type: 'file', multiple: true, accept: 'image/*',
-          onchange: (e) => this._uploadFiles(e.target.files),
-        }),
+        h('label', { className: 'ts-file-label' },
+          h('input', {
+            type: 'file', multiple: true, accept: 'image/*',
+            className: 'ts-file-input',
+            onchange: (e) => this._uploadFiles(e.target.files),
+          }),
+          'Choose Files',
+        ),
         uploading ? h(Loader, { message: 'Uploading...', progress: uploadProgress }) : null
       ) : null,
       uploadMethod === 'urls' ? h('div', { className: 'ts-url-area' },
@@ -1647,6 +1652,21 @@ export class TrainingStudio extends Component {
       .ts-upload-tab:hover { color: var(--text-secondary); }
       .ts-upload-tab--active { color: var(--text-primary); border-bottom-color: var(--accent); }
       .ts-upload-area { margin-top:12px; margin-bottom:12px; }
+      .ts-file-input { display:none; }
+      .ts-file-label {
+        padding: 8px 20px;
+        border: var(--border-width) solid var(--border);
+        cursor: pointer;
+        font-family: var(--ff-condensed);
+        font-size: var(--fs-sm);
+        font-weight: var(--fw-medium);
+        letter-spacing: var(--ls-wider);
+        text-transform: uppercase;
+        display: inline-flex; align-items: center; gap: 6px;
+        background: var(--surface-2); color: var(--text-secondary);
+        transition: border-color var(--dur-interact) var(--ease), color var(--dur-interact) var(--ease);
+      }
+      .ts-file-label:hover { border-color: var(--border-hover); color: var(--text-primary); }
       .ts-url-area { display:flex; gap:8px; align-items:flex-start; margin-top:12px; margin-bottom:12px; }
       .ts-url-area textarea { flex:1; }
 
