@@ -129,7 +129,12 @@ async function handleToolsCallback(bot, query, masterAccountId, deps){
     return;
   }
 
-  await editEscapedMessageText(bot, menu.text, { chat_id: query.message.chat.id, message_id: query.message.message_id, reply_markup: menu.reply_markup });
+  const isPreEscaped = data.startsWith('tool_view_');
+  if (isPreEscaped) {
+    await bot.editMessageText(menu.text, { chat_id: query.message.chat.id, message_id: query.message.message_id, reply_markup: menu.reply_markup, parse_mode: 'MarkdownV2' });
+  } else {
+    await editEscapedMessageText(bot, menu.text, { chat_id: query.message.chat.id, message_id: query.message.message_id, reply_markup: menu.reply_markup });
+  }
   await bot.answerCallbackQuery(query.id);
 }
 
