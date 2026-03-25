@@ -429,7 +429,7 @@ except Exception as e:
       const result = await this.ssh.exec(checkScript, { timeout: 30000 });
       const output = result.trim();
 
-      if (output.startsWith('OK:')) {
+      if (output.includes('OK:')) {
         const match = output.match(/OK: (.+) \| CUDA (.+)/);
         this.logger.info(`[TrainingRunner] GPU check passed: ${output}`);
         return {
