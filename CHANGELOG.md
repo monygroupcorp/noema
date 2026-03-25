@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.3.8](https://github.com/monygroupcorp/noema/compare/v4.3.7...v4.3.8) (2026-03-25)
+
+
+### Bug Fixes
+
+* dataset edit form now saves uploaded images and styles file input ([cfd6656](https://github.com/monygroupcorp/noema/commit/cfd66569915433397be7c9949a9e131247429cf1))
+
 ## [4.3.7](https://github.com/monygroupcorp/noema/compare/v4.3.6...v4.3.7) (2026-03-25)
 
 
