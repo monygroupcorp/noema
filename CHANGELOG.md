@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.3.9](https://github.com/monygroupcorp/noema/compare/v4.3.8...v4.3.9) (2026-03-25)
+
+
+### Bug Fixes
+
+* fortify Telegram polling and setupCommands initialization ([1b779ab](https://github.com/monygroupcorp/noema/commit/1b779abee7fcc66d2aa6b7d6e3f082bff28e0b0b))
+
 ## [4.3.8](https://github.com/monygroupcorp/noema/compare/v4.3.7...v4.3.8) (2026-03-25)
 
 
