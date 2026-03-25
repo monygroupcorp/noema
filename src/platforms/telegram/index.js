@@ -508,50 +508,55 @@ function initializeTelegramPlatform(dependencies, options = {}) {
     await showGroupSettingsMenu(bot, msg, dependencies);
   });
 
+  async function _runSetupCommands() {
+    const cacheManager = WorkflowCacheManager.getInstance();
+    const registry = dependencies.toolRegistry;
+
+    // Wait up to 90s for WorkflowCacheManager and ToolRegistry
+    const timeoutMs = 90000;
+    const start = Date.now();
+
+    try {
+      await Promise.race([
+        cacheManager.initialize(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs))
+      ]);
+    } catch (initErr) {
+      logger.warn(`[Telegram] WorkflowCacheManager did not fully initialize: ${initErr.message}`);
+    }
+
+    while ((registry?.getAllTools()?.length || 0) === 0 && Date.now() - start < timeoutMs) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+
+    const toolCount = registry?.getAllTools()?.length || 0;
+    if (toolCount === 0) {
+      throw new Error(`ToolRegistry still empty after ${timeoutMs}ms`);
+    }
+
+    logger.info(`[Telegram] ToolRegistry ready. Tools count: ${toolCount}.`);
+    const commandsToRegister = await setupDynamicCommands(telegramCommandRegistry, { ...dependencies, disabledFeatures: DISABLED_FEATURES });
+    if (commandsToRegister && commandsToRegister.length > 0) {
+      await bot.setMyCommands(commandsToRegister);
+      logger.info(`[Telegram] Dynamic commands registered: ${commandsToRegister.length}.`);
+    } else {
+      logger.warn('[Telegram] setupDynamicCommands returned no commands.');
+    }
+  }
+
+  async function setupCommandsWithRetry(attempt = 1) {
+    try {
+      await _runSetupCommands();
+    } catch (err) {
+      const delay = Math.min(30000 * attempt, 120000);
+      logger.error(`[Telegram] setupCommands attempt ${attempt} failed: ${err.message}. Retrying in ${delay / 1000}s.`);
+      setTimeout(() => setupCommandsWithRetry(attempt + 1), delay);
+    }
+  }
+
   return {
     bot,
-    async setupCommands() {
-      try {
-        // Ensure WorkflowCacheManager has fully initialized (populating ToolRegistry) before registering commands.
-        const cacheManager = WorkflowCacheManager.getInstance();
-        const timeoutMs = 30000; // 30-second safety cap
-
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`WorkflowCacheManager initialization timed out after ${timeoutMs}ms`)), timeoutMs)
-        );
-
-        let initialized = false;
-        try {
-          await Promise.race([cacheManager.initialize(), timeoutPromise]);
-          initialized = true;
-        } catch (initErr) {
-          logger.warn(`[Telegram] WorkflowCacheManager did not fully initialize: ${initErr.message}`);
-        }
-
-        // Poll ToolRegistry for readiness (non-zero tools) up to same timeout
-        const start = Date.now();
-        const registry = dependencies.toolRegistry;
-        while ((registry?.getAllTools()?.length || 0) === 0 && Date.now() - start < timeoutMs) {
-          await new Promise(r => setTimeout(r, 200));
-        }
-
-        logger.info(`[Telegram] ToolRegistry ready? ${initialized}. Tools count: ${registry?.getAllTools()?.length || 0}.`);
-
-        // Pass the platform-specific commandRegistry instance to the setup function.
-        // It will return a list of commands to be registered with the Telegram API.
-        const commandsToRegister = await setupDynamicCommands(telegramCommandRegistry, { ...dependencies, disabledFeatures: DISABLED_FEATURES });
-        
-        if (commandsToRegister && commandsToRegister.length > 0) {
-            await bot.setMyCommands(commandsToRegister);
-            logger.debug(`Telegram bot dynamic commands configured: ${commandsToRegister.length} commands registered.`);
-        } else {
-            logger.debug('No dynamic commands were registered.');
-        }
-
-      } catch (error) {
-        logger.error('Failed to setup dynamic commands (via setupCommands method):', error);
-      }
-    }
+    setupCommands: () => setupCommandsWithRetry(),
   };
 }
 
