@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.4.0](https://github.com/monygroupcorp/noema/compare/v4.3.10...v4.4.0) (2026-03-25)
+
+
+### Features
+
+* referral code registration, cookie-based purchase attribution, and EXP gate ([6581163](https://github.com/monygroupcorp/noema/commit/6581163045b9917fb6ca21d109a5efd3495d187e))
+
+
+### Bug Fixes
+
+* GPU preflight check fails when Accelerator() prints to stdout ([e5fae5b](https://github.com/monygroupcorp/noema/commit/e5fae5bff04bc4c7e480c6a12847c2ca1cf3ed88))
+
 ## [4.3.10](https://github.com/monygroupcorp/noema/compare/v4.3.9...v4.3.10) (2026-03-25)
 
 
