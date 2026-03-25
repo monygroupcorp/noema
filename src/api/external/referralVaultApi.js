@@ -6,8 +6,10 @@ const { getCreditVaultAddress } = require('../../core/services/alchemy/foundatio
 
 const logger = createLogger('ReferralVaultApi');
 
+const MIN_EXP_FOR_REFERRAL = 50_000;
+
 function createReferralVaultApi(dependencies) {
-  const { ethereumServices = {}, ethereumService: legacyEth, priceFeedService, creditServices = {}, creditService: legacyCredit } = dependencies;
+  const { ethereumServices = {}, ethereumService: legacyEth, priceFeedService, creditServices = {}, creditService: legacyCredit, userService } = dependencies;
 
   const getChainServices = (cid = '1') => ({
     ethereumService: ethereumServices[cid] || legacyEth,
@@ -63,6 +65,19 @@ function createReferralVaultApi(dependencies) {
     }
 
     try {
+      // Check user has enough EXP to create a referral code
+      const userId = req.user?.masterAccountId || req.user?.userId || req.user?.id;
+      if (userId && userService) {
+        try {
+          const { exp } = await userService.getStatusReport(userId);
+          if (exp < MIN_EXP_FOR_REFERRAL) {
+            return res.status(403).json({ error: { code: 'INSUFFICIENT_EXP', message: 'You need to have generated more to create a referral code.' } });
+          }
+        } catch (expErr) {
+          logger.warn('[ReferralVaultApi] Could not verify EXP for user, proceeding:', expErr.message);
+        }
+      }
+
       const { ethereumService } = getChainServices(chainId);
       const vaultAddress = getCreditVaultAddress(chainId);
       const referralKey = ethers.keccak256(ethers.toUtf8Bytes(name));
