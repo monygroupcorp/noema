@@ -38,7 +38,7 @@ class TrainingService {
     masterAccountId, name, notes, allowPublishing, tags, description, costPoints,
     datasetId, modelType, baseModel, offeringId, steps, learningRate, batchSize,
     resolution, loraRank, loraAlpha, loraDropout, triggerWords,
-    trainingMode, controlDatasetId, controlSetId,
+    trainingMode, controlDatasetId, controlSetId, captionSetId,
   }) {
     if (!masterAccountId || !name) {
       const e = new Error('masterAccountId and name are required.');
@@ -112,6 +112,7 @@ class TrainingService {
       trainingMode: trainingMode || null,
       controlDatasetId: controlDatasetId || null,
       controlSetId: controlSetId || null,
+      captionSetId: captionSetId || null,
       environment: process.env.TRAINING_ENVIRONMENT || 'production',
     };
 

@@ -315,6 +315,9 @@ class TrainingJobProcessor {
       // If a specific control set (embellishment) ID was specified, use it
       downloadOptions.controlSetId = job.controlSetId;
     }
+    if (job.captionSetId) {
+      downloadOptions.captionSetId = job.captionSetId;
+    }
     const downloadPromise = this.datasetDownloader.download(
       job.datasetId.toString(),
       jobId,
