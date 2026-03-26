@@ -1571,6 +1571,9 @@ async function main() {
     if (shouldTerminate) {
       log(result.success ? 'Terminating instance...' : 'Terminating instance after emergency recovery...');
       try {
+        await ssh.close();
+      } catch (_) { /* ignore */ }
+      try {
         await service.terminateInstance(readyInstance.instanceId);
         log('Instance terminated successfully');
         _provisionedInstanceId = null; // Clear so error handler doesn't double-terminate

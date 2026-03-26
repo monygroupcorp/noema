@@ -31,6 +31,14 @@
  *    Commands run with stdio: 'inherit' by default, which streams output
  *    to the console. Pass { stdio: 'pipe' } to capture output instead.
  *
+ * 5. SSH MULTIPLEXING (ControlMaster)
+ *    All connections reuse a single persistent master connection via SSH
+ *    ControlMaster. This avoids re-negotiating through VastAI's proxy on
+ *    every command/upload, dramatically improving reliability on flaky hosts.
+ *    The master socket lives at /tmp/vastai-ctrl-{host}-{port}.sock and
+ *    persists for 120s after the last command. Call close() to tear it down
+ *    explicitly when done with the instance.
+ *
  * @example
  * const ssh = new SshTransport({
  *   host: 'ssh2.vast.ai',
@@ -42,8 +50,11 @@
  * await ssh.exec('mkdir -p /opt/myapp');
  * await ssh.upload('./data.tar.gz', '/opt/myapp/data.tar.gz');
  * await ssh.download('/opt/myapp/output.log', './output.log');
+ * await ssh.close(); // shut down master connection when done
  */
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { spawn } = require('child_process');
 
 class SshTransport {
@@ -63,6 +74,10 @@ class SshTransport {
     this.username = username;
     this.privateKeyPath = privateKeyPath;
     this.logger = logger || console;
+
+    // Unique socket path per host+port so concurrent jobs don't share masters
+    const safeHost = host.replace(/[^a-zA-Z0-9.-]/g, '_');
+    this.controlPath = path.join(os.tmpdir(), `vastai-ctrl-${safeHost}-${port}.sock`);
   }
 
   get sshTarget() {
@@ -71,27 +86,29 @@ class SshTransport {
 
   get commonSshArgs() {
     return [
-      '-i',
-      this.privateKeyPath,
-      '-o',
-      'StrictHostKeyChecking=no',
-      '-o',
-      'UserKnownHostsFile=/dev/null',
-      '-p',
-      String(this.port)
+      '-i', this.privateKeyPath,
+      '-o', 'StrictHostKeyChecking=no',
+      '-o', 'UserKnownHostsFile=/dev/null',
+      '-o', `ControlPath=${this.controlPath}`,
+      '-o', 'ControlMaster=auto',
+      '-o', 'ControlPersist=120',
+      '-o', 'ServerAliveInterval=30',
+      '-o', 'ServerAliveCountMax=3',
+      '-p', String(this.port)
     ];
   }
 
   get commonScpArgs() {
     return [
-      '-i',
-      this.privateKeyPath,
-      '-o',
-      'StrictHostKeyChecking=no',
-      '-o',
-      'UserKnownHostsFile=/dev/null',
-      '-P',  // SCP uses uppercase -P for port
-      String(this.port)
+      '-i', this.privateKeyPath,
+      '-o', 'StrictHostKeyChecking=no',
+      '-o', 'UserKnownHostsFile=/dev/null',
+      '-o', `ControlPath=${this.controlPath}`,
+      '-o', 'ControlMaster=auto',
+      '-o', 'ControlPersist=120',
+      '-o', 'ServerAliveInterval=30',
+      '-o', 'ServerAliveCountMax=3',
+      '-P', String(this.port)  // SCP uses uppercase -P for port
     ];
   }
 
@@ -204,6 +221,26 @@ class SshTransport {
         }
       });
       scp.on('error', reject);
+    });
+  }
+
+  /**
+   * Explicitly close the SSH master connection.
+   * Call this when done with the instance so the socket is cleaned up.
+   * Safe to call even if no master is running.
+   */
+  close() {
+    return new Promise((resolve) => {
+      const args = [
+        '-i', this.privateKeyPath,
+        '-o', `ControlPath=${this.controlPath}`,
+        '-o', 'ControlMaster=no',
+        '-O', 'exit',
+        this.sshTarget
+      ];
+      const ssh = spawn('ssh', args, { stdio: 'pipe' });
+      ssh.on('close', () => resolve());
+      ssh.on('error', () => resolve()); // Ignore errors — master may already be gone
     });
   }
 }
