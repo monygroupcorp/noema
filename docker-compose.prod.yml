@@ -30,6 +30,7 @@ services:
       - COLLECTION_EXPORT_PROCESSING_ENABLED=false
     volumes:
       - /var/run/hyperbot:/var/run/hyperbot
+    mem_limit: 900m
     networks:
       hyperbot:
         aliases:

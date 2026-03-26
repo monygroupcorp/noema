@@ -38,8 +38,14 @@ RUN mkdir -p tmp output storage/media logs \
 # Set user after all root-level operations are done
 USER node
 
+ARG BUILD_VERSION=dev
+ARG COMMIT_SHA=unknown
+ARG COMMIT_MSG=unknown
+ENV BUILD_VERSION=$BUILD_VERSION
+ENV COMMIT_SHA=$COMMIT_SHA
+ENV COMMIT_MSG=$COMMIT_MSG
 ENV WEB_PORT=4000
 EXPOSE 4000
 
 # Run directly — Docker handles restarts via --restart policy
-CMD ["node", "app.js"]
+CMD ["node", "--max-old-space-size=768", "app.js"]
