@@ -1,6 +1,6 @@
 {
   "name": "noema",
-  "version": "4.6.1",
+  "version": "4.6.2",
   "scripts": {
     "dev": "node server.js",
     "test": "node --test tests/integration/**/*.test.js",
