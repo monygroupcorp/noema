@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.6.2](https://github.com/monygroupcorp/noema/compare/v4.6.1...v4.6.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* fetch full git history in CI so commit info resolves correctly ([85ba0d0](https://github.com/monygroupcorp/noema/commit/85ba0d0553bc40f034c0c6d95d2237870fa5530b))
+
+
+### Performance Improvements
+
+* add SSH ControlMaster multiplexing to SshTransport ([58c7b77](https://github.com/monygroupcorp/noema/commit/58c7b770f87200ea476c9e59696eec04036109e4))
+
 ## [4.6.1](https://github.com/monygroupcorp/noema/compare/v4.6.0...v4.6.1) (2026-03-26)
 
 
