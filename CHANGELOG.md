@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.9](https://github.com/monygroupcorp/noema/compare/v4.6.8...v4.6.9) (2026-03-26)
+
+
+### Bug Fixes
+
+* fast-fail SSH auth on repeated Permission denied (publickey) ([341e510](https://github.com/monygroupcorp/noema/commit/341e5100cc93fbdcb2de8dfbe98594e5fab94762))
+
 ## [4.6.8](https://github.com/monygroupcorp/noema/compare/v4.6.7...v4.6.8) (2026-03-26)
 
 
