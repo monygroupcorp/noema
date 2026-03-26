@@ -716,6 +716,7 @@ async function main() {
       // VastAI can take 3-5 minutes after port opens for key injection to complete
       const sshTestAttempts = 30; // 30 attempts × 10s = 5 minutes
       let sshVerified = false;
+      let consecutivePermDenied = 0;
       for (let sshTry = 0; sshTry < sshTestAttempts; sshTry++) {
         try {
           // Quick SSH test with short timeout
@@ -731,8 +732,22 @@ async function main() {
           log('SSH auth verified');
           break;
         } catch (sshErr) {
+          const reason = sshErr.stderr?.trim().split('\n').pop() || sshErr.message || 'unknown';
+          const isPermDenied = reason.includes('Permission denied (publickey)');
+
+          if (isPermDenied) {
+            consecutivePermDenied++;
+          } else {
+            consecutivePermDenied = 0;
+          }
+
+          // Fast-fail: key injection is broken on this machine, not just slow
+          if (consecutivePermDenied >= 3) {
+            log(`SSH key rejected 3 times in a row — key injection broken on this instance, bailing early`);
+            throw new Error('SSH auth verification failed: key injection broken (Permission denied x3)');
+          }
+
           if (sshTry < sshTestAttempts - 1) {
-            const reason = sshErr.stderr?.trim().split('\n').pop() || sshErr.message || 'unknown';
             log(`SSH auth not ready (${sshTry + 1}/${sshTestAttempts}), waiting 10s... [${reason}]`);
             await new Promise(r => setTimeout(r, 10000));
           }
