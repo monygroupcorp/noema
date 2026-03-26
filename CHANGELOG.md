@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.8](https://github.com/monygroupcorp/noema/compare/v4.6.7...v4.6.8) (2026-03-26)
+
+
+### Bug Fixes
+
+* add openssh-client to Docker image for VastAI SSH transport ([3fca152](https://github.com/monygroupcorp/noema/commit/3fca15235d6142ad7b7add9b9c5567d3c70c5515))
+
 ## [4.6.7](https://github.com/monygroupcorp/noema/compare/v4.6.6...v4.6.7) (2026-03-26)
 
 
