@@ -397,6 +397,35 @@ async function startApp() {
     logger.info('| StationThis application is now running! |');
     logger.info('===========================================\n');
 
+    // --- Memory reporter: sends heap stats to TELEGRAM_FEEDBACK_CHAT_ID every 10 minutes ---
+    const memFeedbackChatId = process.env.TELEGRAM_FEEDBACK_CHAT_ID;
+    const memBot = platforms.telegram && platforms.telegram.bot;
+    if (memBot && memFeedbackChatId) {
+      let lastHeapMB = 0;
+      const reportMemory = () => {
+        const m = process.memoryUsage();
+        const heapUsed = Math.round(m.heapUsed / 1024 / 1024);
+        const heapTotal = Math.round(m.heapTotal / 1024 / 1024);
+        const rss = Math.round(m.rss / 1024 / 1024);
+        const ext = Math.round(m.external / 1024 / 1024);
+        const delta = lastHeapMB ? heapUsed - lastHeapMB : 0;
+        const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
+        const uptimeMins = Math.round(process.uptime() / 60);
+        lastHeapMB = heapUsed;
+
+        const msg =
+          `📊 *Memory Report* (uptime: ${uptimeMins}m)\n` +
+          `Heap: ${heapUsed} / ${heapTotal} MB  (${deltaStr} MB)\n` +
+          `RSS: ${rss} MB  |  External: ${ext} MB`;
+
+        memBot.sendMessage(memFeedbackChatId, msg, { parse_mode: 'Markdown' }).catch(() => {});
+      };
+      // First reading after 2 min (baseline before load accumulates), then every 10 min
+      setTimeout(() => { reportMemory(); setInterval(reportMemory, 10 * 60 * 1000); }, 2 * 60 * 1000);
+      logger.info('[App] Memory reporter active — reports every 10 min to feedback chat.');
+    }
+    // --- End memory reporter ---
+
     // Return components for external access
     return {
       services,
