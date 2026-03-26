@@ -406,7 +406,7 @@ async function startApp() {
       const msg = process.env.COMMIT_MSG || 'unknown';
       startupBot.sendMessage(
         startupChatId,
-        `*StationThis v${version} is live*\n\`${sha}\` ${msg}`,
+        `*stationthisbot v${version} is live*\n\`${sha}\` ${msg}`,
         { parse_mode: 'Markdown' }
       ).catch(() => {});
     }
