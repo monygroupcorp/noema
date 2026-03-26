@@ -397,34 +397,96 @@ async function startApp() {
     logger.info('| StationThis application is now running! |');
     logger.info('===========================================\n');
 
-    // --- Memory reporter: sends heap stats to TELEGRAM_FEEDBACK_CHAT_ID every 10 minutes ---
+    // --- Startup announcement ---
+    const startupBot = platforms.telegram && platforms.telegram.bot;
+    const startupChatId = process.env.TELEGRAM_FEEDBACK_CHAT_ID;
+    if (startupBot && startupChatId) {
+      const version = process.env.BUILD_VERSION || 'dev';
+      const sha = process.env.COMMIT_SHA || 'unknown';
+      const msg = process.env.COMMIT_MSG || 'unknown';
+      startupBot.sendMessage(
+        startupChatId,
+        `*StationThis v${version} is live*\n\`${sha}\` ${msg}`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => {});
+    }
+    // --- End startup announcement ---
+
+    // --- Memory monitor: alerts on interesting heap events, silent otherwise ---
     const memFeedbackChatId = process.env.TELEGRAM_FEEDBACK_CHAT_ID;
     const memBot = platforms.telegram && platforms.telegram.bot;
     if (memBot && memFeedbackChatId) {
+      const WARN_MB = 400;
+      const CRIT_MB = 600;
+      const SPIKE_MB = 75;       // single-interval jump
+      const LEAK_DELTA_MB = 40;  // cumulative growth over LEAK_CONSECUTIVE intervals
+      const LEAK_CONSECUTIVE = 4;
+      const DROP_MB = 100;       // GC cleared a lot — worth noting
+      const SAMPLE_INTERVAL = 2 * 60 * 1000;
+
       let lastHeapMB = 0;
-      const reportMemory = () => {
+      let warnFired = false;
+      let critFired = false;
+      let consecutiveGrowth = 0;
+      let growthSinceLastDrop = 0;
+      let isFirstReading = true;
+
+      const send = (msg) => memBot.sendMessage(memFeedbackChatId, msg, { parse_mode: 'Markdown' }).catch(() => {});
+
+      const sampleMemory = () => {
         const m = process.memoryUsage();
         const heapUsed = Math.round(m.heapUsed / 1024 / 1024);
         const heapTotal = Math.round(m.heapTotal / 1024 / 1024);
         const rss = Math.round(m.rss / 1024 / 1024);
         const ext = Math.round(m.external / 1024 / 1024);
+        const uptimeMins = Math.round(process.uptime() / 60);
         const delta = lastHeapMB ? heapUsed - lastHeapMB : 0;
         const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
-        const uptimeMins = Math.round(process.uptime() / 60);
+        const summary = `Heap: ${heapUsed}/${heapTotal} MB (${deltaStr} MB) | RSS: ${rss} MB | Ext: ${ext} MB`;
+
+        if (isFirstReading) {
+          send(`*Memory baseline* (uptime: ${uptimeMins}m)\n${summary}`);
+          isFirstReading = false;
+          lastHeapMB = heapUsed;
+          return;
+        }
+
+        // Track consecutive growth for leak detection
+        if (delta > 0) {
+          consecutiveGrowth++;
+          growthSinceLastDrop += delta;
+        } else {
+          consecutiveGrowth = 0;
+          growthSinceLastDrop = 0;
+          // Reset threshold alerts on significant drop so they re-fire if heap climbs again
+          if (Math.abs(delta) >= DROP_MB) {
+            warnFired = false;
+            critFired = false;
+            send(`*Memory drop* (uptime: ${uptimeMins}m) — GC cleared ${Math.abs(delta)} MB\n${summary}`);
+          }
+        }
+
+        if (heapUsed >= CRIT_MB && !critFired) {
+          critFired = true;
+          send(`*CRITICAL: heap at ${heapUsed} MB* (uptime: ${uptimeMins}m) — crash imminent\n${summary}`);
+        } else if (heapUsed >= WARN_MB && !warnFired) {
+          warnFired = true;
+          send(`*Warning: heap at ${heapUsed} MB* (uptime: ${uptimeMins}m)\n${summary}`);
+        } else if (delta >= SPIKE_MB) {
+          send(`*Spike: +${delta} MB in 2 min* (uptime: ${uptimeMins}m)\n${summary}`);
+        } else if (consecutiveGrowth >= LEAK_CONSECUTIVE && growthSinceLastDrop >= LEAK_DELTA_MB) {
+          send(`*Sustained growth: +${growthSinceLastDrop} MB over ${consecutiveGrowth} samples* (uptime: ${uptimeMins}m)\n${summary}`);
+          consecutiveGrowth = 0;
+          growthSinceLastDrop = 0;
+        }
+
         lastHeapMB = heapUsed;
-
-        const msg =
-          `📊 *Memory Report* (uptime: ${uptimeMins}m)\n` +
-          `Heap: ${heapUsed} / ${heapTotal} MB  (${deltaStr} MB)\n` +
-          `RSS: ${rss} MB  |  External: ${ext} MB`;
-
-        memBot.sendMessage(memFeedbackChatId, msg, { parse_mode: 'Markdown' }).catch(() => {});
       };
-      // First reading after 2 min (baseline before load accumulates), then every 10 min
-      setTimeout(() => { reportMemory(); setInterval(reportMemory, 10 * 60 * 1000); }, 2 * 60 * 1000);
-      logger.info('[App] Memory reporter active — reports every 10 min to feedback chat.');
+
+      setTimeout(() => { sampleMemory(); setInterval(sampleMemory, SAMPLE_INTERVAL); }, 2 * 60 * 1000);
+      logger.info('[App] Memory monitor active — alerts on threshold/spike/leak/drop events.');
     }
-    // --- End memory reporter ---
+    // --- End memory monitor ---
 
     // Return components for external access
     return {

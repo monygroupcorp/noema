@@ -25,6 +25,12 @@ jobs:
         with:
           ref: ${{ inputs.tag }}
 
+      - name: Get build info
+        id: build_info
+        run: |
+          echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "msg=$(git log -2 --pretty=format:'%s' | tail -1)" >> $GITHUB_OUTPUT
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -51,3 +57,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_VERSION=${{ inputs.tag }}
+            COMMIT_SHA=${{ steps.build_info.outputs.sha }}
+            COMMIT_MSG=${{ steps.build_info.outputs.msg }}
