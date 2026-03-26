@@ -12,9 +12,9 @@ RUN npm run build
 FROM node:20-slim
 WORKDIR /usr/src/app
 
-# Install git and ffmpeg (slim needs them explicitly)
+# Install system dependencies (slim needs them explicitly)
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ffmpeg ca-certificates \
+  && apt-get install -y --no-install-recommends git ffmpeg ca-certificates openssh-client \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
