@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.7](https://github.com/monygroupcorp/noema/compare/v4.6.6...v4.6.7) (2026-03-26)
+
+
+### Bug Fixes
+
+* search all GPU types upfront and fall through on SSH failure ([2691665](https://github.com/monygroupcorp/noema/commit/2691665d8c8d5c866643137c9fcb11713bdf2fd4))
+
 ## [4.6.6](https://github.com/monygroupcorp/noema/compare/v4.6.5...v4.6.6) (2026-03-26)
 
 
