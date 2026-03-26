@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.1](https://github.com/monygroupcorp/noema/compare/v4.6.0...v4.6.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* startup message shows correct commit and stationthisbot name ([63a725b](https://github.com/monygroupcorp/noema/commit/63a725bca2bb9168fffa49a02c4b03c2f4731f6a))
+
 ## [4.6.0](https://github.com/monygroupcorp/noema/compare/v4.5.0...v4.6.0) (2026-03-26)
 
 
