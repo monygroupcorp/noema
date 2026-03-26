@@ -574,35 +574,33 @@ async function main() {
     ? [args.gpu]
     : [args.gpu, '4090', '3090', 'A5000', 'A6000', 'L40', 'A40'].filter((v, i, a) => a.indexOf(v) === i);
 
-  log(`Will try GPUs in order: ${GPU_FALLBACK_ORDER.join(' → ')}`);
+  log(`Will search offers across: ${GPU_FALLBACK_ORDER.join(' → ')}`);
 
+  // Collect offers across ALL GPU types so we can fall through to the next
+  // type if the preferred type's machines all fail SSH — not just if they're absent.
+  const seenOfferIds = new Set();
   let offers = [];
-  let selectedGpuType = null;
 
   for (const gpuType of GPU_FALLBACK_ORDER) {
     log(`Searching offers for GPU ${gpuType}...`);
     const searchResults = await service.searchOffers({
       gpuType,
       region: args.region,
-      minVramGb: args.minVram ? toNumber(args.minVram, '--min-vram') : 22, // At least 22GB for FLUX
+      minVramGb: args.minVram ? toNumber(args.minVram, '--min-vram') : 22,
       maxHourlyUsd: args.maxPrice ? toNumber(args.maxPrice, '--max-price') : undefined,
-      useExactGpuMatch: false // Always fuzzy match within GPU type
+      useExactGpuMatch: false
     });
-
-    if (searchResults.length > 0) {
-      offers = searchResults;
-      selectedGpuType = gpuType;
-      log(`Found ${offers.length} offers for ${gpuType}`);
-      break;
-    }
-    log(`No offers available for ${gpuType}, trying next...`);
+    const fresh = searchResults.filter(o => !seenOfferIds.has(String(o.id)));
+    fresh.forEach(o => seenOfferIds.add(String(o.id)));
+    offers.push(...fresh);
+    if (fresh.length > 0) log(`Found ${fresh.length} offers for ${gpuType}`);
   }
 
   if (!offers.length) {
     throw new Error(`No matching VastAI offers found. Tried: ${GPU_FALLBACK_ORDER.join(', ')}. Try a different region or wait for availability.`);
   }
 
-  log(`Selected GPU type: ${selectedGpuType} (${offers.length} offers available)`);
+  log(`Total offers across all GPU types: ${offers.length}`);
 
   // Filter out offers we already exhausted in previous attempts on this job
   const skipOfferIds = new Set(
@@ -616,7 +614,7 @@ async function main() {
   }
 
   if (!offers.length) {
-    throw new Error(`All available offers for ${selectedGpuType} were already tried in previous attempts. Try a different GPU type or wait for new inventory.`);
+    throw new Error(`All available offers were already tried in previous attempts. Waiting for new inventory.`);
   }
 
   // Build extra environment variables to pass to the instance
@@ -636,8 +634,8 @@ async function main() {
   const sshTimeoutMin = args.sshTimeout ? toNumber(args.sshTimeout, '--sshTimeout') : 5;
   const sshAttempts = Math.ceil((sshTimeoutMin * 60) / 5);
 
-  // Try up to 5 different offers, retrying on SSH failure
-  const maxFullRetries = Math.min(offers.length, 5);
+  // Try up to 8 different offers across all GPU types before giving up
+  const maxFullRetries = Math.min(offers.length, 8);
   let selectedOffer = null;
   let instance = null;
   let readyInstance = null;
