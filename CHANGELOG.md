@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.3](https://github.com/monygroupcorp/noema/compare/v4.6.2...v4.6.3) (2026-03-26)
+
+
+### Bug Fixes
+
+* sort VastAI offers by reliability first, then price ([beb1ea2](https://github.com/monygroupcorp/noema/commit/beb1ea25b5bca7cb57f43fc909ca8b577b8ebabf))
+
 ## [4.6.2](https://github.com/monygroupcorp/noema/compare/v4.6.1...v4.6.2) (2026-03-26)
 
 
