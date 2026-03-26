@@ -408,7 +408,7 @@ async function startApp() {
         startupChatId,
         `*stationthisbot v${version} is live*\n\`${sha}\` ${msg}`,
         { parse_mode: 'Markdown' }
-      ).catch(() => {});
+      ).catch((err) => logger.warn('[App] Startup announcement failed:', err.message));
     }
     // --- End startup announcement ---
 
@@ -431,7 +431,7 @@ async function startApp() {
       let growthSinceLastDrop = 0;
       let isFirstReading = true;
 
-      const send = (msg) => memBot.sendMessage(memFeedbackChatId, msg, { parse_mode: 'Markdown' }).catch(() => {});
+      const send = (msg) => memBot.sendMessage(memFeedbackChatId, msg, { parse_mode: 'Markdown' }).catch((err) => logger.warn('[App] Memory monitor send failed:', err.message));
 
       const sampleMemory = () => {
         const m = process.memoryUsage();
