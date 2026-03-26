@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.4](https://github.com/monygroupcorp/noema/compare/v4.6.3...v4.6.4) (2026-03-26)
+
+
+### Bug Fixes
+
+* extend SSH auth timeout to 5min and increase offer retries to 5 ([931f5cf](https://github.com/monygroupcorp/noema/commit/931f5cfeadb02e5c4b3cdb976dc3d2c8a469fbcc))
+
 ## [4.6.3](https://github.com/monygroupcorp/noema/compare/v4.6.2...v4.6.3) (2026-03-26)
 
 
