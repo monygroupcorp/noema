@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.5.0](https://github.com/monygroupcorp/noema/compare/v4.4.0...v4.5.0) (2026-03-26)
+
+
+### Features
+
+* periodic memory reporter to Telegram feedback chat ([e8efda1](https://github.com/monygroupcorp/noema/commit/e8efda14b599a05474da73e67f56b8bbb8c0461f))
+
 ## [4.4.0](https://github.com/monygroupcorp/noema/compare/v4.3.10...v4.4.0) (2026-03-25)
 
 
