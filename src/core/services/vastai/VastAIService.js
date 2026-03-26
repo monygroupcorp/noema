@@ -199,17 +199,15 @@ class VastAIService extends ComputeProvider {
       return true;
     });
 
-    const sortBy = criteria.sortBy || 'hourlyUsd';
-    const direction = (criteria.sortDirection || 'asc').toLowerCase();
+    // Sort by reliability desc, then price asc — pick the most stable machine first
     filtered.sort((a, b) => {
-      const av = a[sortBy] ?? 0;
-      const bv = b[sortBy] ?? 0;
-      if (av === bv) return 0;
-      return av < bv ? -1 : 1;
+      const relA = a.reliability ?? 0;
+      const relB = b.reliability ?? 0;
+      if (relB !== relA) return relB - relA;
+      const priceA = a.hourlyUsd ?? 0;
+      const priceB = b.hourlyUsd ?? 0;
+      return priceA - priceB;
     });
-    if (direction === 'desc') {
-      filtered.reverse();
-    }
     return filtered;
   }
 
