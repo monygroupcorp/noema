@@ -39,6 +39,7 @@ class DatasetDownloader {
   async download(datasetId, jobId, options = {}) {
     const baseDir = options.baseDir || '/tmp/training';
     const controlSetId = options.controlSetId || null;
+    const captionSetId = options.captionSetId || null;
     const datasetDir = path.join(baseDir, jobId, 'dataset');
 
     this.logger.debug(`[DatasetDownloader] Downloading dataset ${datasetId} to ${datasetDir}`);
@@ -128,7 +129,7 @@ class DatasetDownloader {
       this.logger.debug(`[DatasetDownloader] Wrote concept prompt to ${captionCount} caption files for KONTEXT concept training`);
     } else {
       // Standard mode: use caption set
-      captionCount = await this._writeCaptions(dataset, imageResults, datasetDir);
+      captionCount = await this._writeCaptions(dataset, imageResults, datasetDir, captionSetId);
     }
 
     // Write .ready marker file to signal download is complete
@@ -258,16 +259,35 @@ class DatasetDownloader {
    * Write caption .txt files alongside images
    * @private
    */
-  async _writeCaptions(dataset, imageResults, datasetDir) {
-    // Find the default caption set, or the first completed one
-    const captionSets = dataset.captionSets || [];
+  async _writeCaptions(dataset, imageResults, datasetDir, captionSetId = null) {
+    // Build a unified list of caption sets from both legacy captionSets and embellishments
+    const legacyCaptionSets = dataset.captionSets || [];
+    const embellishmentCaptionSets = (dataset.embellishments || [])
+      .filter(e => e.type === 'caption')
+      .map(e => ({
+        _id: e._id,
+        method: e.method || 'embellishment',
+        status: e.status,
+        isDefault: e.isDefault || false,
+        // Convert results[].value to captions array
+        captions: (e.results || []).map(r => r?.value || ''),
+      }));
+    const allCaptionSets = [...legacyCaptionSets, ...embellishmentCaptionSets];
 
-    let captionSet = captionSets.find(cs => cs.isDefault && cs.status === 'completed');
-    if (!captionSet) {
-      captionSet = captionSets.find(cs => cs.status === 'completed');
+    let captionSet;
+    if (captionSetId) {
+      // Use the explicitly selected caption set
+      captionSet = allCaptionSets.find(cs => cs._id.toString() === captionSetId.toString());
+      if (!captionSet) {
+        this.logger.warn(`[DatasetDownloader] Specified captionSetId ${captionSetId} not found, falling back to default`);
+      }
     }
+
     if (!captionSet) {
-      captionSet = captionSets[0]; // Fall back to first available
+      // Fall back: default+completed → first completed → first available
+      captionSet = allCaptionSets.find(cs => cs.isDefault && cs.status === 'completed');
+      if (!captionSet) captionSet = allCaptionSets.find(cs => cs.status === 'completed');
+      if (!captionSet) captionSet = allCaptionSets[0];
     }
 
     if (!captionSet || !captionSet.captions || captionSet.captions.length === 0) {
