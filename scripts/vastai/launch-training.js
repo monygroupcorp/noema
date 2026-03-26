@@ -604,6 +604,21 @@ async function main() {
 
   log(`Selected GPU type: ${selectedGpuType} (${offers.length} offers available)`);
 
+  // Filter out offers we already exhausted in previous attempts on this job
+  const skipOfferIds = new Set(
+    args.skipOfferIds ? String(args.skipOfferIds).split(',').filter(Boolean) : []
+  );
+  if (skipOfferIds.size > 0) {
+    const before = offers.length;
+    offers = offers.filter(o => !skipOfferIds.has(String(o.id)));
+    const skipped = before - offers.length;
+    if (skipped > 0) log(`Skipping ${skipped} previously-exhausted offer(s) from prior attempts`);
+  }
+
+  if (!offers.length) {
+    throw new Error(`All available offers for ${selectedGpuType} were already tried in previous attempts. Try a different GPU type or wait for new inventory.`);
+  }
+
   // Build extra environment variables to pass to the instance
   const extraEnv = {};
   if (process.env.HF_TOKEN) {
@@ -637,6 +652,8 @@ async function main() {
       break;
     }
     triedOfferIds.add(offer.id);
+    // Signal the processor to persist this offer ID so retries skip it
+    console.log(`[TRAIN:TRIED_OFFER] ${offer.id}`);
 
     log(`\n[Attempt ${retry + 1}/${maxFullRetries}] Trying offer ${offer.id}:`);
     log(`  GPU: ${offer.gpuType} | VRAM: ${offer.vramGb}GB | CUDA: ${offer.cudaVersion || '?'} | Reliability: ${offer.reliability ? (offer.reliability * 100).toFixed(0) + '%' : '?'} | Price: $${offer.hourlyUsd}/hr`);
@@ -717,7 +734,8 @@ async function main() {
           break;
         } catch (sshErr) {
           if (sshTry < sshTestAttempts - 1) {
-            log(`SSH auth not ready (${sshTry + 1}/${sshTestAttempts}), waiting 10s...`);
+            const reason = sshErr.stderr?.trim().split('\n').pop() || sshErr.message || 'unknown';
+            log(`SSH auth not ready (${sshTry + 1}/${sshTestAttempts}), waiting 10s... [${reason}]`);
             await new Promise(r => setTimeout(r, 10000));
           }
         }

@@ -330,6 +330,16 @@ class TrainingDB extends BaseDB {
   /**
    * Mark job as failed
    */
+  async addExhaustedOffer(jobId, offerId) {
+    return this.updateOne(
+      { _id: new ObjectId(jobId) },
+      {
+        $addToSet: { exhaustedOfferIds: String(offerId) },
+        $set: { updatedAt: new Date() }
+      }
+    );
+  }
+
   async markFailed(jobId, failureReason, extra = {}) {
     return this.updateOne(
       { _id: new ObjectId(jobId), status: { $ne: 'CANCELLED' } },

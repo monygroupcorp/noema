@@ -354,6 +354,12 @@ class TrainingJobProcessor {
       const baseModel = job.baseModel || 'FLUX';
       args.push('--baseModel', baseModel);
 
+      // Skip offers already exhausted in previous retry attempts
+      if (job.exhaustedOfferIds && job.exhaustedOfferIds.length > 0) {
+        args.push('--skipOfferIds', job.exhaustedOfferIds.join(','));
+        this.logger.info(`[JobProcessor] Skipping ${job.exhaustedOfferIds.length} previously-exhausted offer(s)`);
+      }
+
       // Add KONTEXT-specific arguments for concept mode
       if (baseModel === 'KONTEXT') {
         if (job.trainingMode) {
@@ -421,6 +427,14 @@ class TrainingJobProcessor {
           trimmed.split('\n').forEach(line => {
             if (line.trim()) process.stdout.write(`[TRAIN] ${line}\n`);
           });
+        }
+
+        // Persist tried offer IDs so retries skip already-exhausted machines
+        for (const line of chunk.split('\n')) {
+          const triedMatch = line.match(/^\[TRAIN:TRIED_OFFER\]\s+(\S+)/);
+          if (triedMatch) {
+            await self.trainingDb.addExhaustedOffer(jobId, triedMatch[1]).catch(() => {});
+          }
         }
 
         // Extract instance ID when provisioned (multiple patterns)
