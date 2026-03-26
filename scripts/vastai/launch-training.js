@@ -621,8 +621,8 @@ async function main() {
   const sshTimeoutMin = args.sshTimeout ? toNumber(args.sshTimeout, '--sshTimeout') : 5;
   const sshAttempts = Math.ceil((sshTimeoutMin * 60) / 5);
 
-  // Try up to 3 different offers, retrying on SSH failure
-  const maxFullRetries = Math.min(offers.length, 3);
+  // Try up to 5 different offers, retrying on SSH failure
+  const maxFullRetries = Math.min(offers.length, 5);
   let selectedOffer = null;
   let instance = null;
   let readyInstance = null;
@@ -698,8 +698,8 @@ async function main() {
       log('SSH port open, verifying auth...');
 
       // Actually verify SSH auth works (not just port open)
-      // VastAI can take 30-90+ seconds after port opens for key to be ready
-      const sshTestAttempts = 12; // 12 attempts × 10s = 2 minutes
+      // VastAI can take 3-5 minutes after port opens for key injection to complete
+      const sshTestAttempts = 30; // 30 attempts × 10s = 5 minutes
       let sshVerified = false;
       for (let sshTry = 0; sshTry < sshTestAttempts; sshTry++) {
         try {
@@ -724,7 +724,7 @@ async function main() {
       }
 
       if (!sshVerified) {
-        throw new Error('SSH auth verification failed after 2 minutes');
+        throw new Error('SSH auth verification failed after 5 minutes');
       }
 
       // Success! Record the offer we used
