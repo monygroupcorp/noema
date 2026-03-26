@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.6](https://github.com/monygroupcorp/noema/compare/v4.6.5...v4.6.6) (2026-03-26)
+
+
+### Bug Fixes
+
+* log errors from startup announcement and memory monitor sends ([f6ae96b](https://github.com/monygroupcorp/noema/commit/f6ae96b775c04c937745dcc6b91a1766da416389))
+
 ## [4.6.5](https://github.com/monygroupcorp/noema/compare/v4.6.4...v4.6.5) (2026-03-26)
 
 
