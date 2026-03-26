@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.0](https://github.com/monygroupcorp/noema/compare/v4.5.0...v4.6.0) (2026-03-26)
+
+
+### Features
+
+* startup announcement and memory monitor with 768MB cap ([98877a4](https://github.com/monygroupcorp/noema/commit/98877a4296e8a51f8dfdae73848d3d3051b1abe7))
+
 ## [4.5.0](https://github.com/monygroupcorp/noema/compare/v4.4.0...v4.5.0) (2026-03-26)
 
 
