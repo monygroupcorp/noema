@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.10](https://github.com/monygroupcorp/noema/compare/v4.6.9...v4.6.10) (2026-03-26)
+
+
+### Bug Fixes
+
+* captions from embellishments not reaching training ([40b3847](https://github.com/monygroupcorp/noema/commit/40b3847d736c7935ac2725980830ed27d93420bb))
+
 ## [4.6.9](https://github.com/monygroupcorp/noema/compare/v4.6.8...v4.6.9) (2026-03-26)
 
 
