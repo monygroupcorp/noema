@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.5](https://github.com/monygroupcorp/noema/compare/v4.6.4...v4.6.5) (2026-03-26)
+
+
+### Bug Fixes
+
+* skip exhausted VastAI offers across job retries ([ffd6937](https://github.com/monygroupcorp/noema/commit/ffd69379d6b3ee2c34388364628f626699f6bf26))
+
 ## [4.6.4](https://github.com/monygroupcorp/noema/compare/v4.6.3...v4.6.4) (2026-03-26)
 
 
