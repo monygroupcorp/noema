@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.14](https://github.com/monygroupcorp/noema/compare/v4.6.13...v4.6.14) (2026-03-27)
+
+
+### Bug Fixes
+
+* partial recovery falsely marked failed; add GPU/cost to training card ([c038281](https://github.com/monygroupcorp/noema/commit/c03828108642a4fa7d8d304f746d80baa9f68d50))
+
 ## [4.6.13](https://github.com/monygroupcorp/noema/compare/v4.6.12...v4.6.13) (2026-03-27)
 
 
