@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.13](https://github.com/monygroupcorp/noema/compare/v4.6.12...v4.6.13) (2026-03-27)
+
+
+### Bug Fixes
+
+* filter out multi-GPU instances from VastAI offer search ([7386c50](https://github.com/monygroupcorp/noema/commit/7386c504e7b5609117256e7be5e9c63dd868b08f))
+
 ## [4.6.12](https://github.com/monygroupcorp/noema/compare/v4.6.11...v4.6.12) (2026-03-27)
 
 
