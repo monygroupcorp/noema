@@ -112,6 +112,12 @@ class VastAIService extends ComputeProvider {
       q.gpu_frac = { gte: 1.0 };
     }
 
+    // Only rent single-GPU machines — training uses one GPU and multi-GPU instances
+    // charge for all GPUs but we only use one
+    if (criteria.singleGpuOnly !== false) {
+      q.num_gpus = { eq: 1 };
+    }
+
     // Minimum reliability score (0-1, default 0.95 = 95%)
     // Low reliability hosts often have driver/CUDA issues
     const minReliability = criteria.minReliability ?? 0.95;
@@ -148,6 +154,7 @@ class VastAIService extends ComputeProvider {
       vramGb,
       hourlyUsd,
       gpuFrac: rawOffer.gpu_frac ?? 1.0,  // Fraction of GPU (1.0 = full GPU)
+      numGpus: rawOffer.num_gpus ?? 1,   // Number of GPUs on this machine
       region: rawOffer.region || rawOffer.country || rawOffer.geolocation,
       reliability: rawOffer.reliability || rawOffer.host_score,
       cudaVersion: rawOffer.cuda_max_good,
@@ -188,6 +195,10 @@ class VastAIService extends ComputeProvider {
       }
       // Client-side fallback: filter out fractional GPUs
       if (criteria.requireFullGpu !== false && offer.gpuFrac < 1.0) {
+        return false;
+      }
+      // Client-side fallback: filter out multi-GPU machines
+      if (criteria.singleGpuOnly !== false && offer.numGpus > 1) {
         return false;
       }
       // Filter out blocked regions (known SSH connectivity issues)
