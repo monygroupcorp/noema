@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.12](https://github.com/monygroupcorp/noema/compare/v4.6.11...v4.6.12) (2026-03-27)
+
+
+### Bug Fixes
+
+* memory drop alert only fires after a warning or critical, not on normal GC ([288403f](https://github.com/monygroupcorp/noema/commit/288403f9541e61df1f17304387cb8b47d56ee140))
+
 ## [4.6.11](https://github.com/monygroupcorp/noema/compare/v4.6.10...v4.6.11) (2026-03-27)
 
 
