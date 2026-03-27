@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.11](https://github.com/monygroupcorp/noema/compare/v4.6.10...v4.6.11) (2026-03-27)
+
+
+### Bug Fixes
+
+* stop Telegram polling on graceful shutdown to prevent blue-green 409 conflict ([99d8cd1](https://github.com/monygroupcorp/noema/commit/99d8cd1013cd451db6808ce2706057d1f5830715))
+
 ## [4.6.10](https://github.com/monygroupcorp/noema/compare/v4.6.9...v4.6.10) (2026-03-26)
 
 
