@@ -551,7 +551,16 @@ class TrainingJobProcessor {
           // Parse the training result JSON
           const trainingResult = TrainingFinalizationService.parseTrainingResult(stdout);
 
-          if (trainingResult && trainingResult.success) {
+          // A partial recovery (training exited non-zero but a checkpoint was uploaded)
+          // is still a success — the model exists and works. Don't penalize users for
+          // non-fatal training script exits when we have a real model on HF/R2.
+          const hasModel = trainingResult?.hfModelUrl || trainingResult?.r2ModelUrl;
+          const isSuccess = trainingResult?.success || (trainingResult?.partialRecovery && hasModel);
+
+          if (trainingResult && isSuccess) {
+            if (trainingResult.partialRecovery) {
+              this.logger.warn(`[JobProcessor] Job ${jobId}: partial recovery — training exited non-zero but checkpoint was uploaded. Treating as success.`);
+            }
             resolve({
               success: true,
               instanceId,
@@ -561,7 +570,9 @@ class TrainingJobProcessor {
             resolve({
               success: false,
               instanceId,
-              error: 'Training completed but result parsing failed',
+              error: trainingResult
+                ? 'Training completed but no model was produced'
+                : 'Training completed but result JSON was not emitted',
               stdout,
               stderr,
             });

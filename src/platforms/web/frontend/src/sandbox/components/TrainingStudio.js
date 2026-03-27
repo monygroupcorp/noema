@@ -5,6 +5,23 @@ import { fetchJson, postWithCsrf, fetchWithCsrf } from '../../lib/api.js';
 import { websocketClient } from '../ws.js';
 
 const ACTIVE_STATUSES = ['QUEUED', 'PROVISIONING', 'RUNNING', 'FINALIZING'];
+const COST_DENOMS = ['POINTS', 'MS2', 'USD'];
+const COST_DENOM_KEY = 'costDenom';
+const FALLBACK_RATES = { POINTS_per_USD: 2967, MS2_per_USD: 2 };
+
+function loadCostDenom() {
+  try { const s = localStorage.getItem(COST_DENOM_KEY); return COST_DENOMS.includes(s) ? s : 'POINTS'; } catch { return 'POINTS'; }
+}
+function saveCostDenom(d) {
+  try { localStorage.setItem(COST_DENOM_KEY, d); } catch {}
+  window.dispatchEvent(new CustomEvent('denominationChange', { detail: { denomination: d } }));
+}
+function convertCost(usd, denom, rates) {
+  const r = rates || FALLBACK_RATES;
+  if (denom === 'USD') return `$${usd.toFixed(2)}`;
+  if (denom === 'MS2') return `${(usd * (r.MS2_per_USD || 2)).toFixed(2)} MS2`;
+  return `${Math.round(usd * (r.POINTS_per_USD || 2967))} PTS`;
+}
 const DASH = { MAIN: 'main', DATASET_DETAIL: 'dsDetail', DATASET_FORM: 'dsForm', WIZARD: 'wizard', CAPTION_VIEWER: 'captionViewer', CONTROL_VIEWER: 'controlViewer' };
 
 function normalizeId(val) {
@@ -83,13 +100,27 @@ export class TrainingStudio extends Component {
 
       // Confirm
       confirmDeleteTraining: null,
+
+      // Cost denomination (synced with CostHUD via localStorage + event)
+      costDenom: loadCostDenom(),
+      costRates: FALLBACK_RATES,
     };
   }
 
   didMount() {
     this._fetchAll();
     this._setupWS();
-    this.setInterval(() => this._pollTrainings(), 10000);
+    this.setInterval(() => this._pollTrainings(), 60000);
+    this._onDenomChange = (e) => {
+      if (e.detail?.denomination) this.setState({ costDenom: e.detail.denomination });
+    };
+    window.addEventListener('denominationChange', this._onDenomChange);
+    this.registerCleanup(() => window.removeEventListener('denominationChange', this._onDenomChange));
+    // Fetch live rates once
+    fetchJson('/api/external/economy/rates').then(d => {
+      const rates = d?.data || d;
+      if (rates?.POINTS_per_USD) this.setState({ costRates: rates });
+    }).catch(() => {});
   }
 
   // ── WebSocket ──────────────────────────────────────────
@@ -669,11 +700,42 @@ export class TrainingStudio extends Component {
   }
 
   _renderTrainingCard(tr, isActive) {
-    const sLower = (tr.status || 'draft').toLowerCase();
     const progressText = tr.currentStep && tr.totalSteps
       ? `${tr.currentStep}/${tr.totalSteps} (${tr.progress || 0}%)`
       : `${tr.progress || 0}%`;
     const date = tr.completedAt ? new Date(tr.completedAt).toLocaleDateString() : '';
+    const { costDenom, costRates } = this.state;
+
+    // Live cost calculation for active jobs
+    let gpuRow = null;
+    let costRow = null;
+    if (isActive && tr.gpuType) {
+      const rate = tr.gpuHourlyRate || 0;
+      const startMs = tr.startedAt ? new Date(tr.startedAt).getTime() : null;
+      const elapsedHours = startMs ? (Date.now() - startMs) / 3600000 : 0;
+      const costUsd = elapsedHours * rate;
+
+      gpuRow = h('div', { className: 'ts-training-gpu' },
+        h('span', { className: 'ts-training-gpu-name' }, tr.gpuType),
+        rate > 0 ? h('span', { className: 'ts-training-gpu-rate' }, `$${rate.toFixed(2)}/hr`) : null
+      );
+
+      if (rate > 0 && startMs) {
+        costRow = h('div', {
+          className: 'ts-training-cost',
+          onclick: () => {
+            const i = COST_DENOMS.indexOf(costDenom);
+            const next = COST_DENOMS[(i + 1) % COST_DENOMS.length];
+            saveCostDenom(next);
+            this.setState({ costDenom: next });
+          },
+          title: 'Click to change unit'
+        },
+          h('span', { className: 'ts-training-cost-label' }, 'cost so far'),
+          h('span', { className: 'ts-training-cost-value' }, convertCost(costUsd, costDenom, costRates))
+        );
+      }
+    }
 
     return h('div', { className: 'ts-training-card', key: tr._id },
       h('div', { className: 'ts-training-top' },
@@ -684,14 +746,16 @@ export class TrainingStudio extends Component {
         h('span', null, tr.baseModel || ''),
         date ? h('span', null, date) : null
       ),
+      gpuRow,
       isActive ? h('div', { className: 'ts-progress' },
         h('div', { className: 'ts-progress-bar' },
           h('div', { className: 'ts-progress-fill', style: `width:${tr.progress || 0}%` })
         ),
         h('span', { className: 'ts-progress-text' }, progressText)
       ) : null,
+      costRow,
       h('div', { className: 'ts-training-actions' },
-        isActive && tr.status === 'QUEUED'
+        isActive
           ? h(AsyncButton, { variant: 'danger', onclick: () => this._cancelTraining(tr._id), label: 'Cancel' }) : null,
         !isActive && tr.status === 'FAILED'
           ? h(AsyncButton, { variant: 'secondary', onclick: () => this._retryTraining(tr._id), label: 'Retry' }) : null,
@@ -1494,6 +1558,24 @@ export class TrainingStudio extends Component {
         margin-bottom: 6px;
       }
       .ts-training-actions { display:flex; gap:4px; margin-top:8px; }
+
+      .ts-training-gpu {
+        display:flex; justify-content:space-between; align-items:center;
+        font-family: var(--ff-mono); font-size: var(--fs-xs);
+        color: var(--text-label); margin-bottom:4px;
+      }
+      .ts-training-gpu-name { color: var(--text-secondary); }
+      .ts-training-gpu-rate { color: var(--text-label); }
+
+      .ts-training-cost {
+        display:flex; justify-content:space-between; align-items:center;
+        font-family: var(--ff-mono); font-size: var(--fs-xs);
+        color: var(--text-label); margin:4px 0;
+        cursor:pointer; padding:3px 0;
+      }
+      .ts-training-cost:hover .ts-training-cost-value { color: var(--accent); }
+      .ts-training-cost-label { text-transform:uppercase; letter-spacing:var(--ls-wider); }
+      .ts-training-cost-value { color: var(--text-primary); font-weight: var(--fw-medium); }
 
       .ts-progress { margin:8px 0; }
       .ts-progress-bar { height:4px; background: var(--surface-3); overflow:hidden; }
