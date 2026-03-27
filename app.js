@@ -65,6 +65,7 @@ async function startApp() {
     });
     logger.info('[app] initializeServices returned');
     _services = services; // Store for graceful shutdown
+    // _platforms assigned after initializePlatforms below
     /*
     ] [app]: services (shallow): {
       "session": "object",
@@ -136,7 +137,7 @@ async function startApp() {
         logger.warn('[App] dependencies.toolRegistry is MISSING or INVALID!', { registry: dependencies.toolRegistry });
     }
 
-    const platforms = initializePlatforms(dependencies, {
+    const platforms = _platforms = initializePlatforms(dependencies, {
       enableTelegram: true,
       enableDiscord: true,
       enableWeb: true,
@@ -499,8 +500,9 @@ async function startApp() {
   }
 }
 
-// Track services for graceful shutdown
+// Track services and platforms for graceful shutdown
 let _services = null;
+let _platforms = null;
 
 /**
  * Gracefully shuts down all services.
@@ -509,6 +511,18 @@ let _services = null;
  */
 async function shutdownApp() {
   logger.info('[App] Graceful shutdown initiated...');
+
+  // Stop Telegram polling first so the new container doesn't get a 409 conflict
+  const telegramBot = _platforms && _platforms.telegram && _platforms.telegram.bot;
+  if (telegramBot) {
+    try {
+      logger.info('[App] Stopping Telegram polling...');
+      await telegramBot.stopPolling();
+      logger.info('[App] Telegram polling stopped.');
+    } catch (err) {
+      logger.error('[App] Error stopping Telegram polling:', err.message);
+    }
+  }
 
   if (_services && _services.creditServices) {
     const creditServices = _services.creditServices;
