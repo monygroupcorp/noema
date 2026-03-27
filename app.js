@@ -459,12 +459,12 @@ async function startApp() {
         } else {
           consecutiveGrowth = 0;
           growthSinceLastDrop = 0;
-          // Reset threshold alerts on significant drop so they re-fire if heap climbs again
-          if (Math.abs(delta) >= DROP_MB) {
-            warnFired = false;
-            critFired = false;
-            send(`*Memory drop* (uptime: ${uptimeMins}m) — GC cleared ${Math.abs(delta)} MB\n${summary}`);
+          // Only report a drop if we previously alerted (warning/critical) — confirms recovery
+          if (Math.abs(delta) >= DROP_MB && (warnFired || critFired)) {
+            send(`*Memory recovered* (uptime: ${uptimeMins}m) — GC cleared ${Math.abs(delta)} MB\n${summary}`);
           }
+          warnFired = false;
+          critFired = false;
         }
 
         if (heapUsed >= CRIT_MB && !critFired) {
