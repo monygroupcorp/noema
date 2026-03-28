@@ -105,8 +105,8 @@ export class SandboxCanvas2 extends Component {
       nodeModeOutputExpanded: false,
       descriptionExpanded: false,
       originPos: null, // workspace coords { x, y } for Z2 home swipe
-      imageOverlay: null, // { url, label } for lightbox
-      textOverlay: null, // { text, label } for text overlay
+      imageOverlay: null, // { url, label, items?, itemIndex? } for lightbox
+      textOverlay: null, // { text, label, items?, itemIndex? } for text overlay
       textOverlayCopied: false,
       textInputOverlay: null, // { windowId, key, field, currentVal, label } for editing text params
       textInputOverlayCopied: false,
@@ -173,6 +173,11 @@ export class SandboxCanvas2 extends Component {
     return this._engine.screenToWorkspace(clientX, clientY, this._panX, this._panY, this._scale);
   }
 
+  clearPendingConnection() {
+    if (this._engine.fsm.isConnecting) this._engine.fsm.clearConnection();
+    this.setState({ pendingOutputSource: null, pendingInputTarget: null });
+  }
+
   updateWindowOutput(id, output) { this._engine.updateWindowOutput(id, output); }
   updateWindowOutputs(id, outputs) { this._engine.updateWindowOutputs(id, outputs); }
   clearWindowOutput(id) { this._engine.clearWindowOutput(id); }
@@ -213,7 +218,7 @@ export class SandboxCanvas2 extends Component {
       if (w.type === 'upload') return { ...base, type: 'upload', displayName: 'Upload', toolId: 'upload' };
       if (w.type === 'primitive') return { ...base, type: 'primitive', outputType: w.outputType, value: w.value || '', displayName: w.outputType || 'Primitive', toolId: `primitive:${w.outputType || 'unknown'}` };
       if (w.type === 'expression') return { ...base, type: 'expression', expression: w.expression || '', displayName: 'Expression', toolId: 'expression', ...(w.batchOutputs ? { batchOutputs: w.batchOutputs, batchSize: w.batchSize } : {}) };
-      return { ...base, type: w.type || 'tool', displayName: w.tool?.displayName || '', toolId: w.tool?.toolId || '' };
+      return { ...base, type: w.type || 'tool', displayName: w.tool?.displayName || '', toolId: w.tool?.toolId || '', ...(w.batchOutputs?.length > 1 ? { batchOutputs: w.batchOutputs.map(o => { const s = this._sanitiseOutput(o); return s ? { ...s, ...(o._caption ? { _caption: o._caption } : {}) } : null; }).filter(Boolean), batchSize: w.batchSize } : {}) };
     });
     return { toolWindows, connections: [...this._engine.connections.values()] };
   }
@@ -260,11 +265,13 @@ export class SandboxCanvas2 extends Component {
         win.type = 'upload';
       } else if (w.type === 'primitive') {
         win.type = 'primitive'; win.outputType = w.outputType; win.value = w.value || '';
+        if (w.value && w.outputType === 'text') win.output = { type: 'text', text: w.value };
       } else if (w.type === 'expression') {
         win.type = 'expression'; win.expression = w.expression || '';
         if (w.batchOutputs) { win.batchOutputs = w.batchOutputs; win.batchSize = w.batchSize; }
       } else {
         win.type = w.type || 'tool';
+        if (w.batchOutputs?.length > 1) { win.batchOutputs = w.batchOutputs; win.batchSize = w.batchSize; }
       }
       this._engine.windows.set(win.id, win);
       this._engine.physics.addNode(win.id, { x: win.x, y: win.y });
@@ -375,7 +382,13 @@ export class SandboxCanvas2 extends Component {
     }
 
     if (to === 'CANVAS_Z2') {
-      // Zoom out: reset scale, keep pan
+      // Zoom out: keep the screen-center workspace point fixed across scale change
+      const cx = window.innerWidth / 2;
+      const cy = window.innerHeight / 2;
+      const wsX = (cx - this._panX) / this._scale;
+      const wsY = (cy - this._panY) / this._scale;
+      this._panX = cx - wsX * SCALE_Z2;
+      this._panY = cy - wsY * SCALE_Z2;
       this._scale = SCALE_Z2;
       this._animateViewport();
     } else if ((to === 'CANVAS_Z1' || to === 'NODE_MODE') && nodeId) {
@@ -393,6 +406,7 @@ export class SandboxCanvas2 extends Component {
       this._animateViewport();
     }
 
+    document.body.classList.toggle('sc2--node-mode', to === 'NODE_MODE');
     this.setState(update);
   }
 
@@ -459,7 +473,7 @@ export class SandboxCanvas2 extends Component {
       ? this._renderActionBar(multiSelectIds)
       : null;
 
-    const showFab = fsmState !== 'MULTI_SELECT';
+    const showFab = fsmState !== 'MULTI_SELECT' && fsmState !== 'NODE_MODE';
 
     const { originPos } = this.state;
     return h('div', { className: 'sc2-root', ref: el => { this._rootEl = el; } },
@@ -501,30 +515,56 @@ export class SandboxCanvas2 extends Component {
         );
       })() : null,
       canvasMenu ? this._renderCanvasMenu(canvasMenu) : null,
-      this.state.textOverlay ? h('div', {
-        className: 'fd-text-overlay',
-        onclick: () => this.setState({ textOverlay: null, textOverlayCopied: false }),
-      },
-        h('div', { className: 'fd-text-overlay-card', onclick: (e) => e.stopPropagation() },
-          h('div', { className: 'fd-text-overlay-header' },
-            h('span', { className: 'fd-card-section' }, this.state.textOverlay.label),
-            h('button', {
-              className: `fd-text-overlay-copy${this.state.textOverlayCopied ? ' fd-text-overlay-copy--done' : ''}`,
-              onclick: (e) => {
-                e.stopPropagation();
-                navigator.clipboard?.writeText(this.state.textOverlay.text).catch(() => {});
-                this.setState({ textOverlayCopied: true });
-                setTimeout(() => this.setState({ textOverlayCopied: false }), 2000);
-              },
-            }, this.state.textOverlayCopied ? 'Copied ✓' : 'Copy'),
-            h('button', {
-              className: 'fd-text-overlay-close',
-              onclick: () => this.setState({ textOverlay: null, textOverlayCopied: false }),
-            }, '×'),
+      this.state.textOverlay ? (() => {
+        const tov = this.state.textOverlay;
+        const items = tov.items;
+        const hasNav = items && items.length > 1;
+        const idx = tov.itemIndex ?? 0;
+        const total = items?.length ?? 1;
+        const goTo = (i) => {
+          const clamped = Math.max(0, Math.min(total - 1, i));
+          const item = items[clamped];
+          this.setState({ textOverlay: { ...tov, text: item.text ?? '', itemIndex: clamped }, textOverlayCopied: false });
+        };
+        return h('div', {
+          className: 'fd-text-overlay',
+          onclick: () => this.setState({ textOverlay: null, textOverlayCopied: false }),
+        },
+          h('div', { className: 'fd-text-overlay-card', onclick: (e) => e.stopPropagation() },
+            h('div', { className: 'fd-text-overlay-header' },
+              h('span', { className: 'fd-card-section' }, tov.label),
+              hasNav ? h('div', { className: 'fd-text-overlay-nav' },
+                h('button', { className: 'fd-text-overlay-nav-btn', disabled: idx === 0, onclick: (e) => { e.stopPropagation(); goTo(idx - 1); } }, '‹'),
+                total > 10
+                  ? h('input', {
+                      className: 'fd-text-overlay-nav-index',
+                      type: 'number', min: 1, max: total,
+                      value: idx + 1,
+                      onchange: (e) => goTo(parseInt(e.target.value, 10) - 1),
+                      onclick: (e) => e.stopPropagation(),
+                    })
+                  : h('span', { className: 'fd-text-overlay-nav-count' }, `${idx + 1} / ${total}`),
+                total > 10 ? h('span', { className: 'fd-text-overlay-nav-count' }, `/ ${total}`) : null,
+                h('button', { className: 'fd-text-overlay-nav-btn', disabled: idx === total - 1, onclick: (e) => { e.stopPropagation(); goTo(idx + 1); } }, '›'),
+              ) : null,
+              h('button', {
+                className: `fd-text-overlay-copy${this.state.textOverlayCopied ? ' fd-text-overlay-copy--done' : ''}`,
+                onclick: (e) => {
+                  e.stopPropagation();
+                  navigator.clipboard?.writeText(tov.text).catch(() => {});
+                  this.setState({ textOverlayCopied: true });
+                  setTimeout(() => this.setState({ textOverlayCopied: false }), 2000);
+                },
+              }, this.state.textOverlayCopied ? 'Copied ✓' : 'Copy'),
+              h('button', {
+                className: 'fd-text-overlay-close',
+                onclick: () => this.setState({ textOverlay: null, textOverlayCopied: false }),
+              }, '×'),
+            ),
+            h('pre', { className: 'fd-text-overlay-body' }, tov.text),
           ),
-          h('pre', { className: 'fd-text-overlay-body' }, this.state.textOverlay.text),
-        ),
-      ) : null,
+        );
+      })() : null,
       this.state.textInputOverlay ? (() => {
         const closeInputOverlay = () => {
           const { windowId, key, currentVal, onSave } = this.state.textInputOverlay;
@@ -565,24 +605,57 @@ export class SandboxCanvas2 extends Component {
           ),
         );
       })() : null,
-      this.state.imageOverlay ? h('div', {
-        className: 'fd-image-overlay',
-        onclick: () => this.setState({ imageOverlay: null }),
-      },
-        h('div', { className: 'fd-image-overlay-wrap', onclick: (e) => e.stopPropagation() },
-          h('button', {
-            className: 'fd-image-overlay-close',
-            onclick: () => this.setState({ imageOverlay: null }),
-          }, '×'),
-          h('div', { className: 'fd-image-overlay-skeleton' }),
-          h('img', {
-            src: this.state.imageOverlay.url,
-            className: 'fd-image-overlay-img',
-            alt: this.state.imageOverlay.label || '',
-            draggable: false,
-          }),
-        ),
-      ) : null,
+      this.state.imageOverlay ? (() => {
+        const iov = this.state.imageOverlay;
+        const items = iov.items;
+        const hasNav = items && items.length > 1;
+        const idx = iov.itemIndex ?? 0;
+        const total = items?.length ?? 1;
+        const goTo = (i) => {
+          const clamped = Math.max(0, Math.min(total - 1, i));
+          this.setState({ imageOverlay: { ...iov, url: items[clamped].url, itemIndex: clamped } });
+        };
+        return h('div', {
+          className: 'fd-image-overlay',
+          onclick: () => this.setState({ imageOverlay: null }),
+        },
+          h('div', { className: 'fd-image-overlay-wrap', onclick: (e) => e.stopPropagation() },
+            h('div', { className: 'fd-image-overlay-topbar' },
+              hasNav ? h('div', { className: 'fd-image-overlay-nav' },
+                h('button', { className: 'fd-image-overlay-nav-btn', disabled: idx === 0, onclick: (e) => { e.stopPropagation(); goTo(idx - 1); } }, '‹'),
+                total > 10
+                  ? h('input', {
+                      className: 'fd-image-overlay-nav-index',
+                      type: 'number', min: 1, max: total,
+                      value: idx + 1,
+                      onchange: (e) => goTo(parseInt(e.target.value, 10) - 1),
+                      onclick: (e) => e.stopPropagation(),
+                    })
+                  : h('span', { className: 'fd-image-overlay-nav-count' }, `${idx + 1} / ${total}`),
+                total > 10 ? h('span', { className: 'fd-image-overlay-nav-count' }, `/ ${total}`) : null,
+                h('button', { className: 'fd-image-overlay-nav-btn', disabled: idx === total - 1, onclick: (e) => { e.stopPropagation(); goTo(idx + 1); } }, '›'),
+              ) : null,
+              h('button', {
+                className: 'fd-image-overlay-close',
+                onclick: () => this.setState({ imageOverlay: null }),
+              }, '×'),
+            ),
+            h('div', { className: 'fd-image-overlay-img-wrap' },
+              h('div', { className: 'fd-image-overlay-skeleton' }),
+              h('img', {
+                src: iov.url,
+                className: 'fd-image-overlay-img',
+                alt: iov.label || '',
+                draggable: false,
+              }),
+            ),
+            (() => {
+              const caption = items?.[idx]?._caption;
+              return caption ? h('div', { className: 'fd-image-overlay-caption' }, caption) : null;
+            })(),
+          ),
+        );
+      })() : null,
       this.state.instructionPickerOverlay ? (() => {
         const overlay = this.state.instructionPickerOverlay;
         const close = () => this.setState({ instructionPickerOverlay: null });
@@ -837,7 +910,14 @@ export class SandboxCanvas2 extends Component {
           if (fsmState === 'CANVAS_Z2') {
             this._engine.tapNode(win.id);
           } else {
-            this.setState({ imageOverlay: { url: thumbUrl, label: win.tool?.displayName || win.type } });
+            (() => {
+              const imgItems = (win.outputs || win.batchOutputs || []).filter(o => o?.type === 'image' && o?.url);
+              const itemIndex = imgItems.findIndex(o => o.url === thumbUrl);
+              this.setState({ imageOverlay: imgItems.length > 1
+                ? { url: thumbUrl, label: win.tool?.displayName || win.type, items: imgItems, itemIndex: itemIndex >= 0 ? itemIndex : 0 }
+                : { url: thumbUrl, label: win.tool?.displayName || win.type }
+              });
+            })();
           }
         },
       }) : videoUrl ? h('video', {
@@ -1041,10 +1121,13 @@ export class SandboxCanvas2 extends Component {
 
   // After creating a node, auto-wire it if we're mid-connection
   _autoConnectNew(id) {
+    const win = this._engine.windows.get(id);
+    // Expression nodes are never auto-wired — user must connect them explicitly.
+    if (win?.type === 'expression') return;
+
     const pending = this.state.pendingInputTarget;
     if (pending) {
       // New node's output → pending input target
-      const win = this._engine.windows.get(id);
       const outType = normalizeType(win?.tool?.metadata?.outputType || win?.tool?.outputType || win?.outputType);
       const connId = this._engine._genId('c');
       this._engine.addCanvasConnection(connId, id, pending.windowId, 'output', pending.key, outType);
@@ -1133,8 +1216,8 @@ export class SandboxCanvas2 extends Component {
     const connId = this._engine._genId('c');
     this._engine.addCanvasConnection(connId, sourceNodeId, targetWinId, sourcePort, inputKey, sourceType || inputType);
     this._engine.fsm.clearConnection();
-    // Return to Z1 after connecting
-    this._engine.zoomOut(); // NODE_MODE → Z1
+    // Only exit NODE_MODE if open — in Z1 the user is already looking at the target
+    if (this._engine.fsm.state === 'NODE_MODE') this._engine.zoomOut();
     this.setState({ fsmState: this._engine.fsmState, focusedWindowId: this._engine.focusedWindowId });
   }
 
@@ -1696,19 +1779,29 @@ export class SandboxCanvas2 extends Component {
     } else {
       const versions = win.outputVersions || [];
       const vIdx = win.currentVersionIndex >= 0 ? win.currentVersionIndex : versions.length - 1;
-      const out = versions.length > 0 ? versions[vIdx] : win.output;
+      const out = win.batchOutputs?.length > 1
+        ? { type: 'batch', items: win.batchOutputs }
+        : (versions.length > 0 ? versions[vIdx] : win.output);
       const label = win.tool?.displayName || win.type;
       const hasOutput = !!out;
       const isVideo = out?.type === 'video';
       const outputExpanded = this.state.nodeModeOutputExpanded || isVideo;
       const isPastVersion = versions.length > 0 && vIdx < versions.length - 1;
 
-      const renderSingleItem = (o) => {
+      const renderSingleItem = (o, allImageItems) => {
         if (o.type === 'image' && o.url) {
           return h('img', {
             className: 'fd-output-image fd-result-img--clickable',
             src: o.url, alt: 'Output', title: 'Tap to expand',
-            onclick: (e) => { e.stopPropagation(); this.setState({ imageOverlay: { url: o.url, label } }); },
+            onclick: (e) => {
+              e.stopPropagation();
+              const imgItems = allImageItems?.filter(i => i.type === 'image' && i.url);
+              const itemIndex = imgItems?.findIndex(i => i.url === o.url) ?? -1;
+              this.setState({ imageOverlay: imgItems?.length > 1
+                ? { url: o.url, label, items: imgItems, itemIndex: itemIndex >= 0 ? itemIndex : 0 }
+                : { url: o.url, label }
+              });
+            },
           });
         }
         if (o.type === 'video' && o.url) return h('div', { className: 'fd-output-video-wrap' },
@@ -1721,7 +1814,17 @@ export class SandboxCanvas2 extends Component {
         if (o.type === 'text' && o.text) return h('div', {
           className: 'fd-output-text fd-result-img--clickable',
           title: 'Tap to expand',
-          onclick: (e) => { e.stopPropagation(); this.setState({ textOverlay: { text: o.text, label }, textOverlayCopied: false }); },
+          onclick: (e) => {
+            e.stopPropagation();
+            const batchItems = win.batchOutputs?.length > 1 ? win.batchOutputs : null;
+            const itemIndex = batchItems ? batchItems.indexOf(o) : -1;
+            this.setState({
+              textOverlay: batchItems
+                ? { text: o.text, label, items: batchItems, itemIndex: itemIndex >= 0 ? itemIndex : 0 }
+                : { text: o.text, label },
+              textOverlayCopied: false,
+            });
+          },
         }, o.text);
         if (o.type === 'file' && o.files?.length) {
           return h('div', { className: 'fd-output-files' },
@@ -1736,13 +1839,13 @@ export class SandboxCanvas2 extends Component {
         const allItems = o.items || [o];
         if (allItems.length > 1) {
           return h('div', { className: 'fd-output-batch-grid' },
-            ...allItems.map((item, i) => h('div', { key: i, className: 'fd-output-batch-item' }, renderSingleItem(item))),
+            ...allItems.map((item, i) => h('div', { key: i, className: 'fd-output-batch-item' }, renderSingleItem(item, allItems))),
           );
         }
         return renderSingleItem(o);
       };
 
-      outputCard = h('div', { className: 'fd-card fd-card-output' },
+      outputCard = h('div', { className: `fd-card fd-card-output${hasOutput && !outputExpanded ? ' fd-card-output--compact' : ''}` },
         h('div', {
           className: `fd-output-header${hasOutput ? ' fd-output-header--toggle' : ''}`,
           onclick: hasOutput ? (e) => { e.stopPropagation(); this.setState({ nodeModeOutputExpanded: !outputExpanded }); } : null,
@@ -1751,7 +1854,7 @@ export class SandboxCanvas2 extends Component {
           isPastVersion ? h('span', { className: 'fd-output-past-badge' }, 'past — execute → saves as new') : null,
           hasOutput ? h('span', { className: 'fd-output-toggle-icon' }, outputExpanded ? '▲' : '▼') : null,
         ),
-        (!hasOutput || outputExpanded) ? renderOutBody(out) : null,
+        renderOutBody(out),
       );
     }
 
@@ -1817,10 +1920,12 @@ export class SandboxCanvas2 extends Component {
         }
       },
     },
-      h('button', {
-        className: 'fd-nodemode-back',
-        onclick: (e) => { e.stopPropagation(); this._engine.zoomOut(); },
-      }, '← Back to Canvas'),
+      h('div', { className: 'fd-nodemode-topbar' },
+        h('button', {
+          className: 'fd-nodemode-back',
+          onclick: (e) => { e.stopPropagation(); this._engine.zoomOut(); },
+        }, '← Back'),
+      ),
       h('div', { className: 'fd-nodemode-cards' },
         identityCard,
         bodyCard,
@@ -2107,6 +2212,7 @@ export class SandboxCanvas2 extends Component {
       clearTimeout(this._longPressTimeout);
       this._longPressTimeout = null;
     }
+    const wasPinching = !!this._pinchStart;
     this._panStart = null;
     this._pinchStart = null;
     this._lastMoveTime = null;
@@ -2119,6 +2225,20 @@ export class SandboxCanvas2 extends Component {
       return;
     }
     this._nodeTouchStart = null;
+
+    // If fingers are still on screen (e.g. lifting one finger of a pinch),
+    // transition cleanly to single-touch pan — skip swipe/tap/momentum.
+    if (e.touches.length > 0) {
+      this._velBuffer = [];
+      this._gestureStart = null;
+      const t = e.touches[0];
+      this._panStart = { x: t.clientX - this._panX, y: t.clientY - this._panY };
+      this._panAtGestureStart = { x: this._panX, y: this._panY };
+      return;
+    }
+
+    // Discard stale velocity from before a pinch started
+    if (wasPinching) this._velBuffer = [];
 
     this._startMomentum();
 
@@ -2416,12 +2536,35 @@ export class SandboxCanvas2 extends Component {
     return this._wsInitPromise;
   }
 
+  _onExecutionSuccess() {
+    document.dispatchEvent(new CustomEvent('canvas:execution-complete'));
+  }
+
   async _executeWindow(windowId) {
     const win = this._engine.windows.get(windowId);
     if (!win || win.executing) return;
 
     // Expression nodes evaluate client-side via expr-eval
     if (win.type === 'expression') {
+      // Check if any incoming connection is a batch source — if so, delegate to batch executor
+      const exprBatchSources = {};
+      for (const conn of this._engine.connections.values()) {
+        if ((conn.to ?? conn.toWindowId) !== windowId) continue;
+        const srcId = conn.from ?? conn.fromWindowId;
+        const sourceWin = this._engine.windows.get(srcId);
+        if (sourceWin?.batchOutputs && sourceWin.batchOutputs.length > 1) {
+          exprBatchSources[conn.toInput || 'input'] = {
+            outputs: sourceWin.batchOutputs,
+            nodeId: srcId,
+            indexExpr: conn.indexExpr || 'n',
+            connId: conn.id,
+          };
+        }
+      }
+      if (Object.keys(exprBatchSources).length > 0) {
+        return this._executeBatchWindow(windowId, win, {}, {}, exprBatchSources);
+      }
+
       this._engine.updateWindow(windowId, { executing: true, error: null });
       try {
         const { evaluate } = await import('./expressionEval.js');
@@ -2435,6 +2578,7 @@ export class SandboxCanvas2 extends Component {
           else if (out?.type === 'text') variables[conn.toInput || 'input'] = out.text ?? out.data?.text?.[0] ?? '';
           else if (out?.type === 'video') variables[conn.toInput || 'input'] = out.url;
           else if (out?.value !== undefined) variables[conn.toInput || 'input'] = out.value;
+          else if (sourceWin?.value !== undefined) variables[conn.toInput || 'input'] = sourceWin.value;
         }
         const result = evaluate(win.expression, variables);
         if (Array.isArray(result)) {
@@ -2445,6 +2589,7 @@ export class SandboxCanvas2 extends Component {
           }));
           this._engine.updateWindowBatchOutput(windowId, batchOutputs);
           this._engine.updateWindow(windowId, { executing: false, progress: null });
+          this._onExecutionSuccess();
         } else {
           const text = String(result);
           const output = { type: 'text', text };
@@ -2453,6 +2598,7 @@ export class SandboxCanvas2 extends Component {
             output, executing: false, outputLoaded: true,
             outputVersions: versions, currentVersionIndex: versions.length - 1,
           });
+          this._onExecutionSuccess();
         }
       } catch (err) {
         this._engine.updateWindow(windowId, { executing: false, error: err.message });
@@ -2569,9 +2715,10 @@ export class SandboxCanvas2 extends Component {
           outputVersions: versions, currentVersionIndex: versions.length - 1,
         });
         if (result.costUsd) this._recordCost(windowId, result.costUsd);
+        this._onExecutionSuccess();
       } else if (result.status === 'failed') {
         this._engine.updateWindow(windowId, {
-          executing: false, error: result.outputs?.error || 'Execution failed.',
+          executing: false, error: result.error || result.outputs?.error || 'Execution failed.',
         });
       } else if (result.generationId || result.castId) {
         if (win.type === 'spell') {
@@ -2681,11 +2828,14 @@ export class SandboxCanvas2 extends Component {
           metadata: { platform: 'web-sandbox' },
         });
 
+        const caption = inputs.prompt
+          ?? Object.values(inputs).find(v => typeof v === 'string' && !v.startsWith('http') && v.length > 3)
+          ?? null;
         if (result.final && result.status !== 'failed') {
-          batchResults.push(this._normalizeOutput(result));
+          batchResults.push({ ...this._normalizeOutput(result), _caption: caption });
         } else if (result.generationId) {
           const finalResult = await this._pollGenerationStatus(result.generationId);
-          batchResults.push(this._normalizeOutput({ ...finalResult, generationId: result.generationId }));
+          batchResults.push({ ...this._normalizeOutput({ ...finalResult, generationId: result.generationId }), _caption: caption });
         } else {
           batchResults.push({ type: 'error', error: result.outputs?.error || 'Failed' });
         }
@@ -2693,6 +2843,7 @@ export class SandboxCanvas2 extends Component {
 
       this._engine.updateWindowBatchOutput(windowId, batchResults);
       this._engine.updateWindow(windowId, { executing: false, progress: null });
+      this._onExecutionSuccess();
     } catch (err) {
       this._engine.updateWindow(windowId, { executing: false, error: err.message, progress: null });
     }
@@ -2705,12 +2856,13 @@ export class SandboxCanvas2 extends Component {
 
       if (!this._wsHandlers?.generationCompletionManager) {
         const result = await this._pollGenerationStatus(generationId);
-        if (result?.status === 'failed') throw new Error(result.outputs?.error || 'Generation failed.');
+        if (result?.status === 'failed') throw new Error(result.error || result.outputs?.error || 'Generation failed.');
         const output = this._normalizeOutput({ ...result, generationId });
         const win = this._engine.windows.get(windowId);
         if (!win) return;
         const versions = [...(win.outputVersions || []), output];
         this._engine.updateWindow(windowId, { output, executing: false, progress: null, outputLoaded: true, outputVersions: versions, currentVersionIndex: versions.length - 1 });
+        this._onExecutionSuccess();
         return;
       }
 
@@ -2781,6 +2933,7 @@ export class SandboxCanvas2 extends Component {
         outputVersions: versions, currentVersionIndex: versions.length - 1,
       });
       if (result.costUsd) this._recordCost(windowId, result.costUsd);
+      this._onExecutionSuccess();
     } catch (err) {
       _stopProgressListener?.();
       this._engine.updateWindow(windowId, { executing: false, error: err.message, progress: null });
@@ -2814,7 +2967,7 @@ export class SandboxCanvas2 extends Component {
         }
       );
 
-      if (result?.status === 'failed') throw new Error(result.outputs?.error || 'Spell execution failed.');
+      if (result?.status === 'failed') throw new Error(result.error || result.outputs?.error || 'Spell execution failed.');
 
       _stopProgressListener?.();
       _stopProgressListener = null;
@@ -2828,6 +2981,7 @@ export class SandboxCanvas2 extends Component {
         outputVersions: versions, currentVersionIndex: versions.length - 1,
       });
       if (result?.costUsd) this._recordCost(windowId, result.costUsd);
+      this._onExecutionSuccess();
     } catch (err) {
       _stopProgressListener?.();
       this._engine.updateWindow(windowId, { executing: false, error: err.message, progress: null });

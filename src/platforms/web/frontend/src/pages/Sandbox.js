@@ -531,7 +531,10 @@ export class Sandbox extends Component {
         y: am.y,
         workspacePosition: am.workspacePos,
         connecting: am.connecting,
-        onClose: () => this.setState({ actionModal: { visible: false, x: 0, y: 0, workspacePos: null, connecting: false } }),
+        onClose: () => {
+          if (window.sandboxCanvas) window.sandboxCanvas.clearPendingConnection();
+          this.setState({ actionModal: { visible: false, x: 0, y: 0, workspacePos: null, connecting: false } });
+        },
       }),
       te.visible
         ? h('div', {

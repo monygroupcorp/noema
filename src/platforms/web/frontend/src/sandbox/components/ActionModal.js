@@ -408,12 +408,12 @@ export class ActionModal extends Component {
     }
 
     const polar = (r, a) => ({ x: Math.cos(a) * r, y: Math.sin(a) * r });
-    const size = 76 * 2;
-    const cv = 76;
+    const size = 92 * 2;
+    const cv = 92;
 
     // Root view: two-ring radial — outer ring for main actions, inner ring for quick anchors
     if (view === 'root') {
-      const MAIN_OUTER = 72, MAIN_INNER = 46;
+      const MAIN_OUTER = 88, MAIN_INNER = 56;
       const ANCH_OUTER = 42, ANCH_INNER = 26;
       const ANCH_SPAN = Math.PI * 80 / 180; // 80°
 

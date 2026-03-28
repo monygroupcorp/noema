@@ -86,10 +86,15 @@ export class WorkspaceTabs extends Component {
     document.addEventListener('click', this._outsideClick);
 
     this._startAutosave();
+
+    // Save after execution completes so batch outputs persist to DB immediately
+    this._onExecutionComplete = () => this._autosave();
+    document.addEventListener('canvas:execution-complete', this._onExecutionComplete);
   }
 
   willUnmount() {
     if (this._outsideClick) document.removeEventListener('click', this._outsideClick);
+    if (this._onExecutionComplete) document.removeEventListener('canvas:execution-complete', this._onExecutionComplete);
     clearInterval(this._autosaveInterval);
     if (this._onVisibilityChange) document.removeEventListener('visibilitychange', this._onVisibilityChange);
     if (this._onBeforeUnload) window.removeEventListener('beforeunload', this._onBeforeUnload);
@@ -426,6 +431,10 @@ export class WorkspaceTabs extends Component {
         top: var(--header-height, 44px);
         left: 0;
         z-index: var(--z-hud);
+      }
+
+      body.sc2--node-mode .ws-root {
+        display: none;
       }
 
       /* Trigger tab */
