@@ -126,6 +126,7 @@ export class AuthModal extends Component {
       }
       .auth-overlay[hidden] { display: none; }
       .auth-modal {
+        position: relative;
         background: #141414;
         border: 1px solid #2a2a2a;
         border-radius: 8px;
@@ -155,6 +156,11 @@ export class AuthModal extends Component {
         cursor: pointer;
         font-size: 0.95rem;
         margin-bottom: 0.5rem;
+      }
+      .auth-modal .auth-close {
+        width: auto !important;
+        padding: 0 !important;
+        margin: 0 !important;
       }
       .auth-modal .btn-wallet {
         background: #fff;
@@ -203,15 +209,15 @@ export class AuthModal extends Component {
       }
       .auth-modal .back-link:hover { color: #fff; }
       .auth-close {
-        float: right;
+        position: absolute;
+        top: 1rem;
+        right: 1rem;
         background: none;
         border: none;
         color: #888;
         font-size: 1.5rem;
         cursor: pointer;
-        width: auto !important;
-        padding: 0 !important;
-        margin: 0 !important;
+        line-height: 1;
       }
       .auth-close:hover { color: #fff; }
     `;
