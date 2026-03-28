@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.15](https://github.com/monygroupcorp/noema/compare/v4.6.14...v4.6.15) (2026-03-28)
+
+
+### Bug Fixes
+
+* canvas2 expression node system — batch, persistence, overlay nav ([dfeceb9](https://github.com/monygroupcorp/noema/commit/dfeceb9988baf8bdd1c8dfd9444020ef7bb28516))
+
 ## [4.6.14](https://github.com/monygroupcorp/noema/compare/v4.6.13...v4.6.14) (2026-03-27)
 
 
