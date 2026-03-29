@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.18](https://github.com/monygroupcorp/noema/compare/v4.6.17...v4.6.18) (2026-03-29)
+
+
+### Bug Fixes
+
+* direct window.ethereum fallback for ethOS injected wallet ([a25f98a](https://github.com/monygroupcorp/noema/commit/a25f98ac8f3b2b038b1223bdec0fda3287a4a5f4))
+
 ## [4.6.17](https://github.com/monygroupcorp/noema/compare/v4.6.16...v4.6.17) (2026-03-29)
 
 
