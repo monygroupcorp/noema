@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.7.1](https://github.com/monygroupcorp/noema/compare/v4.7.0...v4.7.1) (2026-03-29)
+
+
+### Bug Fixes
+
+* stack node mode params columns vertically on mobile ([227efd8](https://github.com/monygroupcorp/noema/commit/227efd893aa3aceb6c8226358c69ec1c82a78b76))
+
 ## [4.7.0](https://github.com/monygroupcorp/noema/compare/v4.6.18...v4.7.0) (2026-03-29)
 
 
