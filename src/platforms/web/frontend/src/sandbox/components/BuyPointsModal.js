@@ -238,13 +238,21 @@ export class BuyPointsModal extends Component {
     this.setState({ balancesLoading: true });
     const balances = { tokens: {} };
 
+    // Race a provider request against a timeout — smart contract wallets (ethOS, Safe)
+    // can stall indefinitely on eth_getBalance / eth_call via the Android bridge.
+    const rpcRequest = (method, params, timeoutMs = 4000) =>
+      Promise.race([
+        p.request({ method, params }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
+      ]);
+
     // Native ETH
     try {
-      const ethHex = await p.request({ method: 'eth_getBalance', params: [walletAddress, 'latest'] });
+      const ethHex = await rpcRequest('eth_getBalance', [walletAddress, 'latest']);
       const raw = BigInt(ethHex || '0x0');
       balances.tokens[normalizeAddress(ZERO_ADDRESS)] = { raw, decimals: 18, formatted: formatBigIntBalance(raw, 18) };
     } catch (err) {
-      console.warn('[BuyPointsModal] ETH balance fetch failed:', err);
+      console.warn('[BuyPointsModal] ETH balance fetch failed:', err.message);
     }
 
     // ERC20 tokens
@@ -258,11 +266,11 @@ export class BuyPointsModal extends Component {
       if (!isValidAddress(token.address)) continue;
       try {
         const data = `${balanceOfSel}${addrParam}`;
-        const hex = await p.request({ method: 'eth_call', params: [{ to: token.address, data }, 'latest'] });
+        const hex = await rpcRequest('eth_call', [{ to: token.address, data }, 'latest']);
         const raw = hexToBigInt(hex);
         balances.tokens[tokenAddr] = { raw, decimals: token.decimals || 18, formatted: formatBigIntBalance(raw, token.decimals || 18) };
       } catch (err) {
-        console.warn('[BuyPointsModal] Token balance failed:', token.symbol, err);
+        console.warn('[BuyPointsModal] Token balance failed:', token.symbol, err.message);
       }
     }
 
@@ -273,11 +281,11 @@ export class BuyPointsModal extends Component {
       if (!nftAddr || !isValidAddress(nft.address)) continue;
       try {
         const data = `${balanceOfSel}${addrParam}`;
-        const hex = await p.request({ method: 'eth_call', params: [{ to: nft.address, data }, 'latest'] });
+        const hex = await rpcRequest('eth_call', [{ to: nft.address, data }, 'latest']);
         const raw = hexToBigInt(hex);
         balances.tokens[nftAddr] = { raw, decimals: 0, formatted: formatBigIntBalance(raw, 0) };
       } catch (err) {
-        console.warn('[BuyPointsModal] NFT balance failed:', nft.name, err);
+        console.warn('[BuyPointsModal] NFT balance failed:', nft.name, err.message);
       }
     }
 
@@ -713,7 +721,7 @@ export class BuyPointsModal extends Component {
     try {
       const addr = await this._connectWallet();
       this.setState({ walletAddress: addr });
-      await this._fetchBalances();
+      this._fetchBalances(); // fire-and-forget — never block the payment flow
     } catch (err) {
       this.setState({ error: err.message });
     }
