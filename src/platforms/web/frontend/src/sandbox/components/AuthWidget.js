@@ -72,15 +72,21 @@ export class AuthWidget extends Component {
       console.log('[AuthWidget] getAvailableWallets() keys:', keys);
 
       if (keys.length === 0) {
+        // WalletService discovery missed it — try window.ethereum directly as a last resort.
+        // Happens on injected mobile wallets (ethOS, etc.) where property access via the
+        // providerMap can fail silently but the provider is still usable.
+        if (window.ethereum) {
+          console.log('[AuthWidget] discovery returned empty but window.ethereum exists — connecting directly');
+          await this._connectDirect(window.ethereum);
+          return;
+        }
+
         // Phantom installed but Ethereum not enabled (SES lockdown conflict or EVM disabled in settings)
         const phantomNoEvm = window.phantom && !window.phantom.ethereum;
-        const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
         this.setState({
           error: phantomNoEvm
             ? 'Phantom detected but Ethereum is not enabled. In Phantom, go to Settings → Networks and enable Ethereum. Alternatively, install Rabby.'
-            : isMobile
-              ? 'No wallet found. On mobile, open this site inside your wallet\'s browser (e.g. the ethOS browser, MetaMask browser, or Rabby mobile).'
-              : 'No wallet extension found. Install Rabby or MetaMask to continue.',
+            : 'No wallet found. Install Rabby or MetaMask, or open this site in your wallet\'s browser.',
           loading: false,
         });
         return;
@@ -124,6 +130,38 @@ export class AuthWidget extends Component {
       if (!verifyRes.ok) { const e = await verifyRes.json(); throw new Error(e.error?.message || 'Verification failed.'); }
 
       console.log('[AuthWidget] auth complete, emitting success');
+      this._success();
+    } catch (err) {
+      this.setState({ error: err.message || 'Connection failed.', loading: false });
+    }
+  }
+
+  // Direct connect — bypasses WalletService discovery entirely.
+  // Used when window.ethereum is present but getAvailableWallets() returns empty
+  // (e.g. ethOS injected wallet, property access issues in providerMap).
+  async _connectDirect(rawProvider) {
+    this.setState({ loading: true, error: '', showPicker: false });
+    try {
+      const accounts = await rawProvider.request({ method: 'eth_requestAccounts' });
+      if (!accounts || !accounts[0]) throw new Error('No accounts returned from wallet.');
+      const address = accounts[0];
+      console.log('[AuthWidget] direct connect address:', address);
+
+      // Wire up WalletService state so the rest of the app behaves normally
+      this.walletService.setConnectedState({ address, provider: rawProvider, walletType: 'injected' });
+
+      const nonceRes = await postWithCsrf('/api/v1/auth/web3/nonce', { address });
+      if (!nonceRes.ok) { const e = await nonceRes.json(); throw new Error(e.error?.message || 'Failed to get nonce.'); }
+      const { nonce } = await nonceRes.json();
+
+      const signature = await rawProvider.request({
+        method: 'personal_sign',
+        params: [nonce, address],
+      });
+
+      const verifyRes = await postWithCsrf('/api/v1/auth/web3/verify', { address, signature });
+      if (!verifyRes.ok) { const e = await verifyRes.json(); throw new Error(e.error?.message || 'Verification failed.'); }
+
       this._success();
     } catch (err) {
       this.setState({ error: err.message || 'Connection failed.', loading: false });
