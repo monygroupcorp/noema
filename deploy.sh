@@ -475,7 +475,7 @@ if docker ps -a --format '{{.Names}}' | grep -q "^${APP_CONTAINER}$"; then
   OLD_SHUTDOWN_LOG="${LOG_DIR}/shutdown-$(date +%Y%m%d-%H%M%S).log"
   docker logs --tail 50 "${APP_CONTAINER}" >> "${OLD_SHUTDOWN_LOG}" 2>&1 || true
   grep -E "(Stopping Telegram|polling stopped|Graceful shutdown)" "${OLD_SHUTDOWN_LOG}" \
-    | while read -r line; do log "  [old-container] ${line}"; done
+    | while read -r line; do log "  [old-container] ${line}"; done || true
   log "Removing ${APP_CONTAINER}..."
   docker rm "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1
 fi
