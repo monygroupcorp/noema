@@ -34,6 +34,12 @@ export class AuthWidget extends Component {
     this.subscribe('sandbox:requireAuth', () => {
       this.setState({ mode: 'card' });
     });
+    // Clear "no wallet" error if a mobile injector (e.g. ethOS) announces late
+    this.subscribe('wallet:lateProviderDetected', () => {
+      if (this.state.error && this.state.error.includes('No wallet')) {
+        this.setState({ error: '' });
+      }
+    });
   }
 
   _minimize() { this.setState({ mode: 'badge', error: '', showPicker: false }); }
@@ -52,7 +58,7 @@ export class AuthWidget extends Component {
       // Wallets must respond to eip6963:requestProvider per spec; this ensures
       // any wallet that announced before our listener was ready gets captured.
       window.dispatchEvent(new Event('eip6963:requestProvider'));
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 400));
 
       // Diagnostics — check the raw eip6963Providers map and window injections
       const eip6963Entries = [...this.walletService.eip6963Providers.entries()]
@@ -68,10 +74,13 @@ export class AuthWidget extends Component {
       if (keys.length === 0) {
         // Phantom installed but Ethereum not enabled (SES lockdown conflict or EVM disabled in settings)
         const phantomNoEvm = window.phantom && !window.phantom.ethereum;
+        const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
         this.setState({
           error: phantomNoEvm
             ? 'Phantom detected but Ethereum is not enabled. In Phantom, go to Settings → Networks and enable Ethereum. Alternatively, install Rabby.'
-            : 'No wallet extension found. Install Rabby or MetaMask to continue.',
+            : isMobile
+              ? 'No wallet found. On mobile, open this site inside your wallet\'s browser (e.g. the ethOS browser, MetaMask browser, or Rabby mobile).'
+              : 'No wallet extension found. Install Rabby or MetaMask to continue.',
           loading: false,
         });
         return;
