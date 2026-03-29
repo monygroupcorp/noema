@@ -389,11 +389,15 @@ rotate_logs
 DEPLOY_WORKER_FLAG="${DEPLOY_WORKER:-0}"
 DEPLOY_TRAINING_WORKER_FLAG="${DEPLOY_TRAINING_WORKER:-0}"
 
-# 1. Pull image from registry
+# 1. Free disk space before pull — remove all unused images (old versioned tags accumulate)
+log "Pruning unused Docker images to free disk space..."
+docker image prune -a -f >> "${LOG_FILE}" 2>&1 || true
+
+# 2. Pull image from registry
 log "Pulling image ${IMAGE}..."
 docker pull "${IMAGE}" 2>&1 | tee -a "${LOG_FILE}"
 
-# 2. Pause export worker if requested
+# 3. Pause export worker if requested
 if [[ "${DEPLOY_WORKER_FLAG}" == "1" ]]; then
   pause_worker
   wait_for_worker_idle
@@ -464,8 +468,17 @@ docker network disconnect "${NETWORK_NAME}" "${NEW_CONTAINER}" >> "${LOG_FILE}" 
 docker network connect --alias "${CONTAINER_ALIAS}" "${NETWORK_NAME}" "${NEW_CONTAINER}" >> "${LOG_FILE}" 2>&1
 log "Traffic swapped to new container."
 
-# 10. Stop old container and rename new
-stop_container_if_exists "${APP_CONTAINER}"
+# 10. Stop old container (capturing shutdown logs), then rename new
+if docker ps -a --format '{{.Names}}' | grep -q "^${APP_CONTAINER}$"; then
+  log "Stopping ${APP_CONTAINER} (${STOP_TIMEOUT}s graceful)..."
+  docker stop --time "${STOP_TIMEOUT}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1
+  OLD_SHUTDOWN_LOG="${LOG_DIR}/shutdown-$(date +%Y%m%d-%H%M%S).log"
+  docker logs --tail 50 "${APP_CONTAINER}" >> "${OLD_SHUTDOWN_LOG}" 2>&1 || true
+  grep -E "(Stopping Telegram|polling stopped|Graceful shutdown)" "${OLD_SHUTDOWN_LOG}" \
+    | while read -r line; do log "  [old-container] ${line}"; done
+  log "Removing ${APP_CONTAINER}..."
+  docker rm "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1
+fi
 docker rename "${NEW_CONTAINER}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1
 log "Container renamed to ${APP_CONTAINER}."
 
@@ -487,8 +500,8 @@ fi
 # 14. Tag current image as 'previous' for future rollbacks
 docker tag "${IMAGE}" "${REGISTRY}:previous" >> "${LOG_FILE}" 2>&1 || true
 
-# 15. Cleanup dangling images
-docker image prune -f >> "${LOG_FILE}" 2>&1 || true
+# 15. Cleanup unused images (belt-and-suspenders after pre-pull prune)
+docker image prune -a -f >> "${LOG_FILE}" 2>&1 || true
 
 log "Deployment complete. Recent app logs:"
 docker logs --tail 30 "${APP_CONTAINER}" 2>&1 | tee -a "${LOG_FILE}" || true

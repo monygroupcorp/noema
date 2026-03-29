@@ -737,6 +737,10 @@ export class TrainingStudio extends Component {
       }
     }
 
+    const failureMsg = !isActive && tr.status === 'FAILED' && tr.failureReason
+      ? tr.failureReason
+      : null;
+
     return h('div', { className: 'ts-training-card', key: tr._id },
       h('div', { className: 'ts-training-top' },
         h('span', { className: 'ts-training-name' }, tr.name || 'Unnamed'),
@@ -746,6 +750,7 @@ export class TrainingStudio extends Component {
         h('span', null, tr.baseModel || ''),
         date ? h('span', null, date) : null
       ),
+      failureMsg ? h('div', { className: 'ts-training-failure' }, failureMsg) : null,
       gpuRow,
       isActive ? h('div', { className: 'ts-progress' },
         h('div', { className: 'ts-progress-bar' },
@@ -1558,6 +1563,11 @@ export class TrainingStudio extends Component {
         margin-bottom: 6px;
       }
       .ts-training-actions { display:flex; gap:4px; margin-top:8px; }
+
+      .ts-training-failure {
+        font-size: var(--fs-xs); color: var(--warning, #f59e0b);
+        margin: 4px 0; line-height: 1.4;
+      }
 
       .ts-training-gpu {
         display:flex; justify-content:space-between; align-items:center;

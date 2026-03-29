@@ -50,6 +50,10 @@ export class MintSpellFAB extends Component {
 
   static get styles() {
     return `
+      body.sc2--node-mode .mint-fab {
+        display: none;
+      }
+
       .mint-fab {
         position: fixed;
         z-index: var(--z-hud);

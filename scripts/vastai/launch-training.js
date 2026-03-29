@@ -758,6 +758,25 @@ async function main() {
         throw new Error('SSH auth verification failed after 5 minutes');
       }
 
+      // GPU preflight inside the loop — bad GPU = bad machine, try next offer
+      {
+        const sshKeyPath = vastConfig.sshKeyPath;
+        const probeTransport = new SshTransport({
+          host: sshEndpoint,
+          port: readyInstance.sshPort || 22,
+          username: readyInstance.sshUser || 'root',
+          privateKeyPath: sshKeyPath,
+          logger: null
+        });
+        const probeRunner = new TrainingRunner({ ssh: probeTransport, logger: console });
+        log('Running pre-flight GPU check...');
+        const gpuCheck = await probeRunner.preflightGpuCheck();
+        if (!gpuCheck.ok) {
+          throw new Error(`GPU pre-flight check failed: ${gpuCheck.error}`);
+        }
+        log(`GPU OK: ${gpuCheck.gpuName} | CUDA ${gpuCheck.cudaVersion}`);
+      }
+
       // Success! Record the offer we used
       selectedOffer = offer;
       break;
@@ -768,8 +787,9 @@ async function main() {
       const isSshError = err.message?.includes('SSH') ||
                          err.message?.includes('did not become available') ||
                          err.message?.includes('auth verification failed');
+      const isGpuError = err.message?.includes('GPU pre-flight check failed');
 
-      if (isSshError && instance?.instanceId) {
+      if ((isSshError || isGpuError) && instance?.instanceId) {
         log(`SSH failed for instance ${instance.instanceId}: ${err.message}`);
         log(`Terminating and trying next offer...`);
         try {
@@ -985,7 +1005,9 @@ async function main() {
       samplePromptsYaml = `          - "${triggerWord}, detailed, high quality  --ctrl_img ${remoteDir}/control/${ctrlImg}"`;
     } else {
       samplePromptsYaml = `          - "${triggerWord}, portrait, soft lighting, detailed"
-          - "${triggerWord}, artistic composition, high quality"`;
+          - "${triggerWord}, artistic composition, high quality"
+          - "${triggerWord}, cinematic lighting, photorealistic"
+          - "${triggerWord}, vibrant colors, dynamic pose"`;
     }
   }
 
@@ -1134,23 +1156,7 @@ async function main() {
 
   const runner = new TrainingRunner({ ssh, logger: console });
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // PRE-FLIGHT CHECK: Verify GPU/CUDA before training
-  // Catches bad VastAI instances early (driver issues, CUDA problems)
-  // ────────────────────────────────────────────────────────────────────────────
-  log('Running pre-flight GPU check...');
-  const gpuCheck = await runner.preflightGpuCheck();
-  if (!gpuCheck.ok) {
-    console.error('\n' + '═'.repeat(60));
-    console.error('  ❌ GPU PRE-FLIGHT CHECK FAILED');
-    console.error('═'.repeat(60));
-    console.error(`  Error: ${gpuCheck.error}`);
-    console.error('');
-    console.error('  This instance has GPU/CUDA issues. Will terminate and retry.');
-    console.error('═'.repeat(60) + '\n');
-    throw new Error(`GPU pre-flight check failed: ${gpuCheck.error}`);
-  }
-  log(`GPU OK: ${gpuCheck.gpuName} | CUDA ${gpuCheck.cudaVersion}`);
+  // GPU pre-flight already ran inside the offer retry loop — skip here.
 
   if (args.background) {
     // Start in background mode
