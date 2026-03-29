@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.16](https://github.com/monygroupcorp/noema/compare/v4.6.15...v4.6.16) (2026-03-29)
+
+
+### Bug Fixes
+
+* more robust telegram client; group points fixed ([366d91b](https://github.com/monygroupcorp/noema/commit/366d91ba87537e0e501112755420ba3f80c40b33))
+
 ## [4.6.15](https://github.com/monygroupcorp/noema/compare/v4.6.14...v4.6.15) (2026-03-28)
 
 
