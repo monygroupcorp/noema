@@ -103,6 +103,48 @@ function createAuthApi(dependencies) {
     }
     return ethereumService;
   };
+
+  /**
+   * Find a provider that has contract code at the given address.
+   * Tries mainnet first, then all other registered chains (e.g. Base).
+   * Required for smart contract wallets (e.g. ethOS, Safe) deployed on non-mainnet chains.
+   * @param {string} address - Checksummed or lowercase Ethereum address
+   * @returns {Promise<{ provider: ethers.Provider, chainId: string } | null>}
+   */
+  const findProviderForContract = async (address) => {
+    const services = (ethereumServices && typeof ethereumServices === 'object')
+      ? ethereumServices
+      : {};
+
+    // Ordered: mainnet first, then any others
+    const chainOrder = ['1', ...Object.keys(services).filter(k => k !== '1')];
+
+    for (const chainId of chainOrder) {
+      const svc = services[chainId];
+      if (!svc || !svc.provider) continue;
+      try {
+        const code = await svc.provider.getCode(address);
+        if (code && code !== '0x' && code !== '0x0') {
+          logger.debug(`[AuthApi] Contract found at ${address} on chainId ${chainId}`);
+          return { provider: svc.provider, chainId };
+        }
+      } catch (err) {
+        logger.debug(`[AuthApi] getCode failed on chainId ${chainId}: ${err.message}`);
+      }
+    }
+
+    // Fallback: create a public provider for mainnet if no services registered
+    const fallbackRpc = process.env.ETHEREUM_RPC_URL ||
+      (process.env.ALCHEMY_API_KEY ? `https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}` : null) ||
+      'https://eth.llamarpc.com';
+    try {
+      const fallback = new ethers.JsonRpcProvider(fallbackRpc);
+      return { provider: fallback, chainId: '1' };
+    } catch (err) {
+      logger.warn(`[AuthApi] Could not create fallback provider: ${err.message}`);
+      return null;
+    }
+  };
   
   const router = express.Router();
 
@@ -488,61 +530,31 @@ function createAuthApi(dependencies) {
             }
         }
 
-        // Check if this is a smart contract wallet FIRST, before validating signature length
-        // This allows us to handle smart wallets that return non-standard signature formats
-        let ethereumService = getEthereumService();
-        
-        // Fallback: Create a provider if ethereumService isn't available
-        let fallbackProvider = null;
-        if (!ethereumService || !ethereumService.provider) {
-            try {
-                // Try to create a provider from environment variables
-                // Use ETHEREUM_RPC_URL (mainnet) - same as foundationConfig expects
-                const rpcUrl = process.env.ETHEREUM_RPC_URL || 
-                              process.env.ETHEREUM_MAINNET_RPC_URL || 
-                              (process.env.ALCHEMY_API_KEY ? `https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}` : null) ||
-                              'https://eth.llamarpc.com'; // Public fallback
-                
-                if (rpcUrl) {
-                    fallbackProvider = new ethers.JsonRpcProvider(rpcUrl);
-                    logger.debug(`[AuthApi] Created fallback provider for signature verification using ${rpcUrl.substring(0, 30)}...`);
-                } else {
-                    logger.warn(`[AuthApi] No RPC URL available for fallback provider`);
-                }
-            } catch (error) {
-                logger.warn(`[AuthApi] Could not create fallback provider:`, error.message);
-            }
-        }
-        
-        const provider = (ethereumService && ethereumService.provider) ? ethereumService.provider : fallbackProvider;
-        let isSmartWallet = false;
+        // Check if this is a smart contract wallet FIRST, before validating signature length.
+        // findProviderForContract searches all registered chains (mainnet, Base, etc.) so wallets
+        // like ethOS that deploy contracts on non-mainnet chains are detected correctly.
+        const contractResult = await findProviderForContract(lowerCaseAddress);
+        const provider = contractResult ? contractResult.provider : null;
+        let isSmartWallet = !!contractResult;
         const expectedEOALength = 130; // 65 bytes * 2 hex chars per byte
         const signatureIsLong = signatureHex.length > expectedEOALength;
-        
-        if (provider) {
-            try {
-                isSmartWallet = await isContract(provider, lowerCaseAddress);
-                logger.debug(`[AuthApi] Address ${lowerCaseAddress} is ${isSmartWallet ? 'a smart contract wallet' : 'an EOA'}, signature length: ${signatureHex.length}`);
-            } catch (error) {
-                logger.warn(`[AuthApi] Could not check if address is contract:`, error.message);
-                // If contract check fails but signature is unusually long, assume it might be a smart wallet
-                if (signatureIsLong) {
-                    logger.debug(`[AuthApi] Contract check failed but signature length (${signatureHex.length}) suggests smart wallet, will attempt EIP-1271 verification`);
-                    isSmartWallet = true; // Try smart wallet verification as fallback
+
+        if (!isSmartWallet && signatureIsLong) {
+            // Long signature but not found as a contract on any chain — treat as smart wallet anyway
+            logger.debug(`[AuthApi] Address not found as contract but signature length (${signatureHex.length}) suggests smart wallet`);
+            isSmartWallet = true;
+        }
+
+        logger.debug(`[AuthApi] Address ${lowerCaseAddress} is ${isSmartWallet ? `a smart contract wallet (chainId ${contractResult?.chainId ?? 'unknown'})` : 'an EOA'}, signature length: ${signatureHex.length}`);
+
+        if (isSmartWallet && !provider) {
+            logger.error(`[AuthApi] No provider available for smart wallet verification`);
+            return res.status(503).json({
+                error: {
+                    code: 'SERVICE_UNAVAILABLE',
+                    message: 'Smart wallet verification requires blockchain access. Please ensure RPC configuration is set up.'
                 }
-            }
-        } else {
-            logger.warn(`[AuthApi] No provider available (ethereumService or fallback)`);
-            // If no provider is available but signature is very long, we can't verify
-            if (signatureIsLong) {
-                logger.error(`[AuthApi] No provider available, but signature length (${signatureHex.length}) suggests smart wallet. Cannot verify without provider.`);
-                return res.status(503).json({ 
-                    error: { 
-                        code: 'SERVICE_UNAVAILABLE', 
-                        message: 'Smart wallet verification requires blockchain access. Please ensure RPC configuration is set up.' 
-                    } 
-                });
-            }
+            });
         }
 
         let isValid = false;
