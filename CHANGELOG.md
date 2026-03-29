@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.7.2](https://github.com/monygroupcorp/noema/compare/v4.7.1...v4.7.2) (2026-03-29)
+
+
+### Bug Fixes
+
+* timeout wallet balance fetches, don't block payment flow ([0926339](https://github.com/monygroupcorp/noema/commit/09263396e54b168b8482e04d40b36886f03ea277))
+
 ## [4.7.1](https://github.com/monygroupcorp/noema/compare/v4.7.0...v4.7.1) (2026-03-29)
 
 
