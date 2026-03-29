@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.17](https://github.com/monygroupcorp/noema/compare/v4.6.16...v4.6.17) (2026-03-29)
+
+
+### Bug Fixes
+
+* wallet connect for ethOS smart contract wallets ([328d233](https://github.com/monygroupcorp/noema/commit/328d2334ed31e4db8d965b909cc10a1fbb418310))
+
 ## [4.6.16](https://github.com/monygroupcorp/noema/compare/v4.6.15...v4.6.16) (2026-03-29)
 
 
