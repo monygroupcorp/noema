@@ -2178,3 +2178,27 @@
 .fd-result-img--clickable {
   cursor: pointer;
 }
+
+/* ─── Mobile: NODE_MODE params card ──────────────────────────────────────────
+   On narrow screens the two-column (inputs | outputs) layout collapses both
+   columns to near-zero width and makes inputs invisible. Stack vertically
+   instead and remove the max-height cap so content is never clipped.        */
+@media (max-width: 600px) {
+  .fd-card-params {
+    flex-direction: column;
+  }
+  .fd-params-col {
+    max-height: none;
+    flex: none;
+  }
+  .fd-params-inputs {
+    flex: none;
+  }
+  .fd-params-outputs {
+    flex: none;
+  }
+  .fd-params-col + .fd-params-col {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+}
