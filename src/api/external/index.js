@@ -60,7 +60,7 @@ function initializeExternalApi(dependencies) {
    */
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // Limit each IP to 100 requests per windowMs
+    max: 300, // Limit each IP to 300 requests per windowMs
     standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
     legacyHeaders: false, // Disable the `X-RateLimit-*` headers
     message: { error: { code: 'TOO_MANY_REQUESTS', message: 'You have sent too many requests in a given amount of time. Please try again later.' } },

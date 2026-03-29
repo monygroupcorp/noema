@@ -59,8 +59,9 @@ class GenerationExecutionService {
 
     let groupPoolPoints = 0;
     try {
+      const groupOid = ObjectId.isValid(userId) ? new ObjectId(userId) : userId;
       const groupDeposits = this.db.creditLedger
-        ? await this.db.creditLedger.findActiveDepositsForUser(userId)
+        ? await this.db.creditLedger.findActiveDepositsForUser(groupOid)
         : [];
       groupPoolPoints = groupDeposits.reduce((sum, d) => sum + (d.points_remaining || 0), 0);
     } catch (poolErr) {

@@ -245,21 +245,50 @@ function createTelegramBot(dependencies, token, options = {}) {
     }
   });
 
-  // Polling watchdog: restart bot client after 5 consecutive polling errors
+  // Polling watchdog: restart bot client after 5 consecutive polling errors.
+  // 409 Conflict errors (two instances polling same token during blue-green deploy) are
+  // handled separately — they require a long backoff, not rapid cycling.
   let consecutivePollingErrors = 0;
+  let pollingRestartInProgress = false;
+
+  function restartPollingAfter(delayMs, reason) {
+    if (pollingRestartInProgress) return;
+    pollingRestartInProgress = true;
+    consecutivePollingErrors = 0;
+    // Timeout stopPolling at 12s — node-telegram-bot-api can hang here;
+    // if it does we must not leave pollingRestartInProgress stuck forever.
+    Promise.race([
+      bot.stopPolling(),
+      new Promise(resolve => setTimeout(resolve, 12000))
+    ]).then(() => {
+      setTimeout(() => {
+        pollingRestartInProgress = false;
+        bot.startPolling().then(() => {
+          logger.info(`[Bot] Polling restarted after ${reason}.`);
+        }).catch(err => logger.error('[Bot] Failed to restart polling:', err));
+      }, delayMs);
+    }).catch(err => {
+      pollingRestartInProgress = false;
+      logger.error('[Bot] Failed to stop polling before restart:', err);
+    });
+  }
+
   bot.on('polling_error', (error) => {
+    const statusCode = error?.response?.statusCode;
+
+    if (statusCode === 409) {
+      // 409 = another instance is polling the same token (expected during blue-green deploy).
+      // Wait 50s (> 35s stop timeout + health check buffer) so the old container has time to fully stop.
+      logger.warn('[Bot] Telegram 409 conflict — concurrent instance detected (blue-green deploy?). Backing off 50s...');
+      restartPollingAfter(50000, '409 conflict backoff');
+      return;
+    }
+
     consecutivePollingErrors++;
     logger.error(`Telegram polling error (${consecutivePollingErrors} consecutive):`, error);
     if (consecutivePollingErrors >= 5) {
       logger.error('[Bot] 5 consecutive polling errors — restarting polling...');
-      consecutivePollingErrors = 0;
-      bot.stopPolling().then(() => {
-        setTimeout(() => {
-          bot.startPolling().then(() => {
-            logger.info('[Bot] Polling restarted successfully.');
-          }).catch(err => logger.error('[Bot] Failed to restart polling:', err));
-        }, 5000);
-      }).catch(err => logger.error('[Bot] Failed to stop polling before restart:', err));
+      restartPollingAfter(5000, '5 consecutive errors');
     }
   });
 

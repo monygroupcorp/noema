@@ -512,12 +512,16 @@ let _platforms = null;
 async function shutdownApp() {
   logger.info('[App] Graceful shutdown initiated...');
 
-  // Stop Telegram polling first so the new container doesn't get a 409 conflict
+  // Stop Telegram polling first so the new container doesn't get a 409 conflict.
+  // Timeout at 12s so a hung stopPolling() doesn't eat into the credit service cleanup window.
   const telegramBot = _platforms && _platforms.telegram && _platforms.telegram.bot;
   if (telegramBot) {
     try {
       logger.info('[App] Stopping Telegram polling...');
-      await telegramBot.stopPolling();
+      await Promise.race([
+        telegramBot.stopPolling(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('stopPolling timeout')), 12000))
+      ]);
       logger.info('[App] Telegram polling stopped.');
     } catch (err) {
       logger.error('[App] Error stopping Telegram polling:', err.message);
