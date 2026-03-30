@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.7.3](https://github.com/monygroupcorp/noema/compare/v4.7.2...v4.7.3) (2026-03-30)
+
+
+### Bug Fixes
+
+* fetch wallet balances via server RPC, not wallet provider ([46bb58f](https://github.com/monygroupcorp/noema/commit/46bb58f4353b9b0c3700a19c6f5cbfaec0659363))
+
 ## [4.7.2](https://github.com/monygroupcorp/noema/compare/v4.7.1...v4.7.2) (2026-03-29)
 
 
