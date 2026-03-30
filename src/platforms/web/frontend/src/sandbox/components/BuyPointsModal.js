@@ -231,65 +231,27 @@ export class BuyPointsModal extends Component {
   }
 
   async _fetchBalances() {
-    const { walletAddress, supportedAssets } = this.state;
-    const p = this._provider;
-    if (!p || !walletAddress || !supportedAssets) return;
+    const { walletAddress, selectedChainId } = this.state;
+    if (!walletAddress) return;
 
     this.setState({ balancesLoading: true });
-    const balances = { tokens: {} };
-
-    // Race a provider request against a timeout — smart contract wallets (ethOS, Safe)
-    // can stall indefinitely on eth_getBalance / eth_call via the Android bridge.
-    const rpcRequest = (method, params, timeoutMs = 4000) =>
-      Promise.race([
-        p.request({ method, params }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
-      ]);
-
-    // Native ETH
     try {
-      const ethHex = await rpcRequest('eth_getBalance', [walletAddress, 'latest']);
-      const raw = BigInt(ethHex || '0x0');
-      balances.tokens[normalizeAddress(ZERO_ADDRESS)] = { raw, decimals: 18, formatted: formatBigIntBalance(raw, 18) };
+      const chainId = selectedChainId || '1';
+      const res = await fetch(`/api/v1/wallets/balances?address=${walletAddress}&chainId=${chainId}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      // Normalise: raw comes back as string (BigInt serialised), convert to BigInt for display helpers
+      const tokens = {};
+      for (const [addr, entry] of Object.entries(data.tokens || {})) {
+        const raw = BigInt(entry.raw || '0');
+        tokens[addr.toLowerCase()] = { raw, decimals: entry.decimals, formatted: formatBigIntBalance(raw, entry.decimals) };
+      }
+      this.setState({ walletBalances: { tokens }, balancesLoading: false });
     } catch (err) {
-      console.warn('[BuyPointsModal] ETH balance fetch failed:', err.message);
+      console.warn('[BuyPointsModal] balance fetch failed:', err.message);
+      this.setState({ balancesLoading: false });
     }
-
-    // ERC20 tokens
-    const tokens = (supportedAssets.tokens || []).filter(Boolean);
-    const balanceOfSel = '0x70a08231';
-    const addrParam = walletAddress.toLowerCase().replace('0x', '').padStart(64, '0');
-
-    for (const token of tokens) {
-      const tokenAddr = normalizeAddress(token.address);
-      if (!tokenAddr || tokenAddr === normalizeAddress(ZERO_ADDRESS)) continue;
-      if (!isValidAddress(token.address)) continue;
-      try {
-        const data = `${balanceOfSel}${addrParam}`;
-        const hex = await rpcRequest('eth_call', [{ to: token.address, data }, 'latest']);
-        const raw = hexToBigInt(hex);
-        balances.tokens[tokenAddr] = { raw, decimals: token.decimals || 18, formatted: formatBigIntBalance(raw, token.decimals || 18) };
-      } catch (err) {
-        console.warn('[BuyPointsModal] Token balance failed:', token.symbol, err.message);
-      }
-    }
-
-    // NFTs
-    const nfts = (supportedAssets.nfts || []).filter(Boolean);
-    for (const nft of nfts) {
-      const nftAddr = normalizeAddress(nft.address);
-      if (!nftAddr || !isValidAddress(nft.address)) continue;
-      try {
-        const data = `${balanceOfSel}${addrParam}`;
-        const hex = await rpcRequest('eth_call', [{ to: nft.address, data }, 'latest']);
-        const raw = hexToBigInt(hex);
-        balances.tokens[nftAddr] = { raw, decimals: 0, formatted: formatBigIntBalance(raw, 0) };
-      } catch (err) {
-        console.warn('[BuyPointsModal] NFT balance failed:', nft.name, err.message);
-      }
-    }
-
-    this.setState({ walletBalances: balances, balancesLoading: false });
   }
 
   _getBalanceEntry(asset) {
