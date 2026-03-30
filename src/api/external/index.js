@@ -419,6 +419,64 @@ function initializeExternalApi(dependencies) {
     }
   });
 
+  // --- Public: Wallet balances (server-side RPC — never routes through wallet provider) ---
+  // Used by BuyPointsModal so mobile/smart-contract wallets (ethOS, Safe) don't stall on
+  // eth_getBalance / eth_call via their Android bridge.
+  externalApiRouter.get('/wallets/balances', async (req, res) => {
+    const { address, chainId = '1' } = req.query;
+    const { isAddress, formatUnits } = require('ethers');
+    if (!address || !isAddress(address)) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Valid address required.' } });
+    }
+
+    const svc = (dependencies.ethereumServices || {})[String(chainId)];
+    if (!svc || !svc.provider) {
+      return res.status(503).json({ error: { code: 'UNAVAILABLE', message: `No RPC provider for chainId ${chainId}.` } });
+    }
+    const provider = svc.provider;
+    const { getChainTokenConfig, getChainNftConfig } = require('../../core/services/alchemy/tokenConfig');
+    const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+    const balanceOfSel = '0x70a08231';
+    const addrParam = address.toLowerCase().replace('0x', '').padStart(64, '0');
+    const tokens = {};
+
+    // ETH
+    try {
+      const raw = await provider.getBalance(address);
+      tokens[ZERO_ADDRESS] = { raw: raw.toString(), decimals: 18, formatted: formatUnits(raw, 18) };
+    } catch (e) {
+      logger.warn('[wallets/balances] ETH balance failed:', e.message);
+    }
+
+    // ERC20s
+    const tokensCfg = getChainTokenConfig(String(chainId)) || {};
+    for (const [tokenAddr, cfg] of Object.entries(tokensCfg)) {
+      if (!tokenAddr || tokenAddr === ZERO_ADDRESS) continue;
+      try {
+        const result = await provider.call({ to: tokenAddr, data: `${balanceOfSel}${addrParam}` });
+        const raw = BigInt(result || '0x0');
+        tokens[tokenAddr.toLowerCase()] = { raw: raw.toString(), decimals: cfg.decimals || 18, formatted: formatUnits(raw, cfg.decimals || 18) };
+      } catch (e) {
+        logger.warn('[wallets/balances] ERC20 balance failed:', tokenAddr, e.message);
+      }
+    }
+
+    // NFTs
+    const nftsCfg = getChainNftConfig(String(chainId)) || {};
+    for (const [nftAddr] of Object.entries(nftsCfg)) {
+      if (!nftAddr) continue;
+      try {
+        const result = await provider.call({ to: nftAddr, data: `${balanceOfSel}${addrParam}` });
+        const raw = BigInt(result || '0x0');
+        tokens[nftAddr.toLowerCase()] = { raw: raw.toString(), decimals: 0, formatted: raw.toString() };
+      } catch (e) {
+        logger.warn('[wallets/balances] NFT balance failed:', nftAddr, e.message);
+      }
+    }
+
+    return res.json({ address, chainId, tokens });
+  });
+
   // --- Public: Supported Chains (CreditVault deployments) ---
   externalApiRouter.get('/points/supported-chains', (req, res) => {
     const { CREDIT_VAULT_ADDRESSES, CHAIN_NAMES } = require('../../core/services/alchemy/foundationConfig');
