@@ -521,111 +521,88 @@ async function distributeContributorRewards(generationRecord, basePoints, { logg
     logger.debug(`[distributeContributorRewards] Calculating rewards for gen ${generationRecord._id} based on ${basePoints} base points.`);
     const generatingUserId = generationRecord.masterAccountId.toString();
     const rewardsToDistribute = [];
-    const shares = {};
-    let totalShares = 0;
+    const rewardBreakdown = [];
 
-    // --- 1. Gather contributors and count shares ---
-    const loras = (generationRecord.metadata?.loraResolutionData?.appliedLoras || []);
-    loras.forEach(lora => {
-        const ownerId = lora.ownerAccountId?.toString();
-        // Don't reward user for using their own assets
-        if (ownerId && ownerId !== generatingUserId) {
-            shares[ownerId] = (shares[ownerId] || 0) + 1; // 1 share per LoRA used
-            totalShares++;
-            logger.debug(`[distributeContributorRewards] LoRA from ${ownerId} adds 1 share.`);
-        }
-    });
+    const SPELL_REWARD_RATE = 0.05;    // Spell author gets flat 5%
+    const PER_LORA_RATE = 0.05;        // 5% per external LoRA
+    const LORA_POOL_CAP_RATE = 0.15;   // LoRA pool capped at 15%
 
+    // --- 1. Spell author reward (fixed 5%, not shared) ---
     const isSpell = generationRecord.metadata?.isSpell;
     const spellOwnerId = generationRecord.metadata?.spell?.ownedBy?.toString();
     if (isSpell && spellOwnerId && spellOwnerId !== generatingUserId) {
-        shares[spellOwnerId] = (shares[spellOwnerId] || 0) + 1; // 1 share for the spell
-        totalShares++;
-        logger.debug(`[distributeContributorRewards] Spell from ${spellOwnerId} adds 1 share.`);
+        const spellRewardPoints = Math.floor(basePoints * SPELL_REWARD_RATE);
+        if (spellRewardPoints > 0) {
+            rewardsToDistribute.push({ contributorId: spellOwnerId, points: spellRewardPoints, type: 'spell' });
+            logger.debug(`[distributeContributorRewards] Spell author ${spellOwnerId} earns ${spellRewardPoints} points (${SPELL_REWARD_RATE * 100}% of base).`);
+        }
+    }
+
+    // --- 2. LoRA model trainer rewards (5% per model, capped at 15%) ---
+    const loras = (generationRecord.metadata?.loraResolutionData?.appliedLoras || []);
+    const loraShares = {};
+    let totalLoraShares = 0;
+    loras.forEach(lora => {
+        const ownerId = lora.ownerAccountId?.toString();
+        if (ownerId && ownerId !== generatingUserId) {
+            loraShares[ownerId] = (loraShares[ownerId] || 0) + 1;
+            totalLoraShares++;
+            logger.debug(`[distributeContributorRewards] LoRA '${lora.slug}' from ${ownerId} adds 1 share.`);
+        }
+    });
+
+    if (totalLoraShares > 0) {
+        const uncappedLoraPool = Math.floor(basePoints * PER_LORA_RATE * totalLoraShares);
+        const loraRewardPool = Math.min(uncappedLoraPool, Math.floor(basePoints * LORA_POOL_CAP_RATE));
+        const pointsPerLoraShare = Math.floor(loraRewardPool / totalLoraShares);
+        logger.debug(`[distributeContributorRewards] LoRA pool: ${totalLoraShares} shares, uncapped=${uncappedLoraPool}, capped=${loraRewardPool}, per-share=${pointsPerLoraShare}.`);
+
+        if (pointsPerLoraShare > 0) {
+            for (const [ownerId, shareCount] of Object.entries(loraShares)) {
+                const points = pointsPerLoraShare * shareCount;
+                if (points > 0) {
+                    rewardsToDistribute.push({ contributorId: ownerId, points, type: 'lora' });
+                }
+            }
+        }
     }
 
     // Future-proofing for base model owner reward
     const baseModelOwnerId = generationRecord.metadata?.model?.ownerAccountId?.toString();
     if (baseModelOwnerId && baseModelOwnerId !== generatingUserId) {
-        // This part is for future implementation when base model ownership is tracked.
-        // For now, we just log it. Uncomment the lines below to activate it.
-        // shares[baseModelOwnerId] = (shares[baseModelOwnerId] || 0) + 1;
-        // totalShares++;
         logger.debug(`[distributeContributorRewards] Base model owner found (${baseModelOwnerId}), but reward logic is not yet active for base models.`);
     }
 
-    if (totalShares === 0) {
+    if (rewardsToDistribute.length === 0) {
         logger.debug('[distributeContributorRewards] No external contributors found. No rewards to distribute.');
         return { totalPointsToCharge: basePoints, totalRewards: 0, rewardBreakdown: [] };
     }
 
-    // --- 2. Calculate rewards ---
-    const contributorRewardPool = Math.floor(basePoints * 0.20);
-    logger.debug(`[distributeContributorRewards] Total Shares: ${totalShares}. Reward Pool: ${contributorRewardPool} points (20% of base).`);
-
-    if (contributorRewardPool === 0) {
-        logger.debug('[distributeContributorRewards] Reward pool is zero. No rewards to distribute.');
-        return { totalPointsToCharge: basePoints, totalRewards: 0, rewardBreakdown: [] };
-    }
-
-    const pointsPerShare = Math.floor(contributorRewardPool / totalShares);
-    if (pointsPerShare === 0) {
-        logger.debug(`[distributeContributorRewards] Points per share is zero. No rewards to distribute.`);
-        return { totalPointsToCharge: basePoints, totalRewards: 0, rewardBreakdown: [] };
-    }
-
+    // --- 3. Issue credits to contributors ---
     let totalPointsDistributed = 0;
-    const rewardBreakdown = [];
-
-    // --- 3. Prepare reward distribution ---
-    for (const [contributorId, shareCount] of Object.entries(shares)) {
-        const points = pointsPerShare * shareCount;
-        if (points > 0) {
-            rewardsToDistribute.push({ contributorId, points });
-            totalPointsDistributed += points;
-        }
-    }
-    
-    // The user is charged the base cost + total rewards successfully calculated
-    const totalPointsToCharge = basePoints + totalPointsDistributed;
-
-    // --- 4. Issue credits to contributors ---
     for (const reward of rewardsToDistribute) {
         try {
-            const creditPayload = {
+            await economyService.creditPoints(reward.contributorId, {
                 points: reward.points,
-                description: `Reward for your contribution to generation ${generationRecord._id}`,
+                description: `Reward (${reward.type}) for your contribution to generation ${generationRecord._id}`,
                 rewardType: 'CONTRIBUTOR_REWARD',
                 relatedItems: {
                     sourceGenerationId: generationRecord._id.toString(),
                     sourceUserId: generatingUserId,
-                }
-            };
-            await economyService.creditPoints(reward.contributorId, {
-                points: creditPayload.points,
-                description: creditPayload.description,
-                rewardType: creditPayload.rewardType,
-                relatedItems: creditPayload.relatedItems,
+                },
             });
-            logger.debug(`[distributeContributorRewards] Successfully credited ${reward.points} points to contributor ${reward.contributorId}.`);
-            rewardBreakdown.push({
-                contributorId: reward.contributorId,
-                points: reward.points,
-                status: 'credited'
-            });
+            totalPointsDistributed += reward.points;
+            logger.debug(`[distributeContributorRewards] Credited ${reward.points} points (${reward.type}) to ${reward.contributorId}.`);
+            rewardBreakdown.push({ contributorId: reward.contributorId, points: reward.points, type: reward.type, status: 'credited' });
         } catch (error) {
-            logger.error(`[distributeContributorRewards] FAILED to credit contributor ${reward.contributorId} for generation ${generationRecord._id}. Error:`, error.message);
-            rewardBreakdown.push({
-                contributorId: reward.contributorId,
-                points: reward.points,
-                status: 'failed',
-                error: error.message
-            });
+            logger.error(`[distributeContributorRewards] FAILED to credit ${reward.contributorId} for gen ${generationRecord._id}: ${error.message}`);
+            rewardBreakdown.push({ contributorId: reward.contributorId, points: reward.points, type: reward.type, status: 'failed', error: error.message });
         }
     }
-    
-    logger.debug(`[distributeContributorRewards] Calculation complete. Base: ${basePoints}, Rewards: ${totalPointsDistributed}, Total Charge: ${totalPointsToCharge}.`);
-    
+
+    const totalPointsToCharge = basePoints + totalPointsDistributed;
+    logger.debug(`[distributeContributorRewards] Complete. Base: ${basePoints}, Rewards: ${totalPointsDistributed}, Total Charge: ${totalPointsToCharge}.`);
+
     return { totalPointsToCharge, totalRewards: totalPointsDistributed, rewardBreakdown };
 }
 

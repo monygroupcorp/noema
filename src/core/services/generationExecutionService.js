@@ -368,18 +368,20 @@ class GenerationExecutionService {
 
       // Pre-routing LoRA Resolution
       let resolvedInputs = { ...inputs };
+      let loraResolutionData = null;
       if (service === 'comfyui' && tool.metadata?.hasLoraLoader) {
         const promptInputKey = tool.metadata?.telegramPromptInputKey || 'input_prompt';
         if (resolvedInputs[promptInputKey]) {
           const { masterAccountId } = user;
           this.logger.debug(`[Execute] Pre-routing LoRA resolution for tool '${toolId}'.`);
-          const { modifiedPrompt } = await this.loraResolutionService.resolveLoraTriggers(
+          const resolutionResult = await this.loraResolutionService.resolveLoraTriggers(
             resolvedInputs[promptInputKey],
             masterAccountId,
             tool.metadata.baseModel,
             { internal: { client: this.internalApiClient } }
           );
-          resolvedInputs[promptInputKey] = modifiedPrompt;
+          resolvedInputs[promptInputKey] = resolutionResult.modifiedPrompt;
+          loraResolutionData = resolutionResult;
         }
       }
 
@@ -669,7 +671,7 @@ class GenerationExecutionService {
               ...metadata,
               ...(tool.deliveryHints && { deliveryHints: tool.deliveryHints }),
               costRate: costRateInfo,
-              loraResolutionData: {},
+              loraResolutionData: loraResolutionData || metadata?.loraResolutionData || {},
               platformContext: user.platformContext,
               pricingBreakdown,
               isMs2User,
