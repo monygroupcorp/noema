@@ -114,8 +114,8 @@ function createGenerationsApi(dependencies) {
             const promptInputKey = tool.metadata?.telegramPromptInputKey || 'input_prompt';
             const rawPrompt = finalInputs[promptInputKey];
 
-            // 5. LoRA Resolution — runs for all ComfyUI tools with a text prompt
-            if (rawPrompt) {
+            // 5. LoRA Resolution
+            if (tool.metadata.hasLoraLoader && rawPrompt) {
                 if (loraResolutionService) {
                     const { modifiedPrompt, appliedLoras } = await loraResolutionService.resolveLoraTriggers(
                         rawPrompt, user.masterAccountId, tool.metadata.baseModel, dependencies
