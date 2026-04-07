@@ -518,7 +518,7 @@ async function processComfyDeployWebhook(payload, { internalApiClient, logger, w
  * @returns {Promise<{totalPointsToCharge: number, totalRewards: number, rewardBreakdown: Array}>}
  */
 async function distributeContributorRewards(generationRecord, basePoints, { logger }) {
-    logger.debug(`[distributeContributorRewards] Calculating rewards for gen ${generationRecord._id} based on ${basePoints} base points.`);
+    logger.info(`[distributeContributorRewards] Calculating rewards for gen ${generationRecord._id} based on ${basePoints} base points.`);
     const generatingUserId = generationRecord.masterAccountId.toString();
     const rewardsToDistribute = [];
     const rewardBreakdown = [];
@@ -527,6 +527,10 @@ async function distributeContributorRewards(generationRecord, basePoints, { logg
     const PER_LORA_RATE = 0.05;        // 5% per external LoRA
     const LORA_POOL_CAP_RATE = 0.15;   // LoRA pool capped at 15%
 
+    // --- Diagnostic: dump loraResolutionData shape ---
+    const rawLrd = generationRecord.metadata?.loraResolutionData;
+    logger.info(`[distributeContributorRewards] generatingUserId=${generatingUserId}, loraResolutionData keys=${rawLrd ? Object.keys(rawLrd).join(',') : 'MISSING'}, appliedLoras count=${rawLrd?.appliedLoras?.length ?? 'N/A'}`);
+
     // --- 1. Spell author reward (fixed 5%, not shared) ---
     const isSpell = generationRecord.metadata?.isSpell;
     const spellOwnerId = generationRecord.metadata?.spell?.ownedBy?.toString();
@@ -534,7 +538,7 @@ async function distributeContributorRewards(generationRecord, basePoints, { logg
         const spellRewardPoints = Math.floor(basePoints * SPELL_REWARD_RATE);
         if (spellRewardPoints > 0) {
             rewardsToDistribute.push({ contributorId: spellOwnerId, points: spellRewardPoints, type: 'spell' });
-            logger.debug(`[distributeContributorRewards] Spell author ${spellOwnerId} earns ${spellRewardPoints} points (${SPELL_REWARD_RATE * 100}% of base).`);
+            logger.info(`[distributeContributorRewards] Spell author ${spellOwnerId} earns ${spellRewardPoints} points (${SPELL_REWARD_RATE * 100}% of base).`);
         }
     }
 
@@ -544,10 +548,10 @@ async function distributeContributorRewards(generationRecord, basePoints, { logg
     let totalLoraShares = 0;
     loras.forEach(lora => {
         const ownerId = lora.ownerAccountId?.toString();
+        logger.info(`[distributeContributorRewards] LoRA '${lora.slug}': ownerAccountId=${ownerId || 'NULL'}, generatingUser=${generatingUserId}, same=${ownerId === generatingUserId}`);
         if (ownerId && ownerId !== generatingUserId) {
             loraShares[ownerId] = (loraShares[ownerId] || 0) + 1;
             totalLoraShares++;
-            logger.debug(`[distributeContributorRewards] LoRA '${lora.slug}' from ${ownerId} adds 1 share.`);
         }
     });
 
@@ -555,7 +559,7 @@ async function distributeContributorRewards(generationRecord, basePoints, { logg
         const uncappedLoraPool = Math.floor(basePoints * PER_LORA_RATE * totalLoraShares);
         const loraRewardPool = Math.min(uncappedLoraPool, Math.floor(basePoints * LORA_POOL_CAP_RATE));
         const pointsPerLoraShare = Math.floor(loraRewardPool / totalLoraShares);
-        logger.debug(`[distributeContributorRewards] LoRA pool: ${totalLoraShares} shares, uncapped=${uncappedLoraPool}, capped=${loraRewardPool}, per-share=${pointsPerLoraShare}.`);
+        logger.info(`[distributeContributorRewards] LoRA pool: ${totalLoraShares} shares, uncapped=${uncappedLoraPool}, capped=${loraRewardPool}, per-share=${pointsPerLoraShare}.`);
 
         if (pointsPerLoraShare > 0) {
             for (const [ownerId, shareCount] of Object.entries(loraShares)) {
@@ -570,11 +574,11 @@ async function distributeContributorRewards(generationRecord, basePoints, { logg
     // Future-proofing for base model owner reward
     const baseModelOwnerId = generationRecord.metadata?.model?.ownerAccountId?.toString();
     if (baseModelOwnerId && baseModelOwnerId !== generatingUserId) {
-        logger.debug(`[distributeContributorRewards] Base model owner found (${baseModelOwnerId}), but reward logic is not yet active for base models.`);
+        logger.info(`[distributeContributorRewards] Base model owner found (${baseModelOwnerId}), but reward logic is not yet active for base models.`);
     }
 
     if (rewardsToDistribute.length === 0) {
-        logger.debug('[distributeContributorRewards] No external contributors found. No rewards to distribute.');
+        logger.info('[distributeContributorRewards] No external contributors found. No rewards to distribute.');
         return { totalPointsToCharge: basePoints, totalRewards: 0, rewardBreakdown: [] };
     }
 
@@ -592,7 +596,7 @@ async function distributeContributorRewards(generationRecord, basePoints, { logg
                 },
             });
             totalPointsDistributed += reward.points;
-            logger.debug(`[distributeContributorRewards] Credited ${reward.points} points (${reward.type}) to ${reward.contributorId}.`);
+            logger.info(`[distributeContributorRewards] Credited ${reward.points} points (${reward.type}) to ${reward.contributorId}.`);
             rewardBreakdown.push({ contributorId: reward.contributorId, points: reward.points, type: reward.type, status: 'credited' });
         } catch (error) {
             logger.error(`[distributeContributorRewards] FAILED to credit ${reward.contributorId} for gen ${generationRecord._id}: ${error.message}`);
@@ -601,7 +605,7 @@ async function distributeContributorRewards(generationRecord, basePoints, { logg
     }
 
     const totalPointsToCharge = basePoints + totalPointsDistributed;
-    logger.debug(`[distributeContributorRewards] Complete. Base: ${basePoints}, Rewards: ${totalPointsDistributed}, Total Charge: ${totalPointsToCharge}.`);
+    logger.info(`[distributeContributorRewards] Complete. Base: ${basePoints}, Rewards: ${totalPointsDistributed}, Total Charge: ${totalPointsToCharge}.`);
 
     return { totalPointsToCharge, totalRewards: totalPointsDistributed, rewardBreakdown };
 }
