@@ -369,7 +369,7 @@ class GenerationExecutionService {
       // Pre-routing LoRA Resolution
       let resolvedInputs = { ...inputs };
       let loraResolutionData = null;
-      if (service === 'comfyui') {
+      if (service === 'comfyui' && tool.metadata?.hasLoraLoader) {
         const promptInputKey = tool.metadata?.telegramPromptInputKey || 'input_prompt';
         if (resolvedInputs[promptInputKey]) {
           const { masterAccountId } = user;
