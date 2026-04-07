@@ -641,9 +641,9 @@ class WorkflowsService {
     const originalUserPrompt = inputsToRun[promptInputKey];
     const baseModelForLora = tool.metadata?.baseModel || tool.baseModel; // prefer metadata
 
-    // ADR-009: LoRA Resolution Step
-    if (tool.metadata?.hasLoraLoader && originalUserPrompt && typeof originalUserPrompt === 'string') {
-      if (DEBUG_LOGGING_ENABLED) this.logger.info(`[WorkflowsService] Tool ${toolId} has LoRA loader support. Attempting LoRA resolution. BaseModel: ${baseModelForLora}`);
+    // ADR-009: LoRA Resolution Step — runs for all ComfyUI tools with a text prompt
+    if (originalUserPrompt && typeof originalUserPrompt === 'string') {
+      if (DEBUG_LOGGING_ENABLED) this.logger.info(`[WorkflowsService] Attempting LoRA resolution for tool ${toolId}. BaseModel: ${baseModelForLora}`);
       try {
         loraResolutionResult = await loraResolutionService.resolveLoraTriggers(
           originalUserPrompt,
@@ -665,7 +665,6 @@ class WorkflowsService {
       }
     } else {
       if (DEBUG_LOGGING_ENABLED) {
-        if (!tool.metadata?.hasLoraLoader) this.logger.info(`[WorkflowsService] Tool ${toolId} does not have LoRA loader support. Skipping LoRA resolution.`);
         if (!originalUserPrompt || typeof originalUserPrompt !== 'string') this.logger.info(`[WorkflowsService] No valid prompt string found in inputs for key '${promptInputKey}'. Skipping LoRA resolution.`);
       }
     }
