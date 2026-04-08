@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.9.0](https://github.com/monygroupcorp/noema/compare/v4.8.2...v4.9.0) (2026-04-08)
+
+
+### Features
+
+* auto-create contributor reward indexes on application startup ([2aa29ee](https://github.com/monygroupcorp/noema/commit/2aa29eeca2b1955129ebbc5c4599346dc07513d0))
+* contributor reward tally system with dashboard and model page surfacing ([16ae72a](https://github.com/monygroupcorp/noema/commit/16ae72a821451ad0c70314aade3178e587e996d5))
+
 ## [4.8.2](https://github.com/monygroupcorp/noema/compare/v4.8.1...v4.8.2) (2026-04-08)
 
 
