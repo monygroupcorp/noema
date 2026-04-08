@@ -354,6 +354,27 @@ class LoRAModelsDB extends BaseDB {
     return this.updateOne({ slug }, { $inc: { usageCount: 1 } });
   }
 
+  /**
+   * Atomically increment reward stats on a LoRA model document.
+   * @param {string} slug - Model slug
+   * @param {number} points - Reward points awarded for this generation
+   * @returns {Promise<Object>} MongoDB updateOne result
+   */
+  async incrementRewardStats(slug, points) {
+    return this.updateOne(
+      { slug },
+      {
+        $inc: {
+          'rewardStats.lifetimePointsAwarded': points,
+          'rewardStats.generationsRewarded': 1,
+        },
+        $set: {
+          'rewardStats.lastRewardAt': new Date(),
+        },
+      }
+    );
+  }
+
   async updateModel(modelId, updateData) {
     return this.updateOne({ _id: new ObjectId(modelId) }, { $set: updateData });
   }
