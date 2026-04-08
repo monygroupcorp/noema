@@ -139,6 +139,15 @@ async function initializeServices(options = {}) {
           logger.debug('[initializeServices] x402PaymentLogDb indexes ensured.');
         }
       }
+      // Contributor reward indexes (credit ledger tally + leaderboard)
+      const creditLedgerDb = initializedDbServices?.data?.creditLedger;
+      if (creditLedgerDb && typeof creditLedgerDb.ensureIndexes === 'function') {
+        await creditLedgerDb.ensureIndexes();
+      }
+      const userEconomyDb = initializedDbServices?.data?.userEconomy;
+      if (userEconomyDb && typeof userEconomyDb.ensureIndexes === 'function') {
+        await userEconomyDb.ensureIndexes();
+      }
     } catch (indexErr) {
       logger.error('Failed to ensure DB indexes:', indexErr);
     }

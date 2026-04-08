@@ -1,5 +1,5 @@
 const { BaseDB, ObjectId } = require('../BaseDB');
-const { PRIORITY } = require('../utils/queue');
+const { PRIORITY, getCachedClient } = require('../utils/queue');
 
 const COLLECTION_NAME = 'credit_ledger';
 
@@ -34,6 +34,25 @@ class CreditLedgerDB extends BaseDB {
       this.logger = tempLogger;
     } else {
       this.logger = logger;
+    }
+  }
+
+  async ensureIndexes() {
+    try {
+      const client = await getCachedClient();
+      const collection = client.db(this.dbName).collection(this.collectionName);
+      await collection.createIndexes([
+        {
+          key: { master_account_id: 1, type: 1, reward_category: 1 },
+          unique: true,
+          name: 'idx_reward_tally_upsert',
+          partialFilterExpression: { type: 'CONTRIBUTOR_REWARD_TALLY' },
+          background: true,
+        },
+      ]);
+      this.logger.debug('[CreditLedgerDB] Contributor reward indexes ensured.');
+    } catch (err) {
+      this.logger.error('[CreditLedgerDB] Failed to ensure indexes:', err);
     }
   }
 

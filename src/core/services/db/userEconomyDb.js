@@ -1,5 +1,6 @@
 const { BaseDB, ObjectId } = require('./BaseDB');
 const { Decimal128 } = require('mongodb');
+const { getCachedClient } = require('./utils/queue');
 
 const COLLECTION_NAME = 'userEconomy';
 
@@ -198,6 +199,24 @@ class UserEconomyDB extends BaseDB {
       );
     }
     return { success: true, newBalance: parseFloat(newBalance.toString()) };
+  }
+
+  async ensureIndexes() {
+    try {
+      const client = await getCachedClient();
+      const collection = client.db(this.dbName).collection(this.collectionName);
+      await collection.createIndexes([
+        {
+          key: { 'contributorRewards.totalLifetimePoints': -1 },
+          name: 'idx_contributor_leaderboard',
+          sparse: true,
+          background: true,
+        },
+      ]);
+      this.logger.debug('[UserEconomyDB] Contributor reward indexes ensured.');
+    } catch (err) {
+      this.logger.error('[UserEconomyDB] Failed to ensure indexes:', err);
+    }
   }
 
   /**
