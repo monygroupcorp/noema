@@ -118,14 +118,15 @@ function createUserApi(dependencies) {
         logger.warn('[UserApi] /dashboard: Could not fetch points for wallet:', { error: err.message });
         points = 0;
       }
-      // Rewards
-      const sumRewards = (type) => transactions
-        .filter(t => t.transactionType === type && parseFloat(t.amountUsd) > 0)
-        .reduce((sum, t) => sum + parseFloat(t.amountUsd), 0);
+      // Rewards — read from userEconomy tally (fast single-doc read)
+      const cr = economy.contributorRewards || {};
       const rewards = {
-        referral: sumRewards('referral_bonus'),
-        model: sumRewards('model_reward'),
-        spell: sumRewards('spell_reward'),
+        referral: 0, // referral rewards still come from vaults, not contributor system
+        model: cr.lora?.lifetimePoints || 0,
+        spell: cr.spell?.lifetimePoints || 0,
+        totalLifetimePoints: cr.totalLifetimePoints || 0,
+        lora: cr.lora || { lifetimePoints: 0, generationsServed: 0 },
+        spellDetail: cr.spell || { lifetimePoints: 0, castsServed: 0 },
       };
       res.status(200).json({
         masterAccountId: userId, // Add this line

@@ -1,5 +1,5 @@
 const { BaseDB, ObjectId } = require('../BaseDB');
-const { PRIORITY } = require('../utils/queue');
+const { PRIORITY, getCachedClient } = require('../utils/queue');
 
 const COLLECTION_NAME = 'credit_ledger';
 
@@ -34,6 +34,25 @@ class CreditLedgerDB extends BaseDB {
       this.logger = tempLogger;
     } else {
       this.logger = logger;
+    }
+  }
+
+  async ensureIndexes() {
+    try {
+      const client = await getCachedClient();
+      const collection = client.db(this.dbName).collection(this.collectionName);
+      await collection.createIndexes([
+        {
+          key: { master_account_id: 1, type: 1, reward_category: 1 },
+          unique: true,
+          name: 'idx_reward_tally_upsert',
+          partialFilterExpression: { type: 'CONTRIBUTOR_REWARD_TALLY' },
+          background: true,
+        },
+      ]);
+      this.logger.debug('[CreditLedgerDB] Contributor reward indexes ensured.');
+    } catch (err) {
+      this.logger.error('[CreditLedgerDB] Failed to ensure indexes:', err);
     }
   }
 
@@ -726,6 +745,49 @@ class CreditLedgerDB extends BaseDB {
     }
 
     return this.insertOne(dataToInsert);
+  }
+
+  /**
+   * Upsert a contributor reward tally entry.
+   * One entry per user per reward category — atomically increments on each reward event.
+   * These entries participate in wallet-based balance queries and FIFO spending.
+   *
+   * @param {Object} params
+   * @param {ObjectId} params.masterAccountId
+   * @param {string} params.depositorAddress - Wallet address (required for balance visibility)
+   * @param {string} params.rewardCategory - 'lora' or 'spell'
+   * @param {number} params.points - Points to add
+   * @returns {Promise<Object>} MongoDB updateOne result
+   */
+  async upsertRewardTally({ masterAccountId, depositorAddress, rewardCategory, points }) {
+    const now = new Date();
+    return this.updateOne(
+      {
+        master_account_id: masterAccountId,
+        type: 'CONTRIBUTOR_REWARD_TALLY',
+        reward_category: rewardCategory,
+      },
+      {
+        $inc: {
+          points_credited: points,
+          points_remaining: points,
+          total_contributions: 1,
+        },
+        $set: {
+          last_reward_at: now,
+          updatedAt: now,
+        },
+        $setOnInsert: {
+          // Synthetic tx hash to satisfy the unique deposit_tx_hash index
+          deposit_tx_hash: `reward_tally_${masterAccountId.toString()}_${rewardCategory}`,
+          depositor_address: depositorAddress ? depositorAddress.toLowerCase() : null,
+          status: 'CONFIRMED',
+          funding_rate_applied: 1.0,
+          createdAt: now,
+        },
+      },
+      { upsert: true }
+    );
   }
 
   /**
