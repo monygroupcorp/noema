@@ -729,6 +729,49 @@ class CreditLedgerDB extends BaseDB {
   }
 
   /**
+   * Upsert a contributor reward tally entry.
+   * One entry per user per reward category — atomically increments on each reward event.
+   * These entries participate in wallet-based balance queries and FIFO spending.
+   *
+   * @param {Object} params
+   * @param {ObjectId} params.masterAccountId
+   * @param {string} params.depositorAddress - Wallet address (required for balance visibility)
+   * @param {string} params.rewardCategory - 'lora' or 'spell'
+   * @param {number} params.points - Points to add
+   * @returns {Promise<Object>} MongoDB updateOne result
+   */
+  async upsertRewardTally({ masterAccountId, depositorAddress, rewardCategory, points }) {
+    const now = new Date();
+    return this.updateOne(
+      {
+        master_account_id: masterAccountId,
+        type: 'CONTRIBUTOR_REWARD_TALLY',
+        reward_category: rewardCategory,
+      },
+      {
+        $inc: {
+          points_credited: points,
+          points_remaining: points,
+          total_contributions: 1,
+        },
+        $set: {
+          last_reward_at: now,
+          updatedAt: now,
+        },
+        $setOnInsert: {
+          // Synthetic tx hash to satisfy the unique deposit_tx_hash index
+          deposit_tx_hash: `reward_tally_${masterAccountId.toString()}_${rewardCategory}`,
+          depositor_address: depositorAddress ? depositorAddress.toLowerCase() : null,
+          status: 'CONFIRMED',
+          funding_rate_applied: 1.0,
+          createdAt: now,
+        },
+      },
+      { upsert: true }
+    );
+  }
+
+  /**
    * Sums the points_remaining for all active, confirmed deposits for a wallet address.
    * @param {string} walletAddress - The user's wallet address (case-insensitive).
    * @returns {Promise<number>} The total points remaining.

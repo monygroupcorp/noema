@@ -200,6 +200,37 @@ class UserEconomyDB extends BaseDB {
     return { success: true, newBalance: parseFloat(newBalance.toString()) };
   }
 
+  /**
+   * Atomically increment contributor reward tallies on the user economy document.
+   * Creates the contributorRewards sub-document on first call via $inc semantics.
+   *
+   * @param {ObjectId|string} masterAccountId
+   * @param {string} category - 'lora' or 'spell'
+   * @param {number} points - Points to add
+   * @param {Object} [options]
+   * @param {ClientSession} [options.session]
+   * @returns {Promise<Object>} MongoDB updateOne result
+   */
+  async incrementContributorRewards(masterAccountId, category, points, { session } = {}) {
+    const incFields = {
+      [`contributorRewards.${category}.lifetimePoints`]: points,
+      [`contributorRewards.${category}.generationsServed`]: 1,
+      ['contributorRewards.totalLifetimePoints']: points,
+    };
+
+    return this.updateOne(
+      { masterAccountId: new ObjectId(masterAccountId) },
+      {
+        $inc: incFields,
+        $set: { updatedAt: new Date() },
+      },
+      { upsert: false },
+      false,
+      undefined,
+      session
+    );
+  }
+
   // Additional methods for history, etc.
 }
 

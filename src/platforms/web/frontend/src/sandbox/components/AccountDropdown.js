@@ -80,6 +80,9 @@ export class AccountDropdown extends Component {
       .acct-action:hover { background: rgba(255,255,255,0.05); }
       .exp-bar { background: #333; border-radius: 4px; height: 6px; width: 100%; margin: 4px 0; }
       .exp-fill { background: #90caf9; height: 6px; border-radius: 4px; transition: width 0.3s; }
+      .acct-rewards { display: flex; flex-direction: column; gap: 2px; border-top: 1px solid #222; margin-top: 4px; padding-top: 8px; }
+      .acct-rewards-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #666; font-family: var(--ff-condensed); }
+      .acct-rewards-val { color: #81c784; font-weight: 600; }
     `;
   }
 
@@ -99,6 +102,17 @@ export class AccountDropdown extends Component {
         )
       ));
       items.push(h('div', { className: 'acct-item' }, `Points: ${data.points}`));
+
+      // Contributor rewards summary
+      const totalRewardPts = data.rewards?.totalLifetimePoints || 0;
+      if (totalRewardPts > 0) {
+        const usd = (totalRewardPts * 0.000337).toFixed(2);
+        items.push(h('div', { className: 'acct-item acct-rewards' },
+          h('span', { className: 'acct-rewards-label' }, 'Rewards Earned'),
+          h('span', { className: 'acct-rewards-val' }, `${totalRewardPts.toLocaleString()} pts (~$${usd})`)
+        ));
+      }
+
       items.push(h('a', { className: 'acct-action', href: '#', onclick: (e) => this._action('get-more-points', e) }, 'Get More Points'));
     }
 
