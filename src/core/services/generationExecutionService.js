@@ -535,7 +535,10 @@ class GenerationExecutionService {
           const { runId, meta } = await adapter.startJob(jobInputs);
 
           const { masterAccountId } = user;
+          const isSpellStep = metadata && metadata.isSpell;
           const initialDeliveryStatus = (user.platform && user.platform !== 'none') ? 'pending' : 'skipped';
+          const isCookGeneration = metadata && (metadata.source === 'cook' || metadata.collectionId || metadata.cookId);
+          const finalNotificationPlatform = isCookGeneration ? 'cook' : (metadata?.webhookUrl ? 'webhook' : (user.platform || 'none'));
 
           const generationParams = {
             masterAccountId: toMasterAccountId(masterAccountId, isX402Execution),
@@ -544,10 +547,13 @@ class GenerationExecutionService {
             serviceName: tool.service,
             toolId: tool.toolId,
             toolDisplayName: tool.displayName || tool.name || tool.toolId,
+            ...(metadata?.castId && { castId: metadata.castId }),
+            ...(metadata?.cookId && { cookId: metadata.cookId }),
             requestPayload: inputs,
             status: 'processing',
             deliveryStatus: initialDeliveryStatus,
-            notificationPlatform: metadata?.webhookUrl ? 'webhook' : (user.platform || 'none'),
+            ...(isSpellStep && { deliveryStrategy: 'spell_step' }),
+            notificationPlatform: finalNotificationPlatform,
             pointsSpent: isX402Execution ? 0 : pointsRequired,
             protocolNetPoints: 0,
             costUsd: costUsd,
@@ -556,7 +562,10 @@ class GenerationExecutionService {
               ...metadata,
               ...(tool.deliveryHints && { deliveryHints: tool.deliveryHints }),
               costRate: costRateInfo,
+              loraResolutionData: loraResolutionData || metadata?.loraResolutionData || {},
               platformContext: user.platformContext,
+              pricingBreakdown,
+              isMs2User,
               ...(meta ? { adapterMeta: meta } : {}),
               run_id: runId,
               ...(user.platform === 'web-sandbox' ? { notificationContext: { platform: 'web-sandbox', windowId: metadata?.windowId || null } } : {})
@@ -638,81 +647,8 @@ class GenerationExecutionService {
         }
       }
 
-      // Legacy switch/case
+      // Legacy switch/case for non-adapter services
       switch (service) {
-        case 'comfyui': {
-          const { masterAccountId } = user;
-          let finalInputs = { ...resolvedInputs }; // Seed already randomized in pre-routing step
-
-          const isSpellStep = metadata && metadata.isSpell;
-          const initialDeliveryStatus = (user.platform && user.platform !== 'none') ? 'pending' : 'skipped';
-          const isCookGeneration = metadata && (metadata.source === 'cook' || metadata.collectionId || metadata.cookId);
-          const finalNotificationPlatform = isCookGeneration ? 'cook' : (user.platform || 'none');
-
-          const generationParams = {
-            masterAccountId: toMasterAccountId(masterAccountId, isX402Execution),
-            ...(sessionId && { sessionId: new ObjectId(sessionId) }),
-            ...(eventId && { initiatingEventId: new ObjectId(eventId) }),
-            serviceName: tool.service,
-            toolId: tool.toolId,
-            toolDisplayName: tool.displayName || tool.name || tool.toolId,
-            ...(metadata?.castId && { castId: metadata.castId }),
-            ...(metadata?.cookId && { cookId: metadata.cookId }),
-            requestPayload: finalInputs,
-            status: 'pending',
-            deliveryStatus: initialDeliveryStatus,
-            ...(isSpellStep && { deliveryStrategy: 'spell_step' }),
-            notificationPlatform: finalNotificationPlatform,
-            pointsSpent: 0,
-            protocolNetPoints: 0,
-            costUsd: null,
-            metadata: {
-              ...tool.metadata,
-              ...metadata,
-              ...(tool.deliveryHints && { deliveryHints: tool.deliveryHints }),
-              costRate: costRateInfo,
-              loraResolutionData: loraResolutionData || metadata?.loraResolutionData || {},
-              platformContext: user.platformContext,
-              pricingBreakdown,
-              isMs2User,
-              ...(user.platform === 'web-sandbox' ? { notificationContext: { platform: 'web-sandbox' } } : {})
-            }
-          };
-
-          const createResponse = await this.db.generationOutputs.createGenerationOutput(generationParams);
-          generationRecord = createResponse;
-          this.logger.debug(`[Execute] Created generation record ${generationRecord._id} for tool '${toolId}' with costRate: ${JSON.stringify(costRateInfo)}.`);
-
-          const runId = await this.comfyUIService.submitRequest({
-            deploymentId: tool.metadata.deploymentId,
-            inputs: finalInputs,
-          });
-          this.logger.debug(`[Execute] Submitted job to ComfyUI for GenID ${generationRecord._id}. Run ID: ${runId}`);
-
-          await this.db.generationOutputs.updateGenerationOutput(generationRecord._id, {
-            'metadata.run_id': runId,
-            status: 'processing',
-          });
-
-          const est = (typeof estimatedSeconds === 'number' && Number.isFinite(estimatedSeconds)) ? estimatedSeconds : null;
-          return {
-            statusCode: 202,
-            body: {
-              generationId: generationRecord._id.toString(),
-              status: 'processing',
-              service: tool.service,
-              runId,
-              toolId: tool.toolId,
-              queuedAt: generationRecord.requestTimestamp,
-              ...(est !== null ? { estimatedDurationSeconds: est, checkAfterMs: est * 1000 } : {}),
-              estimatedCostUsd: costUsd,
-              estimatedPoints: pointsRequired,
-              pricing: pricingBreakdown,
-              message: 'Your request has been accepted and is being processed.',
-            }
-          };
-        }
-
         case 'static': {
           const initialDeliveryStatus = (user.platform && user.platform !== 'none') ? 'sent' : 'skipped';
           const defaultPoints = 0;
