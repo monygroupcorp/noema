@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.8.2](https://github.com/monygroupcorp/noema/compare/v4.8.1...v4.8.2) (2026-04-08)
+
+
+### Bug Fixes
+
+* write loraResolutionData to generation record via adapter async path ([ab69d62](https://github.com/monygroupcorp/noema/commit/ab69d62cfd7bbe137f6566a54cc251341922b1b0))
+
 ## [4.8.0](https://github.com/monygroupcorp/noema/compare/v4.7.3...v4.8.0) (2026-04-06)
 
 
