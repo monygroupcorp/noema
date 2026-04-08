@@ -6,6 +6,7 @@ const adapterRegistry = require('../adapterRegistry');
 const { getPricingService } = require('../pricing');
 const { generationService } = require('../store/generations/GenerationService');
 const { economyService } = require('../store/economy/EconomyService');
+const LoRAModelsDB = require('../db/loRAModelDb');
 const ResponsePayloadNormalizer = require('../notifications/ResponsePayloadNormalizer');
 const { signWebhook, validateWebhookUrl } = require('../../../utils/webhookUtils');
 
@@ -518,7 +519,7 @@ async function processComfyDeployWebhook(payload, { internalApiClient, logger, w
  * @returns {Promise<{totalPointsToCharge: number, totalRewards: number, rewardBreakdown: Array}>}
  */
 async function distributeContributorRewards(generationRecord, basePoints, { logger }) {
-    logger.info(`[distributeContributorRewards] Calculating rewards for gen ${generationRecord._id} based on ${basePoints} base points.`);
+    logger.debug(`[distributeContributorRewards] Calculating rewards for gen ${generationRecord._id} based on ${basePoints} base points.`);
     const generatingUserId = generationRecord.masterAccountId.toString();
     const rewardsToDistribute = [];
     const rewardBreakdown = [];
@@ -527,9 +528,8 @@ async function distributeContributorRewards(generationRecord, basePoints, { logg
     const PER_LORA_RATE = 0.05;        // 5% per external LoRA
     const LORA_POOL_CAP_RATE = 0.15;   // LoRA pool capped at 15%
 
-    // --- Diagnostic: dump loraResolutionData shape ---
     const rawLrd = generationRecord.metadata?.loraResolutionData;
-    logger.info(`[distributeContributorRewards] generatingUserId=${generatingUserId}, loraResolutionData keys=${rawLrd ? Object.keys(rawLrd).join(',') : 'MISSING'}, appliedLoras count=${rawLrd?.appliedLoras?.length ?? 'N/A'}`);
+    logger.debug(`[distributeContributorRewards] generatingUserId=${generatingUserId}, loraResolutionData keys=${rawLrd ? Object.keys(rawLrd).join(',') : 'MISSING'}, appliedLoras count=${rawLrd?.appliedLoras?.length ?? 'N/A'}`);
 
     // --- 1. Spell author reward (fixed 5%, not shared) ---
     const isSpell = generationRecord.metadata?.isSpell;
@@ -544,17 +544,17 @@ async function distributeContributorRewards(generationRecord, basePoints, { logg
 
     // --- 2. LoRA model trainer rewards (5% per model, capped at 15%) ---
     const loras = (generationRecord.metadata?.loraResolutionData?.appliedLoras || []);
-    const loraShares = {};
-    let totalLoraShares = 0;
+    // Track per-slug data for model-level reward stats
+    const externalLoras = [];
     loras.forEach(lora => {
         const ownerId = lora.ownerAccountId?.toString();
-        logger.info(`[distributeContributorRewards] LoRA '${lora.slug}': ownerAccountId=${ownerId || 'NULL'}, generatingUser=${generatingUserId}, same=${ownerId === generatingUserId}`);
+        logger.debug(`[distributeContributorRewards] LoRA '${lora.slug}': ownerAccountId=${ownerId || 'NULL'}, generatingUser=${generatingUserId}, same=${ownerId === generatingUserId}`);
         if (ownerId && ownerId !== generatingUserId) {
-            loraShares[ownerId] = (loraShares[ownerId] || 0) + 1;
-            totalLoraShares++;
+            externalLoras.push({ slug: lora.slug, ownerId });
         }
     });
 
+    const totalLoraShares = externalLoras.length;
     if (totalLoraShares > 0) {
         const uncappedLoraPool = Math.floor(basePoints * PER_LORA_RATE * totalLoraShares);
         const loraRewardPool = Math.min(uncappedLoraPool, Math.floor(basePoints * LORA_POOL_CAP_RATE));
@@ -562,45 +562,71 @@ async function distributeContributorRewards(generationRecord, basePoints, { logg
         logger.info(`[distributeContributorRewards] LoRA pool: ${totalLoraShares} shares, uncapped=${uncappedLoraPool}, capped=${loraRewardPool}, per-share=${pointsPerLoraShare}.`);
 
         if (pointsPerLoraShare > 0) {
-            for (const [ownerId, shareCount] of Object.entries(loraShares)) {
-                const points = pointsPerLoraShare * shareCount;
-                if (points > 0) {
-                    rewardsToDistribute.push({ contributorId: ownerId, points, type: 'lora' });
-                }
+            // Aggregate by owner for the spendable credit
+            const ownerPoints = {};
+            for (const { slug, ownerId } of externalLoras) {
+                ownerPoints[ownerId] = (ownerPoints[ownerId] || 0) + pointsPerLoraShare;
+            }
+            for (const [ownerId, points] of Object.entries(ownerPoints)) {
+                rewardsToDistribute.push({ contributorId: ownerId, points, type: 'lora' });
             }
         }
     }
 
-    // Future-proofing for base model owner reward
-    const baseModelOwnerId = generationRecord.metadata?.model?.ownerAccountId?.toString();
-    if (baseModelOwnerId && baseModelOwnerId !== generatingUserId) {
-        logger.info(`[distributeContributorRewards] Base model owner found (${baseModelOwnerId}), but reward logic is not yet active for base models.`);
-    }
-
     if (rewardsToDistribute.length === 0) {
-        logger.info('[distributeContributorRewards] No external contributors found. No rewards to distribute.');
+        logger.debug('[distributeContributorRewards] No external contributors found. No rewards to distribute.');
         return { totalPointsToCharge: basePoints, totalRewards: 0, rewardBreakdown: [] };
     }
 
-    // --- 3. Issue credits to contributors ---
+    // --- 3. Issue rewards via tally pattern (three atomic writes per contributor) ---
+    const loraModelsDb = new LoRAModelsDB(logger);
     let totalPointsDistributed = 0;
+
     for (const reward of rewardsToDistribute) {
         try {
-            await economyService.creditPoints(reward.contributorId, {
+            // Resolve contributor wallet for credit ledger visibility
+            const walletAddress = await economyService.getUserWalletAddress(reward.contributorId);
+            if (!walletAddress) {
+                logger.warn(`[distributeContributorRewards] No wallet for contributor ${reward.contributorId}. Tally entry will lack depositor_address.`);
+            }
+
+            // Write 1: Credit ledger tally (spendable balance)
+            await economyService.creditLedger.upsertRewardTally({
+                masterAccountId: economyService._toOid(reward.contributorId),
+                depositorAddress: walletAddress,
+                rewardCategory: reward.type,
                 points: reward.points,
-                description: `Reward (${reward.type}) for your contribution to generation ${generationRecord._id}`,
-                rewardType: 'CONTRIBUTOR_REWARD',
-                relatedItems: {
-                    sourceGenerationId: generationRecord._id.toString(),
-                    sourceUserId: generatingUserId,
-                },
             });
+
+            // Write 2: User economy tally (dashboard + leaderboard)
+            await economyService.userEconomy.incrementContributorRewards(
+                reward.contributorId, reward.type, reward.points
+            );
+
             totalPointsDistributed += reward.points;
             logger.info(`[distributeContributorRewards] Credited ${reward.points} points (${reward.type}) to ${reward.contributorId}.`);
             rewardBreakdown.push({ contributorId: reward.contributorId, points: reward.points, type: reward.type, status: 'credited' });
         } catch (error) {
             logger.error(`[distributeContributorRewards] FAILED to credit ${reward.contributorId} for gen ${generationRecord._id}: ${error.message}`);
             rewardBreakdown.push({ contributorId: reward.contributorId, points: reward.points, type: reward.type, status: 'failed', error: error.message });
+        }
+    }
+
+    // Write 3: Per-model reward stats (non-blocking, best-effort)
+    if (totalLoraShares > 0) {
+        const loraRewardPool = Math.min(
+            Math.floor(basePoints * PER_LORA_RATE * totalLoraShares),
+            Math.floor(basePoints * LORA_POOL_CAP_RATE)
+        );
+        const pointsPerLoraShare = Math.floor(loraRewardPool / totalLoraShares);
+        if (pointsPerLoraShare > 0) {
+            for (const { slug } of externalLoras) {
+                try {
+                    await loraModelsDb.incrementRewardStats(slug, pointsPerLoraShare);
+                } catch (err) {
+                    logger.warn(`[distributeContributorRewards] Failed to update rewardStats for model '${slug}': ${err.message}`);
+                }
+            }
         }
     }
 
