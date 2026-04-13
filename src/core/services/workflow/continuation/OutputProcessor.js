@@ -89,13 +89,16 @@ class OutputProcessor {
 
         // Process each output field
         for (const outputKey in stepOutput) {
-            // Store output with nodeId prefix to prevent overwrites between steps
+            // Store output with nodeId prefix to prevent overwrites between steps.
+            // This is the canonical path used by explicit nodeOutput
+            // parameterMappings on downstream steps — see
+            // ParameterResolver.resolveMappings().
             if (nodeId) {
                 const namespacedKey = `${nodeId}_${outputKey}`;
                 next_inputs[namespacedKey] = stepOutput[outputKey];
                 this.logger.debug(`[OutputProcessor] Stored output "${outputKey}" as "${namespacedKey}" for node ${nodeId}`);
             }
-            
+
             // 1. Check for an explicit mapping
             if (outputMappings && outputMappings[outputKey]) {
                 const inputKey = outputMappings[outputKey];
@@ -106,13 +109,16 @@ class OutputProcessor {
                 const inputKey = 'input_' + outputKey.substring('output_'.length);
                 next_inputs[inputKey] = stepOutput[outputKey];
                 this.logger.debug(`[OutputProcessor] Mapped output "${outputKey}" to input "${inputKey}" via default convention.`);
-            } else {
-                // 3. Carry over any other fields that don't match
-                // Avoid overwriting a more specific mapping (like input_image) with a broader one (like the images array)
-                if (!next_inputs[outputKey]) {
-                    next_inputs[outputKey] = stepOutput[outputKey];
-                }
             }
+            // 3. (Removed) We used to carry any unmapped output over at the
+            //    top level here. That caused an expression or primitive step
+            //    wired to one downstream field (say `input_prompt`) to also
+            //    leak its generic `text` / `result` output into *every other*
+            //    string field on the downstream tool via
+            //    InputParameterNormalizer's variation matching — e.g. filling
+            //    `input_text` and `input_prompt_negative` with the same
+            //    prompt. Unmapped outputs remain reachable via the namespaced
+            //    path above, which is what explicit nodeOutput mappings use.
         }
 
         return next_inputs;
