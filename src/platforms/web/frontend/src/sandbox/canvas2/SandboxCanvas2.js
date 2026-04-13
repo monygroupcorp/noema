@@ -4,6 +4,7 @@ import { ToolWindowBody, UploadWindowBody } from '../canvas/ToolWindowBody.js';
 import * as executionClient from '../executionClient.js';
 import { emitCosts } from '../store.js';
 import { INSTRUCTION_PRESETS } from '../instructionPresets.js';
+import { serializeSubgraph, selectionHasInternalConnection } from '../subgraph.js';
 import '../../style/focus-demo.css';
 
 // ── Type helpers ──────────────────────────────────────────────────────────────
@@ -1971,13 +1972,27 @@ export class SandboxCanvas2 extends Component {
 
   _renderActionBar(selectedIds) {
     const count = selectedIds?.size || 0;
+    const canCompose = selectionHasInternalConnection(this._engine, selectedIds);
     return h('div', { className: 'sc2-action-bar', ontouchstart: (e) => e.stopPropagation() },
+      canCompose ? h('button', {
+        className: 'sc2-action-btn sc2-action-btn--primary',
+        onclick: () => this._composeSpellFromSelection(),
+      }, 'Compose Spell') : null,
       h('button', { className: 'sc2-action-btn', onclick: () => this._batchClone() }, `Clone (${count})`),
       h('button', { className: 'sc2-action-btn', onclick: () => this._batchCopy() }, 'Copy'),
       h('button', { className: 'sc2-action-btn', onclick: () => this._batchCut() }, 'Cut'),
       h('button', { className: 'sc2-action-btn sc2-action-btn--danger', onclick: () => this._batchDelete() }, `Delete (${count})`),
       h('button', { className: 'sc2-action-btn', onclick: () => { this._engine.fsm.exitMultiSelect(); this.setState({ multiSelectIds: new Set() }); } }, 'Cancel'),
     );
+  }
+
+  _composeSpellFromSelection() {
+    const selectedIds = this._engine.fsm.selectedNodeIds;
+    if (!selectionHasInternalConnection(this._engine, selectedIds)) return;
+    const subgraph = serializeSubgraph(this._engine, selectedIds);
+    this._engine.fsm.exitMultiSelect();
+    this.setState({ multiSelectIds: new Set() });
+    eventBus.emit('openSpellsModal', { subgraph });
   }
 
   _batchDelete() {
