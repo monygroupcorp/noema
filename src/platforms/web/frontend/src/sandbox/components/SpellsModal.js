@@ -44,7 +44,16 @@ export class SpellsModal extends Component {
       createDesc: '',
       createVisibility: VISIBILITY.PRIVATE,
       createPrice: 100,
-      createExposed: {},
+      // Seed exposed checkboxes from autoExposed (empty primitives feeding
+      // a step's required input become pre-checked defaults).
+      createExposed: (() => {
+        const seed = {};
+        const autoExposed = props.initialSubgraph?.autoExposed || [];
+        autoExposed.forEach(({ nodeId, paramKey }) => {
+          seed[`${nodeId}__${paramKey}`] = true;
+        });
+        return seed;
+      })(),
       creating: false,
       createError: null,
 
@@ -157,19 +166,45 @@ export class SpellsModal extends Component {
     if (!createName.trim()) return;
     this.setState({ creating: true, createError: null });
     try {
-      const steps = (subgraph?.nodes || []).map((node, i) => ({
-        id: node.id,
-        toolIdentifier: node.toolId,
-        toolVersion: '1.0.0',
-        displayName: node.displayName,
-        parameterMappings: node.parameterMappings || {},
-      }));
+      // Build the set of exposed keys so we can strip matching statics from
+      // the steps we send. If a static mapping stays in, ParameterResolver
+      // will overwrite the caster's parameterOverride at execute time (see
+      // src/core/services/workflow/execution/ParameterResolver.js line 132).
+      const exposedKeys = new Set(
+        Object.entries(createExposed).filter(([, v]) => v).map(([k]) => k)
+      );
+
+      const steps = (subgraph?.nodes || []).map((node) => {
+        const mappings = { ...(node.parameterMappings || {}) };
+        Object.keys(mappings).forEach((pk) => {
+          if (exposedKeys.has(`${node.id}__${pk}`) && mappings[pk]?.type === 'static') {
+            // User chose to expose this input; drop the static default so
+            // the cast-time parameterOverride flows through the pipelineContext.
+            delete mappings[pk];
+          }
+        });
+        return {
+          id: node.id,
+          toolIdentifier: node.toolId,
+          toolVersion: '1.0.0',
+          displayName: node.displayName,
+          parameterMappings: mappings,
+        };
+      });
       const connections = subgraph?.connections || [];
       const exposedInputs = Object.entries(createExposed)
         .filter(([, v]) => v)
         .map(([key]) => {
           const [nodeId, paramKey] = key.split('__');
-          return { nodeId, paramKey };
+          // If the original node had a static mapping for this param, keep
+          // its value as a defaultValue hint for the cast UI (currently shown
+          // as placeholder by SpellPage).
+          const node = (subgraph?.nodes || []).find(n => n.id === nodeId);
+          const originalMapping = node?.parameterMappings?.[paramKey];
+          const defaultValue = originalMapping?.type === 'static' ? originalMapping.value : undefined;
+          return defaultValue !== undefined
+            ? { nodeId, paramKey, defaultValue }
+            : { nodeId, paramKey };
         });
 
       const body = {
@@ -601,14 +636,52 @@ export class SpellsModal extends Component {
   _renderCreate() {
     const { subgraph, createName, createDesc, createVisibility, createPrice, createExposed, creating, createError } = this.state;
     const nodes = subgraph?.nodes || [];
+    const hasExpressionStep = nodes.some(n => n.kind === 'expression');
 
-    // Collect all possible exposed inputs from the subgraph
+    // Inputs already fed by another step in the subgraph can't be exposed —
+    // whoever wrote the spell wired them, and exposing them to casters would
+    // be meaningless. Collect those keys up front.
+    const wiredKeys = new Set();
+    (subgraph?.connections || []).forEach(c => {
+      wiredKeys.add(`${c.toWindowId}__${c.toInput}`);
+    });
+    nodes.forEach(node => {
+      Object.entries(node.parameterMappings || {}).forEach(([pk, m]) => {
+        if (m?.type === 'nodeOutput') wiredKeys.add(`${node.id}__${pk}`);
+      });
+    });
+
+    // Build the exposable input list from each step's full inputSchema
+    // (not just existing parameterMappings). This surfaces every tool input,
+    // not only ones the user typed a static value into.
     const potentialInputs = [];
     nodes.forEach(node => {
-      const mappings = node.parameterMappings || {};
-      Object.keys(mappings).forEach(paramKey => {
+      const schema = node.inputSchema || {};
+      Object.entries(schema).forEach(([paramKey, paramDef]) => {
         const key = `${node.id}__${paramKey}`;
-        potentialInputs.push({ key, nodeId: node.id, paramKey, nodeName: node.displayName });
+        if (wiredKeys.has(key)) return;
+        const mapping = (node.parameterMappings || {})[paramKey];
+        let state;
+        let preview = '';
+        if (mapping?.type === 'static') {
+          state = 'static';
+          const v = mapping.value;
+          preview = typeof v === 'string'
+            ? (v.length > 40 ? v.slice(0, 37) + '...' : v)
+            : (v == null ? '' : String(v));
+        } else {
+          state = paramDef?.required ? 'empty-required' : 'empty-optional';
+        }
+        potentialInputs.push({
+          key,
+          nodeId: node.id,
+          paramKey,
+          nodeName: node.displayName,
+          paramName: paramDef?.name || paramKey,
+          required: !!paramDef?.required,
+          state,
+          preview,
+        });
       });
     });
 
@@ -669,13 +742,30 @@ export class SpellsModal extends Component {
           )
         ) : null,
 
+      // Informational note when the selection contained expression steps.
+      hasExpressionStep
+        ? h('div', {
+            className: 'sm-create-note',
+            style: 'color:var(--text-secondary);font-size:var(--fs-xs);border-left:2px solid var(--border);padding:6px 10px;margin:0 0 12px',
+          },
+          'Expression steps are saved with their expression text baked in. ',
+          'Upstream inputs feeding an expression can be exposed to casters below.'
+        ) : null,
+
       // Exposed inputs
       potentialInputs.length > 0
         ? h('div', { className: 'sm-create-exposed' },
           h('div', { className: 'sm-exposed-title' }, 'Expose Inputs'),
-          h('p', { style: 'color:var(--text-secondary);font-size:var(--fs-xs);margin:0 0 8px' }, 'Exposed inputs can be overridden when someone casts your spell.'),
-          ...potentialInputs.map(inp =>
-            h('label', { className: 'sm-checkbox-row', key: inp.key },
+          h('p', { style: 'color:var(--text-secondary);font-size:var(--fs-xs);margin:0 0 8px' },
+            'Exposed inputs can be overridden when someone casts your spell. ',
+            'Empty required inputs are pre-selected.'
+          ),
+          ...potentialInputs.map(inp => {
+            const stateLabel =
+              inp.state === 'static' ? (inp.preview ? `= ${inp.preview}` : 'static')
+              : inp.state === 'empty-required' ? 'required'
+              : 'optional';
+            return h('label', { className: 'sm-checkbox-row', key: inp.key },
               h('input', {
                 type: 'checkbox',
                 checked: !!createExposed[inp.key],
@@ -684,9 +774,10 @@ export class SpellsModal extends Component {
                 }),
               }),
               h('span', null, `${inp.nodeName}: `),
-              h('strong', null, inp.paramKey)
-            )
-          )
+              h('strong', null, inp.paramName),
+              h('span', { style: 'color:var(--text-label);margin-left:6px;font-size:var(--fs-xs)' }, stateLabel)
+            );
+          })
         ) : null,
 
       h('div', { className: 'sm-nav' },
