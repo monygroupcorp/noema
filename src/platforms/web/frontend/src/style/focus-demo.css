@@ -2179,6 +2179,71 @@
   cursor: pointer;
 }
 
+/* ─── Native save on mobile (tap-and-hold) ──────────────────────────────────
+   .sc2-root sets `touch-action: none` and `user-select: none` so the canvas
+   can handle pan/pinch gestures. Those properties inherit into the output
+   media elements and kill the browser's native long-press callout (the one
+   that offers "Save Image", "Share", etc.). Re-enable the native gesture on
+   the media elements only — pan still works everywhere else because the
+   image overlay is a fixed-position layer above the canvas.
+
+   NOTE: iOS Safari does not support native long-press save on HTML5 <video>
+   at all (OS-level limitation). Android Chrome and desktop do. For the iOS
+   video gap we surface Copy link / Telegram / X share buttons alongside the
+   video — see .fd-media-actions below. */
+.fd-output-image,
+.fd-image-overlay-img,
+.fd-output-video {
+  touch-action: auto;
+  user-select: auto;
+  -webkit-user-select: auto;
+  -webkit-touch-callout: default;
+}
+
+/* ─── Share / copy-link action cluster ────────────────────────────────── */
+.fd-media-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 0 2px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.fd-media-action-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: var(--ff-condensed);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  padding: 5px 9px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  line-height: 1;
+  transition:
+    color var(--dur-interact, 120ms) var(--ease, ease),
+    border-color var(--dur-interact, 120ms) var(--ease, ease);
+}
+.fd-media-action-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.fd-media-action-btn--copied {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Inside the image lightbox top bar, the buttons sit between the nav and
+   close button — keep the cluster compact. */
+.fd-image-overlay-topbar .fd-media-actions {
+  padding: 0;
+  margin: 0 4px;
+}
+
 /* ─── Mobile: NODE_MODE params card ──────────────────────────────────────────
    On narrow screens the two-column (inputs | outputs) layout collapses both
    columns to near-zero width and makes inputs invisible. Stack vertically
