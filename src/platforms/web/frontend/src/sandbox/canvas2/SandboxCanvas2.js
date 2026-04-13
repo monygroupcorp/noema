@@ -5,6 +5,7 @@ import * as executionClient from '../executionClient.js';
 import { emitCosts } from '../store.js';
 import { INSTRUCTION_PRESETS } from '../instructionPresets.js';
 import { serializeSubgraph, selectionHasInternalConnection } from '../subgraph.js';
+import { copyMediaLink, shareToTelegram, shareToX } from '../mediaShare.js';
 import '../../style/focus-demo.css';
 
 // ── Type helpers ──────────────────────────────────────────────────────────────
@@ -115,6 +116,7 @@ export class SandboxCanvas2 extends Component {
       modelPickerOverlay: null, // { windowId, key, currentVal, label, models, loading, error, search }
       pendingInputTarget: null,  // { windowId, key, type, label } — seeking source for an input
       pendingOutputSource: null, // { sourceNodeId, sourcePort, sourceType } — committed when FAB tapped mid-connection
+      mediaCopiedUrl: null,      // URL of the media whose "Copy link" button is flashing "Copied ✓"
     };
   }
 
@@ -369,6 +371,7 @@ export class SandboxCanvas2 extends Component {
     if (this._momentum.running) {
       this._momentum.running = false;
     }
+    clearTimeout(this._mediaCopiedTimeout);
     document.removeEventListener('keydown', this._boundKeyDown);
     if (window.sandboxCanvas === this) delete window.sandboxCanvas;
   }
@@ -636,6 +639,7 @@ export class SandboxCanvas2 extends Component {
                 total > 10 ? h('span', { className: 'fd-image-overlay-nav-count' }, `/ ${total}`) : null,
                 h('button', { className: 'fd-image-overlay-nav-btn', disabled: idx === total - 1, onclick: (e) => { e.stopPropagation(); goTo(idx + 1); } }, '›'),
               ) : null,
+              this._renderMediaActions(iov.url, iov.label),
               h('button', {
                 className: 'fd-image-overlay-close',
                 onclick: () => this.setState({ imageOverlay: null }),
@@ -1805,12 +1809,15 @@ export class SandboxCanvas2 extends Component {
             },
           });
         }
-        if (o.type === 'video' && o.url) return h('div', { className: 'fd-output-video-wrap' },
-          h('video', {
-            className: 'fd-output-video',
-            src: o.url, controls: true, playsinline: true, preload: 'metadata',
-            loop: true,
-          }),
+        if (o.type === 'video' && o.url) return h('div', { className: 'fd-output-video-block' },
+          h('div', { className: 'fd-output-video-wrap' },
+            h('video', {
+              className: 'fd-output-video',
+              src: o.url, controls: true, playsinline: true, preload: 'metadata',
+              loop: true,
+            }),
+          ),
+          this._renderMediaActions(o.url, label),
         );
         if (o.type === 'text' && o.text) return h('div', {
           className: 'fd-output-text fd-result-img--clickable',
@@ -1933,6 +1940,41 @@ export class SandboxCanvas2 extends Component {
         outputCard,
         actionsCard,
       ),
+    );
+  }
+
+  // ─── Media share / copy-link buttons ─────────────────────────────────────
+
+  _renderMediaActions(url, label) {
+    if (!url) return null;
+    const copied = this.state.mediaCopiedUrl === url;
+    const text = label ? `${label} — noema.art` : 'Generated with noema.art';
+    const stop = (e) => { e.stopPropagation(); };
+    return h('div', { className: 'fd-media-actions', onclick: stop, ontouchstart: stop },
+      h('button', {
+        className: `fd-media-action-btn${copied ? ' fd-media-action-btn--copied' : ''}`,
+        title: 'Copy link',
+        onclick: async (e) => {
+          e.stopPropagation();
+          const ok = await copyMediaLink(url);
+          if (!ok) return;
+          this.setState({ mediaCopiedUrl: url });
+          clearTimeout(this._mediaCopiedTimeout);
+          this._mediaCopiedTimeout = setTimeout(() => {
+            if (this.state.mediaCopiedUrl === url) this.setState({ mediaCopiedUrl: null });
+          }, 2000);
+        },
+      }, copied ? 'Copied ✓' : 'Copy link'),
+      h('button', {
+        className: 'fd-media-action-btn',
+        title: 'Share to Telegram',
+        onclick: (e) => { e.stopPropagation(); shareToTelegram(url, text); },
+      }, 'Telegram'),
+      h('button', {
+        className: 'fd-media-action-btn',
+        title: 'Share to X',
+        onclick: (e) => { e.stopPropagation(); shareToX(url, text); },
+      }, 'X'),
     );
   }
 
