@@ -636,7 +636,7 @@ export class SpellsModal extends Component {
   _renderCreate() {
     const { subgraph, createName, createDesc, createVisibility, createPrice, createExposed, creating, createError } = this.state;
     const nodes = subgraph?.nodes || [];
-    const hasExpressionStep = nodes.some(n => n.type === 'expression');
+    const hasExpressionStep = nodes.some(n => n.kind === 'expression');
 
     // Inputs already fed by another step in the subgraph can't be exposed —
     // whoever wrote the spell wired them, and exposing them to casters would

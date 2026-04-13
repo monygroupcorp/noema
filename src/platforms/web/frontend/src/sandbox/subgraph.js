@@ -11,11 +11,14 @@
  *                  (the backend ExpressionAdapter is already registered as
  *                  a tool; see src/core/tools/definitions/expressionTool.js).
  *                  The expression string is stored as a static mapping.
- *   - primitive  → NOT emitted as a step (backend has no primitive-step
- *                  concept). A filled primitive's value is baked into
- *                  downstream steps as a static parameterMapping. An empty
- *                  primitive is dropped but its target param is tagged as
- *                  an autoExpose candidate so the mint modal pre-checks it.
+ *   - primitive  → emitted as a step that also uses toolIdentifier 'expression',
+ *                  but with a passthrough expression "input" and the
+ *                  primitive's value stored in the `input` static mapping.
+ *                  This preserves the primitive as a first-class node in the
+ *                  saved graph (canvas reload, multi-target reuse, post-mint
+ *                  editing) while using the existing backend tool pipeline
+ *                  with no schema changes. The `expression` param is hidden
+ *                  from the Expose Inputs UI via an omitted inputSchema entry.
  *   - other      → ignored (upload, collection, etc. are not spell-able).
  *
  * Connections where both endpoints are emitted steps are translated into
@@ -29,17 +32,54 @@ const EXPRESSION_TOOL_ID = 'expression';
 const EXPRESSION_DEFAULT_OUTPUT_KEY = 'result';
 
 /**
- * Extract the inputSchema for a window, falling back through the known
- * shapes used in canvas2 for tools and expressions.
+ * Read a primitive window's current value. Empty string / null / undefined
+ * means "user hasn't filled this in" and it should become an exposable input.
  */
-function getInputSchemaFor(win) {
-    if (!win) return {};
-    if (win.type === 'tool') {
-        return win.tool?.inputSchema || win.tool?.metadata?.inputSchema || {};
-    }
-    if (win.type === 'expression') {
-        // Mirrors src/core/tools/definitions/expressionTool.js inputSchema.
-        return {
+function readPrimitiveValue(win) {
+    if (!win || win.type !== 'primitive') return undefined;
+    if (win.value === undefined || win.value === null) return undefined;
+    if (typeof win.value === 'string' && win.value.trim() === '') return undefined;
+    return win.value;
+}
+
+/**
+ * Build a serialized step for a tool window.
+ */
+function buildToolNode(win) {
+    return {
+        id: win.id,
+        kind: 'tool',
+        toolId: win.tool.toolId,
+        displayName: win.tool.displayName,
+        workspaceX: win.x,
+        workspaceY: win.y,
+        output: win.output || null,
+        parameterMappings: { ...(win.parameterMappings || {}) },
+        inputSchema: win.tool?.inputSchema || win.tool?.metadata?.inputSchema || {},
+    };
+}
+
+/**
+ * Build a serialized step for an expression window. Maps to the backend
+ * 'expression' tool; the expression text is stored as a static parameter.
+ */
+function buildExpressionNode(win) {
+    return {
+        id: win.id,
+        kind: 'expression',
+        toolId: EXPRESSION_TOOL_ID,
+        displayName: 'Expression',
+        workspaceX: win.x,
+        workspaceY: win.y,
+        output: win.output || null,
+        parameterMappings: {
+            ...(win.parameterMappings || {}),
+            expression: { type: 'static', value: win.expression || '' },
+        },
+        // Both `expression` and `input` are surfaced in the Expose Inputs
+        // list. Users rarely want to expose the expression text itself, but
+        // we keep it visible so they can curate if they want.
+        inputSchema: {
             expression: {
                 name: 'Expression',
                 type: 'string',
@@ -52,22 +92,53 @@ function getInputSchemaFor(win) {
                 required: false,
                 description: 'Primary input value, available as "input" in the expression.',
             },
-        };
-    }
-    return {};
+        },
+    };
 }
 
 /**
- * Read a primitive window's current value. Empty string / null / undefined
- * means "user hasn't filled this in" and it should become an exposable input.
+ * Build a serialized step for a primitive window. Uses the backend expression
+ * tool as a passthrough: expression "input" returns whatever `input` is at
+ * run time, which can be either the baked static value or a cast-time override.
  */
-function readPrimitiveValue(win) {
-    if (!win || win.type !== 'primitive') return undefined;
-    // Text primitives store their typed string in `value`.
-    // Number/other primitives likewise put the raw value in `value`.
-    if (win.value === undefined || win.value === null) return undefined;
-    if (typeof win.value === 'string' && win.value.trim() === '') return undefined;
-    return win.value;
+function buildPrimitiveNode(win) {
+    const value = readPrimitiveValue(win);
+    const label = win.outputType === 'text' ? 'Text'
+        : win.outputType === 'number' ? 'Number'
+        : (win.outputType || 'Primitive');
+    const node = {
+        id: win.id,
+        kind: 'primitive',
+        primitiveOutputType: win.outputType || 'text',
+        toolId: EXPRESSION_TOOL_ID,
+        displayName: label,
+        workspaceX: win.x,
+        workspaceY: win.y,
+        output: win.output || null,
+        parameterMappings: {
+            // Passthrough expression: evaluates the `input` variable and
+            // returns it as `result`. Not user-editable from the Expose
+            // Inputs UI (see inputSchema below — only `input` is declared).
+            expression: { type: 'static', value: 'input' },
+        },
+        // Only `input` is surfaced in the Expose Inputs list. The passthrough
+        // `expression` static is an implementation detail.
+        // `required` is true when there is no static default, because the
+        // backend expression tool will error on undefined `input` at run time
+        // if neither a static nor a cast-time override is provided.
+        inputSchema: {
+            input: {
+                name: 'Value',
+                type: win.outputType === 'number' ? 'number' : 'string',
+                required: value === undefined,
+                description: `Value for this ${label.toLowerCase()} node.`,
+            },
+        },
+    };
+    if (value !== undefined) {
+        node.parameterMappings.input = { type: 'static', value };
+    }
+    return node;
 }
 
 /**
@@ -78,7 +149,7 @@ function readPrimitiveValue(win) {
  * @returns {{
  *   nodes: Array<{
  *     id: string,
- *     type: 'tool' | 'expression',
+ *     kind: 'tool' | 'expression' | 'primitive',
  *     toolId: string,
  *     displayName: string,
  *     workspaceX: number,
@@ -86,124 +157,95 @@ function readPrimitiveValue(win) {
  *     output: any,
  *     parameterMappings: Record<string, { type: 'static' | 'nodeOutput', [k: string]: any }>,
  *     inputSchema: Record<string, any>,
+ *     primitiveOutputType?: string,
  *   }>,
  *   connections: Array<{ fromWindowId: string, fromOutput: string, toWindowId: string, toInput: string, type?: string }>,
  *   autoExposed: Array<{ nodeId: string, paramKey: string }>,
  * }}
  */
 export function serializeSubgraph(engine, selectedNodeIds) {
-    // 1. Partition selected windows by type.
-    const stepWindows = [];   // tools + expressions that become steps
-    const primitives = [];    // filled-or-empty primitives, folded into downstream
+    // 1. Collect every window in the selection that becomes a spell step.
+    //    Tools, expressions, AND primitives all become steps (primitives use
+    //    the expression tool as a passthrough — see buildPrimitiveNode).
+    const stepWindows = [];
     for (const id of selectedNodeIds) {
         const win = engine.windows.get(id);
         if (!win) continue;
-        if (win.type === 'tool' && win.tool) {
-            stepWindows.push(win);
-        } else if (win.type === 'expression') {
-            stepWindows.push(win);
-        } else if (win.type === 'primitive') {
-            primitives.push(win);
-        }
+        if (win.type === 'tool' && win.tool) stepWindows.push(win);
+        else if (win.type === 'expression') stepWindows.push(win);
+        else if (win.type === 'primitive') stepWindows.push(win);
         // Other types (upload, collection, collectionTest, spell) are ignored.
     }
-
     const stepIdSet = new Set(stepWindows.map(w => w.id));
-    const primitiveIdSet = new Set(primitives.map(w => w.id));
 
-    // 2. Build an initial node object for each step with a mutable mapping clone.
+    // 2. Build a serialized node for each step window.
     const nodesById = new Map();
     for (const win of stepWindows) {
-        const isExpr = win.type === 'expression';
-        const base = {
-            id: win.id,
-            type: isExpr ? 'expression' : 'tool',
-            toolId: isExpr ? EXPRESSION_TOOL_ID : win.tool.toolId,
-            displayName: isExpr ? 'Expression' : win.tool.displayName,
-            workspaceX: win.x,
-            workspaceY: win.y,
-            output: win.output || null,
-            parameterMappings: { ...(win.parameterMappings || {}) },
-            inputSchema: getInputSchemaFor(win),
-        };
-        if (isExpr) {
-            // The expression string itself is the `expression` param.
-            base.parameterMappings.expression = {
-                type: 'static',
-                value: win.expression || '',
-            };
-        }
-        nodesById.set(win.id, base);
+        let node;
+        if (win.type === 'tool') node = buildToolNode(win);
+        else if (win.type === 'expression') node = buildExpressionNode(win);
+        else if (win.type === 'primitive') node = buildPrimitiveNode(win);
+        if (node) nodesById.set(win.id, node);
     }
 
-    // 3. Walk all connections once. Classify by (from, to) membership.
-    //    - step → step  : emit nodeOutput mapping on target
-    //    - primitive → step : bake primitive value as static OR mark auto-expose
-    //    - step/primitive → primitive : ignore (primitives are not steps)
-    //    - anything else : ignore
+    // 3. Walk connections once. Any connection where both endpoints are
+    //    step nodes (tool, expression, or primitive) becomes a nodeOutput
+    //    mapping on the target. Note that primitive→tool connections are
+    //    now handled by this generic path since primitives ARE steps.
     const autoExposed = [];
     const connections = [];
     for (const conn of engine.connections.values()) {
         const fromId = conn.from ?? conn.fromWindowId;
         const toId = conn.to ?? conn.toWindowId;
         if (!selectedNodeIds.has(fromId) || !selectedNodeIds.has(toId)) continue;
+        if (!stepIdSet.has(fromId) || !stepIdSet.has(toId)) continue;
+        if (!conn.toInput) continue;
 
         const toNode = nodesById.get(toId);
+        const fromNode = nodesById.get(fromId);
+        if (!toNode || !fromNode) continue;
 
-        // Case A: primitive → step
-        if (primitiveIdSet.has(fromId) && stepIdSet.has(toId) && toNode && conn.toInput) {
-            const primWin = engine.windows.get(fromId);
-            const primValue = readPrimitiveValue(primWin);
-            if (primValue !== undefined) {
-                // Bake the filled primitive as a static default on the target.
-                toNode.parameterMappings[conn.toInput] = {
-                    type: 'static',
-                    value: primValue,
-                };
-            } else {
-                // Empty primitive → the target param becomes an exposable
-                // spell input. We do NOT insert a mapping (so cast-time
-                // parameterOverrides flow through pipelineContext).
-                // Clear any pre-existing mapping so nothing shadows the override.
-                delete toNode.parameterMappings[conn.toInput];
-                autoExposed.push({
-                    nodeId: toId,
-                    paramKey: conn.toInput,
-                });
-            }
-            continue; // primitive connections are not emitted in the connections list
-        }
+        // Expression-tool-backed steps (expression nodes AND primitive nodes)
+        // emit their result under the key 'result'. Tool steps use whatever
+        // the canvas connection stored, falling back to 'output'.
+        const usesExpressionTool = fromNode.kind === 'expression' || fromNode.kind === 'primitive';
+        const defaultOutputKey = usesExpressionTool
+            ? EXPRESSION_DEFAULT_OUTPUT_KEY
+            : 'output';
+        const outputKey = conn.fromOutput || defaultOutputKey;
 
-        // Case B: step → step
-        if (stepIdSet.has(fromId) && stepIdSet.has(toId) && toNode && conn.toInput) {
-            const fromNode = nodesById.get(fromId);
-            // Expression tool outputs live under the key 'result' by default.
-            const defaultOutputKey = fromNode?.type === 'expression'
-                ? EXPRESSION_DEFAULT_OUTPUT_KEY
-                : (conn.fromOutput || 'output');
-            const outputKey = conn.fromOutput || defaultOutputKey;
-
-            toNode.parameterMappings[conn.toInput] = {
-                type: 'nodeOutput',
-                nodeId: fromId,
-                outputKey,
-            };
-            connections.push({
-                fromWindowId: fromId,
-                fromOutput: outputKey,
-                toWindowId: toId,
-                toInput: conn.toInput,
-                type: conn.dataType ?? conn.type,
-            });
-            continue;
-        }
-        // All other cases: ignore.
+        toNode.parameterMappings[conn.toInput] = {
+            type: 'nodeOutput',
+            nodeId: fromId,
+            outputKey,
+        };
+        connections.push({
+            fromWindowId: fromId,
+            fromOutput: outputKey,
+            toWindowId: toId,
+            toInput: conn.toInput,
+            type: conn.dataType ?? conn.type,
+        });
     }
 
-    // 4. Order nodes by their original selection insertion order, so canvas
-    //    layout (left-to-right) roughly becomes step order. This is a
-    //    heuristic; the proper spell edit view (follow-up PR) will allow
-    //    explicit reordering.
+    // 4. Auto-expose any required input that has neither a static value nor
+    //    an incoming wire — otherwise the spell would fail at run time the
+    //    moment a caster tries to execute it. This uniformly catches:
+    //      - empty text primitives feeding a tool (primitive.input unmapped)
+    //      - required tool inputs the user never filled and never wired
+    for (const [nodeId, node] of nodesById) {
+        const schema = node.inputSchema || {};
+        for (const [paramKey, paramDef] of Object.entries(schema)) {
+            if (!paramDef?.required) continue;
+            const mapping = (node.parameterMappings || {})[paramKey];
+            if (mapping) continue; // already has a static or nodeOutput
+            autoExposed.push({ nodeId, paramKey });
+        }
+    }
+
+    // 5. Order nodes roughly left-to-right by canvas x-coordinate so the
+    //    step list in the modal matches visual flow. Proper topological
+    //    sort is a follow-up when the spell edit view lands.
     const nodes = stepWindows
         .map(w => nodesById.get(w.id))
         .filter(Boolean)
@@ -214,30 +256,33 @@ export function serializeSubgraph(engine, selectedNodeIds) {
 
 /**
  * Does this selection produce a composable spell? Requires at least one
- * tool/expression window AND at least one connection whose endpoint lands
- * on that step-producing window. Used to decide whether Compose Spell is a
- * valid action for the current selection.
+ * "real action" window (tool or expression) in the selection — a selection
+ * of only primitives wouldn't form a useful spell — AND at least one
+ * internal connection that touches a step node.
  */
 export function selectionHasInternalConnection(engine, selectedNodeIds) {
     if (!selectedNodeIds || selectedNodeIds.size < 2) return false;
-    // Need at least one tool or expression window in the selection, because
-    // the backend can only execute those as steps.
-    const stepIds = new Set();
+    const actionIds = new Set();   // tools + expressions
+    const allStepIds = new Set();  // tools + expressions + primitives
     for (const id of selectedNodeIds) {
         const win = engine.windows.get(id);
         if (!win) continue;
-        if (win.type === 'tool' && win.tool) stepIds.add(id);
-        else if (win.type === 'expression') stepIds.add(id);
+        if (win.type === 'tool' && win.tool) {
+            actionIds.add(id);
+            allStepIds.add(id);
+        } else if (win.type === 'expression') {
+            actionIds.add(id);
+            allStepIds.add(id);
+        } else if (win.type === 'primitive') {
+            allStepIds.add(id);
+        }
     }
-    if (stepIds.size === 0) return false;
-    // And at least one connection internal to the selection that feeds or
-    // chains a step node — otherwise the subgraph has nothing to serialize
-    // as real spell wiring.
+    if (actionIds.size === 0) return false;
     for (const conn of engine.connections.values()) {
         const from = conn.fromWindowId ?? conn.from;
         const to = conn.toWindowId ?? conn.to;
         if (!selectedNodeIds.has(from) || !selectedNodeIds.has(to)) continue;
-        if (stepIds.has(to) || stepIds.has(from)) return true;
+        if (allStepIds.has(from) && allStepIds.has(to)) return true;
     }
     return false;
 }
