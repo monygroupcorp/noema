@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.9.2](https://github.com/monygroupcorp/noema/compare/v4.9.1...v4.9.2) (2026-04-13)
+
+
+### Bug Fixes
+
+* **sandbox:** make primitive a real backend tool, drop passthrough trick ([e7ebfe4](https://github.com/monygroupcorp/noema/commit/e7ebfe44a1b7d2599824729ef75f5d2da9faf73e))
+* **sandbox:** preserve expression and primitive nodes when composing spell ([370d4ac](https://github.com/monygroupcorp/noema/commit/370d4ac57bb8f803cc2bb3f9199cc68e679e7a08))
+* **sandbox:** preserve primitives as first-class steps in composed spells ([b8df5ac](https://github.com/monygroupcorp/noema/commit/b8df5aca623d6c9b0723023473b49475742b2158))
+
 ## [4.9.1](https://github.com/monygroupcorp/noema/compare/v4.9.0...v4.9.1) (2026-04-13)
 
 
