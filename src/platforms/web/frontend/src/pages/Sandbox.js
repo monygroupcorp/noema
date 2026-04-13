@@ -3,7 +3,6 @@ import { SandboxHeader } from '../sandbox/components/SandboxHeader.js';
 import { WorkspaceTabs } from '../sandbox/components/WorkspaceTabs.js';
 import { Sidebar } from '../sandbox/components/Sidebar.js';
 import { CostHUD } from '../sandbox/components/CostHUD.js';
-import { MintSpellFAB } from '../sandbox/components/MintSpellFAB.js';
 import { ActionModal } from '../sandbox/components/ActionModal.js';
 import { CheckpointPickerModal } from '../sandbox/components/CheckpointPickerModal.js';
 import { InstructionPickerModal } from '../sandbox/components/InstructionPickerModal.js';
@@ -520,7 +519,6 @@ export class Sandbox extends Component {
         h(Sidebar, null)
       ),
       h(CostHUD, null),
-      h(MintSpellFAB, null),
       h(AuthWidget, {
         initialMode: isAuthenticated ? 'hidden' : 'card',
         onSuccess: () => this.setState({ isAuthenticated: true }),
