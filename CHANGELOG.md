@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.9.1](https://github.com/monygroupcorp/noema/compare/v4.9.0...v4.9.1) (2026-04-13)
+
+
+### Bug Fixes
+
+* **sandbox:** allow native tap-and-hold to save output media on mobile ([69c9f71](https://github.com/monygroupcorp/noema/commit/69c9f71599bb9a570c76f845b124694eadf7c827))
+* **sandbox:** show Compose Spell in mobile multi-select action bar ([c6d423b](https://github.com/monygroupcorp/noema/commit/c6d423bbdddba4b6c98faa145bbddb8760b9b390))
+
 ## [4.9.0](https://github.com/monygroupcorp/noema/compare/v4.8.2...v4.9.0) (2026-04-08)
 
 
