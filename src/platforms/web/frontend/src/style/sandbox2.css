@@ -274,6 +274,8 @@
   cursor: pointer;
 }
 .sc2-action-btn:hover { border-color: var(--accent); color: var(--accent); }
+.sc2-action-btn--primary { color: var(--accent); border-color: var(--accent); }
+.sc2-action-btn--primary:hover { background: var(--accent-dim, rgba(147,130,255,0.08)); }
 .sc2-action-btn--danger { color: #f66; border-color: rgba(255,102,102,0.4); }
 .sc2-action-btn--danger:hover { border-color: #f66; }
 
