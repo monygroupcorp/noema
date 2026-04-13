@@ -6,19 +6,18 @@
  * to the legacy state.js activeToolWindows, so this is the source of truth.
  *
  * Node handling:
- *   - tool       → emitted as a step using its existing parameterMappings
- *   - expression → emitted as a step with toolIdentifier 'expression'
- *                  (the backend ExpressionAdapter is already registered as
- *                  a tool; see src/core/tools/definitions/expressionTool.js).
- *                  The expression string is stored as a static mapping.
- *   - primitive  → emitted as a step that also uses toolIdentifier 'expression',
- *                  but with a passthrough expression "input" and the
- *                  primitive's value stored in the `input` static mapping.
- *                  This preserves the primitive as a first-class node in the
- *                  saved graph (canvas reload, multi-target reuse, post-mint
- *                  editing) while using the existing backend tool pipeline
- *                  with no schema changes. The `expression` param is hidden
- *                  from the Expose Inputs UI via an omitted inputSchema entry.
+ *   - tool       → emitted as a step using its existing parameterMappings.
+ *   - expression → emitted as a step with toolIdentifier 'expression'.
+ *                  The backend ExpressionAdapter is a real registered tool
+ *                  (src/core/tools/definitions/expressionTool.js); the
+ *                  expression text is stored as a static mapping.
+ *   - primitive  → emitted as a step with toolIdentifier 'primitive'. The
+ *                  backend PrimitiveAdapter is an identity-function tool
+ *                  (src/core/tools/definitions/primitiveTool.js) — it takes
+ *                  a `value` input and emits it unchanged. This preserves
+ *                  the primitive as a first-class node in the saved graph
+ *                  (canvas reload, multi-target reuse, post-mint editing)
+ *                  with zero runtime cost and no semantic trickery.
  *   - other      → ignored (upload, collection, etc. are not spell-able).
  *
  * Connections where both endpoints are emitted steps are translated into
@@ -26,10 +25,13 @@
  * ParameterResolver.resolveMappings looks them up at execute time.
  */
 
-// Must match the backend expressionTool.toolId.
+// Must match src/core/tools/definitions/expressionTool.js.
 const EXPRESSION_TOOL_ID = 'expression';
-// Matches the outputSchema key in src/core/tools/definitions/expressionTool.js.
-const EXPRESSION_DEFAULT_OUTPUT_KEY = 'result';
+const EXPRESSION_OUTPUT_KEY = 'result';
+
+// Must match src/core/tools/definitions/primitiveTool.js.
+const PRIMITIVE_TOOL_ID = 'primitive';
+const PRIMITIVE_OUTPUT_KEY = 'value';
 
 /**
  * Read a primitive window's current value. Empty string / null / undefined
@@ -97,9 +99,10 @@ function buildExpressionNode(win) {
 }
 
 /**
- * Build a serialized step for a primitive window. Uses the backend expression
- * tool as a passthrough: expression "input" returns whatever `input` is at
- * run time, which can be either the baked static value or a cast-time override.
+ * Build a serialized step for a primitive window. Maps to the backend
+ * 'primitive' tool, an identity-function step that passes its `value`
+ * input through unchanged. Empty primitives get no static mapping and
+ * are picked up by auto-expose in step 4 of serializeSubgraph.
  */
 function buildPrimitiveNode(win) {
     const value = readPrimitiveValue(win);
@@ -110,24 +113,14 @@ function buildPrimitiveNode(win) {
         id: win.id,
         kind: 'primitive',
         primitiveOutputType: win.outputType || 'text',
-        toolId: EXPRESSION_TOOL_ID,
+        toolId: PRIMITIVE_TOOL_ID,
         displayName: label,
         workspaceX: win.x,
         workspaceY: win.y,
         output: win.output || null,
-        parameterMappings: {
-            // Passthrough expression: evaluates the `input` variable and
-            // returns it as `result`. Not user-editable from the Expose
-            // Inputs UI (see inputSchema below — only `input` is declared).
-            expression: { type: 'static', value: 'input' },
-        },
-        // Only `input` is surfaced in the Expose Inputs list. The passthrough
-        // `expression` static is an implementation detail.
-        // `required` is true when there is no static default, because the
-        // backend expression tool will error on undefined `input` at run time
-        // if neither a static nor a cast-time override is provided.
+        parameterMappings: {},
         inputSchema: {
-            input: {
+            value: {
                 name: 'Value',
                 type: win.outputType === 'number' ? 'number' : 'string',
                 required: value === undefined,
@@ -136,7 +129,7 @@ function buildPrimitiveNode(win) {
         },
     };
     if (value !== undefined) {
-        node.parameterMappings.input = { type: 'static', value };
+        node.parameterMappings.value = { type: 'static', value };
     }
     return node;
 }
@@ -165,8 +158,8 @@ function buildPrimitiveNode(win) {
  */
 export function serializeSubgraph(engine, selectedNodeIds) {
     // 1. Collect every window in the selection that becomes a spell step.
-    //    Tools, expressions, AND primitives all become steps (primitives use
-    //    the expression tool as a passthrough — see buildPrimitiveNode).
+    //    Tools, expressions, AND primitives all become steps — each uses
+    //    its own dedicated backend tool (tool/expression/primitive).
     const stepWindows = [];
     for (const id of selectedNodeIds) {
         const win = engine.windows.get(id);
@@ -189,9 +182,7 @@ export function serializeSubgraph(engine, selectedNodeIds) {
     }
 
     // 3. Walk connections once. Any connection where both endpoints are
-    //    step nodes (tool, expression, or primitive) becomes a nodeOutput
-    //    mapping on the target. Note that primitive→tool connections are
-    //    now handled by this generic path since primitives ARE steps.
+    //    step nodes becomes a nodeOutput mapping on the target.
     const autoExposed = [];
     const connections = [];
     for (const conn of engine.connections.values()) {
@@ -205,14 +196,13 @@ export function serializeSubgraph(engine, selectedNodeIds) {
         const fromNode = nodesById.get(fromId);
         if (!toNode || !fromNode) continue;
 
-        // Expression-tool-backed steps (expression nodes AND primitive nodes)
-        // emit their result under the key 'result'. Tool steps use whatever
-        // the canvas connection stored, falling back to 'output'.
-        const usesExpressionTool = fromNode.kind === 'expression' || fromNode.kind === 'primitive';
-        const defaultOutputKey = usesExpressionTool
-            ? EXPRESSION_DEFAULT_OUTPUT_KEY
-            : 'output';
-        const outputKey = conn.fromOutput || defaultOutputKey;
+        // Each step kind emits a fixed canonical output key defined by its
+        // backend tool. For tool steps we honor whatever the canvas
+        // connection stored, falling back to 'output'.
+        let outputKey;
+        if (fromNode.kind === 'primitive') outputKey = PRIMITIVE_OUTPUT_KEY;
+        else if (fromNode.kind === 'expression') outputKey = EXPRESSION_OUTPUT_KEY;
+        else outputKey = conn.fromOutput || 'output';
 
         toNode.parameterMappings[conn.toInput] = {
             type: 'nodeOutput',
@@ -231,7 +221,7 @@ export function serializeSubgraph(engine, selectedNodeIds) {
     // 4. Auto-expose any required input that has neither a static value nor
     //    an incoming wire — otherwise the spell would fail at run time the
     //    moment a caster tries to execute it. This uniformly catches:
-    //      - empty text primitives feeding a tool (primitive.input unmapped)
+    //      - empty primitives with no downstream static (primitive.value unmapped)
     //      - required tool inputs the user never filled and never wired
     for (const [nodeId, node] of nodesById) {
         const schema = node.inputSchema || {};
