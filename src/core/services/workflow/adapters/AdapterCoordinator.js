@@ -37,6 +37,16 @@ class AdapterCoordinator {
 
         this.logger.debug(`[AdapterCoordinator] Executing tool ${tool.toolId} via adapter with inputs: ${JSON.stringify(Object.keys(inputs || {}))}`);
 
+        // Compute costRate from tool.costingModel so the comfydeploy webhook
+        // processor (and any other downstream debit logic) can charge this
+        // step generation. Without this, spell steps were created with no
+        // costRate metadata and the debit branch was silently skipped — users
+        // could cast a spell from canvas without ever being charged.
+        const costRate = this._computeCostRate(tool, inputs);
+        if (!costRate) {
+            this.logger.warn(`[AdapterCoordinator] No costRate could be computed for tool ${tool.toolId}; spell step generation will not be billed.`);
+        }
+
         // Create generation record FIRST
         const generationParams = {
             masterAccountId: new ObjectId(originalContext.masterAccountId),
@@ -57,6 +67,7 @@ class AdapterCoordinator {
                 pipelineContext,
                 originalContext,
                 run_id: null, // Will be set after startJob
+                ...(costRate && { costRate }),
             }
         };
 
@@ -158,6 +169,52 @@ class AdapterCoordinator {
     adapterSupportsAsyncJobs(tool) {
         const adapter = this.adapterRegistry.get(tool.service);
         return adapter && typeof adapter.startJob === 'function';
+    }
+
+    /**
+     * Derives a `{ amount, unit }` cost rate from a tool's costingModel.
+     * Mirrors the logic in generationExecutionService.execute() so spell-step
+     * generation records carry the same `metadata.costRate` shape that the
+     * comfydeploy webhook processor uses to compute and debit cost.
+     *
+     * @private
+     * @param {Object} tool - Tool definition with costingModel
+     * @param {Object} [inputs] - Resolved tool inputs (used for costTable lookups)
+     * @returns {{ amount: number, unit: string }|null}
+     */
+    _computeCostRate(tool, inputs) {
+        const costingModel = tool?.costingModel;
+        if (!costingModel || !costingModel.rateSource) return null;
+
+        try {
+            if (costingModel.rateSource === 'machine') {
+                if (typeof costingModel.rate === 'number' && costingModel.unit) {
+                    return { amount: costingModel.rate, unit: costingModel.unit };
+                }
+                return null;
+            }
+            if (costingModel.rateSource === 'fixed' && costingModel.fixedCost) {
+                return {
+                    amount: costingModel.fixedCost.amount,
+                    unit: costingModel.fixedCost.unit,
+                };
+            }
+            if (costingModel.rateSource === 'static' && costingModel.staticCost) {
+                let staticAmount = costingModel.staticCost.amount;
+                if (staticAmount === 0 && tool.metadata?.costTable) {
+                    const ci = inputs || {};
+                    const m = ci.model || tool.metadata.model || 'dall-e-3';
+                    const sz = ci.size || '1024x1024';
+                    const q = ci.quality || 'standard';
+                    const price = tool.metadata.costTable?.[m]?.[sz]?.[q];
+                    if (price) staticAmount = price;
+                }
+                return { amount: staticAmount, unit: costingModel.staticCost.unit };
+            }
+        } catch (err) {
+            this.logger.warn(`[AdapterCoordinator] _computeCostRate failed for tool ${tool?.toolId}: ${err.message}`);
+        }
+        return null;
     }
 }
 
