@@ -1,11 +1,77 @@
 class SpellsService {
-    constructor({ logger, db, workflowExecutionService, spellPermissionsDb, creditService, spellMigrator }) {
+    constructor({ logger, db, workflowExecutionService, spellPermissionsDb, creditService, spellMigrator, toolRegistry }) {
         this.logger = logger;
         this.db = db; // Contains spellsDb
         this.workflowExecutionService = workflowExecutionService;
         this.spellPermissionsDb = spellPermissionsDb;
         this.creditService = creditService; // Optional: for upfront payment charging
         this.spellMigrator = spellMigrator; // Optional: for auto-healing spells when tool schemas change
+        // Optional: used by augmentExposedInputsIfEmpty to look up each
+        // step's inputSchema so we can compute implicit exposed inputs for
+        // legacy spells that were saved without any. Fall back to reading
+        // the registry from spellMigrator so callers only need to inject one.
+        this.toolRegistry = toolRegistry || spellMigrator?.toolRegistry || null;
+    }
+
+    /**
+     * Compute implicit exposed inputs for a spell whose `exposedInputs`
+     * field is empty. Walks each step, looks up the current tool schema,
+     * and returns `[{nodeId, paramKey}]` entries for every required input
+     * that has neither a static value nor an upstream wire.
+     *
+     * Mirrors the client-side auto-expose logic in
+     * src/platforms/web/frontend/src/sandbox/subgraph.js so existing spells
+     * created before auto-expose shipped still get a sensible default.
+     *
+     * @private
+     * @param {Object} spell
+     * @returns {Array<{nodeId: string, paramKey: string}>}
+     */
+    _computeImplicitExposedInputs(spell) {
+        if (!spell || !Array.isArray(spell.steps) || spell.steps.length === 0) return [];
+        if (!this.toolRegistry || typeof this.toolRegistry.getToolById !== 'function') return [];
+
+        const exposed = [];
+        for (const step of spell.steps) {
+            const toolId = step.toolIdentifier || step.toolId;
+            if (!toolId) continue;
+            const tool = this.toolRegistry.getToolById(toolId);
+            const schema = tool?.inputSchema || tool?.metadata?.inputSchema;
+            if (!schema || typeof schema !== 'object') continue;
+
+            const mappings = step.parameterMappings || {};
+            const nodeId = step.id || step.stepId || step.nodeId;
+            if (!nodeId) continue;
+            for (const [paramKey, paramDef] of Object.entries(schema)) {
+                if (!paramDef?.required) continue;
+                if (mappings[paramKey]) continue; // already has a static or nodeOutput
+                exposed.push({ nodeId, paramKey });
+            }
+        }
+        return exposed;
+    }
+
+    /**
+     * If `spell.exposedInputs` is empty, compute implicit entries from the
+     * spell's steps (required inputs with no mapping) and return a shallow
+     * copy of the spell with those entries set. Returns the spell unchanged
+     * otherwise. Never mutates the input.
+     *
+     * Used at both read time (so SpellPage can render a form) and cast time
+     * (so the telegram `prompt` fall-through in SpellExecutor has something
+     * to route to).
+     *
+     * @param {Object} spell
+     * @returns {Object}
+     */
+    augmentExposedInputsIfEmpty(spell) {
+        if (!spell) return spell;
+        const current = spell.exposedInputs;
+        if (Array.isArray(current) && current.length > 0) return spell;
+        const implicit = this._computeImplicitExposedInputs(spell);
+        if (implicit.length === 0) return spell;
+        this.logger.debug(`[SpellsService] Augmenting spell "${spell.name || spell._id}" with ${implicit.length} implicit exposed inputs: ${JSON.stringify(implicit)}`);
+        return { ...spell, exposedInputs: implicit };
     }
 
     /**
@@ -84,6 +150,12 @@ class SpellsService {
                 }
             }
         }
+
+        // 1.6. Augment exposedInputs if empty — for spells created before
+        // auto-expose shipped, or saved via an older client. Needed so the
+        // telegram-cast "prompt → sole unset exposed input" fall-through in
+        // SpellExecutor has something to route to.
+        spell = this.augmentExposedInputsIfEmpty(spell);
 
         // 2. Check permissions
         const canCast = await this.checkPermissions(spell, context.masterAccountId);
