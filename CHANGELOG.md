@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.9.3](https://github.com/monygroupcorp/noema/compare/v4.9.2...v4.9.3) (2026-04-14)
+
+
+### Bug Fixes
+
+* **workflow:** stop cross-field fan-out of step outputs in spells ([72b7099](https://github.com/monygroupcorp/noema/commit/72b709983f16afb24168b5e575ba8422b1b2cc0b))
+* **workflow:** stop cross-field fan-out of step outputs in spells ([9a31490](https://github.com/monygroupcorp/noema/commit/9a3149057db35c796a2da9c9ca23315017e09cf3))
+
 ## [4.9.2](https://github.com/monygroupcorp/noema/compare/v4.9.1...v4.9.2) (2026-04-13)
 
 
