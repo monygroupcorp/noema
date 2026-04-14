@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.9.4](https://github.com/monygroupcorp/noema/compare/v4.9.3...v4.9.4) (2026-04-14)
+
+
+### Bug Fixes
+
+* **spells,canvas:** backfill exposed inputs and show all-optional schemas ([7d9cc89](https://github.com/monygroupcorp/noema/commit/7d9cc89249280047294b8374e5441a3efce61809))
+* **spells:** route telegram cast prompt to sole exposed input ([0019f2a](https://github.com/monygroupcorp/noema/commit/0019f2a436a938cf5780dc3aaa54ce5461476f04))
+
 ## [4.9.3](https://github.com/monygroupcorp/noema/compare/v4.9.2...v4.9.3) (2026-04-14)
 
 
