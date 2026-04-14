@@ -33,15 +33,29 @@ class PipelineContextBuilder {
     }
 
     /**
-     * Builds the next pipeline context by merging current context with step output and mapped inputs
+     * Builds the next pipeline context by merging current context with
+     * explicitly-mapped inputs for the next step.
+     *
+     * NOTE: we intentionally do NOT spread the raw `stepOutput` at the top
+     * level here. Doing so caused output keys like `text` / `result` from an
+     * expression or primitive step to leak into every matching string field
+     * on the next step via InputParameterNormalizer's aggressive variation
+     * list — e.g. an expression wired only to `input_prompt` would also end
+     * up filling `input_text` and `input_prompt_negative` with the same
+     * value. Downstream steps reach previous outputs through explicit
+     * `nodeOutput` parameterMappings, which resolve from the namespaced
+     * `${nodeId}_${outputKey}` keys that `OutputProcessor.mapOutput` puts
+     * into `next_inputs`.
+     *
      * @param {Object} pipelineContext - Current pipeline context
-     * @param {Object} stepOutput - Output from current step
+     * @param {Object} stepOutput - Output from current step (kept in the
+     *     signature for call-site symmetry / future diagnostics, but no
+     *     longer merged at top level — see note above).
      * @param {Object} next_inputs - Mapped inputs for next step
      * @returns {Object} - Next pipeline context
      */
     buildNextPipelineContext(pipelineContext, stepOutput, next_inputs) {
-        // Merge: existing context + step output + mapped inputs
-        return { ...pipelineContext, ...stepOutput, ...next_inputs };
+        return { ...pipelineContext, ...next_inputs };
     }
 
     /**
