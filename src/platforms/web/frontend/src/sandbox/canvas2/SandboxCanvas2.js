@@ -1474,8 +1474,19 @@ export class SandboxCanvas2 extends Component {
       };
 
       const entries = Object.entries(schema);
-      const required = entries.filter(([, f]) => f.required !== false);
-      const optional = entries.filter(([, f]) => f.required === false);
+      let required = entries.filter(([, f]) => f.required !== false);
+      let optional = entries.filter(([, f]) => f.required === false);
+
+      // If every input in the schema is optional, promote them all to the
+      // main list. Common for comfydeploy workflows (quickmake, etc.) whose
+      // input_types ship with widget defaults and end up flagged as
+      // `required: false` by workflowUtils.parseWorkflowStructure. Leaving
+      // them hidden behind the "+ N more" toggle made the panel look empty
+      // on mobile — the user had no visible inputs to tap.
+      if (required.length === 0 && optional.length > 0) {
+        required = optional;
+        optional = [];
+      }
 
       const outRows = outSchema ? Object.entries(outSchema).map(([key, field]) => {
         const connectedTo = [...this._engine.connections.values()]

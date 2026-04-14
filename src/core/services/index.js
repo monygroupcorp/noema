@@ -378,6 +378,7 @@ async function initializeServices(options = {}) {
       spellPermissionsDb: initializedDbServices.data.spellPermissions,
       creditService: creditServices && creditServices['1'] ? creditServices['1'] : null, // Mainnet credit service for upfront payments
       spellMigrator, // Inject SpellMigrator for auto-healing
+      toolRegistry, // Used by augmentExposedInputsIfEmpty for legacy spells
     });
     // Inject spellsService into EmbellishmentTaskService now that it's available
     if (embellishmentTaskService && typeof embellishmentTaskService.setSpellsService === 'function') {
