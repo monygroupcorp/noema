@@ -71,8 +71,12 @@ class InputParameterNormalizer {
   }
 
   /**
-   * Legacy parameter name mappings for specific tools
-   * Maps new schema keys to their legacy equivalents
+   * Legacy parameter name mappings for specific tools.
+   * Maps canonical schema keys to alternative names the normalizer will
+   * accept as input for that field. Keep these surgical — anything added
+   * here is effectively a hand-picked cross-name translation, as opposed
+   * to the narrow case/underscore variants auto-generated in
+   * `_generateVariations`.
    */
   static LEGACY_MAPPINGS = {
     // string-primitive tool: old names → new names
@@ -83,6 +87,12 @@ class InputParameterNormalizer {
     // chatgpt tool: old names → new names
     prompt: ['input_prompt'],
     instructions: ['input_instructions'],
+    // Platforms / callers commonly send `prompt` for tools whose canonical
+    // schema key is `input_prompt`. Accept it here explicitly rather than
+    // via the generic variation list, which used to match every string
+    // field and caused cross-field fan-out inside multi-input tools.
+    input_prompt: ['prompt'],
+    input_text: ['text'],
   };
 
   /**
@@ -165,22 +175,28 @@ class InputParameterNormalizer {
         variations.add(`input_${snakeCase}`);
       }
     } else if (fieldType === 'string' || fieldType === 'text') {
-      // Text/prompt parameter variations
-      variations.add('input_prompt');
-      variations.add('inputPrompt');
-      variations.add('prompt');
-      variations.add('text');
-      variations.add('input_text');
-      variations.add('inputText');
-      
-      // Case conversions
+      // Only generate true case/underscore variants of the schema key.
+      //
+      // This used to also dump a generic list of common prompt/text names
+      // (`input_prompt`, `prompt`, `text`, `input_text`, `inputText`,
+      // `inputPrompt`) into every string field's variation set. That meant
+      // a tool with multiple string inputs (e.g. `input_prompt`,
+      // `input_text`, `input_prompt_negative`) would have every field
+      // match every other field as a "variation", so a value routed to
+      // one would fan out into all of them — breaking expression/primitive
+      // spells whose outputs were wired to a single downstream field.
+      //
+      // Cross-name translation (e.g. caller sends `prompt` for a tool
+      // whose schema uses `input_prompt`) is handled explicitly through
+      // LEGACY_MAPPINGS, which is additive and has no cross-field fan-out.
       if (schemaKey.includes('_')) {
+        // snake_case → camelCase
         const camelCase = schemaKey.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
         variations.add(camelCase);
       } else {
+        // camelCase → snake_case
         const snakeCase = schemaKey.replace(/([A-Z])/g, '_$1').toLowerCase();
         variations.add(snakeCase);
-        variations.add(`input_${snakeCase}`);
       }
     } else {
       // Generic case conversions for other types
