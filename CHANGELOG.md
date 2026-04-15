@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.9.5](https://github.com/monygroupcorp/noema/compare/v4.9.4...v4.9.5) (2026-04-15)
+
+
+### Bug Fixes
+
+* **spells:** bill spell steps by populating costRate metadata ([654dfd5](https://github.com/monygroupcorp/noema/commit/654dfd5b719391b38554e3d701d930bd8cb5ebfb))
+* **spells:** bill spell steps by populating costRate metadata ([bff864e](https://github.com/monygroupcorp/noema/commit/bff864e629c0238ea88e071fb4f94223baf67610))
+
 ## [4.9.4](https://github.com/monygroupcorp/noema/compare/v4.9.3...v4.9.4) (2026-04-14)
 
 
