@@ -120,9 +120,10 @@ class VastAIService extends ComputeProvider {
 
     // Minimum reliability score (0-1, default 0.95 = 95%)
     // Low reliability hosts often have driver/CUDA issues
+    // VastAI's column is `reliability2`, not `reliability`
     const minReliability = criteria.minReliability ?? 0.95;
     if (minReliability > 0) {
-      q.reliability = { gte: minReliability };
+      q.reliability2 = { gt: minReliability };
     }
 
     // Minimum CUDA version (default 12.0 for modern training)
@@ -135,10 +136,7 @@ class VastAIService extends ComputeProvider {
       Object.assign(q, criteria.extra);
     }
 
-    return {
-      select_cols: ['*'],
-      q
-    };
+    return { q };
   }
 
   normalizeOffer(rawOffer = {}) {
