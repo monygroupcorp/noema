@@ -1,0 +1,180 @@
+{
+  "metadata": {
+    "timestamp": "2026-05-04T17:44:38.577Z",
+    "runs": 10,
+    "successful": 4,
+    "failed": 6
+  },
+  "summary": {
+    "totalTime": {
+      "min": 605.651,
+      "max": 703.586,
+      "avg": 662.0920000000001,
+      "median": 692.592
+    },
+    "sshReadyTime": {
+      "min": 74.649,
+      "max": 166.737,
+      "avg": 121.59525,
+      "median": 158.984
+    },
+    "downloadTime": {
+      "min": 339.621,
+      "max": 466.093,
+      "avg": 388.8115,
+      "median": 384.227
+    },
+    "setupTime": {
+      "min": 108.299,
+      "max": 113.979,
+      "avg": 111.94775000000001,
+      "median": 113.037
+    }
+  },
+  "results": [
+    {
+      "run": 1,
+      "success": false,
+      "error": "SSH command failed with code 255",
+      "timestamp": "2026-05-04T16:09:38.157Z"
+    },
+    {
+      "run": 2,
+      "success": false,
+      "error": "SSH command failed with code 255",
+      "timestamp": "2026-05-04T16:15:19.477Z"
+    },
+    {
+      "run": 3,
+      "success": true,
+      "timestamp": "2026-05-04T16:15:29.480Z",
+      "instanceId": 36128991,
+      "gpuType": "RTX 3090",
+      "sshHost": "ssh8.vast.ai",
+      "hourlyRate": 0.19999999999999998,
+      "provisionTime": 0.693,
+      "sshReadyTime": 158.984,
+      "gitCloneTime": 2.757,
+      "pytorchUpgradeTime": 69.488,
+      "requirementsTime": 36.054,
+      "downloadTime": 339.621,
+      "downloadDetails": {
+        "clip_l": 5.382,
+        "lora": 7.117,
+        "vae": 14.491,
+        "t5xxl": 189.014,
+        "unet": 339.621
+      },
+      "comfyuiStartTime": 16.8,
+      "generationTime": 21.383,
+      "totalTime": 646.539,
+      "offerId": 34524190,
+      "datacenter": "unknown"
+    },
+    {
+      "run": 4,
+      "success": true,
+      "timestamp": "2026-05-04T16:26:26.543Z",
+      "instanceId": 36129464,
+      "gpuType": "RTX 3090",
+      "sshHost": "ssh9.vast.ai",
+      "hourlyRate": 0.19999999999999998,
+      "provisionTime": 0.555,
+      "sshReadyTime": 86.011,
+      "gitCloneTime": 2.95,
+      "pytorchUpgradeTime": 74.836,
+      "requirementsTime": 36.193,
+      "downloadTime": 365.305,
+      "downloadDetails": {
+        "vae": 6.597,
+        "lora": 7.479,
+        "clip_l": 9.816,
+        "t5xxl": 187.307,
+        "unet": 365.304
+      },
+      "comfyuiStartTime": 17.254,
+      "generationTime": 21.842,
+      "totalTime": 605.651,
+      "offerId": 34524190,
+      "datacenter": "unknown"
+    },
+    {
+      "run": 5,
+      "success": false,
+      "error": "SSH command failed with code 255",
+      "timestamp": "2026-05-04T16:49:38.313Z"
+    },
+    {
+      "run": 6,
+      "success": true,
+      "timestamp": "2026-05-04T16:49:48.314Z",
+      "instanceId": 36130529,
+      "gpuType": "RTX 3090",
+      "sshHost": "ssh7.vast.ai",
+      "hourlyRate": 0.19999999999999998,
+      "provisionTime": 0.665,
+      "sshReadyTime": 74.649,
+      "gitCloneTime": 3.272,
+      "pytorchUpgradeTime": 72.893,
+      "requirementsTime": 36.311,
+      "downloadTime": 466.093,
+      "downloadDetails": {
+        "clip_l": 5.296,
+        "vae": 8.392,
+        "lora": 10.075,
+        "t5xxl": 183.974,
+        "unet": 466.093
+      },
+      "comfyuiStartTime": 16.789,
+      "generationTime": 21.244,
+      "totalTime": 692.592,
+      "offerId": 34524190,
+      "datacenter": "unknown"
+    },
+    {
+      "run": 7,
+      "success": true,
+      "timestamp": "2026-05-04T17:01:31.426Z",
+      "instanceId": 36131011,
+      "gpuType": "RTX 3090",
+      "sshHost": "ssh5.vast.ai",
+      "hourlyRate": 0.19999999999999998,
+      "provisionTime": 0.617,
+      "sshReadyTime": 166.737,
+      "gitCloneTime": 2.715,
+      "pytorchUpgradeTime": 74.813,
+      "requirementsTime": 35.509,
+      "downloadTime": 384.227,
+      "downloadDetails": {
+        "clip_l": 6.458,
+        "lora": 8.955,
+        "vae": 11.496,
+        "t5xxl": 189.143,
+        "unet": 384.227
+      },
+      "comfyuiStartTime": 17.098,
+      "generationTime": 21.163,
+      "totalTime": 703.586,
+      "offerId": 35358373,
+      "datacenter": "unknown"
+    },
+    {
+      "run": 8,
+      "success": false,
+      "error": "SSH command failed with code 255",
+      "timestamp": "2026-05-04T17:24:38.476Z"
+    },
+    {
+      "run": 9,
+      "success": false,
+      "error": "SSH did not become ready",
+      "timestamp": "2026-05-04T17:29:53.960Z"
+    },
+    {
+      "run": 10,
+      "success": false,
+      "error": "SSH command failed with code 255",
+      "timestamp": "2026-05-04T17:44:38.548Z"
+    }
+  ]
+}

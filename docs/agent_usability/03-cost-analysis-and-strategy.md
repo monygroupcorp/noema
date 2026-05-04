@@ -3,6 +3,8 @@
 **Date:** 2026-02-03
 **Status:** Benchmark complete - VastAI reliability issues identified
 
+> **⚠️ 2026-05-04 update:** The "VastAI Unsuitable" verdict below predates the offer-quality and SSH-multiplexing work that landed Feb–May 2026. A re-baseline (N=10) shows the success rate doubled from 20% → 40%. Still not user-facing-ready, but the trajectory is real. See [`docs/benchmarks/2026-05-04-vastai-rebaseline.md`](../benchmarks/2026-05-04-vastai-rebaseline.md) for the updated numbers, retry math, and next experiment (baked Docker images).
+
 ## Current State
 
 **Current provider cost:** $100/month base + marked-up compute
