@@ -445,6 +445,7 @@ class LoraService {
       createdAt: lora.createdAt,
       updatedAt: lora.updatedAt,
       isFavorite,
+      rewardStats: lora.rewardStats || null,
     };
   }
 
