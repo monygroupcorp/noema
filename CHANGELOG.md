@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.9.6](https://github.com/monygroupcorp/noema/compare/v4.9.5...v4.9.6) (2026-05-04)
+
+
+### Bug Fixes
+
+* add baked-image spec and benchmark for VastAI cold-start experiment ([a093551](https://github.com/monygroupcorp/noema/commit/a093551c23d9f8fa36d52e8a50af4240ea35b783))
+* VastAI offer search broken by select_cols and reliability column ([93a6436](https://github.com/monygroupcorp/noema/commit/93a64365dc1d0b4eac35d80171cb146a431cba9b))
+
 ## [4.9.5](https://github.com/monygroupcorp/noema/compare/v4.9.4...v4.9.5) (2026-04-15)
 
 
