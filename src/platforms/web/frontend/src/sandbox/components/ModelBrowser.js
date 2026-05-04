@@ -403,6 +403,19 @@ export class ModelBrowser extends Component {
           })
         ) : null,
 
+      // Owner reward stats (visible to model owner only)
+      model.rewardStats && model.ownedBy === this.props.userId
+        ? h('div', { className: 'mb-reward-stats' },
+          h('span', { className: 'mb-meta-label' }, 'Model Earnings:'),
+          h('div', { className: 'mb-reward-row' },
+            h('span', null, `${(model.rewardStats.lifetimePointsAwarded || 0).toLocaleString()} pts earned`),
+            h('span', { className: 'mb-reward-usd' }, `~$${((model.rewardStats.lifetimePointsAwarded || 0) * 0.000337).toFixed(2)}`),
+          ),
+          h('div', { className: 'mb-reward-row' },
+            h('span', null, `${(model.rewardStats.generationsRewarded || 0).toLocaleString()} rewarded generations`),
+          )
+        ) : null,
+
       // Actions
       h('div', { className: 'mb-detail-actions' },
         h('button', {
@@ -636,6 +649,9 @@ export class ModelBrowser extends Component {
       }
       .mb-input:focus { border-color: var(--accent-border); }
       .mb-import-actions { display:flex; gap:8px; justify-content:flex-end; }
+      .mb-reward-stats { background: rgba(129,199,132,0.08); border: 1px solid rgba(129,199,132,0.25); border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
+      .mb-reward-row { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: #ccc; padding: 2px 0; }
+      .mb-reward-usd { color: #81c784; font-weight: 600; }
     `;
   }
 

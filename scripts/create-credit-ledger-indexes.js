@@ -99,8 +99,23 @@ async function createCreditLedgerIndexes() {
     );
     console.log('✓ Created compound index on registration_tx_hash + type');
     
+    // Critical: Unique compound index for contributor reward tally upserts
+    await collection.createIndex(
+      { master_account_id: 1, type: 1, reward_category: 1 },
+      { unique: true, background: true, name: 'idx_reward_tally_upsert', partialFilterExpression: { type: 'CONTRIBUTOR_REWARD_TALLY' } }
+    );
+    console.log('✓ Created unique compound index for reward tally upserts');
+
+    // Contributor reward leaderboard on userEconomy collection
+    const userEconomyCollection = db.collection('userEconomy');
+    await userEconomyCollection.createIndex(
+      { 'contributorRewards.totalLifetimePoints': -1 },
+      { background: true, name: 'idx_contributor_leaderboard', sparse: true }
+    );
+    console.log('✓ Created leaderboard index on userEconomy.contributorRewards.totalLifetimePoints');
+
     console.log('\n✅ All credit_ledger indexes created successfully!');
-    
+
     // List all indexes for verification
     const indexes = await collection.indexes();
     console.log('\n📋 Current indexes:');

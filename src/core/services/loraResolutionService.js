@@ -113,7 +113,13 @@ async function resolveLoraTriggers(promptString, masterAccountId, toolBaseModel,
             });
 
             if (foundInMap || !masterAccountId) { // Allow if public map or found in user's permissioned map
-                appliedLoras.push({ slug, weight, originalWord: fullTag, replacedWord: fullTag, modelId: 'N/A_INLINE_TAG' });
+                // Look up ownerAccountId for inline tag from trigger map
+                let inlineOwnerAccountId = null;
+                triggerMap.forEach(loraList => {
+                  const match = loraList.find(l => l.slug === slug);
+                  if (match) inlineOwnerAccountId = match.ownerAccountId || null;
+                });
+                appliedLoras.push({ slug, weight, originalWord: fullTag, replacedWord: fullTag, modelId: 'N/A_INLINE_TAG', ownerAccountId: inlineOwnerAccountId });
                 lorasAppliedThisRun.add(slug);
                 finalPromptParts.push(fullTag); // Keep the valid, permissioned tag
             } else {
@@ -309,7 +315,8 @@ async function resolveLoraTriggers(promptString, masterAccountId, toolBaseModel,
           weight: weight,
           originalWord: segment,
           replacedWord: loraTag,
-          modelId: selectedLora.modelId
+          modelId: selectedLora.modelId,
+          ownerAccountId: selectedLora.ownerAccountId || null,
         });
         lorasAppliedThisRun.add(selectedLora.slug);
 

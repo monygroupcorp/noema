@@ -19,7 +19,7 @@ export class SandboxHeader extends Component {
   }
 
   didMount() {
-    // Listen for MintSpellFAB opening the spells modal with a subgraph
+    // Listen for the canvas Compose Spell action opening the spells modal with a subgraph
     this.subscribe('openSpellsModal', (data) => {
       this.setState({ showSpells: true, spellSubgraph: data?.subgraph || null });
     });

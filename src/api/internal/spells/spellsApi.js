@@ -58,7 +58,14 @@ module.exports = function spellsApi(dependencies) {
     try {
       const spell = await spellsDb.findByPublicSlug(publicSlug);
       if (!spell) return res.status(404).json({ error: 'Spell not found' });
-      res.status(200).json(spell);
+      // Backfill exposedInputs from the steps schema for legacy spells so
+      // SpellPage renders an input form instead of an empty card. This is
+      // the same logic SpellsService applies at cast time, kept in sync so
+      // both paths see identical effective exposedInputs.
+      const enriched = spellsService?.augmentExposedInputsIfEmpty
+        ? spellsService.augmentExposedInputsIfEmpty(spell)
+        : spell;
+      res.status(200).json(enriched);
     } catch (err) {
       logger.error(`[spellsApi] GET /public/${publicSlug}:`, err);
       res.status(500).json({ error: 'Internal Server Error' });
@@ -248,6 +255,12 @@ module.exports = function spellsApi(dependencies) {
 
       if (!spell) {
         return res.status(404).json({ error: 'Spell not found' });
+      }
+
+      // Backfill exposedInputs from the steps schema for legacy spells so
+      // clients (SpellPage, registry views) render a usable input form.
+      if (spellsService?.augmentExposedInputsIfEmpty) {
+        spell = spellsService.augmentExposedInputsIfEmpty(spell);
       }
 
       // Permission check: Use SpellsService if available, otherwise use simple check
