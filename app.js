@@ -413,6 +413,65 @@ async function startApp() {
     }
     // --- End startup announcement ---
 
+    // --- Unhandled rejection / exception safety net ---
+    // Logs everything, forwards a concise notice to the feedback chat (deduped),
+    // and explicitly does NOT exit. We were exiting cleanly on these and the
+    // container restart loop was the symptom.
+    const noticeBot = startupBot;
+    const noticeChatId = startupChatId;
+    const recentNotices = new Map(); // key -> last sent ms
+    const NOTICE_TTL_MS = 10 * 60 * 1000;
+
+    const fingerprint = (reason) => {
+      if (!reason) return 'nil';
+      const code = reason?.response?.body?.error_code;
+      const chatId = reason?.on?.payload?.chat_id ?? reason?.response?.body?.parameters?.migrate_to_chat_id;
+      if (code) return `tg:${code}:${chatId ?? '?'}`;
+      const name = reason?.name || 'Error';
+      const msg = (reason?.message || String(reason)).split('\n', 1)[0].slice(0, 120);
+      return `${name}:${msg}`;
+    };
+
+    const truncate = (s, n) => {
+      const str = typeof s === 'string' ? s : (s?.message || String(s));
+      return str.length > n ? str.slice(0, n) + '…' : str;
+    };
+
+    const forwardNotice = (kind, reason) => {
+      if (!noticeBot || !noticeChatId) return;
+      const key = `${kind}:${fingerprint(reason)}`;
+      const now = Date.now();
+      const last = recentNotices.get(key);
+      if (last && now - last < NOTICE_TTL_MS) return;
+      recentNotices.set(key, now);
+      if (recentNotices.size > 500) {
+        for (const [k, t] of recentNotices) if (now - t > NOTICE_TTL_MS) recentNotices.delete(k);
+      }
+      const code = reason?.response?.body?.error_code;
+      const desc = reason?.response?.body?.description;
+      const chatId = reason?.on?.payload?.chat_id;
+      const method = reason?.on?.method;
+      const lines = [
+        `⚠️ ${kind}`,
+        method ? `method: ${method}` : null,
+        chatId ? `chat: ${chatId}` : null,
+        code ? `code: ${code}` : null,
+        desc ? `desc: ${truncate(desc, 200)}` : `msg: ${truncate(reason, 200)}`,
+      ].filter(Boolean);
+      noticeBot.sendMessage(noticeChatId, lines.join('\n'), { disable_notification: true })
+        .catch((err) => logger.warn('[App] Failed to forward notice:', err.message));
+    };
+
+    process.on('unhandledRejection', (reason) => {
+      logger.error('[App] Unhandled rejection (suppressed):', reason);
+      forwardNotice('Unhandled rejection', reason);
+    });
+    process.on('uncaughtException', (err) => {
+      logger.error('[App] Uncaught exception (suppressed):', err);
+      forwardNotice('Uncaught exception', err);
+    });
+    // --- End safety net ---
+
     // --- Memory monitor: alerts on interesting heap events, silent otherwise ---
     const memFeedbackChatId = process.env.TELEGRAM_FEEDBACK_CHAT_ID;
     const memBot = platforms.telegram && platforms.telegram.bot;
