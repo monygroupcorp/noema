@@ -66,6 +66,26 @@ class RunPodColdStartBenchmark {
     this.config = getRunPodPodConfig();
     this.service = new RunPodPodService({ logger: this.logger, config: this.config });
     this.results = [];
+    this.activeInstanceId = null; // tracked so a signal handler can clean it up
+
+    // SIGINT/SIGTERM cleanup — ensures Ctrl-C / TaskStop doesn't leak a pod.
+    // The per-run finally{} clears activeInstanceId; if a signal arrives mid-run,
+    // we synchronously fire-and-forget a terminate request before exiting.
+    const shutdown = (sig) => {
+      if (!this.activeInstanceId) {
+        process.exit(130);
+      }
+      const id = this.activeInstanceId;
+      this.activeInstanceId = null;
+      console.error(`\n[${sig}] terminating active pod ${id} before exit...`);
+      this.service.terminateInstance(id)
+        .then(() => { console.error(`[${sig}] pod ${id} terminated.`); process.exit(130); })
+        .catch((err) => { console.error(`[${sig}] terminate failed: ${err.message}. CHECK DASHBOARD.`); process.exit(130); });
+      // Hard-fail if termination hangs > 10s
+      setTimeout(() => { console.error(`[${sig}] terminate timed out after 10s. CHECK DASHBOARD for pod ${id}.`); process.exit(130); }, 10000).unref();
+    };
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
   }
 
   async runBenchmark(numRuns) {
@@ -152,6 +172,7 @@ class RunPodColdStartBenchmark {
         ports: ['22/tcp', '8188/http'],
       });
       instanceId = instance.instanceId;
+      this.activeInstanceId = instanceId; // signal handler will clean this up if interrupted
       timing.instanceId = instanceId;
       timing.provisionTime = (Date.now() - provisionStart) / 1000;
 
@@ -253,6 +274,7 @@ class RunPodColdStartBenchmark {
         } catch (err) {
           this.logger.error(`Failed to terminate ${instanceId}:`, err.message);
         }
+        this.activeInstanceId = null;
       }
       if (ssh && ssh.close) {
         try { await ssh.close(); } catch (_) {}

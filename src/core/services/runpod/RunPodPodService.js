@@ -40,18 +40,28 @@ const RunPodError = require('./RunPodError');
 
 const VALID_CLOUD_TYPES = new Set(['SECURE', 'COMMUNITY']);
 
-// Curated default GPU types — ordered cheapest-first within the 24GB+ band.
-// All values are members of the gpuTypeIds enum in /v1/openapi.json.
-// Override via config.preferredGpuTypes or jobContext.gpuTypeIds.
+// Default GPU types — broad list ordered roughly cheapest-first within the
+// 24GB+ band, with a couple of cheap <24GB options as last-resort fallbacks.
+// Wide list = better chance of finding capacity in COMMUNITY cloud, where
+// RunPod returns HTTP 500 ("This machine does not have the resources to
+// deploy your pod") when no host can satisfy the request. All values are
+// members of the gpuTypeIds enum in /v1/openapi.json.
 const DEFAULT_PREFERRED_GPU_TYPES = [
-  'NVIDIA RTX A4000',          // 16GB — included as a cheap fallback
-  'NVIDIA RTX A4500',          // 20GB
-  'NVIDIA GeForce RTX 3090',   // 24GB
-  'NVIDIA GeForce RTX 4090',   // 24GB
-  'NVIDIA RTX A5000',          // 24GB
-  'NVIDIA L4',                 // 24GB
-  'NVIDIA RTX A6000',          // 48GB
-  'NVIDIA L40S',               // 48GB
+  'NVIDIA GeForce RTX 3090',           // 24GB
+  'NVIDIA GeForce RTX 4090',           // 24GB
+  'NVIDIA GeForce RTX 3090 Ti',        // 24GB
+  'NVIDIA GeForce RTX 4080',           // 16GB — cheap and plentiful
+  'NVIDIA GeForce RTX 4080 SUPER',     // 16GB
+  'NVIDIA RTX A5000',                  // 24GB
+  'NVIDIA RTX A4500',                  // 20GB
+  'NVIDIA L4',                         // 24GB
+  'NVIDIA A40',                        // 48GB
+  'NVIDIA RTX A6000',                  // 48GB
+  'NVIDIA A5000 Ada',                  // 32GB
+  'NVIDIA RTX 5000 Ada Generation',    // 32GB
+  'NVIDIA L40S',                       // 48GB
+  'NVIDIA L40',                        // 48GB
+  'NVIDIA RTX A4000',                  // 16GB — last-resort fallback
 ];
 
 class RunPodPodService extends ComputeProvider {
@@ -181,6 +191,17 @@ class RunPodPodService extends ComputeProvider {
       supportPublicIp: jobContext.supportPublicIp !== false,
       interruptible: jobContext.interruptible === true
     };
+
+    // SECURE cloud doesn't honor supportPublicIp (per /v1/openapi.json:
+    // "Set to true if you need the Pod to expose a public IP" applies to
+    // Community Cloud only). For direct SSH on SECURE, you need
+    // globalNetworking: true — only works on some Secure Cloud datacenters.
+    // Default it on for SECURE so the benchmark's SshTransport can connect.
+    if (cloudType === 'SECURE' && jobContext.globalNetworking !== false) {
+      payload.globalNetworking = true;
+    } else if (jobContext.globalNetworking === true) {
+      payload.globalNetworking = true;
+    }
 
     // dockerStartCmd is a string[] override for CMD (no `dockerArgs` in REST API)
     if (jobContext.dockerStartCmd) {
