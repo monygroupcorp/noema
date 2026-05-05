@@ -80,10 +80,15 @@ class RunPodPodClient {
         lastError = error;
         const status = error.response?.status;
         const errCode = error.code || error.response?.data?.error;
-        const shouldRetry = RETRYABLE_STATUS.has(status) && attempt < retries;
         const body = error.response?.data;
+        // RunPod surfaces capacity exhaustion as a 500 with a specific message.
+        // Retrying with exponential backoff doesn't help — no host exists.
+        // Bail immediately so the caller can try a different config.
+        const bodyMsg = (typeof body === 'string' ? body : (body?.message || body?.error || '')) || '';
+        const isCapacityError = status === 500 && /does not have the resources/i.test(bodyMsg);
+        const shouldRetry = RETRYABLE_STATUS.has(status) && attempt < retries && !isCapacityError;
         this.logger.warn(
-          `[RunPodPodClient] ${method} ${finalUrl} failed (status=${status} code=${errCode || 'n/a'} msg=${error.message}) attempt=${attempt + 1}/${retries + 1}`
+          `[RunPodPodClient] ${method} ${finalUrl} failed (status=${status} code=${errCode || 'n/a'} msg=${error.message}) attempt=${attempt + 1}/${retries + 1}${isCapacityError ? ' [capacity, not retrying]' : ''}`
         );
         if (!shouldRetry) {
           throw new RunPodError(
