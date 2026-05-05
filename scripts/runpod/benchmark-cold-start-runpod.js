@@ -39,7 +39,7 @@ const { RunPodPodService } = require('../../src/core/services/runpod');
 const { getRunPodPodConfig } = require('../../src/config/runpodPod');
 const SshTransport = require('../../src/core/services/remote/SshTransport');
 
-const DOCKER_IMAGE = 'runpod/pytorch:2.1.0-py3.10-cuda12.1.1-devel-ubuntu22.04';
+const DOCKER_IMAGE = 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04';
 const COMFYUI_PORT = 8188;
 const R2_BASE = 'https://models.miladystation2.net';
 
@@ -157,16 +157,22 @@ class RunPodColdStartBenchmark {
       const offers = await this.service.searchOffers({ cloudType: this.cloudType });
       if (!offers?.length) throw new Error('No RunPod offers configured');
 
-      const offer = offers[0];
-      timing.gpuType = offer.gpuType;
-      timing.hourlyRate = offer.hourlyUsd;
-      timing.offerId = offer.id;
-      timing.datacenter = offer.cloudType;
+      // Curated GPU trio that test-ssh.js verified working on COMMUNITY today.
+      // Wider lists let RunPod's "availability" picker fall back to GPU types
+      // that report available but then hit a 500 at the per-host level.
+      const gpuTypeIds = [
+        'NVIDIA RTX A4000',
+        'NVIDIA GeForce RTX 3090',
+        'NVIDIA RTX A4500',
+      ];
+      timing.gpuType = gpuTypeIds[0];
+      timing.offerId = gpuTypeIds[0];
+      timing.datacenter = this.cloudType;
 
       const instance = await this.service.provisionInstance({
-        gpuTypeIds: offers.map((o) => o.id),
+        gpuTypeIds,
         image: DOCKER_IMAGE,
-        diskGb: 50,
+        diskGb: 45,
         label: `runpod-bench-${runNumber}-${Date.now()}`,
         cloudType: this.cloudType,
         ports: ['22/tcp', '8188/http'],
@@ -182,7 +188,7 @@ class RunPodColdStartBenchmark {
       timing.sshReadyTime = (Date.now() - sshStart) / 1000;
 
       const status = await this.service.getInstanceStatus(instanceId);
-      timing.sshHost = status.sshHost || status.publicIp;
+      timing.sshHost = status.publicIp || status.sshHost;
       timing.gpuType = status.gpuType || timing.gpuType;
       timing.hourlyRate = status.hourlyUsd ?? timing.hourlyRate;
 
@@ -192,9 +198,9 @@ class RunPodColdStartBenchmark {
       await ssh.exec('cd /root && rm -rf ComfyUI && git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git', { timeout: 120000 });
       timing.gitCloneTime = (Date.now() - gitStart) / 1000;
 
-      // 4. PyTorch upgrade
+      // 4. PyTorch upgrade — image is already torch 2.4 + cu124, no upgrade needed
       const pytorchStart = Date.now();
-      await ssh.exec('pip install --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 -q', { timeout: 600000 });
+      await ssh.exec('python -c "import torch; print(torch.__version__, torch.cuda.is_available())"', { timeout: 30000 });
       timing.pytorchUpgradeTime = (Date.now() - pytorchStart) / 1000;
 
       // 5. Requirements
@@ -289,12 +295,12 @@ class RunPodColdStartBenchmark {
     const start = Date.now();
     while (Date.now() - start < maxWait) {
       const status = await this.service.getInstanceStatus(instanceId);
-      if (status.status === 'running' && status.sshHost && status.sshPort) {
+      if (status.status === 'running' && status.sshHost && status.sshPort && status.sshUser) {
         try {
           const ssh = new SshTransport({
             host: status.sshHost,
             port: status.sshPort,
-            username: 'root',
+            username: status.sshUser,
             privateKeyPath: this.config.sshKeyPath,
             logger: this.logger,
           });

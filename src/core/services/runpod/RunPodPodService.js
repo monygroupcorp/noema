@@ -6,11 +6,20 @@
  * getInstanceStatus / terminateInstance / attachSshKey.
  *
  * Key differences vs VastAI:
- *   - SSH is direct (not proxied through ssh2.vast.ai) — RunPod assigns a
- *     public IP + mapped TCP port for port 22 inside the container.
- *   - SSH key injection is via the PUBLIC_KEY env var (RunPod convention) at
- *     pod creation time. Their official PyTorch templates honor this; custom
- *     images need an openssh-server present (or installed on startup).
+ *   - SSH is via RunPod's first-class proxy at ssh.runpod.io. The pod's ID
+ *     becomes the SSH username; no public IP is needed. This works on both
+ *     SECURE and COMMUNITY cloud and is the supported, documented path. We
+ *     do NOT request a public IP (supportPublicIp is COMMUNITY-only and
+ *     globalNetworking only works on some SECURE datacenters — neither is
+ *     necessary once you're going through ssh.runpod.io).
+ *   - SSH key injection is dual-path: (a) RunPod auto-injects keys uploaded
+ *     to your account settings, and (b) the PUBLIC_KEY env var is also set
+ *     at pod creation as a belt-and-suspenders fallback. Either path lands
+ *     the key in the pod's authorized_keys.
+ *   - HTTP services (e.g. ComfyUI on 8188) are reached through a separate
+ *     proxy at https://<podId>-<port>.proxy.runpod.net. Cloudflare-fronted,
+ *     so any single request must complete within 100s — fine for ComfyUI's
+ *     async submit/poll API, would not work for a synchronous render call.
  *   - "Reliability" doesn't have a direct analog. We use cloudType (SECURE >
  *     COMMUNITY) as the primary stability signal, then preferred GPU order.
  *   - There is NO GPU-types listing endpoint in the REST API (verified from
@@ -25,10 +34,9 @@
  *   - PodCreateInput.ports is `string[]` like ["22/tcp", "8188/http"]
  *   - PodCreateInput.dockerStartCmd is `string[]`; PodCreateInput has
  *     no `dockerArgs` field
- *   - Pod response has top-level `publicIp` and `portMappings` (object
- *     mapping internal port -> public port, e.g. { "22": 28012 }) — there
- *     is no `runtime.ports[]` array on this REST API (that's the GraphQL
- *     surface)
+ *   - Pod response has top-level `publicIp` and `portMappings`, but we
+ *     ignore both — we route SSH through ssh.runpod.io regardless. They
+ *     stay null on SECURE pods anyway.
  *
  * @see notes/ in src/core/services/vastai/ for general SSH/cold-start gotchas
  */
@@ -125,7 +133,7 @@ class RunPodPodService extends ComputeProvider {
    * for first-available semantics.
    */
   async searchOffers(criteria = {}) {
-    const cloudType = (criteria.cloudType || this.config.defaultCloudType || 'COMMUNITY').toUpperCase();
+    const cloudType = (criteria.cloudType || this.config.defaultCloudType || 'SECURE').toUpperCase();
     if (!VALID_CLOUD_TYPES.has(cloudType)) {
       throw new RunPodError(`Invalid cloudType "${cloudType}" — expected SECURE or COMMUNITY`);
     }
@@ -160,7 +168,7 @@ class RunPodPodService extends ComputeProvider {
       throw new RunPodError('RunPod provisioning requires an image');
     }
 
-    const cloudType = (jobContext.cloudType || this.config.defaultCloudType || 'COMMUNITY').toUpperCase();
+    const cloudType = (jobContext.cloudType || this.config.defaultCloudType || 'SECURE').toUpperCase();
     if (!VALID_CLOUD_TYPES.has(cloudType)) {
       throw new RunPodError(`Invalid cloudType "${cloudType}"`);
     }
@@ -176,6 +184,12 @@ class RunPodPodService extends ComputeProvider {
       ports = ports.split(',').map((s) => s.trim()).filter(Boolean);
     }
 
+    // SSH path policy:
+    //   - COMMUNITY: default supportPublicIp=true so the pod gets a public IP
+    //     and we can SSH in via direct TCP (this path is verified working).
+    //   - SECURE: no public IP — caller can opt in to globalNetworking or the
+    //     ssh.runpod.io proxy, both currently unverified for our setup.
+    // Either default can be overridden by jobContext.
     const payload = {
       name: jobContext.label || this.generateLabel(jobContext),
       imageName: jobContext.image || this.config.defaultImage,
@@ -188,18 +202,15 @@ class RunPodPodService extends ComputeProvider {
       volumeInGb: jobContext.volumeGb || 0,
       ports,
       env,
-      supportPublicIp: jobContext.supportPublicIp !== false,
       interruptible: jobContext.interruptible === true
     };
 
-    // SECURE cloud doesn't honor supportPublicIp (per /v1/openapi.json:
-    // "Set to true if you need the Pod to expose a public IP" applies to
-    // Community Cloud only). For direct SSH on SECURE, you need
-    // globalNetworking: true — only works on some Secure Cloud datacenters.
-    // Default it on for SECURE so the benchmark's SshTransport can connect.
-    if (cloudType === 'SECURE' && jobContext.globalNetworking !== false) {
-      payload.globalNetworking = true;
-    } else if (jobContext.globalNetworking === true) {
+    const wantsPublicIp = jobContext.supportPublicIp === true
+      || (cloudType === 'COMMUNITY' && jobContext.supportPublicIp !== false);
+    if (wantsPublicIp) {
+      payload.supportPublicIp = true;
+    }
+    if (jobContext.globalNetworking === true) {
       payload.globalNetworking = true;
     }
 
@@ -229,12 +240,12 @@ class RunPodPodService extends ComputeProvider {
   }
 
   /**
-   * Pull SSH host/port out of a RunPod pod entity.
+   * Direct-TCP SSH endpoint. Only populated once the pod has a publicIp
+   * and a port-22 mapping (COMMUNITY + supportPublicIp=true path). Returns
+   * { sshHost: null, sshPort: null, sshUser: null } until ready, so callers
+   * can poll the same way they always have.
    *
-   * The REST API exposes `publicIp` (top-level string) and `portMappings`
-   * (object mapping internal port -> public port, e.g. { "22": 28012 }).
-   * The legacy GraphQL API uses runtime.ports[] — we still tolerate that
-   * shape as a fallback in case RunPod backports it.
+   * For the alternate path through ssh.runpod.io see proxySshEndpoint().
    */
   extractSshEndpoint(rawPod = {}) {
     const publicIp = rawPod.publicIp || null;
@@ -242,33 +253,45 @@ class RunPodPodService extends ComputeProvider {
     if (publicIp && portMappings) {
       const sshPort = portMappings['22'] ?? portMappings[22] ?? null;
       if (sshPort) {
-        return { sshHost: publicIp, sshPort: Number(sshPort), publicIp };
+        return { sshHost: publicIp, sshPort: Number(sshPort), sshUser: 'root' };
       }
     }
+    return { sshHost: null, sshPort: null, sshUser: null };
+  }
 
-    // Fallback: legacy runtime.ports[] shape (GraphQL surface).
-    const ports = rawPod.runtime?.ports || [];
-    const sshEntry = ports.find((p) => (p.privatePort === 22 || p.privatePort === '22') && p.isIpPublic !== false);
-    if (sshEntry) {
-      return {
-        sshHost: sshEntry.ip || sshEntry.publicIp || publicIp,
-        sshPort: Number(sshEntry.publicPort || sshEntry.externalPort || 0) || null,
-        publicIp: sshEntry.ip || publicIp
-      };
-    }
+  /**
+   * Proxy SSH endpoint at ssh.runpod.io. Available as soon as the pod has
+   * an ID. Auth depends on the user having registered the key via account
+   * settings or `runpodctl ssh add-key`. Note: in practice (2026-05-05)
+   * this path returns "Permission denied (publickey)" for our setup
+   * despite the key being registered — root cause unresolved.
+   */
+  proxySshEndpoint(rawPod = {}) {
+    const podId = rawPod.id || rawPod.podId || null;
+    if (!podId) return { sshHost: null, sshPort: null, sshUser: null };
+    return { sshHost: 'ssh.runpod.io', sshPort: 22, sshUser: podId };
+  }
 
-    return { sshHost: null, sshPort: null, publicIp };
+  /**
+   * URL for the HTTP proxy on a given internal port. The pod must declare
+   * `<port>/http` in `ports` at creation. Cloudflare-fronted, 100s timeout
+   * per request — fine for ComfyUI's async submit/poll API.
+   */
+  buildHttpProxyUrl(rawPod = {}, internalPort) {
+    const podId = rawPod.id || rawPod.podId;
+    if (!podId || !internalPort) return null;
+    return `https://${podId}-${internalPort}.proxy.runpod.net`;
   }
 
   normalizeInstance(rawPod = {}) {
-    const { sshHost, sshPort, publicIp } = this.extractSshEndpoint(rawPod);
+    const { sshHost, sshPort, sshUser } = this.extractSshEndpoint(rawPod);
 
-    // desiredStatus is RUNNING when the pod is fully booted on a host. Until
-    // then it's CREATED / RESTARTING / etc. The SSH endpoint isn't usable
-    // until both desiredStatus=RUNNING AND portMappings has port 22.
+    // desiredStatus is RUNNING when the pod is fully booted on a host. The
+    // ssh.runpod.io proxy can't reach the container's sshd until then.
+    // Callers still need to probe SSH itself — sshd may take a few extra
+    // seconds to bind after the pod reports RUNNING.
     const desiredStatus = rawPod.desiredStatus || rawPod.status;
-    const sshReady = !!(sshHost && sshPort);
-    const status = (desiredStatus === 'RUNNING' && sshReady)
+    const status = (desiredStatus === 'RUNNING')
       ? 'running'
       : (desiredStatus || 'unknown').toString().toLowerCase();
 
@@ -276,10 +299,11 @@ class RunPodPodService extends ComputeProvider {
     const gpu = rawPod.gpu || {};
     return {
       instanceId: rawPod.id || rawPod.podId,
-      publicIp,
+      publicIp: rawPod.publicIp || null,
       sshHost,
       sshPort,
-      sshUser: 'root',
+      sshUser,
+      comfyuiUrl: this.buildHttpProxyUrl(rawPod, 8188),
       status,
       desiredStatus,
       hourlyUsd: rawPod.costPerHr ?? rawPod.adjustedCostPerHr ?? null,
