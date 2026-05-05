@@ -20,13 +20,22 @@ function delay(ms) {
  * The REST API is the supported surface going forward — the legacy GraphQL API
  * at api.runpod.io/graphql is being deprecated.
  *
- * Key endpoints used here:
- *   GET    /gputypes        — list available GPU SKUs
- *   GET    /gputypes/{id}   — current availability for a SKU
- *   POST   /pods            — provision a pod
- *   GET    /pods            — list pods (filtered)
- *   GET    /pods/{id}       — fetch status, ports, IPs
- *   DELETE /pods/{id}       — terminate a pod
+ * Endpoints exposed (verified via /v1/openapi.json on 2026-05-04):
+ *   POST   /pods                — provision a pod
+ *   GET    /pods                — list pods
+ *   GET    /pods/{id}           — fetch pod status (publicIp, portMappings, etc.)
+ *   PATCH  /pods/{id}           — update mutable fields
+ *   DELETE /pods/{id}           — terminate a pod
+ *   POST   /pods/{id}/stop      — suspend without deleting
+ *   POST   /pods/{id}/start     — resume a stopped pod
+ *   GET/POST /templates         — pod/endpoint templates
+ *   GET/POST /endpoints         — serverless endpoints (separate from RunPodClient)
+ *   GET/POST /networkvolumes    — persistent volumes
+ *
+ * NOT exposed: there is NO /gputypes endpoint. The list of valid GPU type
+ * IDs is a fixed enum in the OpenAPI spec (PodCreateInput.gpuTypeIds.items.enum).
+ * For pricing/availability you'd need the legacy GraphQL API at
+ * api.runpod.io/graphql, which we are intentionally NOT adding here.
  *
  * Mirrors VastAIClient's retry/backoff structure for consistency.
  */
@@ -94,25 +103,6 @@ class RunPodPodClient {
     }
 
     throw lastError;
-  }
-
-  /**
-   * GET /gputypes — list all GPU SKUs available on RunPod.
-   * Returns array of { id, displayName, memoryInGb, secureCloud, communityCloud, ... }.
-   */
-  async listGpuTypes() {
-    return this.request({ method: 'GET', url: '/gputypes' });
-  }
-
-  /**
-   * GET /gputypes/{id} — fetch one GPU SKU including current availability.
-   * Used to check how many machines RunPod has of a given GPU type right now.
-   */
-  async listAvailableGpus(gpuTypeId) {
-    if (!gpuTypeId) {
-      throw new Error('listAvailableGpus requires a gpuTypeId');
-    }
-    return this.request({ method: 'GET', url: `/gputypes/${encodeURIComponent(gpuTypeId)}` });
   }
 
   /**

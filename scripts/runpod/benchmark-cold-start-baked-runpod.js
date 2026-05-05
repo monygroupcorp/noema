@@ -56,9 +56,19 @@ const SshTransport = require('../../src/core/services/remote/SshTransport');
 const COMFYUI_PORT = 8188;
 const COMFYUI_PATH = '/workspace/ComfyUI';
 
-// dockerArgs override that installs+starts sshd, then sleeps. Used when the
-// baked image lacks openssh-server. Keeps the container alive so we can SSH in.
-const SSH_BOOTSTRAP_ARGS = `bash -c "apt-get update -qq && apt-get install -y -qq openssh-server >/dev/null && mkdir -p /run/sshd /root/.ssh && echo \\\"$PUBLIC_KEY\\\" > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && /usr/sbin/sshd && sleep infinity"`;
+// dockerStartCmd override that installs+starts sshd, then sleeps. Used when
+// the baked image lacks openssh-server. Keeps the container alive so we can
+// SSH in. Per /v1/openapi.json, dockerStartCmd is a string[] (CMD override).
+const SSH_BOOTSTRAP_CMD = [
+  'bash',
+  '-c',
+  'apt-get update -qq && apt-get install -y -qq openssh-server >/dev/null && '
+    + 'mkdir -p /run/sshd /root/.ssh && '
+    + 'echo "$PUBLIC_KEY" > /root/.ssh/authorized_keys && '
+    + 'chmod 600 /root/.ssh/authorized_keys && '
+    + '/usr/sbin/sshd && '
+    + 'sleep infinity',
+];
 
 class RunPodBakedBenchmark {
   constructor({ image, skipGeneration, cloudType, bootstrapSsh }) {
@@ -147,15 +157,13 @@ class RunPodBakedBenchmark {
     let instanceId = null;
 
     try {
-      // 1. Pick offer
+      // 1. Pick offer (priority list — RunPod's gpuTypePriority="availability"
+      //    picks the first GPU type in our list that's actually rentable).
       const provisionStart = Date.now();
       const offers = await this.runpodService.searchOffers({
-        minVramGb: 24,
-        maxHourlyUsd: 1.00,
         cloudType: this.cloudType,
       });
-
-      if (!offers?.length) throw new Error('No RunPod GPU offers matched criteria');
+      if (!offers?.length) throw new Error('No RunPod GPU offers configured');
 
       const offer = offers[0];
       timing.gpuType = offer.gpuType;
@@ -164,17 +172,17 @@ class RunPodBakedBenchmark {
       timing.datacenter = offer.cloudType;
       timing.reliability = offer.reliability;
 
-      // 2. Provision
+      // 2. Provision — pass the full priority list as gpuTypeIds.
       const provisionContext = {
-        offerId: offer.id,
+        gpuTypeIds: offers.map((o) => o.id),
         image: this.image,
         diskGb: 60,
         label: `runpod-baked-bench-${runNumber}-${Date.now()}`,
         cloudType: this.cloudType,
-        ports: '22/tcp,8188/http',
+        ports: ['22/tcp', '8188/http'],
       };
       if (this.bootstrapSsh) {
-        provisionContext.dockerArgs = SSH_BOOTSTRAP_ARGS;
+        provisionContext.dockerStartCmd = SSH_BOOTSTRAP_CMD;
       }
 
       const instance = await this.runpodService.provisionInstance(provisionContext);

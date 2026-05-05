@@ -12,10 +12,23 @@
  *     pod creation time. Their official PyTorch templates honor this; custom
  *     images need an openssh-server present (or installed on startup).
  *   - "Reliability" doesn't have a direct analog. We use cloudType (SECURE >
- *     COMMUNITY) as the primary stability signal, then price.
- *   - "Offers" are abstracted: searchOffers returns synthetic offers built from
- *     GPU types whose listed cloudType availability matches our requirements.
- *     RunPod doesn't expose a per-host marketplace listing the way VastAI does.
+ *     COMMUNITY) as the primary stability signal, then preferred GPU order.
+ *   - There is NO GPU-types listing endpoint in the REST API (verified from
+ *     /v1/openapi.json on 2026-05-04). gpuTypeIds is a fixed enum baked into
+ *     the spec. searchOffers therefore returns "offers" built from a curated
+ *     list (config preferredGpuTypes, or a sensible default) — pricing and
+ *     availability aren't exposed via REST. We rely on RunPod's own
+ *     gpuTypePriority="availability" to pick whichever GPU in our list is
+ *     actually rentable at provision time.
+ *
+ * Schema notes (per /v1/openapi.json):
+ *   - PodCreateInput.ports is `string[]` like ["22/tcp", "8188/http"]
+ *   - PodCreateInput.dockerStartCmd is `string[]`; PodCreateInput has
+ *     no `dockerArgs` field
+ *   - Pod response has top-level `publicIp` and `portMappings` (object
+ *     mapping internal port -> public port, e.g. { "22": 28012 }) — there
+ *     is no `runtime.ports[]` array on this REST API (that's the GraphQL
+ *     surface)
  *
  * @see notes/ in src/core/services/vastai/ for general SSH/cold-start gotchas
  */
@@ -26,6 +39,20 @@ const RunPodPodClient = require('./RunPodPodClient');
 const RunPodError = require('./RunPodError');
 
 const VALID_CLOUD_TYPES = new Set(['SECURE', 'COMMUNITY']);
+
+// Curated default GPU types — ordered cheapest-first within the 24GB+ band.
+// All values are members of the gpuTypeIds enum in /v1/openapi.json.
+// Override via config.preferredGpuTypes or jobContext.gpuTypeIds.
+const DEFAULT_PREFERRED_GPU_TYPES = [
+  'NVIDIA RTX A4000',          // 16GB — included as a cheap fallback
+  'NVIDIA RTX A4500',          // 20GB
+  'NVIDIA GeForce RTX 3090',   // 24GB
+  'NVIDIA GeForce RTX 4090',   // 24GB
+  'NVIDIA RTX A5000',          // 24GB
+  'NVIDIA L4',                 // 24GB
+  'NVIDIA RTX A6000',          // 48GB
+  'NVIDIA L40S',               // 48GB
+];
 
 class RunPodPodService extends ComputeProvider {
   constructor({ logger, config } = {}) {
@@ -58,48 +85,34 @@ class RunPodPodService extends ComputeProvider {
   }
 
   /**
-   * Normalize a raw GPU-type entry from /gputypes into our offer shape.
-   * One GPU type = one synthetic offer; price + availability come from the
-   * cloud-type breakdown that RunPod returns per type.
+   * Build a synthetic offer from a GPU type ID.
+   * Pricing isn't available via REST — caller can fill it in if known.
    */
-  normalizeGpuTypeAsOffer(rawGpuType = {}, { cloudType }) {
-    const cloudKey = cloudType === 'SECURE' ? 'secureCloud' : 'communityCloud';
-    const cloudInfo = rawGpuType[cloudKey] || {};
-
-    // RunPod surfaces these on different endpoints with slightly different
-    // field names — be tolerant.
-    const hourlyUsd =
-      cloudInfo.lowestPrice?.uninterruptablePrice ??
-      cloudInfo.minimumBidPrice ??
-      cloudInfo.onDemandPrice ??
-      rawGpuType.lowestPrice?.uninterruptablePrice ??
-      null;
-
-    const memoryInGb =
-      rawGpuType.memoryInGb ??
-      rawGpuType.memoryGb ??
-      rawGpuType.vramGb ??
-      null;
-
+  buildOfferFromGpuTypeId(gpuTypeId, { cloudType, hourlyUsd = null } = {}) {
     return {
-      // Use the GPU type ID as the offer ID — provisionInstance will pass it as gpuTypeIds.
-      id: rawGpuType.id || rawGpuType.gpuTypeId,
-      gpuType: rawGpuType.displayName || rawGpuType.id,
-      vramGb: memoryInGb,
-      hourlyUsd: hourlyUsd != null ? parseFloat(hourlyUsd) : null,
+      id: gpuTypeId,
+      gpuType: gpuTypeId,
+      vramGb: null,        // not exposed via REST
+      hourlyUsd,           // not exposed via REST
       cloudType,
-      // Higher availability count = lower chance we lose the race to another tenant.
-      availability: cloudInfo.availability ?? cloudInfo.availableInstances ?? null,
-      // RunPod's "reliability" stand-in: secure cloud = ToB datacenters, community = third-party.
+      availability: null,  // not exposed via REST
       reliability: cloudType === 'SECURE' ? 1.0 : 0.85,
-      raw: rawGpuType
+      raw: { gpuTypeId, cloudType }
     };
   }
 
   /**
-   * Search RunPod GPU SKUs and return synthetic offers ranked by reliability + price.
-   * RunPod doesn't expose a per-host marketplace, so we build offers from
-   * /gputypes filtered by VRAM and cloud type availability.
+   * Return a prioritized list of "offers" (one per GPU type ID).
+   *
+   * Because the REST API has no /gpuTypes endpoint and no pricing/availability
+   * fields, this method does NOT call RunPod. It returns the configured
+   * preferred GPU types as offers, in priority order, so the caller can hand
+   * them all to provisionInstance() and let RunPod's gpuTypePriority logic
+   * pick whichever is actually available.
+   *
+   * The benchmark uses offers[0].id as the primary GPU type, but a smarter
+   * caller can pass `gpuTypeIds: offers.map(o => o.id)` to provisionInstance
+   * for first-available semantics.
    */
   async searchOffers(criteria = {}) {
     const cloudType = (criteria.cloudType || this.config.defaultCloudType || 'COMMUNITY').toUpperCase();
@@ -107,60 +120,31 @@ class RunPodPodService extends ComputeProvider {
       throw new RunPodError(`Invalid cloudType "${cloudType}" — expected SECURE or COMMUNITY`);
     }
 
-    const data = await this.client.listGpuTypes();
-    const gpuTypes = Array.isArray(data) ? data : (data?.data || data?.gpuTypes || []);
-    const offers = gpuTypes.map((g) => this.normalizeGpuTypeAsOffer(g, { cloudType }));
-    return this.filterAndSortOffers(offers, { ...criteria, cloudType });
-  }
+    const requested = criteria.gpuTypeIds
+      || criteria.preferredGpuTypes
+      || (this.config.preferredGpuTypes?.length ? this.config.preferredGpuTypes : DEFAULT_PREFERRED_GPU_TYPES);
 
-  filterAndSortOffers(offers = [], criteria = {}) {
-    const minVramGb = criteria.minVramGb ?? this.config.minVramGb;
-    const maxHourlyUsd = criteria.maxHourlyUsd ?? this.config.maxPriceUsdPerHour;
-    const preferredSubstrings = (criteria.preferredGpuTypes || this.config.preferredGpuTypes || [])
-      .map((s) => s.toLowerCase());
-
-    const filtered = offers.filter((offer) => {
-      if (!offer.id) return false;
-      // Drop offers whose pricing/availability isn't published for the chosen cloud tier.
-      if (offer.hourlyUsd == null) return false;
-      if (minVramGb && offer.vramGb && offer.vramGb < minVramGb) return false;
-      if (maxHourlyUsd && offer.hourlyUsd > maxHourlyUsd) return false;
-      if (offer.availability != null && offer.availability <= 0) return false;
-      if (criteria.gpuType) {
-        const q = criteria.gpuType.toLowerCase();
-        if (!offer.gpuType?.toLowerCase().includes(q)) return false;
-      }
-      return true;
-    });
-
-    // Boost preferred GPU types to the top, then sort by reliability desc, price asc.
-    filtered.sort((a, b) => {
-      const aPref = preferredSubstrings.some((p) => a.gpuType?.toLowerCase().includes(p)) ? 1 : 0;
-      const bPref = preferredSubstrings.some((p) => b.gpuType?.toLowerCase().includes(p)) ? 1 : 0;
-      if (aPref !== bPref) return bPref - aPref;
-
-      const relA = a.reliability ?? 0;
-      const relB = b.reliability ?? 0;
-      if (relB !== relA) return relB - relA;
-
-      return (a.hourlyUsd ?? 0) - (b.hourlyUsd ?? 0);
-    });
-
-    return filtered;
+    return requested.map((id) => this.buildOfferFromGpuTypeId(id, { cloudType }));
   }
 
   /**
    * Build the POST /pods payload for a benchmark/job.
-   * NOTE on SSH: RunPod's standard PUBLIC_KEY env var is honored by their
-   * official base images, which start sshd on boot. Custom images (like the
-   * baked flux-comfyui-runtime image) generally do NOT include openssh-server.
-   * Pass `dockerArgs` to install/start sshd on boot if needed — see the
-   * benchmark script for an example startup command.
+   *
+   * NOTE on SSH: RunPod's PUBLIC_KEY env var is honored only by images that
+   * start sshd themselves on boot — RunPod's official PyTorch images do; the
+   * baked flux-comfyui-runtime image does not. For images without sshd, pass
+   * `dockerStartCmd: [...]` overriding CMD with an apt-install + sshd command.
+   *
+   * jobContext.gpuTypeIds (array) takes precedence over offerId so the caller
+   * can hand RunPod a prioritized fallback list and let gpuTypePriority pick.
    */
   buildPodPayload(jobContext = {}) {
-    const offerId = jobContext.offerId || jobContext.offer?.id;
-    if (!offerId) {
-      throw new RunPodError('offerId (gpuTypeId) is required to provision a RunPod pod');
+    const gpuTypeIds = Array.isArray(jobContext.gpuTypeIds) && jobContext.gpuTypeIds.length
+      ? jobContext.gpuTypeIds
+      : (jobContext.offerId || jobContext.offer?.id ? [jobContext.offerId || jobContext.offer.id] : null);
+
+    if (!gpuTypeIds) {
+      throw new RunPodError('gpuTypeIds (or offerId) is required to provision a RunPod pod');
     }
     if (!jobContext.image && !this.config.defaultImage) {
       throw new RunPodError('RunPod provisioning requires an image');
@@ -176,22 +160,38 @@ class RunPodPodService extends ComputeProvider {
       ...(jobContext.extraEnv || {})
     };
 
+    // ports must be a string[] per /v1/openapi.json (PodCreateInput.ports)
+    let ports = jobContext.ports || ['22/tcp', '8188/http'];
+    if (typeof ports === 'string') {
+      ports = ports.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+
     const payload = {
       name: jobContext.label || this.generateLabel(jobContext),
       imageName: jobContext.image || this.config.defaultImage,
       cloudType,
-      gpuTypeIds: [offerId],
+      computeType: jobContext.computeType || 'GPU',
+      gpuTypeIds,
       gpuCount: jobContext.gpuCount || 1,
+      gpuTypePriority: jobContext.gpuTypePriority || 'availability',
       containerDiskInGb: jobContext.diskGb || this.config.defaultDiskGb,
       volumeInGb: jobContext.volumeGb || 0,
-      ports: jobContext.ports || '22/tcp,8188/http',
+      ports,
       env,
       supportPublicIp: jobContext.supportPublicIp !== false,
       interruptible: jobContext.interruptible === true
     };
 
-    if (jobContext.dockerArgs) {
-      payload.dockerArgs = jobContext.dockerArgs;
+    // dockerStartCmd is a string[] override for CMD (no `dockerArgs` in REST API)
+    if (jobContext.dockerStartCmd) {
+      payload.dockerStartCmd = Array.isArray(jobContext.dockerStartCmd)
+        ? jobContext.dockerStartCmd
+        : ['bash', '-c', jobContext.dockerStartCmd];
+    }
+    if (jobContext.dockerEntrypoint) {
+      payload.dockerEntrypoint = Array.isArray(jobContext.dockerEntrypoint)
+        ? jobContext.dockerEntrypoint
+        : [jobContext.dockerEntrypoint];
     }
     if (jobContext.volumeMountPath) {
       payload.volumeMountPath = jobContext.volumeMountPath;
@@ -208,35 +208,51 @@ class RunPodPodService extends ComputeProvider {
   }
 
   /**
-   * Pull SSH host/port out of a RunPod pod's runtime ports list.
-   * RunPod exposes mapped public ports under runtime.ports[]:
-   *   { ip, isIpPublic, privatePort, publicPort, type }
-   * We want the entry where privatePort=22 and isIpPublic=true.
+   * Pull SSH host/port out of a RunPod pod entity.
+   *
+   * The REST API exposes `publicIp` (top-level string) and `portMappings`
+   * (object mapping internal port -> public port, e.g. { "22": 28012 }).
+   * The legacy GraphQL API uses runtime.ports[] — we still tolerate that
+   * shape as a fallback in case RunPod backports it.
    */
   extractSshEndpoint(rawPod = {}) {
-    const ports = rawPod.runtime?.ports || rawPod.ports || [];
-    const sshPort = ports.find((p) => (p.privatePort === 22 || p.privatePort === '22') && p.isIpPublic !== false);
-    if (!sshPort) {
-      return { sshHost: null, sshPort: null, publicIp: null };
+    const publicIp = rawPod.publicIp || null;
+    const portMappings = rawPod.portMappings || null;
+    if (publicIp && portMappings) {
+      const sshPort = portMappings['22'] ?? portMappings[22] ?? null;
+      if (sshPort) {
+        return { sshHost: publicIp, sshPort: Number(sshPort), publicIp };
+      }
     }
-    return {
-      sshHost: sshPort.ip || sshPort.publicIp || null,
-      sshPort: sshPort.publicPort || sshPort.externalPort || null,
-      publicIp: sshPort.ip || sshPort.publicIp || null
-    };
+
+    // Fallback: legacy runtime.ports[] shape (GraphQL surface).
+    const ports = rawPod.runtime?.ports || [];
+    const sshEntry = ports.find((p) => (p.privatePort === 22 || p.privatePort === '22') && p.isIpPublic !== false);
+    if (sshEntry) {
+      return {
+        sshHost: sshEntry.ip || sshEntry.publicIp || publicIp,
+        sshPort: Number(sshEntry.publicPort || sshEntry.externalPort || 0) || null,
+        publicIp: sshEntry.ip || publicIp
+      };
+    }
+
+    return { sshHost: null, sshPort: null, publicIp };
   }
 
   normalizeInstance(rawPod = {}) {
     const { sshHost, sshPort, publicIp } = this.extractSshEndpoint(rawPod);
 
-    // RunPod's status field shape: desiredStatus is the user-set target,
-    // currentStatus / lastStatusChange reflect actual state. The pod is
-    // "ready" when runtime is populated AND a public SSH port is mapped.
+    // desiredStatus is RUNNING when the pod is fully booted on a host. Until
+    // then it's CREATED / RESTARTING / etc. The SSH endpoint isn't usable
+    // until both desiredStatus=RUNNING AND portMappings has port 22.
     const desiredStatus = rawPod.desiredStatus || rawPod.status;
-    const hasRuntime = !!(rawPod.runtime && (rawPod.runtime.uptimeInSeconds != null || rawPod.runtime.ports));
-    const status = hasRuntime && desiredStatus === 'RUNNING' ? 'running' : (desiredStatus || 'unknown').toString().toLowerCase();
+    const sshReady = !!(sshHost && sshPort);
+    const status = (desiredStatus === 'RUNNING' && sshReady)
+      ? 'running'
+      : (desiredStatus || 'unknown').toString().toLowerCase();
 
     const machine = rawPod.machine || {};
+    const gpu = rawPod.gpu || {};
     return {
       instanceId: rawPod.id || rawPod.podId,
       publicIp,
@@ -244,10 +260,12 @@ class RunPodPodService extends ComputeProvider {
       sshPort,
       sshUser: 'root',
       status,
+      desiredStatus,
       hourlyUsd: rawPod.costPerHr ?? rawPod.adjustedCostPerHr ?? null,
-      gpuType: machine.gpuDisplayName || machine.gpuType || rawPod.gpuTypeId,
+      gpuType: machine.gpuDisplayName || gpu.gpuTypeId || machine.gpuType || null,
       diskGb: rawPod.containerDiskInGb,
       label: rawPod.name,
+      portMappings: rawPod.portMappings || null,
       raw: rawPod
     };
   }
