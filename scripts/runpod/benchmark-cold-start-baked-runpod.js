@@ -157,25 +157,25 @@ class RunPodBakedBenchmark {
     let instanceId = null;
 
     try {
-      // 1. Pick offer (priority list — RunPod's gpuTypePriority="availability"
-      //    picks the first GPU type in our list that's actually rentable).
+      // 1. Curated GPU trio that test-ssh.js + unbaked benchmark verified
+      //    has capacity on COMMUNITY today. The wider 15-type list lets
+      //    RunPod fall back to GPU types that report available but then
+      //    500 at the per-host level — pretty much always.
       const provisionStart = Date.now();
-      const offers = await this.runpodService.searchOffers({
-        cloudType: this.cloudType,
-      });
-      if (!offers?.length) throw new Error('No RunPod GPU offers configured');
+      const gpuTypeIds = [
+        'NVIDIA RTX A4000',
+        'NVIDIA GeForce RTX 3090',
+        'NVIDIA RTX A4500',
+      ];
+      timing.gpuType = gpuTypeIds[0];
+      timing.offerId = gpuTypeIds[0];
+      timing.datacenter = this.cloudType;
 
-      const offer = offers[0];
-      timing.gpuType = offer.gpuType;
-      timing.hourlyRate = offer.hourlyUsd;
-      timing.offerId = offer.id;
-      timing.datacenter = offer.cloudType;
-      timing.reliability = offer.reliability;
-
-      // 2. Provision — pass the full priority list as gpuTypeIds.
+      // 2. Provision — pass the curated list as gpuTypeIds.
       const provisionContext = {
-        gpuTypeIds: offers.map((o) => o.id),
+        gpuTypeIds,
         image: this.image,
+        // 60GB: image is ~42GB unpacked + ComfyUI runtime overhead.
         diskGb: 60,
         label: `runpod-baked-bench-${runNumber}-${Date.now()}`,
         cloudType: this.cloudType,
@@ -215,7 +215,7 @@ class RunPodBakedBenchmark {
       const startScript = [
         '#!/bin/bash',
         `cd ${COMFYUI_PATH}`,
-        `python main.py --listen 0.0.0.0 --port ${COMFYUI_PORT} >> /tmp/comfyui.log 2>&1 &`,
+        `python3 main.py --listen 0.0.0.0 --port ${COMFYUI_PORT} >> /tmp/comfyui.log 2>&1 &`,
         'echo $! > /tmp/comfyui.pid',
       ].join('\n');
       await ssh.exec(
@@ -299,7 +299,13 @@ class RunPodBakedBenchmark {
   }
 
   async _waitForSsh(instanceId) {
-    const maxWait = 600000; // 10 min — image pull on cold hosts can take a while
+    // 18 min cap. The 30GB baked image pull dominates: ~9-10 min on a cold
+    // community host, then another 30-60s for the apt-install sshd bootstrap
+    // before the pod is reachable. 10 min wasn't enough — we'd hit the deadline
+    // just as SSH was becoming available.
+    const maxWait = 1080000;
+    let lastSshError = null;
+    let attempts = 0;
     const start = Date.now();
 
     while (Date.now() - start < maxWait) {
@@ -316,13 +322,24 @@ class RunPodBakedBenchmark {
           });
           await ssh.exec('echo OK', { timeout: 15000, stdio: 'pipe' });
           return ssh;
-        } catch (_) {}
+        } catch (e) {
+          lastSshError = e;
+          attempts += 1;
+          // Log the actual error every few attempts so we can see what's
+          // wrong (connection refused vs auth failure vs timeout) instead of
+          // silently looping for 18 minutes.
+          if (attempts <= 3 || attempts % 10 === 0) {
+            const stderr = (e.stderr || '').slice(-200).replace(/\s+/g, ' ');
+            this.logger.warn(`ssh probe ${attempts} failed: code=${e.code} msg=${(e.message || '').slice(0, 80)} stderr=${stderr}`);
+          }
+        }
       }
 
       await this._wait(10000);
     }
 
-    throw new Error('SSH did not become ready (10 min cap)');
+    const errCtx = lastSshError ? ` (last: code=${lastSshError.code} msg=${(lastSshError.message || '').slice(0, 100)})` : '';
+    throw new Error(`SSH did not become ready (18 min cap, ${attempts} probes)${errCtx}`);
   }
 
   _minimalFluxWorkflow() {
