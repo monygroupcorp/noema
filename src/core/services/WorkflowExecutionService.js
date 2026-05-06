@@ -53,6 +53,11 @@ class WorkflowExecutionService {
             adapterRegistry.register('comfyui', new ComfyDeployAdapter(comfyUIService));
         }
 
+        // Register RunPod adapter so runmake (service: 'runpod') dispatches via GenerationRunner
+        const { GenerationRunner } = require('./runpod');
+        const RunPodAdapter = require('./runpod/RunPodAdapter');
+        adapterRegistry.register('runpod', new RunPodAdapter(new GenerationRunner({ logger })));
+
         this.asyncJobPoller = new AsyncJobPoller({
             logger, 
             generationRecordManager: this.generationRecordManager 
