@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.9.7](https://github.com/monygroupcorp/noema/compare/v4.9.6...v4.9.7) (2026-05-06)
+
+
+### Bug Fixes
+
+* enrich unhandled-rejection notices with chat title and reply context ([ab9fc48](https://github.com/monygroupcorp/noema/commit/ab9fc484f6cb368e588098509c22862c9e7c4a38))
+
 ## [4.9.6](https://github.com/monygroupcorp/noema/compare/v4.9.5...v4.9.6) (2026-05-04)
 
 
