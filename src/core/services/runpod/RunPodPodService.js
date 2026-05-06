@@ -327,7 +327,164 @@ class RunPodPodService extends ComputeProvider {
     }
 
     // Pod isn't ready immediately — caller should poll getInstanceStatus.
-    return this.normalizeInstance(podData);
+    const instance = this.normalizeInstance(podData);
+
+    // Item 3A — Per-job spend cap. If maxJobCostUsd is set, attach a budget
+    // envelope to the instance so the retry-wrapper can enforce a wall-clock
+    // deadline derived from costPerHr. RunPod sometimes omits costPerHr from
+    // create responses; fall back to the priced-offer estimate the caller
+    // passed in (jobContext.offer?.hourlyUsd) and finally to null.
+    if (jobContext.maxJobCostUsd != null && Number.isFinite(jobContext.maxJobCostUsd)) {
+      const hourlyUsd = instance.hourlyUsd
+        ?? jobContext.offer?.hourlyUsd
+        ?? jobContext.hourlyUsd
+        ?? null;
+      const provisionedAt = Date.now();
+      let projectedDeadline = null;
+      if (hourlyUsd && hourlyUsd > 0) {
+        // 20% safety margin so we don't kill at the exact projected line.
+        const ms = (jobContext.maxJobCostUsd / hourlyUsd) * 3600 * 1000 * 1.2;
+        projectedDeadline = new Date(provisionedAt + ms);
+      }
+      instance.budget = {
+        maxJobCostUsd: jobContext.maxJobCostUsd,
+        hourlyUsd,
+        provisionedAt,
+        projectedDeadline
+      };
+    }
+
+    return instance;
+  }
+
+  /**
+   * Item 1 — Worker-level retry wrapper for end-to-end provisioning.
+   *
+   * Two retry classes are handled, each via a different mechanism:
+   *
+   *   (a) Capacity-500 / GPU-type unavailability — caught by trying a
+   *       different GPU type from the priority list on each attempt. We
+   *       rotate `gpuTypeIds`: attempt N puts gpuTypeIds[N % len] first.
+   *       If the caller didn't pass a list, capacity-500 cannot be retried
+   *       meaningfully — we re-throw on the next attempt's failure.
+   *
+   *   (b) SSH-key-injection failure — happens *after* createPod returns
+   *       success, when RunPod's startup script that injects PUBLIC_KEY
+   *       into authorized_keys never fires (~10% of SECURE hosts). We
+   *       can only detect this from the caller's SSH probe, so this method
+   *       takes an `sshProbe(instance)` callback and treats any throw or
+   *       per-attempt deadline overshoot as a retryable failure.
+   *
+   * Critical invariant: the failed pod is ALWAYS terminated before the
+   * retry, otherwise we leak a paid-for pod on every loop iteration.
+   *
+   * @param {Object} jobContext - same as provisionInstance, plus optional gpuTypeIds.
+   * @param {Object} opts
+   * @param {number} [opts.maxAttempts=3]
+   * @param {number} [opts.perAttemptDeadlineMs=300000]
+   * @param {Function} [opts.sshProbe] - async (instance) => probeResult; throws on failure.
+   * @returns {Promise<{instance: Object, probeResult: any, attempts: number}>}
+   */
+  async provisionInstanceWithRetry(jobContext = {}, opts = {}) {
+    const maxAttempts = opts.maxAttempts ?? 3;
+    const perAttemptDeadlineMs = opts.perAttemptDeadlineMs ?? 5 * 60 * 1000;
+    const sshProbe = typeof opts.sshProbe === 'function' ? opts.sshProbe : null;
+
+    const baseGpuTypeIds = Array.isArray(jobContext.gpuTypeIds) && jobContext.gpuTypeIds.length
+      ? [...jobContext.gpuTypeIds]
+      : null;
+
+    let lastError = null;
+    let attempt = 0;
+    while (attempt < maxAttempts) {
+      attempt += 1;
+
+      // Rotate GPU type priority on each attempt so capacity-500 retries try
+      // a different SKU. attempt=1 => no rotation, attempt=2 => shift by 1, etc.
+      let attemptContext = jobContext;
+      if (baseGpuTypeIds && attempt > 1) {
+        const rotation = (attempt - 1) % baseGpuTypeIds.length;
+        const rotated = baseGpuTypeIds.slice(rotation).concat(baseGpuTypeIds.slice(0, rotation));
+        attemptContext = { ...jobContext, gpuTypeIds: rotated };
+      }
+
+      let instance = null;
+      try {
+        instance = await this.provisionInstance(attemptContext);
+      } catch (err) {
+        lastError = err;
+        const isCapacity = err?.status === 500 && /does not have the resources/i.test(err.message || '');
+        this.logger.warn(
+          `[RunPod] provisionInstance attempt ${attempt}/${maxAttempts} failed (status=${err?.status} capacity=${isCapacity}): ${err?.message}`
+        );
+        if (!baseGpuTypeIds && isCapacity) {
+          // No fallback GPU list — same retry would just hit the same wall.
+          throw err;
+        }
+        if (attempt >= maxAttempts) throw err;
+        continue;
+      }
+
+      // Provisioned successfully. Now run sshProbe under a wall-clock deadline.
+      const attemptStart = Date.now();
+      try {
+        let probeResult = null;
+        if (sshProbe) {
+          probeResult = await this._raceWithDeadline(
+            sshProbe(instance),
+            perAttemptDeadlineMs,
+            `sshProbe exceeded perAttemptDeadlineMs=${perAttemptDeadlineMs}`
+          );
+        }
+
+        // Item 3A enforcement — if a budget envelope is attached, check it.
+        // Note: this is the *post-probe* check; for a long-running job the
+        // caller should check `instance.budget.projectedDeadline` themselves
+        // periodically. Here we only catch jobs that already busted the cap
+        // during provisioning + probe.
+        if (instance.budget?.projectedDeadline
+            && Date.now() > instance.budget.projectedDeadline.getTime()) {
+          throw new RunPodError('budget-exceeded', {
+            code: 'BUDGET_EXCEEDED',
+            status: null
+          });
+        }
+
+        return { instance, probeResult, attempts: attempt };
+      } catch (err) {
+        lastError = err;
+        this.logger.warn(
+          `[RunPod] sshProbe failed on pod ${instance.instanceId} attempt ${attempt}/${maxAttempts} after ${((Date.now() - attemptStart) / 1000).toFixed(1)}s: ${err?.message}`
+        );
+        // ALWAYS terminate the bad pod before the next attempt, even if
+        // termination itself fails — leaking is worse than a stuck retry loop.
+        try {
+          await this.terminateInstance(instance.instanceId);
+        } catch (termErr) {
+          this.logger.error(
+            `[RunPod] Failed to terminate bad pod ${instance.instanceId} during retry: ${termErr?.message}`
+          );
+        }
+        if (err?.code === 'BUDGET_EXCEEDED') throw err; // budget breach is not retryable
+        if (attempt >= maxAttempts) throw err;
+      }
+    }
+
+    // Unreachable — loop either returns or throws. Defensive.
+    throw lastError || new RunPodError('provisionInstanceWithRetry exhausted attempts');
+  }
+
+  /** @private race a promise against a deadline timer */
+  _raceWithDeadline(promise, ms, msg) {
+    let timer;
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new RunPodError(msg, { code: 'DEADLINE_EXCEEDED' })), ms);
+      timer.unref?.();
+    });
+    return Promise.race([
+      promise.finally(() => clearTimeout(timer)),
+      deadline
+    ]);
   }
 
   async getInstanceStatus(instanceId) {
