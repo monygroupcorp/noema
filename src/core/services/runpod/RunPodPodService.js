@@ -184,12 +184,12 @@ class RunPodPodService extends ComputeProvider {
       ports = ports.split(',').map((s) => s.trim()).filter(Boolean);
     }
 
-    // SSH path policy:
-    //   - COMMUNITY: default supportPublicIp=true so the pod gets a public IP
-    //     and we can SSH in via direct TCP (this path is verified working).
-    //   - SECURE: no public IP — caller can opt in to globalNetworking or the
-    //     ssh.runpod.io proxy, both currently unverified for our setup.
-    // Either default can be overridden by jobContext.
+    // SSH path policy: default supportPublicIp=true on BOTH cloud types so
+    // direct-TCP SSH works out of the box. Verified 2026-05-05 against SECURE
+    // (RTX A4000 / L4): publicIp populates ~30s after pod creation, same as
+    // COMMUNITY. Per docs/configuration/expose-ports, SECURE public IPs are
+    // also more stable across pod migrations/restarts than COMMUNITY ones.
+    // Override with supportPublicIp: false if you want a proxy-only setup.
     const payload = {
       name: jobContext.label || this.generateLabel(jobContext),
       imageName: jobContext.image || this.config.defaultImage,
@@ -205,9 +205,7 @@ class RunPodPodService extends ComputeProvider {
       interruptible: jobContext.interruptible === true
     };
 
-    const wantsPublicIp = jobContext.supportPublicIp === true
-      || (cloudType === 'COMMUNITY' && jobContext.supportPublicIp !== false);
-    if (wantsPublicIp) {
+    if (jobContext.supportPublicIp !== false) {
       payload.supportPublicIp = true;
     }
     if (jobContext.globalNetworking === true) {

@@ -293,6 +293,8 @@ class RunPodColdStartBenchmark {
   async _waitForSsh(instanceId) {
     const maxWait = 600000; // 10 min — image pull can take a while on cold hosts
     const start = Date.now();
+    let attempts = 0;
+    let lastError = null;
     while (Date.now() - start < maxWait) {
       const status = await this.service.getInstanceStatus(instanceId);
       if (status.status === 'running' && status.sshHost && status.sshPort && status.sshUser) {
@@ -306,11 +308,19 @@ class RunPodColdStartBenchmark {
           });
           await ssh.exec('echo OK', { timeout: 15000, stdio: 'pipe' });
           return ssh;
-        } catch (_) {}
+        } catch (e) {
+          lastError = e;
+          attempts += 1;
+          if (attempts <= 3 || attempts % 10 === 0) {
+            const stderr = (e.stderr || '').slice(-200).replace(/\s+/g, ' ');
+            this.logger.warn(`ssh probe ${attempts} (${status.sshHost}:${status.sshPort}) failed: code=${e.code} ${stderr || e.message}`);
+          }
+        }
       }
       await this._wait(8000);
     }
-    throw new Error('SSH did not become ready (10 min cap)');
+    const ctx = lastError ? ` (last: code=${lastError.code} ${(lastError.stderr || lastError.message || '').slice(0, 150)})` : '';
+    throw new Error(`SSH did not become ready (10 min cap, ${attempts} probes)${ctx}`);
   }
 
   _minimalWorkflow() {
