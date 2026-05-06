@@ -421,6 +421,8 @@ async function startApp() {
     const noticeChatId = startupChatId;
     const recentNotices = new Map(); // key -> last sent ms
     const NOTICE_TTL_MS = 10 * 60 * 1000;
+    const chatInfoCache = new Map(); // chatId -> { title, type, username, ts, error? }
+    const CHAT_INFO_TTL_MS = 60 * 60 * 1000;
 
     const fingerprint = (reason) => {
       if (!reason) return 'nil';
@@ -437,7 +439,32 @@ async function startApp() {
       return str.length > n ? str.slice(0, n) + '…' : str;
     };
 
-    const forwardNotice = (kind, reason) => {
+    const getChatInfo = async (chatId) => {
+      if (!chatId || !noticeBot) return null;
+      const key = String(chatId);
+      const cached = chatInfoCache.get(key);
+      if (cached && Date.now() - cached.ts < CHAT_INFO_TTL_MS) return cached;
+      let info;
+      try {
+        const chat = await noticeBot.getChat(chatId);
+        info = {
+          title: chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || null,
+          type: chat.type || null,
+          username: chat.username || null,
+          ts: Date.now(),
+        };
+      } catch (err) {
+        info = { title: null, type: null, username: null, error: err?.message || 'getChat failed', ts: Date.now() };
+      }
+      chatInfoCache.set(key, info);
+      if (chatInfoCache.size > 1000) {
+        const cutoff = Date.now() - CHAT_INFO_TTL_MS;
+        for (const [k, v] of chatInfoCache) if (v.ts < cutoff) chatInfoCache.delete(k);
+      }
+      return info;
+    };
+
+    const forwardNotice = async (kind, reason) => {
       if (!noticeBot || !noticeChatId) return;
       const key = `${kind}:${fingerprint(reason)}`;
       const now = Date.now();
@@ -451,10 +478,24 @@ async function startApp() {
       const desc = reason?.response?.body?.description;
       const chatId = reason?.on?.payload?.chat_id;
       const method = reason?.on?.method;
+      const replyToMessageId = reason?.on?.payload?.reply_to_message_id;
+
+      let chatLine = chatId ? `chat: ${chatId}` : null;
+      if (chatId) {
+        const info = await getChatInfo(chatId).catch(() => null);
+        if (info) {
+          const label = info.title
+            ? `${info.title}${info.username ? ' (@' + info.username + ')' : ''}`
+            : (info.error ? `<lookup failed: ${truncate(info.error, 80)}>` : null);
+          if (label) chatLine = `chat: ${chatId} — ${label}${info.type ? ' [' + info.type + ']' : ''}`;
+        }
+      }
+
       const lines = [
         `⚠️ ${kind}`,
         method ? `method: ${method}` : null,
-        chatId ? `chat: ${chatId}` : null,
+        chatLine,
+        replyToMessageId ? `reply_to: ${replyToMessageId}` : null,
         code ? `code: ${code}` : null,
         desc ? `desc: ${truncate(desc, 200)}` : `msg: ${truncate(reason, 200)}`,
       ].filter(Boolean);
