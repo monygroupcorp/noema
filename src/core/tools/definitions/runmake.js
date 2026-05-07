@@ -1,135 +1,73 @@
 /**
- * RunMake GPU Tool Definition
- * User-facing tool for executing AI workflows on RunPod GPU infrastructure.
+ * RunMake — fractal-Tool atomic shape (Phase 1).
+ * Compiles via src/core/services/runpod/Compiler.js into a Deployment.
  *
- * @type {import('../ToolDefinition').ToolDefinition}
+ * @type {import('../fractalTool').FractalTool}
  */
 const runmakeTool = {
   toolId: 'runmake',
   service: 'runpod',
-  version: '1.0.0',
+  version: '2.0.0',
   displayName: 'RunMake GPU',
   commandName: '/runmake',
   apiPath: '/api/internal/run/runmake',
-  description: 'Execute AI workflows on GPU. Supports ComfyUI workflows, LoRA inference, image generation, and custom scripts.',
+  description: 'Execute ComfyUI workflows on RunPod SECURE GPU compute. Phase 1 ships FLUX-schnell text-to-image.',
 
   inputSchema: {
-    workflow: {
-      name: 'Workflow',
+    prompt: {
+      name: 'prompt',
       type: 'string',
       required: true,
-      description: 'The workflow to execute (e.g., flux-gen, flux-dev-gen, sdxl-gen, sd15-gen, custom).'
-    },
-    prompt: {
-      name: 'Prompt',
-      type: 'string',
-      required: false,
       description: 'Text prompt for image generation.'
     },
-    imageUrl: {
-      name: 'Input Image',
-      type: 'image',
-      required: false,
-      description: 'URL of input image for img2img or other image-based workflows.'
-    },
-    loraId: {
-      name: 'LoRA Model',
-      type: 'string',
-      required: false,
-      description: 'ID of the LoRA model to apply during generation.'
-    },
-    loraStrength: {
-      name: 'LoRA Strength',
-      type: 'number',
-      required: false,
-      default: 0.8,
-      advanced: true,
-      description: 'Strength of the LoRA effect (0.0 - 1.0).'
-    },
-    baseModel: {
-      name: 'Base Model',
-      type: 'enum',
-      required: false,
-      default: 'flux-schnell',
-      enum: ['flux-schnell', 'flux-dev', 'sdxl', 'sd15'],
-      description: 'Base model to use for generation.'
-    },
     width: {
-      name: 'Width',
+      name: 'width',
       type: 'number',
       required: false,
-      default: 1024,
+      default: 512,
       advanced: true,
       description: 'Output image width in pixels.'
     },
     height: {
-      name: 'Height',
+      name: 'height',
       type: 'number',
       required: false,
-      default: 1024,
+      default: 512,
       advanced: true,
       description: 'Output image height in pixels.'
     },
     steps: {
-      name: 'Steps',
+      name: 'steps',
       type: 'number',
       required: false,
       default: 4,
       advanced: true,
       description: 'Number of inference steps.'
     },
-    seed: {
-      name: 'Seed',
+    input_seed: {
+      name: 'input_seed',
       type: 'seed',
       required: false,
       advanced: true,
-      description: 'Random seed for reproducible generation.'
-    },
-    negativePrompt: {
-      name: 'Negative Prompt',
-      type: 'string',
-      required: false,
-      advanced: true,
-      description: 'Negative prompt to exclude unwanted elements.'
-    },
-    customScript: {
-      name: 'Custom Script',
-      type: 'text',
-      required: false,
-      advanced: true,
-      visibleIf: { field: 'workflow', values: ['custom'] },
-      description: 'Custom script to execute (only for custom workflow).'
-    },
-    privateMode: {
-      name: 'Private Mode',
-      type: 'boolean',
-      required: false,
-      default: false,
-      advanced: true,
-      description: 'Enable private mode to prevent result caching and logging.'
+      description: 'Random seed. Omit to shuffle; set per-account default via user preferences.'
     }
   },
 
   outputSchema: {
     imageUrl: {
-      name: 'Result Image',
+      name: 'imageUrl',
       type: 'string',
-      description: 'URL of generated image.'
-    },
-    videoUrl: {
-      name: 'Result Video',
-      type: 'string',
-      description: 'URL of generated video.'
+      description: 'Signed URL of the generated image.'
     },
     metadata: {
-      name: 'Metadata',
+      name: 'metadata',
       type: 'object',
-      description: 'Generation metadata including timing, model info, and parameters used.'
+      description: 'Generation metadata: deployment hash, podId, gpuTypeId, timings, cost.'
     }
   },
 
   costingModel: {
-    rateSource: 'machine',  // Rate determined from RunPod instance at runtime
+    rateSource: 'machine',
     unit: 'second'
   },
 
@@ -137,7 +75,7 @@ const runmakeTool = {
 
   webhookStrategy: {
     expectedStatusField: 'status',
-    successValue: 'COMPLETED',
+    successValue: 'succeeded',
     durationTracking: true,
     resultPath: ['outputs']
   },
@@ -152,23 +90,46 @@ const runmakeTool = {
   visibility: 'public',
 
   humanDefaults: {
-    workflow: 'flux-gen',
-    baseModel: 'flux-schnell',
+    width: 512,
+    height: 512,
     steps: 4
   },
+
+  spec: {
+    imageId: 'runpod/pytorch',
+    imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+    workflowTemplate: 'flux-schnell',
+    workflowTemplateVersion: '1',
+    seedInputKey: 'input_seed',
+    requiredModelRefs: [],
+    defaultCookFlags: {
+      batchSize: 1,
+      seedStrategy: 'shuffle',
+      seedPlaceholder: 88888888,
+      privateMode: false
+    }
+  },
+
+  composedSteps: [],
+  exposedInputs: [],
+  exposedOutputs: [],
 
   metadata: {
     provider: 'RunPod',
     cloudType: 'SECURE',
-    instanceTypes: ['comfy-worker', 'custom-runner'],
     warmPoolEnabled: false,
-    modelAffinityScheduling: false,
-    workflowModels: {
-      'flux-gen': 'flux-schnell',
-      'flux-dev-gen': 'flux-dev',
-      'sdxl-gen': 'sdxl',
-      'sd15-gen': 'sd15'
-    }
+    modelAffinityScheduling: false
+  },
+
+  legacyInputSchema: {
+    workflow:        { name: 'Workflow',        type: 'string',  required: true },
+    imageUrl:        { name: 'Input Image',     type: 'image',   required: false },
+    loraId:          { name: 'LoRA Model',      type: 'string',  required: false },
+    loraStrength:    { name: 'LoRA Strength',   type: 'number',  required: false, default: 0.8 },
+    baseModel:       { name: 'Base Model',      type: 'enum',    required: false, default: 'flux-schnell', enum: ['flux-schnell', 'flux-dev', 'sdxl', 'sd15'] },
+    negativePrompt:  { name: 'Negative Prompt', type: 'string',  required: false },
+    customScript:    { name: 'Custom Script',   type: 'text',    required: false },
+    privateMode:     { name: 'Private Mode',    type: 'boolean', required: false, default: false }
   }
 };
 

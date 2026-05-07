@@ -5,6 +5,7 @@
  */
 
 const { ObjectId } = require('mongodb');
+const { isFractalTool } = require('../../../tools/fractalTool');
 
 class AdapterCoordinator {
     constructor({ logger, adapterRegistry, generationRecordManager, asyncJobPoller }) {
@@ -74,17 +75,28 @@ class AdapterCoordinator {
         const { generationId } = await this.generationRecordManager.createGenerationRecord(generationParams);
         this.logger.debug(`[AdapterCoordinator] Created generation record ${generationId} for adapter job`);
 
-        // Merge defaultAdapterParams and costTable from tool metadata before calling startJob
-        const jobInputs = {
-            ...(tool.metadata?.defaultAdapterParams || {}),
-            ...inputs,
-            // Pass costTable for DALL-E tools so adapter can calculate actual cost
-            ...(tool.metadata?.costTable && { costTable: tool.metadata.costTable })
-        };
-
-        // Start async job with merged inputs
-        this.logger.debug(`[AdapterCoordinator] Calling adapter.startJob() with inputs: ${JSON.stringify(jobInputs)}`);
-        const runInfo = await adapter.startJob(jobInputs);
+        // Fractal Tools pass { tool, inputs, accountContext } so the adapter compiles the Deployment.
+        // Legacy tools continue to receive the flat merged-inputs blob.
+        let runInfo;
+        if (isFractalTool(tool)) {
+            this.logger.debug(`[AdapterCoordinator] Calling adapter.startJob() (fractal) tool=${tool.toolId} jobId=${generationId}`);
+            runInfo = await adapter.startJob({
+                tool,
+                inputs,
+                accountContext: { masterAccountId: originalContext.masterAccountId },
+                jobId: generationId.toString(),
+            });
+        } else {
+            // Merge defaultAdapterParams and costTable from tool metadata before calling startJob
+            const jobInputs = {
+                ...(tool.metadata?.defaultAdapterParams || {}),
+                ...inputs,
+                // Pass costTable for DALL-E tools so adapter can calculate actual cost
+                ...(tool.metadata?.costTable && { costTable: tool.metadata.costTable })
+            };
+            this.logger.debug(`[AdapterCoordinator] Calling adapter.startJob() with inputs: ${JSON.stringify(jobInputs)}`);
+            runInfo = await adapter.startJob(jobInputs);
+        }
         this.logger.debug(`[AdapterCoordinator] adapter.startJob() returned runId: ${runInfo?.runId}`);
 
         // Update generation record with runId
