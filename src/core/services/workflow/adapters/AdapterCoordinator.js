@@ -113,6 +113,7 @@ class AdapterCoordinator {
         return {
             generationId,
             runId: runInfo.runId,
+            isNewSession: runInfo.isNewSession ?? false,
             runInfo
         };
     }

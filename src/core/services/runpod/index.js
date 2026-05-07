@@ -10,6 +10,8 @@ const GenerationRunner = require('./GenerationRunner');
 const WorkflowTemplateRegistry = require('./WorkflowTemplateRegistry');
 const Compiler = require('./Compiler');
 const { CompilerError } = Compiler;
+const Session = require('./Session');
+const SessionManager = require('./SessionManager');
 
 module.exports = {
   RunPodClient,
@@ -23,5 +25,7 @@ module.exports = {
   GenerationRunner,
   WorkflowTemplateRegistry,
   Compiler,
-  CompilerError
+  CompilerError,
+  Session,
+  SessionManager,
 };

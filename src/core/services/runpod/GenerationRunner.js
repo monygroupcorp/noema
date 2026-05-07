@@ -258,35 +258,231 @@ class GenerationRunner {
     if (!accountId) throw new Error('runDeployment requires accountId');
     if (!jobId) throw new Error('runDeployment requires jobId');
 
+    let pod = null;
+    try {
+      pod = await this.setupPod(deployment, { jobId, timeouts });
+      return await this.runOnPod(pod.ssh, {
+        comfyApiPayload: deployment.spec.workflow.comfyApiPayload,
+        accountId,
+        jobId,
+        timeouts,
+        podId: pod.podId,
+        hourlyUsd: pod.hourlyUsd,
+        cloudType: pod.cloudType,
+        gpuTypeId: pod.gpuTypeId,
+      });
+    } finally {
+      if (pod) await this.teardownPod(pod.podId, pod.ssh);
+    }
+  }
+
+  /**
+   * Provision a pod, install ComfyUI, and download models.
+   * Does NOT run inference. Does NOT terminate on success — caller owns the pod.
+   * Terminates on setup failure so no pods leak.
+   *
+   * @returns {{ podId, ssh, hourlyUsd, gpuTypeId, cloudType, provisionMs, setupMs }}
+   */
+  async setupPod(deployment, { jobId, timeouts = {} } = {}) {
+    if (!deployment || !deployment.spec) throw new Error('setupPod requires deployment.spec');
     const { spec } = deployment;
+    const t = { ...DEFAULT_TIMEOUTS, ...timeouts };
 
-    const runner = new GenerationRunner({
-      logger: this.logger,
-      config: this.config,
-      service: this.service,
-      scheduler: this.scheduler,
-      uploader: this.uploader,
-      stallDetectorFactory: this.stallDetectorFactory,
-      sshTransportFactory: this.sshTransportFactory,
-      image: spec.image.ociRef,
+    const workload = {
+      vramGb: spec.cookFlags.vramGb ?? 24,
+      cloudPreference: spec.cookFlags.cloudPreference ?? 'SECURE',
+      maxPricePerHr: spec.cookFlags.maxPricePerHr ?? 1.0,
+      maxJobCostUsd: spec.cookFlags.maxJobCostUsd,
+    };
+
+    const gpuTypeIds = this.scheduler.planGpuTypeIds(workload);
+    if (!gpuTypeIds.length) throw new Error(`setupPod: no GPU types match workload (vramGb=${workload.vramGb})`);
+    const cloudType = (workload.cloudPreference || 'SECURE').toUpperCase();
+
+    let podId = null;
+    let ssh = null;
+    let instance = null;
+
+    const provisionStart = Date.now();
+    try {
+      const sshProbe = async (inst) => {
+        const transport = this.sshTransportFactory({
+          host: inst.sshHost,
+          port: inst.sshPort,
+          username: inst.sshUser,
+          privateKeyPath: this.config.sshKeyPath,
+          logger: this.logger,
+        });
+        await transport.exec('echo OK', { timeout: 15000, stdio: 'pipe' });
+        return transport;
+      };
+
+      const probeWithReadiness = async (inst) => {
+        const deadline = Date.now() + t.sshMs;
+        let lastErr = null;
+        while (Date.now() < deadline) {
+          let status;
+          try { status = await this.service.getInstanceStatus(inst.instanceId); } catch (e) { await wait(10000); continue; }
+          if (status.status === 'running' && status.sshHost && status.sshPort && status.sshUser) {
+            try { return await sshProbe(status); } catch (err) { lastErr = err; }
+          }
+          await wait(8000);
+        }
+        throw lastErr || new Error(`SSH not ready within ${t.sshMs}ms`);
+      };
+
+      const { instance: provisioned } = await this.service.provisionInstanceWithRetry(
+        {
+          gpuTypeIds,
+          cloudType,
+          image: spec.image.ociRef,
+          jobId,
+          ports: ['22/tcp', `${COMFYUI_PORT}/http`],
+          maxJobCostUsd: workload.maxJobCostUsd,
+        },
+        {
+          maxAttempts: gpuTypeIds.length,
+          perAttemptDeadlineMs: t.sshMs,
+          sshProbe: async (inst) => {
+            ssh = await probeWithReadiness(inst);
+            return ssh;
+          },
+        }
+      );
+
+      instance = provisioned;
+      podId = instance.instanceId;
+      const provisionMs = Date.now() - provisionStart;
+
+      let hourlyUsd = null;
+      try {
+        const status = await this.service.getInstanceStatus(podId);
+        hourlyUsd = status.hourlyUsd ?? null;
+      } catch (_) {}
+
+      const gpuTypeId = instance.gpuType || gpuTypeIds[0];
+
+      const setupStart = Date.now();
+      await this._runSetup(ssh, { modelManifest: [] });
+      await this._startComfyUi(ssh);
+      await this._waitForComfyApi(ssh, t.jobMs);
+      await this._downloadModels(ssh, spec.models || []);
+      const setupMs = Date.now() - setupStart;
+
+      this.logger.info(`[GenerationRunner] setupPod complete pod=${podId} gpu=${gpuTypeId} provisionMs=${provisionMs} setupMs=${setupMs}`);
+      return { podId, ssh, hourlyUsd, gpuTypeId, cloudType, provisionMs, setupMs };
+    } catch (err) {
+      await this.teardownPod(podId, ssh);
+      throw err;
+    }
+  }
+
+  /**
+   * Run a single inference on an already-configured pod.
+   * Does NOT provision or terminate. Does NOT close ssh — caller (session) owns it.
+   *
+   * @returns same shape as run() success result (status, outputs, timings, cost)
+   */
+  async runOnPod(ssh, {
+    comfyApiPayload,
+    accountId,
+    jobId,
+    timeouts = {},
+    podId = null,
+    hourlyUsd = null,
+    gpuTypeId = null,
+    cloudType = 'SECURE',
+    expectedSteps = 4,
+  } = {}) {
+    if (!ssh) throw new Error('runOnPod requires ssh');
+    if (!comfyApiPayload) throw new Error('runOnPod requires comfyApiPayload');
+    if (!accountId) throw new Error('runOnPod requires accountId');
+    if (!jobId) throw new Error('runOnPod requires jobId');
+
+    const t = { ...DEFAULT_TIMEOUTS, ...timeouts };
+    const totalStart = Date.now();
+    let stalled = false;
+    let stallReason = null;
+
+    const stallDetector = this.stallDetectorFactory({
+      podId,
+      sshConnection: ssh,
+      comfyUiHost: '127.0.0.1',
+      comfyUiPort: COMFYUI_PORT,
+      expectedSteps,
+      stallTimeoutMs: t.stallMs,
+      httpFetch: makeSshHttpFetch(ssh, COMFYUI_PORT),
     });
 
-    return runner.run({
-      accountId,
-      jobId,
-      workload: {
-        vramGb: spec.cookFlags.vramGb ?? 24,
-        cloudPreference: spec.cookFlags.cloudPreference ?? 'SECURE',
-        maxPricePerHr: spec.cookFlags.maxPricePerHr ?? 1.0,
-        expectedSteps: spec.cookFlags.expectedSteps ?? 4,
-        maxJobCostUsd: spec.cookFlags.maxJobCostUsd,
-      },
-      workflow: {
-        comfyApiPayload: spec.workflow.comfyApiPayload,
-        modelManifest: spec.models,
-      },
-      timeouts,
+    stallDetector.on('stalled', ({ reason }) => {
+      stalled = true;
+      stallReason = reason;
+      this.logger.warn(`[GenerationRunner] Pod ${podId} stalled: ${reason}`);
     });
+    stallDetector.start();
+
+    const jobStart = Date.now();
+    let promptId;
+    try {
+      promptId = await this._submitWorkflow(ssh, comfyApiPayload);
+    } catch (err) {
+      stallDetector.stop();
+      throw err;
+    }
+
+    const completion = await this._awaitCompletion(ssh, promptId, {
+      jobMs: t.jobMs,
+      isStalled: () => stalled,
+    });
+
+    const jobMs = Date.now() - jobStart;
+    stallDetector.stop();
+
+    if (stalled) {
+      return {
+        status: 'stalled',
+        podId,
+        gpuTypeId,
+        cloudType,
+        timings: { jobMs, totalMs: Date.now() - totalStart },
+        cost: buildCost(hourlyUsd, Date.now() - totalStart),
+        outputs: [],
+        error: { code: 'STALLED', message: stallReason || 'StallDetector tripped' },
+      };
+    }
+
+    const remotePaths = completion.remotePaths;
+    const outputs = remotePaths.length
+      ? await this.uploader.uploadFromPod({ sshConnection: ssh, accountId, jobId, remotePaths })
+      : [];
+
+    const totalMs = Date.now() - totalStart;
+    return {
+      status: 'completed',
+      podId,
+      gpuTypeId,
+      cloudType,
+      timings: { jobMs, totalMs },
+      cost: buildCost(hourlyUsd, totalMs),
+      outputs,
+    };
+  }
+
+  /**
+   * Terminate a pod and close its SSH connection.
+   */
+  async teardownPod(podId, ssh) {
+    if (podId) {
+      try {
+        await this.service.terminateInstance(podId);
+        this.logger.info(`[GenerationRunner] Pod ${podId} terminated`);
+      } catch (err) {
+        this.logger.error(`[GenerationRunner] Failed to terminate ${podId}: ${err.message}`);
+      }
+    }
+    if (ssh && typeof ssh.close === 'function') {
+      try { await ssh.close(); } catch (_) {}
+    }
   }
 
   async _runSetup(ssh, workflow) {
