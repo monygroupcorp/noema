@@ -63,16 +63,17 @@ class WorkflowExecutionService {
         adapterRegistry.register('runpod', new RunPodAdapter({ generationRunner, compiler, sessionManager, logger }));
 
         this.asyncJobPoller = new AsyncJobPoller({
-            logger, 
-            generationRecordManager: this.generationRecordManager 
+            logger,
+            generationRecordManager: this.generationRecordManager
         });
+        this.workflowNotifier = new WorkflowNotifier({ logger });
         this.adapterCoordinator = new AdapterCoordinator({
             logger,
             adapterRegistry,
             generationRecordManager: this.generationRecordManager,
-            asyncJobPoller: this.asyncJobPoller
+            asyncJobPoller: this.asyncJobPoller,
+            workflowNotifier: this.workflowNotifier
         });
-        this.workflowNotifier = new WorkflowNotifier({ logger });
         
         // Initialize execution services
         this.stepExecutor = new StepExecutor({
