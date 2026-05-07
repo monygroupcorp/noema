@@ -7,6 +7,9 @@ const GPUScheduler = require('./GPUScheduler');
 const StallDetector = require('./StallDetector');
 const OutputUploader = require('./OutputUploader');
 const GenerationRunner = require('./GenerationRunner');
+const WorkflowTemplateRegistry = require('./WorkflowTemplateRegistry');
+const Compiler = require('./Compiler');
+const { CompilerError } = Compiler;
 
 module.exports = {
   RunPodClient,
@@ -17,5 +20,8 @@ module.exports = {
   GPUScheduler,
   StallDetector,
   OutputUploader,
-  GenerationRunner
+  GenerationRunner,
+  WorkflowTemplateRegistry,
+  Compiler,
+  CompilerError
 };

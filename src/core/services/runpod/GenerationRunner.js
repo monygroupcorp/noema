@@ -253,6 +253,42 @@ class GenerationRunner {
     }
   }
 
+  async runDeployment({ deployment, accountId, jobId, timeouts = {} } = {}) {
+    if (!deployment || !deployment.spec) throw new Error('runDeployment requires deployment.spec');
+    if (!accountId) throw new Error('runDeployment requires accountId');
+    if (!jobId) throw new Error('runDeployment requires jobId');
+
+    const { spec } = deployment;
+
+    const runner = new GenerationRunner({
+      logger: this.logger,
+      config: this.config,
+      service: this.service,
+      scheduler: this.scheduler,
+      uploader: this.uploader,
+      stallDetectorFactory: this.stallDetectorFactory,
+      sshTransportFactory: this.sshTransportFactory,
+      image: spec.image.ociRef,
+    });
+
+    return runner.run({
+      accountId,
+      jobId,
+      workload: {
+        vramGb: spec.cookFlags.vramGb ?? 24,
+        cloudPreference: spec.cookFlags.cloudPreference ?? 'SECURE',
+        maxPricePerHr: spec.cookFlags.maxPricePerHr ?? 1.0,
+        expectedSteps: spec.cookFlags.expectedSteps ?? 4,
+        maxJobCostUsd: spec.cookFlags.maxJobCostUsd,
+      },
+      workflow: {
+        comfyApiPayload: spec.workflow.comfyApiPayload,
+        modelManifest: spec.models,
+      },
+      timeouts,
+    });
+  }
+
   async _runSetup(ssh, workflow) {
     await ssh.exec('which git || (apt-get update -qq && apt-get install -y -qq git)', { timeout: 120000 });
     await ssh.exec('cd /root && rm -rf ComfyUI && git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git', { timeout: 120000 });

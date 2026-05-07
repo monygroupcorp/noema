@@ -135,9 +135,17 @@ class ToolRegistry {
    * @returns {{ isValid: boolean; errors: Array<{ toolId: string | 'unknown', message: string }> }}
    */
   validate() {
+    const { isFractalTool, validateFractalTool } = require('./fractalTool');
     const errors = [];
     this.tools.forEach(tool => {
       const toolId = tool.toolId || 'unknown';
+
+      if (isFractalTool(tool)) {
+        const fractalResult = validateFractalTool(tool);
+        for (const err of fractalResult.errors) {
+          errors.push({ toolId, message: `[fractal] ${err.field}: ${err.message}` });
+        }
+      }
 
       if (!tool.toolId) errors.push({ toolId: 'unknown', message: 'Missing toolId' });
       if (!tool.service) errors.push({ toolId, message: 'Missing service' });

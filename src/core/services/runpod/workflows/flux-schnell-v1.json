@@ -1,0 +1,31 @@
+{
+  "templateId": "flux-schnell",
+  "version": "1",
+  "displayName": "FLUX Schnell text-to-image (512x512, 4 steps)",
+  "seedInputKey": "input_seed",
+  "comfyApiPayload": {
+    "6":  { "class_type": "EmptyLatentImage",   "inputs": { "width": 512, "height": 512, "batch_size": 1 } },
+    "8":  { "class_type": "VAEDecode",          "inputs": { "samples": ["13", 0], "vae": ["10", 0] } },
+    "9":  { "class_type": "SaveImage",          "inputs": { "filename_prefix": "runmake", "images": ["8", 0] } },
+    "10": { "class_type": "VAELoader",          "inputs": { "vae_name": "ae.safetensors" } },
+    "11": { "class_type": "DualCLIPLoader",     "inputs": { "clip_name1": "t5xxl_fp16.safetensors", "clip_name2": "clip_l.safetensors", "type": "flux" } },
+    "12": { "class_type": "UNETLoader",         "inputs": { "unet_name": "flux1-schnell.safetensors", "weight_dtype": "fp8_e4m3fn" } },
+    "13": { "class_type": "KSampler",           "inputs": { "seed": 88888888, "steps": 4, "cfg": 1, "sampler_name": "euler", "scheduler": "simple", "denoise": 1, "model": ["12", 0], "positive": ["22", 0], "negative": ["22", 0], "latent_image": ["6", 0] } },
+    "22": { "class_type": "CLIPTextEncodeFlux", "inputs": { "clip": ["11", 0], "clip_l": "PLACEHOLDER", "t5xxl": "PLACEHOLDER", "guidance": 3.5 } }
+  },
+  "slotMap": {
+    "/13/inputs/seed":   "input_seed",
+    "/13/inputs/steps":  "steps",
+    "/6/inputs/width":   "width",
+    "/6/inputs/height":  "height",
+    "/22/inputs/clip_l": "prompt",
+    "/22/inputs/t5xxl":  "prompt"
+  },
+  "requiredModels": [
+    { "role": "unet", "id": "flux1-schnell", "url": "https://models.miladystation2.net/unet/flux1-schnell.safetensors", "dest": "unet/flux1-schnell.safetensors" },
+    { "role": "vae",  "id": "ae",            "url": "https://models.miladystation2.net/vae/ae.safetensors",            "dest": "vae/ae.safetensors" },
+    { "role": "clip", "id": "t5xxl-fp16",    "url": "https://models.miladystation2.net/clip/t5xxl_fp16.safetensors",   "dest": "clip/t5xxl_fp16.safetensors" },
+    { "role": "clip", "id": "clip-l",        "url": "https://models.miladystation2.net/clip/clip_l.safetensors",       "dest": "clip/clip_l.safetensors" }
+  ],
+  "platformHints": { "vramGb": 24, "expectedSteps": 4 }
+}
