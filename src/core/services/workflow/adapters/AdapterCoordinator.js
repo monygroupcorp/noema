@@ -6,13 +6,15 @@
 
 const { ObjectId } = require('mongodb');
 const { isFractalTool } = require('../../../tools/fractalTool');
+const { isFractalCompilerEnabled } = require('../../../tools/featureFlags');
 
 class AdapterCoordinator {
-    constructor({ logger, adapterRegistry, generationRecordManager, asyncJobPoller }) {
+    constructor({ logger, adapterRegistry, generationRecordManager, asyncJobPoller, workflowNotifier }) {
         this.logger = logger;
         this.adapterRegistry = adapterRegistry;
         this.generationRecordManager = generationRecordManager;
         this.asyncJobPoller = asyncJobPoller;
+        this.workflowNotifier = workflowNotifier || null;
     }
 
     /**
@@ -77,8 +79,16 @@ class AdapterCoordinator {
 
         // Fractal Tools pass { tool, inputs, accountContext } so the adapter compiles the Deployment.
         // Legacy tools continue to receive the flat merged-inputs blob.
+        // Gate: fractal tools require the compiler feature flag to be enabled for this account.
         let runInfo;
         if (isFractalTool(tool)) {
+            const accountContext = { masterAccountId: originalContext.masterAccountId };
+            if (!isFractalCompilerEnabled(tool, accountContext)) {
+                throw new Error(
+                    `[AdapterCoordinator] Fractal compiler not enabled for tool ${tool.toolId} / account ${originalContext.masterAccountId}. ` +
+                    `Set NOEMAPLANE_COMPILER_ENABLED=1 or add to NOEMAPLANE_COMPILER_TOOLS + NOEMAPLANE_COMPILER_ALLOWLIST.`
+                );
+            }
             this.logger.debug(`[AdapterCoordinator] Calling adapter.startJob() (fractal) tool=${tool.toolId} jobId=${generationId}`);
             runInfo = await adapter.startJob({
                 tool,
@@ -132,6 +142,18 @@ class AdapterCoordinator {
         try {
             const result = await this.executeWithAdapter(tool, inputs, executionContext, dependencies);
             this.logger.debug(`[AdapterCoordinator] executeWithAdapter completed. GenID: ${result.generationId}, RunId: ${result.runId}`);
+
+            // Notify the user immediately so cold starts don't look like a hung spinner.
+            if (this.workflowNotifier) {
+                const liveStatus = result.isNewSession
+                    ? '❄️ Warming GPU (~7-9 min)…'
+                    : '⚡ Running…';
+                await this.workflowNotifier.notifyStepProgress(executionContext, result.generationId, tool, {
+                    progress: result.isNewSession ? 0.05 : 0.4,
+                    status: 'running',
+                    liveStatus,
+                }).catch(err => this.logger.warn(`[AdapterCoordinator] notifyStepProgress failed: ${err.message}`));
+            }
 
             const adapter = this.adapterRegistry.get(tool.service);
             if (!adapter) {
@@ -232,4 +254,165 @@ class AdapterCoordinator {
 }
 
 module.exports = AdapterCoordinator;
+
+if (require.main === module) {
+    (async () => {
+        const { ObjectId } = require('mongodb');
+        const failures = [];
+        const noop = { debug: () => {}, warn: () => {}, error: () => {}, info: () => {} };
+
+        const fractalTool = {
+            toolId: 'runmake',
+            service: 'runpod',
+            spec: { imageId: 'runpod/pytorch', workflowTemplate: 'flux-schnell' },
+        };
+        const legacyTool = { toolId: 'dall-e', service: 'openai' };
+
+        const fakeGenId = new ObjectId();
+        const makeGenMgr = () => ({
+            createGenerationRecord: async () => ({ generationId: fakeGenId }),
+            updateGenerationRecord: async () => {},
+        });
+        const makePoller = () => ({ startPolling: async () => {} });
+        const makeRegistry = (startJobFn) => ({
+            get: () => ({ startJob: startJobFn }),
+        });
+
+        const makeContext = () => ({
+            spell: { _id: 'spell1', toObject() { return {}; } },
+            stepIndex: 0,
+            pipelineContext: {},
+            originalContext: {
+                masterAccountId: new ObjectId().toString(),
+                platform: 'telegram',
+                castId: 'cast1',
+            },
+        });
+
+        const originalEnv = { ...process.env };
+        const resetEnv = () => {
+            delete process.env.NOEMAPLANE_COMPILER_ENABLED;
+            delete process.env.NOEMAPLANE_COMPILER_TOOLS;
+            delete process.env.NOEMAPLANE_COMPILER_ALLOWLIST;
+        };
+
+        // A. Feature flag OFF → fractal tool throws
+        {
+            resetEnv();
+            const coordinator = new AdapterCoordinator({
+                logger: noop,
+                adapterRegistry: makeRegistry(async () => ({ runId: 'r1', isNewSession: true })),
+                generationRecordManager: makeGenMgr(),
+                asyncJobPoller: makePoller(),
+            });
+            const err = await coordinator.executeWithAdapter(
+                fractalTool, {}, makeContext(), { eventId: new ObjectId().toString() }
+            ).then(() => null).catch(e => e.message);
+            if (!err || !/not enabled/i.test(err)) {
+                failures.push(`A: expected "not enabled" error, got: ${err}`);
+            }
+            console.log(`  A flag-off fractal guard: "${err?.slice(0, 80)}…"`);
+        }
+
+        // B. Feature flag ON → fractal path succeeds
+        {
+            resetEnv();
+            process.env.NOEMAPLANE_COMPILER_ENABLED = '1';
+            let startJobArgs;
+            const coordinator = new AdapterCoordinator({
+                logger: noop,
+                adapterRegistry: makeRegistry(async (args) => { startJobArgs = args; return { runId: 'r2', isNewSession: false }; }),
+                generationRecordManager: makeGenMgr(),
+                asyncJobPoller: makePoller(),
+            });
+            await coordinator.executeWithAdapter(fractalTool, { prompt: 'test' }, makeContext(), { eventId: new ObjectId().toString() });
+            if (!startJobArgs?.tool) failures.push('B: fractal path should pass { tool } to startJob');
+            if (!startJobArgs?.accountContext) failures.push('B: fractal path should pass accountContext');
+            console.log(`  B flag-on fractal: startJob received tool=${startJobArgs?.tool?.toolId} accountContext=${!!startJobArgs?.accountContext}`);
+        }
+
+        // C. Legacy (non-fractal) tool bypasses feature flag check
+        {
+            resetEnv();
+            let startJobArgs;
+            const coordinator = new AdapterCoordinator({
+                logger: noop,
+                adapterRegistry: makeRegistry(async (args) => { startJobArgs = args; return { runId: 'r3' }; }),
+                generationRecordManager: makeGenMgr(),
+                asyncJobPoller: makePoller(),
+            });
+            const err = await coordinator.executeWithAdapter(
+                legacyTool, { size: '1024x1024' }, makeContext(), { eventId: new ObjectId().toString() }
+            ).then(() => null).catch(e => e.message);
+            if (err) failures.push(`C: legacy tool should not throw, got: ${err}`);
+            if (startJobArgs?.tool) failures.push('C: legacy path should NOT pass { tool } to startJob');
+            console.log(`  C legacy bypasses flag: err=${err} hasTool=${!!startJobArgs?.tool}`);
+        }
+
+        // D. Cold-start notification fires with correct liveStatus
+        {
+            resetEnv();
+            process.env.NOEMAPLANE_COMPILER_ENABLED = '1';
+            let capturedStatus;
+            const notifier = {
+                notifyStepProgress: async (ctx, genId, tool, opts) => { capturedStatus = opts.liveStatus; },
+            };
+            const coordinator = new AdapterCoordinator({
+                logger: noop,
+                adapterRegistry: makeRegistry(async () => ({ runId: 'r4', isNewSession: true })),
+                generationRecordManager: makeGenMgr(),
+                asyncJobPoller: makePoller(),
+                workflowNotifier: notifier,
+            });
+            await coordinator.createAsyncJob(fractalTool, {}, makeContext(), { eventId: new ObjectId().toString() }, null);
+            if (!capturedStatus?.includes('❄️')) failures.push(`D: cold-start liveStatus should include ❄️, got: ${capturedStatus}`);
+            console.log(`  D cold-start notification: "${capturedStatus}"`);
+        }
+
+        // E. Warm notification fires with ⚡
+        {
+            resetEnv();
+            process.env.NOEMAPLANE_COMPILER_ENABLED = '1';
+            let capturedStatus;
+            const notifier = {
+                notifyStepProgress: async (ctx, genId, tool, opts) => { capturedStatus = opts.liveStatus; },
+            };
+            const coordinator = new AdapterCoordinator({
+                logger: noop,
+                adapterRegistry: makeRegistry(async () => ({ runId: 'r5', isNewSession: false })),
+                generationRecordManager: makeGenMgr(),
+                asyncJobPoller: makePoller(),
+                workflowNotifier: notifier,
+            });
+            await coordinator.createAsyncJob(fractalTool, {}, makeContext(), { eventId: new ObjectId().toString() }, null);
+            if (!capturedStatus?.includes('⚡')) failures.push(`E: warm liveStatus should include ⚡, got: ${capturedStatus}`);
+            console.log(`  E warm notification: "${capturedStatus}"`);
+        }
+
+        // F. No workflowNotifier → no crash
+        {
+            resetEnv();
+            process.env.NOEMAPLANE_COMPILER_ENABLED = '1';
+            const coordinator = new AdapterCoordinator({
+                logger: noop,
+                adapterRegistry: makeRegistry(async () => ({ runId: 'r6', isNewSession: true })),
+                generationRecordManager: makeGenMgr(),
+                asyncJobPoller: makePoller(),
+            });
+            const err = await coordinator.createAsyncJob(fractalTool, {}, makeContext(), { eventId: new ObjectId().toString() }, null)
+                .then(() => null).catch(e => e.message);
+            if (err) failures.push(`F: no notifier should not throw, got: ${err}`);
+            console.log(`  F no-notifier: err=${err}`);
+        }
+
+        // Restore env
+        for (const k of ['NOEMAPLANE_COMPILER_ENABLED', 'NOEMAPLANE_COMPILER_TOOLS', 'NOEMAPLANE_COMPILER_ALLOWLIST']) {
+            if (originalEnv[k] === undefined) delete process.env[k];
+            else process.env[k] = originalEnv[k];
+        }
+
+        if (failures.length) { console.error('FAIL:', failures.join('; ')); process.exit(1); }
+        console.log('PASS: AdapterCoordinator');
+    })().catch(err => { console.error('FAIL:', err.stack || err); process.exit(1); });
+}
 
