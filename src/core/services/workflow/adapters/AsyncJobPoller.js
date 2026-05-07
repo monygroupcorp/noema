@@ -61,7 +61,13 @@ class AsyncJobPoller {
                         const updatePayload = {
                             status: finalStatus,
                             responsePayload: [{ type: pollRes.type, data: finalData }],
-                            ...(pollRes.costUsd && { costUsd: pollRes.costUsd })
+                            ...(pollRes.costUsd && { costUsd: pollRes.costUsd }),
+                            ...(pollRes.isNewSession !== undefined && {
+                                'metadata.sessionMeta': {
+                                    isNewSession: pollRes.isNewSession,
+                                    timingMs: pollRes.timingMs ?? null,
+                                }
+                            }),
                         };
 
                         await this.generationRecordManager.updateGenerationRecord(generationId, updatePayload);
