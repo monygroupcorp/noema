@@ -12,6 +12,7 @@ const Compiler = require('./Compiler');
 const { CompilerError } = Compiler;
 const Session = require('./Session');
 const SessionManager = require('./SessionManager');
+const SessionRecovery = require('./SessionRecovery');
 
 module.exports = {
   RunPodClient,
@@ -28,4 +29,5 @@ module.exports = {
   CompilerError,
   Session,
   SessionManager,
+  SessionRecovery,
 };

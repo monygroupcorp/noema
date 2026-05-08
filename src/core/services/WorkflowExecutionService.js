@@ -54,13 +54,22 @@ class WorkflowExecutionService {
         }
 
         // Register RunPod adapter: Compiler + SessionManager + GenerationRunner
-        const { GenerationRunner, WorkflowTemplateRegistry, Compiler, SessionManager } = require('./runpod');
+        const { GenerationRunner, WorkflowTemplateRegistry, Compiler, SessionManager, SessionRecovery } = require('./runpod');
         const RunPodAdapter = require('./runpod/RunPodAdapter');
         const workflowTemplates = new WorkflowTemplateRegistry({ logger });
         const compiler = new Compiler({ workflowTemplates, logger });
         const generationRunner = new GenerationRunner({ logger });
-        const sessionManager = new SessionManager({ logger });
+        const sessionStore = db && db.runpodSessions ? db.runpodSessions : null;
+        const sessionManager = new SessionManager({ logger, sessionStore });
         adapterRegistry.register('runpod', new RunPodAdapter({ generationRunner, compiler, sessionManager, logger }));
+
+        // Fire-and-forget: recover live sessions from DB after process restart.
+        // Early requests cold-start normally; recovered sessions become available once probing completes.
+        if (sessionStore) {
+            const sessionRecovery = new SessionRecovery({ logger });
+            sessionRecovery.recover(sessionManager, generationRunner.service, sessionStore)
+                .catch(err => logger.error(`[WorkflowExecutionService] Session recovery failed: ${err.message}`));
+        }
 
         this.asyncJobPoller = new AsyncJobPoller({
             logger,
