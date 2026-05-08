@@ -14,13 +14,16 @@ const SWEEP_INTERVAL_MS = 60 * 1000;             // check every minute
  *
  * Idle sessions (no job within idleTimeoutMs) are evicted by a periodic sweep.
  *
- * Phase 1: in-memory only; sessions are lost on process restart.
- * Phase 2+: persist to DB so restarts can reclaim live pods.
+ * Persistence (Phase 2): pass an optional `sessionStore` (RunpodSessionsDB or
+ * any object with save(session) / delete(sessionId) methods). The manager
+ * writes to the store on register/evict so that SessionRecovery can reconnect
+ * live pods after a process restart.
  */
 class SessionManager {
-  constructor({ idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS, logger = console } = {}) {
+  constructor({ idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS, logger = console, sessionStore = null } = {}) {
     this.idleTimeoutMs = idleTimeoutMs;
     this.logger = logger;
+    this.sessionStore = sessionStore;
     /** @type {Map<string, Session>} accountId → Session */
     this._sessions = new Map();
     this._sweepInterval = setInterval(() => this._sweep(), SWEEP_INTERVAL_MS).unref();
@@ -55,6 +58,7 @@ class SessionManager {
     }
     this._sessions.set(session.accountId, session);
     this.logger.info(`[SessionManager] registered session=${session.sessionId} account=${session.accountId} pod=${session.podId} hash=${session.deploymentHash.slice(7, 19)}…`);
+    this._persistSave(session);
     return session;
   }
 
@@ -90,7 +94,22 @@ class SessionManager {
 
   _evict(session) {
     this.logger.info(`[SessionManager] evicting session=${session.sessionId} pod=${session.podId} idleMs=${session.idleMs()} jobs=${session.jobCount}`);
+    this._persistDelete(session.sessionId);
     return session.terminate();
+  }
+
+  _persistSave(session) {
+    if (!this.sessionStore) return;
+    Promise.resolve(this.sessionStore.save(session)).catch(err =>
+      this.logger.warn(`[SessionManager] sessionStore.save failed: ${err.message}`)
+    );
+  }
+
+  _persistDelete(sessionId) {
+    if (!this.sessionStore) return;
+    Promise.resolve(this.sessionStore.delete(sessionId)).catch(err =>
+      this.logger.warn(`[SessionManager] sessionStore.delete failed: ${err.message}`)
+    );
   }
 
   _sweep() {

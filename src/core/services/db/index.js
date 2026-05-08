@@ -28,6 +28,7 @@ const CollectionExportsDB = require('./collectionExportsDb');
 const ReviewQueueDB = require('./reviewQueueDb');
 const EmbellishmentTasksDB = require('./embellishmentTasksDb');
 const X402PaymentLogDB = require('./x402PaymentLogDb');
+const RunpodSessionsDB = require('./runpodSessionsDb');
 
 // Import new on-chain DB services
 const CreditLedgerDB = require('./alchemy/creditLedgerDb');
@@ -77,6 +78,8 @@ function initializeDbServices(logger) {
     reviewQueue: ReviewQueueDB ? new ReviewQueueDB(logger) : null,
     embellishmentTasks: EmbellishmentTasksDB ? new EmbellishmentTasksDB(logger) : null,
     x402PaymentLog: X402PaymentLogDB ? new X402PaymentLogDB(logger) : null,
+
+    runpodSessions: RunpodSessionsDB ? new RunpodSessionsDB(logger) : null,
 
     // On-chain services
     creditLedger: CreditLedgerDB ? new CreditLedgerDB(logger) : null,
