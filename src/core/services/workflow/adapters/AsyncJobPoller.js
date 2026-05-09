@@ -23,7 +23,7 @@ class AsyncJobPoller {
      */
     async startPolling(generationId, runId, adapter, options = {}) {
         const {
-            maxAttempts = 60, // 5 min at 5s interval
+            maxAttempts = 60, // 300s at 5s interval
             pollInterval = 5000,
             normalizeOutput = null
         } = options;
@@ -77,8 +77,6 @@ class AsyncJobPoller {
 
                         break; // Job completed, exit polling loop
                     }
-
-                    attempts++;
                 }
 
                 if (attempts >= maxAttempts) {

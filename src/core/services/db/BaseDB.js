@@ -215,6 +215,14 @@ class BaseDB {
         }, priority);
     }
 
+    async deleteMany(filter, priority = PRIORITY.MEDIUM, session = null) {
+        return dbQueue.enqueue(async () => {
+            const client = await getCachedClient();
+            const collection = client.db(this.dbName).collection(this.collectionName);
+            return collection.deleteMany(filter, { session });
+        }, priority);
+    }
+
     // Common Operations using $operators - ensure these are passed to updateOne correctly
     async increment(filter, field, amount = 1, priority = PRIORITY.HIGH, session = null) {
         const updateDoc = { $inc: { [field]: amount } };

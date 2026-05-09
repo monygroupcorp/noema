@@ -162,12 +162,13 @@ class AdapterCoordinator {
 
             // Start polling for async adapter jobs
             this.logger.debug(`[AdapterCoordinator] Starting polling for generation ${result.generationId}, runId ${result.runId}`);
+            // 180 attempts × 5 s = 15 min — covers a 9-min cold start plus margin.
             await this.asyncJobPoller.startPolling(
                 result.generationId,
                 result.runId,
                 adapter,
                 {
-                    maxAttempts: 60,
+                    maxAttempts: 180,
                     pollInterval: 5000,
                     normalizeOutput: normalizeOutput
                 }

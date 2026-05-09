@@ -89,8 +89,7 @@ class RunpodSessionsDB extends BaseDB {
   async deleteStale(maxAgeMs = 24 * 60 * 60 * 1000) {
     const cutoff = new Date(Date.now() - maxAgeMs);
     try {
-      const result = await this.deleteOne({ lastUsedAt: { $lt: cutoff } });
-      return result;
+      return await this.deleteMany({ lastUsedAt: { $lt: cutoff } });
     } catch (err) {
       this.logger.warn(`[RunpodSessionsDB] deleteStale failed: ${err.message}`);
     }
