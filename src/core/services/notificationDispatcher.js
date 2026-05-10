@@ -1,6 +1,19 @@
 const notificationEvents = require('../events/notificationEvents');
 const MAX_DELIVERY_ATTEMPTS = 3;
 
+function _formatSessionTiming(sessionMeta) {
+    if (!sessionMeta || sessionMeta.timingMs == null) return null;
+    const ms = sessionMeta.timingMs;
+    let duration;
+    if (ms < 60000) {
+        duration = `${(ms / 1000).toFixed(1)}s`;
+    } else {
+        const totalSec = Math.round(ms / 1000);
+        duration = `${Math.floor(totalSec / 60)}m${totalSec % 60}s`;
+    }
+    return sessionMeta.isNewSession ? `❄️ ${duration} · session warm` : `⚡ ${duration}`;
+}
+
 // Ensure cook orchestrator can continue after internal 'cook' notifications
 const CookOrchestratorService = require('./cook/CookOrchestratorService');
 
@@ -291,7 +304,11 @@ class NotificationDispatcher {
       if (record.status === 'completed') {
         // ✅ Success – keep it concise. No internal IDs exposed.
         const displayName = record.metadata?.displayName || record.serviceName || 'Task';
-        messageContent = `✅ ${displayName} completed successfully!`;
+        const sessionMeta = record.metadata?.sessionMeta;
+        const timingTag = _formatSessionTiming(sessionMeta);
+        messageContent = timingTag
+          ? `✅ ${displayName} · ${timingTag}`
+          : `✅ ${displayName} completed successfully!`;
       } else {
         // ❌ Failure – bubble up service-provided reason when present; otherwise generic.
         const reason = record.statusReason?.trim();

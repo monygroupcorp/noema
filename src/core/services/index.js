@@ -148,6 +148,10 @@ async function initializeServices(options = {}) {
       if (userEconomyDb && typeof userEconomyDb.ensureIndexes === 'function') {
         await userEconomyDb.ensureIndexes();
       }
+      const runpodSessionsDb = initializedDbServices?.data?.runpodSessions;
+      if (runpodSessionsDb && typeof runpodSessionsDb.ensureIndexes === 'function') {
+        await runpodSessionsDb.ensureIndexes();
+      }
     } catch (indexErr) {
       logger.error('Failed to ensure DB indexes:', indexErr);
     }

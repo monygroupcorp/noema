@@ -1,6 +1,7 @@
 'use strict';
 
 const { BaseDB } = require('./BaseDB');
+const { getCachedClient } = require('./utils/queue');
 
 const COLLECTION_NAME = 'runpodSessions';
 
@@ -86,6 +87,27 @@ class RunpodSessionsDB extends BaseDB {
    * Called during recovery to clean up orphaned records from crashed workers.
    * @param {number} [maxAgeMs]
    */
+  /**
+   * Create indexes idempotently. Called once on startup by services/index.js.
+   * - accountId: primary lookup for warm-session reuse
+   * - lastUsedAt: range scan for deleteStale / SessionRecovery age filter
+   * - podId: unique constraint — each pod should map to at most one session
+   */
+  async ensureIndexes() {
+    try {
+      const client = await getCachedClient();
+      const col = client.db(this.dbName).collection(this.collectionName);
+      await col.createIndexes([
+        { key: { accountId: 1 },    name: 'accountId',    background: true },
+        { key: { lastUsedAt: 1 },   name: 'lastUsedAt',   background: true },
+        { key: { podId: 1 },        name: 'podId_unique', unique: true, background: true },
+      ]);
+      this.logger.debug('[RunpodSessionsDB] Indexes ensured.');
+    } catch (err) {
+      this.logger.error('[RunpodSessionsDB] Failed to ensure indexes:', err.message);
+    }
+  }
+
   async deleteStale(maxAgeMs = 24 * 60 * 60 * 1000) {
     const cutoff = new Date(Date.now() - maxAgeMs);
     try {
