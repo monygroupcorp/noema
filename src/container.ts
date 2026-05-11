@@ -6,8 +6,8 @@ import type { Modorum } from './types/modus.js'
 
 import { MongoActorum } from './crystal/MongoActorum.js'
 import { MongoModorum } from './crystal/MongoModorum.js'
+import { MongoSignorum } from './crystal/MongoSignorum.js'
 import { RunPodCursor } from './crystal/RunPodCursor.js'
-import { MemorySignorum } from './crystal/MemorySignorum.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
 import { ActumCompletor } from './crystal/ActumCompletor.js'
 
@@ -44,6 +44,8 @@ export interface ContainerConfig {
   actaCollection?: string
   /** Collection name for modi — default 'modi' */
   modiCollection?: string
+  /** Collection name for signa — default 'signa' */
+  signaCollection?: string
 }
 
 export function createContainer(mongo: MongoClient, config: ContainerConfig): Ring {
@@ -56,8 +58,8 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const modiCol: Collection = db.collection(config.modiCollection ?? 'modi')
   const modorum = new MongoModorum(modiCol)
 
-  // ── Phase 3: in-memory stub ────────────────────────────────────────────────
-  const signorum = new MemorySignorum() // → MongoSignorum in Phase 3
+  const signaCol: Collection = db.collection(config.signaCollection ?? 'signa')
+  const signorum = new MongoSignorum(signaCol)
 
   // ── Execution rail ─────────────────────────────────────────────────────────
   const runpodCursor = new RunPodCursor(
