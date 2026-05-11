@@ -1,0 +1,117 @@
+// =============================================================================
+// NEXUS — the typed event bus that connects business events to ledger entries
+// =============================================================================
+//
+// "nexus" = connection/binding in Latin (4th declension masculine)
+// nexus, nexus, nexui, nexum, nexu
+//
+// The Nexus is NOT a data type — it is the wiring layer above the Signorum
+// ledger. It decouples business events from their financial consequences:
+//
+//   emit(execution_spend event)
+//     → hostCutHook      → [reward signum for host]
+//     → spellRoyaltyHook → [reward signum for modus author]
+//     → modelRoyaltyHook → [reward signa for intella authors]
+//     → platformSkimHook → [reward signum for platform]
+//   → Signorum commits all atomically
+//
+// Adding a new revenue event = one new hook registration.
+// No pipeline modification. No branching. Each hook is its own file.
+//
+// HOOKS ARE PURE: event in → signa out. No DB calls inside hooks.
+// EMIT IS ATOMIC: all signa from all hooks land together or none do.
+//
+// HOOKS HANDLE DISTRIBUTION ONLY. Deduction (marking signa spent) happens
+// via Signorum.settle() before emit. Hooks produce what flows OUT
+// to other parties as a result of the settlement.
+// =============================================================================
+
+import type { Actum } from './actum'
+import type { Modo } from './modo'
+import type { Signum, Signa } from './significandi'
+
+// ---------------------------------------------------------------------------
+// Event types
+// ---------------------------------------------------------------------------
+
+export type SignumEventType =
+  | 'execution_spend'    // a modus ran and was paid for
+  | 'session_spend'      // pod-time accrued on a modo
+  | 'deposit_confirmed'  // inbound credit landed
+  | 'royalty_fired'      // internal — triggers platform skim hook
+
+// The payload each event type carries — typed per event
+export interface SignumEventPayload {
+  execution_spend: {
+    actum: Actum
+    modo?: Modo
+    /** Total impetus points charged for this execution */
+    impetus: bigint
+    /** animaId of the session host — present when executing inside another anima's modo */
+    modoHostAnimaId?: string
+    /** animaId of the modus author — for spell royalty */
+    modusAuctorAnimaId?: string
+    /** animaIds of intella authors — for model royalty, equal-split across all */
+    intellaAuctorAnimaIds?: string[]
+  }
+
+  session_spend: {
+    modo: Modo
+    /** Seconds of pod-time being billed in this tick */
+    seconds: number
+    impetus: bigint
+  }
+
+  deposit_confirmed: {
+    signum: Signum
+    /** animaId of the referrer — for referral split hook */
+    referrerAnimaId?: string
+  }
+
+  royalty_fired: {
+    actumId: string
+    /** Total royalty valor that fired — for platform skim calculation */
+    royaltyValor: bigint
+    /** Base impetus of the execution — platform skim is 5% of this */
+    baseValor: bigint
+  }
+}
+
+export interface SignumEvent<T extends SignumEventType> {
+  type: T
+  payload: SignumEventPayload[T]
+}
+
+// ---------------------------------------------------------------------------
+// Hook type
+// ---------------------------------------------------------------------------
+
+/**
+ * A SignumHook observes one event type and produces zero or more Signum
+ * entries to add to the ledger.
+ *
+ * PURE FUNCTION CONTRACT:
+ *   - No DB calls
+ *   - No side effects
+ *   - Same event → same signa (deterministic)
+ *   - Return [] to produce no entries (e.g. condition not met)
+ */
+export type SignumHook<T extends SignumEventType> = (
+  event: SignumEvent<T>
+) => Promise<Array<Omit<Signum, 'id' | 'natum' | 'status'>>>
+
+// ---------------------------------------------------------------------------
+// Nexus interface
+// ---------------------------------------------------------------------------
+
+/**
+ * Nexus — the event bus.
+ *
+ * Registers hooks per event type. On emit, fans the event out to all
+ * registered hooks, collects their signa, and returns them for atomic
+ * commit by SignorumService.
+ */
+export interface Nexus {
+  on<T extends SignumEventType>(type: T, hook: SignumHook<T>): void
+  emit<T extends SignumEventType>(event: SignumEvent<T>): Promise<Array<Omit<Signum, 'id' | 'natum' | 'status'>>>
+}
