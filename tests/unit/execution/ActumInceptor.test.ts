@@ -1,0 +1,217 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import type { Modus } from '../../../src/types/modus.js'
+import type { Actum } from '../../../src/types/actum.js'
+import type { Signum, Signa } from '../../../src/types/significandi.js'
+import type { Cursor, Actorum, Cursorum, Inceptio } from '../../../src/types/cursus.js'
+import { ActumInceptor } from '../../../src/execution/ActumInceptor.js'
+
+// ---------------------------------------------------------------------------
+// Fakes
+// ---------------------------------------------------------------------------
+
+function makeModus(overrides: Partial<Modus> = {}): Modus {
+  return {
+    id: 'mod-1', nomen: 'test', genus: 'atomicus',
+    versio: '1.0.0', contentHash: 'abc',
+    aditus: {}, exitus: {}, canonica: true,
+    ministerium: 'openai', impetusFixum: 100n,
+    natum: new Date(), mutatum: new Date(),
+    ...overrides,
+  }
+}
+
+function makeSignum(valor: bigint, id = 'sig-1'): Signum {
+  return { id, animaId: 'anima-1', forma: 'eth', valor, auctor: 'test', status: 'valid', natum: new Date() }
+}
+
+function makeModorum(modus: Modus) {
+  return { find: async () => modus, register: async () => {}, list: async () => [] }
+}
+
+function makeRunner(reserve: bigint = 100n): Cursor {
+  return {
+    reserve: async () => reserve,
+    run: async () => ({ exitus: {}, impetus: reserve }),
+  }
+}
+
+function makeCursorum(runner: Cursor): Cursorum {
+  return {
+    register: () => {},
+    resolve: () => runner,
+  }
+}
+
+function makeSignorum(signa: Signa = [makeSignum(500n)]) {
+  const locked: string[] = []
+  return {
+    balance: async () => signa.filter(s => s.status === 'valid').reduce((s, x) => s + x.valor, 0n),
+    issue: async (s: Omit<Signum, 'id' | 'natum' | 'status'>) => ({ ...s, id: 'new', status: 'valid' as const, createdAt: new Date() }),
+    spend: async () => {},
+    lock: async (ids: string[]) => { locked.push(...ids) },
+    release: async () => {},
+    history: async () => signa,
+    _locked: locked,
+  }
+}
+
+function makeActa(): Actorum & { records: Actum[] } {
+  const records: Actum[] = []
+  return {
+    records,
+    create: async (a) => { const r = { ...a, inceptum: new Date() }; records.push(r); return r },
+    update: async (id, patch) => {
+      const r = records.find(x => x.id === id)!
+      Object.assign(r, patch)
+      return r
+    },
+    findById: async (id) => records.find(x => x.id === id) ?? null,
+  }
+}
+
+function makeParams(overrides: Partial<Inceptio> = {}): Inceptio {
+  return { modusId: 'mod-1', aditus: {}, by: { animaId: 'anima-1' }, ...overrides }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+test('returns a nascens actum', async () => {
+  const modus = makeModus()
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(makeRunner()),
+    signorum: makeSignorum(),
+    acta: makeActa(),
+  })
+
+  const actum = await inceptor.initiate(makeParams())
+
+  assert.equal(actum.status, 'nascens')
+})
+
+test('actum records the modusId and versio', async () => {
+  const modus = makeModus({ id: 'mod-42', versio: '2.1.0' })
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(makeRunner()),
+    signorum: makeSignorum(),
+    acta: makeActa(),
+  })
+
+  const actum = await inceptor.initiate(makeParams({ modusId: 'mod-42' }))
+
+  assert.equal(actum.modusId, 'mod-42')
+  assert.equal(actum.modusVersiono, '2.1.0')
+})
+
+test('actum.impetus is set to the reserved amount', async () => {
+  const modus = makeModus()
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(makeRunner(250n)),
+    signorum: makeSignorum([makeSignum(1000n)]),
+    acta: makeActa(),
+  })
+
+  const actum = await inceptor.initiate(makeParams())
+
+  assert.equal(actum.impetus, 250n)
+})
+
+test('actum.aditus records the inputs', async () => {
+  const modus = makeModus()
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(makeRunner()),
+    signorum: makeSignorum(),
+    acta: makeActa(),
+  })
+  const aditus = { prompt: 'a red fox', width: 512 }
+
+  const actum = await inceptor.initiate(makeParams({ aditus }))
+
+  assert.deepEqual(actum.aditus, aditus)
+})
+
+test('actum.modoId is forwarded when provided', async () => {
+  const modus = makeModus()
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(makeRunner()),
+    signorum: makeSignorum(),
+    acta: makeActa(),
+  })
+
+  const actum = await inceptor.initiate(makeParams({ modoId: 'modo-99' }))
+
+  assert.equal(actum.modoId, 'modo-99')
+})
+
+test('signa covering the reservation are locked', async () => {
+  const modus = makeModus()
+  const sig1 = makeSignum(60n, 'sig-a')
+  const sig2 = makeSignum(60n, 'sig-b')
+  const signorum = makeSignorum([sig1, sig2])
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(makeRunner(100n)),
+    signorum,
+    acta: makeActa(),
+  })
+
+  await inceptor.initiate(makeParams())
+
+  assert.ok(signorum._locked.length > 0, 'expected some signa to be locked')
+  const lockedValor = [sig1, sig2]
+    .filter(s => signorum._locked.includes(s.id))
+    .reduce((sum, s) => sum + s.valor, 0n)
+  assert.ok(lockedValor >= 100n, `locked valor ${lockedValor} should cover reservation 100n`)
+})
+
+test('actum.signaConsumed lists the locked signa ids', async () => {
+  const modus = makeModus()
+  const signorum = makeSignorum([makeSignum(500n, 'sig-x')])
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(makeRunner(100n)),
+    signorum,
+    acta: makeActa(),
+  })
+
+  const actum = await inceptor.initiate(makeParams())
+
+  assert.deepEqual(actum.signaConsumed, signorum._locked)
+})
+
+test('throws InsufficientFundsError when balance is below reservation', async () => {
+  const modus = makeModus()
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(makeRunner(1000n)),
+    signorum: makeSignorum([makeSignum(50n)]),  // only 50, need 1000
+    acta: makeActa(),
+  })
+
+  await assert.rejects(
+    () => inceptor.initiate(makeParams()),
+    /insufficient/i,
+  )
+})
+
+test('throws when modus is not found', async () => {
+  const modorum = { find: async () => null, register: async () => {}, list: async () => [] }
+  const inceptor = new ActumInceptor({
+    modorum,
+    cursorum: makeCursorum(makeRunner()),
+    signorum: makeSignorum(),
+    acta: makeActa(),
+  })
+
+  await assert.rejects(
+    () => inceptor.initiate(makeParams()),
+    /modus/i,
+  )
+})
