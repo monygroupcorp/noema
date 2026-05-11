@@ -61,3 +61,14 @@ export interface Persona {
 
 /** "Personae" — nominative plural. All masks of one anima across platforms. */
 export type Personae = Persona[]
+
+/**
+ * PersonaStore — the Persona repository interface.
+ * Core operation is findOrCreate: called on every platform interaction.
+ */
+export interface PersonaStore {
+  /** Find by platform + externusId, or create if not found. Updates visum on find. */
+  findOrCreate(genus: PersonaGenus, externusId: string, defaults?: { animaId: string; nomen?: string }): Promise<Persona>
+  findByAnimaId(animaId: string): Promise<Personae>
+  findByExternus(genus: PersonaGenus, externusId: string): Promise<Persona | null>
+}

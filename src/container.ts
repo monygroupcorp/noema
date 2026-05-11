@@ -3,10 +3,14 @@ import type { Modus } from './types/modus.js'
 import type { Actorum, Cursorum, ActumCompletor as IActumCompletor } from './types/cursus.js'
 import type { Signorum } from './types/significandi.js'
 import type { Modorum } from './types/modus.js'
+import type { AnimaStore } from './types/anima.js'
+import type { PersonaStore } from './types/persona.js'
 
 import { MongoActorum } from './crystal/MongoActorum.js'
 import { MongoModorum } from './crystal/MongoModorum.js'
 import { MongoSignorum } from './crystal/MongoSignorum.js'
+import { MongoAnima } from './crystal/MongoAnima.js'
+import { MongoPersona } from './crystal/MongoPersona.js'
 import { RunPodCursor } from './crystal/RunPodCursor.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
 import { ActumCompletor } from './crystal/ActumCompletor.js'
@@ -15,6 +19,8 @@ export interface Ring {
   actorum: Actorum
   modorum: Modorum
   signorum: Signorum
+  animae: AnimaStore
+  personae: PersonaStore
   cursorum: Cursorum
   completor: IActumCompletor
 }
@@ -46,6 +52,10 @@ export interface ContainerConfig {
   modiCollection?: string
   /** Collection name for signa — default 'signa' */
   signaCollection?: string
+  /** Collection name for animae — default 'animae' */
+  animaeCollection?: string
+  /** Collection name for personae — default 'personae' */
+  personaeCollection?: string
 }
 
 export function createContainer(mongo: MongoClient, config: ContainerConfig): Ring {
@@ -61,6 +71,12 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const signaCol: Collection = db.collection(config.signaCollection ?? 'signa')
   const signorum = new MongoSignorum(signaCol)
 
+  const animaeCol: Collection = db.collection(config.animaeCollection ?? 'animae')
+  const animae = new MongoAnima(animaeCol)
+
+  const personaeCol: Collection = db.collection(config.personaeCollection ?? 'personae')
+  const personae = new MongoPersona(personaeCol)
+
   // ── Execution rail ─────────────────────────────────────────────────────────
   const runpodCursor = new RunPodCursor(
     config.runner as Parameters<typeof RunPodCursor>[0],
@@ -74,5 +90,5 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   const completor = new ActumCompletor(actorum, signorum)
 
-  return { actorum, modorum, signorum, cursorum, completor }
+  return { actorum, modorum, signorum, animae, personae, cursorum, completor }
 }
