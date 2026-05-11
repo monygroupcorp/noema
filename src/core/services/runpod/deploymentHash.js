@@ -69,7 +69,72 @@ function hashDeployment(spec) {
   return `sha256:${digest}`;
 }
 
-module.exports = { hashDeployment, canonicalize };
+/**
+ * Compute the content hash for a Tool version (atomic or composed).
+ * This is the Merkle pin used in composedSteps[].childToolRef.contentHash.
+ *
+ * Atomic: hashes { toolId, version, inputSchema, outputSchema, service, spec }
+ * Composed: hashes { toolId, version, inputSchema, outputSchema, composedSteps, exposedInputs, exposedOutputs }
+ *
+ * @param {Object} tool - the tool definition object
+ * @returns {string} sha256:<hex>
+ */
+function hashToolVersion(tool) {
+  const isComposed = Array.isArray(tool.composedSteps) && tool.composedSteps.length > 0;
+
+  let payload;
+  if (isComposed) {
+    payload = {
+      toolId: tool.toolId,
+      version: tool.version,
+      inputSchema: tool.inputSchema || {},
+      outputSchema: tool.outputSchema || {},
+      composedSteps: (tool.composedSteps || []).map(s => ({
+        stepId: s.stepId,
+        ordine: s.ordine,
+        childToolRef: {
+          toolId: s.childToolRef.toolId,
+          version: s.childToolRef.version,
+          contentHash: s.childToolRef.contentHash,
+        },
+        inputBindings: s.inputBindings || {},
+        runCondition: s.runCondition || null,
+      })),
+      exposedInputs: tool.exposedInputs || [],
+      exposedOutputs: tool.exposedOutputs || [],
+    };
+  } else {
+    const spec = tool.spec;
+    payload = {
+      toolId: tool.toolId,
+      version: tool.version,
+      inputSchema: tool.inputSchema || {},
+      outputSchema: tool.outputSchema || {},
+      service: tool.service || null,
+      spec: spec ? {
+        imageId: spec.imageId,
+        imageVersion: spec.imageVersion,
+        workflowTemplate: spec.workflowTemplate,
+        workflowTemplateVersion: spec.workflowTemplateVersion || null,
+        requiredModelRefs: (spec.requiredModelRefs || [])
+          .slice()
+          .sort((a, b) => {
+            const ra = String(a.role || ''), rb = String(b.role || '');
+            if (ra < rb) return -1; if (ra > rb) return 1;
+            const ia = String(a.id || ''), ib = String(b.id || '');
+            return ia < ib ? -1 : ia > ib ? 1 : 0;
+          }),
+        defaultCookFlags: spec.defaultCookFlags || {},
+      } : null,
+    };
+  }
+
+  const canonical = canonicalize(payload);
+  const digest = crypto.createHash('sha256').update(canonical, 'utf8').digest('hex');
+  return `sha256:${digest}`;
+}
+
+module.exports = { hashDeployment, hashToolVersion, canonicalize };
 
 if (require.main === module) {
   const assert = require('assert');
