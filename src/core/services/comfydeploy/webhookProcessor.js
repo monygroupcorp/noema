@@ -6,9 +6,9 @@ const adapterRegistry = require('../adapterRegistry');
 const { getPricingService } = require('../pricing');
 const { generationService } = require('../store/generations/GenerationService');
 const { economyService } = require('../store/economy/EconomyService');
-const LoRAModelsDB = require('../db/loRAModelDb');
 const ResponsePayloadNormalizer = require('../notifications/ResponsePayloadNormalizer');
 const { signWebhook, validateWebhookUrl } = require('../../../utils/webhookUtils');
+const { chargeGeneration } = require('../charging/chargeGeneration');
 
 // Temporary in-memory cache for live progress (can be managed within this module)
 const activeJobProgress = new Map();
@@ -345,7 +345,13 @@ async function processComfyDeployWebhook(payload, { internalApiClient, logger, w
     // The Notification Dispatch Service will handle notifications based on generationRecord updates.
 
     // ADR-005: Debit logic starts here
-    if (generationRecord && updatePayload.status === 'completed' && costUsd != null && costUsd > 0) {
+    // Spell steps charged upfront via chargeSpellExecution skip per-step debit to prevent double-billing.
+    if (generationRecord?.metadata?.isSpell &&
+        generationRecord.deliveryStrategy === 'spell_step' &&
+        generationRecord.metadata?.castChargedUpfront === true) {
+      logger.debug(`[Webhook Processor] Spell step with upfront cast charge — skipping per-step debit for ${generationId}`);
+      // Fall through to scheduleNext / cook orchestration below without debiting
+    } else if (generationRecord && updatePayload.status === 'completed' && costUsd != null && costUsd > 0) {
       const toolId = generationRecord.metadata?.toolId || generationRecord.toolId; // Fallback as per instructions
       if (!toolId) {
         logger.error(`[Webhook Processor] Debit skipped for generation ${generationId}: toolId is missing in metadata or record.`);
@@ -414,32 +420,33 @@ async function processComfyDeployWebhook(payload, { internalApiClient, logger, w
         logger.debug(`[Webhook Processor] Pricing breakdown for gen ${generationId}: computeUsd=$${costUsd.toFixed(4)}, multiplier=${quote.multiplier}x, finalUsd=$${quote.finalCostUsd.toFixed(4)}, points=${basePointsToSpend} (MS2: ${isMs2User})`);
 
         try {
-          const { totalPointsToCharge, totalRewards, rewardBreakdown } = await distributeContributorRewards(generationRecord, basePointsToSpend, { logger });
-
-          logger.debug(`[Webhook Processor] Attempting to spend ${totalPointsToCharge} points for generation ${generationId}, user ${generationRecord.masterAccountId}. (Base: ${basePointsToSpend}, Rewards: ${totalRewards})`);
-          await economyService.spend(spenderMasterAccountId, { pointsToSpend: totalPointsToCharge, spendContext: { generationId: generationId.toString(), toolId } });
-          logger.info(`[Webhook Processor] Spend successful for generation ${generationId}, user ${generationRecord.masterAccountId}.`);
-
-          const protocolNetPoints = basePointsToSpend;
-
-          logger.debug(`[Webhook Processor] Points accounting for gen ${generationId}: Total Spent: ${totalPointsToCharge}, Contributor Rewards: ${totalRewards}, Protocol Net: ${protocolNetPoints}`);
+          const chargeResult = await chargeGeneration({
+            masterAccountId: spenderMasterAccountId,
+            generationRecord,
+            basePoints: basePointsToSpend,
+            toolId,
+            idempotencyKey: `${generationId}:final-debit`,
+            logger,
+            economyService,
+          });
 
           try {
-            await generationService.recordPointsAccounting(generationId, { pointsSpent: totalPointsToCharge, contributorRewardPoints: totalRewards, protocolNetPoints, rewardBreakdown });
-            logger.debug(`[Webhook Processor] Successfully updated generation ${generationId} with final point accounting.`);
-          } catch(err) {
-            logger.error(`[Webhook Processor] Non-critical error: Failed to update generation ${generationId} with point accounting details after a successful spend.`, err.message);
+            await generationService.recordPointsAccounting(generationId, {
+              pointsSpent: chargeResult.totalPointsCharged,
+              contributorRewardPoints: chargeResult.totalRewards,
+              protocolNetPoints: basePointsToSpend,
+              rewardBreakdown: chargeResult.rewardBreakdown,
+            });
+          } catch (err) {
+            logger.error(`[Webhook Processor] Non-critical: Failed to record accounting for ${generationId}.`, err.message);
           }
 
-          // << ADR-005 EXP Update Start >>
-          try {
-            logger.debug(`[Webhook Processor] Attempting EXP update for masterAccountId ${generationRecord.masterAccountId}: +${totalPointsToCharge}`);
-            await economyService.updateExp(generationRecord.masterAccountId, totalPointsToCharge);
-            logger.debug(`[Webhook Processor] EXP updated for masterAccountId ${generationRecord.masterAccountId}: +${totalPointsToCharge} points`);
-          } catch (expError) {
-            logger.warn(`[Webhook Processor] EXP update failed for masterAccountId ${generationRecord.masterAccountId}. This is non-blocking. Error:`, expError.message, expError.stack);
+          // Record member spend against their group cap (best-effort)
+          if (isGroupPool && generationRecord.metadata?.fallbackMasterAccountId && userCoreDb) {
+            const memberId = generationRecord.metadata.fallbackMasterAccountId;
+            userCoreDb.recordMemberSpend(generationRecord.masterAccountId, memberId, basePointsToSpend)
+              .catch(err => logger.warn(`[Webhook Processor] Non-critical: Failed to record member spend cap for ${memberId}: ${err.message}`));
           }
-          // << ADR-005 EXP Update End >>
 
         } catch (spendError) {
           // --- Group pool fallback: retry with user's own account ---
@@ -447,20 +454,25 @@ async function processComfyDeployWebhook(payload, { internalApiClient, logger, w
             const fallbackId = generationRecord.metadata.fallbackMasterAccountId;
             logger.info(`[Webhook Processor] Group pool spend failed (INSUFFICIENT_FUNDS). Falling back to user ${fallbackId} for generation ${generationId}.`);
             try {
-              const { totalPointsToCharge, totalRewards, rewardBreakdown } = await distributeContributorRewards(generationRecord, basePointsToSpend, { logger });
-              await economyService.spend(fallbackId, { pointsToSpend: totalPointsToCharge, spendContext: { generationId: generationId.toString(), toolId, fallbackFrom: 'group_pool' } });
-              logger.info(`[Webhook Processor] Fallback spend successful for generation ${generationId}, user ${fallbackId}.`);
+              const chargeResult = await chargeGeneration({
+                masterAccountId: fallbackId,
+                generationRecord,
+                basePoints: basePointsToSpend,
+                toolId,
+                idempotencyKey: `${generationId}:final-debit`,
+                logger,
+                economyService,
+              });
 
               try {
-                await generationService.recordPointsAccounting(generationId, { pointsSpent: totalPointsToCharge, contributorRewardPoints: totalRewards, protocolNetPoints: basePointsToSpend, rewardBreakdown });
-              } catch(err) {
+                await generationService.recordPointsAccounting(generationId, {
+                  pointsSpent: chargeResult.totalPointsCharged,
+                  contributorRewardPoints: chargeResult.totalRewards,
+                  protocolNetPoints: basePointsToSpend,
+                  rewardBreakdown: chargeResult.rewardBreakdown,
+                });
+              } catch (err) {
                 logger.error(`[Webhook Processor] Non-critical: Failed to record accounting after fallback spend for ${generationId}.`, err.message);
-              }
-
-              try {
-                await economyService.updateExp(generationRecord.masterAccountId, totalPointsToCharge);
-              } catch (expError) {
-                logger.warn(`[Webhook Processor] EXP update failed after fallback for ${generationRecord.masterAccountId}. Non-blocking.`, expError.message);
               }
             } catch (fallbackError) {
               logger.error(`[Webhook Processor] Fallback spend also FAILED for generation ${generationId}, user ${fallbackId}. Error:`, fallbackError.message);
@@ -474,7 +486,6 @@ async function processComfyDeployWebhook(payload, { internalApiClient, logger, w
             logger.error(`[Webhook Processor] Spend FAILED for generation ${generationId}, user ${generationRecord.masterAccountId}. Error:`, spendError.message, spendError.stack);
             try {
               await generationService.markPaymentFailed(generationId, spendError.message || 'Spend failed post-generation.');
-              logger.debug(`[Webhook Processor] Updated generation ${generationId} status to 'payment_failed'.`);
             } catch (updateError) {
               logger.error(`[Webhook Processor] CRITICAL: Failed to update generation ${generationId} to 'payment_failed' after spend failure. Error:`, updateError.message, updateError.stack);
             }
@@ -509,135 +520,6 @@ async function processComfyDeployWebhook(payload, { internalApiClient, logger, w
   return { success: true, statusCode: 200, data: { message: "Webhook processed successfully. DB record updated." } };
 }
 
-// <<<< ADR-012: Micro-Fee System REVISED >>>>
-/**
- * Calculates and distributes contributor rewards based on a shared pool model.
- * The user is charged the base cost + the total rewards distributed.
- * @param {object} generationRecord - The full generation record.
- * @param {number} basePoints - The base cost of the generation in points.
- * @param {{internalApiClient: object, logger: object}} dependencies - Dependencies.
- * @returns {Promise<{totalPointsToCharge: number, totalRewards: number, rewardBreakdown: Array}>}
- */
-async function distributeContributorRewards(generationRecord, basePoints, { logger }) {
-    logger.debug(`[distributeContributorRewards] Calculating rewards for gen ${generationRecord._id} based on ${basePoints} base points.`);
-    const generatingUserId = generationRecord.masterAccountId.toString();
-    const rewardsToDistribute = [];
-    const rewardBreakdown = [];
-
-    const SPELL_REWARD_RATE = 0.05;    // Spell author gets flat 5%
-    const PER_LORA_RATE = 0.05;        // 5% per external LoRA
-    const LORA_POOL_CAP_RATE = 0.15;   // LoRA pool capped at 15%
-
-    const rawLrd = generationRecord.metadata?.loraResolutionData;
-    logger.debug(`[distributeContributorRewards] generatingUserId=${generatingUserId}, loraResolutionData keys=${rawLrd ? Object.keys(rawLrd).join(',') : 'MISSING'}, appliedLoras count=${rawLrd?.appliedLoras?.length ?? 'N/A'}`);
-
-    // --- 1. Spell author reward (fixed 5%, not shared) ---
-    const isSpell = generationRecord.metadata?.isSpell;
-    const spellOwnerId = generationRecord.metadata?.spell?.ownedBy?.toString();
-    if (isSpell && spellOwnerId && spellOwnerId !== generatingUserId) {
-        const spellRewardPoints = Math.floor(basePoints * SPELL_REWARD_RATE);
-        if (spellRewardPoints > 0) {
-            rewardsToDistribute.push({ contributorId: spellOwnerId, points: spellRewardPoints, type: 'spell' });
-            logger.info(`[distributeContributorRewards] Spell author ${spellOwnerId} earns ${spellRewardPoints} points (${SPELL_REWARD_RATE * 100}% of base).`);
-        }
-    }
-
-    // --- 2. LoRA model trainer rewards (5% per model, capped at 15%) ---
-    const loras = (generationRecord.metadata?.loraResolutionData?.appliedLoras || []);
-    // Track per-slug data for model-level reward stats
-    const externalLoras = [];
-    loras.forEach(lora => {
-        const ownerId = lora.ownerAccountId?.toString();
-        logger.debug(`[distributeContributorRewards] LoRA '${lora.slug}': ownerAccountId=${ownerId || 'NULL'}, generatingUser=${generatingUserId}, same=${ownerId === generatingUserId}`);
-        if (ownerId && ownerId !== generatingUserId) {
-            externalLoras.push({ slug: lora.slug, ownerId });
-        }
-    });
-
-    const totalLoraShares = externalLoras.length;
-    if (totalLoraShares > 0) {
-        const uncappedLoraPool = Math.floor(basePoints * PER_LORA_RATE * totalLoraShares);
-        const loraRewardPool = Math.min(uncappedLoraPool, Math.floor(basePoints * LORA_POOL_CAP_RATE));
-        const pointsPerLoraShare = Math.floor(loraRewardPool / totalLoraShares);
-        logger.info(`[distributeContributorRewards] LoRA pool: ${totalLoraShares} shares, uncapped=${uncappedLoraPool}, capped=${loraRewardPool}, per-share=${pointsPerLoraShare}.`);
-
-        if (pointsPerLoraShare > 0) {
-            // Aggregate by owner for the spendable credit
-            const ownerPoints = {};
-            for (const { slug, ownerId } of externalLoras) {
-                ownerPoints[ownerId] = (ownerPoints[ownerId] || 0) + pointsPerLoraShare;
-            }
-            for (const [ownerId, points] of Object.entries(ownerPoints)) {
-                rewardsToDistribute.push({ contributorId: ownerId, points, type: 'lora' });
-            }
-        }
-    }
-
-    if (rewardsToDistribute.length === 0) {
-        logger.debug('[distributeContributorRewards] No external contributors found. No rewards to distribute.');
-        return { totalPointsToCharge: basePoints, totalRewards: 0, rewardBreakdown: [] };
-    }
-
-    // --- 3. Issue rewards via tally pattern (three atomic writes per contributor) ---
-    const loraModelsDb = new LoRAModelsDB(logger);
-    let totalPointsDistributed = 0;
-
-    for (const reward of rewardsToDistribute) {
-        try {
-            // Resolve contributor wallet for credit ledger visibility
-            const walletAddress = await economyService.getUserWalletAddress(reward.contributorId);
-            if (!walletAddress) {
-                logger.warn(`[distributeContributorRewards] No wallet for contributor ${reward.contributorId}. Tally entry will lack depositor_address.`);
-            }
-
-            // Write 1: Credit ledger tally (spendable balance)
-            await economyService.creditLedger.upsertRewardTally({
-                masterAccountId: economyService._toOid(reward.contributorId),
-                depositorAddress: walletAddress,
-                rewardCategory: reward.type,
-                points: reward.points,
-            });
-
-            // Write 2: User economy tally (dashboard + leaderboard)
-            await economyService.userEconomy.incrementContributorRewards(
-                reward.contributorId, reward.type, reward.points
-            );
-
-            totalPointsDistributed += reward.points;
-            logger.info(`[distributeContributorRewards] Credited ${reward.points} points (${reward.type}) to ${reward.contributorId}.`);
-            rewardBreakdown.push({ contributorId: reward.contributorId, points: reward.points, type: reward.type, status: 'credited' });
-        } catch (error) {
-            logger.error(`[distributeContributorRewards] FAILED to credit ${reward.contributorId} for gen ${generationRecord._id}: ${error.message}`);
-            rewardBreakdown.push({ contributorId: reward.contributorId, points: reward.points, type: reward.type, status: 'failed', error: error.message });
-        }
-    }
-
-    // Write 3: Per-model reward stats (non-blocking, best-effort)
-    if (totalLoraShares > 0) {
-        const loraRewardPool = Math.min(
-            Math.floor(basePoints * PER_LORA_RATE * totalLoraShares),
-            Math.floor(basePoints * LORA_POOL_CAP_RATE)
-        );
-        const pointsPerLoraShare = Math.floor(loraRewardPool / totalLoraShares);
-        if (pointsPerLoraShare > 0) {
-            for (const { slug } of externalLoras) {
-                try {
-                    await loraModelsDb.incrementRewardStats(slug, pointsPerLoraShare);
-                } catch (err) {
-                    logger.warn(`[distributeContributorRewards] Failed to update rewardStats for model '${slug}': ${err.message}`);
-                }
-            }
-        }
-    }
-
-    const totalPointsToCharge = basePoints + totalPointsDistributed;
-    logger.info(`[distributeContributorRewards] Complete. Base: ${basePoints}, Rewards: ${totalPointsDistributed}, Total Charge: ${totalPointsToCharge}.`);
-
-    return { totalPointsToCharge, totalRewards: totalPointsDistributed, rewardBreakdown };
-}
-
-
-// This function is no longer needed as we are using a points-based system and a single reward function.
 /*
 async function issueCredit(masterAccountId, payload, { internalApiClient, logger }) {
     if (!masterAccountId) {
@@ -661,7 +543,6 @@ async function issueCredit(masterAccountId, payload, { internalApiClient, logger
     }
 }
 */
-// <<<< ADR-012: Micro-Fee System END >>>>
 
 // Helper function to build the debit payload as per ADR-005
 function buildDebitPayload(toolId, generationRecord, costUsd) {

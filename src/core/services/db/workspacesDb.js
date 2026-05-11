@@ -149,6 +149,32 @@ class WorkspacesDB extends BaseDB {
     return this.findMany(filter, { limit, skip, sort: { updatedAt: -1 } });
   }
 
+  /**
+   * Increment the revision counter on the template workspace.
+   * Called when admin publishes a new version of the template.
+   * @param {string} slug
+   * @returns {Promise<number>} New revision number
+   */
+  async incrementRevision(slug) {
+    await this.updateOne({ slug }, { $inc: { revision: 1 }, $set: { updatedAt: new Date() } });
+    const ws = await this.findBySlug(slug);
+    return ws?.revision ?? 1;
+  }
+
+  /**
+   * Find all agent workspaces descended from a template that are behind the given revision.
+   * @param {string} templateSlug
+   * @param {number} currentRevision
+   * @returns {Promise<Array>}
+   */
+  async findBehindTemplate(templateSlug, currentRevision) {
+    return this.findMany({
+      'origin.slug': templateSlug,
+      isAgentStarter: true,
+      'origin.templateRevision': { $lt: currentRevision },
+    });
+  }
+
   async deleteWorkspace(slug, requesterId) {
     const ws = await this.findBySlug(slug);
     if (!ws) {

@@ -27,6 +27,7 @@ const createPaymentsApi = require('./payments/paymentsApi');
 const createX402GenerationApi = require('./x402/x402GenerationApi');
 const { createX402Middleware } = require('../../platforms/web/middleware/x402');
 const { createMcpRouter } = require('./mcp');
+const { createAgentDelegationApi } = require('./agents/agentDelegationApi');
 
 
 /**
@@ -609,6 +610,11 @@ function initializeExternalApi(dependencies) {
   } else {
     logger.warn('External Workspaces API router not mounted due to missing dependencies.');
   }
+
+  // Agent delegation redeem (public — token is the credential)
+  const agentDelegationRouter = createAgentDelegationApi(dependencies);
+  externalApiRouter.use('/agents', agentDelegationRouter);
+  logger.debug('External Agent Delegation API mounted at /agents.');
 
   logger.info('External API router initialized.');
   return externalApiRouter;

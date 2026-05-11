@@ -60,6 +60,7 @@ const VastAIService = require('./vastai/VastAIService');
 const { ModelService } = require('./store/models/ModelService');
 const { GenerationExecutionService } = require('./generationExecutionService');
 const { economyService } = require('./store/economy/EconomyService');
+const { DelegationService } = require('./agents/DelegationService');
 const notificationEvents = require('../events/notificationEvents');
 
 /**
@@ -147,6 +148,16 @@ async function initializeServices(options = {}) {
       const userEconomyDb = initializedDbServices?.data?.userEconomy;
       if (userEconomyDb && typeof userEconomyDb.ensureIndexes === 'function') {
         await userEconomyDb.ensureIndexes();
+      }
+      // Typed account indexes (agent / treasury / group)
+      const userCoreDb = initializedDbServices?.data?.userCore;
+      if (userCoreDb && typeof userCoreDb.ensureIndexes === 'function') {
+        await userCoreDb.ensureIndexes();
+      }
+      // Agent delegation link indexes
+      const agentDelegationsDb = initializedDbServices?.data?.agentDelegations;
+      if (agentDelegationsDb && typeof agentDelegationsDb.ensureIndexes === 'function') {
+        await agentDelegationsDb.ensureIndexes();
       }
     } catch (indexErr) {
       logger.error('Failed to ensure DB indexes:', indexErr);
@@ -346,6 +357,11 @@ async function initializeServices(options = {}) {
       logger,
     });
     // Phase 8: GenerationExecutionService — in-process execution (must precede WorkflowExecutionService)
+    const delegationService = new DelegationService({
+      delegationsDb: initializedDbServices.data.agentDelegations,
+      userCoreDb: initializedDbServices.data.userCore,
+      logger,
+    });
     const generationExecutionService = new GenerationExecutionService({
       db: initializedDbServices.data,
       toolRegistry,
@@ -357,6 +373,7 @@ async function initializeServices(options = {}) {
       adminActivityService,
       notificationEvents,
       economyService,
+      delegationService,
       logger,
     });
     logger.debug('GenerationExecutionService initialized.');
@@ -630,6 +647,7 @@ async function initializeServices(options = {}) {
       spellPaymentService, // expose SpellPaymentService
       collectionExportService,
       embellishmentTaskService, // expose EmbellishmentTaskService
+      economyService, // expose for treasury/agent APIs
     };
 
     // DIAGNOSTIC LOGGING REMOVED

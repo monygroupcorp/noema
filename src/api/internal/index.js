@@ -136,6 +136,7 @@ function initializeInternalServices(dependencies = {}) {
       userService: dependencies.userService,
       trainingService: dependencies.trainingService,
       generationExecutionService: dependencies.generationExecutionService, // Phase 8
+      economyService: dependencies.economyService,
   };
 
   // Create an instance of teamServiceDb and add it to apiDependencies
@@ -197,6 +198,13 @@ function initializeInternalServices(dependencies = {}) {
   const groupsApiRouter = createGroupsApi(apiDependencies);
   v1DataRouter.use('/groups', groupsApiRouter);
   logger.debug('[InternalAPI] Groups API service mounted to /v1/data/groups');
+
+  // Treasury + Agent sub-account API (Phase 2)
+  const { createTreasuryApi, createAgentsApi, createTemplateWorkspaceApi } = require('./treasury');
+  v1DataRouter.use('/treasury', createTreasuryApi(apiDependencies));
+  v1DataRouter.use('/agents', createAgentsApi(apiDependencies));
+  v1DataRouter.use('/template-workspace', createTemplateWorkspaceApi(apiDependencies));
+  logger.debug('[InternalAPI] Treasury + Agents + TemplateWorkspace APIs mounted');
 
   // User Core API Service:
   const userCoreApiRouter = createUserCoreApi(apiDependencies);

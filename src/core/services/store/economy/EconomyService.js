@@ -63,9 +63,17 @@ class EconomyService {
    * @returns {Promise<Array>} spend breakdown
    * @throws if insufficient funds or deduction fails
    */
-  async spend(masterAccountId, { pointsToSpend, spendContext } = {}) {
+  async spend(masterAccountId, { pointsToSpend, spendContext, idempotencyKey } = {}) {
     if (!Number.isInteger(pointsToSpend) || pointsToSpend <= 0) {
       throw new Error('pointsToSpend must be a positive integer.');
+    }
+
+    if (idempotencyKey) {
+      const existing = await this.creditLedger.findSpendLog(idempotencyKey);
+      if (existing) {
+        this.logger.info(`[EconomyService] Idempotent spend: key ${idempotencyKey} already processed.`);
+        return existing.related_items.spendSummary;
+      }
     }
 
     const oid = this._toOid(masterAccountId);
@@ -176,6 +184,12 @@ class EconomyService {
       return summary;
     });
 
+    if (idempotencyKey) {
+      await this.creditLedger.createSpendLog(idempotencyKey, oid, spendSummary).catch(err =>
+        this.logger.warn(`[EconomyService] Non-fatal: failed to record spend idempotency log for ${idempotencyKey}: ${err.message}`)
+      );
+    }
+
     this.logger.info(`[EconomyService] SPEND_LOG: User ${idStr} spent ${pointsToSpend} points (target: ${spendTarget})`, {
       totalPointsSpent: pointsToSpend,
       spendBreakdown: spendSummary,
@@ -183,6 +197,99 @@ class EconomyService {
     });
 
     return spendSummary;
+  }
+
+  /**
+   * Atomically transfer points from one account to another (spend + credit in one transaction).
+   * Used for group fund operations to prevent split-brain failures.
+   */
+  async transferPoints(fromMasterAccountId, toMasterAccountId, points, { description, rewardType, relatedItems, idempotencyKey } = {}) {
+    if (!Number.isInteger(points) || points <= 0) {
+      throw new Error('points must be a positive integer.');
+    }
+
+    if (idempotencyKey) {
+      const existing = await this.creditLedger.findSpendLog(idempotencyKey);
+      if (existing) {
+        this.logger.info(`[EconomyService] Idempotent transferPoints: key ${idempotencyKey} already processed.`);
+        return existing.related_items.spendSummary;
+      }
+    }
+
+    const fromOid = this._toOid(fromMasterAccountId);
+    const toOid = this._toOid(toMasterAccountId);
+
+    // Resolve deposits for the source account (same logic as spend)
+    let activeDeposits = await this.creditLedger.findActiveDepositsForUser(fromOid);
+    if (!activeDeposits || activeDeposits.length === 0) {
+      const walletAddress = await this.getUserWalletAddress(fromOid);
+      if (walletAddress) {
+        activeDeposits = await this.creditLedger.findActiveDepositsForWalletAddress(walletAddress);
+      }
+    }
+    if (!activeDeposits || activeDeposits.length === 0) {
+      throw Object.assign(new Error('Source account has no active deposits.'), { code: 'INSUFFICIENT_FUNDS' });
+    }
+
+    const totalAvailable = activeDeposits.reduce((s, d) => s + (d.points_remaining || 0), 0);
+    if (totalAvailable < points) {
+      throw Object.assign(
+        new Error(`Insufficient points. Required: ${points}, Available: ${totalAvailable}`),
+        { code: 'INSUFFICIENT_FUNDS' }
+      );
+    }
+
+    const now = new Date();
+    const result = await this.creditLedger.withTransaction(async (session) => {
+      // Re-read deposits within transaction
+      let txDeposits = await this.creditLedger.findActiveDepositsForUser(fromOid);
+      if (!txDeposits || txDeposits.length === 0) {
+        const walletAddress = await this.getUserWalletAddress(fromOid);
+        if (walletAddress) {
+          txDeposits = await this.creditLedger.findActiveDepositsForWalletAddress(walletAddress);
+        }
+      }
+      txDeposits.sort((a, b) => (a.funding_rate_applied || 0) - (b.funding_rate_applied || 0));
+
+      const txTotal = txDeposits.reduce((s, d) => s + (d.points_remaining || 0), 0);
+      if (txTotal < points) {
+        throw new Error(`Insufficient points in transaction. Required: ${points}, Available: ${txTotal}`);
+      }
+
+      let pointsLeft = points;
+      const summary = [];
+      for (const deposit of txDeposits) {
+        if (pointsLeft <= 0) break;
+        const toDeduct = Math.min(pointsLeft, deposit.points_remaining);
+        await this.creditLedger.deductPointsFromDeposit(deposit._id, toDeduct, session);
+        summary.push({ depositId: deposit._id.toString(), pointsDeducted: toDeduct });
+        pointsLeft -= toDeduct;
+      }
+
+      // Credit the destination within the same transaction
+      await this.creditLedger.insertOne({
+        master_account_id: toOid,
+        status: 'CONFIRMED',
+        type: rewardType || 'TRANSFER_CREDIT',
+        description: description || `Transfer from ${fromOid}`,
+        points_credited: points,
+        points_remaining: points,
+        related_items: relatedItems || {},
+        createdAt: now,
+        updatedAt: now,
+      }, { session });
+
+      return summary;
+    });
+
+    if (idempotencyKey) {
+      await this.creditLedger.createSpendLog(idempotencyKey, fromOid, result).catch(err =>
+        this.logger.warn(`[EconomyService] Non-fatal: failed to record transfer idempotency log: ${err.message}`)
+      );
+    }
+
+    this.logger.info(`[EconomyService] TRANSFER: ${points} pts from ${fromOid} to ${toOid} (type: ${rewardType})`);
+    return result;
   }
 
   /**

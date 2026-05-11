@@ -1,6 +1,7 @@
 const { ObjectId } = require('mongodb');
 const { getPricingService } = require('./pricing');
 const { createLogger } = require('../../utils/logger');
+const { chargeGeneration } = require('./charging/chargeGeneration');
 
 const logger = createLogger('GenerationExecutionService');
 
@@ -24,6 +25,7 @@ class GenerationExecutionService {
     adminActivityService,
     notificationEvents,
     economyService,
+    delegationService,
     logger: injectedLogger,
   } = {}) {
     this.db = db;
@@ -36,6 +38,7 @@ class GenerationExecutionService {
     this.adminActivityService = adminActivityService;
     this.notificationEvents = notificationEvents;
     this.economyService = economyService;
+    this.delegationService = delegationService;
     this.logger = injectedLogger || logger;
   }
 
@@ -56,6 +59,37 @@ class GenerationExecutionService {
 
     const USD_PER_POINT = 0.000337;
     const pointsRequired = Math.max(1, Math.round(pricingResult.finalCostUsd / USD_PER_POINT));
+
+    // --- Per-member spend cap check ---
+    const triggeringMemberId = metadata.fallbackMasterAccountId;
+    if (triggeringMemberId && this.db.userCore) {
+      try {
+        const groupDoc = await this.db.userCore.findUserCoreById(userId);
+        if (groupDoc) {
+          const capStatus = this.db.userCore.getMemberSpendCapStatus(groupDoc, triggeringMemberId);
+          if (capStatus && !capStatus.isExpired) {
+            const effectiveSpend = capStatus.currentMonthPoints + pointsRequired;
+            if (effectiveSpend > capStatus.monthlyCapPoints) {
+              this.logger.warn(`[Execute] Member ${triggeringMemberId} exceeds group cap: ${capStatus.currentMonthPoints}+${pointsRequired} > ${capStatus.monthlyCapPoints}`);
+              return {
+                error: {
+                  statusCode: 402,
+                  body: {
+                    error: {
+                      code: 'MEMBER_CAP_EXCEEDED',
+                      message: 'Your monthly group spending cap has been reached.',
+                      details: { monthlyCapPoints: capStatus.monthlyCapPoints, usedPoints: capStatus.currentMonthPoints, required: pointsRequired }
+                    }
+                  }
+                }
+              };
+            }
+          }
+        }
+      } catch (capErr) {
+        this.logger.warn(`[Execute] Could not check member spend cap for ${triggeringMemberId}: ${capErr.message}`);
+      }
+    }
 
     let groupPoolPoints = 0;
     try {
@@ -458,14 +492,25 @@ class GenerationExecutionService {
           // Deduct points from credit ledger for non-x402 executions
           if (!isX402Execution && pointsRequired > 0 && this.economyService) {
             try {
-              await this.economyService.spend(masterAccountId, {
-                pointsToSpend: pointsRequired,
-                spendContext: { generationId: newGeneration._id.toString(), toolId: tool.toolId }
+              const chargeResult = await chargeGeneration({
+                masterAccountId,
+                generationRecord: newGeneration,
+                basePoints: pointsRequired,
+                toolId: tool.toolId,
+                idempotencyKey: `${newGeneration._id}:final-debit`,
+                logger: this.logger,
+                economyService: this.economyService,
               });
-              this.logger.info(`[Execute] Immediate adapter spend: ${pointsRequired} points for generation ${newGeneration._id}, user ${masterAccountId}`);
+              await this.db.generationOutputs.updateGenerationOutput(newGeneration._id, {
+                pointsSpent: chargeResult.totalPointsCharged,
+                contributorRewardPoints: chargeResult.totalRewards,
+                rewardBreakdown: chargeResult.rewardBreakdown,
+              }).catch(() => {});
+              if (user.delegationId && this.delegationService) {
+                this.delegationService.recordSpend(user.delegationId, chargeResult.totalPointsCharged);
+              }
             } catch (spendErr) {
               this.logger.error(`[Execute] Immediate adapter spend FAILED for generation ${newGeneration._id}: ${spendErr.message}`);
-              // Generation already completed — record payment failure but don't block delivery
               await this.db.generationOutputs.updateGenerationOutput(newGeneration._id, {
                 'metadata.paymentError': spendErr.message,
               }).catch(() => {});
@@ -605,11 +650,24 @@ class GenerationExecutionService {
                   // Deduct points after successful async adapter completion
                   if (!isX402Execution && pointsRequired > 0 && finalStatus === 'completed' && this.economyService) {
                     try {
-                      await this.economyService.spend(user.masterAccountId, {
-                        pointsToSpend: pointsRequired,
-                        spendContext: { generationId: generationRecord._id.toString(), toolId: tool.toolId }
+                      const freshRecord = await this.db.generationOutputs.findGenerationById(generationRecord._id);
+                      const chargeResult = await chargeGeneration({
+                        masterAccountId: user.masterAccountId,
+                        generationRecord: freshRecord || generationRecord,
+                        basePoints: pointsRequired,
+                        toolId: tool.toolId,
+                        idempotencyKey: `${generationRecord._id}:final-debit`,
+                        logger: this.logger,
+                        economyService: this.economyService,
                       });
-                      this.logger.info(`[Execute] Async adapter spend: ${pointsRequired} points for generation ${generationRecord._id}, user ${user.masterAccountId}`);
+                      await this.db.generationOutputs.updateGenerationOutput(generationRecord._id, {
+                        pointsSpent: chargeResult.totalPointsCharged,
+                        contributorRewardPoints: chargeResult.totalRewards,
+                        rewardBreakdown: chargeResult.rewardBreakdown,
+                      }).catch(() => {});
+                      if (user.delegationId && this.delegationService) {
+                        this.delegationService.recordSpend(user.delegationId, chargeResult.totalPointsCharged);
+                      }
                     } catch (spendErr) {
                       this.logger.error(`[Execute] Async adapter spend FAILED for generation ${generationRecord._id}: ${spendErr.message}`);
                       await this.db.generationOutputs.updateGenerationOutput(generationRecord._id, {

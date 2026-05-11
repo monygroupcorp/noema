@@ -506,7 +506,15 @@ module.exports = function initializeUserEconomyApi(dependencies) {
   });
 
   // POST /credit-points - Creates a new credit_ledger entry for rewards.
-  router.post('/credit-points', async (req, res) => {
+  // Requires either x-internal-client-key header (trusted internal service) or loopback origin.
+  router.post('/credit-points', (req, res, next) => {
+    const isInternalKey = Boolean(req.headers['x-internal-client-key']);
+    const isLoopback = req.ip === '127.0.0.1' || req.ip === '::ffff:127.0.0.1' || req.ip === '::1';
+    if (!isInternalKey && !isLoopback) {
+      return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'x-internal-client-key required for credit-points endpoint' } });
+    }
+    next();
+  }, async (req, res) => {
     const masterAccountId = getMasterAccountId(req, res);
     if (!masterAccountId) return;
     const masterAccountIdStr = masterAccountId.toString();

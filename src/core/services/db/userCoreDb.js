@@ -3,9 +3,12 @@
  */
 
 const { BaseDB, ObjectId } = require('./BaseDB');
-const { PRIORITY } = require('./utils/queue');
+const { PRIORITY, getCachedClient } = require('./utils/queue');
 
 const COLLECTION_NAME = 'userCore';
+
+/** Valid account types for the accountType field. */
+const ACCOUNT_TYPES = Object.freeze(['user', 'group', 'agent', 'treasury']);
 
 class UserCoreDB extends BaseDB {
   constructor(logger) {
@@ -462,6 +465,237 @@ class UserCoreDB extends BaseDB {
         lastTouch: new Date(),
       },
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 1 — Typed account support (agent / treasury / group)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Ensures the two sparse indexes required for typed accounts exist.
+   * Called at startup via the standard ensureIndexes() pattern.
+   */
+  async ensureIndexes() {
+    try {
+      const client = await getCachedClient();
+      const collection = client.db(this.dbName).collection(this.collectionName);
+      await collection.createIndexes([
+        {
+          key: { accountType: 1, agentId: 1 },
+          name: 'idx_account_type_agent_id',
+          sparse: true,
+          unique: true,
+          background: true,
+        },
+        {
+          key: { accountType: 1, masterTreasuryId: 1 },
+          name: 'idx_account_type_treasury',
+          sparse: true,
+          background: true,
+        },
+      ]);
+      this.logger.debug('[UserCoreDB] Typed account indexes ensured.');
+    } catch (err) {
+      this.logger.error('[UserCoreDB] Failed to ensure indexes:', err);
+    }
+  }
+
+  /**
+   * Creates a typed account (agent, treasury, group).
+   * Wraps createUserCore with accountType validation.
+   *
+   * @param {'agent'|'treasury'|'group'} accountType
+   * @param {object} data - Additional fields merged into the new document.
+   * @returns {Promise<object>}
+   */
+  async createTypedAccount(accountType, data = {}) {
+    if (!ACCOUNT_TYPES.includes(accountType)) {
+      throw new Error(`Invalid accountType: ${accountType}. Must be one of: ${ACCOUNT_TYPES.join(', ')}`);
+    }
+    return this.createUserCore({ ...data, accountType });
+  }
+
+  /**
+   * Finds all accounts of a given type.
+   * @param {'user'|'group'|'agent'|'treasury'} accountType
+   * @param {object} [additionalFilter={}]
+   * @returns {Promise<object[]>}
+   */
+  async findByAccountType(accountType, additionalFilter = {}) {
+    const query = { accountType, ...additionalFilter };
+    const client = await getCachedClient();
+    const collection = client.db(this.dbName).collection(this.collectionName);
+    return collection.find(query).toArray();
+  }
+
+  /**
+   * Finds an agent userCore by its ERC-8004 agentId string.
+   * @param {string} agentId
+   * @returns {Promise<object|null>}
+   */
+  async findByAgentId(agentId) {
+    return this.findOne({ accountType: 'agent', agentId }, PRIORITY.HIGH);
+  }
+
+  /**
+   * Sets or clears the masterTreasuryId on any typed account.
+   * @param {ObjectId|string} masterAccountId
+   * @param {ObjectId|string|null} treasuryId - null to unlink
+   */
+  async setMasterTreasuryId(masterAccountId, treasuryId) {
+    const update = treasuryId
+      ? { $set: { masterTreasuryId: typeof treasuryId === 'string' ? new ObjectId(treasuryId) : treasuryId } }
+      : { $unset: { masterTreasuryId: '' } };
+    return this.updateUserCore(masterAccountId, update);
+  }
+
+  /**
+   * Updates the payoutPolicy sub-document on an agent account.
+   * @param {ObjectId|string} masterAccountId
+   * @param {{ mode: string, withdrawAddress?: string, split?: object }} policy
+   */
+  async updatePayoutPolicy(masterAccountId, policy) {
+    return this.updateUserCore(masterAccountId, { $set: { payoutPolicy: policy } });
+  }
+
+  /**
+   * Updates the spendingCap on an agent or group account.
+   * @param {ObjectId|string} masterAccountId
+   * @param {{ amount: number, currency: 'USDC', period: 'monthly' }} cap
+   */
+  async updateSpendingCap(masterAccountId, cap) {
+    return this.updateUserCore(masterAccountId, { $set: { spendingCap: cap } });
+  }
+
+  /**
+   * Sets on-chain identity fields for an agent account.
+   * @param {ObjectId|string} masterAccountId
+   * @param {{ agentId, agentChainId, agentAdapter, agentRegistry, agentTokenId, agentOwnerAddress, agentCollection }} fields
+   */
+  async setAgentOnChainFields(masterAccountId, fields) {
+    const allowed = ['agentId', 'agentChainId', 'agentAdapter', 'agentRegistry', 'agentTokenId', 'agentOwnerAddress', 'agentCollection'];
+    const $set = {};
+    for (const key of allowed) {
+      if (fields[key] !== undefined) $set[key] = fields[key];
+    }
+    if (Object.keys($set).length === 0) return this.findUserCoreById(masterAccountId);
+    return this.updateUserCore(masterAccountId, { $set });
+  }
+
+  /**
+   * Updates or creates the treasuryFaucetPolicy on a treasury account.
+   * @param {ObjectId|string} masterAccountId
+   * @param {{ starterGrantPoints: number, monthlyMaxPoints: number, subsidyMode: string, refillCadence: string }} policy
+   */
+  async updateTreasuryFaucetPolicy(masterAccountId, policy) {
+    return this.updateUserCore(masterAccountId, { $set: { treasuryFaucetPolicy: policy } });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 1.4 — Group memberSpendCaps
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Upserts a per-member spend cap entry on a group document.
+   * Uses arrayFilters to update in-place if the member already has an entry,
+   * or $push if not.
+   *
+   * @param {ObjectId|string} groupId - The group's userCore _id
+   * @param {ObjectId|string} memberAccountId
+   * @param {number} monthlyCapPoints
+   * @returns {Promise<object|null>}
+   */
+  async upsertMemberSpendCap(groupId, memberAccountId, monthlyCapPoints) {
+    const gid = typeof groupId === 'string' ? new ObjectId(groupId) : groupId;
+    const mid = typeof memberAccountId === 'string' ? new ObjectId(memberAccountId) : memberAccountId;
+
+    // Try update-in-place first
+    const client = await getCachedClient();
+    const collection = client.db(this.dbName).collection(this.collectionName);
+    const result = await collection.updateOne(
+      { _id: gid, 'memberSpendCaps.masterAccountId': mid },
+      { $set: { 'memberSpendCaps.$[cap].monthlyCapPoints': monthlyCapPoints, updatedAt: new Date() } },
+      { arrayFilters: [{ 'cap.masterAccountId': mid }] }
+    );
+
+    if (result.matchedCount > 0) {
+      return this.findUserCoreById(gid);
+    }
+
+    // Member not in array yet — push a new entry
+    return this.updateUserCore(gid, {
+      $push: {
+        memberSpendCaps: {
+          masterAccountId: mid,
+          monthlyCapPoints,
+          currentMonthPoints: 0,
+          resetAt: this._nextMonthResetDate(),
+        },
+      },
+    });
+  }
+
+  /**
+   * Returns the current spend usage for a member within a group's cap.
+   * Returns null if the member has no cap configured (uncapped).
+   *
+   * @param {object} groupDoc - Full group userCore document
+   * @param {ObjectId|string} memberAccountId
+   * @returns {{ monthlyCapPoints: number, currentMonthPoints: number, resetAt: Date, isExpired: boolean } | null}
+   */
+  getMemberSpendCapStatus(groupDoc, memberAccountId) {
+    const mid = memberAccountId.toString();
+    const caps = groupDoc.memberSpendCaps || [];
+    const entry = caps.find(c => c.masterAccountId?.toString() === mid);
+    if (!entry) return null;
+    const isExpired = entry.resetAt && new Date() > new Date(entry.resetAt);
+    return { ...entry, isExpired };
+  }
+
+  /**
+   * Increments currentMonthPoints for a member's spend cap entry.
+   * Resets the counter if resetAt has passed.
+   *
+   * @param {ObjectId|string} groupId
+   * @param {ObjectId|string} memberAccountId
+   * @param {number} points
+   */
+  async recordMemberSpend(groupId, memberAccountId, points) {
+    const gid = typeof groupId === 'string' ? new ObjectId(groupId) : groupId;
+    const mid = typeof memberAccountId === 'string' ? new ObjectId(memberAccountId) : memberAccountId;
+    const now = new Date();
+
+    const client = await getCachedClient();
+    const collection = client.db(this.dbName).collection(this.collectionName);
+
+    // If the reset window has expired, reset counter first then add new spend
+    await collection.updateOne(
+      { _id: gid, 'memberSpendCaps.masterAccountId': mid, 'memberSpendCaps.resetAt': { $lt: now } },
+      {
+        $set: {
+          'memberSpendCaps.$[cap].currentMonthPoints': points,
+          'memberSpendCaps.$[cap].resetAt': this._nextMonthResetDate(),
+          updatedAt: now,
+        },
+      },
+      { arrayFilters: [{ 'cap.masterAccountId': mid }] }
+    );
+
+    // Unconditional increment path (no-op on matched reset docs since counter was already set)
+    await collection.updateOne(
+      { _id: gid, 'memberSpendCaps.masterAccountId': mid, 'memberSpendCaps.resetAt': { $gte: now } },
+      {
+        $inc: { 'memberSpendCaps.$[cap].currentMonthPoints': points },
+        $set: { updatedAt: now },
+      },
+      { arrayFilters: [{ 'cap.masterAccountId': mid }] }
+    );
+  }
+
+  /** @private Returns the first day of next month at midnight UTC. */
+  _nextMonthResetDate() {
+    const d = new Date();
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1));
   }
 
 }

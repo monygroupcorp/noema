@@ -309,6 +309,21 @@ async function startApp() {
     } else {
       logger.warn('External API router or web app instance not available for mounting. External API will not be accessible.');
     }
+
+    // Mount the embeddable widget surface — no auth, CORS open
+    if (platforms.web && platforms.web.app) {
+      try {
+        const { createWidgetApi } = require('./src/api/widget/widgetApi');
+        const widgetDeps = {
+          logger,
+          db: services.db || {},
+        };
+        platforms.web.app.use('/widget', require('express').json(), createWidgetApi(widgetDeps));
+        logger.debug('Widget API mounted at /widget');
+      } catch (widgetErr) {
+        logger.warn('Widget API failed to mount:', widgetErr.message);
+      }
+    }
     
     // Initialize web server routes BEFORE setting up Telegram commands
     if (platforms.web) {
