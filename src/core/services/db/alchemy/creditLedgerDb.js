@@ -49,10 +49,49 @@ class CreditLedgerDB extends BaseDB {
           partialFilterExpression: { type: 'CONTRIBUTOR_REWARD_TALLY' },
           background: true,
         },
+        {
+          key: { 'related_items.idempotencyKey': 1 },
+          unique: true,
+          sparse: true,
+          name: 'idx_spend_idempotency_key',
+          partialFilterExpression: { type: 'SPEND_DEBIT_LOG' },
+          background: true,
+        },
       ]);
-      this.logger.debug('[CreditLedgerDB] Contributor reward indexes ensured.');
+      this.logger.debug('[CreditLedgerDB] Indexes ensured.');
     } catch (err) {
       this.logger.error('[CreditLedgerDB] Failed to ensure indexes:', err);
+    }
+  }
+
+  /**
+   * Find an existing spend log by idempotency key.
+   * Returns the document if found, null otherwise.
+   */
+  async findSpendLog(idempotencyKey) {
+    return this.findOne({ type: 'SPEND_DEBIT_LOG', 'related_items.idempotencyKey': idempotencyKey });
+  }
+
+  /**
+   * Record the result of a completed spend for idempotency purposes.
+   * On duplicate key (concurrent call), silently ignores — the first writer wins.
+   */
+  async createSpendLog(idempotencyKey, masterAccountId, spendSummary) {
+    const now = new Date();
+    try {
+      await this.insertOne({
+        type: 'SPEND_DEBIT_LOG',
+        master_account_id: masterAccountId,
+        status: 'CONFIRMED',
+        points_credited: 0,
+        points_remaining: 0,
+        related_items: { idempotencyKey, spendSummary },
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (err) {
+      if (err.code === 11000) return; // duplicate — first writer already recorded it
+      throw err;
     }
   }
 

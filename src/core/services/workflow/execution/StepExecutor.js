@@ -9,8 +9,10 @@ const { createEvent } = require('../utils/EventManager');
 const ParameterResolver = require('./ParameterResolver');
 const StrategyFactory = require('./strategies/StrategyFactory');
 
+const MAX_SPELL_DEPTH = 5;
+
 class StepExecutor {
-    constructor({ logger, toolRegistry, workflowsService, internalApiClient, userEventsDb, adapterRegistry, generationRecordManager, adapterCoordinator, workflowNotifier, generationExecutionService }) {
+    constructor({ logger, toolRegistry, workflowsService, internalApiClient, userEventsDb, adapterRegistry, generationRecordManager, adapterCoordinator, workflowNotifier, generationExecutionService, spellsDb, castManager }) {
         this.logger = logger;
         this.toolRegistry = toolRegistry;
         this.workflowsService = workflowsService;
@@ -20,6 +22,8 @@ class StepExecutor {
         this.adapterRegistry = adapterRegistry;
         this.generationRecordManager = generationRecordManager;
         this.generationExecutionService = generationExecutionService || null;
+        this.spellsDb = spellsDb || null;
+        this.castManager = castManager || null;
 
         // Initialize sub-services
         this.parameterResolver = new ParameterResolver({ logger });
@@ -47,6 +51,11 @@ class StepExecutor {
         validateStepIndex(stepIndex, spell.steps.length, spell.name);
         const step = spell.steps[stepIndex];
         validateStep(step, stepIndex, spell.name);
+
+        // Route spell-call steps before any tool lookup
+        if (step.spellRef) {
+            return await this._executeSpellCallStep(spell, step, stepIndex, pipelineContext, originalContext);
+        }
 
         // Resolve tool
         let tool = this.toolRegistry.findByDisplayName(step.toolIdentifier);
@@ -129,6 +138,109 @@ class StepExecutor {
             // Re-throw if not handled
             throw error;
         }
+    }
+    /**
+     * Handles a spell-call step (spellRef set on the step).
+     * Creates a synthetic generation record as the join-point between the parent and sub-spell,
+     * then fires the sub-spell's first step. The parent is suspended until
+     * StepContinuator._finalizeSubCast() resolves the synthetic gen.
+     * @private
+     */
+    async _executeSpellCallStep(parentSpell, step, stepIndex, pipelineContext, originalContext) {
+        if (!this.spellsDb) throw new Error('[StepExecutor] spellsDb required for spell-call steps');
+        if (!this.castManager) throw new Error('[StepExecutor] castManager required for spell-call steps');
+
+        // 1. Load sub-spell
+        const subSpell = await this.spellsDb.findBySlug(step.spellRef);
+        if (!subSpell) {
+            throw Object.assign(new Error(`Sub-spell not found: "${step.spellRef}"`), { code: 'SPELL_NOT_FOUND' });
+        }
+
+        // 2. Circular reference + depth guard
+        const activeSet = new Set(originalContext.activeSpellSlugs || []);
+        if (activeSet.has(step.spellRef)) {
+            throw Object.assign(
+                new Error(`Circular spell reference detected: "${step.spellRef}" is already in the call stack`),
+                { code: 'CIRCULAR_SPELL_REF' }
+            );
+        }
+        if (activeSet.size >= MAX_SPELL_DEPTH) {
+            throw Object.assign(
+                new Error(`Max spell nesting depth (${MAX_SPELL_DEPTH}) exceeded`),
+                { code: 'MAX_DEPTH_EXCEEDED' }
+            );
+        }
+
+        // 3. Resolve sub-spell inputs — treat exposedInputs as the schema boundary
+        const inputSchema = this._exposedInputsToSchema(subSpell.exposedInputs || []);
+        const subInputs = this.parameterResolver.resolveStepInputs(step, pipelineContext, { inputSchema });
+
+        // 4. Create synthetic generation record (the join point for parent spell continuation)
+        const parentCastId = pipelineContext.castId || originalContext.castId;
+        const { generationId: syntheticGenId } = await this.generationRecordManager.createGenerationRecord({
+            masterAccountId: originalContext.masterAccountId,
+            serviceName: 'spell-composer',
+            toolId: `spell-call:${step.spellRef}`,
+            toolDisplayName: subSpell.name,
+            status: 'processing',
+            costUsd: 0,
+            requestPayload: subInputs,
+            metadata: {
+                // Fields StepContinuator.continue() needs to resume the PARENT spell
+                isSpell: true,
+                spell: parentSpell,
+                stepIndex,
+                pipelineContext,
+                originalContext,
+                castId: parentCastId,
+                // Sub-spell tracking
+                isSubSpellBoundary: true,
+                subSpellSlug: step.spellRef,
+                subSpellOutputMappings: step.outputMappings || {},
+            },
+        });
+
+        // 5. Create sub-cast so sub-spell steps have dedup/cost tracking
+        const subCast = await this.castManager.createSubCast({
+            spellId: subSpell._id.toString(),
+            initiatorAccountId: originalContext.masterAccountId,
+            parentCastId,
+            syntheticGenId: syntheticGenId.toString(),
+        });
+        const subCastId = subCast._id.toString();
+
+        // 6. Build sub-spell execution context
+        const subOriginalContext = {
+            ...originalContext,
+            parameterOverrides: subInputs,
+            activeSpellSlugs: [...activeSet, step.spellRef],
+            isSubSpell: true,
+            parentCastId,
+            syntheticGenId: syntheticGenId.toString(),
+            castId: subCastId,
+        };
+        const initialSubPipelineContext = { ...subInputs, castId: subCastId };
+
+        this.logger.info(`[StepExecutor] Dispatching sub-spell "${step.spellRef}" (syntheticGen: ${syntheticGenId}, subCast: ${subCastId})`);
+
+        // 7. Fire sub-spell step 0 — fire-and-forget; parent suspended until synthetic gen resolves
+        await this.executeStep(subSpell, 0, initialSubPipelineContext, subOriginalContext);
+
+        return { status: 'processing', syntheticGenId };
+    }
+
+    /**
+     * Converts a spell's exposedInputs array into an inputSchema-compatible object
+     * so ParameterResolver can validate/prune inputs the same way it does for tools.
+     * @private
+     */
+    _exposedInputsToSchema(exposedInputs) {
+        const schema = {};
+        for (const inp of exposedInputs) {
+            const key = typeof inp === 'string' ? inp : inp?.paramKey;
+            if (key) schema[key] = { required: false, type: 'any' };
+        }
+        return schema;
     }
 }
 

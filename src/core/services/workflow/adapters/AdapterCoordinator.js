@@ -68,6 +68,7 @@ class AdapterCoordinator {
                 originalContext,
                 run_id: null, // Will be set after startJob
                 ...(costRate && { costRate }),
+                ...(originalContext.castChargedUpfront && { castChargedUpfront: true }),
             }
         };
 

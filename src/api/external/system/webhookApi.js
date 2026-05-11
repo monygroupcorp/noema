@@ -1,8 +1,20 @@
 const express = require('express');
+const crypto = require('crypto');
 const { createLogger } = require('../../../utils/logger');
 const { processComfyDeployWebhook } = require('../../../core/services/comfydeploy/webhookProcessor');
 const { validateAlchemySignature, addAlchemyContextToRequest } = require('../../../core/services/alchemy/webhookUtils');
 const bodyParser = require('body-parser');
+
+function verifyComfyDeploySignature(rawBody, signatureHeader, secret) {
+  if (!secret) return true; // Dev mode: skip when env var not set
+  if (!signatureHeader) return false;
+  const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(signatureHeader), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Creates the webhook API router for handling external webhook events.
@@ -15,12 +27,32 @@ function createWebhookApi(dependencies) {
   const webhookRouter = express.Router();
 
   // --- ComfyDeploy Webhook Handler ---
-  webhookRouter.post('/comfydeploy', async (req, res) => {
+  // Uses express.raw() to read the raw body buffer for HMAC-SHA256 signature verification.
+  webhookRouter.post('/comfydeploy', express.raw({ type: 'application/json' }), async (req, res) => {
     try {
-      // The new processor function handles its own logging of the hit and payload
       const routeLogger = dependencies.logger || console;
+      const secret = process.env.COMFY_DEPLOY_WEBHOOK_SECRET;
 
-      // Log summary of dependencies
+      // Signature verification (skip in dev when secret not set)
+      const rawBody = req.body;
+      const signatureHeader = req.headers['x-comfydeploy-signature'] || req.headers['x-comfy-signature'];
+      if (!verifyComfyDeploySignature(rawBody, signatureHeader, secret)) {
+        routeLogger.warn('[WebhookAPI] ComfyDeploy webhook rejected: invalid signature');
+        return res.status(401).json({ error: 'Invalid webhook signature' });
+      }
+      if (!secret) {
+        routeLogger.warn('[WebhookAPI] COMFY_DEPLOY_WEBHOOK_SECRET not set — skipping signature verification (dev mode)');
+      }
+
+      // Parse JSON from raw buffer
+      let parsedBody;
+      try {
+        parsedBody = JSON.parse(rawBody.toString('utf8'));
+      } catch (parseErr) {
+        routeLogger.error('[WebhookAPI] ComfyDeploy webhook: failed to parse JSON body');
+        return res.status(400).json({ error: 'Invalid JSON body' });
+      }
+
       routeLogger.debug('[WebhookAPI] Dependencies prepared for webhookProcessor', {
         internalApiClient: {
           exists: Boolean(dependencies.internal?.client),
@@ -28,17 +60,16 @@ function createWebhookApi(dependencies) {
         },
         loggerAttached: Boolean(dependencies.logger)
       });
-      
-      // Prepare dependencies for the webhook processor
+
       const processorDeps = {
         internalApiClient: dependencies.internalApiClient || dependencies.internal?.client,
         telegramNotifier: dependencies.telegramNotifier,
         logger: dependencies.logger || console,
         webSocketService: dependencies.webSocketService,
-        userCoreDb: dependencies.db?.userCore || null // Phase 7e: in-process group sponsor lookup
+        userCoreDb: dependencies.db?.userCore || null
       };
-      
-      const result = await processComfyDeployWebhook(req.body, processorDeps);
+
+      const result = await processComfyDeployWebhook(parsedBody, processorDeps);
 
       if (result.success) {
         res.status(result.statusCode || 200).json(result.data || { message: "Webhook processed" });

@@ -191,6 +191,12 @@ class StepContinuator {
      * @param {boolean} isLastStep - Whether this is the last step (to avoid duplicate notifications)
      */
     async _finalizeSpell(spell, castId, stepGenerationIds, completedGeneration, originalContext, isLastStep = false) {
+        // Sub-cast finalization: resolve the synthetic gen and wake the parent spell
+        if (originalContext?.isSubSpell && originalContext?.syntheticGenId) {
+            await this._finalizeSubCast(castId, stepGenerationIds, completedGeneration, originalContext);
+            return;
+        }
+
         let finalGenerationRecordForEvent = null;
         // Check if cast is already completed to prevent duplicate finalization
         if (castId) {
@@ -342,6 +348,64 @@ class StepContinuator {
             });
         } catch (emitErr) {
             this.logger.warn(`[StepContinuator] Failed to emit spellCompletion event: ${emitErr.message}`);
+        }
+    }
+
+    /**
+     * Finalizes a sub-spell invocation:
+     *   1. Appends sub-cast generation IDs to the parent cast
+     *   2. Resolves the synthetic generation record to 'completed' with the sub-spell's outputs
+     *   3. Emits generationUpdated so the parent spell's continueExecution fires
+     * @private
+     */
+    async _finalizeSubCast(subCastId, stepGenerationIds, completedGeneration, originalContext) {
+        const { syntheticGenId, parentCastId } = originalContext;
+        this.logger.info(`[StepContinuator] Sub-cast ${subCastId} done → resolving synthetic gen ${syntheticGenId}`);
+
+        // 1. Roll sub-cast generation IDs into parent cast for cost aggregation
+        if (parentCastId && stepGenerationIds?.length) {
+            await this.castManager.appendGenerationIds(parentCastId, stepGenerationIds);
+        }
+
+        // 2. Fetch synthetic gen to read subSpellOutputMappings
+        let outputMappings = {};
+        try {
+            const syntheticGen = await this.generationRecordManager.getGenerationRecord(syntheticGenId);
+            outputMappings = syntheticGen?.metadata?.subSpellOutputMappings || {};
+        } catch (err) {
+            this.logger.warn(`[StepContinuator] Could not read synthetic gen ${syntheticGenId}: ${err.message}`);
+        }
+
+        // 3. Extract final sub-spell outputs and apply output mappings
+        const rawOutputs = completedGeneration.outputs || completedGeneration.responsePayload || {};
+        const mappedOutputs = {};
+        const hasExplicitMappings = Object.keys(outputMappings).length > 0;
+        if (hasExplicitMappings) {
+            for (const [subKey, parentKey] of Object.entries(outputMappings)) {
+                if (rawOutputs[subKey] !== undefined) mappedOutputs[parentKey] = rawOutputs[subKey];
+            }
+        } else {
+            // Pass through all outputs — OutputProcessor on the parent side handles namespacing
+            Object.assign(mappedOutputs, rawOutputs);
+        }
+
+        // 4. Resolve the synthetic gen to completed — this wakes the parent spell
+        try {
+            await this.generationRecordManager.updateGenerationRecord(syntheticGenId, {
+                status: 'completed',
+                responsePayload: mappedOutputs,
+                outputs: mappedOutputs,
+                text: completedGeneration.text || null,
+                result: completedGeneration.result || null,
+            });
+
+            const resolvedGen = await this.generationRecordManager.getGenerationRecord(syntheticGenId);
+            if (resolvedGen) {
+                notificationEvents.emit('generationUpdated', resolvedGen);
+                this.logger.info(`[StepContinuator] Emitted generationUpdated for synthetic gen ${syntheticGenId} → parent spell resumes`);
+            }
+        } catch (err) {
+            this.logger.error(`[StepContinuator] Failed to resolve synthetic gen ${syntheticGenId}: ${err.message}`);
         }
     }
 

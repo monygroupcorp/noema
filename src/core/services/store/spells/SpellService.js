@@ -41,6 +41,40 @@ class SpellService {
   }
 
   /**
+   * Create a sub-cast record for a nested spell invocation.
+   * @param {{ spellId, initiatorAccountId, parentCastId, syntheticGenId }} params
+   */
+  async createSubCast({ spellId, initiatorAccountId, parentCastId, syntheticGenId }) {
+    if (!spellId) throw new Error('spellId is required');
+    if (!initiatorAccountId) throw new Error('initiatorAccountId is required');
+    return this.castsDb.createCast({
+      spellId,
+      initiatorAccountId,
+      metadata: {
+        isSubCast: true,
+        parentCastId: parentCastId?.toString() || null,
+        syntheticGenId: syntheticGenId?.toString() || null,
+      },
+    });
+  }
+
+  /**
+   * Append generation IDs from a completed sub-cast into the parent cast's stepGenerationIds.
+   * Uses $addToSet + $each to stay idempotent.
+   * @param {string|ObjectId} castId
+   * @param {string[]} generationIds
+   */
+  async appendGenerationIds(castId, generationIds) {
+    if (!generationIds?.length) return;
+    const oid = this._toOid(castId);
+    const oids = generationIds.map(id => new ObjectId(id.toString()));
+    await this.castsDb.updateOne(
+      { _id: oid },
+      { $addToSet: { stepGenerationIds: { $each: oids } }, $set: { updatedAt: new Date() } }
+    );
+  }
+
+  /**
    * Update a cast record. Mirrors the PUT /spells/casts/:castId handler exactly:
    *   - generationId: appended to stepGenerationIds ($addToSet to prevent duplicates)
    *   - costDeltaUsd: accumulated into costUsd ($inc)

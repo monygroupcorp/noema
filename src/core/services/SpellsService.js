@@ -213,7 +213,8 @@ class SpellsService {
                 
                 context.creditTxId = chargeResult.creditTxId;
                 context.pointsCharged = chargeResult.pointsCharged;
-                
+                context.castChargedUpfront = true;
+
                 this.logger.info(`[SpellsService] Upfront payment successful: ${chargeResult.pointsCharged} points charged, creditTxId: ${chargeResult.creditTxId}`);
             } catch (error) {
                 if (error.message === 'INSUFFICIENT_POINTS') {

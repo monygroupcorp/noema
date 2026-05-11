@@ -82,6 +82,8 @@ class WorkflowExecutionService {
             adapterCoordinator: this.adapterCoordinator,
             workflowNotifier: this.workflowNotifier,
             generationExecutionService: generationExecutionService || null, // Phase 8
+            spellsDb: db && db.spells ? db.spells : null,          // spell-call steps
+            castManager: this.castManager,                          // sub-cast creation
         });
         this.spellExecutor = new SpellExecutor({
             logger,

@@ -127,6 +127,9 @@ function createGroupsApi(deps = {}) {
    * POST /groups/:chatId/fund
    * Transfer points from a user to a group's pool.
    * Body: { funderMasterAccountId, points, platform? }
+   *
+   * Consent check: funderMasterAccountId must match x-authenticated-account-id header,
+   * unless the call carries x-internal-client-key (trusted internal service calls).
    */
   router.post('/:chatId/fund', async (req, res) => {
     const { chatId } = req.params;
@@ -139,6 +142,13 @@ function createGroupsApi(deps = {}) {
       return res.status(400).json({ error: { code: 'INVALID_PARAMS', message: 'points must be a positive integer' } });
     }
 
+    // Consent check: caller must be the funder, unless this is a trusted internal service call
+    const isInternalServiceCall = Boolean(req.headers['x-internal-client-key']);
+    const authenticatedAccountId = req.headers['x-authenticated-account-id'];
+    if (!isInternalServiceCall && authenticatedAccountId && authenticatedAccountId !== funderMasterAccountId) {
+      return res.status(403).json({ error: { code: 'CONSENT_REQUIRED', message: 'funderMasterAccountId must match authenticated account' } });
+    }
+
     try {
       const groupDoc = await findGroupDoc(chatId, platform);
       if (!groupDoc) return res.status(404).json({ error: { code: 'GROUP_NOT_FOUND' } });
@@ -146,35 +156,52 @@ function createGroupsApi(deps = {}) {
         return res.status(400).json({ error: { code: 'NOT_SPONSORED', message: 'Group must be sponsored before funding' } });
       }
 
-      // Deduct from funder
+      // Atomic transfer: spend from funder and credit group pool in one MongoDB transaction
       try {
-        await economyService.spend(funderMasterAccountId, {
-          pointsToSpend: points,
-          spendContext: { type: 'GROUP_FUND', groupId: groupDoc._id.toString(), chatId }
-        });
-      } catch (spendErr) {
-        if (spendErr.code === 'INSUFFICIENT_FUNDS') {
-          return res.status(402).json({ error: { code: 'INSUFFICIENT_FUNDS', message: 'Not enough points to fund this amount.' } });
-        }
-        throw spendErr;
-      }
-
-      // Credit to group pool
-      try {
-        await economyService.creditPoints(groupDoc._id, {
-          points,
+        await economyService.transferPoints(funderMasterAccountId, groupDoc._id, points, {
           description: 'Group pool funding',
           rewardType: 'GROUP_POOL_FUND',
-          relatedItems: { funderMasterAccountId, chatId }
+          relatedItems: { funderMasterAccountId, chatId },
+          idempotencyKey: `group-fund:${chatId}:${funderMasterAccountId}:${points}:${Date.now()}`,
         });
-      } catch (creditErr) {
-        logger.error(`[GroupsApi] CRITICAL: Spend succeeded but credit failed for group ${chatId}. Funder: ${funderMasterAccountId}, Points: ${points}. Manual reconciliation required. Error: ${creditErr.message}`);
-        return res.status(500).json({ error: { code: 'CREDIT_FAILED', message: 'Points were deducted but could not be credited to group pool. Please contact support.' } });
+      } catch (transferErr) {
+        if (transferErr.code === 'INSUFFICIENT_FUNDS') {
+          return res.status(402).json({ error: { code: 'INSUFFICIENT_FUNDS', message: 'Not enough points to fund this amount.' } });
+        }
+        throw transferErr;
       }
 
       res.json({ success: true, pointsFunded: points });
     } catch (err) {
       logger.error(`[GroupsApi] POST /groups/${chatId}/fund failed: ${err.message}`);
+      res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: err.message } });
+    }
+  });
+
+  /**
+   * PATCH /groups/:chatId/member-caps
+   * Upsert a per-member monthly spend cap.
+   * Body: { memberMasterAccountId, monthlyCapPoints, platform? }
+   */
+  router.patch('/:chatId/member-caps', async (req, res) => {
+    const { chatId } = req.params;
+    const { memberMasterAccountId, monthlyCapPoints, platform = 'telegram_group' } = req.body;
+
+    if (!memberMasterAccountId || monthlyCapPoints == null) {
+      return res.status(400).json({ error: { code: 'INVALID_PARAMS', message: 'memberMasterAccountId and monthlyCapPoints required' } });
+    }
+    if (!Number.isInteger(monthlyCapPoints) || monthlyCapPoints < 0) {
+      return res.status(400).json({ error: { code: 'INVALID_PARAMS', message: 'monthlyCapPoints must be a non-negative integer' } });
+    }
+
+    try {
+      const groupDoc = await findGroupDoc(chatId, platform);
+      if (!groupDoc) return res.status(404).json({ error: { code: 'GROUP_NOT_FOUND' } });
+
+      const updated = await userCoreDb.upsertMemberSpendCap(groupDoc._id, memberMasterAccountId, monthlyCapPoints);
+      res.json(updated);
+    } catch (err) {
+      logger.error(`[GroupsApi] PATCH /groups/${chatId}/member-caps failed: ${err.message}`);
       res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: err.message } });
     }
   });

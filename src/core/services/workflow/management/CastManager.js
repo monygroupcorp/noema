@@ -22,6 +22,29 @@ class CastManager {
     }
 
     /**
+     * Creates a sub-cast record for a nested spell invocation.
+     * @param {{ spellId, initiatorAccountId, parentCastId, syntheticGenId }} params
+     * @returns {Promise<Object>} new cast doc
+     */
+    async createSubCast({ spellId, initiatorAccountId, parentCastId, syntheticGenId }) {
+        return this.spellService.createSubCast({ spellId, initiatorAccountId, parentCastId, syntheticGenId });
+    }
+
+    /**
+     * Appends generation IDs from a completed sub-cast into the parent cast.
+     * @param {string} parentCastId
+     * @param {string[]} generationIds
+     */
+    async appendGenerationIds(parentCastId, generationIds) {
+        try {
+            await this.spellService.appendGenerationIds(parentCastId, generationIds);
+            this.logger.debug(`[CastManager] Appended ${generationIds.length} gen IDs to parent cast ${parentCastId}`);
+        } catch (err) {
+            this.logger.warn(`[CastManager] appendGenerationIds failed for cast ${parentCastId}: ${err.message}`);
+        }
+    }
+
+    /**
      * Checks if a generation has already been processed for a cast
      * @param {string} castId - Cast ID
      * @param {string} generationId - Generation ID to check
