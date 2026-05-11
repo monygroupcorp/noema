@@ -1,0 +1,31 @@
+import type { Actum } from '../types/actum.js'
+import type { Actorum } from '../types/cursus.js'
+
+export class MemoryActorum implements Actorum {
+  private readonly store = new Map<string, Actum>()
+
+  async create(actum: Omit<Actum, 'inceptum'>): Promise<Actum> {
+    const record: Actum = { ...actum, inceptum: new Date() }
+    this.store.set(record.id, record)
+    return record
+  }
+
+  async update(id: string, patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed'>>): Promise<Actum> {
+    const existing = this.store.get(id)
+    if (!existing) throw new Error(`Actum '${id}' not found`)
+    const updated = { ...existing, ...patch }
+    this.store.set(id, updated)
+    return updated
+  }
+
+  async findById(id: string): Promise<Actum | null> {
+    return this.store.get(id) ?? null
+  }
+
+  async findExpired(): Promise<Actum[]> {
+    const now = new Date()
+    return Array.from(this.store.values()).filter(
+      a => a.status === 'nascens' && a.expirat < now
+    )
+  }
+}
