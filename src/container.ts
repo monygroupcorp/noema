@@ -6,6 +6,7 @@ import type { Modorum } from './types/modus.js'
 import type { AnimaStore } from './types/anima.js'
 import type { PersonaStore } from './types/persona.js'
 import type { Vestigiorum } from './types/vestigium.js'
+import type { ModoStore } from './types/modo.js'
 
 import { MongoActorum } from './crystal/MongoActorum.js'
 import { MongoModorum } from './crystal/MongoModorum.js'
@@ -13,7 +14,9 @@ import { MongoSignorum } from './crystal/MongoSignorum.js'
 import { MongoAnima } from './crystal/MongoAnima.js'
 import { MongoPersona } from './crystal/MongoPersona.js'
 import { MongoVestigiorum } from './crystal/MongoVestigiorum.js'
+import { MongoModo } from './crystal/MongoModo.js'
 import { RunPodCursor } from './crystal/RunPodCursor.js'
+import { TesseraCursor } from './crystal/TesseraCursor.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
 import { ActumCompletor } from './crystal/ActumCompletor.js'
 
@@ -24,6 +27,7 @@ export interface Ring {
   animae: AnimaStore
   personae: PersonaStore
   vestigiorum: Vestigiorum
+  modos: ModoStore
   cursorum: Cursorum
   completor: IActumCompletor
 }
@@ -61,6 +65,8 @@ export interface ContainerConfig {
   personaeCollection?: string
   /** Collection name for vestigia — default 'vestigia' */
   vestigiaCollection?: string
+  /** Collection name for modos — default 'modos' */
+  modosCollection?: string
   /**
    * Embed function for semantic search — inject the OpenAI/local model.
    * Absent: index() and search() will throw; create/findById/forIdentity still work.
@@ -90,6 +96,9 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const vestigiaCol: Collection = db.collection(config.vestigiaCollection ?? 'vestigia')
   const vestigiorum = new MongoVestigiorum(vestigiaCol, config.embed)
 
+  const modosCol: Collection = db.collection(config.modosCollection ?? 'modos')
+  const modos = new MongoModo(modosCol)
+
   // ── Execution rail ─────────────────────────────────────────────────────────
   const runpodCursor = new RunPodCursor(
     config.runner as Parameters<typeof RunPodCursor>[0],
@@ -98,10 +107,13 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     { accountId: config.accountId },
   )
 
+  const tesseraCursor = new TesseraCursor(runpodCursor, modos, signorum)
+
   const cursorum = new SimpleCursorum()
   cursorum.register('runpod', runpodCursor)
+  cursorum.register('tessera', tesseraCursor)
 
   const completor = new ActumCompletor(actorum, signorum)
 
-  return { actorum, modorum, signorum, animae, personae, vestigiorum, cursorum, completor }
+  return { actorum, modorum, signorum, animae, personae, vestigiorum, modos, cursorum, completor }
 }
