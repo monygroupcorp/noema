@@ -7,6 +7,11 @@ import type { AnimaStore } from './types/anima.js'
 import type { PersonaStore } from './types/persona.js'
 import type { Vestigiorum } from './types/vestigium.js'
 import type { ModoStore } from './types/modo.js'
+import type { Mandatorum } from './types/mandatum.js'
+import type { Corporum } from './types/corpus.js'
+import type { Collectionum } from './types/collectio.js'
+import type { Tabularum } from './types/tabula.js'
+import type { Testimoniorum, Depositorum, Solutionum, Petitionum } from './types/catena.js'
 
 import { MongoActorum } from './crystal/MongoActorum.js'
 import { MongoModorum } from './crystal/MongoModorum.js'
@@ -19,6 +24,14 @@ import { RunPodCursor } from './crystal/RunPodCursor.js'
 import { TesseraCursor } from './crystal/TesseraCursor.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
 import { ActumCompletor } from './crystal/ActumCompletor.js'
+import { MongoMandatum } from './crystal/MongoMandatum.js'
+import { MongoCorpus } from './crystal/MongoCorpus.js'
+import { MongoCollectio } from './crystal/MongoCollectio.js'
+import { MongoTabula } from './crystal/MongoTabula.js'
+import { MongoTestimoniorum } from './crystal/MongoTestimoniorum.js'
+import { MongoDepositum } from './crystal/MongoDepositum.js'
+import { MongoSolutio } from './crystal/MongoSolutio.js'
+import { MongoPetitio } from './crystal/MongoPetitio.js'
 
 export interface Ring {
   actorum: Actorum
@@ -28,6 +41,14 @@ export interface Ring {
   personae: PersonaStore
   vestigiorum: Vestigiorum
   modos: ModoStore
+  mandatores: Mandatorum
+  corpora: Corporum
+  collectiones: Collectionum
+  tabulae: Tabularum
+  testimonia: Testimoniorum
+  deposita: Depositorum
+  solutiones: Solutionum
+  petitiones: Petitionum
   cursorum: Cursorum
   completor: IActumCompletor
 }
@@ -67,6 +88,14 @@ export interface ContainerConfig {
   vestigiaCollection?: string
   /** Collection name for modos — default 'modos' */
   modosCollection?: string
+  mandatoresCollection?: string
+  corporaCollection?: string
+  collectionesCollection?: string
+  tabulaeCollection?: string
+  testimoniaCollection?: string
+  depositaCollection?: string
+  solutionesCollection?: string
+  petitionesCollection?: string
   /**
    * Embed function for semantic search — inject the OpenAI/local model.
    * Absent: index() and search() will throw; create/findById/forIdentity still work.
@@ -99,6 +128,15 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const modosCol: Collection = db.collection(config.modosCollection ?? 'modos')
   const modos = new MongoModo(modosCol)
 
+  const mandatores = new MongoMandatum(db.collection(config.mandatoresCollection ?? 'mandatores'))
+  const corpora = new MongoCorpus(db.collection(config.corporaCollection ?? 'corpora'))
+  const collectiones = new MongoCollectio(db.collection(config.collectionesCollection ?? 'collectiones'))
+  const tabulae = new MongoTabula(db.collection(config.tabulaeCollection ?? 'tabulae'))
+  const testimonia = new MongoTestimoniorum(db.collection(config.testimoniaCollection ?? 'testimonia'))
+  const deposita = new MongoDepositum(db.collection(config.depositaCollection ?? 'deposita'))
+  const solutiones = new MongoSolutio(db.collection(config.solutionesCollection ?? 'solutiones'))
+  const petitiones = new MongoPetitio(db.collection(config.petitionesCollection ?? 'petitiones'))
+
   // ── Execution rail ─────────────────────────────────────────────────────────
   const runpodCursor = new RunPodCursor(
     config.runner as Parameters<typeof RunPodCursor>[0],
@@ -115,5 +153,10 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   const completor = new ActumCompletor(actorum, signorum)
 
-  return { actorum, modorum, signorum, animae, personae, vestigiorum, modos, cursorum, completor }
+  return {
+    actorum, modorum, signorum, animae, personae, vestigiorum, modos,
+    mandatores, corpora, collectiones, tabulae, testimonia,
+    deposita, solutiones, petitiones,
+    cursorum, completor,
+  }
 }
