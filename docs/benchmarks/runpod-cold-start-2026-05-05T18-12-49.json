@@ -1,0 +1,16 @@
+{
+  "benchmark": "runpod-unbaked-cold-start",
+  "provider": "runpod",
+  "image": "runpod/pytorch:2.1.0-py3.10-cuda12.1.1-devel-ubuntu22.04",
+  "cloudType": "COMMUNITY",
+  "startedAt": "2026-05-05T18:12:49.556Z",
+  "finishedAt": "2026-05-05T18:12:49.562Z",
+  "results": [
+    {
+      "run": 1,
+      "success": false,
+      "error": "SSH did not become ready (10 min cap)",
+      "timestamp": "2026-05-05T18:12:49.556Z"
+    }
+  ]
+}
