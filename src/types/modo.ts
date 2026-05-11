@@ -87,3 +87,17 @@ export interface Modo {
 
 /** Collection of modo instances */
 export type Modes = Modo[]
+
+/**
+ * ModoStore — persistence interface for Modo session records.
+ */
+export interface ModoStore {
+  create(input: Omit<Modo, 'id' | 'inceptum'>): Promise<Modo>
+  findById(id: string): Promise<Modo | null>
+  update(
+    id: string,
+    patch: Partial<Pick<Modo, 'status' | 'materiamId' | 'impetusAccrued' | 'acta' | 'terminatum'>>
+  ): Promise<Modo>
+  /** Return all modos in a live state (claiming, warming, active, idle). */
+  findActive(): Promise<Modo[]>
+}
