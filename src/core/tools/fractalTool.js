@@ -1,10 +1,6 @@
 /**
  * Fractal Tool — schema validators + helpers for the unified Tool primitive.
  *
- * Phase 1 ships atomic-only validation. The shape supports both atomic and
- * composed Tools via optional fields; composed validation is gated until
- * Phase 2 (see docs/plans/2026-05-06-fractal-tool-migration-spec.md §3).
- *
  * @typedef {Object} FractalToolSpec
  * @property {string} imageId
  * @property {string} imageVersion
@@ -14,19 +10,26 @@
  * @property {Object} defaultCookFlags
  * @property {Array<{role:string,id:string,version?:string}>} [requiredModelRefs]
  *
+ * @typedef {Object} Gradus  — one step in a composed Tool
+ * @property {number} ordine
+ * @property {string} stepId
+ * @property {{ toolId: string, version: string, contentHash: string }} childToolRef
+ * @property {Object} inputBindings   — map of paramKey → { kind, ... }
+ * @property {Object} [runCondition]  — { kind: 'expression', expr: string }
+ *
  * @typedef {Object} FractalTool
  * @property {string} toolId
  * @property {string} version
- * @property {string} service                    Phase 1 atomic: 'runpod'.
+ * @property {string|null} service              null for composed tools
  * @property {Object} inputSchema
  * @property {Object} outputSchema
- * @property {FractalToolSpec} spec              Atomic recipe (atomic case).
- * @property {Array} composedSteps               Empty for atomic Tools.
- * @property {Array} exposedInputs               Empty for atomic Tools.
- * @property {Array} exposedOutputs              Empty for atomic Tools.
- *
- * Composed shape: see fractal-tool spec §3.3 — Phase 2+.
+ * @property {FractalToolSpec|null} spec        Atomic recipe; null for composed.
+ * @property {Gradus[]} composedSteps           Empty for atomic Tools.
+ * @property {Array} exposedInputs
+ * @property {Array} exposedOutputs
  */
+
+const VALID_BINDING_KINDS = new Set(['exposedInput', 'static', 'stepOutput', 'expression']);
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -54,32 +57,38 @@ function isAtomicFractalTool(tool) {
   return !Array.isArray(tool.composedSteps) || tool.composedSteps.length === 0;
 }
 
-function validateFractalTool(tool) {
-  const errors = [];
+function isComposedFractalTool(tool) {
+  return Array.isArray(tool.composedSteps) && tool.composedSteps.length > 0;
+}
 
-  if (!isPlainObject(tool)) {
-    return { isValid: false, errors: [{ field: '<root>', message: 'tool must be an object' }] };
-  }
-
-  if (Array.isArray(tool.composedSteps) && tool.composedSteps.length > 0) {
-    return {
-      isValid: false,
-      errors: [{ field: 'composedSteps', message: 'composed Tools not yet supported in Phase 1' }],
-    };
-  }
-
+function _validateCommonFields(tool, errors) {
   if (!isNonEmptyString(tool.toolId)) {
     errors.push({ field: 'toolId', message: 'must be a non-empty string' });
   }
   if (!isNonEmptyString(tool.version)) {
     errors.push({ field: 'version', message: 'must be a non-empty string' });
   }
-  if (!isNonEmptyString(tool.service)) {
-    errors.push({ field: 'service', message: 'must be a non-empty string' });
-  } else if (tool.service !== 'runpod') {
-    errors.push({ field: 'service', message: "Phase 1 atomic Tools must have service === 'runpod'" });
+  if (!isPlainObject(tool.inputSchema)) {
+    errors.push({ field: 'inputSchema', message: 'must be an object' });
   }
+  if (!isPlainObject(tool.outputSchema)) {
+    errors.push({ field: 'outputSchema', message: 'must be an object' });
+  }
+  if (!Array.isArray(tool.composedSteps)) {
+    errors.push({ field: 'composedSteps', message: 'must be an array' });
+  }
+  if (!Array.isArray(tool.exposedInputs)) {
+    errors.push({ field: 'exposedInputs', message: 'must be an array' });
+  }
+  if (!Array.isArray(tool.exposedOutputs)) {
+    errors.push({ field: 'exposedOutputs', message: 'must be an array' });
+  }
+}
 
+function _validateAtomicSpec(tool, errors) {
+  if (!isNonEmptyString(tool.service)) {
+    errors.push({ field: 'service', message: 'must be a non-empty string for atomic tools' });
+  }
   if (!isPlainObject(tool.spec)) {
     errors.push({ field: 'spec', message: 'must be an object' });
   } else {
@@ -102,22 +111,71 @@ function validateFractalTool(tool) {
       errors.push({ field: 'spec.defaultCookFlags', message: 'must be an object' });
     }
   }
+}
 
-  if (!isPlainObject(tool.inputSchema)) {
-    errors.push({ field: 'inputSchema', message: 'must be an object' });
+function _validateComposedSteps(steps, errors) {
+  const seenStepIds = new Set();
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    const prefix = `composedSteps[${i}]`;
+
+    if (!isNonEmptyString(s.stepId)) {
+      errors.push({ field: `${prefix}.stepId`, message: 'must be a non-empty string' });
+    } else if (seenStepIds.has(s.stepId)) {
+      errors.push({ field: `${prefix}.stepId`, message: `duplicate stepId '${s.stepId}'` });
+    } else {
+      seenStepIds.add(s.stepId);
+    }
+
+    if (typeof s.ordine !== 'number') {
+      errors.push({ field: `${prefix}.ordine`, message: 'must be a number' });
+    }
+
+    if (!isPlainObject(s.childToolRef)) {
+      errors.push({ field: `${prefix}.childToolRef`, message: 'must be an object' });
+    } else {
+      if (!isNonEmptyString(s.childToolRef.toolId)) {
+        errors.push({ field: `${prefix}.childToolRef.toolId`, message: 'must be a non-empty string' });
+      }
+      if (!isNonEmptyString(s.childToolRef.version)) {
+        errors.push({ field: `${prefix}.childToolRef.version`, message: 'must be a non-empty string' });
+      }
+      if (!isNonEmptyString(s.childToolRef.contentHash)) {
+        errors.push({ field: `${prefix}.childToolRef.contentHash`, message: 'must be a non-empty string (Merkle pin)' });
+      }
+    }
+
+    if (s.inputBindings !== undefined && !isPlainObject(s.inputBindings)) {
+      errors.push({ field: `${prefix}.inputBindings`, message: 'must be an object if present' });
+    } else if (isPlainObject(s.inputBindings)) {
+      for (const [key, binding] of Object.entries(s.inputBindings)) {
+        if (!isPlainObject(binding)) {
+          errors.push({ field: `${prefix}.inputBindings.${key}`, message: 'binding must be an object' });
+        } else if (!VALID_BINDING_KINDS.has(binding.kind)) {
+          errors.push({ field: `${prefix}.inputBindings.${key}.kind`, message: `unknown binding kind '${binding.kind}'. Valid: ${[...VALID_BINDING_KINDS].join(', ')}` });
+        }
+      }
+    }
   }
-  if (!isPlainObject(tool.outputSchema)) {
-    errors.push({ field: 'outputSchema', message: 'must be an object' });
+}
+
+/**
+ * Validate a fractal Tool — works for both atomic and composed.
+ * Returns { isValid: boolean, errors: Array<{ field, message }> }.
+ */
+function validateFractalTool(tool) {
+  const errors = [];
+
+  if (!isPlainObject(tool)) {
+    return { isValid: false, errors: [{ field: '<root>', message: 'tool must be an object' }] };
   }
 
-  if (!Array.isArray(tool.composedSteps)) {
-    errors.push({ field: 'composedSteps', message: 'must be an array (empty for atomic)' });
-  }
-  if (!Array.isArray(tool.exposedInputs)) {
-    errors.push({ field: 'exposedInputs', message: 'must be an array (empty for atomic)' });
-  }
-  if (!Array.isArray(tool.exposedOutputs)) {
-    errors.push({ field: 'exposedOutputs', message: 'must be an array (empty for atomic)' });
+  _validateCommonFields(tool, errors);
+
+  if (Array.isArray(tool.composedSteps) && tool.composedSteps.length > 0) {
+    _validateComposedSteps(tool.composedSteps, errors);
+  } else {
+    _validateAtomicSpec(tool, errors);
   }
 
   return { isValid: errors.length === 0, errors };
@@ -126,7 +184,9 @@ function validateFractalTool(tool) {
 module.exports = {
   isFractalTool,
   isAtomicFractalTool,
+  isComposedFractalTool,
   validateFractalTool,
+  VALID_BINDING_KINDS,
 };
 
 if (require.main === module) {
@@ -151,59 +211,66 @@ if (require.main === module) {
     exposedOutputs: [],
   };
 
-  const legacy = {
-    toolId: 'runmake',
-    service: 'runpod',
-    version: '1.0.0',
-    inputSchema: {},
-    outputSchema: {},
+  const composed = {
+    toolId: 'make',
+    version: '3.0.0',
+    service: null,
+    spec: null,
+    inputSchema: { prompt: { name: 'Prompt', type: 'text', required: true } },
+    outputSchema: { imageUrl: { name: 'Result', type: 'string' } },
+    composedSteps: [
+      {
+        ordine: 0,
+        stepId: 'gen',
+        childToolRef: { toolId: 'runmake', version: '2.0.0', contentHash: 'sha256:abc123' },
+        inputBindings: { prompt: { kind: 'exposedInput', key: 'prompt' } },
+      },
+    ],
+    exposedInputs: [{ stepId: 'gen', paramKey: 'prompt' }],
+    exposedOutputs: [{ kind: 'stepOutput', stepId: 'gen', outputKey: 'imageUrl', as: 'imageUrl' }],
   };
 
-  const composed = { ...atomic, composedSteps: [{ stepId: 'gen' }] };
-
-  // A
-  assert.strictEqual(isFractalTool(atomic), true, 'A: atomic should be fractal');
-  // B
-  assert.strictEqual(isFractalTool(legacy), false, 'B: legacy should not be fractal');
-  // C
-  assert.strictEqual(isAtomicFractalTool(atomic), true, 'C: atomic should be atomic-fractal');
-  // D
-  assert.strictEqual(isAtomicFractalTool(composed), false, 'D: composed should not be atomic-fractal');
-  // E
-  const okResult = validateFractalTool(atomic);
-  assert.strictEqual(okResult.isValid, true, 'E: atomic should validate');
-  assert.deepStrictEqual(okResult.errors, [], 'E: no errors expected');
-
-  // F — collect specific errors at once
+  // A. atomic is fractal
+  assert.strictEqual(isFractalTool(atomic), true, 'A');
+  // B. composed is fractal
+  assert.strictEqual(isFractalTool(composed), true, 'B');
+  // C. atomic is atomic
+  assert.strictEqual(isAtomicFractalTool(atomic), true, 'C');
+  // D. composed is not atomic
+  assert.strictEqual(isAtomicFractalTool(composed), false, 'D');
+  // E. composed is composed
+  assert.strictEqual(isComposedFractalTool(composed), true, 'E');
+  // F. atomic validates
+  const atomicResult = validateFractalTool(atomic);
+  assert.strictEqual(atomicResult.isValid, true, `F: ${JSON.stringify(atomicResult.errors)}`);
+  // G. composed validates
+  const composedResult = validateFractalTool(composed);
+  assert.strictEqual(composedResult.isValid, true, `G: ${JSON.stringify(composedResult.errors)}`);
+  // H. composed step missing contentHash fails
   const broken = {
-    version: '2.0.0',
-    service: 'runpod',
-    spec: {
-      imageVersion: '1',
-      workflowTemplate: 'flux-schnell',
-      workflowTemplateVersion: '1',
-      seedInputKey: 'input_seed',
-      defaultCookFlags: {},
-    },
-    outputSchema: {},
-    composedSteps: 'not-an-array',
-    exposedInputs: [],
-    exposedOutputs: [],
+    ...composed,
+    composedSteps: [{
+      ordine: 0,
+      stepId: 'gen',
+      childToolRef: { toolId: 'runmake', version: '2.0.0' },
+      inputBindings: {},
+    }],
   };
   const brokenResult = validateFractalTool(broken);
-  assert.strictEqual(brokenResult.isValid, false, 'F: broken should fail validation');
-  const fields = brokenResult.errors.map(e => e.field);
-  assert.ok(fields.includes('toolId'), 'F: missing toolId reported');
-  assert.ok(fields.includes('spec.imageId'), 'F: missing spec.imageId reported');
-  assert.ok(fields.includes('inputSchema'), 'F: missing inputSchema reported');
-  assert.ok(fields.includes('composedSteps'), 'F: composedSteps wrong type reported');
+  assert.strictEqual(brokenResult.isValid, false, 'H: missing contentHash should fail');
+  assert.ok(brokenResult.errors.some(e => e.field.includes('contentHash')), 'H: contentHash error');
+  // I. bad binding kind fails
+  const badBinding = {
+    ...composed,
+    composedSteps: [{
+      ordine: 0,
+      stepId: 'gen',
+      childToolRef: { toolId: 'runmake', version: '2.0.0', contentHash: 'sha256:abc' },
+      inputBindings: { prompt: { kind: 'unknown' } },
+    }],
+  };
+  const badResult = validateFractalTool(badBinding);
+  assert.strictEqual(badResult.isValid, false, 'I: bad binding kind should fail');
 
-  // G
-  const composedResult = validateFractalTool(composed);
-  assert.strictEqual(composedResult.isValid, false, 'G: composed should fail Phase 1');
-  assert.strictEqual(composedResult.errors.length, 1, 'G: exactly one error');
-  assert.strictEqual(composedResult.errors[0].field, 'composedSteps', 'G: error on composedSteps');
-  assert.ok(/Phase 1/.test(composedResult.errors[0].message), 'G: Phase-1 message');
-
-  console.log('fractalTool smoke: A B C D E F G all pass');
+  console.log('fractalTool smoke: A B C D E F G H I all pass');
 }

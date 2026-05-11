@@ -43,7 +43,10 @@ class RunPodAdapter {
     const accountId = accountContext?.masterAccountId || accountContext?.accountId;
     if (!accountId) throw new Error('RunPodAdapter.startJob: accountContext.masterAccountId is required');
 
-    const deployment = await this.compiler.compile({ tool, inputs: inputs || {}, accountContext });
+    const deployments = await this.compiler.compile({ tool, inputs: inputs || {}, accountContext });
+    // For atomic tools (Phase 1–2 path) take the first deployment.
+    // Composed multi-step execution is handled by the orchestrator layer above RunPodAdapter.
+    const deployment = deployments[0];
     const resolvedJobId = jobId || `runpod-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
 
     const existingSession = this.sessionManager.getSession(accountId, deployment.hash);
