@@ -60,6 +60,17 @@ export interface Anima {
 }
 
 /**
+ * AnimaStore — the Anima repository interface.
+ * One implementation: MongoAnima. Possibly MemoryAnima for tests.
+ */
+export interface AnimaStore {
+  create(input: Omit<Anima, 'id' | 'natum' | 'mutatum'>): Promise<Anima>
+  find(id: string): Promise<Anima | null>
+  findByCustos(custos: string): Promise<Anima | null>
+  update(id: string, patch: Partial<Pick<Anima, 'nomen' | 'affines' | 'memoriaRef' | 'custos'>>): Promise<Anima>
+}
+
+/**
  * Animae — nominative plural of anima.
  * A group or team — no new primitive needed. Groups are just grammar.
  */
