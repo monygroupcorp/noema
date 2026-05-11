@@ -1,0 +1,40 @@
+{
+  "benchmark": "runpod-unbaked-cold-start",
+  "provider": "runpod",
+  "image": "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04",
+  "cloudType": "SECURE",
+  "startedAt": "2026-05-06T09:30:29.995Z",
+  "finishedAt": "2026-05-06T09:36:56.705Z",
+  "results": [
+    {
+      "run": 1,
+      "success": true,
+      "timestamp": "2026-05-06T09:30:29.995Z",
+      "provider": "runpod",
+      "cloudType": "SECURE",
+      "image": "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04",
+      "instanceId": "1ttr8h2oeovzm3",
+      "gpuType": "NVIDIA RTX A4000",
+      "sshHost": "213.192.2.109",
+      "hourlyRate": 0.46,
+      "provisionTime": 1.865,
+      "sshReadyTime": 36.56,
+      "gitCloneTime": 2.209,
+      "pytorchUpgradeTime": 2.503,
+      "requirementsTime": 38.309,
+      "downloadTime": 265.694,
+      "downloadDetails": {
+        "clip_l": 3.119,
+        "lora": 3.248,
+        "vae": 3.521,
+        "t5xxl": 176.939,
+        "unet": 265.694
+      },
+      "comfyuiStartTime": 16.365,
+      "generationTime": 21.749,
+      "totalTime": 386.028,
+      "offerId": "NVIDIA RTX A4000",
+      "datacenter": "SECURE"
+    }
+  ]
+}

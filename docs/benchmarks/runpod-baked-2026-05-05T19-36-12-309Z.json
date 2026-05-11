@@ -1,0 +1,17 @@
+{
+  "benchmark": "runpod-baked-cold-start",
+  "provider": "runpod",
+  "image": "monygroup/flux-comfyui-runtime:v1",
+  "cloudType": "COMMUNITY",
+  "bootstrapSsh": true,
+  "startedAt": "2026-05-05T19:36:12.308Z",
+  "finishedAt": "2026-05-05T19:36:12.309Z",
+  "results": [
+    {
+      "run": 1,
+      "success": false,
+      "error": "SSH did not become ready (10 min cap)",
+      "timestamp": "2026-05-05T19:36:12.308Z"
+    }
+  ]
+}

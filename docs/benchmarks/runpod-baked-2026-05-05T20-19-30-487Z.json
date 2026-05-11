@@ -1,0 +1,17 @@
+{
+  "benchmark": "runpod-baked-cold-start",
+  "provider": "runpod",
+  "image": "monygroup/flux-comfyui-runtime:v1",
+  "cloudType": "COMMUNITY",
+  "bootstrapSsh": true,
+  "startedAt": "2026-05-05T20:19:30.480Z",
+  "finishedAt": "2026-05-05T20:19:30.488Z",
+  "results": [
+    {
+      "run": 1,
+      "success": false,
+      "error": "ComfyUI API never came up. Log tail:\nTraceback (most recent call last):\n  File \"/workspace/ComfyUI/main.py\", line 11, in <module>\n    import utils.extra_config\n  File \"/workspace/ComfyUI/utils/extra_config.py\", line 2, in <module>\n    import yaml\nModuleNotFoundError: No module named 'yaml'\n",
+      "timestamp": "2026-05-05T20:19:30.480Z"
+    }
+  ]
+}
