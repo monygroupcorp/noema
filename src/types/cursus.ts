@@ -40,6 +40,19 @@ import type { Actum } from './actum.js'
 import type { Modo } from './modo.js'
 
 // ---------------------------------------------------------------------------
+// CursorResult — what cursor.run() returns
+// ---------------------------------------------------------------------------
+
+/**
+ * CursorResult — what cursor.run() returns.
+ * sync: execution completed inline; Exitus is ready.
+ * async: job submitted to external system; externusJobId is the handle for webhook correlation.
+ */
+export type CursorResult =
+  | { kind: 'sync'; exitus: Exitus }
+  | { kind: 'async'; externusJobId: string }
+
+// ---------------------------------------------------------------------------
 // Exitus — what a cursor hands back after completing execution
 // ---------------------------------------------------------------------------
 
@@ -94,10 +107,11 @@ export interface Cursor {
   reserve(modus: Modus, aditus: Record<string, unknown>): Promise<bigint>
 
   /**
-   * Dispatch and execute. Returns when the job is complete (or failed).
-   * Returns actual impetus consumed — guaranteed ≤ reserve().
+   * Dispatch and execute. Returns when the job is complete (or failed), or
+   * submits to an external system and returns an externusJobId for async completion.
+   * For sync cursors: result.exitus.impetus ≤ reserve(). Guaranteed by each cursor.
    */
-  run(actum: Actum, modo?: Modo): Promise<Exitus>
+  run(actum: Actum, modo?: Modo): Promise<CursorResult>
 }
 
 // ---------------------------------------------------------------------------
@@ -152,9 +166,11 @@ export interface Actorum {
    */
   update(
     id: string,
-    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat'>>
+    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId'>>
   ): Promise<Actum>
   findById(id: string): Promise<Actum | null>
+  /** Find an actum by the external job ID assigned at submission time. */
+  findByExternusJobId(externusJobId: string): Promise<Actum | null>
   /**
    * Return all nascens actum records whose expirat is in the past.
    * These are stuck executions — the cursor never reported back.

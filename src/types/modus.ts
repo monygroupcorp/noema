@@ -113,6 +113,15 @@ export interface Modus {
    */
   impetusFixum?: bigint
 
+  /**
+   * How results are delivered to the caller.
+   * sync: cursor.run() blocks and returns Exitus inline.
+   * async: cursor.run() submits the job and returns externusJobId; completion
+   *        arrives via inbound webhook → ActumCompletor.complete().
+   * Absent defaults to 'sync'.
+   */
+  deliveryMode?: 'sync' | 'async'
+
   /** "auctor" = author/creator in Latin — the animaId of who created this modus */
   auctor?: string
   /** True = platform-owned canonical modus. False = community-published. */

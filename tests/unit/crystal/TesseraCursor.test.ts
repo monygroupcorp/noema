@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { TesseraCursor } from '../../../src/crystal/TesseraCursor.js'
 import { MemorySignorum } from '../../../src/crystal/MemorySignorum.js'
 import type { ModoStore, Modo } from '../../../src/types/modo.js'
-import type { Cursor, Exitus } from '../../../src/types/cursus.js'
+import type { Cursor, CursorResult } from '../../../src/types/cursus.js'
 import type { Modus } from '../../../src/types/modus.js'
 import type { Actum } from '../../../src/types/actum.js'
 
@@ -28,11 +28,14 @@ class MemoryModoStore implements ModoStore {
   }
 }
 
-const fixedExitus: Exitus = { exitus: { url: 'http://cdn.x/img.png' }, impetus: 60n, duratio: 1000 }
+const fixedCursorResult: CursorResult = {
+  kind: 'sync',
+  exitus: { exitus: { url: 'http://cdn.x/img.png' }, impetus: 60n, duratio: 1000 },
+}
 
 class StubCursor implements Cursor {
   async reserve(_modus: Modus): Promise<bigint> { return 120n }
-  async run(_actum: Actum): Promise<Exitus> { return fixedExitus }
+  async run(_actum: Actum): Promise<CursorResult> { return fixedCursorResult }
 }
 
 function makeModus(overrides: Partial<Modus> = {}): Modus {
@@ -119,10 +122,11 @@ test('reserve delegates to inner cursor', async () => {
 
 // ── run ───────────────────────────────────────────────────────────────────────
 
-test('run delegates to inner cursor and returns Exitus', async () => {
+test('run delegates to inner cursor and returns CursorResult', async () => {
   const cursor = new TesseraCursor(new StubCursor(), new MemoryModoStore(), new MemorySignorum())
-  const exitus = await cursor.run(makeActum())
-  assert.equal(exitus.impetus, 60n)
+  const result = await cursor.run(makeActum())
+  assert.equal(result.kind, 'sync')
+  assert.equal((result as Extract<typeof result, { kind: 'sync' }>).exitus.impetus, 60n)
 })
 
 test('run with modo updates impetusAccrued', async () => {

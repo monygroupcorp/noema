@@ -77,6 +77,13 @@ export interface Actum {
   /** "aditus" = entrance in Latin — the inputs provided at cast time */
   aditus: Record<string, unknown>
 
+  /**
+   * The external system's job identifier — set when cursor returns { kind: 'async' }.
+   * Used by the webhook inbound handler to look up the Actum for completion.
+   * "externus" = external; this ID lives in the external system, not ours.
+   */
+  externusJobId?: string
+
   status: ActumStatus
   /** "exitus" = exit in Latin — the outputs produced by the modus */
   exitus?: Record<string, unknown>
