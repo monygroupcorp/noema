@@ -31,11 +31,18 @@ export type PersonaGenus =
  *
  * Created automatically when a user first interacts through a platform.
  * Multiple personae can map to the same animaId (same user, different platforms).
+ *
+ * One persona may link multiple animae — the user can create additional Anima
+ * (separate project profiles, pseudonymous spaces) and switch between them.
+ * Credit lives on each Anima independently; the user moves it between them
+ * as a normal Signum transfer. activeAnimaId is who is speaking right now.
  */
 export interface Persona {
   id: string
-  /** FK → Anima. The soul behind this mask. */
-  animaId: string
+  /** FK → Anima. The currently active soul behind this mask. */
+  activeAnimaId: string
+  /** All Anima ever linked to this persona. First entry is the original. */
+  animaIds: string[]
   genus: PersonaGenus
 
   /**
@@ -71,4 +78,8 @@ export interface PersonaStore {
   findOrCreate(genus: PersonaGenus, externusId: string, defaults?: { animaId: string; nomen?: string }): Promise<Persona>
   findByAnimaId(animaId: string): Promise<Personae>
   findByExternus(genus: PersonaGenus, externusId: string): Promise<Persona | null>
+  /** Add a new Anima to this persona's list. Does not switch active. */
+  linkAnima(personaId: string, animaId: string): Promise<Persona>
+  /** Switch the active Anima. The animaId must already be in animaIds. */
+  switchAnima(personaId: string, animaId: string): Promise<Persona>
 }

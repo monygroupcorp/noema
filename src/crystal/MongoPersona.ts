@@ -25,9 +25,11 @@ export class MongoPersona implements PersonaStore {
     if (existing) return fromDoc(existing as Record<string, unknown>)
 
     const now = new Date()
+    const initialAnimaId = defaults?.animaId ?? ''
     const persona: Persona = {
       id: uuidv4(),
-      animaId: defaults?.animaId ?? '',
+      activeAnimaId: initialAnimaId,
+      animaIds: [initialAnimaId],
       genus,
       externusId,
       nomen: defaults?.nomen,
@@ -40,12 +42,32 @@ export class MongoPersona implements PersonaStore {
   }
 
   async findByAnimaId(animaId: string): Promise<Personae> {
-    const docs = await this.col.find({ animaId }).toArray()
+    const docs = await this.col.find({ animaIds: animaId }).toArray()
     return docs.map(d => fromDoc(d as Record<string, unknown>))
   }
 
   async findByExternus(genus: PersonaGenus, externusId: string): Promise<Persona | null> {
     const doc = await this.col.findOne({ genus, externusId })
     return doc ? fromDoc(doc as Record<string, unknown>) : null
+  }
+
+  async linkAnima(personaId: string, animaId: string): Promise<Persona> {
+    const result = await this.col.findOneAndUpdate(
+      { id: personaId },
+      { $addToSet: { animaIds: animaId } },
+      { returnDocument: 'after' }
+    )
+    if (!result) throw new Error(`Persona not found: ${personaId}`)
+    return fromDoc(result as Record<string, unknown>)
+  }
+
+  async switchAnima(personaId: string, animaId: string): Promise<Persona> {
+    const result = await this.col.findOneAndUpdate(
+      { id: personaId, animaIds: animaId },
+      { $set: { activeAnimaId: animaId } },
+      { returnDocument: 'after' }
+    )
+    if (!result) throw new Error(`Persona not found or animaId not linked: ${personaId}`)
+    return fromDoc(result as Record<string, unknown>)
   }
 }
