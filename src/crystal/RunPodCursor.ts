@@ -31,6 +31,7 @@ export class RunPodCursor implements Cursor {
   }
 
   async run(actum: Actum, _modo?: Modo): Promise<CursorResult> {
+    // aditus validated by validateAditus before dispatch
     const modus = await this.modorum.find(actum.modusId, actum.modusVersiono)
     if (!modus) throw new Error(`Modus '${actum.modusId}' not found`)
 

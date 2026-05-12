@@ -15,6 +15,7 @@ export class HuggingFaceCursor implements Cursor {
   }
 
   async run(actum: Actum, _modo?: Modo): Promise<CursorResult> {
+    // aditus validated by validateAditus before dispatch
     const aditus = actum.aditus
 
     if (!aditus.__spaceUrl) {
