@@ -207,3 +207,159 @@ export interface Intellarum {
    */
   findByTrigger(trigger: string, baseIntellaId: string, animaId?: string): Promise<Intellae>
 }
+
+// =============================================================================
+// INTELLIGENS — the unified model weight registry
+// =============================================================================
+//
+// "Intelligens" is the nominative singular present participle of "intelligo"
+// (to perceive, to understand, to discern) — one perceiving/understanding entity.
+// "Intelligenti" / "Intelligentia" = nominative plural.
+// "Intelligentium" = genitive plural — "of the understanding ones" — the store.
+//
+// This is the backing store for the Models catalog page and the source from
+// which DeploymentBuilder resolves model references. It stores LoRAs,
+// checkpoints, VAEs, CLIPs, ControlNets, and IPAdapters.
+//
+// Compare Intella (above) — the load-onto-pod substrate used by ComfyUI
+// workflow compilation. Intelligens is the user-facing catalog record;
+// the two types may converge in a future phase.
+// =============================================================================
+
+/** The class of weight file — determines how it is loaded and applied */
+export type IntelligensGenus =
+  | 'lora'        // fine-tuned delta weights — applied via merge or injection pass
+  | 'checkpoint'  // full diffusion model weights — the base generation backbone
+  | 'vae'         // variational autoencoder — encodes/decodes latent ↔ pixel space
+  | 'clip'        // text encoder — maps prompt tokens to conditioning vectors
+  | 'controlnet'  // spatial conditioning — guides generation via structural signals
+  | 'ipadapter'   // image prompt conditioning — transfers visual style or composition
+
+/** Who may discover and use this weight */
+export type IntelligensPrivacy = 'public' | 'private'
+
+/**
+ * Intelligens — one weight file known to the platform.
+ *
+ * "intelligens" = nominative singular: one perceiving / discerning entity.
+ * The registry knows it; the system knows how to use it.
+ */
+export interface Intelligens {
+  /** UUID primary key */
+  id: string
+
+  /** "nomen" = name in Latin — human-readable display name */
+  nomen: string
+
+  /** The class of weight this record describes */
+  genus: IntelligensGenus
+
+  /**
+   * Base model this weight is compatible with.
+   * "basis" = foundation/base in Latin.
+   * Examples: 'flux', 'sdxl', 'sd15'
+   */
+  basis: string
+
+  /**
+   * "auctor" = author/creator in Latin — the animaId of the uploader.
+   * Absent for platform-canonical weights.
+   */
+  auctor?: string
+
+  /** true = platform-owned canonical weight; false = community-contributed */
+  canonica: boolean
+
+  /** Who may discover and use this weight */
+  privacy: IntelligensPrivacy
+
+  /**
+   * "notae" = plural of nota (mark, note) — tags for discovery.
+   * Used for style, subject, aesthetic classification.
+   * Examples: ['portrait', 'cinematic', 'anime']
+   */
+  notae: string[]
+
+  /**
+   * "verba" = words in Latin — trigger words for LoRAs.
+   * The text injected into prompts to activate this weight's effect.
+   * Present only for genus: 'lora'. Examples: ['ohwx person', 'flux-portrait']
+   */
+  verba?: string[]
+
+  /**
+   * "locatio" = placement/location in Latin — storage reference.
+   * Either an R2 object key or an external URL.
+   * Examples: 'r2://weights/flux-lora-v1.safetensors', 'https://...'
+   */
+  locatio: string
+
+  /**
+   * SHA-256 of the weight file — content address.
+   * Enables verification that the loaded file matches what was registered.
+   */
+  contentHash?: string
+
+  /**
+   * "magnitudine" = ablative of magnitudo (size, magnitude) — file size in bytes.
+   * Used for storage accounting and download time estimation.
+   */
+  magnitudine?: number
+
+  /**
+   * "descriptio" = description in Latin — human-readable explanation.
+   * Used on the Models catalog page and in search.
+   */
+  descriptio?: string
+
+  /** Community star count — embedded for fast catalog sorting */
+  stellae: number
+
+  /** "natum" = born — when this weight was first registered */
+  natum: Date
+  /** "mutatum" = changed — when this record was last modified */
+  mutatum: Date
+}
+
+/** "Intelligentia" — the collection of all Intelligens records */
+export type Intelligentia = Intelligens[]
+
+/**
+ * IntelligentiumStore — genitive plural "of the understanding ones."
+ * The persistence interface for the model weight registry.
+ */
+export interface IntelligentiumStore {
+  /** Register a new weight. id, natum, mutatum, and stellae are assigned automatically. */
+  create(input: Omit<Intelligens, 'id' | 'natum' | 'mutatum' | 'stellae'>): Promise<Intelligens>
+
+  /** Look up a single weight by id. Returns null if not found. */
+  find(id: string): Promise<Intelligens | null>
+
+  /**
+   * List weights matching the given filter.
+   * All filter fields are ANDed together. Absent fields are not constrained.
+   */
+  list(filter?: {
+    genus?: IntelligensGenus
+    basis?: string
+    auctor?: string
+    canonica?: boolean
+    privacy?: IntelligensPrivacy
+  }): Promise<Intelligentia>
+
+  /**
+   * Update a registered weight. Stamps mutatum automatically.
+   * Throws if the id is not found.
+   */
+  update(
+    id: string,
+    patch: Partial<Pick<Intelligens, 'nomen' | 'descriptio' | 'notae' | 'verba' | 'privacy' | 'stellae' | 'contentHash'>>
+  ): Promise<Intelligens>
+
+  /**
+   * Full-text and prefix search across nomen, descriptio, and notae.
+   * Uses MongoDB $text index if available, otherwise falls back to $regex.
+   * Case-insensitive. Returns all matching weights.
+   */
+  search(query: string): Promise<Intelligentia>
+}

@@ -46,6 +46,12 @@ export interface Actum {
   // ── Location — no identity columns ──────────────────────────────────────
   /** FK → Modo. The session this actum ran within. Optional: some actum run outside sessions. */
   modoId?: string
+  /**
+   * FK → Dictum. The conversation turn that spawned this execution.
+   * Absent for acta spawned from canvas workflows, API calls, or Mandatora.
+   * "dictumId" — origin conversation turn.
+   */
+  dictumId?: string
   /** FK → Materia. The physical pod that executed this actum. */
   materiamId?: string
 
