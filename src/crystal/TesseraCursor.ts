@@ -53,6 +53,7 @@ export class TesseraCursor implements Cursor {
   }
 
   async run(actum: Actum, modo?: Modo): Promise<CursorResult> {
+    // aditus validated by validateAditus before dispatch
     const result = await this.inner.run(actum, modo)
 
     if (modo && result.kind === 'sync') {
