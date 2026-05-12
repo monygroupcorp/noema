@@ -38,11 +38,12 @@ test('findOrCreate creates new persona with id, natum, visum', async () => {
   assert.ok(p.visum instanceof Date)
 })
 
-test('findOrCreate sets genus, externusId, animaId, status active', async () => {
+test('findOrCreate sets genus, externusId, activeAnimaId, animaIds, status active', async () => {
   const p = await store.findOrCreate('telegram', 'tg-111', { animaId: 'anima-a' })
   assert.equal(p.genus, 'telegram')
   assert.equal(p.externusId, 'tg-111')
-  assert.equal(p.animaId, 'anima-a')
+  assert.equal(p.activeAnimaId, 'anima-a')
+  assert.deepEqual(p.animaIds, ['anima-a'])
   assert.equal(p.status, 'active')
 })
 
@@ -99,7 +100,7 @@ test('findByAnimaId does not return other animaId personae', async () => {
   await store.findOrCreate('telegram', 'tg-b', { animaId: 'anima-b' })
   const personae = await store.findByAnimaId('anima-a')
   assert.equal(personae.length, 1)
-  assert.equal(personae[0].animaId, 'anima-a')
+  assert.equal(personae[0].activeAnimaId, 'anima-a')
 })
 
 // ── findByExternus ────────────────────────────────────────────────────────────
@@ -120,4 +121,52 @@ test('findByExternus does not match wrong genus', async () => {
   await store.findOrCreate('telegram', 'shared-id', { animaId: 'anima-z' })
   const found = await store.findByExternus('discord', 'shared-id')
   assert.equal(found, null)
+})
+
+// ── linkAnima ─────────────────────────────────────────────────────────────────
+
+test('linkAnima appends animaId to animaIds without changing activeAnimaId', async () => {
+  const created = await store.findOrCreate('telegram', 'tg-link', { animaId: 'anima-orig' })
+  const updated = await store.linkAnima(created.id, 'anima-new')
+  assert.deepEqual(updated.animaIds, ['anima-orig', 'anima-new'])
+  assert.equal(updated.activeAnimaId, 'anima-orig')
+})
+
+test('linkAnima is idempotent — linking same animaId twice keeps only one entry', async () => {
+  const created = await store.findOrCreate('telegram', 'tg-idem', { animaId: 'anima-orig' })
+  await store.linkAnima(created.id, 'anima-dup')
+  const updated = await store.linkAnima(created.id, 'anima-dup')
+  assert.equal(updated.animaIds.filter((a: string) => a === 'anima-dup').length, 1)
+})
+
+test('linkAnima throws for unknown personaId', async () => {
+  await assert.rejects(
+    () => store.linkAnima('no-such-id', 'anima-x'),
+    /Persona not found/
+  )
+})
+
+// ── switchAnima ───────────────────────────────────────────────────────────────
+
+test('switchAnima updates activeAnimaId to a linked animaId', async () => {
+  const created = await store.findOrCreate('telegram', 'tg-switch', { animaId: 'anima-orig' })
+  await store.linkAnima(created.id, 'anima-second')
+  const updated = await store.switchAnima(created.id, 'anima-second')
+  assert.equal(updated.activeAnimaId, 'anima-second')
+  assert.deepEqual(updated.animaIds, ['anima-orig', 'anima-second'])
+})
+
+test('switchAnima throws when animaId is not in animaIds', async () => {
+  const created = await store.findOrCreate('telegram', 'tg-sw-bad', { animaId: 'anima-orig' })
+  await assert.rejects(
+    () => store.switchAnima(created.id, 'anima-unlinked'),
+    /Persona not found or animaId not linked/
+  )
+})
+
+test('switchAnima throws for unknown personaId', async () => {
+  await assert.rejects(
+    () => store.switchAnima('no-such-id', 'anima-x'),
+    /Persona not found or animaId not linked/
+  )
 })
