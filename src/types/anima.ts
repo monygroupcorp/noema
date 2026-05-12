@@ -76,6 +76,46 @@ export interface AnimaStore {
  */
 export type Animae = Anima[]
 
+// ---------------------------------------------------------------------------
+// Memoria — long-term distilled agent memory
+// ---------------------------------------------------------------------------
+
+/**
+ * Memoria — the distilled long-term memory of an anima.
+ *
+ * "Memoria" = memory, recollection (Latin). One document per anima —
+ * an ever-updated summary of who the user is, what they gravitate toward,
+ * and what preferences the agent has learned over time.
+ *
+ * Unlike conversation history (Colloquium/Dictum), Memoria is distilled —
+ * a compressed, living synthesis, not a raw log.
+ */
+export interface Memoria {
+  id: string
+  /** FK → Anima. One Memoria per anima. */
+  animaId: string
+  /** "summarium" = summary in Latin — distilled description of who this user is */
+  summarium: string
+  /** "affines" = related/drawn-to things — topics and styles this user gravitates toward */
+  affines: string[]
+  /** "praeferentia" = preferences in Latin — structured preference map */
+  praeferentia: Record<string, unknown>
+  /** "natum" = born — when this memoria was first created */
+  natum: Date
+  /** "mutatum" = changed — when this memoria was last updated */
+  mutatum: Date
+}
+
+/**
+ * MemoriaStore — manages the single Memoria record per anima.
+ * upsert() creates on first call and updates on subsequent calls, keyed on animaId.
+ */
+export interface MemoriaStore {
+  /** Create or update the Memoria for an anima. One document per animaId. */
+  upsert(input: Omit<Memoria, 'id' | 'natum' | 'mutatum'>): Promise<Memoria>
+  findByAnima(animaId: string): Promise<Memoria | null>
+}
+
 /**
  * Animarum — genitive plural "of the souls."
  * The parameters that shape how a group's impetus flows and signa are structured.

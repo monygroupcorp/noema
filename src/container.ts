@@ -12,6 +12,10 @@ import type { Corporum } from './types/corpus.js'
 import type { Collectionum } from './types/collectio.js'
 import type { Tabularum } from './types/tabula.js'
 import type { Testimoniorum, Depositorum, Solutionum, Petitionum } from './types/catena.js'
+import type { Scholiorum } from './types/scholium.js'
+import type { ColloquiumStore, DictumStore } from './types/colloquium.js'
+import type { MemoriaStore } from './types/anima.js'
+import type { IntelligentiumStore } from './types/intelligendi.js'
 
 import { MongoActorum } from './crystal/MongoActorum.js'
 import { MongoModorum } from './crystal/MongoModorum.js'
@@ -32,6 +36,11 @@ import { MongoTestimoniorum } from './crystal/MongoTestimoniorum.js'
 import { MongoDepositum } from './crystal/MongoDepositum.js'
 import { MongoSolutio } from './crystal/MongoSolutio.js'
 import { MongoPetitio } from './crystal/MongoPetitio.js'
+import { MongoScholium } from './crystal/MongoScholium.js'
+import { MongoColloquium } from './crystal/MongoColloquium.js'
+import { MongoDictum } from './crystal/MongoDictum.js'
+import { MongoMemoria } from './crystal/MongoMemoria.js'
+import { MongoIntelligendi } from './crystal/MongoIntelligendi.js'
 
 export interface Ring {
   actorum: Actorum
@@ -49,6 +58,11 @@ export interface Ring {
   deposita: Depositorum
   solutiones: Solutionum
   petitiones: Petitionum
+  scholia: Scholiorum
+  colloquia: ColloquiumStore
+  dicta: DictumStore
+  memoriae: MemoriaStore
+  intelligendi: IntelligentiumStore
   cursorum: Cursorum
   completor: IActumCompletor
 }
@@ -96,6 +110,12 @@ export interface ContainerConfig {
   depositaCollection?: string
   solutionesCollection?: string
   petitionesCollection?: string
+  scholiaCollection?: string
+  colloquiaCollection?: string
+  dictaCollection?: string
+  memoriaeCollection?: string
+  /** Collection name for intelligendi — default 'intelligendi' */
+  intelligentiaeCollection?: string
   /**
    * Embed function for semantic search — inject the OpenAI/local model.
    * Absent: index() and search() will throw; create/findById/forIdentity still work.
@@ -136,6 +156,11 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const deposita = new MongoDepositum(db.collection(config.depositaCollection ?? 'deposita'))
   const solutiones = new MongoSolutio(db.collection(config.solutionesCollection ?? 'solutiones'))
   const petitiones = new MongoPetitio(db.collection(config.petitionesCollection ?? 'petitiones'))
+  const scholia = new MongoScholium(db.collection(config.scholiaCollection ?? 'scholia'))
+  const colloquia = new MongoColloquium(db.collection(config.colloquiaCollection ?? 'colloquia'))
+  const dicta = new MongoDictum(db.collection(config.dictaCollection ?? 'dicta'))
+  const memoriae = new MongoMemoria(db.collection(config.memoriaeCollection ?? 'memoriae'))
+  const intelligendi = new MongoIntelligendi(db.collection(config.intelligentiaeCollection ?? 'intelligendi'))
 
   // ── Execution rail ─────────────────────────────────────────────────────────
   const runpodCursor = new RunPodCursor(
@@ -156,7 +181,8 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   return {
     actorum, modorum, signorum, animae, personae, vestigiorum, modos,
     mandatores, corpora, collectiones, tabulae, testimonia,
-    deposita, solutiones, petitiones,
+    deposita, solutiones, petitiones, scholia,
+    colloquia, dicta, memoriae, intelligendi,
     cursorum, completor,
   }
 }

@@ -41,7 +41,7 @@ back: there is no internal HTTP API to call.
 
 ---
 
-## The 19 Primitives — What Each Replaces
+## The 23 Primitives — What Each Replaces
 
 ```
 CRYSTAL PRIMITIVE      REPLACES (JS)                        NEW CAPABILITY
@@ -50,10 +50,14 @@ TIER 1 — CORE (identified side)
   Anima                userCore + UserService               soul persists across platforms
   Persona              platformUsers + find-or-create       platform mask per anima
   Signum               creditLedger + userEconomy           privacy partition, lock/settle/ZK
+  Memoria              (new)                                long-term distilled agent memory;
+                                                            what Anima.memoriaRef points to.
+                                                            Rebuilt periodically from Colloquia.
 
 TIER 1 — CORE (anonymous side)
   Modo                 runpodSessions + SessionManager      sticky GPU session + volume mount
   Actum                generationOutputs + GenerationService immutable execution ledger
+                                                            + dictumId (origin conversation turn)
   Materia              RunPodPodService (partial)           compute substrate with attestation
   Modus                noema.tools + spellsDb + SpellService version-locked fractal tool
   Essendi              tool categories / expression types   atomic expression catalog
@@ -65,25 +69,43 @@ TIER 1 — EXTENDED
   Mandatum             (new — partial in CookOrchestrator)  standing agent instructions
   Tabula               canvas / FocusDemo (web)             authoring workspace + fleet templates
   Vestigium            (entirely new)                       RAG: indexed trace of every output
+  Colloquium           (new)                                conversation thread — identified only.
+                                                            Persists across Modos and sessions.
+                                                            Optional tabulaId + modoId binding.
+  Dictum               (new)                                one turn in a Colloquium.
+                                                            genus: user | agent | systema.
+                                                            actumId links to spawned execution.
+                                                            Mandatum agents may own Colloquia.
 
 TIER 2 — SECONDARY
   Catena               CreditVault/deposits (partial)       onchain layer: ETH, x402, NFT proofs
   Allocutio            Telegram/Discord handlers            platform adapter + iframe embed
+                                                            + WebChatAllocutio (mobile primary)
+
+TIER 3 — SOCIAL
+  Scholium             (new)                                tagged community annotation on Modus
+                                                            or Modos. tag: bug|fix|fork|tip|correct.
+                                                            resoluta? marks resolution. Powers
+                                                            quality signals in community catalog.
 ```
 
 ---
 
 ## Inventory: What Exists Today
 
-### Types — COMPLETE (21 primitives + additions)
+### Types — COMPLETE (21 primitives + additions); 3 new types pending
 
-All 19 original primitives in `src/types/`, plus two additions made to support
-the NFT fleet client feature:
+All 19 original primitives in `src/types/`, plus additions:
 
 - `Tabula` — added `templateId?: string`, `followTemplate?: boolean`,
   and `Tabularum.listDerived()` for workspace fleet propagation
 - `Catena` — added `Testimonium` type + `Testimoniorum` store interface
   for NFT ownership attestation
+
+**Pending additions (Phase 8):**
+- `src/types/colloquium.ts` — `Colloquium`, `Dictum`, `ColloquiumStore`, `DictumStore`
+- `src/types/anima.ts` — `Memoria` type body (Anima.memoriaRef already exists as pointer)
+- `src/types/cursus.ts` — `Actum.dictumId?: string` (origin conversation turn)
 
 ### Memory implementations — COMPLETE for execution rail
 
@@ -300,6 +322,14 @@ root is complete. Ring is authoritative for all staging writes.
 | `MongoTabula` | `noemaplane.tabulae` |
 | `MongoTestimoniorum` | `noemaplane.testimonia` |
 | `MongoDepositum + MongoSolutio + MongoPetitio` | `noemaplane.deposita` etc. |
+| `MongoIntelligendi` ✅ | `noemaplane.intelligendi` |
+
+`MongoIntelligendi` is the **model registry** — unified store for LoRAs, checkpoints,
+VAEs, CLIPs, and any other weight type. ChainEngine Phase 2 (`noemaplane.models`)
+and this are the same work. `DeploymentBuilder.compile()` resolves model references
+by ID against this store; training Moduses reference it for their output Modos.
+The Models page in the catalog is the UI surface above it. Seeds from existing
+`noema.loraModels` + a manual base-model list on first startup.
 
 `src/container.ts` — full composition root, all stores wired.
 
@@ -333,6 +363,218 @@ verification that the ring's API is complete and ergonomic.
 
 JS service retirement (deleting `GenerationService`, `EconomyService`, etc.)
 happens after ring promotion to production — not in staging.
+
+---
+
+### Phase 9 — Social Layer
+
+**Goal:** Community annotation and favorites on Modus/Modos. Powers the
+Models and Flows catalog pages — quality signals, bug reporting, community
+improvement. See `docs/models-flows-design.md` for full UX spec.
+
+**Deliverables:**
+
+`src/types/scholium.ts`
+- `Scholium` — tagged annotation. Fields: id, animaId, targetType
+  ('modus' | 'modos'), targetId, corpus, tag ('bug'|'fix'|'fork'|'tip'|'correct'),
+  natum, resoluta?: Date
+- `Scholiorum` — store interface: create, listByTarget, resolve, findById
+
+`src/crystal/MongoScholium.ts`
+- Collection: `noemaplane.scholia`
+- Indexes: `{ targetType, targetId }`, `{ animaId }`, `{ resoluta: 1 }` sparse
+
+**Favorites** — embedded on Modus/Modos as `stellae: number` count.
+Separate collection only if "who starred" queries are needed for notifications.
+Start embedded, promote if needed.
+
+`src/container.ts`
+- Add `scholia: ScholiOrum` to Ring interface + createContainer() wiring.
+
+---
+
+### Phase 10 — Training as a Flow
+
+**Goal:** Training is not a separate pipeline. It is a Flow with transformation
+type `corpus → modos` (dataset → LoRA), running through the same RunPodCursor
+that handles inference. The entire JS training pipeline is retired. VastAI
+is retired. RunPod is the sole compute provider for both inference and training.
+
+**The insight:** Training is rented compute + a task + a stored output.
+So is generation. The execution rail already handles this shape. The only
+difference is what compile() produces and what ActumCompletor writes on
+completion.
+
+`compile()` is not a ComfyUI compiler — it is a job spec compiler. The
+output type depends on the Modus genus:
+
+```
+inference Modus  →  compile()  →  ComfyUI workflow JSON   →  RunPod serverless
+training Modus   →  compile()  →  AI-Toolkit config YAML  →  RunPod training
+```
+
+The training recipes (FLUX, SDXL, KONTEXT, WAN) are AI-Toolkit config
+generators. That is all they are. They become the compile() implementation
+for training Moduses — not separate service classes. Recipe variation is
+aditus configuration, not code branching.
+
+**Deliverables:**
+
+Training Modus type
+- A Modus with `genus: 'training'` and ports: `corpus` (dataset input),
+  `modos` (LoRA output). Recipe parameters are aditus fields.
+
+`compile()` for training Moduses
+- Accepts training Modus + aditus (recipe params + dataset ref)
+- Produces an AI-Toolkit config YAML — the canonical training job spec
+- Dataset prep (validate, pack, upload) is a pre-compilation step before
+  the Actum is created; not part of the Actum lifecycle itself
+
+`ActumCompletor` — training variant
+- On completion of a training Actum: writes a new Modos document to the ring
+  (the trained LoRA metadata + storage ref)
+- Same completor, different Exitus handler branch keyed on `modus.genus`
+
+**Deployment hash storage (deferred to this phase):**
+ChainEngine specifies storing the fully-resolved compiled deployment by
+`sha256(canonicalize(spec))` for warm-pool affinity routing and first-discoverer
+provenance. Crystal currently computes deployments transiently — `compile()`
+produces the spec, the cursor consumes it, nothing is persisted. `Modus.contentHash`
+hashes the template, not the resolved execution artifact.
+For Phase 10 / training: evaluate whether `noemaplane.deployments` (the
+content-addressed compiled artifact store from the ChainEngine spec) should be
+added as a ring primitive. Warm-pool affinity and "first discoverer" royalty
+mechanics require it. Can be deferred past Phase 10 if session affinity routing
+is handled by other means.
+
+**JS retirement triggered by this phase:**
+- `src/core/services/training/` (10+ files) — entire training pipeline deleted
+- `src/core/services/vastai/` (13 files) — VastAI retired entirely;
+  RunPod handles both inference and training
+- `src/core/services/comfydeploy/` (12 files) — RunPod is the sole
+  execution backend; ComfyDeploy retired
+
+---
+
+### Phase 8 — Conversation Primitives
+
+**Goal:** Chat is first-class in the ring. Colloquium, Dictum, and Memoria
+are not bolted onto the platform layer — they are ring primitives with
+full Mongo implementations, store interfaces, and container wiring.
+
+**Why now:** The product's primary mobile entry point is a chat interface
+(WebChatAllocutio). The personal agent (concierge) requires persistent
+conversation memory across sessions. Without these primitives in the ring,
+chat is a second-class citizen with no path to the privacy partition,
+the ledger, or the RAG layer.
+
+**Deliverables:**
+
+`src/types/colloquium.ts`
+- `Colloquium` — conversation thread. Fields: id, animaId, natum, mutatum,
+  status ('active' | 'archived'), tabulaId?, modoId?, titulus?
+- `Dictum` — one turn. Fields: id, colloquiumId, natum, genus
+  ('user' | 'agent' | 'systema'), corpus (text), actumId?, signaIds[]
+- `ColloquiumStore`, `DictumStore` — store interfaces
+
+`src/types/anima.ts`
+- `Memoria` type body — summarium, affines, praeferentia, natum, mutatum.
+  Anima.memoriaRef already points here; this is the type behind the pointer.
+
+`src/types/cursus.ts`
+- `Actum` — add `dictumId?: string`. Origin conversation turn. Optional —
+  Acta spawned outside a conversation (canvas, API, Mandatum) leave it unset.
+
+`src/crystal/MongoColloquium.ts`
+- Collection: `noemaplane.colloquia`
+- create, find, findByAnima, update, archive
+
+`src/crystal/MongoDictum.ts`
+- Collection: `noemaplane.dicta`
+- create, listByColloquium, findById, update
+
+`src/crystal/MongoMemoria.ts`
+- Collection: `noemaplane.memoriae`
+- upsert (one per animaId), findByAnima
+
+`src/container.ts`
+- Add: `colloquia: ColloquiumStore`, `dicta: DictumStore`,
+  `memoriae: MemoriaStore` to Ring interface + createContainer() wiring.
+
+**Privacy:** Colloquium, Dictum, Memoria are identified-side only.
+animaId is required on all three. No anonymous conversation persistence.
+Anonymous sessions (arcanum/tessera) get ephemeral execution but no chat history.
+
+---
+
+## JS Retirement Map
+
+Each crystal phase has a corresponding JS deletion. The JS codebase shrinks
+as the ring goes live — not after, not in a separate cleanup sprint. Wire it,
+delete it, move on.
+
+### Delete immediately (dead code, no dependencies)
+```
+src/core/services/olddb.legacy.js          155 lines — explicitly abandoned
+src/core/services/oldworkflows.js         1685 lines — deprecated workflow defs
+src/api/internal/teams/                          — deprecated, marked in code
+src/api/external/teams/                          — deprecated, marked in code
+src/api/external/v1/admin/                       — v1 superseded by v2
+```
+
+### Delete at Phase 7 (ring wired to platform handlers)
+
+These are superseded by crystal primitives. Once handlers call the ring
+directly, these files have no callers.
+
+```
+src/core/services/db/           33 files  — replaced by MongoActorum et al.
+src/core/services/store/         9 files  — wrapped by crystal stores
+src/core/services/SpellsService.js        — Modus
+src/core/services/WorkflowExecutionService.js — crystal execution rail
+src/core/services/generationExecutionService.js — RunPodCursor
+src/core/services/cook/          7 files  — dissolves into canvas Value node
+src/core/services/expression/    1 file   — dissolves into canvas Transform node
+src/core/services/batch/                  — dissolves into Value node fan-out
+```
+
+Approximate deletion: ~55 files, ~8,000–12,000 lines.
+
+### Delete at Phase 10 (training as a Flow, RunPod-only)
+
+```
+src/core/services/training/     10+ files — replaced by training Modus + compile()
+src/core/services/vastai/       13 files  — RunPod replaces VastAI entirely
+src/core/services/comfydeploy/  12 files  — RunPod is the sole execution backend
+```
+
+Approximate additional deletion: ~35 files, ~5,000–8,000 lines.
+
+### Migrate to TypeScript (not deleted — platform-critical infrastructure)
+
+These have no crystal equivalent yet and run real production traffic.
+They migrate rather than disappear.
+
+```
+src/platforms/telegram/         platform adapter → TS (Phase 7)
+src/platforms/discord/          platform adapter → TS (Phase 7)
+src/platforms/web/              web server + middleware → TS (Phase 7)
+src/core/services/alchemy/      blockchain/wallet/credit → TS
+src/core/services/media.js      media handling → TS
+src/core/services/storageService.js S3 abstraction → TS
+src/core/services/charging/     point consumption → TS
+src/core/services/pricing/      cost calculation → TS
+src/core/services/notifications/ dispatch layer → TS
+src/core/services/apiKeyService.js → TS
+src/core/services/websocket/    → TS
+src/api/                        entire API layer becomes Allocutio in TS
+```
+
+### Net result
+
+By Phase 10: ~90+ JS files deleted outright, ~150–180 files migrated to TS.
+The JS codebase as it exists today ceases to exist. What remains is either
+in the crystal ring, in typed platform adapters, or in the Allocutio API layer.
 
 ---
 
@@ -383,18 +625,19 @@ ChainEngine Phase 2 (`noemaplane.toolVersions`) = Crystal Phase 2
 
 ## Timeline
 
-| Phase | Description | Staging estimate |
-|-------|-------------|-----------------|
+| Phase | Description | Status |
+|-------|-------------|--------|
 | 0 | Types + memory implementations | ✅ Done |
-| 1 | Execution rail (MongoActorum + RunPodCursor) | 1 week |
-| 2 | Modus registry (MongoModorum) | 1 week |
-| 3 | Ledger + identity (MongoSignorum + MongoAnima) | 2 weeks |
-| 4 | Vestigium / RAG | 1 week |
-| 5 | Sessions / Modo + tessera | 1–2 weeks |
-| 6 | Full ring + composition root | 1–2 weeks |
+| 1 | Execution rail (MongoActorum + RunPodCursor) | ✅ Done |
+| 2 | Modus registry (MongoModorum) | ✅ Done |
+| 3 | Ledger + identity (MongoSignorum + MongoAnima) | ✅ Done |
+| 4 | Vestigium / RAG | ✅ Done |
+| 5 | Sessions / Modo + tessera | ✅ Done |
+| 6 | Full ring + composition root | ✅ Done |
 | 7 | Wire platform handlers to ring | ongoing |
-
-**Total to full ring in staging: ~8–9 weeks (~2 months).**
+| 8 | Conversation primitives (Colloquium + Dictum + Memoria) | ✅ Done |
+| 9 | Social layer (Scholium + favorites) | ✅ Done |
+| 10 | Training as a Flow — RunPod-only, VastAI + ComfyDeploy retired | 2 weeks |
 
 No parallel-write windows. No shadow comparison. No rollback flags.
 Wire it, test it, move on.

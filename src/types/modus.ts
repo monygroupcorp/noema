@@ -118,6 +118,9 @@ export interface Modus {
   /** True = platform-owned canonical modus. False = community-published. */
   canonica: boolean
 
+  /** Community star count — embedded count for fast catalog sorting */
+  stellae?: number
+
   /** "natum" = born — when this modus was first registered */
   natum: Date
   /** "mutatum" = changed — when this modus was last modified */
