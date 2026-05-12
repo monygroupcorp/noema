@@ -26,6 +26,7 @@ interface ExecuteFlowState {
   actumId?: string
   result?: Record<string, unknown>
   browsePageIndex: number
+  priorMessages?: Array<{ role: 'user' | 'assistant'; content: string }>
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +230,28 @@ export class ExecuteFlow implements Flow {
     return this._submit(ctx, state)
   }
 
-  private _handleResult(_ctx: FlowContext, state: ExecuteFlowState, event: PrimitiveEvent): Step | Resolution {
+  private _handleResult(ctx: FlowContext, state: ExecuteFlowState, event: PrimitiveEvent): Step | Resolution | Promise<Step | Resolution> {
+    if (event.kind === 'prompt') {
+      if (state.priorMessages && state.priorMessages.length > 0) {
+        // Text conversation continuation
+        state.aditus = {
+          ...state.aditus,
+          messages: [...state.priorMessages, { role: 'user' as const, content: event.text }],
+        }
+        return this._submit(ctx, state)
+      }
+      // Non-conversation result (image, etc.) — restart
+      state.step = 'SELECT_MODE'
+      state.modusId = undefined
+      state.category = undefined
+      state.mode = undefined
+      state.aditus = {}
+      state.result = undefined
+      state.priorMessages = undefined
+      state.browsePageIndex = 0
+      return this._buildSelectModeStep()
+    }
+
     if (event.kind !== 'action') return this._buildResultStep(state.result ?? {}, state.actumId ?? '')
 
     switch (event.actionId) {
@@ -241,6 +263,7 @@ export class ExecuteFlow implements Flow {
         state.mode = undefined
         state.aditus = {}
         state.result = undefined
+        state.priorMessages = undefined
         state.browsePageIndex = 0
         return this._buildSelectModeStep()
 
@@ -359,7 +382,7 @@ export class ExecuteFlow implements Flow {
   private _buildResultStep(
     result: Record<string, unknown>,
     actumId = '',
-    opts?: {
+    _opts?: {
       modusId?: string
       priorMessages?: Array<{ role: 'user' | 'assistant'; content: string }>
     }
@@ -384,12 +407,6 @@ export class ExecuteFlow implements Flow {
       ? textEntries.map(([k, v]) => `${k}: ${String(v)}`).join('\n')
       : undefined
 
-    // Only mark replyable for text-only results (no media)
-    const isTextOnly = media.length === 0 && textContent !== undefined
-    const replyable = isTextOnly && !!opts?.modusId ? true : undefined
-    const modusId = isTextOnly ? opts?.modusId : undefined
-    const priorMessages = isTextOnly ? opts?.priorMessages : undefined
-
     return {
       primitives: [{
         kind: 'Result',
@@ -405,9 +422,6 @@ export class ExecuteFlow implements Flow {
           { id: 'tweak',          label: '✎ Tweak' },
           { id: 'rerun',          label: '↻ Rerun' },
         ],
-        replyable,
-        modusId,
-        priorMessages,
       }],
     }
   }
@@ -427,9 +441,9 @@ export class ExecuteFlow implements Flow {
   // ---------------------------------------------------------------------------
 
   /**
-   * Build the opts object for _buildResultStep with replyable conversation metadata.
-   * Only produces opts if there is a modusId in state. Builds priorMessages from
-   * existing aditus.messages (continuation) or from the prompt (first turn).
+   * Build conversation history (priorMessages) after a text result and persist it to state.
+   * Only builds for text-only results (no URL keys). Returns undefined for media results,
+   * leaving state.priorMessages unset.
    */
   private _buildReplyOpts(
     state: ExecuteFlowState,
@@ -455,6 +469,9 @@ export class ExecuteFlow implements Flow {
         { role: 'assistant', content: rawText },
       ]
     }
+
+    // Persist to state so RESULT+prompt handler can continue the conversation
+    state.priorMessages = priorMessages
 
     return { modusId: state.modusId, priorMessages }
   }
