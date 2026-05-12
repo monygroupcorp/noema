@@ -26,6 +26,8 @@ import { MongoVestigiorum } from './crystal/MongoVestigiorum.js'
 import { MongoModo } from './crystal/MongoModo.js'
 import { RunPodCursor } from './crystal/RunPodCursor.js'
 import { TesseraCursor } from './crystal/TesseraCursor.js'
+import { OpenAICursor } from './crystal/OpenAICursor.js'
+import { HuggingFaceCursor } from './crystal/HuggingFaceCursor.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
 import { ActumCompletor } from './crystal/ActumCompletor.js'
 import { MongoMandatum } from './crystal/MongoMandatum.js'
@@ -121,6 +123,15 @@ export interface ContainerConfig {
    * Absent: index() and search() will throw; create/findById/forIdentity still work.
    */
   embed?: (text: string) => Promise<number[]>
+  /** OpenAI-compatible client — absent: OpenAI tools will throw at reserve() */
+  openaiClient?: {
+    chat(params: unknown): Promise<{ content: string; usage?: { total_tokens?: number } }>
+    image(params: unknown): Promise<{ url: string }>
+  }
+  /** HuggingFace client — absent: HuggingFace tools will throw at reserve() */
+  huggingfaceClient?: {
+    predict(spaceUrl: string, params: Record<string, unknown>): Promise<Record<string, unknown>>
+  }
 }
 
 export function createContainer(mongo: MongoClient, config: ContainerConfig): Ring {
@@ -175,6 +186,16 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const cursorum = new SimpleCursorum()
   cursorum.register('runpod', runpodCursor)
   cursorum.register('tessera', tesseraCursor)
+
+  if (config.openaiClient) {
+    const openaiCursor = new OpenAICursor(config.openaiClient as Parameters<typeof OpenAICursor>[0])
+    cursorum.register('openai', openaiCursor)
+  }
+
+  if (config.huggingfaceClient) {
+    const hfCursor = new HuggingFaceCursor(config.huggingfaceClient)
+    cursorum.register('huggingface', hfCursor)
+  }
 
   const completor = new ActumCompletor(actorum, signorum)
 

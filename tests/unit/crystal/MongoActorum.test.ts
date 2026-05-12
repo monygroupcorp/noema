@@ -140,3 +140,38 @@ test('findExpired returns multiple expired actum', async () => {
   const results = await acta.findExpired()
   assert.equal(results.length, 2)
 })
+
+// ── findByExternusJobId ───────────────────────────────────────────────────────
+
+test('findByExternusJobId returns null when no actum has that externusJobId', async () => {
+  const result = await acta.findByExternusJobId('ext-job-unknown')
+  assert.equal(result, null)
+})
+
+test('findByExternusJobId returns actum with matching externusJobId', async () => {
+  const input = makeActum({ externusJobId: 'ext-job-abc123' })
+  const created = await acta.create(input)
+  const found = await acta.findByExternusJobId('ext-job-abc123')
+  assert.ok(found)
+  assert.equal(found.id, created.id)
+})
+
+test('findByExternusJobId does not return actum with different externusJobId', async () => {
+  await acta.create(makeActum({ externusJobId: 'ext-job-xyz' }))
+  const result = await acta.findByExternusJobId('ext-job-other')
+  assert.equal(result, null)
+})
+
+test('update can set externusJobId on an actum', async () => {
+  const a = await acta.create(makeActum())
+  const updated = await acta.update(a.id, { externusJobId: 'ext-job-set-via-update' })
+  assert.equal(updated.externusJobId, 'ext-job-set-via-update')
+})
+
+test('findByExternusJobId finds actum whose externusJobId was set via update', async () => {
+  const a = await acta.create(makeActum())
+  await acta.update(a.id, { externusJobId: 'ext-job-updated' })
+  const found = await acta.findByExternusJobId('ext-job-updated')
+  assert.ok(found)
+  assert.equal(found.id, a.id)
+})

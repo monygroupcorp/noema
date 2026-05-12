@@ -1,7 +1,7 @@
 import type { Modus, Modorum } from '../types/modus.js'
 import type { Actum } from '../types/actum.js'
 import type { Modo } from '../types/modo.js'
-import type { Cursor, Exitus } from '../types/cursus.js'
+import type { Cursor, CursorResult } from '../types/cursus.js'
 
 type RunResult =
   | { status: 'completed'; podId: string; timings: { totalMs: number }; outputs: unknown[]; error?: never }
@@ -30,7 +30,7 @@ export class RunPodCursor implements Cursor {
     return BigInt(this.config.maxJobSeconds ?? 1800)
   }
 
-  async run(actum: Actum, _modo?: Modo): Promise<Exitus> {
+  async run(actum: Actum, _modo?: Modo): Promise<CursorResult> {
     const modus = await this.modorum.find(actum.modusId, actum.modusVersiono)
     if (!modus) throw new Error(`Modus '${actum.modusId}' not found`)
 
@@ -50,10 +50,13 @@ export class RunPodCursor implements Cursor {
     const impetus = BigInt(Math.ceil(duratio / 1000))
 
     return {
-      exitus: { outputs: result.outputs },
-      impetus,
-      duratio,
-      materiamId: result.podId,
+      kind: 'sync',
+      exitus: {
+        exitus: { outputs: result.outputs },
+        impetus,
+        duratio,
+        materiamId: result.podId,
+      },
     }
   }
 }

@@ -96,20 +96,23 @@ test('reserve uses configured maxJobSeconds when set', async () => {
 
 test('run returns exitus with outputs from runner', async () => {
   const cursor = new RunPodCursor(makeRunner(), makeCompile(), makeModorum(), { accountId: 'acc-1' })
-  const exitus = await cursor.run(makeActum())
-  assert.deepEqual(exitus.exitus.outputs, [{ url: 'https://example.com/out.png' }])
+  const result = await cursor.run(makeActum())
+  assert.equal(result.kind, 'sync')
+  assert.deepEqual((result as { kind: 'sync'; exitus: { exitus: { outputs: unknown[] } } }).exitus.exitus.outputs, [{ url: 'https://example.com/out.png' }])
 })
 
 test('run sets duratio from runner totalMs', async () => {
   const cursor = new RunPodCursor(makeRunner(), makeCompile(), makeModorum(), { accountId: 'acc-1' })
-  const exitus = await cursor.run(makeActum())
-  assert.equal(exitus.duratio, 5000)
+  const result = await cursor.run(makeActum())
+  assert.equal(result.kind, 'sync')
+  assert.equal((result as Extract<typeof result, { kind: 'sync' }>).exitus.duratio, 5000)
 })
 
 test('run sets materiamId from runner podId', async () => {
   const cursor = new RunPodCursor(makeRunner(), makeCompile(), makeModorum(), { accountId: 'acc-1' })
-  const exitus = await cursor.run(makeActum())
-  assert.equal(exitus.materiamId, 'pod-abc')
+  const result = await cursor.run(makeActum())
+  assert.equal(result.kind, 'sync')
+  assert.equal((result as Extract<typeof result, { kind: 'sync' }>).exitus.materiamId, 'pod-abc')
 })
 
 test('run impetus is ceil(totalMs / 1000)', async () => {
@@ -123,8 +126,9 @@ test('run impetus is ceil(totalMs / 1000)', async () => {
     outputs: [],
   } as any)
   const cursor = new RunPodCursor(runner, makeCompile(), makeModorum(), { accountId: 'acc-1' })
-  const exitus = await cursor.run(makeActum())
-  assert.equal(exitus.impetus, 6n) // ceil(5001 / 1000) = 6
+  const result = await cursor.run(makeActum())
+  assert.equal(result.kind, 'sync')
+  assert.equal((result as Extract<typeof result, { kind: 'sync' }>).exitus.impetus, 6n) // ceil(5001 / 1000) = 6
 })
 
 test('run passes actum.id as jobId to runDeployment', async () => {

@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid'
-import type { Cursor, Exitus } from '../types/cursus.js'
+import type { Cursor, CursorResult } from '../types/cursus.js'
 import type { Modus } from '../types/modus.js'
 import type { Actum } from '../types/actum.js'
 import type { Modo, ModoStore } from '../types/modo.js'
@@ -52,12 +52,12 @@ export class TesseraCursor implements Cursor {
     return this.inner.reserve(modus, aditus)
   }
 
-  async run(actum: Actum, modo?: Modo): Promise<Exitus> {
+  async run(actum: Actum, modo?: Modo): Promise<CursorResult> {
     const result = await this.inner.run(actum, modo)
 
-    if (modo) {
+    if (modo && result.kind === 'sync') {
       await this.modos.update(modo.id, {
-        impetusAccrued: modo.impetusAccrued + result.impetus,
+        impetusAccrued: modo.impetusAccrued + result.exitus.impetus,
         acta: [...modo.acta, actum.id],
       })
     }
