@@ -1,6 +1,8 @@
 import type { Collection, MongoClient } from 'mongodb'
 import type { Modus } from './types/modus.js'
 import type { Actorum, Cursorum, ActumCompletor as IActumCompletor } from './types/cursus.js'
+import type { RunPodClient } from './crystal/RunPodCursor.js'
+import type { ActumInceptor as IActumInceptor } from './execution/ActumInceptor.js'
 import type { Signorum } from './types/significandi.js'
 import type { Modorum } from './types/modus.js'
 import type { AnimaStore } from './types/anima.js'
@@ -16,6 +18,10 @@ import type { Scholiorum } from './types/scholium.js'
 import type { ColloquiumStore, DictumStore } from './types/colloquium.js'
 import type { MemoriaStore } from './types/anima.js'
 import type { IntelligentiumStore } from './types/intelligendi.js'
+import type { MateriaStore } from './types/materia.js'
+import { MongoMateria } from './crystal/MongoMateria.js'
+import { Praefectus } from './crystal/Praefectus.js'
+import { WarmPodClient } from './crystal/WarmPodClient.js'
 
 import { MongoActorum } from './crystal/MongoActorum.js'
 import { MongoModorum } from './crystal/MongoModorum.js'
@@ -30,6 +36,7 @@ import { OpenAICursor } from './crystal/OpenAICursor.js'
 import { HuggingFaceCursor } from './crystal/HuggingFaceCursor.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
 import { ActumCompletor } from './crystal/ActumCompletor.js'
+import { ActumInceptor } from './execution/ActumInceptor.js'
 import { MongoMandatum } from './crystal/MongoMandatum.js'
 import { MongoCorpus } from './crystal/MongoCorpus.js'
 import { MongoCollectio } from './crystal/MongoCollectio.js'
@@ -43,6 +50,7 @@ import { MongoColloquium } from './crystal/MongoColloquium.js'
 import { MongoDictum } from './crystal/MongoDictum.js'
 import { MongoMemoria } from './crystal/MongoMemoria.js'
 import { MongoIntelligendi } from './crystal/MongoIntelligendi.js'
+import { CollectioCursor } from './crystal/CollectioCursor.js'
 
 export interface Ring {
   actorum: Actorum
@@ -67,6 +75,9 @@ export interface Ring {
   intelligendi: IntelligentiumStore
   cursorum: Cursorum
   completor: IActumCompletor
+  inceptor: IActumInceptor
+  materiae: MateriaStore
+  collectioCursor: CollectioCursor
 }
 
 export interface ContainerConfig {
@@ -74,22 +85,23 @@ export interface ContainerConfig {
   mongoUri: string
   /** MongoDB database name — never 'noema' or 'noemaplane' in tests */
   dbName: string
-  /** RunPod accountId forwarded to GenerationRunner */
-  accountId: string
   /**
-   * Compile a Modus + aditus into a GenerationRunner deployment object.
-   * Injected so the container doesn't depend directly on the JS Compiler.
-   * Phase 2: replace with MongoModorum-backed Compiler.
+   * Compile a Modus + aditus into the RunPod job input payload.
+   * Bridges to the Fractal Tool Compiler. Injected to avoid circular deps.
    */
   compile: (modus: Modus, aditus: Record<string, unknown>) => Promise<unknown>
   /**
-   * A GenerationRunner-compatible runner.
-   * Injected so the container can be wired with the existing JS GenerationRunner
-   * without importing it (avoids circular ESM ↔ CJS boundary issues in Phase 1).
+   * RunPod SECURE pod client — provisions a GPU pod, runs the workflow via SSH,
+   * and POSTs the result to webhookUrl. Absent: RunPod tools will throw at run().
    */
-  runner: {
-    runDeployment(args: { deployment: unknown; accountId: string; jobId: string }): Promise<unknown>
-  }
+  runpodClient?: RunPodClient
+  /**
+   * Where the runner POSTs the completion webhook.
+   * Normal deployment: our server (e.g. https://api.noema.io/webhooks/runpod)
+   * TEE deployment: the TEE pod's local endpoint.
+   * This is the ONLY config that differs between deployment contexts.
+   */
+  runpodWebhookUrl?: string
   /** Collection name for acta — default 'acta' */
   actaCollection?: string
   /** Collection name for modi — default 'modi' */
@@ -118,6 +130,13 @@ export interface ContainerConfig {
   memoriaeCollection?: string
   /** Collection name for intelligendi — default 'intelligendi' */
   intelligentiaeCollection?: string
+  /** Collection name for materiae — default 'materiae' */
+  materiaCollection?: string
+  /**
+   * Pre-created MateriaStore — if provided, used directly instead of creating a new MongoMateria.
+   * Pass this when the same store instance needs to be shared with SecurePodClient (keep-warm mode).
+   */
+  materiae?: MateriaStore
   /**
    * Embed function for semantic search — inject the OpenAI/local model.
    * Absent: index() and search() will throw; create/findById/forIdentity still work.
@@ -173,19 +192,37 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const memoriae = new MongoMemoria(db.collection(config.memoriaeCollection ?? 'memoriae'))
   const intelligendi = new MongoIntelligendi(db.collection(config.intelligentiaeCollection ?? 'intelligendi'))
 
+  const materiaCol: Collection = db.collection(config.materiaCollection ?? 'materiae')
+  const materiae = config.materiae ?? new MongoMateria(materiaCol)
+  const praefectus = new Praefectus(materiae)
+
   // ── Execution rail ─────────────────────────────────────────────────────────
-  const runpodCursor = new RunPodCursor(
-    config.runner as Parameters<typeof RunPodCursor>[0],
-    config.compile,
-    modorum,
-    { accountId: config.accountId },
-  )
-
-  const tesseraCursor = new TesseraCursor(runpodCursor, modos, signorum)
-
   const cursorum = new SimpleCursorum()
-  cursorum.register('runpod', runpodCursor)
-  cursorum.register('tessera', tesseraCursor)
+
+  const imageRefOf = (modus: Modus): string | undefined => {
+    const spec = (modus as { runpodSpec?: { imageId?: string; imageVersion?: string } }).runpodSpec
+    return spec?.imageId && spec.imageVersion
+      ? `${spec.imageId}:${spec.imageVersion}`
+      : undefined
+  }
+
+  if (config.runpodClient && config.runpodWebhookUrl) {
+    const runpodCursor = new RunPodCursor(
+      config.runpodClient,
+      config.compile,
+      modorum,
+      actorum,
+      {
+        webhookUrl: config.runpodWebhookUrl,
+        praefectus,
+        warmFactory: (m) => new WarmPodClient(m, materiae),
+        imageRefOf,
+      },
+    )
+    const tesseraCursor = new TesseraCursor(runpodCursor, modos, signorum)
+    cursorum.register('runpod', runpodCursor)
+    cursorum.register('tessera', tesseraCursor)
+  }
 
   if (config.openaiClient) {
     const openaiCursor = new OpenAICursor(config.openaiClient as Parameters<typeof OpenAICursor>[0])
@@ -198,12 +235,16 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   }
 
   const completor = new ActumCompletor(actorum, signorum)
+  const inceptor = new ActumInceptor({ modorum, cursorum, signorum, acta: actorum })
+  const collectioCursor = new CollectioCursor(inceptor, collectiones, actorum, {})
 
   return {
     actorum, modorum, signorum, animae, personae, vestigiorum, modos,
     mandatores, corpora, collectiones, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
-    cursorum, completor,
+    cursorum, completor, inceptor,
+    materiae,
+    collectioCursor,
   }
 }
