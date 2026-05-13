@@ -20,7 +20,7 @@ function agentOwnerSession({ required = true } = {}) {
             return res.status(401).json({ error: { code: 'MISSING_TOKEN', message: 'Authorization Bearer token required' } });
         }
 
-        const secret = process.env.AGENT_SESSION_SECRET;
+        const secret = process.env.AGENT_SESSION_SECRET || process.env.JWT_SECRET;
         if (!secret) {
             return res.status(500).json({ error: { code: 'CONFIG_ERROR', message: 'Session secret not configured' } });
         }
