@@ -6,8 +6,9 @@
 //   GET  /sdk.js                          — browser SDK (CORS: *)
 //   GET  /lib/microact.esm.js            — microact ESM build for partner sites (CORS: *)
 //   GET  /lib/micro-web3.esm.js          — micro-web3 ESM build for partner sites (CORS: *)
-//   GET  /gallery/:collectionAddress      — collection gallery iframe
-//   GET  /gallery/:collectionAddress/feed — gallery JSON feed (CORS: *)
+//   GET   /gallery/:collectionAddress                      — collection gallery iframe
+//   GET   /gallery/:collectionAddress/feed                 — gallery JSON feed (CORS: *)
+//   PATCH /gallery/:collectionAddress/casts/:castId/hide   — hide cast from gallery (owner JWT)
 //   GET  /:agentId                        — iframe mini-app HTML shell
 //   GET  /:agentId/workspace              — workspace + spells JSON (CORS: *)
 //   POST /:agentId/spells/:slug/cast      — guest-safe cast via agent account (CORS: *)
@@ -824,28 +825,125 @@ function buildGalleryHtml(collectionAddress) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Gallery</title>
 <style>
+  :root {
+    --bg:          #0a0a0a;
+    --card-bg:     #141414;
+    --card-radius: 8px;
+    --accent:      #8888aa;
+    --text:        #e0e0e0;
+    --text-dim:    #777;
+  }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { background: #0a0a0a; color: #e0e0e0; font-family: system-ui, sans-serif; min-height: 100%; }
-  body { padding: 12px; }
-  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
-  .card { position: relative; border-radius: 6px; overflow: hidden; background: #161616; }
-  .card img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
-  .card .meta { position: absolute; bottom: 0; left: 0; right: 0; padding: 4px 6px;
-    background: linear-gradient(transparent, rgba(0,0,0,0.82)); font-size: 10px; color: #ccc; }
-  .card .meta .agent { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .card .meta .time { color: #888; }
-  #empty { display: none; padding: 40px; text-align: center; color: #555; font-size: 14px; }
+  html, body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; min-height: 100%; }
+  body { padding: 14px; }
+
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+
+  .card {
+    position: relative; border-radius: var(--card-radius); overflow: hidden;
+    background: var(--card-bg); cursor: pointer;
+    transition: transform .18s ease, box-shadow .18s ease;
+  }
+  .card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,.55); }
+
+  .card img {
+    display: block; width: 100%; aspect-ratio: 1; object-fit: cover;
+    opacity: 0; transition: opacity .35s ease;
+  }
+  .card img.loaded { opacity: 1; }
+
+  /* shimmer skeleton */
+  .card .skel {
+    position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(90deg, var(--card-bg) 0%, #252528 50%, var(--card-bg) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+  .card img.loaded ~ .skel { display: none; }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+  /* meta overlay */
+  .card .meta {
+    position: absolute; bottom: 0; left: 0; right: 0; padding: 28px 8px 7px;
+    background: linear-gradient(transparent, rgba(0,0,0,.88));
+    font-size: 10px; color: var(--text);
+    opacity: 0; transition: opacity .2s;
+    pointer-events: none;
+  }
+  .card:hover .meta { opacity: 1; }
+  .meta .agent { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta .time  { color: var(--text-dim); margin-top: 2px; }
+
+  /* delete button */
+  .card .del-btn {
+    position: absolute; top: 6px; right: 6px; z-index: 5;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: rgba(180,30,30,.9); border: 1px solid rgba(255,80,80,.3);
+    color: #fff; font-size: 11px; line-height: 1; cursor: pointer;
+    display: none; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity .15s;
+  }
+  .card:hover .del-btn { opacity: 1; }
+  body.has-owner .card .del-btn { display: flex; }
+
+  #empty { display: none; padding: 60px 20px; text-align: center; color: var(--text-dim); font-size: 14px; }
+
+  /* lightbox */
+  #lb {
+    display: none; position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,.93); align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  #lb.open { display: flex; }
+  #lb-img {
+    max-width: min(900px, 100%); max-height: 90vh;
+    border-radius: 6px; object-fit: contain;
+    box-shadow: 0 12px 60px rgba(0,0,0,.8);
+  }
+  #lb-close {
+    position: absolute; top: 14px; right: 18px;
+    font-size: 22px; color: #888; cursor: pointer;
+    background: none; border: none; line-height: 1;
+    transition: color .15s;
+  }
+  #lb-close:hover { color: #fff; }
+  #lb-meta {
+    position: absolute; bottom: 18px; left: 0; right: 0;
+    text-align: center; font-size: 11px; color: #666;
+    pointer-events: none;
+  }
 </style>
 </head>
 <body>
 <div id="grid"></div>
 <div id="empty">No outputs yet.</div>
+<div id="lb">
+  <button id="lb-close">✕</button>
+  <img id="lb-img" src="" alt="">
+  <div id="lb-meta"></div>
+</div>
 <script>
 (function () {
   var COLLECTION = ${escapedAddr};
-  var FEED_URL = location.origin + '/widget/gallery/' + encodeURIComponent(COLLECTION) + '/feed';
-  var grid = document.getElementById('grid');
-  var empty = document.getElementById('empty');
+  var BASE       = location.origin;
+  var FEED_URL   = BASE + '/widget/gallery/' + encodeURIComponent(COLLECTION) + '/feed';
+
+  // Apply CSS overrides and read owner JWT from URL params
+  var params = new URLSearchParams(location.search);
+  var ownerJwt = params.get('ownerJwt') || null;
+  var cssMap = { bg: '--bg', 'card-bg': '--card-bg', 'card-radius': '--card-radius', accent: '--accent', text: '--text', 'text-dim': '--text-dim' };
+  Object.keys(cssMap).forEach(function (k) {
+    var v = params.get(k);
+    if (v) document.documentElement.style.setProperty(cssMap[k], decodeURIComponent(v));
+  });
+  if (ownerJwt) document.body.classList.add('has-owner');
+
+  var grid   = document.getElementById('grid');
+  var empty  = document.getElementById('empty');
+  var lb     = document.getElementById('lb');
+  var lbImg  = document.getElementById('lb-img');
+  var lbMeta = document.getElementById('lb-meta');
+  var _seen  = {};
 
   function timeAgo(iso) {
     var d = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -859,17 +957,89 @@ function buildGalleryHtml(collectionAddress) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
+  // Lightbox
+  function openLb(url, label) {
+    lbImg.src = url;
+    lbMeta.textContent = label || '';
+    lb.classList.add('open');
+  }
+  function closeLb() { lb.classList.remove('open'); lbImg.src = ''; }
+
+  document.getElementById('lb-close').addEventListener('click', closeLb);
+  lb.addEventListener('click', function (e) { if (e.target === lb) closeLb(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeLb(); });
+
+  // Hide action
+  function doHide(castId, card) {
+    fetch(BASE + '/widget/gallery/' + encodeURIComponent(COLLECTION) + '/casts/' + encodeURIComponent(castId) + '/hide', {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + ownerJwt },
+    }).then(function (r) {
+      if (!r.ok) return;
+      card.style.transition = 'opacity .25s, transform .25s';
+      card.style.opacity = '0';
+      card.style.transform = 'scale(.88)';
+      setTimeout(function () { if (card.parentNode) card.parentNode.removeChild(card); }, 260);
+      delete _seen[castId];
+    }).catch(function () {});
+  }
+
+  function makeCard(it) {
+    var card = document.createElement('div');
+    card.className = 'card';
+
+    var img = document.createElement('img');
+    img.src = it.url;
+    img.alt = '';
+    img.loading = 'lazy';
+    img.addEventListener('load',  function () { img.classList.add('loaded'); });
+    img.addEventListener('error', function () { img.classList.add('loaded'); });
+
+    var skel = document.createElement('div');
+    skel.className = 'skel';
+
+    var meta = document.createElement('div');
+    meta.className = 'meta';
+    var label = (it.agentName || it.agentId || '');
+    var ago   = timeAgo(it.updatedAt);
+    meta.innerHTML = '<div class="agent">' + esc(label) + '</div><div class="time">' + esc(ago) + '</div>';
+
+    card.appendChild(img);
+    card.appendChild(skel);
+    card.appendChild(meta);
+
+    if (ownerJwt) {
+      var del = document.createElement('button');
+      del.className = 'del-btn';
+      del.textContent = '✕';
+      del.title = 'Hide from gallery';
+      del.addEventListener('click', function (e) { e.stopPropagation(); doHide(it.castId, card); });
+      card.appendChild(del);
+    }
+
+    card.addEventListener('click', function () {
+      openLb(it.url, label + (label && ago ? '  ·  ' : '') + ago);
+    });
+
+    return card;
+  }
+
   function render(items) {
-    if (!items.length) { grid.innerHTML = ''; empty.style.display = 'block'; return; }
+    if (!items.length && !Object.keys(_seen).length) {
+      empty.style.display = 'block';
+      return;
+    }
     empty.style.display = 'none';
-    grid.innerHTML = items.map(function (it) {
-      return '<div class="card">'
-        + '<img src="' + esc(it.url) + '" loading="lazy" alt="">'
-        + '<div class="meta">'
-        + '<div class="agent">' + esc(it.agentName || it.agentId || '') + '</div>'
-        + '<div class="time">' + esc(timeAgo(it.updatedAt)) + '</div>'
-        + '</div></div>';
-    }).join('');
+
+    var frag = document.createDocumentFragment();
+    var hasNew = false;
+    items.forEach(function (it) {
+      if (_seen[it.castId]) return;
+      _seen[it.castId] = true;
+      hasNew = true;
+      frag.appendChild(makeCard(it));
+    });
+    if (hasNew) grid.insertBefore(frag, grid.firstChild);
   }
 
   function load() {
@@ -1651,7 +1821,7 @@ function createWidgetApi(deps = {}) {
             const agentIds = agents.map(a => a._id);
 
             const raw = await deps.db.casts.aggregate([
-                { $match: { initiatorAccountId: { $in: agentIds }, status: 'completed', 'output.url': { $exists: true } } },
+                { $match: { initiatorAccountId: { $in: agentIds }, status: 'completed', 'output.url': { $exists: true }, galleryHidden: { $ne: true } } },
                 { $sort: { updatedAt: -1 } },
                 { $limit: 60 },
                 { $project: { _id: 0, castId: { $toString: '$_id' }, initiatorAccountId: 1, url: '$output.url', updatedAt: 1 } },
@@ -1672,6 +1842,51 @@ function createWidgetApi(deps = {}) {
         } catch (err) {
             logger.error(`[WidgetApi] GET gallery feed: ${err.message}`);
             res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to load gallery' } });
+        }
+    });
+
+    // Hide a cast from the collection gallery (requires owner JWT for any agent in the collection)
+    router.patch('/gallery/:collectionAddress/casts/:castId/hide', async (req, res) => {
+        cors(res);
+        try {
+            const addr   = req.params.collectionAddress.toLowerCase();
+            const castId = req.params.castId;
+
+            const secret = process.env.AGENT_SESSION_SECRET || process.env.JWT_SECRET;
+            if (!secret) return res.status(500).json({ error: { code: 'CONFIG_ERROR', message: 'Session secret not configured' } });
+
+            const auth  = req.headers.authorization || '';
+            const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+            if (!token) return res.status(401).json({ error: { code: 'MISSING_TOKEN', message: 'Authorization header required' } });
+
+            let payload;
+            try { payload = jwt.verify(token, secret, { algorithms: ['HS256'] }); }
+            catch { return res.status(401).json({ error: { code: 'TOKEN_INVALID', message: 'Invalid or expired token' } }); }
+
+            if (payload.tier !== 'agent_owner') {
+                return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Owner session required' } });
+            }
+
+            // Confirm the agent in the token belongs to this collection
+            if (deps.db?.userCore) {
+                const agentDoc = await deps.db.userCore.findByAgentId(payload.sub);
+                if (!agentDoc || (agentDoc.agentCollection || '').toLowerCase() !== addr) {
+                    return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Agent not in this collection' } });
+                }
+            }
+
+            if (deps.db?.casts) {
+                const { ObjectId: OID } = require('mongodb');
+                await deps.db.casts.updateOne(
+                    { _id: new OID(castId) },
+                    { $set: { galleryHidden: true, updatedAt: new Date() } }
+                );
+            }
+
+            res.json({ ok: true });
+        } catch (err) {
+            logger.error(`[WidgetApi] PATCH gallery hide: ${err.message}`);
+            res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to hide cast' } });
         }
     });
 
