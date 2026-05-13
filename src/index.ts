@@ -162,13 +162,13 @@ async function main(): Promise<void> {
   const intellaeCol = mongo.db(DB_NAME).collection('intellae')
   const intellae = new MongoIntella(intellaeCol)
   const compiler = new Compiler(templateRegistry, undefined, intellae)
-  const compile = async (modus: unknown, aditus: Record<string, unknown>): Promise<unknown> => {
+  const compile = async (modus: unknown, aditus: Record<string, unknown>): Promise<{ hash: string; input: unknown }> => {
     const essentia = modus as Essentia
     if (!essentia.runpodSpec) {
       throw new Error(`Modus '${essentia.id}' has no runpodSpec — cannot compile for RunPod`)
     }
-    const { spec } = await compiler.compile(essentia, aditus)
-    return spec.workflow.inputTemplate
+    const { hash, spec } = await compiler.compile(essentia, aditus)
+    return { hash, input: spec.workflow.inputTemplate }
   }
 
   const gpuTypeIds = RUNPOD_GPU_TYPE_IDS?.split(',').map(s => s.trim()).filter(Boolean) ?? []

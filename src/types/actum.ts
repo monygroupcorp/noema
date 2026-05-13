@@ -84,6 +84,13 @@ export interface Actum {
    */
   externusJobId?: string
 
+  /**
+   * SHA-256 content address of the CompiledSpec that was submitted.
+   * "sha256:<hex>" — links this execution to its exact deployment bundle.
+   * Set by RunPodCursor after compilation; absent on non-RunPod cursors.
+   */
+  deploymentHash?: string
+
   status: ActumStatus
   /** "exitus" = exit in Latin — the outputs produced by the modus */
   exitus?: Record<string, unknown>

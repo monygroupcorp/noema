@@ -1,27 +1,50 @@
 import type { Modus, Modorum } from '../types/modus.js'
 import type { Actum } from '../types/actum.js'
 import type { Modo } from '../types/modo.js'
-import type { Cursor, CursorResult } from '../types/cursus.js'
+import type { Cursor, CursorResult, Actorum } from '../types/cursus.js'
+import type { Materia } from '../types/materia.js'
+import type { DeploymentumStore } from '../types/deploymentum.js'
+import type { Praefectus } from './Praefectus.js'
 
-type RunResult =
-  | { status: 'completed'; podId: string; timings: { totalMs: number }; outputs: unknown[]; error?: never }
-  | { status: 'stalled'; podId: string; timings: { totalMs: number }; outputs: unknown[]; error: { code: string; message: string } }
-
-interface Runner {
-  runDeployment(args: { deployment: unknown; accountId: string; jobId: string }): Promise<RunResult>
+/**
+ * RunPodClient — the injectable seam between the cursor and any GPU pod substrate.
+ *
+ * The real implementation provisions a RunPod SECURE pod, SSHes in, runs the
+ * ComfyUI workflow, and POSTs the result to `webhook`. In tests a stub is swapped in.
+ *
+ * `webhook` is the ONLY thing that differs between deployment contexts (normal vs TEE).
+ */
+export interface RunPodClient {
+  submit(params: {
+    input: unknown
+    /** Where the runner POSTs the completion result.
+     * Normal deployment: our server (e.g. https://api.noema.io/webhooks/runpod)
+     * TEE deployment: the TEE pod's local endpoint. */
+    webhook?: string
+  }): Promise<{ id: string }>
 }
 
 interface Config {
-  accountId: string
+  /** Deployment-configurable webhook URL. Set at startup — same cursor code in all contexts. */
+  webhookUrl: string
   /** Upper-bound seconds for a single pod job. Default 1800 (30 min). */
   maxJobSeconds?: number
+  /** Warm GPU pool scheduler. When present, checked before cold-starting a new pod. */
+  praefectus?: Praefectus
+  /** Builds a WarmPodClient for a given Materia — required when praefectus is set. */
+  warmFactory?: (materia: Materia) => RunPodClient
+  /** Extracts the OCI image ref from a modus for Praefectus matching. Returns undefined to skip warm routing. */
+  imageRefOf?: (modus: Modus) => string | undefined
+  /** When set, compiled specs are persisted by hash before submission. */
+  deployments?: DeploymentumStore
 }
 
 export class RunPodCursor implements Cursor {
   constructor(
-    private readonly runner: Runner,
-    private readonly compile: (modus: Modus, aditus: Record<string, unknown>) => Promise<unknown>,
+    private readonly client: RunPodClient,
+    private readonly compile: (modus: Modus, aditus: Record<string, unknown>) => Promise<{ hash: string; input: unknown }>,
     private readonly modorum: Modorum,
+    private readonly actorum: Actorum,
     private readonly config: Config,
   ) {}
 
@@ -31,33 +54,39 @@ export class RunPodCursor implements Cursor {
   }
 
   async run(actum: Actum, _modo?: Modo): Promise<CursorResult> {
-    // aditus validated by validateAditus before dispatch
     const modus = await this.modorum.find(actum.modusId, actum.modusVersiono)
     if (!modus) throw new Error(`Modus '${actum.modusId}' not found`)
 
-    const deployment = await this.compile(modus, actum.aditus)
+    const { hash, input } = await this.compile(modus, actum.aditus)
 
-    const result = await this.runner.runDeployment({
-      deployment,
-      accountId: this.config.accountId,
-      jobId: actum.id,
+    if (this.config.deployments) {
+      await this.config.deployments.upsert({
+        hash,
+        spec: input as Record<string, unknown>,
+        natum: new Date(),
+      })
+    }
+
+    const client = await this._resolveClient(modus)
+    const { id: externusJobId } = await client.submit({
+      input,
+      webhook: this.config.webhookUrl,
     })
 
-    if (result.status === 'stalled') {
-      throw new Error(`Execution stalled: ${result.error.message}`)
-    }
+    await this.actorum.update(actum.id, { externusJobId, deploymentHash: hash, status: 'agens' })
 
-    const duratio = result.timings.totalMs
-    const impetus = BigInt(Math.ceil(duratio / 1000))
+    return { kind: 'async', externusJobId }
+  }
 
-    return {
-      kind: 'sync',
-      exitus: {
-        exitus: { outputs: result.outputs },
-        impetus,
-        duratio,
-        materiamId: result.podId,
-      },
+  private async _resolveClient(modus: Modus): Promise<RunPodClient> {
+    const { praefectus, warmFactory, imageRefOf } = this.config
+    if (praefectus && imageRefOf) {
+      const imageRef = imageRefOf(modus)
+      if (imageRef) {
+        const warm = await praefectus.findWarm(imageRef)
+        if (warm && warmFactory) return warmFactory(warm)
+      }
     }
+    return this.client
   }
 }

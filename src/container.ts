@@ -19,7 +19,9 @@ import type { ColloquiumStore, DictumStore } from './types/colloquium.js'
 import type { MemoriaStore } from './types/anima.js'
 import type { IntelligentiumStore } from './types/intelligendi.js'
 import type { MateriaStore } from './types/materia.js'
+import type { DeploymentumStore } from './types/deploymentum.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
+import { MongoDeploymentum } from './crystal/MongoDeploymentum.js'
 import { Praefectus } from './crystal/Praefectus.js'
 import { WarmPodClient } from './crystal/WarmPodClient.js'
 
@@ -77,6 +79,7 @@ export interface Ring {
   completor: IActumCompletor
   inceptor: IActumInceptor
   materiae: MateriaStore
+  deployments: DeploymentumStore
   collectioCursor: CollectioCursor
 }
 
@@ -89,7 +92,7 @@ export interface ContainerConfig {
    * Compile a Modus + aditus into the RunPod job input payload.
    * Bridges to the Fractal Tool Compiler. Injected to avoid circular deps.
    */
-  compile: (modus: Modus, aditus: Record<string, unknown>) => Promise<unknown>
+  compile: (modus: Modus, aditus: Record<string, unknown>) => Promise<{ hash: string; input: unknown }>
   /**
    * RunPod SECURE pod client — provisions a GPU pod, runs the workflow via SSH,
    * and POSTs the result to webhookUrl. Absent: RunPod tools will throw at run().
@@ -132,6 +135,8 @@ export interface ContainerConfig {
   intelligentiaeCollection?: string
   /** Collection name for materiae — default 'materiae' */
   materiaCollection?: string
+  /** Collection name for deployments — default 'deployments' */
+  deploymentsCollection?: string
   /**
    * Pre-created MateriaStore — if provided, used directly instead of creating a new MongoMateria.
    * Pass this when the same store instance needs to be shared with SecurePodClient (keep-warm mode).
@@ -196,6 +201,9 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const materiae = config.materiae ?? new MongoMateria(materiaCol)
   const praefectus = new Praefectus(materiae)
 
+  const deploymentsCol: Collection = db.collection(config.deploymentsCollection ?? 'deployments')
+  const deployments = new MongoDeploymentum(deploymentsCol)
+
   // ── Execution rail ─────────────────────────────────────────────────────────
   const cursorum = new SimpleCursorum()
 
@@ -217,6 +225,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
         praefectus,
         warmFactory: (m) => new WarmPodClient(m, materiae),
         imageRefOf,
+        deployments,
       },
     )
     const tesseraCursor = new TesseraCursor(runpodCursor, modos, signorum)
@@ -244,7 +253,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
     cursorum, completor, inceptor,
-    materiae,
+    materiae, deployments,
     collectioCursor,
   }
 }
