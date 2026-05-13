@@ -483,9 +483,9 @@ class UserCoreDB extends BaseDB {
         {
           key: { accountType: 1, agentId: 1 },
           name: 'idx_account_type_agent_id',
-          sparse: true,
           unique: true,
           background: true,
+          partialFilterExpression: { agentId: { $exists: true, $ne: null } },
         },
         {
           key: { accountType: 1, masterTreasuryId: 1 },
