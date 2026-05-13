@@ -229,7 +229,12 @@ class SpellsService {
         // 3. Execute the spell via WorkflowExecutionService
         // NOTE: WorkflowExecutionService now uses the centralized execution endpoint for all tool executions.
         this.logger.info(`[SpellsService] Permissions check passed. Handing off to WorkflowExecutionService for spell "${spell.name}". CastId: ${castId || 'none'}`);
-        
+
+        // Annotate context with the spell author so LoRA resolution can access private
+        // models the author embedded in the spell without requiring the executor to hold
+        // separate permissions for each one.
+        context.spellAuthorAccountId = spell.ownedBy?.toString() || null;
+
         try {
             const result = await this.workflowExecutionService.execute(spell, context);
             this.logger.info(`[SpellsService] WorkflowExecutionService.execute() returned for spell "${spell.name}": ${JSON.stringify(result || 'undefined')}`);

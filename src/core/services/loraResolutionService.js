@@ -70,21 +70,59 @@ const WORD_AND_WEIGHT_REGEX = /^([a-zA-Z0-9_.-]+)(?::(\d*\.?\d+))?([\s.,!?()[\]{
 const SPLIT_KEEP_DELIMITERS_REGEX = /(\s+|[.,!?()[\]{}\'\"]+)/g;
 
 /**
+ * Returns a trigger map that merges the executor's accessible LoRAs with the spell
+ * author's private LoRAs.  This allows a spell author to embed private model references
+ * in their spell prompt and have them resolve correctly for any executor — without
+ * requiring each executor to separately license those models.
+ *
+ * @param {string} masterAccountId - Executor's account.
+ * @param {string|null} spellAuthorAccountId - Spell owner's account (may equal masterAccountId).
+ * @param {Function} getTriggerMapFn - Injected or default _getTriggerMap.
+ * @returns {Promise<Map>}
+ */
+async function _getMergedTriggerMap(masterAccountId, spellAuthorAccountId, getTriggerMapFn) {
+  const fn = getTriggerMapFn || _getTriggerMap;
+  const executorMap = await fn(masterAccountId);
+
+  if (!spellAuthorAccountId || spellAuthorAccountId === masterAccountId?.toString()) {
+    return executorMap;
+  }
+
+  const authorMap = await fn(spellAuthorAccountId);
+  const merged = new Map(executorMap);
+  for (const [key, loraList] of authorMap) {
+    if (!merged.has(key)) {
+      merged.set(key, loraList);
+    } else {
+      const existing = merged.get(key);
+      const existingSlugs = new Set(existing.map(l => l.slug));
+      const additions = loraList.filter(l => !existingSlugs.has(l.slug));
+      if (additions.length) merged.set(key, [...existing, ...additions]);
+    }
+  }
+  return merged;
+}
+
+/**
  * Parses the prompt string, identifies LoRA triggers, resolves conflicts,
  * applies permissions, and substitutes triggers with LoRA syntax.
  *
  * @param {string} promptString - The raw prompt input by the user.
  * @param {string} masterAccountId - The ID of the user making the request.
  * @param {string} [toolBaseModel] - Optional tool base model for filtering.
- * @returns {Promise<{modifiedPrompt: string, rawPrompt: string, appliedLoras: Array<{slug: string, weight: number, originalWord: string, replacedWord: string, modelId: string}>, warnings: string[]}>}
+ * @param {object} [dependencies] - Injected deps (e.g. for testing).
+ * @param {string} [spellAuthorAccountId] - Spell owner's account; private LoRAs they
+ *   embedded in the spell prompt are accessible to any executor.
+ * @returns {Promise<{modifiedPrompt: string, rawPrompt: string, appliedLoras: Array, warnings: string[]}>}
  */
-async function resolveLoraTriggers(promptString, masterAccountId, toolBaseModel, dependencies) {
+async function resolveLoraTriggers(promptString, masterAccountId, toolBaseModel, dependencies, spellAuthorAccountId) {
   const rawPrompt = promptString;
   const appliedLoras = [];
   const warnings = [];
   const lorasAppliedThisRun = new Set(); // Tracks slugs of LoRAs applied in this run
 
-  const triggerMap = await (dependencies?._getTriggerMap || _getTriggerMap)(masterAccountId);
+  const getTriggerMapFn = dependencies?._getTriggerMap || _getTriggerMap;
+  const triggerMap = await _getMergedTriggerMap(masterAccountId, spellAuthorAccountId, getTriggerMapFn);
 
   if (!triggerMap || triggerMap.size === 0) {
     return { modifiedPrompt: rawPrompt, rawPrompt, appliedLoras, warnings };
