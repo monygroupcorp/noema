@@ -187,7 +187,7 @@ export class CollectioCursor {
     const totalPieces = collectio.numerus + state.reviveCount
 
     while (
-      state.running.size + state.pendingReview.size < collectio.concurrentia &&
+      state.running.size < collectio.concurrentia &&
       state.nextIndex < totalPieces
     ) {
       const pieceIndex = state.nextIndex++

@@ -389,8 +389,8 @@ test('reviewEnabled: approveActum() increments completae and dispatches next pie
   assert.equal(inceptor.calls.length, 2)
 
   await cursor.onActumCompleta('col-1', 'actum-0', true)
-  // Still 2 — waiting for review
-  assert.equal(inceptor.calls.length, 2)
+  // actum-0 → pendingReview; running.size=1 < concurrentia=2, so piece 2 dispatched immediately
+  assert.equal(inceptor.calls.length, 3, 'should dispatch next piece as soon as running slot opens, not waiting for review')
 
   await cursor.approveActum('col-1', 'actum-0')
 
@@ -399,8 +399,8 @@ test('reviewEnabled: approveActum() increments completae and dispatches next pie
   assert.ok(completaeUpdate, 'should increment completae after approval')
   assert.equal(completaeUpdate.patch.completae, 1)
 
-  // Slot freed by approval should dispatch next
-  assert.equal(inceptor.calls.length, 3, 'should dispatch next piece after approval')
+  // running is full (actum-1, actum-2) so no new piece on approval
+  assert.equal(inceptor.calls.length, 3, 'no additional dispatch on approval since running is already at concurrentia')
 })
 
 // ── Test 13: reviewEnabled — Collectio not completa while pendingReview non-empty
@@ -603,7 +603,37 @@ test('_pieceIndex and _attributes are injected into dispatched aditus', async ()
   assert.equal(attrs[0].value, 'Impressionist')
 })
 
-// ── Test 20: Idempotency on onActumCompleta ───────────────────────────────────
+// ── Test 20: reviewEnabled — pendingReview does NOT block concurrentia slots ──
+
+test('reviewEnabled: pendingReview does not block concurrentia — dispatches 2 more after 2 completions', async () => {
+  const collectio = makeCollectio({ numerus: 5, concurrentia: 2 })
+  const collectiones = makeCollectionum(collectio)
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(
+    inceptor as unknown as ActumInceptor,
+    collectiones,
+    inceptor.actorum,
+    { reviewEnabled: true },
+  )
+
+  await cursor.start(collectio)
+  // start() dispatches 2 pieces (concurrentia=2)
+  assert.equal(inceptor.calls.length, 2, 'should dispatch 2 pieces on start')
+
+  // Both complete — they go to pendingReview, NOT blocking new dispatches
+  await cursor.onActumCompleta('col-1', 'actum-0', true)
+  await cursor.onActumCompleta('col-1', 'actum-1', true)
+
+  // running.size is now 0, pendingReview.size is 2
+  // concurrentia check should be: running.size (0) < concurrentia (2) → dispatch 2 more
+  assert.equal(
+    inceptor.calls.length,
+    4,
+    'should dispatch 2 more pieces because running.size=0 < concurrentia=2, pendingReview does not count',
+  )
+})
+
+// ── Test 22: Idempotency on onActumCompleta ───────────────────────────────────
 
 test('onActumCompleta called twice for same actumId is no-op on second call', async () => {
   const collectio = makeCollectio({ numerus: 3, concurrentia: 2 })
