@@ -31,6 +31,10 @@ COPY . .
 # Copy built frontend from stage 1
 COPY --from=frontend-builder /frontend/dist ./src/platforms/web/frontend/dist
 
+# Copy ESM builds needed by the widget iframe (served via /widget/lib/*)
+COPY --from=frontend-builder /frontend/node_modules/@monygroupcorp/microact/dist/microact.esm.js ./src/platforms/web/frontend/node_modules/@monygroupcorp/microact/dist/microact.esm.js
+COPY --from=frontend-builder /frontend/node_modules/@monygroupcorp/micro-web3/dist/micro-web3.esm.js ./src/platforms/web/frontend/node_modules/@monygroupcorp/micro-web3/dist/micro-web3.esm.js
+
 # Create necessary directories and set permissions before switching user
 RUN mkdir -p tmp output storage/media logs \
     && chown -R node:node tmp output storage logs
