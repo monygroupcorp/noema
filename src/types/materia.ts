@@ -45,6 +45,18 @@ export interface Materia {
   ramGb: number
 
   /**
+   * Docker image this pod was provisioned with — e.g. 'stationthis/flux-comfyui:v1'.
+   * Praefectus matches incoming jobs against this: a job can only be routed to a
+   * warm pod running the same image (models are baked into the image).
+   */
+  imageRef?: string
+
+  /** SSH host for direct pod access (RunPod SECURE provides a public IP). */
+  sshHost?: string
+  /** SSH port (RunPod maps a random public port to the pod's port 22). */
+  sshPort?: number
+
+  /**
    * Cost of this pod in impetus points per second.
    * 1 point = $0.000337 = 1 second of RunPod SECURE pod-time.
    * This is what the session host is billed at-cost (no platform markup on compute).
@@ -71,3 +83,18 @@ export interface Materia {
 
 /** "Materiae" — nominative plural of materia */
 export type Materiae = Materia[]
+
+/**
+ * MateriaStore — persistence interface for Materia (GPU pod) records.
+ */
+export interface MateriaStore {
+  create(input: Omit<Materia, 'id'>): Promise<Materia>
+  findById(id: string): Promise<Materia | null>
+  update(id: string, patch: Partial<Pick<Materia, 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum'>>): Promise<Materia>
+  /**
+   * Return the first idle Materia matching the given imageRef.
+   * Used by Praefectus to find warm pods for incoming jobs.
+   * Returns null when no compatible warm pod is available (cold start).
+   */
+  findWarm(spec: { imageRef: string }): Promise<Materia | null>
+}
