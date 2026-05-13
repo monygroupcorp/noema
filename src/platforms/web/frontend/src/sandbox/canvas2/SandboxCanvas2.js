@@ -33,6 +33,16 @@ function anchorIcon(type) {
   }
 }
 
+// Agent-context node output ports — order determines anchor stacking
+const AGENT_CONTEXT_PORTS = [
+  { portId: 'nftName',        type: 'text',  label: 'NFT Name' },
+  { portId: 'nftImage',       type: 'image', label: 'NFT Image' },
+  { portId: 'nftTokenId',     type: 'text',  label: 'Token ID' },
+  { portId: 'nftCollection',  type: 'text',  label: 'Collection' },
+  { portId: 'chainId',        type: 'text',  label: 'Chain ID' },
+  { portId: 'nftDescription', type: 'text',  label: 'Description' },
+];
+
 // Half-width of node chip (matches .sc2-node { width: 140px })
 const CHIP_HW = 70;
 // Vertical spacing between stacked input anchors
@@ -168,6 +178,12 @@ export class SandboxCanvas2 extends Component {
     return { uploadId, toolId };
   }
 
+  addAgentContextWindow(position) {
+    const id = this._engine.addAgentContextWindow(position || this._defaultPos());
+    this._enterNodeMode(id);
+    return id;
+  }
+
   addCollectionTestWindow(collection, position) {
     return this._engine.addCollectionTestWindow(collection, position || this._defaultPos());
   }
@@ -217,6 +233,7 @@ export class SandboxCanvas2 extends Component {
           steps: (w.spell?.steps || []).map(s => ({ displayName: s.displayName || s.service || s.toolId, service: s.service })),
         }};
       }
+      if (w.type === 'agent-context') return { id: w.id, workspaceX: w.x, workspaceY: w.y, type: 'agent-context' };
       if (w.type === 'collection') return { ...base, type: 'collection', mode: w.mode, collection: { collectionId: w.collection?.collectionId, name: w.collection?.name } };
       if (w.type === 'upload') return { ...base, type: 'upload', displayName: 'Upload', toolId: 'upload' };
       if (w.type === 'primitive') return { ...base, type: 'primitive', outputType: w.outputType, value: w.value || '', displayName: w.outputType || 'Primitive', toolId: `primitive:${w.outputType || 'unknown'}` };
@@ -258,7 +275,9 @@ export class SandboxCanvas2 extends Component {
         costVersions: w.costVersions?.length ? w.costVersions : (localCost?.costVersions || []),
         tool: w.tool || { displayName: w.displayName || '', toolId: w.toolId || '' },
       };
-      if (w.isSpell) {
+      if (w.type === 'agent-context') {
+        win.type = 'agent-context';
+      } else if (w.isSpell) {
         win.type = 'spell'; win.spell = w.spell;
         win.tool = win.tool || { displayName: w.spell?.name || 'Spell', toolId: `spell:${w.spell?._id}` };
         if (win.tool?.toolId?.startsWith('spell-')) win.tool = { ...win.tool, toolId: `spell:${win.tool.toolId.substring(6)}` };
@@ -857,7 +876,11 @@ export class SandboxCanvas2 extends Component {
 
       // Output anchor is on right edge of source chip
       const x1 = from.x + CHIP_HW;
-      const y1 = from.y;
+      let y1 = from.y;
+      if (from.type === 'agent-context' && conn.fromOutput) {
+        const portIdx = AGENT_CONTEXT_PORTS.findIndex(p => p.portId === conn.fromOutput);
+        if (portIdx >= 0) y1 = this._portY(from.y, portIdx, AGENT_CONTEXT_PORTS.length);
+      }
 
       // Input anchor y depends on port index in target schema
       const toSchema = this._inputSchema(to);
@@ -873,10 +896,15 @@ export class SandboxCanvas2 extends Component {
 
     // Pending connection line — from source output anchor to pointer
     if (this._engine.fsm.isConnecting) {
-      const { sourceNodeId } = this._engine.fsm.connection;
+      const { sourceNodeId, sourcePort } = this._engine.fsm.connection;
       const sourceWin = this._engine.windows.get(sourceNodeId);
       if (sourceWin && this._pointerCanvasPos) {
-        const d = `M ${sourceWin.x + CHIP_HW} ${sourceWin.y} L ${this._pointerCanvasPos.x} ${this._pointerCanvasPos.y}`;
+        let srcY = sourceWin.y;
+        if (sourceWin.type === 'agent-context' && sourcePort) {
+          const pIdx = AGENT_CONTEXT_PORTS.findIndex(p => p.portId === sourcePort);
+          if (pIdx >= 0) srcY = this._portY(sourceWin.y, pIdx, AGENT_CONTEXT_PORTS.length);
+        }
+        const d = `M ${sourceWin.x + CHIP_HW} ${srcY} L ${this._pointerCanvasPos.x} ${this._pointerCanvasPos.y}`;
         paths.push(h('path', { key: '__pending', className: 'sc2-conn-path sc2-conn-path--pending', d }));
       }
     }
@@ -940,6 +968,41 @@ export class SandboxCanvas2 extends Component {
           }
         },
       }) : null;
+
+      // ── Agent-context node ────────────────────────────────────────────────
+      if (win.type === 'agent-context') {
+        let cls = 'sc2-node sc2-node--agent-context';
+        if (isFocused) cls += ' sc2-node--focused';
+        if (isSelected) cls += ' sc2-node--selected';
+        // Per-port output anchors stacked on the right
+        const portAnchors = !showAnchors ? [] : AGENT_CONTEXT_PORTS.map((port, i) => {
+          const isPortSource = isConnecting && connection?.sourceNodeId === win.id && connection?.sourcePort === port.portId;
+          return h('button', {
+            key: port.portId,
+            className: `sc2-anchor sc2-anchor--output sc2-anchor--port${isPortSource ? ' sc2-anchor--active' : ''}`,
+            style: { top: `calc(50% + ${(i - (AGENT_CONTEXT_PORTS.length - 1) / 2) * PORT_STRIDE}px)` },
+            title: `${port.label} (${port.type})`,
+            onclick: (e) => {
+              e.stopPropagation();
+              this._engine.fsm.startConnection(win.id, port.portId, port.type);
+              this._ensureZ1();
+              this.setState({ fsmState: this._engine.fsmState });
+            },
+          }, anchorIcon(port.type));
+        });
+        chips.push(h('div', {
+          key: win.id,
+          className: cls,
+          style: { left: `${win.x}px`, top: `${win.y}px` },
+          'data-window-id': win.id,
+          onclick: (e) => { e.stopPropagation(); this._onTapNode(win.id); },
+        },
+          h('div', { className: 'sc2-node-label' }, 'Agent Context'),
+          h('div', { className: 'sc2-node-type' }, 'factory'),
+          ...portAnchors,
+        ));
+        continue;
+      }
 
       const isBatchStack = win.batchSize > 1;
       let cls = 'sc2-node';

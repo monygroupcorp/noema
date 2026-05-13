@@ -317,6 +317,38 @@
   opacity: 0.85;
 }
 
+/* Agent-context (factory) node — golden glow, output-only */
+.sc2-node--agent-context {
+  min-height: 80px;
+  border-color: rgba(255, 190, 60, 0.5);
+  background: rgba(255, 190, 60, 0.06);
+  box-shadow: 0 0 0 1px rgba(255, 190, 60, 0.15);
+}
+.sc2-node--agent-context .sc2-node-label { color: rgba(255, 190, 60, 0.9); }
+.sc2-node--agent-context .sc2-node-type  { color: rgba(255, 190, 60, 0.55); }
+.sc2-node--agent-context.sc2-node--focused {
+  border-color: rgba(255, 190, 60, 0.8);
+  box-shadow: 0 0 0 2px rgba(255, 190, 60, 0.2);
+}
+
+/* Per-port output anchors on agent-context node */
+.sc2-anchor--port {
+  right: -9px;
+  transform: translateY(-50%);
+  border-color: rgba(255, 190, 60, 0.4);
+  color: rgba(255, 190, 60, 0.7);
+  background: rgba(255, 190, 60, 0.08);
+}
+.sc2-anchor--port:hover {
+  border-color: rgba(255, 190, 60, 0.9);
+  color: rgba(255, 190, 60, 1);
+  box-shadow: 0 0 0 2px rgba(255, 190, 60, 0.2);
+}
+.sc2-anchor--port.sc2-anchor--active {
+  border-color: rgba(255, 190, 60, 1);
+  box-shadow: 0 0 0 3px rgba(255, 190, 60, 0.25);
+}
+
 /* Seeking-source badge (reverse connection mode) */
 .sc2-seeking-badge {
   position: fixed;

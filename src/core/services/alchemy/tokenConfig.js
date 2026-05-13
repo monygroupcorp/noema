@@ -18,6 +18,10 @@ const TOKEN_CONFIG = {
     '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': { // USDC
       symbol: 'USDC', decimals: 6, fundingRate: 0.85, donationFundingRate: 0.9, iconUrl: '/images/sandbox/components/usdc.png',
     },
+    '0x000caba1002917b27300d7b67be2d1c51b93bf00': { // CAMEL — Cypher DEX (Algebra Protocol), not Alchemy-indexed
+      symbol: '🐪', decimals: 18, fundingRate: 0.93, donationFundingRate: 0.95, iconUrl: null,
+      dexQuoter: { type: 'algebra', quoter: '0x02f22D58d161d1C291ABfe88764d84120f20F723', pairToken: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', deployer: '0xB9783D9Bd7022b1fCa458518dC0e10646720AcF0' },
+    },
     '0x0000000000c5dc95539589fbD24BE07c6C14eCa4': { // CULT
       symbol: 'CULT', decimals: 18, fundingRate: 0.93, donationFundingRate: 0.95, iconUrl: '/images/sandbox/components/cult.png',
     },

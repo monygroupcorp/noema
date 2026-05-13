@@ -1,6 +1,7 @@
 const { ethers } = require('ethers');
 // This service requires 'node-fetch'. Please install it with `npm install node-fetch@2`
 const fetch = require('node-fetch');
+const CypherDexService = require('./cypherDexService');
 
 // This is the address for native ETH in many contexts.
 const NATIVE_ETH_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -29,12 +30,13 @@ class PriceFeedService {
    */
   constructor(config, logger) {
     this.logger = logger || console;
-    
+
     if (!config || !config.alchemyApiKey) {
       this.logger.warn('[PriceFeedService] Alchemy API Key is missing. Service will use placeholder data.');
     }
     this.alchemyApiKey = config.alchemyApiKey;
-    
+    this._cypherDex = new CypherDexService(this.logger);
+
     this.logger.debug('[PriceFeedService] Initialized.');
   }
 
@@ -165,6 +167,13 @@ class PriceFeedService {
     if (tokenAddress.toLowerCase() === MS2_ADDRESSES.ETH.toLowerCase()) {
       this.logger.info('[PriceFeedService] Identified MS2 token, using CoinGecko price feed.');
       return this._getMS2Price();
+    }
+
+    // CAMEL is on Cypher DEX (Algebra Protocol) and not indexed by Alchemy — use custom quoter
+    if (CypherDexService.isCamelAddress(tokenAddress)) {
+      this.logger.info('[PriceFeedService] Identified CAMEL token, using Cypher DEX quoter.');
+      const ethPrice = await this.getPriceInUsd(NATIVE_ETH_ADDRESS);
+      return this._cypherDex.getCamelPriceInUsd(ethPrice);
     }
 
     const cacheKey = `price_${tokenAddress.toLowerCase()}`;

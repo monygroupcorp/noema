@@ -1,4 +1,5 @@
 // src/core/services/agents/WorkspaceFactory.js
+const { IpfsService } = require('../ipfs/IpfsService');
 //
 // Provisions and keeps agent starter workspaces in sync with the admin template.
 //
@@ -14,13 +15,15 @@
 
 class WorkspaceFactory {
   /**
-   * @param {{ workspacesDb, spellsDb, userCoreDb, logger? }} deps
+   * @param {{ workspacesDb, spellsDb, userCoreDb, storageService?, logger? }} deps
    */
-  constructor({ workspacesDb, spellsDb, userCoreDb, logger } = {}) {
+  constructor({ workspacesDb, spellsDb, userCoreDb, storageService, ipfsService, logger } = {}) {
     this.workspacesDb = workspacesDb;
     this.spellsDb = spellsDb;
     this.userCoreDb = userCoreDb;
+    this.storageService = storageService || null;
     this.logger = logger || console;
+    this.ipfsService = ipfsService || new IpfsService(this.logger);
   }
 
   // ---------------------------------------------------------------------------
@@ -37,9 +40,10 @@ class WorkspaceFactory {
     const template = await this._loadTemplate();
     this.logger.info(`[WorkspaceFactory] Provisioning from template ${template.slug} r${template.revision ?? 1}`);
 
-    const placeholders = await this._buildPlaceholderMap(tokenUri, agentDoc);
+    const { placeholders, portMap } = await this._buildPlaceholderMap(tokenUri, agentDoc);
     const clonedSnapshot = this._substituteSnapshot(template.snapshot, placeholders);
-    const { snapshot: patchedSnapshot } = await this._cloneSpells(clonedSnapshot, agentDoc, { tagTemplateIds: true });
+    const factoryBindings = this._resolveFactoryBindings(clonedSnapshot, portMap);
+    const { snapshot: patchedSnapshot } = await this._cloneSpells(clonedSnapshot, agentDoc, { tagTemplateIds: true, factoryBindings });
 
     const displayName = placeholders['$NFT_NAME'] || agentDoc.profile?.name || agentDoc.agentId || 'Agent Workspace';
 
@@ -332,51 +336,94 @@ class WorkspaceFactory {
   }
 
   async _buildPlaceholderMap(tokenUri, agentDoc) {
-    const map = {
-      '$NFT_TOKEN_ID': String(agentDoc.agentTokenId ?? ''),
-      '$NFT_NAME': agentDoc.profile?.name || agentDoc.agentId || '',
-      '$NFT_IMAGE': '',
+    const portMap = {
+      nftTokenId: String(agentDoc.agentTokenId ?? ''),
+      nftName: agentDoc.profile?.name || agentDoc.agentId || '',
+      nftImage: '',
+      nftCollection: agentDoc.contractAddress || '',
+      chainId: agentDoc.chainId ? String(agentDoc.chainId) : '',
+      nftDescription: agentDoc.profile?.description || '',
     };
 
-    if (!tokenUri) return map;
+    const placeholders = {
+      '$NFT_TOKEN_ID': portMap.nftTokenId,
+      '$NFT_NAME': portMap.nftName,
+      '$NFT_IMAGE': portMap.nftImage,
+    };
+
+    if (!tokenUri) return { placeholders, portMap };
 
     try {
-      const meta = await this._fetchJson(tokenUri);
-      if (meta.image) map['$NFT_IMAGE'] = meta.image;
-      if (meta.name) map['$NFT_NAME'] = meta.name;
+      const meta = await this.ipfsService.fetchJson(tokenUri);
+
+      if (meta.image) {
+        let imageUrl = meta.image;
+        if (imageUrl.startsWith('ipfs://')) {
+          try {
+            imageUrl = await this._mirrorImageToR2(imageUrl, agentDoc._id?.toString());
+          } catch (err) {
+            this.logger.warn(`[WorkspaceFactory] IPFS mirror failed, falling back to gateway: ${err.message}`);
+            imageUrl = this.ipfsService.resolveUrl(imageUrl);
+          }
+        }
+        portMap.nftImage = imageUrl;
+        placeholders['$NFT_IMAGE'] = imageUrl;
+      }
+
+      if (meta.name) {
+        portMap.nftName = meta.name;
+        placeholders['$NFT_NAME'] = meta.name;
+      }
+
+      if (meta.description) {
+        portMap.nftDescription = meta.description;
+      }
 
       const attrs = meta.attributes || meta.traits || [];
       for (const attr of attrs) {
         if (!attr.trait_type) continue;
-        const k = `$NFT_TRAIT_${String(attr.trait_type).toUpperCase().replace(/\s+/g, '_')}`;
-        map[k] = String(attr.value ?? '');
+        const traitName = String(attr.trait_type);
+        const val = String(attr.value ?? '');
+        placeholders[`$NFT_TRAIT_${traitName.toUpperCase().replace(/\s+/g, '_')}`] = val;
+        portMap[`trait:${traitName.toLowerCase().replace(/\s+/g, '_')}`] = val;
       }
     } catch (err) {
       this.logger.warn(`[WorkspaceFactory] Token metadata fetch failed (${tokenUri}): ${err.message}`);
     }
 
-    return map;
+    return { placeholders, portMap };
   }
 
   _substituteSnapshot(snapshot, placeholders) {
     let raw = JSON.stringify(snapshot);
     for (const [placeholder, value] of Object.entries(placeholders)) {
-      raw = raw.split(placeholder).join(value);
+      // JSON.stringify gives us a quoted, escaped string; slice(1,-1) strips the outer quotes
+      // so the result is safe to splice directly into the serialized JSON.
+      const escaped = JSON.stringify(String(value ?? '')).slice(1, -1);
+      raw = raw.split(placeholder).join(escaped);
     }
     return JSON.parse(raw);
   }
 
   /**
    * Clones all spell windows, tagging templateWindowId on every window.
+   * Agent-context windows are stripped (their bindings are already baked).
    * @param {object} snapshot
    * @param {object} agentDoc
-   * @param {{ tagTemplateIds?: boolean }} opts
+   * @param {{ tagTemplateIds?: boolean, factoryBindings?: Map }} opts
    */
-  async _cloneSpells(snapshot, agentDoc, { tagTemplateIds = false } = {}) {
+  async _cloneSpells(snapshot, agentDoc, { tagTemplateIds = false, factoryBindings = null } = {}) {
     const toolWindows = snapshot.toolWindows || [];
     const patchedWindows = [];
+    const agentContextIds = new Set();
 
     for (const win of toolWindows) {
+      // Strip agent-context nodes — they're template-only scaffolding
+      if (win.type === 'agent-context') {
+        agentContextIds.add(win.id);
+        continue;
+      }
+
       const base = tagTemplateIds ? { ...win, templateWindowId: win.id } : { ...win };
 
       if (!win.isSpell || !win.spell?._id) {
@@ -393,41 +440,86 @@ class WorkspaceFactory {
         continue;
       }
 
+      // Apply factory bindings: bake static values into spell, remove from exposedInputs
+      const bindings = factoryBindings?.get(win.id) || [];
+      const boundPortKeys = new Set(bindings.map(b => b.portKey));
+      const exposedInputs = JSON.parse(JSON.stringify(original.exposedInputs || []));
+      const filteredExposedInputs = exposedInputs.filter(
+        ei => !boundPortKeys.has(`${ei.nodeId}__${ei.paramKey}`)
+      );
+      const parameterMappings = {};
+      for (const b of bindings) parameterMappings[b.portKey] = b.value;
+
       const cloned = await this.spellsDb.createSpell({
         name: original.name,
         description: original.description || '',
         creatorId: agentDoc._id,
         steps: JSON.parse(JSON.stringify(original.steps || [])),
-        exposedInputs: JSON.parse(JSON.stringify(original.exposedInputs || [])),
+        exposedInputs: filteredExposedInputs,
+        ...(bindings.length > 0 && { parameterMappings }),
         tags: original.tags || [],
         visibility: 'private',
       });
 
+      if (bindings.length > 0) {
+        this.logger.debug(`[WorkspaceFactory] Baked ${bindings.length} factory binding(s) into spell ${cloned.slug}`);
+      }
       this.logger.debug(`[WorkspaceFactory] Cloned spell ${original.slug} → ${cloned.slug}`);
       patchedWindows.push({ ...base, spell: { _id: cloned._id, slug: cloned.slug, name: cloned.name } });
     }
 
-    return { snapshot: { ...snapshot, toolWindows: patchedWindows } };
+    // Strip connections involving agent-context windows (both field name variants)
+    const filteredConnections = (snapshot.connections || []).filter(c => {
+      const fromId = c.fromWindowId || c.from;
+      const toId = c.toWindowId || c.to;
+      return !agentContextIds.has(fromId) && !agentContextIds.has(toId);
+    });
+
+    return { snapshot: { ...snapshot, toolWindows: patchedWindows, connections: filteredConnections } };
   }
 
-  _fetchJson(uri) {
-    return new Promise((resolve, reject) => {
-      const mod = uri.startsWith('https') ? require('https') : require('http');
-      const req = mod.get(uri, { timeout: 8000 }, (res) => {
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          res.resume();
-          return reject(new Error(`HTTP ${res.statusCode} from tokenUri`));
-        }
-        let body = '';
-        res.on('data', chunk => { body += chunk; });
-        res.on('end', () => {
-          try { resolve(JSON.parse(body)); }
-          catch { reject(new Error('Invalid JSON from tokenUri')); }
-        });
-      });
-      req.on('error', reject);
-      req.on('timeout', () => { req.destroy(); reject(new Error('tokenUri fetch timed out')); });
-    });
+  /**
+   * Walks the snapshot for connections from agent-context windows and maps them
+   * to `{ portKey, value }` bindings grouped by target windowId.
+   *
+   * @param {object} snapshot
+   * @param {object} portMap  — { nftName, nftImage, nftTokenId, 'trait:*', ... }
+   * @returns {Map<string, Array<{ portKey: string, value: string }>>}
+   */
+  _resolveFactoryBindings(snapshot, portMap) {
+    const contextWindowIds = new Set(
+      (snapshot.toolWindows || [])
+        .filter(w => w.type === 'agent-context')
+        .map(w => w.id)
+    );
+
+    if (contextWindowIds.size === 0) return new Map();
+
+    const bindingsByWindowId = new Map();
+    for (const conn of snapshot.connections || []) {
+      if (!contextWindowIds.has(conn.fromWindowId)) continue;
+      // Canvas stores fromOutput/toInput (CanvasEngine field names)
+      const portId = conn.fromOutput || conn.fromPort;
+      const targetKey = conn.toInput || conn.toPort;
+      const value = portMap[portId];
+      if (value === undefined || !targetKey) continue;
+      if (!bindingsByWindowId.has(conn.toWindowId)) {
+        bindingsByWindowId.set(conn.toWindowId, []);
+      }
+      bindingsByWindowId.get(conn.toWindowId).push({ portKey: targetKey, value });
+    }
+
+    return bindingsByWindowId;
+  }
+
+  async _mirrorImageToR2(ipfsUrl, agentId) {
+    if (!this.storageService) throw new Error('storageService not configured');
+    const { stream, contentType } = await this.ipfsService.fetchStream(ipfsUrl);
+    const safeCid = ipfsUrl.replace(/^ipfs:\/\//, '').replace(/\//g, '_');
+    const key = `agent-nft-images/${agentId || 'unknown'}/${safeCid}`;
+    const { permanentUrl } = await this.storageService.uploadFromStream(stream, key, contentType);
+    this.logger.debug(`[WorkspaceFactory] Mirrored IPFS → R2: ${key}`);
+    return permanentUrl;
   }
 }
 

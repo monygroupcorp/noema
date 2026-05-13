@@ -6,6 +6,7 @@
 
 const express = require('express');
 const axios = require('axios');
+const { IpfsService } = require('../../core/services/ipfs/IpfsService');
 const { createLogger } = require('../../utils/logger');
 const { createRateLimitMiddleware } = require('../../utils/rateLimiter');
 const createStatusService = require('./status');
@@ -103,6 +104,7 @@ function initializeInternalServices(dependencies = {}) {
       db: dbDataServices, // Use the extracted dbDataServices which contains userCore, userSessions etc.
       openai: dependencies.openai, // Pass down the openai service instance
       storageService: dependencies.storageService, // Pass down the storage service
+      ipfsService: dependencies.ipfsService || new IpfsService(logger),
       // Pass other relevant top-level dependencies if needed
       appStartTime: dependencies.appStartTime,
       version: dependencies.version,

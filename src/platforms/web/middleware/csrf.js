@@ -26,6 +26,7 @@ const csrfExcluded = [
   '/api/v1/auth/refresh',
   '/api/v1/auth/register', // Add registration if/when implemented
   '/internal/', // Internal API routes (server-to-server, use API keys)
+  '/widget/',   // Widget iframe routes — use Bearer JWT or guest auth, not session cookies
   '/api/v1/admin', // Admin routes use API key authentication, not session-based
   '/api/v1/webhook/alchemy',
   '/api/v1/webhook/comfydeploy',

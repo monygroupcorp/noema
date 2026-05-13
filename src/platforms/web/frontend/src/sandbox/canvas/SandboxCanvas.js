@@ -1157,6 +1157,9 @@ export class SandboxCanvas extends Component {
         ...(w.totalCostUsd ? { totalCostUsd: w.totalCostUsd } : {}),
         ...(w.costVersions?.length ? { costVersions: w.costVersions } : {}),
       };
+      if (w.type === 'agent-context') {
+        return { id: w.id, workspaceX: w.x, workspaceY: w.y, type: 'agent-context' };
+      }
       if (w.type === 'spell') {
         return { ...base, isSpell: true, spell: {
           _id: w.spell?._id,
@@ -1214,7 +1217,10 @@ export class SandboxCanvas extends Component {
         // Restore the tool object if present (includes inputSchema for ParameterForm)
         tool: w.tool || { displayName: w.displayName || '', toolId: w.toolId || '' },
       };
-      if (w.isSpell) {
+      if (w.type === 'agent-context') {
+        win.type = 'agent-context';
+        win.tool = { displayName: 'Agent Context', toolId: null, metadata: { outputType: null } };
+      } else if (w.isSpell) {
         win.type = 'spell';
         win.spell = w.spell;
         win.tool = win.tool || { displayName: w.spell?.name || 'Spell', toolId: `spell:${w.spell?._id}`, metadata: { outputType: 'image' } };
@@ -1323,6 +1329,16 @@ export class SandboxCanvas extends Component {
     return this._addWindow({
       type: 'spell', spell: normalizedSpell,
       tool: { displayName: normalizedSpell.name, toolId: `spell:${normalizedSpell.slug || normalizedSpell._id}`, metadata: { outputType: 'image' } },
+      x: position?.x ?? 200, y: position?.y ?? 200,
+      parameterMappings: {},
+      output: null, outputVersions: [], currentVersionIndex: -1,
+    });
+  }
+
+  addAgentContextWindow(position) {
+    return this._addWindow({
+      type: 'agent-context',
+      tool: { displayName: 'Agent Context', toolId: null, metadata: { outputType: null } },
       x: position?.x ?? 200, y: position?.y ?? 200,
       parameterMappings: {},
       output: null, outputVersions: [], currentVersionIndex: -1,
