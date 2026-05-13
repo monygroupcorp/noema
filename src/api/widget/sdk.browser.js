@@ -73,7 +73,11 @@
 
         if (msg.type === 'WIDGET_READY') {
           onEvent({ type: 'WIDGET_READY' });
-          _doAuth();
+          // Relay any already-connected wallet so the iframe shows "Sign in with Wallet"
+          // immediately without triggering the owner-only challenge/verify flow.
+          _getAccount().then(function (account) {
+            if (account) _postToIframe({ type: 'WALLET_AVAILABLE', address: account });
+          }).catch(function () {});
         } else if (msg.type === 'WALLET_AUTH_REQUEST') {
           _doWalletAuth(msg);
         } else if (msg.type === 'PAYMENT_REQUIRED') {
