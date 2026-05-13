@@ -22,6 +22,15 @@ import { platformSkimHook } from './ledger/hooks/platformSkim.js'
 import { referralSplitHook } from './ledger/hooks/referralSplit.js'
 import { sessionSpendHook } from './ledger/hooks/sessionSpend.js'
 import { spellRoyaltyHook } from './ledger/hooks/spellRoyalty.js'
+import { SecurePodClient, makeSecurePodSshFactory } from './crystal/SecurePodClient.js'
+import { MongoMateria } from './crystal/MongoMateria.js'
+import { MongoIntella } from './crystal/MongoIntella.js'
+import { Compiler } from './crystal/Compiler.js'
+import { WorkflowTemplateRegistry } from './crystal/WorkflowTemplateRegistry.js'
+import { CANONICAL_INTELLAE } from './crystal/seeds/intellae.js'
+import type { Essentia } from './types/essendi.js'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
 
 // ---------------------------------------------------------------------------
 // Env
@@ -36,21 +45,51 @@ if (!MONGODB_URI) throw new Error('MONGODB_URI is required')
 const DB_NAME = process.env.DB_NAME ?? 'noema'
 const PORT = Number(process.env.PORT ?? 3000)
 const RUNPOD_WEBHOOK_SECRET = process.env.RUNPOD_WEBHOOK_SECRET
-const RUNPOD_ACCOUNT_ID = process.env.RUNPOD_ACCOUNT_ID ?? ''
+const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY
+const RUNPOD_GPU_TYPE_IDS = process.env.RUNPOD_GPU_TYPE_IDS   // comma-separated, e.g. "NVIDIA GeForce RTX 4090,NVIDIA RTX A5000"
+const RUNPOD_IMAGE_NAME = process.env.RUNPOD_IMAGE_NAME        // Docker image, e.g. "stationthis/flux-comfyui-runtime:v1"
+const RUNPOD_SSH_KEY_PATH = process.env.RUNPOD_SSH_KEY_PATH ?? `${process.env.HOME}/.ssh/runpod`
+const RUNPOD_CLOUD_TYPE = (process.env.RUNPOD_CLOUD_TYPE ?? 'SECURE') as 'SECURE' | 'COMMUNITY'
+const RUNPOD_WEBHOOK_URL = process.env.RUNPOD_WEBHOOK_URL
+const RUNPOD_KEEP_WARM = process.env.RUNPOD_KEEP_WARM !== 'false'  // default true
 const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL
 
 // ---------------------------------------------------------------------------
-// Compile / runner shims (Phase 2 will replace with real implementations)
+// Fractal Tool Compiler — compiles Essentia + aditus → RunPod job input
 // ---------------------------------------------------------------------------
 
-const compile = async (_modus: unknown, _aditus: unknown): Promise<unknown> => {
-  throw new Error('RunPod Compiler not yet wired — pending Phase 2 migration')
-}
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
-const runner = {
-  runDeployment: async (_args: unknown): Promise<unknown> => {
-    throw new Error('GenerationRunner not yet wired — pending Phase 2 migration')
-  },
+const templateRegistry = new WorkflowTemplateRegistry(
+  path.join(__dirname, 'crystal', 'workflows')
+)
+
+// ---------------------------------------------------------------------------
+// RunPod SECURE pod client — provisions a GPU machine, SSHes in, runs ComfyUI
+// ---------------------------------------------------------------------------
+
+import type { MateriaStore } from './types/materia.js'
+
+function makeSecureRunPodClient(
+  apiKey: string,
+  gpuTypeIds: string[],
+  imageName: string,
+  materiae?: MateriaStore,
+): SecurePodClient {
+  return new SecurePodClient(
+    {
+      apiKey,
+      gpuTypeIds,
+      imageName,
+      cloudType: RUNPOD_CLOUD_TYPE,
+      sshKeyPath: RUNPOD_SSH_KEY_PATH,
+      keepWarm: RUNPOD_KEEP_WARM,
+    },
+    makeSecurePodSshFactory(RUNPOD_SSH_KEY_PATH),
+    globalThis.fetch,
+    materiae,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -116,12 +155,37 @@ async function main(): Promise<void> {
   }
 
   // 3. Create Ring
+  // Create materiae + intellae stores before container so they can be shared
+  const materiaCol = mongo.db(DB_NAME).collection('materiae')
+  const materiae = new MongoMateria(materiaCol)
+
+  const intellaeCol = mongo.db(DB_NAME).collection('intellae')
+  const intellae = new MongoIntella(intellaeCol)
+  const compiler = new Compiler(templateRegistry, undefined, intellae)
+  const compile = async (modus: unknown, aditus: Record<string, unknown>): Promise<unknown> => {
+    const essentia = modus as Essentia
+    if (!essentia.runpodSpec) {
+      throw new Error(`Modus '${essentia.id}' has no runpodSpec — cannot compile for RunPod`)
+    }
+    const { spec } = await compiler.compile(essentia, aditus)
+    return spec.workflow.inputTemplate
+  }
+
+  const gpuTypeIds = RUNPOD_GPU_TYPE_IDS?.split(',').map(s => s.trim()).filter(Boolean) ?? []
+  const runpodClient =
+    RUNPOD_API_KEY && gpuTypeIds.length && RUNPOD_IMAGE_NAME
+      ? makeSecureRunPodClient(RUNPOD_API_KEY, gpuTypeIds, RUNPOD_IMAGE_NAME, materiae)
+      : undefined
+
   const ring = createContainer(mongo, {
     mongoUri: MONGODB_URI as string,
     dbName: DB_NAME,
-    accountId: RUNPOD_ACCOUNT_ID,
     compile: compile as ContainerConfig['compile'],
-    runner: runner as ContainerConfig['runner'],
+    materiae,   // pre-created, shared with SecurePodClient
+    ...(runpodClient && RUNPOD_WEBHOOK_URL ? {
+      runpodClient,
+      runpodWebhookUrl: RUNPOD_WEBHOOK_URL,
+    } : {}),
     ...(openaiClient ? { openaiClient } : {}),
   })
 
@@ -134,11 +198,16 @@ async function main(): Promise<void> {
   nexus.on('session_spend', sessionSpendHook)
   nexus.on('deposit_confirmed', referralSplitHook)
 
-  // 4. Seed canonical modi
+  // 4. Seed canonical modi + intellae
   for (const modus of CANONICAL_MODI) {
     await ring.modorum.register(modus)
   }
   console.log(`Seeded ${CANONICAL_MODI.length} canonical modi`)
+
+  for (const intella of CANONICAL_INTELLAE) {
+    await intellae.upsert(intella)
+  }
+  console.log(`Seeded ${CANONICAL_INTELLAE.length} canonical intellae`)
 
   // 5. Create FlowContextStore + FlowRouter bridge
   let stepCb: StepCallback | null = null
