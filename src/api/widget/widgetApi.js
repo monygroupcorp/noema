@@ -950,7 +950,7 @@ function createWidgetApi(deps = {}) {
     // Verifies the Bearer JWT is a valid agent_owner session for this agentId.
 
     function requireOwner(req, res, agentId) {
-        const secret = process.env.AGENT_SESSION_SECRET;
+        const secret = process.env.AGENT_SESSION_SECRET || process.env.JWT_SECRET;
         if (!secret) { res.status(500).json({ error: { code: 'CONFIG_ERROR', message: 'Session secret not configured' } }); return null; }
         const auth = req.headers.authorization || '';
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
@@ -1042,7 +1042,7 @@ function createWidgetApi(deps = {}) {
             const { status: s, data } = await _internalReq('POST', '/internal/v1/data/auth/find-or-create-by-wallet', { address: recovered });
             if (s >= 400) return res.status(s).json(data);
 
-            const secret = process.env.AGENT_SESSION_SECRET;
+            const secret = process.env.AGENT_SESSION_SECRET || process.env.JWT_SECRET;
             if (!secret) return res.status(500).json({ error: { code: 'CONFIG_ERROR', message: 'Session secret not configured' } });
 
             // Check if this wallet is the agent owner (DB-level check)
@@ -1163,7 +1163,7 @@ function createWidgetApi(deps = {}) {
                 return res.status(500).json({ error: { code: 'USER_ERROR', message: 'Failed to establish user session' } });
             }
 
-            const secret = process.env.AGENT_SESSION_SECRET;
+            const secret = process.env.AGENT_SESSION_SECRET || process.env.JWT_SECRET;
             if (!secret) return res.status(500).json({ error: { code: 'CONFIG_ERROR', message: 'Session secret not configured' } });
 
             const sessionJwt = jwt.sign({
@@ -1311,7 +1311,7 @@ function createWidgetApi(deps = {}) {
             const { status: s, data } = await _internalReq('POST', '/internal/v1/data/auth/find-or-create-by-wallet', { address: entry.depositor_address });
             if (s >= 400) return res.json({ status: 'pending' });
 
-            const secret = process.env.AGENT_SESSION_SECRET;
+            const secret = process.env.AGENT_SESSION_SECRET || process.env.JWT_SECRET;
             if (!secret) return res.status(500).json({ error: { code: 'CONFIG_ERROR', message: 'Session secret not configured' } });
 
             const sessionJwt = jwt.sign({
@@ -1508,7 +1508,7 @@ function createWidgetApi(deps = {}) {
     // calls those directly. These proxy routes cover the auth-gated points endpoints.
 
     function _decodeWidgetJwt(req) {
-        const secret = process.env.AGENT_SESSION_SECRET;
+        const secret = process.env.AGENT_SESSION_SECRET || process.env.JWT_SECRET;
         if (!secret) return null;
         const auth  = req.headers.authorization || '';
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';

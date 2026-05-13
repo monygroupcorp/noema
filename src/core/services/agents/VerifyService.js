@@ -15,7 +15,7 @@ class VerifyService {
     constructor({ challengeService, onChainVerifier, sessionSecret, logger } = {}) {
         this.challengeService = challengeService;
         this.onChainVerifier = onChainVerifier;
-        this.sessionSecret = sessionSecret || process.env.AGENT_SESSION_SECRET || null;
+        this.sessionSecret = sessionSecret || process.env.AGENT_SESSION_SECRET || process.env.JWT_SECRET || null;
         this.logger = logger || console;
     }
 
