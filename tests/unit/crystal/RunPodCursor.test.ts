@@ -1,8 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { RunPodCursor } from '../../../src/crystal/RunPodCursor.js'
+import type { RunPodClient } from '../../../src/crystal/RunPodCursor.js'
 import type { Modus } from '../../../src/types/modus.js'
 import type { Actum } from '../../../src/types/actum.js'
+import type { Actorum } from '../../../src/types/cursus.js'
+import type { Materia, MateriaStore } from '../../../src/types/materia.js'
+import type { DeploymentumStore } from '../../../src/types/deploymentum.js'
+import { Praefectus } from '../../../src/crystal/Praefectus.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -38,22 +43,6 @@ function makeActum(overrides: Partial<Actum> = {}): Actum {
   }
 }
 
-const FAKE_DEPLOYMENT = { hash: 'deadbeef', spec: { workflow: { comfyApiPayload: {} }, cookFlags: {} } }
-
-function makeRunner(result = {
-  status: 'completed',
-  podId: 'pod-abc',
-  gpuTypeId: 'NVIDIA RTX 4090',
-  cloudType: 'SECURE',
-  timings: { totalMs: 5000, jobMs: 4000 },
-  cost: { usd: 0.001 },
-  outputs: [{ url: 'https://example.com/out.png' }],
-}) {
-  return {
-    runDeployment: async (_args: unknown) => result as typeof result,
-  }
-}
-
 function makeModorum(modus: Modus | null = makeModus()) {
   return {
     find: async (_id: string, _versio?: string) => modus,
@@ -62,143 +51,289 @@ function makeModorum(modus: Modus | null = makeModus()) {
   }
 }
 
-function makeCompile(deployment = FAKE_DEPLOYMENT) {
-  return async (_modus: Modus, _aditus: Record<string, unknown>) => deployment
+function makeActorum(): Actorum & { updates: Array<{ id: string; patch: unknown }> } {
+  const updates: Array<{ id: string; patch: unknown }> = []
+  return {
+    updates,
+    create: async (a) => ({ ...a, inceptum: new Date() } as Actum),
+    update: async (id, patch) => {
+      updates.push({ id, patch })
+      return makeActum({ id })
+    },
+    findById: async (_id) => null,
+    findByExternusJobId: async (_id) => null,
+    findExpired: async () => [],
+  }
 }
+
+function makeClient(jobId = 'runpod-job-abc'): RunPodClient & { calls: unknown[] } {
+  const calls: unknown[] = []
+  return {
+    calls,
+    async submit(params) {
+      calls.push(params)
+      return { id: jobId }
+    },
+  }
+}
+
+function makeCompile(input: unknown = { nodes: {} }, hash = 'sha256:abc123') {
+  return async (_modus: Modus, _aditus: Record<string, unknown>) => ({ hash, input })
+}
+
+function makeDeploymentumStore(): DeploymentumStore & { upserts: unknown[] } {
+  const upserts: unknown[] = []
+  return {
+    upserts,
+    async upsert(d) { upserts.push(d) },
+    async find(_hash) { return null },
+  }
+}
+
+const BASE_CONFIG = { webhookUrl: 'https://api.noema.io/webhooks/runpod' }
 
 // ── reserve() ─────────────────────────────────────────────────────────────────
 
 test('reserve returns impetusFixum when set on modus', async () => {
-  const cursor = new RunPodCursor(makeRunner(), makeCompile(), makeModorum(), { accountId: 'acc-1' })
-  const modus = makeModus({ impetusFixum: 500n })
-  const result = await cursor.reserve(modus, {})
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
+  const result = await cursor.reserve(makeModus({ impetusFixum: 500n }), {})
   assert.equal(result, 500n)
 })
 
 test('reserve returns default ceiling when impetusFixum absent', async () => {
-  const cursor = new RunPodCursor(makeRunner(), makeCompile(), makeModorum(), { accountId: 'acc-1' })
-  const modus = makeModus()
-  const result = await cursor.reserve(modus, {})
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
+  const result = await cursor.reserve(makeModus(), {})
   assert.equal(typeof result, 'bigint')
   assert.ok(result > 0n)
 })
 
 test('reserve uses configured maxJobSeconds when set', async () => {
-  const cursor = new RunPodCursor(makeRunner(), makeCompile(), makeModorum(), {
-    accountId: 'acc-1',
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), {
+    webhookUrl: 'https://api.noema.io/webhooks/runpod',
     maxJobSeconds: 600,
   })
   const result = await cursor.reserve(makeModus(), {})
   assert.equal(result, 600n)
 })
 
-// ── run() — happy path ────────────────────────────────────────────────────────
+// ── run() — async submission ──────────────────────────────────────────────────
 
-test('run returns exitus with outputs from runner', async () => {
-  const cursor = new RunPodCursor(makeRunner(), makeCompile(), makeModorum(), { accountId: 'acc-1' })
+test('run returns async result with externusJobId from client', async () => {
+  const client = makeClient('job-xyz')
+  const cursor = new RunPodCursor(client, makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
   const result = await cursor.run(makeActum())
-  assert.equal(result.kind, 'sync')
-  assert.deepEqual((result as { kind: 'sync'; exitus: { exitus: { outputs: unknown[] } } }).exitus.exitus.outputs, [{ url: 'https://example.com/out.png' }])
+  assert.equal(result.kind, 'async')
+  assert.equal((result as { kind: 'async'; externusJobId: string }).externusJobId, 'job-xyz')
 })
 
-test('run sets duratio from runner totalMs', async () => {
-  const cursor = new RunPodCursor(makeRunner(), makeCompile(), makeModorum(), { accountId: 'acc-1' })
-  const result = await cursor.run(makeActum())
-  assert.equal(result.kind, 'sync')
-  assert.equal((result as Extract<typeof result, { kind: 'sync' }>).exitus.duratio, 5000)
-})
-
-test('run sets materiamId from runner podId', async () => {
-  const cursor = new RunPodCursor(makeRunner(), makeCompile(), makeModorum(), { accountId: 'acc-1' })
-  const result = await cursor.run(makeActum())
-  assert.equal(result.kind, 'sync')
-  assert.equal((result as Extract<typeof result, { kind: 'sync' }>).exitus.materiamId, 'pod-abc')
-})
-
-test('run impetus is ceil(totalMs / 1000)', async () => {
-  const runner = makeRunner({ ...makeRunner().runDeployment({}) as unknown as object,
-    status: 'completed',
-    podId: 'pod-abc',
-    gpuTypeId: 'RTX 4090',
-    cloudType: 'SECURE',
-    timings: { totalMs: 5001, jobMs: 4000 },
-    cost: { usd: 0.001 },
-    outputs: [],
-  } as any)
-  const cursor = new RunPodCursor(runner, makeCompile(), makeModorum(), { accountId: 'acc-1' })
-  const result = await cursor.run(makeActum())
-  assert.equal(result.kind, 'sync')
-  assert.equal((result as Extract<typeof result, { kind: 'sync' }>).exitus.impetus, 6n) // ceil(5001 / 1000) = 6
-})
-
-test('run passes actum.id as jobId to runDeployment', async () => {
-  let capturedArgs: unknown
-  const runner = {
-    runDeployment: async (args: unknown) => {
-      capturedArgs = args
-      return {
-        status: 'completed' as const,
-        podId: 'p1',
-        gpuTypeId: 'RTX',
-        cloudType: 'SECURE',
-        timings: { totalMs: 1000, jobMs: 900 },
-        cost: { usd: 0 },
-        outputs: [],
-      }
-    },
-  }
-  const cursor = new RunPodCursor(runner, makeCompile(), makeModorum(), { accountId: 'acc-1' })
-  await cursor.run(makeActum({ id: 'my-actum-id' }))
-  assert.equal((capturedArgs as any).jobId, 'my-actum-id')
-})
-
-test('run passes configured accountId to runDeployment', async () => {
-  let capturedArgs: unknown
-  const runner = {
-    runDeployment: async (args: unknown) => {
-      capturedArgs = args
-      return {
-        status: 'completed' as const,
-        podId: 'p1',
-        gpuTypeId: 'RTX',
-        cloudType: 'SECURE',
-        timings: { totalMs: 1000, jobMs: 900 },
-        cost: { usd: 0 },
-        outputs: [],
-      }
-    },
-  }
-  const cursor = new RunPodCursor(runner, makeCompile(), makeModorum(), { accountId: 'my-account' })
+test('run passes webhookUrl from config to client', async () => {
+  const client = makeClient()
+  const cursor = new RunPodCursor(client, makeCompile(), makeModorum(), makeActorum(), {
+    webhookUrl: 'https://tee-pod.internal/webhooks/runpod',
+  })
   await cursor.run(makeActum())
-  assert.equal((capturedArgs as any).accountId, 'my-account')
+  assert.equal((client.calls[0] as { webhook: string }).webhook, 'https://tee-pod.internal/webhooks/runpod')
+})
+
+test('run passes compiled input to client', async () => {
+  const compiled = { image: 'runpod/pytorch:2.4', workflow: { nodes: [] } }
+  const client = makeClient()
+  const cursor = new RunPodCursor(client, makeCompile(compiled), makeModorum(), makeActorum(), BASE_CONFIG)
+  await cursor.run(makeActum())
+  assert.deepEqual((client.calls[0] as { input: unknown }).input, compiled)
+})
+
+test('run updates actum with externusJobId after submission', async () => {
+  const actorum = makeActorum()
+  const cursor = new RunPodCursor(makeClient('job-555'), makeCompile(), makeModorum(), actorum, BASE_CONFIG)
+  await cursor.run(makeActum({ id: 'my-actum' }))
+  const update = actorum.updates.find(u => u.id === 'my-actum')
+  assert.ok(update, 'actum.update() should be called')
+  assert.equal((update!.patch as { externusJobId: string }).externusJobId, 'job-555')
+})
+
+test('run updates actum status to agens after submission', async () => {
+  const actorum = makeActorum()
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), actorum, BASE_CONFIG)
+  await cursor.run(makeActum({ id: 'my-actum' }))
+  const update = actorum.updates.find(u => u.id === 'my-actum')
+  assert.equal((update!.patch as { status: string }).status, 'agens')
+})
+
+test('run compiles modus + actum.aditus before submitting', async () => {
+  let compiledModus: unknown
+  let compiledAditus: unknown
+  const compile = async (modus: Modus, aditus: Record<string, unknown>) => {
+    compiledModus = modus
+    compiledAditus = aditus
+    return {}
+  }
+  const cursor = new RunPodCursor(makeClient(), compile, makeModorum(), makeActorum(), BASE_CONFIG)
+  await cursor.run(makeActum({ aditus: { prompt: 'a dog', steps: 4 } }))
+  assert.equal((compiledModus as Modus).id, 'runmake.flux-schnell')
+  assert.deepEqual(compiledAditus, { prompt: 'a dog', steps: 4 })
 })
 
 // ── run() — error paths ───────────────────────────────────────────────────────
 
 test('run throws when modus not found in modorum', async () => {
-  const cursor = new RunPodCursor(makeRunner(), makeCompile(), makeModorum(null), { accountId: 'acc-1' })
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(null), makeActorum(), BASE_CONFIG)
   await assert.rejects(
     () => cursor.run(makeActum()),
     /not found/i
   )
 })
 
-test('run throws when runner returns stalled status', async () => {
-  const runner = {
-    runDeployment: async (_args: unknown) => ({
-      status: 'stalled' as const,
-      podId: 'pod-xyz',
-      gpuTypeId: 'RTX',
-      cloudType: 'SECURE',
-      timings: { totalMs: 30000, jobMs: 29000 },
-      cost: { usd: 0.01 },
-      outputs: [],
-      error: { code: 'STALLED', message: 'ComfyUI queue timed out' },
-    }),
+test('run throws when client.submit rejects', async () => {
+  const failingClient: RunPodClient = {
+    async submit(_params) { throw new Error('RunPod API unavailable') },
   }
-  const cursor = new RunPodCursor(runner, makeCompile(), makeModorum(), { accountId: 'acc-1' })
+  const cursor = new RunPodCursor(failingClient, makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
   await assert.rejects(
     () => cursor.run(makeActum()),
-    /stalled/i
+    /RunPod API unavailable/
   )
+})
+
+test('run resolves modus by actum.modusId and modusVersiono', async () => {
+  let resolvedId: string | undefined
+  let resolvedVersiono: string | undefined
+  const modorum = {
+    find: async (id: string, versio?: string) => {
+      resolvedId = id
+      resolvedVersiono = versio
+      return makeModus({ id, versio: versio ?? '1.0.0' })
+    },
+    register: async (_m: Modus) => {},
+    list: async () => [],
+  }
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), modorum, makeActorum(), BASE_CONFIG)
+  await cursor.run(makeActum({ modusId: 'modus.xyz', modusVersiono: '2.1.0' }))
+  assert.equal(resolvedId, 'modus.xyz')
+  assert.equal(resolvedVersiono, '2.1.0')
+})
+
+// ── run() — Praefectus warm routing ──────────────────────────────────────────
+
+function makeMateria(overrides: Partial<Materia> = {}): Materia {
+  return {
+    id: 'mat-warm-1',
+    genus: 'runpod',
+    externusId: 'pod-xyz',
+    gpu: 'NVIDIA GeForce RTX 4090',
+    vramGb: 24,
+    ramGb: 64,
+    impetusPerSecond: 1n,
+    status: 'idle',
+    imageRef: 'stationthis/flux-comfyui:v1',
+    sshHost: '1.2.3.4',
+    sshPort: 12345,
+    ...overrides,
+  }
+}
+
+function makePraefectus(materia: Materia | null): Praefectus {
+  const store: MateriaStore = {
+    async create(input) { return { ...input, id: 'mat-new' } },
+    async findById(_id) { return null },
+    async update(_id, _patch) { return materia! },
+    async findWarm(_spec) { return materia },
+  }
+  return new Praefectus(store)
+}
+
+test('run() routes to warm client when Praefectus finds a matching pod', async () => {
+  const coldClient = makeClient('cold-job')
+  const warmCalls: unknown[] = []
+  const warmClient: RunPodClient = {
+    async submit(params) { warmCalls.push(params); return { id: 'warm-job-1' } },
+  }
+  const cursor = new RunPodCursor(coldClient, makeCompile(), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    praefectus: makePraefectus(makeMateria()),
+    warmFactory: () => warmClient,
+    imageRefOf: () => 'stationthis/flux-comfyui:v1',
+  })
+  const result = await cursor.run(makeActum())
+  assert.equal(result.kind, 'async')
+  assert.equal((result as { kind: 'async'; externusJobId: string }).externusJobId, 'warm-job-1')
+  assert.equal(warmCalls.length, 1, 'warm client should be called')
+  assert.equal(coldClient.calls.length, 0, 'cold client must not be called')
+})
+
+test('run() falls back to cold client when Praefectus returns null', async () => {
+  const coldClient = makeClient('cold-job-2')
+  const warmCalls: unknown[] = []
+  const cursor = new RunPodCursor(coldClient, makeCompile(), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    praefectus: makePraefectus(null),
+    warmFactory: () => ({ async submit() { warmCalls.push(1); return { id: 'warm' } } }),
+    imageRefOf: () => 'stationthis/flux-comfyui:v1',
+  })
+  const result = await cursor.run(makeActum())
+  assert.equal((result as { kind: 'async'; externusJobId: string }).externusJobId, 'cold-job-2')
+  assert.equal(coldClient.calls.length, 1, 'cold client should be called on cold start')
+  assert.equal(warmCalls.length, 0, 'warm client must not be called on cold start')
+})
+
+test('run() queries Praefectus with imageRef from imageRefOf', async () => {
+  let queriedImageRef: string | undefined
+  const fakePraefectus = {
+    findWarm: async (imageRef: string) => { queriedImageRef = imageRef; return null },
+  } as unknown as Praefectus
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    praefectus: fakePraefectus,
+    imageRefOf: () => 'stationthis/sdxl:v2',
+  })
+  await cursor.run(makeActum())
+  assert.equal(queriedImageRef, 'stationthis/sdxl:v2')
+})
+
+test('run() skips Praefectus when imageRefOf returns undefined', async () => {
+  const coldClient = makeClient('cold-job-3')
+  const warmCalls: unknown[] = []
+  const cursor = new RunPodCursor(coldClient, makeCompile(), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    praefectus: makePraefectus(makeMateria()),
+    warmFactory: () => ({ async submit() { warmCalls.push(1); return { id: 'warm' } } }),
+    imageRefOf: () => undefined,
+  })
+  await cursor.run(makeActum())
+  assert.equal(coldClient.calls.length, 1, 'cold client should be called when imageRef unavailable')
+  assert.equal(warmCalls.length, 0, 'warm client not called when imageRefOf returns undefined')
+})
+
+// ── run() — deployment storage ────────────────────────────────────────────────
+
+test('run() stamps deploymentHash on actum after submission', async () => {
+  const actorum = makeActorum()
+  const cursor = new RunPodCursor(makeClient(), makeCompile({}, 'sha256:deadbeef'), makeModorum(), actorum, BASE_CONFIG)
+  await cursor.run(makeActum({ id: 'act-1' }))
+  const update = actorum.updates.find(u => u.id === 'act-1')
+  assert.equal((update!.patch as { deploymentHash?: string }).deploymentHash, 'sha256:deadbeef')
+})
+
+test('run() stores deployment in DeploymentumStore when configured', async () => {
+  const store = makeDeploymentumStore()
+  const cursor = new RunPodCursor(makeClient(), makeCompile({ nodes: {} }, 'sha256:abc'), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    deployments: store,
+  })
+  await cursor.run(makeActum())
+  assert.equal(store.upserts.length, 1)
+  assert.equal((store.upserts[0] as { hash: string }).hash, 'sha256:abc')
+})
+
+test('run() does not throw when DeploymentumStore is absent', async () => {
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
+  await assert.doesNotReject(() => cursor.run(makeActum()))
+})
+
+test('run() passes input (not full compile result) to client.submit', async () => {
+  const compiledInput = { nodes: { '1': { class_type: 'KSampler' } } }
+  const client = makeClient()
+  const cursor = new RunPodCursor(client, makeCompile(compiledInput, 'sha256:xyz'), makeModorum(), makeActorum(), BASE_CONFIG)
+  await cursor.run(makeActum())
+  assert.deepEqual((client.calls[0] as { input: unknown }).input, compiledInput)
 })
