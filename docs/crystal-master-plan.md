@@ -193,176 +193,92 @@ Ring works end-to-end in memory. Architecture is proven.
 
 ---
 
-### Phase 1 — Execution Rail (1 week)
+### Phase 1 — Execution Rail ✅ DONE
 
 **Goal:** Crystal writes its first real records. `MongoActorum` + `RunPodCursor`
 wired into a skeleton `container.ts`. `ActumCompletor` handles RunPod completions.
 
-**Deliverables:**
-
-`src/crystal/MongoActorum.ts`
-- Collection: `noemaplane.acta`
-- Indexes: `{ id: 1 }` unique, `{ status: 1, expirat: 1 }`
-- `bigint` ↔ `Decimal128` on read/write
-
-`src/crystal/RunPodCursor.ts`
-- Implements `Cursor` — wraps existing JS `GenerationRunner`
-- `reserve()` → `GPUScheduler.estimateCost()`
-- `run()` → dispatches to `GenerationRunner`, returns `Exitus`
-
-`src/container.ts` (skeleton)
-- `MongoActorum` + `MemorySignorum` + `MemoryModorum`
-- `Cursorum` with `RunPodCursor` registered
-- `ActumCompletor` wired with these deps
-- Exported as `container` singleton
-
-Wire `ActumCompletor` into `GenerationRunner.onComplete()` / `onFail()`.
-The JS `GenerationService` path stays in place on `main` — we're running
-alongside it in staging, not replacing it.
+Delivered: `MongoActorum`, `RunPodCursor`, `SecurePodClient`, `Praefectus`,
+`WarmPodClient`, `ActumInceptor`, `ActumCompletor`, `SimpleCursorum`, full
+`container.ts` Ring with all 24 Mongo implementations. `RunPodCursor` is
+standalone — does not wrap `GenerationRunner`. Compiler pipeline and
+`WorkflowTemplateRegistry` also land here.
 
 ---
 
-### Phase 2 — Modus Registry (1 week)
+### Phase 2 — Modus Registry ✅ DONE
 
 **Goal:** `noemaplane.modi` is the authoritative tool and spell registry.
-ChainEngine Phase 2 (`noemaplane.toolVersions`) and crystal Phase 2 are the
-same work under two names — `MongoModorum` is the implementation of both.
 
-**Deliverables:**
-
-`src/crystal/MongoModorum.ts`
-- Collection: `noemaplane.modi`
-- `(id, versio)` unique index; `register()` is idempotent on contentHash
-- `find()` without `versio` returns highest semver
-
-Seed `noemaplane.modi` by registering `runmake` and canonical spells on startup.
-`Compiler.compile()` in the ring resolves the Modus from `MongoModorum` before
-compiling — locking version and contentHash into every Actum.
+Delivered: `MongoModorum` with semver resolution + idempotent `register()`.
+`CANONICAL_MODI` seeded on startup. `MongoIntella` (`Intellarum`) wired into
+`Compiler` — model download URLs resolved from registry with template fallback.
+`CANONICAL_INTELLAE` (4 FLUX Schnell models) seeded on startup.
 
 ---
 
-### Phase 3 — Ledger and Identity (2 weeks)
+### Phase 3 — Ledger and Identity ✅ DONE
 
 **Goal:** `MongoSignorum`, `MongoAnima`, `MongoPersona` live in staging.
 The privacy partition is enforced at the database level for the first time.
 
-**Deliverables:**
-
-`src/crystal/MongoSignorum.ts`
-- Collection: `noemaplane.signa` — append-only, no update path
-- `lock/release/settle` are atomic `findOneAndUpdate` status transitions
-- `settle()` uses a MongoDB session transaction: spend locked + issue refund
-- `balance()` is a `$sum` aggregation
-- `issue()` enforces privacy invariant: rejects `forma: arcanum` with `animaId`
-
-`src/crystal/MongoAnima.ts`
-- Collection: `noemaplane.animae`
-
-`src/crystal/MongoPersona.ts`
-- Collection: `noemaplane.personae`
-- `findOrCreate(platform, platformId)` — the crystal's find-or-create
-
-Seed staging with test animae mapped from a sample of `noema.users`.
-No production migration yet — staging data can be synthetic.
+Delivered: `MongoSignorum` (append-only, atomic lock/settle/refund, privacy
+invariant on `issue()`), `MongoAnima` (multi-Persona, activeAnimaId, linkAnima,
+switchAnima), `MongoPersona` (findOrCreate). All 6 ledger hooks wired to Nexus.
+`TelegramIdentityResolver` wired in `index.ts`.
 
 ---
 
-### Phase 4 — Vestigium / RAG (1 week)
+### Phase 4 — Vestigium / RAG ✅ DONE (store only)
 
-**Goal:** Every completed actum in staging produces a Vestigium. RAG search
-endpoint is live and queryable.
+**Goal:** Every completed actum in staging produces a Vestigium.
 
-**Deliverables:**
-
-`src/crystal/MongoVestigiorum.ts`
-- Collection: `noemaplane.vestigia`
-- Atlas Vector Search on `embedding` (or local Qdrant for staging — swappable)
-
-`src/execution/hooks/vestigiumHook.ts`
-- Nexus `execution_spend` handler → `vestigiorum.create()` + async `index()`
-
-`POST /api/v1/rag/search` — `VestigiumQuery` → `VestigiumResult[]`
-`POST /api/v1/rag/rate` — community impression
-`PUT /api/v1/rag/:id/impressio` — author impression
+Delivered: `MongoVestigiorum` with Atlas Vector Search on `embedding`.
+`vestigiumHook` wired to Nexus `execution_spend`. REST search/rate endpoints
+are **not yet built** — store and hook are in place, API surface deferred.
 
 ---
 
-### Phase 5 — Modo / Sessions (1–2 weeks)
+### Phase 5 — Modo / Sessions ✅ DONE
 
-**Goal:** `Modo` is the crystal's session primitive. The JS `SessionManager`
-is the first backend — `RunPodCursor` already speaks to it. This phase types
-it correctly and issues tessera signa as session credentials.
+**Goal:** `Modo` is the crystal's session primitive — sticky GPU sessions with
+tessera signa as session credentials.
 
-**Deliverables:**
-
-`src/crystal/MongoModo.ts`
-- Collection: `noemaplane.modos`
-- Tracks: pod ref, volume mount ref, tessera signum id, active acta, status
-
-`src/crystal/TesseraCursor.ts`
-- On Modo open: issues a `tessera` Signum with session budget, locked to `modoId`
-- Acts as the bearer credential for all actum spend within the session
-
-Nexus hook: `modo_open` event → issue tessera → bind to Modo.
+Delivered: `MongoModo`, `TesseraCursor` (routes session-scoped jobs through
+an open Modo, issues tessera Signum). `DeploymentumStore` also lands here —
+`RunPodCursor` content-addresses each compiled spec and stamps `Actum.deploymentHash`.
 
 ---
 
-### Phase 6 — Full Ring (1–2 weeks)
+### Phase 6 — Full Ring ✅ DONE
 
 **Goal:** All remaining primitives have Mongo implementations. Composition
 root is complete. Ring is authoritative for all staging writes.
 
-**Remaining implementations:**
-
-| File | Collection |
-|------|-----------|
-| `MongoMandatum` | `noemaplane.mandatores` |
-| `MongoCorpus` | `noemaplane.corpora` |
-| `MongoCollectio` | `noemaplane.collectiones` |
-| `MongoTabula` | `noemaplane.tabulae` |
-| `MongoTestimoniorum` | `noemaplane.testimonia` |
-| `MongoDepositum + MongoSolutio + MongoPetitio` | `noemaplane.deposita` etc. |
-| `MongoIntelligendi` ✅ | `noemaplane.intelligendi` |
-
-`MongoIntelligendi` is the **model registry** — unified store for LoRAs, checkpoints,
-VAEs, CLIPs, and any other weight type. ChainEngine Phase 2 (`noemaplane.models`)
-and this are the same work. `DeploymentBuilder.compile()` resolves model references
-by ID against this store; training Moduses reference it for their output Modos.
-The Models page in the catalog is the UI surface above it. Seeds from existing
-`noema.loraModels` + a manual base-model list on first startup.
-
-`src/container.ts` — full composition root, all stores wired.
-
-```typescript
-export interface Container {
-  acta: Actorum
-  modorum: Modorum
-  signorum: Signorum
-  animae: AnimaStore        // find, create, findByCustos
-  personae: PersonaStore    // findOrCreate
-  vestigiorum: Vestigiorum
-  mandatores: Mandatorum
-  collectiones: Collectionum
-  tabulae: Tabularum
-  testimonia: Testimoniorum
-  cursorum: Cursorum
-  completor: ActumCompletor
-  inceptor: ActumInceptor
-  nexus: Nexus
-}
-```
+Delivered: All 24 Mongo implementations (see handoff doc for full table).
+`src/container.ts` (`createContainer`) wires the full Ring. `Ring` interface
+exported — all stores accessible via a single in-process object. 835 tests
+passing.
 
 ---
 
-### Phase 7 — Wire Platform Handlers to Ring (ongoing)
+### Phase 7 — Wire Platform Handlers to Ring ✅ DONE (Telegram); Discord pending
 
-In staging, platform handlers (Telegram, Discord, iframe) begin calling
-the crystal ring directly rather than the JS service layer. This is where
-staging diverges meaningfully from `main`. Each handler migrated is a
-verification that the ring's API is complete and ergonomic.
+In staging, platform handlers begin calling the crystal ring directly.
 
-JS service retirement (deleting `GenerationService`, `EconomyService`, etc.)
-happens after ring promotion to production — not in staging.
+**Telegram — DONE:** `TelegramAllocutio` + `FlowRouter` + `ExecuteFlow` +
+`MongoFlowContextStore` + `webhookRouter`. Full end-to-end: Telegram message
+→ identity resolution → flow dispatch → `ActumInceptor` → RunPod → webhook
+→ reply. `index.ts` boots the full stack.
+
+**Discord — NOT DONE:** No `DiscordAllocutio` exists. Discord users still
+route through the legacy JS platform. Mirror of `TelegramAllocutio` — ~1 day.
+
+**Web / iframe — NOT DONE:** No crystal API routes for tools, spells, users,
+collections. The Vite/Vue frontend is untouched.
+
+JS service retirement (deleting `GenerationService`, etc.) happens after ring
+is promoted to production — not yet.
 
 ---
 
