@@ -649,7 +649,8 @@ class WorkflowsService {
           originalUserPrompt,
           masterAccountId,
           baseModelForLora,
-          dependencies
+          dependencies,
+          dependencies?.spellAuthorAccountId
         );
 
         if (loraResolutionResult) {

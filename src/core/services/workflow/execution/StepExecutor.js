@@ -91,7 +91,7 @@ class StepExecutor {
             tool.toolId,
             stepInput,
             originalContext.masterAccountId,
-            { internal: { client: this.internalApiClient } }
+            { internal: { client: this.internalApiClient }, spellAuthorAccountId: originalContext.spellAuthorAccountId }
         );
 
         // Get execution strategy (from tool definition or factory)
