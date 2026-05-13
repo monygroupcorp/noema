@@ -128,6 +128,7 @@ function buildAppHtml(agentId, mode) {
   .cast-spinner { width: 22px; height: 22px; border: 2px solid #222; border-top-color: #88a; border-radius: 50%; animation: spin 0.9s linear infinite; margin: 0 auto 12px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .cast-msg { font-size: 13px; color: #666; }
+  .cast-elapsed { font-size: 11px; color: #444; margin-top: 6px; font-variant-numeric: tabular-nums; }
   .cast-result { padding: 4px; }
   .cast-result img { width: 100%; border-radius: 6px; display: block; }
   .cast-result .cast-text { font-size: 13px; color: #ccc; white-space: pre-wrap; padding: 8px; }
@@ -707,7 +708,7 @@ function buildAppHtml(agentId, mode) {
   // ── Spell execution ───────────────────────────────────────────────────────
   function castSpell(slug, inputs) {
     window.parent.postMessage({ type: 'SPELL_STARTED', spellSlug: slug }, '*');
-    setContent('<div class="cast-state"><div class="cast-spinner"></div><div class="cast-msg">Casting…</div></div>');
+    setContent('<div class="cast-state"><div class="cast-spinner"></div><div class="cast-msg">Casting…</div><div class="cast-elapsed"></div></div>');
 
     fetch(BASE_URL + '/widget/' + encodeURIComponent(AGENT_ID) + '/spells/' + encodeURIComponent(slug) + '/cast', {
       method: 'POST',
@@ -722,23 +723,37 @@ function buildAppHtml(agentId, mode) {
       }
       var castId = resp.data.castId;
       if (!castId) { showCastResult(resp.data); return; }
-      pollCast(castId, 0);
+      pollCast(castId, 0, Date.now());
     })
     .catch(function(err) { showCastError(err.message); });
   }
 
-  function pollCast(castId, attempts) {
-    if (attempts > 40) { showCastError('Timed out waiting for result.'); return; }
+  function pollCast(castId, attempts, startedAt) {
+    if (attempts > 60) { showCastError('Timed out waiting for result.'); return; }
     setTimeout(function() {
       fetch(BASE_URL + '/widget/' + encodeURIComponent(AGENT_ID) + '/casts/' + encodeURIComponent(castId))
       .then(function(r) { return r.json(); })
       .then(function(d) {
-        if (d.status === 'completed') { showCastResult(d); }
-        else if (d.status === 'failed') { showCastError(d.failureReason || 'Generation failed.'); }
-        else { pollCast(castId, attempts + 1); }
+        if (d.status === 'completed') { showCastResult(d); return; }
+        if (d.status === 'failed') { showCastError(d.failureReason || 'Generation failed.'); return; }
+
+        // Update step progress and elapsed time while pending/running
+        var steps = (d.stepGenerationIds || []).length;
+        var elapsed = Math.floor((Date.now() - startedAt) / 1000);
+        var mins = Math.floor(elapsed / 60);
+        var secs = elapsed % 60;
+        var elapsedStr = mins > 0
+          ? mins + 'm ' + secs + 's'
+          : secs + 's';
+        var msgEl = document.querySelector('.cast-msg');
+        var elapsedEl = document.querySelector('.cast-elapsed');
+        if (msgEl) msgEl.textContent = steps > 0 ? 'Step ' + steps + ' complete…' : 'Running…';
+        if (elapsedEl) elapsedEl.textContent = elapsedStr;
+
+        pollCast(castId, attempts + 1, startedAt);
       })
       .catch(function(err) { showCastError(err.message); });
-    }, 3000);
+    }, 2000);
   }
 
   function goBack() {
