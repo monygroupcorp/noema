@@ -275,3 +275,85 @@ test('COMPLETED exitus.duratio is set from executionTime', async () => {
 
   assert.equal(completor.completed[0].exitus.duratio, 3500)
 })
+
+// ── flowRouter tests ──────────────────────────────────────────────────────────
+
+interface FlowRouterCall {
+  actumId: string
+  result: { kind: 'complete'; exitus: Record<string, unknown> } | { kind: 'failed'; error: string }
+}
+
+function makeFlowRouter() {
+  const calls: FlowRouterCall[] = []
+  return {
+    calls,
+    async handleActumComplete(
+      actumId: string,
+      result: { kind: 'complete'; exitus: Record<string, unknown> } | { kind: 'failed'; error: string },
+    ): Promise<void> {
+      calls.push({ actumId, result })
+    },
+  }
+}
+
+// 14. flowRouter.handleActumComplete is called with complete result when COMPLETED
+test('flowRouter.handleActumComplete is called with complete result when COMPLETED', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const flowRouter = makeFlowRouter()
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    flowRouter,
+  }
+  const body = {
+    id: 'job-abc-123',
+    status: 'COMPLETED',
+    output: [{ url: 'https://example.com/out.png' }],
+    executionTime: 5000,
+  }
+  const result = await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(flowRouter.calls.length, 1)
+  assert.equal(flowRouter.calls[0].actumId, 'actum-test-1')
+  assert.deepEqual(flowRouter.calls[0].result, {
+    kind: 'complete',
+    exitus: { outputs: [{ url: 'https://example.com/out.png' }] },
+  })
+})
+
+// 15. flowRouter.handleActumComplete is called with failed result when FAILED
+test('flowRouter.handleActumComplete is called with failed result when FAILED', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const flowRouter = makeFlowRouter()
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    flowRouter,
+  }
+  const body = { id: 'job-abc-123', status: 'FAILED', error: 'Job failed' }
+  const result = await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(flowRouter.calls.length, 1)
+  assert.equal(flowRouter.calls[0].actumId, 'actum-test-1')
+  assert.deepEqual(flowRouter.calls[0].result, { kind: 'failed', error: 'Job failed' })
+})
+
+// 16. flowRouter is optional — works fine when absent
+test('flowRouter is optional — works fine when absent', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    // no flowRouter
+  }
+  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [] }
+  const result = await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(result.body.success, true)
+})

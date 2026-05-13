@@ -10,7 +10,7 @@ export class MemoryActorum implements Actorum {
     return record
   }
 
-  async update(id: string, patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed'>>): Promise<Actum> {
+  async update(id: string, patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId'>>): Promise<Actum> {
     const existing = this.store.get(id)
     if (!existing) throw new Error(`Actum '${id}' not found`)
     const updated = { ...existing, ...patch }
@@ -20,6 +20,13 @@ export class MemoryActorum implements Actorum {
 
   async findById(id: string): Promise<Actum | null> {
     return this.store.get(id) ?? null
+  }
+
+  async findByExternusJobId(externusJobId: string): Promise<Actum | null> {
+    for (const actum of this.store.values()) {
+      if (actum.externusJobId === externusJobId) return actum
+    }
+    return null
   }
 
   async findExpired(): Promise<Actum[]> {

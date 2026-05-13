@@ -7,6 +7,13 @@ export interface ExecutionWebhookDeps {
   completor: ActumCompletor
   /** HMAC-SHA256 shared secret. If absent, signature validation is skipped (dev only). */
   secret?: string
+  /** Optional: notify waiting flow contexts when execution completes/fails. */
+  flowRouter?: {
+    handleActumComplete(
+      actumId: string,
+      result: { kind: 'complete'; exitus: Record<string, unknown> } | { kind: 'failed'; error: string }
+    ): Promise<void>
+  }
 }
 
 export interface WebhookRequest {
@@ -76,11 +83,16 @@ export async function handleExecutionWebhook(
         duratio: executionTime,
       }
       await deps.completor.complete(actum, exitus)
+      await deps.flowRouter?.handleActumComplete(actum.id, {
+        kind: 'complete',
+        exitus: exitus.exitus as Record<string, unknown>,
+      })
       return { status: 200, body: { success: true } }
     }
 
     if (status === 'FAILED' || status === 'CANCELLED') {
       await deps.completor.fail(actum, payload.error ?? 'Job failed')
+      await deps.flowRouter?.handleActumComplete(actum.id, { kind: 'failed', error: payload.error ?? 'Job failed' })
       return { status: 200, body: { success: true } }
     }
 
