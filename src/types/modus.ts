@@ -31,7 +31,8 @@ export interface Porta {
   type: string          // canonical type name: 'text' | 'image' | 'video' | 'audio' | 'int' | 'float'
   required?: boolean
   default?: unknown
-  description?: string
+  label?: string        // short display name shown on the canvas port
+  description?: string  // longer helper text / tooltip
 }
 
 /**

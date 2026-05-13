@@ -27,6 +27,23 @@
 export type CollectioStatus = 'nascens' | 'agens' | 'completa' | 'cancellata'
 
 /**
+ * TraitValor — one option within a trait axis.
+ * "valor" = value/worth in Latin.
+ */
+export interface TraitValor {
+  /** The actual aditus value injected into the modus when this option is selected */
+  value: unknown
+  /** Human-facing display name. Shown in canvas UI and used as the NFT "value" field. Falls back to String(value). */
+  label?: string
+  /** Probability weight for weighted-random selection. Default 0.5. Higher = more common. */
+  rarity?: number
+  /** Text fragment woven into the assembled generation prompt when this option wins. */
+  promptFragment?: string
+  /** Names of options in OTHER tractus axes that this option blocks (exclusion rules). */
+  excludes?: string[]
+}
+
+/**
  * A single axis of variation in the parameter grid.
  * "Tractus" = a stretch/tract in Latin — one dimension of the expansion.
  *
@@ -34,10 +51,14 @@ export type CollectioStatus = 'nascens' | 'agens' | 'completa' | 'cancellata'
  * Combined with other tractus, produces the full expansion grid.
  */
 export interface Tractus {
-  /** Which aditus port this axis varies */
+  /** The aditus port key this axis varies — e.g. 'background', 'outfit' */
   porta: string
-  /** The values to iterate over on this axis */
-  valores: unknown[]
+  /**
+   * Human-facing category label. Shown on the canvas and used as the NFT "trait_type" field.
+   * Falls back to porta if absent.
+   */
+  label?: string
+  valores: TraitValor[]
 }
 
 /**
