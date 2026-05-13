@@ -444,14 +444,24 @@
       var collectionAddress = opts.collectionAddress;
       var container         = opts.container;
       var chainId           = opts.chainId || '1';
+      var ownerJwt          = opts.ownerJwt  || null;
+      var theme             = opts.theme     || {};
 
       if (!collectionAddress) return Promise.reject(new Error('StationThis.initGallery: collectionAddress is required'));
       if (!container)         return Promise.reject(new Error('StationThis.initGallery: container element is required'));
 
       var baseUrl = opts.baseUrl || _scriptOrigin();
       var addr    = collectionAddress.toLowerCase();
-      var src     = baseUrl + '/widget/gallery/' + encodeURIComponent(addr);
-      if (chainId !== '1') src += '?chainId=' + encodeURIComponent(chainId);
+      var qs = new URLSearchParams();
+      if (chainId !== '1') qs.set('chainId', chainId);
+      if (ownerJwt) qs.set('ownerJwt', ownerJwt);
+      // Theme keys map to CSS custom property param names
+      var themeKeys = { bg: 'bg', cardBg: 'card-bg', cardRadius: 'card-radius', accent: 'accent', text: 'text', textDim: 'text-dim' };
+      Object.keys(themeKeys).forEach(function (k) {
+        if (theme[k]) qs.set(themeKeys[k], theme[k]);
+      });
+      var qstr = qs.toString();
+      var src  = baseUrl + '/widget/gallery/' + encodeURIComponent(addr) + (qstr ? '?' + qstr : '');
 
       var iframe = document.createElement('iframe');
       iframe.src = src;
