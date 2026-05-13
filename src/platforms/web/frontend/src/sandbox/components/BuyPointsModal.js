@@ -14,7 +14,7 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const TIER_ORDER = ['native', 1, 2, 3];
 const TIER_ASSETS = {
   native: ['eth'],
-  1: ['ms2', 'cult'],
+  1: ['🐪', 'ms2', 'cult'],
   2: ['eth', 'weth', 'usdt', 'usdc'],
   3: ['pepe', 'mog', 'spx6900'],
 };

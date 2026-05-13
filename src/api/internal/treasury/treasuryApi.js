@@ -12,6 +12,7 @@ const { agentOwnerSession } = require('./middleware/agentOwnerSession');
 const { AgentAccountService } = require('../../../core/services/agents/AgentAccountService');
 const { DelegationService } = require('../../../core/services/agents/DelegationService');
 const { WorkspaceFactory } = require('../../../core/services/agents/WorkspaceFactory');
+const { IpfsService } = require('../../../core/services/ipfs/IpfsService');
 const { OnChainVerifier } = require('../../../core/services/agents/OnChainVerifier');
 const { ChallengeService } = require('../../../core/services/agents/ChallengeService');
 const { VerifyService } = require('../../../core/services/agents/VerifyService');
@@ -28,7 +29,7 @@ function createTreasuryApi(deps = {}) {
   const logger = deps.logger || console;
 
   const workspaceFactory = (deps.db?.workspaces && deps.db?.spells)
-    ? new WorkspaceFactory({ workspacesDb: deps.db.workspaces, spellsDb: deps.db.spells, userCoreDb: deps.db.userCore, logger })
+    ? new WorkspaceFactory({ workspacesDb: deps.db.workspaces, spellsDb: deps.db.spells, userCoreDb: deps.db.userCore, storageService: deps.storageService, ipfsService: deps.ipfsService || new IpfsService(logger), logger })
     : null;
 
   const svc = new AgentAccountService({
@@ -180,11 +181,16 @@ function createAgentsApi(deps = {}) {
   const router = express.Router();
   const logger = deps.logger || console;
 
+  const workspaceFactory = (deps.db?.workspaces && deps.db?.spells)
+    ? new WorkspaceFactory({ workspacesDb: deps.db.workspaces, spellsDb: deps.db.spells, userCoreDb: deps.db.userCore, storageService: deps.storageService, ipfsService: deps.ipfsService || new IpfsService(logger), logger })
+    : null;
+
   const svc = new AgentAccountService({
     userCoreDb: deps.db?.userCore,
     economyService: deps.economyService,
     creditLedgerDb: deps.db?.creditLedger,
     toolRegistry: deps.toolRegistry,
+    workspaceFactory,
     logger,
   });
 
@@ -193,10 +199,6 @@ function createAgentsApi(deps = {}) {
     userCoreDb: deps.db?.userCore,
     logger,
   });
-
-  const workspaceFactory = (deps.db?.workspaces && deps.db?.spells)
-    ? new WorkspaceFactory({ workspacesDb: deps.db.workspaces, spellsDb: deps.db.spells, userCoreDb: deps.db.userCore, logger })
-    : null;
 
   // Auth services — challenge/verify owner session
   const onChainVerifier = new OnChainVerifier({ logger });
@@ -278,8 +280,11 @@ function createAgentsApi(deps = {}) {
    * Create a delegation link the agent owner can share.
    * Body: { label?, spendCapPoints?, expiresInHours? }
    */
-  router.post('/:agentId/delegations', multisig, async (req, res) => {
+  router.post('/:agentId/delegations', ownerSession, async (req, res) => {
     try {
+      if (req.agentSession.agentId !== req.params.agentId) {
+        return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Session does not match this agent' } });
+      }
       const { label, spendCapPoints, expiresInHours } = req.body;
       const result = await delegationSvc.create(req.params.agentId, { label, spendCapPoints, expiresInHours });
       res.status(201).json(result);
@@ -290,8 +295,11 @@ function createAgentsApi(deps = {}) {
    * GET /agents/:agentId/delegations
    * List active delegations for an agent (owner view).
    */
-  router.get('/:agentId/delegations', multisig, async (req, res) => {
+  router.get('/:agentId/delegations', ownerSession, async (req, res) => {
     try {
+      if (req.agentSession.agentId !== req.params.agentId) {
+        return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Session does not match this agent' } });
+      }
       const delegations = await delegationSvc.list(req.params.agentId);
       res.json({ delegations });
     } catch (err) { handleErr(res, err, 'GET /agents/:agentId/delegations'); }
@@ -301,8 +309,11 @@ function createAgentsApi(deps = {}) {
    * DELETE /agents/:agentId/delegations/:delegationId
    * Revoke a delegation link.
    */
-  router.delete('/:agentId/delegations/:delegationId', multisig, async (req, res) => {
+  router.delete('/:agentId/delegations/:delegationId', ownerSession, async (req, res) => {
     try {
+      if (req.agentSession.agentId !== req.params.agentId) {
+        return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Session does not match this agent' } });
+      }
       await delegationSvc.revoke(req.params.agentId, req.params.delegationId);
       res.json({ success: true });
     } catch (err) { handleErr(res, err, 'DELETE /agents/:agentId/delegations/:delegationId'); }
@@ -443,7 +454,7 @@ function createTemplateWorkspaceApi(deps = {}) {
   const logger = deps.logger || console;
 
   const workspaceFactory = (deps.db?.workspaces && deps.db?.spells)
-    ? new WorkspaceFactory({ workspacesDb: deps.db.workspaces, spellsDb: deps.db.spells, userCoreDb: deps.db.userCore, logger })
+    ? new WorkspaceFactory({ workspacesDb: deps.db.workspaces, spellsDb: deps.db.spells, userCoreDb: deps.db.userCore, storageService: deps.storageService, ipfsService: deps.ipfsService || new IpfsService(logger), logger })
     : null;
 
   const multisig = assertionJwt({ tier: 'multisig' });

@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Widget Demo</title>
+
+  <!-- Resolve @monygroupcorp/microact for micro-web3's ESM import -->
+  <script type="importmap">
+  {
+    "imports": {
+      "@monygroupcorp/microact": "/widget/lib/microact.esm.js"
+    }
+  }
+  </script>
+
+  <!-- StationThis SDK — sets window.StationThis -->
+  <script src="/widget/sdk.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f13;
+      color: #ccc;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Top bar ── */
+    .demo-header {
+      background: #16161e;
+      border-bottom: 1px solid #222;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-shrink: 0;
+    }
+    .demo-logo {
+      width: 26px; height: 26px;
+      background: linear-gradient(135deg, #7c5cff, #a78bfa);
+      border-radius: 6px;
+      flex-shrink: 0;
+    }
+    .demo-site-name {
+      font-size: 14px; font-weight: 600; color: #e0e0e0; letter-spacing: .02em;
+    }
+    .demo-nav {
+      display: flex; gap: 18px; font-size: 12px; color: #555;
+    }
+
+    /* Wallet button — right side of header */
+    #wallet-btn {
+      margin-left: auto;
+      padding: 6px 14px;
+      border-radius: 5px;
+      border: 1px solid #2a2a3a;
+      background: #0e0e16;
+      color: #666;
+      font-size: 12px;
+      font-family: monospace;
+      cursor: pointer;
+      transition: border-color .15s, color .15s;
+    }
+    #wallet-btn:hover { border-color: #444; color: #aaa; }
+    #wallet-btn.connecting { color: #555; cursor: default; }
+    #wallet-btn.connected {
+      border-color: #2a3a2a; color: #6c6; background: #0a100a;
+    }
+    #wallet-btn.connected:hover { border-color: #3a4a3a; }
+
+    /* ── Layout ── */
+    .demo-body { display: flex; flex: 1; min-height: 0; }
+
+    .demo-content {
+      flex: 1; padding: 36px 44px; border-right: 1px solid #1c1c24; overflow-y: auto;
+    }
+    .demo-content h1 { font-size: 26px; font-weight: 700; color: #e8e8f0; margin-bottom: 10px; }
+    .demo-content p  { font-size: 13px; line-height: 1.7; color: #555; max-width: 480px; margin-bottom: 18px; }
+    .demo-placeholder-block {
+      height: 110px; background: #16161e; border: 1px solid #222; border-radius: 8px; margin-bottom: 14px;
+    }
+    #agent-id-display { font-family: monospace; color: #444; }
+
+    /* ── Widget sidebar ── */
+    .demo-widget-sidebar {
+      width: 380px; flex-shrink: 0; display: flex; flex-direction: column; background: #0c0c10;
+    }
+    .demo-widget-label {
+      font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+      color: #444; padding: 12px 18px 9px; border-bottom: 1px solid #1c1c24;
+    }
+    .demo-widget-frame { flex: 1; position: relative; }
+    #widget-container {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+    }
+    .widget-placeholder {
+      display: flex; align-items: center; justify-content: center;
+      height: 100%; color: #2a2a36; font-size: 12px; text-align: center; padding: 20px;
+    }
+
+    /* ── Controls ── */
+    .demo-controls {
+      background: #12121a; border-top: 1px solid #1c1c24;
+      padding: 8px 14px; display: flex; align-items: center; gap: 8px; font-size: 12px;
+    }
+    .demo-controls label { color: #555; flex-shrink: 0; }
+    .demo-controls input {
+      flex: 1; background: #0c0c10; border: 1px solid #2a2a36; color: #ccc;
+      padding: 5px 8px; border-radius: 4px; font-size: 12px; font-family: monospace; outline: none;
+    }
+    .demo-controls input:focus { border-color: #7c5cff; }
+    .demo-controls button {
+      background: #7c5cff; color: #fff; border: none;
+      padding: 5px 14px; border-radius: 4px; font-size: 12px; cursor: pointer; flex-shrink: 0;
+    }
+    .demo-controls button:hover { background: #6b4de6; }
+
+    @media (max-width: 700px) {
+      .demo-body { flex-direction: column; }
+      .demo-content { border-right: none; border-bottom: 1px solid #1c1c24; padding: 22px; }
+      .demo-widget-sidebar { width: 100%; height: 480px; }
+    }
+
+    /* ── WalletModal overlay ── */
+    .wallet-modal-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: rgba(0,0,0,.75);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .wallet-modal {
+      background: #16161e; border: 1px solid #2a2a3a;
+      border-radius: 12px; width: 340px; max-width: 90vw;
+      box-shadow: 0 24px 64px rgba(0,0,0,.85);
+    }
+    .wallet-modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid #222;
+    }
+    .wallet-modal-header h3 {
+      font-size: 13px; font-weight: 600; color: #e0e0e0;
+      margin: 0; letter-spacing: .04em; text-transform: uppercase;
+    }
+    .wallet-modal-close {
+      background: none; border: none; color: #555; font-size: 22px;
+      cursor: pointer; padding: 0; line-height: 1;
+    }
+    .wallet-modal-close:hover { color: #aaa; }
+    .wallet-options { padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+    .wallet-option {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 14px; background: #0c0c10; border: 1px solid #222;
+      border-radius: 8px; cursor: pointer; color: #ccc; font-size: 13px;
+      font-family: inherit; text-align: left; width: 100%;
+      transition: border-color .15s, background .15s;
+    }
+    .wallet-option:hover { border-color: #7c5cff; background: #13132a; color: #e0e0e0; }
+    .wallet-option .wallet-icon {
+      width: 32px; height: 32px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .wallet-option .wallet-icon img { width: 28px; height: 28px; border-radius: 6px; }
+    .wallet-option .wallet-icon svg { width: 28px; height: 28px; }
+  </style>
+</head>
+<body>
+
+  <header class="demo-header">
+    <div class="demo-logo"></div>
+    <span class="demo-site-name">Partner Site</span>
+    <nav class="demo-nav">
+      <span>Home</span><span>Gallery</span><span>About</span>
+    </nav>
+    <button id="wallet-btn">Connect Wallet</button>
+  </header>
+
+  <div class="demo-body">
+    <main class="demo-content">
+      <h1>Your AI agent, embedded.</h1>
+      <p>
+        This demo simulates a partner site using the StationThis widget SDK and
+        micro-web3 for wallet connection. Connect your wallet above, then load an
+        agent to see the full auth flow.
+      </p>
+      <div class="demo-placeholder-block"></div>
+      <div class="demo-placeholder-block" style="height:72px"></div>
+      <p style="color:#333;font-size:11px;font-family:monospace">
+        agent: <span id="agent-id-display">—</span>
+      </p>
+    </main>
+
+    <aside class="demo-widget-sidebar">
+      <div class="demo-widget-label">Agent Widget</div>
+      <div class="demo-widget-frame">
+        <div id="widget-container">
+          <div class="widget-placeholder">Enter an agent ID below and click Load</div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="demo-controls">
+    <label>Agent ID</label>
+    <input type="text" id="agent-input" placeholder="dev-agent-001" />
+    <button id="load-btn">Load</button>
+  </div>
+
+  <script type="module">
+    import { WalletService, WalletModal } from '/widget/lib/micro-web3.esm.js';
+    import { eventBus, h, render } from '/widget/lib/microact.esm.js';
+
+    // ── Wallet ──────────────────────────────────────────────────────────────
+
+    const walletBtn = document.getElementById('wallet-btn');
+    const ws = new WalletService(eventBus);
+
+    function shortAddr(addr) {
+      return addr ? addr.slice(0, 6) + '…' + addr.slice(-4) : '';
+    }
+
+    function setWalletBtnState(state, addr) {
+      walletBtn.disabled = (state === 'connecting');
+      walletBtn.classList.remove('connecting', 'connected');
+      if (state === 'connected') {
+        walletBtn.classList.add('connected');
+        walletBtn.textContent = shortAddr(addr);
+      } else if (state === 'connecting') {
+        walletBtn.classList.add('connecting');
+        walletBtn.textContent = 'Connecting…';
+      } else {
+        walletBtn.textContent = 'Connect Wallet';
+      }
+    }
+
+    // Relay wallet state to the loaded widget
+    function notifyWidget(address) {
+      if (!currentWidget) return;
+      if (address) currentWidget.walletConnected(address);
+      else currentWidget.walletDisconnected();
+    }
+
+    // Listen for micro-web3 wallet events
+    eventBus.on('wallet:connected', ({ address }) => {
+      setWalletBtnState('connected', address);
+      notifyWidget(address);
+    });
+    eventBus.on('wallet:disconnected', () => {
+      setWalletBtnState('idle');
+      notifyWidget(null);
+    });
+    eventBus.on('wallet:connecting', () => setWalletBtnState('connecting'));
+
+    // Also catch connections triggered by the SDK (eth_requestAccounts from the widget)
+    if (window.ethereum) {
+      window.ethereum.on('accountsChanged', (accounts) => {
+        if (accounts.length > 0 && !ws.isConnected()) {
+          setWalletBtnState('connected', accounts[0]);
+          notifyWidget(accounts[0]);
+        } else if (accounts.length === 0 && ws.isConnected()) {
+          setWalletBtnState('idle');
+          notifyWidget(null);
+        }
+      });
+    }
+
+    // Initialize wallet discovery; no auto-reconnect — explicit user action only
+    await ws.initialize({ autoReconnect: false }).catch(() => {});
+
+    // ── Wallet picker modal ──────────────────────────────────────────────────
+    const _modalRoot = document.createElement('div');
+    document.body.appendChild(_modalRoot);
+    let _walletModal = null;
+
+    function _showWalletModal() {
+      const wallets = ws.getAvailableWallets();
+      if (!_walletModal) {
+        render(h(WalletModal, {
+          wallets,
+          onWalletSelected: async (key) => {
+            setWalletBtnState('connecting');
+            try {
+              await ws.selectWallet(key);
+              await ws.connect();
+            } catch (e) {
+              setWalletBtnState('idle');
+              console.warn('[demo] wallet connect failed:', e.message);
+            }
+          },
+          ref: inst => _walletModal = inst,
+        }), _modalRoot);
+      } else {
+        _walletModal.props.wallets = wallets;
+      }
+      _walletModal?.show();
+    }
+
+    walletBtn.addEventListener('click', () => {
+      if (ws.isConnected()) {
+        ws.disconnect?.();
+        setWalletBtnState('idle');
+        return;
+      }
+      _showWalletModal();
+    });
+
+    // ── Widget SDK ───────────────────────────────────────────────────────────
+
+    let currentWidget = null;
+
+    async function loadAgent() {
+      const agentId = document.getElementById('agent-input').value.trim();
+      if (!agentId) return;
+
+      // Tear down previous widget
+      if (currentWidget) { currentWidget.destroy(); currentWidget = null; }
+
+      const container = document.getElementById('widget-container');
+      container.innerHTML = '';
+
+      document.getElementById('agent-id-display').textContent = agentId;
+
+      const url = new URL(window.location);
+      url.searchParams.set('agent', agentId);
+      window.history.replaceState({}, '', url);
+
+      // StationThis.init creates the iframe, wires postMessage bridge,
+      // and uses getProvider() to reach the wallet for signing.
+      currentWidget = await StationThis.init({
+        agentId,
+        container,
+        mode: 'list',
+        getProvider: () => ws.provider || window.ethereum,
+        onReady: () => console.log('[demo] widget ready for', agentId),
+        onEvent: (evt) => console.log('[demo] widget event:', evt),
+      });
+
+      // If wallet was already connected before the widget loaded, tell it now
+      if (ws.isConnected()) currentWidget.walletConnected(ws.getAddress());
+    }
+
+    document.getElementById('load-btn').addEventListener('click', loadAgent);
+    document.getElementById('agent-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') loadAgent();
+    });
+
+    // Auto-load from ?agent= query param
+    const params = new URLSearchParams(window.location.search);
+    const initialAgent = params.get('agent');
+    if (initialAgent) {
+      document.getElementById('agent-input').value = initialAgent;
+      loadAgent();
+    }
+
+    // Relay widget events to console for debugging
+    window.addEventListener('message', (e) => {
+      if (e.data?.type) console.log('[demo] iframe →', e.data);
+    });
+  </script>
+
+</body>
+</html>

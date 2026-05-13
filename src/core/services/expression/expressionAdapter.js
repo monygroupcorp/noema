@@ -81,6 +81,17 @@ class ExpressionAdapter {
       .filter(l => l && !l.startsWith('#'));
     if (lines.length === 0) throw new Error('No expression to evaluate');
 
+    // Pre-populate any variables referenced in the expression that aren't
+    // already in vars with '' so expressions like `input || input0` don't
+    // throw "undefined variable: input" when only input0 is wired.
+    try {
+      for (const line of lines) {
+        for (const v of parser.parse(line).variables()) {
+          if (!(v in vars)) vars[v] = '';
+        }
+      }
+    } catch (_) { /* parse errors surface during evaluate below */ }
+
     const originalInput = vars.input;
     let result;
     try {

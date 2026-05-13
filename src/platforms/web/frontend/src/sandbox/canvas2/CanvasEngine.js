@@ -100,6 +100,18 @@ export class CanvasEngine {
     return { uploadId, toolId };
   }
 
+  addAgentContextWindow(position) {
+    const id = this._genId('w');
+    const win = {
+      id, type: 'agent-context', x: position.x, y: position.y,
+      executing: false, error: null, output: null,
+    };
+    this.windows.set(id, win);
+    this.physics.addNode(id, position);
+    this._notify();
+    return id;
+  }
+
   addCollectionTestWindow(collection, position) {
     const id = this._genId('w');
     const win = {

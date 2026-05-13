@@ -22,6 +22,27 @@ const expressionTool = {
       description: 'Primary input value, available as "input" in the expression.',
       order: 1
     },
+    input0: {
+      name: 'Input 0',
+      type: 'string',
+      required: false,
+      description: 'Named input slot 0, available as "input0" in the expression.',
+      order: 2
+    },
+    input1: {
+      name: 'Input 1',
+      type: 'string',
+      required: false,
+      description: 'Named input slot 1, available as "input1" in the expression.',
+      order: 3
+    },
+    input2: {
+      name: 'Input 2',
+      type: 'string',
+      required: false,
+      description: 'Named input slot 2, available as "input2" in the expression.',
+      order: 4
+    },
   },
   outputSchema: {
     result: {
