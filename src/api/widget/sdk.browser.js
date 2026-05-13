@@ -73,6 +73,7 @@
 
         if (msg.type === 'WIDGET_READY') {
           onEvent({ type: 'WIDGET_READY' });
+          _doAuth();
         } else if (msg.type === 'WALLET_AUTH_REQUEST') {
           _doWalletAuth(msg);
         } else if (msg.type === 'PAYMENT_REQUIRED') {
@@ -100,6 +101,9 @@
               _postToIframe({ type: 'AUTH_ERROR', error: 'WALLET_NOT_CONNECTED' });
               return;
             }
+            // Let the iframe know a wallet is present immediately — button becomes "Sign in with Wallet"
+            // before the challenge round-trip completes.
+            _postToIframe({ type: 'WALLET_AVAILABLE', address: account });
             return _fetch('/widget/' + encodeURIComponent(agentId) + '/auth/challenge', { method: 'POST' })
               .then(function (r) { return r.json(); })
               .then(function (challenge) {
