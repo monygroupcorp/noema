@@ -6,6 +6,7 @@
 //   GET  /sdk.js                          — browser SDK (CORS: *)
 //   GET  /lib/microact.esm.js            — microact ESM build for partner sites (CORS: *)
 //   GET  /lib/micro-web3.esm.js          — micro-web3 ESM build for partner sites (CORS: *)
+//   GET  /partner                        — partner widget iframe (StationThis.initWidget target)
 //   GET   /gallery/:collectionAddress                      — collection gallery iframe
 //   GET   /gallery/:collectionAddress/feed                 — gallery JSON feed (CORS: *)
 //   PATCH /gallery/:collectionAddress/casts/:castId/hide   — hide cast from gallery (owner JWT)
@@ -1102,6 +1103,71 @@ function buildGalleryHtml(collectionAddress) {
 </html>`;
 }
 
+// ── Partner iframe HTML ────────────────────────────────────────────────────────
+
+function buildPartnerHtml(partnerId) {
+    const escapedId = JSON.stringify(partnerId);
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Noema Partner</title>
+<style>
+  :root {
+    --bg:       #0a0a0a;
+    --text:     #e0e0e0;
+    --text-dim: #777;
+    --accent:   #8888aa;
+    --border:   #1e1e1e;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; min-height: 100%; }
+  body { padding: 20px; display: flex; flex-direction: column; min-height: 100vh; }
+  #partner-root { flex: 1; display: flex; flex-direction: column; }
+  .partner-placeholder { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 40px 20px; text-align: center; }
+  .partner-placeholder-label { font-size: 13px; color: var(--text-dim); }
+  .partner-placeholder-id { font-size: 11px; color: var(--border); font-family: monospace; }
+  .partner-footer { font-size: 10px; color: var(--border); text-align: center; padding-top: 12px; border-top: 1px solid var(--border); }
+  .partner-footer a { color: var(--accent); text-decoration: none; }
+  .partner-footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div id="partner-root">
+  <div class="partner-placeholder">
+    <div class="partner-placeholder-label">Powered by Noema</div>
+    <div class="partner-placeholder-id" id="partner-id-display"></div>
+  </div>
+  <div class="partner-footer">
+    <a href="https://noema.so" target="_blank" rel="noopener">noema.so</a>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var PARTNER_ID = ${escapedId};
+
+  // Apply CSS custom-property overrides from query params (same convention as gallery)
+  var params = new URLSearchParams(location.search);
+  var cssMap = { bg: '--bg', text: '--text', 'text-dim': '--text-dim', accent: '--accent', border: '--border' };
+  Object.keys(cssMap).forEach(function (k) {
+    var v = params.get(k);
+    if (v) document.documentElement.style.setProperty(cssMap[k], decodeURIComponent(v));
+  });
+
+  // Display partner id as lightweight confirmation the iframe loaded
+  var el = document.getElementById('partner-id-display');
+  if (el) el.textContent = PARTNER_ID;
+
+  // Notify parent frame that the partner widget is ready
+  window.parent.postMessage({ type: 'PARTNER_READY', partnerId: PARTNER_ID }, '*');
+})();
+</script>
+</body>
+</html>`;
+}
+
 // ── Router factory ─────────────────────────────────────────────────────────────
 
 /**
@@ -1839,6 +1905,31 @@ function createWidgetApi(deps = {}) {
             await delegationSvc.revoke(req.params.agentId, req.params.delId);
             res.json({ success: true });
         } catch (err) { handleErr(res, err, 'DELETE delegations'); }
+    });
+
+    // ── Partner iframe ───────────────────────────────────────────────────────
+
+    router.get('/partner', async (req, res) => {
+        const { partnerId } = req.query;
+        if (!partnerId) {
+            return res.status(400).send('Missing required query param: partnerId');
+        }
+        try {
+            const partnerDoc = deps.db?.partner
+                ? await deps.db.partner.findPartnerById(partnerId)
+                : null;
+            if (!partnerDoc) {
+                return res.status(404).send('Partner not found');
+            }
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.setHeader('X-Frame-Options', 'ALLOWALL');
+            res.setHeader('Content-Security-Policy', "frame-ancestors *");
+            res.setHeader('Cache-Control', 'no-cache');
+            res.send(buildPartnerHtml(partnerId));
+        } catch (err) {
+            logger.error(`[WidgetApi] GET /partner: ${err.message}`);
+            res.status(500).send('Internal server error');
+        }
     });
 
     // ── Collection gallery ───────────────────────────────────────────────────
