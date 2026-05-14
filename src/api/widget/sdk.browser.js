@@ -36,7 +36,7 @@
       opts = opts || {};
       var agentId      = opts.agentId;
       var container    = opts.container;
-      var mode         = opts.mode || 'canvas';
+      var mode         = opts.mode || 'list';
       var baseUrl      = (opts.baseUrl || _scriptOrigin()).replace(/\/$/, '');
       var onReady      = opts.onReady      || function () {};
       var onEvent      = opts.onEvent      || function () {};

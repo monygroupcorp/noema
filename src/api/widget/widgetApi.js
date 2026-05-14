@@ -698,12 +698,9 @@ function buildAppHtml(agentId, mode) {
   }
 
   function renderCanvas(ws) {
-    var count = (ws.spells || []).length;
-    var note = count
-      ? count + ' spell' + (count !== 1 ? 's' : '') + ' in this workspace.<br><br>Tap a spell node to run it.'
-      : 'No spells configured in this workspace yet.';
-    setContent('<div class="canvas-note">' + note + '</div>');
+    // Canvas mode is driven by the host page via postMessage; fall through to list for standalone use.
     window.parent.postMessage({ type: 'WORKSPACE_LOADED', workspace: ws }, '*');
+    renderList(ws);
   }
 
   // ── Spell execution ───────────────────────────────────────────────────────
