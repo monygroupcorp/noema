@@ -209,6 +209,18 @@ export class CollectioCursor {
     await this._dispatch(collectioId)
   }
 
+  /**
+   * Returns the collectioId that owns the given actumId if it is currently
+   * in-flight (nascens/agens), or null if not tracked by this cursor.
+   * Used by the webhook handler to route completion events to the right collection.
+   */
+  findCollectioIdForActum(actumId: string): string | null {
+    for (const [collectioId, state] of this.states) {
+      if (state.running.has(actumId)) return collectioId
+    }
+    return null
+  }
+
   /** Pause dispatching new pieces (in-flight pieces continue). */
   async pause(collectioId: string): Promise<void> {
     const state = this.states.get(collectioId)

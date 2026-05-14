@@ -4,6 +4,7 @@ import type { Exitus } from '../../types/cursus.js'
 import type { Nexus } from '../../types/nexus.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Vestigiorum } from '../../types/vestigium.js'
+import type { Modorum } from '../../types/modus.js'
 import { createVestigiumFromActum } from '../../execution/hooks/vestigiumHook.js'
 
 type AuctorKey = { animaId: string } | { arcanumHash: string }
@@ -26,6 +27,13 @@ export interface ExecutionWebhookDeps {
   signorum?: Signorum
   /** Optional: vestigium store — writes a generation trace after each completion. */
   vestigiorum?: Vestigiorum
+  /** Optional: modus registry — used to look up spell author for royalty routing. */
+  modorum?: Modorum
+  /** Optional: routes collection actum completions back to CollectioCursor. */
+  collectioRouter?: {
+    findCollectioIdForActum(actumId: string): string | null
+    onActumCompleta(collectioId: string, actumId: string, success: boolean): Promise<void>
+  }
 }
 
 export interface WebhookRequest {
@@ -95,17 +103,43 @@ export async function handleExecutionWebhook(
         duratio: executionTime,
       }
       const completed = await deps.completor.complete(actum, exitus)
-      if (deps.nexus && deps.signorum) {
-        const newSigna = await deps.nexus.emit({
-          type: 'execution_spend',
-          payload: { actum: completed, impetus: exitus.impetus },
-        })
-        if (newSigna.length) await deps.signorum.createMany(newSigna)
+
+      // Look up spell author for royalty routing — available via modorum dep
+      let modusAuctorAnimaId: string | undefined
+      if (deps.modorum) {
+        const modus = await deps.modorum.find(actum.modusId)
+        modusAuctorAnimaId = modus?.auctor
       }
+
+      if (deps.nexus && deps.signorum) {
+        const royaltySigna = await deps.nexus.emit({
+          type: 'execution_spend',
+          payload: { actum: completed, impetus: exitus.impetus, modusAuctorAnimaId },
+        })
+        let allSigna = royaltySigna
+        // Fire royalty_fired so platformSkimHook can take its cut
+        if (royaltySigna.length > 0) {
+          const royaltyValor = royaltySigna.reduce((sum, s) => sum + s.valor, 0n)
+          const skimSigna = await deps.nexus.emit({
+            type: 'royalty_fired',
+            payload: { actumId: completed.id, royaltyValor, baseValor: exitus.impetus },
+          })
+          if (skimSigna.length) allSigna = [...allSigna, ...skimSigna]
+        }
+        if (allSigna.length) await deps.signorum.createMany(allSigna)
+      }
+
       const identity = await deps.flowRouter?.handleActumComplete(actum.id, {
         kind: 'complete',
         exitus: exitus.exitus as Record<string, unknown>,
       })
+
+      // Route collection acta to CollectioCursor
+      if (deps.collectioRouter) {
+        const collectioId = deps.collectioRouter.findCollectioIdForActum(actum.id)
+        if (collectioId) await deps.collectioRouter.onActumCompleta(collectioId, actum.id, true)
+      }
+
       if (identity && deps.vestigiorum) {
         createVestigiumFromActum(completed, identity, deps.vestigiorum).catch(() => {})
       }
@@ -115,6 +149,13 @@ export async function handleExecutionWebhook(
     if (status === 'FAILED' || status === 'CANCELLED') {
       await deps.completor.fail(actum, payload.error ?? 'Job failed')
       await deps.flowRouter?.handleActumComplete(actum.id, { kind: 'failed', error: payload.error ?? 'Job failed' })
+
+      // Route collection acta to CollectioCursor on failure
+      if (deps.collectioRouter) {
+        const collectioId = deps.collectioRouter.findCollectioIdForActum(actum.id)
+        if (collectioId) await deps.collectioRouter.onActumCompleta(collectioId, actum.id, false)
+      }
+
       return { status: 200, body: { success: true } }
     }
 

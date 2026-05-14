@@ -287,6 +287,9 @@ async function main(): Promise<void> {
     flowRouter: router,
     nexus,
     signorum: ring.signorum,
+    modorum: ring.modorum,
+    vestigiorum: ring.vestigiorum,
+    collectioRouter: ring.collectioCursor,
   }))
 
   app.listen(PORT, () => console.log(`Listening on :${PORT}`))

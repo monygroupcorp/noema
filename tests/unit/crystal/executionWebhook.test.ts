@@ -423,8 +423,8 @@ test('nexus.emit is called with correct actum and impetus on COMPLETED', async (
   assert.equal(payload.impetus, 3n)
 })
 
-// 18. Returned signa are written via signorum.createMany()
-test('signa returned by nexus.emit are written via signorum.createMany', async () => {
+// 18. Returned signa trigger royalty_fired chain; all land in one createMany
+test('signa returned by nexus.emit trigger royalty_fired and all land in one createMany', async () => {
   const actum = makeActum()
   const completor = makeCompletor()
   const hookSigna: Array<Omit<Signum, 'id' | 'natum' | 'status'>> = [
@@ -442,8 +442,17 @@ test('signa returned by nexus.emit are written via signorum.createMany', async (
   const body = { id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 2000 }
   await handleExecutionWebhook(makeReq(body), deps)
 
+  // execution_spend fires, then royalty_fired since hooks produced signa
+  assert.equal(nexus.emitted.length, 2)
+  assert.equal(nexus.emitted[0].type, 'execution_spend')
+  assert.equal(nexus.emitted[1].type, 'royalty_fired')
+  const royaltyPayload = nexus.emitted[1].payload as { royaltyValor: bigint; baseValor: bigint }
+  assert.equal(royaltyPayload.royaltyValor, 60n)  // 50 + 10
+  assert.equal(royaltyPayload.baseValor, 2n)       // 2000ms → 2 impetus
+
+  // Both execution_spend and royalty_fired signa land in one createMany call
   assert.equal(signorum.created.length, 1)
-  assert.equal(signorum.created[0].length, 2)
+  assert.equal(signorum.created[0].length, 4)  // 2 royalty + 2 skim (mock returns same signa)
   assert.equal(signorum.created[0][0].auctor, 'hook:hostCut')
   assert.equal(signorum.created[0][1].auctor, 'hook:spellRoyalty')
 })
