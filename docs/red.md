@@ -127,4 +127,8 @@ Three new tests: retry succeeds on second attempt; FAILED fires after all retrie
 ---
 
 ### 15. `embed` / `embedImage` not wired in index.ts
-`MongoVestigiorum` accepts `embed` and `embedImage` functions but they are not passed in `createContainer()`. The fire-and-forget index calls silently no-op. Intentional (models not yet baked into RunPod image) — low priority until pod image is ready.
+`MongoVestigiorum` accepts `embed` and `embedImage` functions but they are not passed in `createContainer()`. The fire-and-forget index calls in `vestigiumHook.ts` silently no-op on every actum completion.
+
+**Spec written:** `docs/embed-spec.md` — self-hosted OpenCLIP ViT-B/32 microservice (512-dim, CPU, ~50ms). Text and image live in the same embedding space (CLIP's key feature). Wires via `CLIP_SERVICE_URL` env var; no changes to vestigiumHook required.
+
+**Blocked on:** Python service implementation + Atlas Vector Search index setup. Once `CLIP_SERVICE_URL` is live, wiring `index.ts` is trivial (see spec). Backfill script also specced for migrating existing vestigia.
