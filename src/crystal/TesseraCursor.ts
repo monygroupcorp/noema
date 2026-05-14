@@ -56,11 +56,15 @@ export class TesseraCursor implements Cursor {
     // aditus validated by validateAditus before dispatch
     const result = await this.inner.run(actum, modo)
 
-    if (modo && result.kind === 'sync') {
-      await this.modos.update(modo.id, {
-        impetusAccrued: modo.impetusAccrued + result.exitus.impetus,
+    if (modo) {
+      // Always track the actum, even for async — impetus is unknown until webhook fires
+      const patch: Parameters<typeof this.modos.update>[1] = {
         acta: [...modo.acta, actum.id],
-      })
+      }
+      if (result.kind === 'sync') {
+        patch.impetusAccrued = modo.impetusAccrued + result.exitus.impetus
+      }
+      await this.modos.update(modo.id, patch)
     }
 
     return result

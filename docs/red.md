@@ -50,10 +50,17 @@ Added `CollectioCursor.findCollectioIdForActum(actumId)` which searches the in-m
 
 ---
 
-### 9. TesseraCursor unreviewed
-Bridges tessera (signum-gated session) to RunPod execution. Unknown whether it correctly handles session expiry mid-job, double-spend prevention, or partial execution.
+### 9. ~~TesseraCursor unreviewed~~ — reviewed, one bug fixed, two gaps documented
 
-**Files:** `src/crystal/TesseraCursor.ts`
+**Fixed — async acta tracking:** `run()` only appended `actum.id` to `modo.acta` when `result.kind === 'sync'`. Async jobs were invisible to the Modo — their IDs never landed in `acta`. Fixed: always append `actum.id` when a Modo is present; gate `impetusAccrued` update on sync only (async impetus is unknown until the webhook fires). Two tests added.
+
+**Gap — budget enforcement absent:** `Signorum` has no `findByModoId()` method. `Modo` has no `budget` field. The tessera signum `valor` doc says "decremented on each use" but the ledger is append-only — no decrement mechanism exists. `TesseraCursor.run()` cannot check whether `impetusAccrued + cost ≤ tessera.valor` without a query path. Budget overspend is currently not caught. Fix requires either adding `findByModoId` to `Signorum` + `MemorySignorum` + `MongoSignorum`, or storing `budget` on the `Modo` record and passing it through.
+
+**Gap — async impetusAccrued never updated at webhook time:** When a cursor returns `kind: 'async'`, the actual impetus is reported by the execution webhook. The webhook handler (`executionWebhook.ts`) calls `ActumCompletor.complete()` which settles signa — but no code path calls `modos.update({ impetusAccrued })` on webhook receipt. Sessions with async jobs will show `impetusAccrued` as permanently lower than actual spend.
+
+**Intentional — Modo stays `'claiming'`:** `claiming → warming → active` transitions belong to the pod provisioning layer (MateriaFlow / SecurePodClient), not TesseraCursor. TesseraCursor creates the session token; a separate flow provisions the pod and advances the status.
+
+**Files:** `src/crystal/TesseraCursor.ts`, `tests/unit/crystal/TesseraCursor.test.ts`
 
 ---
 

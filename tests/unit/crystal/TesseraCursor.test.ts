@@ -33,9 +33,15 @@ const fixedCursorResult: CursorResult = {
   exitus: { exitus: { url: 'http://cdn.x/img.png' }, impetus: 60n, duratio: 1000 },
 }
 
+const asyncCursorResult: CursorResult = {
+  kind: 'async',
+  externusJobId: 'job-ext-1',
+}
+
 class StubCursor implements Cursor {
+  constructor(private readonly result: CursorResult = fixedCursorResult) {}
   async reserve(_modus: Modus): Promise<bigint> { return 120n }
-  async run(_actum: Actum): Promise<CursorResult> { return fixedCursorResult }
+  async run(_actum: Actum): Promise<CursorResult> { return this.result }
 }
 
 function makeModus(overrides: Partial<Modus> = {}): Modus {
@@ -164,4 +170,22 @@ test('run accumulates impetusAccrued across multiple runs', async () => {
   const m2 = await modos.findById(modo.id)
   // StubCursor returns 60n per run
   assert.equal(m2!.impetusAccrued, 120n)
+})
+
+test('run with async result still appends actumId to modo.acta', async () => {
+  const modos = new MemoryModoStore()
+  const cursor = new TesseraCursor(new StubCursor(asyncCursorResult), modos, new MemorySignorum())
+  const { modo } = await cursor.openModo(1800n, { animaId: 'anima-abc' })
+  await cursor.run(makeActum({ id: 'actum-async' }), modo)
+  const updated = await modos.findById(modo.id)
+  assert.ok(updated!.acta.includes('actum-async'))
+})
+
+test('run with async result does not update impetusAccrued — actual cost unknown until webhook', async () => {
+  const modos = new MemoryModoStore()
+  const cursor = new TesseraCursor(new StubCursor(asyncCursorResult), modos, new MemorySignorum())
+  const { modo } = await cursor.openModo(1800n, { animaId: 'anima-abc' })
+  await cursor.run(makeActum({ id: 'actum-async' }), modo)
+  const updated = await modos.findById(modo.id)
+  assert.equal(updated!.impetusAccrued, 0n)
 })
