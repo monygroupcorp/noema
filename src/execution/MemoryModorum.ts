@@ -18,6 +18,16 @@ export class MemoryModorum implements Modorum {
     return versions.get(sorted[0]) ?? null
   }
 
+  async update(id: string, patch: Partial<Pick<Modus, 'computeStrategy' | 'gpuClass' | 'podPolicy'>>): Promise<Modus> {
+    const versions = this.store.get(id)
+    if (!versions || versions.size === 0) throw new Error(`Modus not found: ${id}`)
+    const sorted = Array.from(versions.keys()).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+    const latest = versions.get(sorted[0])!
+    const updated = { ...latest, ...patch, mutatum: new Date() }
+    versions.set(latest.versio, updated)
+    return updated
+  }
+
   async list(filter?: Partial<Pick<Modus, 'genus' | 'canonica' | 'auctor'>>): Promise<Modi> {
     const all: Modus[] = []
     for (const versions of this.store.values()) {

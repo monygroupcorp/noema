@@ -5,8 +5,15 @@ import { handleExecutionWebhook } from '../../../src/api/webhooks/executionWebho
 import type { ExecutionWebhookDeps, WebhookRequest } from '../../../src/api/webhooks/executionWebhook.js'
 import type { Actum } from '../../../src/types/actum.js'
 import type { Exitus } from '../../../src/types/cursus.js'
-import type { Nexus, SignumEvent, SignumEventType } from '../../../src/types/nexus.js'
-import type { Signum, Signorum } from '../../../src/types/significandi.js'
+import type { Modus } from '../../../src/types/modus.js'
+import { Nexus } from '../../../src/ledger/Nexus.js'
+import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
+import { MemoryModorum } from '../../../src/execution/MemoryModorum.js'
+import { MemoryActorum } from '../../../src/execution/MemoryActorum.js'
+import { hostCutHook } from '../../../src/ledger/hooks/hostCut.js'
+import { spellRoyaltyHook } from '../../../src/ledger/hooks/spellRoyalty.js'
+import { modelRoyaltyHook } from '../../../src/ledger/hooks/modelRoyalty.js'
+import { platformSkimHook } from '../../../src/ledger/hooks/platformSkim.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -360,159 +367,131 @@ test('flowRouter is optional — works fine when absent', async () => {
   assert.equal(result.body.success, true)
 })
 
-// ── Nexus tests ───────────────────────────────────────────────────────────────
+// ── Ledger integration — real Nexus + hooks + MemorySignorum + MemoryModorum ──
+//
+// These tests use the real Nexus class with real hooks registered, MemorySignorum,
+// MemoryModorum, and MemoryActorum. No mocks at this layer — seams live only at
+// the completor and flowRouter boundaries (those are tested independently).
 
-interface NexusMock {
-  emitted: Array<SignumEvent<SignumEventType>>
-  returnSigna: Array<Omit<Signum, 'id' | 'natum' | 'status'>>
-  emit<T extends SignumEventType>(event: SignumEvent<T>): Promise<Array<Omit<Signum, 'id' | 'natum' | 'status'>>>
-  on<T extends SignumEventType>(type: T, hook: unknown): void
+const TEST_MODUS: Modus = {
+  id: 'runmake.flux-schnell',
+  nomen: 'Flux Schnell',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: 'test-hash',
+  aditus: {},
+  exitus: {},
+  canonica: true,
+  auctor: 'anima-flux-author',
+  natum: new Date(),
+  mutatum: new Date(),
 }
 
-function makeNexus(returnSigna: Array<Omit<Signum, 'id' | 'natum' | 'status'>> = []): NexusMock {
-  const mock: NexusMock = {
-    emitted: [],
-    returnSigna,
-    async emit(event) {
-      mock.emitted.push(event as SignumEvent<SignumEventType>)
-      return returnSigna
-    },
-    on() {},
+function makeLedgerDeps() {
+  const nexus = new Nexus()
+  nexus.on('execution_spend', hostCutHook)
+  nexus.on('execution_spend', spellRoyaltyHook)
+  nexus.on('execution_spend', modelRoyaltyHook)
+  nexus.on('royalty_fired', platformSkimHook)
+  return {
+    nexus,
+    signorum: new MemorySignorum(),
+    modorum: new MemoryModorum(),
+    actorum: new MemoryActorum(),
   }
-  return mock
 }
 
-interface SignorumMock {
-  created: Array<Array<Omit<Signum, 'id' | 'natum' | 'status'>>>
-  createMany(signa: Array<Omit<Signum, 'id' | 'natum' | 'status'>>): Promise<Signum[]>
+async function seedActum(actorum: MemoryActorum, actum: Actum): Promise<void> {
+  const { inceptum: _, ...input } = actum
+  await actorum.create(input)
 }
 
-function makeSignorum(): SignorumMock {
-  const mock: SignorumMock = {
-    created: [],
-    async createMany(signa) {
-      mock.created.push(signa)
-      return signa.map((s, i) => ({ ...s, id: `signum-${i}`, natum: new Date(), status: 'valid' as const }))
-    },
-  }
-  return mock
-}
+// 17. spellRoyalty signum issued to modus auctor on COMPLETED
+test('COMPLETED with spell author — spellRoyalty signum issued to auctor', async () => {
+  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  await modorum.register({ ...TEST_MODUS })
+  await seedActum(actorum, makeActum())
 
-// 17. Nexus emit is called with correct actum and impetus on COMPLETED
-test('nexus.emit is called with correct actum and impetus on COMPLETED', async () => {
-  const actum = makeActum()
-  const completor = makeCompletor()
-  const nexus = makeNexus()
-  const signorum = makeSignorum()
   const deps: ExecutionWebhookDeps = {
-    actorum: makeActorum(actum),
-    completor,
-    nexus: nexus as unknown as Nexus,
-    signorum: signorum as unknown as Signorum,
+    actorum, completor: makeCompletor(), nexus, signorum, modorum,
   }
-  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 3000 }
-  const result = await handleExecutionWebhook(makeReq(body), deps)
+  // 200s → 200n impetus; spellRoyalty = 10% = 20n
+  await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }), deps)
+
+  const signa = await signorum.history({ animaId: 'anima-flux-author' })
+  assert.equal(signa.length, 1)
+  assert.equal(signa[0].forma, 'reward')
+  assert.equal(signa[0].valor, 20n)
+  assert.equal(signa[0].auctor, 'nexus:spellRoyalty')
+})
+
+// 18. platformSkim signum issued to platform after royalty fires
+test('platformSkim signum issued when spellRoyalty produces a signum', async () => {
+  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  await modorum.register({ ...TEST_MODUS })
+  await seedActum(actorum, makeActum())
+
+  const deps: ExecutionWebhookDeps = {
+    actorum, completor: makeCompletor(), nexus, signorum, modorum,
+  }
+  await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }), deps)
+
+  // platformSkim = 5% of baseValor(200n impetus) = 10n
+  const platformId = process.env.PLATFORM_ANIMA_ID ?? 'platform'
+  const signa = await signorum.history({ animaId: platformId })
+  assert.equal(signa.length, 1)
+  assert.equal(signa[0].forma, 'reward')
+  assert.equal(signa[0].valor, 10n)
+  assert.equal(signa[0].auctor, 'nexus:platformSkim')
+})
+
+// 19. No signa when modus has no auctor — royalty_fired also not triggered
+test('no signa issued when modus has no auctor', async () => {
+  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  await modorum.register({ ...TEST_MODUS, auctor: undefined })
+  await seedActum(actorum, makeActum())
+
+  const deps: ExecutionWebhookDeps = {
+    actorum, completor: makeCompletor(), nexus, signorum, modorum,
+  }
+  await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }), deps)
+
+  const authorSigna = await signorum.history({ animaId: 'anima-flux-author' })
+  assert.equal(authorSigna.length, 0)
+  const platformSigna = await signorum.history({ animaId: process.env.PLATFORM_ANIMA_ID ?? 'platform' })
+  assert.equal(platformSigna.length, 0)
+})
+
+// 20. No signa issued on FAILED
+test('no signa issued on FAILED', async () => {
+  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  await modorum.register({ ...TEST_MODUS })
+  await seedActum(actorum, makeActum())
+
+  const deps: ExecutionWebhookDeps = {
+    actorum, completor: makeCompletor(), nexus, signorum, modorum,
+  }
+  const result = await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'FAILED', error: 'OOM' }), deps)
 
   assert.equal(result.status, 200)
-  assert.equal(nexus.emitted.length, 1)
-  const event = nexus.emitted[0]
-  assert.equal(event.type, 'execution_spend')
-  const payload = event.payload as { actum: Actum; impetus: bigint }
-  assert.equal(payload.actum.id, 'actum-test-1')
-  assert.equal(payload.actum.status, 'completus')
-  assert.equal(payload.impetus, 3n)
+  const signa = await signorum.history({ animaId: 'anima-flux-author' })
+  assert.equal(signa.length, 0)
 })
 
-// 18. Returned signa trigger royalty_fired chain; all land in one createMany
-test('signa returned by nexus.emit trigger royalty_fired and all land in one createMany', async () => {
-  const actum = makeActum()
-  const completor = makeCompletor()
-  const hookSigna: Array<Omit<Signum, 'id' | 'natum' | 'status'>> = [
-    { forma: 'reward', valor: 50n, auctor: 'hook:hostCut', animaId: 'anima-host' },
-    { forma: 'reward', valor: 10n, auctor: 'hook:spellRoyalty', animaId: 'anima-author' },
-  ]
-  const nexus = makeNexus(hookSigna)
-  const signorum = makeSignorum()
+// 21. No signa issued on CANCELLED
+test('no signa issued on CANCELLED', async () => {
+  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  await modorum.register({ ...TEST_MODUS })
+  await seedActum(actorum, makeActum())
+
   const deps: ExecutionWebhookDeps = {
-    actorum: makeActorum(actum),
-    completor,
-    nexus: nexus as unknown as Nexus,
-    signorum: signorum as unknown as Signorum,
+    actorum, completor: makeCompletor(), nexus, signorum, modorum,
   }
-  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 2000 }
-  await handleExecutionWebhook(makeReq(body), deps)
-
-  // execution_spend fires, then royalty_fired since hooks produced signa
-  assert.equal(nexus.emitted.length, 2)
-  assert.equal(nexus.emitted[0].type, 'execution_spend')
-  assert.equal(nexus.emitted[1].type, 'royalty_fired')
-  const royaltyPayload = nexus.emitted[1].payload as { royaltyValor: bigint; baseValor: bigint }
-  assert.equal(royaltyPayload.royaltyValor, 60n)  // 50 + 10
-  assert.equal(royaltyPayload.baseValor, 2n)       // 2000ms → 2 impetus
-
-  // Both execution_spend and royalty_fired signa land in one createMany call
-  assert.equal(signorum.created.length, 1)
-  assert.equal(signorum.created[0].length, 4)  // 2 royalty + 2 skim (mock returns same signa)
-  assert.equal(signorum.created[0][0].auctor, 'hook:hostCut')
-  assert.equal(signorum.created[0][1].auctor, 'hook:spellRoyalty')
-})
-
-// 19. signorum.createMany is NOT called when nexus returns no signa
-test('signorum.createMany is not called when nexus returns empty signa', async () => {
-  const actum = makeActum()
-  const completor = makeCompletor()
-  const nexus = makeNexus([]) // empty — no hooks produced signa
-  const signorum = makeSignorum()
-  const deps: ExecutionWebhookDeps = {
-    actorum: makeActorum(actum),
-    completor,
-    nexus: nexus as unknown as Nexus,
-    signorum: signorum as unknown as Signorum,
-  }
-  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [] }
-  await handleExecutionWebhook(makeReq(body), deps)
-
-  assert.equal(signorum.created.length, 0)
-})
-
-// 20. Nexus is NOT called on FAILED
-test('nexus.emit is NOT called on FAILED', async () => {
-  const actum = makeActum()
-  const completor = makeCompletor()
-  const nexus = makeNexus()
-  const signorum = makeSignorum()
-  const deps: ExecutionWebhookDeps = {
-    actorum: makeActorum(actum),
-    completor,
-    nexus: nexus as unknown as Nexus,
-    signorum: signorum as unknown as Signorum,
-  }
-  const body = { id: 'job-abc-123', status: 'FAILED', error: 'OOM' }
-  const result = await handleExecutionWebhook(makeReq(body), deps)
+  const result = await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'CANCELLED' }), deps)
 
   assert.equal(result.status, 200)
-  assert.equal(nexus.emitted.length, 0)
-  assert.equal(signorum.created.length, 0)
-})
-
-// 21. Nexus is NOT called on CANCELLED
-test('nexus.emit is NOT called on CANCELLED', async () => {
-  const actum = makeActum()
-  const completor = makeCompletor()
-  const nexus = makeNexus()
-  const signorum = makeSignorum()
-  const deps: ExecutionWebhookDeps = {
-    actorum: makeActorum(actum),
-    completor,
-    nexus: nexus as unknown as Nexus,
-    signorum: signorum as unknown as Signorum,
-  }
-  const body = { id: 'job-abc-123', status: 'CANCELLED' }
-  const result = await handleExecutionWebhook(makeReq(body), deps)
-
-  assert.equal(result.status, 200)
-  assert.equal(nexus.emitted.length, 0)
-  assert.equal(signorum.created.length, 0)
+  const signa = await signorum.history({ animaId: 'anima-flux-author' })
+  assert.equal(signa.length, 0)
 })
 
 // 22. Missing nexus dep is a no-op (backward compat)
@@ -522,7 +501,6 @@ test('missing nexus dep is a no-op — request still succeeds', async () => {
   const deps: ExecutionWebhookDeps = {
     actorum: makeActorum(actum),
     completor,
-    // no nexus, no signorum
   }
   const body = { id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 1000 }
   const result = await handleExecutionWebhook(makeReq(body), deps)
