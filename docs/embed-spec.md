@@ -2,129 +2,107 @@
 
 **Status:** Specced, not implemented  
 **Last updated:** 2026-05-14  
-**Scope:** Self-hosted CLIP embedding service + wiring into vestigium pipeline + backfill migration
+**Scope:** Self-hosted CLIP embedding service + search API + smart migration
 
 ---
 
-## Problem
+## Model: OpenCLIP ViT-B/32 — locked in
 
-`vestigiumHook.ts` fires three index calls fire-and-forget after every completed actum:
+512-dimensional vectors. Committed. If we upgrade the model later we re-embed everything and rebuild Atlas indexes — that's fine, old vestigia are all the same content anyway.
 
-```ts
-vestigiorum.indexPromptum(v.id).catch(() => {})   // "I remember what I typed"
-vestigiorum.indexImago(v.id).catch(() => {})       // "I remember what it looked like"
-vestigiorum.indexIntella(v.id).catch(() => {})     // "I remember which model I used"
-```
+**Why this model:**
+- 150MB on disk, CPU inference (~50ms), no GPU required
+- Text and image embeddings live in the **same vector space** — this is the whole point
+- "I remember what it looked like" works by typing a text description and getting visual matches, even if the original prompt was completely different
+- No licensing issues, well-supported via `open-clip-torch`
 
-`MongoVestigiorum` silently no-ops all three because `embed` and `embedImage` are never passed to `createContainer()` in `index.ts`. Every vestigium is stored with empty embedding fields. Search works only by metadata filters — not semantically.
-
-Two distinct goals:
-1. **New vestigia** — embed automatically on every completed actum going forward
-2. **Old vestigia** — backfill existing records in the DB for the full corpus
-
----
-
-## Model Choice: OpenCLIP ViT-B/32
-
-**Why CLIP specifically:**  
-CLIP (Contrastive Language-Image Pretraining) encodes both text and images into the *same* vector space. This means:
-- `embeddingPromptum` (text) and `embeddingImago` (image) are **directly comparable** — you can search images by typing text and get visual matches, even if the prompt used to generate them was different
-- "I remember what it looked like" works with a text query describing the visual, not just matching keywords from the original prompt
-
-**Why ViT-B/32 specifically:**  
-- 150MB on disk — no GPU required for inference
-- ~50ms per request on CPU
-- 512-dimensional output vectors for both text and image
-- `openclip` ViT-B/32 trained on LAION-2B is the canonical small CLIP baseline
-- Well-supported, no licensing issues
-
-**Dimension:** 512 floats per vector. This is fixed — Atlas Search indexes must be built to this dimension.
-
-**Not using:** OpenAI's embedding API (no image support), sentence-transformers text-only models (can't compare to image embeddings), larger CLIP variants (unnecessary for this use case).
+**Dimension is fixed at 512.** Atlas Search indexes are built to this number. Document it and don't change it without re-embedding everything.
 
 ---
 
 ## Service Design
 
-A minimal Python HTTP service wrapping OpenCLIP inference.
+A minimal Python FastAPI service. Runs as a Docker container alongside the main server. CPU-only.
 
 ### Endpoints
 
 ```
 POST /embed/text
 Body: { "text": "a cat on a beach at sunset" }
-Response: { "embedding": [0.021, -0.134, ..., 0.087] }   # 512 floats
-```
+Response: { "embedding": [0.021, -0.134, ..., 0.087] }   # 512 floats, L2-normalised
 
-```
 POST /embed/image
 Body: { "url": "https://cdn.noema.io/outputs/abc123.png" }
-Response: { "embedding": [0.021, -0.134, ..., 0.087] }   # 512 floats
+Response: { "embedding": [0.021, -0.134, ..., 0.087] }   # 512 floats, L2-normalised
 ```
 
-Both endpoints return a 512-float array. Both live in the same embedding space.
+Vectors are L2-normalised before returning. Cosine similarity = dot product.
 
-### Error responses
+### Error codes
 
 ```
-{ "error": "text must be non-empty" }           # 400
-{ "error": "failed to fetch image: 404" }       # 422
-{ "error": "internal error" }                   # 500
+400  text/url empty or missing
+422  failed to fetch image (404, timeout, etc.)
+500  model inference error
 ```
 
-### Implementation notes
+### Implementation sketch
 
 ```python
-# requirements: open-clip-torch, fastapi, uvicorn, Pillow, httpx
+# requirements: open-clip-torch, fastapi, uvicorn[standard], Pillow, httpx
 import open_clip, torch, httpx
 from PIL import Image
 from io import BytesIO
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
+app = FastAPI()
 model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='openai')
 tokenizer = open_clip.get_tokenizer('ViT-B-32')
 model.eval()
 
+class TextReq(BaseModel): text: str
+class ImageReq(BaseModel): url: str
+
+def normalise(vec): return (vec / vec.norm(dim=-1, keepdim=True)).squeeze(0).tolist()
+
 @app.post('/embed/text')
-async def embed_text(body: TextRequest):
-    tokens = tokenizer([body.text])
+async def embed_text(body: TextReq):
+    if not body.text.strip():
+        raise HTTPException(400, 'text must be non-empty')
     with torch.no_grad():
-        vec = model.encode_text(tokens)
-        vec = vec / vec.norm(dim=-1, keepdim=True)  # L2 normalise
-    return { 'embedding': vec[0].tolist() }
+        return { 'embedding': normalise(model.encode_text(tokenizer([body.text]))) }
 
 @app.post('/embed/image')
-async def embed_image(body: ImageRequest):
-    img_bytes = await httpx.AsyncClient().get(body.url)
-    img = preprocess(Image.open(BytesIO(img_bytes.content))).unsqueeze(0)
+async def embed_image(body: ImageReq):
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(body.url)
+        if r.status_code != 200:
+            raise HTTPException(422, f'failed to fetch image: {r.status_code}')
+    img = preprocess(Image.open(BytesIO(r.content))).unsqueeze(0)
     with torch.no_grad():
-        vec = model.encode_image(img)
-        vec = vec / vec.norm(dim=-1, keepdim=True)
-    return { 'embedding': vec[0].tolist() }
+        return { 'embedding': normalise(model.encode_image(img)) }
 ```
 
-Vectors are L2-normalised before returning — cosine similarity is then equivalent to dot product, which is what Atlas Vector Search computes.
-
-### Deployment
-
-Runs as a Docker container alongside the main server. CPU-only — no GPU required.
+### Dockerfile
 
 ```dockerfile
 FROM python:3.11-slim
-RUN pip install open-clip-torch fastapi uvicorn[standard] Pillow httpx
+RUN pip install --no-cache-dir open-clip-torch fastapi uvicorn[standard] Pillow httpx
+WORKDIR /app
 COPY clip_service.py .
-# First run downloads the model (~150MB) — pre-download in build for prod:
+# Pre-download model weights at build time (~150MB)
 RUN python -c "import open_clip; open_clip.create_model_and_transforms('ViT-B-32', pretrained='openai')"
 CMD ["uvicorn", "clip_service:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
-Environment variable: `CLIP_SERVICE_URL=http://localhost:8080` (or the service hostname in Docker compose)
+**Files:** `clip_service/clip_service.py`, `clip_service/Dockerfile`, `clip_service/requirements.txt`
 
 ---
 
 ## Integration: index.ts
 
-When `CLIP_SERVICE_URL` is set, build `embed` and `embedImage` functions and pass them to `createContainer`:
+When `CLIP_SERVICE_URL` is set, build `embed` and `embedImage` and pass them to `createContainer`. No changes to `vestigiumHook.ts` needed — it already fires the three index calls fire-and-forget.
 
 ```ts
 const CLIP_SERVICE_URL = process.env.CLIP_SERVICE_URL
@@ -133,25 +111,17 @@ let embed: ((text: string) => Promise<number[]>) | undefined
 let embedImage: ((url: string) => Promise<number[]>) | undefined
 
 if (CLIP_SERVICE_URL) {
-  embed = async (text: string) => {
-    const res = await fetch(`${CLIP_SERVICE_URL}/embed/text`, {
+  const clipPost = async (path: string, body: unknown): Promise<number[]> => {
+    const res = await fetch(`${CLIP_SERVICE_URL}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(body),
     })
-    if (!res.ok) throw new Error(`CLIP service embed/text failed: ${res.status}`)
+    if (!res.ok) throw new Error(`CLIP service ${path} failed: ${res.status}`)
     return (await res.json() as { embedding: number[] }).embedding
   }
-
-  embedImage = async (url: string) => {
-    const res = await fetch(`${CLIP_SERVICE_URL}/embed/image`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
-    })
-    if (!res.ok) throw new Error(`CLIP service embed/image failed: ${res.status}`)
-    return (await res.json() as { embedding: number[] }).embedding
-  }
+  embed = (text) => clipPost('/embed/text', { text })
+  embedImage = (url) => clipPost('/embed/image', { url })
 }
 
 // In createContainer call:
@@ -159,68 +129,138 @@ if (CLIP_SERVICE_URL) {
 ...(embedImage ? { embedImage } : {}),
 ```
 
-`vestigiumHook.ts` already fires the index calls fire-and-forget. No changes needed there — once `embed`/`embedImage` are present, they start working automatically.
+---
+
+## Search API Endpoint
+
+The `Vestigiorum.search()` method is already implemented. It needs a REST surface.
+
+### Route
+
+```
+GET /api/vestigia/search
+```
+
+### Query parameters
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `q` | string | required | Text to embed and search against |
+| `per` | `promptum` \| `imago` \| `intella` | `promptum` | Which embedding dimension to search |
+| `limit` | number | 20 | Max results |
+| `minSim` | number | 0.7 | Minimum cosine similarity threshold |
+| `modusId` | string | — | Filter to one modus |
+| `genus` | string | — | `image`, `video`, `text`, `audio` |
+| `visibilitas` | string (comma-separated) | — | `privata,communis,publica` |
+
+### Auth
+
+- No auth: returns `publica` vestigia only
+- Authenticated as anima: also returns their own `privata` and `communis`
+- `auctorKey` is derived from the authenticated session, never passed as a query param
+
+### Response
+
+```json
+{
+  "results": [
+    {
+      "vestigium": { "id": "...", "promptum": "...", "imagoUrl": "...", ... },
+      "similaritas": 0.891
+    }
+  ]
+}
+```
+
+### Error cases
+
+- `embed` not configured (no CLIP service): `503 Service Unavailable`
+- `per: 'imago'` but no `embeddingImago` exists on any records: returns empty results (not an error)
+- Empty `q`: `400 Bad Request`
+
+### Notes
+
+- `search()` currently does a full in-memory collection scan. This is fine for hundreds of records. Atlas `$vectorSearch` replaces it when scale demands — that's a separate task from this spec.
+- The `per: 'imago'` dimension is the most interesting one: query with text, match by visual content.
+
+---
+
+## Migration Strategy: Prompt-Guided Regen Decisions
+
+Old vestigia have no embeddings. Not all are worth regenerating — some outputs are generic, some are unique.
+
+### Phase 1: Embed all prompts first (always possible, no regen needed)
+
+Run `indexPromptum` and `indexIntella` on everything. These only need text, which we always have. Fast, cheap, no image fetches.
+
+### Phase 2: Use prompt embedding to decide what's worth regenerating
+
+Once `embeddingPromptum` exists for all records, compute a **rarity score** for each vestigium in the prompt embedding space. Rare embeddings = interesting/unique generations worth recovering. Dense clusters = generic/common outputs.
+
+**Rarity metric:** k-nearest-neighbour distance in the prompt embedding space.
+
+```
+rarity(v) = mean distance to v's k nearest neighbours (k=5)
+```
+
+High rarity → isolated in embedding space → unique prompt → worth regening  
+Low rarity → clustered with many similar prompts → generic → skip
+
+The migration script will:
+1. Load all `embeddingPromptum` vectors
+2. Compute pairwise kNN distances (or use a fast ANN library like `hnswlib`)
+3. Score each vestigium
+4. Produce two lists: `regen_candidates.json` and `skipped.json`
+5. Optionally trigger regen jobs for candidates
+
+### Threshold
+
+Start with the top 20% by rarity score. Tune based on what you see — the cluster visualization (t-SNE or UMAP projection) will make it obvious where the interesting content lives.
+
+### Phase 3: For regen candidates — regen + index imago
+
+A regen triggers a new actum with the same modus + aditus. On completion, `vestigiumHook` auto-indexes the new imago. No special migration code needed for this step — it goes through the normal cast flow.
+
+### Phase 4: Index imago for vestigia that already have a valid imagoUrl
+
+Some old vestigia may have a valid CDN URL for their image. Run `indexImago` on those first before triggering any regens.
+
+**Script:** `scripts/migration/backfill-vestigia-embeddings.ts`  
+Flags: `--phase 1|2|3|4`, `--dry-run`, `--limit N`
 
 ---
 
 ## Atlas Vector Search Indexes
 
-Three separate vector search indexes are required on the `vestigia` collection. Each maps to one embedding field.
+Three separate indexes on the `vestigia` collection, one per embedding field.
 
 ```json
-// embeddingPromptum index
 {
   "fields": [{
     "type": "vector",
     "path": "embeddingPromptum",
     "numDimensions": 512,
     "similarity": "cosine",
-    "filters": [{ "type": "filter", "path": "visibilitas" }]
+    "filters": [
+      { "type": "filter", "path": "visibilitas" },
+      { "type": "filter", "path": "auctorKey.animaId" }
+    ]
   }]
 }
 ```
 
-Same structure for `embeddingImago` and `embeddingIntella` — just change `path`.
+Same structure for `embeddingImago` and `embeddingIntella`.
 
-The in-memory cosine fallback in `MongoVestigiorum.search()` works for small datasets and local dev. The `$vectorSearch` replacement (marked TODO in the code) should be wired in once these indexes exist on Atlas.
-
----
-
-## Migration / Backfill
-
-Script: `scripts/migration/backfill-vestigia-embeddings.ts`
-
-Strategy:
-- Find all vestigia where `embeddingPromptum` is absent → call `indexPromptum`
-- Find all vestigia where `embeddingIntella` is absent and `intellaDescription` exists → call `indexIntella`
-- Find all vestigia where `embeddingImago` is absent and `imagoUrl` exists → call `indexImago`
-- Resume-safe: already-indexed records are skipped
-- Rate-limited: 100ms delay between requests to avoid overloading the service
-- Dry-run mode: `--dry-run` reports counts without writing
-
-The script requires `CLIP_SERVICE_URL` and connects directly to MongoDB. It instantiates `MongoVestigiorum` with the embed functions and calls the existing `index*` methods — no new write paths needed.
+The `$vectorSearch` replacement in `MongoVestigiorum.search()` is a separate task — current in-memory fallback works fine until the collection grows past ~10k records.
 
 ---
 
-## Open Questions
+## Build Order
 
-1. **Service location in prod**: Single instance on the app server, or a dedicated container? The app server is the simplest starting point; promote to a dedicated instance if embed latency becomes a bottleneck.
-
-2. **Image fetch auth**: `indexImago` calls `embedImage(v.imagoUrl)`. If `imagoUrl` is an S3 pre-signed URL, it may expire before backfill runs. The backfill script should generate fresh URLs or skip expired ones.
-
-3. **`$vectorSearch` migration**: The current `search()` does a full collection scan. Once Atlas Search indexes are live, the `// TODO: replace with $vectorSearch` comment in `MongoVestigiorum.search()` needs to be implemented. This is a separate task from wiring the embed functions.
-
-4. **Model upgrade path**: ViT-B/32 at 512 dims is the starting point. Moving to ViT-L/14 (768 dims) or SigLIP (1152 dims) would require re-embedding all vestigia and updating the Atlas index dimension — not a trivial migration. Commit to the dimension you want before building the Atlas indexes.
-
----
-
-## Files to create/modify
-
-| File | Change |
-|------|--------|
-| `clip_service/clip_service.py` | New — the FastAPI service |
-| `clip_service/Dockerfile` | New — service container |
-| `clip_service/requirements.txt` | New |
-| `src/index.ts` | Wire `embed` / `embedImage` from `CLIP_SERVICE_URL` |
-| `scripts/migration/backfill-vestigia-embeddings.ts` | New — backfill script |
-| `docs/atlas-indexes.md` | New (or update) — Atlas Search index definitions |
+1. `clip_service/` — Python service, Docker image
+2. `src/index.ts` — wire `CLIP_SERVICE_URL` → `embed` / `embedImage`
+3. `src/api/vestigia/searchRouter.ts` — `GET /api/vestigia/search`
+4. Wire search router into `index.ts`
+5. `scripts/migration/backfill-vestigia-embeddings.ts` — phase 1 (promptum + intella)
+6. Phase 2 analysis: rarity scoring script
+7. Atlas indexes + `$vectorSearch` upgrade (when scale demands)
