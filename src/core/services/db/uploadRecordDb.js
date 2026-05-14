@@ -104,6 +104,13 @@ class UploadRecordDB extends BaseDB {
    * @param {number} windowMs - Window size in milliseconds (default: 1 hour)
    * @returns {Promise<number>}
    */
+  async listByPartner(partnerId, limit = 100) {
+    return this.findMany(
+      { partnerId },
+      { sort: { createdAt: -1 }, limit }
+    );
+  }
+
   async countRecentByPartner(partnerId, windowMs = 60 * 60 * 1000) {
     const since = new Date(Date.now() - windowMs);
     return this.count({ partnerId, createdAt: { $gte: since } });

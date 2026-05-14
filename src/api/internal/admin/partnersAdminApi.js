@@ -44,7 +44,7 @@ function createPartnersAdminApi({ partnerDb, splitLedgerDb, uploadRecordDb }) {
    */
   router.get('/:partnerId', async (req, res) => {
     try {
-      const partner = await partnerDb.findPartnerById(req.params.partnerId);
+      const partner = await partnerDb.findPartnerByIdAny(req.params.partnerId);
       if (!partner) return res.status(404).json({ error: 'NOT_FOUND' });
       const ledger = await splitLedgerDb.findByPartnerId(req.params.partnerId);
       const total = await splitLedgerDb.partnerTotal(req.params.partnerId);
@@ -95,6 +95,9 @@ function createPartnersAdminApi({ partnerDb, splitLedgerDb, uploadRecordDb }) {
       for (const key of allowed) {
         if (req.body[key] !== undefined) fields[key] = req.body[key];
       }
+      if (Object.keys(fields).length === 0) {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: 'No updatable fields provided' });
+      }
       await partnerDb.updatePartner(req.params.partnerId, fields);
       return res.json({ ok: true });
     } catch (error) {
@@ -110,10 +113,7 @@ function createPartnersAdminApi({ partnerDb, splitLedgerDb, uploadRecordDb }) {
    */
   router.get('/:partnerId/uploads', async (req, res) => {
     try {
-      const uploads = await uploadRecordDb.findMany(
-        { partnerId: req.params.partnerId },
-        { sort: { createdAt: -1 }, limit: 100 }
-      );
+      const uploads = await uploadRecordDb.listByPartner(req.params.partnerId);
       const uploadCount = await uploadRecordDb.countRecentByPartner(req.params.partnerId);
       const runCount = await uploadRecordDb.countRecentRunsByPartner(req.params.partnerId);
       return res.json({ uploads, uploadCount1h: uploadCount, runCount1h: runCount });
