@@ -33,6 +33,9 @@ const X402PaymentLogDB = require('./x402PaymentLogDb');
 const CreditLedgerDB = require('./alchemy/creditLedgerDb');
 const SystemStateDB = require('./alchemy/systemStateDb');
 const AgentDelegationsDB = require('./agentDelegationsDb');
+const PartnerDB = require('./partnerDb');
+const UploadRecordDB = require('./uploadRecordDb');
+const SplitLedgerDB = require('./splitLedgerDb');
 
 // Placeholder for any existing/legacy DB service exports if this file already exists
 // For example:
@@ -85,6 +88,11 @@ function initializeDbServices(logger) {
 
     // Agent delegation links
     agentDelegations: new AgentDelegationsDB(logger),
+
+    // Partner x402 proxy services
+    partner: new PartnerDB(logger),
+    uploadRecords: new UploadRecordDB(logger),
+    splitLedger: new SplitLedgerDB(logger),
 
     // ... add other services here
   };
