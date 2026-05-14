@@ -18,21 +18,18 @@ _(none outstanding)_
 
 ---
 
-### 5. Ledger hook math unaudited
-Six hooks (`hostCut`, `spellRoyalty`, `modelRoyalty`, `platformSkim`, `sessionSpend`, `referralSplit`) were wired and are now live. Their implementations in `src/ledger/hooks/` have never been read in this session. The percentages, conditions, and edge cases (missing auctor, zero royalty, self-referral) are unknown.
+### 5. ~~Ledger hook math unaudited~~ — resolved
+Audited all six hooks. Math correct. Three bugs found and fixed:
+- **Missing payload fields**: `nexus.emit` was called without `modusAuctorAnimaId` so `spellRoyaltyHook` always returned `[]`. Fixed: `modorum` threaded into webhook deps; modus looked up after completion to populate `modusAuctorAnimaId`.
+- **`royalty_fired` never emitted**: `platformSkimHook` was registered but the `royalty_fired` event was never fired. Fixed: after `execution_spend` emit, if any royalty signa returned, we emit `royalty_fired` with the summed valor; both batches land in one `createMany` call.
+- **Self-referral not guarded**: `referralSplitHook` would pay a referral to a user who referred themselves. Fixed: added `if (referrerAnimaId === signum.animaId) return []`.
 
-**Verify:** Read all six. Check: do royalty percentages sum correctly? Does platformSkim fire on zero-royalty executions? Does referralSplit handle the case where referrer === payer?
-
-**Files:** `src/ledger/hooks/*.ts`
+Royalty math: 20% host cut + 10% spell royalty + 5% model royalty = 35% of impetus distributed. Platform takes 5% of royalty total (~1.75% of execution). sessionSpend and referralSplit are correct.
 
 ---
 
-### 6. CollectioCursor.onActumCompleta not called for collection acta
-`CollectioCursor.rehydrate()` now reconstructs state on boot. But `onActumCompleta()` must be called when each actum from a collection finishes — who calls it? The webhook handler calls `flowRouter.handleActumComplete()` but there is no bridge from `FlowRouter` to `CollectioCursor.onActumCompleta()`. Collection acta that complete after a restart are silently dropped; the collection never marks completa.
-
-**Verify:** Trace the path from `handleExecutionWebhook` → `flowRouter.handleActumComplete` → `CollectioCursor`. If the bridge is missing, wire it.
-
-**Files:** `src/api/webhooks/executionWebhook.ts`, `src/flow/FlowRouter.ts`, `src/crystal/CollectioCursor.ts`
+### 6. ~~CollectioCursor.onActumCompleta not called for collection acta~~ — resolved
+Added `CollectioCursor.findCollectioIdForActum(actumId)` which searches the in-memory `running` sets. Added `collectioRouter?` dep to `ExecutionWebhookDeps` (structural interface: `findCollectioIdForActum` + `onActumCompleta`). Webhook now checks for a collection owner and calls `onActumCompleta(collectioId, actumId, success/false)` on both COMPLETED and FAILED paths. `ring.collectioCursor` passed as `collectioRouter` in `index.ts`. Collection acta completing after restart are properly routed: `rehydrate()` rebuilds the `running` sets, so `findCollectioIdForActum` works correctly post-restart.
 
 ---
 
