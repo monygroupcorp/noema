@@ -7,7 +7,7 @@
  */
 
 const { BaseDB } = require('./BaseDB');
-const { getCachedClient } = require('./utils/queue');
+const { dbQueue, getCachedClient } = require('./utils/queue');
 
 const COLLECTION_NAME = 'upload_records';
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -38,13 +38,15 @@ class UploadRecordDB extends BaseDB {
    * - status + expiresAt: expiry cleanup + pending lookup
    */
   async ensureIndexes() {
-    const client = await getCachedClient();
-    const col = client.db(this.dbName).collection(this.collectionName);
-    await col.createIndexes([
-      { key: { uploadId: 1 }, unique: true, name: 'uploadId_unique_idx' },
-      { key: { partnerId: 1, createdAt: -1 }, name: 'partnerId_createdAt_idx', background: true },
-      { key: { status: 1, expiresAt: 1 }, name: 'status_expiresAt_idx', background: true },
-    ]);
+    await dbQueue.enqueue(async () => {
+      const client = await getCachedClient();
+      const col = client.db(this.dbName).collection(this.collectionName);
+      await col.createIndexes([
+        { key: { uploadId: 1 }, unique: true, name: 'uploadId_unique_idx' },
+        { key: { partnerId: 1, createdAt: -1 }, name: 'partnerId_createdAt_idx', background: true },
+        { key: { status: 1, expiresAt: 1 }, name: 'status_expiresAt_idx', background: true },
+      ]);
+    });
     this.logger.debug('[UploadRecordDB] Indexes ensured.');
   }
 
@@ -69,14 +71,15 @@ class UploadRecordDB extends BaseDB {
   }
 
   /**
-   * Find an upload record by uploadId. Returns any non-expired record
-   * (pending or used) so callers can inspect the current state.
+   * Find a pending upload record by uploadId.
+   * Only returns records that are still pending and not yet expired.
    * @param {string} uploadId
    * @returns {Promise<UploadRecord|null>}
    */
   async findUploadRecord(uploadId) {
     return this.findOne({
       uploadId,
+      status: 'pending',
       expiresAt: { $gt: new Date() },
     });
   }
@@ -103,9 +106,7 @@ class UploadRecordDB extends BaseDB {
    */
   async countRecentByPartner(partnerId, windowMs = 60 * 60 * 1000) {
     const since = new Date(Date.now() - windowMs);
-    const client = await require('./utils/queue').getCachedClient();
-    const col = client.db(this.dbName).collection(this.collectionName);
-    return col.countDocuments({ partnerId, createdAt: { $gte: since } });
+    return this.count({ partnerId, createdAt: { $gte: since } });
   }
 
   /**
@@ -116,9 +117,7 @@ class UploadRecordDB extends BaseDB {
    */
   async countRecentRunsByPartner(partnerId, windowMs = 60 * 60 * 1000) {
     const since = new Date(Date.now() - windowMs);
-    const client = await require('./utils/queue').getCachedClient();
-    const col = client.db(this.dbName).collection(this.collectionName);
-    return col.countDocuments({ partnerId, status: 'used', updatedAt: { $gte: since } });
+    return this.count({ partnerId, status: 'used', updatedAt: { $gte: since } });
   }
 }
 

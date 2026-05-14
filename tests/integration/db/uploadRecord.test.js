@@ -24,7 +24,7 @@ describe('UploadRecordDB', () => {
     assert.ok(result.insertedId);
   });
 
-  test('findUploadRecord retrieves by uploadId with pending status', async () => {
+  test('findUploadRecord retrieves only pending records', async () => {
     const uploadDb = new UploadRecordDB(console);
     const found = await uploadDb.findUploadRecord('test-upload-id-001');
     assert.equal(found.status, 'pending');
@@ -34,7 +34,8 @@ describe('UploadRecordDB', () => {
   test('markUsed sets status to used and links runId', async () => {
     const uploadDb = new UploadRecordDB(console);
     await uploadDb.markUsed('test-upload-id-001', 'run-id-xyz');
-    const found = await uploadDb.findUploadRecord('test-upload-id-001');
+    // Use findOne directly since record is no longer pending
+    const found = await uploadDb.findOne({ uploadId: 'test-upload-id-001' });
     assert.equal(found.status, 'used');
     assert.equal(found.usedInRunId, 'run-id-xyz');
   });
