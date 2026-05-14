@@ -127,10 +127,19 @@ test('findExpired ignores nascens actum with future expirat', async () => {
   assert.equal(results.length, 0)
 })
 
-test('findExpired ignores non-nascens actum even if past expirat', async () => {
+test('findExpired ignores completus and fractus actum even if past expirat', async () => {
   await acta.create(makeActum({ status: 'completus', expirat: new Date(Date.now() - 1000) }))
+  await acta.create(makeActum({ status: 'fractus', expirat: new Date(Date.now() - 1000) }))
   const results = await acta.findExpired()
   assert.equal(results.length, 0)
+})
+
+test('findExpired returns agens actum past expirat', async () => {
+  const stuck = makeActum({ status: 'agens', expirat: new Date(Date.now() - 1000) })
+  await acta.create(stuck)
+  const results = await acta.findExpired()
+  assert.equal(results.length, 1)
+  assert.equal(results[0].id, stuck.id)
 })
 
 test('findExpired returns multiple expired actum', async () => {

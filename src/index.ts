@@ -196,6 +196,13 @@ async function main(): Promise<void> {
   await ring.collectioCursor.rehydrate()
   console.log('CollectioCursor rehydrated')
 
+  // 3c. Recover expired acta — release locked signa from jobs that never completed
+  const expired = await ring.actorum.findExpired()
+  if (expired.length) {
+    console.log(`Recovering ${expired.length} expired acta`)
+    await Promise.all(expired.map(a => ring.completor.fail(a, 'Actum expired — pod never reported back')))
+  }
+
   // 4. Create Nexus, register hooks
   const nexus = new Nexus()
   nexus.on('execution_spend', hostCutHook)
