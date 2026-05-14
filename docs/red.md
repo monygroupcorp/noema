@@ -44,13 +44,9 @@ Added `CollectioCursor.findCollectioIdForActum(actumId)` which searches the in-m
 
 ---
 
-### 8. ~~SecurePodClient unreviewed~~ — reviewed, one bug fixed, two noted
+### 8. ~~SecurePodClient unreviewed~~ — reviewed, one bug fixed, two promoted to items 17 and 18
 
 **Fixed — pod leak on SSH timeout:** `_waitForSsh` and `sshFactory` previously ran before the `try/finally` block, so if SSH polling timed out (pod provisioned but never ready) the pod was never terminated. Restructured: both are now inside the `try/finally`; `_terminatePod` always runs on any failure. Test added.
-
-**Noted — no fetch timeouts:** `_provisionPod` and `_getSshInfo` use raw `fetchFn` with no AbortController timeout. If RunPod's REST API hangs, the entire background job hangs indefinitely. Low-urgency fix: add a `_fetchWithTimeout` helper wrapping AbortController.
-
-**Noted — webhook POST failure degrades to FAILED:** If the COMPLETED webhook POST throws, `jobSucceeded` remains false, the `finally` terminates the pod, and the outer `.catch()` fires a FAILED webhook — even though the job ran successfully. The actum ends up `fractus` with real output discarded. Acceptable for now (operator can investigate), but worth hardening with retry logic later.
 
 ---
 
@@ -94,6 +90,24 @@ Used by `CollectioCursor` for generative NFT trait selection. LCG seeding, colli
 **What's missing:** In `ActumInceptor.initiate()`, when `by` is `{ arcanumHash }` and the selected signa include an arcanum signum, the actum should be created with `nullifier` set to the arcanum's spend proof. This requires ZK proof verification logic (or a simpler hash-based proof for non-ZK mode).
 
 **Files:** `src/execution/ActumInceptor.ts`, `src/types/actum.ts`
+
+---
+
+### 17. SecurePodClient: no fetch timeouts on RunPod REST calls
+`_provisionPod` and `_getSshInfo` use raw `fetchFn` with no AbortController timeout. If RunPod's API hangs or is unreachable, the entire background job hangs indefinitely — no error, no webhook, no actum update. The pod exists in limbo until the server restarts or the actum expiry sweep fires.
+
+**Fix:** Add a `_fetchWithTimeout(url, init, ms)` helper that wraps `AbortController`. Use it in `_provisionPod` (suggest 30s) and `_getSshInfo` (suggest 10s per poll).
+
+**Files:** `src/crystal/SecurePodClient.ts`
+
+---
+
+### 18. SecurePodClient: COMPLETED webhook failure silently degrades to FAILED actum
+If the COMPLETED webhook POST to our server throws (network blip, server restart), `jobSucceeded` remains false, the `finally` terminates the pod, and the outer `.catch()` fires a FAILED webhook. The actum ends up `fractus` even though the job ran successfully and output is ready — but the pod is already gone so output is unrecoverable.
+
+**Fix:** Retry the COMPLETED webhook POST before allowing the error to propagate. Even 2–3 retries with short backoff would cover transient blips. Alternatively, store `remotePaths` before the POST and include them in the FAILED payload so operators can recover manually.
+
+**Files:** `src/crystal/SecurePodClient.ts`
 
 ---
 
