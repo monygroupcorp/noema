@@ -329,20 +329,42 @@ test('performance strategy always cold-starts — Praefectus never called', asyn
 
 test('economy strategy calls findWarm with { forEconomy: true }', async () => {
   let capturedOpts: { forEconomy?: boolean } | undefined
+  const fakeMateria: Materia = {
+    id: 'mat-eco', genus: 'runpod', externusId: 'pod-eco',
+    gpu: 'RTX4090', vramGb: 24, ramGb: 64, impetusPerSecond: 1n, status: 'idle',
+    imageRef: 'stationthis/flux-comfyui:v1', podPolicy: 'economy',
+  }
   const fakePraefectus = {
     findWarm: async (_imageRef: string, opts?: { forEconomy?: boolean }) => {
       capturedOpts = opts
-      return null
+      return fakeMateria
     },
   } as unknown as Praefectus
-  const coldClient = makeClient('cold-eco')
-  const cursor = new RunPodCursor(coldClient, makeCompile(), makeModorum(), makeActorum(), {
+  const warmClient = makeClient('warm-eco')
+  const cursor = new RunPodCursor(makeClient('cold'), makeCompile(), makeModorum(), makeActorum(), {
     ...BASE_CONFIG,
     praefectus: fakePraefectus,
+    warmFactory: () => warmClient,
     imageRefOf: () => 'stationthis/flux-comfyui:v1',
   })
   await cursor.run(makeActum({ computeStrategy: 'economy' }))
   assert.deepEqual(capturedOpts, { forEconomy: true }, 'findWarm must receive { forEconomy: true }')
+})
+
+test('economy strategy throws EconomyUnavailableError when no warm pod available', async () => {
+  const { EconomyUnavailableError } = await import('../../../src/crystal/RunPodCursor.js')
+  const fakePraefectus = {
+    findWarm: async () => null,
+  } as unknown as Praefectus
+  const cursor = new RunPodCursor(makeClient('cold'), makeCompile(), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    praefectus: fakePraefectus,
+    imageRefOf: () => 'stationthis/flux-comfyui:v1',
+  })
+  await assert.rejects(
+    () => cursor.run(makeActum({ computeStrategy: 'economy' })),
+    (err: Error) => err instanceof EconomyUnavailableError,
+  )
 })
 
 test('standard strategy (and absent) uses warm-then-cold behavior', async () => {

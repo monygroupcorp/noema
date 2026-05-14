@@ -90,8 +90,24 @@ export class RunPodCursor implements Cursor {
         const forEconomy = actum.computeStrategy === 'economy'
         const warm = await praefectus.findWarm(imageRef, forEconomy ? { forEconomy: true } : undefined)
         if (warm && warmFactory) return warmFactory(warm)
+
+        // Economy jobs must not silently fall back to a cold-start pod —
+        // the user elected to wait for warm capacity, not to be billed full price.
+        if (forEconomy) throw new EconomyUnavailableError(imageRef)
       }
     }
     return this.client
+  }
+}
+
+/**
+ * Thrown when an economy-strategy job finds no warm pod in the economy pool.
+ * Callers should hold the job and retry when a pod becomes available,
+ * rather than silently upgrading the user to a full cold-start.
+ */
+export class EconomyUnavailableError extends Error {
+  constructor(imageRef: string) {
+    super(`No economy-pool pod available for image '${imageRef}' — job not dispatched`)
+    this.name = 'EconomyUnavailableError'
   }
 }
