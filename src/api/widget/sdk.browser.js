@@ -547,6 +547,10 @@
     initWidget: function (opts) {
       opts = opts || {};
       var partnerId = opts.partnerId;
+      if (!partnerId) {
+        console.error('[StationThis] initWidget: partnerId is required');
+        return { destroy: function () {} };
+      }
       var el = typeof opts.el === 'string' ? document.querySelector(opts.el) : opts.el;
       if (!el) {
         console.error('[StationThis] initWidget: element not found', opts.el);
@@ -554,6 +558,7 @@
       }
 
       var BASE_URL = _scriptOrigin();
+      var iframeOrigin = _scriptOrigin();
       var src = BASE_URL + '/widget/partner?partnerId=' + encodeURIComponent(partnerId);
       if (opts.theme) src += '&theme=' + encodeURIComponent(opts.theme);
 
@@ -568,11 +573,12 @@
 
       function _closeLb() {
         if (_lb) { document.body.removeChild(_lb); _lb = null; }
-        if (iframe.contentWindow) iframe.contentWindow.postMessage({ type: 'GALLERY_LIGHTBOX_CLOSE' }, '*');
+        if (iframe.contentWindow) iframe.contentWindow.postMessage({ type: 'GALLERY_LIGHTBOX_CLOSE' }, iframeOrigin);
       }
 
       function _onMsg(e) {
         if (!e.data) return;
+        try { if (e.source !== iframe.contentWindow) return; } catch (_) {}
         if (e.data.type === 'GALLERY_LIGHTBOX') {
           if (_lb) _closeLb();
           var overlay = document.createElement('div');
