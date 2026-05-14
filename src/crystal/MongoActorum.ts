@@ -27,7 +27,7 @@ export class MongoActorum implements Actorum {
 
   async update(
     id: string,
-    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId'>>
+    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'deploymentHash'>>
   ): Promise<Actum> {
     const { impetus, ...rest } = patch
     const $set: Record<string, unknown> = { ...rest }
@@ -54,7 +54,7 @@ export class MongoActorum implements Actorum {
 
   async findExpired(): Promise<Actum[]> {
     const docs = await this.col
-      .find({ status: 'nascens', expirat: { $lte: new Date() } })
+      .find({ status: { $in: ['nascens', 'agens'] }, expirat: { $lte: new Date() } })
       .toArray()
     return docs.map(fromDoc)
   }

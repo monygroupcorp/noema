@@ -13,12 +13,8 @@ _(none outstanding)_
 
 ## 🟠 High — real gaps, not yet causing visible failures
 
-### 4. Expired actum recovery not verified
-`Actum.expirat` is set 15 min ahead at inception. The type comments describe a recovery loop: `Actorum.findExpired()` → `ActumCompletor.fail()` on each. But no such loop has been verified to exist or be called. Any actum whose pod silently dies mid-job is stuck `nascens` or `agens` forever, with its signa locked and unrecoverable.
-
-**Verify:** grep for `findExpired` across the codebase. If absent, implement it: `MongoActorum.findExpired()` returns acta where `status IN (nascens, agens) AND expirat < now`. A cron or startup sweep calls `fail()` on each, releasing locked signa.
-
-**Files:** `src/crystal/MongoActorum.ts`, `src/index.ts` (boot sweep or cron)
+### 4. ~~Expired actum recovery~~ — resolved
+`findExpired()` was implemented but only queried `nascens` (missed `agens`), and was never called. Fixed: queries both statuses, boot sweep in `index.ts` now runs on startup.
 
 ---
 
