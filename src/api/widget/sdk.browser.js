@@ -469,9 +469,70 @@
       iframe.setAttribute('allowtransparency', 'true');
       container.appendChild(iframe);
 
+      // ── Parent-page lightbox for gallery image clicks ─────────────────────
+      // The gallery iframe sends GALLERY_LIGHTBOX via postMessage; we create
+      // a full-page overlay here in the parent document where there are no
+      // iframe sizing constraints.
+      var _lb = null;
+
+      function _createLb(url, label) {
+        if (_lb) _lb.parentNode.removeChild(_lb);
+        var el = document.createElement('div');
+        el.style.cssText = [
+          'position:fixed;inset:0;z-index:2147483647',
+          'background:rgba(0,0,0,.93)',
+          'display:flex;flex-direction:column;align-items:center;justify-content:center',
+          'padding:20px',
+          'cursor:pointer',
+        ].join(';');
+
+        var img = document.createElement('img');
+        img.src = url;
+        img.style.cssText = 'max-width:min(900px,100%);max-height:85vh;border-radius:6px;object-fit:contain;box-shadow:0 12px 60px rgba(0,0,0,.8);cursor:default;';
+        img.addEventListener('click', function (e) { e.stopPropagation(); });
+
+        var close = document.createElement('button');
+        close.textContent = '✕';
+        close.style.cssText = 'position:absolute;top:14px;right:18px;font-size:22px;color:#aaa;background:none;border:none;cursor:pointer;line-height:1;padding:4px;';
+        close.addEventListener('click', _closeLb);
+
+        var meta = document.createElement('div');
+        meta.textContent = label || '';
+        meta.style.cssText = 'position:absolute;bottom:16px;left:0;right:0;text-align:center;font-size:11px;color:#666;pointer-events:none;font-family:system-ui,sans-serif;';
+
+        el.appendChild(img);
+        el.appendChild(close);
+        if (label) el.appendChild(meta);
+        el.addEventListener('click', _closeLb);
+        document.body.appendChild(el);
+        _lb = el;
+
+        document.addEventListener('keydown', _lbKeyDown);
+        // Tell iframe to suppress its local fallback overlay
+        iframe.contentWindow.postMessage({ type: 'GALLERY_LIGHTBOX_CLOSE' }, '*');
+      }
+
+      function _closeLb() {
+        if (_lb) { _lb.parentNode.removeChild(_lb); _lb = null; }
+        document.removeEventListener('keydown', _lbKeyDown);
+      }
+
+      function _lbKeyDown(e) { if (e.key === 'Escape') _closeLb(); }
+
+      function _onGalleryMsg(e) {
+        if (!e.data || e.data.type !== 'GALLERY_LIGHTBOX') return;
+        // Only handle messages from our iframe
+        try { if (e.source !== iframe.contentWindow) return; } catch (_) {}
+        _createLb(e.data.url, e.data.label);
+      }
+
+      global.addEventListener('message', _onGalleryMsg);
+
       return Promise.resolve({
         iframe:  iframe,
         destroy: function () {
+          global.removeEventListener('message', _onGalleryMsg);
+          _closeLb();
           if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
         },
       });

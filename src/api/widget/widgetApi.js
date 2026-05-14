@@ -247,12 +247,11 @@ function buildAppHtml(agentId, mode) {
     _isOwner = payload.tier === 'agent_owner';
     if (_isOwner) {
       setStatus('Owner');
-      _addOwnerToggle();
-      loadOwnerDashboard();
+      _addOwnerControls();
     } else {
       setStatus('Access granted');
-      loadWorkspace();
     }
+    loadWorkspace();
     _loadPointsChip();
   }
 
@@ -515,14 +514,25 @@ function buildAppHtml(agentId, mode) {
     poll();
   }
 
-  // ── Owner toggle button ───────────────────────────────────────────────────
-  function _addOwnerToggle() {
+  // ── Owner controls (link back to Noema + delegations button) ─────────────
+  function _addOwnerControls() {
+    // Noema management link
+    var link = document.createElement('a');
+    link.id = 'owner-noema-link';
+    link.textContent = 'Manage ↗';
+    link.href = BASE_URL;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.style.cssText = 'font-size:11px;color:#88a;text-decoration:none;padding:2px 8px;border:1px solid #2a2a3a;border-radius:4px;white-space:nowrap;flex-shrink:0;';
+    $status.appendChild(link);
+
+    // Delegations toggle
     var btn = document.createElement('button');
     btn.id = 'owner-toggle';
-    btn.textContent = 'Dashboard';
+    btn.textContent = 'Links';
     btn.addEventListener('click', function() {
       _showingDash = !_showingDash;
-      btn.textContent = _showingDash ? 'Workspace' : 'Dashboard';
+      btn.textContent = _showingDash ? 'Spells' : 'Links';
       if (_showingDash) { loadOwnerDashboard(); } else { loadWorkspace(); }
     });
     $status.appendChild(btn);
@@ -671,7 +681,13 @@ function buildAppHtml(agentId, mode) {
 
   function renderList(ws) {
     var spells = ws.spells || [];
-    if (!spells.length) { setContent('<p class="loading">No spells configured.</p>'); return; }
+    if (!spells.length) {
+      var msg = _isOwner
+        ? '<p class="loading">No spells in this workspace yet.<br><a href="' + BASE_URL + '" target="_blank" rel="noopener" style="color:#88a">Configure on Noema ↗</a></p>'
+        : '<p class="loading">No spells configured yet.</p>';
+      setContent(msg);
+      return;
+    }
     var html = spells.map(function(s) {
       var inputs = s.exposedInputs || [];
       var inputsHtml = inputs.map(function(inp) {
@@ -980,8 +996,12 @@ function buildGalleryHtml(collectionAddress) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
-  // Lightbox
+  // Lightbox — prefer postMessage to parent (works regardless of iframe size/overflow)
+  // Falls back to in-iframe overlay when opened standalone (no parent SDK)
   function openLb(url, label) {
+    // Always try postMessage first — parent SDK creates full-page overlay
+    window.parent.postMessage({ type: 'GALLERY_LIGHTBOX', url: url, label: label || '' }, '*');
+    // In-iframe fallback: also show local overlay (SDK listener will suppress if it handles it)
     lbImg.src = url;
     lbMeta.textContent = label || '';
     lb.classList.add('open');
@@ -991,6 +1011,8 @@ function buildGalleryHtml(collectionAddress) {
   document.getElementById('lb-close').addEventListener('click', closeLb);
   lb.addEventListener('click', function (e) { if (e.target === lb) closeLb(); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeLb(); });
+  // Listen for parent-initiated close
+  window.addEventListener('message', function (e) { if (e.data && e.data.type === 'GALLERY_LIGHTBOX_CLOSE') closeLb(); });
 
   // Hide action
   function doHide(castId, card) {
