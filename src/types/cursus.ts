@@ -36,7 +36,7 @@
 // =============================================================================
 
 import type { Modus } from './modus.js'
-import type { Actum } from './actum.js'
+import type { Actum, ComputeStrategy, GpuClass } from './actum.js'
 import type { Modo } from './modo.js'
 
 // ---------------------------------------------------------------------------
@@ -219,4 +219,15 @@ export interface Inceptio {
   by: { animaId: string } | { arcanumHash: string }
   /** FK → Modo. The session this actum runs within — optional */
   modoId?: string
+  /**
+   * Per-run compute strategy override. Absent = use the Modus default,
+   * which itself falls back to 'standard' if unset.
+   * Set from the advanced settings panel on the run button.
+   */
+  computeStrategy?: ComputeStrategy
+  /**
+   * Per-run GPU class override. Only meaningful when computeStrategy is 'performance'.
+   * Absent = use the Modus default.
+   */
+  gpuClass?: GpuClass
 }

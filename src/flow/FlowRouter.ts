@@ -132,17 +132,26 @@ export class FlowRouter {
    * Called by the Nexus execution_spend hook when an async Actum finishes.
    * If no context is waiting on this actumId, this is a no-op.
    */
+  /**
+   * Resume a flow that was waiting for an async actum to complete.
+   * Returns the identity (AuctorKey) of the flow context that consumed this
+   * actumId, or null if no context was waiting. Callers use the returned
+   * identity to fire post-completion side-effects (e.g. vestigium indexing)
+   * without storing identity on the Actum itself (privacy partition).
+   */
   async handleActumComplete(
     actumId: string,
     result: { kind: 'complete'; exitus: Record<string, unknown> } | { kind: 'failed'; error: string }
-  ): Promise<void> {
+  ): Promise<AuctorKey | null> {
     const { store, onStep, onResolution } = this.deps
 
     const ctx = store.findByPendingActumId(actumId)
-    if (!ctx) return
+    if (!ctx) return null
 
     const flow = this.flows.get(ctx.intent)
-    if (!flow || !hasCompletion(flow)) return
+    if (!flow || !hasCompletion(flow)) return null
+
+    const identity = ctx.identity
 
     const outcome = await flow.handleCompletion(ctx, result)
 
@@ -154,6 +163,8 @@ export class FlowRouter {
       store.delete(ctx.platform, ctx.platformUserId)
       onResolution(ctx, outcome)
     }
+
+    return identity
   }
 
   /** Clear the active flow for a user (abandon). */

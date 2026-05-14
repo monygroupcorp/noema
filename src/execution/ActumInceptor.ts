@@ -18,7 +18,7 @@ export class ActumInceptor {
 
   async initiate(params: Inceptio): Promise<Actum> {
     const { modorum, cursorum, signorum, acta } = this.deps
-    const { modusId, versio, aditus, by, modoId } = params
+    const { modusId, versio, aditus, by, modoId, computeStrategy: strategyOverride, gpuClass: gpuOverride } = params
 
     // 1. Resolve modus
     const modus = await modorum.find(modusId, versio)
@@ -53,6 +53,10 @@ export class ActumInceptor {
 
     // 7. Create the actum record — release locks if this fails (atomicity)
     try {
+      // Per-run override > Modus preference > absent (platform defaults at dispatch)
+      const computeStrategy = strategyOverride ?? modus.computeStrategy
+      const gpuClass = gpuOverride ?? modus.gpuClass
+
       return await acta.create({
         id: actumId,
         modusId: modus.id,
@@ -63,6 +67,8 @@ export class ActumInceptor {
         aditus,
         status: 'nascens',
         expirat: new Date(Date.now() + DEFAULT_EXPIRAT_MS),
+        ...(computeStrategy ? { computeStrategy } : {}),
+        ...(gpuClass ? { gpuClass } : {}),
       })
     } catch (err) {
       await signorum.release(selected)

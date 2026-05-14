@@ -3,6 +3,10 @@ import type { Actorum, ActumCompletor } from '../../types/cursus.js'
 import type { Exitus } from '../../types/cursus.js'
 import type { Nexus } from '../../types/nexus.js'
 import type { Signorum } from '../../types/significandi.js'
+import type { Vestigiorum } from '../../types/vestigium.js'
+import { createVestigiumFromActum } from '../../execution/hooks/vestigiumHook.js'
+
+type AuctorKey = { animaId: string } | { arcanumHash: string }
 
 export interface ExecutionWebhookDeps {
   actorum: Actorum
@@ -14,12 +18,14 @@ export interface ExecutionWebhookDeps {
     handleActumComplete(
       actumId: string,
       result: { kind: 'complete'; exitus: Record<string, unknown> } | { kind: 'failed'; error: string }
-    ): Promise<void>
+    ): Promise<AuctorKey | null>
   }
   /** Optional: Nexus event bus — fires execution_spend hooks after completion. */
   nexus?: Nexus
   /** Optional: ledger write target — bulk-inserts hook-produced signa. Required when nexus is set. */
   signorum?: Signorum
+  /** Optional: vestigium store — writes a generation trace after each completion. */
+  vestigiorum?: Vestigiorum
 }
 
 export interface WebhookRequest {
@@ -96,10 +102,13 @@ export async function handleExecutionWebhook(
         })
         if (newSigna.length) await deps.signorum.createMany(newSigna)
       }
-      await deps.flowRouter?.handleActumComplete(actum.id, {
+      const identity = await deps.flowRouter?.handleActumComplete(actum.id, {
         kind: 'complete',
         exitus: exitus.exitus as Record<string, unknown>,
       })
+      if (identity && deps.vestigiorum) {
+        createVestigiumFromActum(completed, identity, deps.vestigiorum).catch(() => {})
+      }
       return { status: 200, body: { success: true } }
     }
 
