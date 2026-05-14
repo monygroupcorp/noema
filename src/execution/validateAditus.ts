@@ -54,7 +54,7 @@ function coerce(key: string, type: string, value: unknown): unknown {
 
     case 'int': {
       const n = Number(value)
-      if (Number.isNaN(n)) {
+      if (!Number.isFinite(n) || String(value).trim() === '') {
         throw new Error(`aditus: field "${key}" must be an integer, got "${String(value)}"`)
       }
       return Math.round(n)
@@ -62,7 +62,7 @@ function coerce(key: string, type: string, value: unknown): unknown {
 
     case 'float': {
       const n = Number(value)
-      if (Number.isNaN(n)) {
+      if (!Number.isFinite(n) || String(value).trim() === '') {
         throw new Error(`aditus: field "${key}" must be a float, got "${String(value)}"`)
       }
       return n

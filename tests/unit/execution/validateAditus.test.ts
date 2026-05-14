@@ -93,6 +93,30 @@ test('validateAditus: throws for int when value is NaN', () => {
   )
 })
 
+test('validateAditus: throws for int when value is empty string', () => {
+  const s = schema({ seed: { type: 'int', required: true } })
+  assert.throws(
+    () => validateAditus(s, { seed: '' }),
+    { message: 'aditus: field "seed" must be an integer, got ""' }
+  )
+})
+
+test('validateAditus: throws for int when value is whitespace-only string', () => {
+  const s = schema({ seed: { type: 'int', required: true } })
+  assert.throws(
+    () => validateAditus(s, { seed: '   ' }),
+    { message: 'aditus: field "seed" must be an integer, got "   "' }
+  )
+})
+
+test('validateAditus: throws for int when value is Infinity', () => {
+  const s = schema({ seed: { type: 'int', required: true } })
+  assert.throws(
+    () => validateAditus(s, { seed: Infinity }),
+    /must be an integer/
+  )
+})
+
 // ---------------------------------------------------------------------------
 // 6. Type coercion — 'float'
 // ---------------------------------------------------------------------------
@@ -108,6 +132,22 @@ test('validateAditus: throws for float when value is NaN', () => {
   assert.throws(
     () => validateAditus(s, { strength: 'bad' }),
     { message: 'aditus: field "strength" must be a float, got "bad"' }
+  )
+})
+
+test('validateAditus: throws for float when value is empty string', () => {
+  const s = schema({ strength: { type: 'float', required: true } })
+  assert.throws(
+    () => validateAditus(s, { strength: '' }),
+    { message: 'aditus: field "strength" must be a float, got ""' }
+  )
+})
+
+test('validateAditus: throws for float when value is whitespace-only string', () => {
+  const s = schema({ strength: { type: 'float', required: true } })
+  assert.throws(
+    () => validateAditus(s, { strength: '   ' }),
+    { message: 'aditus: field "strength" must be a float, got "   "' }
   )
 })
 

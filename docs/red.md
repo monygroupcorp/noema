@@ -82,8 +82,14 @@ Partition holds structurally:
 ### 11. Discord allocutio absent
 Mirrors `TelegramAllocutio` (~1 day to implement). Blocking Discord users from the crystal.
 
-### 12. ValidateAditus coverage
-`src/execution/validateAditus.ts` validates aditus against Modus schema at cast time. Unknown how complete this is — missing or extra fields, type coercion, required vs optional handling.
+### 12. ~~ValidateAditus coverage~~ — reviewed, two bugs fixed
+
+Implementation and test coverage were both solid. Two coercion bugs found and fixed:
+
+- **Empty and whitespace-only strings for `int`/`float` silently became `0`**: `Number('')` and `Number('   ')` both return `0` in JavaScript, which is finite and not NaN, so the old `Number.isNaN` guard never fired. A form field left blank would coerce to `0` instead of raising a validation error. Fixed: guard is now `!Number.isFinite(n) || String(value).trim() === ''`.
+- **`Infinity` passed through `int` fields**: `Number.isNaN(Infinity)` is `false`, so `Math.round(Infinity)` returned `Infinity` as a valid integer. Fixed by the same `!Number.isFinite()` change.
+
+Seven new tests added covering empty string, whitespace-only string, and Infinity for both `int` and `float`.
 
 ### 13. Compiler correctness
 `src/crystal/Compiler.ts` converts `Modus + aditus → RunPod job payload`. The output feeds directly into ComfyUI. Unknown whether all field mappings, version pinning, and composed modus compilation are correct.
