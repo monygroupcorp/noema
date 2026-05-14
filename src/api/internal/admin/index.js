@@ -6,6 +6,7 @@
 
 const express = require('express');
 const createRevenueAdminApi = require('./revenueApi');
+const { createPartnersAdminApi } = require('./partnersAdminApi');
 
 /**
  * Create the admin API router
@@ -26,6 +27,13 @@ function createAdminApi(dependencies) {
   });
 
   router.use('/revenue', revenueRouter);
+
+  const partnersRouter = createPartnersAdminApi({
+    partnerDb: dependencies.db?.partner,
+    splitLedgerDb: dependencies.db?.splitLedger,
+    uploadRecordDb: dependencies.db?.uploadRecords,
+  });
+  router.use('/partners', partnersRouter);
 
   return router;
 }
