@@ -28,6 +28,8 @@ const createX402GenerationApi = require('./x402/x402GenerationApi');
 const { createX402Middleware } = require('../../platforms/web/middleware/x402');
 const { createMcpRouter } = require('./mcp');
 const { createAgentDelegationApi } = require('./agents/agentDelegationApi');
+const { createPresignApi } = require('./partner/presignApi');
+const { createPartnerRunApi } = require('./partner/partnerRunApi');
 
 
 /**
@@ -615,6 +617,30 @@ function initializeExternalApi(dependencies) {
   const agentDelegationRouter = createAgentDelegationApi(dependencies);
   externalApiRouter.use('/agents', agentDelegationRouter);
   logger.debug('External Agent Delegation API mounted at /agents.');
+
+  // Partner presign (no auth — domain-locked + rate limited)
+  const presignRouter = createPresignApi({
+    storageService: dependencies.storageService,
+    partnerDb: dependencies.db?.partner,
+    uploadRecordDb: dependencies.db?.uploadRecords,
+  });
+  externalApiRouter.use('/media', presignRouter);
+  logger.debug('External Partner Presign API mounted at /media. (Public, domain-locked + rate limited)');
+
+  // Partner spell run (x402 payment auth)
+  if (x402Middleware && x402ReceiverAddress) {
+    const partnerRunRouter = createPartnerRunApi({
+      spellsDb: dependencies.db?.spells,
+      partnerDb: dependencies.db?.partner,
+      uploadRecordDb: dependencies.db?.uploadRecords,
+      splitLedgerDb: dependencies.db?.splitLedger,
+      x402PaymentLogDb: dependencies.db?.data?.x402PaymentLog,
+      receiverAddress: x402ReceiverAddress,
+      network: x402Network,
+    });
+    externalApiRouter.use('/partner', x402Middleware, partnerRunRouter);
+    logger.debug('Partner run API mounted at /api/v1/partner (x402 protected)');
+  }
 
   logger.info('External API router initialized.');
   return externalApiRouter;
