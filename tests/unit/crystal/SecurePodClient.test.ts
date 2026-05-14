@@ -342,6 +342,113 @@ test('SSH status poll timeout terminates the pod', async () => {
   assert.ok(hang.terminateCalls.count >= 1, 'pod must be terminated when SSH polls hang')
 })
 
+// ── COMPLETED webhook retries ─────────────────────────────────────────────────
+
+function makeReadyPodFetch(podId: string, webhookHandler: (body: unknown) => Response) {
+  return async (url: string, opts: RequestInit = {}): Promise<Response> => {
+    const method = (opts.method ?? 'GET').toUpperCase()
+    if (method === 'POST' && url.includes('/pods') && !url.includes(podId)) {
+      return new Response(JSON.stringify({ id: podId }), { status: 200 })
+    }
+    if (method === 'GET' && url.includes(`/pods/${podId}`)) {
+      return new Response(JSON.stringify({
+        desiredStatus: 'RUNNING',
+        runtime: { ports: [
+          { ip: '1.2.3.4', privatePort: 22, publicPort: 12345, type: 'tcp' },
+          { ip: '1.2.3.4', privatePort: 8188, publicPort: 18188, type: 'http' },
+        ] },
+      }), { status: 200 })
+    }
+    if (method === 'DELETE') return new Response('{}', { status: 200 })
+    if (method === 'POST') return webhookHandler(JSON.parse((opts.body as string) ?? '{}'))
+    return new Response('Not found', { status: 404 })
+  }
+}
+
+test('COMPLETED webhook fires on second attempt after transient failure', async () => {
+  const podId = 'pod-retry-ok'
+  let webhookCalls = 0
+  const captured: unknown[] = []
+
+  const fetch = makeReadyPodFetch(podId, (body) => {
+    webhookCalls++
+    if ((body as { status?: string }).status === 'COMPLETED' && webhookCalls === 1) {
+      return new Response('Service unavailable', { status: 503 })
+    }
+    captured.push(body)
+    return new Response('{}', { status: 200 })
+  })
+
+  const client = new SecurePodClient(
+    makeConfig({ webhookRetries: 2, webhookRetryDelayMs: 0 }),
+    () => makeSshTransport(),
+    fetch,
+  )
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 100))
+
+  const completed = captured.find(p => (p as { status?: string }).status === 'COMPLETED')
+  assert.ok(completed, 'COMPLETED webhook should fire after retry')
+  assert.equal(webhookCalls, 2, 'should have attempted the webhook twice')
+})
+
+test('fires FAILED webhook when all COMPLETED webhook retries are exhausted', async () => {
+  const podId = 'pod-retry-fail'
+  const captured: unknown[] = []
+
+  const fetch = makeReadyPodFetch(podId, (body) => {
+    const status = (body as { status?: string }).status
+    if (status === 'COMPLETED') return new Response('Server error', { status: 500 })
+    captured.push(body)
+    return new Response('{}', { status: 200 })
+  })
+
+  const client = new SecurePodClient(
+    makeConfig({ webhookRetries: 1, webhookRetryDelayMs: 0 }),
+    () => makeSshTransport(),
+    fetch,
+  )
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 200))
+
+  const failed = captured.find(p => (p as { status?: string }).status === 'FAILED')
+  assert.ok(failed, 'FAILED webhook should fire after all COMPLETED retries are exhausted')
+})
+
+test('pod is terminated even when all COMPLETED webhook retries fail', async () => {
+  const podId = 'pod-retry-term'
+  let terminateCalls = 0
+
+  const fetch = async (url: string, opts: RequestInit = {}): Promise<Response> => {
+    const method = (opts.method ?? 'GET').toUpperCase()
+    if (method === 'POST' && url.includes('/pods') && !url.includes(podId)) {
+      return new Response(JSON.stringify({ id: podId }), { status: 200 })
+    }
+    if (method === 'GET' && url.includes(`/pods/${podId}`)) {
+      return new Response(JSON.stringify({
+        desiredStatus: 'RUNNING',
+        runtime: { ports: [
+          { ip: '1.2.3.4', privatePort: 22, publicPort: 12345, type: 'tcp' },
+          { ip: '1.2.3.4', privatePort: 8188, publicPort: 18188, type: 'http' },
+        ] },
+      }), { status: 200 })
+    }
+    if (method === 'DELETE' && url.includes(podId)) { terminateCalls++; return new Response('{}', { status: 200 }) }
+    // All webhook POSTs fail
+    if (method === 'POST') return new Response('err', { status: 500 })
+    return new Response('Not found', { status: 404 })
+  }
+
+  const client = new SecurePodClient(
+    makeConfig({ webhookRetries: 1, webhookRetryDelayMs: 0 }),
+    () => makeSshTransport(),
+    fetch,
+  )
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 200))
+  assert.ok(terminateCalls >= 1, 'pod must be terminated even when webhook retries all fail')
+})
+
 test('keepWarm: terminates pod on job failure, does NOT register Materia', async () => {
   const brokenSsh = makeSshTransport({
     async exec(_cmd: string) { throw new Error('SSH connection refused') },

@@ -20,6 +20,10 @@ export interface SecurePodConfig {
   comfyReadyTimeoutMs?: number   // default: 5 min
   comfyPollIntervalMs?: number   // default: 2000
   jobTimeoutMs?: number          // default: 15 min
+  /** How many times to retry the COMPLETED webhook POST on failure (default: 3). */
+  webhookRetries?: number        // default: 3
+  /** Base delay between webhook retries in ms; doubles each attempt (default: 1000). */
+  webhookRetryDelayMs?: number   // default: 1000
   /** When true: register pod as idle Materia instead of terminating after a successful job. */
   keepWarm?: boolean
   /** Cost rate for the Materia record (default 0n). */
@@ -101,6 +105,27 @@ export class SecurePodClient implements RunPodClient {
   }
 
   // ── private ──────────────────────────────────────────────────────────────
+
+  private async _postWebhook(url: string, body: unknown): Promise<void> {
+    const retries = this.config.webhookRetries ?? 3
+    const baseDelayMs = this.config.webhookRetryDelayMs ?? 1000
+    let lastError: unknown
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      if (attempt > 0) await sleep(baseDelayMs * (2 ** (attempt - 1)))
+      try {
+        const res = await this.fetchFn(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (res.ok) return
+        lastError = new Error(`webhook POST returned ${res.status}`)
+      } catch (err) {
+        lastError = err
+      }
+    }
+    throw lastError
+  }
 
   private async _fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
     const controller = new AbortController()
@@ -200,15 +225,11 @@ export class SecurePodClient implements RunPodClient {
       const executionTime = Date.now() - startMs
 
       if (webhook) {
-        await this.fetchFn(webhook, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: podId,
-            status: 'COMPLETED',
-            output: remotePaths.map(p => ({ path: p })),
-            executionTime,
-          }),
+        await this._postWebhook(webhook, {
+          id: podId,
+          status: 'COMPLETED',
+          output: remotePaths.map(p => ({ path: p })),
+          executionTime,
         })
       }
       jobSucceeded = true
