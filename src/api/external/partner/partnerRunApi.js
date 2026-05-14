@@ -121,15 +121,23 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
         return sendPaymentRequired(res, paymentRequired);
       }
 
-      // Validate payment covers cost
-      const validation = await x402ExecutionService.validatePaymentForExecution(x402, amount);
+      // Validate payment covers cost (validatePaymentForExecution expects USD, not atomic units)
+      const requiredCostUsd = x402ExecutionService.usdcAtomicToUsd(amount);
+      const validation = await x402ExecutionService.validatePaymentForExecution(x402, requiredCostUsd);
       if (!validation.valid) {
         logger.warn('[partnerRun] Payment validation failed', { error: validation.errorCode, slug });
         return res.status(402).json({ error: validation.errorCode, message: 'Payment invalid' });
       }
 
-      const { signatureHash } = validation;
       const runId = uuidv4();
+
+      // Record payment as verified before settlement
+      const record = await x402ExecutionService.recordPaymentVerified(x402, {
+        toolId: slug,
+        spellId: spell._id ? String(spell._id) : undefined,
+        costUsd: requiredCostUsd,
+      });
+      const signatureHash = record.signatureHash;
 
       // Mark upload as used
       if (uploadId) {
@@ -152,8 +160,12 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
         network: x402.network,
       });
 
-      // Settle payment
-      await x402ExecutionService.settlePayment(x402, signatureHash);
+      // Settle payment and check result before marking credited
+      const settlement = await x402ExecutionService.settlePayment(x402, signatureHash);
+      if (!settlement.success) {
+        logger.error('[partnerRun] Settlement failed', { error: settlement.error, runId, slug });
+        return res.status(202).json({ runId, status: 'queued', spellSlug: slug, settlementPending: true });
+      }
       await splitLedgerDb.markCredited(runId);
 
       logger.info('[partnerRun] Spell queued', { runId, slug, partnerId });
