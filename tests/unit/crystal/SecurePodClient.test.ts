@@ -249,6 +249,19 @@ test('keepWarm: registered Materia has externusId matching the pod ID', async ()
   assert.equal((store.createCalls[0] as { externusId: string }).externusId, 'pod-warm-123')
 })
 
+test('background job terminates pod when SSH readiness times out', async () => {
+  // sshReadyAfterCalls=9999 — pod never becomes SSH-ready within the short timeout
+  const mock = makePodApiMock('pod-ssh-timeout', 9999)
+  const client = new SecurePodClient(
+    makeConfig({ sshReadyTimeoutMs: 50, sshPollIntervalMs: 10 }),
+    () => makeSshTransport(),
+    mock.podApi,
+  )
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+  assert.ok(mock.terminateCalls() >= 1, 'pod must be terminated even when SSH never becomes ready')
+})
+
 test('keepWarm: terminates pod on job failure, does NOT register Materia', async () => {
   const brokenSsh = makeSshTransport({
     async exec(_cmd: string) { throw new Error('SSH connection refused') },
