@@ -30,7 +30,8 @@ jobs:
         with:
           context: .
           push: true
-          no-cache: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.sha }}
+          cache-from: type=gha,scope=staging-${{ github.sha }}
+          cache-to: type=gha,scope=staging-${{ github.sha }},mode=max
