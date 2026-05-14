@@ -1,7 +1,7 @@
 # Red — Critical Gaps in the Crystal
 
 Working document. Items are removed when resolved, not marked done.
-Last updated: 2026-05-13
+Last updated: 2026-05-14
 
 ---
 
@@ -24,7 +24,9 @@ Audited all six hooks. Math correct. Three bugs found and fixed:
 - **`royalty_fired` never emitted**: `platformSkimHook` was registered but the `royalty_fired` event was never fired. Fixed: after `execution_spend` emit, if any royalty signa returned, we emit `royalty_fired` with the summed valor; both batches land in one `createMany` call.
 - **Self-referral not guarded**: `referralSplitHook` would pay a referral to a user who referred themselves. Fixed: added `if (referrerAnimaId === signum.animaId) return []`.
 
-Royalty math: 20% host cut + 10% spell royalty + 5% model royalty = 35% of impetus distributed. Platform takes 5% of royalty total (~1.75% of execution). sessionSpend and referralSplit are correct.
+Royalty math: 20% host cut + 10% spell royalty + 5% model royalty = 35% of impetus distributed. Platform takes 5% of baseValor (full execution impetus) when royalties fire — not 5% of the royalty pool. sessionSpend and referralSplit are correct.
+
+**Test suite note:** The fake nexus mock that papered over this (returned signa regardless of payload) has been replaced. Ledger tests now use real Nexus + real hooks + MemorySignorum + MemoryModorum + MemoryActorum. MemoryActorum and MemoryModorum were also fixed to match their Mongo counterparts (agens in findExpired, update() method).
 
 ---
 
