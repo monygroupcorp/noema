@@ -9,6 +9,7 @@
  */
 
 const { BaseDB } = require('./BaseDB');
+const { dbQueue, getCachedClient } = require('./utils/queue');
 
 const COLLECTION_NAME = 'split_ledger';
 
@@ -41,14 +42,15 @@ class SplitLedgerDB extends BaseDB {
    * - status: background settlement queries
    */
   async ensureIndexes() {
-    const { getCachedClient } = require('./utils/queue');
-    const client = await getCachedClient();
-    const col = client.db(this.dbName).collection(this.collectionName);
-    await col.createIndexes([
-      { key: { runId: 1 }, unique: true, name: 'runId_unique_idx' },
-      { key: { partnerId: 1, status: 1, createdAt: -1 }, name: 'partnerId_status_createdAt_idx', background: true },
-      { key: { status: 1 }, name: 'status_idx', background: true },
-    ]);
+    await dbQueue.enqueue(async () => {
+      const client = await getCachedClient();
+      const col = client.db(this.dbName).collection(this.collectionName);
+      await col.createIndexes([
+        { key: { runId: 1 }, unique: true, name: 'runId_unique_idx' },
+        { key: { partnerId: 1, status: 1, createdAt: -1 }, name: 'partnerId_status_createdAt_idx', background: true },
+        { key: { status: 1 }, name: 'status_idx', background: true },
+      ]);
+    });
     this.logger.debug('[SplitLedgerDB] Indexes ensured.');
   }
 
