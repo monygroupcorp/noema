@@ -7,7 +7,11 @@ const PartnerDB = require('../../../src/core/services/db/partnerDb');
 describe('PartnerDB', () => {
   let db;
   before(async () => { ({ db } = await getTestDb()); });
-  after(async () => { await closeTestDb(); });
+  after(async () => {
+    const partnerDb = new PartnerDB(console);
+    await partnerDb.deleteOne({ partnerId: 'pk_test_abc123' });
+    await closeTestDb();
+  });
 
   test('createPartner inserts and findPartnerById retrieves', async () => {
     const partnerDb = new PartnerDB(console);
