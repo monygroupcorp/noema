@@ -109,12 +109,14 @@ Both timeout values are injectable via `SecurePodConfig` for test control. Three
 
 ---
 
-### 18. SecurePodClient: COMPLETED webhook failure silently degrades to FAILED actum
-If the COMPLETED webhook POST to our server throws (network blip, server restart), `jobSucceeded` remains false, the `finally` terminates the pod, and the outer `.catch()` fires a FAILED webhook. The actum ends up `fractus` even though the job ran successfully and output is ready — but the pod is already gone so output is unrecoverable.
+### 18. ~~SecurePodClient: COMPLETED webhook failure silently degrades to FAILED actum~~ — resolved
+Added `_postWebhook(url, body)` helper with configurable retry + exponential backoff. Replaces the bare `fetchFn` call for the COMPLETED webhook POST. Retries both on thrown errors (network blip, connection refused) and non-2xx responses. After exhausting retries the error propagates as before, which fires the FAILED webhook from the outer `.catch()`.
 
-**Fix:** Retry the COMPLETED webhook POST before allowing the error to propagate. Even 2–3 retries with short backoff would cover transient blips. Alternatively, store `remotePaths` before the POST and include them in the FAILED payload so operators can recover manually.
+Config knobs: `webhookRetries` (default 3) and `webhookRetryDelayMs` (base delay, doubles each attempt, default 1000ms). Both are injectable for test control.
 
-**Files:** `src/crystal/SecurePodClient.ts`
+The FAILED webhook in `submit().catch()` remains a single best-effort call — no retries needed there since the job genuinely failed.
+
+Three new tests: retry succeeds on second attempt; FAILED fires after all retries exhausted; pod terminated even when all retries fail.
 
 ---
 
