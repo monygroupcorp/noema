@@ -164,16 +164,19 @@ export class SecurePodClient implements RunPodClient {
 
   private async _runBackground(podId: string, input: unknown, webhook: string | undefined): Promise<void> {
     const startMs = Date.now()
-    const sshInfo = await this._waitForSsh(podId)
-    const ssh = this.sshFactory(sshInfo)
-    const jobTimeoutMs = this.config.jobTimeoutMs ?? 15 * 60 * 1000
+    let ssh: SshTransportLike | null = null
+    let sshInfo: SshInfo | null = null
     let jobSucceeded = false
 
     try {
+      // Both inside try so _terminatePod always runs on any early failure
+      sshInfo = await this._waitForSsh(podId)
+      ssh = this.sshFactory(sshInfo)
+
       await this._waitForComfyApi(ssh)
 
       const promptId = await this._submitWorkflow(ssh, input)
-      const remotePaths = await this._awaitCompletion(ssh, promptId, jobTimeoutMs)
+      const remotePaths = await this._awaitCompletion(ssh, promptId, this.config.jobTimeoutMs ?? 15 * 60 * 1000)
 
       const executionTime = Date.now() - startMs
 
@@ -191,8 +194,8 @@ export class SecurePodClient implements RunPodClient {
       }
       jobSucceeded = true
     } finally {
-      await ssh.close().catch(() => {})
-      if (jobSucceeded && this.config.keepWarm && this.materiae) {
+      await ssh?.close().catch(() => {})
+      if (jobSucceeded && this.config.keepWarm && this.materiae && sshInfo) {
         await this.materiae.create({
           genus: 'runpod',
           externusId: podId,

@@ -44,10 +44,13 @@ Added `CollectioCursor.findCollectioIdForActum(actumId)` which searches the in-m
 
 ---
 
-### 8. SecurePodClient unreviewed (299 lines)
-The real pod provisioning path — provisions a RunPod SECURE pod, SSH bootstraps it, and orchestrates the full job lifecycle. Largest file in the project. We have not read it. Unknown whether it handles edge cases (provision timeout, SSH failure, partial webhook delivery).
+### 8. ~~SecurePodClient unreviewed~~ — reviewed, one bug fixed, two noted
 
-**Files:** `src/crystal/SecurePodClient.ts`
+**Fixed — pod leak on SSH timeout:** `_waitForSsh` and `sshFactory` previously ran before the `try/finally` block, so if SSH polling timed out (pod provisioned but never ready) the pod was never terminated. Restructured: both are now inside the `try/finally`; `_terminatePod` always runs on any failure. Test added.
+
+**Noted — no fetch timeouts:** `_provisionPod` and `_getSshInfo` use raw `fetchFn` with no AbortController timeout. If RunPod's REST API hangs, the entire background job hangs indefinitely. Low-urgency fix: add a `_fetchWithTimeout` helper wrapping AbortController.
+
+**Noted — webhook POST failure degrades to FAILED:** If the COMPLETED webhook POST throws, `jobSucceeded` remains false, the `finally` terminates the pod, and the outer `.catch()` fires a FAILED webhook — even though the job ran successfully. The actum ends up `fractus` with real output discarded. Acceptable for now (operator can investigate), but worth hardening with retry logic later.
 
 ---
 
