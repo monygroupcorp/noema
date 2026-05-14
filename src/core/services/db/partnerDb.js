@@ -54,6 +54,10 @@ class PartnerDB extends BaseDB {
     return this.findOne({ partnerId, status: 'active' });
   }
 
+  async findPartnerByIdAny(partnerId) {
+    return this.findOne({ partnerId });
+  }
+
   async findPartnerByDomain(domain) {
     return this.findOne({ allowedDomains: domain, status: 'active' });
   }
