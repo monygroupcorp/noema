@@ -537,6 +537,70 @@
         },
       });
     },
+
+    /**
+     * Mounts a partner widget iframe inside `el`.
+     *
+     * @param {{ partnerId: string, el: string|Element, theme?: string }} opts
+     * @returns {{ destroy: () => void }}
+     */
+    initWidget: function (opts) {
+      opts = opts || {};
+      var partnerId = opts.partnerId;
+      var el = typeof opts.el === 'string' ? document.querySelector(opts.el) : opts.el;
+      if (!el) {
+        console.error('[StationThis] initWidget: element not found', opts.el);
+        return { destroy: function () {} };
+      }
+
+      var BASE_URL = _scriptOrigin();
+      var src = BASE_URL + '/widget/partner?partnerId=' + encodeURIComponent(partnerId);
+      if (opts.theme) src += '&theme=' + encodeURIComponent(opts.theme);
+
+      var iframe = document.createElement('iframe');
+      iframe.src = src;
+      iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
+      iframe.allow = 'clipboard-write';
+      el.appendChild(iframe);
+
+      // Lightbox handler — same pattern as initGallery
+      var _lb = null;
+
+      function _closeLb() {
+        if (_lb) { document.body.removeChild(_lb); _lb = null; }
+        if (iframe.contentWindow) iframe.contentWindow.postMessage({ type: 'GALLERY_LIGHTBOX_CLOSE' }, '*');
+      }
+
+      function _onMsg(e) {
+        if (!e.data) return;
+        if (e.data.type === 'GALLERY_LIGHTBOX') {
+          if (_lb) _closeLb();
+          var overlay = document.createElement('div');
+          overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.93);display:flex;align-items:center;justify-content:center;flex-direction:column;cursor:zoom-out;';
+          var img = document.createElement('img');
+          img.src = e.data.url;
+          img.style.cssText = 'max-width:90vw;max-height:85vh;object-fit:contain;border-radius:4px;';
+          var meta = document.createElement('p');
+          meta.textContent = e.data.label || '';
+          meta.style.cssText = 'color:#fff;margin-top:12px;font-size:14px;opacity:.7;';
+          overlay.appendChild(img);
+          overlay.appendChild(meta);
+          overlay.addEventListener('click', _closeLb);
+          document.body.appendChild(overlay);
+          _lb = overlay;
+        }
+      }
+
+      global.addEventListener('message', _onMsg);
+
+      return {
+        destroy: function () {
+          global.removeEventListener('message', _onMsg);
+          if (_lb) _closeLb();
+          if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+        },
+      };
+    },
   };
 
   global.StationThis = StationThis;
