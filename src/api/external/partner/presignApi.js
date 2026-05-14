@@ -13,6 +13,8 @@ const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB (enforced by R2, we just d
 const ipLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
   keyGenerator: (req) => req.ip,
   message: { error: 'TOO_MANY_REQUESTS', message: 'Upload rate limit exceeded.' },
 });
@@ -21,7 +23,9 @@ const ipLimiter = rateLimit({
 const partnerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 50,
-  keyGenerator: (req) => req.body?.partnerId || 'unknown',
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.body?.partnerId || req.ip,
   message: { error: 'TOO_MANY_REQUESTS', message: 'Partner upload rate limit exceeded.' },
 });
 
@@ -29,43 +33,55 @@ function createPresignApi({ storageService, partnerDb, uploadRecordDb }) {
   const router = express.Router();
 
   router.post('/presign', ipLimiter, partnerLimiter, async (req, res) => {
-    const { partnerId, filename, mimeType } = req.body;
+    try {
+      const { partnerId, filename, mimeType } = req.body;
 
-    if (!partnerId || !filename || !mimeType) {
-      return res.status(400).json({ error: 'BAD_REQUEST', message: 'partnerId, filename, mimeType required' });
+      if (!partnerId || !filename || !mimeType) {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: 'partnerId, filename, mimeType required' });
+      }
+
+      if (!ALLOWED_MIME_TYPES.includes(mimeType)) {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: 'Only image files are allowed' });
+      }
+
+      if (typeof filename !== 'string' || filename.length > 200) {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: 'filename must be a string under 200 characters' });
+      }
+      if (/[/\\]/.test(filename)) {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: 'filename must not contain path separators' });
+      }
+
+      // Validate partner + domain
+      const origin = req.get('Origin') || '';
+      const domain = origin.replace(/^https?:\/\//, '').replace(/:\d+$/, '').replace(/\/.*$/, '');
+
+      const partner = await partnerDb.findPartnerById(partnerId);
+      if (!partner) {
+        return res.status(404).json({ error: 'NOT_FOUND', message: 'Partner not found' });
+      }
+      if (!partner.allowedDomains.includes(domain)) {
+        logger.warn('[presign] Domain mismatch', { partnerId, domain, allowed: partner.allowedDomains });
+        return res.status(403).json({ error: 'FORBIDDEN', message: 'Domain not registered for this partner' });
+      }
+
+      // Generate presigned URL
+      const { signedUrl, permanentUrl } = await storageService.generateSignedUploadUrl(
+        `partner_${partnerId}`,
+        filename,
+        mimeType,
+        'uploads'
+      );
+
+      // Earmark the upload
+      const uploadId = uuidv4();
+      const ipHash = crypto.createHash('sha256').update(req.ip || '').digest('hex');
+      await uploadRecordDb.createUploadRecord({ uploadId, partnerId, originDomain: domain, ipHash });
+
+      return res.json({ uploadId, presignedUrl: signedUrl, permanentUrl, maxBytes: MAX_FILE_SIZE_BYTES });
+    } catch (err) {
+      logger.error('[presign] internal error', { error: err.message, partnerId: req.body?.partnerId, filename: req.body?.filename });
+      return res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Failed to generate upload URL' });
     }
-
-    if (!ALLOWED_MIME_TYPES.includes(mimeType)) {
-      return res.status(400).json({ error: 'BAD_REQUEST', message: 'Only image files are allowed' });
-    }
-
-    // Validate partner + domain
-    const origin = req.get('Origin') || '';
-    const domain = origin.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-
-    const partner = await partnerDb.findPartnerById(partnerId);
-    if (!partner) {
-      return res.status(404).json({ error: 'NOT_FOUND', message: 'Partner not found' });
-    }
-    if (!partner.allowedDomains.includes(domain)) {
-      logger.warn('[presign] Domain mismatch', { partnerId, domain, allowed: partner.allowedDomains });
-      return res.status(403).json({ error: 'FORBIDDEN', message: 'Domain not registered for this partner' });
-    }
-
-    // Generate presigned URL
-    const { signedUrl, permanentUrl } = await storageService.generateSignedUploadUrl(
-      `partner_${partnerId}`,
-      filename,
-      mimeType,
-      'uploads'
-    );
-
-    // Earmark the upload
-    const uploadId = uuidv4();
-    const ipHash = crypto.createHash('sha256').update(req.ip || '').digest('hex');
-    await uploadRecordDb.createUploadRecord({ uploadId, partnerId, originDomain: domain, ipHash });
-
-    return res.json({ uploadId, presignedUrl: signedUrl, permanentUrl, maxBytes: MAX_FILE_SIZE_BYTES });
   });
 
   return router;
