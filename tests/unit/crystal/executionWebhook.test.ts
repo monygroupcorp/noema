@@ -5,6 +5,8 @@ import { handleExecutionWebhook } from '../../../src/api/webhooks/executionWebho
 import type { ExecutionWebhookDeps, WebhookRequest } from '../../../src/api/webhooks/executionWebhook.js'
 import type { Actum } from '../../../src/types/actum.js'
 import type { Exitus } from '../../../src/types/cursus.js'
+import type { Nexus, SignumEvent, SignumEventType } from '../../../src/types/nexus.js'
+import type { Signum, Signorum } from '../../../src/types/significandi.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -356,4 +358,167 @@ test('flowRouter is optional — works fine when absent', async () => {
 
   assert.equal(result.status, 200)
   assert.equal(result.body.success, true)
+})
+
+// ── Nexus tests ───────────────────────────────────────────────────────────────
+
+interface NexusMock {
+  emitted: Array<SignumEvent<SignumEventType>>
+  returnSigna: Array<Omit<Signum, 'id' | 'natum' | 'status'>>
+  emit<T extends SignumEventType>(event: SignumEvent<T>): Promise<Array<Omit<Signum, 'id' | 'natum' | 'status'>>>
+  on<T extends SignumEventType>(type: T, hook: unknown): void
+}
+
+function makeNexus(returnSigna: Array<Omit<Signum, 'id' | 'natum' | 'status'>> = []): NexusMock {
+  const mock: NexusMock = {
+    emitted: [],
+    returnSigna,
+    async emit(event) {
+      mock.emitted.push(event as SignumEvent<SignumEventType>)
+      return returnSigna
+    },
+    on() {},
+  }
+  return mock
+}
+
+interface SignorumMock {
+  created: Array<Array<Omit<Signum, 'id' | 'natum' | 'status'>>>
+  createMany(signa: Array<Omit<Signum, 'id' | 'natum' | 'status'>>): Promise<Signum[]>
+}
+
+function makeSignorum(): SignorumMock {
+  const mock: SignorumMock = {
+    created: [],
+    async createMany(signa) {
+      mock.created.push(signa)
+      return signa.map((s, i) => ({ ...s, id: `signum-${i}`, natum: new Date(), status: 'valid' as const }))
+    },
+  }
+  return mock
+}
+
+// 17. Nexus emit is called with correct actum and impetus on COMPLETED
+test('nexus.emit is called with correct actum and impetus on COMPLETED', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const nexus = makeNexus()
+  const signorum = makeSignorum()
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    nexus: nexus as unknown as Nexus,
+    signorum: signorum as unknown as Signorum,
+  }
+  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 3000 }
+  const result = await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(nexus.emitted.length, 1)
+  const event = nexus.emitted[0]
+  assert.equal(event.type, 'execution_spend')
+  const payload = event.payload as { actum: Actum; impetus: bigint }
+  assert.equal(payload.actum.id, 'actum-test-1')
+  assert.equal(payload.actum.status, 'completus')
+  assert.equal(payload.impetus, 3n)
+})
+
+// 18. Returned signa are written via signorum.createMany()
+test('signa returned by nexus.emit are written via signorum.createMany', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const hookSigna: Array<Omit<Signum, 'id' | 'natum' | 'status'>> = [
+    { forma: 'reward', valor: 50n, auctor: 'hook:hostCut', animaId: 'anima-host' },
+    { forma: 'reward', valor: 10n, auctor: 'hook:spellRoyalty', animaId: 'anima-author' },
+  ]
+  const nexus = makeNexus(hookSigna)
+  const signorum = makeSignorum()
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    nexus: nexus as unknown as Nexus,
+    signorum: signorum as unknown as Signorum,
+  }
+  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 2000 }
+  await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(signorum.created.length, 1)
+  assert.equal(signorum.created[0].length, 2)
+  assert.equal(signorum.created[0][0].auctor, 'hook:hostCut')
+  assert.equal(signorum.created[0][1].auctor, 'hook:spellRoyalty')
+})
+
+// 19. signorum.createMany is NOT called when nexus returns no signa
+test('signorum.createMany is not called when nexus returns empty signa', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const nexus = makeNexus([]) // empty — no hooks produced signa
+  const signorum = makeSignorum()
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    nexus: nexus as unknown as Nexus,
+    signorum: signorum as unknown as Signorum,
+  }
+  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [] }
+  await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(signorum.created.length, 0)
+})
+
+// 20. Nexus is NOT called on FAILED
+test('nexus.emit is NOT called on FAILED', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const nexus = makeNexus()
+  const signorum = makeSignorum()
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    nexus: nexus as unknown as Nexus,
+    signorum: signorum as unknown as Signorum,
+  }
+  const body = { id: 'job-abc-123', status: 'FAILED', error: 'OOM' }
+  const result = await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(nexus.emitted.length, 0)
+  assert.equal(signorum.created.length, 0)
+})
+
+// 21. Nexus is NOT called on CANCELLED
+test('nexus.emit is NOT called on CANCELLED', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const nexus = makeNexus()
+  const signorum = makeSignorum()
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    nexus: nexus as unknown as Nexus,
+    signorum: signorum as unknown as Signorum,
+  }
+  const body = { id: 'job-abc-123', status: 'CANCELLED' }
+  const result = await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(nexus.emitted.length, 0)
+  assert.equal(signorum.created.length, 0)
+})
+
+// 22. Missing nexus dep is a no-op (backward compat)
+test('missing nexus dep is a no-op — request still succeeds', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    // no nexus, no signorum
+  }
+  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 1000 }
+  const result = await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(result.body.success, true)
+  assert.equal(completor.completed.length, 1)
 })

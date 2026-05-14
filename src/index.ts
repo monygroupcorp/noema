@@ -28,6 +28,7 @@ import { MongoIntella } from './crystal/MongoIntella.js'
 import { Compiler } from './crystal/Compiler.js'
 import { WorkflowTemplateRegistry } from './crystal/WorkflowTemplateRegistry.js'
 import { CANONICAL_INTELLAE } from './crystal/seeds/intellae.js'
+import { ensureIndexes } from './crystal/ensureIndexes.js'
 import type { Essentia } from './types/essendi.js'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -124,6 +125,8 @@ async function main(): Promise<void> {
   const mongo = new MongoClient(MONGODB_URI as string)
   await mongo.connect()
   console.log('MongoDB connected')
+  await ensureIndexes(mongo.db(DB_NAME))
+  console.log('Indexes ensured')
 
   // 2. Build OpenAI client if key is present
   let openaiClient: ContainerConfig['openaiClient'] | undefined
@@ -188,6 +191,10 @@ async function main(): Promise<void> {
     } : {}),
     ...(openaiClient ? { openaiClient } : {}),
   })
+
+  // 3b. Rehydrate in-flight collections from DB (recovery after restart)
+  await ring.collectioCursor.rehydrate()
+  console.log('CollectioCursor rehydrated')
 
   // 4. Create Nexus, register hooks
   const nexus = new Nexus()
@@ -271,6 +278,8 @@ async function main(): Promise<void> {
     completor: ring.completor,
     secret: RUNPOD_WEBHOOK_SECRET,
     flowRouter: router,
+    nexus,
+    signorum: ring.signorum,
   }))
 
   app.listen(PORT, () => console.log(`Listening on :${PORT}`))

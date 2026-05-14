@@ -147,6 +147,7 @@ export interface ContainerConfig {
    * Absent: index() and search() will throw; create/findById/forIdentity still work.
    */
   embed?: (text: string) => Promise<number[]>
+  embedImage?: (imageUrl: string) => Promise<number[]>
   /** OpenAI-compatible client — absent: OpenAI tools will throw at reserve() */
   openaiClient?: {
     chat(params: unknown): Promise<{ content: string; usage?: { total_tokens?: number } }>
@@ -178,7 +179,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const personae = new MongoPersona(personaeCol)
 
   const vestigiaCol: Collection = db.collection(config.vestigiaCollection ?? 'vestigia')
-  const vestigiorum = new MongoVestigiorum(vestigiaCol, config.embed)
+  const vestigiorum = new MongoVestigiorum(vestigiaCol, config.embed, config.embedImage)
 
   const modosCol: Collection = db.collection(config.modosCollection ?? 'modos')
   const modos = new MongoModo(modosCol)

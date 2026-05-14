@@ -115,6 +115,7 @@ export type Collectiones = Collectio[]
 export interface Collectionum {
   find(id: string): Promise<Collectio | null>
   list(filter?: Partial<Pick<Collectio, 'status'>>): Promise<Collectiones>
+  listByStatus(status: CollectioStatus): Promise<Collectiones>
   create(collectio: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'impetusTotal'>): Promise<Collectio>
   update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'impetusTotal' | 'completum'>>): Promise<Collectio>
 }

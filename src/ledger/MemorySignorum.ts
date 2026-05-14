@@ -50,6 +50,10 @@ export class MemorySignorum implements Signorum {
     }
   }
 
+  async createMany(signa: Array<Omit<Signum, 'id' | 'natum' | 'status'>>): Promise<Signum[]> {
+    return Promise.all(signa.map(s => this.issue(s)))
+  }
+
   async settle(signaIds: string[], actualImpetus: bigint, actumId: string): Promise<void> {
     const signa = signaIds.map(id => {
       const s = this.store.get(id)

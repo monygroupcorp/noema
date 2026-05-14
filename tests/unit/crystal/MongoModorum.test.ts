@@ -171,3 +171,48 @@ test('list with no filter and empty collection returns empty array', async () =>
   const result = await modorum.list()
   assert.deepEqual(result, [])
 })
+
+// ── update ────────────────────────────────────────────────────────────────────
+
+test('update sets computeStrategy on a modus', async () => {
+  await modorum.register(makeModus())
+  const updated = await modorum.update('test.modus', { computeStrategy: 'performance' })
+  assert.equal(updated.computeStrategy, 'performance')
+})
+
+test('update sets gpuClass on a modus', async () => {
+  await modorum.register(makeModus())
+  const updated = await modorum.update('test.modus', { gpuClass: 'ultra' })
+  assert.equal(updated.gpuClass, 'ultra')
+})
+
+test('update sets podPolicy on a modus', async () => {
+  await modorum.register(makeModus())
+  const updated = await modorum.update('test.modus', { podPolicy: 'private' })
+  assert.equal(updated.podPolicy, 'private')
+})
+
+test('update persists all three preferences together', async () => {
+  await modorum.register(makeModus())
+  const updated = await modorum.update('test.modus', {
+    computeStrategy: 'economy',
+    gpuClass: 'standard',
+    podPolicy: 'economy',
+  })
+  assert.equal(updated.computeStrategy, 'economy')
+  assert.equal(updated.gpuClass, 'standard')
+  assert.equal(updated.podPolicy, 'economy')
+})
+
+test('update throws for unknown modus id', async () => {
+  await assert.rejects(
+    () => modorum.update('ghost.modus', { computeStrategy: 'standard' }),
+    /not found/i,
+  )
+})
+
+test('update does not change contentHash', async () => {
+  await modorum.register(makeModus({ contentHash: 'hash-locked' }))
+  const updated = await modorum.update('test.modus', { computeStrategy: 'performance' })
+  assert.equal(updated.contentHash, 'hash-locked')
+})

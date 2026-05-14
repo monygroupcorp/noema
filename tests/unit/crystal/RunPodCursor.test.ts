@@ -304,6 +304,83 @@ test('run() skips Praefectus when imageRefOf returns undefined', async () => {
   assert.equal(warmCalls.length, 0, 'warm client not called when imageRefOf returns undefined')
 })
 
+// ── run() — computeStrategy routing ──────────────────────────────────────────
+
+test('performance strategy always cold-starts — Praefectus never called', async () => {
+  const coldClient = makeClient('cold-perf')
+  let praefectusCallCount = 0
+  const fakePraefectus = {
+    findWarm: async (_imageRef: string, _opts?: { forEconomy?: boolean }) => {
+      praefectusCallCount++
+      return makeMateria()
+    },
+  } as unknown as Praefectus
+  const cursor = new RunPodCursor(coldClient, makeCompile(), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    praefectus: fakePraefectus,
+    warmFactory: () => ({ async submit() { return { id: 'warm-should-not-be-used' } } }),
+    imageRefOf: () => 'stationthis/flux-comfyui:v1',
+  })
+  const result = await cursor.run(makeActum({ computeStrategy: 'performance' }))
+  assert.equal(praefectusCallCount, 0, 'Praefectus must not be consulted for performance strategy')
+  assert.equal(coldClient.calls.length, 1, 'cold client must be used')
+  assert.equal((result as { kind: 'async'; externusJobId: string }).externusJobId, 'cold-perf')
+})
+
+test('economy strategy calls findWarm with { forEconomy: true }', async () => {
+  let capturedOpts: { forEconomy?: boolean } | undefined
+  const fakePraefectus = {
+    findWarm: async (_imageRef: string, opts?: { forEconomy?: boolean }) => {
+      capturedOpts = opts
+      return null
+    },
+  } as unknown as Praefectus
+  const coldClient = makeClient('cold-eco')
+  const cursor = new RunPodCursor(coldClient, makeCompile(), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    praefectus: fakePraefectus,
+    imageRefOf: () => 'stationthis/flux-comfyui:v1',
+  })
+  await cursor.run(makeActum({ computeStrategy: 'economy' }))
+  assert.deepEqual(capturedOpts, { forEconomy: true }, 'findWarm must receive { forEconomy: true }')
+})
+
+test('standard strategy (and absent) uses warm-then-cold behavior', async () => {
+  // standard: finds warm pod → uses it
+  const warmCalls: unknown[] = []
+  const warmClient: RunPodClient = {
+    async submit(params) { warmCalls.push(params); return { id: 'warm-std' } },
+  }
+  const coldClientStd = makeClient('cold-std')
+  const cursorStd = new RunPodCursor(coldClientStd, makeCompile(), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    praefectus: makePraefectus(makeMateria()),
+    warmFactory: () => warmClient,
+    imageRefOf: () => 'stationthis/flux-comfyui:v1',
+  })
+  const resultStd = await cursorStd.run(makeActum({ computeStrategy: 'standard' }))
+  assert.equal((resultStd as { kind: 'async'; externusJobId: string }).externusJobId, 'warm-std')
+  assert.equal(warmCalls.length, 1, 'warm client should be used for standard')
+  assert.equal(coldClientStd.calls.length, 0, 'cold client not used when warm available')
+
+  // absent computeStrategy: same warm-then-cold path
+  const coldClientAbsent = makeClient('cold-absent')
+  const absentWarmCalls: unknown[] = []
+  const absentWarmClient: RunPodClient = {
+    async submit(params) { absentWarmCalls.push(params); return { id: 'warm-absent' } },
+  }
+  const cursorAbsent = new RunPodCursor(coldClientAbsent, makeCompile(), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    praefectus: makePraefectus(makeMateria()),
+    warmFactory: () => absentWarmClient,
+    imageRefOf: () => 'stationthis/flux-comfyui:v1',
+  })
+  const resultAbsent = await cursorAbsent.run(makeActum())  // no computeStrategy
+  assert.equal((resultAbsent as { kind: 'async'; externusJobId: string }).externusJobId, 'warm-absent')
+  assert.equal(absentWarmCalls.length, 1, 'warm client should be used when strategy absent')
+  assert.equal(coldClientAbsent.calls.length, 0, 'cold client not used when warm available and strategy absent')
+})
+
 // ── run() — deployment storage ────────────────────────────────────────────────
 
 test('run() stamps deploymentHash on actum after submission', async () => {

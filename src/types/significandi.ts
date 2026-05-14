@@ -146,4 +146,10 @@ export interface Signorum {
    * This replaces the naive spend(all) + lose(delta) pattern.
    */
   settle(signaIds: string[], actualImpetus: bigint, actumId: string): Promise<void>
+  /**
+   * Bulk-insert signa produced by Nexus hooks.
+   * Each entry gets a generated id, status: 'valid', and natum: new Date().
+   * Returns the fully-hydrated Signum records in insertion order.
+   */
+  createMany(signa: Array<Omit<Signum, 'id' | 'natum' | 'status'>>): Promise<Signum[]>
 }

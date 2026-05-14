@@ -47,8 +47,13 @@ function makeCollectionum(initial?: Collectio): CollectionumStub {
     async find(id: string) {
       return store.get(id) ?? null
     },
-    async list() {
-      return [...store.values()]
+    async list(filter?: Partial<Collectio>) {
+      const all = [...store.values()]
+      if (!filter?.status) return all
+      return all.filter(c => c.status === filter.status)
+    },
+    async listByStatus(status: Collectio['status']) {
+      return [...store.values()].filter(c => c.status === status)
     },
     async create(input) {
       const c = { ...input, id: 'col-auto', natum: new Date(), acta: [], completae: 0, fractae: 0, impetusTotal: 0n } as Collectio
@@ -631,6 +636,175 @@ test('reviewEnabled: pendingReview does not block concurrentia — dispatches 2 
     4,
     'should dispatch 2 more pieces because running.size=0 < concurrentia=2, pendingReview does not count',
   )
+})
+
+// ── Tests 23–26: rehydrate() ──────────────────────────────────────────────────
+
+test('rehydrate() restores state for agens collections', async () => {
+  // Simulate a collection that was agens at restart time
+  const collectio = makeCollectio({
+    id: 'col-restart',
+    status: 'agens',
+    acta: ['actum-r0', 'actum-r1'],
+    numerus: 4,
+    concurrentia: 2,
+  })
+  const collectiones = makeCollectionum(collectio)
+
+  // Seed actum store with two in-flight acta
+  const actorum = makeActorum()
+  const a0: Actum = {
+    id: 'actum-r0',
+    modusId: 'modus-x',
+    modusVersiono: '1',
+    aditus: {},
+    status: 'nascens',
+    impetus: 0n,
+    signaConsumed: [],
+    inceptum: new Date(),
+    expirat: new Date(Date.now() + 60_000),
+  }
+  const a1: Actum = {
+    id: 'actum-r1',
+    modusId: 'modus-x',
+    modusVersiono: '1',
+    aditus: {},
+    status: 'agens',
+    impetus: 0n,
+    signaConsumed: [],
+    inceptum: new Date(),
+    expirat: new Date(Date.now() + 60_000),
+  }
+  actorum.store.set('actum-r0', a0)
+  actorum.store.set('actum-r1', a1)
+
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(
+    inceptor as unknown as ActumInceptor,
+    collectiones,
+    actorum,
+    {},
+  )
+
+  await cursor.rehydrate()
+
+  // After rehydrate, onActumCompleta should work for the restored state
+  // Signal that actum-r0 completed — cursor should dispatch next piece
+  await cursor.onActumCompleta('col-restart', 'actum-r0', true)
+  assert.equal(inceptor.calls.length, 1, 'should dispatch next piece when a running actum completes after rehydrate')
+})
+
+test('rehydrate() correctly identifies running vs pending-review acta', async () => {
+  const collectio = makeCollectio({
+    id: 'col-review',
+    status: 'agens',
+    acta: ['actum-q0', 'actum-q1', 'actum-q2'],
+    numerus: 5,
+    concurrentia: 3,
+  })
+  const collectiones = makeCollectionum(collectio)
+
+  const actorum = makeActorum()
+  // actum-q0: completed, pending review
+  actorum.store.set('actum-q0', {
+    id: 'actum-q0', modusId: 'm', modusVersiono: '1', aditus: {},
+    status: 'completus', impetus: 0n, signaConsumed: [],
+    inceptum: new Date(), expirat: new Date(Date.now() + 60_000),
+    exitus: { reviewOutcome: 'pending' },
+  } as Actum)
+  // actum-q1: in-flight
+  actorum.store.set('actum-q1', {
+    id: 'actum-q1', modusId: 'm', modusVersiono: '1', aditus: {},
+    status: 'nascens', impetus: 0n, signaConsumed: [],
+    inceptum: new Date(), expirat: new Date(Date.now() + 60_000),
+  } as Actum)
+  // actum-q2: previously rejected (revive)
+  actorum.store.set('actum-q2', {
+    id: 'actum-q2', modusId: 'm', modusVersiono: '1', aditus: {},
+    status: 'fractus', impetus: 0n, signaConsumed: [],
+    inceptum: new Date(), expirat: new Date(Date.now() + 60_000),
+    exitus: { reviewOutcome: 'rejected' },
+  } as Actum)
+
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(
+    inceptor as unknown as ActumInceptor,
+    collectiones,
+    actorum,
+    { reviewEnabled: true },
+  )
+
+  await cursor.rehydrate()
+
+  // actum-q1 is running — complete it; since reviewEnabled, it goes to pendingReview
+  // and a new piece should be dispatched (running.size 0 < concurrentia 3)
+  await cursor.onActumCompleta('col-review', 'actum-q1', true)
+  assert.ok(inceptor.calls.length >= 1, 'should dispatch next piece after running actum completes')
+
+  // actum-q0 was pending review — approving it should increment completae
+  await cursor.approveActum('col-review', 'actum-q0')
+  const completaeUpdate = collectiones.updates.find(u => u.patch.completae !== undefined)
+  assert.ok(completaeUpdate, 'approving a rehydrated pending-review actum should increment completae')
+})
+
+test('rehydrate() is a no-op when no agens collections exist', async () => {
+  const collectio = makeCollectio({ id: 'col-nascens', status: 'nascens' })
+  const collectiones = makeCollectionum(collectio)
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(
+    inceptor as unknown as ActumInceptor,
+    collectiones,
+    inceptor.actorum,
+    {},
+  )
+
+  await cursor.rehydrate()
+
+  // No state loaded — onActumCompleta for an unknown collection is a no-op
+  await cursor.onActumCompleta('col-nascens', 'actum-0', true)
+  assert.equal(inceptor.calls.length, 0, 'no dispatches after rehydrate with no agens collections')
+  assert.equal(collectiones.updates.length, 0, 'no updates after rehydrate with no agens collections')
+})
+
+test('after rehydrate, onActumCompleta() dispatches the next piece correctly', async () => {
+  // Simulate restart mid-collection: 2 of 5 pieces already dispatched
+  // both still running (nascens), nextIndex reconstructed as acta.length = 2
+  const collectio = makeCollectio({
+    id: 'col-mid',
+    status: 'agens',
+    acta: ['actum-m0', 'actum-m1'],
+    numerus: 5,
+    concurrentia: 2,
+  })
+  const collectiones = makeCollectionum(collectio)
+
+  const actorum = makeActorum()
+  actorum.store.set('actum-m0', {
+    id: 'actum-m0', modusId: 'm', modusVersiono: '1', aditus: {},
+    status: 'nascens', impetus: 0n, signaConsumed: [],
+    inceptum: new Date(), expirat: new Date(Date.now() + 60_000),
+  } as Actum)
+  actorum.store.set('actum-m1', {
+    id: 'actum-m1', modusId: 'm', modusVersiono: '1', aditus: {},
+    status: 'nascens', impetus: 0n, signaConsumed: [],
+    inceptum: new Date(), expirat: new Date(Date.now() + 60_000),
+  } as Actum)
+
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(
+    inceptor as unknown as ActumInceptor,
+    collectiones,
+    actorum,
+    {},
+  )
+
+  await cursor.rehydrate()
+
+  // Complete actum-m0 — should dispatch piece at index 2 (not 0 or 1)
+  await cursor.onActumCompleta('col-mid', 'actum-m0', true)
+  assert.equal(inceptor.calls.length, 1, 'should dispatch exactly 1 new piece')
+  const dispatched = inceptor.calls[0]
+  assert.equal(dispatched.aditus._pieceIndex, 2, 'should dispatch piece at nextIndex=2, not restart from 0')
 })
 
 // ── Test 22: Idempotency on onActumCompleta ───────────────────────────────────

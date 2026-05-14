@@ -1,6 +1,6 @@
 import { Collection } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
-import type { Collectio, Collectiones, Collectionum } from '../types/collectio.js'
+import type { Collectio, Collectiones, CollectioStatus, Collectionum } from '../types/collectio.js'
 
 function toDoc(c: Partial<Collectio>): Record<string, unknown> {
   const { impetusTotal, ...rest } = c
@@ -31,6 +31,10 @@ export class MongoCollectio implements Collectionum {
   async list(filter?: Partial<Pick<Collectio, 'status'>>): Promise<Collectiones> {
     const docs = await this.col.find(filter ?? {}).toArray()
     return docs.map(d => fromDoc(d as Record<string, unknown>))
+  }
+
+  async listByStatus(status: CollectioStatus): Promise<Collectiones> {
+    return this.list({ status })
   }
 
   async update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'impetusTotal' | 'completum'>>): Promise<Collectio> {

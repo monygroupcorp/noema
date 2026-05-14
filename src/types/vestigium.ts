@@ -5,38 +5,28 @@
 // "Vestigium" = footprint, track, trace (Latin, neuter 2nd declension).
 // Vestigia sunt — the footprints remain.
 //
-// A Vestigium is created from a completed Actum. It records the prompt that
-// was used (aditus), a textual summary of the output, a pre-computed embedding
-// vector, and social metadata (ratings). This is what the RAG layer indexes.
+// A Vestigium is created from a completed Actum. It records the prompt used,
+// the negative prompt (if any), a textual summary of the output, the models
+// that were used, and up to three pre-computed embedding vectors for semantic
+// search across three distinct user recall paths:
 //
-// The embedding is stored as a plain number[] on the document — not in any
-// proprietary format. The implementation (Atlas Vector Search, pgvector,
-// Qdrant, Weaviate, Pinecone) is behind the Vestigiorum interface.
-// Migrating stores = exporting documents (vectors included) + swapping the
-// implementation. No re-embedding needed.
+//   embeddingPromptum  — "I remember what I typed"
+//   embeddingImago     — "I remember what it looked like"
+//   embeddingIntella   — "I remember which model I used"
+//
+// Each embedding is populated independently and asynchronously after creation.
+// A vestigium with no embeddings is valid and searchable by metadata.
 //
 // PRIVACY PARTITION:
 //   auctorKey mirrors the `by` pattern on Inceptio and Mandatum:
-//     { animaId }     → identified path (imperfect current use)
+//     { animaId }     → identified path
 //     { arcanumHash } → anonymous path (ZK / perfect private use)
-//   Never both. Never neither. Enforced at write time by the implementation.
+//   Never both. Never neither.
 //
-// INDEXING:
-//   create()  → vestigium written, embedding absent (async indexing pending)
-//   index()   → embedding computed and written
-//   search()  → embed(quaerendum) → ANN search with metadata pre-filter
-//
-// HOOKUP TO EXECUTION RAIL:
-//   ActumCompletor.complete() returns the completed Actum.
-//   The execution orchestrator (RunPodAdapter, API handler) calls
-//   vestigiorum.create() with the output — the execution rail itself is
-//   unaware of vestigia.
-//
-// SESSION SUMMARIES:
-//   After a Modo terminates, a session summary vestigium can be created
-//   (genus: 'text', actumId absent, fonteIds pointing to the output vestigia).
-//   This enables "last Tuesday I was working on portraits"-style RAG over
-//   session history using the same search() interface.
+// ATLAS VECTOR SEARCH:
+//   Three separate Atlas Search indexes are required on noemaplane.vestigia,
+//   one per embedding field. Each has filter paths for visibilitas and
+//   auctorKey.animaId. See docs/atlas-indexes.md (or Atlas UI) for definitions.
 // =============================================================================
 
 export type VestigiumVisibility = 'privata' | 'communis' | 'publica'
@@ -53,23 +43,12 @@ export type ImpressioKind = 'amor' | 'risus' | 'maeror'
 
 /**
  * Impressio — the reaction record attached to a Vestigium.
- *
- * Two separate concerns:
- *   auctorImpressio — the author's own reaction, used for personal RAG
- *                     filtering ("search only the images I loved")
- *   amor/risus/maeror counts — anonymous community reactions, no rater IDs
- *                     stored on the Vestigium. The implementation tracks rater
- *                     identity internally (as hashed keys) to prevent double-
- *                     rating; the public surface exposes only counts.
  */
 export interface Impressio {
   /** Author's own reaction — one choice, changeable, used for personal filtering */
   auctorImpressio?: ImpressioKind
-  /** Community love count */
   amor: number
-  /** Community laughter count */
   risus: number
-  /** Community grief count */
   maeror: number
 }
 
@@ -77,145 +56,136 @@ export interface Impressio {
  * Vestigium — the indexed trace of a completed actum output.
  *
  * Created after ActumCompletor.complete(). One vestigium per notable output.
- * The embedding is populated asynchronously via Vestigiorum.index().
+ * Embeddings are populated asynchronously via index*() methods.
  */
 export interface Vestigium {
   id: string
 
-  /**
-   * FK → Actum. The execution that produced this output.
-   * Absent for synthetic vestigia (session summaries, manual entries).
-   */
+  /** FK → Actum. The execution that produced this output. */
   actumId?: string
   /** FK → Modus. What tool produced this output. */
   modusId: string
-  /**
-   * The exact modus version at run time — locked in, like actum.modusVersiono.
-   * Allows filtering "outputs from FLUX v2 specifically."
-   */
+  /** Exact modus version at run time — locked in. */
   modusVersiono?: string
   /** FK → Modo. The session this ran within — if any. */
   modoId?: string
 
   /**
    * Who owns this vestigium for retrieval purposes.
-   * Mirrors the `by` pattern on Inceptio and Mandatum.
    * { animaId }     → identified path
    * { arcanumHash } → anonymous path (ZK bearer)
-   * Never both. Never neither.
    */
   auctorKey: { animaId: string } | { arcanumHash: string }
 
   /**
-   * The textual prompt used — extracted from actum.aditus by the orchestrator.
+   * The text prompt used at cast time.
    * "promptum" = what is brought forth (past participle of promere).
-   * This field, concatenated with summarium, is what gets embedded.
-   * For multi-modal tools without a text prompt: a short description of the
-   * input (e.g. "style transfer: photo → impressionist painting").
    */
   promptum: string
 
   /**
-   * Textual summary of the output.
-   * For text outputs: the text itself, truncated to a sensible limit.
-   * For image/video/audio: a generated caption or description produced by
-   * the cursor at completion time (or by a subsequent captioning pass).
-   * "summarium" = summary in Latin.
+   * The negative prompt, if the modus accepts one.
+   * "negativum" = the negated / excluded direction.
+   * Combined with promptum for embeddingPromptum.
+   */
+  negativum?: string
+
+  /**
+   * Textual summary of the output — a caption or description.
+   * For text outputs: the text itself (truncated).
+   * For image/video/audio: a generated caption.
    */
   summarium: string
 
-  /** What kind of output was produced */
-  genus: VestigiumGenus
-
-  visibilitas: VestigiumVisibility
-
-  /** Social reactions from author and community */
-  impressio: Impressio
+  /**
+   * URL of the primary output image (or video frame thumbnail).
+   * Used by indexImago() to fetch and embed the visual content.
+   * "imago" = image, likeness in Latin.
+   */
+  imagoUrl?: string
 
   /**
-   * User-assigned keyword tags — for hybrid text + vector search.
-   * "signacula" = small marks/seals in Latin (diminutive of signum).
-   * E.g. ['portrait', 'forest', 'soft-light']
+   * FK[] → Intella. The model IDs resolved and used for this execution.
+   * Stored for exact-match filtering ("show everything from FLUX Schnell").
+   * Also embedded as text via indexIntella() for fuzzy model recall.
    */
+  intellaIds?: string[]
+
+  /**
+   * Pre-rendered textual description of the models used — assembled by the
+   * hook from Intella names and descriptions at creation time.
+   * Used by indexIntella() to embed without needing a registry lookup.
+   */
+  intellaDescription?: string
+
+  genus: VestigiumGenus
+  visibilitas: VestigiumVisibility
+  impressio: Impressio
+
+  /** User-assigned keyword tags for hybrid search. */
   signacula?: string[]
 
   /**
-   * Pre-computed embedding vector for semantic search.
-   * Stored as a plain number[] — portable to any vector store.
-   * Absent until Vestigiorum.index() is called (async after creation).
-   *
-   * Dimensionality is determined by the configured embedding model:
-   *   1536 for text-embedding-3-large
-   *    768 for text-embedding-3-small
-   *   1024 for e5-large-v2, etc.
-   *
-   * Migration note: since this is a plain array on the document, exporting
-   * and re-importing to another vector store requires no re-embedding.
+   * Embedding of promptum + negativum.
+   * Search: "I remember what I typed."
+   * Atlas Search index: embeddingPromptum (cosine, dim = model-dependent).
    */
-  embedding?: number[]
+  embeddingPromptum?: number[]
 
   /**
-   * FK[] → Vestigium. Source vestigia this was derived from.
-   * Present on session summary vestigia — points to the individual output
-   * vestigia whose content was collapsed into this summary.
+   * Embedding of the output image / visual content.
+   * Search: "I remember what it looked like."
+   * Atlas Search index: embeddingImago (cosine, dim = model-dependent).
    */
+  embeddingImago?: number[]
+
+  /**
+   * Embedding of intellaDescription — the textual description of models used.
+   * Search: "I remember which model I used."
+   * Atlas Search index: embeddingIntella (cosine, dim = model-dependent).
+   */
+  embeddingIntella?: number[]
+
+  /** FK[] → Vestigium. Source vestigia for session summary vestigia. */
   fonteIds?: string[]
 
-  /** "natum" = born — when this vestigium was created */
   natum: Date
-  /** "mutatum" = changed — when tags, visibility, or impressio were last updated */
   mutatum: Date
 }
 
-/** "Vestigia" — nominative plural of vestigium */
 export type Vestigia = Vestigium[]
 
 // ---------------------------------------------------------------------------
 // Query and result types
 // ---------------------------------------------------------------------------
 
-/**
- * VestigiumQuery — the search parameters for Vestigiorum.search().
- * Used directly by agents and by the /rag/search endpoint.
- */
+export type VestigiumSearchDimension = 'promptum' | 'imago' | 'intella'
+
 export interface VestigiumQuery {
-  /** Text to embed and search against. "what to seek" */
+  /** Text to embed and search against. */
   quaerendum: string
   /**
-   * Scope search to one identity's vestigia.
-   * Absent = search across public (visibilitas: 'publica') vestigia only.
-   * Present = search this identity's private + communis + publica vestigia.
+   * Which embedding dimension to search.
+   * promptum → embeddingPromptum (default — "I remember what I typed")
+   * imago    → embeddingImago    ("I remember what it looked like")
+   * intella  → embeddingIntella  ("I remember which model I used")
    */
+  per?: VestigiumSearchDimension
+  /** Scope to one identity. Absent = public-only search. */
   auctorKey?: { animaId: string } | { arcanumHash: string }
-  /**
-   * Filter by visibility. Defaults:
-   *   with auctorKey → ['privata', 'communis', 'publica']
-   *   without        → ['publica']
-   */
   visibilitas?: VestigiumVisibility[]
-  /**
-   * Only return results where the author reacted with one of these impressions.
-   * E.g. ['amor'] → personal gallery of loved outputs.
-   * Absent = no impression filter.
-   */
+  /** Only return results where the author reacted with one of these. */
   auctorImpressio?: ImpressioKind[]
-  /** Restrict to outputs from a specific modus */
   modusId?: string
-  /** Restrict to outputs of a specific genus */
   genus?: VestigiumGenus
-  /** Maximum results to return — default 20 */
+  /** Filter by specific intella model IDs (exact match, any-of). */
+  intellaIds?: string[]
   limit?: number
-  /** Minimum cosine similarity (0–1) — default 0.7 */
   minSimilaritas?: number
 }
 
-/**
- * VestigiumResult — one ranked result from a search.
- * "similaritas" = similarity in Latin.
- */
 export interface VestigiumResult {
   vestigium: Vestigium
-  /** Cosine similarity score from the vector search (0–1) */
   similaritas: number
 }
 
@@ -223,84 +193,54 @@ export interface VestigiumResult {
 // Vestigiorum — the trace store
 // ---------------------------------------------------------------------------
 
-/**
- * Vestigiorum — genitive plural "of the traces."
- * The store and search surface for all vestigia.
- *
- * Implementations:
- *   MemoryVestigiorum         — in-process map, for tests
- *   MongoAtlasVestigiorum     — MongoDB Atlas Vector Search ($vectorSearch + $filter)
- *   PgVectorVestigiorum       — pgvector (<-> operator with WHERE)
- *   QdrantVestigiorum         — Qdrant filtered ANN
- *
- * All implementations satisfy the same contract. Migrating from Atlas to
- * pgvector = export documents (vectors included as number[]) + swap impl.
- */
 export interface Vestigiorum {
   /**
-   * Create a vestigium from a completed actum output.
-   * Called by the execution orchestrator after ActumCompletor.complete().
-   * Embedding is absent on creation — call index() to populate asynchronously.
-   * Impressio is initialised to all-zero counts with no auctorImpressio.
+   * Create a vestigium. No embeddings are set — call index*() to populate.
    */
   create(
-    vestigium: Omit<Vestigium, 'id' | 'natum' | 'mutatum' | 'embedding' | 'impressio'>
+    vestigium: Omit<Vestigium, 'id' | 'natum' | 'mutatum' | 'embeddingPromptum' | 'embeddingImago' | 'embeddingIntella' | 'impressio'>
   ): Promise<Vestigium>
 
   /**
-   * Compute and store the embedding for a vestigium.
-   * Embeds promptum + summarium concatenated.
-   * Idempotent — safe to call multiple times; re-embeds if already present.
+   * Embed promptum + negativum and store as embeddingPromptum.
+   * "I remember what I typed."
    */
-  index(id: string): Promise<void>
+  indexPromptum(id: string): Promise<void>
 
   /**
-   * Semantic vector search with metadata pre-filtering.
-   *
-   * Implementation contract:
-   *   1. Embed query.quaerendum using the configured embedding model
-   *   2. Run ANN search against the embedding index
-   *   3. Apply metadata filters (auctorKey, visibilitas, auctorImpressio,
-   *      modusId, genus) as pre-filters on the index, not post-filters
-   *   4. Return results ranked by cosine similarity, trimmed to limit
-   *
-   * Atlas impl:  $vectorSearch with $filter
-   * pgvector:    SELECT ... ORDER BY embedding <-> $1 WHERE ...
-   * Qdrant:      search() with filter payload conditions
+   * Fetch imagoUrl and embed the image, store as embeddingImago.
+   * "I remember what it looked like."
+   * No-op if imagoUrl is absent on the vestigium.
+   */
+  indexImago(id: string): Promise<void>
+
+  /**
+   * Embed intellaDescription and store as embeddingIntella.
+   * "I remember which model I used."
+   * No-op if intellaDescription is absent on the vestigium.
+   */
+  indexIntella(id: string): Promise<void>
+
+  /**
+   * Semantic search across one embedding dimension.
+   * query.per selects which dimension (default: 'promptum').
+   * Results are ranked by cosine similarity and trimmed to limit.
    */
   search(query: VestigiumQuery): Promise<VestigiumResult[]>
 
   findById(id: string): Promise<Vestigium | null>
 
-  /**
-   * Return the most recent vestigia for an identity — no semantic query.
-   * Used for RAG context injection ("show me recent outputs") and for
-   * building session summary inputs.
-   */
   forIdentity(
     auctorKey: { animaId: string } | { arcanumHash: string },
     limit?: number
   ): Promise<Vestigium[]>
 
-  /**
-   * Set or clear the author's own impression of their output.
-   * The author may change their mind — this overwrites the previous value.
-   * null clears the impression entirely.
-   * Only the holder of the matching auctorKey may call this.
-   */
   setAuctorImpressio(
     id: string,
     auctorKey: { animaId: string } | { arcanumHash: string },
     impressio: ImpressioKind | null
   ): Promise<Vestigium>
 
-  /**
-   * Record a community reaction from a non-author viewer.
-   * Privacy-preserving: increments the count on the vestigium.
-   * The implementation tracks rater identity internally (as H(raterKey))
-   * to prevent double-rating; no rater ID is ever stored on the Vestigium.
-   * Throws if raterKey matches the vestigium's auctorKey (use setAuctorImpressio).
-   */
   rate(
     id: string,
     raterKey: { animaId: string } | { arcanumHash: string },

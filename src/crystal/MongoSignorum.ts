@@ -54,6 +54,14 @@ export class MongoSignorum implements Signorum {
     return docs.map(d => fromDoc(d as Record<string, unknown>))
   }
 
+  async createMany(signa: Array<Omit<Signum, 'id' | 'natum' | 'status'>>): Promise<Signum[]> {
+    if (signa.length === 0) return []
+    const now = new Date()
+    const records: Signum[] = signa.map(s => ({ ...s, id: uuidv4(), natum: now, status: 'valid' as const }))
+    await this.col.insertMany(records.map(toDoc))
+    return records
+  }
+
   async settle(signaIds: string[], actualImpetus: bigint, actumId: string): Promise<void> {
     const docs = await this.col.find({ id: { $in: signaIds } }).toArray()
     const total = docs.reduce((sum, d) => sum + BigInt(d.valor as string), 0n)

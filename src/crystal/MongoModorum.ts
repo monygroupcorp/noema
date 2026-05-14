@@ -50,4 +50,14 @@ export class MongoModorum implements Modorum {
     const docs = await this.col.find(query).toArray()
     return docs.map(fromDoc)
   }
+
+  async update(id: string, patch: Partial<Pick<Modus, 'computeStrategy' | 'gpuClass' | 'podPolicy'>>): Promise<Modus> {
+    const result = await this.col.findOneAndUpdate(
+      { id },
+      { $set: { ...patch, mutatum: new Date() } },
+      { returnDocument: 'after', sort: { natum: -1 } },
+    )
+    if (!result) throw new Error(`Modus not found: ${id}`)
+    return fromDoc(result)
+  }
 }

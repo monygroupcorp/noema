@@ -1,5 +1,5 @@
 import type { Collection, Document } from 'mongodb'
-import type { Materia, MateriaStore } from '../types/materia.js'
+import type { Materia, MateriaStore, PodPolicy } from '../types/materia.js'
 
 // bigint is not a BSON type — stored as decimal string, converted on read/write
 type MateriaDoc = Omit<Materia, 'impetusPerSecond'> & { impetusPerSecond: string }
@@ -35,7 +35,7 @@ export class MongoMateria implements MateriaStore {
 
   async update(
     id: string,
-    patch: Partial<Pick<Materia, 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum'>>
+    patch: Partial<Pick<Materia, 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum' | 'podPolicy' | 'shareToken'>>
   ): Promise<Materia> {
     const result = await this.col.findOneAndUpdate(
       { id },
@@ -46,8 +46,12 @@ export class MongoMateria implements MateriaStore {
     return fromDoc(result)
   }
 
-  async findWarm(spec: { imageRef: string }): Promise<Materia | null> {
-    const doc = await this.col.findOne({ status: 'idle', imageRef: spec.imageRef })
+  async findWarm(spec: { imageRef?: string; podPolicy?: PodPolicy; shareToken?: string }): Promise<Materia | null> {
+    const filter: Record<string, unknown> = { status: 'idle' }
+    if (spec.imageRef) filter.imageRef = spec.imageRef
+    if (spec.podPolicy) filter.podPolicy = spec.podPolicy
+    if (spec.shareToken) filter.shareToken = spec.shareToken
+    const doc = await this.col.findOne(filter)
     return doc ? fromDoc(doc) : null
   }
 }
