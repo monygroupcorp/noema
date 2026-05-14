@@ -619,16 +619,20 @@ function initializeExternalApi(dependencies) {
   logger.debug('External Agent Delegation API mounted at /agents.');
 
   // Partner presign (no auth — domain-locked + rate limited)
-  const presignRouter = createPresignApi({
-    storageService: dependencies.storageService,
-    partnerDb: dependencies.db?.partner,
-    uploadRecordDb: dependencies.db?.uploadRecords,
-  });
-  externalApiRouter.use('/media', presignRouter);
-  logger.debug('External Partner Presign API mounted at /media. (Public, domain-locked + rate limited)');
+  if (dependencies.storageService && dependencies.db?.partner && dependencies.db?.uploadRecords) {
+    const presignRouter = createPresignApi({
+      storageService: dependencies.storageService,
+      partnerDb: dependencies.db.partner,
+      uploadRecordDb: dependencies.db.uploadRecords,
+    });
+    externalApiRouter.use('/media', presignRouter);
+    logger.debug('External Partner Presign API mounted at /media.');
+  } else {
+    logger.warn('External Partner Presign API not mounted due to missing storageService or DB dependencies.');
+  }
 
   // Partner spell run (x402 payment auth)
-  if (x402Middleware && x402ReceiverAddress) {
+  if (x402Enabled && x402Middleware && x402ReceiverAddress) {
     const partnerRunRouter = createPartnerRunApi({
       spellsDb: dependencies.db?.spells,
       partnerDb: dependencies.db?.partner,
@@ -639,7 +643,7 @@ function initializeExternalApi(dependencies) {
       network: x402Network,
     });
     externalApiRouter.use('/partner', x402Middleware, partnerRunRouter);
-    logger.debug('Partner run API mounted at /api/v1/partner (x402 protected)');
+    logger.debug('External Partner Run API mounted at /api/v1/partner (x402 protected)');
   }
 
   logger.info('External API router initialized.');
