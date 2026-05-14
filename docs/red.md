@@ -100,12 +100,12 @@ Used by `CollectioCursor` for generative NFT trait selection. LCG seeding, colli
 
 ---
 
-### 17. SecurePodClient: no fetch timeouts on RunPod REST calls
-`_provisionPod` and `_getSshInfo` use raw `fetchFn` with no AbortController timeout. If RunPod's API hangs or is unreachable, the entire background job hangs indefinitely — no error, no webhook, no actum update. The pod exists in limbo until the server restarts or the actum expiry sweep fires.
+### 17. ~~SecurePodClient: no fetch timeouts on RunPod REST calls~~ — resolved
+Added `_fetchWithTimeout(url, init, ms)` helper wrapping `AbortController`. Used in:
+- `_provisionPod`: 30s default (`provisionTimeoutMs`). AbortError propagates — provision failure is fatal and kills the submit() call.
+- `_getSshInfo`: 10s default (`sshInfoTimeoutMs`). AbortError is caught → returns `null`, so a single slow poll counts as "not ready yet" and `_waitForSsh`'s overall deadline (`sshReadyTimeoutMs`) still governs the give-up point.
 
-**Fix:** Add a `_fetchWithTimeout(url, init, ms)` helper that wraps `AbortController`. Use it in `_provisionPod` (suggest 30s) and `_getSshInfo` (suggest 10s per poll).
-
-**Files:** `src/crystal/SecurePodClient.ts`
+Both timeout values are injectable via `SecurePodConfig` for test control. Three new tests verify: provision abort rejects `submit()`, SSH poll abort leads to FAILED webhook, and pod is terminated after SSH poll timeouts.
 
 ---
 

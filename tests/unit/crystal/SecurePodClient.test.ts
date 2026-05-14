@@ -262,6 +262,86 @@ test('background job terminates pod when SSH readiness times out', async () => {
   assert.ok(mock.terminateCalls() >= 1, 'pod must be terminated even when SSH never becomes ready')
 })
 
+// ── fetch timeouts ────────────────────────────────────────────────────────────
+
+function makeHangingFetch(podId = 'pod-hang') {
+  const webhookPayloads: unknown[] = []
+  const terminateCalls = { count: 0 }
+
+  const fetch = async (url: string, opts: RequestInit = {}): Promise<Response> => {
+    const method = (opts.method ?? 'GET').toUpperCase()
+
+    // Provision POST succeeds immediately
+    if (method === 'POST' && url.includes('/pods') && !url.includes(podId)) {
+      return new Response(JSON.stringify({ id: podId }), { status: 200 })
+    }
+
+    // Status GET hangs — aborts when signal fires
+    if (method === 'GET' && url.includes(`/pods/${podId}`)) {
+      return new Promise((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () =>
+          reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' })))
+      })
+    }
+
+    // DELETE — termination
+    if (method === 'DELETE' && url.includes(`/pods/${podId}`)) {
+      terminateCalls.count++
+      return new Response('{}', { status: 200 })
+    }
+
+    // Webhook POST
+    if (method === 'POST') {
+      webhookPayloads.push(JSON.parse((opts.body as string) ?? '{}'))
+      return new Response('{}', { status: 200 })
+    }
+
+    return new Response('Not found', { status: 404 })
+  }
+
+  return { fetch, webhookPayloads, terminateCalls }
+}
+
+test('submit() rejects when pod provision fetch hangs past provisionTimeoutMs', async () => {
+  const hangFetch = async (_url: string, opts: RequestInit = {}): Promise<Response> =>
+    new Promise((_resolve, reject) => {
+      opts.signal?.addEventListener('abort', () =>
+        reject(Object.assign(new Error('Aborted'), { name: 'AbortError' })))
+    })
+
+  const client = new SecurePodClient(
+    makeConfig({ provisionTimeoutMs: 50 }),
+    () => makeSshTransport(),
+    hangFetch,
+  )
+  await assert.rejects(() => client.submit({ input: {} }))
+})
+
+test('background job fires FAILED webhook when SSH status poll hangs past sshInfoTimeoutMs', async () => {
+  const hang = makeHangingFetch('pod-hang-ssh')
+  const client = new SecurePodClient(
+    makeConfig({ sshInfoTimeoutMs: 30, sshReadyTimeoutMs: 100, sshPollIntervalMs: 0 }),
+    () => makeSshTransport(),
+    hang.fetch,
+  )
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 500))
+  const failed = hang.webhookPayloads.find(p => (p as { status?: string }).status === 'FAILED')
+  assert.ok(failed, 'FAILED webhook should fire after SSH poll hangs past timeout')
+})
+
+test('SSH status poll timeout terminates the pod', async () => {
+  const hang = makeHangingFetch('pod-hang-term')
+  const client = new SecurePodClient(
+    makeConfig({ sshInfoTimeoutMs: 30, sshReadyTimeoutMs: 100, sshPollIntervalMs: 0 }),
+    () => makeSshTransport(),
+    hang.fetch,
+  )
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 500))
+  assert.ok(hang.terminateCalls.count >= 1, 'pod must be terminated when SSH polls hang')
+})
+
 test('keepWarm: terminates pod on job failure, does NOT register Materia', async () => {
   const brokenSsh = makeSshTransport({
     async exec(_cmd: string) { throw new Error('SSH connection refused') },
