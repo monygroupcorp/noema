@@ -619,11 +619,11 @@ function initializeExternalApi(dependencies) {
   logger.debug('External Agent Delegation API mounted at /agents.');
 
   // Partner presign (no auth — domain-locked + rate limited)
-  if (dependencies.storageService && dependencies.db?.partner && dependencies.db?.uploadRecords) {
+  if (dependencies.storageService && dependencies.db?.data?.partner && dependencies.db?.data?.uploadRecords) {
     const presignRouter = createPresignApi({
       storageService: dependencies.storageService,
-      partnerDb: dependencies.db.partner,
-      uploadRecordDb: dependencies.db.uploadRecords,
+      partnerDb: dependencies.db.data.partner,
+      uploadRecordDb: dependencies.db.data.uploadRecords,
     });
     externalApiRouter.use('/media', presignRouter);
     logger.debug('External Partner Presign API mounted at /media.');
@@ -634,10 +634,10 @@ function initializeExternalApi(dependencies) {
   // Partner spell run (x402 payment auth)
   if (x402Enabled && x402Middleware && x402ReceiverAddress) {
     const partnerRunRouter = createPartnerRunApi({
-      spellsDb: dependencies.db?.spells,
-      partnerDb: dependencies.db?.partner,
-      uploadRecordDb: dependencies.db?.uploadRecords,
-      splitLedgerDb: dependencies.db?.splitLedger,
+      spellsDb: dependencies.db?.data?.spells,
+      partnerDb: dependencies.db?.data?.partner,
+      uploadRecordDb: dependencies.db?.data?.uploadRecords,
+      splitLedgerDb: dependencies.db?.data?.splitLedger,
       x402PaymentLogDb: dependencies.db?.data?.x402PaymentLog,
       receiverAddress: x402ReceiverAddress,
       network: x402Network,

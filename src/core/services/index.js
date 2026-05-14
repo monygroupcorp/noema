@@ -159,6 +159,10 @@ async function initializeServices(options = {}) {
       if (agentDelegationsDb && typeof agentDelegationsDb.ensureIndexes === 'function') {
         await agentDelegationsDb.ensureIndexes();
       }
+      // Partner, upload record, and split ledger indexes
+      if (initializedDbServices?.data?.partner?.ensureIndexes) await initializedDbServices.data.partner.ensureIndexes();
+      if (initializedDbServices?.data?.uploadRecords?.ensureIndexes) await initializedDbServices.data.uploadRecords.ensureIndexes();
+      if (initializedDbServices?.data?.splitLedger?.ensureIndexes) await initializedDbServices.data.splitLedger.ensureIndexes();
     } catch (indexErr) {
       logger.error('Failed to ensure DB indexes:', indexErr);
     }
