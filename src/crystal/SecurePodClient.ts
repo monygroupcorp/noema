@@ -13,7 +13,9 @@ export interface SecurePodConfig {
   cloudType?: 'SECURE' | 'COMMUNITY'
   containerDiskGb?: number
   /** Overrideable timeouts (ms) — defaults tuned for production, inject small values in tests. */
-  sshReadyTimeoutMs?: number     // default: 10 min
+  provisionTimeoutMs?: number    // default: 30_000 — per-request timeout for the pod creation POST
+  sshInfoTimeoutMs?: number      // default: 10_000 — per-request timeout for each SSH status poll GET
+  sshReadyTimeoutMs?: number     // default: 10 min  — overall deadline for SSH to become reachable
   sshPollIntervalMs?: number     // default: 8000
   comfyReadyTimeoutMs?: number   // default: 5 min
   comfyPollIntervalMs?: number   // default: 2000
@@ -100,8 +102,18 @@ export class SecurePodClient implements RunPodClient {
 
   // ── private ──────────────────────────────────────────────────────────────
 
+  private async _fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), ms)
+    try {
+      return await this.fetchFn(url, { ...init, signal: controller.signal })
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
   private async _provisionPod(): Promise<string> {
-    const res = await this.fetchFn('https://rest.runpod.io/v1/pods', {
+    const res = await this._fetchWithTimeout('https://rest.runpod.io/v1/pods', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.config.apiKey}`,
@@ -117,7 +129,7 @@ export class SecurePodClient implements RunPodClient {
         ports: '22/tcp,8188/http',
         supportPublicIp: true,
       }),
-    })
+    }, this.config.provisionTimeoutMs ?? 30_000)
 
     if (!res.ok) {
       const text = await res.text().catch(() => '')
@@ -141,9 +153,16 @@ export class SecurePodClient implements RunPodClient {
   }
 
   private async _getSshInfo(podId: string): Promise<SshInfo | null> {
-    const res = await this.fetchFn(`https://rest.runpod.io/v1/pods/${podId}`, {
-      headers: { 'Authorization': `Bearer ${this.config.apiKey}` },
-    })
+    let res: Response
+    try {
+      res = await this._fetchWithTimeout(`https://rest.runpod.io/v1/pods/${podId}`, {
+        headers: { 'Authorization': `Bearer ${this.config.apiKey}` },
+      }, this.config.sshInfoTimeoutMs ?? 10_000)
+    } catch {
+      // Timeout or network error on a single poll — treat as not-ready.
+      // _waitForSsh deadline governs the overall give-up point.
+      return null
+    }
     if (!res.ok) return null
 
     const data = await res.json() as RunPodPodStatus
