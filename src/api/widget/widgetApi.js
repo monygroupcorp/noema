@@ -123,7 +123,15 @@ function buildAppHtml(agentId, mode) {
   .spell-cast:hover { background: #1e1e3a; border-color: #44f; color: #aac; }
   .spell-cast:disabled { opacity: .4; cursor: default; }
   .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
-  .gallery-item img { width: 100%; border-radius: 4px; }
+  .gallery-item { cursor: pointer; border-radius: 4px; overflow: hidden; }
+  .gallery-item img { width: 100%; border-radius: 4px; display: block; transition: opacity .2s; }
+  .gallery-item:hover img { opacity: .85; }
+  /* app lightbox */
+  #app-lb { display: none; position: fixed; inset: 0; z-index: 999; background: rgba(0,0,0,.92); align-items: center; justify-content: center; padding: 16px; }
+  #app-lb.open { display: flex; }
+  #app-lb img { max-width: 100%; max-height: 90vh; border-radius: 6px; object-fit: contain; box-shadow: 0 8px 40px rgba(0,0,0,.8); }
+  #app-lb-close { position: absolute; top: 12px; right: 16px; font-size: 22px; color: #888; cursor: pointer; background: none; border: none; line-height: 1; }
+  #app-lb-close:hover { color: #fff; }
   .canvas-note { color: #555; font-size: 13px; text-align: center; padding: 40px 20px; }
   .cast-state { text-align: center; padding: 40px 20px; }
   .cast-spinner { width: 22px; height: 22px; border: 2px solid #222; border-top-color: #88a; border-radius: 50%; animation: spin 0.9s linear infinite; margin: 0 auto 12px; }
@@ -191,6 +199,10 @@ function buildAppHtml(agentId, mode) {
   </div>
   <div id="content"><p class="loading">Waiting for authentication…</p></div>
 </div>
+<div id="app-lb">
+  <button id="app-lb-close">✕</button>
+  <img id="app-lb-img" src="" alt="">
+</div>
 <script>
 (function() {
   'use strict';
@@ -207,6 +219,15 @@ function buildAppHtml(agentId, mode) {
   var $statusText = document.getElementById('status-text');
   var $status     = document.getElementById('status');
   var $content    = document.getElementById('content');
+
+  // ── App lightbox ──────────────────────────────────────────────────────────
+  var $appLb    = document.getElementById('app-lb');
+  var $appLbImg = document.getElementById('app-lb-img');
+  function openAppLb(url) { $appLbImg.src = url; $appLb.classList.add('open'); }
+  function closeAppLb() { $appLb.classList.remove('open'); $appLbImg.src = ''; }
+  document.getElementById('app-lb-close').addEventListener('click', closeAppLb);
+  $appLb.addEventListener('click', function(e) { if (e.target === $appLb) closeAppLb(); });
+  document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeAppLb(); });
 
   function setStatus(txt) { $statusText.textContent = txt; }
   function setContent(html) { $content.innerHTML = html; }
@@ -691,10 +712,13 @@ function buildAppHtml(agentId, mode) {
     }
     var html = '<div class="gallery-grid">'
       + outputs.map(function(o) {
-          return '<div class="gallery-item"><img src="' + esc(o.url) + '" loading="lazy"></div>';
+          return '<div class="gallery-item" data-url="' + esc(o.url) + '"><img src="' + esc(o.url) + '" loading="lazy"></div>';
         }).join('')
       + '</div>';
     setContent(html);
+    $content.querySelectorAll('.gallery-item').forEach(function(el) {
+      el.addEventListener('click', function() { openAppLb(el.dataset.url); });
+    });
   }
 
   function renderCanvas(ws) {
@@ -767,7 +791,7 @@ function buildAppHtml(agentId, mode) {
                || (typeof out === 'string' && out);
     var html;
     if (imgUrl) {
-      html = '<div class="cast-result"><img src="' + esc(imgUrl) + '" alt="Result">'
+      html = '<div class="cast-result"><img src="' + esc(imgUrl) + '" alt="Result" style="cursor:zoom-in;" data-url="' + esc(imgUrl) + '">'
            + '<div class="cast-back">← Back</div></div>';
     } else if (textVal) {
       html = '<div class="cast-result"><div class="cast-text">' + esc(textVal) + '</div>'
@@ -780,6 +804,8 @@ function buildAppHtml(agentId, mode) {
     setContent(html);
     var back = $content.querySelector('.cast-back');
     if (back) back.addEventListener('click', goBack);
+    var resImg = $content.querySelector('img[data-url]');
+    if (resImg) resImg.addEventListener('click', function() { openAppLb(resImg.dataset.url); });
     window.parent.postMessage({ type: 'SPELL_CAST', result: data }, '*');
   }
 
