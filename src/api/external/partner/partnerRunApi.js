@@ -139,9 +139,12 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
       });
       const signatureHash = record.signatureHash;
 
-      // Mark upload as used
+      // Mark upload as used (atomic check to prevent double-use)
       if (uploadId) {
-        await uploadRecordDb.markUsed(uploadId, runId);
+        const markResult = await uploadRecordDb.markUsed(uploadId, runId);
+        if (markResult.modifiedCount === 0) {
+          return res.status(409).json({ error: 'UPLOAD_CONSUMED', message: 'uploadId already used or expired' });
+        }
       }
 
       // Record split ledger entry
