@@ -58,10 +58,16 @@ Bridges tessera (signum-gated session) to RunPod execution. Unknown whether it c
 
 ---
 
-### 10. Privacy partition enforcement unverified
-The design is clear: Actum has no animaId, the crossing is three hops via nullifier. But this is documented intent, not verified enforcement. Nothing in the crystal prevents accidentally writing animaId onto an Actum or crossing the partition in a shortcut.
+### 10. ~~Privacy partition enforcement unverified~~ — verified clean, one gap noted
 
-**Verify:** Confirm `Actum` type has no animaId field. Confirm no code path writes one. Check that Signorum queries are keyed on identity-safe constructs.
+Partition holds structurally:
+- `Actum` type has no `animaId` field — confirmed
+- No code path writes `animaId` onto an Actum — grep clean
+- `MongoSignorum` and `MemorySignorum` both throw at write time if arcanum/tessera signum has `animaId`
+- All Signorum queries (`balance`, `history`, `lock`, `settle`) keyed on `AuctorKey { animaId } | { arcanumHash }` — never raw actumId
+- `TesseraCursor` keeps anonymous forma — no animaId written anywhere in tessera path
+
+**Gap found (not a violation):** `actum.nullifier` is declared in the type and the three-hop crossing (`actum.nullifier → signum(arcanum) → signum(deposit) → anima`) is documented throughout. But nothing in the codebase ever *writes* nullifier onto an Actum. The arcanum-funded execution path is scaffolded (type exists, design is documented) but not implemented — arcanum signa can't currently fund an execution. Not a privacy leak; the partition holds. This is a missing feature, tracked separately as item 16.
 
 ---
 
@@ -78,6 +84,15 @@ Mirrors `TelegramAllocutio` (~1 day to implement). Blocking Discord users from t
 
 ### 14. TraitMixer edge cases
 Used by `CollectioCursor` for generative NFT trait selection. LCG seeding, collision avoidance, and rarity distribution are complex enough to deserve a dedicated audit.
+
+### 16. Arcanum execution path unimplemented
+`actum.nullifier` is declared on `Actum` and the three-hop crossing is documented, but no code writes it. An anima holding only arcanum signa cannot fund a modus execution — `ActumInceptor` passes `by: { arcanumHash }` correctly through balance/lock, but `actum.nullifier` is never stamped, so the spend proof is never recorded and the crossing path (`nullifier → arcanum signum → deposit → anima`) is inert.
+
+**What's missing:** In `ActumInceptor.initiate()`, when `by` is `{ arcanumHash }` and the selected signa include an arcanum signum, the actum should be created with `nullifier` set to the arcanum's spend proof. This requires ZK proof verification logic (or a simpler hash-based proof for non-ZK mode).
+
+**Files:** `src/execution/ActumInceptor.ts`, `src/types/actum.ts`
+
+---
 
 ### 15. `embed` / `embedImage` not wired in index.ts
 `MongoVestigiorum` accepts `embed` and `embedImage` functions but they are not passed in `createContainer()`. The fire-and-forget index calls silently no-op. Intentional (models not yet baked into RunPod image) — low priority until pod image is ready.
