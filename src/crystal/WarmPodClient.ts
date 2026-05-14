@@ -68,8 +68,9 @@ export class WarmPodClient implements RunPodClient {
 
     this._runBackground(params.input, params.webhook).catch(async (err) => {
       console.error(`[WarmPodClient] Materia ${id} job failed: ${(err as Error).message}`)
-      // Return pod to idle even on failure so it can serve future jobs
-      await this.materiae.update(id, { status: 'idle' }).catch(() => {})
+      // Return pod to idle (or terminate if private) even on failure
+      const nextStatus = this.materia.podPolicy === 'private' ? 'terminated' : 'idle'
+      await this.materiae.update(id, { status: nextStatus }).catch(() => {})
       if (params.webhook) {
         await this.fetchFn(params.webhook, {
           method: 'POST',
@@ -113,8 +114,9 @@ export class WarmPodClient implements RunPodClient {
       }
     } finally {
       await ssh.close().catch(() => {})
-      // Return pod to idle — do NOT terminate
-      await this.materiae.update(id, { status: 'idle' }).catch(() => {})
+      // Terminate private pods; return all others to idle
+      const nextStatus = this.materia.podPolicy === 'private' ? 'terminated' : 'idle'
+      await this.materiae.update(id, { status: nextStatus }).catch(() => {})
     }
   }
 

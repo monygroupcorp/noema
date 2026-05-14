@@ -117,6 +117,19 @@ test('update throws for unknown id', async () => {
   )
 })
 
+test('update patches podPolicy', async () => {
+  const m = await store.create(makeInput())
+  const updated = await store.update(m.id, { podPolicy: 'economy' })
+  assert.equal(updated.podPolicy, 'economy')
+})
+
+test('update patches shareToken', async () => {
+  const m = await store.create(makeInput())
+  const updated = await store.update(m.id, { podPolicy: 'link', shareToken: 'tok-abc123' })
+  assert.equal(updated.podPolicy, 'link')
+  assert.equal(updated.shareToken, 'tok-abc123')
+})
+
 // ── findWarm ──────────────────────────────────────────────────────────────────
 
 test('findWarm returns an idle materia with matching imageRef', async () => {
@@ -144,5 +157,32 @@ test('findWarm returns null when imageRef does not match', async () => {
   const input = makeInput({ status: 'idle', imageRef: 'stationthis/flux-comfyui:v1' })
   await store.create(input)
   const result = await store.findWarm({ imageRef: 'stationthis/flux-comfyui:v2' })
+  assert.equal(result, null)
+})
+
+test('findWarm with podPolicy filter returns only matching policy pods', async () => {
+  await store.create(makeInput({ status: 'idle', imageRef: 'img:v1', podPolicy: 'private' }))
+  const eco = await store.create(makeInput({ status: 'idle', imageRef: 'img:v1', podPolicy: 'economy' }))
+  const found = await store.findWarm({ imageRef: 'img:v1', podPolicy: 'economy' })
+  assert.ok(found)
+  assert.equal(found.id, eco.id)
+})
+
+test('findWarm with podPolicy filter returns null when no economy pod exists', async () => {
+  await store.create(makeInput({ status: 'idle', imageRef: 'img:v1', podPolicy: 'private' }))
+  const result = await store.findWarm({ imageRef: 'img:v1', podPolicy: 'economy' })
+  assert.equal(result, null)
+})
+
+test('findWarm with shareToken returns pod matching token', async () => {
+  const m = await store.create(makeInput({ status: 'idle', imageRef: 'img:v1', podPolicy: 'link', shareToken: 'tok-xyz' }))
+  const found = await store.findWarm({ shareToken: 'tok-xyz' })
+  assert.ok(found)
+  assert.equal(found.id, m.id)
+})
+
+test('findWarm with shareToken returns null for wrong token', async () => {
+  await store.create(makeInput({ status: 'idle', podPolicy: 'link', shareToken: 'tok-xyz' }))
+  const result = await store.findWarm({ shareToken: 'tok-wrong' })
   assert.equal(result, null)
 })

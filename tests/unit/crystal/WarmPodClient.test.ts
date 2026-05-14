@@ -142,3 +142,54 @@ test('submit() marks Materia idle and POSTs FAILED webhook when SSH throws', asy
   const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
   assert.ok(idleUpdate, 'Materia should return to idle even on failure')
 })
+
+// ── podPolicy status tests ────────────────────────────────────────────────────
+
+test('private pod: status becomes terminated after job completes', async () => {
+  const materia = makeMateria({ podPolicy: 'private' })
+  const store = makeMateriaStore(materia)
+  const capture = makeWebhookCapture()
+  const client = new WarmPodClient(materia, store, () => makeSshTransport(), capture.fetch, { comfyPollIntervalMs: 0, comfyReadyTimeoutMs: 500, jobTimeoutMs: 500 })
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 100))
+  const terminatedUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'terminated')
+  assert.ok(terminatedUpdate, 'private pod should be terminated after job completes')
+  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
+  assert.equal(idleUpdate, undefined, 'private pod must not return to idle')
+})
+
+test('economy pod: status becomes idle after job completes', async () => {
+  const materia = makeMateria({ podPolicy: 'economy' })
+  const store = makeMateriaStore(materia)
+  const capture = makeWebhookCapture()
+  const client = new WarmPodClient(materia, store, () => makeSshTransport(), capture.fetch, { comfyPollIntervalMs: 0, comfyReadyTimeoutMs: 500, jobTimeoutMs: 500 })
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 100))
+  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
+  assert.ok(idleUpdate, 'economy pod should return to idle after job completes')
+})
+
+test('absent podPolicy: status becomes idle after job completes (backward compat)', async () => {
+  const materia = makeMateria()  // no podPolicy
+  const store = makeMateriaStore(materia)
+  const capture = makeWebhookCapture()
+  const client = new WarmPodClient(materia, store, () => makeSshTransport(), capture.fetch, { comfyPollIntervalMs: 0, comfyReadyTimeoutMs: 500, jobTimeoutMs: 500 })
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 100))
+  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
+  assert.ok(idleUpdate, 'pod with no podPolicy should return to idle (backward compat)')
+})
+
+test('private pod: status becomes terminated even on job failure', async () => {
+  const brokenSsh = makeSshTransport({ async exec(_cmd) { throw new Error('GPU exploded') } })
+  const materia = makeMateria({ podPolicy: 'private' })
+  const store = makeMateriaStore(materia)
+  const capture = makeWebhookCapture()
+  const client = new WarmPodClient(materia, store, () => brokenSsh, capture.fetch, { comfyPollIntervalMs: 0, comfyReadyTimeoutMs: 50, jobTimeoutMs: 500 })
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 500))
+  const terminatedUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'terminated')
+  assert.ok(terminatedUpdate, 'private pod should be terminated even when job fails')
+  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
+  assert.equal(idleUpdate, undefined, 'private pod must not return to idle on failure')
+})

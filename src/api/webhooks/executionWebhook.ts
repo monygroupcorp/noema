@@ -1,6 +1,8 @@
 import crypto from 'node:crypto'
 import type { Actorum, ActumCompletor } from '../../types/cursus.js'
 import type { Exitus } from '../../types/cursus.js'
+import type { Nexus } from '../../types/nexus.js'
+import type { Signorum } from '../../types/significandi.js'
 
 export interface ExecutionWebhookDeps {
   actorum: Actorum
@@ -14,6 +16,10 @@ export interface ExecutionWebhookDeps {
       result: { kind: 'complete'; exitus: Record<string, unknown> } | { kind: 'failed'; error: string }
     ): Promise<void>
   }
+  /** Optional: Nexus event bus — fires execution_spend hooks after completion. */
+  nexus?: Nexus
+  /** Optional: ledger write target — bulk-inserts hook-produced signa. Required when nexus is set. */
+  signorum?: Signorum
 }
 
 export interface WebhookRequest {
@@ -82,7 +88,14 @@ export async function handleExecutionWebhook(
         impetus: BigInt(Math.ceil(executionTime / 1000)),
         duratio: executionTime,
       }
-      await deps.completor.complete(actum, exitus)
+      const completed = await deps.completor.complete(actum, exitus)
+      if (deps.nexus && deps.signorum) {
+        const newSigna = await deps.nexus.emit({
+          type: 'execution_spend',
+          payload: { actum: completed, impetus: exitus.impetus },
+        })
+        if (newSigna.length) await deps.signorum.createMany(newSigna)
+      }
       await deps.flowRouter?.handleActumComplete(actum.id, {
         kind: 'complete',
         exitus: exitus.exitus as Record<string, unknown>,

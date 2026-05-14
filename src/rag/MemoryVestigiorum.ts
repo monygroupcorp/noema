@@ -33,16 +33,17 @@ function cosine(a: number[], b: number[]): number {
 
 export class MemoryVestigiorum implements Vestigiorum {
   private readonly store = new Map<string, Vestigium>()
-  // vestigiumId → Set<raterToken> — tracks who has rated to prevent double-rating
   private readonly raters = new Map<string, Set<string>>()
-  // monotonic counter for stable ordering when natum values tie (same millisecond)
   private seq = 0
   private readonly insertionSeq = new Map<string, number>()
 
-  constructor(private readonly embed?: (text: string) => Promise<number[]>) {}
+  constructor(
+    private readonly embed?: (text: string) => Promise<number[]>,
+    private readonly embedImage?: (imageUrl: string) => Promise<number[]>,
+  ) {}
 
   async create(
-    vestigium: Omit<Vestigium, 'id' | 'natum' | 'mutatum' | 'embedding' | 'impressio'>
+    vestigium: Omit<Vestigium, 'id' | 'natum' | 'mutatum' | 'embeddingPromptum' | 'embeddingImago' | 'embeddingIntella' | 'impressio'>
   ): Promise<Vestigium> {
     const now = new Date()
     const record: Vestigium = {
@@ -57,57 +58,75 @@ export class MemoryVestigiorum implements Vestigiorum {
     return record
   }
 
-  async index(id: string): Promise<void> {
-    if (!this.embed) {
-      throw new Error('No embed function configured — pass one to the MemoryVestigiorum constructor')
-    }
+  async indexPromptum(id: string): Promise<void> {
+    if (!this.embed) throw new Error('No embed function configured')
     const v = this.store.get(id)
     if (!v) throw new Error(`Vestigium '${id}' not found`)
-    const text = `${v.promptum} ${v.summarium}`
-    const embedding = await this.embed(text)
-    this.store.set(id, { ...v, embedding })
+    const text = v.negativum ? `${v.promptum} ${v.negativum}` : v.promptum
+    const embeddingPromptum = await this.embed(text)
+    this.store.set(id, { ...v, embeddingPromptum })
+  }
+
+  async indexImago(id: string): Promise<void> {
+    if (!this.embedImage) throw new Error('No embedImage function configured')
+    const v = this.store.get(id)
+    if (!v) throw new Error(`Vestigium '${id}' not found`)
+    if (!v.imagoUrl) return
+    const embeddingImago = await this.embedImage(v.imagoUrl)
+    this.store.set(id, { ...v, embeddingImago })
+  }
+
+  async indexIntella(id: string): Promise<void> {
+    if (!this.embed) throw new Error('No embed function configured')
+    const v = this.store.get(id)
+    if (!v) throw new Error(`Vestigium '${id}' not found`)
+    if (!v.intellaDescription) return
+    const embeddingIntella = await this.embed(v.intellaDescription)
+    this.store.set(id, { ...v, embeddingIntella })
   }
 
   async search(query: VestigiumQuery): Promise<VestigiumResult[]> {
-    if (!this.embed) {
-      throw new Error('No embed function configured — pass one to the MemoryVestigiorum constructor')
-    }
+    if (!this.embed) throw new Error('No embed function configured')
 
     const {
       quaerendum,
+      per = 'promptum',
       auctorKey,
       visibilitas,
       auctorImpressio,
       modusId,
       genus,
+      intellaIds,
       limit = 20,
       minSimilaritas = 0.7,
     } = query
 
-    // Default visibility: all if scoped to identity, public-only if open search
     const allowedVisibility: string[] = visibilitas ?? (auctorKey ? ['privata', 'communis', 'publica'] : ['publica'])
-
     const queryEmbedding = await this.embed(quaerendum)
+
+    const embeddingKey = per === 'imago' ? 'embeddingImago'
+      : per === 'intella' ? 'embeddingIntella'
+      : 'embeddingPromptum'
 
     const results: VestigiumResult[] = []
 
     for (const v of this.store.values()) {
-      if (!v.embedding) continue
+      const emb = v[embeddingKey] as number[] | undefined
+      if (!emb) continue
       if (!allowedVisibility.includes(v.visibilitas)) continue
       if (auctorKey && !matchesKey(v.auctorKey, auctorKey)) continue
       if (auctorImpressio && !auctorImpressio.includes(v.impressio.auctorImpressio as ImpressioKind)) continue
       if (modusId && v.modusId !== modusId) continue
       if (genus && v.genus !== genus) continue
+      if (intellaIds && !intellaIds.some(id => v.intellaIds?.includes(id))) continue
 
-      const similaritas = cosine(queryEmbedding, v.embedding)
+      const similaritas = cosine(queryEmbedding, emb)
       if (similaritas < minSimilaritas) continue
 
       results.push({ vestigium: v, similaritas })
     }
 
-    return results
-      .sort((a, b) => b.similaritas - a.similaritas)
-      .slice(0, limit)
+    return results.sort((a, b) => b.similaritas - a.similaritas).slice(0, limit)
   }
 
   async findById(id: string): Promise<Vestigium | null> {
@@ -137,10 +156,7 @@ export class MemoryVestigiorum implements Vestigiorum {
     }
     const updated: Vestigium = {
       ...v,
-      impressio: {
-        ...v.impressio,
-        auctorImpressio: impressio ?? undefined,
-      },
+      impressio: { ...v.impressio, auctorImpressio: impressio ?? undefined },
       mutatum: new Date(),
     }
     this.store.set(id, updated)
@@ -155,18 +171,12 @@ export class MemoryVestigiorum implements Vestigiorum {
     }
     const token = raterToken(raterKey)
     const raterSet = this.raters.get(id) ?? new Set<string>()
-    if (raterSet.has(token)) {
-      throw new Error(`Rater has already rated this vestigium — double-rating rejected`)
-    }
+    if (raterSet.has(token)) throw new Error(`Rater has already rated this vestigium — double-rating rejected`)
     raterSet.add(token)
     this.raters.set(id, raterSet)
-
     this.store.set(id, {
       ...v,
-      impressio: {
-        ...v.impressio,
-        [impressio]: v.impressio[impressio] + 1,
-      },
+      impressio: { ...v.impressio, [impressio]: v.impressio[impressio] + 1 },
       mutatum: new Date(),
     })
   }

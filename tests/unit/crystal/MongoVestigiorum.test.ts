@@ -87,9 +87,11 @@ test('create with arcanumHash auctorKey round-trips correctly', async () => {
   assert.deepEqual(v.auctorKey, { arcanumHash: 'myhash' })
 })
 
-test('create has no embedding initially', async () => {
+test('create has no embeddings initially', async () => {
   const v = await store.create(makeInput())
-  assert.equal(v.embedding, undefined)
+  assert.equal(v.embeddingPromptum, undefined)
+  assert.equal(v.embeddingImago, undefined)
+  assert.equal(v.embeddingIntella, undefined)
 })
 
 // ── findById ──────────────────────────────────────────────────────────────────
@@ -239,21 +241,61 @@ test('rate allows multiple raters', async () => {
   assert.equal(found!.impressio.amor, 2)
 })
 
-// ── index + search ────────────────────────────────────────────────────────────
+// ── indexPromptum + search ────────────────────────────────────────────────────
 
-test('index stores embedding on the vestigium', async () => {
+test('indexPromptum stores embeddingPromptum on the vestigium', async () => {
   const v = await store.create(makeInput({ promptum: 'cat portrait' }))
-  assert.equal(v.embedding, undefined)
-  await store.index(v.id)
+  assert.equal(v.embeddingPromptum, undefined)
+  await store.indexPromptum(v.id)
   const indexed = await store.findById(v.id)
-  assert.ok(Array.isArray(indexed!.embedding))
-  assert.equal(indexed!.embedding!.length, 3)
+  assert.ok(Array.isArray(indexed!.embeddingPromptum))
+  assert.equal(indexed!.embeddingPromptum!.length, 3)
 })
 
-test('search returns vestigium with similar embedding above threshold', async () => {
+test('indexPromptum appends negativum when present', async () => {
+  const v = await store.create(makeInput({ promptum: 'cat portrait', negativum: 'blurry' }))
+  await store.indexPromptum(v.id)
+  // mockEmbed('cat portrait blurry') → [1,0,0] (no match in mock, falls to default)
+  const indexed = await store.findById(v.id)
+  assert.ok(Array.isArray(indexed!.embeddingPromptum))
+})
+
+test('indexImago stores embeddingImago when imagoUrl is present', async () => {
+  const mockEmbedImg = async (_url: string) => [0, 1, 0]
+  const imgStore = new MongoVestigiorum(col, mockEmbed, mockEmbedImg)
+  const v = await imgStore.create(makeInput({ imagoUrl: 'https://cdn.example.com/img.png' }))
+  await imgStore.indexImago(v.id)
+  const indexed = await imgStore.findById(v.id)
+  assert.deepEqual(indexed!.embeddingImago, [0, 1, 0])
+})
+
+test('indexImago is a no-op when imagoUrl is absent', async () => {
+  const mockEmbedImg = async (_url: string) => [0, 1, 0]
+  const imgStore = new MongoVestigiorum(col, mockEmbed, mockEmbedImg)
+  const v = await imgStore.create(makeInput())
+  await imgStore.indexImago(v.id)
+  const indexed = await imgStore.findById(v.id)
+  assert.equal(indexed!.embeddingImago, undefined)
+})
+
+test('indexIntella stores embeddingIntella when intellaDescription is present', async () => {
+  const v = await store.create(makeInput({ intellaDescription: 'FLUX Schnell model' }))
+  await store.indexIntella(v.id)
+  const indexed = await store.findById(v.id)
+  assert.ok(Array.isArray(indexed!.embeddingIntella))
+})
+
+test('indexIntella is a no-op when intellaDescription is absent', async () => {
+  const v = await store.create(makeInput())
+  await store.indexIntella(v.id)
+  const indexed = await store.findById(v.id)
+  assert.equal(indexed!.embeddingIntella, undefined)
+})
+
+test('search returns vestigium with similar embeddingPromptum above threshold', async () => {
   const v = await store.create(makeInput({ visibilitas: 'publica' }))
-  await store.index(v.id)
-  // mockEmbed('cat portrait') = [1,0,0], query 'portrait' also = [1,0,0]
+  await store.indexPromptum(v.id)
+  // mockEmbed('a portrait of a cat') = [1,0,0], query 'portrait' also = [1,0,0]
   const results = await store.search({ quaerendum: 'portrait', minSimilaritas: 0.9 })
   assert.equal(results.length, 1)
   assert.equal(results[0].vestigium.id, v.id)
@@ -262,7 +304,7 @@ test('search returns vestigium with similar embedding above threshold', async ()
 
 test('search excludes vestigium below minSimilaritas', async () => {
   const v = await store.create(makeInput({ visibilitas: 'publica' }))
-  await store.index(v.id)
+  await store.indexPromptum(v.id)
   // 'unrelated' → [0,0,1], cosine([1,0,0],[0,0,1]) = 0
   const results = await store.search({ quaerendum: 'unrelated', minSimilaritas: 0.5 })
   assert.equal(results.length, 0)
@@ -271,8 +313,8 @@ test('search excludes vestigium below minSimilaritas', async () => {
 test('search filters by auctorKey', async () => {
   const mine = await store.create(makeInput({ auctorKey: { animaId: 'anima-me' }, visibilitas: 'privata' }))
   const theirs = await store.create(makeInput({ auctorKey: { animaId: 'anima-other' }, visibilitas: 'publica' }))
-  await store.index(mine.id)
-  await store.index(theirs.id)
+  await store.indexPromptum(mine.id)
+  await store.indexPromptum(theirs.id)
   const results = await store.search({ quaerendum: 'portrait', auctorKey: { animaId: 'anima-me' }, minSimilaritas: 0.5 })
   assert.equal(results.length, 1)
   assert.equal(results[0].vestigium.id, mine.id)
@@ -281,9 +323,25 @@ test('search filters by auctorKey', async () => {
 test('search without auctorKey returns only publica', async () => {
   const pub = await store.create(makeInput({ visibilitas: 'publica' }))
   const priv = await store.create(makeInput({ visibilitas: 'privata' }))
-  await store.index(pub.id)
-  await store.index(priv.id)
+  await store.indexPromptum(pub.id)
+  await store.indexPromptum(priv.id)
   const results = await store.search({ quaerendum: 'portrait', minSimilaritas: 0.5 })
   assert.equal(results.length, 1)
   assert.equal(results[0].vestigium.id, pub.id)
+})
+
+test('search per imago uses embeddingImago', async () => {
+  const mockEmbedImg = async (_url: string) => [1, 0, 0]
+  const imgStore = new MongoVestigiorum(col, mockEmbed, mockEmbedImg)
+  const v = await imgStore.create(makeInput({ imagoUrl: 'https://cdn.example.com/img.png', visibilitas: 'publica' }))
+  await imgStore.indexImago(v.id)
+  const results = await imgStore.search({ quaerendum: 'anything', per: 'imago', minSimilaritas: 0.9 })
+  assert.ok(results.some(r => r.vestigium.id === v.id))
+})
+
+test('search per intella uses embeddingIntella', async () => {
+  const v = await store.create(makeInput({ intellaDescription: 'FLUX model', visibilitas: 'publica' }))
+  await store.indexIntella(v.id)
+  const results = await store.search({ quaerendum: 'FLUX', per: 'intella', minSimilaritas: 0.9 })
+  assert.ok(results.some(r => r.vestigium.id === v.id))
 })

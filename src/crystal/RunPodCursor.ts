@@ -67,7 +67,7 @@ export class RunPodCursor implements Cursor {
       })
     }
 
-    const client = await this._resolveClient(modus)
+    const client = await this._resolveClient(modus, actum)
     const { id: externusJobId } = await client.submit({
       input,
       webhook: this.config.webhookUrl,
@@ -78,12 +78,17 @@ export class RunPodCursor implements Cursor {
     return { kind: 'async', externusJobId }
   }
 
-  private async _resolveClient(modus: Modus): Promise<RunPodClient> {
+  private async _resolveClient(modus: Modus, actum: Actum): Promise<RunPodClient> {
     const { praefectus, warmFactory, imageRefOf } = this.config
+
+    // 'performance' always cold-starts a dedicated pod — never touch the warm pool.
+    if (actum.computeStrategy === 'performance') return this.client
+
     if (praefectus && imageRefOf) {
       const imageRef = imageRefOf(modus)
       if (imageRef) {
-        const warm = await praefectus.findWarm(imageRef)
+        const forEconomy = actum.computeStrategy === 'economy'
+        const warm = await praefectus.findWarm(imageRef, forEconomy ? { forEconomy: true } : undefined)
         if (warm && warmFactory) return warmFactory(warm)
       }
     }

@@ -42,6 +42,55 @@ export class CollectioCursor {
     private readonly config: CollectioCursorConfig,
   ) {}
 
+  /**
+   * Rehydrate in-memory state for all collections that were agens at the time
+   * of a server restart. Call once after container creation, before the server
+   * starts accepting requests.
+   *
+   * Does NOT re-dispatch pieces — in-flight acta will complete via
+   * onActumCompleta() which will then dispatch the next batch as normal.
+   */
+  async rehydrate(): Promise<void> {
+    const agensList = await this.collectiones.listByStatus('agens')
+
+    for (const collectio of agensList) {
+      // Already tracked (e.g. rehydrate called twice) — skip
+      if (this.states.has(collectio.id)) continue
+
+      // Reconstruct running set: acta whose status is nascens or agens
+      const running = new Set<string>()
+      const pendingReview = new Set<string>()
+      let reviveCount = 0
+
+      for (const actumId of collectio.acta) {
+        const actum = await this.actorum.findById(actumId)
+        if (!actum) continue
+
+        if (actum.status === 'nascens' || actum.status === 'agens') {
+          running.add(actumId)
+        }
+
+        if (actum.exitus?.reviewOutcome === 'pending') {
+          pendingReview.add(actumId)
+        }
+
+        if (actum.exitus?.reviewOutcome === 'rejected') {
+          reviveCount++
+        }
+      }
+
+      const state: CollectioState = {
+        nextIndex: collectio.acta.length,
+        running,
+        paused: false,
+        pendingReview,
+        reviveCount,
+      }
+
+      this.states.set(collectio.id, state)
+    }
+  }
+
   /** Start executing a Collectio — marks it agens, begins dispatching pieces. */
   async start(collectio: Collectio): Promise<void> {
     const state: CollectioState = {

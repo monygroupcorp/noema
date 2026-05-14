@@ -1,6 +1,6 @@
 import type { Collection, Document } from 'mongodb'
 import { randomUUID } from 'node:crypto'
-import type { Collectio, Collectiones, Collectionum } from '../types/collectio.js'
+import type { Collectio, Collectiones, CollectioStatus, Collectionum } from '../types/collectio.js'
 
 // bigint is not a BSON type — stored as decimal string, converted on read/write
 type CollectioDoc = Omit<Collectio, 'impetusTotal'> & { impetusTotal: string }
@@ -45,6 +45,10 @@ export class MongoCollectionum implements Collectionum {
   async list(filter?: Partial<Pick<Collectio, 'status'>>): Promise<Collectiones> {
     const docs = await this.col.find(filter ?? {}).toArray()
     return docs.map(fromDoc)
+  }
+
+  async listByStatus(status: CollectioStatus): Promise<Collectiones> {
+    return this.list({ status })
   }
 
   async update(

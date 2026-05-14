@@ -121,12 +121,6 @@ All 19 original primitives in `src/types/`, plus additions:
 | `src/execution/hooks/` | ✅ Done |
 | `src/rag/MemoryVestigiorum.ts` | ✅ Done — 27 tests passing |
 
-### Not yet built
-- All Mongo implementations (`src/crystal/Mongo*.ts`)
-- Composition root (`src/container.ts`)
-- Crystal API routes
-- `RunPodCursor` (bridge to JS `GenerationRunner`)
-
 ---
 
 ## The Ring Architecture
@@ -550,10 +544,10 @@ ChainEngine Phase 2 (`noemaplane.toolVersions`) = Crystal Phase 2
 | 4 | Vestigium / RAG | ✅ Done |
 | 5 | Sessions / Modo + tessera | ✅ Done |
 | 6 | Full ring + composition root | ✅ Done |
-| 7 | Wire platform handlers to ring | ongoing |
-| 8 | Conversation primitives (Colloquium + Dictum + Memoria) | ✅ Done |
+| 7 | Wire platform handlers to ring | ✅ Telegram done; Discord pending |
+| 8 | Conversation primitives (Colloquium + Dictum + Memoria) | ✅ Ring-wired; ExecuteFlow threading pending |
 | 9 | Social layer (Scholium + favorites) | ✅ Done |
-| 10 | Training as a Flow — RunPod-only, VastAI + ComfyDeploy retired | 2 weeks |
+| 10 | Training as a Flow — RunPod-only, VastAI + ComfyDeploy retired | not started |
 
 No parallel-write windows. No shadow comparison. No rollback flags.
 Wire it, test it, move on.

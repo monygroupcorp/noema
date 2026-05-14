@@ -22,6 +22,10 @@
 //   modo     — by/in/through a mode — the runtime session (ablative) → Modo type
 // =============================================================================
 
+import type { ComputeStrategy, GpuClass } from './actum.js'
+import type { PodPolicy } from './materia.js'
+export type { ComputeStrategy, GpuClass, PodPolicy }
+
 /** Whether a modus is a leaf operation or a tree of other modi */
 export type ModusGenus = 'atomicus' | 'compositus'
 
@@ -123,6 +127,17 @@ export interface Modus {
    */
   deliveryMode?: 'sync' | 'async'
 
+  // ── Execution preferences ────────────────────────────────────────────────
+  // These fields are per-flow user preferences. They are NOT part of the
+  // contentHash — changing them does not change the workflow definition.
+  // The HOME "set default" bulk-updates these across all user-owned flows.
+  /** How this flow should be dispatched. Absent: 'standard'. */
+  computeStrategy?: ComputeStrategy
+  /** GPU class for performance-tier runs. Only meaningful when computeStrategy is 'performance'. */
+  gpuClass?: GpuClass
+  /** What happens to the warm pod after a job on this flow completes. Absent: 'economy'. */
+  podPolicy?: PodPolicy
+
   /** "auctor" = author/creator in Latin — the animaId of who created this modus */
   auctor?: string
   /** True = platform-owned canonical modus. False = community-published. */
@@ -148,4 +163,11 @@ export interface Modorum {
   find(id: string, versio?: string): Promise<Modus | null>
   register(modus: Modus): Promise<void>
   list(filter?: Partial<Pick<Modus, 'genus' | 'canonica' | 'auctor'>>): Promise<Modi>
+  /**
+   * Update execution preferences on a user-owned modus.
+   * Only non-definitional fields (computeStrategy, gpuClass, podPolicy) are
+   * accepted here — changes that would alter the workflow definition require
+   * a new register() call with a bumped versio and recomputed contentHash.
+   */
+  update(id: string, patch: Partial<Pick<Modus, 'computeStrategy' | 'gpuClass' | 'podPolicy'>>): Promise<Modus>
 }

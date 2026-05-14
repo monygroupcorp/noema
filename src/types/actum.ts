@@ -21,11 +21,24 @@
 // RunPod SECURE pod-time. impetus on actum records the total points consumed.
 // =============================================================================
 
+import type { GpuClass } from './materia.js'
+export type { GpuClass }
+
 export type ActumStatus =
   | 'nascens'     // initializing — execution has started, not yet running
   | 'agens'       // running — modus is actively executing on materia
   | 'completus'   // completed successfully — exitus is populated
   | 'fractus'     // failed — error is populated ("fractus" = broken in Latin)
+
+/**
+ * ComputeStrategy — how the user wants this generation dispatched.
+ *
+ * 'performance' — dedicated pod, user-selected GPU class, highest cost, immediate.
+ * 'standard'    — on-demand pod, platform-chosen GPU, default experience.
+ * 'economy'     — queued; dispatched against a warm pod another user left idle.
+ *                 Cheaper (no cold-start cost); wait time is non-deterministic.
+ */
+export type ComputeStrategy = 'performance' | 'standard' | 'economy'
 
 /**
  * Actum — the discrete execution report for a single modus run.
@@ -54,6 +67,19 @@ export interface Actum {
   dictumId?: string
   /** FK → Materia. The physical pod that executed this actum. */
   materiamId?: string
+
+  // ── Compute spec ────────────────────────────────────────────────────────
+  /**
+   * How the user dispatched this generation.
+   * Absent: treated as 'standard'. Recorded at cast time from either the
+   * user's Anima preference or the per-run advanced settings override.
+   */
+  computeStrategy?: ComputeStrategy
+  /**
+   * GPU class the user requested. Only meaningful when computeStrategy is
+   * 'performance'. Absent: platform picks a suitable default.
+   */
+  gpuClass?: GpuClass
 
   // ── Cost ────────────────────────────────────────────────────────────────
   /**

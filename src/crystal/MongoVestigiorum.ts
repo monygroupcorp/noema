@@ -34,13 +34,14 @@ function fromDoc(doc: Record<string, unknown>): Vestigium {
     impressio: Record<string, unknown>
   }
 
-  // Reconstruct the union type from the flat stored form
   const key: AuctorKey = auctorKey.animaId
     ? { animaId: auctorKey.animaId }
     : { arcanumHash: auctorKey.arcanumHash! }
 
-  // Strip auctorImpressio if null/undefined to keep the interface clean
-  const { auctorImpressio, ...counts } = impressio as { auctorImpressio?: string; amor: number; risus: number; maeror: number }
+  const { auctorImpressio, ...counts } = impressio as {
+    auctorImpressio?: string
+    amor: number; risus: number; maeror: number
+  }
 
   return {
     ...rest,
@@ -66,16 +67,16 @@ function cosine(a: number[], b: number[]): number {
 export class MongoVestigiorum implements Vestigiorum {
   constructor(
     private col: Collection,
-    private embed?: (text: string) => Promise<number[]>
+    private embed?: (text: string) => Promise<number[]>,
+    private embedImage?: (imageUrl: string) => Promise<number[]>,
   ) {}
 
   async create(
-    input: Omit<Vestigium, 'id' | 'natum' | 'mutatum' | 'embedding' | 'impressio'>
+    input: Omit<Vestigium, 'id' | 'natum' | 'mutatum' | 'embeddingPromptum' | 'embeddingImago' | 'embeddingIntella' | 'impressio'>
   ): Promise<Vestigium> {
     const now = new Date()
     const id = uuidv4()
     const impressio = { amor: 0, risus: 0, maeror: 0 }
-    // Store auctorKey as a flat optional-field object for queryability
     const auctorKeyDoc = 'animaId' in input.auctorKey
       ? { animaId: input.auctorKey.animaId }
       : { arcanumHash: input.auctorKey.arcanumHash }
@@ -86,12 +87,31 @@ export class MongoVestigiorum implements Vestigiorum {
     return { ...input, id, impressio, natum: now, mutatum: now }
   }
 
-  async index(id: string): Promise<void> {
+  async indexPromptum(id: string): Promise<void> {
     if (!this.embed) throw new Error('No embed function configured')
     const v = await this.findById(id)
     if (!v) throw new Error(`Vestigium '${id}' not found`)
-    const embedding = await this.embed(`${v.promptum} ${v.summarium}`)
-    await this.col.updateOne({ id }, { $set: { embedding } })
+    const text = v.negativum ? `${v.promptum} ${v.negativum}` : v.promptum
+    const embeddingPromptum = await this.embed(text)
+    await this.col.updateOne({ id }, { $set: { embeddingPromptum } })
+  }
+
+  async indexImago(id: string): Promise<void> {
+    if (!this.embedImage) throw new Error('No embedImage function configured')
+    const v = await this.findById(id)
+    if (!v) throw new Error(`Vestigium '${id}' not found`)
+    if (!v.imagoUrl) return
+    const embeddingImago = await this.embedImage(v.imagoUrl)
+    await this.col.updateOne({ id }, { $set: { embeddingImago } })
+  }
+
+  async indexIntella(id: string): Promise<void> {
+    if (!this.embed) throw new Error('No embed function configured')
+    const v = await this.findById(id)
+    if (!v) throw new Error(`Vestigium '${id}' not found`)
+    if (!v.intellaDescription) return
+    const embeddingIntella = await this.embed(v.intellaDescription)
+    await this.col.updateOne({ id }, { $set: { embeddingIntella } })
   }
 
   async search(query: VestigiumQuery): Promise<VestigiumResult[]> {
@@ -99,29 +119,44 @@ export class MongoVestigiorum implements Vestigiorum {
 
     const {
       quaerendum,
+      per = 'promptum',
       auctorKey,
       visibilitas,
       auctorImpressio,
       modusId,
       genus,
+      intellaIds,
       limit = 20,
       minSimilaritas = 0.7,
     } = query
 
+    // TODO: replace with $vectorSearch per dimension when Atlas Search indexes
+    // are configured. Each per value maps to a separate Atlas Search index:
+    //   'promptum' → embeddingPromptum index
+    //   'imago'    → embeddingImago index
+    //   'intella'  → embeddingIntella index
+    const embeddingKey = per === 'imago' ? 'embeddingImago'
+      : per === 'intella' ? 'embeddingIntella'
+      : 'embeddingPromptum'
+
     const allowedVis: string[] = visibilitas ?? (auctorKey ? ['privata', 'communis', 'publica'] : ['publica'])
 
-    const filter: Record<string, unknown> = { visibilitas: { $in: allowedVis }, embedding: { $exists: true } }
+    const filter: Record<string, unknown> = {
+      visibilitas: { $in: allowedVis },
+      [embeddingKey]: { $exists: true },
+    }
     if (auctorKey) Object.assign(filter, auctorKeyQuery(auctorKey))
     if (modusId) filter.modusId = modusId
     if (genus) filter.genus = genus
     if (auctorImpressio) filter['impressio.auctorImpressio'] = { $in: auctorImpressio }
+    if (intellaIds?.length) filter.intellaIds = { $in: intellaIds }
 
     const docs = await this.col.find(filter).toArray()
     const queryVec = await this.embed(quaerendum)
 
     const results: VestigiumResult[] = []
     for (const doc of docs) {
-      const emb = doc.embedding as number[] | undefined
+      const emb = doc[embeddingKey] as number[] | undefined
       if (!emb) continue
       const similaritas = cosine(queryVec, emb)
       if (similaritas < minSimilaritas) continue

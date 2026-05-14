@@ -26,6 +26,31 @@ export type MateriaStatus =
   | 'terminated'  // destroyed — volume may persist, pod does not
 
 /**
+ * GpuClass — the hardware tier a user requests for a generation.
+ *
+ * 'standard'    — platform-chosen GPU (RTX 4090 class); default for most workflows.
+ * 'performance' — high-end datacenter GPU (A100/A40 class); faster, higher cost.
+ * 'ultra'       — flagship GPU (H100 class); maximum throughput, highest cost.
+ *
+ * The actual RunPod GPU ID for each class is resolved at dispatch time
+ * based on availability and Modus compatibility requirements.
+ */
+export type GpuClass = 'standard' | 'performance' | 'ultra'
+
+/**
+ * PodPolicy — what happens to a warm pod after a job completes.
+ *
+ * 'private'  — pod is torn down immediately; no piggybacking allowed.
+ * 'economy'  — pod joins the economy pool; idle capacity is offered to
+ *              economy-queue jobs. The original user pays only their own
+ *              wall-clock time; platform routes economy riders onto the margin.
+ * 'link'     — pod is addressable via a shareToken; anyone with the link
+ *              can dispatch against it while it remains idle. Host pays
+ *              pod time; riders pay execution + a host fee.
+ */
+export type PodPolicy = 'private' | 'economy' | 'link'
+
+/**
  * Materia — a single compute pod instance.
  *
  * "materia" = matter/material in Latin (Aristotle's hyle).
@@ -66,6 +91,27 @@ export interface Materia {
   status: MateriaStatus
 
   /**
+   * GPU class this pod was provisioned for.
+   * Recorded at provision time so Praefectus can match economy/link riders
+   * against the class they requested.
+   */
+  gpuClass?: GpuClass
+
+  /**
+   * Post-job sharing policy for this pod.
+   * Set when the pod is provisioned based on the spawning user's preference.
+   * Absent: treated as 'standard' (warm pool eligible, no link sharing).
+   */
+  podPolicy?: PodPolicy
+
+  /**
+   * Opaque token for link-share pods.
+   * When podPolicy is 'link', this token is included in the share URL.
+   * Anyone with the token can dispatch against this pod while it is idle.
+   */
+  shareToken?: string
+
+  /**
    * TEE (Trusted Execution Environment) attestation quote.
    * The enclave signs: image hash + weights hash + config hash +
    * ephemeral WireGuard public key generated inside the enclave.
@@ -90,11 +136,15 @@ export type Materiae = Materia[]
 export interface MateriaStore {
   create(input: Omit<Materia, 'id'>): Promise<Materia>
   findById(id: string): Promise<Materia | null>
-  update(id: string, patch: Partial<Pick<Materia, 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum'>>): Promise<Materia>
+  update(id: string, patch: Partial<Pick<Materia, 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum' | 'podPolicy' | 'shareToken'>>): Promise<Materia>
   /**
-   * Return the first idle Materia matching the given imageRef.
-   * Used by Praefectus to find warm pods for incoming jobs.
-   * Returns null when no compatible warm pod is available (cold start).
+   * Return the first idle Materia matching the given spec.
+   *
+   * Standard routing: { imageRef } — any idle pod running that image.
+   * Economy routing:  { imageRef, podPolicy: 'economy' } — only economy-pool pods.
+   * Link routing:     { shareToken } — the specific pod behind a share link.
+   *
+   * Returns null when no matching pod is available.
    */
-  findWarm(spec: { imageRef: string }): Promise<Materia | null>
+  findWarm(spec: { imageRef?: string; podPolicy?: PodPolicy; shareToken?: string }): Promise<Materia | null>
 }
