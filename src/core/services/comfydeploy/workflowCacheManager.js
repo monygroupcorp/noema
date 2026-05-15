@@ -356,7 +356,8 @@ class WorkflowCacheManager {
       
       // Process machines to add cost information
       const processedMachines = rawMachines.map(machine => {
-        const gpuType = machine.gpu_type; // Assuming the field name is gpu_type
+        // ComfyDeploy API returns 'gpu' field (not 'gpu_type'); normalize to uppercase for map lookup
+        const gpuType = (machine.gpu || machine.gpu_type)?.toUpperCase() || null;
         let costPerSecond = GPU_COST_PER_SECOND['CPU']; // Default to CPU cost
         let foundCost = false;
 
@@ -368,7 +369,7 @@ class WorkflowCacheManager {
              if (gpuType) {
                this.logger.warn(`[WorkflowCacheManager] GPU type "${gpuType}" for machine ${machine.id} not found in cost map. Defaulting to CPU cost.`);
              } else {
-               this.logger.warn(`[WorkflowCacheManager] Machine ${machine.id} (${machine.name || 'N/A'}) missing 'gpu_type' field. Defaulting to CPU cost.`);
+               this.logger.warn(`[WorkflowCacheManager] Machine ${machine.id} (${machine.name || 'N/A'}) missing gpu/gpu_type field. Defaulting to CPU cost.`);
              }
            }
         }
@@ -1048,7 +1049,7 @@ class WorkflowCacheManager {
             if (isFluxGeneralDeployment && DEBUG_LOGGING_ENABLED) {
                 this.logger.info(`[WorkflowCacheManager-FLUXGENERAL] Found machine for ID '${machineId}': ${JSON.stringify(machine)}`);
             }
-            const gpuType = machine.gpu_type || machine.gpu; // Check both gpu_type and gpu
+            const gpuType = (machine.gpu_type || machine.gpu)?.toUpperCase() || null;
             if (isFluxGeneralDeployment && DEBUG_LOGGING_ENABLED) {
                 this.logger.info(`[WorkflowCacheManager-FLUXGENERAL] Machine GPU type: '${gpuType}'`);
             }
