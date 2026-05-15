@@ -1043,11 +1043,16 @@ function buildGalleryHtml(collectionAddress) {
     card.className = 'card';
 
     var img = document.createElement('img');
-    img.src = it.url;
     img.alt = '';
     img.loading = 'lazy';
-    img.addEventListener('load',  function () { img.classList.add('loaded'); });
+    var _t0 = Date.now();
+    function _reveal() {
+      var wait = Math.max(0, 600 - (Date.now() - _t0));
+      setTimeout(function () { img.classList.add('loaded'); }, wait);
+    }
+    img.addEventListener('load',  _reveal);
     img.addEventListener('error', function () { img.classList.add('loaded'); });
+    img.src = it.url;
 
     var skel = document.createElement('div');
     skel.className = 'skel';
