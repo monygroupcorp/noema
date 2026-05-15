@@ -25,4 +25,14 @@ describe('economy constants', () => {
     );
     assert.ok(!src.includes('const USD_PER_POINT'), 'pricingService must not define USD_PER_POINT locally');
   });
+
+  test('generationExecutionService uses central USD_PER_POINT', () => {
+    const src = require('fs').readFileSync(
+      require('path').join(__dirname, '../../../src/core/services/generationExecutionService.js'),
+      'utf8'
+    );
+    assert.ok(!src.includes('const USD_PER_POINT'), 'generationExecutionService must not define USD_PER_POINT locally');
+    assert.ok(src.includes("require('../constants/economy')") || src.includes('require("../constants/economy")'),
+      'generationExecutionService must import from constants/economy');
+  });
 });
