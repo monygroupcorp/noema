@@ -49,6 +49,18 @@ class CookCollectionsDB extends BaseDB {
     if (userId) query.userId = userId;
     await this.deleteOne(query);
   }
+
+  /**
+   * Set the rev-share BPS for a collection.
+   * @param {string} collectionId
+   * @param {number} bps  — e.g. 500 = 5%
+   */
+  async setRevShareBps(collectionId, bps) {
+    if (typeof bps !== 'number' || bps < 0 || bps > 10000) {
+      throw new Error('revShareBps must be a number 0–10000');
+    }
+    await this.updateCollection(collectionId, { 'config.revShareBps': bps });
+  }
 }
 
 module.exports = CookCollectionsDB; 
