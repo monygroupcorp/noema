@@ -56,8 +56,8 @@ class CookCollectionsDB extends BaseDB {
    * @param {number} bps  — e.g. 500 = 5%
    */
   async setRevShareBps(collectionId, bps) {
-    if (typeof bps !== 'number' || bps < 0 || bps > 10000) {
-      throw new Error('revShareBps must be a number 0–10000');
+    if (!Number.isInteger(bps) || bps < 0 || bps > 10000) {
+      throw new Error('revShareBps must be an integer 0–10000');
     }
     const result = await this.updateCollection(collectionId, { 'config.revShareBps': bps });
     if (result?.matchedCount === 0) {

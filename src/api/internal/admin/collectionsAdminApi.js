@@ -27,8 +27,8 @@ function createCollectionsAdminApi({ cookCollectionsDb }) {
    */
   router.patch('/:collectionId/rev-share', async (req, res) => {
     const { bps } = req.body || {};
-    if (typeof bps !== 'number') {
-      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'bps must be a number' } });
+    if (!Number.isInteger(bps)) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'bps must be an integer' } });
     }
     try {
       await cookCollectionsDb.setRevShareBps(req.params.collectionId, bps);

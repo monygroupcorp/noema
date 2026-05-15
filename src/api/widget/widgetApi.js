@@ -44,6 +44,7 @@ const { HTTPFacilitatorClient } = require('@x402/core/server');
 const { createFacilitatorConfig } = require('@coinbase/x402');
 const { distributeAgentOwnerReward } = require('../../core/services/charging/agentOwnerReward');
 const { USD_PER_POINT } = require('../../core/constants/economy');
+const { economyService } = require('../../core/services/store/economy/EconomyService');
 
 // ── x402 session constants ──────────────────────────────────────────────────────
 const BASE_USDC_ADDRESS  = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -1587,7 +1588,7 @@ function createWidgetApi(deps = {}) {
                 grossPoints,
                 runId,
                 spellSlug,
-                economyService: require('../../core/services/store/economy/EconomyService').economyService,
+                economyService,
                 splitLedgerDb: deps.db?.splitLedger || null,
                 logger,
             }).catch(err => logger.error('[widget/x402/spell] agentOwnerReward failed:', err.message));
