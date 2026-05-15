@@ -41,7 +41,7 @@ class CookCollectionsDB extends BaseDB {
     if (Object.keys(unsetFields).length > 0) {
       updateOp.$unset = unsetFields;
     }
-    await this.updateOne({ collectionId }, updateOp);
+    return this.updateOne({ collectionId }, updateOp);
   }
 
   async deleteCollection(collectionId, userId) {
@@ -59,8 +59,11 @@ class CookCollectionsDB extends BaseDB {
     if (typeof bps !== 'number' || bps < 0 || bps > 10000) {
       throw new Error('revShareBps must be a number 0–10000');
     }
-    await this.updateCollection(collectionId, { 'config.revShareBps': bps });
+    const result = await this.updateCollection(collectionId, { 'config.revShareBps': bps });
+    if (result?.matchedCount === 0) {
+      throw new Error(`Collection not found: ${collectionId}`);
+    }
   }
 }
 
-module.exports = CookCollectionsDB; 
+module.exports = CookCollectionsDB;
