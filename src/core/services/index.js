@@ -62,6 +62,7 @@ const { GenerationExecutionService } = require('./generationExecutionService');
 const { economyService } = require('./store/economy/EconomyService');
 const { DelegationService } = require('./agents/DelegationService');
 const notificationEvents = require('../events/notificationEvents');
+const { startDragnet } = require('./charging/agentOwnerDragnet');
 
 /**
  * Initialize all core services
@@ -669,6 +670,16 @@ async function initializeServices(options = {}) {
       storageService: storageService,
       pointsService: pointsService
     });
+
+    // Start agent-owner dragnet (daily sweep for unclaimed split_ledger entries)
+    const _splitLedgerDb = initializedDbServices?.data?.splitLedger;
+    const _userCoreDb = initializedDbServices?.data?.userCore;
+    if (_splitLedgerDb && _userCoreDb && economyService) {
+      startDragnet({ splitLedgerDb: _splitLedgerDb, userCoreDb: _userCoreDb, economyService, logger });
+      logger.debug('[initializeServices] agentOwnerDragnet started.');
+    } else {
+      logger.warn('[initializeServices] agentOwnerDragnet not started: missing splitLedgerDb, userCoreDb, or economyService.');
+    }
 
     // Return instantiated services
     return {
