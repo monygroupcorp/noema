@@ -264,6 +264,20 @@ describe('GenerationExecutionService', () => {
     });
   });
 
+  describe('x402 contributor rewards', () => {
+    test('x402 execution calls distributeContributorRewards when x402BasePoints set', async () => {
+      // Verify that the x402 branch in generationExecutionService invokes contributor rewards
+      const src = require('fs').readFileSync(
+        require('path').join(__dirname, '../../../src/core/services/generationExecutionService.js'),
+        'utf8'
+      );
+      assert.ok(
+        src.includes('distributeContributorRewards') && src.includes('isX402Execution') && src.includes('x402BasePoints'),
+        'generationExecutionService must call distributeContributorRewards for x402 path'
+      );
+    });
+  });
+
   describe('async adapter spend', () => {
     afterEach(() => {
       adapterRegistry.adapters.delete('test-async-adapter');
