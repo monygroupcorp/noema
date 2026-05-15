@@ -21,6 +21,10 @@ async function runDragnet({ splitLedgerDb, userCoreDb, economyService, logger })
 
   const entries = await splitLedgerDb.findUnclaimed(BATCH_SIZE);
 
+  if (entries.length === BATCH_SIZE) {
+    logger?.warn(`[dragnet] batch full (${BATCH_SIZE}) — more unclaimed entries may remain`);
+  }
+
   for (const entry of entries) {
     try {
       const user = await userCoreDb.findUserCoreByWalletAddress(entry.ownerAddress);
@@ -32,6 +36,10 @@ async function runDragnet({ splitLedgerDb, userCoreDb, economyService, logger })
 
       const masterAccountId = user._id;
 
+      // NOTE: upsertRewardTally and incrementContributorRewards are two separate writes with
+      // no transaction. If incrementContributorRewards fails after upsertRewardTally succeeds,
+      // the entry stays pending and will be retried — causing upsertRewardTally to run again.
+      // Both are $inc operations so double-crediting is the failure mode. Window is narrow but known.
       await economyService.creditLedger.upsertRewardTally({
         masterAccountId: economyService._toOid(masterAccountId),
         depositorAddress: null,
