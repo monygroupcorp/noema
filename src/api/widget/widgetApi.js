@@ -42,12 +42,19 @@ const { CREDIT_VAULT_ADDRESSES } = require('../../core/services/alchemy/foundati
 const { decodePaymentSignatureHeader, encodePaymentRequiredHeader } = require('@x402/core/http');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
 const { createFacilitatorConfig } = require('@coinbase/x402');
+const { distributeAgentOwnerReward } = require('../../core/services/charging/agentOwnerReward');
+const { USD_PER_POINT } = require('../../core/constants/economy');
 
 // ── x402 session constants ──────────────────────────────────────────────────────
 const BASE_USDC_ADDRESS  = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const X402_NETWORK       = 'eip155:8453';
 const X402_SESSION_USDC  = '1000000'; // $1.00 USDC (6 decimals)
 const X402_CAST_USDC     = process.env.X402_CAST_USDC || '100000'; // $0.10 default; override per-deploy
+
+// Convert USDC atomic units (6 decimals) to Noema points
+function usdcAtomicToPoints(atomicStr) {
+    return Math.round(Number(atomicStr) / 1e6 / USD_PER_POINT);
+}
 
 // Lazy singleton — only created if CDP credentials are present
 let _facilitatorClient = null;
@@ -1565,6 +1572,26 @@ function createWidgetApi(deps = {}) {
                 }
             }
 
+            // Compute gross points from x402 payment amount
+            const grossPoints = usdcAtomicToPoints(X402_CAST_USDC);
+            const runId = require('crypto').randomUUID();
+
+            // Agent/collection owner rev-share — before dispatch
+            let agentCollection = null;
+            if (agentDoc.agentCollection && deps.db?.cookCollections) {
+                agentCollection = await deps.db.cookCollections.findById(agentDoc.agentCollection);
+            }
+            await distributeAgentOwnerReward({
+                agentDoc,
+                collection: agentCollection,
+                grossPoints,
+                runId,
+                spellSlug,
+                economyService: require('../../core/services/store/economy/EconomyService').economyService,
+                splitLedgerDb: deps.db?.splitLedger || null,
+                logger,
+            }).catch(err => logger.error('[widget/x402/spell] agentOwnerReward failed:', err.message));
+
             const inputs = req.body?.inputs || {};
             const { status, data } = await _internalReq('POST', '/internal/v1/data/spells/cast', {
                 slug:    spellSlug,
@@ -1573,6 +1600,9 @@ function createWidgetApi(deps = {}) {
                     parameterOverrides: inputs,
                     platform:           'widget-x402',
                     payerAddress:       verifyResult.payer,
+                    isX402:             true,
+                    x402BasePoints:     grossPoints,
+                    runId,
                 },
             });
 
