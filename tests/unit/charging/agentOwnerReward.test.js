@@ -12,6 +12,7 @@ describe('distributeAgentOwnerReward', () => {
       creditLedger: {
         upsertRewardTally: async (args) => { credited = args; },
       },
+      userEconomy: { incrementContributorRewards: async () => {} },
     };
 
     const result = await distributeAgentOwnerReward({
@@ -81,6 +82,7 @@ describe('distributeAgentOwnerReward', () => {
     const mockEconomy = {
       _toOid: (id) => id,
       creditLedger: { upsertRewardTally: async (args) => { credited = args; } },
+      userEconomy: { incrementContributorRewards: async () => {} },
     };
 
     await distributeAgentOwnerReward({

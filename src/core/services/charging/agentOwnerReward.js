@@ -39,11 +39,12 @@ async function distributeAgentOwnerReward({
         rewardCategory: 'agent_owner',
         points: pointsAmount,
       });
+      await economyService.userEconomy.incrementContributorRewards(ownerUserId, 'agent_owner', pointsAmount);
       logger.info(`[agentOwnerReward] Credited ${pointsAmount} pts (agent_owner) to ${ownerUserId} for run ${runId}`);
       return { status: 'credited', pointsAmount };
     } catch (err) {
       logger.error(`[agentOwnerReward] Failed to credit ${ownerUserId}: ${err.message}`);
-      return { status: 'skipped', pointsAmount };
+      return { status: 'skipped', pointsAmount: 0 };
     }
   }
 
@@ -62,7 +63,7 @@ async function distributeAgentOwnerReward({
       return { status: 'unclaimed', pointsAmount };
     } catch (err) {
       logger.error(`[agentOwnerReward] Failed to store unclaimed entry for ${ownerAddress}: ${err.message}`);
-      return { status: 'skipped', pointsAmount };
+      return { status: 'skipped', pointsAmount: 0 };
     }
   }
 
