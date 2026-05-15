@@ -181,7 +181,7 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
       logger.info('[partnerRun] Spell queued', { runId, slug, partnerId });
 
       // Agent/collection owner rev-share for partner-proxied runs (best-effort)
-      const grossPoints = usdcAtomicToPoints(amount);
+      const grossPoints = usdcAtomicToPoints(grossAmount);
       let agentDoc = null;
       let agentCollection = null;
       // Look up agent if agentId provided in request body — skip if unavailable
