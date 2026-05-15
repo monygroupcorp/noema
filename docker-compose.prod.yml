@@ -21,9 +21,30 @@ x-common: &common
     - no-new-privileges
 
 services:
+  clip:
+    image: ghcr.io/monygroupcorp/noema-clip:${VERSION:-latest}
+    container_name: noema-clip
+    build:
+      context: ./clip_service
+    restart: unless-stopped
+    networks:
+      hyperbot:
+        aliases:
+          - clip
+    mem_limit: 1200m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
   bot:
     <<: *common
     container_name: hyperbotcontained
+    depends_on:
+      clip:
+        condition: service_healthy
     environment:
       - ETHEREUM_SIGNER_PRIVATE_KEY=${ETHEREUM_SIGNER_PRIVATE_KEY:-}
       - MAINTENANCE_MODE_FILE=/var/run/hyperbot/maintenance.flag

@@ -14,6 +14,7 @@ import { TelegramAllocutio } from './allocutio/TelegramAllocutio.js'
 import type { RouterDeps, IdentityResolver } from './allocutio/TelegramAllocutio.js'
 import type { AuctorKey } from './flow/types.js'
 import { createWebhookRouter } from './api/webhooks/webhookRouter.js'
+import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { CANONICAL_MODI } from './crystal/seeds/modi.js'
 
 import { hostCutHook } from './ledger/hooks/hostCut.js'
@@ -128,7 +129,32 @@ async function main(): Promise<void> {
   await ensureIndexes(mongo.db(DB_NAME))
   console.log('Indexes ensured')
 
-  // 2. Build OpenAI client if key is present
+  // 2. Build embedding functions (CLIP service) and OpenAI client
+  const CLIP_SERVICE_URL = process.env.CLIP_SERVICE_URL
+
+  let embed: ContainerConfig['embed'] | undefined
+  let embedImage: ContainerConfig['embedImage'] | undefined
+
+  if (CLIP_SERVICE_URL) {
+    const clipPost = async (path: string, body: unknown): Promise<number[]> => {
+      const res = await fetch(`${CLIP_SERVICE_URL}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const msg = await res.text().catch(() => '')
+        throw new Error(`CLIP service ${path} failed: ${res.status} ${msg}`)
+      }
+      return (await res.json() as { embedding: number[] }).embedding
+    }
+    embed      = (text) => clipPost('/embed/text',  { text })
+    embedImage = (url)  => clipPost('/embed/image', { url })
+    console.log(`CLIP service: ${CLIP_SERVICE_URL}`)
+  } else {
+    console.warn('CLIP_SERVICE_URL not set — vestigium embeddings disabled')
+  }
+
   let openaiClient: ContainerConfig['openaiClient'] | undefined
   if (process.env.OPENAI_API_KEY) {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -190,6 +216,8 @@ async function main(): Promise<void> {
       runpodWebhookUrl: RUNPOD_WEBHOOK_URL,
     } : {}),
     ...(openaiClient ? { openaiClient } : {}),
+    ...(embed ? { embed } : {}),
+    ...(embedImage ? { embedImage } : {}),
   })
 
   // 3b. Rehydrate in-flight collections from DB (recovery after restart)
@@ -279,6 +307,8 @@ async function main(): Promise<void> {
       (req as { rawBody?: string }).rawBody = buf.toString()
     },
   }))
+
+  app.use('/api/vestigia', createVestigiaRouter(ring.vestigiorum))
 
   app.use('/webhooks', createWebhookRouter({
     actorum: ring.actorum,

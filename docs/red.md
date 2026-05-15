@@ -126,9 +126,15 @@ Three new tests: retry succeeds on second attempt; FAILED fires after all retrie
 
 ---
 
-### 15. `embed` / `embedImage` not wired in index.ts
-`MongoVestigiorum` accepts `embed` and `embedImage` functions but they are not passed in `createContainer()`. The fire-and-forget index calls in `vestigiumHook.ts` silently no-op on every actum completion.
+### 15. ~~`embed` / `embedImage` not wired~~ — service built, search API live
 
-**Spec written:** `docs/embed-spec.md` — self-hosted OpenCLIP ViT-B/32 microservice (512-dim, CPU, ~50ms). Text and image live in the same embedding space (CLIP's key feature). Wires via `CLIP_SERVICE_URL` env var; no changes to vestigiumHook required.
+**Built:**
+- `clip_service/` — Python FastAPI wrapping OpenCLIP ViT-B/32 (512-dim, CPU, ~50ms). Single and batch endpoints for text + image. L2-normalised vectors. Weights baked into Docker image at build time.
+- `src/index.ts` — `CLIP_SERVICE_URL` → `embed` + `embedImage` wired into `createContainer`. Warns at startup when absent.
+- `src/api/vestigia/vestigiaRouter.ts` — `GET /api/vestigia/search` (semantic, per promptum/imago/intella), `GET /api/vestigia` (recent history), `GET /api/vestigia/:id`. Returns 503 when CLIP service absent.
+- `docker-compose.yml` / `docker-compose.prod.yml` — `clip` service on `hyperbot` network with healthcheck.
 
-**Blocked on:** Python service implementation + Atlas Vector Search index setup. Once `CLIP_SERVICE_URL` is live, wiring `index.ts` is trivial (see spec). Backfill script also specced for migrating existing vestigia.
+**Still open:**
+- `scripts/migration/backfill-vestigia-embeddings.ts` — phase 1 (embed all prompts/intella) + phase 2 (kNN rarity scoring for regen candidates)
+- Atlas `$vectorSearch` upgrade in `MongoVestigiorum.search()` (in-memory fallback fine until ~10k records)
+- Atlas Search index definitions (see `docs/embed-spec.md`)
