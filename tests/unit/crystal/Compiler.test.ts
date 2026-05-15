@@ -172,6 +172,21 @@ test('compile() throws when runpodSpec absent on essentia', async () => {
   )
 })
 
+test('compile() uses increment strategy: baseSeed + pieceIndex', async () => {
+  const essentia = makeEssentia({
+    runpodSpec: {
+      ...makeEssentia().runpodSpec!,
+      defaultCookFlags: { seedStrategy: 'increment' },
+    },
+  })
+  const compiler = makeCompiler()
+  const { spec } = await compiler.compile(essentia, {
+    prompt: 'test',
+    _cookFlags: { baseSeed: 1000, pieceIndex: 7 },
+  })
+  assert.equal(spec.seed, 1007)
+})
+
 test('compile() throws CompilerError when template not found', async () => {
   const compiler = makeCompiler(1)
   const essentia = makeEssentia({

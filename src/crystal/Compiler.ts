@@ -163,7 +163,7 @@ export class Compiler {
         const placeholder = cookFlags.seedPlaceholder ?? essentia.runpodSpec?.defaultCookFlags?.seedPlaceholder ?? 88888888
         return Number(placeholder)
       }
-      case 'incremented': {
+      case 'increment': {
         const base = Number(cookFlags.baseSeed ?? 0)
         const idx = Number(cookFlags.pieceIndex ?? 0)
         return base + idx

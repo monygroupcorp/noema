@@ -84,8 +84,15 @@ Implementation and test coverage were both solid. Two coercion bugs found and fi
 
 Seven new tests added covering empty string, whitespace-only string, and Infinity for both `int` and `float`.
 
-### 13. Compiler correctness
-`src/crystal/Compiler.ts` converts `Modus + aditus → RunPod job payload`. The output feeds directly into ComfyUI. Unknown whether all field mappings, version pinning, and composed modus compilation are correct.
+### 13. ~~Compiler correctness~~ — audited, one bug fixed
+
+**Fixed — `'increment'` seed strategy never fired:** `_resolveSeed` had `case 'incremented':` but the type defines the value as `'increment'`. Any collection using `seedStrategy: 'increment'` (base + pieceIndex) would throw `UNKNOWN_SEED_STRATEGY` at runtime. Fixed: `case 'increment':`. One test added.
+
+**No other bugs found.** Slot map traversal, model resolution, seed strategies (shuffle/fixed/increment), cook flag merging, hash determinism, and error paths all correct.
+
+**Intentional gap — composed modus compilation:** The crystal `Compiler` only handles `Essentia` with `runpodSpec`. Composed modi are not supported — `index.ts` throws clearly if `runpodSpec` is absent. Composed compilation remains in the legacy JS layer for now.
+
+**Files:** `src/crystal/Compiler.ts`, `tests/unit/crystal/Compiler.test.ts`
 
 ### 14. ~~TraitMixer edge cases~~ — audited, tag-group exclusion added
 
