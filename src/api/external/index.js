@@ -639,6 +639,8 @@ function initializeExternalApi(dependencies) {
       uploadRecordDb: dependencies.db?.data?.uploadRecords,
       splitLedgerDb: dependencies.db?.data?.splitLedger,
       x402PaymentLogDb: dependencies.db?.data?.x402PaymentLog,
+      userCoreDb: dependencies.db?.data?.userCore,
+      cookCollectionsDb: dependencies.db?.data?.cookCollections,
       receiverAddress: x402ReceiverAddress,
       network: x402Network,
     });
