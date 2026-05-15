@@ -29,6 +29,20 @@ const COLLECTION_NAME = 'split_ledger';
  * @property {Date} updatedAt
  */
 
+/**
+ * @typedef {Object} AgentOwnerUnclaimedEntry
+ * @property {'agent_owner_unclaimed'} type
+ * @property {string} runId
+ * @property {string} spellSlug
+ * @property {string} agentId
+ * @property {string} ownerAddress    - ETH wallet address of the agent owner
+ * @property {number} pointsAmount    - Points owed (not USDC)
+ * @property {'pending'|'credited'} status
+ * @property {Date} [creditedAt]      - Set when dragnet credits the owner; absent until then
+ * @property {Date} createdAt
+ * @property {Date} updatedAt
+ */
+
 class SplitLedgerDB extends BaseDB {
   constructor(logger) {
     super(COLLECTION_NAME);
@@ -40,6 +54,7 @@ class SplitLedgerDB extends BaseDB {
    * - runId: unique (one credit entry per run)
    * - partnerId + status + createdAt: partner ledger queries + pagination
    * - status: background settlement queries
+   * - type + status + createdAt: dragnet sweep for agent_owner_unclaimed entries
    */
   async ensureIndexes() {
     await dbQueue.enqueue(async () => {
@@ -98,6 +113,8 @@ class SplitLedgerDB extends BaseDB {
    */
   async createUnclaimedAgentOwnerEntry({ runId, spellSlug, agentId, ownerAddress, pointsAmount }) {
     const now = new Date();
+    // creditedAt intentionally omitted — BaseDB.validateData strips nulls.
+    // The dragnet sets it via $set when the owner onboards.
     return this.insertOne({
       type: 'agent_owner_unclaimed',
       runId,
@@ -106,7 +123,6 @@ class SplitLedgerDB extends BaseDB {
       ownerAddress,
       pointsAmount,
       status: 'pending',
-      creditedAt: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -115,7 +131,7 @@ class SplitLedgerDB extends BaseDB {
   /**
    * Return pending unclaimed agent-owner entries for dragnet.
    * @param {number} limit
-   * @returns {Promise<SplitLedgerEntry[]>}
+   * @returns {Promise<AgentOwnerUnclaimedEntry[]>}
    */
   async findUnclaimed(limit = 100) {
     return this.findMany(
