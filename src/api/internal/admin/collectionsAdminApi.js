@@ -36,6 +36,9 @@ function createCollectionsAdminApi({ cookCollectionsDb }) {
       return res.json({ ok: true });
     } catch (err) {
       logger.error('[collectionsAdmin] setRevShareBps failed', { error: err.message, collectionId: req.params.collectionId });
+      if (err.message.startsWith('Collection not found')) {
+        return res.status(404).json({ error: { code: 'NOT_FOUND', message: err.message } });
+      }
       return res.status(400).json({ error: { code: 'BAD_REQUEST', message: err.message } });
     }
   });
