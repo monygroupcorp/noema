@@ -483,7 +483,8 @@ class GenerationExecutionService {
               ...metadata,
               ...(tool.deliveryHints && { deliveryHints: tool.deliveryHints }),
               costRate: costRateInfo,
-              platformContext: user.platformContext
+              platformContext: user.platformContext,
+              loraResolutionData: loraResolutionData || metadata?.loraResolutionData || {},
             }
           };
 
