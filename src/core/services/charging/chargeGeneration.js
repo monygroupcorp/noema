@@ -10,8 +10,7 @@
 
 const { economyService: defaultEconomyService } = require('../store/economy/EconomyService');
 const { distributeContributorRewards } = require('./contributorRewards');
-
-const USD_PER_POINT = 0.000337;
+const { USD_PER_POINT } = require('../../constants/economy');
 
 const HOST_CUT_POINTS = 10;
 const PLATFORM_ROYALTY_SKIM_RATE = 0.05;

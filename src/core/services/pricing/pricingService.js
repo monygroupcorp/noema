@@ -6,9 +6,7 @@
  */
 
 const { PRICING_CONFIG } = require('./pricingConfig');
-
-// Station economy: 1 point = $0.000337 (matches GPU baseline)
-const USD_PER_POINT = 0.000337;
+const { USD_PER_POINT } = require('../../constants/economy');
 
 class PricingService {
   constructor(logger) {
