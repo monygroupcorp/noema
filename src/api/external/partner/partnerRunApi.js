@@ -21,8 +21,15 @@ const {
   BASE_SEPOLIA_USDC_ADDRESS,
   NETWORKS
 } = require('../../../core/services/x402');
+const { distributeAgentOwnerReward } = require('../../../core/services/charging/agentOwnerReward');
+const { USD_PER_POINT } = require('../../../core/constants/economy');
+const { economyService } = require('../../../core/services/store/economy/EconomyService');
 
 const logger = createLogger('partnerRunApi');
+
+function usdcAtomicToPoints(atomicStr) {
+  return Math.round(Number(atomicStr) / 1e6 / USD_PER_POINT);
+}
 
 const DEFAULT_SPELL_PRICE_USDC = process.env.X402_CAST_USDC || '100000'; // $0.10
 const DEFAULT_SPLIT_BPS = 500; // 5%
@@ -39,7 +46,7 @@ const DEFAULT_SPLIT_BPS = 500; // 5%
  * @param {string} dependencies.receiverAddress - Address to receive payments
  * @param {string} [dependencies.network] - Network ID (defaults to Base mainnet)
  */
-function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerDb, x402PaymentLogDb, receiverAddress, network = NETWORKS.BASE_MAINNET }) {
+function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerDb, x402PaymentLogDb, userCoreDb, cookCollectionsDb, receiverAddress, network = NETWORKS.BASE_MAINNET }) {
   if (!receiverAddress) throw new Error('partnerRunApi requires receiverAddress');
 
   const router = express.Router();
@@ -172,6 +179,30 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
       await splitLedgerDb.markCredited(runId);
 
       logger.info('[partnerRun] Spell queued', { runId, slug, partnerId });
+
+      // Agent/collection owner rev-share for partner-proxied runs (best-effort)
+      const grossPoints = usdcAtomicToPoints(amount);
+      let agentDoc = null;
+      let agentCollection = null;
+      // Look up agent if agentId provided in request body — skip if unavailable
+      if (userCoreDb && req.body?.agentId) {
+        agentDoc = await userCoreDb.findByAgentId(req.body.agentId).catch(() => null);
+      }
+      if (agentDoc?.agentCollection && cookCollectionsDb) {
+        agentCollection = await cookCollectionsDb.findById(agentDoc.agentCollection).catch(() => null);
+      }
+      if (agentDoc) {
+        await distributeAgentOwnerReward({
+          agentDoc,
+          collection: agentCollection,
+          grossPoints,
+          runId,
+          spellSlug: slug,
+          economyService,
+          splitLedgerDb: splitLedgerDb || null,
+          logger,
+        }).catch(err => logger.error('[partnerRun] agentOwnerReward failed:', err.message));
+      }
 
       // TODO: dispatch spell execution (wire to existing spell execution service)
       // For now return accepted — execution dispatch wired in next task
