@@ -104,12 +104,17 @@ Audit findings:
 
 **Files:** `src/types/collectio.ts`, `src/crystal/TraitMixer.ts`, `tests/unit/crystal/TraitMixer.test.ts`
 
-### 16. Arcanum execution path unimplemented
-`actum.nullifier` is declared on `Actum` and the three-hop crossing is documented, but no code writes it. An anima holding only arcanum signa cannot fund a modus execution — `ActumInceptor` passes `by: { arcanumHash }` correctly through balance/lock, but `actum.nullifier` is never stamped, so the spend proof is never recorded and the crossing path (`nullifier → arcanum signum → deposit → anima`) is inert.
+### 16. ~~Arcanum execution path unimplemented~~ — resolved
 
-**What's missing:** In `ActumInceptor.initiate()`, when `by` is `{ arcanumHash }` and the selected signa include an arcanum signum, the actum should be created with `nullifier` set to the arcanum's spend proof. This requires ZK proof verification logic (or a simpler hash-based proof for non-ZK mode).
+**ArcanumIssuer** (`src/ledger/ArcanumIssuer.ts`): converts identified balance → arcanum signum in one call. Generates 32-byte secret, computes `arcanumHash = sha256(secret)`, locks and settles identified signa, issues arcanum signum with `testis: arcanumHash`. Returns `{ secret, arcanumHash, signumId }` — secret never stored; platform cannot reverse the anonymization. `signumId` is the future nullifier.
 
-**Files:** `src/execution/ActumInceptor.ts`, `src/types/actum.ts`
+**Nullifier stamping** (`ActumInceptor.initiate()`): when `by = { arcanumHash }`, finds the arcanum signum in the selected set, checks `findByNullifier()` for double-spend, then stamps `actum.nullifier = arcanumSignum.id`. Identified path (`by = { animaId }`) is unchanged.
+
+**Double-spend protection**: `findByNullifier()` added to `Actorum` interface, `MemoryActorum`, and `MongoActorum`. Any second attempt to spend the same arcanum signum is rejected before the lock step.
+
+No ZK needed: nullifier = arcanum signum's UUID ID. The crossing (`actum.nullifier → signum(arcanum) → signum(deposit) → anima`) is now live.
+
+**Tests:** 8 tests in `ArcanumIssuer.test.ts` (issuance, refund, privacy partition, secret entropy), 3 in `ActumInceptor.test.ts` (no nullifier on identified path, nullifier stamped on arcanum path, double-spend rejected).
 
 ---
 

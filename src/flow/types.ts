@@ -91,7 +91,7 @@ export type Resolution =
 
 export type AuctorKey =
   | { animaId: string }
-  | { arcanumHash: string }
+  | { commitment: string }
 
 // ---------------------------------------------------------------------------
 // Platform
@@ -107,7 +107,7 @@ export interface FlowContext {
   intent: Intent
   /** The flow-specific step state — each Flow defines its own state shape */
   state: unknown
-  /** Identity — animaId for identified users, arcanumHash for anonymous */
+  /** Identity — animaId for identified users, commitment for anonymous */
   identity: AuctorKey
   /** Active session (Modo) if one exists */
   modoId?: string

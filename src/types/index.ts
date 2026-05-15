@@ -6,7 +6,7 @@
 // │  signum       proof of value — identified forma:              │
 // │               integer | eth | x402 | minted | mined | reward  │
 // └───────────────────────────┬───────────────────────────────────┘
-//                             │ arcanumHash (one-way, no return path)
+//                             │ commitment (one-way, no return path)
 // ┌─ TIER 1: CORE (bridge) ───▼───────────────────────────────────┐
 // │  signum       anonymous forma: arcanum | tessera               │
 // │               arcanum = H(secret), holds balance               │

@@ -52,6 +52,11 @@ export class MongoActorum implements Actorum {
     return doc ? fromDoc(doc) : null
   }
 
+  async findByNullifier(nullifier: string): Promise<Actum | null> {
+    const doc = await this.col.findOne({ nullifier })
+    return doc ? fromDoc(doc) : null
+  }
+
   async findExpired(): Promise<Actum[]> {
     const docs = await this.col
       .find({ status: { $in: ['nascens', 'agens'] }, expirat: { $lte: new Date() } })

@@ -38,6 +38,7 @@
 import type { Modus } from './modus.js'
 import type { Actum, ComputeStrategy, GpuClass } from './actum.js'
 import type { Modo } from './modo.js'
+import type { ArcanumSpendProof } from '../arcanum/types.js'
 
 // ---------------------------------------------------------------------------
 // CursorResult — what cursor.run() returns
@@ -172,6 +173,11 @@ export interface Actorum {
   /** Find an actum by the external job ID assigned at submission time. */
   findByExternusJobId(externusJobId: string): Promise<Actum | null>
   /**
+   * Find an actum by its nullifier — the spend proof stamped when an arcanum
+   * signum was consumed. Used to reject double-spend attempts.
+   */
+  findByNullifier(nullifier: string): Promise<Actum | null>
+  /**
    * Return all nascens actum records whose expirat is in the past.
    * These are stuck executions — the cursor never reported back.
    * Caller should call ActumCompletor.fail() on each to release locked signa.
@@ -215,8 +221,15 @@ export interface Inceptio {
   /** Specific version to run. Absent = latest registered version. */
   versio?: string
   aditus: Record<string, unknown>
-  /** Who is paying — identified side (animaId) or anonymous side (arcanumHash) */
-  by: { animaId: string } | { arcanumHash: string }
+  /**
+   * Who is paying.
+   *   { animaId }      — identified user; balance queried from Signorum by animaId.
+   *   { commitment }   — legacy anonymous path: looks up arcanum signa by commitment hash.
+   *                      Deprecated — use arcanumProof for the real unlinkable spend.
+   *   { arcanumProof } — ZK Groth16 proof of Merkle note membership.
+   *                      The real anonymous path: platform cannot link spend to identity.
+   */
+  by: { animaId: string } | { commitment: string } | { arcanumProof: ArcanumSpendProof }
   /** FK → Modo. The session this actum runs within — optional */
   modoId?: string
   /**

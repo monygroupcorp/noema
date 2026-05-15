@@ -82,9 +82,9 @@ test('create with animaId auctorKey round-trips correctly', async () => {
   assert.deepEqual(v.auctorKey, { animaId: 'anima-xyz' })
 })
 
-test('create with arcanumHash auctorKey round-trips correctly', async () => {
-  const v = await store.create(makeInput({ auctorKey: { arcanumHash: 'myhash' } }))
-  assert.deepEqual(v.auctorKey, { arcanumHash: 'myhash' })
+test('create with commitment auctorKey round-trips correctly', async () => {
+  const v = await store.create(makeInput({ auctorKey: { commitment: 'myhash' } }))
+  assert.deepEqual(v.auctorKey, { commitment: 'myhash' })
 })
 
 test('create has no embeddings initially', async () => {
@@ -118,9 +118,9 @@ test('forIdentity returns vestigia for animaId', async () => {
   assert.equal(results.length, 2)
 })
 
-test('forIdentity returns vestigia for arcanumHash', async () => {
-  await store.create(makeInput({ auctorKey: { arcanumHash: 'hash1' } }))
-  const results = await store.forIdentity({ arcanumHash: 'hash1' })
+test('forIdentity returns vestigia for commitment', async () => {
+  await store.create(makeInput({ auctorKey: { commitment: 'hash1' } }))
+  const results = await store.forIdentity({ commitment: 'hash1' })
   assert.equal(results.length, 1)
 })
 

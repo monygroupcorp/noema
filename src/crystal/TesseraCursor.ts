@@ -5,7 +5,7 @@ import type { Actum } from '../types/actum.js'
 import type { Modo, ModoStore } from '../types/modo.js'
 import type { Signum, Signorum } from '../types/significandi.js'
 
-type AuctorKey = { animaId: string } | { arcanumHash: string }
+type AuctorKey = { animaId: string } | { commitment: string }
 
 export interface TesseraOpenResult {
   modo: Modo

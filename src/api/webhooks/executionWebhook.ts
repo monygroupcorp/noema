@@ -8,7 +8,7 @@ import type { Modorum } from '../../types/modus.js'
 import type { ModoStore } from '../../types/modo.js'
 import { createVestigiumFromActum } from '../../execution/hooks/vestigiumHook.js'
 
-type AuctorKey = { animaId: string } | { arcanumHash: string }
+type AuctorKey = { animaId: string } | { commitment: string }
 
 export interface ExecutionWebhookDeps {
   actorum: Actorum

@@ -48,15 +48,15 @@ test('balance scopes to animaId — other accounts excluded', async () => {
   assert.equal(bal, 500n)
 })
 
-test('balance by arcanumHash sums only signa with that arcanumHash', async () => {
+test('balance by commitment sums only signa with that commitment', async () => {
   const s = new MemorySignorum()
-  // arcanum signum has no animaId — identified by arcanumHash on the signum itself
+  // arcanum signum has no animaId — identified by commitment on the signum itself
   await s.issue({ forma: 'arcanum', valor: 400n, auctor: 'test', testis: 'hash-abc' })
   await s.issue({ forma: 'arcanum', valor: 600n, auctor: 'test', testis: 'hash-abc' })
   await s.issue({ forma: 'arcanum', valor: 999n, auctor: 'test', testis: 'hash-other' })
 
-  // arcanumHash lookup matches on signum.testis for arcanum forma
-  const bal = await s.balance({ arcanumHash: 'hash-abc' })
+  // commitment lookup matches on signum.testis for arcanum forma
+  const bal = await s.balance({ commitment: 'hash-abc' })
   assert.equal(bal, 1000n)
 })
 

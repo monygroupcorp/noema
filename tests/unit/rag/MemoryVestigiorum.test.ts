@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { MemoryVestigiorum } from '../../../src/rag/MemoryVestigiorum.js'
 
 const ANIMA_KEY = { animaId: 'anima-1' } as const
-const ARCANUM_KEY = { arcanumHash: 'hash-abc' } as const
+const ARCANUM_KEY = { commitment: 'hash-abc' } as const
 const OTHER_KEY = { animaId: 'anima-2' } as const
 
 function makeVestigium(overrides: Record<string, unknown> = {}) {
@@ -87,13 +87,13 @@ test('forIdentity returns vestigia for matching animaId', async () => {
   assert.ok(results.every(v => 'animaId' in v.auctorKey && v.auctorKey.animaId === 'anima-1'))
 })
 
-test('forIdentity returns vestigia for matching arcanumHash', async () => {
+test('forIdentity returns vestigia for matching commitment', async () => {
   const store = new MemoryVestigiorum()
   await store.create(makeVestigium({ auctorKey: ARCANUM_KEY }))
   await store.create(makeVestigium({ auctorKey: ANIMA_KEY }))
   const results = await store.forIdentity(ARCANUM_KEY)
   assert.equal(results.length, 1)
-  assert.ok('arcanumHash' in results[0].auctorKey)
+  assert.ok('commitment' in results[0].auctorKey)
 })
 
 test('forIdentity returns most recent first and respects limit', async () => {

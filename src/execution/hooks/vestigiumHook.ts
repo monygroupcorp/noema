@@ -1,7 +1,7 @@
 import type { Actum } from '../../types/actum.js'
 import type { Vestigium, Vestigiorum, VestigiumGenus, VestigiumVisibility } from '../../types/vestigium.js'
 
-type AuctorKey = { animaId: string } | { arcanumHash: string }
+type AuctorKey = { animaId: string } | { commitment: string }
 
 export interface VestigiumHookOptions {
   genus?: VestigiumGenus

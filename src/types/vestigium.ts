@@ -20,7 +20,7 @@
 // PRIVACY PARTITION:
 //   auctorKey mirrors the `by` pattern on Inceptio and Mandatum:
 //     { animaId }     → identified path
-//     { arcanumHash } → anonymous path (ZK / perfect private use)
+//     { commitment } → anonymous path (ZK / perfect private use)
 //   Never both. Never neither.
 //
 // ATLAS VECTOR SEARCH:
@@ -73,9 +73,9 @@ export interface Vestigium {
   /**
    * Who owns this vestigium for retrieval purposes.
    * { animaId }     → identified path
-   * { arcanumHash } → anonymous path (ZK bearer)
+   * { commitment } → anonymous path (ZK bearer)
    */
-  auctorKey: { animaId: string } | { arcanumHash: string }
+  auctorKey: { animaId: string } | { commitment: string }
 
   /**
    * The text prompt used at cast time.
@@ -172,7 +172,7 @@ export interface VestigiumQuery {
    */
   per?: VestigiumSearchDimension
   /** Scope to one identity. Absent = public-only search. */
-  auctorKey?: { animaId: string } | { arcanumHash: string }
+  auctorKey?: { animaId: string } | { commitment: string }
   visibilitas?: VestigiumVisibility[]
   /** Only return results where the author reacted with one of these. */
   auctorImpressio?: ImpressioKind[]
@@ -231,19 +231,19 @@ export interface Vestigiorum {
   findById(id: string): Promise<Vestigium | null>
 
   forIdentity(
-    auctorKey: { animaId: string } | { arcanumHash: string },
+    auctorKey: { animaId: string } | { commitment: string },
     limit?: number
   ): Promise<Vestigium[]>
 
   setAuctorImpressio(
     id: string,
-    auctorKey: { animaId: string } | { arcanumHash: string },
+    auctorKey: { animaId: string } | { commitment: string },
     impressio: ImpressioKind | null
   ): Promise<Vestigium>
 
   rate(
     id: string,
-    raterKey: { animaId: string } | { arcanumHash: string },
+    raterKey: { animaId: string } | { commitment: string },
     impressio: ImpressioKind
   ): Promise<void>
 

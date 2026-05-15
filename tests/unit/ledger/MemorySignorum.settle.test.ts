@@ -78,7 +78,7 @@ test('settle with arcanum signa: refund preserves anonymous identity', async () 
   await s.settle([sig.id], 300n, 'act-1')
 
   // Refund signum must also be arcanum with same testis so anonymous identity is preserved
-  const bal = await s.balance({ arcanumHash: 'hash-abc' })
+  const bal = await s.balance({ commitment: 'hash-abc' })
   assert.equal(bal, 700n)
 })
 

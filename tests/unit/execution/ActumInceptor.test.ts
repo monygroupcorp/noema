@@ -56,7 +56,7 @@ function makeSignorum(signa: Signa = [makeSignum(500n)]) {
   }
 }
 
-function makeActa(): Actorum & { records: Actum[] } {
+function makeActa(nullifierMap: Map<string, Actum> = new Map()): Actorum & { records: Actum[] } {
   const records: Actum[] = []
   return {
     records,
@@ -67,6 +67,9 @@ function makeActa(): Actorum & { records: Actum[] } {
       return r
     },
     findById: async (id) => records.find(x => x.id === id) ?? null,
+    findByExternusJobId: async () => null,
+    findByNullifier: async (nullifier) => nullifierMap.get(nullifier) ?? null,
+    findExpired: async () => [],
   }
 }
 
@@ -213,5 +216,82 @@ test('throws when modus is not found', async () => {
   await assert.rejects(
     () => inceptor.initiate(makeParams()),
     /modus/i,
+  )
+})
+
+// ── Arcanum path ──────────────────────────────────────────────────────────────
+
+function makeArcanumSignum(valor: bigint, id = 'arc-1', commitment = 'hash-abc'): Signum {
+  return { id, forma: 'arcanum', valor, auctor: 'test', testis: commitment, status: 'valid', natum: new Date() }
+}
+
+test('actum has no nullifier when payer is identified (animaId)', async () => {
+  const modus = makeModus()
+  const acta = makeActa()
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(makeRunner(50n)),
+    signorum: makeSignorum([makeSignum(500n)]),
+    acta,
+  })
+
+  const actum = await inceptor.initiate(makeParams({ by: { animaId: 'anima-1' } }))
+
+  assert.equal(actum.nullifier, undefined)
+})
+
+test('actum.nullifier is set to arcanum signum id when payer is arcanum', async () => {
+  const modus = makeModus()
+  const commitment = 'deadbeef'
+  const arcSignum = makeArcanumSignum(500n, 'arc-sig-1', commitment)
+  const acta = makeActa()
+  const signorum = makeSignorum([arcSignum])
+  // Override history to return by commitment
+  const originalHistory = signorum.history.bind(signorum)
+  signorum.history = async (by) => {
+    if ('commitment' in by && by.commitment === commitment) return [arcSignum]
+    return originalHistory(by)
+  }
+
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(makeRunner(100n)),
+    signorum,
+    acta,
+  })
+
+  const actum = await inceptor.initiate(makeParams({ by: { commitment } }))
+
+  assert.equal(actum.nullifier, 'arc-sig-1')
+})
+
+test('initiate() rejects when nullifier is already recorded on an existing actum', async () => {
+  const modus = makeModus()
+  const commitment = 'deadbeef'
+  const arcSignum = makeArcanumSignum(500n, 'arc-sig-2', commitment)
+
+  // Pre-populate nullifier map with a previous actum
+  const existingActum: Actum = {
+    id: 'actum-previous', modusId: 'mod-1', modusVersiono: '1.0.0',
+    impetus: 100n, signaConsumed: ['arc-sig-2'], aditus: {},
+    status: 'completus', nullifier: 'arc-sig-2',
+    inceptum: new Date(), expirat: new Date(),
+  }
+  const nullifierMap = new Map([['arc-sig-2', existingActum]])
+  const acta = makeActa(nullifierMap)
+
+  const signorum = makeSignorum([arcSignum])
+  signorum.history = async () => [arcSignum]
+
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(makeRunner(100n)),
+    signorum,
+    acta,
+  })
+
+  await assert.rejects(
+    () => inceptor.initiate(makeParams({ by: { commitment } })),
+    /already spent/i,
   )
 })

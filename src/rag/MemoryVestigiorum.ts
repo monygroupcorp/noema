@@ -8,16 +8,16 @@ import type {
   ImpressioKind,
 } from '../types/vestigium.js'
 
-type AuctorKey = { animaId: string } | { arcanumHash: string }
+type AuctorKey = { animaId: string } | { commitment: string }
 
 function matchesKey(a: AuctorKey, b: AuctorKey): boolean {
   if ('animaId' in a && 'animaId' in b) return a.animaId === b.animaId
-  if ('arcanumHash' in a && 'arcanumHash' in b) return a.arcanumHash === b.arcanumHash
+  if ('commitment' in a && 'commitment' in b) return a.commitment === b.commitment
   return false
 }
 
 function raterToken(key: AuctorKey): string {
-  return 'animaId' in key ? `animaId:${key.animaId}` : `arcanumHash:${key.arcanumHash}`
+  return 'animaId' in key ? `animaId:${key.animaId}` : `commitment:${key.commitment}`
 }
 
 function cosine(a: number[], b: number[]): number {

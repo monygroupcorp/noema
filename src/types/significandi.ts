@@ -90,7 +90,7 @@ export interface Signum {
    * Direction: deposit → arcanum ONLY. arcanum has no back-pointer.
    * This asymmetry is the schema-level privacy guarantee.
    */
-  arcanumHash?: string
+  commitment?: string
 
   /**
    * FK → Modo. Present on tessera forma only.
@@ -118,10 +118,10 @@ export type Signa = Signum[]
 export interface Signorum {
   /**
    * Current spendable balance.
-   * Query by animaId (identified side) or arcanumHash (anonymous side).
+   * Query by animaId (identified side) or commitment (anonymous side).
    * Returns sum of all valid Signum.valor for the given identity.
    */
-  balance(by: { animaId: string } | { arcanumHash: string }): Promise<bigint>
+  balance(by: { animaId: string } | { commitment: string }): Promise<bigint>
   /** Issue a new signum — the only write operation besides spend */
   issue(signum: Omit<Signum, 'id' | 'natum' | 'status'>): Promise<Signum>
   /**
@@ -136,7 +136,7 @@ export interface Signorum {
    */
   release(signaIds: string[]): Promise<void>
   /** Full ledger history for an identity — all signa ever issued */
-  history(by: { animaId: string } | { arcanumHash: string }): Promise<Signa>
+  history(by: { animaId: string } | { commitment: string }): Promise<Signa>
   /**
    * Settle a completed actum's locked signa against the actual impetus consumed.
    * Spends all provided signa and issues a refund signum for any delta

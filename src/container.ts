@@ -53,6 +53,9 @@ import { MongoDictum } from './crystal/MongoDictum.js'
 import { MongoMemoria } from './crystal/MongoMemoria.js'
 import { MongoIntelligendi } from './crystal/MongoIntelligendi.js'
 import { CollectioCursor } from './crystal/CollectioCursor.js'
+import { ArcanumIssuer } from './ledger/ArcanumIssuer.js'
+import { MongoArcanumTree } from './arcanum/ArcanumTree.js'
+import { ArcanumVerifier, MongoNullifierStore, type VerifyFn } from './arcanum/ArcanumVerifier.js'
 
 export interface Ring {
   actorum: Actorum
@@ -78,6 +81,9 @@ export interface Ring {
   cursorum: Cursorum
   completor: IActumCompletor
   inceptor: IActumInceptor
+  arcanumIssuer: ArcanumIssuer
+  arcanumTree: MongoArcanumTree
+  arcanumVerifier: ArcanumVerifier
   materiae: MateriaStore
   deployments: DeploymentumStore
   collectioCursor: CollectioCursor
@@ -137,6 +143,15 @@ export interface ContainerConfig {
   materiaCollection?: string
   /** Collection name for deployments — default 'deployments' */
   deploymentsCollection?: string
+  /** Collection name for arcanum Merkle tree leaves — default 'arcanum_leaves' */
+  arcanumLeavesCollection?: string
+  /** Collection name for spent nullifiers — default 'arcanum_nullifiers' */
+  arcanumNullifiersCollection?: string
+  /**
+   * Groth16 verify function — inject makeSnarkjsVerifier(verificationKey) after running
+   * arcanum-trusted-setup.sh. Absent: all ZK spend proofs will throw at verify().
+   */
+  arcanumVerifyFn?: VerifyFn
   /**
    * Pre-created MateriaStore — if provided, used directly instead of creating a new MongoMateria.
    * Pass this when the same store instance needs to be shared with SecurePodClient (keep-warm mode).
@@ -235,7 +250,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   }
 
   if (config.openaiClient) {
-    const openaiCursor = new OpenAICursor(config.openaiClient as Parameters<typeof OpenAICursor>[0])
+    const openaiCursor = new OpenAICursor(config.openaiClient as ConstructorParameters<typeof OpenAICursor>[0])
     cursorum.register('openai', openaiCursor)
   }
 
@@ -245,7 +260,20 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   }
 
   const completor = new ActumCompletor(actorum, signorum)
-  const inceptor = new ActumInceptor({ modorum, cursorum, signorum, acta: actorum })
+  const arcanumLeafCol = db.collection(config.arcanumLeavesCollection ?? 'arcanum_leaves')
+  const arcanumNullifiersCol = db.collection(config.arcanumNullifiersCollection ?? 'arcanum_nullifiers')
+  const arcanumTree = new MongoArcanumTree(arcanumLeafCol)
+  const arcanumNullifiers = new MongoNullifierStore(arcanumNullifiersCol)
+  const arcanumVerifier = new ArcanumVerifier({
+    tree: arcanumTree,
+    nullifiers: arcanumNullifiers,
+    // Production: inject makeSnarkjsVerifier(verificationKey) from container config after
+    // running arcanum-trusted-setup.sh. Absent: ZK spend proofs will throw at verify().
+    verify: config.arcanumVerifyFn
+      ?? (async () => { throw new Error('arcanumVerifyFn not configured — run arcanum-trusted-setup.sh') }),
+  })
+  const inceptor = new ActumInceptor({ modorum, cursorum, signorum, acta: actorum, arcanumVerifier })
+  const arcanumIssuer = new ArcanumIssuer({ signorum, tree: arcanumTree })
   const collectioCursor = new CollectioCursor(inceptor, collectiones, actorum, {})
 
   return {
@@ -253,7 +281,8 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     mandatores, corpora, collectiones, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
-    cursorum, completor, inceptor,
+    cursorum, completor, inceptor, arcanumIssuer,
+    arcanumTree, arcanumVerifier,
     materiae, deployments,
     collectioCursor,
   }

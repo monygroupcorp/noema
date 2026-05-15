@@ -123,9 +123,9 @@ test('balance does not include other identities', async () => {
   assert.equal(b, 100n)
 })
 
-test('balance works by arcanumHash', async () => {
+test('balance works by commitment', async () => {
   await signorum.issue({ forma: 'arcanum', valor: 200n, auctor: 'system', testis: 'myhash' })
-  const b = await signorum.balance({ arcanumHash: 'myhash' })
+  const b = await signorum.balance({ commitment: 'myhash' })
   assert.equal(b, 200n)
 })
 

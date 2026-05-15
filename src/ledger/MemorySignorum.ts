@@ -8,8 +8,8 @@ export class MemorySignorum implements Signorum {
     if ((signum.forma === 'arcanum' || signum.forma === 'tessera') && signum.animaId !== undefined) {
       throw new Error(`Privacy partition violation: ${signum.forma} signum must not have animaId`)
     }
-    if ((signum.forma === 'arcanum' || signum.forma === 'tessera') && signum.arcanumHash !== undefined) {
-      throw new Error(`One-way link violation: ${signum.forma} signum must not have arcanumHash — it is the anonymous end, not the deposit end`)
+    if ((signum.forma === 'arcanum' || signum.forma === 'tessera') && signum.commitment !== undefined) {
+      throw new Error(`One-way link violation: ${signum.forma} signum must not have commitment — it is the anonymous end, not the deposit end`)
     }
     const record: Signum = {
       ...signum,
@@ -21,13 +21,13 @@ export class MemorySignorum implements Signorum {
     return record
   }
 
-  async balance(by: { animaId: string } | { arcanumHash: string }): Promise<bigint> {
+  async balance(by: { animaId: string } | { commitment: string }): Promise<bigint> {
     return this.forIdentity(by)
       .filter(s => s.status === 'valid')
       .reduce((sum, s) => sum + s.valor, 0n)
   }
 
-  async history(by: { animaId: string } | { arcanumHash: string }): Promise<Signa> {
+  async history(by: { animaId: string } | { commitment: string }): Promise<Signa> {
     return this.forIdentity(by)
   }
 
@@ -85,12 +85,12 @@ export class MemorySignorum implements Signorum {
     }
   }
 
-  private forIdentity(by: { animaId: string } | { arcanumHash: string }): Signa {
+  private forIdentity(by: { animaId: string } | { commitment: string }): Signa {
     const signa = Array.from(this.store.values())
     if ('animaId' in by) {
       return signa.filter(s => s.animaId === by.animaId)
     }
-    // arcanumHash: anonymous signa store their commitment in signum.testis
-    return signa.filter(s => s.forma === 'arcanum' && s.testis === by.arcanumHash)
+    // commitment: anonymous signa store their commitment in signum.testis
+    return signa.filter(s => s.forma === 'arcanum' && s.testis === by.commitment)
   }
 }
