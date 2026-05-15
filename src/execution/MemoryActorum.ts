@@ -29,6 +29,13 @@ export class MemoryActorum implements Actorum {
     return null
   }
 
+  async findByNullifier(nullifier: string): Promise<Actum | null> {
+    for (const actum of this.store.values()) {
+      if (actum.nullifier === nullifier) return actum
+    }
+    return null
+  }
+
   async findExpired(): Promise<Actum[]> {
     const now = new Date()
     return Array.from(this.store.values()).filter(

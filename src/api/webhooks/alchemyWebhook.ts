@@ -183,7 +183,7 @@ async function handlePaymentLog(
   const [token, amount] = coder.decode(
     ['address', 'uint256', 'uint256', 'uint256'],
     log.data,
-  ) as [string, bigint, bigint, bigint]
+  ) as unknown as [string, bigint, bigint, bigint]
 
   const valor = BigInt(amount)
 
@@ -261,7 +261,7 @@ async function handleNftLog(
   const [token, tokenId] = coder.decode(
     ['address', 'uint256'],
     log.data,
-  ) as [string, bigint]
+  ) as unknown as [string, bigint]
 
   // Look up anima by sender wallet
   const anima = await deps.animae.findByCustos(from)

@@ -40,24 +40,24 @@ test('INVARIANT: arcanum signum in ledger never has animaId', async () => {
 
 // ── One-Way Commitment Link ──────────────────────────────────────────────────
 // RULE: the link from deposit → commitment is one-directional.
-// An arcanum signum must never carry arcanumHash — it IS the anonymous end.
+// An arcanum signum must never carry commitment — it IS the anonymous end.
 // A back-pointer would collapse the cryptographic break between deposit and session.
 
-test('INVARIANT: issuing arcanum signum with arcanumHash throws', async () => {
+test('INVARIANT: issuing arcanum signum with commitment throws', async () => {
   const s = new MemorySignorum()
 
   await assert.rejects(
-    () => s.issue({ forma: 'arcanum', valor: 100n, auctor: 'test', testis: 'hash-x', arcanumHash: 'deposit-hash' }),
-    /one.way|back.pointer|arcanum.*arcanumHash|link.*direction/i
+    () => s.issue({ forma: 'arcanum', valor: 100n, auctor: 'test', testis: 'hash-x', commitment: 'deposit-hash' }),
+    /one.way|back.pointer|arcanum.*commitment|link.*direction/i
   )
 })
 
-test('INVARIANT: tessera signum with arcanumHash throws', async () => {
+test('INVARIANT: tessera signum with commitment throws', async () => {
   const s = new MemorySignorum()
 
   await assert.rejects(
-    () => s.issue({ forma: 'tessera', valor: 100n, auctor: 'test', arcanumHash: 'deposit-hash' }),
-    /one.way|back.pointer|tessera.*arcanumHash|link.*direction/i
+    () => s.issue({ forma: 'tessera', valor: 100n, auctor: 'test', commitment: 'deposit-hash' }),
+    /one.way|back.pointer|tessera.*commitment|link.*direction/i
   )
 })
 
@@ -153,7 +153,7 @@ test('INVARIANT: arcanum balance query returns only signa for that hash', async 
   await s.issue({ forma: 'arcanum', valor: 200n, auctor: 'test', testis: 'hash-anon' })
   await s.issue({ forma: 'arcanum', valor: 999n, auctor: 'test', testis: 'hash-other' })
 
-  assert.equal(await s.balance({ arcanumHash: 'hash-anon' }), 500n, 'must not include other-hash signa')
+  assert.equal(await s.balance({ commitment: 'hash-anon' }), 500n, 'must not include other-hash signa')
 })
 
 test('INVARIANT: locked arcanum signa do not appear in balance', async () => {
@@ -163,7 +163,7 @@ test('INVARIANT: locked arcanum signa do not appear in balance', async () => {
 
   await s.lock([a.id], 'act-1')
 
-  assert.equal(await s.balance({ arcanumHash: 'hash-anon' }), 600n)
+  assert.equal(await s.balance({ commitment: 'hash-anon' }), 600n)
 })
 
 test('INVARIANT: value is conserved through arcanum issue→lock→settle cycle', async () => {
@@ -176,7 +176,7 @@ test('INVARIANT: value is conserved through arcanum issue→lock→settle cycle'
   await s.settle([sig.id], charged, 'act-1')
 
   assert.equal(
-    await s.balance({ arcanumHash: 'hash-anon' }),
+    await s.balance({ commitment: 'hash-anon' }),
     issued - charged,
     'net arcanum balance must equal issued minus charged'
   )
@@ -188,7 +188,7 @@ test('INVARIANT: settle refund on arcanum signum has same testis and no animaId'
   await s.lock([sig.id], 'act-1')
   await s.settle([sig.id], 400n, 'act-1')
 
-  const history = await s.history({ arcanumHash: 'hash-anon' })
+  const history = await s.history({ commitment: 'hash-anon' })
   const refund = history.find(s => s.auctor === 'settle:delta')
 
   assert.ok(refund, 'refund signum must exist in arcanum history')
@@ -248,15 +248,15 @@ test('INVARIANT: system-wide value conservation across mixed operations', async 
 })
 
 // ── One-Way Link: Forward Pointer Preserved ──────────────────────────────────
-// RULE: identified signa that funded a commitment carry arcanumHash.
+// RULE: identified signa that funded a commitment carry commitment.
 // The forward direction of the link must be stored and retrievable.
 
-test('INVARIANT: identified signum with arcanumHash is preserved through history', async () => {
+test('INVARIANT: identified signum with commitment is preserved through history', async () => {
   const s = new MemorySignorum()
-  await s.issue({ animaId: 'anima-1', forma: 'eth', valor: 1000n, auctor: 'deposit', arcanumHash: 'hash-anon' })
+  await s.issue({ animaId: 'anima-1', forma: 'eth', valor: 1000n, auctor: 'deposit', commitment: 'hash-anon' })
 
   const history = await s.history({ animaId: 'anima-1' })
   assert.equal(history.length, 1)
-  assert.equal(history[0].arcanumHash, 'hash-anon', 'forward link must be stored on identified signum')
+  assert.equal(history[0].commitment, 'hash-anon', 'forward link must be stored on identified signum')
   assert.equal(history[0].animaId, 'anima-1', 'identified signum must retain animaId')
 })

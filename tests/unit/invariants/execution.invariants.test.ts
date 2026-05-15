@@ -325,11 +325,11 @@ test('INVARIANT: arcanum-funded actum charges exactly actual impetus', async () 
   cursorum.register('test', fakeCursor(800n, 300n))
   await signorum.issue({ forma: 'arcanum', valor: 5000n, auctor: 'test', testis: 'hash-anon' })
 
-  const actum = await inceptor.initiate({ modusId: 'mod-1', aditus: {}, by: { arcanumHash: 'hash-anon' } })
+  const actum = await inceptor.initiate({ modusId: 'mod-1', aditus: {}, by: { commitment: 'hash-anon' } })
   await completor.complete(actum, { exitus: {}, impetus: 300n })
 
   assert.equal(
-    await signorum.balance({ arcanumHash: 'hash-anon' }),
+    await signorum.balance({ commitment: 'hash-anon' }),
     5000n - 300n,
     'arcanum user charged exactly actual impetus'
   )
@@ -341,11 +341,11 @@ test('INVARIANT: arcanum-funded actum: fail() restores arcanum balance exactly',
   cursorum.register('test', fakeCursor(600n, 600n))
   await signorum.issue({ forma: 'arcanum', valor: 1000n, auctor: 'test', testis: 'hash-anon' })
 
-  const actum = await inceptor.initiate({ modusId: 'mod-1', aditus: {}, by: { arcanumHash: 'hash-anon' } })
+  const actum = await inceptor.initiate({ modusId: 'mod-1', aditus: {}, by: { commitment: 'hash-anon' } })
   await completor.fail(actum, 'crash')
 
   assert.equal(
-    await signorum.balance({ arcanumHash: 'hash-anon' }),
+    await signorum.balance({ commitment: 'hash-anon' }),
     1000n,
     'arcanum balance must be fully restored after fail'
   )

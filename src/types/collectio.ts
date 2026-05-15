@@ -87,8 +87,8 @@ export interface Collectio {
   /** Total number of combinations = product of all tractus.valores.length */
   numerus: number
 
-  /** FK → Anima or arcanumHash — who initiated this collection */
-  by: { animaId: string } | { arcanumHash: string }
+  /** FK → Anima or commitment — who initiated this collection */
+  by: { animaId: string } | { commitment: string }
 
   /** FK[] → Actum. The executions this collection spawned */
   acta: string[]

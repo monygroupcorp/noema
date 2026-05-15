@@ -93,5 +93,12 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('intellae').createIndex({ id: 1 }, { unique: true }),
     db.collection('intellae').createIndex({ canonica: 1 }),
     db.collection('intellae').createIndex({ genus: 1 }),
+
+    // arcanum_leaves — ZK Merkle tree leaf records
+    db.collection('arcanum_leaves').createIndex({ leafIndex: 1 }, { unique: true }),
+    db.collection('arcanum_leaves').createIndex({ commitment: 1 }, { unique: true }),
+
+    // arcanum_nullifiers — spent note registry (double-spend prevention)
+    db.collection('arcanum_nullifiers').createIndex({ nullifierHash: 1 }, { unique: true }),
   ])
 }

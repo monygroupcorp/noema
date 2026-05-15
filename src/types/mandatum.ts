@@ -12,7 +12,7 @@
 // a Mandatum can fire many times. An agent IS a Mandatum: autonomous, scoped,
 // potentially self-scheduling (a Mandatum whose exitus creates new Mandatora).
 //
-// PRIVACY: A Mandatum can be anonymous. When by.arcanumHash is set, the
+// PRIVACY: A Mandatum can be anonymous. When by.commitment is set, the
 // autonomous actor has no identity — the same privacy partition as Modo.
 // An anonymous agent is a standing commitment to act, funded by a ZK balance.
 //
@@ -61,8 +61,8 @@ export interface Mandatum {
   modusId: string
   /** The inputs to pass — may include template expressions for dynamic values */
   aditus: Record<string, unknown>
-  /** Who pays — identified (animaId) or anonymous (arcanumHash) */
-  by: { animaId: string } | { arcanumHash: string }
+  /** Who pays — identified (animaId) or anonymous (commitment) */
+  by: { animaId: string } | { commitment: string }
 
   /** What causes this mandatum to fire */
   triggerGenus: MandatumTriggerGenus

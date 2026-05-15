@@ -11,7 +11,7 @@ import { FlowRouter } from './flow/FlowRouter.js'
 import type { StepCallback, ResolutionCallback } from './flow/FlowRouter.js'
 import { ExecuteFlow } from './flow/flows/ExecuteFlow.js'
 import { TelegramAllocutio } from './allocutio/TelegramAllocutio.js'
-import type { RouterDeps, IdentityResolver } from './allocutio/TelegramAllocutio.js'
+import type { RouterDeps, IdentityResolver, TelegramSender } from './allocutio/TelegramAllocutio.js'
 import type { AuctorKey } from './flow/types.js'
 import { createWebhookRouter } from './api/webhooks/webhookRouter.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
@@ -31,7 +31,6 @@ import { WorkflowTemplateRegistry } from './crystal/WorkflowTemplateRegistry.js'
 import { CANONICAL_INTELLAE } from './crystal/seeds/intellae.js'
 import { ensureIndexes } from './crystal/ensureIndexes.js'
 import type { Essentia } from './types/essendi.js'
-import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
 // ---------------------------------------------------------------------------
@@ -59,9 +58,6 @@ const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL
 // ---------------------------------------------------------------------------
 // Fractal Tool Compiler — compiles Essentia + aditus → RunPod job input
 // ---------------------------------------------------------------------------
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
 
 const templateRegistry = new WorkflowTemplateRegistry(
   path.join(__dirname, 'crystal', 'workflows')
@@ -159,7 +155,8 @@ async function main(): Promise<void> {
   if (process.env.OPENAI_API_KEY) {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     openaiClient = {
-      chat: async (params) => {
+      chat: async (rawParams) => {
+        const params = rawParams as { model: string; messages: unknown[]; temperature?: number }
         const res = await openai.chat.completions.create({
           model: params.model,
           messages: params.messages as OpenAI.Chat.ChatCompletionMessageParam[],
@@ -170,7 +167,8 @@ async function main(): Promise<void> {
           usage: { total_tokens: res.usage?.total_tokens },
         }
       },
-      image: async (params) => {
+      image: async (rawParams) => {
+        const params = rawParams as { model: string; prompt: string; size?: string; quality?: string; n?: number }
         const res = await openai.images.generate({
           model: params.model,
           prompt: params.prompt,
@@ -178,7 +176,7 @@ async function main(): Promise<void> {
           quality: params.quality as OpenAI.ImageGenerateParams['quality'],
           n: params.n,
         })
-        return { url: res.data[0]?.url ?? '' }
+        return { url: res.data?.[0]?.url ?? '' }
       },
     }
   }
@@ -292,7 +290,7 @@ async function main(): Promise<void> {
 
   const allocutio = new TelegramAllocutio({
     router: routerDeps,
-    sender: tgBot.telegram,
+    sender: tgBot.telegram as unknown as TelegramSender,
     identity: identityResolver,
     botStartupTime,
   })
@@ -303,8 +301,8 @@ async function main(): Promise<void> {
   // 8. Express + webhook router
   const app = express()
   app.use(express.json({
-    verify: (req, _res, buf) => {
-      (req as { rawBody?: string }).rawBody = buf.toString()
+    verify: (req: import('express').Request & { rawBody?: string }, _res, buf: Buffer) => {
+      req.rawBody = buf.toString()
     },
   }))
 

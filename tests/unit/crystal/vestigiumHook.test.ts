@@ -161,10 +161,10 @@ test('accepts explicit genus override', async () => {
   assert.equal(v.genus, 'video')
 })
 
-test('accepts arcanumHash auctorKey', async () => {
+test('accepts commitment auctorKey', async () => {
   const store = new MemoryVestigiorum()
-  const v = await createVestigiumFromActum(makeActum(), { arcanumHash: 'deadbeef' }, store)
-  assert.deepEqual(v.auctorKey, { arcanumHash: 'deadbeef' })
+  const v = await createVestigiumFromActum(makeActum(), { commitment: 'deadbeef' }, store)
+  assert.deepEqual(v.auctorKey, { commitment: 'deadbeef' })
 })
 
 test('passes actumId onto the vestigium', async () => {

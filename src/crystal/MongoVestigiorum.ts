@@ -9,34 +9,34 @@ import type {
   ImpressioKind,
 } from '../types/vestigium.js'
 
-type AuctorKey = { animaId: string } | { arcanumHash: string }
+type AuctorKey = { animaId: string } | { commitment: string }
 
 function raterToken(key: AuctorKey): string {
-  return 'animaId' in key ? `a:${key.animaId}` : `h:${key.arcanumHash}`
+  return 'animaId' in key ? `a:${key.animaId}` : `h:${key.commitment}`
 }
 
 function matchesKey(a: AuctorKey, b: AuctorKey): boolean {
   if ('animaId' in a && 'animaId' in b) return a.animaId === b.animaId
-  if ('arcanumHash' in a && 'arcanumHash' in b) return a.arcanumHash === b.arcanumHash
+  if ('commitment' in a && 'commitment' in b) return a.commitment === b.commitment
   return false
 }
 
 function auctorKeyQuery(key: AuctorKey): Record<string, unknown> {
   if ('animaId' in key) return { 'auctorKey.animaId': key.animaId }
-  return { 'auctorKey.arcanumHash': key.arcanumHash }
+  return { 'auctorKey.commitment': key.commitment }
 }
 
 function fromDoc(doc: Record<string, unknown>): Vestigium {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, _raters, auctorKey, impressio, ...rest } = doc as Record<string, unknown> & {
     _id: unknown; _raters: unknown
-    auctorKey: { animaId?: string; arcanumHash?: string }
+    auctorKey: { animaId?: string; commitment?: string }
     impressio: Record<string, unknown>
   }
 
   const key: AuctorKey = auctorKey.animaId
     ? { animaId: auctorKey.animaId }
-    : { arcanumHash: auctorKey.arcanumHash! }
+    : { commitment: auctorKey.commitment! }
 
   const { auctorImpressio, ...counts } = impressio as {
     auctorImpressio?: string
@@ -79,7 +79,7 @@ export class MongoVestigiorum implements Vestigiorum {
     const impressio = { amor: 0, risus: 0, maeror: 0 }
     const auctorKeyDoc = 'animaId' in input.auctorKey
       ? { animaId: input.auctorKey.animaId }
-      : { arcanumHash: input.auctorKey.arcanumHash }
+      : { commitment: input.auctorKey.commitment }
 
     const doc = { ...input, id, auctorKey: auctorKeyDoc, impressio, _raters: [], natum: now, mutatum: now }
     await this.col.insertOne(doc)

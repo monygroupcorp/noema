@@ -13,9 +13,9 @@ function fromDoc(doc: Record<string, unknown>): Signum {
   return { ...rest, valor: BigInt(valor) } as Signum
 }
 
-function identityQuery(by: { animaId: string } | { arcanumHash: string }): Record<string, unknown> {
+function identityQuery(by: { animaId: string } | { commitment: string }): Record<string, unknown> {
   if ('animaId' in by) return { animaId: by.animaId }
-  return { testis: by.arcanumHash, forma: 'arcanum' }
+  return { testis: by.commitment, forma: 'arcanum' }
 }
 
 export class MongoSignorum implements Signorum {
@@ -30,7 +30,7 @@ export class MongoSignorum implements Signorum {
     return signum
   }
 
-  async balance(by: { animaId: string } | { arcanumHash: string }): Promise<bigint> {
+  async balance(by: { animaId: string } | { commitment: string }): Promise<bigint> {
     const docs = await this.col.find({ ...identityQuery(by), status: 'valid' }).toArray()
     return docs.reduce((sum, d) => sum + BigInt(d.valor as string), 0n)
   }
@@ -49,7 +49,7 @@ export class MongoSignorum implements Signorum {
     )
   }
 
-  async history(by: { animaId: string } | { arcanumHash: string }): Promise<Signa> {
+  async history(by: { animaId: string } | { commitment: string }): Promise<Signa> {
     const docs = await this.col.find(identityQuery(by)).toArray()
     return docs.map(d => fromDoc(d as Record<string, unknown>))
   }
