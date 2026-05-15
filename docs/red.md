@@ -37,13 +37,6 @@ Added `CollectioCursor.findCollectioIdForActum(actumId)` which searches the in-m
 
 ## 🟡 Medium — structural gaps, not immediately broken
 
-### 7. Phase 8 — Colloquium/Dictum not threaded into any flow
-`Colloquium` and `Dictum` are ring-wired but `ExecuteFlow` has zero deps on them. No Dictum is created for a generation, so there is no conversation history, no thread linking generations together, no agent memory loop.
-
-**Decision needed:** Dictum threading belongs in an agent/conversational flow, not in ExecuteFlow (which is one-shot). A future `ConversationFlow` or `AgentFlow` owns this. Not a bug in the current system — but should be scoped before Phase 8 is marked complete.
-
----
-
 ### 8. ~~SecurePodClient unreviewed~~ — reviewed, one bug fixed, two promoted to items 17 and 18
 
 **Fixed — pod leak on SSH timeout:** `_waitForSsh` and `sshFactory` previously ran before the `try/finally` block, so if SSH polling timed out (pod provisioned but never ready) the pod was never terminated. Restructured: both are now inside the `try/finally`; `_terminatePod` always runs on any failure. Test added.
