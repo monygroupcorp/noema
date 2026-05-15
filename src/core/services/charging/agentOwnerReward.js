@@ -3,7 +3,7 @@
 // Distributes the agent/collection owner rev-share for x402 runs.
 // Fallback chain: Noema account → split_ledger unclaimed → log only.
 
-const DEFAULT_REV_SHARE_BPS = 500;
+const { DEFAULT_AGENT_OWNER_REV_SHARE_BPS: DEFAULT_REV_SHARE_BPS } = require('../../constants/economy');
 
 /**
  * @param {object} params

@@ -51,7 +51,8 @@ class SplitLedgerDB extends BaseDB {
 
   /**
    * Ensure indexes exist for this collection.
-   * - runId: unique (one credit entry per run)
+   * - runId + type: unique compound (standard entries have no type field; unclaimed entries
+   *   have type: 'agent_owner_unclaimed' — allows both to share the same runId)
    * - partnerId + status + createdAt: partner ledger queries + pagination
    * - status: background settlement queries
    * - type + status + createdAt: dragnet sweep for agent_owner_unclaimed entries
@@ -61,7 +62,7 @@ class SplitLedgerDB extends BaseDB {
       const client = await getCachedClient();
       const col = client.db(this.dbName).collection(this.collectionName);
       await col.createIndexes([
-        { key: { runId: 1 }, unique: true, name: 'runId_unique_idx' },
+        { key: { runId: 1, type: 1 }, unique: true, name: 'runId_type_unique_idx' },
         { key: { partnerId: 1, status: 1, createdAt: -1 }, name: 'partnerId_status_createdAt_idx', background: true },
         { key: { status: 1 }, name: 'status_idx', background: true },
         { key: { type: 1, status: 1, createdAt: 1 }, name: 'type_status_createdAt_idx', background: true },
