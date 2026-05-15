@@ -1,3 +1,5 @@
+const { getPricingService } = require('./pricing');
+
 class SpellsService {
     constructor({ logger, db, workflowExecutionService, spellPermissionsDb, creditService, spellMigrator, toolRegistry }) {
         this.logger = logger;
@@ -310,7 +312,7 @@ class SpellsService {
             throw new Error('GenerationOutputsDB is not available – cannot generate quote.');
         }
 
-        const USD_TO_POINTS_CONVERSION_RATE = 0.000337; // Keep in sync with CreditService
+        const pricingService = getPricingService(this.logger);
 
         const breakdown = [];
         let totalRuntimeMs = 0;
@@ -324,81 +326,65 @@ class SpellsService {
                 continue;
             }
 
-            // Match on toolId (primary) or toolDisplayName (fallback) to find historical executions
-            // Note: Generation records store toolId, toolDisplayName, and serviceName
-            // We match on toolId first, then fallback to toolDisplayName for backward compatibility
-            // Also try matching by serviceName for tools that might not have toolId set correctly
+            // Look up the tool's current costingModel from the registry.
+            // This gives us the correct rate even if historical costUsd data is stale.
+            const toolDef = this.toolRegistry ? this.toolRegistry.getToolById(toolId) : null;
+            const costingModel = toolDef?.costingModel || null;
+            const serviceName = toolDef?.service || 'comfyui';
+
+            // Query historical avg duration (not costUsd — costUsd may be stale from wrong GPU rate)
             const pipeline = [
-                { $match: { 
+                { $match: {
                     $or: [
                         { toolId: toolId },
                         { toolDisplayName: toolId },
-                        // Fallback: match by serviceName if toolId matches the service (for legacy records)
                         { serviceName: toolId }
                     ],
-                    status: 'completed', 
-                    // Require costUsd, but durationMs is optional (some async jobs don't track duration)
-                    costUsd: { $exists: true, $ne: null, $gt: 0 }
+                    status: 'completed',
+                    durationMs: { $exists: true, $ne: null, $gt: 0 }
                 }},
-                // Sort by responseTimestamp if available, otherwise by requestTimestamp
-                { $sort: { 
-                    responseTimestamp: -1,
-                    requestTimestamp: -1 
-                }},
+                { $sort: { responseTimestamp: -1, requestTimestamp: -1 }},
                 { $limit: sampleSize },
                 { $group: {
                     _id: null,
                     count: { $sum: 1 },
-                    avgRuntimeMs: { $avg: '$durationMs' },
-                    avgCostUsd: { $avg: '$costUsd' },
-                    minCostUsd: { $min: '$costUsd' },
-                    maxCostUsd: { $max: '$costUsd' }
+                    avgDurationMs: { $avg: '$durationMs' }
                 }}
             ];
 
             const [stats] = await generationOutputsDb.aggregate(pipeline);
-            
-            // Log query results for debugging
-            if (!stats || stats.count === 0) {
-                this.logger.warn(`[SpellsService] No historical data found for tool "${toolId}". Query matched 0 records.`);
-            } else {
-                // Convert Decimal128 to number for logging
-                let avgCostUsdForLog = 0;
-                if (stats.avgCostUsd) {
-                    if (typeof stats.avgCostUsd === 'object' && stats.avgCostUsd._bsontype === 'Decimal128') {
-                        avgCostUsdForLog = parseFloat(stats.avgCostUsd.toString());
-                    } else {
-                        avgCostUsdForLog = parseFloat(stats.avgCostUsd) || 0;
-                    }
-                }
-                const avgRuntimeMsForLog = stats.avgRuntimeMs || 0;
-                this.logger.info(`[SpellsService] Found ${stats.count} historical records for tool "${toolId}". Avg cost: $${avgCostUsdForLog.toFixed(6)}, Avg runtime: ${avgRuntimeMsForLog.toFixed(0)}ms`);
-            }
-            const avgRuntimeMs = stats?.avgRuntimeMs || 0;
-            let avgCostUsd = 0;
-            if (stats?.avgCostUsd) {
-                // Decimal128 may be returned; convert safely
-                if (typeof stats.avgCostUsd === 'object' && stats.avgCostUsd._bsontype === 'Decimal128') {
-                    avgCostUsd = parseFloat(stats.avgCostUsd.toString());
-                } else {
-                    avgCostUsd = parseFloat(stats.avgCostUsd);
-                }
-            }
-            
-            // Fallback: If no historical data exists, use a minimal default cost estimate
-            // This prevents returning 0 cost which would block spell execution
-            // TODO: Enhance to use tool's costingModel when toolRegistry is available
-            if (avgCostUsd === 0 || !stats) {
-                this.logger.warn(`[SpellsService] No historical cost data found for tool "${toolId}". Using fallback estimate.`);
-                // Use a minimal default: $0.01 USD (approximately 30 points)
-                // This is a conservative estimate that ensures spells can execute
-                avgCostUsd = 0.01;
-            }
-            
-            const avgCostPts = avgCostUsd / USD_TO_POINTS_CONVERSION_RATE;
+            const avgDurationMs = stats?.avgDurationMs || 0;
 
-            breakdown.push({ toolId, avgRuntimeMs, avgCostPts });
-            totalRuntimeMs += avgRuntimeMs;
+            if (!stats || stats.count === 0) {
+                this.logger.warn(`[SpellsService] No historical duration data for tool "${toolId}".`);
+            } else {
+                this.logger.info(`[SpellsService] Historical data for "${toolId}": ${stats.count} records, avgDuration=${avgDurationMs.toFixed(0)}ms`);
+            }
+
+            // Compute base compute cost using the tool's current rate × historical avg duration.
+            // Fall back to 30s if no duration history exists.
+            let computeCostUsd = 0;
+            if (costingModel) {
+                const unit = costingModel.unit?.toLowerCase();
+                if (unit === 'second' || unit === 'seconds') {
+                    const estimatedSec = avgDurationMs > 0 ? avgDurationMs / 1000 : 30;
+                    computeCostUsd = costingModel.rate * estimatedSec;
+                } else if (['request', 'run', 'fixed', 'token'].includes(unit)) {
+                    computeCostUsd = costingModel.rate;
+                } else if (costingModel.rateSource === 'static' && costingModel.staticCost) {
+                    computeCostUsd = costingModel.staticCost.amount;
+                }
+            }
+
+            // Apply platform markup so the quote reflects what the user will actually pay.
+            // pricingService.getQuote applies the same multiplier the webhook processor uses.
+            const quote = pricingService.getQuote({ computeCostUsd, serviceName, isMs2User: false, toolId });
+            const avgCostPts = quote.totalPoints;
+
+            this.logger.info(`[SpellsService] Quote for "${toolId}": computeUsd=$${computeCostUsd.toFixed(6)}, multiplier=${quote.multiplier}x, finalPts=${avgCostPts} (rate=${costingModel?.rate}, unit=${costingModel?.unit}, avgDurMs=${avgDurationMs.toFixed(0)})`);
+
+            breakdown.push({ toolId, avgRuntimeMs: avgDurationMs, avgCostPts });
+            totalRuntimeMs += avgDurationMs;
             totalCostPts += avgCostPts;
         }
 
