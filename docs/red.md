@@ -87,8 +87,15 @@ Seven new tests added covering empty string, whitespace-only string, and Infinit
 ### 13. Compiler correctness
 `src/crystal/Compiler.ts` converts `Modus + aditus → RunPod job payload`. The output feeds directly into ComfyUI. Unknown whether all field mappings, version pinning, and composed modus compilation are correct.
 
-### 14. TraitMixer edge cases
-Used by `CollectioCursor` for generative NFT trait selection. LCG seeding, collision avoidance, and rarity distribution are complex enough to deserve a dedicated audit.
+### 14. ~~TraitMixer edge cases~~ — audited, tag-group exclusion added
+
+Audit findings:
+- **No bugs found.** LCG seeding, weighted selection, exclusion filtering, and prompt assembly are all correct.
+- **`rarity` naming**: used as a selection weight (higher = more common). Counterintuitive for NFT context — documented in the type comment.
+- **No uniqueness guarantee**: the algorithm doesn't prevent two pieces from sharing identical trait combinations. Statistically unlikely for large collections; acceptable for now.
+- **Tag-group mutual exclusion added**: `tags?: string[]` on `TraitValor` + `tagRules?: string[][]` on `selectForPiece`. Each inner array is a mutually exclusive group — once a valor with tag `'fantasy'` is selected, all subsequent valors tagged `'sci-fi'` are filtered out (and vice versa). Stacks with the existing label-level `excludes` mechanism. Five new tests added.
+
+**Files:** `src/types/collectio.ts`, `src/crystal/TraitMixer.ts`, `tests/unit/crystal/TraitMixer.test.ts`
 
 ### 16. Arcanum execution path unimplemented
 `actum.nullifier` is declared on `Actum` and the three-hop crossing is documented, but no code writes it. An anima holding only arcanum signa cannot fund a modus execution — `ActumInceptor` passes `by: { arcanumHash }` correctly through balance/lock, but `actum.nullifier` is never stamped, so the spend proof is never recorded and the crossing path (`nullifier → arcanum signum → deposit → anima`) is inert.

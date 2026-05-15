@@ -39,8 +39,14 @@ export interface TraitValor {
   rarity?: number
   /** Text fragment woven into the assembled generation prompt when this option wins. */
   promptFragment?: string
-  /** Names of options in OTHER tractus axes that this option blocks (exclusion rules). */
+  /** Names of options in OTHER tractus axes that this option blocks (label-level exclusion). */
   excludes?: string[]
+  /**
+   * Theme tags for group-level mutual exclusion.
+   * e.g. ['fantasy', 'medieval'] — used with selectForPiece tagRules to prevent
+   * mixing themed options (e.g. 'fantasy' never coexists with 'sci-fi').
+   */
+  tags?: string[]
 }
 
 /**

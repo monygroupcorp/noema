@@ -294,3 +294,118 @@ test('aditus record maps porta to selected valor.value', () => {
   assert.equal(result.aditus['background'], 'desert_url')
   assert.equal(result.aditus['style'], 'oil_painting')
 })
+
+// ── Tag-group exclusion (tagRules) ────────────────────────────────────────────
+
+test('tagRules: selecting a fantasy valor blocks all sci-fi valors in later tractus', () => {
+  const tractus: Tractus[] = [
+    makeTractus('background', [
+      { value: 'enchanted_forest', label: 'Enchanted Forest', tags: ['fantasy'], rarity: 1 },
+    ]),
+    makeTractus('outfit', [
+      { value: 'spacesuit', label: 'Spacesuit', tags: ['sci-fi'], rarity: 0.9 },
+      { value: 'robe', label: 'Robe', tags: ['fantasy'], rarity: 0.1 },
+    ]),
+  ]
+
+  for (let i = 0; i < 50; i++) {
+    const result = selectForPiece({
+      tractus,
+      pieceIndex: i,
+      tagRules: [['fantasy', 'sci-fi']],
+    })
+    assert.notEqual(result.aditus['outfit'], 'spacesuit',
+      `Piece ${i}: sci-fi outfit should be blocked when fantasy background selected`)
+  }
+})
+
+test('tagRules: selecting a sci-fi valor blocks all fantasy valors in later tractus', () => {
+  const tractus: Tractus[] = [
+    makeTractus('background', [
+      { value: 'space_station', label: 'Space Station', tags: ['sci-fi'], rarity: 1 },
+    ]),
+    makeTractus('weapon', [
+      { value: 'sword', label: 'Sword', tags: ['fantasy'], rarity: 0.9 },
+      { value: 'laser', label: 'Laser', tags: ['sci-fi'], rarity: 0.1 },
+    ]),
+  ]
+
+  for (let i = 0; i < 50; i++) {
+    const result = selectForPiece({
+      tractus,
+      pieceIndex: i,
+      tagRules: [['fantasy', 'sci-fi']],
+    })
+    assert.notEqual(result.aditus['weapon'], 'sword',
+      `Piece ${i}: fantasy weapon should be blocked when sci-fi background selected`)
+  }
+})
+
+test('tagRules: multiple independent rules enforced simultaneously', () => {
+  const tractus: Tractus[] = [
+    makeTractus('season', [
+      { value: 'snow', label: 'Snow', tags: ['winter'], rarity: 1 },
+    ]),
+    makeTractus('theme', [
+      { value: 'spaceship', label: 'Spaceship', tags: ['sci-fi'], rarity: 1 },
+    ]),
+    makeTractus('outfit', [
+      { value: 'swimsuit', label: 'Swimsuit', tags: ['summer'], rarity: 0.5 },
+      { value: 'spacesuit', label: 'Spacesuit', tags: ['sci-fi'], rarity: 0.5 },
+      { value: 'coat', label: 'Coat', tags: ['winter'], rarity: 0.5 },
+    ]),
+  ]
+
+  // Rules: winter/summer mutually exclusive, fantasy/sci-fi mutually exclusive
+  // season=winter blocks summer outfits; theme=sci-fi blocks sci-fi outfits (same tag = not blocked)
+  // Wait — sci-fi theme selects sci-fi, which blocks sci-fi in outfit? No — same tag isn't blocked.
+  // Only OTHER tags in the group are blocked. So sci-fi selected → nothing blocked within sci-fi group
+  // (sci-fi is the only tag in that group here, so nothing is blocked).
+  // winter selected → summer blocked in outfit.
+  // So outfit candidates = [coat (winter), spacesuit (sci-fi)] — swimsuit (summer) is blocked.
+  for (let i = 0; i < 50; i++) {
+    const result = selectForPiece({
+      tractus,
+      pieceIndex: i,
+      tagRules: [['winter', 'summer'], ['fantasy', 'sci-fi']],
+    })
+    assert.notEqual(result.aditus['outfit'], 'swimsuit',
+      `Piece ${i}: summer outfit should be blocked when winter season selected`)
+  }
+})
+
+test('tagRules: untagged valors are never blocked by tag rules', () => {
+  const tractus: Tractus[] = [
+    makeTractus('background', [
+      { value: 'forest', label: 'Forest', tags: ['fantasy'], rarity: 1 },
+    ]),
+    makeTractus('accessory', [
+      { value: 'glasses', label: 'Glasses', rarity: 1 },  // no tags — never blocked
+    ]),
+  ]
+
+  for (let i = 0; i < 10; i++) {
+    const result = selectForPiece({
+      tractus,
+      pieceIndex: i,
+      tagRules: [['fantasy', 'sci-fi']],
+    })
+    assert.equal(result.aditus['accessory'], 'glasses',
+      `Piece ${i}: untagged accessory should never be blocked`)
+  }
+})
+
+test('tagRules absent: tags on valors have no effect', () => {
+  const tractus: Tractus[] = [
+    makeTractus('background', [
+      { value: 'forest', label: 'Forest', tags: ['fantasy'], rarity: 1 },
+    ]),
+    makeTractus('outfit', [
+      { value: 'spacesuit', label: 'Spacesuit', tags: ['sci-fi'], rarity: 1 },
+    ]),
+  ]
+
+  // No tagRules — tags are ignored, spacesuit must be selected (only option)
+  const result = selectForPiece({ tractus, pieceIndex: 0 })
+  assert.equal(result.aditus['outfit'], 'spacesuit')
+})

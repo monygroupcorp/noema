@@ -55,25 +55,40 @@ export function selectForPiece(params: {
   basePrompt?: string
   collectionName?: string
   totalPieces?: number
+  /**
+   * Tag-group mutual exclusion rules.
+   * Each inner array is a mutually exclusive group of tags: once any valor
+   * with a tag from that group is selected, all subsequent valors carrying
+   * any OTHER tag from the same group are filtered out.
+   *
+   * Example: [['fantasy', 'sci-fi'], ['summer', 'winter']]
+   * → 'fantasy' and 'sci-fi' themed options never appear on the same piece.
+   */
+  tagRules?: string[][]
 }): TraitSelection {
-  const { tractus, pieceIndex, basePrompt } = params
+  const { tractus, pieceIndex, basePrompt, tagRules } = params
 
   if (tractus.length === 0) {
     return { aditus: {}, prompt: basePrompt ?? '', attributes: [] }
   }
 
-  // Track selected labels for exclusion checking (label ?? String(value))
+  // Track selected labels for label-level exclusion (label ?? String(value))
   const selectedLabels = new Set<string>()
+  // Track which tags are blocked by tag-group rules
+  const blockedTags = new Set<string>()
   const winners: Array<{ tractus: Tractus; valor: TraitValor }> = []
 
   for (let ti = 0; ti < tractus.length; ti++) {
     const tract = tractus[ti]
     const seed = seedFor(ti, pieceIndex)
 
-    // Step 1: filter out excluded options
+    // Step 1: filter out excluded options (label-level + tag-group level)
     let candidates = tract.valores.filter(v => {
-      if (!v.excludes || v.excludes.length === 0) return true
-      return !v.excludes.some(ex => selectedLabels.has(ex))
+      // Label-level exclusion: valor.excludes lists specific labels to block
+      if (v.excludes?.some(ex => selectedLabels.has(ex))) return false
+      // Tag-group exclusion: valor's tags overlap with blocked tags
+      if (v.tags?.some(t => blockedTags.has(t))) return false
+      return true
     })
 
     // Fallback: if all candidates are excluded (shouldn't happen in practice),
@@ -110,9 +125,23 @@ export function selectForPiece(params: {
       }
     }
 
-    // Record selected label for exclusion checking in subsequent tractus
+    // Record selected label for label-level exclusion in subsequent tractus
     const winnerLabel = winner.label ?? String(winner.value)
     selectedLabels.add(winnerLabel)
+
+    // Update blocked tags: for each tag-group rule, if the winner carries a tag
+    // from that group, block all OTHER tags in that group for subsequent tractus.
+    if (tagRules && winner.tags && winner.tags.length > 0) {
+      for (const group of tagRules) {
+        const matchedTag = winner.tags.find(t => group.includes(t))
+        if (matchedTag !== undefined) {
+          for (const t of group) {
+            if (t !== matchedTag) blockedTags.add(t)
+          }
+        }
+      }
+    }
+
     winners.push({ tractus: tract, valor: winner })
   }
 
