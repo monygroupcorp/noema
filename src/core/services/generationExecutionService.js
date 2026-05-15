@@ -2,6 +2,7 @@ const { ObjectId } = require('mongodb');
 const { getPricingService } = require('./pricing');
 const { createLogger } = require('../../utils/logger');
 const { chargeGeneration } = require('./charging/chargeGeneration');
+const { distributeContributorRewards } = require('./charging/contributorRewards');
 const { USD_PER_POINT } = require('../constants/economy');
 
 const logger = createLogger('GenerationExecutionService');
@@ -516,6 +517,12 @@ class GenerationExecutionService {
             }
           }
 
+          // Distribute contributor royalties for x402 executions (spell author + LoRA owners)
+          if (isX402Execution && user.x402BasePoints > 0 && this.economyService) {
+            distributeContributorRewards(newGeneration, user.x402BasePoints, { logger: this.logger })
+              .catch(err => this.logger.error(`[Execute] x402 contributor rewards failed for gen ${newGeneration._id}: ${err.message}`));
+          }
+
           const recordToEmit = {
             ...newGeneration,
             ...(isSpellStep && { deliveryStrategy: 'spell_step' })
@@ -673,6 +680,14 @@ class GenerationExecutionService {
                         'metadata.paymentError': spendErr.message,
                       }).catch(() => {});
                     }
+                  }
+
+                  // Distribute contributor royalties for x402 async completions
+                  if (isX402Execution && user.x402BasePoints > 0 && finalStatus === 'completed' && this.economyService) {
+                    const recordForRewards = await this.db.generationOutputs.findGenerationById(generationRecord._id)
+                      .catch(() => generationRecord);
+                    distributeContributorRewards(recordForRewards, user.x402BasePoints, { logger: this.logger })
+                      .catch(err => this.logger.error(`[Execute] x402 async contributor rewards failed for gen ${generationRecord._id}: ${err.message}`));
                   }
 
                   const updated = await this.db.generationOutputs.findGenerationById(generationRecord._id);
