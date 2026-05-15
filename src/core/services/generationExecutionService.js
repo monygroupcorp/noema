@@ -2,6 +2,7 @@ const { ObjectId } = require('mongodb');
 const { getPricingService } = require('./pricing');
 const { createLogger } = require('../../utils/logger');
 const { chargeGeneration } = require('./charging/chargeGeneration');
+const { USD_PER_POINT } = require('../constants/economy');
 
 const logger = createLogger('GenerationExecutionService');
 
@@ -57,7 +58,6 @@ class GenerationExecutionService {
       toolId: tool.toolId,
     });
 
-    const USD_PER_POINT = 0.000337;
     const pointsRequired = Math.max(1, Math.round(pricingResult.finalCostUsd / USD_PER_POINT));
 
     // --- Per-member spend cap check ---
@@ -205,7 +205,6 @@ class GenerationExecutionService {
 
     this.logger.debug(`[Pricing] Service: ${tool.service}, Base: $${baseCostUsd.toFixed(4)}, Final: $${pricingResult.finalCostUsd.toFixed(4)}, Tier: ${isMs2User ? 'MS2' : 'standard'}`);
 
-    const USD_PER_POINT = 0.000337;
     const pointsRequired = Math.max(1, Math.round(pricingResult.finalCostUsd / USD_PER_POINT));
 
     const currentPoints = this.db.creditLedger
