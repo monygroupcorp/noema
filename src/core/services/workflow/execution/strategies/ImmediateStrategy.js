@@ -30,6 +30,9 @@ class ImmediateStrategy extends ExecutionStrategy {
                 platform: originalContext.platform,
                 platformId: originalContext.platformId,
                 platformContext: originalContext.platformContext || {},
+                isX402: originalContext.isX402 || false,
+                payerAddress: originalContext.payerAddress || null,
+                x402BasePoints: originalContext.x402BasePoints || 0,
             },
             eventId: eventId,
             metadata: {
