@@ -36,6 +36,7 @@ const AgentDelegationsDB = require('./agentDelegationsDb');
 const PartnerDB = require('./partnerDb');
 const UploadRecordDB = require('./uploadRecordDb');
 const SplitLedgerDB = require('./splitLedgerDb');
+const IssuerDB = require('./issuerDb');
 
 // Placeholder for any existing/legacy DB service exports if this file already exists
 // For example:
@@ -93,6 +94,9 @@ function initializeDbServices(logger) {
     partner: new PartnerDB(logger),
     uploadRecords: new UploadRecordDB(logger),
     splitLedger: new SplitLedgerDB(logger),
+
+    // Trusted JWT issuers (replaces per-partner env vars)
+    issuer: new IssuerDB(logger),
 
     // ... add other services here
   };
