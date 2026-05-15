@@ -8,6 +8,7 @@ const express = require('express');
 const createRevenueAdminApi = require('./revenueApi');
 const { createPartnersAdminApi } = require('./partnersAdminApi');
 const { createCollectionsAdminApi } = require('./collectionsAdminApi');
+const { createIssuersAdminApi } = require('./issuersAdminApi');
 
 /**
  * Create the admin API router
@@ -40,6 +41,11 @@ function createAdminApi(dependencies) {
     cookCollectionsDb: dependencies.db?.cookCollections,
   });
   router.use('/collections', collectionsRouter);
+
+  const issuersRouter = createIssuersAdminApi({
+    issuerDb: dependencies.db?.issuer,
+  });
+  router.use('/issuers', issuersRouter);
 
   return router;
 }

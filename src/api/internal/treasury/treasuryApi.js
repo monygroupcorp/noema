@@ -7,7 +7,7 @@
 //   public = no auth guard
 
 const express = require('express');
-const { assertionJwt } = require('./middleware/assertionJwt');
+const { createAssertionJwt } = require('./middleware/assertionJwt');
 const { agentOwnerSession } = require('./middleware/agentOwnerSession');
 const { AgentAccountService } = require('../../../core/services/agents/AgentAccountService');
 const { DelegationService } = require('../../../core/services/agents/DelegationService');
@@ -17,9 +17,6 @@ const { OnChainVerifier } = require('../../../core/services/agents/OnChainVerifi
 const { ChallengeService } = require('../../../core/services/agents/ChallengeService');
 const { VerifyService } = require('../../../core/services/agents/VerifyService');
 
-const multisig = assertionJwt({ tier: 'multisig' });
-const agentAssertion = assertionJwt({ tier: 'agent' });
-
 /**
  * @param {{ db, economyService, toolRegistry?, logger }} deps
  * @returns {express.Router}
@@ -27,6 +24,10 @@ const agentAssertion = assertionJwt({ tier: 'agent' });
 function createTreasuryApi(deps = {}) {
   const router = express.Router();
   const logger = deps.logger || console;
+
+  const assertionJwt = createAssertionJwt({ issuerDb: deps.db?.issuer });
+  const multisig = assertionJwt({ tier: 'multisig' });
+  const agentAssertion = assertionJwt({ tier: 'agent' });
 
   const workspaceFactory = (deps.db?.workspaces && deps.db?.spells)
     ? new WorkspaceFactory({ workspacesDb: deps.db.workspaces, spellsDb: deps.db.spells, userCoreDb: deps.db.userCore, storageService: deps.storageService, ipfsService: deps.ipfsService || new IpfsService(logger), logger })
@@ -180,6 +181,8 @@ function createTreasuryApi(deps = {}) {
 function createAgentsApi(deps = {}) {
   const router = express.Router();
   const logger = deps.logger || console;
+
+  const assertionJwt = createAssertionJwt({ issuerDb: deps.db?.issuer });
 
   const workspaceFactory = (deps.db?.workspaces && deps.db?.spells)
     ? new WorkspaceFactory({ workspacesDb: deps.db.workspaces, spellsDb: deps.db.spells, userCoreDb: deps.db.userCore, storageService: deps.storageService, ipfsService: deps.ipfsService || new IpfsService(logger), logger })
@@ -457,6 +460,7 @@ function createTemplateWorkspaceApi(deps = {}) {
     ? new WorkspaceFactory({ workspacesDb: deps.db.workspaces, spellsDb: deps.db.spells, userCoreDb: deps.db.userCore, storageService: deps.storageService, ipfsService: deps.ipfsService || new IpfsService(logger), logger })
     : null;
 
+  const assertionJwt = createAssertionJwt({ issuerDb: deps.db?.issuer });
   const multisig = assertionJwt({ tier: 'multisig' });
 
   function handleErr(res, err, label) {

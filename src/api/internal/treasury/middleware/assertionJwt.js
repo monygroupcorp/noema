@@ -1,37 +1,39 @@
 // src/api/internal/treasury/middleware/assertionJwt.js
 //
-// Verifies issuer JWTs from camelcabal.fun (ES256, JWKS-backed).
-// Two auth tiers exposed via req.assertion:
-//   { tier: 'multisig', role: 'treasury-admin', sub, iat, exp }
-//   { tier: 'agent',    chainId, adapter, agentId, sub, iat, exp }
+// Verifies issuer JWTs (ES256, JWKS-backed) for any registered trusted issuer.
+// Issuers are stored in the `trusted_issuers` collection — no env vars per partner.
 //
-// Env vars:
-//   CAMEL_ISSUER_JWKS_URL   — JWKS endpoint (required in production)
-//   CAMEL_ISSUER_DOMAIN     — expected `iss` claim value
+// Usage:
+//   const { createAssertionJwt } = require('./assertionJwt');
+//   const assertionJwt = createAssertionJwt({ issuerDb: deps.db.issuer });
+//   router.get('/protected', assertionJwt({ tier: 'multisig' }), handler);
 
 const jwt = require('jsonwebtoken');
 const https = require('https');
 
-const JWKS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const JWKS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
 
-let _jwksCache = null;
-let _jwksCacheAt = 0;
+// Per-issuer JWKS cache: issuerId → { keys: JWK[], cachedAt: number }
+const _cache = new Map();
 
 /**
- * Fetches JWKS from CAMEL_ISSUER_JWKS_URL and caches for TTL.
- * @returns {Promise<Array>} Array of JWK key objects
+ * Force-bust the JWKS cache for a specific issuer (used by admin refresh endpoint).
+ * @param {string} issuerId
  */
-async function fetchJwks() {
-  const now = Date.now();
-  if (_jwksCache && now - _jwksCacheAt < JWKS_CACHE_TTL_MS) {
-    return _jwksCache;
-  }
+function bustJwksCache(issuerId) {
+  _cache.delete(issuerId);
+}
 
-  const url = process.env.CAMEL_ISSUER_JWKS_URL;
-  if (!url) throw new Error('CAMEL_ISSUER_JWKS_URL not configured');
+/**
+ * Fetches JWKS from the given URL and caches per issuerId.
+ */
+async function fetchJwks(issuerId, jwksUrl) {
+  const now = Date.now();
+  const cached = _cache.get(issuerId);
+  if (cached && now - cached.cachedAt < JWKS_CACHE_TTL_MS) return cached.keys;
 
   const body = await new Promise((resolve, reject) => {
-    https.get(url, (res) => {
+    https.get(jwksUrl, (res) => {
       let data = '';
       res.on('data', chunk => { data += chunk; });
       res.on('end', () => resolve(data));
@@ -40,52 +42,17 @@ async function fetchJwks() {
   });
 
   const { keys } = JSON.parse(body);
-  _jwksCache = keys;
-  _jwksCacheAt = now;
+  _cache.set(issuerId, { keys, cachedAt: Date.now() });
   return keys;
 }
 
-/**
- * Converts a JWK (EC P-256) to PEM format for jsonwebtoken.
- * Only handles ES256 public keys.
- */
 function jwkToPem(jwk) {
-  // jsonwebtoken accepts the raw JWK object for EC keys when using jose-style imports
-  // For simplicity, use the built-in crypto module to import via SubtleCrypto format
-  // We rely on the `jwk-to-pem` pattern via manual DER encoding or fall back to
-  // the `crypto.createPublicKey` approach available in Node ≥ 15.
   return require('crypto').createPublicKey({ key: jwk, format: 'jwk' }).export({ type: 'spki', format: 'pem' });
 }
 
 /**
- * Verifies a Bearer JWT against the issuer JWKS.
- * Returns the decoded payload or throws.
- */
-async function verifyIssuerJwt(token) {
-  const issuerDomain = process.env.CAMEL_ISSUER_DOMAIN;
-
-  // Decode header to find kid
-  const header = jwt.decode(token, { complete: true })?.header;
-  if (!header || header.alg !== 'ES256') {
-    throw Object.assign(new Error('Invalid JWT algorithm — ES256 required'), { code: 'INVALID_ALG' });
-  }
-
-  const keys = await fetchJwks();
-  const key = header.kid ? keys.find(k => k.kid === header.kid) : keys[0];
-  if (!key) throw Object.assign(new Error('No matching JWKS key for kid'), { code: 'KEY_NOT_FOUND' });
-
-  const pem = jwkToPem(key);
-
-  const verifyOpts = { algorithms: ['ES256'] };
-  if (issuerDomain) verifyOpts.issuer = issuerDomain;
-
-  return jwt.verify(token, pem, verifyOpts);
-}
-
-/**
- * Parses the `sub` claim into agent identity parts.
- * Expected format: `agent:<chainId>:<adapterAddress>:<agentId>`
- * Returns null if format does not match.
+ * Parses `sub` claim → agent identity.
+ * Format: `agent:<chainId>:<adapterAddress>:<agentId>`
  */
 function parseAgentSub(sub) {
   if (!sub || !sub.startsWith('agent:')) return null;
@@ -96,52 +63,80 @@ function parseAgentSub(sub) {
 }
 
 /**
- * Express middleware factory.
+ * Factory — binds issuerDb once, returns the assertionJwt(options) middleware factory.
  *
- * @param {{ tier?: 'multisig'|'agent'|'any', required?: boolean }} [options]
- *   tier    — if set, rejects tokens that do not match the required tier
- *   required — if false, allows unauthenticated requests (req.assertion = null)
+ * @param {{ issuerDb: import('../../../../core/services/db/issuerDb') }} deps
  */
-function assertionJwt({ tier, required = true } = {}) {
-  return async function assertionJwtMiddleware(req, res, next) {
-    const authHeader = req.headers['authorization'] || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+function createAssertionJwt({ issuerDb } = {}) {
+  if (!issuerDb) throw new Error('createAssertionJwt requires issuerDb');
 
-    if (!token) {
-      if (!required) {
-        req.assertion = null;
-        return next();
-      }
-      return res.status(401).json({ error: { code: 'MISSING_TOKEN', message: 'Authorization Bearer token required' } });
-    }
+  /**
+   * @param {{ tier?: 'multisig'|'agent'|'any', required?: boolean }} [options]
+   */
+  return function assertionJwt({ tier, required = true } = {}) {
+    return async function assertionJwtMiddleware(req, res, next) {
+      const authHeader = req.headers['authorization'] || '';
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
-    try {
-      const payload = await verifyIssuerJwt(token);
-
-      let assertion;
-      const agentParts = parseAgentSub(payload.sub);
-
-      if (agentParts) {
-        assertion = { tier: 'agent', ...agentParts, sub: payload.sub, iat: payload.iat, exp: payload.exp };
-      } else if (payload.role === 'treasury-admin') {
-        assertion = { tier: 'multisig', role: payload.role, sub: payload.sub, iat: payload.iat, exp: payload.exp };
-      } else {
-        return res.status(403).json({ error: { code: 'UNKNOWN_TIER', message: 'JWT does not match a recognised claim tier' } });
+      if (!token) {
+        if (!required) { req.assertion = null; return next(); }
+        return res.status(401).json({ error: { code: 'MISSING_TOKEN', message: 'Authorization Bearer token required' } });
       }
 
-      if (tier && tier !== 'any' && assertion.tier !== tier) {
-        return res.status(403).json({ error: { code: 'WRONG_TIER', message: `This endpoint requires tier: ${tier}` } });
-      }
+      try {
+        // Decode without verifying to extract `iss` and `kid`
+        const decoded = jwt.decode(token, { complete: true });
+        if (!decoded || decoded.header?.alg !== 'ES256') {
+          return res.status(401).json({ error: { code: 'INVALID_ALG', message: 'ES256 JWT required' } });
+        }
 
-      req.assertion = assertion;
-      next();
-    } catch (err) {
-      const code = err.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED'
-        : err.name === 'JsonWebTokenError' ? 'INVALID_TOKEN'
-        : err.code || 'AUTH_ERROR';
-      return res.status(401).json({ error: { code, message: err.message } });
-    }
+        const issuerId = decoded.payload?.iss;
+        if (!issuerId) {
+          return res.status(401).json({ error: { code: 'MISSING_ISS', message: 'JWT missing iss claim' } });
+        }
+
+        // Look up trusted issuer in DB
+        const issuer = await issuerDb.findByIssuerId(issuerId);
+        if (!issuer) {
+          return res.status(401).json({ error: { code: 'UNKNOWN_ISSUER', message: `Issuer '${issuerId}' is not registered or is suspended` } });
+        }
+
+        // Fetch JWKS and find matching key
+        const keys = await fetchJwks(issuerId, issuer.jwksUrl);
+        const kid = decoded.header?.kid;
+        const key = kid ? keys.find(k => k.kid === kid) : keys[0];
+        if (!key) {
+          return res.status(401).json({ error: { code: 'KEY_NOT_FOUND', message: 'No matching JWKS key for kid' } });
+        }
+
+        const pem = jwkToPem(key);
+        const payload = jwt.verify(token, pem, { algorithms: ['ES256'], issuer: issuerId });
+
+        // Determine tier from claims
+        let assertion;
+        const agentParts = parseAgentSub(payload.sub);
+        if (agentParts) {
+          assertion = { tier: 'agent', ...agentParts, sub: payload.sub, iat: payload.iat, exp: payload.exp };
+        } else if (payload.role === 'treasury-admin') {
+          assertion = { tier: 'multisig', role: payload.role, sub: payload.sub, iat: payload.iat, exp: payload.exp };
+        } else {
+          return res.status(403).json({ error: { code: 'UNKNOWN_TIER', message: 'JWT does not match a recognised claim tier' } });
+        }
+
+        if (tier && tier !== 'any' && assertion.tier !== tier) {
+          return res.status(403).json({ error: { code: 'WRONG_TIER', message: `This endpoint requires tier: ${tier}` } });
+        }
+
+        req.assertion = assertion;
+        next();
+      } catch (err) {
+        const code = err.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED'
+          : err.name === 'JsonWebTokenError' ? 'INVALID_TOKEN'
+          : err.code || 'AUTH_ERROR';
+        return res.status(401).json({ error: { code, message: err.message } });
+      }
+    };
   };
 }
 
-module.exports = { assertionJwt, verifyIssuerJwt, parseAgentSub };
+module.exports = { createAssertionJwt, bustJwksCache, parseAgentSub };
