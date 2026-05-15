@@ -9,6 +9,9 @@ describe('SplitLedgerDB', () => {
   after(async () => {
     const splitDb = new SplitLedgerDB(console);
     await splitDb.deleteOne({ runId: 'run-001' });
+    await splitDb.deleteOne({ runId: 'test-run-unclaimed-1' });
+    await splitDb.deleteOne({ runId: 'test-run-unclaimed-2' });
+    await splitDb.deleteOne({ runId: 'test-run-unclaimed-3' });
     await closeTestDb();
   });
 
@@ -38,5 +41,51 @@ describe('SplitLedgerDB', () => {
     const splitDb = new SplitLedgerDB(console);
     const total = await splitDb.partnerTotal('pk_test_abc');
     assert.equal(total, 50000);
+  });
+
+  test('createUnclaimedAgentOwnerEntry stores unclaimed entry', async () => {
+    const db = new SplitLedgerDB(console);
+    const result = await db.createUnclaimedAgentOwnerEntry({
+      runId: 'test-run-unclaimed-1',
+      spellSlug: 'test-spell',
+      agentId: 'agent_abc',
+      ownerAddress: '0xdeadbeef',
+      pointsAmount: 14,
+    });
+    assert.ok(result.insertedId);
+
+    const entry = await db.findOne({ runId: 'test-run-unclaimed-1' });
+    assert.equal(entry.type, 'agent_owner_unclaimed');
+    assert.equal(entry.status, 'pending');
+    assert.equal(entry.pointsAmount, 14);
+    assert.equal(entry.ownerAddress, '0xdeadbeef');
+  });
+
+  test('findUnclaimed returns pending agent_owner_unclaimed entries', async () => {
+    const db = new SplitLedgerDB(console);
+    await db.createUnclaimedAgentOwnerEntry({
+      runId: 'test-run-unclaimed-2',
+      spellSlug: 'test-spell',
+      agentId: 'agent_abc',
+      ownerAddress: '0xcafe',
+      pointsAmount: 20,
+    });
+    const entries = await db.findUnclaimed(10);
+    assert.ok(entries.some(e => e.runId === 'test-run-unclaimed-2'));
+  });
+
+  test('markAgentOwnerCredited transitions status to credited', async () => {
+    const db = new SplitLedgerDB(console);
+    await db.createUnclaimedAgentOwnerEntry({
+      runId: 'test-run-unclaimed-3',
+      spellSlug: 'test-spell',
+      agentId: 'agent_abc',
+      ownerAddress: '0xfeed',
+      pointsAmount: 7,
+    });
+    await db.markAgentOwnerCredited('test-run-unclaimed-3');
+    const entry = await db.findOne({ runId: 'test-run-unclaimed-3' });
+    assert.equal(entry.status, 'credited');
+    assert.ok(entry.creditedAt instanceof Date);
   });
 });
