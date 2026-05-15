@@ -5,7 +5,7 @@ import type { Corpus, Corpora, Corporum } from '../types/corpus.js'
 function fromDoc(doc: Record<string, unknown>): Corpus {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, ...rest } = doc as Record<string, unknown> & { _id: unknown }
-  return rest as Corpus
+  return rest as unknown as Corpus
 }
 
 export class MongoCorpus implements Corporum {

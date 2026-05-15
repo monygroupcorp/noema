@@ -5,7 +5,7 @@ import type { Testimonium, Testimonia, Testimoniorum } from '../types/catena.js'
 function fromDoc(doc: Record<string, unknown>): Testimonium {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, ...rest } = doc as Record<string, unknown> & { _id: unknown }
-  return rest as Testimonium
+  return rest as unknown as Testimonium
 }
 
 export class MongoTestimoniorum implements Testimoniorum {

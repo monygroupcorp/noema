@@ -87,7 +87,7 @@ export class ExecuteFlow implements Flow {
         category: existing.category,
       }
       ctx.state = state
-      return this._submit(ctx, state)
+      return this._submit(ctx, state) as Promise<Step>
     }
 
     // Direct entry with modusId pre-set (spell shortcut)

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.2
 
-# Stage 1: Build frontend
+# Stage 1: Build frontend (JS web app)
 FROM node:20-slim AS frontend-builder
 WORKDIR /frontend
 COPY src/platforms/web/frontend/package*.json ./
@@ -8,7 +8,21 @@ RUN npm ci
 COPY src/platforms/web/frontend/ ./
 RUN npm run build
 
-# Stage 2: Production
+# Stage 2: Compile TypeScript
+FROM node:20-slim AS ts-builder
+WORKDIR /build
+COPY package*.json ./
+RUN npm ci --legacy-peer-deps
+COPY . .
+RUN npx tsc
+# Copy non-TS assets (ABIs, workflow JSON templates) into dist alongside compiled output
+RUN find src -name '*.json' ! -name 'package*.json' | while read f; do \
+  target="dist/${f#src/}"; \
+  mkdir -p "$(dirname "$target")"; \
+  cp "$f" "$target"; \
+done
+
+# Stage 3: Production
 FROM node:20-slim
 WORKDIR /usr/src/app
 
@@ -25,11 +39,18 @@ COPY package*.json ./
 ENV NODE_ENV=production
 RUN npm install --omit=dev --legacy-peer-deps
 
-# Copy the rest of the application code
+# Copy the rest of the application code (JS workers, scripts, etc.)
 COPY . .
+
+# Overlay compiled TypeScript output
+COPY --from=ts-builder /build/dist ./dist
 
 # Copy built frontend from stage 1
 COPY --from=frontend-builder /frontend/dist ./src/platforms/web/frontend/dist
+
+# Copy ESM builds needed by the widget iframe (served via /widget/lib/*)
+COPY --from=frontend-builder /frontend/node_modules/@monygroupcorp/microact/dist/microact.esm.js ./src/platforms/web/frontend/node_modules/@monygroupcorp/microact/dist/microact.esm.js
+COPY --from=frontend-builder /frontend/node_modules/@monygroupcorp/micro-web3/dist/micro-web3.esm.js ./src/platforms/web/frontend/node_modules/@monygroupcorp/micro-web3/dist/micro-web3.esm.js
 
 # Create necessary directories and set permissions before switching user
 RUN mkdir -p tmp output storage/media logs \
@@ -47,5 +68,5 @@ ENV COMMIT_MSG=$COMMIT_MSG
 ENV WEB_PORT=4000
 EXPOSE 4000
 
-# Run directly — Docker handles restarts via --restart policy
-CMD ["node", "--max-old-space-size=768", "app.js"]
+# Crystal entry point — compiled TypeScript
+CMD ["node", "--max-old-space-size=768", "dist/index.js"]

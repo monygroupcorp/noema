@@ -5,7 +5,7 @@ import type { Persona, Personae, PersonaGenus, PersonaStore } from '../types/per
 function fromDoc(doc: Record<string, unknown>): Persona {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, ...rest } = doc as Record<string, unknown> & { _id: unknown }
-  return rest as Persona
+  return rest as unknown as Persona
 }
 
 export class MongoPersona implements PersonaStore {

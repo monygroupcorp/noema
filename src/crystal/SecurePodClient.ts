@@ -319,17 +319,14 @@ export class SecurePodClient implements RunPodClient {
 // Default SSH factory — uses the system ssh binary via SshTransport.js
 // ---------------------------------------------------------------------------
 
-import { createRequire } from 'node:module'
-
-const _require = createRequire(import.meta.url)
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SshTransportCtor = new (opts: { host: string; port: number; username: string; privateKeyPath: string }) => SshTransportLike
 let _SshTransport: SshTransportCtor | null = null
 
 function loadSshTransport(): SshTransportCtor {
   if (!_SshTransport) {
-    _SshTransport = _require('../core/services/remote/SshTransport.js') as SshTransportCtor
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    _SshTransport = require('../core/services/remote/SshTransport.js') as SshTransportCtor
   }
   return _SshTransport
 }

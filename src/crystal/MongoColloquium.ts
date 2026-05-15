@@ -5,7 +5,7 @@ import type { Colloquium, ColloquiumStore } from '../types/colloquium.js'
 function fromDoc(doc: Record<string, unknown>): Colloquium {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, ...rest } = doc as Record<string, unknown> & { _id: unknown }
-  return rest as Colloquium
+  return rest as unknown as Colloquium
 }
 
 export class MongoColloquium implements ColloquiumStore {
