@@ -5,7 +5,7 @@ import type { Signum, Signa, Signorum } from '../types/significandi.js'
 export class MemorySignorum implements Signorum {
   private readonly store = new Map<string, Signum>()
 
-  async balance(by: { animaId: string } | { arcanumHash: string }): Promise<bigint> {
+  async balance(by: { animaId: string } | { commitment: string }): Promise<bigint> {
     return [...this.store.values()]
       .filter(s => s.status === 'valid' && this._matches(s, by))
       .reduce((sum, s) => sum + s.valor, 0n)
@@ -31,8 +31,12 @@ export class MemorySignorum implements Signorum {
     }
   }
 
-  async history(by: { animaId: string } | { arcanumHash: string }): Promise<Signa> {
+  async history(by: { animaId: string } | { commitment: string }): Promise<Signa> {
     return [...this.store.values()].filter(s => this._matches(s, by))
+  }
+
+  async createMany(signa: Array<Omit<Signum, 'id' | 'natum' | 'status'>>): Promise<Signum[]> {
+    return Promise.all(signa.map(s => this.issue(s)))
   }
 
   async settle(signaIds: string[], actualImpetus: bigint, actumId: string): Promise<void> {
@@ -60,8 +64,8 @@ export class MemorySignorum implements Signorum {
     }
   }
 
-  private _matches(s: Signum, by: { animaId: string } | { arcanumHash: string }): boolean {
+  private _matches(s: Signum, by: { animaId: string } | { commitment: string }): boolean {
     if ('animaId' in by) return s.animaId === by.animaId
-    return s.testis === by.arcanumHash
+    return s.testis === by.commitment
   }
 }

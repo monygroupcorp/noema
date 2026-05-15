@@ -5,7 +5,7 @@ import type { Memoria, MemoriaStore } from '../types/anima.js'
 function fromDoc(doc: Record<string, unknown>): Memoria {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, ...rest } = doc as Record<string, unknown> & { _id: unknown }
-  return rest as Memoria
+  return rest as unknown as Memoria
 }
 
 export class MongoMemoria implements MemoriaStore {

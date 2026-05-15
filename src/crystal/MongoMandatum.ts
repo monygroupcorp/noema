@@ -5,7 +5,7 @@ import type { Mandatum, Mandata, Mandatorum } from '../types/mandatum.js'
 function fromDoc(doc: Record<string, unknown>): Mandatum {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, _nextFire, ...rest } = doc as Record<string, unknown> & { _id: unknown; _nextFire: unknown }
-  return rest as Mandatum
+  return rest as unknown as Mandatum
 }
 
 export class MongoMandatum implements Mandatorum {

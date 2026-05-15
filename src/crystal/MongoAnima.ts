@@ -5,7 +5,7 @@ import type { Anima, AnimaStore } from '../types/anima.js'
 function fromDoc(doc: Record<string, unknown>): Anima {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, ...rest } = doc as Record<string, unknown> & { _id: unknown }
-  return rest as Anima
+  return rest as unknown as Anima
 }
 
 export class MongoAnima implements AnimaStore {

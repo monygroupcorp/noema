@@ -14,6 +14,15 @@ export class MemoryModorum implements Modorum {
     this.store.set(`${modus.id}@${modus.versio}`, modus)
   }
 
+  async update(id: string, patch: Partial<Pick<Modus, 'computeStrategy' | 'gpuClass' | 'podPolicy'>>): Promise<Modus> {
+    const modus = this.store.get(id)
+    if (!modus) throw new Error(`Modus '${id}' not found`)
+    const updated = { ...modus, ...patch }
+    this.store.set(id, updated)
+    this.store.set(`${id}@${updated.versio}`, updated)
+    return updated
+  }
+
   async list(filter?: Partial<Pick<Modus, 'genus' | 'canonica' | 'auctor'>>): Promise<Modi> {
     const all = [...new Set(this.store.values())]
     if (!filter) return all

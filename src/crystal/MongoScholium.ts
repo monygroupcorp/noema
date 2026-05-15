@@ -5,7 +5,7 @@ import type { Scholium, Scholiorum, ScholiumTargetType } from '../types/scholium
 function fromDoc(doc: Record<string, unknown>): Scholium {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, ...rest } = doc as Record<string, unknown> & { _id: unknown }
-  return rest as Scholium
+  return rest as unknown as Scholium
 }
 
 export class MongoScholium implements Scholiorum {

@@ -5,7 +5,7 @@ import type { Tabula, Tabulae, Tabularum } from '../types/tabula.js'
 function fromDoc(doc: Record<string, unknown>): Tabula {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, ...rest } = doc as Record<string, unknown> & { _id: unknown }
-  return rest as Tabula
+  return rest as unknown as Tabula
 }
 
 export class MongoTabula implements Tabularum {
