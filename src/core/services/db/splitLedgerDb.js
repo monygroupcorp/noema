@@ -49,6 +49,7 @@ class SplitLedgerDB extends BaseDB {
         { key: { runId: 1 }, unique: true, name: 'runId_unique_idx' },
         { key: { partnerId: 1, status: 1, createdAt: -1 }, name: 'partnerId_status_createdAt_idx', background: true },
         { key: { status: 1 }, name: 'status_idx', background: true },
+        { key: { type: 1, status: 1, createdAt: 1 }, name: 'type_status_createdAt_idx', background: true },
       ]);
     });
     this.logger.debug('[SplitLedgerDB] Indexes ensured.');
@@ -87,6 +88,51 @@ class SplitLedgerDB extends BaseDB {
     return this.updateOne(
       { runId, status: 'pending' },
       { $set: { status: 'credited', settledAt: new Date(), updatedAt: new Date() } }
+    );
+  }
+
+  /**
+   * Create an unclaimed agent-owner entry (owner has no Noema account at time of run).
+   * @param {{ runId: string, spellSlug: string, agentId: string, ownerAddress: string, pointsAmount: number }} params
+   * @returns {Promise<import('mongodb').InsertOneResult>}
+   */
+  async createUnclaimedAgentOwnerEntry({ runId, spellSlug, agentId, ownerAddress, pointsAmount }) {
+    const now = new Date();
+    return this.insertOne({
+      type: 'agent_owner_unclaimed',
+      runId,
+      spellSlug,
+      agentId,
+      ownerAddress,
+      pointsAmount,
+      status: 'pending',
+      creditedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  /**
+   * Return pending unclaimed agent-owner entries for dragnet.
+   * @param {number} limit
+   * @returns {Promise<SplitLedgerEntry[]>}
+   */
+  async findUnclaimed(limit = 100) {
+    return this.findMany(
+      { type: 'agent_owner_unclaimed', status: 'pending' },
+      { sort: { createdAt: 1 }, limit }
+    );
+  }
+
+  /**
+   * Mark an unclaimed agent-owner entry as credited (dragnet sweep).
+   * @param {string} runId
+   * @returns {Promise<import('mongodb').UpdateResult>}
+   */
+  async markAgentOwnerCredited(runId) {
+    return this.updateOne(
+      { runId, type: 'agent_owner_unclaimed', status: 'pending' },
+      { $set: { status: 'credited', creditedAt: new Date(), updatedAt: new Date() } }
     );
   }
 
