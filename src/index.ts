@@ -318,6 +318,7 @@ async function main(): Promise<void> {
     nexus,
     signorum: ring.signorum,
     modorum: ring.modorum,
+    modos: ring.modos,
     vestigiorum: ring.vestigiorum,
     collectioRouter: ring.collectioCursor,
   }))

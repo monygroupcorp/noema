@@ -50,17 +50,17 @@ Added `CollectioCursor.findCollectioIdForActum(actumId)` which searches the in-m
 
 ---
 
-### 9. ~~TesseraCursor unreviewed~~ — reviewed, one bug fixed, two gaps documented
+### 9. ~~TesseraCursor unreviewed~~ — reviewed, two bugs fixed, budget enforcement closed as non-issue
 
 **Fixed — async acta tracking:** `run()` only appended `actum.id` to `modo.acta` when `result.kind === 'sync'`. Async jobs were invisible to the Modo — their IDs never landed in `acta`. Fixed: always append `actum.id` when a Modo is present; gate `impetusAccrued` update on sync only (async impetus is unknown until the webhook fires). Two tests added.
 
-**Gap — budget enforcement absent:** `Signorum` has no `findByModoId()` method. `Modo` has no `budget` field. The tessera signum `valor` doc says "decremented on each use" but the ledger is append-only — no decrement mechanism exists. `TesseraCursor.run()` cannot check whether `impetusAccrued + cost ≤ tessera.valor` without a query path. Budget overspend is currently not caught. Fix requires either adding `findByModoId` to `Signorum` + `MemorySignorum` + `MongoSignorum`, or storing `budget` on the `Modo` record and passing it through.
+**Fixed — async impetusAccrued never updated at webhook time:** When an async job completes, the execution webhook now updates `modo.impetusAccrued` using `actum.modoId` (already present on Actum). `modos?: ModoStore` added to `ExecutionWebhookDeps`; wired via `ring.modos` in `index.ts`. Three tests added (updates on COMPLETED, no-op when dep absent, no-op when actum has no modoId).
 
-**Gap — async impetusAccrued never updated at webhook time:** When a cursor returns `kind: 'async'`, the actual impetus is reported by the execution webhook. The webhook handler (`executionWebhook.ts`) calls `ActumCompletor.complete()` which settles signa — but no code path calls `modos.update({ impetusAccrued })` on webhook receipt. Sessions with async jobs will show `impetusAccrued` as permanently lower than actual spend.
+**Closed — budget enforcement:** The tessera signum `valor` IS the budget. Hard enforcement is already handled by `signorum.lock()` failing when the payer has insufficient signa — no overspend is possible at that layer. Soft pre-dispatch estimation is not meaningful given cold-start and run-time variance. No `budget` field needed on Modo; no `findByModoId` needed on Signorum.
 
-**Intentional — Modo stays `'claiming'`:** `claiming → warming → active` transitions belong to the pod provisioning layer (MateriaFlow / SecurePodClient), not TesseraCursor. TesseraCursor creates the session token; a separate flow provisions the pod and advances the status.
+**Intentional — Modo stays `'claiming'`:** `claiming → warming → active` transitions belong to the pod provisioning layer (MateriaFlow / SecurePodClient), not TesseraCursor.
 
-**Files:** `src/crystal/TesseraCursor.ts`, `tests/unit/crystal/TesseraCursor.test.ts`
+**Files:** `src/crystal/TesseraCursor.ts`, `src/crystal/MemoryModo.ts`, `src/api/webhooks/executionWebhook.ts`, `tests/unit/crystal/executionWebhook.test.ts`
 
 ---
 

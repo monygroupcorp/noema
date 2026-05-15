@@ -4,6 +4,7 @@ import crypto from 'node:crypto'
 import { handleExecutionWebhook } from '../../../src/api/webhooks/executionWebhook.js'
 import type { ExecutionWebhookDeps, WebhookRequest } from '../../../src/api/webhooks/executionWebhook.js'
 import type { Actum } from '../../../src/types/actum.js'
+import { MemoryModo } from '../../../src/crystal/MemoryModo.js'
 import type { Exitus } from '../../../src/types/cursus.js'
 import type { Modus } from '../../../src/types/modus.js'
 import { Nexus } from '../../../src/ledger/Nexus.js'
@@ -508,4 +509,52 @@ test('missing nexus dep is a no-op — request still succeeds', async () => {
   assert.equal(result.status, 200)
   assert.equal(result.body.success, true)
   assert.equal(completor.completed.length, 1)
+})
+
+// ── Modo session spend ────────────────────────────────────────────────────────
+
+// 23. COMPLETED webhook updates impetusAccrued on the modo for async jobs
+test('COMPLETED updates modo impetusAccrued when actum has modoId', async () => {
+  const modos = new MemoryModo()
+  const modo = await modos.create({ status: 'active', impetusAccrued: 100n, acta: [], idleWarmthSec: 300 })
+  const actum = makeActum({ modoId: modo.id })
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor: makeCompletor(),
+    modos,
+  }
+
+  await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 60_000 }), deps)
+
+  const updated = await modos.findById(modo.id)
+  // executionTime 60_000ms → impetus = ceil(60_000 / 1000) = 60; 100 + 60 = 160
+  assert.equal(updated?.impetusAccrued, 160n)
+})
+
+// 24. COMPLETED without modos dep is a no-op — does not throw
+test('COMPLETED without modos dep succeeds when actum has modoId', async () => {
+  const actum = makeActum({ modoId: 'modo-xyz' })
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor: makeCompletor(),
+  }
+  const result = await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 5000 }), deps)
+  assert.equal(result.status, 200)
+})
+
+// 25. COMPLETED for actum without modoId leaves modos untouched
+test('COMPLETED for actum without modoId does not update any modo', async () => {
+  const modos = new MemoryModo()
+  const modo = await modos.create({ status: 'active', impetusAccrued: 50n, acta: [], idleWarmthSec: 300 })
+  const actum = makeActum()  // no modoId
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor: makeCompletor(),
+    modos,
+  }
+
+  await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 10_000 }), deps)
+
+  const unchanged = await modos.findById(modo.id)
+  assert.equal(unchanged?.impetusAccrued, 50n)
 })

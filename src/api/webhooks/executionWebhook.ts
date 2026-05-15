@@ -5,6 +5,7 @@ import type { Nexus } from '../../types/nexus.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Vestigiorum } from '../../types/vestigium.js'
 import type { Modorum } from '../../types/modus.js'
+import type { ModoStore } from '../../types/modo.js'
 import { createVestigiumFromActum } from '../../execution/hooks/vestigiumHook.js'
 
 type AuctorKey = { animaId: string } | { arcanumHash: string }
@@ -29,6 +30,8 @@ export interface ExecutionWebhookDeps {
   vestigiorum?: Vestigiorum
   /** Optional: modus registry — used to look up spell author for royalty routing. */
   modorum?: Modorum
+  /** Optional: session store — updates impetusAccrued when async jobs complete. */
+  modos?: ModoStore
   /** Optional: routes collection actum completions back to CollectioCursor. */
   collectioRouter?: {
     findCollectioIdForActum(actumId: string): string | null
@@ -103,6 +106,17 @@ export async function handleExecutionWebhook(
         duratio: executionTime,
       }
       const completed = await deps.completor.complete(actum, exitus)
+
+      // Update session spend — async jobs can't update impetusAccrued at dispatch
+      // time since the actual cost is unknown until the webhook fires.
+      if (deps.modos && actum.modoId) {
+        const modo = await deps.modos.findById(actum.modoId)
+        if (modo) {
+          await deps.modos.update(actum.modoId, {
+            impetusAccrued: modo.impetusAccrued + exitus.impetus,
+          })
+        }
+      }
 
       // Look up spell author for royalty routing — available via modorum dep
       let modusAuctorAnimaId: string | undefined
