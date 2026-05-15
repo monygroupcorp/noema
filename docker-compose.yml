@@ -10,3 +10,21 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    environment:
+      - CLIP_SERVICE_URL=http://clip:8080
+    depends_on:
+      clip:
+        condition: service_healthy
+
+  clip:
+    build:
+      context: ./clip_service
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
