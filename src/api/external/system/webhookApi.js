@@ -27,14 +27,16 @@ function createWebhookApi(dependencies) {
   const webhookRouter = express.Router();
 
   // --- ComfyDeploy Webhook Handler ---
-  // Uses express.raw() to read the raw body buffer for HMAC-SHA256 signature verification.
-  webhookRouter.post('/comfydeploy', express.raw({ type: 'application/json' }), async (req, res) => {
+  // The global express.json() (with rawBodySaver) pre-parses the body and saves the raw
+  // Buffer to req.rawBody. We use req.rawBody for HMAC verification and req.body for the
+  // parsed payload — the route-level express.raw() is not needed.
+  webhookRouter.post('/comfydeploy', async (req, res) => {
     try {
       const routeLogger = dependencies.logger || console;
       const secret = process.env.COMFY_DEPLOY_WEBHOOK_SECRET;
 
-      // Signature verification (skip in dev when secret not set)
-      const rawBody = req.body;
+      // req.rawBody is set by rawBodySaver verify callback on the global express.json()
+      const rawBody = req.rawBody;
       const signatureHeader = req.headers['x-comfydeploy-signature'] || req.headers['x-comfy-signature'];
       if (!verifyComfyDeploySignature(rawBody, signatureHeader, secret)) {
         routeLogger.warn('[WebhookAPI] ComfyDeploy webhook rejected: invalid signature');
@@ -44,13 +46,15 @@ function createWebhookApi(dependencies) {
         routeLogger.warn('[WebhookAPI] COMFY_DEPLOY_WEBHOOK_SECRET not set — skipping signature verification (dev mode)');
       }
 
-      // Parse JSON from raw buffer
-      let parsedBody;
-      try {
-        parsedBody = JSON.parse(rawBody.toString('utf8'));
-      } catch (parseErr) {
-        routeLogger.error('[WebhookAPI] ComfyDeploy webhook: failed to parse JSON body');
-        return res.status(400).json({ error: 'Invalid JSON body' });
+      // Body already parsed by global express.json(); fall back to manual parse if content-type differed
+      let parsedBody = req.body;
+      if (!parsedBody || typeof parsedBody !== 'object') {
+        try {
+          parsedBody = JSON.parse((rawBody || req.body || '').toString('utf8'));
+        } catch (parseErr) {
+          routeLogger.error('[WebhookAPI] ComfyDeploy webhook: failed to parse JSON body');
+          return res.status(400).json({ error: 'Invalid JSON body' });
+        }
       }
 
       routeLogger.debug('[WebhookAPI] Dependencies prepared for webhookProcessor', {
