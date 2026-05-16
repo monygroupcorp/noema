@@ -52,7 +52,6 @@ class CreditLedgerDB extends BaseDB {
         {
           key: { 'related_items.idempotencyKey': 1 },
           unique: true,
-          sparse: true,
           name: 'idx_spend_idempotency_key',
           partialFilterExpression: { type: 'SPEND_DEBIT_LOG' },
           background: true,
