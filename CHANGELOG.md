@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.10.1](https://github.com/monygroupcorp/noema/compare/v4.10.0...v4.10.1) (2026-05-16)
+
+
+### Bug Fixes
+
+* **db:** remove sparse+partialFilter conflict and drop unsupported $ne:null in partial index ([9fa6ffb](https://github.com/monygroupcorp/noema/commit/9fa6ffb4958bc31735f18561cbe77fe810e82f54))
+
 ## [4.10.0](https://github.com/monygroupcorp/noema/compare/v4.9.7...v4.10.0) (2026-05-15)
 
 
