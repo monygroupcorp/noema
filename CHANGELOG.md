@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.10.2](https://github.com/monygroupcorp/noema/compare/v4.10.1...v4.10.2) (2026-05-16)
+
+
+### Bug Fixes
+
+* **webhook:** use req.rawBody for HMAC and req.body as parsed payload ([afebbd8](https://github.com/monygroupcorp/noema/commit/afebbd8eb233683b61277909441cd3efef80e772))
+
 ## [4.10.1](https://github.com/monygroupcorp/noema/compare/v4.10.0...v4.10.1) (2026-05-16)
 
 
