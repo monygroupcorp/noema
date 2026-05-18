@@ -91,6 +91,21 @@ describe('AgentAccountDB', () => {
     assert.equal(found.balance, 75);
   });
 
+  test('debitBalance decrements balance correctly', async () => {
+    const agentAccountDb = new AgentAccountDB(console);
+    // balance is currently 75 from the addBalance test above
+    await agentAccountDb.debitBalance(createdAgentAccountId, 30);
+    const found = await agentAccountDb.findByAgentAccountId(createdAgentAccountId);
+    assert.equal(found.balance, 45);
+  });
+
+  test('setStatus updates status correctly', async () => {
+    const agentAccountDb = new AgentAccountDB(console);
+    await agentAccountDb.setStatus(createdAgentAccountId, 'suspended');
+    const found = await agentAccountDb.findByAgentAccountId(createdAgentAccountId);
+    assert.equal(found.status, 'suspended');
+  });
+
   test('setPayoutPolicy updates payoutPolicy', async () => {
     const agentAccountDb = new AgentAccountDB(console);
     const newPolicy = { mode: 'withdraw', withdrawAddress: '0x1234567890abcdef1234567890abcdef12345678' };
