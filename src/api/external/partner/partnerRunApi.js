@@ -43,10 +43,11 @@ const DEFAULT_SPLIT_BPS = 500; // 5%
  * @param {Object} dependencies.uploadRecordDb - UploadRecordDB instance
  * @param {Object} dependencies.splitLedgerDb - SplitLedgerDB instance
  * @param {Object} dependencies.x402PaymentLogDb - X402PaymentLogDB instance
+ * @param {Object} [dependencies.spellsService] - SpellsService for dynamic quote-based pricing
  * @param {string} dependencies.receiverAddress - Address to receive payments
  * @param {string} [dependencies.network] - Network ID (defaults to Base mainnet)
  */
-function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerDb, x402PaymentLogDb, userCoreDb, cookCollectionsDb, receiverAddress, network = NETWORKS.BASE_MAINNET }) {
+function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerDb, x402PaymentLogDb, userCoreDb, cookCollectionsDb, spellsService, receiverAddress, network = NETWORKS.BASE_MAINNET }) {
   if (!receiverAddress) throw new Error('partnerRunApi requires receiverAddress');
 
   const router = express.Router();
@@ -109,7 +110,20 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
         }
       }
 
-      const amount = spell.x402Price || DEFAULT_SPELL_PRICE_USDC;
+      // Compute x402 price dynamically from historical execution data.
+      // Falls back to spell.x402Price or the env default if quoteSpell is unavailable.
+      let amount = spell.x402Price || DEFAULT_SPELL_PRICE_USDC;
+      if (spellsService) {
+        try {
+          const quote = await spellsService.quoteSpell(slug);
+          if (quote.totalCostPts > 0) {
+            amount = String(Math.round(quote.totalCostPts * USD_PER_POINT * 1e6));
+          }
+        } catch (quoteErr) {
+          logger.warn('[partnerRun] quoteSpell failed, using fallback price', { slug, error: quoteErr.message });
+        }
+      }
+
       const x402 = req.x402;
 
       // No payment — issue 402
