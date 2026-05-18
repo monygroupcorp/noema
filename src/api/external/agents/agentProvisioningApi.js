@@ -12,7 +12,7 @@ const express = require('express');
 const { pointsToUsd } = require('./agentUtils');
 const { fireSessionCallback } = require('../../../core/services/agents/agentSessionCallback');
 
-const MASTER_WORKSPACE_SLUG = process.env.CAMEL_MASTER_WORKSPACE_SLUG || '745218a5';
+const DEFAULT_STARTER_WORKSPACE_SLUG = process.env.DEFAULT_STARTER_WORKSPACE_SLUG || '745218a5';
 
 /**
  * Create Agent Provisioning API router.
@@ -81,15 +81,72 @@ function createAgentProvisioningApi({
       const { agentId, tokenId, owner_at_assertion, scope, spending_cap, exp } = jwtPayload;
       const ownerAddress = (owner_at_assertion || '').toLowerCase();
 
-      // Step 4 — Idempotency check
+      // Step 4 — Idempotency / existing-account check
       const existing = await agentAccountDb.findByAgentId(agentId);
-      if (existing && existing.status === 'active') {
-        return res.status(200).json({
-          agentAccountId: existing.agentAccountId,
-          manifestURI: `https://noema.art/api/agents/${existing.agentAccountId}/manifest`,
-          revokeURI: `https://noema.art/api/sessions/${existing.agentAccountId}/revoke`,
-          balance: { amount: pointsToUsd(existing.balance), currency: 'USDC' },
-        });
+      if (existing) {
+        if (existing.status === 'active') {
+          return res.status(200).json({
+            agentAccountId: existing.agentAccountId,
+            manifestURI: `https://noema.art/api/agents/${existing.agentAccountId}/manifest`,
+            revokeURI: `https://noema.art/api/sessions/${existing.agentAccountId}/revoke`,
+            balance: { amount: pointsToUsd(existing.balance), currency: 'USDC' },
+          });
+        }
+        if (existing.status === 'revoked') {
+          return res.status(409).json({ error: { code: 'AGENT_REVOKED', message: 'This agent account has been permanently revoked' } });
+        }
+        // status === 'suspended': a prior provisioning attempt debited failed — retry the financial steps only
+        if (existing.status === 'suspended') {
+          const starterGrant = treasury.faucetPolicy?.starterGrant || 0;
+          if (treasury.balance < starterGrant) {
+            return res.status(402).json({ error: { code: 'INSUFFICIENT_FUNDS', message: 'Treasury has insufficient balance for starter grant' } });
+          }
+          const debitSuccess = await treasuryDb.debitBalance(treasury.treasuryId, starterGrant);
+          if (!debitSuccess) {
+            return res.status(402).json({ error: { code: 'INSUFFICIENT_FUNDS', message: 'Treasury balance exhausted during provisioning retry' } });
+          }
+          await agentAccountDb.setStatus(existing.agentAccountId, 'active');
+          if (starterGrant > 0) {
+            await agentAccountDb.addBalance(existing.agentAccountId, starterGrant);
+            try {
+              await economyService.creditPoints(existing.noemaAccountId, {
+                points: starterGrant,
+                description: 'CAMEL agent starter grant (retry)',
+                rewardType: 'AGENT_GRANT',
+                relatedItems: { agentAccountId: existing.agentAccountId, treasuryId: treasury.treasuryId, tokenId },
+              });
+            } catch (err) {
+              log.error('[agentProvisioning] creditPoints failed on suspended retry (non-fatal)', { agentAccountId: existing.agentAccountId, error: err.message });
+            }
+          }
+          fireSessionCallback({
+            issuerDomain: treasury.issuerDomain,
+            tokenId,
+            payload: {
+              platform: 'noema.art',
+              platformAgentId: existing.agentAccountId,
+              scope,
+              issuedAt: Math.floor(Date.now() / 1000),
+              expiresAt: Math.floor(new Date(exp * 1000).getTime() / 1000),
+              manifestURI: `https://noema.art/api/agents/${existing.agentAccountId}/manifest`,
+              revokeURI: `https://noema.art/api/sessions/${existing.agentAccountId}/revoke`,
+              billing: {
+                model: 'treasury-funded',
+                treasuryRef: treasury.treasuryId,
+                agentBalance: pointsToUsd(starterGrant),
+                monthlyCap: pointsToUsd(treasury.faucetPolicy?.monthlyMax || 0),
+                currency: 'USDC',
+              },
+            },
+            options: { logger: log },
+          });
+          return res.status(202).json({
+            agentAccountId: existing.agentAccountId,
+            manifestURI: `https://noema.art/api/agents/${existing.agentAccountId}/manifest`,
+            revokeURI: `https://noema.art/api/sessions/${existing.agentAccountId}/revoke`,
+            balance: { amount: pointsToUsd(starterGrant), currency: 'USDC' },
+          });
+        }
       }
 
       // Step 5 — Check treasury balance
@@ -112,14 +169,15 @@ function createAgentProvisioningApi({
       const card = await fetchAgentCard(treasury.issuerDomain, tokenId);
       const cardProfile = card?.profile || { name: 'CAMEL Agent', description: '', image: null };
 
-      // Step 8 — Clone master workspace
+      // Step 8 — Clone starter workspace (per-treasury slug, with global fallback)
+      const starterSlug = treasury.starterWorkspaceSlug || DEFAULT_STARTER_WORKSPACE_SLUG;
       let masterSnapshot;
       try {
-        const master = await workspacesDb.findOne({ slug: MASTER_WORKSPACE_SLUG });
+        const master = await workspacesDb.findOne({ slug: starterSlug });
         if (!master) throw new Error('Master workspace not found');
         masterSnapshot = JSON.parse(JSON.stringify(master.snapshot)); // deep clone
       } catch (err) {
-        log.error('[agentProvisioning] Master workspace not found', { error: err.message });
+        log.error('[agentProvisioning] Starter workspace not found', { starterSlug, error: err.message });
         return res.status(503).json({ error: { code: 'TEMPLATE_NOT_FOUND', message: 'Agent workspace template unavailable' } });
       }
 
@@ -135,7 +193,7 @@ function createAgentProvisioningApi({
           snapshot: masterSnapshot,
           name: `${cardProfile.name || 'CAMEL Agent'} #${tokenId}`,
           ownerId: noemaAccountId,
-          origin: { slug: MASTER_WORKSPACE_SLUG },
+          origin: { slug: starterSlug },
           visibility: 'private',
         });
         workspaceSlug = ws.slug;
