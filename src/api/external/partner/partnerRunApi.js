@@ -12,6 +12,7 @@
 
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
+const { ObjectId } = require('mongodb');
 const { createLogger } = require('../../../utils/logger');
 const {
   createX402ExecutionService,
@@ -44,11 +45,12 @@ const DEFAULT_SPLIT_BPS = 500; // 5%
  * @param {Object} dependencies.splitLedgerDb - SplitLedgerDB instance
  * @param {Object} dependencies.x402PaymentLogDb - X402PaymentLogDB instance
  * @param {Object} [dependencies.castsDb] - CastsDB instance for cast tracking
+ * @param {Object} [dependencies.generationOutputsDb] - GenerationOutputsDB for output URLs in status endpoint
  * @param {Object} [dependencies.spellsService] - SpellsService for quoting and execution
  * @param {string} dependencies.receiverAddress - Address to receive payments
  * @param {string} [dependencies.network] - Network ID (defaults to Base mainnet)
  */
-function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerDb, x402PaymentLogDb, userCoreDb, cookCollectionsDb, castsDb, spellsService, receiverAddress, network = NETWORKS.BASE_MAINNET }) {
+function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerDb, x402PaymentLogDb, userCoreDb, cookCollectionsDb, castsDb, generationOutputsDb, spellsService, receiverAddress, network = NETWORKS.BASE_MAINNET }) {
   if (!receiverAddress) throw new Error('partnerRunApi requires receiverAddress');
 
   const router = express.Router();
@@ -236,6 +238,11 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
           const castResult = await spellsService.castSpell(slug, castContext, castsDb);
           castId = castResult?.castId || castContext.castId || null;
           logger.info('[partnerRun] Spell cast dispatched', { runId, slug, castId });
+          if (castId) {
+            splitLedgerDb.setCastId(runId, castId).catch(err =>
+              logger.error('[partnerRun] setCastId failed:', err.message)
+            );
+          }
         } catch (castErr) {
           logger.error('[partnerRun] castSpell failed after payment settled', { error: castErr.message, runId, slug });
           // Payment is already settled — return 202 so the partner knows payment succeeded
@@ -249,6 +256,99 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
     } catch (err) {
       logger.error('[partnerRun] execution error', { error: err.message, slug: req.params.slug });
       return res.status(500).json({ error: 'EXECUTION_ERROR', message: 'Spell execution failed' });
+    }
+  });
+
+  /**
+   * GET /partner/runs/:runId
+   *
+   * Poll the status of a spell run initiated via the partner run endpoint.
+   * Authenticated by partnerId query param + Origin domain check.
+   *
+   * Query:
+   * - partnerId: string (required)
+   *
+   * Response:
+   * - { runId, spellSlug, castId, status, stepsDone, stepsTotal, outputs, failureReason? }
+   */
+  router.get('/runs/:runId', async (req, res) => {
+    try {
+      const { runId } = req.params;
+      const { partnerId } = req.query;
+
+      if (!partnerId) {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: 'partnerId required' });
+      }
+
+      // Same domain validation as run endpoint
+      const origin = req.get('Origin') || '';
+      const domain = origin.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
+
+      const partner = await partnerDb.findPartnerById(partnerId);
+      if (!partner) {
+        return res.status(404).json({ error: 'NOT_FOUND', message: 'Partner not found' });
+      }
+      if (!partner.allowedDomains.includes(domain)) {
+        logger.warn('[partnerRun/status] Domain mismatch', { partnerId, domain, allowed: partner.allowedDomains });
+        return res.status(403).json({ error: 'FORBIDDEN', message: 'Domain not registered for this partner' });
+      }
+
+      // Look up run — validates partnerId ownership
+      const ledgerEntry = await splitLedgerDb.findByRunId(runId);
+      if (!ledgerEntry || ledgerEntry.partnerId !== partnerId) {
+        return res.status(404).json({ error: 'NOT_FOUND', message: 'Run not found' });
+      }
+
+      const { castId, spellSlug } = ledgerEntry;
+
+      if (!castId) {
+        return res.json({ runId, spellSlug, status: 'queued', stepsDone: 0, stepsTotal: 0, outputs: [] });
+      }
+
+      // Fetch cast document
+      const cast = await castsDb.findOne({ _id: new ObjectId(castId) });
+      if (!cast) {
+        return res.json({ runId, spellSlug, castId, status: 'unknown', stepsDone: 0, stepsTotal: 0, outputs: [] });
+      }
+
+      // Step count for progress (best-effort spell fetch)
+      const spell = await spellsDb.findOne({ slug: spellSlug });
+      const stepsTotal = spell?.steps?.length || 0;
+      const stepsDone = cast.stepGenerationIds?.length || 0;
+
+      // Collect output URLs from completed generation records
+      let outputs = [];
+      if (cast.stepGenerationIds?.length && generationOutputsDb) {
+        const gens = await generationOutputsDb.findGenerations(
+          { _id: { $in: cast.stepGenerationIds } },
+          { projection: { artifactUrls: 1, responsePayload: 1, status: 1 } }
+        );
+        for (const g of gens) {
+          if (g.artifactUrls?.length) {
+            for (const url of g.artifactUrls) outputs.push({ url, type: 'image' });
+          } else {
+            const rp = g.responsePayload;
+            const text = rp?.text || rp?.response;
+            if (text) outputs.push({ type: 'text', text });
+          }
+        }
+      }
+
+      return res.json({
+        runId,
+        spellSlug,
+        castId,
+        status: cast.status,
+        stepsDone,
+        stepsTotal,
+        outputs,
+        ...(cast.failureReason && { failureReason: cast.failureReason }),
+        ...(cast.completedAt && { completedAt: cast.completedAt }),
+      });
+
+    } catch (err) {
+      logger.error('[partnerRun/status] error', { error: err.message, runId: req.params.runId });
+      return res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Status lookup failed' });
     }
   });
 
