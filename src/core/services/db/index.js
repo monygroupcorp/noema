@@ -37,6 +37,8 @@ const PartnerDB = require('./partnerDb');
 const UploadRecordDB = require('./uploadRecordDb');
 const SplitLedgerDB = require('./splitLedgerDb');
 const IssuerDB = require('./issuerDb');
+const TreasuryDB = require('./treasuryDb');
+const AgentAccountDB = require('./agentAccountDb');
 
 // Placeholder for any existing/legacy DB service exports if this file already exists
 // For example:
@@ -97,6 +99,10 @@ function initializeDbServices(logger) {
 
     // Trusted JWT issuers (replaces per-partner env vars)
     issuer: new IssuerDB(logger),
+
+    // CAMEL agent runtime
+    treasury: new TreasuryDB(logger),
+    agentAccount: new AgentAccountDB(logger),
 
     // ... add other services here
   };
