@@ -43,11 +43,12 @@ const DEFAULT_SPLIT_BPS = 500; // 5%
  * @param {Object} dependencies.uploadRecordDb - UploadRecordDB instance
  * @param {Object} dependencies.splitLedgerDb - SplitLedgerDB instance
  * @param {Object} dependencies.x402PaymentLogDb - X402PaymentLogDB instance
- * @param {Object} [dependencies.spellsService] - SpellsService for dynamic quote-based pricing
+ * @param {Object} [dependencies.castsDb] - CastsDB instance for cast tracking
+ * @param {Object} [dependencies.spellsService] - SpellsService for quoting and execution
  * @param {string} dependencies.receiverAddress - Address to receive payments
  * @param {string} [dependencies.network] - Network ID (defaults to Base mainnet)
  */
-function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerDb, x402PaymentLogDb, userCoreDb, cookCollectionsDb, spellsService, receiverAddress, network = NETWORKS.BASE_MAINNET }) {
+function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerDb, x402PaymentLogDb, userCoreDb, cookCollectionsDb, castsDb, spellsService, receiverAddress, network = NETWORKS.BASE_MAINNET }) {
   if (!receiverAddress) throw new Error('partnerRunApi requires receiverAddress');
 
   const router = express.Router();
@@ -93,8 +94,9 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
         return res.status(403).json({ error: 'FORBIDDEN', message: 'Domain not registered for this partner' });
       }
 
-      // Validate spell exists and is published
-      const spell = await spellsDb.findOne({ slug, published: true });
+      // Validate spell exists (published flag is deprecated; access is controlled
+      // by partner credential + domain validation above)
+      const spell = await spellsDb.findOne({ slug });
       if (!spell) {
         return res.status(404).json({ error: 'NOT_FOUND', message: `Spell '${slug}' not found` });
       }
@@ -218,9 +220,31 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
         }).catch(err => logger.error('[partnerRun] agentOwnerReward failed:', err.message));
       }
 
-      // TODO: dispatch spell execution (wire to existing spell execution service)
-      // For now return accepted — execution dispatch wired in next task
-      return res.status(202).json({ runId, status: 'queued', spellSlug: slug });
+      // Dispatch spell execution. Use the spell owner's MAID as masterAccountId so
+      // checkPermissions passes without relaxing the permission model — the x402
+      // payment already authorized this execution.
+      let castId = null;
+      if (spellsService) {
+        const castContext = {
+          masterAccountId: spell.ownedBy?.toString(),
+          inputs,
+          runId,
+          // Forward optional caller-supplied webhook for result delivery
+          ...(req.body.webhookUrl && { webhookUrl: req.body.webhookUrl }),
+        };
+        try {
+          const castResult = await spellsService.castSpell(slug, castContext, castsDb);
+          castId = castResult?.castId || castContext.castId || null;
+          logger.info('[partnerRun] Spell cast dispatched', { runId, slug, castId });
+        } catch (castErr) {
+          logger.error('[partnerRun] castSpell failed after payment settled', { error: castErr.message, runId, slug });
+          // Payment is already settled — return 202 so the partner knows payment succeeded
+          // even if execution failed to dispatch. They can retry via support.
+          return res.status(202).json({ runId, status: 'dispatch_failed', spellSlug: slug, castId });
+        }
+      }
+
+      return res.status(202).json({ runId, status: 'running', spellSlug: slug, castId });
 
     } catch (err) {
       logger.error('[partnerRun] execution error', { error: err.message, slug: req.params.slug });

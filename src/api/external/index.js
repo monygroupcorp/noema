@@ -641,6 +641,7 @@ function initializeExternalApi(dependencies) {
       x402PaymentLogDb: dependencies.db?.data?.x402PaymentLog,
       userCoreDb: dependencies.db?.data?.userCore,
       cookCollectionsDb: dependencies.db?.data?.cookCollections,
+      castsDb: dependencies.db?.data?.casts,
       spellsService: dependencies.spellsService,
       receiverAddress: x402ReceiverAddress,
       network: x402Network,
