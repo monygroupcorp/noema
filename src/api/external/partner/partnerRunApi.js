@@ -14,6 +14,7 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { ObjectId } = require('mongodb');
 const { createLogger } = require('../../../utils/logger');
+const { getActiveJobProgress } = require('../../../core/services/comfydeploy/webhookProcessor');
 const {
   createX402ExecutionService,
   createPaymentRequired,
@@ -334,14 +335,43 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
         }
       }
 
+      // Factor in ComfyUI Deploy progress for the currently-running step.
+      // stepGenerationIds only holds completed steps, so while a ComfyUI job is
+      // in-flight its generation record exists (status:'processing') but hasn't
+      // been appended yet. We look it up and pull progress from the in-memory
+      // webhook cache to give an accurate overall percentage.
+      let currentStepProgress = 0;
+      let currentStepLiveStatus = null;
+      if (cast.status === 'running' && generationOutputsDb) {
+        const [inProgressGen] = await generationOutputsDb.findGenerations(
+          { castId: new ObjectId(castId), status: 'processing' },
+          { sort: { requestTimestamp: -1 }, limit: 1,
+            projection: { 'metadata.run_id': 1 } }
+        );
+        if (inProgressGen?.metadata?.run_id) {
+          const jobState = getActiveJobProgress().get(inProgressGen.metadata.run_id);
+          if (jobState) {
+            currentStepProgress = typeof jobState.progress === 'number' ? jobState.progress : 0;
+            currentStepLiveStatus = jobState.live_status || null;
+          }
+        }
+      }
+
+      // overall 0-1 progress: completed steps + fractional current step
+      const progress = stepsTotal > 0
+        ? Math.min((stepsDone + currentStepProgress) / stepsTotal, 1)
+        : (cast.status === 'completed' ? 1 : 0);
+
       return res.json({
         runId,
         spellSlug,
         castId,
         status: cast.status,
+        progress,
         stepsDone,
         stepsTotal,
         outputs,
+        ...(currentStepLiveStatus && { currentStepLiveStatus }),
         ...(cast.failureReason && { failureReason: cast.failureReason }),
         ...(cast.completedAt && { completedAt: cast.completedAt }),
       });
