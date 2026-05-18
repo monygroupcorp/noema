@@ -4,8 +4,10 @@
  * Exposes the CAMEL ERC-8004 session manifest and revoke endpoints.
  *
  * Routes (registered with full paths, mount at / in external API):
- *   GET  /agents/:agentAccountId/manifest
- *   POST /sessions/:agentAccountId/revoke
+ *   GET   /agents/:agentAccountId/manifest
+ *   POST  /sessions/:agentAccountId/revoke
+ *   PATCH /agents/:agentAccountId/payout-policy
+ *   GET   /agents/:agentAccountId/earnings
  */
 
 const express = require('express');
@@ -151,6 +153,13 @@ function createAgentSessionApi({ agentAccountDb, treasuryDb, splitLedgerDb, logg
    * PATCH /agents/:agentAccountId/payout-policy
    *
    * Update the payout policy for an agent account.
+   *
+   * Auth (v1): agentAccountId acts as an implicit credential — the same model used by
+   * POST /sessions/:agentAccountId/revoke. This is intentional for v1 but means anyone
+   * who can enumerate or guess an agentAccountId can redirect revenue. Acceptable for
+   * v1 because the agentAccountId space is sparse (cmw_ + 3 random bytes, never published
+   * in bulk). v2 should gate this behind a CAMEL JWT or signed holder challenge.
+   * TODO(v2): add CAMEL JWT verification before this endpoint is public-facing.
    */
   router.patch('/agents/:agentAccountId/payout-policy', async (req, res) => {
     const { agentAccountId } = req.params;
@@ -206,32 +215,15 @@ function createAgentSessionApi({ agentAccountDb, treasuryDb, splitLedgerDb, logg
         });
       }
 
-      let recentInflows = [];
-      let totalGross = 0;
-      try {
-        // SplitLedgerDB is keyed by partnerId; use findByPartnerId with the agentAccountId as a
-        // best-effort approximation if a direct agentAccountId filter isn't available.
-        let entries = [];
-        if (typeof splitLedgerDb.findByPartnerId === 'function') {
-          entries = await splitLedgerDb.findByPartnerId(agentAccountId, 20);
-        }
-        entries = entries || [];
-        totalGross = entries.reduce((sum, e) => sum + parseInt(e.grossAmount || '0', 10), 0);
-        recentInflows = entries.map(e => ({
-          spellSlug: e.spellSlug || null,
-          amount: (parseInt(e.grossAmount || '0', 10) / 1e6).toFixed(6).replace(/\.?0+$/, '') || '0',
-          currency: 'USDC',
-          timestamp: Math.floor(new Date(e.createdAt).getTime() / 1000),
-        }));
-      } catch (err) {
-        log.warn('[agentSessionApi] Failed to fetch split ledger entries for earnings', { agentAccountId, error: err.message });
-      }
-
-      const totalUsd = (totalGross / 1e6).toFixed(2);
+      // TODO(v2): SplitLedgerDB is keyed by partnerId (e.g. pk_live_xxx), not by agentAccountId.
+      // Per-agent earnings require either: (a) writing agentAccountId onto split ledger entries
+      // at run time, (b) a dedicated agentUsage collection, or (c) a join via treasury.partnerId
+      // filtered to this agent's scope. None of these exist yet. Return empty until the query
+      // semantics are decided and the data source is wired up.
       return res.status(200).json({
         agentAccountId,
-        totalEarnings: { amount: totalUsd, currency: 'USDC' },
-        recentInflows,
+        totalEarnings: { amount: '0.00', currency: 'USDC' },
+        recentInflows: [],
       });
     } catch (err) {
       log.error('[agentSessionApi] Unexpected error in earnings handler', { agentAccountId, error: err.message });

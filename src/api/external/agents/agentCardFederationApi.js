@@ -6,8 +6,9 @@
  *   - Dynamically-quoted spell capabilities with x402 pricing
  *
  * Routes (registered with full paths, mount at / in external API):
- *   GET /treasury/:treasuryId/agents/:agentId
- *   GET /agents/:agentAccountId/capabilities
+ *   GET  /treasury/:treasuryId/agents/:agentId
+ *   POST /treasury/:treasuryId/agents/:agentId/donate
+ *   GET  /agents/:agentAccountId/capabilities
  */
 
 const express = require('express');
@@ -137,12 +138,15 @@ function createAgentCardFederationApi({ agentAccountDb, treasuryDb, splitLedgerD
       }
 
       await agentAccountDb.addBalance(agentAccount.agentAccountId, points);
-      const updatedAccount = await agentAccountDb.findByAgentAccountId(agentAccount.agentAccountId);
+
+      // Compute new balance optimistically — avoids partial-failure if the second read
+      // throws after the increment has already landed.
+      const newBalance = agentAccount.balance + points;
 
       return res.status(200).json({
         agentAccountId: agentAccount.agentAccountId,
         donatedPoints: points,
-        newBalance: updatedAccount.balance,
+        newBalance,
       });
     } catch (err) {
       log.error('[agentCardFederation] Unexpected error in donate handler', { treasuryId, agentId, error: err.message });

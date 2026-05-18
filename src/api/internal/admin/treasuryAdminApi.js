@@ -184,6 +184,9 @@ function createTreasuryAdminApi({ treasuryDb, agentAccountDb }) {
         return res.status(400).json({ error: 'INSUFFICIENT_BALANCE', message: `Insufficient balance to topup ${points} points` });
       }
 
+      // TODO(v2): if addBalance throws after debitBalance succeeds, the treasury is debited
+      // but the agent receives nothing. Add compensating rollback (re-credit treasury) or
+      // convert to a two-phase ledger write before this endpoint handles significant volume.
       await agentAccountDb.addBalance(agentAccount.agentAccountId, points);
       logger.info('[treasuryAdminApi] Agent topup completed', { treasuryId, agentId, agentAccountId: agentAccount.agentAccountId, points });
       return res.json({ agentAccountId: agentAccount.agentAccountId, pointsAdded: points });
