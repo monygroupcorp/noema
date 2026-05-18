@@ -21,7 +21,7 @@ const MASTER_WORKSPACE_SLUG = process.env.CAMEL_MASTER_WORKSPACE_SLUG || '745218
  * @param {object} deps.treasuryDb
  * @param {object} deps.agentAccountDb
  * @param {object} deps.workspacesDb
- * @param {object} deps.camelJwtVerifier
+ * @param {object} deps.agentJwtVerifier
  * @param {object} deps.economyService
  * @param {object} deps.internalApiClient
  * @param {object} [deps.agentCardFetcher]
@@ -32,7 +32,7 @@ function createAgentProvisioningApi({
   treasuryDb,
   agentAccountDb,
   workspacesDb,
-  camelJwtVerifier,
+  agentJwtVerifier,
   economyService,
   internalApiClient,
   agentCardFetcher: agentCardFetcherFn,
@@ -70,7 +70,7 @@ function createAgentProvisioningApi({
       // Step 3 — Verify JWT
       let jwtPayload;
       try {
-        jwtPayload = await camelJwtVerifier.verifyAssertionJwt(token, treasury.issuerDomain);
+        jwtPayload = await agentJwtVerifier.verifyAssertionJwt(token, treasury.issuerDomain);
       } catch (err) {
         if (err.name === 'JwksUnavailableError') {
           return res.status(503).json({ error: { code: 'SERVICE_UNAVAILABLE', message: 'JWKS service unavailable' } });

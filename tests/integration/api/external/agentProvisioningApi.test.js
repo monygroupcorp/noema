@@ -57,7 +57,7 @@ function makeMockWorkspacesDb(overrides = {}) {
   };
 }
 
-function makeMockCamelJwtVerifier(payload, overrides = {}) {
+function makeMockAgentJwtVerifier(payload, overrides = {}) {
   return {
     verifyAssertionJwt: async () => payload,
     ...overrides,
@@ -119,7 +119,7 @@ function createTestApp({
     treasuryDb: makeMockTreasuryDb(treasury, treasuryDbOverrides),
     agentAccountDb: makeMockAgentAccountDb(agentAccountDbOverrides),
     workspacesDb: makeMockWorkspacesDb(workspacesDbOverrides),
-    camelJwtVerifier: makeMockCamelJwtVerifier(jwtPayload, jwtVerifierOverrides),
+    agentJwtVerifier: makeMockAgentJwtVerifier(jwtPayload, jwtVerifierOverrides),
     economyService: makeMockEconomyService(economyServiceOverrides),
     internalApiClient: makeMockInternalApiClient(internalApiClientOverrides),
     agentCardFetcher,
