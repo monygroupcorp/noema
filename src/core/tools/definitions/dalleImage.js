@@ -54,9 +54,10 @@ const dalleImageTool = {
   },
   costingModel: {
     rateSource: 'static',
-    // base cost will be looked up from metadata.costTable
+    // Default: dall-e-3, 1024x1024, standard quality = $0.04/image
+    // Full per-size/quality pricing is in metadata.costTable
     staticCost: {
-      amount: 0,
+      amount: 0.04,
       unit: 'run'
     }
   },

@@ -290,7 +290,6 @@ class SpellsService {
             spell = await this.db.spells.findById(spellIdentifier);
         } else {
             spell = await this.db.spells.findBySlug(spellIdentifier);
-            // If not found, try public slug lookup (for public spells)
             if (!spell) {
                 spell = await this.db.spells.findByPublicSlug(spellIdentifier);
             }
@@ -300,13 +299,11 @@ class SpellsService {
             throw new Error(`Spell \"${spellIdentifier}\" not found.`);
         }
 
-        // Ensure steps array exists
         const steps = Array.isArray(spell.steps) ? spell.steps : [];
         if (steps.length === 0) {
             throw new Error('Spell contains no steps – cannot generate quote.');
         }
 
-        // 2. Iterate over each step and compute average stats using GenerationOutputsDB
         const generationOutputsDb = this.db.generationOutputs;
         if (!generationOutputsDb || typeof generationOutputsDb.aggregate !== 'function') {
             throw new Error('GenerationOutputsDB is not available – cannot generate quote.');
@@ -314,78 +311,125 @@ class SpellsService {
 
         const pricingService = getPricingService(this.logger);
 
-        const breakdown = [];
-        let totalRuntimeMs = 0;
-        let totalCostPts = 0;
+        // Pre-fetch historical stats once per unique toolId to avoid redundant DB queries
+        // when a spell repeats the same tool across multiple steps.
+        const uniqueToolIds = [...new Set(
+            steps.map(s => s.toolIdentifier || s.toolId).filter(Boolean)
+        )];
 
-        for (const step of steps) {
-            // Support both `toolIdentifier` and legacy `toolId`
-            const toolId = step.toolIdentifier || step.toolId;
-            if (!toolId) {
-                this.logger.warn(`[SpellsService] Step ${step.stepId || '<unknown>'} is missing toolIdentifier/toolId – skipping from quote.`);
-                continue;
-            }
-
-            // Look up the tool's current costingModel from the registry.
-            // This gives us the correct rate even if historical costUsd data is stale.
-            const toolDef = this.toolRegistry ? this.toolRegistry.getToolById(toolId) : null;
-            const costingModel = toolDef?.costingModel || null;
-            const serviceName = toolDef?.service || 'comfyui';
-
-            // Query historical avg duration (not costUsd — costUsd may be stale from wrong GPU rate)
-            const pipeline = [
+        const historyCache = {};
+        await Promise.all(uniqueToolIds.map(async (toolId) => {
+            const [stats] = await generationOutputsDb.aggregate([
                 { $match: {
                     $or: [
-                        { toolId: toolId },
+                        { toolId },
                         { toolDisplayName: toolId },
                         { serviceName: toolId }
                     ],
                     status: 'completed',
                     durationMs: { $exists: true, $ne: null, $gt: 0 }
                 }},
-                { $sort: { responseTimestamp: -1, requestTimestamp: -1 }},
+                { $sort: { responseTimestamp: -1, requestTimestamp: -1 } },
                 { $limit: sampleSize },
                 { $group: {
                     _id: null,
-                    count: { $sum: 1 },
-                    avgDurationMs: { $avg: '$durationMs' }
+                    count:         { $sum: 1 },
+                    avgDurationMs: { $avg: '$durationMs' },
+                    // Also average actual billed cost — used as fallback when
+                    // toolRegistry rate is unavailable (e.g. tool re-registered
+                    // with different ID, or rate lookup failed at startup).
+                    // Billing is accurate post-webhook fix (2026-05-11).
+                    avgCostUsd:    { $avg: { $toDouble: '$costUsd' } },
+                    billedCount:   { $sum: { $cond: [{ $gt: [{ $toDouble: '$costUsd' }, 0] }, 1, 0] } },
                 }}
-            ];
+            ]);
+            historyCache[toolId] = stats || null;
+        }));
 
-            const [stats] = await generationOutputsDb.aggregate(pipeline);
-            const avgDurationMs = stats?.avgDurationMs || 0;
+        const breakdown = [];
+        let totalRuntimeMs = 0;
+        let totalCostPts = 0;
 
-            if (!stats || stats.count === 0) {
-                this.logger.warn(`[SpellsService] No historical duration data for tool "${toolId}".`);
-            } else {
-                this.logger.info(`[SpellsService] Historical data for "${toolId}": ${stats.count} records, avgDuration=${avgDurationMs.toFixed(0)}ms`);
+        for (const step of steps) {
+            const toolId = step.toolIdentifier || step.toolId;
+            if (!toolId) {
+                this.logger.warn(`[SpellsService] Step ${step.stepId || '<unknown>'} missing toolIdentifier/toolId – skipping.`);
+                continue;
             }
 
-            // Compute base compute cost using the tool's current rate × historical avg duration.
-            // Fall back to 30s if no duration history exists.
+            const toolDef = this.toolRegistry?.getToolById(toolId) ?? null;
+            const costingModel = toolDef?.costingModel ?? null;
+            const serviceName = toolDef?.service || 'comfyui';
+
+            const hist = historyCache[toolId];
+            const avgDurationMs = hist?.avgDurationMs || 0;
+            const historicalCostUsd = (hist?.billedCount > 0) ? (hist.avgCostUsd || 0) : 0;
+
+            if (!hist || hist.count === 0) {
+                this.logger.warn(`[SpellsService] No history for tool "${toolId}".`);
+            }
+
+            // Resolve compute cost with priority:
+            //   1. Static cost from costingModel (joycaption, ltx-video, etc.)
+            //   2. Rate × duration from costingModel (comfy tools via toolRegistry)
+            //   3. Historical avgCostUsd (fallback when toolRegistry rate is unavailable)
             let computeCostUsd = 0;
+            let rateSource = 'none';
+
             if (costingModel) {
-                const unit = costingModel.unit?.toLowerCase();
-                if (unit === 'second' || unit === 'seconds') {
-                    const estimatedSec = avgDurationMs > 0 ? avgDurationMs / 1000 : 30;
-                    computeCostUsd = costingModel.rate * estimatedSec;
-                } else if (['request', 'run', 'fixed', 'token'].includes(unit)) {
-                    computeCostUsd = costingModel.rate;
-                } else if (costingModel.rateSource === 'static' && costingModel.staticCost) {
+                if (costingModel.rateSource === 'static' && costingModel.staticCost?.amount > 0) {
+                    // Static-cost tools store price in staticCost.amount, not costingModel.rate
                     computeCostUsd = costingModel.staticCost.amount;
+                    rateSource = 'static';
+                } else if (typeof costingModel.rate === 'number' && costingModel.rate > 0) {
+                    const unit = costingModel.unit?.toLowerCase();
+                    if (unit === 'second' || unit === 'seconds') {
+                        const estimatedSec = avgDurationMs > 0 ? avgDurationMs / 1000 : 30;
+                        computeCostUsd = costingModel.rate * estimatedSec;
+                        rateSource = 'rate×duration';
+                    } else {
+                        computeCostUsd = costingModel.rate;
+                        rateSource = 'rate×fixed';
+                    }
                 }
             }
 
-            // Apply platform markup so the quote reflects what the user will actually pay.
-            // pricingService.getQuote applies the same multiplier the webhook processor uses.
-            const quote = pricingService.getQuote({ computeCostUsd, serviceName, isMs2User: false, toolId });
-            const avgCostPts = quote.totalPoints;
+            // Fallback: if costingModel gave nothing, use historical avgCostUsd.
+            // This handles comfy tools where toolRegistry rate lookup failed at
+            // startup, or tools that have been re-keyed since last registration.
+            if (computeCostUsd === 0 && historicalCostUsd > 0) {
+                computeCostUsd = historicalCostUsd;
+                rateSource = 'historical-costUsd';
+            }
 
-            this.logger.info(`[SpellsService] Quote for "${toolId}": computeUsd=$${computeCostUsd.toFixed(6)}, multiplier=${quote.multiplier}x, finalPts=${avgCostPts} (rate=${costingModel?.rate}, unit=${costingModel?.unit}, avgDurMs=${avgDurationMs.toFixed(0)})`);
+            // Only apply platform markup and minimum charge when there is actual
+            // compute cost. Zero-cost orchestration tools (primitives, expressions,
+            // string ops) should not inflate the quote with minimum-charge noise.
+            let avgCostPts = 0;
+            if (computeCostUsd > 0) {
+                const quote = pricingService.getQuote({ computeCostUsd, serviceName, isMs2User: false, toolId });
+                avgCostPts = quote.totalPoints;
+                this.logger.info(`[SpellsService] Quote "${toolId}": $${computeCostUsd.toFixed(6)} [${rateSource}] × ${quote.multiplier}x = ${avgCostPts}pts (avgDurMs=${avgDurationMs.toFixed(0)})`);
+            } else {
+                this.logger.info(`[SpellsService] Quote "${toolId}": no compute cost [${rateSource}] – 0pts`);
+            }
 
             breakdown.push({ toolId, avgRuntimeMs: avgDurationMs, avgCostPts });
             totalRuntimeMs += avgDurationMs;
             totalCostPts += avgCostPts;
+        }
+
+        // Last-resort fallback: if every step had no data and no static cost,
+        // return the cached quote from the spell document rather than 0.
+        if (totalCostPts === 0 && spell.avgCostPtsCached > 0) {
+            this.logger.warn(`[SpellsService] Live quote yielded 0 pts for "${spellIdentifier}" – falling back to cached ${spell.avgCostPtsCached} pts`);
+            return {
+                spellId: spell._id,
+                totalRuntimeMs: spell.avgRuntimeMsCached || 0,
+                totalCostPts: Math.ceil(spell.avgCostPtsCached),
+                breakdown: [],
+                fromCache: true,
+            };
         }
 
         return {
