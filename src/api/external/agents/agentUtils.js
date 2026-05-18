@@ -4,4 +4,13 @@ function pointsToUsd(points) {
   return ((points || 0) * USD_PER_POINT).toFixed(2);
 }
 
-module.exports = { pointsToUsd };
+/**
+ * Convert USDC atomic units (6 decimals) to a USD string.
+ * @param {string|number} atomicAmount
+ * @returns {string}
+ */
+function atomicUsdcToUsd(atomicAmount) {
+  return (Number(atomicAmount) / 1e6).toFixed(6);
+}
+
+module.exports = { pointsToUsd, atomicUsdcToUsd };

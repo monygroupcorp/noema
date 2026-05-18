@@ -97,4 +97,28 @@ describe('TreasuryDB', () => {
     const found = await treasuryDb.findByTreasuryId(TEST_TREASURY_ID);
     assert.equal(found.status, 'suspended');
   });
+
+  test('createTreasury with partnerId stores the partnerId field', async () => {
+    const altId = 'camel-test-partner';
+    const treasuryDb = new TreasuryDB(console);
+    const result = await treasuryDb.createTreasury({
+      treasuryId: altId,
+      issuerName: 'partner-test',
+      issuerDomain: 'partner-test.example.com',
+      faucetPolicy: { starterGrant: 10, monthlyMax: 100, subsidyMode: 'on', refillCadence: 'monthly' },
+      partnerId: 'pk_live_test123',
+    });
+    assert.ok(result.insertedId);
+    const found = await treasuryDb.findByTreasuryId(altId);
+    assert.equal(found.partnerId, 'pk_live_test123');
+    // Clean up
+    await treasuryDb.deleteOne({ treasuryId: altId });
+  });
+
+  test('updatePartnerId sets partnerId on existing treasury', async () => {
+    const treasuryDb = new TreasuryDB(console);
+    await treasuryDb.updatePartnerId(TEST_TREASURY_ID, 'pk_live_updated456');
+    const found = await treasuryDb.findByTreasuryId(TEST_TREASURY_ID);
+    assert.equal(found.partnerId, 'pk_live_updated456');
+  });
 });

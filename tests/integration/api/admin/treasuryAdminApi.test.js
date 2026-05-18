@@ -32,6 +32,7 @@ function makeMockTreasuryDb(overrides = {}) {
     debitBalance: async () => true,
     updateFaucetPolicy: async () => {},
     setStatus: async () => {},
+    updatePartnerId: async () => {},
     ...overrides,
   };
 }
@@ -287,6 +288,55 @@ describe('Treasury Admin API', () => {
     const res = await supertest(app)
       .patch('/treasury/test-1/status')
       .send({ status: 'banana' });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'BAD_REQUEST');
+  });
+
+  // ─── POST / with optional partnerId ──────────────────────────────────────
+
+  test('POST / passes optional partnerId through to createTreasury', async () => {
+    let capturedArgs = null;
+    const mockDb = makeMockTreasuryDb({
+      createTreasury: async (args) => {
+        capturedArgs = args;
+        return { insertedId: 'fake-id' };
+      },
+    });
+    const localApp = createTestApp(mockDb);
+    const res = await supertest(localApp)
+      .post('/treasury')
+      .send({
+        issuerName: 'PARTNER',
+        issuerDomain: 'partner.example.com',
+        faucetPolicy: { starterGrant: 50, monthlyMax: 200, subsidyMode: 'on', refillCadence: 'monthly' },
+        partnerId: 'pk_live_abc123',
+      });
+    assert.equal(res.status, 201);
+    assert.equal(capturedArgs.partnerId, 'pk_live_abc123');
+  });
+
+  // ─── PATCH /:id/partner ───────────────────────────────────────────────────
+
+  test('PATCH /:id/partner returns 200 { ok: true } for valid partnerId', async () => {
+    const res = await supertest(app)
+      .patch('/treasury/test-1/partner')
+      .send({ partnerId: 'pk_live_xyz789' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+  });
+
+  test('PATCH /:id/partner returns 404 when treasury not found', async () => {
+    const res = await supertest(app)
+      .patch('/treasury/no-such-id/partner')
+      .send({ partnerId: 'pk_live_xyz789' });
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error, 'NOT_FOUND');
+  });
+
+  test('PATCH /:id/partner returns 400 when partnerId is missing', async () => {
+    const res = await supertest(app)
+      .patch('/treasury/test-1/partner')
+      .send({});
     assert.equal(res.status, 400);
     assert.equal(res.body.error, 'BAD_REQUEST');
   });

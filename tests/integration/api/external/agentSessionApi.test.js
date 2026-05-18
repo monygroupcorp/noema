@@ -96,6 +96,31 @@ describe('Agent Session API — GET /agents/:agentAccountId/manifest', () => {
     assert.equal(res.body.billing.currency, 'USDC');
   });
 
+  // 1b. Active manifest includes status: 'active'
+  test('Active account manifest includes status: "active"', async () => {
+    const app = createTestApp();
+    const res = await supertest(app).get('/agents/cmw_test01/manifest');
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.status, 'active');
+  });
+
+  // 1c. Revoked account → 200 lean response (no billing/workspaceURL)
+  test('Revoked account → 200 lean response with status: "revoked"', async () => {
+    const app = createTestApp({
+      agentAccount: makeMockAgentAccount({ status: 'revoked' }),
+    });
+    const res = await supertest(app).get('/agents/cmw_test01/manifest');
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.platform, 'noema.art');
+    assert.equal(res.body.agentAccountId, 'cmw_test01');
+    assert.equal(res.body.status, 'revoked');
+    // Should NOT have billing or workspaceURL
+    assert.equal(res.body.billing, undefined);
+    assert.equal(res.body.workspaceURL, undefined);
+  });
+
   // 2. agentAccountId not found → 404 NOT_FOUND
   test('agentAccountId not found → 404 NOT_FOUND', async () => {
     const app = createTestApp({ agentAccount: null });

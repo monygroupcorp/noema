@@ -39,6 +39,15 @@ function createAgentSessionApi({ agentAccountDb, treasuryDb, logger }) {
         return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent account not found' } });
       }
 
+      // Surface status so CAMEL can detect revoked/suspended sessions
+      if (agentAccount.status !== 'active') {
+        return res.status(200).json({
+          platform: 'noema.art',
+          agentAccountId,
+          status: agentAccount.status, // 'revoked' | 'suspended'
+        });
+      }
+
       const treasury = await treasuryDb.findByTreasuryId(agentAccount.treasuryId);
       if (!treasury) {
         log.error('[agentSessionApi] Treasury not found for agentAccount', { agentAccountId, treasuryId: agentAccount.treasuryId });
@@ -47,6 +56,7 @@ function createAgentSessionApi({ agentAccountDb, treasuryDb, logger }) {
 
       const manifest = {
         platform: 'noema.art',
+        status: 'active',
         scope: agentAccount.scope || [],
         issuedAt: Math.floor(new Date(agentAccount.sessionIssuedAt).getTime() / 1000),
         expiresAt: Math.floor(new Date(agentAccount.sessionExpiresAt).getTime() / 1000),
