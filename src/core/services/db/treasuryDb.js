@@ -26,6 +26,7 @@ const { getCachedClient } = require('./utils/queue');
  * @property {FaucetPolicy} faucetPolicy
  * @property {'active'|'suspended'} status
  * @property {string} [partnerId] - Optional: linked partner API key (e.g. 'pk_live_abc123') for usage tracking
+ * @property {Date|null} [lastDripAt] - Timestamp of last faucet drip run; undefined on legacy records (treated as null)
  * @property {Date} createdAt
  * @property {Date} updatedAt
  */
@@ -106,6 +107,28 @@ class TreasuryDB extends BaseDB {
 
   async listAll() {
     return this.findMany({}, { sort: { createdAt: -1 } });
+  }
+
+  /**
+   * Find all active treasuries, sorted by createdAt ascending.
+   * Used by the faucet worker to sweep all fundable treasuries.
+   * @returns {Promise<TreasuryRecord[]>}
+   */
+  async findActiveTreasuries() {
+    return this.findMany({ status: 'active' }, { sort: { createdAt: 1 } });
+  }
+
+  /**
+   * Set the lastDripAt timestamp after a faucet sweep.
+   * @param {string} treasuryId
+   * @param {Date} date
+   * @returns {Promise<import('mongodb').UpdateResult>}
+   */
+  async updateLastDripAt(treasuryId, date) {
+    return this.updateOne(
+      { treasuryId },
+      { $set: { lastDripAt: date, updatedAt: new Date() } }
+    );
   }
 }
 
