@@ -9,6 +9,7 @@ const createRevenueAdminApi = require('./revenueApi');
 const { createPartnersAdminApi } = require('./partnersAdminApi');
 const { createCollectionsAdminApi } = require('./collectionsAdminApi');
 const { createIssuersAdminApi } = require('./issuersAdminApi');
+const { createTreasuryAdminApi } = require('./treasuryAdminApi');
 
 /**
  * Create the admin API router
@@ -46,6 +47,11 @@ function createAdminApi(dependencies) {
     issuerDb: dependencies.db?.issuer,
   });
   router.use('/issuers', issuersRouter);
+
+  const treasuryRouter = createTreasuryAdminApi({
+    treasuryDb: dependencies.db?.treasury,
+  });
+  router.use('/treasury', treasuryRouter);
 
   return router;
 }
