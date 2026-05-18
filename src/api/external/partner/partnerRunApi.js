@@ -36,6 +36,51 @@ function usdcAtomicToPoints(atomicStr) {
 const DEFAULT_SPELL_PRICE_USDC = process.env.X402_CAST_USDC || '100000'; // $0.10
 const DEFAULT_SPLIT_BPS = 500; // 5%
 
+// Minimum weight assigned to steps with no duration history (near-instant sync steps).
+// Keeps them present in the math but proportionally tiny vs a 5-min ComfyUI run.
+const INSTANT_STEP_MS = 200;
+
+/**
+ * Return per-step duration weights for a spell.
+ * Each weight is the historical avg execution time (ms) for that step's tool,
+ * floored at INSTANT_STEP_MS so zero-cost sync steps don't collapse to zero.
+ *
+ * @param {Object} spell
+ * @param {Object} generationOutputsDb
+ * @returns {Promise<number[]>} one weight per step, same order as spell.steps
+ */
+async function getStepWeights(spell, generationOutputsDb) {
+  const steps = spell.steps || [];
+  if (!steps.length || !generationOutputsDb) return steps.map(() => INSTANT_STEP_MS);
+
+  const uniqueToolIds = [...new Set(steps.map(s => s.toolIdentifier || s.toolId).filter(Boolean))];
+
+  const durationMap = {};
+  await Promise.all(uniqueToolIds.map(async toolId => {
+    try {
+      const [stats] = await generationOutputsDb.aggregate([
+        { $match: {
+            $or: [{ toolId }, { toolDisplayName: toolId }, { serviceName: toolId }],
+            status: 'completed',
+            durationMs: { $exists: true, $gt: 0 },
+        }},
+        { $sort: { _id: -1 } },
+        { $limit: 20 },
+        { $group: { _id: null, avgDurationMs: { $avg: '$durationMs' } } },
+      ]);
+      durationMap[toolId] = stats?.avgDurationMs || 0;
+    } catch (_) {
+      durationMap[toolId] = 0;
+    }
+  }));
+
+  return steps.map(step => {
+    const toolId = step.toolIdentifier || step.toolId;
+    const avg = durationMap[toolId] || 0;
+    return avg > INSTANT_STEP_MS ? avg : INSTANT_STEP_MS;
+  });
+}
+
 /**
  * Create partner run API router
  *
@@ -357,10 +402,22 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
         }
       }
 
-      // overall 0-1 progress: completed steps + fractional current step
-      const progress = stepsTotal > 0
-        ? Math.min((stepsDone + currentStepProgress) / stepsTotal, 1)
-        : (cast.status === 'completed' ? 1 : 0);
+      // Weight each step by its historical avg duration so a 200ms string primitive
+      // doesn't claim the same slice of progress as a 5-min ComfyUI run.
+      let progress;
+      if (cast.status === 'completed') {
+        progress = 1;
+      } else if (spell && stepsTotal > 0) {
+        const weights = await getStepWeights(spell, generationOutputsDb);
+        const totalWeight = weights.reduce((a, b) => a + b, 0);
+        const completedWeight = weights.slice(0, stepsDone).reduce((a, b) => a + b, 0);
+        const activeWeight = (weights[stepsDone] ?? 0) * currentStepProgress;
+        progress = totalWeight > 0
+          ? Math.min((completedWeight + activeWeight) / totalWeight, 1)
+          : 0;
+      } else {
+        progress = 0;
+      }
 
       return res.json({
         runId,
