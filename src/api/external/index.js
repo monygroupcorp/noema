@@ -30,6 +30,7 @@ const { createMcpRouter } = require('./mcp');
 const { createAgentDelegationApi } = require('./agents/agentDelegationApi');
 const { createAgentProvisioningApi } = require('./agents/agentProvisioningApi');
 const { createAgentSessionApi } = require('./agents/agentSessionApi');
+const { createAgentCardFederationApi } = require('./agents/agentCardFederationApi');
 const { createPresignApi } = require('./partner/presignApi');
 const { createPartnerRunApi } = require('./partner/partnerRunApi');
 
@@ -648,6 +649,21 @@ function initializeExternalApi(dependencies) {
     logger.debug('External Agent Session API mounted at / (GET /agents/:id/manifest, POST /sessions/:id/revoke).');
   } else {
     logger.warn('External Agent Session API not mounted due to missing DB dependencies.');
+  }
+
+  // CAMEL agent card federation (public — card builder reads balance and capabilities)
+  if (dependencies.db?.data?.agentAccount && dependencies.db?.data?.treasury) {
+    const agentCardFederationRouter = createAgentCardFederationApi({
+      agentAccountDb: dependencies.db.data.agentAccount,
+      treasuryDb: dependencies.db.data.treasury,
+      splitLedgerDb: dependencies.db?.data?.splitLedger || null,
+      spellsService: dependencies.spellsService || null,
+      logger,
+    });
+    externalApiRouter.use('/', agentCardFederationRouter);
+    logger.debug('External Agent Card Federation API mounted at / (GET /treasury/:id/agents/:id, GET /agents/:id/capabilities).');
+  } else {
+    logger.warn('External Agent Card Federation API not mounted due to missing DB dependencies.');
   }
 
   // Partner presign (no auth — domain-locked + rate limited)
