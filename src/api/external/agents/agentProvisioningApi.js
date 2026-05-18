@@ -9,7 +9,7 @@
  */
 
 const express = require('express');
-const { fetchAgentCard } = require('../../../core/services/agents/agentCardFetcher');
+const fetch = require('node-fetch');
 const { USD_PER_POINT } = require('../../../core/constants/economy');
 
 const MASTER_WORKSPACE_SLUG = '745218a5';
@@ -33,6 +33,7 @@ function pointsToUsd(points) {
  * @param {object} deps.camelJwtVerifier
  * @param {object} deps.economyService
  * @param {object} deps.internalApiClient
+ * @param {object} [deps.agentCardFetcher]
  * @param {object} [deps.logger]
  * @returns {express.Router}
  */
@@ -43,8 +44,10 @@ function createAgentProvisioningApi({
   camelJwtVerifier,
   economyService,
   internalApiClient,
+  agentCardFetcher: agentCardFetcherFn,
   logger,
 }) {
+  const fetchAgentCard = agentCardFetcherFn || require('../../../core/services/agents/agentCardFetcher').fetchAgentCard;
   const log = logger || console;
   const router = express.Router({ mergeParams: true });
 
@@ -174,7 +177,13 @@ function createAgentProvisioningApi({
       // Step 10 — Debit treasury (atomic)
       const debitSuccess = await treasuryDb.debitBalance(treasury.treasuryId, starterGrant);
       if (!debitSuccess) {
-        await agentAccountDb.setStatus(agentAccountId, 'suspended');
+        try {
+          await agentAccountDb.setStatus(agentAccountId, 'suspended');
+        } catch (suspendErr) {
+          log.error('[agentProvisioning] Failed to suspend agent account after debit failure', {
+            agentAccountId, error: suspendErr.message
+          });
+        }
         return res.status(402).json({ error: { code: 'INSUFFICIENT_FUNDS', message: 'Treasury balance exhausted during provisioning' } });
       }
 
@@ -198,27 +207,31 @@ function createAgentProvisioningApi({
       }
 
       // Step 13 — Fire session callback async (non-blocking)
+      const callbackUrl = `https://${treasury.issuerDomain}/agents/${tokenId}/sessions`;
+      const callbackPayload = {
+        platform: 'noema.art',
+        platformAgentId: agentAccountId,
+        scope,
+        issuedAt: Math.floor(Date.now() / 1000),
+        expiresAt: Math.floor(new Date(exp * 1000).getTime() / 1000),
+        manifestURI: `https://noema.art/api/agents/${agentAccountId}/manifest`,
+        revokeURI: `https://noema.art/api/sessions/${agentAccountId}/revoke`,
+        billing: {
+          model: 'treasury-funded',
+          treasuryRef: treasury.treasuryId,
+          agentBalance: pointsToUsd(starterGrant),
+          monthlyCap: pointsToUsd(treasury.faucetPolicy?.monthlyMax || 0),
+          currency: 'USDC',
+        },
+      };
       setImmediate(async () => {
         try {
-          await internalApiClient.post(
-            `https://${treasury.issuerDomain}/agents/${tokenId}/sessions`,
-            {
-              platform: 'noema.art',
-              platformAgentId: agentAccountId,
-              scope,
-              issuedAt: Math.floor(Date.now() / 1000),
-              expiresAt: Math.floor(new Date(exp * 1000).getTime() / 1000),
-              manifestURI: `https://noema.art/api/agents/${agentAccountId}/manifest`,
-              revokeURI: `https://noema.art/api/sessions/${agentAccountId}/revoke`,
-              billing: {
-                model: 'treasury-funded',
-                treasuryRef: treasury.treasuryId,
-                agentBalance: pointsToUsd(starterGrant),
-                monthlyCap: pointsToUsd(treasury.faucetPolicy?.monthlyMax || 0),
-                currency: 'USDC',
-              },
-            }
-          );
+          await fetch(callbackUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...callbackPayload }),
+            timeout: 10000,
+          });
         } catch (err) {
           log.warn('[agentProvisioning] Session callback failed (non-blocking)', { error: err.message });
         }
