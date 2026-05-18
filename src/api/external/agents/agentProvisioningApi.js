@@ -12,7 +12,7 @@ const express = require('express');
 const { pointsToUsd } = require('./agentUtils');
 const { fireSessionCallback } = require('../../../core/services/agents/agentSessionCallback');
 
-const MASTER_WORKSPACE_SLUG = '745218a5';
+const MASTER_WORKSPACE_SLUG = process.env.CAMEL_MASTER_WORKSPACE_SLUG || '745218a5';
 
 /**
  * Create Agent Provisioning API router.

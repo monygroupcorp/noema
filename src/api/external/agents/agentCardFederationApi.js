@@ -39,10 +39,11 @@ const STATIC_CAPABILITIES = [
  * @param {object} deps.treasuryDb
  * @param {object} deps.splitLedgerDb
  * @param {object} [deps.spellsService]
+ * @param {object} [deps.economyService]
  * @param {object} [deps.logger]
  * @returns {express.Router}
  */
-function createAgentCardFederationApi({ agentAccountDb, treasuryDb, splitLedgerDb, spellsService, logger }) {
+function createAgentCardFederationApi({ agentAccountDb, treasuryDb, splitLedgerDb, spellsService, economyService, logger }) {
   const log = logger || console;
   const router = express.Router();
 
@@ -138,6 +139,24 @@ function createAgentCardFederationApi({ agentAccountDb, treasuryDb, splitLedgerD
       }
 
       await agentAccountDb.addBalance(agentAccount.agentAccountId, points);
+
+      // Credit the Noema economy account so the agent can spend points via spell execution.
+      // Best-effort: a ledger failure does not roll back the sub-account credit.
+      if (economyService && agentAccount.noemaAccountId) {
+        try {
+          await economyService.creditPoints(agentAccount.noemaAccountId, {
+            points,
+            description: `Donation to agent ${agentAccount.agentAccountId}`,
+            rewardType: 'AGENT_DONATION',
+            relatedItems: { agentAccountId: agentAccount.agentAccountId, treasuryId: agentAccount.treasuryId },
+          });
+        } catch (creditErr) {
+          log.warn('[agentCardFederation] economyService.creditPoints failed for donation — sub-account credited but noema ledger not updated', {
+            agentAccountId: agentAccount.agentAccountId,
+            error: creditErr.message,
+          });
+        }
+      }
 
       // Compute new balance optimistically — avoids partial-failure if the second read
       // throws after the increment has already landed.

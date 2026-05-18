@@ -61,6 +61,7 @@ const { ModelService } = require('./store/models/ModelService');
 const { GenerationExecutionService } = require('./generationExecutionService');
 const { economyService } = require('./store/economy/EconomyService');
 const { DelegationService } = require('./agents/DelegationService');
+const { CamelJwtVerifier } = require('./agents/camelJwtVerifier');
 const notificationEvents = require('../events/notificationEvents');
 const { startDragnet } = require('./charging/agentOwnerDragnet');
 const { startFaucet } = require('./agents/agentFaucetWorker');
@@ -372,6 +373,7 @@ async function initializeServices(options = {}) {
       userCoreDb: initializedDbServices.data.userCore,
       logger,
     });
+    const camelJwtVerifier = new CamelJwtVerifier({ logger });
     const generationExecutionService = new GenerationExecutionService({
       db: initializedDbServices.data,
       toolRegistry,
@@ -658,6 +660,7 @@ async function initializeServices(options = {}) {
       collectionExportService,
       embellishmentTaskService, // expose EmbellishmentTaskService
       economyService, // expose for treasury/agent APIs
+      camelJwtVerifier, // CAMEL ERC-8004 JWT verifier for provisioning endpoint
     };
 
     // DIAGNOSTIC LOGGING REMOVED

@@ -21,6 +21,7 @@ const mockAgentAccount = {
   agentAccountId: 'cmw_test01',
   agentId: '42',
   treasuryId: 'camel-1',
+  noemaAccountId: '507f1f77bcf86cd799439011',
   balance: 37125,       // points → pointsToUsd(37125) = (37125 * 0.000337).toFixed(2) = "12.51"
   status: 'active',
 };
@@ -76,6 +77,7 @@ function createTestApp({
   treasuryDbOverrides = {},
   splitLedgerDbOverrides = {},
   spellsService = null,
+  economyService = null,
 } = {}) {
   const app = express();
   app.use(express.json());
@@ -85,6 +87,7 @@ function createTestApp({
     treasuryDb: makeMockTreasuryDb(treasury, treasuryDbOverrides),
     splitLedgerDb: makeMockSplitLedgerDb(splitLedgerEntries, splitLedgerDbOverrides),
     spellsService,
+    economyService,
     logger: { error: () => {}, warn: () => {}, debug: () => {}, info: () => {} },
   });
 
@@ -328,5 +331,26 @@ describe('Agent Card Federation API — POST /treasury/:treasuryId/agents/:agent
 
     assert.equal(res.status, 400);
     assert.equal(res.body.error.code, 'AGENT_SUSPENDED');
+  });
+
+  // 23. Donate calls economyService.creditPoints when provided
+  test('Donate with economyService → creditPoints called with AGENT_DONATION rewardType', async () => {
+    let creditPointsArgs = null;
+    const mockEconomyService = {
+      creditPoints: async (noemaAccountId, opts) => {
+        creditPointsArgs = { noemaAccountId, ...opts };
+        return { entryId: 'entry_donate_001' };
+      },
+    };
+    const app = createTestApp({ economyService: mockEconomyService });
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents/42/donate')
+      .send({ points: 100 });
+
+    assert.equal(res.status, 200);
+    assert.ok(creditPointsArgs, 'creditPoints should have been called');
+    assert.equal(creditPointsArgs.noemaAccountId, mockAgentAccount.noemaAccountId);
+    assert.equal(creditPointsArgs.points, 100);
+    assert.equal(creditPointsArgs.rewardType, 'AGENT_DONATION');
   });
 });

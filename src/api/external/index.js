@@ -659,6 +659,7 @@ function initializeExternalApi(dependencies) {
       treasuryDb: dependencies.db.data.treasury,
       splitLedgerDb: dependencies.db?.data?.splitLedger || null,
       spellsService: dependencies.spellsService || null,
+      economyService: dependencies.economyService || null,
       logger,
     });
     externalApiRouter.use('/', agentCardFederationRouter);
