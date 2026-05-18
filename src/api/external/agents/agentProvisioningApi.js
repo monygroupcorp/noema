@@ -9,19 +9,10 @@
  */
 
 const express = require('express');
-const fetch = require('node-fetch');
-const { USD_PER_POINT } = require('../../../core/constants/economy');
+const { pointsToUsd } = require('./agentUtils');
+const { fireSessionCallback } = require('../../../core/services/agents/agentSessionCallback');
 
 const MASTER_WORKSPACE_SLUG = '745218a5';
-
-/**
- * Convert points to a USD string (2 decimal places).
- * @param {number} points
- * @returns {string}
- */
-function pointsToUsd(points) {
-  return (points * USD_PER_POINT).toFixed(2);
-}
 
 /**
  * Create Agent Provisioning API router.
@@ -207,34 +198,26 @@ function createAgentProvisioningApi({
       }
 
       // Step 13 — Fire session callback async (non-blocking)
-      const callbackUrl = `https://${treasury.issuerDomain}/agents/${tokenId}/sessions`;
-      const callbackPayload = {
-        platform: 'noema.art',
-        platformAgentId: agentAccountId,
-        scope,
-        issuedAt: Math.floor(Date.now() / 1000),
-        expiresAt: Math.floor(new Date(exp * 1000).getTime() / 1000),
-        manifestURI: `https://noema.art/api/agents/${agentAccountId}/manifest`,
-        revokeURI: `https://noema.art/api/sessions/${agentAccountId}/revoke`,
-        billing: {
-          model: 'treasury-funded',
-          treasuryRef: treasury.treasuryId,
-          agentBalance: pointsToUsd(starterGrant),
-          monthlyCap: pointsToUsd(treasury.faucetPolicy?.monthlyMax || 0),
-          currency: 'USDC',
+      fireSessionCallback({
+        issuerDomain: treasury.issuerDomain,
+        tokenId,
+        payload: {
+          platform: 'noema.art',
+          platformAgentId: agentAccountId,
+          scope,
+          issuedAt: Math.floor(Date.now() / 1000),
+          expiresAt: Math.floor(new Date(exp * 1000).getTime() / 1000),
+          manifestURI: `https://noema.art/api/agents/${agentAccountId}/manifest`,
+          revokeURI: `https://noema.art/api/sessions/${agentAccountId}/revoke`,
+          billing: {
+            model: 'treasury-funded',
+            treasuryRef: treasury.treasuryId,
+            agentBalance: pointsToUsd(starterGrant),
+            monthlyCap: pointsToUsd(treasury.faucetPolicy?.monthlyMax || 0),
+            currency: 'USDC',
+          },
         },
-      };
-      setImmediate(async () => {
-        try {
-          await fetch(callbackUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...callbackPayload }),
-            timeout: 10000,
-          });
-        } catch (err) {
-          log.warn('[agentProvisioning] Session callback failed (non-blocking)', { error: err.message });
-        }
+        options: { logger: log },
       });
 
       // Step 14 — Return response
