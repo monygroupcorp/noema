@@ -5,6 +5,9 @@ import type {
   VestigiumVisibility,
   VestigiumGenus,
 } from '../../types/vestigium.js'
+import { makeLogger } from '../../lib/logger.js'
+
+const log = makeLogger('vestigia:router')
 
 export function createVestigiaRouter(vestigiorum: Vestigiorum): Router {
   const router = Router()
@@ -64,7 +67,7 @@ export function createVestigiaRouter(vestigiorum: Vestigiorum): Router {
       if (msg.includes('No embed function')) {
         return res.status(503).json({ error: 'embedding service not configured — CLIP_SERVICE_URL is not set' })
       }
-      console.error('[vestigiaRouter] search error:', err)
+      log.error('search error', { error: String(err) })
       return res.status(500).json({ error: 'internal search error' })
     }
   })
@@ -90,7 +93,7 @@ export function createVestigiaRouter(vestigiorum: Vestigiorum): Router {
       const vestigia = await vestigiorum.forIdentity({ animaId }, limit)
       return res.json({ vestigia, count: vestigia.length })
     } catch (err) {
-      console.error('[vestigiaRouter] forIdentity error:', err)
+      log.error('forIdentity error', { error: String(err) })
       return res.status(500).json({ error: 'internal error' })
     }
   })
@@ -103,7 +106,7 @@ export function createVestigiaRouter(vestigiorum: Vestigiorum): Router {
       if (!v) return res.status(404).json({ error: 'not found' })
       return res.json({ vestigium: v })
     } catch (err) {
-      console.error('[vestigiaRouter] findById error:', err)
+      log.error('findById error', { error: String(err) })
       return res.status(500).json({ error: 'internal error' })
     }
   })

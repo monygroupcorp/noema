@@ -4,6 +4,11 @@ import type { Signorum } from '../types/significandi.js'
 import type { Modorum } from '../types/modus.js'
 import type { Cursorum, Actorum, Inceptio } from '../types/cursus.js'
 import type { ArcanumVerifier } from '../arcanum/ArcanumVerifier.js'
+import { makeLogger } from '../lib/logger.js'
+import { getTrace } from '../lib/trace.js'
+import { bus } from '../lib/bus.js'
+
+const log = makeLogger('execution:inceptor')
 
 const DEFAULT_EXPIRAT_MS = 15 * 60 * 1000  // 15 minutes
 
@@ -41,6 +46,7 @@ export class ActumInceptor {
     // 3. Balance check
     const balance = await signorum.balance(by)
     if (balance < reservation) {
+      log.warn('insufficient funds', { balance: balance.toString(), required: reservation.toString() })
       throw new Error(`Insufficient funds: balance ${balance} < required ${reservation}`)
     }
 
@@ -80,7 +86,7 @@ export class ActumInceptor {
       const computeStrategy = strategyOverride ?? modus.computeStrategy
       const gpuClass = gpuOverride ?? modus.gpuClass
 
-      return await acta.create({
+      const actum = await acta.create({
         id: actumId,
         modusId: modus.id,
         modusVersiono: modus.versio,
@@ -94,6 +100,22 @@ export class ActumInceptor {
         ...(gpuClass ? { gpuClass } : {}),
         ...(nullifier ? { nullifier } : {}),
       })
+      log.info('actum initiated', {
+        actumId:     actum.id,
+        modusId:     modus.id,
+        byType:      'arcanumProof' in by ? 'arcanumProof'
+                     : 'commitment' in by ? 'commitment'
+                     : 'animaId',
+        reservation: reservation.toString(),
+      })
+      const ctx = getTrace()
+      if (ctx) ctx.actumId = actum.id
+      bus.emit('actum.start', {
+        actumId: actum.id,
+        modusId: modus.id,
+        animaId: 'animaId' in by ? by.animaId : undefined,
+      })
+      return actum
     } catch (err) {
       await signorum.release(selected)
       throw err

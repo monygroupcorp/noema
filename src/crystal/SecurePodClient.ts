@@ -1,5 +1,9 @@
 import type { RunPodClient } from './RunPodCursor.js'
 import type { MateriaStore } from '../types/materia.js'
+import { makeLogger } from '../lib/logger.js'
+import { getTrace } from '../lib/trace.js'
+
+const log = makeLogger('cursor:runpod:secure')
 
 // ---------------------------------------------------------------------------
 // Types
@@ -88,10 +92,18 @@ export class SecurePodClient implements RunPodClient {
   ) {}
 
   async submit(params: { input: unknown; webhook?: string }): Promise<{ id: string }> {
+    log.info('pod provisioning', { actumId: getTrace()?.actumId })
     const podId = await this._provisionPod()
 
+    // After pod is provisioned — record podId and provisionMs
+    const _traceCtx = getTrace()
+    if (_traceCtx) {
+      _traceCtx.wideFields.podId = podId
+      _traceCtx.provisionMs = Date.now() - _traceCtx.startTs
+    }
+
     this._runBackground(podId, params.input, params.webhook).catch(async (err) => {
-      console.error(`[SecurePodClient] Pod ${podId} failed: ${(err as Error).message}`)
+      log.error(`Pod ${podId} failed`, { podId, error: (err as Error).message })
       if (params.webhook) {
         await this.fetchFn(params.webhook, {
           method: 'POST',
@@ -171,7 +183,19 @@ export class SecurePodClient implements RunPodClient {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       const info = await this._getSshInfo(podId)
-      if (info) return info
+      if (info) {
+        const sshCtx = getTrace()
+        log.info('pod SSH ready', {
+          podId,
+          elapsedMs: Date.now() - (sshCtx?.startTs ?? Date.now()),
+        })
+        // After SSH becomes ready — record elapsed and cursorType
+        if (sshCtx) {
+          sshCtx.sshReadyMs = Date.now() - sshCtx.startTs
+          sshCtx.wideFields.cursorType = 'runpod:secure'
+        }
+        return info
+      }
       await sleep(pollMs)
     }
     throw new Error(`Pod ${podId} SSH not ready within ${timeoutMs}ms`)
@@ -220,6 +244,12 @@ export class SecurePodClient implements RunPodClient {
       await this._waitForComfyApi(ssh)
 
       const promptId = await this._submitWorkflow(ssh, input)
+      log.info('job submitted', { podId })
+      // After job is submitted to ComfyUI
+      const submitCtx = getTrace()
+      if (submitCtx) {
+        submitCtx.jobSubmitMs = Date.now() - submitCtx.startTs
+      }
       const remotePaths = await this._awaitCompletion(ssh, promptId, this.config.jobTimeoutMs ?? 15 * 60 * 1000)
 
       const executionTime = Date.now() - startMs

@@ -1,6 +1,9 @@
 import type { Collection } from 'mongodb'
 import type { ArcanumSpendProof } from './types.js'
 import type { ArcanumTreeStore } from './ArcanumTree.js'
+import { makeLogger } from '../lib/logger.js'
+
+const log = makeLogger('arcanum:verifier')
 
 // ---------------------------------------------------------------------------
 // ArcanumVerifier — verifies ZK spend proofs and manages the nullifier set

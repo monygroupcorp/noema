@@ -1,6 +1,9 @@
 import { Router } from 'express'
 import type { ArcanumIssuer } from '../../ledger/ArcanumIssuer.js'
 import type { ArcanumTreeStore } from '../../arcanum/ArcanumTree.js'
+import { makeLogger } from '../../lib/logger.js'
+
+const log = makeLogger('arcanum:router')
 
 export function createArcanumRouter(
   arcanumIssuer: ArcanumIssuer,
@@ -67,7 +70,7 @@ export function createArcanumRouter(
       const msg = (err as Error).message ?? 'issue failed'
       if (/insufficient/i.test(msg)) return res.status(402).json({ error: msg })
       if (/positive/i.test(msg))    return res.status(400).json({ error: msg })
-      console.error('[arcanumRouter] issue error:', err)
+      log.error('issue error', { error: String(err) })
       return res.status(500).json({ error: 'internal error' })
     }
   })
@@ -88,7 +91,7 @@ export function createArcanumRouter(
       ])
       return res.json({ root, size })
     } catch (err) {
-      console.error('[arcanumRouter] getRoot error:', err)
+      log.error('getRoot error', { error: String(err) })
       return res.status(500).json({ error: 'internal error' })
     }
   })
@@ -116,7 +119,7 @@ export function createArcanumRouter(
     } catch (err) {
       const msg = (err as Error).message ?? ''
       if (/out of range/i.test(msg)) return res.status(404).json({ error: msg })
-      console.error('[arcanumRouter] getProof error:', err)
+      log.error('getProof error', { error: String(err) })
       return res.status(500).json({ error: 'internal error' })
     }
   })

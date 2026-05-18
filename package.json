@@ -2,7 +2,7 @@
   "name": "noema",
   "version": "4.9.6",
   "scripts": {
-    "dev": "node server.js",
+    "dev": "bash scripts/run-crystal.sh",
     "test": "node --test tests/integration/**/*.test.js",
     "test:db": "node --test tests/integration/db/**/*.test.js",
     "test:api": "node --test tests/integration/api/**/*.test.js",
@@ -10,7 +10,8 @@
     "test:server": "node tests/e2e/test-server.js",
     "test:unit": "npx tsx --test tests/unit/**/*.test.ts tests/unit/**/**/*.test.ts",
     "test:runpod": "node --test tests/unit/runpod/*.test.js tests/unit/workflow/*.test.js",
-    "test:crystal": "./scripts/run-with-env.sh npx tsx --test 'tests/unit/crystal/*.test.ts' 'tests/unit/crystal/**/*.test.ts'"
+    "test:crystal": "./scripts/run-with-env.sh npx tsx --test 'tests/unit/crystal/*.test.ts' 'tests/unit/crystal/**/*.test.ts' 'tests/unit/lib/**/*.test.ts' 'tests/unit/api/**/*.test.ts' 'tests/unit/analytics/**/*.test.ts'",
+    "dashboard": "node scripts/dashboard.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.840.0",
@@ -73,6 +74,9 @@
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "blessed": "^0.1.81",
+    "blessed-contrib": "^4.11.0",
+    "eventsource": "^2.0.2",
     "pino-pretty": "^11.2.1",
     "supertest": "^7.2.2",
     "tsx": "^4.21.0",

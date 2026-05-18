@@ -9,6 +9,28 @@
 import type { Primitive, Step, Resolution, FlowContext, Intent, Platform, AuctorKey, PrimitiveEvent } from '../flow/types.js'
 import type { Allocutio, Nuntius, Responsum } from '../types/allocutio.js'
 import type { Inceptio } from '../types/cursus.js'
+import { makeLogger } from '../lib/logger.js'
+
+const log = makeLogger('telegram:allocutio')
+
+// ---------------------------------------------------------------------------
+// Static text
+// ---------------------------------------------------------------------------
+
+const HELP_TEXT = `\
+noema
+
+  Creative
+  /make    — generate images and art
+  /chat    — chat with an AI model
+  /flows   — browse all available tools
+
+  Account
+  /status  — view balance and account
+  /wallet  — manage connected wallets
+  /cancel  — cancel current action
+  /help    — show this message\
+`
 
 // ---------------------------------------------------------------------------
 // Telegram Update (minimal typing)
@@ -125,14 +147,15 @@ function renderPrimitive(primitive: Primitive): RenderResult {
     }
 
     case 'Paginate': {
-      const itemLines = primitive.items
-        .map((item, i) => `${i + 1}. ${item.label}`)
-        .join('\n')
-      const text = `${primitive.label}\n\n${itemLines}\n\nPage ${primitive.page}/${primitive.totalPages}`
-      const navRow: InlineButton[] = [btn('◀ Prev', 'pp'), btn('▶ Next', 'pn')]
+      const text = `${primitive.label}  (page ${primitive.page + 1}/${primitive.totalPages})`
+      const itemRows: InlineButton[][] = primitive.items.map(item => [btn(item.label, `ps:${item.id}`)])
+      const navRow: InlineButton[] = []
+      if (primitive.page > 0) navRow.push(btn('◀ Prev', 'pp'))
+      if (primitive.page < primitive.totalPages - 1) navRow.push(btn('▶ Next', 'pn'))
+      const rows = navRow.length > 0 ? [...itemRows, navRow] : itemRows
       return {
         text,
-        extra: { reply_markup: inlineKeyboard([navRow]) },
+        extra: { reply_markup: inlineKeyboard(rows) },
       }
     }
 
@@ -279,6 +302,12 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // chatId lookup: platform:userId → chatId (set when first message arrives)
   private readonly chatIds = new Map<string, number>()
 
+  // pending edit: platform:userId → messageId of the message to edit in place
+  private readonly pendingEditMessageIds = new Map<string, number>()
+
+  // last command message: platform:userId → messageId of the most recent command message
+  private readonly lastCommandMessageIds = new Map<string, number>()
+
   constructor(deps: {
     router: RouterDeps
     sender: TelegramSender
@@ -316,7 +345,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         await this._handleCallbackQuery(update.callback_query)
       }
     } catch (err) {
-      console.error('TelegramAllocutio error:', err)
+      log.error('TelegramAllocutio error', { error: String(err) })
       if (chatId) {
         if (messageId) {
           void this._react(chatId, messageId, '😨')
@@ -376,6 +405,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // React with 🤔 to acknowledge receipt
     if (messageId !== undefined) {
       void this._react(chatId, messageId, '🤔')
+      // Store command message ID for async reaction (Feature 3)
+      this.lastCommandMessageIds.set(`telegram:${userId}`, messageId)
     }
 
     // Extract command (strip leading / and any @bot_username suffix, plus args)
@@ -383,15 +414,34 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     const cmd = rawCmd.split('@')[0].toLowerCase()
 
     switch (cmd) {
-      case '/run':
-      case '/imagine':
-      case '/tools':
       case '/start': {
+        await this._sendStart(chatId)
+        if (messageId !== undefined) void this._react(chatId, messageId, '👌')
+        break
+      }
+
+      case '/run':
+      case '/make': {
         const identity = await this.identity.resolve(userId)
         await this.router.enter('execute', 'telegram', userId, identity)
-        if (messageId !== undefined) {
-          void this._react(chatId, messageId, '👌')
-        }
+        if (messageId !== undefined) void this._react(chatId, messageId, '👌')
+        break
+      }
+
+      case '/chat': {
+        const identity = await this.identity.resolve(userId)
+        // Pre-set chatgpt modus so the user lands directly on the prompt field
+        await this.router.enter('execute', 'telegram', userId, identity, {
+          state: { modusId: 'modus.chatgpt', aditus: {}, browsePageIndex: 0 },
+        })
+        if (messageId !== undefined) void this._react(chatId, messageId, '👌')
+        break
+      }
+
+      case '/flows': {
+        const identity = await this.identity.resolve(userId)
+        await this.router.enter('execute', 'telegram', userId, identity)
+        if (messageId !== undefined) void this._react(chatId, messageId, '👌')
         break
       }
 
@@ -403,12 +453,36 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       }
 
       case '/status': {
-        await this.sender.sendMessage(chatId, 'Status coming soon.')
+        await this.sender.sendMessage(chatId,
+          'Balance and account info coming soon.',
+          { reply_markup: inlineKeyboard([[
+            btn('connect wallet', 'a:connect_wallet'),
+            btn('top up',        'a:topup'),
+          ]]) },
+        )
+        break
+      }
+
+      case '/wallet': {
+        await this.sender.sendMessage(chatId,
+          'Wallet management coming soon.',
+          { reply_markup: inlineKeyboard([[
+            btn('connect wallet', 'a:connect_wallet'),
+            btn('balance',        'a:balance'),
+          ]]) },
+        )
+        break
+      }
+
+      case '/help': {
+        await this.sender.sendMessage(chatId, HELP_TEXT)
         break
       }
 
       default:
-        await this.sender.sendMessage(chatId, 'Unknown command.')
+        await this.sender.sendMessage(chatId,
+          `Unknown command. Type /help to see what's available.`
+        )
         break
     }
   }
@@ -435,6 +509,27 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     const event = decodeCallbackData(query.data)
     if (!event) return
 
+    // Store the message ID for in-place editing on the next step
+    if (query.message?.message_id !== undefined) {
+      this.pendingEditMessageIds.set(`telegram:${userId}`, query.message.message_id)
+    }
+
+    // Start-screen shortcut buttons — launch flows directly
+    if (event.kind === 'select') {
+      if (event.selectedId === 'make' || event.selectedId === 'flows') {
+        const identity = await this.identity.resolve(userId)
+        await this.router.enter('execute', 'telegram', userId, identity)
+        return
+      }
+      if (event.selectedId === 'chat') {
+        const identity = await this.identity.resolve(userId)
+        await this.router.enter('execute', 'telegram', userId, identity, {
+          state: { modusId: 'modus.chatgpt', aditus: {}, browsePageIndex: 0 },
+        })
+        return
+      }
+    }
+
     if (this.router.hasContext('telegram', userId)) {
       await this.router.handle('telegram', userId, event)
     }
@@ -448,13 +543,45 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     const chatId = this._getChatId(ctx)
     if (chatId === null) return
 
+    const userKey = `${ctx.platform}:${ctx.platformUserId}`
+    // Consume the pending edit message ID (if any) — used for the first keyboard primitive
+    let editMessageId = this.pendingEditMessageIds.get(userKey)
+    if (editMessageId !== undefined) this.pendingEditMessageIds.delete(userKey)
+
     for (const primitive of step.primitives) {
+      // Result primitives are never edited — always sent as new messages
       if (primitive.kind === 'Result') {
+        editMessageId = undefined  // stop editing for subsequent primitives
         await this._sendResult(chatId, primitive)
         continue
       }
+
+      // Feature 3: Stream with status 'running' → react on command message, send nothing
+      if (primitive.kind === 'Stream' && primitive.status === 'running') {
+        const commandMessageId = this.lastCommandMessageIds.get(userKey)
+        if (commandMessageId !== undefined) {
+          void this._react(chatId, commandMessageId, '👌')
+        } else {
+          await this.sender.sendMessage(chatId, '⏳ Working on it…')
+        }
+        editMessageId = undefined
+        continue
+      }
+
       const { text, extra } = renderPrimitive(primitive)
-      await this.sender.sendMessage(chatId, text, extra)
+
+      // Feature 2: edit in place if we have a pending edit message ID and this primitive has a keyboard
+      if (editMessageId !== undefined && extra?.reply_markup) {
+        try {
+          await this.sender.editMessageText(chatId, editMessageId, text, extra)
+        } catch {
+          // Fallback: send as new message (message too old, content unchanged, etc.)
+          await this.sender.sendMessage(chatId, text, extra)
+        }
+        editMessageId = undefined  // only edit the first keyboard primitive
+      } else {
+        await this.sender.sendMessage(chatId, text, extra)
+      }
     }
   }
 
@@ -515,6 +642,24 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     }
     // Send keyboard as follow-up text message (Telegram limitation)
     await this.sender.sendMessage(chatId, '—', extra)
+  }
+
+  // -------------------------------------------------------------------------
+  // _sendStart — welcome message with quick-start buttons
+  // -------------------------------------------------------------------------
+
+  private async _sendStart(chatId: number): Promise<void> {
+    const text = `\
+noema
+
+Generate AI art, chat with models, explore creative tools.`
+
+    await this.sender.sendMessage(chatId, text, {
+      reply_markup: inlineKeyboard([
+        [btn('make', 's:make'), btn('chat', 's:chat'), btn('flows', 's:flows')],
+        [btn('connect wallet', 'a:connect_wallet'), btn('balance', 'a:balance')],
+      ]),
+    })
   }
 
   // -------------------------------------------------------------------------
