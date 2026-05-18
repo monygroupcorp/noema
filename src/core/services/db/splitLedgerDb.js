@@ -154,6 +154,28 @@ class SplitLedgerDB extends BaseDB {
   }
 
   /**
+   * Find a standard ledger entry by runId (excludes agent_owner_unclaimed entries).
+   * @param {string} runId
+   * @returns {Promise<SplitLedgerEntry|null>}
+   */
+  async findByRunId(runId) {
+    return this.findOne({ runId, type: { $exists: false } });
+  }
+
+  /**
+   * Store the castId on a ledger entry after spell dispatch succeeds.
+   * @param {string} runId
+   * @param {string} castId
+   * @returns {Promise<import('mongodb').UpdateResult>}
+   */
+  async setCastId(runId, castId) {
+    return this.updateOne(
+      { runId, type: { $exists: false } },
+      { $set: { castId, updatedAt: new Date() } }
+    );
+  }
+
+  /**
    * Find all ledger entries for a partner, sorted by most recent.
    * @param {string} partnerId
    * @param {number} limit
