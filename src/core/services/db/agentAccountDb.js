@@ -141,12 +141,13 @@ class AgentAccountDB extends BaseDB {
     );
   }
 
-  // Caller is responsible for verifying sufficient balance before calling
+  // Atomic balance guard: returns false if balance < points (no write occurs).
   async debitBalance(agentAccountId, points) {
-    return this.updateOne(
-      { agentAccountId },
+    const result = await this.updateOne(
+      { agentAccountId, balance: { $gte: points } },
       { $inc: { balance: -points }, $set: { updatedAt: new Date() } }
     );
+    return result.matchedCount > 0;
   }
 
   async setPayoutPolicy(agentAccountId, policy) {

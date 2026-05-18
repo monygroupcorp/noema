@@ -1,4 +1,4 @@
-// tests/unit/services/agents/camelJwtVerifier.test.js
+// tests/unit/services/agents/agentJwtVerifier.test.js
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
@@ -6,11 +6,11 @@ const jwt = require('jsonwebtoken');
 const { generateKeyPairSync } = require('crypto');
 
 const {
-  CamelJwtVerifier,
+  AgentJwtVerifier,
   JwksUnavailableError,
   UnknownKeyError,
   AssertionExpiredError,
-} = require('../../../../src/core/services/agents/camelJwtVerifier');
+} = require('../../../../src/core/services/agents/agentJwtVerifier');
 
 // Generate a real ES256 keypair once for all tests
 const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
@@ -37,12 +37,12 @@ function mintJwt(payload, { kid = 'test-key-1', expiresIn = '1h', audience = 'no
   });
 }
 
-describe('CamelJwtVerifier', () => {
+describe('AgentJwtVerifier', () => {
   test('verifyAssertionJwt: happy path — returns decoded payload', async () => {
     const jwkWithKid = { ...jwkPublicKey, kid: 'test-key-1' };
     const token = mintJwt({ agentId: 'agent-1', tokenId: 'tok-1' });
 
-    const verifier = new CamelJwtVerifier({ _fetchFn: mockFetch([jwkWithKid]) });
+    const verifier = new AgentJwtVerifier({ _fetchFn: mockFetch([jwkWithKid]) });
     const payload = await verifier.verifyAssertionJwt(token, 'camelcabal.fun');
 
     assert.equal(payload.agentId, 'agent-1');
@@ -64,7 +64,7 @@ describe('CamelJwtVerifier', () => {
       };
     };
 
-    const verifier = new CamelJwtVerifier({ _fetchFn: countingFetch });
+    const verifier = new AgentJwtVerifier({ _fetchFn: countingFetch });
 
     const token1 = mintJwt({ agentId: 'agent-1' });
     const token2 = mintJwt({ agentId: 'agent-2' });
@@ -80,7 +80,7 @@ describe('CamelJwtVerifier', () => {
     const jwkWithKid = { ...jwkPublicKey, kid: 'test-key-1' };
     const token = mintJwt({ agentId: 'agent-1' }, { kid: 'missing-key' });
 
-    const verifier = new CamelJwtVerifier({ _fetchFn: mockFetch([jwkWithKid]) });
+    const verifier = new AgentJwtVerifier({ _fetchFn: mockFetch([jwkWithKid]) });
 
     await assert.rejects(
       () => verifier.verifyAssertionJwt(token, 'camelcabal.fun'),
@@ -95,7 +95,7 @@ describe('CamelJwtVerifier', () => {
     const jwkWithKid = { ...jwkPublicKey, kid: 'test-key-1' };
     const token = mintJwt({ agentId: 'agent-1' }, { expiresIn: '-1s' });
 
-    const verifier = new CamelJwtVerifier({ _fetchFn: mockFetch([jwkWithKid]) });
+    const verifier = new AgentJwtVerifier({ _fetchFn: mockFetch([jwkWithKid]) });
 
     await assert.rejects(
       () => verifier.verifyAssertionJwt(token, 'camelcabal.fun'),
@@ -109,7 +109,7 @@ describe('CamelJwtVerifier', () => {
   test('verifyAssertionJwt: throws JwksUnavailableError on non-200 JWKS response', async () => {
     const token = mintJwt({ agentId: 'agent-1' });
 
-    const verifier = new CamelJwtVerifier({ _fetchFn: mockFetch([], { status: 404 }) });
+    const verifier = new AgentJwtVerifier({ _fetchFn: mockFetch([], { status: 404 }) });
 
     await assert.rejects(
       () => verifier.verifyAssertionJwt(token, 'camelcabal.fun'),
@@ -132,7 +132,7 @@ describe('CamelJwtVerifier', () => {
       json: async () => ({})
     });
 
-    const verifier = new CamelJwtVerifier({ _fetchFn: badFetch });
+    const verifier = new AgentJwtVerifier({ _fetchFn: badFetch });
 
     await assert.rejects(
       () => verifier.verifyAssertionJwt(token, 'camelcabal.fun'),
@@ -147,7 +147,7 @@ describe('CamelJwtVerifier', () => {
     const jwkWithKid = { ...jwkPublicKey, kid: 'test-key-1' };
     const wrongAudToken = mintJwt({ agentId: 'agent-1' }, { audience: 'wrong-audience' });
 
-    const verifier = new CamelJwtVerifier({ _fetchFn: mockFetch([jwkWithKid]) });
+    const verifier = new AgentJwtVerifier({ _fetchFn: mockFetch([jwkWithKid]) });
 
     await assert.rejects(
       async () => verifier.verifyAssertionJwt(wrongAudToken, 'camelcabal.fun'),
@@ -159,7 +159,7 @@ describe('CamelJwtVerifier', () => {
     const jwkWithKid = { ...jwkPublicKey, kid: 'test-key-1' };
     const wrongIssToken = mintJwt({ agentId: 'agent-1' }, { issuer: 'https://wrong-issuer.com' });
 
-    const verifier = new CamelJwtVerifier({ _fetchFn: mockFetch([jwkWithKid]) });
+    const verifier = new AgentJwtVerifier({ _fetchFn: mockFetch([jwkWithKid]) });
 
     await assert.rejects(
       async () => verifier.verifyAssertionJwt(wrongIssToken, 'camelcabal.fun'),
@@ -175,7 +175,7 @@ describe('CamelJwtVerifier', () => {
       audience: 'noema.art'
     });
 
-    const verifier = new CamelJwtVerifier({ _fetchFn: mockFetch([]) });
+    const verifier = new AgentJwtVerifier({ _fetchFn: mockFetch([]) });
 
     await assert.rejects(
       () => verifier.verifyAssertionJwt(token, 'camelcabal.fun'),

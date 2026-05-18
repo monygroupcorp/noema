@@ -1,6 +1,8 @@
-// src/core/services/agents/camelJwtVerifier.js
+// src/core/services/agents/agentJwtVerifier.js
 //
-// Verifies ES256 JWTs issued by CAMEL agent runtimes using JWKS discovery.
+// Verifies ES256 JWTs issued by any agent issuer using JWKS discovery.
+// Convention: issuer must expose JWKS at https://{issuerDomain}/.well-known/jwks.json
+// and issue tokens with aud:'noema.art' and iss:'https://{issuerDomain}'.
 
 const jwt = require('jsonwebtoken');
 const fetch = require('node-fetch');
@@ -38,25 +40,25 @@ class AssertionExpiredError extends Error {
 }
 
 // ---------------------------------------------------------------------------
-// CamelJwtVerifier
+// AgentJwtVerifier
 // ---------------------------------------------------------------------------
 
-class CamelJwtVerifier {
+class AgentJwtVerifier {
   /**
    * @param {object} opts
    * @param {object}   [opts.logger]           - Optional pre-created logger
-   * @param {number}   [opts.jwksTtlSeconds]   - How long to cache JWKS (default 300s)
+   * @param {number}   [opts.jwksTtlSeconds]   - How long to cache JWKS (default 3600s)
    * @param {Function} [opts._fetchFn]         - Dependency-injected fetch (for testing)
    */
   constructor({ logger, jwksTtlSeconds = 3600, _fetchFn } = {}) {
-    this.logger = logger || createLogger('CamelJwtVerifier');
+    this.logger = logger || createLogger('AgentJwtVerifier');
     this.jwksTtlSeconds = jwksTtlSeconds;
     this._fetch = _fetchFn || fetch;
     this._jwksCache = new Map(); // keyed by `jwks:${issuerDomain}`
   }
 
   /**
-   * Verifies a CAMEL-issued ES256 JWT assertion.
+   * Verifies an ES256 JWT assertion from any issuer implementing the agent convention.
    *
    * @param {string} token          - Raw JWT string
    * @param {string} issuerDomain   - e.g. 'camelcabal.fun'
@@ -110,6 +112,7 @@ class CamelJwtVerifier {
   /**
    * Fetches and caches the JWKS for the given issuer domain.
    * Stores the in-flight Promise to prevent concurrent double-fetch.
+   * On UnknownKeyError the caller can clear the cache entry to force a fresh fetch.
    *
    * @param {string} issuerDomain
    * @returns {Promise<Array>} - Array of JWK objects
@@ -201,4 +204,4 @@ class CamelJwtVerifier {
   }
 }
 
-module.exports = { CamelJwtVerifier, JwksUnavailableError, UnknownKeyError, AssertionExpiredError };
+module.exports = { AgentJwtVerifier, JwksUnavailableError, UnknownKeyError, AssertionExpiredError };
