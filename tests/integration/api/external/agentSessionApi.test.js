@@ -1,7 +1,7 @@
 /**
  * Agent Session API Integration Tests
  *
- * Tests GET /agents/:agentAccountId/manifest and POST /sessions/:agentAccountId/revoke.
+ * Tests all four agent session endpoints: manifest, revoke, payout-policy, earnings.
  * All dependencies are mocked — no MongoDB or HTTP calls are made.
  */
 
@@ -298,5 +298,21 @@ describe('Agent Session API — GET /agents/:agentAccountId/earnings', () => {
 
     assert.equal(res.status, 404);
     assert.ok(res.body.error);
+  });
+
+  // 16. splitLedgerDb provided → still returns empty until per-agent query is wired
+  test('splitLedgerDb provided but earnings returns empty (per-agent query not yet wired)', async () => {
+    const mockSplitLedgerDb = {
+      findByPartnerId: async () => [
+        { spellSlug: 'generate-image', grossAmount: '50000', createdAt: new Date() },
+      ],
+    };
+    const app = createTestApp({ splitLedgerDb: mockSplitLedgerDb });
+    const res = await supertest(app).get('/agents/cmw_test01/earnings');
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.agentAccountId, 'cmw_test01');
+    assert.equal(res.body.totalEarnings.amount, '0.00');
+    assert.equal(res.body.recentInflows.length, 0);
   });
 });
