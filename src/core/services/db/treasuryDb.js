@@ -25,6 +25,7 @@ const { getCachedClient } = require('./utils/queue');
  * @property {number} balance        - Point balance (integer)
  * @property {FaucetPolicy} faucetPolicy
  * @property {'active'|'suspended'} status
+ * @property {string} [partnerId] - Optional: linked partner API key (e.g. 'pk_live_abc123') for usage tracking
  * @property {Date} createdAt
  * @property {Date} updatedAt
  */
@@ -41,11 +42,12 @@ class TreasuryDB extends BaseDB {
     await col.createIndexes([
       { key: { treasuryId: 1 }, unique: true, name: 'treasuryId_unique_idx' },
       { key: { issuerDomain: 1, status: 1 }, name: 'issuerDomain_status_idx', background: true },
+      { key: { partnerId: 1 }, name: 'partnerId_idx', background: true, sparse: true },
     ]);
     this.logger.debug('[TreasuryDB] Indexes ensured.');
   }
 
-  async createTreasury({ treasuryId, issuerName, issuerDomain, faucetPolicy, balance = 0 }) {
+  async createTreasury({ treasuryId, issuerName, issuerDomain, faucetPolicy, balance = 0, partnerId }) {
     const now = new Date();
     return this.insertOne({
       treasuryId,
@@ -53,6 +55,7 @@ class TreasuryDB extends BaseDB {
       issuerDomain,
       faucetPolicy,
       balance,
+      ...(partnerId ? { partnerId } : {}),
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -95,6 +98,10 @@ class TreasuryDB extends BaseDB {
       { treasuryId },
       { $set: { status, updatedAt: new Date() } }
     );
+  }
+
+  async updatePartnerId(treasuryId, partnerId) {
+    return this.updateOne({ treasuryId }, { $set: { partnerId, updatedAt: new Date() } });
   }
 
   async listAll() {

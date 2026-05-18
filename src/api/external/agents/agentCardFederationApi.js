@@ -11,14 +11,7 @@
  */
 
 const express = require('express');
-const { pointsToUsd } = require('./agentUtils');
-
-// USDC has 6 decimals; grossAmount in split_ledger is stored as USDC atomic units.
-// e.g. "50000" → $0.05 USDC
-function grossAmountToUsd(entry) {
-  const raw = Number(entry.grossAmount || 0);
-  return (raw / 1e6).toFixed(6);
-}
+const { pointsToUsd, atomicUsdcToUsd } = require('./agentUtils');
 
 // Static capability list used when spellsService is unavailable or has no listing method.
 // v1: DALL-E 3 image generation is the primary capability exposed to CAMEL agents.
@@ -86,7 +79,7 @@ function createAgentCardFederationApi({ agentAccountDb, treasuryDb, splitLedgerD
           const entries = await splitLedgerDb.findByPartnerId(treasury.partnerId, 10);
           recentUsage = (entries || []).map(entry => ({
             spell: entry.spellSlug || entry.spell || null,
-            cost: { amount: grossAmountToUsd(entry), currency: 'USDC' },
+            cost: { amount: atomicUsdcToUsd(entry.grossAmount || 0), currency: 'USDC' },
             timestamp: Math.floor(new Date(entry.createdAt).getTime() / 1000),
           }));
         } catch (err) {
