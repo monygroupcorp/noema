@@ -103,6 +103,54 @@ function createAgentCardFederationApi({ agentAccountDb, treasuryDb, splitLedgerD
   });
 
   /**
+   * POST /treasury/:treasuryId/agents/:agentId/donate
+   *
+   * Public donation: add points directly to an agent account balance (no treasury debit).
+   */
+  router.post('/treasury/:treasuryId/agents/:agentId/donate', async (req, res) => {
+    const { treasuryId, agentId } = req.params;
+    try {
+      const { points } = req.body;
+      if (points === undefined || points === null) {
+        return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'points is required' } });
+      }
+      if (!Number.isInteger(points) || points <= 0) {
+        return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'points must be a positive integer' } });
+      }
+
+      const treasury = await treasuryDb.findByTreasuryId(treasuryId);
+      if (!treasury) {
+        return res.status(404).json({ error: { code: 'NOT_FOUND', message: `Treasury ${treasuryId} not found` } });
+      }
+
+      const agentAccount = await agentAccountDb.findByAgentId(agentId);
+      if (!agentAccount) {
+        return res.status(404).json({ error: { code: 'AGENT_NOT_FOUND', message: 'Agent account not found' } });
+      }
+
+      if (agentAccount.treasuryId !== treasuryId) {
+        return res.status(400).json({ error: { code: 'BAD_REQUEST', message: `Agent ${agentId} does not belong to treasury ${treasuryId}` } });
+      }
+
+      if (agentAccount.status !== 'active') {
+        return res.status(400).json({ error: { code: 'AGENT_SUSPENDED', message: 'Agent account is not active' } });
+      }
+
+      await agentAccountDb.addBalance(agentAccount.agentAccountId, points);
+      const updatedAccount = await agentAccountDb.findByAgentAccountId(agentAccount.agentAccountId);
+
+      return res.status(200).json({
+        agentAccountId: agentAccount.agentAccountId,
+        donatedPoints: points,
+        newBalance: updatedAccount.balance,
+      });
+    } catch (err) {
+      log.error('[agentCardFederation] Unexpected error in donate handler', { treasuryId, agentId, error: err.message });
+      return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Unexpected error processing donation' } });
+    }
+  });
+
+  /**
    * GET /agents/:agentAccountId/capabilities
    *
    * Returns dynamically-quoted spell capabilities for the agent's CAMEL card.

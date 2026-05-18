@@ -18,10 +18,11 @@ const { fireSessionCallback } = require('../../../core/services/agents/agentSess
  * @param {object} deps
  * @param {object} deps.agentAccountDb
  * @param {object} deps.treasuryDb
+ * @param {object} [deps.splitLedgerDb]
  * @param {object} [deps.logger]
  * @returns {express.Router}
  */
-function createAgentSessionApi({ agentAccountDb, treasuryDb, logger }) {
+function createAgentSessionApi({ agentAccountDb, treasuryDb, splitLedgerDb, logger }) {
   const log = logger || console;
   const router = express.Router();
 
@@ -143,6 +144,98 @@ function createAgentSessionApi({ agentAccountDb, treasuryDb, logger }) {
     } catch (err) {
       log.error('[agentSessionApi] Unexpected error in revoke handler', { agentAccountId, error: err.message });
       return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Unexpected error revoking session' } });
+    }
+  });
+
+  /**
+   * PATCH /agents/:agentAccountId/payout-policy
+   *
+   * Update the payout policy for an agent account.
+   */
+  router.patch('/agents/:agentAccountId/payout-policy', async (req, res) => {
+    const { agentAccountId } = req.params;
+    try {
+      const agentAccount = await agentAccountDb.findByAgentAccountId(agentAccountId);
+      if (!agentAccount) {
+        return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent account not found' } });
+      }
+
+      const { mode, withdrawAddress } = req.body;
+      if (!['self-fund', 'withdraw', 'split'].includes(mode)) {
+        return res.status(400).json({ error: { code: 'BAD_REQUEST', message: "mode must be 'self-fund', 'withdraw', or 'split'" } });
+      }
+
+      const ethAddressRegex = /^0x[0-9a-fA-F]{40}$/;
+      if (mode === 'withdraw' || mode === 'split') {
+        if (!withdrawAddress || !ethAddressRegex.test(withdrawAddress)) {
+          return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'withdrawAddress is required and must be a valid Ethereum address for withdraw/split mode' } });
+        }
+      }
+
+      const resolvedWithdrawAddress = (mode === 'withdraw' || mode === 'split') ? withdrawAddress : null;
+      await agentAccountDb.setPayoutPolicy(agentAccountId, { mode, withdrawAddress: resolvedWithdrawAddress });
+
+      return res.status(200).json({
+        agentAccountId,
+        payoutPolicy: { mode, withdrawAddress: resolvedWithdrawAddress },
+      });
+    } catch (err) {
+      log.error('[agentSessionApi] Unexpected error in payout-policy handler', { agentAccountId, error: err.message });
+      return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Unexpected error updating payout policy' } });
+    }
+  });
+
+  /**
+   * GET /agents/:agentAccountId/earnings
+   *
+   * Return total earnings and recent inflows for an agent account.
+   */
+  router.get('/agents/:agentAccountId/earnings', async (req, res) => {
+    const { agentAccountId } = req.params;
+    try {
+      const agentAccount = await agentAccountDb.findByAgentAccountId(agentAccountId);
+      if (!agentAccount) {
+        return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent account not found' } });
+      }
+
+      if (!splitLedgerDb) {
+        return res.status(200).json({
+          agentAccountId,
+          totalEarnings: { amount: '0.00', currency: 'USDC' },
+          recentInflows: [],
+        });
+      }
+
+      let recentInflows = [];
+      let totalGross = 0;
+      try {
+        // SplitLedgerDB is keyed by partnerId; use findByPartnerId with the agentAccountId as a
+        // best-effort approximation if a direct agentAccountId filter isn't available.
+        let entries = [];
+        if (typeof splitLedgerDb.findByPartnerId === 'function') {
+          entries = await splitLedgerDb.findByPartnerId(agentAccountId, 20);
+        }
+        entries = entries || [];
+        totalGross = entries.reduce((sum, e) => sum + parseInt(e.grossAmount || '0', 10), 0);
+        recentInflows = entries.map(e => ({
+          spellSlug: e.spellSlug || null,
+          amount: (parseInt(e.grossAmount || '0', 10) / 1e6).toFixed(6).replace(/\.?0+$/, '') || '0',
+          currency: 'USDC',
+          timestamp: Math.floor(new Date(e.createdAt).getTime() / 1000),
+        }));
+      } catch (err) {
+        log.warn('[agentSessionApi] Failed to fetch split ledger entries for earnings', { agentAccountId, error: err.message });
+      }
+
+      const totalUsd = (totalGross / 1e6).toFixed(2);
+      return res.status(200).json({
+        agentAccountId,
+        totalEarnings: { amount: totalUsd, currency: 'USDC' },
+        recentInflows,
+      });
+    } catch (err) {
+      log.error('[agentSessionApi] Unexpected error in earnings handler', { agentAccountId, error: err.message });
+      return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Unexpected error fetching earnings' } });
     }
   });
 

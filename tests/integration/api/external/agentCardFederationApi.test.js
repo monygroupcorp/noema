@@ -47,6 +47,7 @@ function makeMockAgentAccountDb(account, overrides = {}) {
   return {
     findByAgentId: async (id) => (account && account.agentId === id ? account : null),
     findByAgentAccountId: async (id) => (account && account.agentAccountId === id ? account : null),
+    addBalance: async () => ({ modifiedCount: 1 }),
     ...overrides,
   };
 }
@@ -224,5 +225,108 @@ describe('Agent Card Federation API — GET /agents/:agentAccountId/capabilities
     assert.ok(Array.isArray(cap.x402.chains), 'x402.chains is array');
     assert.ok(cap.x402.chains.includes(8453), 'chains includes Base mainnet (8453)');
     assert.ok(typeof cap.x402.facilitator === 'string', 'x402.facilitator is string');
+  });
+});
+
+// ─── Tests: POST /treasury/:treasuryId/agents/:agentId/donate ────────────────
+
+describe('Agent Card Federation API — POST /treasury/:treasuryId/agents/:agentId/donate', () => {
+  // 16. Valid donate → 200 with { agentAccountId, donatedPoints, newBalance }
+  test('Valid donate → 200 with agentAccountId, donatedPoints, newBalance', async () => {
+    const updatedAccount = { ...mockAgentAccount, balance: mockAgentAccount.balance + 50 };
+    const app = createTestApp({
+      agentAccountDbOverrides: {
+        findByAgentAccountId: async (id) => (id === mockAgentAccount.agentAccountId ? updatedAccount : null),
+      },
+    });
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents/42/donate')
+      .send({ points: 50 });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.agentAccountId, 'cmw_test01');
+    assert.equal(res.body.donatedPoints, 50);
+    assert.ok(typeof res.body.newBalance === 'number');
+  });
+
+  // 17. Points missing → 400
+  test('Points missing → 400 BAD_REQUEST', async () => {
+    const app = createTestApp();
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents/42/donate')
+      .send({});
+
+    assert.equal(res.status, 400);
+    assert.ok(res.body.error);
+  });
+
+  // 18. Points <= 0 → 400
+  test('Points <= 0 → 400 BAD_REQUEST', async () => {
+    const app = createTestApp();
+    const res0 = await supertest(app)
+      .post('/treasury/camel-1/agents/42/donate')
+      .send({ points: 0 });
+    assert.equal(res0.status, 400);
+
+    const resNeg = await supertest(app)
+      .post('/treasury/camel-1/agents/42/donate')
+      .send({ points: -10 });
+    assert.equal(resNeg.status, 400);
+  });
+
+  // 19. Treasury not found → 404
+  test('Treasury not found → 404 NOT_FOUND', async () => {
+    const app = createTestApp({ treasury: null });
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents/42/donate')
+      .send({ points: 50 });
+
+    assert.equal(res.status, 404);
+    assert.ok(res.body.error);
+  });
+
+  // 20. Agent not found → 404
+  test('Agent not found → 404 NOT_FOUND', async () => {
+    const app = createTestApp({ agentAccount: null });
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents/99/donate')
+      .send({ points: 50 });
+
+    assert.equal(res.status, 404);
+    assert.ok(res.body.error);
+  });
+
+  // 21. Agent in wrong treasury → 400
+  test('Agent belongs to different treasury → 400', async () => {
+    const wrongTreasuryAgent = { ...mockAgentAccount, treasuryId: 'other-treasury' };
+    const app = createTestApp({
+      agentAccountDbOverrides: {
+        findByAgentId: async (id) => (id === '42' ? wrongTreasuryAgent : null),
+        findByAgentAccountId: async (id) => (id === wrongTreasuryAgent.agentAccountId ? wrongTreasuryAgent : null),
+      },
+    });
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents/42/donate')
+      .send({ points: 50 });
+
+    assert.equal(res.status, 400);
+    assert.ok(res.body.error);
+  });
+
+  // 22. Suspended agent → 400 AGENT_SUSPENDED
+  test('Suspended agent → 400 AGENT_SUSPENDED', async () => {
+    const suspendedAgent = { ...mockAgentAccount, status: 'suspended' };
+    const app = createTestApp({
+      agentAccountDbOverrides: {
+        findByAgentId: async (id) => (id === '42' ? suspendedAgent : null),
+        findByAgentAccountId: async (id) => (id === suspendedAgent.agentAccountId ? suspendedAgent : null),
+      },
+    });
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents/42/donate')
+      .send({ points: 50 });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, 'AGENT_SUSPENDED');
   });
 });
