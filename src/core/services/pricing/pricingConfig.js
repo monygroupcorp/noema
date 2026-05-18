@@ -24,8 +24,8 @@ const PRICING_CONFIG = {
     // Need 4x markup on standard, 2x on MS2 to recover ~$75-100
     comfyui: {
       description: 'ComfyUI Deploy platform fee recovery',
-      standard: 4.0,    // 4x compute cost for standard users
-      ms2: 2.0,         // 2x compute cost for MS2 token holders (50% discount)
+      standard: 1.5,    // 1.5x compute cost for standard users
+      ms2: 1.2,         // 1.2x compute cost for MS2 token holders
       enabled: true,
     },
 
