@@ -78,6 +78,24 @@ describe('fetchAgentCard', () => {
     assert.deepEqual(r2, VALID_CARD);
   });
 
+  test('concurrent dedup: both callers receive null when fetch fails', async () => {
+    let fetchCallCount = 0;
+    const failingFetch = async () => {
+      fetchCallCount++;
+      await new Promise((r) => setImmediate(r));
+      throw new Error('network error');
+    };
+
+    const [r1, r2] = await Promise.all([
+      fetchAgentCard('fail-domain.test', 'tok-fail', { _fetchFn: failingFetch }),
+      fetchAgentCard('fail-domain.test', 'tok-fail', { _fetchFn: failingFetch }),
+    ]);
+
+    assert.equal(r1, null);
+    assert.equal(r2, null);
+    assert.equal(fetchCallCount, 1);
+  });
+
   test('non-200 response (404) → returns null', async () => {
     const result = await fetchAgentCard('example4.com', 'tok-4', {
       _fetchFn: mockFetch(VALID_CARD, { status: 404 }),

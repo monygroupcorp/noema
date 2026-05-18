@@ -83,7 +83,7 @@ async function _doFetch(issuerDomain, tokenId, key, _fetchFn, logger) {
   }
 
   // 8. Success: store in cache and schedule eviction
-  _cache.set(key, { data: result, expiresAt: Date.now() + TTL_MS });
+  _cache.set(key, { data: result, expiresAt: Date.now() + TTL_MS, promise: null });
   setTimeout(() => _cache.delete(key), TTL_MS).unref();
 
   return result;
