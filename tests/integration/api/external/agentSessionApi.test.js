@@ -42,6 +42,7 @@ function makeMockAgentAccountDb(agentAccount, overrides = {}) {
   return {
     findByAgentAccountId: async (id) => (id === (agentAccount && agentAccount.agentAccountId) ? agentAccount : null),
     revoke: async () => ({ modifiedCount: 1 }),
+    setPayoutPolicy: async () => ({ modifiedCount: 1 }),
     ...overrides,
   };
 }
@@ -60,6 +61,7 @@ function createTestApp({
   treasury = makeMockTreasury(),
   agentAccountDbOverrides = {},
   treasuryDbOverrides = {},
+  splitLedgerDb = null,
 } = {}) {
   const app = express();
   app.use(express.json());
@@ -67,6 +69,7 @@ function createTestApp({
   const router = createAgentSessionApi({
     agentAccountDb: makeMockAgentAccountDb(agentAccount, agentAccountDbOverrides),
     treasuryDb: makeMockTreasuryDb(treasury, treasuryDbOverrides),
+    splitLedgerDb,
     logger: { error: () => {}, warn: () => {}, debug: () => {}, info: () => {} },
   });
 
@@ -195,5 +198,105 @@ describe('Agent Session API — POST /sessions/:agentAccountId/revoke', () => {
 
     assert.equal(res.status, 500);
     assert.equal(res.body.error.code, 'INTERNAL_ERROR');
+  });
+});
+
+// ─── Tests: PATCH /agents/:agentAccountId/payout-policy ─────────────────────
+
+describe('Agent Session API — PATCH /agents/:agentAccountId/payout-policy', () => {
+  // 8. Valid PATCH with mode self-fund → 200 with updated policy
+  test('Valid PATCH mode "self-fund" → 200 with payoutPolicy', async () => {
+    const app = createTestApp();
+    const res = await supertest(app)
+      .patch('/agents/cmw_test01/payout-policy')
+      .send({ mode: 'self-fund' });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.agentAccountId, 'cmw_test01');
+    assert.equal(res.body.payoutPolicy.mode, 'self-fund');
+    assert.equal(res.body.payoutPolicy.withdrawAddress, null);
+  });
+
+  // 9. Valid PATCH with mode withdraw + valid ETH address → 200
+  test('Valid PATCH mode "withdraw" + valid ETH address → 200', async () => {
+    const app = createTestApp();
+    const res = await supertest(app)
+      .patch('/agents/cmw_test01/payout-policy')
+      .send({ mode: 'withdraw', withdrawAddress: '0xAbCd1234567890abcdef1234567890abcdef1234' });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.payoutPolicy.mode, 'withdraw');
+    assert.equal(res.body.payoutPolicy.withdrawAddress, '0xAbCd1234567890abcdef1234567890abcdef1234');
+  });
+
+  // 10. Mode withdraw without withdrawAddress → 400
+  test('Mode "withdraw" without withdrawAddress → 400', async () => {
+    const app = createTestApp();
+    const res = await supertest(app)
+      .patch('/agents/cmw_test01/payout-policy')
+      .send({ mode: 'withdraw' });
+
+    assert.equal(res.status, 400);
+    assert.ok(res.body.error);
+  });
+
+  // 11. Invalid mode → 400
+  test('Invalid mode → 400', async () => {
+    const app = createTestApp();
+    const res = await supertest(app)
+      .patch('/agents/cmw_test01/payout-policy')
+      .send({ mode: 'drain' });
+
+    assert.equal(res.status, 400);
+    assert.ok(res.body.error);
+  });
+
+  // 12. Invalid ETH address format → 400
+  test('Invalid ETH address format → 400', async () => {
+    const app = createTestApp();
+    const res = await supertest(app)
+      .patch('/agents/cmw_test01/payout-policy')
+      .send({ mode: 'split', withdrawAddress: 'not-an-eth-address' });
+
+    assert.equal(res.status, 400);
+    assert.ok(res.body.error);
+  });
+
+  // 13. Agent not found → 404
+  test('Agent not found → 404', async () => {
+    const app = createTestApp({ agentAccount: null });
+    const res = await supertest(app)
+      .patch('/agents/cmw_missing/payout-policy')
+      .send({ mode: 'self-fund' });
+
+    assert.equal(res.status, 404);
+    assert.ok(res.body.error);
+  });
+});
+
+// ─── Tests: GET /agents/:agentAccountId/earnings ─────────────────────────────
+
+describe('Agent Session API — GET /agents/:agentAccountId/earnings', () => {
+  // 14. Valid agent with no splitLedger → 200 with zero earnings
+  test('Valid agent with no splitLedger → 200 with totalEarnings 0.00 and empty recentInflows', async () => {
+    const app = createTestApp({ splitLedgerDb: null });
+    const res = await supertest(app).get('/agents/cmw_test01/earnings');
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.agentAccountId, 'cmw_test01');
+    assert.ok(res.body.totalEarnings);
+    assert.equal(res.body.totalEarnings.amount, '0.00');
+    assert.equal(res.body.totalEarnings.currency, 'USDC');
+    assert.ok(Array.isArray(res.body.recentInflows));
+    assert.equal(res.body.recentInflows.length, 0);
+  });
+
+  // 15. Agent not found → 404
+  test('Agent not found → 404', async () => {
+    const app = createTestApp({ agentAccount: null });
+    const res = await supertest(app).get('/agents/cmw_missing/earnings');
+
+    assert.equal(res.status, 404);
+    assert.ok(res.body.error);
   });
 });

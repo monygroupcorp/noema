@@ -643,6 +643,7 @@ function initializeExternalApi(dependencies) {
     const agentSessionRouter = createAgentSessionApi({
       agentAccountDb: dependencies.db.data.agentAccount,
       treasuryDb: dependencies.db.data.treasury,
+      splitLedgerDb: dependencies.db?.data?.splitLedger || null,
       logger,
     });
     externalApiRouter.use('/', agentSessionRouter);

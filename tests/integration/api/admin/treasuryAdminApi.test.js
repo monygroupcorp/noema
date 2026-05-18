@@ -40,9 +40,19 @@ function makeMockTreasuryDb(overrides = {}) {
 function makeMockAgentAccountDb(overrides = {}) {
   return {
     countByTreasuryId: async () => 0,
+    findByAgentId: async () => null,
+    addBalance: async () => ({ modifiedCount: 1 }),
     ...overrides,
   };
 }
+
+const sampleAgentAccount = {
+  agentAccountId: 'cmw_aaa001',
+  agentId: 'agent-42',
+  treasuryId: 'test-1',
+  balance: 500,
+  status: 'active',
+};
 
 function createTestApp(mockDb, mockAgentAccountDb) {
   const app = express();
@@ -339,5 +349,98 @@ describe('Treasury Admin API', () => {
       .send({});
     assert.equal(res.status, 400);
     assert.equal(res.body.error, 'BAD_REQUEST');
+  });
+
+  // ─── POST /:treasuryId/agents/:agentId/topup ──────────────────────────────
+
+  test('POST /:treasuryId/agents/:agentId/topup returns 200 with { agentAccountId, pointsAdded }', async () => {
+    const mockDb = makeMockTreasuryDb({ debitBalance: async () => true });
+    const mockAgentDb = makeMockAgentAccountDb({
+      findByAgentId: async (id) => (id === 'agent-42' ? sampleAgentAccount : null),
+    });
+    const localApp = createTestApp(mockDb, mockAgentDb);
+    const res = await supertest(localApp)
+      .post('/treasury/test-1/agents/agent-42/topup')
+      .send({ points: 100 });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.agentAccountId, 'cmw_aaa001');
+    assert.equal(res.body.pointsAdded, 100);
+  });
+
+  test('POST /:treasuryId/agents/:agentId/topup returns 400 when points is missing', async () => {
+    const mockAgentDb = makeMockAgentAccountDb({
+      findByAgentId: async (id) => (id === 'agent-42' ? sampleAgentAccount : null),
+    });
+    const localApp = createTestApp(makeMockTreasuryDb(), mockAgentDb);
+    const res = await supertest(localApp)
+      .post('/treasury/test-1/agents/agent-42/topup')
+      .send({});
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'BAD_REQUEST');
+  });
+
+  test('POST /:treasuryId/agents/:agentId/topup returns 400 when points <= 0', async () => {
+    const mockAgentDb = makeMockAgentAccountDb({
+      findByAgentId: async (id) => (id === 'agent-42' ? sampleAgentAccount : null),
+    });
+    const localApp = createTestApp(makeMockTreasuryDb(), mockAgentDb);
+    const res0 = await supertest(localApp)
+      .post('/treasury/test-1/agents/agent-42/topup')
+      .send({ points: 0 });
+    assert.equal(res0.status, 400);
+    assert.equal(res0.body.error, 'BAD_REQUEST');
+
+    const resNeg = await supertest(localApp)
+      .post('/treasury/test-1/agents/agent-42/topup')
+      .send({ points: -5 });
+    assert.equal(resNeg.status, 400);
+    assert.equal(resNeg.body.error, 'BAD_REQUEST');
+  });
+
+  test('POST /:treasuryId/agents/:agentId/topup returns 404 when treasury not found', async () => {
+    const mockAgentDb = makeMockAgentAccountDb({
+      findByAgentId: async (id) => (id === 'agent-42' ? sampleAgentAccount : null),
+    });
+    const localApp = createTestApp(makeMockTreasuryDb(), mockAgentDb);
+    const res = await supertest(localApp)
+      .post('/treasury/no-such-treasury/agents/agent-42/topup')
+      .send({ points: 100 });
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error, 'NOT_FOUND');
+  });
+
+  test('POST /:treasuryId/agents/:agentId/topup returns 404 when agent not found', async () => {
+    const localApp = createTestApp(makeMockTreasuryDb(), makeMockAgentAccountDb());
+    const res = await supertest(localApp)
+      .post('/treasury/test-1/agents/no-such-agent/topup')
+      .send({ points: 100 });
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error, 'NOT_FOUND');
+  });
+
+  test('POST /:treasuryId/agents/:agentId/topup returns 400 when agent belongs to different treasury', async () => {
+    const wrongTreasuryAgent = { ...sampleAgentAccount, treasuryId: 'other-treasury' };
+    const mockAgentDb = makeMockAgentAccountDb({
+      findByAgentId: async (id) => (id === 'agent-42' ? wrongTreasuryAgent : null),
+    });
+    const localApp = createTestApp(makeMockTreasuryDb(), mockAgentDb);
+    const res = await supertest(localApp)
+      .post('/treasury/test-1/agents/agent-42/topup')
+      .send({ points: 100 });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'BAD_REQUEST');
+  });
+
+  test('POST /:treasuryId/agents/:agentId/topup returns 400 INSUFFICIENT_BALANCE when treasury lacks funds', async () => {
+    const mockDb = makeMockTreasuryDb({ debitBalance: async () => false });
+    const mockAgentDb = makeMockAgentAccountDb({
+      findByAgentId: async (id) => (id === 'agent-42' ? sampleAgentAccount : null),
+    });
+    const localApp = createTestApp(mockDb, mockAgentDb);
+    const res = await supertest(localApp)
+      .post('/treasury/test-1/agents/agent-42/topup')
+      .send({ points: 9999999 });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'INSUFFICIENT_BALANCE');
   });
 });

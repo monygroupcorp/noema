@@ -150,6 +150,50 @@ function createTreasuryAdminApi({ treasuryDb, agentAccountDb }) {
   });
 
   /**
+   * POST /internal/v1/admin/treasury/:treasuryId/agents/:agentId/topup
+   *
+   * Transfer points from treasury balance to agent account balance.
+   */
+  router.post('/:treasuryId/agents/:agentId/topup', async (req, res) => {
+    const { treasuryId, agentId } = req.params;
+    try {
+      const { points } = req.body;
+      if (points === undefined || points === null) {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: 'points is required' });
+      }
+      if (!Number.isInteger(points) || points <= 0) {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: 'points must be a positive integer' });
+      }
+
+      const treasury = await treasuryDb.findByTreasuryId(treasuryId);
+      if (!treasury) {
+        return res.status(404).json({ error: 'NOT_FOUND', message: `Treasury ${treasuryId} not found` });
+      }
+
+      const agentAccount = await agentAccountDb.findByAgentId(agentId);
+      if (!agentAccount) {
+        return res.status(404).json({ error: 'NOT_FOUND', message: `Agent ${agentId} not found` });
+      }
+
+      if (agentAccount.treasuryId !== treasuryId) {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: `Agent ${agentId} does not belong to treasury ${treasuryId}` });
+      }
+
+      const debited = await treasuryDb.debitBalance(treasuryId, points);
+      if (!debited) {
+        return res.status(400).json({ error: 'INSUFFICIENT_BALANCE', message: `Insufficient balance to topup ${points} points` });
+      }
+
+      await agentAccountDb.addBalance(agentAccount.agentAccountId, points);
+      logger.info('[treasuryAdminApi] Agent topup completed', { treasuryId, agentId, agentAccountId: agentAccount.agentAccountId, points });
+      return res.json({ agentAccountId: agentAccount.agentAccountId, pointsAdded: points });
+    } catch (err) {
+      logger.error('[treasuryAdminApi] topup failed', { treasuryId, agentId, error: err.message });
+      return res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Failed to topup agent account' });
+    }
+  });
+
+  /**
    * PATCH /internal/v1/admin/treasury/:treasuryId/policy
    *
    * Update faucet policy fields
