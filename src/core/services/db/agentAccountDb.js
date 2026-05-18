@@ -97,7 +97,7 @@ class AgentAccountDB extends BaseDB {
       treasuryId,
       agentId,
       tokenId,
-      ownerAddress,
+      ownerAddress: ownerAddress?.toLowerCase(),
       noemaAccountId,
       workspaceSlug,
       scope,
@@ -135,6 +135,7 @@ class AgentAccountDB extends BaseDB {
     );
   }
 
+  // Caller is responsible for verifying sufficient balance before calling
   async debitBalance(agentAccountId, points) {
     return this.updateOne(
       { agentAccountId },
@@ -153,6 +154,13 @@ class AgentAccountDB extends BaseDB {
     return this.updateOne(
       { agentAccountId },
       { $set: { status: 'revoked', updatedAt: new Date() } }
+    );
+  }
+
+  async setStatus(agentAccountId, status) {
+    return this.updateOne(
+      { agentAccountId },
+      { $set: { status, updatedAt: new Date() } }
     );
   }
 }

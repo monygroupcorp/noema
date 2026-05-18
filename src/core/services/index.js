@@ -165,6 +165,8 @@ async function initializeServices(options = {}) {
       if (initializedDbServices?.data?.uploadRecords?.ensureIndexes) await initializedDbServices.data.uploadRecords.ensureIndexes();
       if (initializedDbServices?.data?.splitLedger?.ensureIndexes) await initializedDbServices.data.splitLedger.ensureIndexes();
       if (initializedDbServices?.data?.issuer?.ensureIndexes) await initializedDbServices.data.issuer.ensureIndexes();
+      if (initializedDbServices?.data?.treasury?.ensureIndexes) await initializedDbServices.data.treasury.ensureIndexes();
+      if (initializedDbServices?.data?.agentAccount?.ensureIndexes) await initializedDbServices.data.agentAccount.ensureIndexes();
     } catch (indexErr) {
       logger.error('Failed to ensure DB indexes:', indexErr);
     }

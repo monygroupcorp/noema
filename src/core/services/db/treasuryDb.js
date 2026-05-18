@@ -74,6 +74,7 @@ class TreasuryDB extends BaseDB {
     );
   }
 
+  // Caller is responsible for verifying sufficient balance before calling
   async debitBalance(treasuryId, points) {
     return this.updateOne(
       { treasuryId },
