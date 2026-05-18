@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.10.3](https://github.com/monygroupcorp/noema/compare/v4.10.2...v4.10.3) (2026-05-18)
+
+
+### Bug Fixes
+
+* **pricing:** reduce comfyui markup to 1.5x and quote x402 price from historical data ([dc2eb61](https://github.com/monygroupcorp/noema/commit/dc2eb617c02b58934ebda612010c660c25b0aa15))
+* **quotes:** improve quoteSpell accuracy and robustness ([bef2e08](https://github.com/monygroupcorp/noema/commit/bef2e087d004195ecd0eddae5a8bdb001e91826e))
+
 ## [4.10.2](https://github.com/monygroupcorp/noema/compare/v4.10.1...v4.10.2) (2026-05-16)
 
 
