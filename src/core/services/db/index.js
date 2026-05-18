@@ -39,6 +39,7 @@ const SplitLedgerDB = require('./splitLedgerDb');
 const IssuerDB = require('./issuerDb');
 const TreasuryDB = require('./treasuryDb');
 const AgentAccountDB = require('./agentAccountDb');
+const FaucetDripsDB = require('./faucetDripsDb');
 
 // Placeholder for any existing/legacy DB service exports if this file already exists
 // For example:
@@ -103,6 +104,7 @@ function initializeDbServices(logger) {
     // CAMEL agent runtime
     treasury: new TreasuryDB(logger),
     agentAccount: new AgentAccountDB(logger),
+    faucetDrips: new FaucetDripsDB(logger),
 
     // ... add other services here
   };

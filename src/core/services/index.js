@@ -63,6 +63,7 @@ const { economyService } = require('./store/economy/EconomyService');
 const { DelegationService } = require('./agents/DelegationService');
 const notificationEvents = require('../events/notificationEvents');
 const { startDragnet } = require('./charging/agentOwnerDragnet');
+const { startFaucet } = require('./agents/agentFaucetWorker');
 
 /**
  * Initialize all core services
@@ -167,6 +168,7 @@ async function initializeServices(options = {}) {
       if (initializedDbServices?.data?.issuer?.ensureIndexes) await initializedDbServices.data.issuer.ensureIndexes();
       if (initializedDbServices?.data?.treasury?.ensureIndexes) await initializedDbServices.data.treasury.ensureIndexes();
       if (initializedDbServices?.data?.agentAccount?.ensureIndexes) await initializedDbServices.data.agentAccount.ensureIndexes();
+      if (initializedDbServices?.data?.faucetDrips?.ensureIndexes) await initializedDbServices.data.faucetDrips.ensureIndexes();
     } catch (indexErr) {
       logger.error('Failed to ensure DB indexes:', indexErr);
     }
@@ -682,6 +684,23 @@ async function initializeServices(options = {}) {
       logger.debug('[initializeServices] agentOwnerDragnet started.');
     } else {
       logger.warn('[initializeServices] agentOwnerDragnet not started: missing splitLedgerDb, userCoreDb, or economyService.');
+    }
+
+    // Start CAMEL agent faucet (daily sweep; per-treasury cadence enforced inside worker)
+    const _treasuryDb = initializedDbServices?.data?.treasury;
+    const _agentAccountDb = initializedDbServices?.data?.agentAccount;
+    const _faucetDripsDb = initializedDbServices?.data?.faucetDrips;
+    if (_treasuryDb && _agentAccountDb && _faucetDripsDb && economyService) {
+      startFaucet({
+        treasuryDb: _treasuryDb,
+        agentAccountDb: _agentAccountDb,
+        faucetDripsDb: _faucetDripsDb,
+        economyService,
+        logger,
+      });
+      logger.debug('[initializeServices] agentFaucetWorker started.');
+    } else {
+      logger.warn('[initializeServices] agentFaucetWorker not started: missing treasury/agentAccount/faucetDrips DB or economyService');
     }
 
     // Return instantiated services
