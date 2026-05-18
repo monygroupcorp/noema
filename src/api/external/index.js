@@ -29,6 +29,7 @@ const { createX402Middleware } = require('../../platforms/web/middleware/x402');
 const { createMcpRouter } = require('./mcp');
 const { createAgentDelegationApi } = require('./agents/agentDelegationApi');
 const { createAgentProvisioningApi } = require('./agents/agentProvisioningApi');
+const { createAgentSessionApi } = require('./agents/agentSessionApi');
 const { createPresignApi } = require('./partner/presignApi');
 const { createPartnerRunApi } = require('./partner/partnerRunApi');
 
@@ -634,6 +635,19 @@ function initializeExternalApi(dependencies) {
     logger.debug('External Agent Provisioning API mounted at /treasury.');
   } else {
     logger.warn('External Agent Provisioning API not mounted due to missing DB or camelJwtVerifier dependencies.');
+  }
+
+  // CAMEL agent session manifest + revoke (public — agentAccountId is the implicit credential)
+  if (dependencies.db?.data?.treasury && dependencies.db?.data?.agentAccount) {
+    const agentSessionRouter = createAgentSessionApi({
+      agentAccountDb: dependencies.db.data.agentAccount,
+      treasuryDb: dependencies.db.data.treasury,
+      logger,
+    });
+    externalApiRouter.use('/', agentSessionRouter);
+    logger.debug('External Agent Session API mounted at / (GET /agents/:id/manifest, POST /sessions/:id/revoke).');
+  } else {
+    logger.warn('External Agent Session API not mounted due to missing DB dependencies.');
   }
 
   // Partner presign (no auth — domain-locked + rate limited)
