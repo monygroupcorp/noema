@@ -27,12 +27,13 @@ function mockFetch(keys, { status = 200, cacheControl = null } = {}) {
   });
 }
 
-function mintJwt(payload, { kid = 'test-key-1', expiresIn = '1h', audience = 'noema.art' } = {}) {
+function mintJwt(payload, { kid = 'test-key-1', expiresIn = '1h', audience = 'noema.art', issuer = 'https://camelcabal.fun' } = {}) {
   return jwt.sign(payload, privateKeyPem, {
     algorithm: 'ES256',
     keyid: kid,
     expiresIn,
-    audience
+    audience,
+    issuer
   });
 }
 
@@ -48,12 +49,12 @@ describe('CamelJwtVerifier', () => {
     assert.equal(payload.tokenId, 'tok-1');
   });
 
-  test('verifyAssertionJwt: caches JWKS — fetches only once on two calls', async () => {
+  test('verifyAssertionJwt: caches JWKS — concurrent calls fetch only once', async () => {
     const jwkWithKid = { ...jwkPublicKey, kid: 'test-key-1' };
-    let fetchCount = 0;
+    let fetchCallCount = 0;
 
     const countingFetch = async (url, opts) => {
-      fetchCount++;
+      fetchCallCount++;
       return {
         ok: true,
         status: 200,
@@ -68,10 +69,11 @@ describe('CamelJwtVerifier', () => {
     const token1 = mintJwt({ agentId: 'agent-1' });
     const token2 = mintJwt({ agentId: 'agent-2' });
 
-    await verifier.verifyAssertionJwt(token1, 'camelcabal.fun');
-    await verifier.verifyAssertionJwt(token2, 'camelcabal.fun');
-
-    assert.equal(fetchCount, 1);
+    const [r1, r2] = await Promise.all([
+      verifier.verifyAssertionJwt(token1, 'camelcabal.fun'),
+      verifier.verifyAssertionJwt(token2, 'camelcabal.fun'),
+    ]);
+    assert.equal(fetchCallCount, 1); // must be 1, not 2
   });
 
   test('verifyAssertionJwt: throws UnknownKeyError when kid not in JWKS', async () => {
@@ -143,12 +145,25 @@ describe('CamelJwtVerifier', () => {
 
   test('verifyAssertionJwt: rejects token with wrong audience', async () => {
     const jwkWithKid = { ...jwkPublicKey, kid: 'test-key-1' };
-    const token = mintJwt({ agentId: 'agent-1' }, { audience: 'wrong-audience' });
+    const wrongAudToken = mintJwt({ agentId: 'agent-1' }, { audience: 'wrong-audience' });
 
     const verifier = new CamelJwtVerifier({ _fetchFn: mockFetch([jwkWithKid]) });
 
     await assert.rejects(
-      () => verifier.verifyAssertionJwt(token, 'camelcabal.fun')
+      async () => verifier.verifyAssertionJwt(wrongAudToken, 'camelcabal.fun'),
+      (err) => { assert.equal(err.name, 'JsonWebTokenError'); return true; }
+    );
+  });
+
+  test('verifyAssertionJwt: rejects token with wrong issuer', async () => {
+    const jwkWithKid = { ...jwkPublicKey, kid: 'test-key-1' };
+    const wrongIssToken = mintJwt({ agentId: 'agent-1' }, { issuer: 'https://wrong-issuer.com' });
+
+    const verifier = new CamelJwtVerifier({ _fetchFn: mockFetch([jwkWithKid]) });
+
+    await assert.rejects(
+      async () => verifier.verifyAssertionJwt(wrongIssToken, 'camelcabal.fun'),
+      (err) => { assert.equal(err.name, 'JsonWebTokenError'); return true; }
     );
   });
 
