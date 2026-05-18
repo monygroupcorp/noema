@@ -19,14 +19,15 @@ const { getCachedClient } = require('./utils/queue');
 
 /**
  * @typedef {Object} TreasuryRecord
- * @property {string} treasuryId     - Unique treasury key (e.g. 'camel-1')
- * @property {string} issuerName     - Human-readable issuer name (e.g. 'camel')
- * @property {string} issuerDomain   - Issuer domain (e.g. 'camelcabal.fun')
- * @property {number} balance        - Point balance (integer)
+ * @property {string} treasuryId              - Unique treasury key (e.g. 'camel-1')
+ * @property {string} issuerName              - Human-readable issuer name (e.g. 'camel')
+ * @property {string} issuerDomain            - Issuer domain (e.g. 'camelcabal.fun')
+ * @property {number} balance                 - Point balance (integer)
  * @property {FaucetPolicy} faucetPolicy
  * @property {'active'|'suspended'} status
- * @property {string} [partnerId] - Optional: linked partner API key (e.g. 'pk_live_abc123') for usage tracking
- * @property {Date|null} [lastDripAt] - Timestamp of last faucet drip run; undefined on legacy records (treated as null)
+ * @property {string} [partnerId]             - Optional: linked partner API key for usage tracking
+ * @property {string} [starterWorkspaceSlug]  - Workspace template slug for this issuer (falls back to DEFAULT_STARTER_WORKSPACE_SLUG env var)
+ * @property {Date|null} [lastDripAt]         - Timestamp of last faucet drip run; undefined on legacy records (treated as null)
  * @property {Date} createdAt
  * @property {Date} updatedAt
  */
@@ -48,7 +49,7 @@ class TreasuryDB extends BaseDB {
     this.logger.debug('[TreasuryDB] Indexes ensured.');
   }
 
-  async createTreasury({ treasuryId, issuerName, issuerDomain, faucetPolicy, balance = 0, partnerId }) {
+  async createTreasury({ treasuryId, issuerName, issuerDomain, faucetPolicy, balance = 0, partnerId, starterWorkspaceSlug }) {
     const now = new Date();
     return this.insertOne({
       treasuryId,
@@ -57,10 +58,18 @@ class TreasuryDB extends BaseDB {
       faucetPolicy,
       balance,
       ...(partnerId ? { partnerId } : {}),
+      ...(starterWorkspaceSlug ? { starterWorkspaceSlug } : {}),
       status: 'active',
       createdAt: now,
       updatedAt: now,
     });
+  }
+
+  async updateStarterWorkspaceSlug(treasuryId, starterWorkspaceSlug) {
+    return this.updateOne(
+      { treasuryId },
+      { $set: { starterWorkspaceSlug, updatedAt: new Date() } }
+    );
   }
 
   async findByTreasuryId(treasuryId) {

@@ -62,7 +62,7 @@ function createTreasuryAdminApi({ treasuryDb, agentAccountDb }) {
    */
   router.post('/', async (req, res) => {
     try {
-      const { issuerName, issuerDomain, faucetPolicy, treasuryId: requestedTreasuryId, partnerId } = req.body;
+      const { issuerName, issuerDomain, faucetPolicy, treasuryId: requestedTreasuryId, partnerId, starterWorkspaceSlug } = req.body;
       if (!issuerName || !issuerDomain || !faucetPolicy) {
         return res.status(400).json({ error: 'BAD_REQUEST', message: 'issuerName, issuerDomain, and faucetPolicy are required' });
       }
@@ -75,7 +75,11 @@ function createTreasuryAdminApi({ treasuryDb, agentAccountDb }) {
       } else {
         treasuryId = `treasury_${issuerName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${uuidv4().slice(0, 6)}`;
       }
-      await treasuryDb.createTreasury({ treasuryId, issuerName, issuerDomain, faucetPolicy, ...(partnerId ? { partnerId } : {}) });
+      await treasuryDb.createTreasury({
+        treasuryId, issuerName, issuerDomain, faucetPolicy,
+        ...(partnerId ? { partnerId } : {}),
+        ...(starterWorkspaceSlug ? { starterWorkspaceSlug } : {}),
+      });
       logger.info('[treasuryAdminApi] Treasury created', { treasuryId, issuerName });
       return res.status(201).json({ treasuryId });
     } catch (err) {
@@ -263,6 +267,33 @@ function createTreasuryAdminApi({ treasuryDb, agentAccountDb }) {
     } catch (err) {
       logger.error('[treasuryAdminApi] setStatus failed', { treasuryId, error: err.message });
       return res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Failed to update treasury status' });
+    }
+  });
+
+  /**
+   * PATCH /internal/v1/admin/treasury/:treasuryId/workspace
+   *
+   * Set the starter workspace template slug for this treasury.
+   * Agents provisioned for this issuer will clone this workspace instead of the global default.
+   */
+  router.patch('/:treasuryId/workspace', async (req, res) => {
+    const { treasuryId } = req.params;
+    try {
+      const { starterWorkspaceSlug } = req.body;
+      if (!starterWorkspaceSlug || typeof starterWorkspaceSlug !== 'string') {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: 'starterWorkspaceSlug must be a non-empty string' });
+      }
+
+      const treasury = await treasuryDb.findByTreasuryId(treasuryId);
+      if (!treasury) {
+        return res.status(404).json({ error: 'NOT_FOUND', message: `Treasury ${treasuryId} not found` });
+      }
+
+      await treasuryDb.updateStarterWorkspaceSlug(treasuryId, starterWorkspaceSlug);
+      return res.json({ ok: true });
+    } catch (err) {
+      logger.error('[treasuryAdminApi] updateStarterWorkspaceSlug failed', { treasuryId, error: err.message });
+      return res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Failed to update starter workspace slug' });
     }
   });
 

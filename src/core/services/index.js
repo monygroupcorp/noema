@@ -577,6 +577,8 @@ async function initializeServices(options = {}) {
       collectionExportService,
       embellishmentTaskService, // Add embellishment task service
       generationExecutionService, // Phase 8: in-process execution
+      agentJwtVerifier, // multi-issuer ES256 JWT verifier (ERC-8004 agent onboarding)
+      economyService, // economy ledger (agent provisioning + faucet credits)
     });
     
     // The internalApiClient is a singleton utility, not from apiServices.
