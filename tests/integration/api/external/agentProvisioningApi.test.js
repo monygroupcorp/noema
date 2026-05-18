@@ -95,6 +95,12 @@ const DEFAULT_JWT_PAYLOAD = {
 
 // ─── Test app factory ─────────────────────────────────────────────────────────
 
+const DEFAULT_AGENT_CARD = {
+  profile: { name: 'Test Agent', description: 'A test agent', image: null },
+  collection: 'camel',
+  agentId: 'agent-1',
+};
+
 function createTestApp({
   treasury = makeMockTreasury(),
   treasuryDbOverrides = {},
@@ -104,6 +110,7 @@ function createTestApp({
   jwtVerifierOverrides = {},
   economyServiceOverrides = {},
   internalApiClientOverrides = {},
+  agentCardFetcher = async () => DEFAULT_AGENT_CARD,
 } = {}) {
   const app = express();
   app.use(express.json());
@@ -115,6 +122,7 @@ function createTestApp({
     camelJwtVerifier: makeMockCamelJwtVerifier(jwtPayload, jwtVerifierOverrides),
     economyService: makeMockEconomyService(economyServiceOverrides),
     internalApiClient: makeMockInternalApiClient(internalApiClientOverrides),
+    agentCardFetcher,
     logger: { error: () => {}, warn: () => {}, debug: () => {}, info: () => {} },
   });
 
@@ -328,10 +336,8 @@ describe('Agent Provisioning API', () => {
 
   // 12. Card fetch failure → still returns 202 (fallback values used)
   test('Card fetch failure → still returns 202 (fallback values used)', async () => {
-    // fetchAgentCard is a module-level function; we test with a workspaces findOne
-    // that returns null for the card's optional path via a workspace that doesn't
-    // have a matching w-3 window — just verify 202 comes through.
     const app = createTestApp({
+      agentCardFetcher: async () => null,
       workspacesDbOverrides: {
         findOne: async ({ slug }) => {
           if (slug === '745218a5') {
@@ -342,18 +348,12 @@ describe('Agent Provisioning API', () => {
         createWorkspace: async () => ({ _id: 'fake', slug: 'new-slug' }),
       },
     });
-    // The agentCardFetcher will fail because its fetch fn will hit the network;
-    // in the provisioning handler it's called with fetchAgentCard which uses node-fetch.
-    // Since we can't inject it here easily, we verify the handler still returns 202
-    // even when the card profile falls back. We rely on the actual fetchAgentCard
-    // being best-effort (catches internally and returns null).
-    // In a unit test environment without network, it will fail and return null.
+
     const res = await supertest(app)
       .post('/treasury/camel-1/agents')
       .set('Authorization', 'Bearer valid-token')
       .send();
 
-    // Either 202 (card null, fallback used) or 202 regardless
     assert.equal(res.status, 202);
     assert.ok(res.body.agentAccountId);
   });
