@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.10.4](https://github.com/monygroupcorp/noema/compare/v4.10.3...v4.10.4) (2026-05-18)
+
+
+### Bug Fixes
+
+* **partner:** wire spell execution dispatch and drop deprecated published check ([b66cbc7](https://github.com/monygroupcorp/noema/commit/b66cbc7a3b15fed08f687ec85f0f3907c7043b5b))
+
 ## [4.10.3](https://github.com/monygroupcorp/noema/compare/v4.10.2...v4.10.3) (2026-05-18)
 
 
