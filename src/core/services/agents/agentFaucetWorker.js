@@ -64,9 +64,11 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
       const periodStart = new Date(periodEnd.getTime() - 30 * 86400000);
 
       const scored = agents.map(agent => {
+        // Clamp to [0, 30]: Math.max(0, ...) handles future-dated sessionIssuedAt (clock skew
+        // or renewed sessions), preventing score from exceeding 1.0.
         const sessionRecencyDays = Math.min(
           30,
-          (periodEnd.getTime() - new Date(agent.sessionIssuedAt).getTime()) / 86400000,
+          Math.max(0, (periodEnd.getTime() - new Date(agent.sessionIssuedAt).getTime()) / 86400000),
         );
         // Newer agents score higher: 1 at day 0, 0 at day 30
         const score = Math.max(0, (30 - sessionRecencyDays) / 30);
@@ -83,7 +85,11 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
 
       // ── d. Compute drip amounts with monthly cap ───────────────────────────
       const firstOfMonth = new Date(periodEnd.getFullYear(), periodEnd.getMonth(), 1);
-      const monthlyMax = treasury.faucetPolicy?.monthlyMax || 0;
+      const monthlyMax = treasury.faucetPolicy?.monthlyMax ?? 0;
+      if (monthlyMax === 0) {
+        log.warn(`[agentFaucetWorker] Treasury ${treasury.treasuryId} has monthlyMax=0 — no drips will be issued; check faucetPolicy`);
+        continue;
+      }
 
       const agentsWithAlloc = [];
       for (const agent of scored) {
@@ -128,20 +134,82 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
             failureReason: 'INSUFFICIENT_BALANCE',
           });
           treasuryBalanceExhausted = true;
+          // Remaining agents in agentsWithAlloc receive no drip record this cycle.
+          // Reconcile by checking lastDripAt against the absence of drip records for those agents.
           break;
         }
 
+        // ── Stage 1: credit agent sub-account balance ─────────────────────
         try {
           await agentAccountDb.addBalance(agent.agentAccountId, dripAmount);
-          const { entryId } = await economyService.creditPoints(agent.noemaAccountId, {
+        } catch (addErr) {
+          log.error('[agentFaucetWorker] addBalance failed after treasury debit — agent NOT credited, manual reconciliation required', {
+            stage: 'addBalance',
+            treasuryId: treasury.treasuryId,
+            agentAccountId: agent.agentAccountId,
+            dripAmount,
+            error: addErr.message,
+          });
+          try {
+            await faucetDripsDb.createDrip({
+              treasuryId: treasury.treasuryId,
+              agentAccountId: agent.agentAccountId,
+              noemaAccountId: agent.noemaAccountId,
+              amount: dripAmount,
+              periodStart,
+              periodEnd,
+              scoringInputs: { spellsInvoked30d: agent.spellsInvoked30d, sessionRecencyDays: agent.sessionRecencyDays, score: agent.score },
+              creditLedgerEntryId: null,
+              status: 'failed',
+              failureReason: addErr.message,
+            });
+          } catch (dripErr) {
+            log.error('[agentFaucetWorker] failed to record addBalance failure — drip audit trail incomplete', { error: dripErr.message });
+          }
+          errors++;
+          continue;
+        }
+
+        // ── Stage 2: credit noema economy ledger ──────────────────────────
+        let entryId;
+        try {
+          const result = await economyService.creditPoints(agent.noemaAccountId, {
             points: dripAmount,
             description: `Faucet drip from treasury ${treasury.treasuryId}`,
             rewardType: 'FAUCET_DRIP',
-            relatedItems: {
-              agentAccountId: agent.agentAccountId,
-              treasuryId: treasury.treasuryId,
-            },
+            relatedItems: { agentAccountId: agent.agentAccountId, treasuryId: treasury.treasuryId },
           });
+          entryId = result.entryId;
+        } catch (creditErr) {
+          log.error('[agentFaucetWorker] creditPoints failed after addBalance — agent sub-account credited but noema ledger not updated, manual reconciliation required', {
+            stage: 'creditPoints',
+            treasuryId: treasury.treasuryId,
+            agentAccountId: agent.agentAccountId,
+            dripAmount,
+            error: creditErr.message,
+          });
+          try {
+            await faucetDripsDb.createDrip({
+              treasuryId: treasury.treasuryId,
+              agentAccountId: agent.agentAccountId,
+              noemaAccountId: agent.noemaAccountId,
+              amount: dripAmount,
+              periodStart,
+              periodEnd,
+              scoringInputs: { spellsInvoked30d: agent.spellsInvoked30d, sessionRecencyDays: agent.sessionRecencyDays, score: agent.score },
+              creditLedgerEntryId: null,
+              status: 'failed',
+              failureReason: creditErr.message,
+            });
+          } catch (dripErr) {
+            log.error('[agentFaucetWorker] failed to record creditPoints failure — drip audit trail incomplete', { error: dripErr.message });
+          }
+          errors++;
+          continue;
+        }
+
+        // ── Both stages succeeded: record credited drip ───────────────────
+        try {
           await faucetDripsDb.createDrip({
             treasuryId: treasury.treasuryId,
             agentAccountId: agent.agentAccountId,
@@ -149,43 +217,19 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
             amount: dripAmount,
             periodStart,
             periodEnd,
-            scoringInputs: {
-              spellsInvoked30d: agent.spellsInvoked30d,
-              sessionRecencyDays: agent.sessionRecencyDays,
-              score: agent.score,
-            },
+            scoringInputs: { spellsInvoked30d: agent.spellsInvoked30d, sessionRecencyDays: agent.sessionRecencyDays, score: agent.score },
             creditLedgerEntryId: entryId.toString(),
             status: 'credited',
             failureReason: null,
           });
-          log.info(`[agentFaucetWorker] Dripped ${dripAmount} pts to agent ${agent.agentAccountId} from treasury ${treasury.treasuryId}`);
-          agentsDripped++;
-          totalPointsDripped += dripAmount;
-        } catch (err) {
-          log.error('[agentFaucetWorker] creditPoints failed after debit — manual reconciliation required', {
-            treasuryId: treasury.treasuryId,
-            agentAccountId: agent.agentAccountId,
-            dripAmount,
-            error: err.message,
+        } catch (dripErr) {
+          log.warn('[agentFaucetWorker] failed to record credited drip — balances are correct but audit trail incomplete', {
+            agentAccountId: agent.agentAccountId, error: dripErr.message,
           });
-          await faucetDripsDb.createDrip({
-            treasuryId: treasury.treasuryId,
-            agentAccountId: agent.agentAccountId,
-            noemaAccountId: agent.noemaAccountId,
-            amount: dripAmount,
-            periodStart,
-            periodEnd,
-            scoringInputs: {
-              spellsInvoked30d: agent.spellsInvoked30d,
-              sessionRecencyDays: agent.sessionRecencyDays,
-              score: agent.score,
-            },
-            creditLedgerEntryId: null,
-            status: 'failed',
-            failureReason: err.message,
-          });
-          errors++;
         }
+        log.info(`[agentFaucetWorker] Dripped ${dripAmount} pts to agent ${agent.agentAccountId} from treasury ${treasury.treasuryId}`);
+        agentsDripped++;
+        totalPointsDripped += dripAmount;
       }
 
       // ── f. Update lastDripAt ───────────────────────────────────────────────
