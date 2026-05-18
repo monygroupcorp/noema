@@ -128,6 +128,11 @@ class AgentAccountDB extends BaseDB {
     return this.findMany({ treasuryId, status: 'active' });
   }
 
+  async countByTreasuryId(treasuryId) {
+    const accounts = await this.findMany({ treasuryId, status: 'active' });
+    return accounts.length;
+  }
+
   async addBalance(agentAccountId, points) {
     return this.updateOne(
       { agentAccountId },

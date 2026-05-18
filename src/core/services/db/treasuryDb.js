@@ -74,12 +74,13 @@ class TreasuryDB extends BaseDB {
     );
   }
 
-  // Caller is responsible for verifying sufficient balance before calling
   async debitBalance(treasuryId, points) {
-    return this.updateOne(
-      { treasuryId },
+    // Caller is responsible for verifying sufficient balance before calling
+    const result = await this.updateOne(
+      { treasuryId, balance: { $gte: points } },
       { $inc: { balance: -points }, $set: { updatedAt: new Date() } }
     );
+    return result.matchedCount > 0; // false = insufficient balance (atomic check)
   }
 
   async updateFaucetPolicy(treasuryId, policy) {

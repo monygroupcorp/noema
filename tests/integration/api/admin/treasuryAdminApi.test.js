@@ -29,17 +29,24 @@ function makeMockTreasuryDb(overrides = {}) {
     findByTreasuryId: async (id) => (id === 'test-1' ? sampleTreasury : null),
     createTreasury: async () => ({ insertedId: 'fake-id' }),
     addBalance: async () => {},
-    debitBalance: async () => {},
+    debitBalance: async () => true,
     updateFaucetPolicy: async () => {},
     setStatus: async () => {},
     ...overrides,
   };
 }
 
-function createTestApp(mockDb) {
+function makeMockAgentAccountDb(overrides = {}) {
+  return {
+    countByTreasuryId: async () => 0,
+    ...overrides,
+  };
+}
+
+function createTestApp(mockDb, mockAgentAccountDb) {
   const app = express();
   app.use(express.json());
-  const router = createTreasuryAdminApi({ treasuryDb: mockDb });
+  const router = createTreasuryAdminApi({ treasuryDb: mockDb, agentAccountDb: mockAgentAccountDb || makeMockAgentAccountDb() });
   app.use('/treasury', router);
   return app;
 }
@@ -62,10 +69,12 @@ describe('Treasury Admin API', () => {
 
   // ─── GET /:id ─────────────────────────────────────────────────────────────
 
-  test('GET /:id returns 200 with { treasury: {...} } when found', async () => {
+  test('GET /:id returns 200 with { treasury: {...}, agentCount } when found', async () => {
     const res = await supertest(app).get('/treasury/test-1');
     assert.equal(res.status, 200);
     assert.equal(res.body.treasury.treasuryId, 'test-1');
+    assert.equal(typeof res.body.agentCount, 'number');
+    assert.equal(res.body.agentCount, 0);
   });
 
   test('GET /:id returns 404 when not found', async () => {
@@ -189,12 +198,39 @@ describe('Treasury Admin API', () => {
   });
 
   test('POST /:id/debit returns 400 (INSUFFICIENT_BALANCE) when balance < points', async () => {
-    // sampleTreasury.balance = 1000, requesting 5000
-    const res = await supertest(app)
+    const mockDb = makeMockTreasuryDb({
+      debitBalance: async () => false,
+    });
+    const localApp = createTestApp(mockDb);
+    const res = await supertest(localApp)
       .post('/treasury/test-1/debit')
       .send({ points: 5000 });
     assert.equal(res.status, 400);
     assert.equal(res.body.error, 'INSUFFICIENT_BALANCE');
+  });
+
+  test('POST /:id/debit returns 400 when points is missing', async () => {
+    const res = await supertest(app)
+      .post('/treasury/test-1/debit')
+      .send({});
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'BAD_REQUEST');
+  });
+
+  test('POST /:id/debit returns 400 when points is 0', async () => {
+    const res = await supertest(app)
+      .post('/treasury/test-1/debit')
+      .send({ points: 0 });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'BAD_REQUEST');
+  });
+
+  test('POST /:id/debit returns 400 when points is negative', async () => {
+    const res = await supertest(app)
+      .post('/treasury/test-1/debit')
+      .send({ points: -10 });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'BAD_REQUEST');
   });
 
   // ─── PATCH /:id/policy ────────────────────────────────────────────────────
@@ -213,6 +249,22 @@ describe('Treasury Admin API', () => {
       .send({ starterGrant: 200 });
     assert.equal(res.status, 404);
     assert.equal(res.body.error, 'NOT_FOUND');
+  });
+
+  test('PATCH /:id/policy returns 400 for invalid subsidyMode', async () => {
+    const res = await supertest(app)
+      .patch('/treasury/test-1/policy')
+      .send({ subsidyMode: 'turbo' });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'BAD_REQUEST');
+  });
+
+  test('PATCH /:id/policy returns 400 for invalid refillCadence', async () => {
+    const res = await supertest(app)
+      .patch('/treasury/test-1/policy')
+      .send({ refillCadence: 'daily' });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'BAD_REQUEST');
   });
 
   // ─── PATCH /:id/status ────────────────────────────────────────────────────
