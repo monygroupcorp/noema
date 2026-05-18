@@ -48,7 +48,7 @@ class CamelJwtVerifier {
    * @param {number}   [opts.jwksTtlSeconds]   - How long to cache JWKS (default 300s)
    * @param {Function} [opts._fetchFn]         - Dependency-injected fetch (for testing)
    */
-  constructor({ logger, jwksTtlSeconds = 300, _fetchFn } = {}) {
+  constructor({ logger, jwksTtlSeconds = 3600, _fetchFn } = {}) {
     this.logger = logger || createLogger('CamelJwtVerifier');
     this.jwksTtlSeconds = jwksTtlSeconds;
     this._fetch = _fetchFn || fetch;
@@ -93,6 +93,7 @@ class CamelJwtVerifier {
       const payload = jwt.verify(token, pem, {
         algorithms: ['ES256'],
         audience: 'noema.art',
+        issuer: `https://${issuerDomain}`,
       });
       return payload;
     } catch (err) {
@@ -108,6 +109,7 @@ class CamelJwtVerifier {
 
   /**
    * Fetches and caches the JWKS for the given issuer domain.
+   * Stores the in-flight Promise to prevent concurrent double-fetch.
    *
    * @param {string} issuerDomain
    * @returns {Promise<Array>} - Array of JWK objects
@@ -116,16 +118,33 @@ class CamelJwtVerifier {
     const cacheKey = 'jwks:' + issuerDomain;
     const entry = this._jwksCache.get(cacheKey);
 
-    if (entry && entry.expiresAt > Date.now()) {
-      return entry.keys;
-    }
+    // Return resolved keys if cache is warm
+    if (entry && entry.expiresAt && entry.expiresAt > Date.now()) return entry.keys;
 
+    // Return in-flight promise to avoid concurrent double-fetch
+    if (entry && entry.promise) return entry.promise;
+
+    // Start fetch and store promise immediately
+    const promise = this._doFetchJwks(issuerDomain, cacheKey);
+    this._jwksCache.set(cacheKey, { promise });
+    return promise;
+  }
+
+  /**
+   * Does the actual JWKS fetch, parses it, and populates the cache.
+   *
+   * @param {string} issuerDomain
+   * @param {string} cacheKey
+   * @returns {Promise<Array>} - Array of JWK objects
+   */
+  async _doFetchJwks(issuerDomain, cacheKey) {
     const url = `https://${issuerDomain}/.well-known/jwks.json`;
 
     let response;
     try {
       response = await this._fetch(url, { timeout: 10000 });
     } catch (err) {
+      this._jwksCache.delete(cacheKey);
       throw new JwksUnavailableError(
         `Failed to fetch JWKS from ${url}: ${err.message}`,
         { cause: err, issuerDomain }
@@ -133,6 +152,7 @@ class CamelJwtVerifier {
     }
 
     if (!response.ok) {
+      this._jwksCache.delete(cacheKey);
       throw new JwksUnavailableError(
         `JWKS endpoint returned ${response.status} ${response.statusText} for ${url}`,
         { issuerDomain }
@@ -143,6 +163,7 @@ class CamelJwtVerifier {
     try {
       data = await response.json();
     } catch (err) {
+      this._jwksCache.delete(cacheKey);
       throw new JwksUnavailableError(
         `Failed to parse JWKS JSON from ${url}: ${err.message}`,
         { cause: err, issuerDomain }
@@ -150,6 +171,7 @@ class CamelJwtVerifier {
     }
 
     if (!Array.isArray(data.keys)) {
+      this._jwksCache.delete(cacheKey);
       throw new JwksUnavailableError(
         `JWKS response from ${url} is missing a 'keys' array`,
         { issuerDomain }
@@ -168,10 +190,10 @@ class CamelJwtVerifier {
 
     const ttlMs = ttlSeconds * 1000;
 
-    this._jwksCache.set(cacheKey, { keys: data.keys, expiresAt: Date.now() + ttlMs });
+    this._jwksCache.set(cacheKey, { keys: data.keys, expiresAt: Date.now() + ttlMs, promise: null });
 
     // Auto-evict after TTL to avoid stale entries accumulating
-    setTimeout(() => this._jwksCache.delete(cacheKey), ttlMs);
+    setTimeout(() => this._jwksCache.delete(cacheKey), ttlMs).unref();
 
     this.logger.debug(`Cached JWKS for ${issuerDomain} (ttl=${ttlSeconds}s, keys=${data.keys.length})`);
 
