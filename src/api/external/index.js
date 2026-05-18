@@ -28,6 +28,7 @@ const createX402GenerationApi = require('./x402/x402GenerationApi');
 const { createX402Middleware } = require('../../platforms/web/middleware/x402');
 const { createMcpRouter } = require('./mcp');
 const { createAgentDelegationApi } = require('./agents/agentDelegationApi');
+const { createAgentProvisioningApi } = require('./agents/agentProvisioningApi');
 const { createPresignApi } = require('./partner/presignApi');
 const { createPartnerRunApi } = require('./partner/partnerRunApi');
 
@@ -617,6 +618,23 @@ function initializeExternalApi(dependencies) {
   const agentDelegationRouter = createAgentDelegationApi(dependencies);
   externalApiRouter.use('/agents', agentDelegationRouter);
   logger.debug('External Agent Delegation API mounted at /agents.');
+
+  // CAMEL agent provisioning (public — CAMEL JWT assertion is the credential)
+  if (dependencies.db?.data?.treasury && dependencies.db?.data?.agentAccount && dependencies.camelJwtVerifier) {
+    const agentProvisioningRouter = createAgentProvisioningApi({
+      treasuryDb: dependencies.db.data.treasury,
+      agentAccountDb: dependencies.db.data.agentAccount,
+      workspacesDb: dependencies.db.data.workspaces,
+      camelJwtVerifier: dependencies.camelJwtVerifier,
+      economyService: dependencies.economyService,
+      internalApiClient,
+      logger,
+    });
+    externalApiRouter.use('/treasury', agentProvisioningRouter);
+    logger.debug('External Agent Provisioning API mounted at /treasury.');
+  } else {
+    logger.warn('External Agent Provisioning API not mounted due to missing DB or camelJwtVerifier dependencies.');
+  }
 
   // Partner presign (no auth — domain-locked + rate limited)
   if (dependencies.storageService && dependencies.db?.data?.partner && dependencies.db?.data?.uploadRecords) {

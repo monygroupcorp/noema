@@ -40,7 +40,8 @@ describe('AgentAccountDB', () => {
       sessionIssuedAt: now,
       sessionExpiresAt: expires,
     });
-    assert.ok(result.insertedId);
+    assert.ok(result.agentAccountId, 'createAgentAccount should return agentAccountId');
+    assert.ok(result.insertedId, 'createAgentAccount should return insertedId');
 
     // Fetch the inserted doc to check agentAccountId
     const found = await agentAccountDb.findByAgentId(TEST_AGENT_ID);
