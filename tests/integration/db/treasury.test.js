@@ -59,11 +59,20 @@ describe('TreasuryDB', () => {
     assert.equal(found.balance, 50);
   });
 
-  test('debitBalance decrements the balance', async () => {
+  test('debitBalance returns true and decrements the balance when sufficient', async () => {
     const treasuryDb = new TreasuryDB(console);
-    await treasuryDb.debitBalance(TEST_TREASURY_ID, 20);
+    const result = await treasuryDb.debitBalance(TEST_TREASURY_ID, 20);
+    assert.equal(result, true);
     const found = await treasuryDb.findByTreasuryId(TEST_TREASURY_ID);
     assert.equal(found.balance, 30);
+  });
+
+  test('debitBalance returns false and makes no write when points > balance', async () => {
+    const treasuryDb = new TreasuryDB(console);
+    const result = await treasuryDb.debitBalance(TEST_TREASURY_ID, 99999);
+    assert.equal(result, false);
+    const found = await treasuryDb.findByTreasuryId(TEST_TREASURY_ID);
+    assert.equal(found.balance, 30); // unchanged
   });
 
   test('updateFaucetPolicy sets new policy', async () => {

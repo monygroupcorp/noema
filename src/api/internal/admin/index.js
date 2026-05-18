@@ -50,6 +50,7 @@ function createAdminApi(dependencies) {
 
   const treasuryRouter = createTreasuryAdminApi({
     treasuryDb: dependencies.db?.treasury,
+    agentAccountDb: dependencies.db?.agentAccount,
   });
   router.use('/treasury', treasuryRouter);
 

@@ -16,8 +16,9 @@ const logger = createLogger('treasuryAdminApi');
  *
  * @param {Object} dependencies
  * @param {import('../../../core/services/db/treasuryDb')} dependencies.treasuryDb
+ * @param {import('../../../core/services/db/agentAccountDb')} dependencies.agentAccountDb
  */
-function createTreasuryAdminApi({ treasuryDb }) {
+function createTreasuryAdminApi({ treasuryDb, agentAccountDb }) {
   const router = express.Router();
 
   /**
@@ -46,7 +47,8 @@ function createTreasuryAdminApi({ treasuryDb }) {
       if (!treasury) {
         return res.status(404).json({ error: 'NOT_FOUND', message: `Treasury ${req.params.treasuryId} not found` });
       }
-      return res.json({ treasury });
+      const agentCount = agentAccountDb ? await agentAccountDb.countByTreasuryId(req.params.treasuryId) : 0;
+      return res.json({ treasury, agentCount });
     } catch (err) {
       logger.error('[treasuryAdminApi] findByTreasuryId failed', { treasuryId: req.params.treasuryId, error: err.message });
       return res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Failed to get treasury' });
@@ -60,11 +62,19 @@ function createTreasuryAdminApi({ treasuryDb }) {
    */
   router.post('/', async (req, res) => {
     try {
-      const { issuerName, issuerDomain, faucetPolicy } = req.body;
+      const { issuerName, issuerDomain, faucetPolicy, treasuryId: requestedTreasuryId } = req.body;
       if (!issuerName || !issuerDomain || !faucetPolicy) {
         return res.status(400).json({ error: 'BAD_REQUEST', message: 'issuerName, issuerDomain, and faucetPolicy are required' });
       }
-      const treasuryId = `treasury_${issuerName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${uuidv4().slice(0, 6)}`;
+      let treasuryId;
+      if (requestedTreasuryId !== undefined) {
+        if (typeof requestedTreasuryId !== 'string' || requestedTreasuryId.trim() === '') {
+          return res.status(400).json({ error: 'BAD_REQUEST', message: 'treasuryId must be a non-empty string' });
+        }
+        treasuryId = requestedTreasuryId;
+      } else {
+        treasuryId = `treasury_${issuerName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${uuidv4().slice(0, 6)}`;
+      }
       await treasuryDb.createTreasury({ treasuryId, issuerName, issuerDomain, faucetPolicy });
       logger.info('[treasuryAdminApi] Treasury created', { treasuryId, issuerName });
       return res.status(201).json({ treasuryId });
@@ -126,11 +136,10 @@ function createTreasuryAdminApi({ treasuryDb }) {
         return res.status(404).json({ error: 'NOT_FOUND', message: `Treasury ${treasuryId} not found` });
       }
 
-      if (treasury.balance < points) {
-        return res.status(400).json({ error: 'INSUFFICIENT_BALANCE', message: `Treasury balance (${treasury.balance}) is less than requested debit (${points})` });
+      const debited = await treasuryDb.debitBalance(treasuryId, points);
+      if (!debited) {
+        return res.status(400).json({ error: 'INSUFFICIENT_BALANCE', message: `Insufficient balance to debit ${points} points` });
       }
-
-      await treasuryDb.debitBalance(treasuryId, points);
 
       const updated = await treasuryDb.findByTreasuryId(treasuryId);
       return res.json({ balance: updated.balance });
@@ -160,6 +169,19 @@ function createTreasuryAdminApi({ treasuryDb }) {
       }
       if (Object.keys(fields).length === 0) {
         return res.status(400).json({ error: 'BAD_REQUEST', message: 'At least one of starterGrant, monthlyMax, subsidyMode, refillCadence is required' });
+      }
+
+      if (fields.subsidyMode !== undefined && !['on', 'off', 'hybrid'].includes(fields.subsidyMode)) {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: "subsidyMode must be 'on', 'off', or 'hybrid'" });
+      }
+      if (fields.refillCadence !== undefined && !['weekly', 'biweekly', 'monthly'].includes(fields.refillCadence)) {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: "refillCadence must be 'weekly', 'biweekly', or 'monthly'" });
+      }
+      if (fields.starterGrant !== undefined && (!Number.isInteger(fields.starterGrant) || fields.starterGrant < 0)) {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: 'starterGrant must be a non-negative integer' });
+      }
+      if (fields.monthlyMax !== undefined && (!Number.isInteger(fields.monthlyMax) || fields.monthlyMax < 0)) {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: 'monthlyMax must be a non-negative integer' });
       }
 
       const updatedPolicy = { ...treasury.faucetPolicy, ...fields };
