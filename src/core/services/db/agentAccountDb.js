@@ -92,7 +92,7 @@ class AgentAccountDB extends BaseDB {
   }) {
     const agentAccountId = await this._generateAgentAccountId();
     const now = new Date();
-    return this.insertOne({
+    const result = await this.insertOne({
       agentAccountId,
       treasuryId,
       agentId,
@@ -110,6 +110,7 @@ class AgentAccountDB extends BaseDB {
       createdAt: now,
       updatedAt: now,
     });
+    return { agentAccountId, insertedId: result.insertedId };
   }
 
   async findByAgentAccountId(agentAccountId) {
