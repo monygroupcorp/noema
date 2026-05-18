@@ -1,6 +1,9 @@
 import type { Db } from 'mongodb'
 import type { FlowContext, Platform } from './types.js'
 import type { FlowContextStore } from './FlowContextStore.js'
+import { makeLogger } from '../lib/logger.js'
+
+const log = makeLogger('flow:context-store')
 
 export class MongoFlowContextStore implements FlowContextStore {
   private readonly collection
@@ -32,7 +35,7 @@ export class MongoFlowContextStore implements FlowContextStore {
     if (ctx.pendingActumId) this.actumIndex.set(ctx.pendingActumId, k)
 
     // Fire-and-forget Mongo upsert
-    this._upsert(k, ctx).catch(err => console.error('[MongoFlowContextStore] upsert error:', err))
+    this._upsert(k, ctx).catch((err: unknown) => log.error('upsert error', { error: String(err) }))
   }
 
   delete(platform: Platform, userId: string): void {
@@ -40,7 +43,7 @@ export class MongoFlowContextStore implements FlowContextStore {
     const existing = this.primary.get(k)
     if (existing?.pendingActumId) this.actumIndex.delete(existing.pendingActumId)
     this.primary.delete(k)
-    this._delete(k).catch(err => console.error('[MongoFlowContextStore] delete error:', err))
+    this._delete(k).catch((err: unknown) => log.error('delete error', { error: String(err) }))
   }
 
   findByPendingActumId(actumId: string): FlowContext | undefined {

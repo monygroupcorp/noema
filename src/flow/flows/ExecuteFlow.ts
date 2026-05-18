@@ -224,7 +224,18 @@ export class ExecuteFlow implements Flow {
     const reservation = await cursor.reserve(modus, state.aditus)
 
     if (balance < reservation) {
-      return { kind: 'handoff', toIntent: 'manage', withContext: { reason: 'insufficient_funds' } }
+      return {
+        primitives: [{
+          kind: 'Detail',
+          label: 'Insufficient balance',
+          content: `This tool costs ${reservation} but your balance is ${balance}.\n\nTop up to continue.`,
+          actions: [
+            { id: 'connect_wallet', label: 'connect wallet' },
+            { id: 'buy_credits',    label: 'buy credits'   },
+            { id: 'cancel',         label: '✕'             },
+          ],
+        }],
+      }
     }
 
     return this._submit(ctx, state)

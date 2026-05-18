@@ -287,7 +287,7 @@ test('CONFIGURE + form, balance sufficient, async cursor returns AWAITING_COMPLE
   assert.ok(ctx.pendingActumId, 'pendingActumId should be set on ctx')
 })
 
-test('CONFIGURE + form, balance insufficient returns handoff to manage', async () => {
+test('CONFIGURE + form, balance insufficient returns Detail step with top-up actions', async () => {
   const deps = makeDeps({
     signorum: {
       balance: async () => 0n,  // zero balance
@@ -306,12 +306,16 @@ test('CONFIGURE + form, balance insufficient returns handoff to manage', async (
   await flow.handle(ctx, { kind: 'paginate', action: 'select', selectedId: 'mod-1' })
 
   const result = await flow.handle(ctx, { kind: 'form', values: { prompt: 'a cat' } })
-  assertResolution(result)
+  assertStep(result)
 
-  assert.equal(result.kind, 'handoff')
-  if (result.kind === 'handoff') {
-    assert.equal(result.toIntent, 'manage')
-    assert.deepEqual((result.withContext as { reason: string }).reason, 'insufficient_funds')
+  const p = result.primitives[0]
+  assert.equal(p.kind, 'Detail')
+  if (p.kind === 'Detail') {
+    assert.ok(p.label.includes('Insufficient') || p.label.includes('balance'), 'label should mention balance')
+    const actionIds = p.actions.map(a => a.id)
+    assert.ok(actionIds.includes('connect_wallet'), 'should have connect_wallet action')
+    assert.ok(actionIds.includes('buy_credits'), 'should have buy_credits action')
+    assert.ok(actionIds.includes('cancel'), 'should have cancel action')
   }
 })
 

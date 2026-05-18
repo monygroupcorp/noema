@@ -15,7 +15,14 @@ import type { RouterDeps, IdentityResolver, TelegramSender } from './allocutio/T
 import type { AuctorKey } from './flow/types.js'
 import { createWebhookRouter } from './api/webhooks/webhookRouter.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
+import { createLiveRouter } from './api/internal/liveRouter.js'
+import { WideEventStore }         from './analytics/WideEventStore.js'
+import { ensureWideIndexes }      from './analytics/ensureWideIndexes.js'
+import { startAnalyticsListener } from './analytics/analyticsListener.js'
+import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
 import { CANONICAL_MODI } from './crystal/seeds/modi.js'
+import { makeLogger } from './lib/logger.js'
+import { withTrace, makeTraceContext } from './lib/trace.js'
 
 import { hostCutHook } from './ledger/hooks/hostCut.js'
 import { modelRoyaltyHook } from './ledger/hooks/modelRoyalty.js'
@@ -115,15 +122,18 @@ class TelegramIdentityResolver implements IdentityResolver {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
+  const log = makeLogger('startup')
+
   // 0. Record startup time (used to filter stale Telegram updates)
   const botStartupTime = Date.now()
 
   // 1. Connect MongoDB
   const mongo = new MongoClient(MONGODB_URI as string)
   await mongo.connect()
-  console.log('MongoDB connected')
+  log.info('MongoDB connected')
   await ensureIndexes(mongo.db(DB_NAME))
-  console.log('Indexes ensured')
+  await ensureWideIndexes(mongo.db(DB_NAME))
+  log.info('Indexes ensured')
 
   // 2. Build embedding functions (CLIP service) and OpenAI client
   const CLIP_SERVICE_URL = process.env.CLIP_SERVICE_URL
@@ -146,9 +156,9 @@ async function main(): Promise<void> {
     }
     embed      = (text) => clipPost('/embed/text',  { text })
     embedImage = (url)  => clipPost('/embed/image', { url })
-    console.log(`CLIP service: ${CLIP_SERVICE_URL}`)
+    log.info(`CLIP service: ${CLIP_SERVICE_URL}`)
   } else {
-    console.warn('CLIP_SERVICE_URL not set — vestigium embeddings disabled')
+    log.warn('CLIP_SERVICE_URL not set — vestigium embeddings disabled')
   }
 
   let openaiClient: ContainerConfig['openaiClient'] | undefined
@@ -220,12 +230,12 @@ async function main(): Promise<void> {
 
   // 3b. Rehydrate in-flight collections from DB (recovery after restart)
   await ring.collectioCursor.rehydrate()
-  console.log('CollectioCursor rehydrated')
+  log.info('CollectioCursor rehydrated')
 
   // 3c. Recover expired acta — release locked signa from jobs that never completed
   const expired = await ring.actorum.findExpired()
   if (expired.length) {
-    console.log(`Recovering ${expired.length} expired acta`)
+    log.info(`Recovering ${expired.length} expired acta`)
     await Promise.all(expired.map(a => ring.completor.fail(a, 'Actum expired — pod never reported back')))
   }
 
@@ -242,12 +252,12 @@ async function main(): Promise<void> {
   for (const modus of CANONICAL_MODI) {
     await ring.modorum.register(modus)
   }
-  console.log(`Seeded ${CANONICAL_MODI.length} canonical modi`)
+  log.info(`Seeded ${CANONICAL_MODI.length} canonical modi`)
 
   for (const intella of CANONICAL_INTELLAE) {
     await intellae.upsert(intella)
   }
-  console.log(`Seeded ${CANONICAL_INTELLAE.length} canonical intellae`)
+  log.info(`Seeded ${CANONICAL_INTELLAE.length} canonical intellae`)
 
   // 5. Create FlowContextStore + FlowRouter bridge
   let stepCb: StepCallback | null = null
@@ -295,8 +305,14 @@ async function main(): Promise<void> {
     botStartupTime,
   })
 
-  tgBot.on('message', ctx => allocutio.receive(ctx.update))
-  tgBot.on('callback_query', ctx => allocutio.receive(ctx.update))
+  tgBot.on('message', ctx => {
+    const traceCtx = makeTraceContext({ platform: 'telegram' })
+    withTrace(traceCtx, () => allocutio.receive(ctx.update))
+  })
+  tgBot.on('callback_query', ctx => {
+    const traceCtx = makeTraceContext({ platform: 'telegram' })
+    withTrace(traceCtx, () => allocutio.receive(ctx.update))
+  })
 
   // 8. Express + webhook router
   const app = express()
@@ -307,6 +323,12 @@ async function main(): Promise<void> {
   }))
 
   app.use('/api/vestigia', createVestigiaRouter(ring.vestigiorum))
+
+  const INTERNAL_SECRET = process.env.INTERNAL_SECRET
+  const wideStore = new WideEventStore(mongo.db(DB_NAME))
+  startAnalyticsListener(wideStore)
+  app.use('/internal', createLiveRouter(INTERNAL_SECRET))
+  app.use('/internal/analytics', createAnalyticsRouter(wideStore, INTERNAL_SECRET))
 
   app.use('/webhooks', createWebhookRouter({
     actorum: ring.actorum,
@@ -321,13 +343,28 @@ async function main(): Promise<void> {
     collectioRouter: ring.collectioCursor,
   }))
 
-  app.listen(PORT, () => console.log(`Listening on :${PORT}`))
+  app.listen(PORT, () => log.info(`Listening on :${PORT}`))
 
-  // 9. Start Telegram
+  // 9. Register bot commands with Telegram
+  const BOT_COMMANDS = [
+    { command: 'make',   description: 'Generate images and art'        },
+    { command: 'chat',   description: 'Chat with an AI model'          },
+    { command: 'flows',  description: 'Browse all available tools'     },
+    { command: 'status', description: 'View your balance and account'  },
+    { command: 'wallet', description: 'Manage connected wallets'       },
+    { command: 'cancel', description: 'Cancel current action'          },
+    { command: 'help',   description: 'Show available commands'        },
+  ]
+  await tgBot.telegram.setMyCommands(BOT_COMMANDS).catch((e: unknown) =>
+    log.warn('Failed to register bot commands', { error: String(e) })
+  )
+  log.info('Bot commands registered', { count: BOT_COMMANDS.length })
+
+  // 10. Start Telegram
   if (TELEGRAM_WEBHOOK_URL) {
     await tgBot.telegram.setWebhook(`${TELEGRAM_WEBHOOK_URL}/telegram`)
     app.use(tgBot.webhookCallback('/telegram'))
-    console.log(`Telegram webhook set to ${TELEGRAM_WEBHOOK_URL}/telegram`)
+    log.info(`Telegram webhook set to ${TELEGRAM_WEBHOOK_URL}/telegram`)
   } else {
     let pollingRestartInProgress = false
     let consecutivePollingErrors = 0
@@ -336,27 +373,27 @@ async function main(): Promise<void> {
     await tgBot.launch({
       allowedUpdates: ['message', 'callback_query'],
     })
-    console.log('Telegram polling started')
+    log.info('Telegram polling started')
 
     tgBot.catch((err: unknown) => {
       const status = (err as { response?: { error_code?: number } })?.response?.error_code
 
       if (status === 409) {
-        console.warn('[Bot] 409 conflict — concurrent instance. Backing off 50s.')
+        log.warn('Bot 409 conflict — concurrent instance. Backing off 50s.')
         if (!pollingRestartInProgress) {
           pollingRestartInProgress = true
           consecutivePollingErrors = 0
           setTimeout(() => {
             pollingRestartInProgress = false
             tgBot.launch({ allowedUpdates: ['message', 'callback_query'] })
-              .catch(e => console.error('[Bot] Failed restart after 409:', e))
+              .catch((e: unknown) => log.error('Bot failed restart after 409', { error: String(e) }))
           }, 50_000)
         }
         return
       }
 
       consecutivePollingErrors++
-      console.error(`[Bot] Polling error (${consecutivePollingErrors}):`, err)
+      log.error(`Bot polling error (${consecutivePollingErrors})`, { error: String(err) })
 
       if (consecutivePollingErrors >= 5 && !pollingRestartInProgress) {
         pollingRestartInProgress = true
@@ -364,7 +401,7 @@ async function main(): Promise<void> {
         setTimeout(() => {
           pollingRestartInProgress = false
           tgBot.launch({ allowedUpdates: ['message', 'callback_query'] })
-            .catch(e => console.error('[Bot] Failed restart after errors:', e))
+            .catch((e: unknown) => log.error('Bot failed restart after errors', { error: String(e) }))
         }, 5_000)
       }
     })
@@ -372,7 +409,7 @@ async function main(): Promise<void> {
 
   // 10. Graceful shutdown
   const shutdown = async (signal: string): Promise<void> => {
-    console.log(`${signal} received — shutting down`)
+    log.info(`${signal} received — shutting down`)
     tgBot.stop(signal)
     await mongo.close()
     process.exit(0)
@@ -383,6 +420,7 @@ async function main(): Promise<void> {
 }
 
 main().catch(err => {
-  console.error('Fatal startup error:', err)
+  const fatalLog = makeLogger('startup')
+  fatalLog.error('Fatal startup error', { error: String(err) })
   process.exit(1)
 })

@@ -466,11 +466,12 @@ test('callback_query pn fires paginate next event to router', async () => {
   assert.equal((event as { kind: 'paginate'; action: string }).action, 'next')
 })
 
-// 11. Stream primitive with status 'running' → sends plain text "⏳ Running..."
-test('Stream primitive with running status sends running text', async () => {
+// 11. Stream primitive with status 'running' and a stored command message → reacts 👌, sends nothing
+test('Stream primitive with running status reacts 👌 on command message when command message ID is stored', async () => {
   const { allocutio, router, sender } = makeAllocutio()
 
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  // Send a /run command with a specific message ID — this stores the command message ID
+  await allocutio.receive(msgUpdate(123, 456, '/run', 50))
 
   const ctx: FlowContext = {
     intent: 'execute',
@@ -490,12 +491,15 @@ test('Stream primitive with running status sends running text', async () => {
   }
 
   sender.sent.length = 0
+  sender.reactions.length = 0
   router.triggerStep(ctx, step)
   await new Promise(r => setImmediate(r))
 
-  const msg = sender.sent[0]
-  assert.ok(msg, 'Should send a message')
-  assert.match(msg.text, /Running/i, 'Should contain "Running"')
+  // Should NOT send a message — the reaction replaces the Stream card
+  assert.equal(sender.sent.length, 0, 'Should not send a message when reacting with 👌')
+  // Should react with 👌 on the original command message
+  const thumbsUp = sender.reactions.find(r => r.emoji === '👌' && r.messageId === 50)
+  assert.ok(thumbsUp, 'Should react 👌 on the original command message')
 })
 
 // 12. Stream primitive with status 'complete' → sends message with content

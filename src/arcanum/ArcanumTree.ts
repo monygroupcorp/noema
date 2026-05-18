@@ -1,6 +1,9 @@
 import type { Collection } from 'mongodb'
 import type { ArcanumLeaf } from './types.js'
 import { poseidon, computeLeaf } from './poseidon.js'
+import { makeLogger } from '../lib/logger.js'
+
+const log = makeLogger('arcanum:tree')
 
 // =============================================================================
 // ArcanumTree — append-only Poseidon Merkle tree for anonymous note commitments

@@ -3,6 +3,9 @@ import type { Signorum } from '../types/significandi.js'
 import type { ArcanumTreeStore } from '../arcanum/ArcanumTree.js'
 import type { ArcanumIssuance } from '../arcanum/types.js'
 import { computeCommitment, computeNullifierHash } from '../arcanum/poseidon.js'
+import { makeLogger } from '../lib/logger.js'
+
+const log = makeLogger('arcanum:issuer')
 
 // ---------------------------------------------------------------------------
 // ArcanumIssuer — converts identified balance → anonymous Merkle note

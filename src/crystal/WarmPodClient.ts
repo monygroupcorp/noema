@@ -2,6 +2,9 @@ import type { RunPodClient } from './RunPodCursor.js'
 import type { Materia, MateriaStore } from '../types/materia.js'
 import type { SshTransportLike } from './SecurePodClient.js'
 import { makeSecurePodSshFactory } from './SecurePodClient.js'
+import { makeLogger } from '../lib/logger.js'
+
+const log = makeLogger('cursor:runpod:warm')
 
 const COMFYUI_PORT = 8188
 
@@ -67,7 +70,7 @@ export class WarmPodClient implements RunPodClient {
     await this.materiae.update(id, { status: 'active' })
 
     this._runBackground(params.input, params.webhook).catch(async (err) => {
-      console.error(`[WarmPodClient] Materia ${id} job failed: ${(err as Error).message}`)
+      log.error(`Materia ${id} job failed`, { materiaId: id, error: (err as Error).message })
       // Return pod to idle (or terminate if private) even on failure
       const nextStatus = this.materia.podPolicy === 'private' ? 'terminated' : 'idle'
       await this.materiae.update(id, { status: nextStatus }).catch(() => {})
