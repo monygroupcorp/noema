@@ -45,7 +45,7 @@ export class ActumInceptor {
 
     // 3. Balance check
     const balance = await signorum.balance(by)
-    if (balance < reservation) {
+    if (balance < reservation && !process.env.DEV_FREE_EXECUTION) {
       log.warn('insufficient funds', { balance: balance.toString(), required: reservation.toString() })
       throw new Error(`Insufficient funds: balance ${balance} < required ${reservation}`)
     }

@@ -76,6 +76,22 @@ export class ExecuteFlow implements Flow {
   async enter(ctx: FlowContext): Promise<Step> {
     const existing = ctx.state as Partial<ExecuteFlowState> | undefined
 
+    // Pre-filled shortcut: modusId + non-empty aditus → validate and submit directly
+    if (existing?.modusId && existing.aditus && Object.keys(existing.aditus as Record<string, unknown>).length > 0 && !Array.isArray((existing.aditus as Record<string, unknown>).messages)) {
+      const state: ExecuteFlowState = {
+        step: 'CONFIGURE',
+        modusId: existing.modusId,
+        aditus: {},
+        browsePageIndex: 0,
+        mode: existing.mode,
+        category: existing.category,
+      }
+      ctx.state = state
+      const modus = await this._resolveModus(state)
+      state.aditus = validateAditus(modus.aditus, existing.aditus as Record<string, unknown>)
+      return this._submit(ctx, state) as Promise<Step>
+    }
+
     // Conversational reply shortcut: modusId + messages[] already set → skip form, submit directly
     if (existing?.modusId && Array.isArray(existing.aditus?.messages)) {
       const state: ExecuteFlowState = {
@@ -211,19 +227,30 @@ export class ExecuteFlow implements Flow {
   }
 
   private async _handleConfigure(ctx: FlowContext, state: ExecuteFlowState, event: PrimitiveEvent): Promise<Step | Resolution> {
-    if (event.kind !== 'form') return this._buildConfigureStep(state)
+    // Accept plain text as the value for the first unfilled required field
+    let formValues: Record<string, unknown>
+    if (event.kind === 'form') {
+      formValues = event.values
+    } else if (event.kind === 'prompt') {
+      const modus = await this._resolveModus(state)
+      const firstRequired = Object.entries(modus.aditus).find(([k, p]) => p.required && !(k in state.aditus))
+      if (!firstRequired) return this._buildConfigureStep(state)
+      formValues = { [firstRequired[0]]: event.text }
+    } else {
+      return this._buildConfigureStep(state)
+    }
 
     // Merge form values into aditus, then validate and strip against schema
     const modus = await this._resolveModus(state)
-    const validated = validateAditus(modus.aditus, { ...state.aditus, ...event.values })
+    const validated = validateAditus(modus.aditus, { ...state.aditus, ...formValues })
     state.aditus = validated
 
-    // Balance check
+    // Balance check — skipped in dev when DEV_FREE_EXECUTION is set
     const balance = await this.deps.signorum.balance(ctx.identity)
     const cursor = this.deps.cursorum.resolve(modus)
     const reservation = await cursor.reserve(modus, state.aditus)
 
-    if (balance < reservation) {
+    if (balance < reservation && !process.env.DEV_FREE_EXECUTION) {
       return {
         primitives: [{
           kind: 'Detail',

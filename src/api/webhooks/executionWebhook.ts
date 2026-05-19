@@ -50,10 +50,15 @@ export interface WebhookResult {
   body: { success: boolean; message?: string }
 }
 
+interface RunPodOutputItem {
+  url?: string
+  path?: string
+}
+
 interface RunPodPayload {
   id: string
   status: string
-  output?: unknown[]
+  output?: Array<RunPodOutputItem | string>
   error?: string
   executionTime?: number
   delayTime?: number
@@ -96,12 +101,36 @@ export async function handleExecutionWebhook(
       return { status: 404, body: { success: false, message: `No actum found for externusJobId: ${payload.id}` } }
     }
 
+    // Idempotency: webhook may arrive more than once; already-terminal actums are a no-op
+    if (actum.status === 'completus' || actum.status === 'fractus') {
+      return { status: 200, body: { success: true } }
+    }
+
     const status = payload.status
 
     if (status === 'COMPLETED') {
       const executionTime = payload.executionTime ?? 0
+
+      // Build typed exitus from output items
+      const outputItems = payload.output ?? []
+      let exitusData: Record<string, unknown> = { outputs: outputItems }
+      const urlItems = outputItems
+        .map(o => (typeof o === 'object' && o !== null && 'url' in o ? (o as RunPodOutputItem).url : undefined))
+        .filter((u): u is string => !!u)
+      if (urlItems.length > 0) {
+        const ext = urlItems[0].split('?')[0].split('.').pop()?.toLowerCase() ?? ''
+        const isVideo = /mp4|webm|mov/.test(ext)
+        const isAudio = /mp3|wav|ogg|flac/.test(ext)
+        exitusData = isVideo
+          ? { videoUrl: urlItems[0] }
+          : isAudio
+          ? { audioUrl: urlItems[0] }
+          : { imageUrl: urlItems[0] }
+        urlItems.slice(1).forEach((u, i) => { exitusData[`imageUrl${i + 2}`] = u })
+      }
+
       const exitus: Exitus = {
-        exitus: { outputs: payload.output ?? [] },
+        exitus: exitusData,
         impetus: BigInt(Math.ceil(executionTime / 1000)),
         duratio: executionTime,
       }
@@ -157,6 +186,7 @@ export async function handleExecutionWebhook(
       if (identity && deps.vestigiorum) {
         createVestigiumFromActum(completed, identity, deps.vestigiorum).catch(() => {})
       }
+
       return { status: 200, body: { success: true } }
     }
 
@@ -164,7 +194,6 @@ export async function handleExecutionWebhook(
       await deps.completor.fail(actum, payload.error ?? 'Job failed')
       await deps.flowRouter?.handleActumComplete(actum.id, { kind: 'failed', error: payload.error ?? 'Job failed' })
 
-      // Route collection acta to CollectioCursor on failure
       if (deps.collectioRouter) {
         const collectioId = deps.collectioRouter.findCollectioIdForActum(actum.id)
         if (collectioId) await deps.collectioRouter.onActumCompleta(collectioId, actum.id, false)

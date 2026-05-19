@@ -11,7 +11,8 @@ import { FlowRouter } from './flow/FlowRouter.js'
 import type { StepCallback, ResolutionCallback } from './flow/FlowRouter.js'
 import { ExecuteFlow } from './flow/flows/ExecuteFlow.js'
 import { TelegramAllocutio } from './allocutio/TelegramAllocutio.js'
-import type { RouterDeps, IdentityResolver, TelegramSender } from './allocutio/TelegramAllocutio.js'
+import type { RouterDeps, IdentityResolver } from './allocutio/TelegramAllocutio.js'
+import { makeTelegramSender } from './allocutio/TelegramSenderAdapter.js'
 import type { AuctorKey } from './flow/types.js'
 import { createWebhookRouter } from './api/webhooks/webhookRouter.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
@@ -21,6 +22,7 @@ import { ensureWideIndexes }      from './analytics/ensureWideIndexes.js'
 import { startAnalyticsListener } from './analytics/analyticsListener.js'
 import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
 import { CANONICAL_MODI } from './crystal/seeds/modi.js'
+import { CANONICAL_ESSENTIAE } from './crystal/seeds/essentiae.js'
 import { makeLogger } from './lib/logger.js'
 import { withTrace, makeTraceContext } from './lib/trace.js'
 
@@ -30,7 +32,7 @@ import { platformSkimHook } from './ledger/hooks/platformSkim.js'
 import { referralSplitHook } from './ledger/hooks/referralSplit.js'
 import { sessionSpendHook } from './ledger/hooks/sessionSpend.js'
 import { spellRoyaltyHook } from './ledger/hooks/spellRoyalty.js'
-import { SecurePodClient, makeSecurePodSshFactory } from './crystal/SecurePodClient.js'
+import { SecurePodClient, makeSecurePodSshFactory, type R2Config } from './crystal/SecurePodClient.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { Compiler } from './crystal/Compiler.js'
@@ -54,12 +56,19 @@ const DB_NAME = process.env.DB_NAME ?? 'noema'
 const PORT = Number(process.env.PORT ?? 3000)
 const RUNPOD_WEBHOOK_SECRET = process.env.RUNPOD_WEBHOOK_SECRET
 const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY
-const RUNPOD_GPU_TYPE_IDS = process.env.RUNPOD_GPU_TYPE_IDS   // comma-separated, e.g. "NVIDIA GeForce RTX 4090,NVIDIA RTX A5000"
-const RUNPOD_IMAGE_NAME = process.env.RUNPOD_IMAGE_NAME        // Docker image, e.g. "stationthis/flux-comfyui-runtime:v1"
 const RUNPOD_SSH_KEY_PATH = process.env.RUNPOD_SSH_KEY_PATH ?? `${process.env.HOME}/.ssh/runpod`
 const RUNPOD_CLOUD_TYPE = (process.env.RUNPOD_CLOUD_TYPE ?? 'SECURE') as 'SECURE' | 'COMMUNITY'
-const RUNPOD_WEBHOOK_URL = process.env.RUNPOD_WEBHOOK_URL
 const RUNPOD_KEEP_WARM = process.env.RUNPOD_KEEP_WARM !== 'false'  // default true
+// Production: derive from public WEBHOOK_URL. Local dev: post back to ourselves.
+// SecurePodClient runs on our server (not on the pod), so localhost always works.
+const RUNPOD_WEBHOOK_URL = process.env.WEBHOOK_URL
+  ? `https://${process.env.WEBHOOK_URL.replace(/^https?:\/\//, '').replace(/\/$/, '')}/webhooks/runpod`
+  : `http://localhost:${process.env.PORT ?? 3000}/webhooks/runpod`
+const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID
+const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID
+const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY
+const R2_OUTPUTS_BUCKET = process.env.R2_OUTPUTS_BUCKET ?? process.env.R2_BUCKET_NAME
+const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL
 const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL
 
 // ---------------------------------------------------------------------------
@@ -76,20 +85,19 @@ const templateRegistry = new WorkflowTemplateRegistry(
 
 import type { MateriaStore } from './types/materia.js'
 
-function makeSecureRunPodClient(
-  apiKey: string,
-  gpuTypeIds: string[],
-  imageName: string,
-  materiae?: MateriaStore,
-): SecurePodClient {
+function makeSecureRunPodClient(materiae?: MateriaStore): SecurePodClient {
+  const r2: R2Config | undefined =
+    R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_OUTPUTS_BUCKET
+      ? { accountId: R2_ACCOUNT_ID, accessKeyId: R2_ACCESS_KEY_ID, secretAccessKey: R2_SECRET_ACCESS_KEY, bucket: R2_OUTPUTS_BUCKET, publicUrl: R2_PUBLIC_URL }
+      : undefined
+
   return new SecurePodClient(
     {
-      apiKey,
-      gpuTypeIds,
-      imageName,
+      apiKey: RUNPOD_API_KEY!,
       cloudType: RUNPOD_CLOUD_TYPE,
       sshKeyPath: RUNPOD_SSH_KEY_PATH,
       keepWarm: RUNPOD_KEEP_WARM,
+      r2,
     },
     makeSecurePodSshFactory(RUNPOD_SSH_KEY_PATH),
     globalThis.fetch,
@@ -205,14 +213,10 @@ async function main(): Promise<void> {
       throw new Error(`Modus '${essentia.id}' has no runpodSpec — cannot compile for RunPod`)
     }
     const { hash, spec } = await compiler.compile(essentia, aditus)
-    return { hash, input: spec.workflow.inputTemplate }
+    return { hash, input: spec }
   }
 
-  const gpuTypeIds = RUNPOD_GPU_TYPE_IDS?.split(',').map(s => s.trim()).filter(Boolean) ?? []
-  const runpodClient =
-    RUNPOD_API_KEY && gpuTypeIds.length && RUNPOD_IMAGE_NAME
-      ? makeSecureRunPodClient(RUNPOD_API_KEY, gpuTypeIds, RUNPOD_IMAGE_NAME, materiae)
-      : undefined
+  const runpodClient = RUNPOD_API_KEY ? makeSecureRunPodClient(materiae) : undefined
 
   const ring = createContainer(mongo, {
     mongoUri: MONGODB_URI as string,
@@ -248,11 +252,16 @@ async function main(): Promise<void> {
   nexus.on('session_spend', sessionSpendHook)
   nexus.on('deposit_confirmed', referralSplitHook)
 
-  // 4. Seed canonical modi + intellae
+  // 4. Seed canonical modi + essentiae + intellae
   for (const modus of CANONICAL_MODI) {
     await ring.modorum.register(modus)
   }
   log.info(`Seeded ${CANONICAL_MODI.length} canonical modi`)
+
+  for (const essentia of CANONICAL_ESSENTIAE) {
+    await ring.modorum.register(essentia)
+  }
+  log.info(`Seeded ${CANONICAL_ESSENTIAE.length} canonical essentiae`)
 
   for (const intella of CANONICAL_INTELLAE) {
     await intellae.upsert(intella)
@@ -300,7 +309,7 @@ async function main(): Promise<void> {
 
   const allocutio = new TelegramAllocutio({
     router: routerDeps,
-    sender: tgBot.telegram as unknown as TelegramSender,
+    sender: makeTelegramSender(tgBot.telegram),
     identity: identityResolver,
     botStartupTime,
   })
@@ -322,6 +331,7 @@ async function main(): Promise<void> {
     },
   }))
 
+  app.get('/api/health', (_req, res) => res.json({ ok: true, v: process.env.BUILD_VERSION ?? 'dev' }))
   app.use('/api/vestigia', createVestigiaRouter(ring.vestigiorum))
 
   const INTERNAL_SECRET = process.env.INTERNAL_SECRET
@@ -411,6 +421,47 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     log.info(`${signal} received — shutting down`)
     tgBot.stop(signal)
+
+    // Tear down all active RunPod pods unless KEEP_WARM=1
+    if (process.env.KEEP_WARM !== '1' && RUNPOD_API_KEY) {
+      try {
+        // Collect pod IDs from two sources:
+        // 1. Materia records (warm pods that completed at least one job)
+        // 2. In-flight actums (pods mid-bootstrap that haven't created a Materia yet)
+        const activeMateriae = await materiae.findActive()
+        const inFlightActa = await ring.actorum.findInFlight()
+
+        const podIds = new Set<string>()
+        for (const m of activeMateriae) podIds.add(m.externusId)
+        for (const a of inFlightActa) if (a.externusJobId) podIds.add(a.externusJobId)
+
+        if (podIds.size > 0) {
+          log.info(`tearing down ${podIds.size} pod(s)`)
+          await Promise.allSettled(Array.from(podIds).map(async (podId) => {
+            try {
+              await fetch(`https://rest.runpod.io/v1/pods/${podId}/stop`, {
+                method: 'POST', headers: { Authorization: `Bearer ${RUNPOD_API_KEY}` },
+              })
+              await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
+                method: 'DELETE', headers: { Authorization: `Bearer ${RUNPOD_API_KEY}` },
+              })
+              log.info(`pod ${podId} terminated`)
+            } catch (err) {
+              log.warn(`pod ${podId} teardown failed`, { error: (err as Error).message })
+            }
+          }))
+          // Mark Materia records terminated
+          await Promise.allSettled(activeMateriae.map(m =>
+            materiae.update(m.id, { status: 'terminated' }).catch(() => {})
+          ))
+        }
+      } catch (err) {
+        log.warn('pod teardown error', { error: (err as Error).message })
+      }
+    } else if (process.env.KEEP_WARM === '1') {
+      log.info('KEEP_WARM=1 — leaving pods running')
+    }
+
     await mongo.close()
     process.exit(0)
   }

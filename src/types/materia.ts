@@ -138,7 +138,9 @@ export interface MateriaStore {
   findById(id: string): Promise<Materia | null>
   update(id: string, patch: Partial<Pick<Materia, 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum' | 'podPolicy' | 'shareToken'>>): Promise<Materia>
   /**
-   * Return the first idle Materia matching the given spec.
+   * Atomically claim an idle Materia matching the given spec, transitioning it
+   * to 'active' in a single findOneAndUpdate. Prevents two concurrent requests
+   * from both winning the same warm pod.
    *
    * Standard routing: { imageRef } — any idle pod running that image.
    * Economy routing:  { imageRef, podPolicy: 'economy' } — only economy-pool pods.
@@ -147,4 +149,6 @@ export interface MateriaStore {
    * Returns null when no matching pod is available.
    */
   findWarm(spec: { imageRef?: string; podPolicy?: PodPolicy; shareToken?: string }): Promise<Materia | null>
+  /** Return all Materiae that are not terminated — used for graceful shutdown teardown. */
+  findActive(): Promise<Materia[]>
 }

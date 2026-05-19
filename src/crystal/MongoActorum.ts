@@ -63,4 +63,11 @@ export class MongoActorum implements Actorum {
       .toArray()
     return docs.map(fromDoc)
   }
+
+  async findInFlight(): Promise<Actum[]> {
+    const docs = await this.col
+      .find({ status: { $in: ['nascens', 'agens'] }, externusJobId: { $exists: true, $ne: null } })
+      .toArray()
+    return docs.map(fromDoc)
+  }
 }

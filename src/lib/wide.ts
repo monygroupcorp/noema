@@ -78,5 +78,5 @@ export function buildWideEvent(
 export function emitWideEvent(wide: WideEvent): void {
   // Emit as a structured log line so it lands in stdout + bus
   process.stdout.write(JSON.stringify({ ...wide, level: 'info', component: 'wide' }) + '\n')
-  bus.emit('actum.complete', wide)
+  bus.emit(wide.event, wide)
 }

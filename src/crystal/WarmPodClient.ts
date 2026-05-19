@@ -1,175 +1,167 @@
 import type { RunPodClient } from './RunPodCursor.js'
 import type { Materia, MateriaStore } from '../types/materia.js'
-import type { SshTransportLike } from './SecurePodClient.js'
-import { makeSecurePodSshFactory } from './SecurePodClient.js'
+import { SecurePodClient } from './SecurePodClient.js'
 import { makeLogger } from '../lib/logger.js'
 
 const log = makeLogger('cursor:runpod:warm')
-
-const COMFYUI_PORT = 8188
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
 }
 
 interface WarmPodConfig {
-  comfyReadyTimeoutMs?: number
-  comfyPollIntervalMs?: number
+  runnerReadyTimeoutMs?: number
+  runnerPollIntervalMs?: number
   jobTimeoutMs?: number
 }
 
-interface ComfyHistoryEntry {
-  outputs?: Record<string, {
-    images?: Array<{ filename: string; subfolder: string; type: string }>
-    gifs?: Array<{ filename: string; subfolder: string; type: string }>
-    videos?: Array<{ filename: string; subfolder: string; type: string }>
-  }>
+interface CompiledSpecLike {
+  workflow: { inputTemplate: Record<string, unknown> }
+  models: Array<{ url: string; dest: string; sizeBytes?: number }>
 }
 
-function collectOutputPaths(outputs: ComfyHistoryEntry['outputs']): string[] {
-  const paths: string[] = []
-  for (const node of Object.values(outputs ?? {})) {
-    for (const kind of ['images', 'gifs', 'videos'] as const) {
-      for (const item of node[kind] ?? []) {
-        const subdir = item.subfolder ? `${item.subfolder}/` : ''
-        paths.push(`/root/ComfyUI/output/${subdir}${item.filename}`)
-      }
-    }
-  }
-  return paths
+function isCompiledSpec(v: unknown): v is CompiledSpecLike {
+  if (!v || typeof v !== 'object') return false
+  const o = v as Record<string, unknown>
+  return (
+    o.workflow !== null && typeof o.workflow === 'object' &&
+    typeof (o.workflow as Record<string, unknown>).inputTemplate === 'object' &&
+    Array.isArray(o.models)
+  )
+}
+
+interface JobResult {
+  status: 'running' | 'completed' | 'failed'
+  output?: Array<{ url: string }>
+  error?: string
+  executionTime?: number
 }
 
 /**
  * WarmPodClient — runs a ComfyUI job on an already-running SECURE pod.
  *
- * Unlike SecurePodClient (which provisions → runs → terminates), WarmPodClient:
- *   - SSHes into an existing pod (no provisioning)
- *   - Submits the workflow (ComfyUI is already running)
- *   - Returns the pod to idle status after the job (no termination)
- *
- * This is the execution side of Praefectus — the router finds the pod,
- * WarmPodClient does the work.
+ * Submits the job to runner.py via the RunPod HTTP proxy, then polls
+ * runner.py's /job/<id> endpoint for the result. When done, fires the
+ * completion webhook from Crystal's own process — no outbound calls from the
+ * pod required, which avoids reverse-proxy / CSRF issues.
  */
 export class WarmPodClient implements RunPodClient {
-  private readonly sshFactory: (info: { host: string; port: number; user: string }) => SshTransportLike
-
   constructor(
     private readonly materia: Materia,
     private readonly materiae: MateriaStore,
-    sshFactory?: (info: { host: string; port: number; user: string }) => SshTransportLike,
     private readonly fetchFn: typeof fetch = globalThis.fetch,
     private readonly config: WarmPodConfig = {},
-  ) {
-    this.sshFactory = sshFactory ?? makeSecurePodSshFactory(process.env.RUNPOD_SSH_KEY_PATH ?? `${process.env.HOME}/.ssh/runpod`)
-  }
+  ) {}
 
   async submit(params: { input: unknown; webhook?: string }): Promise<{ id: string }> {
-    const { id } = this.materia
-
-    // Mark busy immediately (before returning) so Praefectus won't double-dispatch
-    await this.materiae.update(id, { status: 'active' })
+    const { id, externusId } = this.materia
 
     this._runBackground(params.input, params.webhook).catch(async (err) => {
-      log.error(`Materia ${id} job failed`, { materiaId: id, error: (err as Error).message })
-      // Return pod to idle (or terminate if private) even on failure
-      const nextStatus = this.materia.podPolicy === 'private' ? 'terminated' : 'idle'
-      await this.materiae.update(id, { status: nextStatus }).catch(() => {})
+      log.error(`Materia ${externusId} job failed`, { materiaId: id, externusId, error: (err as Error).message })
       if (params.webhook) {
         await this.fetchFn(params.webhook, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id, status: 'FAILED', error: (err as Error).message }),
+          body: JSON.stringify({ id: externusId, status: 'FAILED', error: (err as Error).message }),
         }).catch(() => {})
       }
     })
 
-    return { id }
+    return { id: externusId }
   }
 
   // ── private ──────────────────────────────────────────────────────────────
 
-  private async _runBackground(input: unknown, webhook: string | undefined): Promise<void> {
-    const { id, sshHost, sshPort } = this.materia
-    if (!sshHost || !sshPort) throw new Error(`Materia ${id} has no SSH info`)
+  private _runnerBase(): string {
+    return SecurePodClient.runnerBase(this.materia.externusId)
+  }
 
-    const startMs = Date.now()
-    const ssh = this.sshFactory({ host: sshHost, port: sshPort, user: 'root' })
+  private async _runBackground(input: unknown, webhook: string | undefined): Promise<void> {
+    const { id, externusId } = this.materia
+    const runnerBase = this._runnerBase()
+    const workflowInput = isCompiledSpec(input) ? input.workflow.inputTemplate : input
+    let podReachable = false
 
     try {
-      await this._waitForComfyApi(ssh)
-      const promptId = await this._submitWorkflow(ssh, input)
-      const jobTimeoutMs = this.config.jobTimeoutMs ?? 15 * 60 * 1000
-      const remotePaths = await this._awaitCompletion(ssh, promptId, jobTimeoutMs)
+      await this._waitForRunner(runnerBase)
+      podReachable = true
 
-      const executionTime = Date.now() - startMs
+      // Submit job — runner.py queues it and exposes status at GET /job/<externusId>
+      const res = await this.fetchFn(`${runnerBase}/job`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: externusId, workflow: workflowInput }),
+        signal: AbortSignal.timeout(15000),
+      })
+
+      if (!res.ok) {
+        if (res.status >= 500) podReachable = false
+        throw new Error(`runner.py POST /job returned ${res.status}`)
+      }
+
+      log.info('job queued on runner.py', { materiaId: id, externusId, runnerBase })
+
+      // Poll for completion — Crystal fires the webhook itself from this process
+      const jobTimeoutMs = this.config.jobTimeoutMs ?? 15 * 60 * 1000
+      const result = await this._pollJobResult(runnerBase, externusId, jobTimeoutMs)
+
+      if (result.status === 'failed') {
+        throw new Error(result.error ?? 'runner.py job failed')
+      }
 
       if (webhook) {
         await this.fetchFn(webhook, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            id,
+            id: externusId,
             status: 'COMPLETED',
-            output: remotePaths.map(p => ({ path: p })),
-            executionTime,
+            output: result.output ?? [],
+            executionTime: result.executionTime ?? 0,
           }),
         })
       }
     } finally {
-      await ssh.close().catch(() => {})
-      // Terminate private pods; return all others to idle
-      const nextStatus = this.materia.podPolicy === 'private' ? 'terminated' : 'idle'
+      // Pod unreachable = dead; otherwise return to idle
+      const nextStatus = (!podReachable || this.materia.podPolicy === 'private') ? 'terminated' : 'idle'
       await this.materiae.update(id, { status: nextStatus }).catch(() => {})
     }
   }
 
-  private async _waitForComfyApi(ssh: SshTransportLike): Promise<void> {
-    const timeoutMs = this.config.comfyReadyTimeoutMs ?? 2 * 60 * 1000
-    const pollMs = this.config.comfyPollIntervalMs ?? 2000
+  private async _waitForRunner(runnerBase: string): Promise<void> {
+    const timeoutMs = this.config.runnerReadyTimeoutMs ?? 30_000
+    const pollMs = this.config.runnerPollIntervalMs ?? 2000
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       try {
-        const out = await ssh.exec(`curl -sf http://localhost:${COMFYUI_PORT}/system_stats`, { stdio: 'pipe', timeout: 5000 })
-        if (out && out.includes('system')) return
+        const res = await this.fetchFn(`${runnerBase}/health`, { signal: AbortSignal.timeout(5000) })
+        if (res.ok) {
+          const body = await res.json() as { status?: string }
+          if (body.status === 'ready' || body.status === 'busy') return
+        }
       } catch (_) {
         // not ready yet
       }
       await sleep(pollMs)
     }
-    throw new Error('ComfyUI API not responsive on warm pod')
+    throw new Error('runner.py not reachable on warm pod')
   }
 
-  private async _submitWorkflow(ssh: SshTransportLike, input: unknown): Promise<string | null> {
-    const payload = JSON.stringify({ prompt: input }).replace(/'/g, "'\\''")
-    const out = await ssh.exec(
-      `curl -sf -X POST http://localhost:${COMFYUI_PORT}/prompt -H "Content-Type: application/json" -d '${payload}'`,
-      { stdio: 'pipe', timeout: 15000 },
-    )
-    try {
-      const parsed = JSON.parse(out ?? '{}') as { prompt_id?: string }
-      return parsed.prompt_id ?? null
-    } catch (_) {
-      return null
-    }
-  }
-
-  private async _awaitCompletion(ssh: SshTransportLike, promptId: string | null, timeoutMs: number): Promise<string[]> {
-    const pollMs = this.config.comfyPollIntervalMs ?? 2000
+  private async _pollJobResult(runnerBase: string, jobId: string, timeoutMs: number): Promise<JobResult> {
+    const pollMs = this.config.runnerPollIntervalMs ?? 2000
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       try {
-        const out = await ssh.exec(`curl -sf http://localhost:${COMFYUI_PORT}/history`, { stdio: 'pipe', timeout: 5000 })
-        const history = JSON.parse(out ?? '{}') as Record<string, ComfyHistoryEntry>
-        const entry = promptId ? history[promptId] : Object.values(history)[0]
-        if (entry?.outputs) {
-          const paths = collectOutputPaths(entry.outputs)
-          if (paths.length) return paths
+        const res = await this.fetchFn(`${runnerBase}/job/${jobId}`, { signal: AbortSignal.timeout(5000) })
+        if (res.ok) {
+          const body = await res.json() as JobResult
+          if (body.status === 'completed' || body.status === 'failed') return body
         }
       } catch (_) {
         // poll again
       }
       await sleep(pollMs)
     }
-    throw new Error('Workflow did not complete within job timeout')
+    throw new Error('runner.py job did not complete within timeout')
   }
 }
