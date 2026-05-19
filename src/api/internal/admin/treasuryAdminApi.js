@@ -18,7 +18,7 @@ const logger = createLogger('treasuryAdminApi');
  * @param {import('../../../core/services/db/treasuryDb')} dependencies.treasuryDb
  * @param {import('../../../core/services/db/agentAccountDb')} dependencies.agentAccountDb
  */
-function createTreasuryAdminApi({ treasuryDb, agentAccountDb }) {
+function createTreasuryAdminApi({ treasuryDb, agentAccountDb, economyService }) {
   const router = express.Router();
 
   /**
@@ -192,6 +192,24 @@ function createTreasuryAdminApi({ treasuryDb, agentAccountDb }) {
       // but the agent receives nothing. Add compensating rollback (re-credit treasury) or
       // convert to a two-phase ledger write before this endpoint handles significant volume.
       await agentAccountDb.addBalance(agentAccount.agentAccountId, points);
+
+      // Credit the Noema economy account so points are spendable on spells (non-fatal).
+      if (economyService && agentAccount.noemaAccountId) {
+        try {
+          await economyService.creditPoints(agentAccount.noemaAccountId, {
+            points,
+            description: `Admin topup from treasury ${treasuryId}`,
+            rewardType: 'AGENT_TOPUP',
+            relatedItems: { agentAccountId: agentAccount.agentAccountId, treasuryId },
+          });
+        } catch (creditErr) {
+          logger.error('[treasuryAdminApi] creditPoints failed on topup — sub-account credited but noema ledger not updated', {
+            agentAccountId: agentAccount.agentAccountId,
+            error: creditErr.message,
+          });
+        }
+      }
+
       logger.info('[treasuryAdminApi] Agent topup completed', { treasuryId, agentId, agentAccountId: agentAccount.agentAccountId, points });
       return res.json({ agentAccountId: agentAccount.agentAccountId, pointsAdded: points });
     } catch (err) {
@@ -213,13 +231,13 @@ function createTreasuryAdminApi({ treasuryDb, agentAccountDb }) {
         return res.status(404).json({ error: 'NOT_FOUND', message: `Treasury ${treasuryId} not found` });
       }
 
-      const allowed = ['starterGrant', 'monthlyMax', 'subsidyMode', 'refillCadence'];
+      const allowed = ['starterGrant', 'monthlyMax', 'perCycleBudget', 'subsidyMode', 'refillCadence'];
       const fields = {};
       for (const key of allowed) {
         if (req.body[key] !== undefined) fields[key] = req.body[key];
       }
       if (Object.keys(fields).length === 0) {
-        return res.status(400).json({ error: 'BAD_REQUEST', message: 'At least one of starterGrant, monthlyMax, subsidyMode, refillCadence is required' });
+        return res.status(400).json({ error: 'BAD_REQUEST', message: 'At least one of starterGrant, monthlyMax, perCycleBudget, subsidyMode, refillCadence is required' });
       }
 
       if (fields.subsidyMode !== undefined && !['on', 'off', 'hybrid'].includes(fields.subsidyMode)) {
@@ -233,6 +251,9 @@ function createTreasuryAdminApi({ treasuryDb, agentAccountDb }) {
       }
       if (fields.monthlyMax !== undefined && (!Number.isInteger(fields.monthlyMax) || fields.monthlyMax < 0)) {
         return res.status(400).json({ error: 'BAD_REQUEST', message: 'monthlyMax must be a non-negative integer' });
+      }
+      if (fields.perCycleBudget !== undefined && (!Number.isInteger(fields.perCycleBudget) || fields.perCycleBudget < 0)) {
+        return res.status(400).json({ error: 'BAD_REQUEST', message: 'perCycleBudget must be a non-negative integer' });
       }
 
       const updatedPolicy = { ...treasury.faucetPolicy, ...fields };

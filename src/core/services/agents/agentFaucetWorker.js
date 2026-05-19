@@ -72,9 +72,7 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
         );
         // Newer agents score higher: 1 at day 0, 0 at day 30
         const score = Math.max(0, (30 - sessionRecencyDays) / 30);
-        // TODO(scoring-v2): query generationOutputsDb for spellsInvoked30d
-        const spellsInvoked30d = 0;
-        return { ...agent, sessionRecencyDays, score, spellsInvoked30d };
+        return { ...agent, sessionRecencyDays, score };
       });
 
       const totalScore = scored.reduce((sum, a) => sum + a.score, 0);
@@ -91,13 +89,21 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
         continue;
       }
 
+      // perCycleBudget is the pool for this sweep — must be set explicitly to avoid draining the entire treasury balance.
+      const perCycleBudget = treasury.faucetPolicy?.perCycleBudget ?? null;
+      if (perCycleBudget === null) {
+        log.warn(`[agentFaucetWorker] Treasury ${treasury.treasuryId} has no perCycleBudget — skipping to avoid draining full balance; set faucetPolicy.perCycleBudget`);
+        continue;
+      }
+      const cycleBudget = Math.min(perCycleBudget, treasury.balance);
+
       const agentsWithAlloc = [];
       for (const agent of scored) {
         const dripsThisMonth = await faucetDripsDb.findByAgentAndPeriod(agent.agentAccountId, firstOfMonth);
         const pointsReceivedThisMonth = dripsThisMonth.reduce((sum, d) => sum + d.amount, 0);
         const cap = Math.max(0, monthlyMax - pointsReceivedThisMonth);
 
-        const rawAlloc = Math.floor((agent.score / totalScore) * treasury.balance);
+        const rawAlloc = Math.floor((agent.score / totalScore) * cycleBudget);
         const dripAmount = Math.min(rawAlloc, cap);
 
         agentsWithAlloc.push({ agent, dripAmount, cap });
@@ -109,6 +115,27 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
       for (const { agent, dripAmount } of agentsWithAlloc) {
         if (dripAmount <= 0) continue;
 
+        // Once exhausted, write skipped records for all remaining agents with non-zero allocations.
+        if (treasuryBalanceExhausted) {
+          try {
+            await faucetDripsDb.createDrip({
+              treasuryId: treasury.treasuryId,
+              agentAccountId: agent.agentAccountId,
+              noemaAccountId: agent.noemaAccountId,
+              amount: dripAmount,
+              periodStart,
+              periodEnd,
+              scoringInputs: { sessionRecencyDays: agent.sessionRecencyDays, score: agent.score },
+              creditLedgerEntryId: null,
+              status: 'skipped',
+              failureReason: 'INSUFFICIENT_BALANCE',
+            });
+          } catch (dripErr) {
+            log.warn('[agentFaucetWorker] failed to record skipped drip for exhausted agent', { agentAccountId: agent.agentAccountId, error: dripErr.message });
+          }
+          continue;
+        }
+
         // Atomic debit — may fail mid-sweep if treasury runs dry
         const debited = await treasuryDb.debitBalance(treasury.treasuryId, dripAmount);
         if (!debited) {
@@ -117,26 +144,27 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
             agentAccountId: agent.agentAccountId,
             dripAmount,
           });
-          await faucetDripsDb.createDrip({
-            treasuryId: treasury.treasuryId,
-            agentAccountId: agent.agentAccountId,
-            noemaAccountId: agent.noemaAccountId,
-            amount: dripAmount,
-            periodStart,
-            periodEnd,
-            scoringInputs: {
-              spellsInvoked30d: agent.spellsInvoked30d,
-              sessionRecencyDays: agent.sessionRecencyDays,
-              score: agent.score,
-            },
-            creditLedgerEntryId: null,
-            status: 'skipped',
-            failureReason: 'INSUFFICIENT_BALANCE',
-          });
+          try {
+            await faucetDripsDb.createDrip({
+              treasuryId: treasury.treasuryId,
+              agentAccountId: agent.agentAccountId,
+              noemaAccountId: agent.noemaAccountId,
+              amount: dripAmount,
+              periodStart,
+              periodEnd,
+              scoringInputs: {
+                sessionRecencyDays: agent.sessionRecencyDays,
+                score: agent.score,
+              },
+              creditLedgerEntryId: null,
+              status: 'skipped',
+              failureReason: 'INSUFFICIENT_BALANCE',
+            });
+          } catch (dripErr) {
+            log.warn('[agentFaucetWorker] failed to record mid-sweep skipped drip', { agentAccountId: agent.agentAccountId, error: dripErr.message });
+          }
           treasuryBalanceExhausted = true;
-          // Remaining agents in agentsWithAlloc receive no drip record this cycle.
-          // Reconcile by checking lastDripAt against the absence of drip records for those agents.
-          break;
+          continue;
         }
 
         // ── Stage 1: credit agent sub-account balance ─────────────────────
@@ -158,7 +186,7 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
               amount: dripAmount,
               periodStart,
               periodEnd,
-              scoringInputs: { spellsInvoked30d: agent.spellsInvoked30d, sessionRecencyDays: agent.sessionRecencyDays, score: agent.score },
+              scoringInputs: { sessionRecencyDays: agent.sessionRecencyDays, score: agent.score },
               creditLedgerEntryId: null,
               status: 'failed',
               failureReason: addErr.message,
@@ -196,7 +224,7 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
               amount: dripAmount,
               periodStart,
               periodEnd,
-              scoringInputs: { spellsInvoked30d: agent.spellsInvoked30d, sessionRecencyDays: agent.sessionRecencyDays, score: agent.score },
+              scoringInputs: { sessionRecencyDays: agent.sessionRecencyDays, score: agent.score },
               creditLedgerEntryId: null,
               status: 'failed',
               failureReason: creditErr.message,
@@ -217,7 +245,7 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
             amount: dripAmount,
             periodStart,
             periodEnd,
-            scoringInputs: { spellsInvoked30d: agent.spellsInvoked30d, sessionRecencyDays: agent.sessionRecencyDays, score: agent.score },
+            scoringInputs: { sessionRecencyDays: agent.sessionRecencyDays, score: agent.score },
             creditLedgerEntryId: entryId.toString(),
             status: 'credited',
             failureReason: null,

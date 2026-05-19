@@ -11,8 +11,9 @@ const { getCachedClient } = require('./utils/queue');
 
 /**
  * @typedef {Object} FaucetPolicy
- * @property {number} starterGrant   - Points allocated on first provisioning
- * @property {number} monthlyMax     - Points ceiling per agent per month
+ * @property {number} starterGrant     - Points allocated on first provisioning
+ * @property {number} monthlyMax       - Points ceiling per agent per month
+ * @property {number} perCycleBudget   - Total points to distribute per faucet sweep (required; worker skips treasury if absent)
  * @property {'on'|'off'|'hybrid'} subsidyMode
  * @property {'weekly'|'biweekly'|'monthly'} refillCadence
  */

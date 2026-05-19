@@ -197,38 +197,12 @@ function createAgentSessionApi({ agentAccountDb, treasuryDb, splitLedgerDb, logg
   /**
    * GET /agents/:agentAccountId/earnings
    *
-   * Return total earnings and recent inflows for an agent account.
+   * Per-agent earnings tracking is not yet implemented (SplitLedger is keyed by
+   * partnerId, not agentAccountId). Returns 501 rather than misleading zeros.
+   * TODO(v2): wire once agentAccountId is written onto split ledger entries.
    */
-  router.get('/agents/:agentAccountId/earnings', async (req, res) => {
-    const { agentAccountId } = req.params;
-    try {
-      const agentAccount = await agentAccountDb.findByAgentAccountId(agentAccountId);
-      if (!agentAccount) {
-        return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent account not found' } });
-      }
-
-      if (!splitLedgerDb) {
-        return res.status(200).json({
-          agentAccountId,
-          totalEarnings: { amount: '0.00', currency: 'USDC' },
-          recentInflows: [],
-        });
-      }
-
-      // TODO(v2): SplitLedgerDB is keyed by partnerId (e.g. pk_live_xxx), not by agentAccountId.
-      // Per-agent earnings require either: (a) writing agentAccountId onto split ledger entries
-      // at run time, (b) a dedicated agentUsage collection, or (c) a join via treasury.partnerId
-      // filtered to this agent's scope. None of these exist yet. Return empty until the query
-      // semantics are decided and the data source is wired up.
-      return res.status(200).json({
-        agentAccountId,
-        totalEarnings: { amount: '0.00', currency: 'USDC' },
-        recentInflows: [],
-      });
-    } catch (err) {
-      log.error('[agentSessionApi] Unexpected error in earnings handler', { agentAccountId, error: err.message });
-      return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Unexpected error fetching earnings' } });
-    }
+  router.get('/agents/:agentAccountId/earnings', (req, res) => {
+    return res.status(501).json({ error: { code: 'NOT_IMPLEMENTED', message: 'Per-agent earnings tracking not yet implemented' } });
   });
 
   return router;
