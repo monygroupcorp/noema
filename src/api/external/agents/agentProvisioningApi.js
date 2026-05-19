@@ -86,6 +86,13 @@ function createAgentProvisioningApi({
         return res.status(400).json({ error: { code: 'INVALID_ASSERTION', message: 'owner_at_assertion must be a valid Ethereum address' } });
       }
 
+      // Extract chain metadata from sub claim: "agent:<chainId>:<adapterAddress>:<agentId>"
+      // Store adapter but NOT collection — adapter-owned NFTs resolve via Mode B (adapter.ownerOf)
+      // rather than Mode C (adapter → nftId → collection.ownerOf), which would return the adapter address.
+      const subParts = (jwtPayload.sub || '').split(':');
+      const agentChainId = subParts.length >= 4 ? Number(subParts[1]) || null : null;
+      const agentAdapter = subParts.length >= 4 && /^0x[0-9a-f]{40}$/i.test(subParts[2]) ? subParts[2].toLowerCase() : null;
+
       // Step 4 — Idempotency / existing-account check
       const existing = await agentAccountDb.findByAgentId(agentId);
       if (existing) {
@@ -217,6 +224,8 @@ function createAgentProvisioningApi({
           scope: scope || [],
           sessionIssuedAt: new Date(),
           sessionExpiresAt: new Date(exp * 1000),
+          agentChainId,
+          agentAdapter,
         });
         agentAccountId = result.agentAccountId;
       } catch (err) {
