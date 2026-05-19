@@ -38,12 +38,13 @@ const STATIC_CAPABILITIES = [
  * @param {object} deps.agentAccountDb
  * @param {object} deps.treasuryDb
  * @param {object} deps.splitLedgerDb
+ * @param {object} [deps.agentJwtVerifier]
  * @param {object} [deps.spellsService]
  * @param {object} [deps.economyService]
  * @param {object} [deps.logger]
  * @returns {express.Router}
  */
-function createAgentCardFederationApi({ agentAccountDb, treasuryDb, splitLedgerDb, spellsService, economyService, logger }) {
+function createAgentCardFederationApi({ agentAccountDb, treasuryDb, splitLedgerDb, agentJwtVerifier, spellsService, economyService, logger }) {
   const log = logger || console;
   const router = express.Router();
 
@@ -95,11 +96,18 @@ function createAgentCardFederationApi({ agentAccountDb, treasuryDb, splitLedgerD
   /**
    * POST /treasury/:treasuryId/agents/:agentId/donate
    *
-   * Public donation: add points directly to an agent account balance (no treasury debit).
+   * Treasury-funded manual top-up of an agent sub-account.  The caller must present a
+   * valid CAMEL JWT signed by the treasury's registered JWKS issuer, proving they control
+   * the treasury.  Points are atomically debited from the treasury balance and credited to
+   * the agent sub-account and Noema economy ledger.
+   *
+   * This is the manual complement to the automated faucet drip — the treasury owner can
+   * reward specific agents on demand, outside the drip schedule.
    */
   router.post('/treasury/:treasuryId/agents/:agentId/donate', async (req, res) => {
     const { treasuryId, agentId } = req.params;
     try {
+      // Step 1 — Validate points input
       const { points } = req.body;
       if (points === undefined || points === null) {
         return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'points is required' } });
@@ -108,52 +116,78 @@ function createAgentCardFederationApi({ agentAccountDb, treasuryDb, splitLedgerD
         return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'points must be a positive integer' } });
       }
 
+      // Step 2 — Fetch treasury (needed for issuerDomain before JWT verification)
       const treasury = await treasuryDb.findByTreasuryId(treasuryId);
       if (!treasury) {
         return res.status(404).json({ error: { code: 'NOT_FOUND', message: `Treasury ${treasuryId} not found` } });
       }
 
+      // Step 3 — Verify caller is the treasury's issuer (CAMEL JWT signed by treasury JWKS)
+      if (!agentJwtVerifier) {
+        return res.status(503).json({ error: { code: 'SERVICE_UNAVAILABLE', message: 'JWT verification not available' } });
+      }
+      const authHeader = req.get('Authorization') || '';
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+      if (!token) {
+        return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Bearer token required' } });
+      }
+      try {
+        await agentJwtVerifier.verifyAssertionJwt(token, treasury.issuerDomain);
+      } catch (err) {
+        if (err.name === 'JwksUnavailableError') {
+          return res.status(503).json({ error: { code: 'SERVICE_UNAVAILABLE', message: 'JWKS service unavailable' } });
+        }
+        return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired JWT' } });
+      }
+
+      // Step 4 — Find and validate agent account
       const agentAccount = await agentAccountDb.findByAgentId(agentId);
       if (!agentAccount) {
         return res.status(404).json({ error: { code: 'AGENT_NOT_FOUND', message: 'Agent account not found' } });
       }
-
       if (agentAccount.treasuryId !== treasuryId) {
         return res.status(400).json({ error: { code: 'BAD_REQUEST', message: `Agent ${agentId} does not belong to treasury ${treasuryId}` } });
       }
-
       if (agentAccount.status !== 'active') {
         return res.status(400).json({ error: { code: 'AGENT_SUSPENDED', message: 'Agent account is not active' } });
       }
 
+      // Step 5 — Atomic treasury debit
+      const debited = await treasuryDb.debitBalance(treasuryId, points);
+      if (!debited) {
+        return res.status(400).json({ error: { code: 'INSUFFICIENT_BALANCE', message: 'Treasury has insufficient balance' } });
+      }
+
+      // Step 6 — Credit agent sub-account
+      // TODO(v2): if addBalance throws after debitBalance succeeds, compensate by re-crediting treasury.
       await agentAccountDb.addBalance(agentAccount.agentAccountId, points);
 
-      // Credit the Noema economy account so the agent can spend points via spell execution.
-      // Best-effort: a ledger failure does not roll back the sub-account credit.
+      // Step 7 — Credit Noema economy ledger (non-fatal)
+      if (economyService && !agentAccount.noemaAccountId) {
+        log.warn('[agentCardFederation] agentAccount missing noemaAccountId — sub-account credited but Noema ledger skipped', {
+          agentAccountId: agentAccount.agentAccountId,
+        });
+      }
       if (economyService && agentAccount.noemaAccountId) {
         try {
           await economyService.creditPoints(agentAccount.noemaAccountId, {
             points,
-            description: `Donation to agent ${agentAccount.agentAccountId}`,
-            rewardType: 'AGENT_DONATION',
-            relatedItems: { agentAccountId: agentAccount.agentAccountId, treasuryId: agentAccount.treasuryId },
+            description: `Treasury donation from ${treasuryId}`,
+            rewardType: 'AGENT_DONATE',
+            relatedItems: { agentAccountId: agentAccount.agentAccountId, treasuryId },
           });
         } catch (creditErr) {
-          log.warn('[agentCardFederation] economyService.creditPoints failed for donation — sub-account credited but noema ledger not updated', {
+          log.error('[agentCardFederation] creditPoints failed on donate — sub-account credited but noema ledger not updated', {
             agentAccountId: agentAccount.agentAccountId,
             error: creditErr.message,
           });
         }
       }
 
-      // Compute new balance optimistically — avoids partial-failure if the second read
-      // throws after the increment has already landed.
-      const newBalance = agentAccount.balance + points;
-
+      log.info('[agentCardFederation] Treasury donation completed', { treasuryId, agentId, points });
       return res.status(200).json({
         agentAccountId: agentAccount.agentAccountId,
         donatedPoints: points,
-        newBalance,
       });
     } catch (err) {
       log.error('[agentCardFederation] Unexpected error in donate handler', { treasuryId, agentId, error: err.message });

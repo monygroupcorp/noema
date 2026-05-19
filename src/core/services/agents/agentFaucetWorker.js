@@ -268,15 +268,36 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
       }
 
       // ── f. Update lastDripAt ───────────────────────────────────────────────
-      await treasuryDb.updateLastDripAt(treasury.treasuryId, new Date());
+      // Catch separately from the outer try so a failure here is surfaced as a
+      // CRITICAL financial inconsistency (drips issued but lastDripAt not saved →
+      // all agents will be double-dripped on the next tick).
+      try {
+        await treasuryDb.updateLastDripAt(treasury.treasuryId, new Date());
+      } catch (updateErr) {
+        log.error(
+          `[agentFaucetWorker] CRITICAL: updateLastDripAt failed for treasury ${treasury.treasuryId} — ` +
+          'agents were dripped but lastDripAt was NOT updated; double-drip will occur on next tick; ' +
+          'manual intervention required',
+          { treasuryId: treasury.treasuryId, error: updateErr.message },
+        );
+        errors++;
+        // Tag the error so the outer catch can identify it, skip the generic
+        // log line, and avoid double-incrementing the errors counter.
+        updateErr._lastDripAtFailure = true;
+        throw updateErr;
+      }
       treasuriesProcessed++;
 
       if (treasuryBalanceExhausted) {
         log.warn(`[agentFaucetWorker] Treasury ${treasury.treasuryId} balance exhausted mid-sweep`);
       }
     } catch (err) {
-      log.error(`[agentFaucetWorker] Error processing treasury ${treasury.treasuryId}: ${err.message}`);
-      errors++;
+      if (!err._lastDripAtFailure) {
+        // Generic treasury error — not already logged/counted above.
+        log.error(`[agentFaucetWorker] Error processing treasury ${treasury.treasuryId}: ${err.message}`);
+        errors++;
+      }
+      // treasuriesProcessed intentionally not incremented on any error path.
     }
   }
 
@@ -290,6 +311,10 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
  * Start the daily faucet worker. Runs immediately on startup, then on the FAUCET_INTERVAL_MS cadence.
  * Per-treasury cadence (weekly/biweekly/monthly) is checked inside runFaucet.
  *
+ * A module-level `isRunning` guard prevents overlapping sweeps: if runFaucet takes longer
+ * than FAUCET_INTERVAL_MS the next tick is skipped with a warning rather than launching a
+ * second concurrent sweep (which would hit the faucetDripsDb unique index and throw).
+ *
  * @param {{
  *   treasuryDb: object,
  *   agentAccountDb: object,
@@ -299,12 +324,28 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
  * }} deps
  * @returns {NodeJS.Timeout}
  */
+let isRunning = false;
+
 function startFaucet(deps) {
   const log = deps.logger || console;
-  runFaucet(deps).catch(err => log.error('[agentFaucetWorker] Initial run failed', { error: err.message }));
-  const handle = setInterval(() => {
-    runFaucet(deps).catch(err => log.error('[agentFaucetWorker] Scheduled run failed', { error: err.message }));
-  }, FAUCET_INTERVAL_MS);
+
+  async function runGuarded(label) {
+    if (isRunning) {
+      log.warn(`[agentFaucetWorker] ${label}: faucet sweep already in progress, skipping tick`);
+      return;
+    }
+    isRunning = true;
+    try {
+      await runFaucet(deps);
+    } catch (err) {
+      log.error(`[agentFaucetWorker] ${label} failed`, { error: err.message });
+    } finally {
+      isRunning = false;
+    }
+  }
+
+  runGuarded('Initial run');
+  const handle = setInterval(() => runGuarded('Scheduled run'), FAUCET_INTERVAL_MS);
   if (handle.unref) handle.unref();
   return handle;
 }

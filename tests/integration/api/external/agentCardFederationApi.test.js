@@ -232,77 +232,163 @@ describe('Agent Card Federation API — GET /agents/:agentAccountId/capabilities
 });
 
 // ─── Tests: POST /treasury/:treasuryId/agents/:agentId/donate ────────────────
+// Treasury-funded manual top-up. Caller must present a CAMEL JWT signed by the
+// treasury's JWKS issuer. Points are debited from treasury and credited to agent.
+
+function makeMockAgentJwtVerifier(overrides = {}) {
+  return {
+    verifyAssertionJwt: async (_token, _issuerDomain) => ({ sub: 'treasury-owner' }),
+    ...overrides,
+  };
+}
+
+function createDonateTestApp({
+  agentAccount = mockAgentAccount,
+  treasury = mockTreasury,
+  agentAccountDbOverrides = {},
+  treasuryDbOverrides = {},
+  economyService = null,
+  agentJwtVerifier = makeMockAgentJwtVerifier(),
+} = {}) {
+  const app = express();
+  app.use(express.json());
+  const router = createAgentCardFederationApi({
+    agentAccountDb: makeMockAgentAccountDb(agentAccount, agentAccountDbOverrides),
+    treasuryDb: makeMockTreasuryDb(treasury, {
+      debitBalance: async () => true,
+      ...treasuryDbOverrides,
+    }),
+    splitLedgerDb: makeMockSplitLedgerDb(),
+    agentJwtVerifier,
+    economyService,
+    logger: { error: () => {}, warn: () => {}, debug: () => {}, info: () => {} },
+  });
+  app.use('/', router);
+  return app;
+}
 
 describe('Agent Card Federation API — POST /treasury/:treasuryId/agents/:agentId/donate', () => {
-  // 16. Valid donate → 200 with { agentAccountId, donatedPoints, newBalance }
-  test('Valid donate → 200 with agentAccountId, donatedPoints, newBalance', async () => {
-    const updatedAccount = { ...mockAgentAccount, balance: mockAgentAccount.balance + 50 };
-    const app = createTestApp({
-      agentAccountDbOverrides: {
-        findByAgentAccountId: async (id) => (id === mockAgentAccount.agentAccountId ? updatedAccount : null),
-      },
-    });
+  // 16. Happy path → 200 with donatedPoints
+  test('Valid request with JWT → 200 with donatedPoints', async () => {
+    const app = createDonateTestApp();
     const res = await supertest(app)
       .post('/treasury/camel-1/agents/42/donate')
+      .set('Authorization', 'Bearer valid.issuer.token')
       .send({ points: 50 });
 
     assert.equal(res.status, 200);
     assert.equal(res.body.agentAccountId, 'cmw_test01');
     assert.equal(res.body.donatedPoints, 50);
-    assert.ok(typeof res.body.newBalance === 'number');
   });
 
-  // 17. Points missing → 400
-  test('Points missing → 400 BAD_REQUEST', async () => {
-    const app = createTestApp();
+  // 17. No Authorization header → 401
+  test('No Authorization header → 401 UNAUTHORIZED', async () => {
+    const app = createDonateTestApp();
     const res = await supertest(app)
       .post('/treasury/camel-1/agents/42/donate')
+      .send({ points: 50 });
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.code, 'UNAUTHORIZED');
+  });
+
+  // 18. Invalid JWT → 401
+  test('Invalid JWT → 401 UNAUTHORIZED', async () => {
+    const app = createDonateTestApp({
+      agentJwtVerifier: makeMockAgentJwtVerifier({
+        verifyAssertionJwt: async () => { throw new Error('jwt expired'); },
+      }),
+    });
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents/42/donate')
+      .set('Authorization', 'Bearer bad.token')
+      .send({ points: 50 });
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.code, 'UNAUTHORIZED');
+  });
+
+  // 19. JWKS unavailable → 503
+  test('JWKS unavailable → 503 SERVICE_UNAVAILABLE', async () => {
+    const jwksErr = Object.assign(new Error('JWKS fetch failed'), { name: 'JwksUnavailableError' });
+    const app = createDonateTestApp({
+      agentJwtVerifier: makeMockAgentJwtVerifier({
+        verifyAssertionJwt: async () => { throw jwksErr; },
+      }),
+    });
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents/42/donate')
+      .set('Authorization', 'Bearer some.token')
+      .send({ points: 50 });
+
+    assert.equal(res.status, 503);
+    assert.equal(res.body.error.code, 'SERVICE_UNAVAILABLE');
+  });
+
+  // 20. agentJwtVerifier not wired → 503
+  test('agentJwtVerifier not wired → 503 SERVICE_UNAVAILABLE', async () => {
+    const app = createDonateTestApp({ agentJwtVerifier: null });
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents/42/donate')
+      .set('Authorization', 'Bearer valid.token')
+      .send({ points: 50 });
+
+    assert.equal(res.status, 503);
+    assert.equal(res.body.error.code, 'SERVICE_UNAVAILABLE');
+  });
+
+  // 21. Points missing → 400
+  test('Points missing → 400 BAD_REQUEST', async () => {
+    const app = createDonateTestApp();
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents/42/donate')
+      .set('Authorization', 'Bearer valid.token')
       .send({});
 
     assert.equal(res.status, 400);
-    assert.ok(res.body.error);
+    assert.equal(res.body.error.code, 'BAD_REQUEST');
   });
 
-  // 18. Points <= 0 → 400
+  // 22. Points <= 0 → 400
   test('Points <= 0 → 400 BAD_REQUEST', async () => {
-    const app = createTestApp();
-    const res0 = await supertest(app)
-      .post('/treasury/camel-1/agents/42/donate')
-      .send({ points: 0 });
-    assert.equal(res0.status, 400);
-
-    const resNeg = await supertest(app)
-      .post('/treasury/camel-1/agents/42/donate')
-      .send({ points: -10 });
-    assert.equal(resNeg.status, 400);
-  });
-
-  // 19. Treasury not found → 404
-  test('Treasury not found → 404 NOT_FOUND', async () => {
-    const app = createTestApp({ treasury: null });
+    const app = createDonateTestApp();
     const res = await supertest(app)
       .post('/treasury/camel-1/agents/42/donate')
+      .set('Authorization', 'Bearer valid.token')
+      .send({ points: 0 });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, 'BAD_REQUEST');
+  });
+
+  // 23. Treasury not found → 404
+  test('Treasury not found → 404 NOT_FOUND', async () => {
+    const app = createDonateTestApp({ treasury: null });
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents/42/donate')
+      .set('Authorization', 'Bearer valid.token')
       .send({ points: 50 });
 
     assert.equal(res.status, 404);
-    assert.ok(res.body.error);
+    assert.equal(res.body.error.code, 'NOT_FOUND');
   });
 
-  // 20. Agent not found → 404
-  test('Agent not found → 404 NOT_FOUND', async () => {
-    const app = createTestApp({ agentAccount: null });
+  // 24. Agent not found → 404
+  test('Agent not found → 404 AGENT_NOT_FOUND', async () => {
+    const app = createDonateTestApp({ agentAccount: null });
     const res = await supertest(app)
       .post('/treasury/camel-1/agents/99/donate')
+      .set('Authorization', 'Bearer valid.token')
       .send({ points: 50 });
 
     assert.equal(res.status, 404);
-    assert.ok(res.body.error);
+    assert.equal(res.body.error.code, 'AGENT_NOT_FOUND');
   });
 
-  // 21. Agent in wrong treasury → 400
-  test('Agent belongs to different treasury → 400', async () => {
+  // 25. Agent belongs to different treasury → 400
+  test('Agent belongs to different treasury → 400 BAD_REQUEST', async () => {
     const wrongTreasuryAgent = { ...mockAgentAccount, treasuryId: 'other-treasury' };
-    const app = createTestApp({
+    const app = createDonateTestApp({
       agentAccountDbOverrides: {
         findByAgentId: async (id) => (id === '42' ? wrongTreasuryAgent : null),
         findByAgentAccountId: async (id) => (id === wrongTreasuryAgent.agentAccountId ? wrongTreasuryAgent : null),
@@ -310,16 +396,17 @@ describe('Agent Card Federation API — POST /treasury/:treasuryId/agents/:agent
     });
     const res = await supertest(app)
       .post('/treasury/camel-1/agents/42/donate')
+      .set('Authorization', 'Bearer valid.token')
       .send({ points: 50 });
 
     assert.equal(res.status, 400);
-    assert.ok(res.body.error);
+    assert.equal(res.body.error.code, 'BAD_REQUEST');
   });
 
-  // 22. Suspended agent → 400 AGENT_SUSPENDED
+  // 26. Suspended agent → 400
   test('Suspended agent → 400 AGENT_SUSPENDED', async () => {
     const suspendedAgent = { ...mockAgentAccount, status: 'suspended' };
-    const app = createTestApp({
+    const app = createDonateTestApp({
       agentAccountDbOverrides: {
         findByAgentId: async (id) => (id === '42' ? suspendedAgent : null),
         findByAgentAccountId: async (id) => (id === suspendedAgent.agentAccountId ? suspendedAgent : null),
@@ -327,30 +414,45 @@ describe('Agent Card Federation API — POST /treasury/:treasuryId/agents/:agent
     });
     const res = await supertest(app)
       .post('/treasury/camel-1/agents/42/donate')
+      .set('Authorization', 'Bearer valid.token')
       .send({ points: 50 });
 
     assert.equal(res.status, 400);
     assert.equal(res.body.error.code, 'AGENT_SUSPENDED');
   });
 
-  // 23. Donate calls economyService.creditPoints when provided
-  test('Donate with economyService → creditPoints called with AGENT_DONATION rewardType', async () => {
-    let creditPointsArgs = null;
+  // 27. Treasury insufficient balance → 400
+  test('Insufficient treasury balance → 400 INSUFFICIENT_BALANCE', async () => {
+    const app = createDonateTestApp({
+      treasuryDbOverrides: { debitBalance: async () => false },
+    });
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents/42/donate')
+      .set('Authorization', 'Bearer valid.token')
+      .send({ points: 99999 });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, 'INSUFFICIENT_BALANCE');
+  });
+
+  // 28. economyService.creditPoints is called on success
+  test('creditPoints called on successful donation', async () => {
+    let creditArgs = null;
     const mockEconomyService = {
       creditPoints: async (noemaAccountId, opts) => {
-        creditPointsArgs = { noemaAccountId, ...opts };
+        creditArgs = { noemaAccountId, ...opts };
         return { entryId: 'entry_donate_001' };
       },
     };
-    const app = createTestApp({ economyService: mockEconomyService });
+    const app = createDonateTestApp({ economyService: mockEconomyService });
     const res = await supertest(app)
       .post('/treasury/camel-1/agents/42/donate')
+      .set('Authorization', 'Bearer valid.token')
       .send({ points: 100 });
 
     assert.equal(res.status, 200);
-    assert.ok(creditPointsArgs, 'creditPoints should have been called');
-    assert.equal(creditPointsArgs.noemaAccountId, mockAgentAccount.noemaAccountId);
-    assert.equal(creditPointsArgs.points, 100);
-    assert.equal(creditPointsArgs.rewardType, 'AGENT_DONATION');
+    assert.ok(creditArgs, 'creditPoints must be called');
+    assert.equal(creditArgs.points, 100);
+    assert.equal(creditArgs.rewardType, 'AGENT_DONATE');
   });
 });

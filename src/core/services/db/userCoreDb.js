@@ -559,15 +559,6 @@ class UserCoreDB extends BaseDB {
   }
 
   /**
-   * Updates the spendingCap on an agent or group account.
-   * @param {ObjectId|string} masterAccountId
-   * @param {{ amount: number, currency: 'USDC', period: 'monthly' }} cap
-   */
-  async updateSpendingCap(masterAccountId, cap) {
-    return this.updateUserCore(masterAccountId, { $set: { spendingCap: cap } });
-  }
-
-  /**
    * Sets on-chain identity fields for an agent account.
    * @param {ObjectId|string} masterAccountId
    * @param {{ agentId, agentChainId, agentAdapter, agentRegistry, agentTokenId, agentOwnerAddress, agentCollection }} fields

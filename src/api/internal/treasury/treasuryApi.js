@@ -113,12 +113,12 @@ function createTreasuryApi(deps = {}) {
   /**
    * POST /treasury/:id/agents
    * Register an agent sub-account. Requires agent assertion JWT.
-   * Body: { agentId, chainId, adapter, registry, tokenId, ownerAddress, collection, scope?, spendingCap? }
+   * Body: { agentId, chainId, adapter, registry, tokenId, ownerAddress, collection, scope? }
    */
   router.post('/:id/agents', agentAssertion, async (req, res) => {
     try {
-      const { agentId, chainId, adapter, registry, tokenId, tokenUri, ownerAddress, collection, scope, spendingCap } = req.body;
-      const result = await svc.createAgentSubAccount(req.params.id, { agentId, chainId, adapter, registry, tokenId, tokenUri, ownerAddress, collection, scope, spendingCap });
+      const { agentId, chainId, adapter, registry, tokenId, tokenUri, ownerAddress, collection, scope } = req.body;
+      const result = await svc.createAgentSubAccount(req.params.id, { agentId, chainId, adapter, registry, tokenId, tokenUri, ownerAddress, collection, scope });
       res.status(201).json(result);
     } catch (err) { handleErr(res, err, 'POST /treasury/:id/agents'); }
   });

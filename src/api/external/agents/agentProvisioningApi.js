@@ -78,8 +78,13 @@ function createAgentProvisioningApi({
         return res.status(401).json({ error: { code: 'INVALID_ASSERTION', message: err.message } });
       }
 
-      const { agentId, tokenId, owner_at_assertion, scope, spending_cap, exp } = jwtPayload;
+      const { agentId, tokenId, owner_at_assertion, scope, exp } = jwtPayload;
       const ownerAddress = (owner_at_assertion || '').toLowerCase();
+
+      // Finding #5 — Validate ownerAddress is a real Ethereum address before any account lookup
+      if (!/^0x[0-9a-f]{40}$/.test(ownerAddress)) {
+        return res.status(400).json({ error: { code: 'INVALID_ASSERTION', message: 'owner_at_assertion must be a valid Ethereum address' } });
+      }
 
       // Step 4 — Idempotency / existing-account check
       const existing = await agentAccountDb.findByAgentId(agentId);
@@ -149,11 +154,8 @@ function createAgentProvisioningApi({
         }
       }
 
-      // Step 5 — Check treasury balance
+      // Step 5 — Read starterGrant amount (balance pre-check moved to step 10 for freshness)
       const starterGrant = treasury.faucetPolicy?.starterGrant || 0;
-      if (treasury.balance < starterGrant) {
-        return res.status(402).json({ error: { code: 'INSUFFICIENT_FUNDS', message: 'Treasury has insufficient balance for starter grant' } });
-      }
 
       // Step 6 — Find or create Noema account
       let noemaAccountId;
@@ -213,19 +215,57 @@ function createAgentProvisioningApi({
           noemaAccountId,
           workspaceSlug,
           scope: scope || [],
-          spendingCap: spending_cap || {},
           sessionIssuedAt: new Date(),
           sessionExpiresAt: new Date(exp * 1000),
         });
         agentAccountId = result.agentAccountId;
       } catch (err) {
+        // Finding #4 — E11000 means a concurrent request won the race; treat as idempotent success
+        if (err.code === 11000) {
+          const racedAccount = await agentAccountDb.findByAgentId(agentId);
+          if (racedAccount && racedAccount.status === 'active') {
+            return res.status(200).json({
+              agentAccountId: racedAccount.agentAccountId,
+              manifestURI: `https://noema.art/api/agents/${racedAccount.agentAccountId}/manifest`,
+              revokeURI: `https://noema.art/api/sessions/${racedAccount.agentAccountId}/revoke`,
+              balance: { amount: pointsToUsd(racedAccount.balance), currency: 'USDC' },
+            });
+          }
+        }
         log.error('[agentProvisioning] AgentAccount creation failed', { agentId, error: err.message });
         return res.status(500).json({ error: { code: 'RECORD_CREATION_FAILED', message: 'Failed to create agent account' } });
       }
 
-      // Step 10 — Debit treasury (atomic)
+      // Step 10 — Fresh balance pre-check + atomic treasury debit (Finding #12: narrow TOCTOU window)
+      const freshTreasury = await treasuryDb.findByTreasuryId(treasury.treasuryId);
+      if (!freshTreasury || freshTreasury.balance < starterGrant) {
+        // Finding #7: clean up cloned workspace before suspending
+        try {
+          await workspacesDb.deleteWorkspace({ slug: workspaceSlug });
+        } catch (cleanupErr) {
+          log.error('[agentProvisioning] Workspace cleanup failed after pre-check balance shortfall', {
+            workspaceSlug, error: cleanupErr.message
+          });
+        }
+        try {
+          await agentAccountDb.setStatus(agentAccountId, 'suspended');
+        } catch (suspendErr) {
+          log.error('[agentProvisioning] Failed to suspend agent account after balance pre-check failure', {
+            agentAccountId, error: suspendErr.message
+          });
+        }
+        return res.status(402).json({ error: { code: 'INSUFFICIENT_FUNDS', message: 'Treasury has insufficient balance for starter grant' } });
+      }
       const debitSuccess = await treasuryDb.debitBalance(treasury.treasuryId, starterGrant);
       if (!debitSuccess) {
+        // Finding #7: clean up cloned workspace before suspending
+        try {
+          await workspacesDb.deleteWorkspace({ slug: workspaceSlug });
+        } catch (cleanupErr) {
+          log.error('[agentProvisioning] Workspace cleanup failed after debit failure', {
+            workspaceSlug, error: cleanupErr.message
+          });
+        }
         try {
           await agentAccountDb.setStatus(agentAccountId, 'suspended');
         } catch (suspendErr) {

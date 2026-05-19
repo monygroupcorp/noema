@@ -119,6 +119,10 @@ class AgentDelegationsDB extends BaseDB {
    * Returns the updated document.
    * Throws if the cap would be exceeded.
    *
+   * The cap constraint is enforced inside the query filter so the read and
+   * write are a single atomic operation — concurrent calls cannot both pass
+   * the cap check and then both increment (TOCTOU race condition).
+   *
    * @param {ObjectId|string} delegationId
    * @param {number} points
    */
@@ -127,23 +131,34 @@ class AgentDelegationsDB extends BaseDB {
     const client = await getCachedClient();
     const collection = client.db(this.dbName).collection(this.collectionName);
 
-    // Read current state first to enforce cap
-    const current = await collection.findOne({ _id: oid });
-    if (!current) throw Object.assign(new Error('Delegation not found'), { code: 'NOT_FOUND' });
-    if (current.revokedAt) throw Object.assign(new Error('Delegation revoked'), { code: 'REVOKED' });
-    if (current.spendCapPoints !== null && current.pointsSpent + points > current.spendCapPoints) {
-      throw Object.assign(new Error('Delegation spend cap exceeded'), { code: 'CAP_EXCEEDED' });
-    }
-
+    // Atomic update: the filter rejects documents where the cap would be
+    // exceeded.  When spendCapPoints is null there is no cap, so we include
+    // both cases in the $expr via an $or.
     const result = await collection.findOneAndUpdate(
-      { _id: oid },
+      {
+        _id: oid,
+        revokedAt: null,
+        $or: [
+          { spendCapPoints: null },
+          { $expr: { $lte: [{ $add: ['$pointsSpent', points] }, '$spendCapPoints'] } },
+        ],
+      },
       {
         $inc: { pointsSpent: points, usageCount: 1 },
         $set: { updatedAt: new Date() },
       },
       { returnDocument: 'after' }
     );
-    return result;
+
+    if (result) return result;
+
+    // The atomic update did not match — do a separate read to produce a
+    // meaningful error code (not part of the critical path, races here are
+    // harmless because we are only building an error message).
+    const delegation = await collection.findOne({ _id: oid });
+    if (!delegation) throw Object.assign(new Error('Delegation not found'), { code: 'NOT_FOUND' });
+    if (delegation.revokedAt) throw Object.assign(new Error('Delegation revoked'), { code: 'REVOKED' });
+    throw Object.assign(new Error('Delegation spend cap exceeded'), { code: 'CAP_EXCEEDED' });
   }
 }
 

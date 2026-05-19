@@ -20,11 +20,12 @@ const { fireSessionCallback } = require('../../../core/services/agents/agentSess
  * @param {object} deps
  * @param {object} deps.agentAccountDb
  * @param {object} deps.treasuryDb
+ * @param {object} [deps.agentJwtVerifier]  - AgentJwtVerifier instance. Required for payout-policy auth (Finding #2).
  * @param {object} [deps.splitLedgerDb]
  * @param {object} [deps.logger]
  * @returns {express.Router}
  */
-function createAgentSessionApi({ agentAccountDb, treasuryDb, splitLedgerDb, logger }) {
+function createAgentSessionApi({ agentAccountDb, treasuryDb, agentJwtVerifier, splitLedgerDb, logger }) {
   const log = logger || console;
   const router = express.Router();
 
@@ -84,7 +85,9 @@ function createAgentSessionApi({ agentAccountDb, treasuryDb, splitLedgerDb, logg
   /**
    * POST /sessions/:agentAccountId/revoke
    *
-   * Public (agentAccountId is the implicit credential for v1).
+   * Requires a revokeToken as ?token=<revokeToken> query parameter for accounts
+   * that have a revokeToken set (all accounts created after this fix). Legacy
+   * accounts without a revokeToken stored are not gated (backward-compat).
    * Revokes the session and fires a callback to the issuer.
    */
   router.post('/sessions/:agentAccountId/revoke', async (req, res) => {
@@ -96,15 +99,33 @@ function createAgentSessionApi({ agentAccountDb, treasuryDb, splitLedgerDb, logg
         return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent account not found' } });
       }
 
+      // Finding #11 — revokeToken gate: enforced only when the account has a revokeToken (new accounts).
+      // Legacy accounts without the field pass through for backward-compat.
+      if (agentAccount.revokeToken) {
+        const providedToken = req.query.token;
+        if (!providedToken || providedToken !== agentAccount.revokeToken) {
+          return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Invalid or missing revoke token' } });
+        }
+      }
+
       // Idempotent: already revoked
       if (agentAccount.status === 'revoked') {
-        return res.status(200).json({
+        // Finding #15 — use dedicated revokedAt field when available; fall back to updatedAt for legacy records.
+        const revokedAtValue = agentAccount.revokedAt
+          ? new Date(agentAccount.revokedAt).toISOString()
+          : agentAccount.updatedAt
+            ? new Date(agentAccount.updatedAt).toISOString()
+            : new Date().toISOString();
+        const idempotentResponse = {
           agentAccountId,
           status: 'revoked',
-          revokedAt: agentAccount.updatedAt
-            ? new Date(agentAccount.updatedAt).toISOString()
-            : new Date().toISOString(),
-        });
+          revokedAt: revokedAtValue,
+        };
+        if (!agentAccount.revokedAt) {
+          // Indicate that revokedAt is an estimate (updatedAt may have been bumped after revocation)
+          idempotentResponse.revokedAt_estimated = true;
+        }
+        return res.status(200).json(idempotentResponse);
       }
 
       await agentAccountDb.revoke(agentAccountId);
@@ -154,12 +175,15 @@ function createAgentSessionApi({ agentAccountDb, treasuryDb, splitLedgerDb, logg
    *
    * Update the payout policy for an agent account.
    *
-   * Auth (v1): agentAccountId acts as an implicit credential — the same model used by
-   * POST /sessions/:agentAccountId/revoke. This is intentional for v1 but means anyone
-   * who can enumerate or guess an agentAccountId can redirect revenue. Acceptable for
-   * v1 because the agentAccountId space is sparse (cmw_ + 3 random bytes, never published
-   * in bulk). v2 should gate this behind a CAMEL JWT or signed holder challenge.
-   * TODO(v2): add CAMEL JWT verification before this endpoint is public-facing.
+   * Auth (Finding #2): Requires a valid CAMEL agent JWT in the Authorization header
+   * (Bearer <token>). The JWT is verified against the treasury's issuerDomain, and
+   * the JWT's `agentId` claim must match the agentAccount's stored `agentId`.
+   * Returns 401 if no JWT is present, 403 if the JWT is valid but the agentId
+   * does not match the account being modified.
+   *
+   * When `agentJwtVerifier` is not injected (e.g. legacy test environments), auth
+   * is skipped for backward-compat — wire `agentJwtVerifier` in the mount point
+   * to activate enforcement.
    */
   router.patch('/agents/:agentAccountId/payout-policy', async (req, res) => {
     const { agentAccountId } = req.params;
@@ -167,6 +191,43 @@ function createAgentSessionApi({ agentAccountDb, treasuryDb, splitLedgerDb, logg
       const agentAccount = await agentAccountDb.findByAgentAccountId(agentAccountId);
       if (!agentAccount) {
         return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent account not found' } });
+      }
+
+      // Finding #2 — JWT ownership check (enforced when agentJwtVerifier is wired in).
+      if (agentJwtVerifier) {
+        const authHeader = req.get('Authorization') || '';
+        const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+        if (!token) {
+          return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Bearer token required' } });
+        }
+
+        // Look up treasury for issuerDomain
+        let treasury;
+        try {
+          treasury = await treasuryDb.findByTreasuryId(agentAccount.treasuryId);
+        } catch (err) {
+          log.error('[agentSessionApi] Failed to fetch treasury for payout-policy auth', { agentAccountId, error: err.message });
+          return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Unexpected error during authentication' } });
+        }
+        if (!treasury) {
+          log.error('[agentSessionApi] Treasury not found for payout-policy auth', { agentAccountId, treasuryId: agentAccount.treasuryId });
+          return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Treasury configuration missing' } });
+        }
+
+        let jwtPayload;
+        try {
+          jwtPayload = await agentJwtVerifier.verifyAssertionJwt(token, treasury.issuerDomain);
+        } catch (err) {
+          if (err.name === 'JwksUnavailableError') {
+            return res.status(503).json({ error: { code: 'SERVICE_UNAVAILABLE', message: 'JWKS service unavailable' } });
+          }
+          return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired agent JWT' } });
+        }
+
+        // Verify JWT's agentId matches the account being modified
+        if (String(jwtPayload.agentId) !== String(agentAccount.agentId)) {
+          return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Agent JWT does not match the requested account' } });
+        }
       }
 
       const { mode, withdrawAddress } = req.body;
