@@ -258,12 +258,50 @@ function createAgentSessionApi({ agentAccountDb, treasuryDb, agentJwtVerifier, s
   /**
    * GET /agents/:agentAccountId/earnings
    *
-   * Per-agent earnings tracking is not yet implemented (SplitLedger is keyed by
-   * partnerId, not agentAccountId). Returns 501 rather than misleading zeros.
-   * TODO(v2): wire once agentAccountId is written onto split ledger entries.
+   * Returns credited split-ledger runs attributed to this agent. Covers standard
+   * partner-run entries (where agentId is written at run time) and unclaimed
+   * agent_owner entries. Returns empty totals rather than 501 when no entries exist.
    */
-  router.get('/agents/:agentAccountId/earnings', (req, res) => {
-    return res.status(501).json({ error: { code: 'NOT_IMPLEMENTED', message: 'Per-agent earnings tracking not yet implemented' } });
+  router.get('/agents/:agentAccountId/earnings', async (req, res) => {
+    const { agentAccountId } = req.params;
+    try {
+      const agentAccount = await agentAccountDb.findByAgentAccountId(agentAccountId);
+      if (!agentAccount) {
+        return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent account not found' } });
+      }
+
+      let entries = [];
+      if (splitLedgerDb) {
+        try {
+          entries = await splitLedgerDb.findByAgentId(agentAccount.agentId, 50);
+        } catch (err) {
+          log.warn('[agentSessionApi] Could not fetch earnings from splitLedger', { agentAccountId, error: err.message });
+        }
+      }
+
+      const credited = entries.filter(e => e.status === 'credited');
+      const totalGrossAtomic = credited.reduce((sum, e) => sum + Number(e.grossAmount || e.pointsAmount || 0), 0);
+      const recentRuns = entries.slice(0, 10).map(e => ({
+        spell: e.spellSlug,
+        grossAmount: e.grossAmount || null,
+        pointsAmount: e.pointsAmount || null,
+        status: e.status,
+        timestamp: e.createdAt instanceof Date ? e.createdAt.getTime() : new Date(e.createdAt).getTime(),
+      }));
+
+      return res.status(200).json({
+        agentAccountId,
+        agentId: agentAccount.agentId,
+        totals: {
+          creditedRuns: credited.length,
+          grossAtomicUsdc: String(totalGrossAtomic),
+        },
+        recentRuns,
+      });
+    } catch (err) {
+      log.error('[agentSessionApi] Unexpected error in earnings handler', { agentAccountId, error: err.message });
+      return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Unexpected error fetching earnings' } });
+    }
   });
 
   return router;

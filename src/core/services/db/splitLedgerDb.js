@@ -66,6 +66,7 @@ class SplitLedgerDB extends BaseDB {
         { key: { partnerId: 1, status: 1, createdAt: -1 }, name: 'partnerId_status_createdAt_idx', background: true },
         { key: { status: 1 }, name: 'status_idx', background: true },
         { key: { type: 1, status: 1, createdAt: 1 }, name: 'type_status_createdAt_idx', background: true },
+        { key: { agentId: 1, createdAt: -1 }, name: 'agentId_createdAt_idx', background: true, sparse: true },
       ]);
     });
     this.logger.debug('[SplitLedgerDB] Indexes ensured.');
@@ -74,10 +75,11 @@ class SplitLedgerDB extends BaseDB {
   /**
    * Create a new split ledger entry with pending status.
    * @param {{ partnerId: string, runId: string, spellSlug: string, uploadId: string|null,
-   *           grossAmount: string, partnerAmount: string, asset: string, network: string }} params
+   *           grossAmount: string, partnerAmount: string, asset: string, network: string,
+   *           agentId?: string|null }} params
    * @returns {Promise<import('mongodb').InsertOneResult>}
    */
-  async createEntry({ partnerId, runId, spellSlug, uploadId, grossAmount, partnerAmount, asset, network }) {
+  async createEntry({ partnerId, runId, spellSlug, uploadId, grossAmount, partnerAmount, asset, network, agentId }) {
     const now = new Date();
     return this.insertOne({
       partnerId,
@@ -88,11 +90,24 @@ class SplitLedgerDB extends BaseDB {
       partnerAmount,
       asset,
       network,
+      ...(agentId && { agentId }),
       status: 'pending',
       settledAt: null,
       createdAt: now,
       updatedAt: now,
     });
+  }
+
+  /**
+   * Find split ledger entries attributed to a specific agent (by agentId).
+   * Returns both standard entries (where agentId was passed at run time) and
+   * agent_owner_unclaimed entries which always carry agentId.
+   * @param {string} agentId - ERC-8004 agentId
+   * @param {number} limit
+   * @returns {Promise<Array>}
+   */
+  async findByAgentId(agentId, limit = 20) {
+    return this.findMany({ agentId }, { sort: { createdAt: -1 }, limit });
   }
 
   /**

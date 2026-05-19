@@ -232,6 +232,7 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
         partnerAmount,
         asset: x402.asset,
         network: x402.network,
+        agentId: agentDoc?.agentId || null,
       });
 
       // Settle payment and check result before marking credited
