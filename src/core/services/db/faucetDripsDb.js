@@ -14,7 +14,6 @@ const { getCachedClient } = require('./utils/queue');
 
 /**
  * @typedef {Object} ScoringInputs
- * @property {number} spellsInvoked30d   - Spells run in last 30 days (0 in v1)
  * @property {number} sessionRecencyDays - Days since sessionIssuedAt, capped at 30
  * @property {number} score              - Computed weight (float)
  */
