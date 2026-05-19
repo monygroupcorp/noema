@@ -15,6 +15,7 @@ function makeTreasury(overrides = {}) {
     faucetPolicy: {
       starterGrant: 100,
       monthlyMax: 500,
+      perCycleBudget: 200,
       subsidyMode: 'on',
       refillCadence: 'weekly',
     },
@@ -188,9 +189,9 @@ describe('agentFaucetWorker', () => {
     });
     await runFaucet(deps);
     assert.equal(addBalanceCalls, 0, 'addBalance should not be called when debitBalance fails');
-    // Only first agent gets a skipped record; loop breaks
-    assert.equal(dripsCreated.length, 1);
-    assert.equal(dripsCreated[0], 'skipped');
+    // Both agents should receive skipped records (Fix 5: no longer breaks after first failure)
+    assert.equal(dripsCreated.length, 2);
+    assert.ok(dripsCreated.every(s => s === 'skipped'), 'all drip records should be skipped');
   });
 
   test('runFaucet creates faucetDrip record with status:credited on success', async () => {

@@ -75,13 +75,20 @@ class AgentJwtVerifier {
     // Step 2: fetch (or use cached) JWKS
     const keys = await this._getJwks(issuerDomain);
 
-    // Step 3: find the matching key
-    const foundKey = keys.find((k) => k.kid === kid);
+    // Step 3: find the matching key; retry once with a fresh JWKS fetch on cache miss
+    let foundKey = keys.find((k) => k.kid === kid);
     if (!foundKey) {
-      throw new UnknownKeyError(
-        `No key with kid '${kid}' found in JWKS for ${issuerDomain}`,
-        { kid, issuerDomain }
-      );
+      // Invalidate cache and retry — the issuer may have rotated keys since the last fetch.
+      const cacheKey = 'jwks:' + issuerDomain;
+      this._jwksCache.delete(cacheKey);
+      const freshKeys = await this._getJwks(issuerDomain);
+      foundKey = freshKeys.find((k) => k.kid === kid);
+      if (!foundKey) {
+        throw new UnknownKeyError(
+          `No key with kid '${kid}' found in JWKS for ${issuerDomain} (tried fresh fetch)`,
+          { kid, issuerDomain }
+        );
+      }
     }
 
     // Step 4: convert JWK → PEM
