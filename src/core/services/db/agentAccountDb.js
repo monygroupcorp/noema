@@ -20,9 +20,13 @@ const { getCachedClient } = require('./utils/queue');
  * @typedef {Object} AgentAccountRecord
  * @property {string} agentAccountId   - 'cmw_' + 6-char hex (generated on create)
  * @property {string} treasuryId       - FK → TreasuryDB
- * @property {string} agentId          - ERC-8004 uint as string
+ * @property {string} agentId          - ERC-8004 registration ID as string (from JWT sub)
  * @property {string} tokenId          - CAMEL NFT token ID as string
- * @property {string} ownerAddress     - Lowercase ETH address at time of assertion
+ * @property {string} ownerAddress     - Lowercase ETH address at time of assertion (owner_at_assertion)
+ * @property {number|null} agentChainId - EVM chain ID from JWT sub (null if sub unparseable)
+ * @property {string|null} agentAdapter - Adapter contract address (lowercase) from JWT sub.
+ *   Stored without agentCollection so OnChainVerifier selects Mode B (adapter.ownerOf), which
+ *   returns the human wallet even when the adapter contract holds the underlying NFT.
  * @property {string} noemaAccountId   - ObjectId string → userCore._id
  * @property {string} workspaceSlug    - Slug of cloned agent workspace
  * @property {string[]} scope
@@ -75,6 +79,8 @@ class AgentAccountDB extends BaseDB {
     agentId,
     tokenId,
     ownerAddress,
+    agentChainId,
+    agentAdapter,
     noemaAccountId,
     workspaceSlug,
     scope,
@@ -90,6 +96,8 @@ class AgentAccountDB extends BaseDB {
       agentId,
       tokenId,
       ownerAddress: ownerAddress?.toLowerCase(),
+      ...(agentChainId != null && { agentChainId }),
+      ...(agentAdapter && { agentAdapter }),
       noemaAccountId,
       workspaceSlug,
       scope,

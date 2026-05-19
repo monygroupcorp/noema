@@ -85,6 +85,7 @@ function makeMockInternalApiClient(overrides = {}) {
 }
 
 const DEFAULT_JWT_PAYLOAD = {
+  sub: 'agent:1:0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef:999888777',
   agentId: '999888777',
   tokenId: '42',
   owner_at_assertion: '0xDeadBeefDeadBeefDeadBeefDeadBeefDeadBeef',
@@ -146,6 +147,43 @@ describe('Agent Provisioning API', () => {
     assert.ok(res.body.revokeURI.includes(res.body.agentAccountId));
     assert.ok(typeof res.body.balance.amount === 'string');
     assert.equal(res.body.balance.currency, 'USDC');
+  });
+
+  // 1b. Chain metadata extracted from sub claim and stored
+  test('Chain metadata (agentChainId, agentAdapter) extracted from JWT sub and passed to createAgentAccount', async () => {
+    let captured = null;
+    const app = createTestApp({
+      agentAccountDbOverrides: {
+        createAgentAccount: async (params) => { captured = params; return { agentAccountId: 'cmw_abc123', insertedId: 'oid' }; },
+      },
+    });
+    await supertest(app)
+      .post('/treasury/camel-1/agents')
+      .set('Authorization', 'Bearer valid-token')
+      .send();
+
+    assert.ok(captured, 'createAgentAccount was called');
+    assert.equal(captured.agentChainId, 1, 'chainId parsed from sub');
+    assert.equal(captured.agentAdapter, '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef', 'adapter parsed from sub');
+  });
+
+  // 1c. Malformed sub → agentChainId and agentAdapter stored as null (no crash)
+  test('Malformed sub → agentChainId/agentAdapter are null, provisioning still succeeds', async () => {
+    let captured = null;
+    const app = createTestApp({
+      jwtPayload: { ...DEFAULT_JWT_PAYLOAD, sub: 'badformat' },
+      agentAccountDbOverrides: {
+        createAgentAccount: async (params) => { captured = params; return { agentAccountId: 'cmw_abc123', insertedId: 'oid' }; },
+      },
+    });
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents')
+      .set('Authorization', 'Bearer valid-token')
+      .send();
+
+    assert.equal(res.status, 202);
+    assert.equal(captured.agentChainId, null);
+    assert.equal(captured.agentAdapter, null);
   });
 
   // 2. Idempotency
