@@ -10,6 +10,8 @@ import type { Primitive, Step, Resolution, FlowContext, Intent, Platform, Auctor
 import type { Allocutio, Nuntius, Responsum } from '../types/allocutio.js'
 import type { Inceptio } from '../types/cursus.js'
 import { makeLogger } from '../lib/logger.js'
+import { bus } from '../lib/bus.js'
+import type { WideEvent } from '../lib/wide.js'
 
 const log = makeLogger('telegram:allocutio')
 
@@ -60,18 +62,15 @@ export interface TelegramUpdate {
 // ---------------------------------------------------------------------------
 
 export interface TelegramSender {
-  sendMessage(
-    chatId: number,
-    text: string,
-    extra?: { reply_markup?: unknown }
-  ): Promise<{ message_id: number }>
-  editMessageText(
-    chatId: number,
-    messageId: number,
-    text: string,
-    extra?: { reply_markup?: unknown }
-  ): Promise<void>
+  sendMessage(chatId: number, text: string, extra?: { reply_markup?: unknown; caption?: string }): Promise<{ message_id: number }>
+  editMessageText(chatId: number, messageId: number, text: string, extra?: { reply_markup?: unknown }): Promise<void>
   answerCallbackQuery(callbackQueryId: string): Promise<void>
+  sendPhoto(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
+  sendVideo(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
+  sendDocument(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
+  sendMediaGroup(chatId: number, media: unknown[]): Promise<void>
+  setMessageReaction?(chatId: number, messageId: number, reaction: unknown[]): Promise<void>
+  getFileLink(fileId: string): Promise<string>
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +307,15 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // last command message: platform:userId → messageId of the most recent command message
   private readonly lastCommandMessageIds = new Map<string, number>()
 
+  // actum progress tracking for cold-start UX
+  private readonly actumProgress = new Map<string, {
+    chatId: number
+    progressMessageId: number | null
+    commandMessageId: number | undefined
+    lastEditMs: number
+    isCold: boolean
+  }>()
+
   constructor(deps: {
     router: RouterDeps
     sender: TelegramSender
@@ -323,6 +331,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // Wire router callbacks
     this.router.onStep((ctx, step) => { void this._handleStep(ctx, step) })
     this.router.onResolution((ctx, resolution) => { void this._handleResolution(ctx, resolution) })
+
+    // Wire bus events for pod lifecycle → Telegram progress messages
+    bus.on('actum.stage', (data) => { void this._handleActumStage(data) })
+    bus.on('actum.complete', (wide) => { void this._handleActumComplete(wide) })
+    bus.on('actum.fail', (wide) => { this.actumProgress.delete(wide.actumId) })
   }
 
   // -------------------------------------------------------------------------
@@ -423,7 +436,13 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       case '/run':
       case '/make': {
         const identity = await this.identity.resolve(userId)
-        await this.router.enter('execute', 'telegram', userId, identity)
+        // Parse prompt from command: /make <prompt text>
+        const promptText = text.replace(/^\/(?:make|run)(?:@\S+)?\s*/i, '').trim()
+        const defaultModusId = 'runmake.flux-schnell'
+        const initialState = promptText
+          ? { modusId: defaultModusId, aditus: { prompt: promptText }, browsePageIndex: 0 }
+          : { modusId: defaultModusId, aditus: {}, browsePageIndex: 0 }
+        await this.router.enter('execute', 'telegram', userId, identity, { state: initialState })
         if (messageId !== undefined) void this._react(chatId, messageId, '👌')
         break
       }
@@ -506,6 +525,18 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     if (!query.data) return
 
+    // Pod invite button — send a forwardable invite message
+    if (query.data.startsWith('pod_invite:') && chatId) {
+      const inviteText = [
+        'A StationThis pod is warming up.',
+        'Send /make [your prompt] to queue your generation on this pod.',
+        '',
+        'Powered by noema.',
+      ].join('\n')
+      void this.sender.sendMessage(chatId, inviteText).catch(() => {})
+      return
+    }
+
     const event = decodeCallbackData(query.data)
     if (!event) return
 
@@ -556,13 +587,23 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         continue
       }
 
-      // Feature 3: Stream with status 'running' → react on command message, send nothing
+      // Stream(running) → react 👌 and register actum for progress tracking
       if (primitive.kind === 'Stream' && primitive.status === 'running') {
         const commandMessageId = this.lastCommandMessageIds.get(userKey)
         if (commandMessageId !== undefined) {
           void this._react(chatId, commandMessageId, '👌')
         } else {
           await this.sender.sendMessage(chatId, '⏳ Working on it…')
+        }
+        // Register actum so stage events can send progress messages to this chat
+        if (primitive.actumId) {
+          this.actumProgress.set(primitive.actumId, {
+            chatId,
+            progressMessageId: null,
+            commandMessageId,
+            lastEditMs: 0,
+            isCold: false,
+          })
         }
         editMessageId = undefined
         continue
@@ -605,20 +646,13 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       const m = primitive.media[0]
       try {
         if (m.type === 'image') {
-          await (this.sender as unknown as {
-            sendPhoto(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
-          }).sendPhoto(chatId, m.url, { caption: m.caption, ...extra })
+          await this.sender.sendPhoto(chatId, m.url, { caption: m.caption, ...extra })
         } else if (m.type === 'video') {
-          await (this.sender as unknown as {
-            sendVideo(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
-          }).sendVideo(chatId, m.url, { caption: m.caption, ...extra })
+          await this.sender.sendVideo(chatId, m.url, { caption: m.caption, ...extra })
         } else {
-          await (this.sender as unknown as {
-            sendDocument(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
-          }).sendDocument(chatId, m.url, { caption: m.caption, ...extra })
+          await this.sender.sendDocument(chatId, m.url, { caption: m.caption, ...extra })
         }
       } catch {
-        // Fallback: send URL as text (no send-file permission, too large, etc.)
         await this.sender.sendMessage(chatId, m.url, extra)
       }
       return
@@ -631,11 +665,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         media: m.url,
         caption: i === 0 ? m.caption : undefined,
       }))
-      await (this.sender as unknown as {
-        sendMediaGroup(chatId: number, media: unknown[]): Promise<void>
-      }).sendMediaGroup(chatId, media)
+      await this.sender.sendMediaGroup(chatId, media)
     } catch {
-      // Fallback: send each URL as text
       for (const m of primitive.media) {
         await this.sender.sendMessage(chatId, m.url).catch(() => {})
       }
@@ -668,12 +699,120 @@ Generate AI art, chat with models, explore creative tools.`
 
   private async _react(chatId: number, messageId: number, emoji: string): Promise<void> {
     try {
-      await (this.sender as unknown as {
-        setMessageReaction?(chatId: number, messageId: number, reaction: unknown[]): Promise<void>
-      }).setMessageReaction?.(chatId, messageId, [{ type: 'emoji', emoji }])
+      await this.sender.setMessageReaction?.(chatId, messageId, [{ type: 'emoji', emoji }])
     } catch {
       // Reactions are decorative — swallow all errors silently
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // _handleActumStage — bus event → send or edit cold-start progress message
+  // -------------------------------------------------------------------------
+
+  private async _handleActumStage(data: { actumId: string; stage: string; elapsedMs: number }): Promise<void> {
+    const progress = this.actumProgress.get(data.actumId)
+    if (!progress) return
+
+    const { chatId, commandMessageId } = progress
+    const now = Date.now()
+
+    if (data.stage === 'warm-pod-found') {
+      // Swap to 🔥 reaction and skip progress message
+      if (commandMessageId !== undefined) {
+        void this._react(chatId, commandMessageId, '🔥')
+      }
+      return
+    }
+
+    if (data.stage === 'provisioning') {
+      progress.isCold = true
+      const text = this._progressText('provisioning', data.elapsedMs)
+      try {
+        const msg = await this.sender.sendMessage(chatId, text, {
+          reply_markup: inlineKeyboard([[btn('Invite to this pod', `pod_invite:${data.actumId}`)]]),
+        })
+        progress.progressMessageId = msg.message_id
+        progress.lastEditMs = now
+      } catch { /* non-critical */ }
+      return
+    }
+
+    // Rate-limit edits to 1 per 4s — telegram will 429 on faster edits
+    if (now - progress.lastEditMs < 4000) return
+    if (progress.progressMessageId === null) return
+
+    const text = this._progressText(data.stage, data.elapsedMs)
+    void this.sender.editMessageText(chatId, progress.progressMessageId, text, {
+      reply_markup: inlineKeyboard([[btn('Invite to this pod', `pod_invite:${data.actumId}`)]]),
+    }).catch(() => {})
+    progress.lastEditMs = now
+  }
+
+  private _progressText(stage: string, elapsedMs: number): string {
+    const elapsed = Math.round(elapsedMs / 1000)
+    const elapsedStr = elapsed >= 60
+      ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
+      : `${elapsed}s`
+
+    const stageLines: Record<string, string> = {
+      'provisioning':   'Provisioning cold pod...',
+      'ssh-ready':      'Pod online. Setting up runtime...',
+      'bootstrapping':  'Bootstrapping runtime...',
+      'comfy-ready':    'Models loaded. Generating...',
+      'inferring':      'Generating image...',
+    }
+    const header = stageLines[stage] ?? `Stage: ${stage}`
+
+    const lines = [
+      header,
+      `Elapsed: ${elapsedStr}`,
+    ]
+
+    if (stage === 'provisioning') {
+      lines.push('Est. time: ~5 min on cold start')
+      lines.push('')
+      lines.push('To switch model, reply: xl  dev  schnell')
+    }
+
+    return lines.join('\n')
+  }
+
+  // -------------------------------------------------------------------------
+  // _handleActumComplete — bus event → concierge message after delivery
+  // -------------------------------------------------------------------------
+
+  private async _handleActumComplete(wide: WideEvent): Promise<void> {
+    const progress = this.actumProgress.get(wide.actumId)
+    if (!progress) return
+
+    // Wait for image delivery to arrive in Telegram first
+    await new Promise<void>(r => setTimeout(r, 3000))
+
+    const { chatId } = progress
+    const durationSec = Math.round(wide.durationMs / 1000)
+    const durationStr = durationSec >= 60
+      ? `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`
+      : `${durationSec}s`
+
+    const isSlow = wide.coldStart && wide.durationMs > 8 * 60 * 1000
+
+    const lines = isSlow
+      ? [
+          `Cold start took ${durationStr} — longer than expected.`,
+          `Your next gen will reuse this warm pod for instant results.`,
+        ]
+      : [
+          `Pod stays warm for ~15 min.`,
+          `Run /make again for instant results on this pod.`,
+        ]
+
+    lines.push('')
+    lines.push('To stop accruing compute cost, destroy the pod now.')
+
+    void this.sender.sendMessage(chatId, lines.join('\n')).catch(() => {})
+
+    // Clean up
+    this.actumProgress.delete(wide.actumId)
   }
 
   // -------------------------------------------------------------------------
@@ -682,8 +821,7 @@ Generate AI art, chat with models, explore creative tools.`
 
   private async _resolveFileUrl(fileId: string): Promise<string | null> {
     try {
-      return await (this.sender as unknown as { getFileLink(fileId: string): Promise<string> })
-        .getFileLink(fileId)
+      return await this.sender.getFileLink(fileId)
     } catch {
       return null
     }
@@ -702,7 +840,8 @@ Generate AI art, chat with models, explore creative tools.`
         await this.sender.sendMessage(chatId, '✅ Done.')
         break
       case 'abandon':
-        await this.sender.sendMessage(chatId, 'Cancelled.')
+        // Silent — abandon fires on implicit context replacement (e.g. /make while already in a flow).
+        // Explicit /cancel sends its own message directly from the command handler.
         break
       case 'handoff':
         // No message needed — router will fire onStep for the new flow

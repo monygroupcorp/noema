@@ -183,6 +183,8 @@ export interface Actorum {
    * Caller should call ActumCompletor.fail() on each to release locked signa.
    */
   findExpired(): Promise<Actum[]>
+  /** Return all nascens/agens actums that have an externusJobId — in-flight pods. */
+  findInFlight(): Promise<Actum[]>
 }
 
 // ---------------------------------------------------------------------------

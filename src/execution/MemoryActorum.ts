@@ -42,4 +42,10 @@ export class MemoryActorum implements Actorum {
       a => (a.status === 'nascens' || a.status === 'agens') && a.expirat < now
     )
   }
+
+  async findInFlight(): Promise<Actum[]> {
+    return Array.from(this.store.values()).filter(
+      a => (a.status === 'nascens' || a.status === 'agens') && a.externusJobId != null
+    )
+  }
 }

@@ -19,17 +19,17 @@ REGISTRY="ghcr.io/monygroupcorp/noema"
 IMAGE="${REGISTRY}:staging"
 
 # Container
-STAGING_CONTAINER="hyperbot-staging"
-NETWORK_NAME="hyperbot_network"
-CONTAINER_ALIAS="hyperbot-staging"
+STAGING_CONTAINER="crystal-staging"
+NETWORK_NAME="crystal_network"
+CONTAINER_ALIAS="crystal-staging"
 
 # Health check tuning
 HEALTH_CHECK_RETRIES="${HEALTH_CHECK_RETRIES:-30}"
 HEALTH_CHECK_DELAY="${HEALTH_CHECK_DELAY:-3}"
 
 # Logging
-LOG_DIR="/var/log/hyperbot"
-LOG_FILE="${LOG_DIR}/hyperbot-staging.log"
+LOG_DIR="/var/log/crystal"
+LOG_FILE="${LOG_DIR}/crystal-staging.log"
 mkdir -p "${LOG_DIR}"
 
 log() { echo "[staging-deploy] $1" | tee -a "${LOG_FILE}"; }

@@ -51,7 +51,18 @@ export class MongoMateria implements MateriaStore {
     if (spec.imageRef) filter.imageRef = spec.imageRef
     if (spec.podPolicy) filter.podPolicy = spec.podPolicy
     if (spec.shareToken) filter.shareToken = spec.shareToken
-    const doc = await this.col.findOne(filter)
+    // Atomic claim: only matches idle pods and transitions to active in one operation.
+    // Prevents two concurrent requests from dispatching to the same warm pod.
+    const doc = await this.col.findOneAndUpdate(
+      filter,
+      { $set: { status: 'active' } },
+      { returnDocument: 'after' }
+    )
     return doc ? fromDoc(doc) : null
+  }
+
+  async findActive(): Promise<Materia[]> {
+    const docs = await this.col.find({ status: { $ne: 'terminated' } }).toArray()
+    return docs.map(fromDoc)
   }
 }

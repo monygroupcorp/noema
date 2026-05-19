@@ -26,6 +26,18 @@ const MODELS = {
     size: '23GB',
     requiresAuth: true
   },
+  'flux-schnell-fp8': {
+    source: 'https://huggingface.co/Kijai/flux-fp8/resolve/main/flux1-schnell-fp8-e4m3fn.safetensors',
+    destination: 'unet/flux1-schnell-fp8-e4m3fn.safetensors',
+    size: '11.1GB',
+    requiresAuth: false
+  },
+  'flux-schnell-fp8-scaled': {
+    source: 'https://huggingface.co/Comfy-Org/flux1-schnell/resolve/main/flux1-schnell-fp8.safetensors',
+    destination: 'unet/flux1-schnell-fp8-scaled.safetensors',
+    size: '17.2GB',
+    requiresAuth: false
+  },
   'flux-vae': {
     source: 'https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors',
     destination: 'vae/ae.safetensors',

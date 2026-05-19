@@ -9,7 +9,7 @@
     "9":  { "class_type": "SaveImage",          "inputs": { "filename_prefix": "runmake", "images": ["8", 0] } },
     "10": { "class_type": "VAELoader",          "inputs": { "vae_name": "ae.safetensors" } },
     "11": { "class_type": "DualCLIPLoader",     "inputs": { "clip_name1": "t5xxl_fp16.safetensors", "clip_name2": "clip_l.safetensors", "type": "flux" } },
-    "12": { "class_type": "UNETLoader",         "inputs": { "unet_name": "flux1-schnell.safetensors", "weight_dtype": "fp8_e4m3fn" } },
+    "12": { "class_type": "UNETLoader",         "inputs": { "unet_name": "flux1-schnell-fp8-scaled.safetensors", "weight_dtype": "fp8_e4m3fn_scaled" } },
     "13": { "class_type": "KSampler",           "inputs": { "seed": 88888888, "steps": 4, "cfg": 1, "sampler_name": "euler", "scheduler": "simple", "denoise": 1, "model": ["12", 0], "positive": ["22", 0], "negative": ["22", 0], "latent_image": ["6", 0] } },
     "22": { "class_type": "CLIPTextEncodeFlux", "inputs": { "clip": ["11", 0], "clip_l": "PLACEHOLDER", "t5xxl": "PLACEHOLDER", "guidance": 3.5 } }
   },
@@ -22,10 +22,10 @@
     "/22/inputs/t5xxl":  "prompt"
   },
   "requiredModels": [
-    { "role": "unet", "id": "intella.flux-schnell", "url": "https://models.miladystation2.net/unet/flux1-schnell.safetensors", "dest": "unet/flux1-schnell.safetensors" },
-    { "role": "vae",  "id": "intella.flux-vae",     "url": "https://models.miladystation2.net/vae/ae.safetensors",            "dest": "vae/ae.safetensors" },
-    { "role": "clip", "id": "intella.t5xxl-fp16",   "url": "https://models.miladystation2.net/clip/t5xxl_fp16.safetensors",  "dest": "clip/t5xxl_fp16.safetensors" },
-    { "role": "clip", "id": "intella.clip-l",       "url": "https://models.miladystation2.net/clip/clip_l.safetensors",      "dest": "clip/clip_l.safetensors" }
+    { "role": "unet", "id": "intella.flux-schnell-fp8-scaled", "url": "https://models.miladystation2.net/unet/flux1-schnell-fp8-scaled.safetensors", "dest": "unet/flux1-schnell-fp8-scaled.safetensors", "sizeBytes": 17236328572 },
+    { "role": "vae",  "id": "intella.flux-vae",     "url": "https://models.miladystation2.net/vae/ae.safetensors",            "dest": "vae/ae.safetensors",            "sizeBytes": 334643800 },
+    { "role": "clip", "id": "intella.t5xxl-fp16",   "url": "https://models.miladystation2.net/clip/t5xxl_fp16.safetensors",  "dest": "clip/t5xxl_fp16.safetensors",  "sizeBytes": 10309764096 },
+    { "role": "clip", "id": "intella.clip-l",       "url": "https://models.miladystation2.net/clip/clip_l.safetensors",      "dest": "clip/clip_l.safetensors",      "sizeBytes": 246144992 }
   ],
   "platformHints": { "vramGb": 24, "expectedSteps": 4 }
 }

@@ -120,9 +120,9 @@ export class Compiler {
   // ── private ──────────────────────────────────────────────────────────────
 
   private async _resolveModels(
-    refs: Array<{ role: string; id: string; url?: string; dest: string }>,
-  ): Promise<Array<{ role: string; id: string; url: string; dest: string }>> {
-    const resolved: Array<{ role: string; id: string; url: string; dest: string }> = []
+    refs: Array<{ role: string; id: string; url?: string; dest: string; sizeBytes?: number }>,
+  ): Promise<Array<{ role: string; id: string; url: string; dest: string; sizeBytes?: number }>> {
+    const resolved: Array<{ role: string; id: string; url: string; dest: string; sizeBytes?: number }> = []
     for (const ref of refs) {
       let url = ref.url
       let dest = ref.dest
@@ -136,7 +136,7 @@ export class Compiler {
       if (!url) {
         throw new CompilerError('MODEL_NOT_RESOLVED', `No URL for model '${ref.id}' — register it in the model registry`)
       }
-      resolved.push({ role: ref.role, id: ref.id, url, dest })
+      resolved.push({ role: ref.role, id: ref.id, url, dest, sizeBytes: ref.sizeBytes })
     }
     return resolved.sort((a, b) => {
       const r = a.role.localeCompare(b.role)
