@@ -82,7 +82,10 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
       }
 
       // ── d. Compute drip amounts with monthly cap ───────────────────────────
-      const firstOfMonth = new Date(periodEnd.getFullYear(), periodEnd.getMonth(), 1);
+      // Cap window starts at lastDripAt (cadence-aligned), not the first of the calendar month.
+      // This prevents agents who receive a weekly drip from accumulating points that
+      // exceed monthlyMax just because calendar-month arithmetic resets the window early.
+      const capWindowStart = treasury.lastDripAt ? new Date(treasury.lastDripAt) : new Date(periodEnd.getTime() - cadenceMs);
       const monthlyMax = treasury.faucetPolicy?.monthlyMax ?? 0;
       if (monthlyMax === 0) {
         log.warn(`[agentFaucetWorker] Treasury ${treasury.treasuryId} has monthlyMax=0 — no drips will be issued; check faucetPolicy`);
@@ -99,9 +102,9 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
 
       const agentsWithAlloc = [];
       for (const agent of scored) {
-        const dripsThisMonth = await faucetDripsDb.findByAgentAndPeriod(agent.agentAccountId, firstOfMonth);
-        const pointsReceivedThisMonth = dripsThisMonth.reduce((sum, d) => sum + d.amount, 0);
-        const cap = Math.max(0, monthlyMax - pointsReceivedThisMonth);
+        const dripsThisCycle = await faucetDripsDb.findByAgentAndPeriod(agent.agentAccountId, capWindowStart);
+        const pointsReceivedThisCycle = dripsThisCycle.reduce((sum, d) => sum + d.amount, 0);
+        const cap = Math.max(0, monthlyMax - pointsReceivedThisCycle);
 
         const rawAlloc = Math.floor((agent.score / totalScore) * cycleBudget);
         const dripAmount = Math.min(rawAlloc, cap);
