@@ -13,13 +13,15 @@ ENV_FILE="${SCRIPT_DIR}/.env.staging"
 
 # --- defaults ---
 NOEMA_URL="https://staging.noema.art"
-INTERNAL_SECRET=""
 
-# Load secret from .env.staging if present
-if [[ -f "${ENV_FILE}" ]]; then
-  val=$(grep -E '^INTERNAL_SECRET=' "${ENV_FILE}" | cut -d= -f2- | tr -d '"' || true)
-  [[ -n "${val}" ]] && INTERNAL_SECRET="${val}"
-fi
+# Load secret from .env.staging or local .env if not already in environment
+for f in "${ENV_FILE}" "${SCRIPT_DIR}/.env"; do
+  if [[ -z "${INTERNAL_SECRET:-}" && -f "${f}" ]]; then
+    val=$(grep -E '^INTERNAL_SECRET=' "${f}" | cut -d= -f2- | tr -d '"' || true)
+    [[ -n "${val}" ]] && INTERNAL_SECRET="${val}"
+  fi
+done
+INTERNAL_SECRET="${INTERNAL_SECRET:-}"
 
 # --- arg parsing ---
 while [[ $# -gt 0 ]]; do

@@ -585,7 +585,14 @@ export class SecurePodClient implements RunPodClient {
         ? Math.max(900_000, Math.ceil(model.sizeBytes / MIN_BYTES_PER_SEC * 1.5 * 1000))
         : 2_400_000
       await ssh.exec(`mkdir -p "$(dirname '${destPath}')"`, { timeout: 10_000 })
-      await ssh.exec(`wget -q "${model.url}" -O "${destPath}"`, { timeout: timeoutMs })
+      // aria2c with 16 parallel connections saturates throughput on slow CDN edges;
+      // fall back to wget if aria2c is unavailable
+      await ssh.exec(
+        `if command -v aria2c >/dev/null 2>&1; then ` +
+        `aria2c -x16 -s16 --allow-overwrite=true -q "${model.url}" -o "${destPath}"; ` +
+        `else wget -q "${model.url}" -O "${destPath}"; fi`,
+        { timeout: timeoutMs }
+      )
       log.info('model downloaded', { dest: model.dest })
     }))
   }
