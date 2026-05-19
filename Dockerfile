@@ -15,8 +15,11 @@ COPY package*.json ./
 RUN npm ci --legacy-peer-deps
 COPY . .
 RUN npx tsc
-# Copy non-TS assets (JSON, plain JS modules) into dist alongside compiled output
+# Copy non-TS assets (JSON, plain JS modules) into dist alongside compiled output.
+# Skip any .js file that has a .ts counterpart — tsc output takes precedence.
 RUN find src \( -name '*.json' -o -name '*.js' \) ! -name 'package*.json' ! -path '*/frontend/*' | while read f; do \
+  ts_equiv="${f%.js}.ts"; \
+  [ -f "${ts_equiv}" ] && continue; \
   target="dist/${f#src/}"; \
   mkdir -p "$(dirname "$target")"; \
   cp "$f" "$target"; \
