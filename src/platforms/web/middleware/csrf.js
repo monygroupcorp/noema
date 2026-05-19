@@ -26,6 +26,7 @@ const csrfExcluded = [
   '/api/v1/auth/refresh',
   '/api/v1/auth/register', // Add registration if/when implemented
   '/internal/', // Internal API routes (server-to-server, use API keys)
+  '/webhooks/', // Async job callbacks — server-to-server, no session available
   '/api/v1/admin', // Admin routes use API key authentication, not session-based
   '/api/v1/webhook/alchemy',
   '/api/v1/webhook/comfydeploy',
