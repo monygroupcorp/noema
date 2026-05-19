@@ -278,36 +278,76 @@ describe('Agent Session API — PATCH /agents/:agentAccountId/payout-policy', ()
 // ─── Tests: GET /agents/:agentAccountId/earnings ─────────────────────────────
 
 describe('Agent Session API — GET /agents/:agentAccountId/earnings', () => {
-  // 14. Earnings endpoint returns 501 until per-agent query is implemented
-  test('Earnings → 501 NOT_IMPLEMENTED (per-agent tracking not yet wired)', async () => {
+  function makeMockSplitLedgerDb(entries = [], overrides = {}) {
+    return {
+      findByAgentId: async (_agentId, _limit) => entries,
+      ...overrides,
+    };
+  }
+
+  const creditedEntry = {
+    spellSlug: 'generate-image',
+    grossAmount: '50000',
+    status: 'credited',
+    createdAt: new Date('2026-05-01T10:00:00Z'),
+  };
+  const pendingEntry = {
+    spellSlug: 'generate-image',
+    grossAmount: '50000',
+    status: 'pending',
+    createdAt: new Date('2026-05-02T10:00:00Z'),
+  };
+
+  // 14. No splitLedgerDb → 200 with empty totals
+  test('No splitLedgerDb → 200 with zero totals and empty recentRuns', async () => {
     const app = createTestApp({ splitLedgerDb: null });
     const res = await supertest(app).get('/agents/cmw_test01/earnings');
 
-    assert.equal(res.status, 501);
-    assert.equal(res.body.error.code, 'NOT_IMPLEMENTED');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.agentAccountId, 'cmw_test01');
+    assert.equal(res.body.agentId, 'agent-42');
+    assert.equal(res.body.totals.creditedRuns, 0);
+    assert.equal(res.body.totals.grossAtomicUsdc, '0');
+    assert.deepEqual(res.body.recentRuns, []);
   });
 
-  // 15. Same 501 regardless of whether the agent exists (no DB lookup in unimplemented handler)
-  test('Earnings → 501 regardless of agent existence', async () => {
+  // 15. Agent not found → 404
+  test('Unknown agentAccountId → 404 NOT_FOUND', async () => {
     const app = createTestApp({ agentAccount: null });
     const res = await supertest(app).get('/agents/cmw_missing/earnings');
 
-    assert.equal(res.status, 501);
-    assert.equal(res.body.error.code, 'NOT_IMPLEMENTED');
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error.code, 'NOT_FOUND');
   });
 
-  // 16. Same 501 even when splitLedgerDb is provided
-  test('Earnings with splitLedgerDb provided → still 501 NOT_IMPLEMENTED', async () => {
-    const mockSplitLedgerDb = {
-      findByPartnerId: async () => [
-        { spellSlug: 'generate-image', grossAmount: '50000', createdAt: new Date() },
-      ],
-    };
-    const app = createTestApp({ splitLedgerDb: mockSplitLedgerDb });
+  // 16. Credited entries summed correctly
+  test('Credited entries → correct totals and recentRuns shape', async () => {
+    const app = createTestApp({
+      splitLedgerDb: makeMockSplitLedgerDb([creditedEntry, pendingEntry]),
+    });
     const res = await supertest(app).get('/agents/cmw_test01/earnings');
 
-    assert.equal(res.status, 501);
-    assert.equal(res.body.error.code, 'NOT_IMPLEMENTED');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.totals.creditedRuns, 1, 'only credited entries counted');
+    assert.equal(res.body.totals.grossAtomicUsdc, '50000');
+    assert.equal(res.body.recentRuns.length, 2, 'all entries in recentRuns');
+    const first = res.body.recentRuns[0];
+    assert.equal(first.spell, 'generate-image');
+    assert.equal(first.grossAmount, '50000');
+    assert.ok(typeof first.timestamp === 'number');
+  });
+
+  // 17. splitLedgerDb query failure → 200 with empty (non-fatal)
+  test('splitLedgerDb query throws → 200 with empty totals (non-fatal)', async () => {
+    const app = createTestApp({
+      splitLedgerDb: makeMockSplitLedgerDb([], {
+        findByAgentId: async () => { throw new Error('DB unavailable'); },
+      }),
+    });
+    const res = await supertest(app).get('/agents/cmw_test01/earnings');
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.totals.creditedRuns, 0);
   });
 });
 

@@ -75,9 +75,20 @@ function createAgentCardFederationApi({ agentAccountDb, treasuryDb, splitLedgerD
         return res.status(500).json({ error: { code: 'TREASURY_NOT_FOUND', message: 'Treasury configuration missing' } });
       }
 
-      // Step 4 — Recent usage: not yet tracked per-agent; return empty array honestly.
-      // TODO(v2): query a per-agent usage index once split ledger entries carry agentAccountId.
-      const recentUsage = [];
+      // Step 4 — Recent usage: last 5 runs attributed to this agentId on the split ledger.
+      let recentUsage = [];
+      if (splitLedgerDb) {
+        try {
+          const entries = await splitLedgerDb.findByAgentId(agentId, 5);
+          recentUsage = entries.map(e => ({
+            spell: e.spellSlug,
+            cost: { amount: atomicUsdcToUsd(e.grossAmount || '0'), currency: 'USDC' },
+            timestamp: e.createdAt instanceof Date ? e.createdAt.getTime() : new Date(e.createdAt).getTime(),
+          }));
+        } catch (usageErr) {
+          log.warn('[agentCardFederation] Could not fetch recentUsage', { agentId, error: usageErr.message });
+        }
+      }
 
       // Step 5 — Return response
       return res.status(200).json({

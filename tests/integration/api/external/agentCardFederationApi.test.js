@@ -63,6 +63,7 @@ function makeMockTreasuryDb(treasury, overrides = {}) {
 function makeMockSplitLedgerDb(entries = mockSplitLedgerEntries, overrides = {}) {
   return {
     findByPartnerId: async (_partnerId, _limit) => entries,
+    findByAgentId: async (_agentId, _limit) => entries,
     ...overrides,
   };
 }
@@ -114,16 +115,15 @@ describe('Agent Card Federation API — GET /treasury/:treasuryId/agents/:agentI
     // monthlyCap
     assert.ok(typeof res.body.monthlyCap === 'string', 'monthlyCap is string');
 
-    // recentUsage structure
+    // recentUsage structure — mock returns 1 entry, so assert its shape
     assert.ok(Array.isArray(res.body.recentUsage), 'recentUsage is array');
-    if (res.body.recentUsage.length > 0) {
-      const entry = res.body.recentUsage[0];
-      assert.ok('spell' in entry, 'entry has spell field');
-      assert.ok(entry.cost, 'entry has cost');
-      assert.equal(entry.cost.currency, 'USDC');
-      assert.ok(typeof entry.cost.amount === 'string', 'cost.amount is string');
-      assert.ok(typeof entry.timestamp === 'number', 'timestamp is number');
-    }
+    assert.ok(res.body.recentUsage.length > 0, 'recentUsage has entries from splitLedger');
+    const entry = res.body.recentUsage[0];
+    assert.equal(entry.spell, 'generate-image');
+    assert.ok(entry.cost, 'entry has cost');
+    assert.equal(entry.cost.currency, 'USDC');
+    assert.ok(typeof entry.cost.amount === 'string', 'cost.amount is string');
+    assert.ok(typeof entry.timestamp === 'number', 'timestamp is number');
   });
 
   // Test 2: Agent not found → 404 AGENT_NOT_FOUND
