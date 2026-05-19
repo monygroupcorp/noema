@@ -117,11 +117,11 @@ class AgentAccountService {
    * Creates an agent sub-account under a treasury, applies the starter grant.
    *
    * @param {string|ObjectId} treasuryId
-   * @param {{ agentId: string, chainId: number, adapter: string, registry: string, tokenId: number, ownerAddress: string, collection: string, scope?: string[], spendingCap?: object }} agentParams
+   * @param {{ agentId: string, chainId: number, adapter: string, registry: string, tokenId: number, ownerAddress: string, collection: string, scope?: string[] }} agentParams
    * @returns {Promise<{ agentDoc: object, agentAccountId: string, starterGrantApplied: number }>}
    */
   async createAgentSubAccount(treasuryId, agentParams = {}) {
-    const { agentId, chainId, adapter, registry, tokenId, tokenUri, ownerAddress, collection, scope = [], spendingCap } = agentParams;
+    const { agentId, chainId, adapter, registry, tokenId, tokenUri, ownerAddress, collection, scope = [] } = agentParams;
 
     if (!agentId) throw Object.assign(new Error('agentId is required'), { code: 'INVALID_PARAMS' });
 
@@ -143,7 +143,6 @@ class AgentAccountService {
       agentCollection: collection,
       masterTreasuryId: toOid(treasuryId),
       scope,
-      ...(spendingCap && { spendingCap }),
     });
 
     const agentAccountId = `${AGENT_ID_PREFIX}${agentDoc._id.toString()}`;

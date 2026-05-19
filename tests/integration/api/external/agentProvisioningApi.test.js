@@ -89,7 +89,6 @@ const DEFAULT_JWT_PAYLOAD = {
   tokenId: '42',
   owner_at_assertion: '0xDeadBeefDeadBeefDeadBeefDeadBeefDeadBeef',
   scope: ['generate', 'read'],
-  spending_cap: { amount: '100', currency: 'points', period: 'monthly' },
   exp: Math.floor(Date.now() / 1000) + 3600,
 };
 

@@ -644,6 +644,7 @@ function initializeExternalApi(dependencies) {
       agentAccountDb: dependencies.db.data.agentAccount,
       treasuryDb: dependencies.db.data.treasury,
       splitLedgerDb: dependencies.db?.data?.splitLedger || null,
+      agentJwtVerifier: dependencies.agentJwtVerifier || null,
       logger,
     });
     externalApiRouter.use('/', agentSessionRouter);
@@ -658,6 +659,7 @@ function initializeExternalApi(dependencies) {
       agentAccountDb: dependencies.db.data.agentAccount,
       treasuryDb: dependencies.db.data.treasury,
       splitLedgerDb: dependencies.db?.data?.splitLedger || null,
+      agentJwtVerifier: dependencies.agentJwtVerifier || null,
       spellsService: dependencies.spellsService || null,
       economyService: dependencies.economyService || null,
       logger,

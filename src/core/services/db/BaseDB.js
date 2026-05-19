@@ -23,9 +23,11 @@ class BaseDB {
             throw new Error('Invalid data: must be an object');
         }
 
-        // Remove undefined/null values
+        // Remove undefined values only. null is a valid MongoDB sentinel
+        // (e.g. creditLedgerEntryId: null on skipped drips) and must be preserved
+        // so queries like { creditLedgerEntryId: null } return correct results.
         Object.keys(data).forEach(key => {
-            if (data[key] === undefined || data[key] === null) {
+            if (data[key] === undefined) {
                 delete data[key];
             }
         });

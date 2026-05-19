@@ -17,13 +17,6 @@ const { getCachedClient } = require('./utils/queue');
  */
 
 /**
- * @typedef {Object} SpendingCap
- * @property {string} amount
- * @property {string} currency
- * @property {string} period
- */
-
-/**
  * @typedef {Object} AgentAccountRecord
  * @property {string} agentAccountId   - 'cmw_' + 6-char hex (generated on create)
  * @property {string} treasuryId       - FK → TreasuryDB
@@ -33,7 +26,6 @@ const { getCachedClient } = require('./utils/queue');
  * @property {string} noemaAccountId   - ObjectId string → userCore._id
  * @property {string} workspaceSlug    - Slug of cloned agent workspace
  * @property {string[]} scope
- * @property {SpendingCap} spendingCap
  * @property {number} balance          - Points (integer), starts at 0
  * @property {PayoutPolicy} payoutPolicy
  * @property {'active'|'revoked'|'suspended'} status
@@ -86,11 +78,11 @@ class AgentAccountDB extends BaseDB {
     noemaAccountId,
     workspaceSlug,
     scope,
-    spendingCap,
     sessionIssuedAt,
     sessionExpiresAt,
   }) {
     const agentAccountId = await this._generateAgentAccountId();
+    const revokeToken = crypto.randomBytes(32).toString('hex');
     const now = new Date();
     const result = await this.insertOne({
       agentAccountId,
@@ -101,16 +93,16 @@ class AgentAccountDB extends BaseDB {
       noemaAccountId,
       workspaceSlug,
       scope,
-      spendingCap,
       balance: 0,
       payoutPolicy: { mode: 'self-fund' },
+      revokeToken,
       status: 'active',
       sessionIssuedAt,
       sessionExpiresAt,
       createdAt: now,
       updatedAt: now,
     });
-    return { agentAccountId, insertedId: result.insertedId };
+    return { agentAccountId, revokeToken, insertedId: result.insertedId };
   }
 
   async findByAgentAccountId(agentAccountId) {
@@ -130,8 +122,7 @@ class AgentAccountDB extends BaseDB {
   }
 
   async countByTreasuryId(treasuryId) {
-    const accounts = await this.findMany({ treasuryId, status: 'active' });
-    return accounts.length;
+    return this.count({ treasuryId, status: 'active' });
   }
 
   async addBalance(agentAccountId, points) {
@@ -158,9 +149,10 @@ class AgentAccountDB extends BaseDB {
   }
 
   async revoke(agentAccountId) {
+    const now = new Date();
     return this.updateOne(
       { agentAccountId },
-      { $set: { status: 'revoked', updatedAt: new Date() } }
+      { $set: { status: 'revoked', revokedAt: now, updatedAt: now } }
     );
   }
 

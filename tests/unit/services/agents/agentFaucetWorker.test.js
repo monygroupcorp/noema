@@ -262,6 +262,46 @@ describe('agentFaucetWorker', () => {
     assert.equal(updateLastDripCalled, false, 'lastDripAt should not be updated for empty-agent treasury');
   });
 
+  test('runFaucet surfaces updateLastDripAt failure and does not silently swallow it', async () => {
+    // Stub updateLastDripAt to throw after agents have been dripped.
+    const deps = makeDefaultDeps({
+      treasuryDb: {
+        findActiveTreasuries: async () => [makeTreasury()],
+        debitBalance: async () => true,
+        updateLastDripAt: async () => { throw new Error('db write timeout'); },
+      },
+    });
+    const result = await runFaucet(deps);
+    // The error must be surfaced in the return value so operators can see it.
+    assert.ok(result.errors >= 1, 'errors should be >= 1 when updateLastDripAt throws');
+    // treasuriesProcessed must NOT be incremented — the sweep did not finish cleanly.
+    assert.equal(result.treasuriesProcessed, 0, 'treasuriesProcessed should be 0 when updateLastDripAt throws');
+  });
+
+  test('runFaucet re-attempts drip on second call when updateLastDripAt failed (double-drip regression)', async () => {
+    // Simulate: first call drips agents but updateLastDripAt fails, so lastDripAt is never
+    // persisted. On the second call the treasury is still "due" and agents must be dripped
+    // again (since from the DB's perspective no drip occurred).
+    const treasury = makeTreasury(); // lastDripAt: null → always due
+    let dripsAttempted = 0;
+
+    const deps = makeDefaultDeps({
+      treasuryDb: {
+        findActiveTreasuries: async () => [treasury],
+        debitBalance: async () => true,
+        updateLastDripAt: async () => { throw new Error('db write timeout'); },
+      },
+      agentAccountDb: {
+        findActiveByTreasuryId: async () => { dripsAttempted++; return [makeAgent()]; },
+        addBalance: async () => {},
+      },
+    });
+
+    await runFaucet(deps); // first call — drips agents, updateLastDripAt fails
+    await runFaucet(deps); // second call — lastDripAt still null, must attempt drip again
+    assert.ok(dripsAttempted >= 2, 'agents should be queried on both calls when lastDripAt was never updated');
+  });
+
   test('startFaucet calls runFaucet immediately and returns handle', async () => {
     let runCount = 0;
     // Patch runFaucet via the module — we test the module's startFaucet directly.

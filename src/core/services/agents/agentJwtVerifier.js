@@ -10,6 +10,24 @@ const { createPublicKey } = require('crypto');
 const { createLogger } = require('../../../utils/logger');
 
 // ---------------------------------------------------------------------------
+// Domain validation (SSRF defense)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true only for plain hostnames: letters, digits, hyphens, dots, at
+ * least one dot.  Rejects IP literals, paths, credentials, bare labels like
+ * "localhost", and any other character that could be exploited when the value
+ * is interpolated into a URL.
+ *
+ * @param {string} domain
+ * @returns {boolean}
+ */
+function isValidIssuerDomain(domain) {
+  if (typeof domain !== 'string') return false;
+  return /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)+$/.test(domain);
+}
+
+// ---------------------------------------------------------------------------
 // Custom error classes
 // ---------------------------------------------------------------------------
 
@@ -148,6 +166,13 @@ class AgentJwtVerifier {
    * @returns {Promise<Array>} - Array of JWK objects
    */
   async _doFetchJwks(issuerDomain, cacheKey) {
+    if (!isValidIssuerDomain(issuerDomain)) {
+      this._jwksCache.delete(cacheKey);
+      throw new JwksUnavailableError(
+        `Refusing to fetch JWKS: issuerDomain '${issuerDomain}' failed hostname validation`,
+        { issuerDomain }
+      );
+    }
     const url = `https://${issuerDomain}/.well-known/jwks.json`;
 
     let response;

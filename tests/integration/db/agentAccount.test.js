@@ -36,7 +36,6 @@ describe('AgentAccountDB', () => {
       noemaAccountId: TEST_NOEMA_ACCOUNT_ID,
       workspaceSlug: TEST_WORKSPACE_SLUG,
       scope: ['generate', 'read'],
-      spendingCap: { amount: '100', currency: 'points', period: 'monthly' },
       sessionIssuedAt: now,
       sessionExpiresAt: expires,
     });

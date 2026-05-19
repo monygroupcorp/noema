@@ -17,6 +17,7 @@ const { createAgentSessionApi } = require('../../../../src/api/external/agents/a
 function makeMockAgentAccount(overrides = {}) {
   return {
     agentAccountId: 'cmw_test01',
+    agentId: 'agent-42',
     treasuryId: 'camel-1',
     tokenId: '42',
     scope: ['spell.image.generate'],
@@ -307,5 +308,144 @@ describe('Agent Session API — GET /agents/:agentAccountId/earnings', () => {
 
     assert.equal(res.status, 501);
     assert.equal(res.body.error.code, 'NOT_IMPLEMENTED');
+  });
+});
+
+// ─── Tests: PATCH /agents/:agentAccountId/payout-policy — auth enforcement ───
+// These tests exercise Finding #2 fix: when agentJwtVerifier is injected the
+// endpoint requires a valid CAMEL JWT whose agentId matches the account.
+
+function makeMockAgentJwtVerifier(overrides = {}) {
+  return {
+    verifyAssertionJwt: async (_token, _issuerDomain) => ({ agentId: 'agent-42' }),
+    ...overrides,
+  };
+}
+
+function createTestAppWithAuth({
+  agentAccount = makeMockAgentAccount(),
+  treasury = makeMockTreasury(),
+  agentAccountDbOverrides = {},
+  treasuryDbOverrides = {},
+  agentJwtVerifierOverrides = {},
+} = {}) {
+  const app = express();
+  app.use(express.json());
+  const router = createAgentSessionApi({
+    agentAccountDb: makeMockAgentAccountDb(agentAccount, agentAccountDbOverrides),
+    treasuryDb: makeMockTreasuryDb(treasury, treasuryDbOverrides),
+    agentJwtVerifier: makeMockAgentJwtVerifier(agentJwtVerifierOverrides),
+    logger: { error: () => {}, warn: () => {}, debug: () => {}, info: () => {} },
+  });
+  app.use('/', router);
+  return app;
+}
+
+describe('Agent Session API — PATCH /agents/:agentAccountId/payout-policy (auth enforced)', () => {
+  // 17. No Authorization header → 401
+  test('No Authorization header → 401 UNAUTHORIZED', async () => {
+    const app = createTestAppWithAuth();
+    const res = await supertest(app)
+      .patch('/agents/cmw_test01/payout-policy')
+      .send({ mode: 'self-fund' });
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.code, 'UNAUTHORIZED');
+  });
+
+  // 18. Authorization header not "Bearer <token>" → 401
+  test('Authorization header not "Bearer <token>" → 401 UNAUTHORIZED', async () => {
+    const app = createTestAppWithAuth();
+    const res = await supertest(app)
+      .patch('/agents/cmw_test01/payout-policy')
+      .set('Authorization', 'Basic dXNlcjpwYXNz')
+      .send({ mode: 'self-fund' });
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.code, 'UNAUTHORIZED');
+  });
+
+  // 19. Token present but verifyAssertionJwt throws a generic error → 401
+  test('Invalid/expired JWT → 401 UNAUTHORIZED', async () => {
+    const app = createTestAppWithAuth({
+      agentJwtVerifierOverrides: {
+        verifyAssertionJwt: async () => { throw new Error('jwt expired'); },
+      },
+    });
+    const res = await supertest(app)
+      .patch('/agents/cmw_test01/payout-policy')
+      .set('Authorization', 'Bearer bad.token.here')
+      .send({ mode: 'self-fund' });
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.code, 'UNAUTHORIZED');
+  });
+
+  // 20. JWKS unavailable → 503
+  test('JWKS unavailable → 503 SERVICE_UNAVAILABLE', async () => {
+    const jwksErr = Object.assign(new Error('JWKS fetch failed'), { name: 'JwksUnavailableError' });
+    const app = createTestAppWithAuth({
+      agentJwtVerifierOverrides: {
+        verifyAssertionJwt: async () => { throw jwksErr; },
+      },
+    });
+    const res = await supertest(app)
+      .patch('/agents/cmw_test01/payout-policy')
+      .set('Authorization', 'Bearer some.token')
+      .send({ mode: 'self-fund' });
+
+    assert.equal(res.status, 503);
+    assert.equal(res.body.error.code, 'SERVICE_UNAVAILABLE');
+  });
+
+  // 21. JWT's agentId doesn't match the account → 403
+  test('JWT agentId mismatch → 403 FORBIDDEN', async () => {
+    const app = createTestAppWithAuth({
+      agentJwtVerifierOverrides: {
+        verifyAssertionJwt: async () => ({ agentId: 'different-agent-99' }),
+      },
+    });
+    const res = await supertest(app)
+      .patch('/agents/cmw_test01/payout-policy')
+      .set('Authorization', 'Bearer valid.token')
+      .send({ mode: 'self-fund' });
+
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error.code, 'FORBIDDEN');
+  });
+
+  // 22. Treasury missing for account → 500 (misconfiguration)
+  test('Treasury not found for account → 500 INTERNAL_ERROR', async () => {
+    const app = createTestAppWithAuth({ treasury: null });
+    const res = await supertest(app)
+      .patch('/agents/cmw_test01/payout-policy')
+      .set('Authorization', 'Bearer valid.token')
+      .send({ mode: 'self-fund' });
+
+    assert.equal(res.status, 500);
+    assert.equal(res.body.error.code, 'INTERNAL_ERROR');
+  });
+
+  // 23. Valid JWT with matching agentId → 200 (happy path with auth enforced)
+  test('Valid JWT with matching agentId → 200', async () => {
+    const app = createTestAppWithAuth();
+    const res = await supertest(app)
+      .patch('/agents/cmw_test01/payout-policy')
+      .set('Authorization', 'Bearer valid.camel.token')
+      .send({ mode: 'self-fund' });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.agentAccountId, 'cmw_test01');
+    assert.equal(res.body.payoutPolicy.mode, 'self-fund');
+  });
+
+  // 24. Without agentJwtVerifier, no auth required (backward compat)
+  test('Without agentJwtVerifier, no auth required (backward compat)', async () => {
+    const app = createTestApp();
+    const res = await supertest(app)
+      .patch('/agents/cmw_test01/payout-policy')
+      .send({ mode: 'self-fund' });
+
+    assert.equal(res.status, 200);
   });
 });

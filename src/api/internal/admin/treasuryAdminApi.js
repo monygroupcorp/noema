@@ -12,6 +12,20 @@ const { createLogger } = require('../../../utils/logger');
 const logger = createLogger('treasuryAdminApi');
 
 /**
+ * Validates that a string is a plain hostname with no path, credentials, IP
+ * literals, or other characters that could enable SSRF when interpolated into
+ * a URL.  Accepts only letters, digits, hyphens, and dots; requires at least
+ * one dot (so bare labels like "localhost" are rejected).
+ *
+ * @param {string} domain
+ * @returns {boolean}
+ */
+function isValidIssuerDomain(domain) {
+  if (typeof domain !== 'string') return false;
+  return /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)+$/.test(domain);
+}
+
+/**
  * Create treasury admin API router
  *
  * @param {Object} dependencies
@@ -66,10 +80,16 @@ function createTreasuryAdminApi({ treasuryDb, agentAccountDb, economyService }) 
       if (!issuerName || !issuerDomain || !faucetPolicy) {
         return res.status(400).json({ error: 'BAD_REQUEST', message: 'issuerName, issuerDomain, and faucetPolicy are required' });
       }
+      if (!isValidIssuerDomain(issuerDomain)) {
+        return res.status(400).json({ error: 'INVALID_ISSUER_DOMAIN', message: 'issuerDomain must be a plain hostname (letters, digits, hyphens, dots; no paths, credentials, or IP literals)' });
+      }
       let treasuryId;
       if (requestedTreasuryId !== undefined) {
         if (typeof requestedTreasuryId !== 'string' || requestedTreasuryId.trim() === '') {
           return res.status(400).json({ error: 'BAD_REQUEST', message: 'treasuryId must be a non-empty string' });
+        }
+        if (!/^[a-zA-Z0-9_-]+$/.test(requestedTreasuryId)) {
+          return res.status(400).json({ error: 'INVALID_TREASURY_ID', message: 'treasuryId may only contain letters, digits, underscores, and hyphens' });
         }
         treasuryId = requestedTreasuryId;
       } else {
@@ -83,6 +103,9 @@ function createTreasuryAdminApi({ treasuryDb, agentAccountDb, economyService }) 
       logger.info('[treasuryAdminApi] Treasury created', { treasuryId, issuerName });
       return res.status(201).json({ treasuryId });
     } catch (err) {
+      if (err.code === 11000) {
+        return res.status(409).json({ error: 'CONFLICT', message: 'A treasury with this ID already exists' });
+      }
       logger.error('[treasuryAdminApi] createTreasury failed', { error: err.message });
       return res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Failed to create treasury' });
     }
