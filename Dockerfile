@@ -15,8 +15,8 @@ COPY package*.json ./
 RUN npm ci --legacy-peer-deps
 COPY . .
 RUN npx tsc
-# Copy non-TS assets (ABIs, workflow JSON templates) into dist alongside compiled output
-RUN find src -name '*.json' ! -name 'package*.json' | while read f; do \
+# Copy non-TS assets (JSON, plain JS modules) into dist alongside compiled output
+RUN find src \( -name '*.json' -o -name '*.js' \) ! -name 'package*.json' ! -path '*/frontend/*' | while read f; do \
   target="dist/${f#src/}"; \
   mkdir -p "$(dirname "$target")"; \
   cp "$f" "$target"; \

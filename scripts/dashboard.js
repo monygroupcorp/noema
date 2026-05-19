@@ -28,11 +28,11 @@ const hintsBar = blessed.box({
 
 // ── Widgets ───────────────────────────────────────────────────────────────────
 
-const activeList = grid.set(0, 0, 6, 4, contrib.log, {
-  label: ' ACTIVE EXECUTIONS ',
-  fg: 'green',
+const activeTable = grid.set(0, 0, 6, 4, contrib.table, {
+  label: ' ACTIVE PODS ',
+  columnSpacing: 1,
+  columnWidth: [8, 12, 6, 12],
   border: { type: 'line' },
-  scrollable: true,
 })
 
 const revLine = grid.set(0, 4, 3, 8, contrib.line, {
@@ -96,11 +96,13 @@ function renderHints() {
 // ── Renderers ─────────────────────────────────────────────────────────────────
 
 function renderActive() {
-  activeList.setLabel(` ACTIVE EXECUTIONS (${activeActa.size}) `)
-  for (const [id, info] of activeActa) {
+  activeTable.setLabel(` ACTIVE PODS (${activeActa.size}) `)
+  const rows = Array.from(activeActa.entries()).map(([id, info]) => {
     const elapsed = Math.round((Date.now() - info.startTs) / 1000)
-    activeList.log(`${id.slice(0,8)}  ${info.modusId.padEnd(14)}  ${elapsed}s  ${info.stage ?? ''}`)
-  }
+    const elapsedStr = elapsed >= 60 ? `${Math.floor(elapsed/60)}m${elapsed%60}s` : `${elapsed}s`
+    return [id.slice(0, 8), (info.modusId ?? '').slice(0, 12), elapsedStr, info.stage ?? 'initiated']
+  })
+  activeTable.setData({ headers: ['actum', 'modus', 'elapsed', 'stage'], data: rows })
   screen.render()
 }
 
@@ -251,6 +253,7 @@ setInterval(() => {
 // ── Initial render ────────────────────────────────────────────────────────────
 
 renderRevLine()
+activeTable.setData({ headers: ['actum', 'modus', 'elapsed', 'stage'], data: [] })
 completionsTable.setData({ headers: ['actumId', 'modus', 'duration', 'outcome'], data: [] })
 renderHints()
 

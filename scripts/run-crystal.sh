@@ -40,7 +40,10 @@ if [ -f .env ]; then
     value="$(echo "$value" | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")"
     if [[ -z "$key" || "$key" =~ ^# ]]; then continue; fi
     if [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-      export "$key"="$value"
+      # Env vars set before the script runs take precedence over .env
+      if [ -z "${!key+x}" ]; then
+        export "$key"="$value"
+      fi
     fi
   done < <(grep -v '^\s*#' .env | grep '=')
 else
@@ -52,8 +55,9 @@ fi
 # -----------------------------------------------------------------------------
 export PORT="${PORT:-3001}"
 export DB_NAME="${DB_NAME:-noema}"
-export LOG_LEVEL="${LOG_LEVEL:-info}"
+export LOG_LEVEL="${LOG_LEVEL:-debug}"
 export INTERNAL_SECRET="${INTERNAL_SECRET:-dev-secret}"
+export DEV_FREE_EXECUTION="${DEV_FREE_EXECUTION:-1}"
 
 # Suppress RunPod webhook URL in dev so the server doesn't wait for callbacks
 # that will never come (set it in .env if you want to test the full async path)
@@ -106,18 +110,28 @@ trap cleanup EXIT
 # 5. Start crystal server via tsx (no compile step)
 # -----------------------------------------------------------------------------
 CRYSTAL_LOG="/tmp/crystal-dev.log"
+
+# Fail fast if port is already in use — avoids silently connecting to a stale server
+if lsof -ti :"$PORT" >/dev/null 2>&1; then
+  STALE_PID=$(lsof -ti :"$PORT" 2>/dev/null)
+  STALE_CMD=$(ps -p "$STALE_PID" -o comm= 2>/dev/null || echo "unknown")
+  echo "[run-crystal.sh] ERROR: port $PORT already in use by pid $STALE_PID ($STALE_CMD)"
+  echo "[run-crystal.sh] Stop it first, or unset PORT to use a different port."
+  exit 1
+fi
+
 echo "[run-crystal.sh] Starting crystal server (raw logs → $CRYSTAL_LOG)..."
 npx tsx src/index.ts > "$CRYSTAL_LOG" 2>&1 &
 CRYSTAL_PID=$!
 
-# Wait for the server to accept connections
+# Wait for the server to accept connections — verify it's OUR process on the port
 MAX_WAIT=45
 WAITED=0
 echo -n "[run-crystal.sh] Waiting for :$PORT"
 while ! (echo >/dev/tcp/localhost/$PORT) 2>/dev/null; do
   if ! kill -0 "$CRYSTAL_PID" 2>/dev/null; then
     echo ""
-    echo "[run-crystal.sh] ERROR: Crystal server exited unexpectedly. Check logs above."
+    echo "[run-crystal.sh] ERROR: Crystal server exited unexpectedly. Check $CRYSTAL_LOG"
     exit 1
   fi
   if [ $WAITED -ge $MAX_WAIT ]; then
