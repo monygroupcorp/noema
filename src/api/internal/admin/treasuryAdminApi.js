@@ -194,6 +194,11 @@ function createTreasuryAdminApi({ treasuryDb, agentAccountDb, economyService }) 
       await agentAccountDb.addBalance(agentAccount.agentAccountId, points);
 
       // Credit the Noema economy account so points are spendable on spells (non-fatal).
+      if (economyService && !agentAccount.noemaAccountId) {
+        logger.warn('[treasuryAdminApi] agentAccount missing noemaAccountId — sub-account credited but Noema ledger skipped; backfill required', {
+          agentAccountId: agentAccount.agentAccountId,
+        });
+      }
       if (economyService && agentAccount.noemaAccountId) {
         try {
           await economyService.creditPoints(agentAccount.noemaAccountId, {

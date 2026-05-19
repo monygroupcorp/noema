@@ -92,11 +92,15 @@ async function runFaucet({ treasuryDb, agentAccountDb, faucetDripsDb, economySer
         continue;
       }
 
-      // perCycleBudget is the pool for this sweep — must be set explicitly to avoid draining the entire treasury balance.
-      const perCycleBudget = treasury.faucetPolicy?.perCycleBudget ?? null;
+      // perCycleBudget is the explicit sweep pool. Fall back to monthlyMax for legacy treasuries
+      // that predate Fix 4 (no migration required). Warn so ops know to set it explicitly.
+      const perCycleBudget = treasury.faucetPolicy?.perCycleBudget ?? treasury.faucetPolicy?.monthlyMax ?? null;
       if (perCycleBudget === null) {
-        log.warn(`[agentFaucetWorker] Treasury ${treasury.treasuryId} has no perCycleBudget — skipping to avoid draining full balance; set faucetPolicy.perCycleBudget`);
+        log.warn(`[agentFaucetWorker] Treasury ${treasury.treasuryId} has neither perCycleBudget nor monthlyMax — skipping; check faucetPolicy`);
         continue;
+      }
+      if (treasury.faucetPolicy?.perCycleBudget == null) {
+        log.warn(`[agentFaucetWorker] Treasury ${treasury.treasuryId} missing perCycleBudget — falling back to monthlyMax=${monthlyMax}; set faucetPolicy.perCycleBudget`);
       }
       const cycleBudget = Math.min(perCycleBudget, treasury.balance);
 

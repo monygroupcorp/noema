@@ -373,4 +373,92 @@ describe('Agent Provisioning API', () => {
     assert.equal(res.status, 202);
     assert.ok(res.body.agentAccountId);
   });
+
+  // 14. Suspended agent retry — debit succeeds → 202, account reactivated
+  test('Suspended agent: debit succeeds on retry → 202, account reactivated', async () => {
+    const suspendedAccount = {
+      agentAccountId: 'cmw_susp01',
+      status: 'suspended',
+      balance: 0,
+      noemaAccountId: 'aabbccddeeff001122334455',
+      treasuryId: 'camel-1',
+      tokenId: '42',
+      scope: ['generate'],
+    };
+    let statusSet = null;
+    let balanceAdded = null;
+    let creditPointsCalled = false;
+
+    const app = createTestApp({
+      agentAccountDbOverrides: {
+        findByAgentId: async () => suspendedAccount,
+        setStatus: async (id, status) => { statusSet = status; },
+        addBalance: async (id, pts) => { balanceAdded = pts; },
+      },
+      treasuryDbOverrides: {
+        debitBalance: async () => true,
+      },
+      economyServiceOverrides: {
+        creditPoints: async () => { creditPointsCalled = true; return { entryId: 'eid' }; },
+      },
+    });
+
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents')
+      .set('Authorization', 'Bearer valid-token')
+      .send();
+
+    assert.equal(res.status, 202);
+    assert.equal(res.body.agentAccountId, 'cmw_susp01');
+    assert.equal(statusSet, 'active', 'account should be reactivated');
+    assert.ok(balanceAdded > 0, 'balance should be credited');
+    assert.equal(creditPointsCalled, true, 'creditPoints should be called on retry');
+  });
+
+  // 15. Suspended agent retry — debit fails → 402, stays suspended
+  test('Suspended agent: debit fails on retry → 402 INSUFFICIENT_FUNDS', async () => {
+    const suspendedAccount = {
+      agentAccountId: 'cmw_susp02',
+      status: 'suspended',
+      balance: 0,
+      noemaAccountId: 'aabbccddeeff001122334456',
+      treasuryId: 'camel-1',
+      tokenId: '43',
+      scope: [],
+    };
+    const app = createTestApp({
+      agentAccountDbOverrides: {
+        findByAgentId: async () => suspendedAccount,
+      },
+      treasuryDbOverrides: {
+        debitBalance: async () => false,
+      },
+    });
+
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents')
+      .set('Authorization', 'Bearer valid-token')
+      .send();
+
+    assert.equal(res.status, 402);
+    assert.equal(res.body.error.code, 'INSUFFICIENT_FUNDS');
+  });
+
+  // 16. Revoked agent → 409 AGENT_REVOKED (terminal state, no retry)
+  test('Revoked agent → 409 AGENT_REVOKED', async () => {
+    const revokedAccount = { agentAccountId: 'cmw_rev01', status: 'revoked', balance: 0 };
+    const app = createTestApp({
+      agentAccountDbOverrides: {
+        findByAgentId: async () => revokedAccount,
+      },
+    });
+
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents')
+      .set('Authorization', 'Bearer valid-token')
+      .send();
+
+    assert.equal(res.status, 409);
+    assert.equal(res.body.error.code, 'AGENT_REVOKED');
+  });
 });

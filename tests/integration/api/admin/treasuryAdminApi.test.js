@@ -33,6 +33,7 @@ function makeMockTreasuryDb(overrides = {}) {
     updateFaucetPolicy: async () => {},
     setStatus: async () => {},
     updatePartnerId: async () => {},
+    updateStarterWorkspaceSlug: async () => {},
     ...overrides,
   };
 }
@@ -50,14 +51,26 @@ const sampleAgentAccount = {
   agentAccountId: 'cmw_aaa001',
   agentId: 'agent-42',
   treasuryId: 'test-1',
+  noemaAccountId: 'aabbccddeeff001122334455',
   balance: 500,
   status: 'active',
 };
 
-function createTestApp(mockDb, mockAgentAccountDb) {
+function makeMockEconomyService(overrides = {}) {
+  return {
+    creditPoints: async () => ({ entryId: 'fake-entry-id' }),
+    ...overrides,
+  };
+}
+
+function createTestApp(mockDb, mockAgentAccountDb, economyService) {
   const app = express();
   app.use(express.json());
-  const router = createTreasuryAdminApi({ treasuryDb: mockDb, agentAccountDb: mockAgentAccountDb || makeMockAgentAccountDb() });
+  const router = createTreasuryAdminApi({
+    treasuryDb: mockDb,
+    agentAccountDb: mockAgentAccountDb || makeMockAgentAccountDb(),
+    economyService: economyService || null,
+  });
   app.use('/treasury', router);
   return app;
 }
@@ -442,5 +455,100 @@ describe('Treasury Admin API', () => {
       .send({ points: 9999999 });
     assert.equal(res.status, 400);
     assert.equal(res.body.error, 'INSUFFICIENT_BALANCE');
+  });
+
+  // ─── topup: creditPoints wiring (Fix 9) ──────────────────────────────────
+
+  test('POST /:treasuryId/agents/:agentId/topup calls economyService.creditPoints with AGENT_TOPUP', async () => {
+    let creditArgs = null;
+    const economyService = makeMockEconomyService({
+      creditPoints: async (noemaAccountId, opts) => { creditArgs = { noemaAccountId, opts }; return { entryId: 'eid' }; },
+    });
+    const mockAgentDb = makeMockAgentAccountDb({
+      findByAgentId: async (id) => (id === 'agent-42' ? sampleAgentAccount : null),
+    });
+    const localApp = createTestApp(makeMockTreasuryDb(), mockAgentDb, economyService);
+    const res = await supertest(localApp)
+      .post('/treasury/test-1/agents/agent-42/topup')
+      .send({ points: 100 });
+
+    assert.equal(res.status, 200);
+    assert.ok(creditArgs, 'creditPoints should have been called');
+    assert.equal(creditArgs.noemaAccountId, sampleAgentAccount.noemaAccountId);
+    assert.equal(creditArgs.opts.points, 100);
+    assert.equal(creditArgs.opts.rewardType, 'AGENT_TOPUP');
+  });
+
+  test('POST /:treasuryId/agents/:agentId/topup returns 200 even when creditPoints throws (non-fatal)', async () => {
+    const economyService = makeMockEconomyService({
+      creditPoints: async () => { throw new Error('ledger down'); },
+    });
+    const mockAgentDb = makeMockAgentAccountDb({
+      findByAgentId: async (id) => (id === 'agent-42' ? sampleAgentAccount : null),
+    });
+    const localApp = createTestApp(makeMockTreasuryDb(), mockAgentDb, economyService);
+    const res = await supertest(localApp)
+      .post('/treasury/test-1/agents/agent-42/topup')
+      .send({ points: 100 });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.pointsAdded, 100);
+  });
+
+  // ─── PATCH /:id/workspace (Fix 2) ────────────────────────────────────────
+
+  test('PATCH /:id/workspace returns 200 { ok: true } for valid slug', async () => {
+    let capturedSlug = null;
+    const mockDb = makeMockTreasuryDb({
+      updateStarterWorkspaceSlug: async (id, slug) => { capturedSlug = slug; },
+    });
+    const localApp = createTestApp(mockDb);
+    const res = await supertest(localApp)
+      .patch('/treasury/test-1/workspace')
+      .send({ starterWorkspaceSlug: 'abc12345' });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(capturedSlug, 'abc12345');
+  });
+
+  test('PATCH /:id/workspace returns 400 when starterWorkspaceSlug is missing', async () => {
+    const res = await supertest(app)
+      .patch('/treasury/test-1/workspace')
+      .send({});
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'BAD_REQUEST');
+  });
+
+  test('PATCH /:id/workspace returns 404 when treasury not found', async () => {
+    const res = await supertest(app)
+      .patch('/treasury/no-such-id/workspace')
+      .send({ starterWorkspaceSlug: 'abc12345' });
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error, 'NOT_FOUND');
+  });
+
+  // ─── perCycleBudget in faucet policy (Fix 4) ─────────────────────────────
+
+  test('PATCH /:id/policy accepts perCycleBudget', async () => {
+    let capturedPolicy = null;
+    const mockDb = makeMockTreasuryDb({
+      updateFaucetPolicy: async (id, policy) => { capturedPolicy = policy; },
+    });
+    const localApp = createTestApp(mockDb);
+    const res = await supertest(localApp)
+      .patch('/treasury/test-1/policy')
+      .send({ perCycleBudget: 300 });
+
+    assert.equal(res.status, 200);
+    assert.equal(capturedPolicy.perCycleBudget, 300);
+  });
+
+  test('PATCH /:id/policy returns 400 for negative perCycleBudget', async () => {
+    const res = await supertest(app)
+      .patch('/treasury/test-1/policy')
+      .send({ perCycleBudget: -1 });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'BAD_REQUEST');
   });
 });
