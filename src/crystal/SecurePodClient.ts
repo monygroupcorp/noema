@@ -154,6 +154,14 @@ export class SecurePodClient implements RunPodClient {
       try {
         await this._runBackground(podId!, imageName, params.input, params.webhook, undefined, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics)
       } catch (firstErr) {
+        // Once comfyrunner accepted the job it OWNS the run and the webhook. A
+        // dropped SSE stream after that point means we lost visibility, not that
+        // the job failed — re-provisioning would spawn a redundant pod and
+        // re-download every model. Stop here and let comfyrunner fire the webhook.
+        if (runnerAcceptedJob) {
+          log.warn('lost SSE after comfyrunner accepted job — not retrying; comfyrunner owns the webhook', { podId, error: (firstErr as Error).message })
+          return
+        }
         log.warn(`pod run attempt 1/${maxAttempts} failed`, { podId, error: (firstErr as Error).message })
         for (let attempt = 2; attempt <= maxAttempts; attempt++) {
           log.info('retrying on new pod', { attempt })
@@ -172,6 +180,10 @@ export class SecurePodClient implements RunPodClient {
             await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics)
             return
           } catch (runErr) {
+            if (runnerAcceptedJob) {
+              log.warn('lost SSE after comfyrunner accepted job — not retrying; comfyrunner owns the webhook', { podId: retryPodId, error: (runErr as Error).message })
+              return
+            }
             log.warn(`pod run attempt ${attempt}/${maxAttempts} failed`, { podId: retryPodId, error: (runErr as Error).message })
             if (attempt === maxAttempts) throw runErr
           }
