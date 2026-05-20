@@ -10,7 +10,7 @@ export class MemoryActorum implements Actorum {
     return record
   }
 
-  async update(id: string, patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'deploymentHash'>>): Promise<Actum> {
+  async update(id: string, patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'deploymentHash' | 'executio'>>): Promise<Actum> {
     const existing = this.store.get(id)
     if (!existing) throw new Error(`Actum '${id}' not found`)
     const updated = { ...existing, ...patch }

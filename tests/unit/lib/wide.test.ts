@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { buildWideEvent, emitWideEvent } from '../../../src/lib/wide.js'
 import { makeTraceContext } from '../../../src/lib/trace.js'
 import { bus } from '../../../src/lib/bus.js'
-import type { Actum } from '../../../src/types/actum.js'
+import type { Actum, ActumExecutio } from '../../../src/types/actum.js'
 import type { Exitus } from '../../../src/types/cursus.js'
 import type { WideEvent } from '../../../src/lib/wide.js'
 
@@ -58,30 +58,30 @@ function makeExitus(impetus = 700n): Exitus {
 }
 
 // ---------------------------------------------------------------------------
-// Test 1 — buildWideEvent includes correct timings from trace context
+// Pod telemetry is sourced from actum.executio (durable across the webhook
+// boundary), NOT from the trace context — the completion webhook runs in a
+// fresh context with none of the in-flight pod state.
 // ---------------------------------------------------------------------------
 
-test('buildWideEvent includes correct timings from trace context', () => {
-  const ctx = makeTraceContext({
-    startTs:     Date.now() - 3000,
-    provisionMs: 1000,
-    sshReadyMs:  2000,
-    jobSubmitMs: 2500,
-    webhookMs:   2900,
-  })
-  const actum = makeActum()
+test('buildWideEvent reads pod timings from actum.executio', () => {
+  const executio: ActumExecutio = { provisionMs: 1000, sshReadyMs: 2000, coldStart: true }
+  const ctx = makeTraceContext({ webhookMs: 2900, jobSubmitMs: 2500 })
+  const actum = makeActum({ executio })
   const wide = buildWideEvent(actum, ctx, 'completed', makeExitus())
 
   assert.equal(wide.provisionMs, 1000)
   assert.equal(wide.sshReadyMs,  2000)
-  assert.equal(wide.jobSubmitMs, 2500)
-  assert.equal(wide.webhookMs,   2900)
-  assert.ok(wide.durationMs >= 2900, 'durationMs should be at least 2900ms')
+  assert.equal(wide.webhookMs,   2900)   // webhookMs still comes from the (correct) webhook ctx
 })
 
-// ---------------------------------------------------------------------------
-// Test 2 — buildWideEvent computes refund as reservation - impetus
-// ---------------------------------------------------------------------------
+test('buildWideEvent computes durationMs from the actum, not the trace context', () => {
+  const inceptum = new Date(Date.now() - 6 * 60 * 1000)
+  const completum = new Date(inceptum.getTime() + 5 * 60 * 1000)  // 5 min run
+  const actum = makeActum({ inceptum, completum })
+  // ctx.startTs is recent (webhook just started) — must NOT be used for durationMs
+  const wide = buildWideEvent(actum, makeTraceContext(), 'completed', makeExitus())
+  assert.equal(wide.durationMs, 5 * 60 * 1000)
+})
 
 test('buildWideEvent computes refund as reservation minus impetus', () => {
   const ctx = makeTraceContext()
@@ -94,67 +94,93 @@ test('buildWideEvent computes refund as reservation minus impetus', () => {
   assert.equal(wide.refund,      '300')         // 1000 - 700 = 300
 })
 
-// ---------------------------------------------------------------------------
-// Test 3 — buildWideEvent spreads ctx.wideFields (gpuType, podId present)
-// ---------------------------------------------------------------------------
+test('buildWideEvent surfaces gpuType and podId from executio', () => {
+  const actum = makeActum({ executio: { gpuType: 'NVIDIA_A40', podId: 'pod-xyz-999' } })
+  const wide = buildWideEvent(actum, makeTraceContext(), 'completed', makeExitus())
+  assert.equal(wide.gpuType, 'NVIDIA_A40')
+  assert.equal(wide.podId,   'pod-xyz-999')
+})
 
-test('buildWideEvent spreads ctx.wideFields onto the wide event', () => {
-  const ctx = makeTraceContext({
-    wideFields: { gpuType: 'NVIDIA_A40', podId: 'pod-xyz-999', cursorType: 'runpod:secure' },
-  })
-  const actum = makeActum()
-  const wide = buildWideEvent(actum, ctx, 'completed', makeExitus())
+test('buildWideEvent coldStart reflects executio.coldStart', () => {
+  const cold = buildWideEvent(makeActum({ executio: { coldStart: true } }), makeTraceContext(), 'completed', makeExitus())
+  assert.equal(cold.coldStart, true)
+  const warm = buildWideEvent(makeActum({ executio: { coldStart: false } }), makeTraceContext(), 'completed', makeExitus())
+  assert.equal(warm.coldStart, false)
+  const none = buildWideEvent(makeActum(), makeTraceContext(), 'completed', makeExitus())
+  assert.equal(none.coldStart, false)  // no executio → not a cold start
+})
 
-  assert.equal(wide.gpuType,     'NVIDIA_A40')
-  assert.equal(wide.podId,       'pod-xyz-999')
-  assert.equal(wide.cursorType,  'runpod:secure')
+test('buildWideEvent carries download telemetry from executio', () => {
+  const actum = makeActum({ executio: {
+    modelsDownloaded: 3, modelsReused: 1, downloadMs: 42_000, downloadBytes: 28_000_000_000,
+  } })
+  const wide = buildWideEvent(actum, makeTraceContext(), 'completed', makeExitus())
+  assert.equal(wide.modelsDownloaded, 3)
+  assert.equal(wide.modelsReused,     1)
+  assert.equal(wide.downloadMs,       42_000)
+  assert.equal(wide.downloadBytes,    28_000_000_000)
+})
+
+test('buildWideEvent derives costUsd from costPerHr and duration', () => {
+  const inceptum = new Date(Date.now() - 60 * 60 * 1000)
+  const completum = new Date(inceptum.getTime() + 30 * 60 * 1000)  // 30 min = 0.5 hr
+  const actum = makeActum({ inceptum, completum, executio: { costPerHr: 0.7, coldStart: true } })
+  const wide = buildWideEvent(actum, makeTraceContext(), 'completed', makeExitus())
+  assert.equal(wide.costPerHr, 0.7)
+  assert.equal(wide.costUsd,   0.35)  // 0.7 * 0.5 hr
+})
+
+test('buildWideEvent leaves costUsd undefined when no rate is known', () => {
+  const wide = buildWideEvent(makeActum(), makeTraceContext(), 'completed', makeExitus())
+  assert.equal(wide.costUsd, undefined)
+})
+
+test('buildWideEvent executionMs prefers executio, falls back to exitus.duratio', () => {
+  const fromExecutio = buildWideEvent(makeActum({ executio: { executionMs: 1234 } }), makeTraceContext(), 'completed', makeExitus())
+  assert.equal(fromExecutio.executionMs, 1234)
+  const fromExitus = buildWideEvent(makeActum(), makeTraceContext(), 'completed', makeExitus())
+  assert.equal(fromExitus.executionMs, 5000)  // exitus.duratio
 })
 
 // ---------------------------------------------------------------------------
-// Test 4 — buildWideEvent marks coldStart: true when ctx.provisionMs is set
+// Event-name regression: emitWideEvent must emit the name listeners subscribe
+// to ('actum.complete' / 'actum.fail'). The original bug emitted
+// 'actum.completed' / 'actum.failed' → nothing was ever persisted.
 // ---------------------------------------------------------------------------
 
-test('buildWideEvent marks coldStart true when ctx.provisionMs is set', () => {
-  const ctx = makeTraceContext({ provisionMs: 1500 })
-  const wide = buildWideEvent(makeActum(), ctx, 'completed', makeExitus())
-  assert.equal(wide.coldStart, true)
+test('buildWideEvent sets event to actum.complete / actum.fail', () => {
+  assert.equal(buildWideEvent(makeActum(), makeTraceContext(), 'completed', makeExitus()).event, 'actum.complete')
+  assert.equal(buildWideEvent(makeActum(), makeTraceContext(), 'failed', undefined, 'boom').event, 'actum.fail')
 })
 
-// ---------------------------------------------------------------------------
-// Test 5 — buildWideEvent marks coldStart: false when ctx.provisionMs is undefined
-// ---------------------------------------------------------------------------
-
-test('buildWideEvent marks coldStart false when ctx.provisionMs is undefined', () => {
-  const ctx = makeTraceContext()  // provisionMs not set
-  const wide = buildWideEvent(makeActum(), ctx, 'completed', makeExitus())
-  assert.equal(wide.coldStart, false)
-})
-
-// ---------------------------------------------------------------------------
-// Test 6 — emitWideEvent writes to stdout and emits on bus
-// ---------------------------------------------------------------------------
-
-test('emitWideEvent writes to stdout and emits actum.complete on bus', () => {
-  const ctx = makeTraceContext()
-  const wide = buildWideEvent(makeActum(), ctx, 'completed', makeExitus())
+test('emitWideEvent emits on the actum.complete channel listeners use', () => {
+  const wide = buildWideEvent(makeActum(), makeTraceContext(), 'completed', makeExitus())
 
   const busEvents: WideEvent[] = []
   const listener = (w: WideEvent) => busEvents.push(w)
   bus.on('actum.complete', listener)
 
-  let stdoutLine: Record<string, unknown> | null = null
   const lines = captureStdout(() => emitWideEvent(wide)) as Array<Record<string, unknown>>
 
   bus.removeListener('actum.complete', listener)
 
-  // stdout check
   assert.ok(lines.length >= 1, 'expected at least one stdout line')
-  stdoutLine = lines[0]
-  assert.equal(stdoutLine.component, 'wide')
-  assert.equal(stdoutLine.level,     'info')
-  assert.equal(stdoutLine.actumId,   'actum-001')
+  assert.equal(lines[0].component, 'wide')
+  assert.equal(lines[0].actumId,   'actum-001')
 
-  // bus check
   assert.equal(busEvents.length, 1)
   assert.equal(busEvents[0].actumId, 'actum-001')
+})
+
+test('emitWideEvent emits on the actum.fail channel for failures', () => {
+  const wide = buildWideEvent(makeActum({ status: 'fractus' }), makeTraceContext(), 'failed', undefined, 'OOM')
+
+  const failEvents: WideEvent[] = []
+  const listener = (w: WideEvent) => failEvents.push(w)
+  bus.on('actum.fail', listener)
+  captureStdout(() => emitWideEvent(wide))
+  bus.removeListener('actum.fail', listener)
+
+  assert.equal(failEvents.length, 1)
+  assert.equal(failEvents[0].errorCode, 'OOM')
 })

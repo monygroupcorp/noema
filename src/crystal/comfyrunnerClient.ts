@@ -78,17 +78,28 @@ export async function submitToRunner(
  * Emits bus events for progress and optional stage callbacks for Telegram UX.
  * Reconnects up to 3 times on dropped connections, replaying from last seq.
  */
+export interface RunMetrics {
+  modelsDownloaded?: number
+  modelsReused?:     number
+  downloadMs?:       number
+  downloadBytes?:    number
+  executionMs?:      number
+}
+
 export async function awaitViaStream(
   fetchFn: typeof fetch,
   runnerBase: string,
   jobId: string,
   timeoutMs: number,
   emitStage?: (stage: string) => void,
+  onMetrics?: (m: RunMetrics) => void,
 ): Promise<void> {
   let lastSeq = -1
   let inferringEmitted = false
   let modelTotal = 0
   let modelDone = 0
+  let downloadStartMs = 0
+  let downloadBytes = 0
   const deadline = Date.now() + timeoutMs
 
   for (let attempt = 0; attempt <= 3; attempt++) {
@@ -143,12 +154,15 @@ export async function awaitViaStream(
                 const { total = 0, present = 0 } = event as { total?: number; present?: number }
                 modelTotal = total
                 modelDone = present
+                if (total > present && downloadStartMs === 0) downloadStartMs = Date.now()
                 log.info('model preflight', { jobId, missing: total - present, present, total })
                 if (total > present) emitStage?.(`downloading:${present}/${total}`)
                 break
               }
               case 'downloading': {
                 const { dest, total: bytes } = event as { dest?: string; total?: number }
+                if (downloadStartMs === 0) downloadStartMs = Date.now()
+                if (typeof bytes === 'number') downloadBytes += bytes
                 if (modelTotal === 0) emitStage?.('downloading')
                 log.info('model download started', { jobId, dest, bytes })
                 break
@@ -162,7 +176,9 @@ export async function awaitViaStream(
               }
               case 'models-ready': {
                 const { downloaded = 0, reused = 0 } = event as { downloaded?: number; reused?: number }
-                log.info('models ready', { jobId, downloaded, reused })
+                const downloadMs = downloadStartMs > 0 ? Date.now() - downloadStartMs : 0
+                log.info('models ready', { jobId, downloaded, reused, downloadMs, downloadBytes })
+                onMetrics?.({ modelsDownloaded: downloaded, modelsReused: reused, downloadMs, downloadBytes })
                 break
               }
               case 'installing-node':
@@ -194,6 +210,7 @@ export async function awaitViaStream(
               case 'complete': {
                 const { executionTimeMs } = event as { executionTimeMs?: number }
                 log.info('job complete', { jobId, executionTimeMs })
+                if (typeof executionTimeMs === 'number') onMetrics?.({ executionMs: executionTimeMs })
                 return
               }
               case 'error': {

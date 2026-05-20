@@ -1,5 +1,6 @@
 import type { RunPodClient } from './RunPodCursor.js'
 import type { Materia, MateriaStore } from '../types/materia.js'
+import type { ActumExecutio } from '../types/actum.js'
 import type { R2Config } from './SecurePodClient.js'
 import { SecurePodClient } from './SecurePodClient.js'
 import { submitToRunner, awaitViaStream } from './comfyrunnerClient.js'
@@ -34,13 +35,13 @@ export class WarmPodClient implements RunPodClient {
     private readonly config: WarmPodConfig = {},
   ) {}
 
-  async submit(params: { input: unknown; webhook?: string; onPodActive?: (podId: string) => Promise<void> }): Promise<{ id: string }> {
+  async submit(params: { input: unknown; webhook?: string; onPodActive?: (podId: string) => Promise<void>; onMetrics?: (executio: ActumExecutio) => Promise<void> }): Promise<{ id: string }> {
     const { id, externusId } = this.materia
     // Unique per-submission ID — reusing externusId would 409 on second job to same warm pod
     const jobId = `${externusId}-${Date.now()}`
     let runnerAcceptedJob = false
 
-    this._runBackground(params.input, params.webhook, jobId, (accepted) => { runnerAcceptedJob = accepted })
+    this._runBackground(params.input, params.webhook, jobId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics)
       .catch(async (err) => {
         log.error(`Materia ${externusId} job failed`, { materiaId: id, externusId, error: (err as Error).message })
         if (params.webhook && !runnerAcceptedJob) {
@@ -73,10 +74,14 @@ export class WarmPodClient implements RunPodClient {
     webhook: string | undefined,
     jobId: string,
     onRunnerAccepted: (accepted: boolean) => void,
+    onMetrics?: (executio: ActumExecutio) => Promise<void>,
   ): Promise<void> {
     const { id, externusId } = this.materia
     const runnerBase = this._runnerBase()
     let podReachable = false
+    // Warm reuse: no provisioning cost, so coldStart is false. Download metrics
+    // (if the warm pod was missing models) and execution time stream from comfyrunner.
+    const executio: ActumExecutio = { podId: externusId, coldStart: false }
 
     try {
       await this._waitForRunner(runnerBase)
@@ -90,7 +95,9 @@ export class WarmPodClient implements RunPodClient {
         this.fetchFn,
         runnerBase,
         jobId,
-        this.config.jobTimeoutMs ?? 15 * 60 * 1000,
+        this.config.jobTimeoutMs ?? 45 * 60 * 1000,
+        undefined,
+        (m) => { Object.assign(executio, m); void onMetrics?.({ ...executio }) },
       )
     } catch (err) {
       const msg = (err as Error).message ?? ''
