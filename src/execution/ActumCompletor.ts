@@ -12,7 +12,8 @@ const log = makeLogger('execution:completor')
 interface Deps {
   acta: Actorum
   signorum: Signorum
-  nexus: Nexus
+  nexus?: Nexus
+  terminatePod?: (podId: string) => Promise<void>
 }
 
 export class ActumCompletor {
@@ -66,24 +67,30 @@ export class ActumCompletor {
       }
     }
 
-    // Business logic rail — hooks fire here
-    await nexus.emit({
-      type: 'execution_spend',
-      payload: {
-        actum: completed,
-        impetus,
-      },
-    })
+    if (nexus) {
+      await nexus.emit({
+        type: 'execution_spend',
+        payload: {
+          actum: completed,
+          impetus,
+        },
+      })
+    }
 
     return completed
   }
 
   async fail(actum: Actum, error: string): Promise<Actum> {
-    const { acta, signorum } = this.deps
+    const { acta, signorum, terminatePod } = this.deps
 
     const current = await acta.findById(actum.id)
     if (current?.status === 'completus' || current?.status === 'fractus') {
       return current
+    }
+
+    // Invariant: kill the pod before releasing signa — never refund while a pod still burns.
+    if (actum.externusJobId && terminatePod) {
+      await terminatePod(actum.externusJobId).catch(() => {})
     }
 
     // Release all locked signa — nothing was consumed

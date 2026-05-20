@@ -754,19 +754,33 @@ Generate AI art, chat with models, explore creative tools.`
       ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
       : `${elapsed}s`
 
-    const stageLines: Record<string, string> = {
-      'provisioning':   'Provisioning cold pod...',
-      'ssh-ready':      'Pod online. Setting up runtime...',
-      'bootstrapping':  'Bootstrapping runtime...',
-      'comfy-ready':    'Models loaded. Generating...',
-      'inferring':      'Generating image...',
-    }
-    const header = stageLines[stage] ?? `Stage: ${stage}`
+    let header: string
+    let progressBar: string | null = null
 
-    const lines = [
-      header,
-      `Elapsed: ${elapsedStr}`,
-    ]
+    if (stage.startsWith('progress:')) {
+      const [n, m] = stage.slice(9).split('/').map(Number)
+      const pct = m > 0 ? n / m : 0
+      const filled = Math.round(pct * 10)
+      progressBar = `[${'█'.repeat(filled)}${'░'.repeat(10 - filled)}] ${n}/${m}`
+      header = 'Generating...'
+    } else {
+      const stageLines: Record<string, string> = {
+        'provisioning':     'Provisioning cold pod...',
+        'ssh-ready':        'Pod online. Setting up runtime...',
+        'bootstrapping':    'Bootstrapping runtime...',
+        'downloading':      'Downloading models...',
+        'installing-nodes': 'Loading plugins...',
+        'restarting':       'Reloading runtime...',
+        'comfy-ready':      'Models loaded. Generating...',
+        'inferring':        'Generating image...',
+        'uploading':        'Saving result...',
+      }
+      header = stageLines[stage] ?? `Stage: ${stage}`
+    }
+
+    const lines = [header]
+    if (progressBar) lines.push(progressBar)
+    lines.push(`Elapsed: ${elapsedStr}`)
 
     if (stage === 'provisioning') {
       lines.push('Est. time: ~5 min on cold start')

@@ -1,49 +1,30 @@
 import type { RunPodClient } from './RunPodCursor.js'
 import type { Materia, MateriaStore } from '../types/materia.js'
+import type { R2Config } from './SecurePodClient.js'
 import { SecurePodClient } from './SecurePodClient.js'
+import { submitToRunner, awaitViaStream } from './comfyrunnerClient.js'
 import { makeLogger } from '../lib/logger.js'
 
 const log = makeLogger('cursor:runpod:warm')
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms))
-}
 
 interface WarmPodConfig {
   runnerReadyTimeoutMs?: number
   runnerPollIntervalMs?: number
   jobTimeoutMs?: number
+  r2?: R2Config
 }
 
-interface CompiledSpecLike {
-  workflow: { inputTemplate: Record<string, unknown> }
-  models: Array<{ url: string; dest: string; sizeBytes?: number }>
-}
-
-function isCompiledSpec(v: unknown): v is CompiledSpecLike {
-  if (!v || typeof v !== 'object') return false
-  const o = v as Record<string, unknown>
-  return (
-    o.workflow !== null && typeof o.workflow === 'object' &&
-    typeof (o.workflow as Record<string, unknown>).inputTemplate === 'object' &&
-    Array.isArray(o.models)
-  )
-}
-
-interface JobResult {
-  status: 'running' | 'completed' | 'failed'
-  output?: Array<{ url: string }>
-  error?: string
-  executionTime?: number
+function sleep(ms: number): Promise<void> {
+  return new Promise(r => setTimeout(r, ms))
 }
 
 /**
  * WarmPodClient — runs a ComfyUI job on an already-running SECURE pod.
  *
- * Submits the job to runner.py via the RunPod HTTP proxy, then polls
- * runner.py's /job/<id> endpoint for the result. When done, fires the
- * completion webhook from Crystal's own process — no outbound calls from the
- * pod required, which avoids reverse-proxy / CSRF issues.
+ * Submits the job to comfyrunner via the RunPod HTTP proxy. comfyrunner handles
+ * model/custom-node preflight, inference, R2 upload, and fires the completion
+ * webhook directly from the pod. Crystal subscribes to the SSE stream only to
+ * track lifecycle (terminate vs keep-warm) and emit stage events to the bus.
  */
 export class WarmPodClient implements RunPodClient {
   constructor(
@@ -53,19 +34,30 @@ export class WarmPodClient implements RunPodClient {
     private readonly config: WarmPodConfig = {},
   ) {}
 
-  async submit(params: { input: unknown; webhook?: string }): Promise<{ id: string }> {
+  async submit(params: { input: unknown; webhook?: string; onPodActive?: (podId: string) => Promise<void> }): Promise<{ id: string }> {
     const { id, externusId } = this.materia
+    // Unique per-submission ID — reusing externusId would 409 on second job to same warm pod
+    const jobId = `${externusId}-${Date.now()}`
+    let runnerAcceptedJob = false
 
-    this._runBackground(params.input, params.webhook).catch(async (err) => {
-      log.error(`Materia ${externusId} job failed`, { materiaId: id, externusId, error: (err as Error).message })
-      if (params.webhook) {
-        await this.fetchFn(params.webhook, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: externusId, status: 'FAILED', error: (err as Error).message }),
-        }).catch(() => {})
-      }
-    })
+    this._runBackground(params.input, params.webhook, jobId, (accepted) => { runnerAcceptedJob = accepted })
+      .catch(async (err) => {
+        log.error(`Materia ${externusId} job failed`, { materiaId: id, externusId, error: (err as Error).message })
+        if (params.webhook && !runnerAcceptedJob) {
+          // comfyrunner never received the job — Crystal is the only one that can fire this webhook
+          for (let attempt = 0; attempt < 3; attempt++) {
+            if (attempt) await new Promise(r => setTimeout(r, 1000 * attempt))
+            try {
+              const res = await this.fetchFn(params.webhook, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: externusId, status: 'FAILED', error: (err as Error).message }),
+              })
+              if (res.ok) break
+            } catch (_) { /* retry */ }
+          }
+        }
+      })
 
     return { id: externusId }
   }
@@ -76,53 +68,37 @@ export class WarmPodClient implements RunPodClient {
     return SecurePodClient.runnerBase(this.materia.externusId)
   }
 
-  private async _runBackground(input: unknown, webhook: string | undefined): Promise<void> {
+  private async _runBackground(
+    input: unknown,
+    webhook: string | undefined,
+    jobId: string,
+    onRunnerAccepted: (accepted: boolean) => void,
+  ): Promise<void> {
     const { id, externusId } = this.materia
     const runnerBase = this._runnerBase()
-    const workflowInput = isCompiledSpec(input) ? input.workflow.inputTemplate : input
     let podReachable = false
 
     try {
       await this._waitForRunner(runnerBase)
       podReachable = true
 
-      // Submit job — runner.py queues it and exposes status at GET /job/<externusId>
-      const res = await this.fetchFn(`${runnerBase}/job`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId: externusId, workflow: workflowInput }),
-        signal: AbortSignal.timeout(15000),
-      })
+      await submitToRunner(this.fetchFn, runnerBase, jobId, input, webhook, this.config.r2)
+      onRunnerAccepted(true)
+      log.info('job submitted to comfyrunner', { materiaId: id, externusId, jobId })
 
-      if (!res.ok) {
-        if (res.status >= 500) podReachable = false
-        throw new Error(`runner.py POST /job returned ${res.status}`)
+      await awaitViaStream(
+        this.fetchFn,
+        runnerBase,
+        jobId,
+        this.config.jobTimeoutMs ?? 15 * 60 * 1000,
+      )
+    } catch (err) {
+      const msg = (err as Error).message ?? ''
+      if (msg.includes('503') || msg.includes('ECONNREFUSED') || msg.includes('not reachable')) {
+        podReachable = false
       }
-
-      log.info('job queued on runner.py', { materiaId: id, externusId, runnerBase })
-
-      // Poll for completion — Crystal fires the webhook itself from this process
-      const jobTimeoutMs = this.config.jobTimeoutMs ?? 15 * 60 * 1000
-      const result = await this._pollJobResult(runnerBase, externusId, jobTimeoutMs)
-
-      if (result.status === 'failed') {
-        throw new Error(result.error ?? 'runner.py job failed')
-      }
-
-      if (webhook) {
-        await this.fetchFn(webhook, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: externusId,
-            status: 'COMPLETED',
-            output: result.output ?? [],
-            executionTime: result.executionTime ?? 0,
-          }),
-        })
-      }
+      throw err
     } finally {
-      // Pod unreachable = dead; otherwise return to idle
       const nextStatus = (!podReachable || this.materia.podPolicy === 'private') ? 'terminated' : 'idle'
       await this.materiae.update(id, { status: nextStatus }).catch(() => {})
     }
@@ -130,8 +106,8 @@ export class WarmPodClient implements RunPodClient {
 
   private async _waitForRunner(runnerBase: string): Promise<void> {
     const timeoutMs = this.config.runnerReadyTimeoutMs ?? 30_000
-    const pollMs = this.config.runnerPollIntervalMs ?? 2000
-    const deadline = Date.now() + timeoutMs
+    const pollMs    = this.config.runnerPollIntervalMs ?? 2000
+    const deadline  = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       try {
         const res = await this.fetchFn(`${runnerBase}/health`, { signal: AbortSignal.timeout(5000) })
@@ -144,24 +120,6 @@ export class WarmPodClient implements RunPodClient {
       }
       await sleep(pollMs)
     }
-    throw new Error('runner.py not reachable on warm pod')
-  }
-
-  private async _pollJobResult(runnerBase: string, jobId: string, timeoutMs: number): Promise<JobResult> {
-    const pollMs = this.config.runnerPollIntervalMs ?? 2000
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-      try {
-        const res = await this.fetchFn(`${runnerBase}/job/${jobId}`, { signal: AbortSignal.timeout(5000) })
-        if (res.ok) {
-          const body = await res.json() as JobResult
-          if (body.status === 'completed' || body.status === 'failed') return body
-        }
-      } catch (_) {
-        // poll again
-      }
-      await sleep(pollMs)
-    }
-    throw new Error('runner.py job did not complete within timeout')
+    throw new Error(`comfyrunner not reachable on warm pod ${this.materia.externusId}`)
   }
 }

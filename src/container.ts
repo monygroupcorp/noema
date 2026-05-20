@@ -37,7 +37,7 @@ import { TesseraCursor } from './crystal/TesseraCursor.js'
 import { OpenAICursor } from './crystal/OpenAICursor.js'
 import { HuggingFaceCursor } from './crystal/HuggingFaceCursor.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
-import { ActumCompletor } from './crystal/ActumCompletor.js'
+import { ActumCompletor } from './execution/ActumCompletor.js'
 import { ActumInceptor } from './execution/ActumInceptor.js'
 import { MongoMandatum } from './crystal/MongoMandatum.js'
 import { MongoCorpus } from './crystal/MongoCorpus.js'
@@ -264,7 +264,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     cursorum.register('huggingface', hfCursor)
   }
 
-  const completor = new ActumCompletor(actorum, signorum, config.terminatePod)
+  const completor = new ActumCompletor({ acta: actorum, signorum, terminatePod: config.terminatePod })
   const arcanumLeafCol = db.collection(config.arcanumLeavesCollection ?? 'arcanum_leaves')
   const arcanumNullifiersCol = db.collection(config.arcanumNullifiersCollection ?? 'arcanum_nullifiers')
   const arcanumTree = new MongoArcanumTree(arcanumLeafCol)
