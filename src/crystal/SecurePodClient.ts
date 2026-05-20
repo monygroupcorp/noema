@@ -6,8 +6,9 @@ import { makeLogger } from '../lib/logger.js'
 import { getTrace } from '../lib/trace.js'
 import { bus } from '../lib/bus.js'
 import { terminatePod as _terminatePodUtil } from './terminatePod.js'
+import { submitToRunner, awaitViaStream, isCompiledSpec, type R2Config } from './comfyrunnerClient.js'
 
-const RUNNER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/runner.py')
+const COMFYRUNNER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/comfyrunner.py')
 
 const log = makeLogger('cursor:runpod:secure')
 
@@ -15,13 +16,7 @@ const log = makeLogger('cursor:runpod:secure')
 // Types
 // ---------------------------------------------------------------------------
 
-export interface R2Config {
-  accountId: string
-  accessKeyId: string
-  secretAccessKey: string
-  bucket: string
-  publicUrl?: string
-}
+export type { R2Config } from './comfyrunnerClient.js'
 
 // Ordered by preference: 24GB VRAM SECURE-tier GPUs first, then fallbacks
 // All GPUs with ≥24 GB VRAM — needed for the full BF16 FLUX model.
@@ -93,46 +88,8 @@ interface RunPodPodStatus {
   portMappings?: Record<string, number>
 }
 
-interface ComfyHistoryEntry {
-  outputs?: Record<string, {
-    images?: Array<{ filename: string; subfolder: string; type: string }>
-    gifs?: Array<{ filename: string; subfolder: string; type: string }>
-    videos?: Array<{ filename: string; subfolder: string; type: string }>
-  }>
-}
-
-const COMFYUI_PORT = 8188
-
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
-}
-
-interface CompiledSpecLike {
-  workflow: { inputTemplate: Record<string, unknown> }
-  models: Array<{ url: string; dest: string; sizeBytes?: number }>
-}
-
-function isCompiledSpec(v: unknown): v is CompiledSpecLike {
-  if (!v || typeof v !== 'object') return false
-  const o = v as Record<string, unknown>
-  return (
-    o.workflow !== null && typeof o.workflow === 'object' &&
-    typeof (o.workflow as Record<string, unknown>).inputTemplate === 'object' &&
-    Array.isArray(o.models)
-  )
-}
-
-function collectOutputPaths(outputs: ComfyHistoryEntry['outputs']): string[] {
-  const paths: string[] = []
-  for (const node of Object.values(outputs ?? {})) {
-    for (const kind of ['images', 'gifs', 'videos'] as const) {
-      for (const item of node[kind] ?? []) {
-        const subdir = item.subfolder ? `${item.subfolder}/` : ''
-        paths.push(`/root/ComfyUI/output/${subdir}${item.filename}`)
-      }
-    }
-  }
-  return paths
 }
 
 // ---------------------------------------------------------------------------
@@ -183,9 +140,12 @@ export class SecurePodClient implements RunPodClient {
     }
 
     let activePodId = podId
+    // Tracks whether comfyrunner accepted the job. Once true, comfyrunner owns
+    // the failure webhook — Crystal must not fire a second one.
+    let runnerAcceptedJob = false
     const runWithRetry = async () => {
       try {
-        await this._runBackground(podId!, imageName, params.input, params.webhook)
+        await this._runBackground(podId!, imageName, params.input, params.webhook, undefined, (accepted) => { runnerAcceptedJob = accepted })
       } catch (firstErr) {
         log.warn(`pod run attempt 1/${maxAttempts} failed`, { podId, error: (firstErr as Error).message })
         for (let attempt = 2; attempt <= maxAttempts; attempt++) {
@@ -202,7 +162,7 @@ export class SecurePodClient implements RunPodClient {
           // Update DB so the retry pod is tracked; webhook will fire with retryPodId
           await params.onPodActive?.(retryPodId).catch(() => {})
           try {
-            await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId)
+            await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId, (accepted) => { runnerAcceptedJob = accepted })
             return
           } catch (runErr) {
             log.warn(`pod run attempt ${attempt}/${maxAttempts} failed`, { podId: retryPodId, error: (runErr as Error).message })
@@ -214,12 +174,11 @@ export class SecurePodClient implements RunPodClient {
 
     runWithRetry().catch(async (err) => {
       log.error(`Pod ${activePodId} failed`, { podId: activePodId, error: (err as Error).message })
-      if (params.webhook) {
-        await this.fetchFn(params.webhook, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: podId, status: 'FAILED', error: (err as Error).message }),
-        }).catch(() => {})
+      // Only fire Crystal-side webhook when comfyrunner never accepted the job.
+      // If it did, comfyrunner owns the failure webhook — double-firing corrupts the caller.
+      if (params.webhook && !runnerAcceptedJob) {
+        await this._postWebhook(params.webhook, { id: podId, status: 'FAILED', error: (err as Error).message })
+          .catch(() => {})
       }
     })
 
@@ -350,7 +309,15 @@ export class SecurePodClient implements RunPodClient {
   }
 
   // externusJobId: the job ID stored on the actum (always the first pod's ID, even on retries)
-  private async _runBackground(podId: string, imageName: string, input: unknown, webhook: string | undefined, externusJobId?: string): Promise<void> {
+  // onRunnerAccepted: called with true once comfyrunner has accepted the job (owns the webhook from that point)
+  private async _runBackground(
+    podId: string,
+    imageName: string,
+    input: unknown,
+    webhook: string | undefined,
+    externusJobId?: string,
+    onRunnerAccepted?: (accepted: boolean) => void,
+  ): Promise<void> {
     const startMs = Date.now()
     let ssh: SshTransportLike | null = null
     let sshInfo: SshInfo | null = null
@@ -361,51 +328,31 @@ export class SecurePodClient implements RunPodClient {
     let jobSucceeded = false
 
     try {
-      // Both inside try so _terminatePod always runs on any early failure
       emitStage('provisioning')
       sshInfo = await this._waitForSsh(podId)
       emitStage('ssh-ready')
       ssh = await this._waitForSshd(sshInfo)
+      emitStage('bootstrapping')
+      await this._bootstrap(ssh, podId)
 
-      // If input is a full CompiledSpec (has workflow.inputTemplate), bootstrap ComfyUI first
-      const spec = isCompiledSpec(input) ? input : null
-      const workflowInput = spec ? spec.workflow.inputTemplate : input
+      // SSH only needed for bootstrap — close before HTTP phase
+      await ssh.close()
+      ssh = null
 
-      if (spec) {
-        emitStage('bootstrapping')
-        await this._bootstrap(ssh, spec, podId)
-      }
-
+      const runnerBase = SecurePodClient.runnerBase(podId)
+      await this._waitForRunner(runnerBase)
       emitStage('comfy-ready')
-      await this._waitForComfyApi(ssh)
 
-      const promptId = await this._submitWorkflow(ssh, workflowInput)
-      emitStage('inferring')
-      log.info('job submitted', { podId })
-      // After job is submitted to ComfyUI
+      const jobId = externusJobId ?? podId
+      await submitToRunner(this.fetchFn, runnerBase, jobId, input, webhook, this.config.r2)
+      onRunnerAccepted?.(true)  // comfyrunner now owns the failure webhook
+
       const submitCtx = getTrace()
-      if (submitCtx) {
-        submitCtx.jobSubmitMs = Date.now() - submitCtx.startTs
-      }
-      const remotePaths = await this._awaitCompletion(ssh, promptId, this.config.jobTimeoutMs ?? 15 * 60 * 1000)
+      if (submitCtx) submitCtx.jobSubmitMs = Date.now() - submitCtx.startTs
 
-      const executionTime = Date.now() - startMs
-
-      let outputItems: Array<{ url: string } | { path: string }>
-      if (this.config.r2 && remotePaths.length > 0) {
-        outputItems = await this._uploadToR2(ssh, remotePaths)
-      } else {
-        outputItems = remotePaths.map(p => ({ path: p }))
-      }
-
-      if (webhook) {
-        await this._postWebhook(webhook, {
-          id: externusJobId ?? podId,
-          status: 'COMPLETED',
-          output: outputItems,
-          executionTime,
-        })
-      }
+      // comfyrunner fires the webhook; we subscribe to SSE only to know when done
+      // (so we can terminate/warm the pod and emit stage events to the bus)
+      await awaitViaStream(this.fetchFn, runnerBase, jobId, this.config.jobTimeoutMs ?? 15 * 60 * 1000, emitStage)
       jobSucceeded = true
     } finally {
       await ssh?.close().catch(() => {})
@@ -421,7 +368,7 @@ export class SecurePodClient implements RunPodClient {
           sshPort: sshInfo.port,
           impetusPerSecond: this.config.impetusPerSecond ?? 0n,
           status: 'idle',
-        }).catch(() => {})   // best-effort — don't fail the job over registration
+        }).catch(() => {})
       } else {
         await this._terminatePod(podId)
       }
@@ -446,16 +393,16 @@ export class SecurePodClient implements RunPodClient {
     }
   }
 
-  /** Returns the runner.py HTTP base URL for a given pod ID. */
+  /** Returns the comfyrunner HTTP base URL for a given pod ID. */
   static runnerBase(podId: string): string {
     return `https://${podId}-8080.proxy.runpod.net`
   }
 
-  /** Poll runner.py /health until it reports 'ready'. */
+  /** Poll comfyrunner /health until it reports 'ready' or 'busy'. */
   private async _waitForRunner(runnerBase: string): Promise<void> {
     const timeoutMs = this.config.comfyReadyTimeoutMs ?? 5 * 60 * 1000
-    const pollMs = this.config.comfyPollIntervalMs ?? 2000
-    const deadline = Date.now() + timeoutMs
+    const pollMs    = this.config.comfyPollIntervalMs ?? 2000
+    const deadline  = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       try {
         const res = await this.fetchFn(`${runnerBase}/health`, { signal: AbortSignal.timeout(5000) })
@@ -468,163 +415,26 @@ export class SecurePodClient implements RunPodClient {
       }
       await sleep(pollMs)
     }
-    throw new Error('runner.py did not become ready within timeout')
+    throw new Error('comfyrunner did not become ready within timeout')
   }
 
-  private async _waitForComfyApi(ssh: SshTransportLike): Promise<void> {
-    const timeoutMs = this.config.comfyReadyTimeoutMs ?? 5 * 60 * 1000
-    const pollMs = this.config.comfyPollIntervalMs ?? 2000
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-      try {
-        const out = await ssh.exec(
-          `curl -sf http://localhost:${COMFYUI_PORT}/system_stats`,
-          { stdio: 'pipe', timeout: 5000 },
-        )
-        if (out && out.includes('system')) return
-      } catch (_) {
-        // not ready yet — retry until deadline
-      }
-      await sleep(pollMs)
-    }
-    throw new Error('ComfyUI API never came up')
-  }
+  private async _bootstrap(ssh: SshTransportLike, podId: string): Promise<void> {
+    log.info('bootstrapping pod', { podId })
 
-  private async _submitWorkflow(ssh: SshTransportLike, input: unknown): Promise<string | null> {
-    const payload = JSON.stringify({ prompt: input }).replace(/'/g, "'\\''")
-    const out = await ssh.exec(
-      `curl -sf -X POST http://localhost:${COMFYUI_PORT}/prompt -H "Content-Type: application/json" -d '${payload}'`,
-      { stdio: 'pipe', timeout: 15000 },
-    )
-    try {
-      const parsed = JSON.parse(out ?? '{}') as { prompt_id?: string }
-      return parsed.prompt_id ?? null
-    } catch (_) {
-      return null
-    }
-  }
-
-  private async _awaitCompletion(
-    ssh: SshTransportLike,
-    promptId: string | null,
-    timeoutMs: number,
-  ): Promise<string[]> {
-    const pollMs = this.config.comfyPollIntervalMs ?? 2000
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-      try {
-        const out = await ssh.exec(
-          `curl -sf http://localhost:${COMFYUI_PORT}/history`,
-          { stdio: 'pipe', timeout: 5000 },
-        )
-        const history = JSON.parse(out ?? '{}') as Record<string, ComfyHistoryEntry>
-        const entry = promptId ? history[promptId] : Object.values(history)[0]
-        if (entry?.outputs) {
-          const paths = collectOutputPaths(entry.outputs)
-          if (paths.length) return paths
-        }
-      } catch (_) {
-        // poll again
-      }
-      await sleep(pollMs)
-    }
-    throw new Error('Workflow did not complete within job timeout')
-  }
-
-  private async _bootstrap(ssh: SshTransportLike, spec: CompiledSpecLike, podId: string): Promise<void> {
-    log.info('bootstrapping ComfyUI')
-
-    // Install git if not present, clone ComfyUI
+    // Install deps, clone ComfyUI, install Python packages (comfyrunner deps included)
     await ssh.exec('which git || (apt-get update -qq && apt-get install -y -qq git)', { timeout: 120_000 })
     await ssh.exec('cd /root && rm -rf ComfyUI && git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git', { timeout: 120_000 })
-    await ssh.exec('cd /root/ComfyUI && pip install -r requirements.txt -q', { timeout: 600_000 })
+    await ssh.exec('cd /root/ComfyUI && pip install -r requirements.txt websocket-client boto3 -q', { timeout: 600_000 })
 
-    // Start ComfyUI in background before downloading models (parallel speedup)
+    // Upload comfyrunner.py and start it — comfyrunner owns ComfyUI startup internally
+    const script = fs.readFileSync(COMFYRUNNER_SCRIPT_PATH, 'utf8')
+    const b64 = Buffer.from(script).toString('base64').replace(/\n/g, '')
+    await ssh.exec(`echo '${b64}' | base64 -d > /root/comfyrunner.py`, { timeout: 10_000 })
     await ssh.exec(
-      'cd /root/ComfyUI && nohup python main.py --listen 0.0.0.0 --port 8188 >> /tmp/comfyui.log 2>&1 &',
+      `RUNPOD_POD_ID=${podId} COMFYUI_DIR=/root/ComfyUI nohup python3 /root/comfyrunner.py >> /tmp/comfyrunner.log 2>&1 &`,
       { timeout: 5_000 },
-    ).catch(() => {})
-
-    // Upload runner.py and start it alongside ComfyUI
-    try {
-      const runnerScript = fs.readFileSync(RUNNER_SCRIPT_PATH, 'utf8')
-      const b64 = Buffer.from(runnerScript).toString('base64').replace(/\n/g, '')
-      await ssh.exec(`echo '${b64}' | base64 -d > /root/runner.py && chmod +x /root/runner.py`, { timeout: 10_000 })
-      await ssh.exec(
-        `RUNPOD_POD_ID=${podId} nohup python3 /root/runner.py >> /tmp/runner.log 2>&1 &`,
-        { timeout: 5_000 },
-      )
-      log.info('runner.py started', { podId })
-    } catch (err) {
-      log.warn('runner.py upload/start failed — warm reuse unavailable', { error: (err as Error).message })
-    }
-
-    // Download models in parallel. Per-model timeout is derived from sizeBytes so large
-    // models get proportionally more time. Assumes 5 MB/s minimum per stream with 1.5x buffer.
-    // Fallback for models without sizeBytes: 40 min.
-    const MIN_BYTES_PER_SEC = 5 * 1024 * 1024
-    await Promise.all(spec.models.map(async (model) => {
-      const destPath = `/root/ComfyUI/models/${model.dest}`
-      const timeoutMs = model.sizeBytes
-        ? Math.max(900_000, Math.ceil(model.sizeBytes / MIN_BYTES_PER_SEC * 1.5 * 1000))
-        : 2_400_000
-      await ssh.exec(`mkdir -p "$(dirname '${destPath}')"`, { timeout: 10_000 })
-      // aria2c with 16 parallel connections saturates throughput on slow CDN edges;
-      // fall back to wget if aria2c is unavailable
-      await ssh.exec(
-        `if command -v aria2c >/dev/null 2>&1; then ` +
-        `aria2c -x16 -s16 --allow-overwrite=true -q "${model.url}" -o "${destPath}"; ` +
-        `else wget -q "${model.url}" -O "${destPath}"; fi`,
-        { timeout: timeoutMs }
-      )
-      log.info('model downloaded', { dest: model.dest })
-    }))
-  }
-
-  private async _uploadToR2(
-    ssh: SshTransportLike,
-    remotePaths: string[],
-  ): Promise<Array<{ url: string }>> {
-    const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3')
-    const r2 = this.config.r2!
-    const client = new S3Client({
-      region: 'auto',
-      endpoint: `https://${r2.accountId}.r2.cloudflarestorage.com`,
-      credentials: { accessKeyId: r2.accessKeyId, secretAccessKey: r2.secretAccessKey },
-    })
-
-    const CONTENT_TYPES: Record<string, string> = {
-      png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-      webp: 'image/webp', gif: 'image/gif',
-      mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
-    }
-
-    const results: Array<{ url: string }> = []
-    for (const remotePath of remotePaths) {
-      const filename = remotePath.split('/').pop()!
-      const ext = filename.split('.').pop()?.toLowerCase() ?? ''
-      const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream'
-
-      const b64 = await ssh.exec(`base64 -w0 "${remotePath}"`, { stdio: 'pipe', timeout: 60_000 })
-      if (!b64) {
-        log.warn('empty base64 output for remote file', { remotePath })
-        continue
-      }
-      const buffer = Buffer.from(b64.trim(), 'base64')
-      const key = `outputs/${Date.now()}-${filename}`
-
-      await client.send(new PutObjectCommand({
-        Bucket: r2.bucket,
-        Key: key,
-        Body: buffer,
-        ContentType: contentType,
-      }))
-
-      const base = r2.publicUrl ? r2.publicUrl.replace(/\/$/, '') : `https://${r2.bucket}.r2.dev`
-      results.push({ url: `${base}/${key}` })
-      log.info('output uploaded to R2', { key, size: buffer.byteLength })
-    }
-    return results
+    )
+    log.info('comfyrunner started', { podId })
   }
 }
 

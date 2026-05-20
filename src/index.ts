@@ -89,7 +89,7 @@ import type { MateriaStore } from './types/materia.js'
 function makeSecureRunPodClient(materiae?: MateriaStore): SecurePodClient {
   const r2: R2Config | undefined =
     R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_OUTPUTS_BUCKET
-      ? { accountId: R2_ACCOUNT_ID, accessKeyId: R2_ACCESS_KEY_ID, secretAccessKey: R2_SECRET_ACCESS_KEY, bucket: R2_OUTPUTS_BUCKET, publicUrl: R2_PUBLIC_URL }
+      ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_OUTPUTS_BUCKET!, publicUrl: R2_PUBLIC_URL }
       : undefined
 
   return new SecurePodClient(
