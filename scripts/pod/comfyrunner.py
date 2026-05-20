@@ -167,6 +167,16 @@ def _wait_for_comfy_http(timeout: int = COMFY_READY_TIMEOUT) -> bool:
     log.error("ComfyUI HTTP never became ready")
     return False
 
+
+def _tail_comfy_log(n: int = 40) -> str:
+    """Last n lines of ComfyUI's log — attached to errors so a stalled/dead pod
+    is still diagnosable from the failure event/webhook."""
+    try:
+        with open("/tmp/comfyui.log", "r", errors="replace") as f:
+            return "".join(f.readlines()[-n:]).strip()
+    except Exception:
+        return "(comfyui.log unavailable)"
+
 # ── ComfyUI WebSocket listener ─────────────────────────────────────────────────
 
 def _append_event(job_id: str, event: dict) -> None:
@@ -446,11 +456,24 @@ def _process_job(job_spec: dict) -> None:
             _prompt_to_job[prompt_id] = job_id
 
         log.info(f"job {job_id} submitted to ComfyUI as {prompt_id}")
+        # Signal that ComfyUI accepted the prompt and execution has begun — lets the
+        # client distinguish a download stall from a ComfyUI execution/load stall.
+        _append_event(job_id, {"type": "workflow-submitted", "promptId": prompt_id})
 
-        # 4. Wait for completion via WS push event (no polling)
+        # 4. Wait for completion via WS push event, emitting a heartbeat while we
+        #    wait. nodesExecuted staying 0 across heartbeats = stuck loading models
+        #    (before any node runs); climbing = executing but slow.
         comfy_event = _jobs[job_id]["comfy_event"]
-        if not comfy_event.wait(timeout=JOB_TIMEOUT):
-            raise RuntimeError(f"job {job_id} timed out after {JOB_TIMEOUT}s")
+        deadline = time.time() + JOB_TIMEOUT
+        while not comfy_event.wait(timeout=20):
+            if time.time() >= deadline:
+                raise RuntimeError(
+                    f"job {job_id} timed out after {JOB_TIMEOUT}s waiting for ComfyUI. "
+                    f"comfyui.log tail:\n{_tail_comfy_log()}"
+                )
+            with _lock:
+                nodes_executed = sum(1 for e in _jobs[job_id]["events"] if e.get("type") == "node")
+            _append_event(job_id, {"type": "waiting", "elapsedS": int(time.time() - start), "nodesExecuted": nodes_executed})
 
         with _lock:
             comfy_error = _jobs[job_id].get("comfy_error")
@@ -491,6 +514,10 @@ def _process_job(job_spec: dict) -> None:
     except Exception as e:
         log.error(f"job {job_id} failed: {e}")
         err_str = str(e)
+        # Ensure ComfyUI's last log lines ride along on any failure that doesn't
+        # already include them (e.g. execution errors), so a dead pod stays diagnosable.
+        if "comfyui.log tail:" not in err_str:
+            err_str = f"{err_str}\ncomfyui.log tail:\n{_tail_comfy_log()}"
         with _lock:
             job = _jobs[job_id]
             job["status"] = "failed"
