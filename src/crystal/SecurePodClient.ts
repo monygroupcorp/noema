@@ -443,7 +443,7 @@ export class SecurePodClient implements RunPodClient {
 // ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SshTransportCtor = new (opts: { host: string; port: number; username: string; privateKeyPath: string }) => SshTransportLike
+type SshTransportCtor = new (opts: { host: string; port: number; username: string; privateKeyPath: string; logger?: unknown }) => SshTransportLike
 let _SshTransport: SshTransportCtor | null = null
 
 function loadSshTransport(): SshTransportCtor {
