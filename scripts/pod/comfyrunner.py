@@ -95,8 +95,12 @@ def _http_post(url: str, body: dict, timeout: int = 15) -> dict:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"HTTP {e.code} from {url}: {detail}") from e
 
 # ── ComfyUI lifecycle ──────────────────────────────────────────────────────────
 

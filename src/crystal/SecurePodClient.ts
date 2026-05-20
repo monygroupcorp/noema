@@ -323,7 +323,7 @@ export class SecurePodClient implements RunPodClient {
     let sshInfo: SshInfo | null = null
     const emitStage = (stage: string) => {
       const ctx = getTrace()
-      if (ctx?.actumId) bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - startMs })
+      if (ctx?.actumId) bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - (ctx.startTs ?? startMs) })
     }
     let jobSucceeded = false
 
@@ -352,7 +352,7 @@ export class SecurePodClient implements RunPodClient {
 
       // comfyrunner fires the webhook; we subscribe to SSE only to know when done
       // (so we can terminate/warm the pod and emit stage events to the bus)
-      await awaitViaStream(this.fetchFn, runnerBase, jobId, this.config.jobTimeoutMs ?? 15 * 60 * 1000, emitStage)
+      await awaitViaStream(this.fetchFn, runnerBase, jobId, this.config.jobTimeoutMs ?? 45 * 60 * 1000, emitStage)
       jobSucceeded = true
     } finally {
       await ssh?.close().catch(() => {})
@@ -455,8 +455,9 @@ function loadSshTransport(): SshTransportCtor {
 }
 
 export function makeSecurePodSshFactory(sshKeyPath: string): (info: SshInfo) => SshTransportLike {
+  const sshLog = makeLogger('ssh:transport')
   return (info: SshInfo) => {
     const Ctor = loadSshTransport()
-    return new Ctor({ host: info.host, port: info.port, username: info.user, privateKeyPath: sshKeyPath })
+    return new Ctor({ host: info.host, port: info.port, username: info.user, privateKeyPath: sshKeyPath, logger: sshLog })
   }
 }
