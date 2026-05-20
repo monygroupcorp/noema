@@ -18,16 +18,23 @@ export interface WideEvent {
   reservation:   string   // bigint as string
   impetus:       string   // bigint as string
   refund:        string   // bigint as string
-  // Timing (ms from actum initiation — null means that stage didn't run)
+  // Timing (ms — durationMs is total wall-clock; others are per-stage, undefined if skipped)
   durationMs:    number
   provisionMs?:  number
   sshReadyMs?:   number
   jobSubmitMs?:  number
   webhookMs?:    number
   coldStart:     boolean
-  // Infrastructure — contributed by SecurePodClient via ctx.wideFields
-  gpuType?:      string
-  podId?:        string
+  // Pod telemetry — read off actum.executio (durable across the webhook boundary)
+  gpuType?:           string
+  podId?:             string
+  downloadMs?:        number
+  modelsDownloaded?:  number
+  modelsReused?:      number
+  downloadBytes?:     number
+  executionMs?:       number
+  costPerHr?:         number
+  costUsd?:           number
   // Outcome
   status:        'completed' | 'failed'
   errorCode?:    string
@@ -50,8 +57,20 @@ export function buildWideEvent(
   const reservation = actum.impetus
   const refund = reservation > impetus ? reservation - impetus : 0n
 
+  // Pod telemetry is read off the actum, not the trace context: the completion
+  // webhook runs in a fresh context, so ctx has none of the in-flight pod state.
+  const e = actum.executio ?? {}
+  // Total wall-clock from execution start to completion. Durable on the actum —
+  // ctx.startTs on the webhook path is just the webhook handler's own start.
+  const endTs = actum.completum ? actum.completum.getTime() : Date.now()
+  const durationMs = endTs - actum.inceptum.getTime()
+  const executionMs = e.executionMs ?? exitus?.duratio
+  const costUsd = e.costPerHr !== undefined
+    ? Number((e.costPerHr * (durationMs / 3_600_000)).toFixed(6))
+    : undefined
+
   return {
-    event:         `actum.${status}` as WideEvent['event'],
+    event:         status === 'completed' ? 'actum.complete' : 'actum.fail',
     ts:            new Date().toISOString(),
     actumId:       actum.id,
     modusId:       actum.modusId,
@@ -62,16 +81,23 @@ export function buildWideEvent(
     reservation:   reservation.toString(),
     impetus:       impetus.toString(),
     refund:        refund.toString(),
-    durationMs:    Date.now() - ctx.startTs,
-    provisionMs:   ctx.provisionMs,
-    sshReadyMs:    ctx.sshReadyMs,
+    durationMs,
+    provisionMs:   e.provisionMs,
+    sshReadyMs:    e.sshReadyMs,
     jobSubmitMs:   ctx.jobSubmitMs,
     webhookMs:     ctx.webhookMs,
-    coldStart:     !!ctx.provisionMs,
+    coldStart:     e.coldStart ?? false,
+    gpuType:       e.gpuType,
+    podId:         e.podId,
+    downloadMs:        e.downloadMs,
+    modelsDownloaded:  e.modelsDownloaded,
+    modelsReused:      e.modelsReused,
+    downloadBytes:     e.downloadBytes,
+    executionMs,
+    costPerHr:     e.costPerHr,
+    costUsd,
     status,
     errorCode,
-    // Merge anything sub-components contributed (gpuType, podId, cursorType, etc.)
-    ...ctx.wideFields,
   }
 }
 

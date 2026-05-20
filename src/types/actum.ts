@@ -130,6 +130,9 @@ export interface Actum {
   completum?: Date
   /** Wall-clock execution time in milliseconds */
   duratio?: number
+
+  /** Pod execution telemetry — see ActumExecutio. Absent for non-pod cursors. */
+  executio?: ActumExecutio
   /**
    * Hard deadline for this execution.
    * A nascens actum past this timestamp is stuck — the cursor never reported back.
@@ -137,6 +140,39 @@ export interface Actum {
    * This releases all locked signa back to the payer with zero charge.
    */
   expirat: Date
+}
+
+/**
+ * Pod execution telemetry — provisioning, model-download, and inference metrics.
+ *
+ * Written onto the actum by the cursor *as the job runs* (before completion), so
+ * the data is durable and survives the webhook boundary: the completion webhook
+ * runs in a fresh trace context with none of this in-flight state, so it reads
+ * these metrics back off the actum to build the wide analytics event.
+ */
+export interface ActumExecutio {
+  /** Pod creation → RunPod API reporting RUNNING with an SSH port. Absent on warm reuse. */
+  provisionMs?: number
+  /** Actum start → sshd actually accepting connections. */
+  sshReadyMs?: number
+  /** Wall-clock spent downloading models this run (0 when all were already present). */
+  downloadMs?: number
+  /** Count of models fetched this run. */
+  modelsDownloaded?: number
+  /** Count of models already present on the pod (warm reuse). */
+  modelsReused?: number
+  /** Total bytes fetched this run. */
+  downloadBytes?: number
+  /** comfyrunner-reported inference time. */
+  executionMs?: number
+  /** GPU class the pod ran on, when known. */
+  gpuType?: string
+  /** RunPod pod id that actually ran the job (final, post-retry). */
+  podId?: string
+  /** true = a pod was provisioned for this run; false = warm pod reuse. */
+  coldStart?: boolean
+  /** Pod hourly rate in USD, captured from RunPod at provision. Used to derive cost. */
+  costPerHr?: number
 }
 
 /** "Acta" — nominative plural of actum. A series of acts. */

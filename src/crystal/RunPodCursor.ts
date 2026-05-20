@@ -1,5 +1,5 @@
 import type { Modus, Modorum } from '../types/modus.js'
-import type { Actum } from '../types/actum.js'
+import type { Actum, ActumExecutio } from '../types/actum.js'
 import type { Modo } from '../types/modo.js'
 import type { Cursor, CursorResult, Actorum } from '../types/cursus.js'
 import type { Materia } from '../types/materia.js'
@@ -27,6 +27,12 @@ export interface RunPodClient {
      * reflects the pod that is actually running.
      */
     onPodActive?: (podId: string) => Promise<void>
+    /**
+     * Called as pod execution telemetry accrues (provisioning, downloads, etc.).
+     * Persisted onto the actum so it survives to the completion webhook, which
+     * runs in a fresh context with none of this in-flight state.
+     */
+    onMetrics?: (executio: ActumExecutio) => Promise<void>
   }): Promise<{ id: string }>
 }
 
@@ -80,6 +86,9 @@ export class RunPodCursor implements Cursor {
       onPodActive: async (newPodId) => {
         // Retry pod is now active — update so boot recovery and reconciliation see the right pod
         await this.actorum.update(actum.id, { externusJobId: newPodId }).catch(() => {})
+      },
+      onMetrics: async (executio) => {
+        await this.actorum.update(actum.id, { executio }).catch(() => {})
       },
     })
 

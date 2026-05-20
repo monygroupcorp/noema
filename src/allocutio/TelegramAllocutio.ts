@@ -810,20 +810,14 @@ Generate AI art, chat with models, explore creative tools.`
       ? `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`
       : `${durationSec}s`
 
-    const isSlow = wide.coldStart && wide.durationMs > 8 * 60 * 1000
-
-    const lines = isSlow
-      ? [
-          `Cold start took ${durationStr} — longer than expected.`,
-          `Your next gen will reuse this warm pod for instant results.`,
-        ]
-      : [
-          `Pod stays warm for ~15 min.`,
-          `Run /make again for instant results on this pod.`,
-        ]
-
-    lines.push('')
-    lines.push('To stop accruing compute cost, destroy the pod now.')
+    const lines: string[] = [
+      wide.coldStart
+        ? `Done in ${durationStr} (cold start — provisioned a fresh GPU pod).`
+        : `Done in ${durationStr}.`,
+    ]
+    if (typeof wide.costUsd === 'number' && wide.costUsd > 0) {
+      lines.push(`Compute cost: ~$${wide.costUsd.toFixed(2)}`)
+    }
 
     void this.sender.sendMessage(chatId, lines.join('\n')).catch(() => {})
 

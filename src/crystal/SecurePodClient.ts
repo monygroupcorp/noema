@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { RunPodClient } from './RunPodCursor.js'
 import type { MateriaStore } from '../types/materia.js'
+import type { ActumExecutio } from '../types/actum.js'
 import { makeLogger } from '../lib/logger.js'
 import { getTrace } from '../lib/trace.js'
 import { bus } from '../lib/bus.js'
@@ -80,12 +81,14 @@ interface SshInfo {
   host: string
   port: number
   user: string
+  costPerHr?: number
 }
 
 interface RunPodPodStatus {
   desiredStatus?: string
   publicIp?: string
   portMappings?: Record<string, number>
+  costPerHr?: number
 }
 
 function sleep(ms: number): Promise<void> {
@@ -104,7 +107,7 @@ export class SecurePodClient implements RunPodClient {
     private readonly materiae?: MateriaStore,
   ) {}
 
-  async submit(params: { input: unknown; webhook?: string; onPodActive?: (podId: string) => Promise<void> }): Promise<{ id: string }> {
+  async submit(params: { input: unknown; webhook?: string; onPodActive?: (podId: string) => Promise<void>; onMetrics?: (executio: ActumExecutio) => Promise<void> }): Promise<{ id: string }> {
     // Derive image from spec if available, else fall back to config
     const specOciRef = isCompiledSpec(params.input)
       ? ((params.input as unknown as { image?: { ociRef?: string } }).image?.ociRef)
@@ -145,7 +148,7 @@ export class SecurePodClient implements RunPodClient {
     let runnerAcceptedJob = false
     const runWithRetry = async () => {
       try {
-        await this._runBackground(podId!, imageName, params.input, params.webhook, undefined, (accepted) => { runnerAcceptedJob = accepted })
+        await this._runBackground(podId!, imageName, params.input, params.webhook, undefined, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics)
       } catch (firstErr) {
         log.warn(`pod run attempt 1/${maxAttempts} failed`, { podId, error: (firstErr as Error).message })
         for (let attempt = 2; attempt <= maxAttempts; attempt++) {
@@ -162,7 +165,7 @@ export class SecurePodClient implements RunPodClient {
           // Update DB so the retry pod is tracked; webhook will fire with retryPodId
           await params.onPodActive?.(retryPodId).catch(() => {})
           try {
-            await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId, (accepted) => { runnerAcceptedJob = accepted })
+            await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics)
             return
           } catch (runErr) {
             log.warn(`pod run attempt ${attempt}/${maxAttempts} failed`, { podId: retryPodId, error: (runErr as Error).message })
@@ -301,7 +304,7 @@ export class SecurePodClient implements RunPodClient {
     const sshPort = data.portMappings?.['22']
     if (!sshPort) return null
 
-    return { host: data.publicIp, port: sshPort, user: 'root' }
+    return { host: data.publicIp, port: sshPort, user: 'root', costPerHr: data.costPerHr }
   }
 
   private async _terminatePod(podId: string): Promise<void> {
@@ -317,6 +320,7 @@ export class SecurePodClient implements RunPodClient {
     webhook: string | undefined,
     externusJobId?: string,
     onRunnerAccepted?: (accepted: boolean) => void,
+    onMetrics?: (executio: ActumExecutio) => Promise<void>,
   ): Promise<void> {
     const startMs = Date.now()
     let ssh: SshTransportLike | null = null
@@ -325,13 +329,22 @@ export class SecurePodClient implements RunPodClient {
       const ctx = getTrace()
       if (ctx?.actumId) bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - (ctx.startTs ?? startMs) })
     }
+    // Pod telemetry accumulated as the job runs and persisted onto the actum
+    // (via onMetrics) before completion — the completion webhook can't see this
+    // in-flight state otherwise. Each report sends the full accumulated object.
+    const executio: ActumExecutio = { podId, coldStart: true }
+    const reportMetrics = () => { void onMetrics?.({ ...executio }) }
     let jobSucceeded = false
 
     try {
       emitStage('provisioning')
       sshInfo = await this._waitForSsh(podId)
+      executio.provisionMs = Date.now() - startMs
+      executio.costPerHr = sshInfo.costPerHr
       emitStage('ssh-ready')
       ssh = await this._waitForSshd(sshInfo)
+      executio.sshReadyMs = Date.now() - startMs
+      reportMetrics()  // persist provision/ssh/podId/costPerHr — survives even if download fails
       emitStage('bootstrapping')
       await this._bootstrap(ssh, podId)
 
@@ -352,7 +365,10 @@ export class SecurePodClient implements RunPodClient {
 
       // comfyrunner fires the webhook; we subscribe to SSE only to know when done
       // (so we can terminate/warm the pod and emit stage events to the bus)
-      await awaitViaStream(this.fetchFn, runnerBase, jobId, this.config.jobTimeoutMs ?? 45 * 60 * 1000, emitStage)
+      await awaitViaStream(
+        this.fetchFn, runnerBase, jobId, this.config.jobTimeoutMs ?? 45 * 60 * 1000, emitStage,
+        (m) => { Object.assign(executio, m); reportMetrics() },
+      )
       jobSucceeded = true
     } finally {
       await ssh?.close().catch(() => {})
