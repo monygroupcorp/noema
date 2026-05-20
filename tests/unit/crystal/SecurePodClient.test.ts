@@ -218,6 +218,20 @@ describe('SSH bootstrap', () => {
     await new Promise(r => setTimeout(r, 300))
     expect((webhookPayloads as Array<{ status?: string }>).some(p => p.status === 'FAILED')).toBe(false)
   })
+
+  it('does NOT provision a new pod after comfyrunner accepted the job (no retry cascade)', async () => {
+    // comfyrunner accepts then the stream errors. comfyrunner owns the job —
+    // Crystal must NOT re-provision (that spawns redundant pods + re-downloads).
+    const { fetch } = makeFetchMock('pod-accepted', { sseEvents: [{ type: 'error', error: 'OOM' }] })
+    const client = new SecurePodClient(makeConfig(), () => makeSshTransport(), fetch)
+    await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+    await new Promise(r => setTimeout(r, 300))
+    const provisionCalls = (fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([url, opts]) => (opts?.method ?? 'GET').toUpperCase() === 'POST'
+        && (url as string).includes('rest.runpod.io') && (url as string).includes('/pods'),
+    )
+    expect(provisionCalls.length).toBe(1)
+  })
 })
 
 // ── pod lifecycle ─────────────────────────────────────────────────────────────
