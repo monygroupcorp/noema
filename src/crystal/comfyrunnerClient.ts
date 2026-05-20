@@ -91,7 +91,7 @@ export async function awaitViaStream(
   runnerBase: string,
   jobId: string,
   timeoutMs: number,
-  emitStage?: (stage: string) => void,
+  emitStage?: (stage: string, info?: { etaMs?: number }) => void,
   onMetrics?: (m: RunMetrics) => void,
 ): Promise<void> {
   let lastSeq = -1
@@ -100,6 +100,8 @@ export async function awaitViaStream(
   let modelDone = 0
   let downloadStartMs = 0
   let downloadBytes = 0
+  let completedBytes = 0
+  const dlSizes = new Map<string, number>()
   const deadline = Date.now() + timeoutMs
 
   for (let attempt = 0; attempt <= 3; attempt++) {
@@ -162,7 +164,10 @@ export async function awaitViaStream(
               case 'downloading': {
                 const { dest, total: bytes } = event as { dest?: string; total?: number }
                 if (downloadStartMs === 0) downloadStartMs = Date.now()
-                if (typeof bytes === 'number') downloadBytes += bytes
+                if (typeof bytes === 'number') {
+                  downloadBytes += bytes
+                  if (dest) dlSizes.set(dest, bytes)
+                }
                 if (modelTotal === 0) emitStage?.('downloading')
                 log.info('model download started', { jobId, dest, bytes })
                 break
@@ -170,8 +175,18 @@ export async function awaitViaStream(
               case 'downloaded': {
                 modelDone++
                 const { dest, elapsedMs: dlMs } = event as { dest?: string; elapsedMs?: number }
+                if (dest) completedBytes += dlSizes.get(dest) ?? 0
                 log.info('model downloaded', { jobId, dest, elapsedMs: dlMs, done: modelDone, total: modelTotal })
-                if (modelTotal > 0) emitStage?.(`downloading:${modelDone}/${modelTotal}`)
+                if (modelTotal > 0) {
+                  // ETA from aggregate download velocity (bytes/sec) over remaining bytes.
+                  const elapsed = Date.now() - downloadStartMs
+                  let etaMs: number | undefined
+                  if (elapsed > 0 && completedBytes > 0 && downloadBytes > completedBytes) {
+                    const bytesPerMs = completedBytes / elapsed
+                    etaMs = Math.round((downloadBytes - completedBytes) / bytesPerMs)
+                  }
+                  emitStage?.(`downloading:${modelDone}/${modelTotal}`, etaMs !== undefined ? { etaMs } : undefined)
+                }
                 break
               }
               case 'models-ready': {
