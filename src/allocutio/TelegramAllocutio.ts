@@ -12,6 +12,7 @@ import type { Inceptio } from '../types/cursus.js'
 import { makeLogger } from '../lib/logger.js'
 import { bus } from '../lib/bus.js'
 import type { WideEvent } from '../lib/wide.js'
+import { classifyError } from '../lib/classifyError.js'
 
 const log = makeLogger('telegram:allocutio')
 
@@ -360,11 +361,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     } catch (err) {
       log.error('TelegramAllocutio error', { error: String(err) })
       if (chatId) {
-        if (messageId) {
-          void this._react(chatId, messageId, '😨')
-        }
+        if (messageId) void this._react(chatId, messageId, '😨')
         await this.sender
-          .sendMessage(chatId, 'Something went wrong. Please try again.')
+          .sendMessage(chatId, classifyError(err))
           .catch(() => {})
       }
     }

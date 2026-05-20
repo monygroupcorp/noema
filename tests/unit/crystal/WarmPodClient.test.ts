@@ -1,10 +1,21 @@
-import { test } from 'node:test'
-import assert from 'node:assert/strict'
+import { describe, it, expect, vi } from 'vitest'
 import { WarmPodClient } from '../../../src/crystal/WarmPodClient.js'
 import type { Materia, MateriaStore } from '../../../src/types/materia.js'
-import type { SshTransportLike } from '../../../src/crystal/SecurePodClient.js'
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+function makeSseStream(events: Array<Record<string, unknown>>): Response {
+  const encoder = new TextEncoder()
+  let i = 0
+  const stream = new ReadableStream({
+    pull(controller) {
+      if (i >= events.length) { controller.close(); return }
+      const ev = events[i++]
+      controller.enqueue(encoder.encode(`id: ${i - 1}\ndata: ${JSON.stringify(ev)}\n\n`))
+    },
+  })
+  return new Response(stream, { status: 200 })
+}
 
 function makeMateria(overrides: Partial<Materia> = {}): Materia {
   return {
@@ -29,167 +40,174 @@ function makeMateriaStore(materia: Materia): MateriaStore & { updates: Array<{ i
     updates,
     async create(input) { return { ...input, id: 'mat-new' } },
     async findById(id) { return materia.id === id ? materia : null },
-    async update(id, patch) {
-      updates.push({ id, patch })
-      return { ...materia, ...patch }
-    },
-    async findWarm(_spec) { return null },
+    async update(id, patch) { updates.push({ id, patch }); return { ...materia, ...patch } },
+    async findWarm() { return null },
   } as MateriaStore & { updates: Array<{ id: string; patch: unknown }> }
 }
 
-function makeSshTransport(overrides: Partial<SshTransportLike> = {}): SshTransportLike & { execCalls: string[] } {
-  const execCalls: string[] = []
-  return {
-    execCalls,
-    async exec(cmd: string) {
-      execCalls.push(cmd)
-      if (cmd.includes('/system_stats')) return '{"system":{}}'
-      if (cmd.includes('/prompt')) return JSON.stringify({ prompt_id: 'P1' })
-      if (cmd.includes('/history')) return JSON.stringify({
-        P1: { outputs: { '9': { images: [{ filename: 'render_001.png', subfolder: '', type: 'output' }] } } }
-      })
-      return ''
-    },
-    async close() {},
-    ...overrides,
-  } as SshTransportLike & { execCalls: string[] }
-}
+/**
+ * Mock fetch for comfyrunner endpoints on the warm pod.
+ * Handles: GET /health, POST /job, GET /job/:id/stream, POST <webhook>
+ */
+function makeComfyrunnerFetch(externusId: string, opts: {
+  healthStatus?: string
+  jobAccepted?: boolean
+  sseEvents?: Array<Record<string, unknown>>
+  webhookPayloads?: unknown[]
+} = {}) {
+  const {
+    healthStatus = 'ready',
+    jobAccepted = true,
+    sseEvents = [{ type: 'complete' }],
+    webhookPayloads = [],
+  } = opts
 
-function makeWebhookCapture(): { payloads: unknown[]; fetch: typeof fetch } {
-  const payloads: unknown[] = []
-  const fakeFetch = async (_url: string, opts: RequestInit = {}): Promise<Response> => {
-    payloads.push(JSON.parse((opts.body as string) ?? '{}'))
-    return new Response('{}', { status: 200 })
-  }
-  return { payloads, fetch: fakeFetch as typeof fetch }
+  const runnerBase = `https://${externusId}-8080.proxy.runpod.net`
+
+  const fetch = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+
+    if (method === 'GET' && url === `${runnerBase}/health`) {
+      return new Response(JSON.stringify({ status: healthStatus }), { status: 200 })
+    }
+    if (method === 'POST' && url === `${runnerBase}/job`) {
+      return new Response('{}', { status: jobAccepted ? 200 : 503 })
+    }
+    if (method === 'GET' && url.startsWith(`${runnerBase}/job/`)) {
+      return makeSseStream(sseEvents)
+    }
+    // webhook capture
+    if (method === 'POST') {
+      webhookPayloads.push(JSON.parse((init?.body as string) ?? '{}'))
+      return new Response('{}', { status: 200 })
+    }
+
+    return new Response('Not found', { status: 404 })
+  }) as unknown as typeof fetch
+
+  return { fetch, webhookPayloads }
 }
 
 // ── submit() ──────────────────────────────────────────────────────────────────
 
-test('submit() returns the Materia id as externusJobId immediately', async () => {
-  const materia = makeMateria()
-  const store = makeMateriaStore(materia)
-  const client = new WarmPodClient(materia, store, () => makeSshTransport())
-  const result = await client.submit({ input: { '1': {} }, webhook: 'https://example.com/hook' })
-  assert.equal(result.id, 'mat-warm-1')
-})
-
-test('submit() marks Materia active before running the job', async () => {
-  const materia = makeMateria()
-  const store = makeMateriaStore(materia)
-  const client = new WarmPodClient(materia, store, () => makeSshTransport())
-  await client.submit({ input: {}, webhook: 'https://example.com/hook' })
-  const activeUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'active')
-  assert.ok(activeUpdate, 'status should be set to active before job runs')
-})
-
-test('submit() marks Materia idle again after job completes', async () => {
-  const materia = makeMateria()
-  const store = makeMateriaStore(materia)
-  const capture = makeWebhookCapture()
-  const client = new WarmPodClient(materia, store, () => makeSshTransport(), capture.fetch, { comfyPollIntervalMs: 0, comfyReadyTimeoutMs: 500, jobTimeoutMs: 500 })
-  await client.submit({ input: {} })
-  await new Promise(r => setTimeout(r, 100))
-  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
-  assert.ok(idleUpdate, 'status should return to idle after job completes')
-})
-
-test('submit() does NOT terminate the pod after completion', async () => {
-  let terminateCalled = false
-  const materia = makeMateria()
-  const store = makeMateriaStore(materia)
-  const client = new WarmPodClient(materia, store, () => makeSshTransport(), async (_url: string, _opts?: RequestInit) => {
-    if (_url.includes('/pods/') && (_opts?.method ?? 'GET') === 'DELETE') terminateCalled = true
-    return new Response('{}', { status: 200 })
+describe('submit()', () => {
+  it('returns externusId immediately (before job completes)', async () => {
+    const materia = makeMateria()
+    const { fetch } = makeComfyrunnerFetch('pod-xyz')
+    const client = new WarmPodClient(materia, makeMateriaStore(materia), fetch)
+    const result = await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+    expect(result.id).toBe('pod-xyz')
   })
-  await client.submit({ input: {}, webhook: 'https://example.com/hook' })
-  await new Promise(r => setTimeout(r, 100))
-  assert.equal(terminateCalled, false, 'warm pod must not be terminated after job')
+
+  it('polls /health then POSTs to /job', async () => {
+    const materia = makeMateria()
+    const { fetch } = makeComfyrunnerFetch('pod-xyz')
+    const client = new WarmPodClient(materia, makeMateriaStore(materia), fetch)
+    await client.submit({ input: {} })
+    await new Promise(r => setTimeout(r, 50))
+
+    const calls = (fetch as ReturnType<typeof vi.fn>).mock.calls.map(([url, opts]) => ({
+      url,
+      method: (opts?.method ?? 'GET').toUpperCase(),
+    }))
+    expect(calls.some(c => c.url.includes('/health') && c.method === 'GET')).toBe(true)
+    expect(calls.some(c => c.url.includes('/job') && !c.url.includes('/stream') && c.method === 'POST')).toBe(true)
+  })
+
+  it('awaits the SSE stream after submitting the job', async () => {
+    const materia = makeMateria()
+    const { fetch } = makeComfyrunnerFetch('pod-xyz')
+    const client = new WarmPodClient(materia, makeMateriaStore(materia), fetch)
+    await client.submit({ input: {} })
+    await new Promise(r => setTimeout(r, 50))
+
+    const calls = (fetch as ReturnType<typeof vi.fn>).mock.calls.map(([url]) => url as string)
+    expect(calls.some(u => u.includes('/job/') && u.includes('/stream'))).toBe(true)
+  })
 })
 
-test('submit() POSTs COMPLETED webhook when workflow finishes', async () => {
-  const materia = makeMateria()
-  const store = makeMateriaStore(materia)
-  const capture = makeWebhookCapture()
-  const client = new WarmPodClient(materia, store, () => makeSshTransport(), capture.fetch, { comfyPollIntervalMs: 0, comfyReadyTimeoutMs: 500, jobTimeoutMs: 500 })
-  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
-  await new Promise(r => setTimeout(r, 100))
-  const completed = capture.payloads.find(p => (p as { status?: string }).status === 'COMPLETED')
-  assert.ok(completed, 'COMPLETED webhook should be POSTed')
+// ── Materia status ─────────────────────────────────────────────────────────────
+
+describe('Materia status after job', () => {
+  it('sets status to idle after stream completes (economy pod)', async () => {
+    const materia = makeMateria({ podPolicy: 'economy' })
+    const store = makeMateriaStore(materia)
+    const { fetch } = makeComfyrunnerFetch('pod-xyz')
+    const client = new WarmPodClient(materia, store, fetch)
+    await client.submit({ input: {} })
+    await new Promise(r => setTimeout(r, 100))
+    const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
+    expect(idleUpdate).toBeDefined()
+  })
+
+  it('sets status to idle when no podPolicy set (default)', async () => {
+    const materia = makeMateria()  // no podPolicy
+    const store = makeMateriaStore(materia)
+    const { fetch } = makeComfyrunnerFetch('pod-xyz')
+    const client = new WarmPodClient(materia, store, fetch)
+    await client.submit({ input: {} })
+    await new Promise(r => setTimeout(r, 100))
+    const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
+    expect(idleUpdate).toBeDefined()
+  })
+
+  it('sets status to terminated for private pod', async () => {
+    const materia = makeMateria({ podPolicy: 'private' })
+    const store = makeMateriaStore(materia)
+    const { fetch } = makeComfyrunnerFetch('pod-xyz')
+    const client = new WarmPodClient(materia, store, fetch)
+    await client.submit({ input: {} })
+    await new Promise(r => setTimeout(r, 100))
+    const terminatedUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'terminated')
+    expect(terminatedUpdate).toBeDefined()
+    const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
+    expect(idleUpdate).toBeUndefined()
+  })
+
+  it('sets status to terminated for private pod even on failure', async () => {
+    const materia = makeMateria({ podPolicy: 'private' })
+    const store = makeMateriaStore(materia)
+    const { fetch } = makeComfyrunnerFetch('pod-xyz', {
+      healthStatus: 'starting',  // never ready → triggers failure
+    })
+    const client = new WarmPodClient(materia, store, fetch, { runnerReadyTimeoutMs: 50, runnerPollIntervalMs: 0 })
+    await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+    await new Promise(r => setTimeout(r, 300))
+    const terminatedUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'terminated')
+    expect(terminatedUpdate).toBeDefined()
+  })
 })
 
-test('submit() webhook payload id matches the Materia id', async () => {
-  const materia = makeMateria({ id: 'mat-unique-99' })
-  const store = makeMateriaStore(materia)
-  const capture = makeWebhookCapture()
-  const client = new WarmPodClient(materia, store, () => makeSshTransport(), capture.fetch, { comfyPollIntervalMs: 0, comfyReadyTimeoutMs: 500, jobTimeoutMs: 500 })
-  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
-  await new Promise(r => setTimeout(r, 100))
-  const completed = capture.payloads.find(p => (p as { status?: string }).status === 'COMPLETED') as { id?: string }
-  assert.equal(completed?.id, 'mat-unique-99')
-})
+// ── webhook behaviour ─────────────────────────────────────────────────────────
 
-test('submit() marks Materia idle and POSTs FAILED webhook when SSH throws', async () => {
-  const brokenSsh = makeSshTransport({ async exec(_cmd) { throw new Error('ComfyUI gone') } })
-  const materia = makeMateria()
-  const store = makeMateriaStore(materia)
-  const capture = makeWebhookCapture()
-  const client = new WarmPodClient(materia, store, () => brokenSsh, capture.fetch, { comfyPollIntervalMs: 0, comfyReadyTimeoutMs: 50, jobTimeoutMs: 500 })
-  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
-  await new Promise(r => setTimeout(r, 500))
-  const failed = capture.payloads.find(p => (p as { status?: string }).status === 'FAILED')
-  assert.ok(failed, 'FAILED webhook should be POSTed on SSH error')
-  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
-  assert.ok(idleUpdate, 'Materia should return to idle even on failure')
-})
+describe('webhook behaviour', () => {
+  it('fires FAILED webhook when comfyrunner health never becomes ready', async () => {
+    const materia = makeMateria()
+    const store = makeMateriaStore(materia)
+    const webhookPayloads: unknown[] = []
+    const { fetch } = makeComfyrunnerFetch('pod-xyz', {
+      healthStatus: 'starting',
+      webhookPayloads,
+    })
+    const client = new WarmPodClient(materia, store, fetch, { runnerReadyTimeoutMs: 50, runnerPollIntervalMs: 0 })
+    await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+    await new Promise(r => setTimeout(r, 300))
+    const failed = (webhookPayloads as Array<{ status?: string }>).find(p => p.status === 'FAILED')
+    expect(failed).toBeDefined()
+  })
 
-// ── podPolicy status tests ────────────────────────────────────────────────────
-
-test('private pod: status becomes terminated after job completes', async () => {
-  const materia = makeMateria({ podPolicy: 'private' })
-  const store = makeMateriaStore(materia)
-  const capture = makeWebhookCapture()
-  const client = new WarmPodClient(materia, store, () => makeSshTransport(), capture.fetch, { comfyPollIntervalMs: 0, comfyReadyTimeoutMs: 500, jobTimeoutMs: 500 })
-  await client.submit({ input: {} })
-  await new Promise(r => setTimeout(r, 100))
-  const terminatedUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'terminated')
-  assert.ok(terminatedUpdate, 'private pod should be terminated after job completes')
-  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
-  assert.equal(idleUpdate, undefined, 'private pod must not return to idle')
-})
-
-test('economy pod: status becomes idle after job completes', async () => {
-  const materia = makeMateria({ podPolicy: 'economy' })
-  const store = makeMateriaStore(materia)
-  const capture = makeWebhookCapture()
-  const client = new WarmPodClient(materia, store, () => makeSshTransport(), capture.fetch, { comfyPollIntervalMs: 0, comfyReadyTimeoutMs: 500, jobTimeoutMs: 500 })
-  await client.submit({ input: {} })
-  await new Promise(r => setTimeout(r, 100))
-  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
-  assert.ok(idleUpdate, 'economy pod should return to idle after job completes')
-})
-
-test('absent podPolicy: status becomes idle after job completes (backward compat)', async () => {
-  const materia = makeMateria()  // no podPolicy
-  const store = makeMateriaStore(materia)
-  const capture = makeWebhookCapture()
-  const client = new WarmPodClient(materia, store, () => makeSshTransport(), capture.fetch, { comfyPollIntervalMs: 0, comfyReadyTimeoutMs: 500, jobTimeoutMs: 500 })
-  await client.submit({ input: {} })
-  await new Promise(r => setTimeout(r, 100))
-  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
-  assert.ok(idleUpdate, 'pod with no podPolicy should return to idle (backward compat)')
-})
-
-test('private pod: status becomes terminated even on job failure', async () => {
-  const brokenSsh = makeSshTransport({ async exec(_cmd) { throw new Error('GPU exploded') } })
-  const materia = makeMateria({ podPolicy: 'private' })
-  const store = makeMateriaStore(materia)
-  const capture = makeWebhookCapture()
-  const client = new WarmPodClient(materia, store, () => brokenSsh, capture.fetch, { comfyPollIntervalMs: 0, comfyReadyTimeoutMs: 50, jobTimeoutMs: 500 })
-  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
-  await new Promise(r => setTimeout(r, 500))
-  const terminatedUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'terminated')
-  assert.ok(terminatedUpdate, 'private pod should be terminated even when job fails')
-  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
-  assert.equal(idleUpdate, undefined, 'private pod must not return to idle on failure')
+  it('does NOT fire FAILED webhook when comfyrunner accepted the job (comfyrunner owns it)', async () => {
+    const materia = makeMateria()
+    const store = makeMateriaStore(materia)
+    const webhookPayloads: unknown[] = []
+    // comfyrunner accepts job but SSE stream returns an error
+    const { fetch } = makeComfyrunnerFetch('pod-xyz', {
+      sseEvents: [{ type: 'error', error: 'OOM' }],
+      webhookPayloads,
+    })
+    const client = new WarmPodClient(materia, store, fetch)
+    await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+    await new Promise(r => setTimeout(r, 200))
+    expect((webhookPayloads as Array<{ status?: string }>).some(p => p.status === 'FAILED')).toBe(false)
+  })
 })

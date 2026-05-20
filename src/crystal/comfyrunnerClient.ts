@@ -17,6 +17,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
 }
 
+// Marks a terminal job failure (error event from comfyrunner) — must not be retried.
+class JobError extends Error {
+  readonly isJobError = true
+}
+
 export interface CompiledSpecLike {
   workflow: { inputTemplate: Record<string, unknown> }
   models: Array<{ url: string; dest: string; sizeBytes?: number }>
@@ -164,7 +169,7 @@ export async function awaitViaStream(
               case 'complete':
                 return
               case 'error':
-                throw new Error((event.error as string) || 'comfyrunner job failed')
+                throw new JobError((event.error as string) || 'comfyrunner job failed')
             }
           }
         }
@@ -172,7 +177,7 @@ export async function awaitViaStream(
       // Stream closed without terminal event — retry
       log.warn('SSE stream closed without terminal event', { jobId, attempt })
     } catch (err) {
-      if (attempt >= 3 || Date.now() >= deadline) throw err
+      if ((err as { isJobError?: boolean }).isJobError || attempt >= 3 || Date.now() >= deadline) throw err
     }
   }
 
