@@ -196,6 +196,13 @@ export async function awaitViaStream(
                 onMetrics?.({ modelsDownloaded: downloaded, modelsReused: reused, downloadMs, downloadBytes })
                 break
               }
+              case 'workflow-submitted':
+                log.info('workflow submitted to ComfyUI', { jobId, promptId: event.promptId })
+                break
+              case 'waiting':
+                // Heartbeat while ComfyUI runs. nodesExecuted=0 across many of these = stuck loading.
+                log.info('awaiting ComfyUI', { jobId, elapsedS: event.elapsedS, nodesExecuted: event.nodesExecuted })
+                break
               case 'installing-node':
                 emitStage?.('installing-nodes')
                 break
