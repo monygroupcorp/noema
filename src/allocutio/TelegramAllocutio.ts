@@ -10,7 +10,7 @@ import type { Primitive, Step, Resolution, FlowContext, Intent, Platform, Auctor
 import type { Allocutio, Nuntius, Responsum } from '../types/allocutio.js'
 import type { Inceptio } from '../types/cursus.js'
 import { makeLogger } from '../lib/logger.js'
-import { bus } from '../lib/bus.js'
+import { bus, type StageInfo } from '../lib/bus.js'
 import type { WideEvent } from '../lib/wide.js'
 import { classifyError } from '../lib/classifyError.js'
 
@@ -708,7 +708,7 @@ Generate AI art, chat with models, explore creative tools.`
   // _handleActumStage — bus event → send or edit cold-start progress message
   // -------------------------------------------------------------------------
 
-  private async _handleActumStage(data: { actumId: string; stage: string; elapsedMs: number }): Promise<void> {
+  private async _handleActumStage(data: { actumId: string; stage: string; elapsedMs: number; info?: StageInfo }): Promise<void> {
     const progress = this.actumProgress.get(data.actumId)
     if (!progress) return
 
@@ -723,13 +723,20 @@ Generate AI art, chat with models, explore creative tools.`
       return
     }
 
-    if (data.stage === 'provisioning') {
-      progress.isCold = true
-      const text = this._progressText('provisioning', data.elapsedMs)
+    if (data.stage === 'provisioning') progress.isCold = true
+
+    const keyboard = inlineKeyboard([[btn('Invite to this pod', `pod_invite:${data.actumId}`)]])
+    const text = this._progressText(data.stage, data.elapsedMs, data.info)
+
+    // Lazily create the progress message on the FIRST stage we can deliver.
+    // The 'provisioning' event usually fires before this actum is registered
+    // (cursor.run blocks on synchronous pod provisioning, and registration only
+    // happens once the flow emits the Stream primitive afterward) — so gating
+    // creation on 'provisioning' dropped every subsequent stage. Any first stage
+    // now creates the message; later ones edit it.
+    if (progress.progressMessageId === null) {
       try {
-        const msg = await this.sender.sendMessage(chatId, text, {
-          reply_markup: inlineKeyboard([[btn('Invite to this pod', `pod_invite:${data.actumId}`)]]),
-        })
+        const msg = await this.sender.sendMessage(chatId, text, { reply_markup: keyboard })
         progress.progressMessageId = msg.message_id
         progress.lastEditMs = now
       } catch { /* non-critical */ }
@@ -738,23 +745,29 @@ Generate AI art, chat with models, explore creative tools.`
 
     // Rate-limit edits to 1 per 4s — telegram will 429 on faster edits
     if (now - progress.lastEditMs < 4000) return
-    if (progress.progressMessageId === null) return
 
-    const text = this._progressText(data.stage, data.elapsedMs)
-    void this.sender.editMessageText(chatId, progress.progressMessageId, text, {
-      reply_markup: inlineKeyboard([[btn('Invite to this pod', `pod_invite:${data.actumId}`)]]),
-    }).catch(() => {})
+    void this.sender.editMessageText(chatId, progress.progressMessageId, text, { reply_markup: keyboard }).catch(() => {})
     progress.lastEditMs = now
   }
 
-  private _progressText(stage: string, elapsedMs: number): string {
-    const elapsed = Math.round(elapsedMs / 1000)
-    const elapsedStr = elapsed >= 60
-      ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
-      : `${elapsed}s`
+  private _progressText(stage: string, elapsedMs: number, info?: StageInfo): string {
+    const fmt = (sec: number) => sec >= 60 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${sec}s`
+    const elapsedStr = fmt(Math.round(elapsedMs / 1000))
+
+    // Pod lock-in — surface GPU / region / price the moment we acquire the pod.
+    if (stage === 'pod-locked') {
+      const lines = ['🔒 Locked onto a GPU pod']
+      if (info?.gpuType) lines.push(`GPU: ${info.gpuType}`)
+      if (info?.region)  lines.push(`Region: ${info.region}`)
+      if (typeof info?.costPerHr === 'number') lines.push(`Rate: $${info.costPerHr.toFixed(2)}/hr`)
+      lines.push('Setting up runtime...')
+      lines.push(`Elapsed: ${elapsedStr}`)
+      return lines.join('\n')
+    }
 
     let header: string
     let progressBar: string | null = null
+    let etaLine: string | null = null
 
     if (stage.startsWith('progress:')) {
       const [n, m] = stage.slice(9).split('/').map(Number)
@@ -765,6 +778,9 @@ Generate AI art, chat with models, explore creative tools.`
     } else if (stage.startsWith('downloading:')) {
       const [n, m] = stage.slice(12).split('/').map(Number)
       header = `Downloading models (${n}/${m})...`
+      if (typeof info?.etaMs === 'number' && info.etaMs > 0) {
+        etaLine = `~${fmt(Math.round(info.etaMs / 1000))} left`
+      }
     } else {
       const stageLines: Record<string, string> = {
         'provisioning':     'Provisioning cold pod...',
@@ -782,6 +798,7 @@ Generate AI art, chat with models, explore creative tools.`
 
     const lines = [header]
     if (progressBar) lines.push(progressBar)
+    if (etaLine) lines.push(etaLine)
     lines.push(`Elapsed: ${elapsedStr}`)
 
     if (stage === 'provisioning') {

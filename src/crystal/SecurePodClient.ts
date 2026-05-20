@@ -82,6 +82,8 @@ interface SshInfo {
   port: number
   user: string
   costPerHr?: number
+  gpuType?: string
+  region?: string
 }
 
 interface RunPodPodStatus {
@@ -89,6 +91,8 @@ interface RunPodPodStatus {
   publicIp?: string
   portMappings?: Record<string, number>
   costPerHr?: number
+  gpuTypeIds?: string[]
+  machine?: { gpuDisplayName?: string; dataCenterId?: string; location?: string }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -304,7 +308,9 @@ export class SecurePodClient implements RunPodClient {
     const sshPort = data.portMappings?.['22']
     if (!sshPort) return null
 
-    return { host: data.publicIp, port: sshPort, user: 'root', costPerHr: data.costPerHr }
+    const gpuType = data.machine?.gpuDisplayName ?? data.gpuTypeIds?.[0]
+    const region  = data.machine?.dataCenterId ?? data.machine?.location
+    return { host: data.publicIp, port: sshPort, user: 'root', costPerHr: data.costPerHr, gpuType, region }
   }
 
   private async _terminatePod(podId: string): Promise<void> {
@@ -325,9 +331,9 @@ export class SecurePodClient implements RunPodClient {
     const startMs = Date.now()
     let ssh: SshTransportLike | null = null
     let sshInfo: SshInfo | null = null
-    const emitStage = (stage: string) => {
+    const emitStage = (stage: string, info?: import('../lib/bus.js').StageInfo) => {
       const ctx = getTrace()
-      if (ctx?.actumId) bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - (ctx.startTs ?? startMs) })
+      if (ctx?.actumId) bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - (ctx.startTs ?? startMs), info })
     }
     // Pod telemetry accumulated as the job runs and persisted onto the actum
     // (via onMetrics) before completion — the completion webhook can't see this
@@ -341,7 +347,10 @@ export class SecurePodClient implements RunPodClient {
       sshInfo = await this._waitForSsh(podId)
       executio.provisionMs = Date.now() - startMs
       executio.costPerHr = sshInfo.costPerHr
-      emitStage('ssh-ready')
+      executio.gpuType = sshInfo.gpuType
+      // Pod acquired — surface GPU/region/price to the user the moment we lock on.
+      log.info('pod locked', { podId, gpuType: sshInfo.gpuType, region: sshInfo.region, costPerHr: sshInfo.costPerHr })
+      emitStage('pod-locked', { gpuType: sshInfo.gpuType, region: sshInfo.region, costPerHr: sshInfo.costPerHr })
       ssh = await this._waitForSshd(sshInfo)
       executio.sshReadyMs = Date.now() - startMs
       reportMetrics()  // persist provision/ssh/podId/costPerHr — survives even if download fails
