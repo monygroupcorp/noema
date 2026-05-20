@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { TesseraCursor } from '../../../src/crystal/TesseraCursor.js'
-import { MemorySignorum } from '../../../src/crystal/MemorySignorum.js'
+import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
 import type { ModoStore, Modo } from '../../../src/types/modo.js'
 import type { Cursor, CursorResult } from '../../../src/types/cursus.js'
 import type { Modus } from '../../../src/types/modus.js'
