@@ -4,6 +4,7 @@ import { validateAditus } from '../../execution/validateAditus.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Actorum, ActumCompletor, Cursorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
+import { classifyError } from '../../lib/classifyError.js'
 
 // ---------------------------------------------------------------------------
 // ExecuteFlow state types
@@ -162,13 +163,12 @@ export class ExecuteFlow implements Flow {
       const opts = this._buildReplyOpts(state, result.exitus)
       return this._buildResultStep(result.exitus, state.actumId ?? '', opts)
     } else {
-      // Failed — return an error Detail step
       return {
         primitives: [{
           kind: 'Detail',
-          label: 'Execution Failed',
-          content: `Error: ${result.error}`,
-          actions: [{ id: 'run_again', label: 'Try Again' }],
+          label: 'Generation failed',
+          content: classifyError(result.error),
+          actions: [{ id: 'run_again', label: 'Try again' }],
         }],
       }
     }
