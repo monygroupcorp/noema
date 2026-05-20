@@ -762,6 +762,9 @@ Generate AI art, chat with models, explore creative tools.`
       const filled = Math.round(pct * 10)
       progressBar = `[${'█'.repeat(filled)}${'░'.repeat(10 - filled)}] ${n}/${m}`
       header = 'Generating...'
+    } else if (stage.startsWith('downloading:')) {
+      const [n, m] = stage.slice(12).split('/').map(Number)
+      header = `Downloading models (${n}/${m})...`
     } else {
       const stageLines: Record<string, string> = {
         'provisioning':     'Provisioning cold pod...',

@@ -87,6 +87,8 @@ export async function awaitViaStream(
 ): Promise<void> {
   let lastSeq = -1
   let inferringEmitted = false
+  let modelTotal = 0
+  let modelDone = 0
   const deadline = Date.now() + timeoutMs
 
   for (let attempt = 0; attempt <= 3; attempt++) {
@@ -137,6 +139,17 @@ export async function awaitViaStream(
             dataLine = ''
 
             switch (event.type) {
+              case 'preflight-models': {
+                const { total = 0, present = 0 } = event as { total?: number; present?: number }
+                modelTotal = total
+                modelDone = present
+                if (total > present) emitStage?.(`downloading:${present}/${total}`)
+                break
+              }
+              case 'downloaded':
+                modelDone++
+                if (modelTotal > 0) emitStage?.(`downloading:${modelDone}/${modelTotal}`)
+                break
               case 'installing-node':
                 emitStage?.('installing-nodes')
                 break
@@ -144,7 +157,7 @@ export async function awaitViaStream(
                 emitStage?.('restarting')
                 break
               case 'downloading':
-                emitStage?.('downloading')
+                if (modelTotal === 0) emitStage?.('downloading')
                 break
               case 'node':
                 if (!inferringEmitted) {
