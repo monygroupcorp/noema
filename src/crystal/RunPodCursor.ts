@@ -21,6 +21,12 @@ export interface RunPodClient {
      * Normal deployment: our server (e.g. https://api.noema.io/webhooks/runpod)
      * TEE deployment: the TEE pod's local endpoint. */
     webhook?: string
+    /**
+     * Called when the active pod changes — i.e. when a retry provisions a new pod.
+     * Callers should update actum.externusJobId to the new podId so the DB always
+     * reflects the pod that is actually running.
+     */
+    onPodActive?: (podId: string) => Promise<void>
   }): Promise<{ id: string }>
 }
 
@@ -71,6 +77,10 @@ export class RunPodCursor implements Cursor {
     const { id: externusJobId } = await client.submit({
       input,
       webhook: this.config.webhookUrl,
+      onPodActive: async (newPodId) => {
+        // Retry pod is now active — update so boot recovery and reconciliation see the right pod
+        await this.actorum.update(actum.id, { externusJobId: newPodId }).catch(() => {})
+      },
     })
 
     await this.actorum.update(actum.id, { externusJobId, deploymentHash: hash, status: 'agens' })
