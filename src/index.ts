@@ -33,6 +33,7 @@ import { referralSplitHook } from './ledger/hooks/referralSplit.js'
 import { sessionSpendHook } from './ledger/hooks/sessionSpend.js'
 import { spellRoyaltyHook } from './ledger/hooks/spellRoyalty.js'
 import { SecurePodClient, makeSecurePodSshFactory, type R2Config } from './crystal/SecurePodClient.js'
+import { terminatePod, listRunPodPods } from './crystal/terminatePod.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { Compiler } from './crystal/Compiler.js'
@@ -218,11 +219,16 @@ async function main(): Promise<void> {
 
   const runpodClient = RUNPOD_API_KEY ? makeSecureRunPodClient(materiae) : undefined
 
+  const podTerminator = RUNPOD_API_KEY
+    ? (podId: string) => terminatePod(RUNPOD_API_KEY!, podId)
+    : undefined
+
   const ring = createContainer(mongo, {
     mongoUri: MONGODB_URI as string,
     dbName: DB_NAME,
     compile: compile as ContainerConfig['compile'],
     materiae,   // pre-created, shared with SecurePodClient
+    terminatePod: podTerminator,
     ...(runpodClient && RUNPOD_WEBHOOK_URL ? {
       runpodClient,
       runpodWebhookUrl: RUNPOD_WEBHOOK_URL,
@@ -236,11 +242,33 @@ async function main(): Promise<void> {
   await ring.collectioCursor.rehydrate()
   log.info('CollectioCursor rehydrated')
 
-  // 3c. Recover expired acta — release locked signa from jobs that never completed
+  // 3c. Recover expired acta — release locked signa; fail() now also kills any live pod
   const expired = await ring.actorum.findExpired()
   if (expired.length) {
     log.info(`Recovering ${expired.length} expired acta`)
     await Promise.all(expired.map(a => ring.completor.fail(a, 'Actum expired — pod never reported back')))
+  }
+
+  // 3d. Reconcile against live RunPod pods — terminate any pod not tracked by the DB.
+  // This is the catch-all invariant: even if a pod ID slipped through without being written
+  // to an actum or Materia, it gets killed on the next startup.
+  if (RUNPOD_API_KEY) {
+    try {
+      const livePods = await listRunPodPods(RUNPOD_API_KEY)
+      const knownPodIds = new Set<string>()
+      for (const a of await ring.actorum.findInFlight()) if (a.externusJobId) knownPodIds.add(a.externusJobId)
+      for (const m of await materiae.findActive()) knownPodIds.add(m.externusId)
+
+      const orphans = livePods.filter(p => p.desiredStatus === 'RUNNING' && !knownPodIds.has(p.id))
+      if (orphans.length > 0) {
+        log.warn(`found ${orphans.length} orphaned pod(s) — terminating`, { ids: orphans.map(p => p.id) })
+        await Promise.allSettled(orphans.map(p => terminatePod(RUNPOD_API_KEY!, p.id)))
+      } else if (livePods.length > 0) {
+        log.info(`pod reconciliation: ${livePods.length} pod(s) accounted for`)
+      }
+    } catch (err) {
+      log.warn('pod reconciliation error', { error: (err as Error).message })
+    }
   }
 
   // 4. Create Nexus, register hooks
@@ -437,19 +465,7 @@ async function main(): Promise<void> {
 
         if (podIds.size > 0) {
           log.info(`tearing down ${podIds.size} pod(s)`)
-          await Promise.allSettled(Array.from(podIds).map(async (podId) => {
-            try {
-              await fetch(`https://rest.runpod.io/v1/pods/${podId}/stop`, {
-                method: 'POST', headers: { Authorization: `Bearer ${RUNPOD_API_KEY}` },
-              })
-              await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
-                method: 'DELETE', headers: { Authorization: `Bearer ${RUNPOD_API_KEY}` },
-              })
-              log.info(`pod ${podId} terminated`)
-            } catch (err) {
-              log.warn(`pod ${podId} teardown failed`, { error: (err as Error).message })
-            }
-          }))
+          await Promise.allSettled(Array.from(podIds).map(podId => terminatePod(RUNPOD_API_KEY!, podId)))
           // Mark Materia records terminated
           await Promise.allSettled(activeMateriae.map(m =>
             materiae.update(m.id, { status: 'terminated' }).catch(() => {})

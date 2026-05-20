@@ -158,6 +158,11 @@ export interface ContainerConfig {
    */
   materiae?: MateriaStore
   /**
+   * Terminate a RunPod pod by ID. Injected so ActumCompletor can kill orphaned pods when
+   * failing an actum (boot recovery, manual expiry). Absent: pods are left running on fail().
+   */
+  terminatePod?: (podId: string) => Promise<void>
+  /**
    * Embed function for semantic search — inject the OpenAI/local model.
    * Absent: index() and search() will throw; create/findById/forIdentity still work.
    */
@@ -259,7 +264,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     cursorum.register('huggingface', hfCursor)
   }
 
-  const completor = new ActumCompletor(actorum, signorum)
+  const completor = new ActumCompletor(actorum, signorum, config.terminatePod)
   const arcanumLeafCol = db.collection(config.arcanumLeavesCollection ?? 'arcanum_leaves')
   const arcanumNullifiersCol = db.collection(config.arcanumNullifiersCollection ?? 'arcanum_nullifiers')
   const arcanumTree = new MongoArcanumTree(arcanumLeafCol)

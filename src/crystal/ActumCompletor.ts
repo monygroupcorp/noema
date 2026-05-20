@@ -6,6 +6,7 @@ export class ActumCompletor implements IActumCompletor {
   constructor(
     private readonly actorum: Actorum,
     private readonly signorum: Signorum,
+    private readonly terminatePod?: (podId: string) => Promise<void>,
   ) {}
 
   async complete(actum: Actum, exitus: Exitus): Promise<Actum> {
@@ -21,6 +22,11 @@ export class ActumCompletor implements IActumCompletor {
   }
 
   async fail(actum: Actum, error: string): Promise<Actum> {
+    // Invariant: terminating the pod is attempted before releasing signa so we
+    // never refund a user while a pod is still burning money on their behalf.
+    if (actum.externusJobId && this.terminatePod) {
+      await this.terminatePod(actum.externusJobId).catch(() => {})
+    }
     await this.signorum.release(actum.signaConsumed)
     return this.actorum.update(actum.id, {
       status: 'fractus',

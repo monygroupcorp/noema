@@ -5,6 +5,7 @@ import type { MateriaStore } from '../types/materia.js'
 import { makeLogger } from '../lib/logger.js'
 import { getTrace } from '../lib/trace.js'
 import { bus } from '../lib/bus.js'
+import { terminatePod as _terminatePodUtil } from './terminatePod.js'
 
 const RUNNER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/runner.py')
 
@@ -146,7 +147,7 @@ export class SecurePodClient implements RunPodClient {
     private readonly materiae?: MateriaStore,
   ) {}
 
-  async submit(params: { input: unknown; webhook?: string }): Promise<{ id: string }> {
+  async submit(params: { input: unknown; webhook?: string; onPodActive?: (podId: string) => Promise<void> }): Promise<{ id: string }> {
     // Derive image from spec if available, else fall back to config
     const specOciRef = isCompiledSpec(params.input)
       ? ((params.input as unknown as { image?: { ociRef?: string } }).image?.ociRef)
@@ -198,8 +199,10 @@ export class SecurePodClient implements RunPodClient {
             continue
           }
           activePodId = retryPodId
+          // Update DB so the retry pod is tracked; webhook will fire with retryPodId
+          await params.onPodActive?.(retryPodId).catch(() => {})
           try {
-            await this._runBackground(retryPodId, imageName, params.input, params.webhook, podId)
+            await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId)
             return
           } catch (runErr) {
             log.warn(`pod run attempt ${attempt}/${maxAttempts} failed`, { podId: retryPodId, error: (runErr as Error).message })
@@ -343,26 +346,7 @@ export class SecurePodClient implements RunPodClient {
   }
 
   private async _terminatePod(podId: string): Promise<void> {
-    try {
-      // Stop first (required if RUNNING), then delete to fully remove it
-      await this._fetchWithTimeout(`https://rest.runpod.io/v1/pods/${podId}/stop`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${this.config.apiKey}` },
-      }, 15_000).catch(() => {})
-
-      const res = await this._fetchWithTimeout(`https://rest.runpod.io/v1/pods/${podId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${this.config.apiKey}` },
-      }, 15_000)
-      if (!res.ok) {
-        const text = await res.text().catch(() => '')
-        log.warn('pod delete failed', { podId, status: res.status, body: text })
-      } else {
-        log.info('pod terminated', { podId })
-      }
-    } catch (err) {
-      log.warn('pod terminate error', { podId, error: (err as Error).message })
-    }
+    await _terminatePodUtil(this.config.apiKey, podId)
   }
 
   // externusJobId: the job ID stored on the actum (always the first pod's ID, even on retries)
