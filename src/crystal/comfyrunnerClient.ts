@@ -143,21 +143,33 @@ export async function awaitViaStream(
                 const { total = 0, present = 0 } = event as { total?: number; present?: number }
                 modelTotal = total
                 modelDone = present
+                log.info('model preflight', { jobId, missing: total - present, present, total })
                 if (total > present) emitStage?.(`downloading:${present}/${total}`)
                 break
               }
-              case 'downloaded':
+              case 'downloading': {
+                const { dest, total: bytes } = event as { dest?: string; total?: number }
+                if (modelTotal === 0) emitStage?.('downloading')
+                log.info('model download started', { jobId, dest, bytes })
+                break
+              }
+              case 'downloaded': {
                 modelDone++
+                const { dest, elapsedMs: dlMs } = event as { dest?: string; elapsedMs?: number }
+                log.info('model downloaded', { jobId, dest, elapsedMs: dlMs, done: modelDone, total: modelTotal })
                 if (modelTotal > 0) emitStage?.(`downloading:${modelDone}/${modelTotal}`)
                 break
+              }
+              case 'models-ready': {
+                const { downloaded = 0, reused = 0 } = event as { downloaded?: number; reused?: number }
+                log.info('models ready', { jobId, downloaded, reused })
+                break
+              }
               case 'installing-node':
                 emitStage?.('installing-nodes')
                 break
               case 'restarting-comfy':
                 emitStage?.('restarting')
-                break
-              case 'downloading':
-                if (modelTotal === 0) emitStage?.('downloading')
                 break
               case 'node':
                 if (!inferringEmitted) {
@@ -171,7 +183,7 @@ export async function awaitViaStream(
                   bus.emit('actum.stage', {
                     actumId:  ctx.actumId,
                     stage:    `progress:${event.value}/${event.max}`,
-                    elapsedMs: 0,
+                    elapsedMs: Date.now() - (ctx.startTs ?? deadline - timeoutMs),
                   })
                 }
                 break
@@ -179,10 +191,16 @@ export async function awaitViaStream(
               case 'uploading':
                 emitStage?.('uploading')
                 break
-              case 'complete':
+              case 'complete': {
+                const { executionTimeMs } = event as { executionTimeMs?: number }
+                log.info('job complete', { jobId, executionTimeMs })
                 return
-              case 'error':
-                throw new JobError((event.error as string) || 'comfyrunner job failed')
+              }
+              case 'error': {
+                const errMsg = (event.error as string) || 'comfyrunner job failed'
+                log.warn('job error from comfyrunner', { jobId, error: errMsg })
+                throw new JobError(errMsg)
+              }
             }
           }
         }
