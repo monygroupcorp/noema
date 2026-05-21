@@ -9,6 +9,8 @@ export interface StageInfo {
   costPerHr?: number
   /** Estimated time remaining for the current phase (e.g. model download), in ms. */
   etaMs?:     number
+  /** Pod id, carried at lock-in so the UI can control the pod (warm window / destroy). */
+  podId?:     string
 }
 
 // Typed event map — extended in Phase 2 with actum lifecycle events

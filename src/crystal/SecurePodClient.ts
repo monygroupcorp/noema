@@ -364,7 +364,7 @@ export class SecurePodClient implements RunPodClient {
       executio.gpuType = sshInfo.gpuType
       // Pod acquired — surface GPU/region/price to the user the moment we lock on.
       log.info('pod locked', { podId, gpuType: sshInfo.gpuType, region: sshInfo.region, costPerHr: sshInfo.costPerHr })
-      emitStage('pod-locked', { gpuType: sshInfo.gpuType, region: sshInfo.region, costPerHr: sshInfo.costPerHr })
+      emitStage('pod-locked', { gpuType: sshInfo.gpuType, region: sshInfo.region, costPerHr: sshInfo.costPerHr, podId })
       ssh = await this._waitForSshd(sshInfo)
       executio.sshReadyMs = Date.now() - startMs
       reportMetrics()  // persist provision/ssh/podId/costPerHr — survives even if download fails

@@ -343,6 +343,8 @@ async function main(): Promise<void> {
     sender: makeTelegramSender(tgBot.telegram),
     identity: identityResolver,
     botStartupTime,
+    materiae,
+    terminatePod: RUNPOD_API_KEY ? (podId) => terminatePod(RUNPOD_API_KEY, podId) : undefined,
   })
 
   tgBot.on('message', ctx => {

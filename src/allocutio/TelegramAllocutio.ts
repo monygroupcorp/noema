@@ -12,9 +12,15 @@ import type { Inceptio } from '../types/cursus.js'
 import { makeLogger } from '../lib/logger.js'
 import { bus, type StageInfo } from '../lib/bus.js'
 import type { WideEvent } from '../lib/wide.js'
+import type { MateriaStore } from '../types/materia.js'
 import { classifyError } from '../lib/classifyError.js'
 
 const log = makeLogger('telegram:allocutio')
+
+// Warm-window ladder for the per-pod stepper buttons. < steps toward 1s, > toward 30m.
+const WARM_LADDER_MS    = [1_000, 5_000, 30_000, 60_000, 300_000, 600_000, 1_800_000]
+const WARM_LADDER_LABEL = ['1s', '5s', '30s', '1m', '5m', '10m', '30m']
+const WARM_DEFAULT_MS    = 60_000  // 1m
 
 // ---------------------------------------------------------------------------
 // Static text
@@ -297,6 +303,10 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     identity: IdentityResolver
     /** Unix ms timestamp of bot startup. Messages older than this are dropped. */
     botStartupTime?: number
+    /** Pod registry — used to set a pod's warmUntil from the warm-window buttons. */
+    materiae?: MateriaStore
+    /** Terminate a pod by its external id — backs the "destroy now" button. */
+    terminatePod?: (podId: string) => Promise<void>
   }
 
   // chatId lookup: platform:userId → chatId (set when first message arrives)
@@ -318,6 +328,12 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // Pod details captured at lock-in, retained so every later stage update keeps
     // showing GPU/region/price instead of replacing it.
     podInfo?: StageInfo
+    /** RunPod pod id (from lock-in) — target for warm-window / destroy buttons. */
+    podId?: string
+    /** User-selected warm window (ms); applied to the pod's warmUntil at idle. */
+    warmTtlMs: number
+    /** Last rendered progress text — re-used when a button tap re-renders the keyboard. */
+    lastText: string
   }>()
 
   constructor(deps: {
@@ -326,6 +342,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     identity: IdentityResolver
     /** Unix ms timestamp of bot startup. Messages older than this are dropped. */
     botStartupTime?: number
+    materiae?: MateriaStore
+    terminatePod?: (podId: string) => Promise<void>
   }) {
     this.deps = deps
     this.router = deps.router
@@ -527,6 +545,43 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     if (!query.data) return
 
+    // Warm-window stepper / destroy buttons
+    if (query.data.startsWith('warm:') && chatId) {
+      const [, action, actumId] = query.data.split(':')
+      const progress = this.actumProgress.get(actumId)
+      if (!progress) return
+      if (action === 'noop') return
+
+      if (action === 'kill') {
+        // Fire immediately — destroy the pod the moment it's pressed.
+        if (progress.podId && this.deps.terminatePod) {
+          void this.deps.terminatePod(progress.podId).catch(() => {})
+          void this._setPodWarmUntil(progress.podId, 0)  // mark Materia for reaping if terminate lags
+        }
+        if (progress.progressMessageId !== null) {
+          void this.sender.editMessageText(chatId, progress.progressMessageId, '✕ Pod destroyed.', {}).catch(() => {})
+        }
+        this.actumProgress.delete(actumId)
+        return
+      }
+
+      // Step the warm window up/down the ladder.
+      let idx = WARM_LADDER_MS.indexOf(progress.warmTtlMs)
+      if (idx < 0) idx = WARM_LADDER_MS.indexOf(WARM_DEFAULT_MS)
+      idx = action === 'inc' ? Math.min(WARM_LADDER_MS.length - 1, idx + 1) : Math.max(0, idx - 1)
+      progress.warmTtlMs = WARM_LADDER_MS[idx]
+
+      // If the pod is already idle, re-arm its deadline now; otherwise the choice
+      // is applied when the job completes (see _handleActumComplete).
+      if (progress.podId) void this._setPodWarmUntil(progress.podId, progress.warmTtlMs)
+
+      if (progress.progressMessageId !== null) {
+        const keyboard = this._warmKeyboard(actumId, progress.warmTtlMs, progress.podId !== undefined)
+        void this.sender.editMessageText(chatId, progress.progressMessageId, progress.lastText, { reply_markup: keyboard }).catch(() => {})
+      }
+      return
+    }
+
     // Pod invite button — send a forwardable invite message
     if (query.data.startsWith('pod_invite:') && chatId) {
       const inviteText = [
@@ -605,6 +660,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
             commandMessageId,
             lastEditMs: 0,
             isCold: false,
+            warmTtlMs: WARM_DEFAULT_MS,
+            lastText: '',
           })
         }
         editMessageId = undefined
@@ -731,9 +788,11 @@ Generate AI art, chat with models, explore creative tools.`
     if (data.info?.gpuType || data.info?.region || typeof data.info?.costPerHr === 'number') {
       progress.podInfo = { ...progress.podInfo, ...data.info }
     }
+    if (data.info?.podId) progress.podId = data.info.podId
 
-    const keyboard = inlineKeyboard([[btn('Invite to this pod', `pod_invite:${data.actumId}`)]])
+    const keyboard = this._warmKeyboard(data.actumId, progress.warmTtlMs, progress.podId !== undefined)
     const text = this._progressText(data.stage, data.elapsedMs, data.info, progress.podInfo)
+    progress.lastText = text
 
     // Lazily create the progress message on the FIRST stage we can deliver.
     // The 'provisioning' event usually fires before this actum is registered
@@ -755,6 +814,30 @@ Generate AI art, chat with models, explore creative tools.`
 
     void this.sender.editMessageText(chatId, progress.progressMessageId, text, { reply_markup: keyboard }).catch(() => {})
     progress.lastEditMs = now
+  }
+
+  /** Warm-window stepper + destroy keyboard. Only shows the controls once a pod
+   *  exists (podKnown); before lock-in there's nothing to control. */
+  private _warmKeyboard(actumId: string, warmTtlMs: number, podKnown: boolean): unknown {
+    if (!podKnown) return inlineKeyboard([])
+    let idx = WARM_LADDER_MS.indexOf(warmTtlMs)
+    if (idx < 0) idx = WARM_LADDER_MS.indexOf(WARM_DEFAULT_MS)
+    return inlineKeyboard([
+      [
+        btn('⏱ ‹', `warm:dec:${actumId}`),
+        btn(`warm: ${WARM_LADDER_LABEL[idx]}`, `warm:noop:${actumId}`),
+        btn('› ⏱', `warm:inc:${actumId}`),
+      ],
+      [ btn('✕ Destroy now', `warm:kill:${actumId}`) ],
+    ])
+  }
+
+  /** Apply a chosen warm window to the pod's Materia (warmUntil = now + ttl). */
+  private async _setPodWarmUntil(podId: string, ttlMs: number): Promise<void> {
+    if (!this.deps.materiae) return
+    const pods = await this.deps.materiae.findActive().catch(() => [])
+    const m = pods.find(p => p.externusId === podId)
+    if (m) await this.deps.materiae.update(m.id, { warmUntil: new Date(Date.now() + ttlMs) }).catch(() => {})
   }
 
   private _progressText(stage: string, elapsedMs: number, info?: StageInfo, accrued?: StageInfo): string {
@@ -845,10 +928,17 @@ Generate AI art, chat with models, explore creative tools.`
       lines.push(`Compute cost: ~$${wide.costUsd.toFixed(2)}`)
     }
 
+    // Apply the user's chosen warm window to the pod (overrides the reaper's
+    // default TTL stamped when the pod went idle).
+    const podId = progress.podId ?? wide.podId
+    if (podId) void this._setPodWarmUntil(podId, progress.warmTtlMs)
+
     void this.sender.sendMessage(chatId, lines.join('\n')).catch(() => {})
 
-    // Clean up
-    this.actumProgress.delete(wide.actumId)
+    // Keep the warm-window / destroy buttons live through the warm window so the
+    // user can still extend or destroy after delivery, then clean up the entry.
+    const ttl = progress.warmTtlMs
+    setTimeout(() => this.actumProgress.delete(wide.actumId), ttl + 5_000).unref?.()
   }
 
   // -------------------------------------------------------------------------
