@@ -91,12 +91,14 @@ function makeComfyrunnerFetch(externusId: string, opts: {
 // ── submit() ──────────────────────────────────────────────────────────────────
 
 describe('submit()', () => {
-  it('returns externusId immediately (before job completes)', async () => {
+  it('returns the per-submission jobId immediately (must match the webhook id)', async () => {
     const materia = makeMateria()
     const { fetch } = makeComfyrunnerFetch('pod-xyz')
     const client = new WarmPodClient(materia, makeMateriaStore(materia), fetch)
     const result = await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
-    expect(result.id).toBe('pod-xyz')
+    // jobId is `${externusId}-${Date.now()}` — the id comfyrunner fires the webhook
+    // with, so the actum's externusJobId must equal it (not the bare externusId).
+    expect(result.id).toMatch(/^pod-xyz-\d+$/)
   })
 
   it('polls /health then POSTs to /job', async () => {

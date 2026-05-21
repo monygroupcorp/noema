@@ -52,7 +52,7 @@ export class WarmPodClient implements RunPodClient {
               const res = await this.fetchFn(params.webhook, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: externusId, status: 'FAILED', error: (err as Error).message }),
+                body: JSON.stringify({ id: jobId, status: 'FAILED', error: (err as Error).message }),
               })
               if (res.ok) break
             } catch (_) { /* retry */ }
@@ -60,7 +60,10 @@ export class WarmPodClient implements RunPodClient {
         }
       })
 
-    return { id: externusId }
+    // Return the per-submission jobId, not externusId: comfyrunner fires its
+    // webhook keyed by jobId, and the actum's externusJobId must match it so the
+    // completion webhook can find the actum. (externusId would 404 every time.)
+    return { id: jobId }
   }
 
   // ── private ──────────────────────────────────────────────────────────────
