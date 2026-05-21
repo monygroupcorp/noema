@@ -111,6 +111,10 @@ export interface ContainerConfig {
    * This is the ONLY config that differs between deployment contexts.
    */
   runpodWebhookUrl?: string
+  /** R2 config for warm-pod jobs so they upload to durable storage (not pod-proxy URLs). */
+  runpodR2?: import('./crystal/SecurePodClient.js').R2Config
+  /** Warm-window TTL (ms) passed to warm-pod jobs — default 60_000. */
+  runpodWarmTtlMs?: number
   /** Collection name for acta — default 'acta' */
   actaCollection?: string
   /** Collection name for modi — default 'modi' */
@@ -244,7 +248,10 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
       {
         webhookUrl: config.runpodWebhookUrl,
         praefectus,
-        warmFactory: (m) => new WarmPodClient(m, materiae),
+        warmFactory: (m) => new WarmPodClient(m, materiae, undefined, {
+          r2: config.runpodR2,
+          warmTtlMs: config.runpodWarmTtlMs,
+        }),
         imageRefOf,
         deployments,
       },
