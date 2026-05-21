@@ -37,6 +37,7 @@ import threading
 import time
 import urllib.request
 import urllib.error
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -45,6 +46,10 @@ COMFYUI_DIR          = os.environ.get("COMFYUI_DIR", "/root/ComfyUI")
 COMFYUI_ARGS         = os.environ.get("COMFYUI_ARGS", "--listen 0.0.0.0 --port 8188")
 COMFYUI_URL          = "http://localhost:8188"
 COMFYUI_WS_URL       = "ws://localhost:8188/ws"
+# ComfyUI routes execution events (executing/progress/execution_success) only to
+# the WS client whose clientId matches the /prompt submission. The WS connection
+# and every /prompt MUST share this id or we receive zero execution events.
+CLIENT_ID            = uuid.uuid4().hex
 PORT                 = int(os.environ.get("RUNNER_PORT", "8080"))
 POD_ID               = os.environ.get("RUNPOD_POD_ID", "")
 JOB_TIMEOUT          = int(os.environ.get("JOB_TIMEOUT", "900"))
@@ -194,7 +199,7 @@ def _ws_listener_thread() -> None:
         _comfyui_ready.wait()
         try:
             import websocket  # websocket-client
-            ws = websocket.create_connection(COMFYUI_WS_URL, timeout=10)
+            ws = websocket.create_connection(f"{COMFYUI_WS_URL}?clientId={CLIENT_ID}", timeout=10)
             log.info("ComfyUI WS connected")
             _ws_connected.set()
             while True:
@@ -455,7 +460,7 @@ def _process_job(job_spec: dict) -> None:
         _ensure_models(models, job_id)
 
         # 3. Submit workflow to ComfyUI
-        result = _http_post(f"{COMFYUI_URL}/prompt", {"prompt": workflow})
+        result = _http_post(f"{COMFYUI_URL}/prompt", {"prompt": workflow, "client_id": CLIENT_ID})
         prompt_id = result.get("prompt_id")
         if not prompt_id:
             raise RuntimeError(f"ComfyUI /prompt returned no prompt_id: {result}")
