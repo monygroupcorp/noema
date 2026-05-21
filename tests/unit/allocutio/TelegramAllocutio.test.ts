@@ -41,6 +41,8 @@ function makeSender() {
   const videos: Array<{ chatId: number; url: string; extra?: unknown }> = []
   const mediaGroups: Array<{ chatId: number; media: unknown[] }> = []
   const reactions: Array<{ chatId: number; messageId: number; emoji: string }> = []
+  const captions: Array<{ chatId: number; messageId: number; caption: string; extra?: unknown }> = []
+  const markups: Array<{ chatId: number; messageId: number; reply_markup: unknown }> = []
 
   return {
     sent,
@@ -76,6 +78,14 @@ function makeSender() {
     },
     getFileLink: async (fileId: string) => {
       return `https://api.telegram.org/file/bot-token/${fileId}`
+    },
+    captions,
+    markups,
+    editMessageCaption: async (chatId: number, messageId: number, caption: string, extra?: unknown) => {
+      captions.push({ chatId, messageId, caption, extra })
+    },
+    editMessageReplyMarkup: async (chatId: number, messageId: number, reply_markup: unknown) => {
+      markups.push({ chatId, messageId, reply_markup })
     },
   }
 }
@@ -229,18 +239,27 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
     async update(id: string, patch: unknown) { materiaUpdates.push({ id, patch }); return { id, ...(patch as object) } },
   }
 
+  const fakeActum = {
+    id: 'actum-1', modusId: 'runmake.flux-schnell', modusVersiono: '1', impetus: 0n,
+    signaConsumed: [], aditus: { input_seed: 4242 }, status: 'completus', inceptum: new Date(),
+    expirat: new Date(), duratio: 12000,
+    executio: { coldStart: false, executionMs: 9000, gpuType: 'RTX 4090', costPerHr: 0.69, modelsReused: 4, modelsDownloaded: 0 },
+  }
+  const acta = { async findById(_id: string) { return fakeActum as unknown as import('../../../src/types/actum.js').Actum } }
+
   const allocutio = new TelegramAllocutio({
     router: router as unknown as import('../../../src/allocutio/TelegramAllocutio.js').RouterDeps,
     sender,
     identity,
     botStartupTime: opts.botStartupTime,
+    acta,
     ...(opts.withPodControls ? {
       materiae: materiae as unknown as import('../../../src/types/materia.js').MateriaStore,
       terminatePod: async (podId: string) => { terminated.push(podId) },
     } : {}),
   })
 
-  return { allocutio, sender, identity, router, terminated, materiaUpdates }
+  return { allocutio, sender, identity, router, terminated, materiaUpdates, fakeActum }
 }
 
 // =============================================================================
@@ -1002,4 +1021,81 @@ test('progress:N/M stage does not create a standalone generating message', async
   bus.emit('actum.stage', { actumId: 'actum-p', stage: 'progress:1/4', elapsedMs: 4000 })
   await new Promise(r => setImmediate(r))
   assert.equal(sender.sent.length, 0, 'the KSampler progress bar should not spawn a message')
+})
+
+// =============================================================================
+// Phase 3 — morphing delivery menu (Info / Rate / Wrench)
+// =============================================================================
+function resultStep(actumId: string): Step {
+  return { primitives: [{
+    kind: 'Result', actumId, label: 'Here you go',
+    media: [{ type: 'image', url: 'https://x/img.png', caption: 'a cat' }],
+    actions: [
+      { id: 'rate_beautiful', label: '😻' }, { id: 'rate_funny', label: '😹' }, { id: 'rate_negative', label: '😿' },
+      { id: 'tweak', label: '✎ Tweak' }, { id: 'rerun', label: '↻ Rerun' },
+    ],
+  }] } as unknown as Step
+}
+const flowCtx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
+function cbTo(msgId: number, data: string): Parameters<TelegramAllocutio['receive']>[0] {
+  return { update_id: 9, callback_query: { id: 'cb', from: { id: 123 }, message: { message_id: msgId, chat: { id: 456 } }, data } } as unknown as Parameters<TelegramAllocutio['receive']>[0]
+}
+
+test('Result renders the default delivery row (ℹ ♥ ⚙ with dm: callbacks)', async () => {
+  const { allocutio, router, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  router.triggerStep(flowCtx, resultStep('actum-1'))
+  await new Promise(r => setImmediate(r))
+  const kb = (sender.photos[0]?.extra as { reply_markup: { inline_keyboard: Array<Array<{ callback_data: string }>> } }).reply_markup.inline_keyboard
+  const data = kb.flat().map(b => b.callback_data)
+  assert.deepEqual(data, ['dm:info:actum-1', 'dm:rate:actum-1', 'dm:wrench:actum-1'])
+})
+
+test('dm:rate morphs the row to the rating emojis', async () => {
+  const { allocutio, router, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  router.triggerStep(flowCtx, resultStep('actum-1'))
+  await new Promise(r => setImmediate(r))
+  await allocutio.receive(cbTo(201, 'dm:rate:actum-1'))
+  const m = sender.markups.at(-1)!.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> }
+  assert.deepEqual(m.inline_keyboard.flat().map(b => b.callback_data),
+    ['dm:rated:actum-1:beautiful', 'dm:rated:actum-1:funny', 'dm:rated:actum-1:negative'])
+})
+
+test('dm:wrench morphs the row to Back / Tweak / Rerun', async () => {
+  const { allocutio, router, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  router.triggerStep(flowCtx, resultStep('actum-1'))
+  await new Promise(r => setImmediate(r))
+  await allocutio.receive(cbTo(201, 'dm:wrench:actum-1'))
+  const m = sender.markups.at(-1)!.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> }
+  assert.deepEqual(m.inline_keyboard.flat().map(b => b.callback_data),
+    ['dm:back:actum-1', 'dm:tweak:actum-1', 'dm:rerun:actum-1'])
+})
+
+test('dm:info edits the caption to DB-sourced stats', async () => {
+  const { allocutio, router, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  router.triggerStep(flowCtx, resultStep('actum-1'))
+  await new Promise(r => setImmediate(r))
+  await allocutio.receive(cbTo(201, 'dm:info:actum-1'))
+  await new Promise(r => setImmediate(r))
+  const cap = sender.captions.at(-1)!.caption
+  assert.match(cap, /RTX 4090/)
+  assert.match(cap, /Seed: 4242/)
+  assert.match(cap, /warm/)
+})
+
+test('dm:tweak runs under the presser (presser pays) prefilled with the modus', async () => {
+  const { allocutio, router } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  router.triggerStep(flowCtx, resultStep('actum-1'))
+  await new Promise(r => setImmediate(r))
+  router.calls.length = 0
+  await allocutio.receive(cbTo(201, 'dm:tweak:actum-1'))
+  await new Promise(r => setImmediate(r))
+  const enter = router.calls.find(c => c.method === 'enter')
+  assert.ok(enter, 'should enter execute for the presser')
+  assert.equal((enter!.args[2]), '123', 'under the presser userId')
+  assert.equal(((enter!.args[4] as { state: { modusId: string } }).state.modusId), 'runmake.flux-schnell')
 })
