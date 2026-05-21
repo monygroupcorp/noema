@@ -13,6 +13,7 @@ import { makeLogger } from '../lib/logger.js'
 import { bus, type StageInfo } from '../lib/bus.js'
 import type { WideEvent } from '../lib/wide.js'
 import type { MateriaStore } from '../types/materia.js'
+import type { Actum } from '../types/actum.js'
 import { classifyError } from '../lib/classifyError.js'
 
 const log = makeLogger('telegram:allocutio')
@@ -21,6 +22,33 @@ const log = makeLogger('telegram:allocutio')
 const WARM_LADDER_MS    = [1_000, 5_000, 30_000, 60_000, 300_000, 600_000, 1_800_000]
 const WARM_LADDER_LABEL = ['1s', '5s', '30s', '1m', '5m', '10m', '30m']
 const WARM_DEFAULT_MS    = 60_000  // 1m
+
+// Delivery menu: a single morphing 3-button row. Default → Info/Rate/Wrench;
+// Rate → the fixed rating emojis; Wrench → Back/Tweak/Rerun.
+const RATE_EMOJI: Record<string, string> = { beautiful: '😻', funny: '😹', negative: '😿' }
+
+function deliveryKeyboard(actumId: string, state: 'default' | 'rate' | 'wrench', rateGlyph = '♥'): InlineKeyboard {
+  switch (state) {
+    case 'rate':
+      return inlineKeyboard([[
+        btn(RATE_EMOJI.beautiful, `dm:rated:${actumId}:beautiful`),
+        btn(RATE_EMOJI.funny,     `dm:rated:${actumId}:funny`),
+        btn(RATE_EMOJI.negative,  `dm:rated:${actumId}:negative`),
+      ]])
+    case 'wrench':
+      return inlineKeyboard([[
+        btn('←',       `dm:back:${actumId}`),
+        btn('✎ Tweak', `dm:tweak:${actumId}`),
+        btn('↻ Rerun', `dm:rerun:${actumId}`),
+      ]])
+    default:
+      return inlineKeyboard([[
+        btn('ℹ',       `dm:info:${actumId}`),
+        btn(rateGlyph, `dm:rate:${actumId}`),
+        btn('⚙',       `dm:wrench:${actumId}`),
+      ]])
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Static text
@@ -71,6 +99,10 @@ export interface TelegramUpdate {
 export interface TelegramSender {
   sendMessage(chatId: number, text: string, extra?: { reply_markup?: unknown; caption?: string }): Promise<{ message_id: number }>
   editMessageText(chatId: number, messageId: number, text: string, extra?: { reply_markup?: unknown }): Promise<void>
+  /** Edit a media message's caption (text-message edit won't work on photos). */
+  editMessageCaption?(chatId: number, messageId: number, caption: string, extra?: { reply_markup?: unknown }): Promise<void>
+  /** Edit only a message's inline keyboard — used to morph the delivery menu in place. */
+  editMessageReplyMarkup?(chatId: number, messageId: number, reply_markup: unknown): Promise<void>
   answerCallbackQuery(callbackQueryId: string): Promise<void>
   sendPhoto(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
   sendVideo(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
@@ -218,17 +250,7 @@ function renderPrimitive(primitive: Primitive): RenderResult {
     }
 
     case 'Result': {
-      // Delivery keyboard: two rows
-      // Row 1: rate buttons
-      // Row 2: non-rate action buttons
-      const rateRow = primitive.actions
-        .filter(a => a.id.startsWith('rate_'))
-        .map(a => btn(a.label, `ra:${primitive.actumId}:${a.id.replace('rate_', '')}`))
-
-      const actionRow = primitive.actions
-        .filter(a => !a.id.startsWith('rate_'))
-        .map(a => btn(a.label, `a:${a.id}:${primitive.actumId}`))
-
+      // Single morphing delivery row — starts on the default Info/Rate/Wrench.
       const text = primitive.textContent
         ? primitive.textContent
         : primitive.media?.length
@@ -237,7 +259,7 @@ function renderPrimitive(primitive: Primitive): RenderResult {
 
       return {
         text,
-        extra: { reply_markup: inlineKeyboard([rateRow, actionRow]) },
+        extra: { reply_markup: deliveryKeyboard(primitive.actumId, 'default') },
       }
     }
   }
@@ -307,6 +329,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     materiae?: MateriaStore
     /** Terminate a pod by its external id — backs the "destroy now" button. */
     terminatePod?: (podId: string) => Promise<void>
+    /** Look up an actum (for the delivery menu's Info stats). */
+    acta?: { findById(id: string): Promise<Actum | null> }
   }
 
   // chatId lookup: platform:userId → chatId (set when first message arrives)
@@ -336,6 +360,17 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     lastText: string
   }>()
 
+  // Delivery-menu state per result, keyed by actumId — backs Info caption toggle
+  // and remembers the chosen rating glyph for the morphing row.
+  private readonly resultMeta = new Map<string, {
+    chatId: number
+    messageId: number
+    caption: string
+    isMedia: boolean
+    showingStats: boolean
+    rateGlyph: string
+  }>()
+
   constructor(deps: {
     router: RouterDeps
     sender: TelegramSender
@@ -344,6 +379,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     botStartupTime?: number
     materiae?: MateriaStore
     terminatePod?: (podId: string) => Promise<void>
+    acta?: { findById(id: string): Promise<Actum | null> }
   }) {
     this.deps = deps
     this.router = deps.router
@@ -545,6 +581,12 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     if (!query.data) return
 
+    // Delivery menu — morphing row + Info stats
+    if (query.data.startsWith('dm:') && chatId) {
+      await this._handleDeliveryMenu(query, chatId)
+      return
+    }
+
     // Warm-window stepper / destroy buttons
     if (query.data.startsWith('warm:') && chatId) {
       const [, action, actumId] = query.data.split(':')
@@ -697,20 +739,23 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     if (!primitive.media || primitive.media.length === 0) {
       // Text-only result (chatgpt, caption, etc.)
-      await this.sender.sendMessage(chatId, keyboardText, extra)
+      const sent = await this.sender.sendMessage(chatId, keyboardText, extra)
+      this._trackResult(primitive.actumId, chatId, sent.message_id, keyboardText, false)
       return
     }
 
     if (primitive.media.length === 1) {
       const m = primitive.media[0]
       try {
+        let sent: { message_id: number }
         if (m.type === 'image') {
-          await this.sender.sendPhoto(chatId, m.url, { caption: m.caption, ...extra })
+          sent = await this.sender.sendPhoto(chatId, m.url, { caption: m.caption, ...extra })
         } else if (m.type === 'video') {
-          await this.sender.sendVideo(chatId, m.url, { caption: m.caption, ...extra })
+          sent = await this.sender.sendVideo(chatId, m.url, { caption: m.caption, ...extra })
         } else {
-          await this.sender.sendDocument(chatId, m.url, { caption: m.caption, ...extra })
+          sent = await this.sender.sendDocument(chatId, m.url, { caption: m.caption, ...extra })
         }
+        this._trackResult(primitive.actumId, chatId, sent.message_id, m.caption ?? '', true)
       } catch {
         await this.sender.sendMessage(chatId, m.url, extra)
       }
@@ -732,6 +777,109 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     }
     // Send keyboard as follow-up text message (Telegram limitation)
     await this.sender.sendMessage(chatId, '—', extra)
+  }
+
+  /** Remember a delivered result so the morphing menu (Info toggle, rating glyph) can edit it. */
+  private _trackResult(actumId: string, chatId: number, messageId: number, caption: string, isMedia: boolean): void {
+    this.resultMeta.set(actumId, { chatId, messageId, caption, isMedia, showingStats: false, rateGlyph: '♥' })
+  }
+
+  // -------------------------------------------------------------------------
+  // _handleDeliveryMenu — the morphing delivery row (Info / Rate / Wrench)
+  // -------------------------------------------------------------------------
+
+  private async _handleDeliveryMenu(
+    query: NonNullable<TelegramUpdate['callback_query']>,
+    chatId: number,
+  ): Promise<void> {
+    const parts = (query.data ?? '').split(':')   // dm:<action>:<actumId>[:<type>]
+    const action = parts[1]
+    const actumId = parts[2]
+    const messageId = query.message?.message_id
+    const meta = this.resultMeta.get(actumId)
+    const editMarkup = (state: 'default' | 'rate' | 'wrench', glyph?: string) => {
+      if (messageId !== undefined) {
+        void this.sender.editMessageReplyMarkup?.(chatId, messageId, deliveryKeyboard(actumId, state, glyph)).catch(() => {})
+      }
+    }
+
+    switch (action) {
+      case 'rate':   editMarkup('rate'); return
+      case 'wrench': editMarkup('wrench'); return
+      case 'back':   editMarkup('default', meta?.rateGlyph); return
+      case 'info':   await this._toggleInfo(actumId); return
+      case 'rated': {
+        const type = parts[3]
+        const glyph = RATE_EMOJI[type] ?? '♥'
+        if (meta) meta.rateGlyph = glyph
+        // Record the rating under the presser (feedback; routed when they have a flow context).
+        const userId = String(query.from.id)
+        if (this.router.hasContext('telegram', userId)) {
+          await this.router.handle('telegram', userId, { kind: 'result_action', actumId, actionId: `rate_${type}` })
+        }
+        editMarkup('default', glyph)
+        return
+      }
+      case 'tweak':
+      case 'rerun':
+        await this._rerunForPresser(query, chatId, actumId)
+        return
+    }
+  }
+
+  /** Toggle the result's caption between the image caption and a DB-sourced stats block. */
+  private async _toggleInfo(actumId: string): Promise<void> {
+    const meta = this.resultMeta.get(actumId)
+    if (!meta) return
+    const keyboard = deliveryKeyboard(actumId, 'default', meta.rateGlyph)
+    const text = meta.showingStats ? meta.caption : await this._formatGenStats(actumId)
+    meta.showingStats = !meta.showingStats
+    try {
+      if (meta.isMedia) {
+        await this.sender.editMessageCaption?.(meta.chatId, meta.messageId, text, { reply_markup: keyboard })
+      } else {
+        await this.sender.editMessageText(meta.chatId, meta.messageId, text, { reply_markup: keyboard })
+      }
+    } catch { /* edit is best-effort */ }
+  }
+
+  /** Build the Info stats block from the durable actum record. */
+  private async _formatGenStats(actumId: string): Promise<string> {
+    const actum = await this.deps.acta?.findById(actumId).catch(() => null)
+    if (!actum) return 'Stats unavailable.'
+    const e = actum.executio ?? {}
+    const lines: string[] = [`Modus: ${actum.modusId}`]
+    const ms = e.executionMs ?? actum.duratio
+    if (typeof ms === 'number') lines.push(`Generation: ${(ms / 1000).toFixed(1)}s`)
+    lines.push(`Pod: ${e.coldStart ? 'cold start' : 'warm'}`)
+    if (e.gpuType) lines.push(`GPU: ${e.gpuType}`)
+    if (typeof e.costPerHr === 'number' && typeof actum.duratio === 'number') {
+      lines.push(`Cost: ~$${(e.costPerHr * actum.duratio / 3_600_000).toFixed(3)}`)
+    }
+    if (typeof e.modelsReused === 'number') {
+      lines.push(`Models: ${e.modelsReused} reused, ${e.modelsDownloaded ?? 0} downloaded`)
+    }
+    const seed = (actum.aditus as Record<string, unknown> | undefined)?.input_seed
+    if (seed !== undefined) lines.push(`Seed: ${seed}`)
+    return lines.join('\n')
+  }
+
+  /** Tweak/Rerun: run under the PRESSER (presser pays), prefilled with the actum's modus + params. */
+  private async _rerunForPresser(
+    query: NonNullable<TelegramUpdate['callback_query']>,
+    chatId: number,
+    actumId: string,
+  ): Promise<void> {
+    const userId = String(query.from.id)
+    this.chatIds.set(`telegram:${userId}`, chatId)
+    const actum = await this.deps.acta?.findById(actumId).catch(() => null)
+    if (!actum) return
+    const identity = await this.identity.resolve(userId)
+    // Lands in CONFIGURE prefilled with the original params; the presser submits → they pay.
+    // (True one-tap auto-submit Rerun is a small ExecuteFlow follow-up.)
+    await this.router.enter('execute', 'telegram', userId, identity, {
+      state: { modusId: actum.modusId, aditus: actum.aditus, browsePageIndex: 0 },
+    })
   }
 
   // -------------------------------------------------------------------------

@@ -349,6 +349,7 @@ async function main(): Promise<void> {
     botStartupTime,
     materiae,
     terminatePod: RUNPOD_API_KEY ? (podId) => terminatePod(RUNPOD_API_KEY, podId) : undefined,
+    acta: ring.actorum,
   })
 
   tgBot.on('message', ctx => {
