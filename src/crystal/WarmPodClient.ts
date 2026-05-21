@@ -13,6 +13,8 @@ interface WarmPodConfig {
   runnerPollIntervalMs?: number
   jobTimeoutMs?: number
   r2?: R2Config
+  /** How long the pod stays warm/idle after this job before the reaper kills it (ms). Default 60_000. */
+  warmTtlMs?: number
 }
 
 function sleep(ms: number): Promise<void> {
@@ -110,7 +112,11 @@ export class WarmPodClient implements RunPodClient {
       throw err
     } finally {
       const nextStatus = (!podReachable || this.materia.podPolicy === 'private') ? 'terminated' : 'idle'
-      await this.materiae.update(id, { status: nextStatus }).catch(() => {})
+      const patch: { status: 'terminated' | 'idle'; warmUntil?: Date } = { status: nextStatus }
+      // Re-arm the idle deadline so the reaper gives this pod a fresh warm window
+      // past *this* job's delivery (a follow-up within the window reuses it).
+      if (nextStatus === 'idle') patch.warmUntil = new Date(Date.now() + (this.config.warmTtlMs ?? 60_000))
+      await this.materiae.update(id, patch).catch(() => {})
     }
   }
 

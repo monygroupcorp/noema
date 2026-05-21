@@ -64,6 +64,8 @@ export interface SecurePodConfig {
   webhookRetryDelayMs?: number   // default: 1000
   /** When true: register pod as idle Materia instead of terminating after a successful job. */
   keepWarm?: boolean
+  /** How long a pod stays warm/idle before the reaper terminates it (ms). Default 60_000. */
+  warmTtlMs?: number
   /** Cost rate for the Materia record (default 0n). */
   impetusPerSecond?: bigint
   /** How many pod provision attempts before giving up (default: 3; last attempt uses COMMUNITY cloud). */
@@ -397,7 +399,7 @@ export class SecurePodClient implements RunPodClient {
         await this.materiae.create({
           genus: 'runpod',
           externusId: podId,
-          gpu: (this.config.gpuTypeIds ?? DEFAULT_GPU_TYPE_IDS)[0] ?? '',
+          gpu: sshInfo.gpuType ?? (this.config.gpuTypeIds ?? DEFAULT_GPU_TYPE_IDS)[0] ?? '',
           vramGb: 0,
           ramGb: 0,
           imageRef: imageName,
@@ -405,6 +407,7 @@ export class SecurePodClient implements RunPodClient {
           sshPort: sshInfo.port,
           impetusPerSecond: this.config.impetusPerSecond ?? 0n,
           status: 'idle',
+          warmUntil: new Date(Date.now() + (this.config.warmTtlMs ?? 60_000)),
         }).catch(() => {})
       } else {
         await this._terminatePod(podId)

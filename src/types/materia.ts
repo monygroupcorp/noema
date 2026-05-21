@@ -125,6 +125,14 @@ export interface Materia {
   inceptum?: Date
   /** "terminatum" = terminated — when this pod was destroyed */
   terminatum?: Date
+
+  /**
+   * Idle deadline — when an idle pod should be reaped (terminated) if not reused.
+   * Stamped to now + warm-TTL each time the pod goes idle after a job. The idle
+   * reaper terminates pods past this time. Default TTL is 1 minute past delivery;
+   * a user may extend it at commission time.
+   */
+  warmUntil?: Date
 }
 
 /** "Materiae" — nominative plural of materia */
@@ -136,7 +144,7 @@ export type Materiae = Materia[]
 export interface MateriaStore {
   create(input: Omit<Materia, 'id'>): Promise<Materia>
   findById(id: string): Promise<Materia | null>
-  update(id: string, patch: Partial<Pick<Materia, 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum' | 'podPolicy' | 'shareToken'>>): Promise<Materia>
+  update(id: string, patch: Partial<Pick<Materia, 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum' | 'podPolicy' | 'shareToken' | 'warmUntil'>>): Promise<Materia>
   /**
    * Atomically claim an idle Materia matching the given spec, transitioning it
    * to 'active' in a single findOneAndUpdate. Prevents two concurrent requests
@@ -151,4 +159,10 @@ export interface MateriaStore {
   findWarm(spec: { imageRef?: string; podPolicy?: PodPolicy; shareToken?: string }): Promise<Materia | null>
   /** Return all Materiae that are not terminated — used for graceful shutdown teardown. */
   findActive(): Promise<Materia[]>
+  /**
+   * Atomically reap idle pods past their warmUntil deadline: transition each from
+   * 'idle' to 'terminated' (one findOneAndUpdate per pod, so a concurrent claim
+   * via findWarm can't lose) and return them so the caller can destroy the pods.
+   */
+  reapIdle(now: Date): Promise<Materia[]>
 }
