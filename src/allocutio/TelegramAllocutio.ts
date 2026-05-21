@@ -775,6 +775,10 @@ Generate AI art, chat with models, explore creative tools.`
     const { chatId, commandMessageId } = progress
     const now = Date.now()
 
+    // The KSampler progress bar (progress:N/M) is suppressed: it never keeps up
+    // with fast (esp. warm) jobs and burns Telegram edit quota for ~zero value.
+    if (data.stage.startsWith('progress:')) return
+
     if (data.stage === 'warm-pod-found') {
       // Swap to 🔥 reaction and skip progress message
       if (commandMessageId !== undefined) {
@@ -910,30 +914,14 @@ Generate AI art, chat with models, explore creative tools.`
     const progress = this.actumProgress.get(wide.actumId)
     if (!progress) return
 
-    // Wait for image delivery to arrive in Telegram first
-    await new Promise<void>(r => setTimeout(r, 3000))
-
-    const { chatId } = progress
-    const durationSec = Math.round(wide.durationMs / 1000)
-    const durationStr = durationSec >= 60
-      ? `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`
-      : `${durationSec}s`
-
-    const lines: string[] = [
-      wide.coldStart
-        ? `Done in ${durationStr} (cold start — provisioned a fresh GPU pod).`
-        : `Done in ${durationStr}.`,
-    ]
-    if (typeof wide.costUsd === 'number' && wide.costUsd > 0) {
-      lines.push(`Compute cost: ~$${wide.costUsd.toFixed(2)}`)
-    }
+    // No concierge message — per-gen stats (duration/cost/warm-cold/seed) now
+    // live in the delivery menu's Info button, so a "Done in Xs" per delivery
+    // is pure noise on a loop.
 
     // Apply the user's chosen warm window to the pod (overrides the reaper's
     // default TTL stamped when the pod went idle).
     const podId = progress.podId ?? wide.podId
     if (podId) void this._setPodWarmUntil(podId, progress.warmTtlMs)
-
-    void this.sender.sendMessage(chatId, lines.join('\n')).catch(() => {})
 
     // Keep the warm-window / destroy buttons live through the warm window so the
     // user can still extend or destroy after delivery, then clean up the entry.
