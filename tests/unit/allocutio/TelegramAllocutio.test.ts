@@ -960,3 +960,46 @@ test('warm:inc steps the window up and re-arms the pod warmUntil', async () => {
   const warmPatch = materiaUpdates.find(u => (u.patch as { warmUntil?: Date }).warmUntil)
   assert.ok(warmPatch, 'stepping the window should re-arm the pod warmUntil')
 })
+
+// =============================================================================
+// Phase 1+2 — kill the waste, warm reaction
+// =============================================================================
+test('actum.complete applies the warm window but sends NO concierge message', async () => {
+  const { allocutio, router, sender, materiaUpdates } = makeAllocutio({ withPodControls: true })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
+  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-c', status: 'running' }] })
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'actum-c', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1' } })
+  await new Promise(r => setImmediate(r))
+
+  sender.sent.length = 0
+  bus.emit('actum.complete', { actumId: 'actum-c', durationMs: 13000, coldStart: false, costUsd: 0.01, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
+  await new Promise(r => setTimeout(r, 150))
+
+  assert.equal(sender.sent.length, 0, 'should not send a "Done in" concierge message')
+  assert.ok(materiaUpdates.some(u => (u.patch as { warmUntil?: Date }).warmUntil), 'warm window should still be applied')
+})
+
+test('warm-pod-found stage reacts 🔥 on the command message', async () => {
+  const { allocutio, router, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
+  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-w', status: 'running' }] })
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'actum-w', stage: 'warm-pod-found', elapsedMs: 0 })
+  await new Promise(r => setImmediate(r))
+  assert.ok(sender.reactions.some(r => r.emoji === '🔥' && r.messageId === 50), 'should react 🔥 for a warm pod')
+})
+
+test('progress:N/M stage does not create a standalone generating message', async () => {
+  const { allocutio, router, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
+  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-p', status: 'running' }] })
+  await new Promise(r => setImmediate(r))
+  sender.sent.length = 0
+  bus.emit('actum.stage', { actumId: 'actum-p', stage: 'progress:1/4', elapsedMs: 4000 })
+  await new Promise(r => setImmediate(r))
+  assert.equal(sender.sent.length, 0, 'the KSampler progress bar should not spawn a message')
+})

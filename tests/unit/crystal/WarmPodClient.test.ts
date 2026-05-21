@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { WarmPodClient } from '../../../src/crystal/WarmPodClient.js'
 import type { Materia, MateriaStore } from '../../../src/types/materia.js'
+import { bus } from '../../../src/lib/bus.js'
+import { withTrace, makeTraceContext } from '../../../src/lib/trace.js'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -99,6 +101,20 @@ describe('submit()', () => {
     // jobId is `${externusId}-${Date.now()}` — the id comfyrunner fires the webhook
     // with, so the actum's externusJobId must equal it (not the bare externusId).
     expect(result.id).toMatch(/^pod-xyz-\d+$/)
+  })
+
+  it('emits a warm-pod-found stage so the UI can react 🔥', async () => {
+    const materia = makeMateria()
+    const { fetch } = makeComfyrunnerFetch('pod-xyz')
+    const client = new WarmPodClient(materia, makeMateriaStore(materia), fetch)
+    const stages: string[] = []
+    const listener = (d: { stage: string }) => stages.push(d.stage)
+    bus.on('actum.stage', listener)
+    await withTrace(makeTraceContext({ actumId: 'actum-warm' }), async () => {
+      await client.submit({ input: {} })
+    })
+    bus.off('actum.stage', listener)
+    expect(stages).toContain('warm-pod-found')
   })
 
   it('polls /health then POSTs to /job', async () => {
