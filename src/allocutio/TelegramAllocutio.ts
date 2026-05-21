@@ -315,6 +315,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     commandMessageId: number | undefined
     lastEditMs: number
     isCold: boolean
+    // Pod details captured at lock-in, retained so every later stage update keeps
+    // showing GPU/region/price instead of replacing it.
+    podInfo?: StageInfo
   }>()
 
   constructor(deps: {
@@ -724,9 +727,13 @@ Generate AI art, chat with models, explore creative tools.`
     }
 
     if (data.stage === 'provisioning') progress.isCold = true
+    // Capture pod details at lock-in and keep them for every subsequent update.
+    if (data.info?.gpuType || data.info?.region || typeof data.info?.costPerHr === 'number') {
+      progress.podInfo = { ...progress.podInfo, ...data.info }
+    }
 
     const keyboard = inlineKeyboard([[btn('Invite to this pod', `pod_invite:${data.actumId}`)]])
-    const text = this._progressText(data.stage, data.elapsedMs, data.info)
+    const text = this._progressText(data.stage, data.elapsedMs, data.info, progress.podInfo)
 
     // Lazily create the progress message on the FIRST stage we can deliver.
     // The 'provisioning' event usually fires before this actum is registered
@@ -750,19 +757,21 @@ Generate AI art, chat with models, explore creative tools.`
     progress.lastEditMs = now
   }
 
-  private _progressText(stage: string, elapsedMs: number, info?: StageInfo): string {
+  private _progressText(stage: string, elapsedMs: number, info?: StageInfo, accrued?: StageInfo): string {
     const fmt = (sec: number) => sec >= 60 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${sec}s`
     const elapsedStr = fmt(Math.round(elapsedMs / 1000))
 
-    // Pod lock-in — surface GPU / region / price the moment we acquire the pod.
+    // Persistent pod header — once we lock onto a pod, keep GPU/region/price
+    // visible on every subsequent stage rather than replacing it.
+    const pod = accrued ?? info
+    const podHeader = (pod && (pod.gpuType || pod.region || typeof pod.costPerHr === 'number'))
+      ? '🔒 ' + [pod.gpuType, pod.region, typeof pod.costPerHr === 'number' ? `$${pod.costPerHr.toFixed(2)}/hr` : undefined]
+          .filter(Boolean).join(' · ')
+      : null
+
     if (stage === 'pod-locked') {
-      const lines = ['🔒 Locked onto a GPU pod']
-      if (info?.gpuType) lines.push(`GPU: ${info.gpuType}`)
-      if (info?.region)  lines.push(`Region: ${info.region}`)
-      if (typeof info?.costPerHr === 'number') lines.push(`Rate: $${info.costPerHr.toFixed(2)}/hr`)
-      lines.push('Setting up runtime...')
-      lines.push(`Elapsed: ${elapsedStr}`)
-      return lines.join('\n')
+      return [podHeader ?? '🔒 Locked onto a GPU pod', 'Setting up runtime...', `Elapsed: ${elapsedStr}`]
+        .filter(Boolean).join('\n')
     }
 
     let header: string
@@ -796,7 +805,7 @@ Generate AI art, chat with models, explore creative tools.`
       header = stageLines[stage] ?? `Stage: ${stage}`
     }
 
-    const lines = [header]
+    const lines = podHeader ? [podHeader, header] : [header]
     if (progressBar) lines.push(progressBar)
     if (etaLine) lines.push(etaLine)
     lines.push(`Elapsed: ${elapsedStr}`)
