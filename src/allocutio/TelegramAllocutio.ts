@@ -710,6 +710,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         const warmPending = primitive.actumId !== undefined && this.pendingWarm.has(primitive.actumId)
         const warmPodId = primitive.actumId !== undefined ? this.pendingWarm.get(primitive.actumId) : undefined
         if (primitive.actumId !== undefined) this.pendingWarm.delete(primitive.actumId)
+        log.info('stream register', { actumId: primitive.actumId, warmPending, commandMessageId, pendingKeys: [...this.pendingWarm.keys()] })
         if (commandMessageId !== undefined) {
           void this._react(chatId, commandMessageId, warmPending ? '🔥' : '👌')
         } else {
@@ -943,6 +944,7 @@ Generate AI art, chat with models, explore creative tools.`
     // requiring a progress entry: react 🔥 if we can, else stash so registration does.
     if (data.stage === 'warm-pod-found') {
       const p = this.actumProgress.get(data.actumId)
+      log.info('warm signal received', { actumId: data.actumId, hasProgress: !!p, podId: data.info?.podId })
       if (p) {
         if (data.info?.podId) p.podId = data.info.podId
         if (p.commandMessageId !== undefined) void this._react(p.chatId, p.commandMessageId, '🔥')
