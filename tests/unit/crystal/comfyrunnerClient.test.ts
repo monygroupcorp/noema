@@ -188,3 +188,37 @@ describe('awaitViaStream', () => {
     expect(headers[1]?.['Last-Event-ID']).toBe('0')
   })
 })
+
+describe('throttle detection', () => {
+  it('throws ThrottleError on sustained low download velocity', async () => {
+    // ~5 MB/s for 60s (well under the 20 MB/s floor) → bail
+    const fetchFn = vi.fn(async () =>
+      makeSseStream([
+        { type: 'download-progress', bytesDownloaded: 0,         elapsedMs: 0 },
+        { type: 'download-progress', bytesDownloaded: 75_000_000,  elapsedMs: 15_000 },
+        { type: 'download-progress', bytesDownloaded: 150_000_000, elapsedMs: 30_000 },
+        { type: 'download-progress', bytesDownloaded: 225_000_000, elapsedMs: 45_000 },
+        { type: 'download-progress', bytesDownloaded: 300_000_000, elapsedMs: 60_000 },
+        { type: 'complete' },
+      ]),
+    ) as unknown as typeof fetch
+    await expect(
+      awaitViaStream(fetchFn, 'https://pod-8080.proxy.runpod.net', 'job-t', 600_000),
+    ).rejects.toThrow(/throttl/i)
+  })
+
+  it('does NOT bail when download velocity is healthy', async () => {
+    // ~100 MB/s → fine
+    const fetchFn = vi.fn(async () =>
+      makeSseStream([
+        { type: 'download-progress', bytesDownloaded: 0,             elapsedMs: 0 },
+        { type: 'download-progress', bytesDownloaded: 1_500_000_000, elapsedMs: 15_000 },
+        { type: 'download-progress', bytesDownloaded: 3_000_000_000, elapsedMs: 30_000 },
+        { type: 'complete' },
+      ]),
+    ) as unknown as typeof fetch
+    await expect(
+      awaitViaStream(fetchFn, 'https://pod-8080.proxy.runpod.net', 'job-h', 600_000),
+    ).resolves.toBeUndefined()
+  })
+})

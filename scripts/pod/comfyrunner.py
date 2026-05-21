@@ -354,12 +354,37 @@ def _ensure_models(models: list, job_id: str) -> None:
         except Exception as e:
             errors.append(f"{model['dest']}: {e}")
 
+    # Periodic aggregate progress so the client can detect a throttled pod mid-download
+    # (the per-file downloaded events only fire on completion — far too late on a crawl).
+    dl_start = time.time()
+    total_bytes = sum(m.get("sizeBytes", 0) for m in missing)
+    stop_progress = threading.Event()
+
+    def _progress_emitter() -> None:
+        while not stop_progress.wait(15):
+            done = 0
+            for m in missing:
+                try:
+                    done += os.path.getsize(_model_path(m["dest"]))
+                except OSError:
+                    pass
+            _append_event(job_id, {
+                "type": "download-progress",
+                "bytesDownloaded": done,
+                "bytesTotal": total_bytes,
+                "elapsedMs": int((time.time() - dl_start) * 1000),
+            })
+
+    pe = threading.Thread(target=_progress_emitter, daemon=True)
+    pe.start()
+
     for m in missing:
         t = threading.Thread(target=_download, args=(m,), daemon=True)
         threads.append(t)
         t.start()
     for t in threads:
         t.join()
+    stop_progress.set()
 
     if errors:
         raise RuntimeError(f"model download failed: {'; '.join(errors)}")
