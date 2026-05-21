@@ -217,8 +217,15 @@ def _ws_listener_thread() -> None:
 
                 if etype == "executing":
                     node = data.get("node")
-                    if node:  # null node = execution finished at ComfyUI level
+                    if node:
                         _append_event(job_id, {"type": "node", "node": node})
+                    else:
+                        # null node is ComfyUI's classic "prompt finished" signal
+                        with _lock:
+                            job = _jobs.get(job_id)
+                            if job:
+                                job["comfy_complete"] = True
+                                job["comfy_event"].set()
                 elif etype == "progress":
                     _append_event(job_id, {
                         "type":  "progress",
@@ -226,7 +233,9 @@ def _ws_listener_thread() -> None:
                         "max":   data.get("max"),
                         "node":  data.get("node"),
                     })
-                elif etype == "execution_complete":
+                elif etype in ("execution_success", "execution_complete"):
+                    # Modern ComfyUI emits execution_success; older builds emitted
+                    # execution_complete. Either is the terminal success signal.
                     with _lock:
                         job = _jobs.get(job_id)
                         if job:
