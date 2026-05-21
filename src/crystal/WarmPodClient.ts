@@ -45,9 +45,10 @@ export class WarmPodClient implements RunPodClient {
     const jobId = `${externusId}-${Date.now()}`
     let runnerAcceptedJob = false
 
-    // Signal "warm" so the Telegram layer reacts 🔥 (vs 👌 for a cold start).
+    // Signal "warm" so the Telegram layer reacts 🔥 (vs 👌 for a cold start), and
+    // carry the pod id so the destroy button can terminate this warm pod.
     const ctx = getTrace()
-    if (ctx?.actumId) bus.emit('actum.stage', { actumId: ctx.actumId, stage: 'warm-pod-found', elapsedMs: 0 })
+    if (ctx?.actumId) bus.emit('actum.stage', { actumId: ctx.actumId, stage: 'warm-pod-found', elapsedMs: 0, info: { podId: externusId } })
 
     this._runBackground(params.input, params.webhook, jobId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics)
       .catch(async (err) => {

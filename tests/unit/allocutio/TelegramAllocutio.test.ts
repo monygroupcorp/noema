@@ -257,7 +257,7 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
     ...(opts.withPodControls ? {
       materiae: materiae as unknown as import('../../../src/types/materia.js').MateriaStore,
       terminatePod: async (podId: string) => { terminated.push(podId) },
-      cancelActum: async (actumId: string, reason: string) => { cancelCalls.push({ actumId, reason }) },
+      cancelActum: async (actumId: string, reason: string) => { cancelCalls.push({ actumId, reason }); return true },
     } : {}),
   })
 
@@ -1141,4 +1141,25 @@ test('warm:retry cancels the actum AND re-runs on a fresh pod under the presser'
   const enter = router.calls.find(c => c.method === 'enter')
   assert.ok(enter, 'retry should re-enter execute on a fresh pod')
   assert.equal(enter!.args[2], '123', 'under the presser')
+})
+
+// =============================================================================
+// Warm 🔥 survives the race (warm-pod-found arrives before actum registration)
+// =============================================================================
+test('warm signal arriving before registration still reacts 🔥 (not 👌)', async () => {
+  const { allocutio, router, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+
+  // Warm signal fires FIRST (WarmPodClient emits it inside submit, pre-Stream)
+  bus.emit('actum.stage', { actumId: 'actum-warm', stage: 'warm-pod-found', elapsedMs: 0, info: { podId: 'pod-9' } })
+  await new Promise(r => setImmediate(r))
+
+  // Then the flow yields the Stream primitive → registration
+  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
+  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-warm', status: 'running' }] })
+  await new Promise(r => setImmediate(r))
+
+  // setMessageReaction replaces, so the LAST reaction on the command message wins.
+  const last = sender.reactions.filter(r => r.messageId === 50).at(-1)
+  assert.equal(last?.emoji, '🔥', 'warm reuse should end on 🔥 (replacing the initial 👌)')
 })

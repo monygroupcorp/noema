@@ -352,7 +352,11 @@ async function main(): Promise<void> {
     acta: ring.actorum,
     cancelActum: async (actumId, reason) => {
       const a = await ring.actorum.findById(actumId)
-      if (a && a.status !== 'completus' && a.status !== 'fractus') await ring.completor.fail(a, reason)
+      if (a && a.status !== 'completus' && a.status !== 'fractus') {
+        await ring.completor.fail(a, reason)
+        return true   // actually refunded an in-flight job
+      }
+      return false    // already terminal — nothing to refund
     },
   })
 
