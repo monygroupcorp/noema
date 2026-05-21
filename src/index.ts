@@ -350,6 +350,10 @@ async function main(): Promise<void> {
     materiae,
     terminatePod: RUNPOD_API_KEY ? (podId) => terminatePod(RUNPOD_API_KEY, podId) : undefined,
     acta: ring.actorum,
+    cancelActum: async (actumId, reason) => {
+      const a = await ring.actorum.findById(actumId)
+      if (a && a.status !== 'completus' && a.status !== 'fractus') await ring.completor.fail(a, reason)
+    },
   })
 
   tgBot.on('message', ctx => {

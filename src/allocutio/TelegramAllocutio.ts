@@ -331,6 +331,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     terminatePod?: (podId: string) => Promise<void>
     /** Look up an actum (for the delivery menu's Info stats). */
     acta?: { findById(id: string): Promise<Actum | null> }
+    /** Cancel an in-flight actum — fails it (releases reserved signa) and terminates its pod. Backs the destroy/retry buttons. */
+    cancelActum?: (actumId: string, reason: string) => Promise<void>
   }
 
   // chatId lookup: platform:userId → chatId (set when first message arrives)
@@ -380,6 +382,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     materiae?: MateriaStore
     terminatePod?: (podId: string) => Promise<void>
     acta?: { findById(id: string): Promise<Actum | null> }
+    cancelActum?: (actumId: string, reason: string) => Promise<void>
   }) {
     this.deps = deps
     this.router = deps.router
@@ -594,16 +597,24 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       if (!progress) return
       if (action === 'noop') return
 
-      if (action === 'kill') {
-        // Fire immediately — destroy the pod the moment it's pressed.
-        if (progress.podId && this.deps.terminatePod) {
+      if (action === 'kill' || action === 'retry') {
+        const retrying = action === 'retry'
+        // Cancel the actum: fails it (releases reserved signa → refund) AND terminates
+        // the pod. completor.fail owns the pod teardown, so this is a true cancel, not
+        // just a pod kill that leaves credits locked.
+        if (this.deps.cancelActum) {
+          await this.deps.cancelActum(actumId, retrying ? 'destroyed — retrying on a new pod' : 'cancelled by user').catch(() => {})
+        } else if (progress.podId && this.deps.terminatePod) {
+          // Fallback: at least kill the pod if no cancel path is wired.
           void this.deps.terminatePod(progress.podId).catch(() => {})
-          void this._setPodWarmUntil(progress.podId, 0)  // mark Materia for reaping if terminate lags
         }
         if (progress.progressMessageId !== null) {
-          void this.sender.editMessageText(chatId, progress.progressMessageId, '✕ Pod destroyed.', {}).catch(() => {})
+          const msg = retrying ? '⟲ Cancelled — retrying on a fresh pod…' : '✕ Cancelled. Your credits were released.'
+          void this.sender.editMessageText(chatId, progress.progressMessageId, msg, {}).catch(() => {})
         }
         this.actumProgress.delete(actumId)
+        // Retry: re-run the same params on a new pod, billed to the presser.
+        if (retrying) await this._rerunForPresser(query, chatId, actumId)
         return
       }
 
@@ -980,7 +991,7 @@ Generate AI art, chat with models, explore creative tools.`
         btn(`warm: ${WARM_LADDER_LABEL[idx]}`, `warm:noop:${actumId}`),
         btn('› ⏱', `warm:inc:${actumId}`),
       ],
-      [ btn('✕ Destroy now', `warm:kill:${actumId}`) ],
+      [ btn('✕', `warm:kill:${actumId}`), btn('⟲', `warm:retry:${actumId}`) ],
     ])
   }
 
