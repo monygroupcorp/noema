@@ -160,7 +160,9 @@ export class SecurePodClient implements RunPodClient {
         // dropped SSE stream after that point means we lost visibility, not that
         // the job failed — re-provisioning would spawn a redundant pod and
         // re-download every model. Stop here and let comfyrunner fire the webhook.
-        if (runnerAcceptedJob) {
+        // EXCEPTION: a throttle bail is a deliberate "this pod is fleecing us" abort
+        // — we DO want to re-provision on a fresh pod, so let it fall through to retry.
+        if (runnerAcceptedJob && !(firstErr as { isThrottleError?: boolean }).isThrottleError) {
           log.warn('lost SSE after comfyrunner accepted job — not retrying; comfyrunner owns the webhook', { podId, error: (firstErr as Error).message })
           return
         }
@@ -182,7 +184,7 @@ export class SecurePodClient implements RunPodClient {
             await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics)
             return
           } catch (runErr) {
-            if (runnerAcceptedJob) {
+            if (runnerAcceptedJob && !(runErr as { isThrottleError?: boolean }).isThrottleError) {
               log.warn('lost SSE after comfyrunner accepted job — not retrying; comfyrunner owns the webhook', { podId: retryPodId, error: (runErr as Error).message })
               return
             }
@@ -195,9 +197,11 @@ export class SecurePodClient implements RunPodClient {
 
     runWithRetry().catch(async (err) => {
       log.error(`Pod ${activePodId} failed`, { podId: activePodId, error: (err as Error).message })
-      // Only fire Crystal-side webhook when comfyrunner never accepted the job.
-      // If it did, comfyrunner owns the failure webhook — double-firing corrupts the caller.
-      if (params.webhook && !runnerAcceptedJob) {
+      // Only fire Crystal-side webhook when comfyrunner never accepted the job —
+      // EXCEPT when we exhausted throttle-retries: comfyrunner accepted but we
+      // deliberately bailed every pod, so no webhook is coming and the client must
+      // be told (and refunded) "no good pods available".
+      if (params.webhook && (!runnerAcceptedJob || (err as { isThrottleError?: boolean }).isThrottleError)) {
         await this._postWebhook(params.webhook, { id: podId, status: 'FAILED', error: (err as Error).message })
           .catch(() => {})
       }

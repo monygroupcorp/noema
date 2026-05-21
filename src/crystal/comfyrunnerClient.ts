@@ -22,6 +22,18 @@ class JobError extends Error {
   readonly isJobError = true
 }
 
+// Marks a deliberately-bailed run: the pod's download was throttled below a usable
+// rate. Unlike JobError this SHOULD be retried on a fresh pod (provider throttling
+// is per-pod). SecurePodClient lets this bypass the "don't retry after accept" guard.
+export class ThrottleError extends Error {
+  readonly isThrottleError = true
+}
+
+// Aggregate download must sustain at least this rate, else the pod is considered
+// throttled and the run is bailed to a fresh pod. Tunable without redeploy.
+const THROTTLE_MIN_MBPS  = Number(process.env.THROTTLE_MIN_MBPS ?? 20)
+const THROTTLE_WINDOW_MS = Number(process.env.THROTTLE_WINDOW_MS ?? 45_000)
+
 export interface CompiledSpecLike {
   workflow: { inputTemplate: Record<string, unknown> }
   models: Array<{ url: string; dest: string; sizeBytes?: number }>
@@ -102,6 +114,10 @@ export async function awaitViaStream(
   let downloadBytes = 0
   let completedBytes = 0
   const dlSizes = new Map<string, number>()
+  // Throttle detection state (from download-progress samples).
+  let lastProgBytes = -1
+  let lastProgMs = 0
+  let slowSinceMs = 0
   const deadline = Date.now() + timeoutMs
 
   for (let attempt = 0; attempt <= 3; attempt++) {
@@ -196,6 +212,24 @@ export async function awaitViaStream(
                 onMetrics?.({ modelsDownloaded: downloaded, modelsReused: reused, downloadMs, downloadBytes })
                 break
               }
+              case 'download-progress': {
+                const { bytesDownloaded = 0, elapsedMs: pMs = 0 } = event as { bytesDownloaded?: number; elapsedMs?: number }
+                if (lastProgBytes >= 0 && pMs > lastProgMs) {
+                  const mbps = ((bytesDownloaded - lastProgBytes) / (1024 * 1024)) / ((pMs - lastProgMs) / 1000)
+                  if (mbps < THROTTLE_MIN_MBPS) {
+                    if (slowSinceMs === 0) slowSinceMs = pMs
+                    else if (pMs - slowSinceMs >= THROTTLE_WINDOW_MS) {
+                      log.warn('pod download throttled — bailing', { jobId, mbps: Number(mbps.toFixed(1)), minMbps: THROTTLE_MIN_MBPS })
+                      throw new ThrottleError(`download throttled to ${mbps.toFixed(1)} MB/s (min ${THROTTLE_MIN_MBPS})`)
+                    }
+                  } else {
+                    slowSinceMs = 0
+                  }
+                }
+                lastProgBytes = bytesDownloaded
+                lastProgMs = pMs
+                break
+              }
               case 'workflow-submitted':
                 log.info('workflow submitted to ComfyUI', { jobId, promptId: event.promptId })
                 break
@@ -247,7 +281,8 @@ export async function awaitViaStream(
       // Stream closed without terminal event — retry
       log.warn('SSE stream closed without terminal event', { jobId, attempt })
     } catch (err) {
-      if ((err as { isJobError?: boolean }).isJobError || attempt >= 3 || Date.now() >= deadline) throw err
+      const e = err as { isJobError?: boolean; isThrottleError?: boolean }
+      if (e.isJobError || e.isThrottleError || attempt >= 3 || Date.now() >= deadline) throw err
     }
   }
 

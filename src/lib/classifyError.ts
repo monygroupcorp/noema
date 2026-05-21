@@ -30,6 +30,9 @@ export function classifyError(err: unknown): string {
   if (/comfyrunner.*job failed/i.test(msg) || /execution.*failed/i.test(msg))
     return "Generation failed on the pod. Your credits weren't charged — try again."
 
+  if (/throttl/i.test(msg))
+    return "Couldn't get a fast enough GPU — the provider was throttling downloads on every pod we tried. Your credits weren't charged — try again shortly."
+
   if (/timeout|timed out|expired/i.test(msg))
     return "The job timed out. The pod is being shut down — try again."
 
