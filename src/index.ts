@@ -88,11 +88,13 @@ const templateRegistry = new WorkflowTemplateRegistry(
 
 import type { MateriaStore } from './types/materia.js'
 
+const RUNPOD_R2: R2Config | undefined =
+  R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_OUTPUTS_BUCKET
+    ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_OUTPUTS_BUCKET!, publicUrl: R2_PUBLIC_URL }
+    : undefined
+
 function makeSecureRunPodClient(materiae?: MateriaStore): SecurePodClient {
-  const r2: R2Config | undefined =
-    R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_OUTPUTS_BUCKET
-      ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_OUTPUTS_BUCKET!, publicUrl: R2_PUBLIC_URL }
-      : undefined
+  const r2 = RUNPOD_R2
 
   return new SecurePodClient(
     {
@@ -235,6 +237,8 @@ async function main(): Promise<void> {
     ...(runpodClient && RUNPOD_WEBHOOK_URL ? {
       runpodClient,
       runpodWebhookUrl: RUNPOD_WEBHOOK_URL,
+      runpodR2: RUNPOD_R2,
+      runpodWarmTtlMs: RUNPOD_WARM_TTL_MS,
     } : {}),
     ...(openaiClient ? { openaiClient } : {}),
     ...(embed ? { embed } : {}),
