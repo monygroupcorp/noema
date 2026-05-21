@@ -35,7 +35,7 @@ export class MongoMateria implements MateriaStore {
 
   async update(
     id: string,
-    patch: Partial<Pick<Materia, 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum' | 'podPolicy' | 'shareToken'>>
+    patch: Partial<Pick<Materia, 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum' | 'podPolicy' | 'shareToken' | 'warmUntil'>>
   ): Promise<Materia> {
     const result = await this.col.findOneAndUpdate(
       { id },
@@ -64,5 +64,22 @@ export class MongoMateria implements MateriaStore {
   async findActive(): Promise<Materia[]> {
     const docs = await this.col.find({ status: { $ne: 'terminated' } }).toArray()
     return docs.map(fromDoc)
+  }
+
+  async reapIdle(now: Date): Promise<Materia[]> {
+    const reaped: Materia[] = []
+    // One atomic claim per pod: an idle pod past its deadline flips to terminated.
+    // A concurrent findWarm (idle→active) on the same pod simply wins the race and
+    // this loop's filter no longer matches it.
+    for (;;) {
+      const doc = await this.col.findOneAndUpdate(
+        { status: 'idle', warmUntil: { $lte: now } },
+        { $set: { status: 'terminated', terminatum: now } },
+        { returnDocument: 'after' },
+      )
+      if (!doc) break
+      reaped.push(fromDoc(doc))
+    }
+    return reaped
   }
 }

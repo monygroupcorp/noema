@@ -35,6 +35,7 @@ import { spellRoyaltyHook } from './ledger/hooks/spellRoyalty.js'
 import { SecurePodClient, makeSecurePodSshFactory, type R2Config } from './crystal/SecurePodClient.js'
 import { terminatePod, listRunPodPods } from './crystal/terminatePod.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
+import { startIdleReaper } from './crystal/idleReaper.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { Compiler } from './crystal/Compiler.js'
 import { WorkflowTemplateRegistry } from './crystal/WorkflowTemplateRegistry.js'
@@ -60,6 +61,7 @@ const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY
 const RUNPOD_SSH_KEY_PATH = process.env.RUNPOD_SSH_KEY_PATH ?? `${process.env.HOME}/.ssh/runpod`
 const RUNPOD_CLOUD_TYPE = (process.env.RUNPOD_CLOUD_TYPE ?? 'SECURE') as 'SECURE' | 'COMMUNITY'
 const RUNPOD_KEEP_WARM = process.env.RUNPOD_KEEP_WARM !== 'false'  // default true
+const RUNPOD_WARM_TTL_MS = Number(process.env.RUNPOD_WARM_TTL_MS ?? 60_000)  // idle window before reaper kills a warm pod
 // Production: derive from public WEBHOOK_URL. Local dev: post back to ourselves.
 // SecurePodClient runs on our server (not on the pod), so localhost always works.
 const RUNPOD_WEBHOOK_URL = process.env.WEBHOOK_URL
@@ -98,6 +100,7 @@ function makeSecureRunPodClient(materiae?: MateriaStore): SecurePodClient {
       cloudType: RUNPOD_CLOUD_TYPE,
       sshKeyPath: RUNPOD_SSH_KEY_PATH,
       keepWarm: RUNPOD_KEEP_WARM,
+      warmTtlMs: RUNPOD_WARM_TTL_MS,
       r2,
     },
     makeSecurePodSshFactory(RUNPOD_SSH_KEY_PATH),
@@ -365,6 +368,14 @@ async function main(): Promise<void> {
   const INTERNAL_SECRET = process.env.INTERNAL_SECRET
   const wideStore = new WideEventStore(mongo.db(DB_NAME))
   startAnalyticsListener(wideStore)
+
+  // Idle-pod reaper — terminate warm pods that sat idle past their warmUntil
+  // deadline (default 1 min past delivery). Prevents keep-warm pods from billing
+  // indefinitely when no follow-up job reuses them.
+  if (RUNPOD_API_KEY) {
+    startIdleReaper(materiae, (externusId) => terminatePod(RUNPOD_API_KEY, externusId), 30_000)
+    log.info('idle-pod reaper started', { warmTtlMs: RUNPOD_WARM_TTL_MS })
+  }
   app.use('/internal', createLiveRouter(INTERNAL_SECRET))
   app.use('/internal/analytics', createAnalyticsRouter(wideStore, INTERNAL_SECRET))
 
