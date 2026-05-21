@@ -37,9 +37,9 @@ function deliveryKeyboard(actumId: string, state: 'default' | 'rate' | 'wrench',
       ]])
     case 'wrench':
       return inlineKeyboard([[
-        btn('←',       `dm:back:${actumId}`),
-        btn('✎ Tweak', `dm:tweak:${actumId}`),
-        btn('↻ Rerun', `dm:rerun:${actumId}`),
+        btn('←', `dm:back:${actumId}`),
+        btn('✎', `dm:tweak:${actumId}`),
+        btn('↻', `dm:rerun:${actumId}`),
       ]])
     default:
       return inlineKeyboard([[
