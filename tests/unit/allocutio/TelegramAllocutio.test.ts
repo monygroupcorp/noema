@@ -233,6 +233,7 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
   const identity = makeIdentity()
   const router = makeRouter()
   const terminated: string[] = []
+  const cancelCalls: Array<{ actumId: string; reason: string }> = []
   const materiaUpdates: Array<{ id: string; patch: unknown }> = []
   const materiae = {
     async findActive() { return [{ id: 'mat-1', externusId: 'pod-1' }] },
@@ -256,10 +257,11 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
     ...(opts.withPodControls ? {
       materiae: materiae as unknown as import('../../../src/types/materia.js').MateriaStore,
       terminatePod: async (podId: string) => { terminated.push(podId) },
+      cancelActum: async (actumId: string, reason: string) => { cancelCalls.push({ actumId, reason }) },
     } : {}),
   })
 
-  return { allocutio, sender, identity, router, terminated, materiaUpdates, fakeActum }
+  return { allocutio, sender, identity, router, terminated, cancelCalls, materiaUpdates, fakeActum }
 }
 
 // =============================================================================
@@ -934,8 +936,8 @@ test('_react called with 🤔 emoji on command receipt', async () => {
 // =============================================================================
 // Warm-window controls — destroy-now button kills the pod immediately
 // =============================================================================
-test('warm:kill button terminates the locked pod immediately', async () => {
-  const { allocutio, router, terminated } = makeAllocutio({ withPodControls: true })
+test('warm:kill button cancels the actum (which tears down the pod) immediately', async () => {
+  const { allocutio, router, cancelCalls } = makeAllocutio({ withPodControls: true })
 
   // Send a command first so the user's chatId is known
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
@@ -956,7 +958,8 @@ test('warm:kill button terminates the locked pod immediately', async () => {
     callback_query: { id: 'cb1', from: { id: 123 }, message: { message_id: 101, chat: { id: 456 } }, data: 'warm:kill:actum-1' },
   } as unknown as Parameters<typeof allocutio.receive>[0])
 
-  assert.deepEqual(terminated, ['pod-1'], 'destroy now should terminate the locked pod')
+  assert.equal(cancelCalls.length, 1, 'destroy should cancel the actum (completor.fail tears down the pod + refunds)')
+  assert.equal(cancelCalls[0].actumId, 'actum-1')
 })
 
 test('warm:inc steps the window up and re-arms the pod warmUntil', async () => {
@@ -1098,4 +1101,44 @@ test('dm:tweak runs under the presser (presser pays) prefilled with the modus', 
   assert.ok(enter, 'should enter execute for the presser')
   assert.equal((enter!.args[2]), '123', 'under the presser userId')
   assert.equal(((enter!.args[4] as { state: { modusId: string } }).state.modusId), 'runmake.flux-schnell')
+})
+
+// =============================================================================
+// Cancel-on-destroy + destroy-and-retry
+// =============================================================================
+test('warm:kill cancels the actum (refund) and does not retry', async () => {
+  const { allocutio, router, cancelCalls } = makeAllocutio({ withPodControls: true })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
+  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-k', status: 'running' }] })
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'actum-k', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1' } })
+  await new Promise(r => setImmediate(r))
+  router.calls.length = 0
+  await allocutio.receive(cbTo(101, 'warm:kill:actum-k'))
+  await new Promise(r => setImmediate(r))
+
+  assert.equal(cancelCalls.length, 1, 'should cancel (fail) the actum')
+  assert.equal(cancelCalls[0].actumId, 'actum-k')
+  assert.match(cancelCalls[0].reason, /cancel/i)
+  assert.ok(!router.calls.some(c => c.method === 'enter'), 'kill must not re-enter a new run')
+})
+
+test('warm:retry cancels the actum AND re-runs on a fresh pod under the presser', async () => {
+  const { allocutio, router, cancelCalls } = makeAllocutio({ withPodControls: true })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
+  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-r', status: 'running' }] })
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'actum-r', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1' } })
+  await new Promise(r => setImmediate(r))
+  router.calls.length = 0
+  await allocutio.receive(cbTo(101, 'warm:retry:actum-r'))
+  await new Promise(r => setImmediate(r))
+
+  assert.equal(cancelCalls.length, 1, 'retry should cancel the old actum (refund) first')
+  assert.match(cancelCalls[0].reason, /retr/i)
+  const enter = router.calls.find(c => c.method === 'enter')
+  assert.ok(enter, 'retry should re-enter execute on a fresh pod')
+  assert.equal(enter!.args[2], '123', 'under the presser')
 })
