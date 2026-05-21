@@ -331,8 +331,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     terminatePod?: (podId: string) => Promise<void>
     /** Look up an actum (for the delivery menu's Info stats). */
     acta?: { findById(id: string): Promise<Actum | null> }
-    /** Cancel an in-flight actum — fails it (releases reserved signa) and terminates its pod. Backs the destroy/retry buttons. */
-    cancelActum?: (actumId: string, reason: string) => Promise<void>
+    /** Cancel an in-flight actum — fails it (releases reserved signa). Returns true if it
+     *  actually refunded (false if the actum was already terminal). Backs destroy/retry. */
+    cancelActum?: (actumId: string, reason: string) => Promise<boolean>
   }
 
   // chatId lookup: platform:userId → chatId (set when first message arrives)
@@ -343,6 +344,10 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
   // last command message: platform:userId → messageId of the most recent command message
   private readonly lastCommandMessageIds = new Map<string, number>()
+
+  // Warm signal that arrived before the actum was registered: actumId → podId.
+  // Drained when the Stream primitive registers, so warm reuse reacts 🔥 not 👌.
+  private readonly pendingWarm = new Map<string, string | undefined>()
 
   // actum progress tracking for cold-start UX
   private readonly actumProgress = new Map<string, {
@@ -382,7 +387,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     materiae?: MateriaStore
     terminatePod?: (podId: string) => Promise<void>
     acta?: { findById(id: string): Promise<Actum | null> }
-    cancelActum?: (actumId: string, reason: string) => Promise<void>
+    cancelActum?: (actumId: string, reason: string) => Promise<boolean>
   }) {
     this.deps = deps
     this.router = deps.router
@@ -599,17 +604,18 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
       if (action === 'kill' || action === 'retry') {
         const retrying = action === 'retry'
-        // Cancel the actum: fails it (releases reserved signa → refund) AND terminates
-        // the pod. completor.fail owns the pod teardown, so this is a true cancel, not
-        // just a pod kill that leaves credits locked.
-        if (this.deps.cancelActum) {
-          await this.deps.cancelActum(actumId, retrying ? 'destroyed — retrying on a new pod' : 'cancelled by user').catch(() => {})
-        } else if (progress.podId && this.deps.terminatePod) {
-          // Fallback: at least kill the pod if no cancel path is wired.
-          void this.deps.terminatePod(progress.podId).catch(() => {})
-        }
+        // Always stop the meter — terminate the pod regardless of job state (a warm
+        // pod that already delivered still needs killing).
+        if (progress.podId && this.deps.terminatePod) void this.deps.terminatePod(progress.podId).catch(() => {})
+        // Refund only if the job was still in flight; a completed actum no-ops (the
+        // user already got their result and paid fair value — don't claim a refund).
+        const refunded = this.deps.cancelActum
+          ? await this.deps.cancelActum(actumId, retrying ? 'destroyed — retrying on a new pod' : 'cancelled by user').catch(() => false)
+          : false
         if (progress.progressMessageId !== null) {
-          const msg = retrying ? '⟲ Cancelled — retrying on a fresh pod…' : '✕ Cancelled. Your credits were released.'
+          const msg = retrying
+            ? '⟲ Retrying on a fresh pod…'
+            : refunded ? '✕ Cancelled — credits released.' : '✕ Pod shut down.'
           void this.sender.editMessageText(chatId, progress.progressMessageId, msg, {}).catch(() => {})
         }
         this.actumProgress.delete(actumId)
@@ -697,11 +703,15 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         continue
       }
 
-      // Stream(running) → react 👌 and register actum for progress tracking
+      // Stream(running) → react 👌 (or 🔥 if a warm signal already arrived) and register actum
       if (primitive.kind === 'Stream' && primitive.status === 'running') {
         const commandMessageId = this.lastCommandMessageIds.get(userKey)
+        // A warm signal may have raced ahead of registration — drain it here.
+        const warmPending = primitive.actumId !== undefined && this.pendingWarm.has(primitive.actumId)
+        const warmPodId = primitive.actumId !== undefined ? this.pendingWarm.get(primitive.actumId) : undefined
+        if (primitive.actumId !== undefined) this.pendingWarm.delete(primitive.actumId)
         if (commandMessageId !== undefined) {
-          void this._react(chatId, commandMessageId, '👌')
+          void this._react(chatId, commandMessageId, warmPending ? '🔥' : '👌')
         } else {
           await this.sender.sendMessage(chatId, '⏳ Working on it…')
         }
@@ -713,6 +723,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
             commandMessageId,
             lastEditMs: 0,
             isCold: false,
+            podId: warmPodId,
             warmTtlMs: WARM_DEFAULT_MS,
             lastText: '',
           })
@@ -823,11 +834,10 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         const type = parts[3]
         const glyph = RATE_EMOJI[type] ?? '♥'
         if (meta) meta.rateGlyph = glyph
-        // Record the rating under the presser (feedback; routed when they have a flow context).
-        const userId = String(query.from.id)
-        if (this.router.hasContext('telegram', userId)) {
-          await this.router.handle('telegram', userId, { kind: 'result_action', actumId, actionId: `rate_${type}` })
-        }
+        // Rating is feedback on a specific result — it must NOT route through the
+        // user's flow (router.handle), which during AWAITING_COMPLETION renders the
+        // "Working…" step and can re-deliver. Just reflect the choice on the button;
+        // durable rating persistence is a separate (ratings-store) follow-up.
         editMarkup('default', glyph)
         return
       }
@@ -928,23 +938,29 @@ Generate AI art, chat with models, explore creative tools.`
   // -------------------------------------------------------------------------
 
   private async _handleActumStage(data: { actumId: string; stage: string; elapsedMs: number; info?: StageInfo }): Promise<void> {
+    // Warm signal can arrive BEFORE the actum is registered (WarmPodClient emits it
+    // inside submit, before the flow yields the Stream primitive). Handle it without
+    // requiring a progress entry: react 🔥 if we can, else stash so registration does.
+    if (data.stage === 'warm-pod-found') {
+      const p = this.actumProgress.get(data.actumId)
+      if (p) {
+        if (data.info?.podId) p.podId = data.info.podId
+        if (p.commandMessageId !== undefined) void this._react(p.chatId, p.commandMessageId, '🔥')
+      } else {
+        this.pendingWarm.set(data.actumId, data.info?.podId)
+      }
+      return
+    }
+
     const progress = this.actumProgress.get(data.actumId)
     if (!progress) return
 
-    const { chatId, commandMessageId } = progress
+    const { chatId } = progress
     const now = Date.now()
 
     // The KSampler progress bar (progress:N/M) is suppressed: it never keeps up
     // with fast (esp. warm) jobs and burns Telegram edit quota for ~zero value.
     if (data.stage.startsWith('progress:')) return
-
-    if (data.stage === 'warm-pod-found') {
-      // Swap to 🔥 reaction and skip progress message
-      if (commandMessageId !== undefined) {
-        void this._react(chatId, commandMessageId, '🔥')
-      }
-      return
-    }
 
     if (data.stage === 'provisioning') progress.isCold = true
     // Capture pod details at lock-in and keep them for every subsequent update.
