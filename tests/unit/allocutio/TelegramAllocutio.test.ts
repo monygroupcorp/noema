@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { TelegramAllocutio } from '../../../src/allocutio/TelegramAllocutio.js'
+import { bus } from '../../../src/lib/bus.js'
 import type {
   FlowContext, Step, Resolution, PrimitiveEvent, Intent, Platform, AuctorKey
 } from '../../../src/flow/types.js'
@@ -217,19 +218,29 @@ function staleMsgUpdate(userId: number, chatId: number, text: string, pastSecond
 // =============================================================================
 // Helper: build TelegramAllocutio wired with router callbacks
 // =============================================================================
-function makeAllocutio(opts: { botStartupTime?: number } = {}) {
+function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean } = {}) {
   const sender = makeSender()
   const identity = makeIdentity()
   const router = makeRouter()
+  const terminated: string[] = []
+  const materiaUpdates: Array<{ id: string; patch: unknown }> = []
+  const materiae = {
+    async findActive() { return [{ id: 'mat-1', externusId: 'pod-1' }] },
+    async update(id: string, patch: unknown) { materiaUpdates.push({ id, patch }); return { id, ...(patch as object) } },
+  }
 
   const allocutio = new TelegramAllocutio({
     router: router as unknown as import('../../../src/allocutio/TelegramAllocutio.js').RouterDeps,
     sender,
     identity,
     botStartupTime: opts.botStartupTime,
+    ...(opts.withPodControls ? {
+      materiae: materiae as unknown as import('../../../src/types/materia.js').MateriaStore,
+      terminatePod: async (podId: string) => { terminated.push(podId) },
+    } : {}),
   })
 
-  return { allocutio, sender, identity, router }
+  return { allocutio, sender, identity, router, terminated, materiaUpdates }
 }
 
 // =============================================================================
@@ -899,4 +910,53 @@ test('_react called with 🤔 emoji on command receipt', async () => {
   assert.ok(sender.reactions.length > 0, 'setMessageReaction should be called')
   const thinking = sender.reactions.find(r => r.emoji === '🤔')
   assert.ok(thinking, 'should react with 🤔')
+})
+
+// =============================================================================
+// Warm-window controls — destroy-now button kills the pod immediately
+// =============================================================================
+test('warm:kill button terminates the locked pod immediately', async () => {
+  const { allocutio, router, terminated } = makeAllocutio({ withPodControls: true })
+
+  // Send a command first so the user's chatId is known
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  // Register the actum via a running Stream primitive
+  const ctx: FlowContext = {
+    intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123',
+  }
+  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'Generating', actumId: 'actum-1', status: 'running' }] })
+  await new Promise(r => setImmediate(r))
+
+  // Lock-in stage carries the podId and creates the progress message
+  bus.emit('actum.stage', { actumId: 'actum-1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  await new Promise(r => setImmediate(r))
+
+  // Tap "destroy now"
+  await allocutio.receive({
+    update_id: 1,
+    callback_query: { id: 'cb1', from: { id: 123 }, message: { message_id: 101, chat: { id: 456 } }, data: 'warm:kill:actum-1' },
+  } as unknown as Parameters<typeof allocutio.receive>[0])
+
+  assert.deepEqual(terminated, ['pod-1'], 'destroy now should terminate the locked pod')
+})
+
+test('warm:inc steps the window up and re-arms the pod warmUntil', async () => {
+  const { allocutio, router, materiaUpdates } = makeAllocutio({ withPodControls: true })
+
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  const ctx: FlowContext = {
+    intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123',
+  }
+  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'Generating', actumId: 'actum-2', status: 'running' }] })
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'actum-2', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1' } })
+  await new Promise(r => setImmediate(r))
+
+  await allocutio.receive({
+    update_id: 2,
+    callback_query: { id: 'cb2', from: { id: 123 }, message: { message_id: 101, chat: { id: 456 } }, data: 'warm:inc:actum-2' },
+  } as unknown as Parameters<typeof allocutio.receive>[0])
+
+  const warmPatch = materiaUpdates.find(u => (u.patch as { warmUntil?: Date }).warmUntil)
+  assert.ok(warmPatch, 'stepping the window should re-arm the pod warmUntil')
 })
