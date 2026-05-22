@@ -51,10 +51,17 @@ export class PodSession {
       return
     }
     if (stage === 'pod-locked') {
-      this.journal.push({ kind: 'found', gpu: this.pod.gpu, rate: this.pod.rate, ms: this._phaseMs(info, now) })
-      this.phaseStartMs = now     // prep phase starts
-      this.live = { kind: 'initializing' }
-      this._phase = 'prep'
+      if (this._phase === 'hunting') {
+        // Cold start (or bail replacement): commit the Found line + enter prep.
+        this.journal.push({ kind: 'found', gpu: this.pod.gpu, rate: this.pod.rate, ms: this._phaseMs(info, now) })
+        this.phaseStartMs = now
+        this.live = { kind: 'initializing' }
+        this._phase = 'prep'
+      } else {
+        // Warm reuse of an already-known pod: no new Found line, straight to work.
+        this.live = { kind: 'generating' }
+        this._phase = 'ready'
+      }
       return
     }
     if (stage === 'ssh-ready' || stage === 'bootstrapping') { this.live = { kind: 'initializing' }; this._phase = 'prep'; return }
