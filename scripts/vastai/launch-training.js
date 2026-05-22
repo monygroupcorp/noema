@@ -93,6 +93,21 @@ const OpenAIService = require('../../src/core/services/openai/openaiService');
 // Cloudflare R2 integration (for private models)
 const StorageService = require('../../src/core/services/storageService');
 
+/**
+ * Build a HuggingFace upload command that works across huggingface_hub versions.
+ *
+ * huggingface_hub v1.0 removed the legacy `huggingface-cli` in favour of the new
+ * `hf` CLI (same positional args: <repo_id> <local_path> <path_in_repo>). The
+ * ostris/aitoolkit image floats on :latest and now ships huggingface_hub>=1.x,
+ * so `huggingface-cli upload` fails with exit 1. Prefer `hf upload`, fall back to
+ * the legacy CLI for older images.
+ */
+function buildHfUploadCmd(token, repoId, localPath, pathInRepo, commitMessage) {
+  const args = `${repoId} "${localPath}" "${pathInRepo}" --commit-message "${commitMessage}"`;
+  return `export HF_TOKEN="${token}" && ` +
+    `(command -v hf >/dev/null 2>&1 && hf upload ${args} || huggingface-cli upload ${args})`;
+}
+
 // Default ai-toolkit config templates
 const DEFAULT_TEMPLATE = path.resolve(__dirname, '../../src/core/services/vastai/configs/flux-lora-24gb-aitoolkit.yaml');
 const KONTEXT_CONCEPT_TEMPLATE = path.resolve(__dirname, '../../src/core/services/vastai/configs/flux-kontext-concept-24gb-aitoolkit.yaml');
@@ -1399,9 +1414,9 @@ async function main() {
           const remoteSafetensors = `${remoteDir}/output/${modelName}/${modelName}.safetensors`;
           const remoteSamplesDir = `${remoteDir}/output/${modelName}/samples`;
 
-          // Upload safetensors using huggingface-cli (handles LFS automatically)
+          // Upload safetensors using the HF CLI (handles LFS automatically)
           log(`Uploading ${finalModel.name} (${finalModel.sizeFormatted}) to HuggingFace...`);
-          const uploadCmd = `export HF_TOKEN="${extraEnv.HF_TOKEN}" && huggingface-cli upload ${hfRepoId} "${remoteSafetensors}" "${modelName}.safetensors" --commit-message "Upload trained model"`;
+          const uploadCmd = buildHfUploadCmd(extraEnv.HF_TOKEN, hfRepoId, remoteSafetensors, `${modelName}.safetensors`, 'Upload trained model');
           await ssh.exec(uploadCmd, { timeout: 300000 }); // 5 min timeout for upload
 
           // Model uploaded - set URL immediately so nothing downstream can block it
@@ -1440,7 +1455,7 @@ async function main() {
 
             // Upload the staging folder
             log(`Uploading ${maxSamples} sample images to HuggingFace...`);
-            const uploadSamplesCmd = `export HF_TOKEN="${extraEnv.HF_TOKEN}" && huggingface-cli upload ${hfRepoId} "${stagingDir}" samples --commit-message "Upload sample images"`;
+            const uploadSamplesCmd = buildHfUploadCmd(extraEnv.HF_TOKEN, hfRepoId, stagingDir, 'samples', 'Upload sample images');
             await ssh.exec(uploadSamplesCmd, { timeout: 120000 });
             uploadedSampleCount = maxSamples;
           } else {
@@ -1454,7 +1469,7 @@ async function main() {
           try {
             log('Uploading training config to HuggingFace...');
             const remoteConfigFile = `${remoteDir}/config/${path.basename(remoteConfigPath)}`;
-            const uploadConfigCmd = `export HF_TOKEN="${extraEnv.HF_TOKEN}" && huggingface-cli upload ${hfRepoId} "${remoteConfigFile}" "training_config.yaml" --commit-message "Upload training config"`;
+            const uploadConfigCmd = buildHfUploadCmd(extraEnv.HF_TOKEN, hfRepoId, remoteConfigFile, 'training_config.yaml', 'Upload training config');
             await ssh.exec(uploadConfigCmd, { timeout: 60000 });
             uploaded.push('config');
             log('Training config uploaded');
@@ -1473,17 +1488,26 @@ async function main() {
         }
       } catch (err) {
         log(`WARNING: HuggingFace upload failed: ${err.message}`);
-        log('Model remains on remote instance - can upload manually before termination');
+        if (err.stderr) log(`  HF upload stderr: ${String(err.stderr).slice(0, 1000)}`);
+        if (err.output) log(`  HF upload stdout: ${String(err.output).slice(0, 1000)}`);
+        log('HuggingFace upload failed - will attempt R2 fallback before termination');
       }
     }
 
     // ────────────────────────────────────────────────────────────────────────────
-    // PHASE 5B: Upload to Cloudflare R2 directly from remote (for private models)
-    // Uses presigned URL so remote instance can PUT directly to R2
+    // PHASE 5B: Upload to Cloudflare R2 directly from remote.
+    // Runs when R2 is the chosen destination OR as a fallback when the model
+    // trained successfully but is not yet persisted anywhere (e.g. HF upload
+    // failed). A successful train must never be lost just because one uploader
+    // broke. Uses a presigned URL so the remote instance can PUT directly to R2.
     // ────────────────────────────────────────────────────────────────────────────
     let r2ModelUrl = null;
-    if (result.success && args.r2Upload && !hfRepoId) {
-      log('Uploading model to Cloudflare R2 (from remote instance)...');
+    if (result.success && !hfModelUrl && !r2ModelUrl) {
+      if (hfRepoId) {
+        log('HuggingFace upload did not persist the model - attempting R2 fallback...');
+      } else {
+        log('Uploading model to Cloudflare R2 (from remote instance)...');
+      }
 
       try {
         // Initialize StorageService
@@ -1522,6 +1546,8 @@ async function main() {
         }
       } catch (err) {
         log(`WARNING: Cloudflare R2 upload failed: ${err.message}`);
+        if (err.stderr) log(`  R2 upload stderr: ${String(err.stderr).slice(0, 1000)}`);
+        if (err.output) log(`  R2 upload stdout: ${String(err.output).slice(0, 1000)}`);
         log('Model remains on remote instance - can upload manually before termination');
       }
     }
@@ -1549,7 +1575,7 @@ async function main() {
           const recoveryFilename = latestCheckpoint.name.replace('.safetensors', '_PARTIAL.safetensors');
 
           log(`Emergency upload to HuggingFace: ${recoveryFilename}`);
-          const uploadCmd = `export HF_TOKEN="${extraEnv.HF_TOKEN}" && huggingface-cli upload ${hfRepoId} "${remoteCheckpointPath}" "${recoveryFilename}" --commit-message "Emergency recovery: training failed at step ${result.parsed.lastStep || '?'}"`;
+          const uploadCmd = buildHfUploadCmd(extraEnv.HF_TOKEN, hfRepoId, remoteCheckpointPath, recoveryFilename, `Emergency recovery: training failed at step ${result.parsed.lastStep || '?'}`);
           await ssh.exec(uploadCmd, { timeout: 300000 });
 
           hfModelUrl = `https://huggingface.co/${hfRepoId}`;
@@ -1598,12 +1624,12 @@ async function main() {
       }
     }
 
-    // Terminate instance if training succeeded and not in noTerminate mode
-    // Also terminate after failed training IF we successfully recovered the checkpoint
-    const shouldTerminate = !args.noTerminate && (
-      result.success ||
-      (!result.success && (hfModelUrl || r2ModelUrl))  // Failed but recovered checkpoint
-    );
+    // Only terminate once the model is actually persisted somewhere (HF or R2).
+    // A successful train whose upload failed must NOT be terminated, or the only
+    // copy of the weights is destroyed (this is exactly how the "Lawb" run was
+    // lost). The 4h instance sweeper is the backstop for instances left running.
+    const modelPersisted = Boolean(hfModelUrl || r2ModelUrl);
+    const shouldTerminate = !args.noTerminate && modelPersisted;
 
     if (shouldTerminate) {
       log(result.success ? 'Terminating instance...' : 'Terminating instance after emergency recovery...');
@@ -1618,6 +1644,13 @@ async function main() {
         log(`Warning: Failed to terminate instance: ${err.message}`);
         log(`You may need to manually terminate instance ${readyInstance.instanceId}`);
       }
+    } else if (result.success && !modelPersisted) {
+      log('⚠️  CRITICAL: training SUCCEEDED but the model was NOT persisted (HF and R2 both failed).');
+      log('Instance left RUNNING so the model can be recovered manually before the sweeper reclaims it.');
+      log(`Instance ID: ${readyInstance.instanceId}`);
+      log(`SSH: ssh -p ${readyInstance.sshPort} root@${sshEndpoint}`);
+      log(`Model: ${remoteDir}/output/${modelName}/${modelName}.safetensors`);
+      _provisionedInstanceId = null; // Clear - intentionally leaving for recovery (sweeper is backstop)
     } else if (!result.success) {
       log('Training failed - instance NOT terminated for debugging');
       log(`Instance ID: ${readyInstance.instanceId}`);
