@@ -934,56 +934,6 @@ test('_react called with 🤔 emoji on command receipt', async () => {
 })
 
 // =============================================================================
-// Warm-window controls — destroy-now button kills the pod immediately
-// =============================================================================
-test('warm:kill button cancels the actum (which tears down the pod) immediately', async () => {
-  const { allocutio, router, cancelCalls } = makeAllocutio({ withPodControls: true })
-
-  // Send a command first so the user's chatId is known
-  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
-  // Register the actum via a running Stream primitive
-  const ctx: FlowContext = {
-    intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123',
-  }
-  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'Generating', actumId: 'actum-1', status: 'running' }] })
-  await new Promise(r => setImmediate(r))
-
-  // Lock-in stage carries the podId and creates the progress message
-  bus.emit('actum.stage', { actumId: 'actum-1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
-  await new Promise(r => setImmediate(r))
-
-  // Tap "destroy now"
-  await allocutio.receive({
-    update_id: 1,
-    callback_query: { id: 'cb1', from: { id: 123 }, message: { message_id: 101, chat: { id: 456 } }, data: 'warm:kill:actum-1' },
-  } as unknown as Parameters<typeof allocutio.receive>[0])
-
-  assert.equal(cancelCalls.length, 1, 'destroy should cancel the actum (completor.fail tears down the pod + refunds)')
-  assert.equal(cancelCalls[0].actumId, 'actum-1')
-})
-
-test('warm:inc steps the window up and re-arms the pod warmUntil', async () => {
-  const { allocutio, router, materiaUpdates } = makeAllocutio({ withPodControls: true })
-
-  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
-  const ctx: FlowContext = {
-    intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123',
-  }
-  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'Generating', actumId: 'actum-2', status: 'running' }] })
-  await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'actum-2', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1' } })
-  await new Promise(r => setImmediate(r))
-
-  await allocutio.receive({
-    update_id: 2,
-    callback_query: { id: 'cb2', from: { id: 123 }, message: { message_id: 101, chat: { id: 456 } }, data: 'warm:inc:actum-2' },
-  } as unknown as Parameters<typeof allocutio.receive>[0])
-
-  const warmPatch = materiaUpdates.find(u => (u.patch as { warmUntil?: Date }).warmUntil)
-  assert.ok(warmPatch, 'stepping the window should re-arm the pod warmUntil')
-})
-
-// =============================================================================
 // Phase 1+2 — kill the waste, warm reaction
 // =============================================================================
 test('actum.complete applies the warm window but sends NO concierge message', async () => {
@@ -1105,46 +1055,6 @@ test('dm:tweak runs under the presser (presser pays) prefilled with the modus', 
 })
 
 // =============================================================================
-// Cancel-on-destroy + destroy-and-retry
-// =============================================================================
-test('warm:kill cancels the actum (refund) and does not retry', async () => {
-  const { allocutio, router, cancelCalls } = makeAllocutio({ withPodControls: true })
-  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
-  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
-  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-k', status: 'running' }] })
-  await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'actum-k', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1' } })
-  await new Promise(r => setImmediate(r))
-  router.calls.length = 0
-  await allocutio.receive(cbTo(101, 'warm:kill:actum-k'))
-  await new Promise(r => setImmediate(r))
-
-  assert.equal(cancelCalls.length, 1, 'should cancel (fail) the actum')
-  assert.equal(cancelCalls[0].actumId, 'actum-k')
-  assert.match(cancelCalls[0].reason, /cancel/i)
-  assert.ok(!router.calls.some(c => c.method === 'enter'), 'kill must not re-enter a new run')
-})
-
-test('warm:retry cancels the actum AND re-runs on a fresh pod under the presser', async () => {
-  const { allocutio, router, cancelCalls } = makeAllocutio({ withPodControls: true })
-  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
-  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
-  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-r', status: 'running' }] })
-  await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'actum-r', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1' } })
-  await new Promise(r => setImmediate(r))
-  router.calls.length = 0
-  await allocutio.receive(cbTo(101, 'warm:retry:actum-r'))
-  await new Promise(r => setImmediate(r))
-
-  assert.equal(cancelCalls.length, 1, 'retry should cancel the old actum (refund) first')
-  assert.match(cancelCalls[0].reason, /retr/i)
-  const enter = router.calls.find(c => c.method === 'enter')
-  assert.ok(enter, 'retry should re-enter execute on a fresh pod')
-  assert.equal(enter!.args[2], '123', 'under the presser')
-})
-
-// =============================================================================
 // Warm 🔥 survives the race (warm-pod-found arrives before actum registration)
 // =============================================================================
 test('warm signal arriving before registration still reacts 🔥 (not 👌)', async () => {
@@ -1191,8 +1101,8 @@ test('pod-locked creates the session bulletin with the warm stepper + confirm', 
   assert.ok(data.includes('bul:inc'), 'setup state shows stepper')
 })
 
-test('bul:kill is host-only and terminates the pod (freezes receipt)', async () => {
-  const { allocutio, router, terminated } = makeAllocutio({ withPodControls: true })
+test('bul:kill is host-only, terminates the pod, and cancels in-flight gens (freezes receipt)', async () => {
+  const { allocutio, router, terminated, cancelCalls } = makeAllocutio({ withPodControls: true })
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
@@ -1202,10 +1112,31 @@ test('bul:kill is host-only and terminates the pod (freezes receipt)', async () 
   await allocutio.receive(bulCb(999, 'bul:kill'))   // not the host
   await new Promise(r => setImmediate(r))
   assert.deepEqual(terminated, [], 'non-host kill is ignored')
+  assert.equal(cancelCalls.length, 0, 'non-host kill does not cancel')
 
   await allocutio.receive(bulCb(123, 'bul:kill'))   // the host
   await new Promise(r => setImmediate(r))
   assert.deepEqual(terminated, ['pod-1'], 'host kill terminates the session pod')
+  // Cancel-on-destroy: the in-flight gen on this chat is cancelled (refunded).
+  assert.equal(cancelCalls.length, 1, 'host kill cancels the in-flight actum')
+  assert.equal(cancelCalls[0].actumId, 'a1')
+})
+
+test('pod.reaped freezes the matching session bulletin to a receipt', async () => {
+  const { allocutio, router, sender } = makeAllocutio({ withPodControls: true })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  lockPod(allocutio, router, 'a1')
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  await new Promise(r => setImmediate(r))
+  sender.edited.length = 0
+
+  bus.emit('pod.reaped', { externusId: 'pod-1' })
+  await new Promise(r => setImmediate(r))
+
+  // The bulletin re-renders into its receipt state ("Pod shut down.").
+  assert.ok(sender.edited.some(e => /shut down/i.test(e.text)),
+    'reaped pod freezes its bulletin to the receipt')
 })
 
 test('actum.complete tallies the gen into the bulletin totals', async () => {

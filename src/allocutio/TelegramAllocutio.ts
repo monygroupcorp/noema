@@ -367,15 +367,15 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     totalCostUsd: number
     renewTimer?: ReturnType<typeof setTimeout>
     ended: boolean                            // receipt state — pod gone, buttons stripped
+    activity?: string                         // current in-flight stage phrase (cleared on complete)
+    lastEditMs?: number                       // throttle in-flight edits (terminal edits bypass)
   }>()
 
   // actum progress tracking for cold-start UX
   private readonly actumProgress = new Map<string, {
     chatId: number
     hostUserId: string                        // who spawned this actum — becomes the bulletin host
-    progressMessageId: number | null
     commandMessageId: number | undefined
-    lastEditMs: number
     isCold: boolean
     // Pod details captured at lock-in, retained so every later stage update keeps
     // showing GPU/region/price instead of replacing it.
@@ -384,8 +384,6 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     podId?: string
     /** User-selected warm window (ms); applied to the pod's warmUntil at idle. */
     warmTtlMs: number
-    /** Last rendered progress text — re-used when a button tap re-renders the keyboard. */
-    lastText: string
   }>()
 
   // Delivery-menu state per result, keyed by actumId — backs Info caption toggle
@@ -422,7 +420,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // Wire bus events for pod lifecycle → Telegram progress messages
     bus.on('actum.stage', (data) => { void this._handleActumStage(data) })
     bus.on('actum.complete', (wide) => { void this._handleActumComplete(wide) })
-    bus.on('actum.fail', (wide) => { this.actumProgress.delete(wide.actumId) })
+    bus.on('actum.fail', (wide) => { void this._handleActumFail(wide) })
+    // A warm pod reaped by the idle reaper → freeze its session bulletin to a receipt.
+    bus.on('pod.reaped', ({ externusId }) => { this._handlePodReaped(externusId) })
   }
 
   // -------------------------------------------------------------------------
@@ -622,52 +622,6 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       return
     }
 
-    // Warm-window stepper / destroy buttons
-    if (query.data.startsWith('warm:') && chatId) {
-      const [, action, actumId] = query.data.split(':')
-      const progress = this.actumProgress.get(actumId)
-      if (!progress) return
-      if (action === 'noop') return
-
-      if (action === 'kill' || action === 'retry') {
-        const retrying = action === 'retry'
-        // Always stop the meter — terminate the pod regardless of job state (a warm
-        // pod that already delivered still needs killing).
-        if (progress.podId && this.deps.terminatePod) void this.deps.terminatePod(progress.podId).catch(() => {})
-        // Refund only if the job was still in flight; a completed actum no-ops (the
-        // user already got their result and paid fair value — don't claim a refund).
-        const refunded = this.deps.cancelActum
-          ? await this.deps.cancelActum(actumId, retrying ? 'destroyed — retrying on a new pod' : 'cancelled by user').catch(() => false)
-          : false
-        if (progress.progressMessageId !== null) {
-          const msg = retrying
-            ? '⟲ Retrying on a fresh pod…'
-            : refunded ? '✕ Cancelled — credits released.' : '✕ Pod shut down.'
-          void this.sender.editMessageText(chatId, progress.progressMessageId, msg, {}).catch(() => {})
-        }
-        this.actumProgress.delete(actumId)
-        // Retry: re-run the same params on a new pod, billed to the presser.
-        if (retrying) await this._rerunForPresser(query, chatId, actumId)
-        return
-      }
-
-      // Step the warm window up/down the ladder.
-      let idx = WARM_LADDER_MS.indexOf(progress.warmTtlMs)
-      if (idx < 0) idx = WARM_LADDER_MS.indexOf(WARM_DEFAULT_MS)
-      idx = action === 'inc' ? Math.min(WARM_LADDER_MS.length - 1, idx + 1) : Math.max(0, idx - 1)
-      progress.warmTtlMs = WARM_LADDER_MS[idx]
-
-      // If the pod is already idle, re-arm its deadline now; otherwise the choice
-      // is applied when the job completes (see _handleActumComplete).
-      if (progress.podId) void this._setPodWarmUntil(progress.podId, progress.warmTtlMs)
-
-      if (progress.progressMessageId !== null) {
-        const keyboard = this._warmKeyboard(actumId, progress.warmTtlMs, progress.podId !== undefined)
-        void this.sender.editMessageText(chatId, progress.progressMessageId, progress.lastText, { reply_markup: keyboard }).catch(() => {})
-      }
-      return
-    }
-
     // Pod invite button — send a forwardable invite message
     if (query.data.startsWith('pod_invite:') && chatId) {
       const inviteText = [
@@ -755,13 +709,10 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
           this.actumProgress.set(primitive.actumId, {
             chatId,
             hostUserId: ctx.platformUserId,
-            progressMessageId: null,
             commandMessageId,
-            lastEditMs: 0,
             isCold: false,
             podId: warmPodId,
             warmTtlMs: WARM_DEFAULT_MS,
-            lastText: '',
           })
           // A new command resets the bulletin's death-clock debounce (don't hop it
           // away mid-interaction) and keeps the session alive.
@@ -999,7 +950,6 @@ Generate AI art, chat with models, explore creative tools.`
     if (!progress) return
 
     const { chatId } = progress
-    const now = Date.now()
 
     // The KSampler progress bar (progress:N/M) is suppressed: it never keeps up
     // with fast (esp. warm) jobs and burns Telegram edit quota for ~zero value.
@@ -1012,55 +962,46 @@ Generate AI art, chat with models, explore creative tools.`
     }
     if (data.info?.podId) progress.podId = data.info.podId
 
-    // Pod lock-in drives the session bulletin (the warm/kill controls live there now,
-    // so it survives restarts and stays pressable). The per-actum message is just
-    // transient stage text — no buttons.
-    if (data.info && (data.info.gpuType || typeof data.info.costPerHr === 'number' || data.info.podId)) {
-      this._ensureBulletin(chatId, progress.hostUserId, data.info)
+    // The session bulletin is the sole live HUD: there is no separate per-actum
+    // progress message. Every stage updates the bulletin's transient activity
+    // line (created on the first stage so cold-start provisioning shows at once).
+    this._ensureBulletin(chatId, progress.hostUserId, progress.podInfo)
+    const b = this.bulletins.get(chatId)
+    if (!b) return
+    b.activity = this._activityLine(data.stage, data.info)
+
+    // Throttle in-flight edits to ~1/3s (Telegram 429s on faster), but always
+    // render lock-in (pod header just appeared) so the GPU/price shows promptly.
+    const now = Date.now()
+    const isLockIn = !!(data.info && (data.info.gpuType || typeof data.info.costPerHr === 'number' || data.info.podId))
+    if (isLockIn || b.lastEditMs === undefined || now - b.lastEditMs >= 3000) {
+      b.lastEditMs = now
       void this._showBulletin(chatId)
-      this._scheduleBulletinRenewal(chatId)
     }
-
-    const keyboard = inlineKeyboard([])
-    const text = this._progressText(data.stage, data.elapsedMs, data.info, progress.podInfo)
-    progress.lastText = text
-
-    // Lazily create the progress message on the FIRST stage we can deliver.
-    // The 'provisioning' event usually fires before this actum is registered
-    // (cursor.run blocks on synchronous pod provisioning, and registration only
-    // happens once the flow emits the Stream primitive afterward) — so gating
-    // creation on 'provisioning' dropped every subsequent stage. Any first stage
-    // now creates the message; later ones edit it.
-    if (progress.progressMessageId === null) {
-      try {
-        const msg = await this.sender.sendMessage(chatId, text, { reply_markup: keyboard })
-        progress.progressMessageId = msg.message_id
-        progress.lastEditMs = now
-      } catch { /* non-critical */ }
-      return
-    }
-
-    // Rate-limit edits to 1 per 4s — telegram will 429 on faster edits
-    if (now - progress.lastEditMs < 4000) return
-
-    void this.sender.editMessageText(chatId, progress.progressMessageId, text, { reply_markup: keyboard }).catch(() => {})
-    progress.lastEditMs = now
+    this._scheduleBulletinRenewal(chatId)
   }
 
-  /** Warm-window stepper + destroy keyboard. Only shows the controls once a pod
-   *  exists (podKnown); before lock-in there's nothing to control. */
-  private _warmKeyboard(actumId: string, warmTtlMs: number, podKnown: boolean): unknown {
-    if (!podKnown) return inlineKeyboard([])
-    let idx = WARM_LADDER_MS.indexOf(warmTtlMs)
-    if (idx < 0) idx = WARM_LADDER_MS.indexOf(WARM_DEFAULT_MS)
-    return inlineKeyboard([
-      [
-        btn('⏱ ‹', `warm:dec:${actumId}`),
-        btn(`warm: ${WARM_LADDER_LABEL[idx]}`, `warm:noop:${actumId}`),
-        btn('› ⏱', `warm:inc:${actumId}`),
-      ],
-      [ btn('✕', `warm:kill:${actumId}`), btn('⟲', `warm:retry:${actumId}`) ],
-    ])
+  /** Short phrase for the bulletin's in-flight activity line. */
+  private _activityLine(stage: string, info?: StageInfo): string {
+    const fmt = (sec: number) => sec >= 60 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${sec}s`
+    if (stage.startsWith('downloading:')) {
+      const [n, m] = stage.slice(12).split('/').map(Number)
+      const eta = (typeof info?.etaMs === 'number' && info.etaMs > 0) ? ` · ~${fmt(Math.round(info.etaMs / 1000))} left` : ''
+      return `Downloading models (${n}/${m})...${eta}`
+    }
+    const lines: Record<string, string> = {
+      'provisioning':     'Provisioning cold pod...',
+      'pod-locked':       'Setting up runtime...',
+      'ssh-ready':        'Pod online. Setting up runtime...',
+      'bootstrapping':    'Bootstrapping runtime...',
+      'downloading':      'Downloading models...',
+      'installing-nodes': 'Loading plugins...',
+      'restarting':       'Reloading runtime...',
+      'comfy-ready':      'Models loaded. Generating...',
+      'inferring':        'Generating image...',
+      'uploading':        'Saving result...',
+    }
+    return lines[stage] ?? `Working... (${stage})`
   }
 
   // -------------------------------------------------------------------------
@@ -1091,6 +1032,8 @@ Generate AI art, chat with models, explore creative tools.`
       lines.push('🔒 ' + [pod.gpuType, pod.region, typeof pod.costPerHr === 'number' ? `$${pod.costPerHr.toFixed(2)}/hr` : undefined]
         .filter(Boolean).join(' · '))
     }
+    // In-flight activity (current stage) — shown only while a gen is running.
+    if (b.activity && !b.ended) lines.push(b.activity)
     if (b.genCount > 0) {
       const totals = `${b.genCount} gen${b.genCount > 1 ? 's' : ''} · ${fmt(Math.round(b.totalDurationMs / 1000))}` +
         (b.totalCostUsd > 0 ? ` · $${b.totalCostUsd.toFixed(2)}` : '')
@@ -1187,7 +1130,15 @@ Generate AI art, chat with models, explore creative tools.`
       case 'kill': {  // host shuts the pod down now → freeze to receipt
         if (!isHost) return
         if (b.podInfo.podId && this.deps.terminatePod) void this.deps.terminatePod(b.podInfo.podId).catch(() => {})
+        // Cancel-on-destroy: refund any gen still in flight on this chat's pod —
+        // a completed actum no-ops, so this never claws back a fair-value result.
+        if (this.deps.cancelActum) {
+          for (const [actumId, p] of this.actumProgress) {
+            if (p.chatId === chatId) void this.deps.cancelActum(actumId, 'cancelled by user — pod shut down').catch(() => {})
+          }
+        }
         if (b.renewTimer) clearTimeout(b.renewTimer)
+        b.activity = undefined
         b.ended = true
         await this._showBulletin(chatId)
         return
@@ -1201,68 +1152,6 @@ Generate AI art, chat with models, explore creative tools.`
     const pods = await this.deps.materiae.findActive().catch(() => [])
     const m = pods.find(p => p.externusId === podId)
     if (m) await this.deps.materiae.update(m.id, { warmUntil: new Date(Date.now() + ttlMs) }).catch(() => {})
-  }
-
-  private _progressText(stage: string, elapsedMs: number, info?: StageInfo, accrued?: StageInfo): string {
-    const fmt = (sec: number) => sec >= 60 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${sec}s`
-    const elapsedStr = fmt(Math.round(elapsedMs / 1000))
-
-    // Persistent pod header — once we lock onto a pod, keep GPU/region/price
-    // visible on every subsequent stage rather than replacing it.
-    const pod = accrued ?? info
-    const podHeader = (pod && (pod.gpuType || pod.region || typeof pod.costPerHr === 'number'))
-      ? '🔒 ' + [pod.gpuType, pod.region, typeof pod.costPerHr === 'number' ? `$${pod.costPerHr.toFixed(2)}/hr` : undefined]
-          .filter(Boolean).join(' · ')
-      : null
-
-    if (stage === 'pod-locked') {
-      return [podHeader ?? '🔒 Locked onto a GPU pod', 'Setting up runtime...', `Elapsed: ${elapsedStr}`]
-        .filter(Boolean).join('\n')
-    }
-
-    let header: string
-    let progressBar: string | null = null
-    let etaLine: string | null = null
-
-    if (stage.startsWith('progress:')) {
-      const [n, m] = stage.slice(9).split('/').map(Number)
-      const pct = m > 0 ? n / m : 0
-      const filled = Math.round(pct * 10)
-      progressBar = `[${'█'.repeat(filled)}${'░'.repeat(10 - filled)}] ${n}/${m}`
-      header = 'Generating...'
-    } else if (stage.startsWith('downloading:')) {
-      const [n, m] = stage.slice(12).split('/').map(Number)
-      header = `Downloading models (${n}/${m})...`
-      if (typeof info?.etaMs === 'number' && info.etaMs > 0) {
-        etaLine = `~${fmt(Math.round(info.etaMs / 1000))} left`
-      }
-    } else {
-      const stageLines: Record<string, string> = {
-        'provisioning':     'Provisioning cold pod...',
-        'ssh-ready':        'Pod online. Setting up runtime...',
-        'bootstrapping':    'Bootstrapping runtime...',
-        'downloading':      'Downloading models...',
-        'installing-nodes': 'Loading plugins...',
-        'restarting':       'Reloading runtime...',
-        'comfy-ready':      'Models loaded. Generating...',
-        'inferring':        'Generating image...',
-        'uploading':        'Saving result...',
-      }
-      header = stageLines[stage] ?? `Stage: ${stage}`
-    }
-
-    const lines = podHeader ? [podHeader, header] : [header]
-    if (progressBar) lines.push(progressBar)
-    if (etaLine) lines.push(etaLine)
-    lines.push(`Elapsed: ${elapsedStr}`)
-
-    if (stage === 'provisioning') {
-      lines.push('Est. time: ~5 min on cold start')
-      lines.push('')
-      lines.push('To switch model, reply: xl  dev  schnell')
-    }
-
-    return lines.join('\n')
   }
 
   // -------------------------------------------------------------------------
@@ -1281,6 +1170,7 @@ Generate AI art, chat with models, explore creative tools.`
     const b = this.bulletins.get(progress.chatId)
     const warmTtlMs = b?.warmTtlMs ?? progress.warmTtlMs
     if (b) {
+      b.activity = undefined  // gen done — clear the in-flight line
       b.genCount += 1
       b.totalDurationMs += wide.durationMs
       if (typeof wide.costUsd === 'number') b.totalCostUsd += wide.costUsd
@@ -1293,6 +1183,31 @@ Generate AI art, chat with models, explore creative tools.`
     if (podId) void this._setPodWarmUntil(podId, warmTtlMs)
 
     setTimeout(() => this.actumProgress.delete(wide.actumId), warmTtlMs + 5_000).unref?.()
+  }
+
+  /** Job failed — clear the bulletin's in-flight line, surface the failure, drop tracking. */
+  private async _handleActumFail(wide: WideEvent): Promise<void> {
+    const progress = this.actumProgress.get(wide.actumId)
+    if (progress) {
+      const b = this.bulletins.get(progress.chatId)
+      if (b) {
+        b.activity = undefined
+        void this._showBulletin(progress.chatId)
+      }
+    }
+    this.actumProgress.delete(wide.actumId)
+  }
+
+  /** A warm pod was reaped — freeze the matching session bulletin to its receipt. */
+  private _handlePodReaped(externusId: string): void {
+    for (const b of this.bulletins.values()) {
+      if (b.podInfo.podId === externusId && !b.ended) {
+        if (b.renewTimer) clearTimeout(b.renewTimer)
+        b.activity = undefined
+        b.ended = true
+        void this._showBulletin(b.chatId)
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
