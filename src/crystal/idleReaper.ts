@@ -1,4 +1,5 @@
 import type { MateriaStore } from '../types/materia.js'
+import { bus } from '../lib/bus.js'
 import { makeLogger } from '../lib/logger.js'
 
 const log = makeLogger('crystal:reaper')
@@ -21,6 +22,8 @@ export function startIdleReaper(
       for (const m of reaped) {
         await terminatePod(m.externusId).catch(e =>
           log.warn('reap terminate failed', { externusId: m.externusId, error: String(e) }))
+        // Tell the UI a warm pod just died so its session bulletin can freeze to a receipt.
+        bus.emit('pod.reaped', { externusId: m.externusId })
         log.info('reaped idle pod', { materiaId: m.id, externusId: m.externusId, gpu: m.gpu })
       }
     } catch (err) {

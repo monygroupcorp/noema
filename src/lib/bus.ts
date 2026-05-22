@@ -20,6 +20,8 @@ export interface BusEvents {
   'actum.stage':     [data: { actumId: string; stage: string; elapsedMs: number; info?: StageInfo }]
   'actum.complete':  [wide: WideEvent]
   'actum.fail':      [wide: WideEvent]
+  /** Idle reaper terminated a warm pod — lets the UI freeze its bulletin to a receipt. */
+  'pod.reaped':      [data: { externusId: string }]
 }
 
 class TypedBus extends EventEmitter {
