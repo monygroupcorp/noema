@@ -61,6 +61,8 @@ export class FakeWarmPodClient implements RunPodClient {
       void params.onMetrics?.({
         executionMs, downloadMs: 0, modelsDownloaded: 0, modelsReused: 4,
         gpuType, podId, coldStart: false, costPerHr,
+        // A warm reuse bills only its short inference window (~25s).
+        billedMs: 25_000,
       })
 
       if (params.webhook) {

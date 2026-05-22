@@ -65,8 +65,11 @@ export function buildWideEvent(
   const endTs = actum.completum ? actum.completum.getTime() : Date.now()
   const durationMs = endTs - actum.inceptum.getTime()
   const executionMs = e.executionMs ?? exitus?.duratio
+  // Cost is billed against pod wall-time. Prefer an explicit billedMs when the
+  // cursor reports one (the dev fake), else the actum's inceptum→completum delta.
+  const billedMs = e.billedMs ?? durationMs
   const costUsd = e.costPerHr !== undefined
-    ? Number((e.costPerHr * (durationMs / 3_600_000)).toFixed(6))
+    ? Number((e.costPerHr * (billedMs / 3_600_000)).toFixed(6))
     : undefined
 
   return {

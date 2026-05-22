@@ -72,6 +72,9 @@ export class FakeRunPodClient implements RunPodClient {
     void params.onMetrics?.({
       provisionMs: step, sshReadyMs: step * 1.5, downloadMs, executionMs,
       modelsDownloaded: 4, modelsReused: 0, gpuType, podId, coldStart: true, costPerHr,
+      // A cold run really bills ~7 min of pod wall-time — surface that so the
+      // bulletin shows a believable spend instead of a few fake wall-clock seconds.
+      billedMs: 7 * 60_000,
     })
 
     if (params.webhook) {
