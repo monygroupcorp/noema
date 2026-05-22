@@ -22,6 +22,7 @@ const log = makeLogger('telegram:allocutio')
 const WARM_LADDER_MS    = [1_000, 5_000, 30_000, 60_000, 300_000, 600_000, 1_800_000]
 const WARM_LADDER_LABEL = ['1s', '5s', '30s', '1m', '5m', '10m', '30m']
 const WARM_DEFAULT_MS    = 60_000  // 1m
+const AUTO_SETTLE_MS     = 20_000  // confirm the warm window if untouched for this long
 
 // Delivery menu: a single morphing 3-button row. Default → Info/Rate/Wrench;
 // Rate → the fixed rating emojis; Wrench → Back/Tweak/Rerun.
@@ -336,6 +337,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     /** Cancel an in-flight actum — fails it (releases reserved signa). Returns true if it
      *  actually refunded (false if the actum was already terminal). Backs destroy/retry. */
     cancelActum?: (actumId: string, reason: string) => Promise<boolean>
+    /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
+    autoSettleMs?: number
   }
 
   // chatId lookup: platform:userId → chatId (set when first message arrives)
@@ -369,6 +372,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     ended: boolean                            // receipt state — pod gone, buttons stripped
     activity?: string                         // current in-flight stage phrase (cleared on complete)
     lastEditMs?: number                       // throttle in-flight edits (terminal edits bypass)
+    settleTimer?: ReturnType<typeof setTimeout> // auto-confirm the warm window if untouched
   }>()
 
   // actum progress tracking for cold-start UX
@@ -409,6 +413,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     terminatePod?: (podId: string) => Promise<void>
     acta?: { findById(id: string): Promise<Actum | null> }
     cancelActum?: (actumId: string, reason: string) => Promise<boolean>
+    /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
+    autoSettleMs?: number
   }) {
     this.deps = deps
     this.router = deps.router
@@ -1033,28 +1039,48 @@ Generate AI art, chat with models, explore creative tools.`
     ])
   }
 
+  /** "NVIDIA GeForce RTX 4090" → "RTX 4090"; drop vendor noise the user doesn't need. */
+  private _shortGpu(gpu?: string): string | undefined {
+    return gpu?.replace(/^NVIDIA\s+(GeForce\s+)?/i, '').trim() || undefined
+  }
+
+  /** Money: $X.XX, but "<$0.01" for a positive sub-cent so it never reads $0.00. */
+  private _money(usd: number): string {
+    if (usd > 0 && usd < 0.01) return '<$0.01'
+    return `$${usd.toFixed(2)}`
+  }
+
   private _renderBulletin(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>): string {
     const fmt = (sec: number) => sec >= 60 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${sec}s`
     const lines: string[] = []
-    const pod = b.podInfo
-    if (pod.gpuType || typeof pod.costPerHr === 'number' || pod.region) {
-      lines.push('🔒 ' + [pod.gpuType, pod.region, typeof pod.costPerHr === 'number' ? `$${pod.costPerHr.toFixed(2)}/hr` : undefined]
-        .filter(Boolean).join(' · '))
-    }
-    // In-flight activity (current stage) — shown only while a gen is running.
-    if (b.activity && !b.ended) lines.push(b.activity)
+
+    // 1. Spend-first session summary (only once there's something to total).
     if (b.genCount > 0) {
-      const totals = `${b.genCount} gen${b.genCount > 1 ? 's' : ''} · ${fmt(Math.round(b.totalDurationMs / 1000))}` +
-        (b.totalCostUsd > 0 ? ` · $${b.totalCostUsd.toFixed(2)}` : '')
-      lines.push(b.ended ? `Session receipt: ${totals}` : `Session: ${totals}`)
+      const spend = b.totalCostUsd > 0 ? `Spent ${this._money(b.totalCostUsd)} · ` : ''
+      const totals = `${b.genCount} gen${b.genCount > 1 ? 's' : ''} · ${fmt(Math.round(b.totalDurationMs / 1000))}`
+      lines.push(b.ended ? `Session receipt: ${spend}${totals}` : `${spend}${totals}`)
     }
-    if (b.ended) {
+
+    // 2. Pod identity — GPU + hourly rate. No location (confusing to the user).
+    const gpu = this._shortGpu(b.podInfo.gpuType)
+    const rate = typeof b.podInfo.costPerHr === 'number' ? `$${b.podInfo.costPerHr.toFixed(2)}/hr` : undefined
+    if (gpu || rate) {
+      const id = [gpu, rate].filter(Boolean).join(' · ')
+      lines.push(b.ended ? `${id} — shut down` : id)
+    } else if (b.ended) {
       lines.push('Pod shut down.')
-    } else {
-      const idx = Math.max(0, WARM_LADDER_MS.indexOf(b.warmTtlMs))
-      lines.push(b.confirmed
-        ? `Stays warm ${WARM_LADDER_LABEL[idx]} after each result.`
-        : `Set how long to keep the pod warm, then ✓.`)
+    }
+
+    // 3. In-flight activity, else the warm-window status / setup prompt.
+    if (!b.ended) {
+      if (b.activity) {
+        lines.push(b.activity)
+      } else {
+        const idx = Math.max(0, WARM_LADDER_MS.indexOf(b.warmTtlMs))
+        lines.push(b.confirmed
+          ? `Warm ${WARM_LADDER_LABEL[idx]} after each result.`
+          : `Set how long to keep the pod warm, then ✓.`)
+      }
     }
     return lines.join('\n') || 'Pod active.'
   }
@@ -1068,9 +1094,26 @@ Generate AI art, chat with models, explore creative tools.`
         confirmed: false, genCount: 0, totalDurationMs: 0, totalCostUsd: 0, ended: false,
       }
       this.bulletins.set(chatId, b)
+      this._armAutoSettle(chatId)  // start the no-interaction settle clock for setup
     }
     b.ended = false  // a new pod revives a receipted session
     if (podInfo) b.podInfo = { ...b.podInfo, ...podInfo }
+  }
+
+  /** Arm (or re-arm) the auto-settle clock: if the host doesn't touch the stepper
+   *  for AUTO_SETTLE_MS, confirm the currently-shown warm window automatically. */
+  private _armAutoSettle(chatId: number): void {
+    const b = this.bulletins.get(chatId)
+    if (!b || b.confirmed || b.ended) return
+    if (b.settleTimer) clearTimeout(b.settleTimer)
+    b.settleTimer = setTimeout(() => {
+      const cur = this.bulletins.get(chatId)
+      if (!cur || cur.confirmed || cur.ended) return
+      cur.confirmed = true
+      cur.settleTimer = undefined
+      void this._showBulletin(chatId)
+    }, this.deps.autoSettleMs ?? AUTO_SETTLE_MS)
+    b.settleTimer.unref?.()
   }
 
   /** Render + post/edit the bulletin. `renew` deletes the old message and re-posts
@@ -1123,17 +1166,20 @@ Generate AI art, chat with models, explore creative tools.`
         idx = action === 'inc' ? Math.min(WARM_LADDER_MS.length - 1, idx + 1) : Math.max(0, idx - 1)
         b.warmTtlMs = WARM_LADDER_MS[idx]
         if (b.podInfo.podId) void this._setPodWarmUntil(b.podInfo.podId, b.warmTtlMs)
+        this._armAutoSettle(chatId)  // touching the stepper resets the no-interaction clock
         await this._showBulletin(chatId)
         return
       }
       case 'confirm':
         if (!isHost) return
+        if (b.settleTimer) { clearTimeout(b.settleTimer); b.settleTimer = undefined }
         b.confirmed = true
         await this._showBulletin(chatId)
         return
       case 'time':  // host reopens the stepper to re-adjust the warm window
         if (!isHost) return
         b.confirmed = false
+        this._armAutoSettle(chatId)  // reopened → restart the settle clock
         await this._showBulletin(chatId)
         return
       case 'kill': {  // host shuts the pod down now → freeze to receipt
@@ -1147,6 +1193,7 @@ Generate AI art, chat with models, explore creative tools.`
           }
         }
         if (b.renewTimer) clearTimeout(b.renewTimer)
+        if (b.settleTimer) { clearTimeout(b.settleTimer); b.settleTimer = undefined }
         b.activity = undefined
         b.ended = true
         await this._showBulletin(chatId)
@@ -1212,6 +1259,7 @@ Generate AI art, chat with models, explore creative tools.`
     for (const b of this.bulletins.values()) {
       if (b.podInfo.podId === externusId && !b.ended) {
         if (b.renewTimer) clearTimeout(b.renewTimer)
+        if (b.settleTimer) { clearTimeout(b.settleTimer); b.settleTimer = undefined }
         b.activity = undefined
         b.ended = true
         void this._showBulletin(b.chatId)

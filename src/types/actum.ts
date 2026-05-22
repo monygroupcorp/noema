@@ -173,6 +173,12 @@ export interface ActumExecutio {
   coldStart?: boolean
   /** Pod hourly rate in USD, captured from RunPod at provision. Used to derive cost. */
   costPerHr?: number
+  /**
+   * Authoritative billed wall-time in ms, when the cursor knows it (e.g. the dev
+   * fake reporting a realistic pod lifetime). Cost derivation prefers this over
+   * the actum's inceptum→completum delta. Real clients leave it unset.
+   */
+  billedMs?: number
 }
 
 /** "Acta" — nominative plural of actum. A series of acts. */

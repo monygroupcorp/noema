@@ -228,7 +228,7 @@ function staleMsgUpdate(userId: number, chatId: number, text: string, pastSecond
 // =============================================================================
 // Helper: build TelegramAllocutio wired with router callbacks
 // =============================================================================
-function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean } = {}) {
+function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number } = {}) {
   const sender = makeSender()
   const identity = makeIdentity()
   const router = makeRouter()
@@ -253,6 +253,7 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
     sender,
     identity,
     botStartupTime: opts.botStartupTime,
+    ...(opts.autoSettleMs !== undefined ? { autoSettleMs: opts.autoSettleMs } : {}),
     acta,
     ...(opts.withPodControls ? {
       materiae: materiae as unknown as import('../../../src/types/materia.js').MateriaStore,
@@ -1157,4 +1158,43 @@ test('actum.complete tallies the gen into the bulletin totals', async () => {
   await new Promise(r => setImmediate(r))
   const txt = sender.edited.map(m => m.text).join('\n')
   assert.match(txt, /1 gen/, 'bulletin shows the session gen count')
+})
+
+test('bulletin renders spend-first, short GPU, no location, with price', async () => {
+  const { allocutio, router, sender } = makeAllocutio({ withPodControls: true })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  lockPod(allocutio, router, 'a1')
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'NVIDIA GeForce RTX 4090', region: 'EU-RO-1', costPerHr: 0.69 } })
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, coldStart: true, costUsd: 0.08, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
+  await new Promise(r => setImmediate(r))
+
+  const txt = [...sender.sent.map(s => s.text), ...sender.edited.map(e => e.text)].join('\n---\n')
+  assert.match(txt, /Spent \$0\.08 · 1 gen/, 'spend-first summary line')
+  assert.match(txt, /RTX 4090 · \$0\.69\/hr/, 'short GPU name + hourly rate')
+  assert.ok(!/EU-RO-1/.test(txt), 'location is dropped (confusing to the user)')
+  assert.ok(!/NVIDIA|GeForce/.test(txt), 'vendor noise is stripped from the GPU name')
+})
+
+test('warm window auto-settles (confirms) if the host does not interact', async () => {
+  const { allocutio, router, sender } = makeAllocutio({ withPodControls: true, autoSettleMs: 40 })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  lockPod(allocutio, router, 'a1')
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  await new Promise(r => setImmediate(r))
+
+  // Before the window lapses, the stepper (bul:confirm) is still offered.
+  const setup = [...sender.sent, ...sender.edited].at(-1)
+  const setupBtns = ((setup!.extra as { reply_markup: { inline_keyboard: Array<Array<{ callback_data: string }>> } }).reply_markup.inline_keyboard).flat().map(b => b.callback_data)
+  assert.ok(setupBtns.includes('bul:confirm'), 'setup shows the confirm button')
+
+  sender.edited.length = 0
+  await new Promise(r => setTimeout(r, 80))   // past the 40ms settle window
+
+  const settled = sender.edited.at(-1)
+  assert.ok(settled, 'auto-settle re-rendered the bulletin')
+  const btns = ((settled!.extra as { reply_markup: { inline_keyboard: Array<Array<{ callback_data: string }>> } }).reply_markup.inline_keyboard).flat().map(b => b.callback_data)
+  assert.ok(btns.includes('bul:kill') && !btns.includes('bul:confirm'), 'auto-settle flips to the confirmed control row')
 })
