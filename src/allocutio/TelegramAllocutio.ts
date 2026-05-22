@@ -1088,7 +1088,11 @@ Generate AI art, chat with models, explore creative tools.`
   /** Ensure a bulletin exists for the chat (created on the session's first pod). */
   private _ensureBulletin(chatId: number, hostUserId: string, podInfo?: StageInfo): void {
     let b = this.bulletins.get(chatId)
-    if (!b) {
+    // A receipted (ended) bulletin is final history — never reanimate it. Start a
+    // fresh bulletin (new message at the bottom) and leave the old receipt frozen.
+    if (!b || b.ended) {
+      if (b?.renewTimer) clearTimeout(b.renewTimer)
+      if (b?.settleTimer) clearTimeout(b.settleTimer)
       b = {
         chatId, hostUserId, messageId: null, podInfo: {}, warmTtlMs: WARM_DEFAULT_MS,
         confirmed: false, genCount: 0, totalDurationMs: 0, totalCostUsd: 0, ended: false,
@@ -1096,7 +1100,6 @@ Generate AI art, chat with models, explore creative tools.`
       this.bulletins.set(chatId, b)
       this._armAutoSettle(chatId)  // start the no-interaction settle clock for setup
     }
-    b.ended = false  // a new pod revives a receipted session
     if (podInfo) b.podInfo = { ...b.podInfo, ...podInfo }
   }
 
