@@ -5,7 +5,7 @@
 // compact callback_data strings back into PrimitiveEvents. No I/O, no class state —
 // kept out of the adapter so TelegramAllocutio is just orchestration.
 
-import type { Primitive, PrimitiveEvent } from '../flow/types.js'
+import type { Primitive, PrimitiveEvent } from '../../flow/types.js'
 
 // ── inline keyboard helpers ──────────────────────────────────────────────────
 

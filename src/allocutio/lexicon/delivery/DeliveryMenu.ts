@@ -1,4 +1,4 @@
-import type { Actum } from '../../types/actum.js'
+import type { Actum } from '../../../types/actum.js'
 import type { UiKeyboard } from '../ui/Keyboard.js'
 import { RATE_EMOJI, menuKeyboard, formatStats, type MenuState } from './DeliveryView.js'
 

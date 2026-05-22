@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { BulletinView, type BulletinSnapshot } from '../../../../src/allocutio/bulletin/BulletinView.js'
-import { WARM_DEFAULT_MS, type BulletinKeyboard } from '../../../../src/allocutio/bulletin/types.js'
+import { BulletinView, type BulletinSnapshot } from '../../../../src/allocutio/lexicon/bulletin/BulletinView.js'
+import { WARM_DEFAULT_MS, type BulletinKeyboard } from '../../../../src/allocutio/lexicon/bulletin/types.js'
 
 const base: BulletinSnapshot = {
   journal: [], live: null,

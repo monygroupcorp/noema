@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DeliveryMenu, type DeliverySink } from '../../../../src/allocutio/delivery/DeliveryMenu.js'
-import { menuKeyboard, formatStats } from '../../../../src/allocutio/delivery/DeliveryView.js'
-import type { UiKeyboard } from '../../../../src/allocutio/ui/Keyboard.js'
+import { DeliveryMenu, type DeliverySink } from '../../../../src/allocutio/lexicon/delivery/DeliveryMenu.js'
+import { menuKeyboard, formatStats } from '../../../../src/allocutio/lexicon/delivery/DeliveryView.js'
+import type { UiKeyboard } from '../../../../src/allocutio/lexicon/ui/Keyboard.js'
 import type { Actum } from '../../../../src/types/actum.js'
 
 function makeSink() {

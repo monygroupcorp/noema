@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { CommandRouter } from '../../../../src/allocutio/commands/CommandRouter.js'
+import { CommandRouter } from '../../../../src/allocutio/telegram/commands/CommandRouter.js'
 
 function make() {
   const calls: Record<string, unknown[]> = { enter: [], cancel: [], msg: [], start: [], ack: [] }

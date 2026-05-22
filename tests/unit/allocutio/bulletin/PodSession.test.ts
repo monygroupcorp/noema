@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { PodSession } from '../../../../src/allocutio/bulletin/PodSession.js'
+import { PodSession } from '../../../../src/allocutio/lexicon/bulletin/PodSession.js'
 
 test('cold lifecycle: silent hunt → Found → prep → ready, journal commits persist', () => {
   const s = new PodSession('host-1')

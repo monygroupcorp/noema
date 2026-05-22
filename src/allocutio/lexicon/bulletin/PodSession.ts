@@ -1,4 +1,4 @@
-import type { StageInfo } from '../../lib/bus.js'
+import type { StageInfo } from '../../../lib/bus.js'
 import { Ledger } from './Ledger.js'
 import type { BulletinSnapshot } from './BulletinView.js'
 import {

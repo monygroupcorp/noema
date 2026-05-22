@@ -1,4 +1,4 @@
-import type { StageInfo } from '../../lib/bus.js'
+import type { StageInfo } from '../../../lib/bus.js'
 import { PodSession } from './PodSession.js'
 import { BulletinView } from './BulletinView.js'
 import { TimerRegistry } from './TimerRegistry.js'

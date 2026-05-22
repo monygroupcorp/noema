@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { TelegramAllocutio } from '../../../src/allocutio/TelegramAllocutio.js'
+import { TelegramAllocutio } from '../../../src/allocutio/telegram/TelegramAllocutio.js'
 import { bus } from '../../../src/lib/bus.js'
 import type {
   FlowContext, Step, Resolution, PrimitiveEvent, Intent, Platform, AuctorKey
@@ -249,7 +249,7 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
   const acta = { async findById(_id: string) { return fakeActum as unknown as import('../../../src/types/actum.js').Actum } }
 
   const allocutio = new TelegramAllocutio({
-    router: router as unknown as import('../../../src/allocutio/TelegramAllocutio.js').RouterDeps,
+    router: router as unknown as import('../../../src/allocutio/telegram/TelegramAllocutio.js').RouterDeps,
     sender,
     identity,
     botStartupTime: opts.botStartupTime,
