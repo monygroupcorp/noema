@@ -529,9 +529,11 @@ test('Stream primitive with running status reacts 👌 on command message when c
 
   // Should NOT send a message — the reaction replaces the Stream card
   assert.equal(sender.sent.length, 0, 'Should not send a message when reacting with 👌')
-  // Should react with 👌 on the original command message
+  // The cold-start 👌 is deferred (~800ms) so a warm signal can preempt it with 🔥.
+  // No warm signal here → 👌 lands after the timer.
+  await new Promise(r => setTimeout(r, 900))
   const thumbsUp = sender.reactions.find(r => r.emoji === '👌' && r.messageId === 50)
-  assert.ok(thumbsUp, 'Should react 👌 on the original command message')
+  assert.ok(thumbsUp, 'Should react 👌 on the original command message (deferred)')
 })
 
 // 12. Stream primitive with status 'complete' → sends message with content
@@ -960,9 +962,11 @@ test('warm-pod-found stage reacts 🔥 on the command message', async () => {
   router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-w', status: 'running' }] })
   await new Promise(r => setImmediate(r))
   bus.emit('actum.stage', { actumId: 'actum-w', stage: 'warm-pod-found', elapsedMs: 0 })
-  // 🔥 is delayed ~1.2s so it lands after the command's 👌 (and dodges Telegram's reaction rate-limit).
-  await new Promise(r => setTimeout(r, 1400))
+  // warm-pod-found cancels the deferred 👌 and reacts 🔥 (~500ms). Wait past both the
+  // 🔥 delay and the 👌 deadline (800ms) to prove 👌 never fired.
+  await new Promise(r => setTimeout(r, 900))
   assert.ok(sender.reactions.some(r => r.emoji === '🔥' && r.messageId === 50), 'should react 🔥 for a warm pod')
+  assert.ok(!sender.reactions.some(r => r.emoji === '👌'), 'a warm run must never flash 👌')
 })
 
 test('progress:N/M stage does not create a standalone generating message', async () => {
@@ -1065,15 +1069,17 @@ test('warm signal arriving before registration still reacts 🔥 (not 👌)', as
   bus.emit('actum.stage', { actumId: 'actum-warm', stage: 'warm-pod-found', elapsedMs: 0, info: { podId: 'pod-9' } })
   await new Promise(r => setImmediate(r))
 
-  // Then the flow yields the Stream primitive → registration
+  // Then the flow yields the Stream primitive → registration. Because the warm
+  // signal already arrived (pendingWarm), registration goes straight to 🔥 and
+  // never schedules the deferred 👌.
   const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
   router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-warm', status: 'running' }] })
-  // 🔥 is delayed ~1.2s so it lands last (after the command's 👌).
-  await new Promise(r => setTimeout(r, 1400))
+  await new Promise(r => setTimeout(r, 900))
 
   // setMessageReaction replaces, so the LAST reaction on the command message wins.
   const last = sender.reactions.filter(r => r.messageId === 50).at(-1)
-  assert.equal(last?.emoji, '🔥', 'warm reuse should end on 🔥 (replacing the initial 👌)')
+  assert.equal(last?.emoji, '🔥', 'warm reuse should end on 🔥')
+  assert.ok(!sender.reactions.some(r => r.emoji === '👌'), 'a warm run must never flash 👌')
 })
 
 // =============================================================================

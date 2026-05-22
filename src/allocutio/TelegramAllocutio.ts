@@ -384,6 +384,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     podId?: string
     /** User-selected warm window (ms); applied to the pod's warmUntil at idle. */
     warmTtlMs: number
+    /** Pending speculative 👌 reaction — cancelled if a warm signal preempts it with 🔥. */
+    okTimer?: ReturnType<typeof setTimeout>
   }>()
 
   // Delivery-menu state per result, keyed by actumId — backs Info caption toggle
@@ -528,7 +530,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
           ? { modusId: defaultModusId, aditus: { prompt: promptText }, browsePageIndex: 0 }
           : { modusId: defaultModusId, aditus: {}, browsePageIndex: 0 }
         await this.router.enter('execute', 'telegram', userId, identity, { state: initialState })
-        if (messageId !== undefined) void this._react(chatId, messageId, '👌')
+        // No 👌 here: the "accepted" reaction is owned by the Stream registration
+        // (👌 for a cold start, 🔥 for a warm reuse) so a warm run never flashes 👌.
         break
       }
 
@@ -691,29 +694,34 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         const warmPending = primitive.actumId !== undefined && this.pendingWarm.has(primitive.actumId)
         const warmPodId = primitive.actumId !== undefined ? this.pendingWarm.get(primitive.actumId) : undefined
         if (primitive.actumId !== undefined) this.pendingWarm.delete(primitive.actumId)
-        if (commandMessageId !== undefined) {
-          // The command handler already reacted 👌 instantly. For a warm reuse, flip
-          // it to 🔥 — but delay so it reliably lands AFTER the 👌 (the two reactions
-          // race at the Telegram API and a too-fast second one gets rate-limited).
-          if (warmPending) {
-            const cmid = commandMessageId
-            setTimeout(() => void this._react(chatId, cmid, '🔥'), 1200).unref?.()
-          } else {
-            void this._react(chatId, commandMessageId, '👌')
-          }
-        } else {
+        if (commandMessageId === undefined) {
           await this.sender.sendMessage(chatId, '⏳ Working on it…')
+        } else if (warmPending) {
+          // Warm reuse already known — go straight to 🔥, never show 👌.
+          const cmid = commandMessageId
+          setTimeout(() => void this._react(chatId, cmid, '🔥'), 500).unref?.()
         }
-        // Register actum so stage events can send progress messages to this chat
+        // Register actum so stage events can drive the bulletin for this chat.
         if (primitive.actumId) {
-          this.actumProgress.set(primitive.actumId, {
+          const entry = {
             chatId,
             hostUserId: ctx.platformUserId,
             commandMessageId,
             isCold: false,
             podId: warmPodId,
             warmTtlMs: WARM_DEFAULT_MS,
-          })
+            okTimer: undefined as ReturnType<typeof setTimeout> | undefined,
+          }
+          this.actumProgress.set(primitive.actumId, entry)
+          // Defer the 👌 (cold-start ack): hold it briefly so a warm signal that
+          // arrives just after registration can cancel it (see warm-pod-found) and
+          // react 🔥 instead — a warm run must never flash 👌.
+          if (commandMessageId !== undefined && !warmPending) {
+            const cmid = commandMessageId
+            const t = setTimeout(() => void this._react(chatId, cmid, '👌'), 800)
+            t.unref?.()
+            entry.okTimer = t
+          }
           // A new command resets the bulletin's death-clock debounce (don't hop it
           // away mid-interaction) and keeps the session alive.
           this._scheduleBulletinRenewal(chatId)
@@ -935,10 +943,11 @@ Generate AI art, chat with models, explore creative tools.`
       const p = this.actumProgress.get(data.actumId)
       if (p) {
         if (data.info?.podId) p.podId = data.info.podId
-        // Delay so 🔥 lands after (and replaces) the command handler's instant 👌.
+        // Cancel the deferred 👌 — a warm run reacts 🔥 only, never 👌.
+        if (p.okTimer) { clearTimeout(p.okTimer); p.okTimer = undefined }
         if (p.commandMessageId !== undefined) {
           const { chatId: pc, commandMessageId: cm } = p
-          setTimeout(() => void this._react(pc, cm, '🔥'), 1200).unref?.()
+          setTimeout(() => void this._react(pc, cm, '🔥'), 500).unref?.()
         }
       } else {
         this.pendingWarm.set(data.actumId, data.info?.podId)
