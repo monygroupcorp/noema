@@ -1010,7 +1010,8 @@ test('warm-pod-found stage reacts 🔥 on the command message', async () => {
   router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-w', status: 'running' }] })
   await new Promise(r => setImmediate(r))
   bus.emit('actum.stage', { actumId: 'actum-w', stage: 'warm-pod-found', elapsedMs: 0 })
-  await new Promise(r => setImmediate(r))
+  // 🔥 is delayed ~1.2s so it lands after the command's 👌 (and dodges Telegram's reaction rate-limit).
+  await new Promise(r => setTimeout(r, 1400))
   assert.ok(sender.reactions.some(r => r.emoji === '🔥' && r.messageId === 50), 'should react 🔥 for a warm pod')
 })
 
@@ -1157,7 +1158,8 @@ test('warm signal arriving before registration still reacts 🔥 (not 👌)', as
   // Then the flow yields the Stream primitive → registration
   const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
   router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-warm', status: 'running' }] })
-  await new Promise(r => setImmediate(r))
+  // 🔥 is delayed ~1.2s so it lands last (after the command's 👌).
+  await new Promise(r => setTimeout(r, 1400))
 
   // setMessageReaction replaces, so the LAST reaction on the command message wins.
   const last = sender.reactions.filter(r => r.messageId === 50).at(-1)

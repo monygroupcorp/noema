@@ -710,9 +710,16 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         const warmPending = primitive.actumId !== undefined && this.pendingWarm.has(primitive.actumId)
         const warmPodId = primitive.actumId !== undefined ? this.pendingWarm.get(primitive.actumId) : undefined
         if (primitive.actumId !== undefined) this.pendingWarm.delete(primitive.actumId)
-        log.info('stream register', { actumId: primitive.actumId, warmPending, commandMessageId, pendingKeys: [...this.pendingWarm.keys()] })
         if (commandMessageId !== undefined) {
-          void this._react(chatId, commandMessageId, warmPending ? '🔥' : '👌')
+          // The command handler already reacted 👌 instantly. For a warm reuse, flip
+          // it to 🔥 — but delay so it reliably lands AFTER the 👌 (the two reactions
+          // race at the Telegram API and a too-fast second one gets rate-limited).
+          if (warmPending) {
+            const cmid = commandMessageId
+            setTimeout(() => void this._react(chatId, cmid, '🔥'), 1200).unref?.()
+          } else {
+            void this._react(chatId, commandMessageId, '👌')
+          }
         } else {
           await this.sender.sendMessage(chatId, '⏳ Working on it…')
         }
@@ -944,10 +951,13 @@ Generate AI art, chat with models, explore creative tools.`
     // requiring a progress entry: react 🔥 if we can, else stash so registration does.
     if (data.stage === 'warm-pod-found') {
       const p = this.actumProgress.get(data.actumId)
-      log.info('warm signal received', { actumId: data.actumId, hasProgress: !!p, podId: data.info?.podId })
       if (p) {
         if (data.info?.podId) p.podId = data.info.podId
-        if (p.commandMessageId !== undefined) void this._react(p.chatId, p.commandMessageId, '🔥')
+        // Delay so 🔥 lands after (and replaces) the command handler's instant 👌.
+        if (p.commandMessageId !== undefined) {
+          const { chatId: pc, commandMessageId: cm } = p
+          setTimeout(() => void this._react(pc, cm, '🔥'), 1200).unref?.()
+        }
       } else {
         this.pendingWarm.set(data.actumId, data.info?.podId)
       }
