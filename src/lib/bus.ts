@@ -11,6 +11,10 @@ export interface StageInfo {
   etaMs?:     number
   /** Pod id, carried at lock-in so the UI can control the pod (warm window / destroy). */
   podId?:     string
+  /** Authoritative duration (ms) of the phase that just completed (hunt at pod-locked,
+   *  prep at comfy-ready). Lets the UI show a real "in 30s" / "4.5m" summary; falls
+   *  back to the UI's own wall-clock when absent. */
+  phaseMs?:   number
 }
 
 // Typed event map — extended in Phase 2 with actum lifecycle events

@@ -29,6 +29,10 @@ const COLD_TYPICAL_MS    = 7 * 60_000  // ~7m
 // Typical warm-reuse compute window — used to estimate the marginal cost of the
 // next gen ("next gen ~$X") so the cost-averaging nudge has a number.
 const WARM_TYPICAL_SEC   = 25
+// Narrate the struggle only when there's struggle: surface the hunt line if the
+// pod search drags past this, and annotate the download if prep runs long.
+const HUNT_SLOW_MS       = 12_000
+const DL_SLOW_MS         = 90_000
 
 // Delivery menu: a single morphing 3-button row. Default → Info/Rate/Wrench;
 // Rate → the fixed rating emojis; Wrench → Back/Tweak/Rerun.
@@ -373,11 +377,18 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     confirmed: boolean                        // setup (stepper+✓) vs confirmed (refresh/time/kill)
     genCount: number
     totalDurationMs: number
+    totalExecMs: number                       // sum of per-gen execution time → exec average
     totalCostUsd: number
     renewTimer?: ReturnType<typeof setTimeout>
     ended: boolean                            // receipt state — pod gone, buttons stripped
-    activity?: string                         // current in-flight stage phrase (cleared on complete)
-    lastShownActivity?: string                // last activity text actually rendered (dedupe repeats)
+    // The bulletin is a journal: committed phase-summary lines that persist
+    // (hunt result, bail metas, prep result) plus one volatile "live" line.
+    journal: string[]                         // committed infra-story lines (kept in order)
+    live?: string                             // current in-flight working line
+    phaseStartMs?: number                     // wall-clock start of the current phase (hunt/prep)
+    podCount: number                          // pods tried this session (for "Quit pod N")
+    slowTimer?: ReturnType<typeof setTimeout>  // fires if the hunt drags → "taking longer than usual"
+    lastShown?: string                        // last full text rendered (dedupe repeats)
     lastEditMs?: number                       // throttle identical in-flight edits
     settleTimer?: ReturnType<typeof setTimeout> // auto-confirm the warm window if untouched
   }>()
@@ -984,65 +995,120 @@ Generate AI art, chat with models, explore creative tools.`
     }
     if (data.info?.podId) progress.podId = data.info.podId
 
-    // The session bulletin is the sole live HUD: there is no separate per-actum
-    // progress message. Every stage updates the bulletin's transient activity
-    // line (created on the first stage so cold-start provisioning shows at once).
+    // The bulletin is the sole live HUD: a journal of committed infra-story lines
+    // (hunt result, bail metas, prep result) plus one volatile "live" line.
     this._ensureBulletin(chatId, progress.hostUserId, progress.podInfo)
     const b = this.bulletins.get(chatId)
     if (!b) return
-    b.activity = this._activityLine(data.stage, data.info, data.elapsedMs, progress.isCold)
-
-    // Render on every meaningful change (a new activity phrase, or pod lock-in),
-    // but throttle identical repeats to ~1/3s so heartbeat events don't 429 us.
-    const now = Date.now()
-    const isLockIn = !!(data.info && (data.info.gpuType || typeof data.info.costPerHr === 'number' || data.info.podId))
-    const changed = b.activity !== b.lastShownActivity
-    if (isLockIn || changed || b.lastEditMs === undefined || now - b.lastEditMs >= 3000) {
-      b.lastEditMs = now
-      b.lastShownActivity = b.activity
-      void this._showBulletin(chatId)
-    }
+    this._advanceJournal(b, data.stage, data.info)
+    void this._showBulletin(chatId)        // _showBulletin dedupes identical text
     this._scheduleBulletinRenewal(chatId)
   }
 
   /**
-   * The concierge voice for line 3. Dry & competent: the provider is the fickle
-   * variable, never us. The cold-start arc reads like a guide fishing a moody sea —
-   * the bite (pod-locked), the race (downloading vs typical), cutting a bad pod
-   * loose (bail), and a luck verdict once it boots.
+   * Advance the bulletin journal for a stage. Committed lines persist; the live
+   * line is volatile. Dry & competent voice: the provider is the fickle variable,
+   * never us. The hunt narrates only when it drags (else it's silent and just
+   * commits a "Found …" line); a bail erases the current hunt line and records a
+   * permanent meta line before re-hunting.
    */
-  private _activityLine(stage: string, info?: StageInfo, elapsedMs = 0, isCold = false): string {
-    const fmt = (sec: number) => sec >= 60 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${sec}s`
-    const elapsed = fmt(Math.round(elapsedMs / 1000))
+  private _advanceJournal(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>, stage: string, info?: StageInfo): void {
+    const now = Date.now()
+    if (stage === 'provisioning') {
+      b.podCount += 1
+      b.phaseStartMs = now
+      b.live = undefined          // hunt is quiet unless it drags (see slow timer)
+      this._armSlowHunt(b)
+      return
+    }
+    if (stage === 'pod-locked') {
+      if (b.slowTimer) { clearTimeout(b.slowTimer); b.slowTimer = undefined }
+      b.journal.push(this._huntLine(b, info, now))
+      b.phaseStartMs = now        // prep phase starts
+      b.live = 'Initializing…'
+      return
+    }
+    if (stage === 'ssh-ready' || stage === 'bootstrapping') { b.live = 'Initializing…'; return }
+    if (stage.startsWith('downloading')) {
+      const slow = b.phaseStartMs !== undefined && now - b.phaseStartMs > DL_SLOW_MS
+      const tail = slow ? ' — taking longer than usual' : ''
+      if (stage.startsWith('downloading:')) {
+        const [n, m] = stage.slice(12).split('/').map(Number)
+        b.live = `Connected, downloading models (${n}/${m})…${tail}`
+      } else {
+        b.live = `Connected, downloading models…${tail}`
+      }
+      return
+    }
+    if (stage === 'installing-nodes') { b.live = 'Loading plugins…'; return }
+    if (stage === 'restarting')       { b.live = 'Reloading the pod…'; return }
+    if (stage === 'pod-bailed')       { this._bail(b); return }
+    if (stage === 'comfy-ready') {
+      b.journal.push(this._prepLine(b, info, now))
+      b.live = 'Generating…'
+      return
+    }
+    if (stage === 'inferring') { b.live = 'Generating…'; return }
+    if (stage === 'uploading') { b.live = 'Saving your result…'; return }
+    // unknown stage — keep the current live line
+  }
 
-    if (stage.startsWith('downloading:')) {
-      // The race: how are we doing against the typical cold start?
-      const [n, m] = stage.slice(12).split('/').map(Number)
-      return `Loading models (${n}/${m}) · ${elapsed} in, usually ~${fmt(COLD_TYPICAL_MS / 1000)}.`
-    }
-    if (stage === 'comfy-ready' && isCold) {
-      // Boot verdict — the luck payoff, judged against the typical cold start.
-      const ratio = COLD_TYPICAL_MS > 0 ? elapsedMs / COLD_TYPICAL_MS : 1
-      const verdict = ratio < 0.7 ? 'faster than usual.'
-        : ratio <= 1.1 ? 'about typical.'
-        : 'slow side today. Make it count.'
-      return `Booted in ${elapsed} — ${verdict}`
-    }
+  /** If the hunt drags past the threshold, surface it (provider-blame, not ours). */
+  private _armSlowHunt(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>): void {
+    if (b.slowTimer) clearTimeout(b.slowTimer)
+    b.slowTimer = setTimeout(() => {
+      const cur = this.bulletins.get(b.chatId)
+      if (!cur || cur.ended) return
+      cur.live = 'Hunting for an open GPU — providers are slammed. Hang tight.'
+      void this._showBulletin(cur.chatId)
+    }, HUNT_SLOW_MS)
+    b.slowTimer.unref?.()
+  }
 
-    const lines: Record<string, string> = {
-      'provisioning':     'Hunting for an open GPU — providers are slammed. Hang tight.',
-      'pod-locked':       "Got one. Let's see how it runs.",
-      'ssh-ready':        'Setting up the pod…',
-      'bootstrapping':    'Setting up the pod…',
-      'downloading':      'Loading models…',
-      'installing-nodes': 'Loading plugins…',
-      'restarting':       'Reloading the pod…',
-      'pod-bailed':       "This pod's dragging — grabbing a fresh one.",
-      'comfy-ready':      'Making your image now.',
-      'inferring':        'Making your image now.',
-      'uploading':        'Saving your result…',
+  /** Committed hunt summary, e.g. "Found RTX 4090 for $0.69/hr in 30s". */
+  private _huntLine(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>, info: StageInfo | undefined, now: number): string {
+    const gpu = this._shortGpu(b.podInfo.gpuType)
+    const rate = typeof b.podInfo.costPerHr === 'number' ? `$${b.podInfo.costPerHr.toFixed(2)}/hr` : undefined
+    const ms = info?.phaseMs ?? (b.phaseStartMs ? now - b.phaseStartMs : 0)
+    const who = gpu ? (rate ? `${gpu} for ${rate}` : gpu) : 'a pod'
+    return `Found ${who} in ${this._fmtDur(ms)}`
+  }
+
+  /** Committed prep summary, e.g. "Prepared Make Setup in 4.5m (30% < avg)". */
+  private _prepLine(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>, info: StageInfo | undefined, now: number): string {
+    const ms = info?.phaseMs ?? (b.phaseStartMs ? now - b.phaseStartMs : 0)
+    const ratio = COLD_TYPICAL_MS > 0 ? ms / COLD_TYPICAL_MS : 1
+    const pct = Math.round((ratio - 1) * 100)
+    const cmp = pct > 0 ? `${pct}% > avg` : pct < 0 ? `${-pct}% < avg` : '~avg'
+    return `Prepared Make Setup in ${this._fmtDur(ms)} (${cmp})`
+  }
+
+  /** Cut a sluggish pod loose: erase its hunt line, record a permanent meta line. */
+  private _bail(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>): void {
+    for (let i = b.journal.length - 1; i >= 0; i--) {
+      if (b.journal[i].startsWith('Found ')) { b.journal.splice(i, 1); break }
     }
-    return lines[stage] ?? `Working… (${stage})`
+    b.journal.push(`Quit pod ${b.podCount} for download throttle`)
+    if (b.slowTimer) { clearTimeout(b.slowTimer); b.slowTimer = undefined }
+    b.live = undefined            // re-hunt silently; the next provisioning re-arms
+    b.phaseStartMs = undefined
+  }
+
+  /** Compact duration: "30s" under a minute, "4.5m" above. */
+  private _fmtDur(ms: number): string {
+    const sec = Math.max(0, Math.round(ms / 1000))
+    return sec < 60 ? `${sec}s` : `${(sec / 60).toFixed(1)}m`
+  }
+
+  /** The execution stat line: "5 gens · exec ~13s avg · $0.012 ea · $0.09 total". */
+  private _statLine(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>): string {
+    const segs = [`${b.genCount} gen${b.genCount > 1 ? 's' : ''}`]
+    if (b.totalExecMs > 0) segs.push(`exec ~${this._fmtDur(b.totalExecMs / b.genCount)} avg`)
+    if (b.totalCostUsd > 0) {
+      segs.push(`${this._moneyFine(b.totalCostUsd / b.genCount)} ea`)
+      segs.push(`${this._money(b.totalCostUsd)} total`)
+    }
+    return segs.join(' · ')
   }
 
   // -------------------------------------------------------------------------
@@ -1085,43 +1151,33 @@ Generate AI art, chat with models, explore creative tools.`
   private _renderBulletin(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>): string {
     const lines: string[] = []
 
-    // 1. Spend/value — leads with spend, but the per-gen average is the star: it
-    //    falls with each warm gen, making the cost-averaging story self-evident.
+    // 1. The journal — committed infra-story lines (hunt result, bail metas, prep
+    //    result). These persist; GPU + rate live inside the "Found …" line.
+    for (const j of b.journal) lines.push(j)
+
+    // 2. Execution stats — appears once a gen has completed; the per-gen average
+    //    falls with each warm gen (the cost-averaging story made self-evident).
     if (b.genCount > 0) {
-      const segs: string[] = []
-      if (b.totalCostUsd > 0) segs.push(`Spent ${this._money(b.totalCostUsd)}`)
-      segs.push(`${b.genCount} gen${b.genCount > 1 ? 's' : ''}`)
-      if (b.totalCostUsd > 0) segs.push(`${this._moneyFine(b.totalCostUsd / b.genCount)} each`)
-      lines.push((b.ended ? 'Session receipt: ' : '') + segs.join(' · '))
+      lines.push((b.ended ? 'Session receipt · ' : '') + this._statLine(b))
     }
 
-    // 2. Pod identity — GPU + hourly rate. No location (confusing to the user).
-    const gpu = this._shortGpu(b.podInfo.gpuType)
-    const rate = typeof b.podInfo.costPerHr === 'number' ? `$${b.podInfo.costPerHr.toFixed(2)}/hr` : undefined
-    if (gpu || rate) {
-      const id = [gpu, rate].filter(Boolean).join(' · ')
-      lines.push(b.ended ? `${id} — shut down` : id)
-    } else if (b.ended) {
-      lines.push('Pod shut down.')
-    }
-
-    // 3. In-flight activity, else the warm-window status / setup prompt.
+    // 3. The live line (in-flight), else the resting warm nudge / setup prompt.
     if (!b.ended) {
-      if (b.activity) {
-        lines.push(b.activity)
+      if (b.live) {
+        lines.push(b.live)
+      } else if (!b.confirmed) {
+        lines.push('Set how long to keep the pod warm, then ✓.')
       } else {
         const idx = Math.max(0, WARM_LADDER_MS.indexOf(b.warmTtlMs))
-        if (!b.confirmed) {
-          lines.push('Set how long to keep the pod warm, then ✓.')
-        } else {
-          // Cost-averaging nudge: the pod's warm, so the next gen is nearly free —
-          // keep cooking to drive the per-gen average down.
-          const marginal = typeof b.podInfo.costPerHr === 'number'
-            ? ` · next gen ~${this._moneyFine(b.podInfo.costPerHr * WARM_TYPICAL_SEC / 3600)}`
-            : ''
-          lines.push(`Warm ${WARM_LADDER_LABEL[idx]}${marginal} — keep cooking.`)
-        }
+        const marginal = typeof b.podInfo.costPerHr === 'number'
+          ? ` · next gen ~${this._moneyFine(b.podInfo.costPerHr * WARM_TYPICAL_SEC / 3600)}`
+          : ''
+        lines.push(`Warm ${WARM_LADDER_LABEL[idx]}${marginal} — keep cooking.`)
       }
+    } else if (b.genCount === 0) {
+      // Receipt for a session that closed before any gen — the stat line (which
+      // carries "Session receipt · …") never rendered, so signal closure here.
+      lines.push('Pod shut down.')
     }
     return lines.join('\n') || 'Pod active.'
   }
@@ -1134,9 +1190,11 @@ Generate AI art, chat with models, explore creative tools.`
     if (!b || b.ended) {
       if (b?.renewTimer) clearTimeout(b.renewTimer)
       if (b?.settleTimer) clearTimeout(b.settleTimer)
+      if (b?.slowTimer) clearTimeout(b.slowTimer)
       b = {
         chatId, hostUserId, messageId: null, podInfo: {}, warmTtlMs: WARM_DEFAULT_MS,
-        confirmed: false, genCount: 0, totalDurationMs: 0, totalCostUsd: 0, ended: false,
+        confirmed: false, genCount: 0, totalDurationMs: 0, totalExecMs: 0, totalCostUsd: 0,
+        ended: false, journal: [], podCount: 0,
       }
       this.bulletins.set(chatId, b)
       this._armAutoSettle(chatId)  // start the no-interaction settle clock for setup
@@ -1167,7 +1225,11 @@ Generate AI art, chat with models, explore creative tools.`
     if (!b) return
     const text = this._renderBulletin(b)
     const keyboard = this._bulletinKeyboard(b)
+    // Dedupe on text AND keyboard — a confirm/settle flips only the buttons.
+    const sig = text + ' ' + JSON.stringify(keyboard)
     if (b.messageId !== null && !opts.renew) {
+      if (sig === b.lastShown) return   // skip no-op edits (heartbeats etc.)
+      b.lastShown = sig
       await this.sender.editMessageText(chatId, b.messageId, text, { reply_markup: keyboard }).catch(() => {})
       return
     }
@@ -1175,6 +1237,7 @@ Generate AI art, chat with models, explore creative tools.`
     try {
       const msg = await this.sender.sendMessage(chatId, text, { reply_markup: keyboard })
       b.messageId = msg.message_id
+      b.lastShown = sig
       if (old !== null) void this.sender.deleteMessage?.(chatId, old).catch(() => {})
     } catch { /* non-critical */ }
   }
@@ -1238,7 +1301,8 @@ Generate AI art, chat with models, explore creative tools.`
         }
         if (b.renewTimer) clearTimeout(b.renewTimer)
         if (b.settleTimer) { clearTimeout(b.settleTimer); b.settleTimer = undefined }
-        b.activity = undefined
+        if (b.slowTimer) { clearTimeout(b.slowTimer); b.slowTimer = undefined }
+        b.live = undefined
         b.ended = true
         await this._showBulletin(chatId)
         return
@@ -1270,9 +1334,11 @@ Generate AI art, chat with models, explore creative tools.`
     const b = this.bulletins.get(progress.chatId)
     const warmTtlMs = b?.warmTtlMs ?? progress.warmTtlMs
     if (b) {
-      b.activity = undefined  // gen done — clear the in-flight line
+      b.live = undefined  // gen done — clear the in-flight line; the stat line rests
+      if (b.slowTimer) { clearTimeout(b.slowTimer); b.slowTimer = undefined }
       b.genCount += 1
       b.totalDurationMs += wide.durationMs
+      if (typeof wide.executionMs === 'number') b.totalExecMs += wide.executionMs
       if (typeof wide.costUsd === 'number') b.totalCostUsd += wide.costUsd
       void this._showBulletin(progress.chatId)
       this._scheduleBulletinRenewal(progress.chatId)
@@ -1291,7 +1357,8 @@ Generate AI art, chat with models, explore creative tools.`
     if (progress) {
       const b = this.bulletins.get(progress.chatId)
       if (b) {
-        b.activity = undefined
+        b.live = undefined
+        if (b.slowTimer) { clearTimeout(b.slowTimer); b.slowTimer = undefined }
         void this._showBulletin(progress.chatId)
       }
     }
@@ -1304,7 +1371,8 @@ Generate AI art, chat with models, explore creative tools.`
       if (b.podInfo.podId === externusId && !b.ended) {
         if (b.renewTimer) clearTimeout(b.renewTimer)
         if (b.settleTimer) { clearTimeout(b.settleTimer); b.settleTimer = undefined }
-        b.activity = undefined
+        if (b.slowTimer) { clearTimeout(b.slowTimer); b.slowTimer = undefined }
+        b.live = undefined
         b.ended = true
         void this._showBulletin(b.chatId)
       }
