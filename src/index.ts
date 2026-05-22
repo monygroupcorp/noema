@@ -33,6 +33,7 @@ import { referralSplitHook } from './ledger/hooks/referralSplit.js'
 import { sessionSpendHook } from './ledger/hooks/sessionSpend.js'
 import { spellRoyaltyHook } from './ledger/hooks/spellRoyalty.js'
 import { SecurePodClient, makeSecurePodSshFactory, type R2Config } from './crystal/SecurePodClient.js'
+import { FakeRunPodClient } from './crystal/FakeRunPodClient.js'
 import { terminatePod, listRunPodPods } from './crystal/terminatePod.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
 import { startIdleReaper } from './crystal/idleReaper.js'
@@ -222,7 +223,12 @@ async function main(): Promise<void> {
     return { hash, input: spec }
   }
 
-  const runpodClient = RUNPOD_API_KEY ? makeSecureRunPodClient(materiae) : undefined
+  // DEV_FAKE_POD: simulate the whole pod lifecycle locally (no real GPU, $0) so the
+  // Telegram UX can be iterated for free. Falls back to the real SECURE cursor otherwise.
+  const runpodClient = process.env.DEV_FAKE_POD
+    ? new FakeRunPodClient()
+    : (RUNPOD_API_KEY ? makeSecureRunPodClient(materiae) : undefined)
+  if (process.env.DEV_FAKE_POD) log.warn('DEV_FAKE_POD active — pods are simulated, no real GPU will be provisioned')
 
   const podTerminator = RUNPOD_API_KEY
     ? (podId: string) => terminatePod(RUNPOD_API_KEY!, podId)
