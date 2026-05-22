@@ -17,7 +17,17 @@
 set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-[ -f .env.fake ] && { set -a; . ./.env.fake; set +a; }
+# Safe line-by-line parser — raw `source` mangles values like a Mongo SRV URI
+# (the `&` in ?retryWrites=true&w=majority is read as a shell background operator).
+if [ -f .env.fake ]; then
+  while IFS='=' read -r key value; do
+    key="$(echo "$key" | xargs)"
+    value="$(echo "$value" | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")"
+    [[ -z "$key" || "$key" =~ ^# ]] && continue
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    [ -z "${!key+x}" ] && export "$key"="$value"   # inline env wins over file
+  done < <(grep -v '^\s*#' .env.fake | grep '=')
+fi
 
 : "${BOT_TOKEN:?set BOT_TOKEN (use a TEST bot, not prod) in .env.fake}"
 : "${MONGODB_URI:?set MONGODB_URI (local or scratch DB) in .env.fake}"
