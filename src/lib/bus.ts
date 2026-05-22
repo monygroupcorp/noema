@@ -15,6 +15,8 @@ export interface StageInfo {
    *  prep at comfy-ready). Lets the UI show a real "in 30s" / "4.5m" summary; falls
    *  back to the UI's own wall-clock when absent. */
   phaseMs?:   number
+  /** Why a pod was cut loose, carried on a `pod-bailed` stage (e.g. "download throttle"). */
+  bailReason?: string
 }
 
 // Typed event map — extended in Phase 2 with actum lifecycle events
