@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ReactionController } from '../../../../src/allocutio/reactions/ReactionController.js'
+import { ReactionController } from '../../../../src/allocutio/telegram/reactions/ReactionController.js'
 
 function make() {
   const reactions: Array<{ messageId: number; emoji: string }> = []

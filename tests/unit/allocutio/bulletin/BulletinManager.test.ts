@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { BulletinManager, type BulletinSink } from '../../../../src/allocutio/bulletin/BulletinManager.js'
-import type { BulletinKeyboard } from '../../../../src/allocutio/bulletin/types.js'
+import { BulletinManager, type BulletinSink } from '../../../../src/allocutio/lexicon/bulletin/BulletinManager.js'
+import type { BulletinKeyboard } from '../../../../src/allocutio/lexicon/bulletin/types.js'
 
 function makeSink() {
   const posts: Array<{ chatId: number; text: string; kb: BulletinKeyboard }> = []

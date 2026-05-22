@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Ledger } from '../../../../src/allocutio/bulletin/Ledger.js'
+import { Ledger } from '../../../../src/allocutio/lexicon/bulletin/Ledger.js'
 
 test('empty ledger has no gens and zeroed summary', () => {
   const l = new Ledger()

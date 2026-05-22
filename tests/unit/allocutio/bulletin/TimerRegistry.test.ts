@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { TimerRegistry } from '../../../../src/allocutio/bulletin/TimerRegistry.js'
+import { TimerRegistry } from '../../../../src/allocutio/lexicon/bulletin/TimerRegistry.js'
 
 const tick = (ms: number) => new Promise(r => setTimeout(r, ms))
 

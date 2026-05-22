@@ -1,4 +1,4 @@
-import type { Actum } from '../../types/actum.js'
+import type { Actum } from '../../../types/actum.js'
 import type { UiKeyboard } from '../ui/Keyboard.js'
 
 /** Rating glyphs — the fixed set the delivery row offers. */

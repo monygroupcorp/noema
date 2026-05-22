@@ -5,7 +5,7 @@
 // the sender it writes through, the identity resolver, and the slice of FlowRouter
 // it uses. Kept separate so the adapter file is implementation, not declarations.
 
-import type { Intent, Platform, AuctorKey, PrimitiveEvent, FlowContext, Step, Resolution } from '../flow/types.js'
+import type { Intent, Platform, AuctorKey, PrimitiveEvent, FlowContext, Step, Resolution } from '../../flow/types.js'
 
 /** Minimal typing of the Telegram webhook Update objects we consume. */
 export interface TelegramUpdate {
