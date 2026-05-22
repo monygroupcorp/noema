@@ -17,6 +17,7 @@ import type { Actum } from '../types/actum.js'
 import { classifyError } from '../lib/classifyError.js'
 import { BulletinManager, type BulletinSink } from './bulletin/BulletinManager.js'
 import { DeliveryMenu, type DeliverySink } from './delivery/DeliveryMenu.js'
+import { ReactionController } from './reactions/ReactionController.js'
 import type { UiKeyboard } from './ui/Keyboard.js'
 
 const log = makeLogger('telegram:allocutio')
@@ -318,23 +319,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // last command message: platform:userId → messageId of the most recent command message
   private readonly lastCommandMessageIds = new Map<string, number>()
 
-  // Warm signal that arrived before the actum was registered: actumId → podId.
-  // Drained when the Stream primitive registers, so warm reuse reacts 🔥 not 👌.
-  private readonly pendingWarm = new Map<string, string | undefined>()
-
-  // The session bulletin (the flagship HUD) lives in its own subsystem now; this
-  // adapter only feeds it lifecycle events and renders for it (see _bulletinSink).
+  // The session bulletin (HUD), the delivery menu, and the command-message reaction
+  // choreography each live in their own subsystem now; this adapter just feeds them.
   private readonly bulletins: BulletinManager
   private readonly delivery: DeliveryMenu
-
-  // Per-actum reaction bookkeeping: just enough to drive the 👌/🔥 reaction on the
-  // command message (the bulletin owns everything else).
-  private readonly actumProgress = new Map<string, {
-    chatId: number
-    commandMessageId?: number
-    /** Pending speculative 👌 reaction — cancelled if a warm signal preempts it with 🔥. */
-    okTimer?: ReturnType<typeof setTimeout>
-  }>()
+  private readonly reactions: ReactionController
 
   constructor(deps: {
     router: RouterDeps
@@ -371,6 +360,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       acta: deps.acta,
       rerun: (actumId, presserUserId, chatId) => this._rerun(actumId, presserUserId, chatId),
     })
+
+    // The 👌/🔥 reaction choreography on the command message.
+    this.reactions = new ReactionController({ react: (c, m, e) => this._react(c, m, e) })
 
     // Wire router callbacks
     this.router.onStep((ctx, step) => { void this._handleStep(ctx, step) })
@@ -701,37 +693,12 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         continue
       }
 
-      // Stream(running) → react 👌 (or 🔥 if a warm signal already arrived) and register actum
+      // Stream(running) → register the actum with the reaction + bulletin subsystems.
       if (primitive.kind === 'Stream' && primitive.status === 'running') {
         const commandMessageId = this.lastCommandMessageIds.get(userKey)
-        // A warm signal may have raced ahead of registration — drain it here.
-        const warmPending = primitive.actumId !== undefined && this.pendingWarm.has(primitive.actumId)
-        const warmPodId = primitive.actumId !== undefined ? this.pendingWarm.get(primitive.actumId) : undefined
-        if (primitive.actumId !== undefined) this.pendingWarm.delete(primitive.actumId)
-        if (commandMessageId === undefined) {
-          await this.sender.sendMessage(chatId, '⏳ Working on it…')
-        } else if (warmPending) {
-          // Warm reuse already known — go straight to 🔥, never show 👌.
-          const cmid = commandMessageId
-          setTimeout(() => void this._react(chatId, cmid, '🔥'), 500).unref?.()
-        }
-        // Register the actum: the bulletin manager owns the HUD; we keep only the
-        // reaction bookkeeping (the deferred 👌 / 🔥 on the command message).
+        if (commandMessageId === undefined) await this.sender.sendMessage(chatId, '⏳ Working on it…')
         if (primitive.actumId) {
-          void warmPodId  // pod id is the bulletin's concern now
-          const entry: { chatId: number; commandMessageId?: number; okTimer?: ReturnType<typeof setTimeout> } = {
-            chatId, commandMessageId,
-          }
-          this.actumProgress.set(primitive.actumId, entry)
-          // Defer the 👌 (cold-start ack): hold it briefly so a warm signal that
-          // arrives just after registration can cancel it (see warm-pod-found) and
-          // react 🔥 instead — a warm run must never flash 👌.
-          if (commandMessageId !== undefined && !warmPending) {
-            const cmid = commandMessageId
-            const t = setTimeout(() => void this._react(chatId, cmid, '👌'), 800)
-            t.unref?.()
-            entry.okTimer = t
-          }
+          this.reactions.register(primitive.actumId, chatId, commandMessageId)
           this.bulletins.register(chatId, primitive.actumId, ctx.platformUserId)
         }
         editMessageId = undefined
@@ -842,27 +809,12 @@ Generate AI art, chat with models, explore creative tools.`
   }
 
   // -------------------------------------------------------------------------
-  // _handleActumStage — bus event → send or edit cold-start progress message
+  // Pod lifecycle → reaction choreography + bulletin journal
   // -------------------------------------------------------------------------
 
   private async _handleActumStage(data: { actumId: string; stage: string; elapsedMs: number; info?: StageInfo }): Promise<void> {
-    // Warm signal can arrive BEFORE the actum is registered (WarmPodClient emits it
-    // inside submit, before the flow yields the Stream primitive). Handle it without
-    // requiring a progress entry: react 🔥 if we can, else stash so registration does.
-    if (data.stage === 'warm-pod-found') {
-      const p = this.actumProgress.get(data.actumId)
-      if (p) {
-        // Cancel the deferred 👌 — a warm run reacts 🔥 only, never 👌.
-        if (p.okTimer) { clearTimeout(p.okTimer); p.okTimer = undefined }
-        if (p.commandMessageId !== undefined) {
-          const { chatId: pc, commandMessageId: cm } = p
-          setTimeout(() => void this._react(pc, cm, '🔥'), 500).unref?.()
-        }
-      } else {
-        this.pendingWarm.set(data.actumId, data.info?.podId)
-      }
-      return
-    }
+    // Warm signal (may arrive before OR after the Stream registers) → 🔥, never 👌.
+    if (data.stage === 'warm-pod-found') { this.reactions.noteWarm(data.actumId); return }
 
     // KSampler progress (progress:N/M) is suppressed — it never keeps up with fast
     // jobs and burns edit quota. Every other stage drives the bulletin journal.
@@ -871,18 +823,12 @@ Generate AI art, chat with models, explore creative tools.`
   }
 
   private async _handleActumComplete(wide: WideEvent): Promise<void> {
-    // Reaction cleanup — the deferred 👌 is moot once the gen is done.
-    const progress = this.actumProgress.get(wide.actumId)
-    if (progress?.okTimer) clearTimeout(progress.okTimer)
-    this.actumProgress.delete(wide.actumId)
-    // The bulletin records the gen and applies the chosen warm window to the pod.
+    this.reactions.clear(wide.actumId)
     this.bulletins.onComplete(wide.actumId, { costUsd: wide.costUsd, execMs: wide.executionMs, podId: wide.podId })
   }
 
   private async _handleActumFail(wide: WideEvent): Promise<void> {
-    const progress = this.actumProgress.get(wide.actumId)
-    if (progress?.okTimer) clearTimeout(progress.okTimer)
-    this.actumProgress.delete(wide.actumId)
+    this.reactions.clear(wide.actumId)
     this.bulletins.onFail(wide.actumId)
   }
 
