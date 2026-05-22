@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.10.6](https://github.com/monygroupcorp/noema/compare/v4.10.5...v4.10.6) (2026-05-22)
+
+
+### Bug Fixes
+
+* **training:** use hf CLI for uploads + never terminate unpersisted model ([06430f5](https://github.com/monygroupcorp/noema/commit/06430f57f4a3d2b42710810ff8c8a86dbdfec8d9))
+
 ## [4.10.5](https://github.com/monygroupcorp/noema/compare/v4.10.4...v4.10.5) (2026-05-22)
 
 
