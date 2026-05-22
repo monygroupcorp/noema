@@ -15,6 +15,9 @@ export function makeTelegramSender(tg: Telegram): TelegramSender {
     editMessageReplyMarkup: (chatId, messageId, reply_markup) =>
       tg.editMessageReplyMarkup(chatId, messageId, undefined, reply_markup as never).then(() => {}),
 
+    deleteMessage: (chatId, messageId) =>
+      tg.deleteMessage(chatId, messageId).then(() => {}),
+
     answerCallbackQuery: (id) =>
       tg.answerCbQuery(id).then(() => {}),
 
