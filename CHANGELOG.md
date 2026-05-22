@@ -1,5 +1,41 @@
 # Changelog
 
+## [4.10.5](https://github.com/monygroupcorp/noema/compare/v4.10.4...v4.10.5) (2026-05-22)
+
+
+### Bug Fixes
+
+* **agents:** add agent card federation endpoints ([0c7eaf5](https://github.com/monygroupcorp/noema/commit/0c7eaf510d576b4bc1569b6365363506f9e1c62a))
+* **agents:** add agent session manifest and revoke endpoints ([accb2e1](https://github.com/monygroupcorp/noema/commit/accb2e16a96d72a4a342333293cb0aa287a661b2))
+* **agents:** add agentCardFetcher with 5-min cache ([0fa905b](https://github.com/monygroupcorp/noema/commit/0fa905bf5a531320141e5be0910faf59bda51fb8))
+* **agents:** add CAMEL agent provisioning endpoint ([82d7f1c](https://github.com/monygroupcorp/noema/commit/82d7f1cbb0468cd3b49982e34b0d5caf74a4c21b))
+* **agents:** add CamelJwtVerifier ES256 JWT verification utility ([2651932](https://github.com/monygroupcorp/noema/commit/2651932ce186dc546404b79cf57d33a286c945c0))
+* **agents:** add Step 10 management endpoints (topup, payout-policy, earnings, donate) ([2ecc8f1](https://github.com/monygroupcorp/noema/commit/2ecc8f1b2e156e4322866a20132faa7e713d30d8))
+* **agents:** add Step 11 faucet cron — agentFaucetWorker + FaucetDripsDB ([5c19d7e](https://github.com/monygroupcorp/noema/commit/5c19d7e3cf688ecd7bca5c106a67c969cf215802))
+* **agents:** add treasury admin API endpoints ([38150b5](https://github.com/monygroupcorp/noema/commit/38150b5404b82dbf74f5f6531caa8517586798cd))
+* **agents:** add TreasuryDB and AgentAccountDB data models ([d33007a](https://github.com/monygroupcorp/noema/commit/d33007a87a8d7ba0eb82e3f7db811284f46c7b4c))
+* **agents:** address final review — CamelJwtVerifier bootstrap, donate economy credit, env slug ([0a1cbf4](https://github.com/monygroupcorp/noema/commit/0a1cbf436be740d12b3334f6ff1bf5503a108559))
+* **agents:** address Step 1 review: ensureIndexes wiring, ownerAddress normalization, setStatus method ([fc01e57](https://github.com/monygroupcorp/noema/commit/fc01e57ffac8dbe584adca01c8a7bb753187645d))
+* **agents:** address Step 10 review — donate partial-failure, payout-policy auth note, earnings query ([b180802](https://github.com/monygroupcorp/noema/commit/b180802df546f150de038ccbe57fa81e1ebb9876))
+* **agents:** address Step 11 review — monthlyMax guard, score clamping, error stage separation ([7babbd0](https://github.com/monygroupcorp/noema/commit/7babbd0a32f06e2150f48f9f376ed32394c30ff0))
+* **agents:** address Step 2 review: iss enforcement, concurrent JWKS fetch, TTL default ([2c8a14a](https://github.com/monygroupcorp/noema/commit/2c8a14a9538820495ef78c3b9fa45fe7b5b69c09))
+* **agents:** address Step 4 review: cache entry consistency, concurrent failure test ([07b02be](https://github.com/monygroupcorp/noema/commit/07b02be1b3282cd94cc48e7479d7c432047c6262))
+* **agents:** address Step 5 review: atomic debit, optional treasuryId, agent count, policy validation ([1ad4ce9](https://github.com/monygroupcorp/noema/commit/1ad4ce92d42ee5e45ccb6668792fd4d9647e44a2))
+* **agents:** address Step 6 review: setStatus safety, session callback client, injectable card fetcher ([307c647](https://github.com/monygroupcorp/noema/commit/307c647751fd13d9f00c87e15e80cf1fe7c6186f))
+* **agents:** address Steps 7+9 review: manifest status, partnerId schema, atomicUsdcToUsd ([4083006](https://github.com/monygroupcorp/noema/commit/40830067e122c1ef4888a077115008a9e0ee8acd))
+* **agents:** extract agentSessionCallback and agentUtils from provisioning endpoint ([406a3c1](https://github.com/monygroupcorp/noema/commit/406a3c1861bc119ebff976d7fde2b4d7d71a0007))
+* **agents:** Fix 12 — align faucet cap window with cadence, not calendar month ([412b6fd](https://github.com/monygroupcorp/noema/commit/412b6fd83b371fb48d075505f6b207772c3929b5))
+* **agents:** Fix 4-11 — perCycleBudget, skipped drips, JWKS rotation, 501 earnings, topup creditPoints ([6a3010c](https://github.com/monygroupcorp/noema/commit/6a3010ce3e59b182862f150acba590d2a4f38581))
+* **agents:** implement earnings + recentUsage via splitLedger.findByAgentId ([632848b](https://github.com/monygroupcorp/noema/commit/632848b691b267df4bad1793cc7601f67bdffde2))
+* **agents:** Round 2 hardening — donate, delegation tests, spendingCap removal, 19 audit fixes ([f8c5eda](https://github.com/monygroupcorp/noema/commit/f8c5eda13f30188e6856e712dcbc9795ea11dc7e))
+* **agents:** store agentChainId+agentAdapter from JWT sub for adapter-owned NFT ownership ([b0ae3b0](https://github.com/monygroupcorp/noema/commit/b0ae3b0dc2b4546d69973ac854b0a946bcba1f1d))
+* **agents:** wire agentJwtVerifier+economyService; per-treasury workspace; suspended retry ([bb3a736](https://github.com/monygroupcorp/noema/commit/bb3a7369f00280ec6b31dcf8feaa618a0f39bfb6))
+* **camel:** perCycleBudget backward-compat + hardening test coverage ([d33fae5](https://github.com/monygroupcorp/noema/commit/d33fae5931bd6ef4a8a1bac776952a52f0e7b6f0))
+* external generations /execute uses getToolById (getTool was undefined) ([40ac602](https://github.com/monygroupcorp/noema/commit/40ac602e53317f44377de2667d3d7792bb1f8d26))
+* **partner:** add run status polling endpoint and castId tracking ([91c096b](https://github.com/monygroupcorp/noema/commit/91c096b7df7196ec414af08dff045378ee62849e))
+* **partner:** factor ComfyUI Deploy webhook progress into run status ([9969502](https://github.com/monygroupcorp/noema/commit/996950264bc0d8fcfbf955ae26155517c98fe5b4))
+* **partner:** weight run progress by historical step duration ([d8ddadd](https://github.com/monygroupcorp/noema/commit/d8ddaddd79dcf28696fe739fc259adaa60343ebe))
+
 ## [4.10.4](https://github.com/monygroupcorp/noema/compare/v4.10.3...v4.10.4) (2026-05-18)
 
 
