@@ -113,10 +113,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     // The slash-command surface → flow router.
     this.commands = new CommandRouter({
-      enterExecute: async (userId, state) => {
-        const identity = await this.identity.resolve(userId)
-        await this.router.enter('execute', 'telegram', userId, identity, state ? { state } : undefined)
-      },
+      enterExecute: (userId, state) => this._enterExecute(userId, state),
       cancel: (userId) => this.router.clear('telegram', userId),
       sendMessage: (chatId, text, extra) => this.sender.sendMessage(chatId, text, extra),
       sendStart: (chatId) => this._sendStart(chatId),
@@ -171,6 +168,13 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   }
 
   /** Re-run an actum under the presser (presser pays), prefilled with its modus + params. */
+  /** Enter the execute flow for a user, optionally prefilled — the single path used by
+   *  slash commands and start-screen shortcuts alike. */
+  private async _enterExecute(userId: string, state?: Record<string, unknown>): Promise<void> {
+    const identity = await this.identity.resolve(userId)
+    await this.router.enter('execute', 'telegram', userId, identity, state ? { state } : undefined)
+  }
+
   private async _rerun(actumId: string, presserUserId: string, chatId: number): Promise<void> {
     this.chatIds.set(`telegram:${presserUserId}`, chatId)
     const actum = await this.deps.acta?.findById(actumId).catch(() => null)
@@ -328,18 +332,14 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       this.pendingEditMessageIds.set(`telegram:${userId}`, query.message.message_id)
     }
 
-    // Start-screen shortcut buttons — launch flows directly
+    // Start-screen shortcut buttons — launch flows directly (same path as commands).
     if (event.kind === 'select') {
       if (event.selectedId === 'make' || event.selectedId === 'flows') {
-        const identity = await this.identity.resolve(userId)
-        await this.router.enter('execute', 'telegram', userId, identity)
+        await this._enterExecute(userId)
         return
       }
       if (event.selectedId === 'chat') {
-        const identity = await this.identity.resolve(userId)
-        await this.router.enter('execute', 'telegram', userId, identity, {
-          state: { modusId: 'modus.chatgpt', aditus: {}, browsePageIndex: 0 },
-        })
+        await this._enterExecute(userId, { modusId: 'modus.chatgpt', aditus: {}, browsePageIndex: 0 })
         return
       }
     }
