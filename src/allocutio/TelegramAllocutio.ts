@@ -15,24 +15,10 @@ import type { WideEvent } from '../lib/wide.js'
 import type { MateriaStore } from '../types/materia.js'
 import type { Actum } from '../types/actum.js'
 import { classifyError } from '../lib/classifyError.js'
+import { BulletinManager, type BulletinSink } from './bulletin/BulletinManager.js'
+import type { BulletinKeyboard } from './bulletin/types.js'
 
 const log = makeLogger('telegram:allocutio')
-
-// Warm-window ladder for the per-pod stepper buttons. < steps toward 1s, > toward 30m.
-const WARM_LADDER_MS    = [1_000, 5_000, 30_000, 60_000, 300_000, 600_000, 1_800_000]
-const WARM_LADDER_LABEL = ['1s', '5s', '30s', '1m', '5m', '10m', '30m']
-const WARM_DEFAULT_MS    = 60_000  // 1m
-const AUTO_SETTLE_MS     = 20_000  // confirm the warm window if untouched for this long
-// Typical cold-start (provision + model download) — the baseline the "luck" verdict
-// races against. Hardcoded for now; later a rolling average from wide_events.
-const COLD_TYPICAL_MS    = 7 * 60_000  // ~7m
-// Typical warm-reuse compute window — used to estimate the marginal cost of the
-// next gen ("next gen ~$X") so the cost-averaging nudge has a number.
-const WARM_TYPICAL_SEC   = 25
-// Narrate the struggle only when there's struggle: surface the hunt line if the
-// pod search drags past this, and annotate the download if prep runs long.
-const HUNT_SLOW_MS       = 12_000
-const DL_SLOW_MS         = 90_000
 
 // Delivery menu: a single morphing 3-button row. Default → Info/Rate/Wrench;
 // Rate → the fixed rating emojis; Wrench → Back/Tweak/Rerun.
@@ -364,48 +350,15 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // Drained when the Stream primitive registers, so warm reuse reacts 🔥 not 👌.
   private readonly pendingWarm = new Map<string, string | undefined>()
 
-  // Session bulletin — one per conversation (keyed by chatId). The flagship HUD:
-  // shows the active pod + session totals, carries the warm/kill controls, and
-  // self-renews to the bottom of the chat so its buttons stay fresh. Freezes into
-  // a receipt when the session's pod is gone.
-  private readonly bulletins = new Map<number, {
-    chatId: number
-    hostUserId: string                       // who spawned the session — scopes kill/time
-    messageId: number | null
-    podInfo: StageInfo                        // GPU / region / $hr of the current pod
-    warmTtlMs: number
-    confirmed: boolean                        // setup (stepper+✓) vs confirmed (refresh/time/kill)
-    genCount: number
-    totalDurationMs: number
-    totalExecMs: number                       // sum of per-gen execution time → exec average
-    totalCostUsd: number
-    renewTimer?: ReturnType<typeof setTimeout>
-    ended: boolean                            // receipt state — pod gone, buttons stripped
-    // The bulletin is a journal: committed phase-summary lines that persist
-    // (hunt result, bail metas, prep result) plus one volatile "live" line.
-    journal: string[]                         // committed infra-story lines (kept in order)
-    live?: string                             // current in-flight working line
-    phaseStartMs?: number                     // wall-clock start of the current phase (hunt/prep)
-    podCount: number                          // pods tried this session (for "Quit pod N")
-    slowTimer?: ReturnType<typeof setTimeout>  // fires if the hunt drags → "taking longer than usual"
-    lastShown?: string                        // last full text rendered (dedupe repeats)
-    lastEditMs?: number                       // throttle identical in-flight edits
-    settleTimer?: ReturnType<typeof setTimeout> // auto-confirm the warm window if untouched
-  }>()
+  // The session bulletin (the flagship HUD) lives in its own subsystem now; this
+  // adapter only feeds it lifecycle events and renders for it (see _bulletinSink).
+  private readonly bulletins: BulletinManager
 
-  // actum progress tracking for cold-start UX
+  // Per-actum reaction bookkeeping: just enough to drive the 👌/🔥 reaction on the
+  // command message (the bulletin owns everything else).
   private readonly actumProgress = new Map<string, {
     chatId: number
-    hostUserId: string                        // who spawned this actum — becomes the bulletin host
-    commandMessageId: number | undefined
-    isCold: boolean
-    // Pod details captured at lock-in, retained so every later stage update keeps
-    // showing GPU/region/price instead of replacing it.
-    podInfo?: StageInfo
-    /** RunPod pod id (from lock-in) — target for warm-window / destroy buttons. */
-    podId?: string
-    /** User-selected warm window (ms); applied to the pod's warmUntil at idle. */
-    warmTtlMs: number
+    commandMessageId?: number
     /** Pending speculative 👌 reaction — cancelled if a warm signal preempts it with 🔥. */
     okTimer?: ReturnType<typeof setTimeout>
   }>()
@@ -439,16 +392,50 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     this.sender = deps.sender
     this.identity = deps.identity
 
+    // The bulletin subsystem: it owns the journal/ledger/timers/render; we give it a
+    // sink (how to put messages on Telegram) and the pod-control deps it needs.
+    this.bulletins = new BulletinManager({
+      sink: this._bulletinSink(),
+      terminatePod: deps.terminatePod,
+      cancelActum: deps.cancelActum,
+      setPodWarmUntil: (podId, ttlMs) => this._setPodWarmUntil(podId, ttlMs),
+      autoSettleMs: deps.autoSettleMs,
+    })
+
     // Wire router callbacks
     this.router.onStep((ctx, step) => { void this._handleStep(ctx, step) })
     this.router.onResolution((ctx, resolution) => { void this._handleResolution(ctx, resolution) })
 
-    // Wire bus events for pod lifecycle → Telegram progress messages
+    // Pod lifecycle → bulletin manager (+ the local reaction bookkeeping).
     bus.on('actum.stage', (data) => { void this._handleActumStage(data) })
     bus.on('actum.complete', (wide) => { void this._handleActumComplete(wide) })
     bus.on('actum.fail', (wide) => { void this._handleActumFail(wide) })
-    // A warm pod reaped by the idle reaper → freeze its session bulletin to a receipt.
-    bus.on('pod.reaped', ({ externusId }) => { this._handlePodReaped(externusId) })
+    bus.on('pod.reaped', ({ externusId }) => { this.bulletins.onReaped(externusId) })
+  }
+
+  /** How the bulletin manager puts messages on Telegram (BulletinSink). */
+  private _bulletinSink(): BulletinSink {
+    const toInline = (kb: BulletinKeyboard) => inlineKeyboard(kb.map(row => row.map(b => btn(b.label, b.data))))
+    return {
+      post: async (chatId, text, kb) => {
+        try {
+          const msg = await this.sender.sendMessage(chatId, text, { reply_markup: toInline(kb) })
+          return msg.message_id
+        } catch { return null }
+      },
+      edit: async (chatId, messageId, text, kb) => {
+        await this.sender.editMessageText(chatId, messageId, text, { reply_markup: toInline(kb) }).catch(() => {})
+      },
+      remove: async (chatId, messageId) => { void this.sender.deleteMessage?.(chatId, messageId).catch(() => {}) },
+    }
+  }
+
+  /** Resolve a pod's Materia and stamp its warm deadline (backs the warm-window buttons). */
+  private async _setPodWarmUntil(podId: string, ttlMs: number): Promise<void> {
+    if (!this.deps.materiae) return
+    const pods = await this.deps.materiae.findActive().catch(() => [])
+    const m = pods.find(p => p.externusId === podId)
+    if (m) await this.deps.materiae.update(m.id, { warmUntil: new Date(Date.now() + ttlMs) }).catch(() => {})
   }
 
   // -------------------------------------------------------------------------
@@ -639,7 +626,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     // Session bulletin — warm stepper / confirm / refresh / time / kill
     if (query.data.startsWith('bul:') && chatId) {
-      await this._handleBulletin(query, chatId)
+      const action = query.data.split(':')[1] ?? ''
+      await this.bulletins.handleControl(chatId, String(query.from.id), action)
       return
     }
 
@@ -725,16 +713,12 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
           const cmid = commandMessageId
           setTimeout(() => void this._react(chatId, cmid, '🔥'), 500).unref?.()
         }
-        // Register actum so stage events can drive the bulletin for this chat.
+        // Register the actum: the bulletin manager owns the HUD; we keep only the
+        // reaction bookkeeping (the deferred 👌 / 🔥 on the command message).
         if (primitive.actumId) {
-          const entry = {
-            chatId,
-            hostUserId: ctx.platformUserId,
-            commandMessageId,
-            isCold: false,
-            podId: warmPodId,
-            warmTtlMs: WARM_DEFAULT_MS,
-            okTimer: undefined as ReturnType<typeof setTimeout> | undefined,
+          void warmPodId  // pod id is the bulletin's concern now
+          const entry: { chatId: number; commandMessageId?: number; okTimer?: ReturnType<typeof setTimeout> } = {
+            chatId, commandMessageId,
           }
           this.actumProgress.set(primitive.actumId, entry)
           // Defer the 👌 (cold-start ack): hold it briefly so a warm signal that
@@ -746,9 +730,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
             t.unref?.()
             entry.okTimer = t
           }
-          // A new command resets the bulletin's death-clock debounce (don't hop it
-          // away mid-interaction) and keeps the session alive.
-          this._scheduleBulletinRenewal(chatId)
+          this.bulletins.register(chatId, primitive.actumId, ctx.platformUserId)
         }
         editMessageId = undefined
         continue
@@ -966,7 +948,6 @@ Generate AI art, chat with models, explore creative tools.`
     if (data.stage === 'warm-pod-found') {
       const p = this.actumProgress.get(data.actumId)
       if (p) {
-        if (data.info?.podId) p.podId = data.info.podId
         // Cancel the deferred 👌 — a warm run reacts 🔥 only, never 👌.
         if (p.okTimer) { clearTimeout(p.okTimer); p.okTimer = undefined }
         if (p.commandMessageId !== undefined) {
@@ -979,404 +960,26 @@ Generate AI art, chat with models, explore creative tools.`
       return
     }
 
-    const progress = this.actumProgress.get(data.actumId)
-    if (!progress) return
-
-    const { chatId } = progress
-
-    // The KSampler progress bar (progress:N/M) is suppressed: it never keeps up
-    // with fast (esp. warm) jobs and burns Telegram edit quota for ~zero value.
+    // KSampler progress (progress:N/M) is suppressed — it never keeps up with fast
+    // jobs and burns edit quota. Every other stage drives the bulletin journal.
     if (data.stage.startsWith('progress:')) return
-
-    if (data.stage === 'provisioning') progress.isCold = true
-    // Capture pod details at lock-in and keep them for every subsequent update.
-    if (data.info?.gpuType || data.info?.region || typeof data.info?.costPerHr === 'number') {
-      progress.podInfo = { ...progress.podInfo, ...data.info }
-    }
-    if (data.info?.podId) progress.podId = data.info.podId
-
-    // The bulletin is the sole live HUD: a journal of committed infra-story lines
-    // (hunt result, bail metas, prep result) plus one volatile "live" line.
-    this._ensureBulletin(chatId, progress.hostUserId, progress.podInfo)
-    const b = this.bulletins.get(chatId)
-    if (!b) return
-    this._advanceJournal(b, data.stage, data.info)
-    void this._showBulletin(chatId)        // _showBulletin dedupes identical text
-    this._scheduleBulletinRenewal(chatId)
+    this.bulletins.onStage(data.actumId, data.stage, data.info)
   }
-
-  /**
-   * Advance the bulletin journal for a stage. Committed lines persist; the live
-   * line is volatile. Dry & competent voice: the provider is the fickle variable,
-   * never us. The hunt narrates only when it drags (else it's silent and just
-   * commits a "Found …" line); a bail erases the current hunt line and records a
-   * permanent meta line before re-hunting.
-   */
-  private _advanceJournal(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>, stage: string, info?: StageInfo): void {
-    const now = Date.now()
-    if (stage === 'provisioning') {
-      b.podCount += 1
-      b.phaseStartMs = now
-      b.live = undefined          // hunt is quiet unless it drags (see slow timer)
-      this._armSlowHunt(b)
-      return
-    }
-    if (stage === 'pod-locked') {
-      if (b.slowTimer) { clearTimeout(b.slowTimer); b.slowTimer = undefined }
-      b.journal.push(this._huntLine(b, info, now))
-      b.phaseStartMs = now        // prep phase starts
-      b.live = 'Initializing…'
-      return
-    }
-    if (stage === 'ssh-ready' || stage === 'bootstrapping') { b.live = 'Initializing…'; return }
-    if (stage.startsWith('downloading')) {
-      const slow = b.phaseStartMs !== undefined && now - b.phaseStartMs > DL_SLOW_MS
-      const tail = slow ? ' — taking longer than usual' : ''
-      if (stage.startsWith('downloading:')) {
-        const [n, m] = stage.slice(12).split('/').map(Number)
-        b.live = `Connected, downloading models (${n}/${m})…${tail}`
-      } else {
-        b.live = `Connected, downloading models…${tail}`
-      }
-      return
-    }
-    if (stage === 'installing-nodes') { b.live = 'Loading plugins…'; return }
-    if (stage === 'restarting')       { b.live = 'Reloading the pod…'; return }
-    if (stage === 'pod-bailed')       { this._bail(b); return }
-    if (stage === 'comfy-ready') {
-      b.journal.push(this._prepLine(b, info, now))
-      b.live = 'Generating…'
-      return
-    }
-    if (stage === 'inferring') { b.live = 'Generating…'; return }
-    if (stage === 'uploading') { b.live = 'Saving your result…'; return }
-    // unknown stage — keep the current live line
-  }
-
-  /** If the hunt drags past the threshold, surface it (provider-blame, not ours). */
-  private _armSlowHunt(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>): void {
-    if (b.slowTimer) clearTimeout(b.slowTimer)
-    b.slowTimer = setTimeout(() => {
-      const cur = this.bulletins.get(b.chatId)
-      if (!cur || cur.ended) return
-      cur.live = 'Hunting for an open GPU — providers are slammed. Hang tight.'
-      void this._showBulletin(cur.chatId)
-    }, HUNT_SLOW_MS)
-    b.slowTimer.unref?.()
-  }
-
-  /** Committed hunt summary, e.g. "Found RTX 4090 for $0.69/hr in 30s". */
-  private _huntLine(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>, info: StageInfo | undefined, now: number): string {
-    const gpu = this._shortGpu(b.podInfo.gpuType)
-    const rate = typeof b.podInfo.costPerHr === 'number' ? `$${b.podInfo.costPerHr.toFixed(2)}/hr` : undefined
-    const ms = info?.phaseMs ?? (b.phaseStartMs ? now - b.phaseStartMs : 0)
-    const who = gpu ? (rate ? `${gpu} for ${rate}` : gpu) : 'a pod'
-    return `Found ${who} in ${this._fmtDur(ms)}`
-  }
-
-  /** Committed prep summary, e.g. "Prepared Make Setup in 4.5m (30% < avg)". */
-  private _prepLine(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>, info: StageInfo | undefined, now: number): string {
-    const ms = info?.phaseMs ?? (b.phaseStartMs ? now - b.phaseStartMs : 0)
-    const ratio = COLD_TYPICAL_MS > 0 ? ms / COLD_TYPICAL_MS : 1
-    const pct = Math.round((ratio - 1) * 100)
-    const cmp = pct > 0 ? `${pct}% > avg` : pct < 0 ? `${-pct}% < avg` : '~avg'
-    return `Prepared Make Setup in ${this._fmtDur(ms)} (${cmp})`
-  }
-
-  /** Cut a sluggish pod loose: erase its hunt line, record a permanent meta line. */
-  private _bail(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>): void {
-    for (let i = b.journal.length - 1; i >= 0; i--) {
-      if (b.journal[i].startsWith('Found ')) { b.journal.splice(i, 1); break }
-    }
-    b.journal.push(`Quit pod ${b.podCount} for download throttle`)
-    if (b.slowTimer) { clearTimeout(b.slowTimer); b.slowTimer = undefined }
-    b.live = undefined            // re-hunt silently; the next provisioning re-arms
-    b.phaseStartMs = undefined
-  }
-
-  /** Compact duration: "30s" under a minute, "4.5m" above. */
-  private _fmtDur(ms: number): string {
-    const sec = Math.max(0, Math.round(ms / 1000))
-    return sec < 60 ? `${sec}s` : `${(sec / 60).toFixed(1)}m`
-  }
-
-  /** The execution stat line: "5 gens · exec ~13s avg · $0.012 ea · $0.09 total". */
-  private _statLine(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>): string {
-    const segs = [`${b.genCount} gen${b.genCount > 1 ? 's' : ''}`]
-    if (b.totalExecMs > 0) segs.push(`exec ~${this._fmtDur(b.totalExecMs / b.genCount)} avg`)
-    if (b.totalCostUsd > 0) {
-      segs.push(`${this._moneyFine(b.totalCostUsd / b.genCount)} ea`)
-      segs.push(`${this._money(b.totalCostUsd)} total`)
-    }
-    return segs.join(' · ')
-  }
-
-  // -------------------------------------------------------------------------
-  // Session bulletin — the per-conversation HUD (controls + totals + receipt)
-  // -------------------------------------------------------------------------
-
-  private _bulletinKeyboard(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>): unknown {
-    if (b.ended) return inlineKeyboard([])  // receipt — nothing to control
-    if (!b.confirmed) {
-      let idx = WARM_LADDER_MS.indexOf(b.warmTtlMs)
-      if (idx < 0) idx = WARM_LADDER_MS.indexOf(WARM_DEFAULT_MS)
-      return inlineKeyboard([
-        [ btn('⏱ ‹', 'bul:dec'), btn(`warm: ${WARM_LADDER_LABEL[idx]}`, 'bul:noop'), btn('› ⏱', 'bul:inc') ],
-        [ btn('✓', 'bul:confirm') ],
-      ])
-    }
-    // Confirmed: ⟳ refresh (public) · ⏱ time (host) · ✕ kill (host)
-    return inlineKeyboard([
-      [ btn('⟳', 'bul:refresh'), btn('⏱', 'bul:time'), btn('✕', 'bul:kill') ],
-    ])
-  }
-
-  /** "NVIDIA GeForce RTX 4090" → "RTX 4090"; drop vendor noise the user doesn't need. */
-  private _shortGpu(gpu?: string): string | undefined {
-    return gpu?.replace(/^NVIDIA\s+(GeForce\s+)?/i, '').trim() || undefined
-  }
-
-  /** Money: $X.XX, but "<$0.01" for a positive sub-cent so it never reads $0.00. */
-  private _money(usd: number): string {
-    if (usd > 0 && usd < 0.01) return '<$0.01'
-    return `$${usd.toFixed(2)}`
-  }
-
-  /** Finer money for per-gen figures, where sub-cent precision tells the averaging story. */
-  private _moneyFine(usd: number): string {
-    if (usd <= 0) return '$0.00'
-    return `$${usd.toFixed(usd < 0.1 ? 3 : 2)}`
-  }
-
-  private _renderBulletin(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>): string {
-    const lines: string[] = []
-
-    // 1. The journal — committed infra-story lines (hunt result, bail metas, prep
-    //    result). These persist; GPU + rate live inside the "Found …" line.
-    for (const j of b.journal) lines.push(j)
-
-    // 2. Execution stats — appears once a gen has completed; the per-gen average
-    //    falls with each warm gen (the cost-averaging story made self-evident).
-    if (b.genCount > 0) {
-      lines.push((b.ended ? 'Session receipt · ' : '') + this._statLine(b))
-    }
-
-    // 3. The live line (in-flight), else the resting warm nudge / setup prompt.
-    if (!b.ended) {
-      if (b.live) {
-        lines.push(b.live)
-      } else if (!b.confirmed) {
-        lines.push('Set how long to keep the pod warm, then ✓.')
-      } else {
-        const idx = Math.max(0, WARM_LADDER_MS.indexOf(b.warmTtlMs))
-        const marginal = typeof b.podInfo.costPerHr === 'number'
-          ? ` · next gen ~${this._moneyFine(b.podInfo.costPerHr * WARM_TYPICAL_SEC / 3600)}`
-          : ''
-        lines.push(`Warm ${WARM_LADDER_LABEL[idx]}${marginal} — keep cooking.`)
-      }
-    } else if (b.genCount === 0) {
-      // Receipt for a session that closed before any gen — the stat line (which
-      // carries "Session receipt · …") never rendered, so signal closure here.
-      lines.push('Pod shut down.')
-    }
-    return lines.join('\n') || 'Pod active.'
-  }
-
-  /** Ensure a bulletin exists for the chat (created on the session's first pod). */
-  private _ensureBulletin(chatId: number, hostUserId: string, podInfo?: StageInfo): void {
-    let b = this.bulletins.get(chatId)
-    // A receipted (ended) bulletin is final history — never reanimate it. Start a
-    // fresh bulletin (new message at the bottom) and leave the old receipt frozen.
-    if (!b || b.ended) {
-      if (b?.renewTimer) clearTimeout(b.renewTimer)
-      if (b?.settleTimer) clearTimeout(b.settleTimer)
-      if (b?.slowTimer) clearTimeout(b.slowTimer)
-      b = {
-        chatId, hostUserId, messageId: null, podInfo: {}, warmTtlMs: WARM_DEFAULT_MS,
-        confirmed: false, genCount: 0, totalDurationMs: 0, totalExecMs: 0, totalCostUsd: 0,
-        ended: false, journal: [], podCount: 0,
-      }
-      this.bulletins.set(chatId, b)
-      this._armAutoSettle(chatId)  // start the no-interaction settle clock for setup
-    }
-    if (podInfo) b.podInfo = { ...b.podInfo, ...podInfo }
-  }
-
-  /** Arm (or re-arm) the auto-settle clock: if the host doesn't touch the stepper
-   *  for AUTO_SETTLE_MS, confirm the currently-shown warm window automatically. */
-  private _armAutoSettle(chatId: number): void {
-    const b = this.bulletins.get(chatId)
-    if (!b || b.confirmed || b.ended) return
-    if (b.settleTimer) clearTimeout(b.settleTimer)
-    b.settleTimer = setTimeout(() => {
-      const cur = this.bulletins.get(chatId)
-      if (!cur || cur.confirmed || cur.ended) return
-      cur.confirmed = true
-      cur.settleTimer = undefined
-      void this._showBulletin(chatId)
-    }, this.deps.autoSettleMs ?? AUTO_SETTLE_MS)
-    b.settleTimer.unref?.()
-  }
-
-  /** Render + post/edit the bulletin. `renew` deletes the old message and re-posts
-   *  at the bottom of the chat (fresh callback timers, stays last). */
-  private async _showBulletin(chatId: number, opts: { renew?: boolean } = {}): Promise<void> {
-    const b = this.bulletins.get(chatId)
-    if (!b) return
-    const text = this._renderBulletin(b)
-    const keyboard = this._bulletinKeyboard(b)
-    // Dedupe on text AND keyboard — a confirm/settle flips only the buttons.
-    const sig = text + ' ' + JSON.stringify(keyboard)
-    if (b.messageId !== null && !opts.renew) {
-      if (sig === b.lastShown) return   // skip no-op edits (heartbeats etc.)
-      b.lastShown = sig
-      await this.sender.editMessageText(chatId, b.messageId, text, { reply_markup: keyboard }).catch(() => {})
-      return
-    }
-    const old = b.messageId
-    try {
-      const msg = await this.sender.sendMessage(chatId, text, { reply_markup: keyboard })
-      b.messageId = msg.message_id
-      b.lastShown = sig
-      if (old !== null) void this.sender.deleteMessage?.(chatId, old).catch(() => {})
-    } catch { /* non-critical */ }
-  }
-
-  /** Debounced hop-to-bottom: after ~8s of quiet, re-post the bulletin last in chat. */
-  private _scheduleBulletinRenewal(chatId: number): void {
-    const b = this.bulletins.get(chatId)
-    if (!b || b.ended) return
-    if (b.renewTimer) clearTimeout(b.renewTimer)
-    b.renewTimer = setTimeout(() => { void this._showBulletin(chatId, { renew: true }) }, 8000)
-    b.renewTimer.unref?.()
-  }
-
-  /** Bulletin callbacks. refresh is public; time/kill are host-only. */
-  private async _handleBulletin(
-    query: NonNullable<TelegramUpdate['callback_query']>,
-    chatId: number,
-  ): Promise<void> {
-    const action = (query.data ?? '').split(':')[1]
-    const b = this.bulletins.get(chatId)
-    if (!b || action === 'noop') return
-    const isHost = String(query.from.id) === b.hostUserId
-
-    switch (action) {
-      case 'refresh':  // public — anyone can bump the bulletin to the bottom
-        await this._showBulletin(chatId, { renew: true })
-        return
-      case 'dec':
-      case 'inc': {
-        if (!isHost) return
-        let idx = WARM_LADDER_MS.indexOf(b.warmTtlMs)
-        if (idx < 0) idx = WARM_LADDER_MS.indexOf(WARM_DEFAULT_MS)
-        idx = action === 'inc' ? Math.min(WARM_LADDER_MS.length - 1, idx + 1) : Math.max(0, idx - 1)
-        b.warmTtlMs = WARM_LADDER_MS[idx]
-        if (b.podInfo.podId) void this._setPodWarmUntil(b.podInfo.podId, b.warmTtlMs)
-        this._armAutoSettle(chatId)  // touching the stepper resets the no-interaction clock
-        await this._showBulletin(chatId)
-        return
-      }
-      case 'confirm':
-        if (!isHost) return
-        if (b.settleTimer) { clearTimeout(b.settleTimer); b.settleTimer = undefined }
-        b.confirmed = true
-        await this._showBulletin(chatId)
-        return
-      case 'time':  // host reopens the stepper to re-adjust the warm window
-        if (!isHost) return
-        b.confirmed = false
-        this._armAutoSettle(chatId)  // reopened → restart the settle clock
-        await this._showBulletin(chatId)
-        return
-      case 'kill': {  // host shuts the pod down now → freeze to receipt
-        if (!isHost) return
-        if (b.podInfo.podId && this.deps.terminatePod) void this.deps.terminatePod(b.podInfo.podId).catch(() => {})
-        // Cancel-on-destroy: refund any gen still in flight on this chat's pod —
-        // a completed actum no-ops, so this never claws back a fair-value result.
-        if (this.deps.cancelActum) {
-          for (const [actumId, p] of this.actumProgress) {
-            if (p.chatId === chatId) void this.deps.cancelActum(actumId, 'cancelled by user — pod shut down').catch(() => {})
-          }
-        }
-        if (b.renewTimer) clearTimeout(b.renewTimer)
-        if (b.settleTimer) { clearTimeout(b.settleTimer); b.settleTimer = undefined }
-        if (b.slowTimer) { clearTimeout(b.slowTimer); b.slowTimer = undefined }
-        b.live = undefined
-        b.ended = true
-        await this._showBulletin(chatId)
-        return
-      }
-    }
-  }
-
-  /** Apply a chosen warm window to the pod's Materia (warmUntil = now + ttl). */
-  private async _setPodWarmUntil(podId: string, ttlMs: number): Promise<void> {
-    if (!this.deps.materiae) return
-    const pods = await this.deps.materiae.findActive().catch(() => [])
-    const m = pods.find(p => p.externusId === podId)
-    if (m) await this.deps.materiae.update(m.id, { warmUntil: new Date(Date.now() + ttlMs) }).catch(() => {})
-  }
-
-  // -------------------------------------------------------------------------
-  // _handleActumComplete — bus event → concierge message after delivery
-  // -------------------------------------------------------------------------
 
   private async _handleActumComplete(wide: WideEvent): Promise<void> {
+    // Reaction cleanup — the deferred 👌 is moot once the gen is done.
     const progress = this.actumProgress.get(wide.actumId)
-    if (!progress) return
-
-    // No concierge message — per-gen stats (duration/cost/warm-cold/seed) now
-    // live in the delivery menu's Info button, so a "Done in Xs" per delivery
-    // is pure noise on a loop.
-
-    // Tally the result into the session bulletin, using its confirmed warm window.
-    const b = this.bulletins.get(progress.chatId)
-    const warmTtlMs = b?.warmTtlMs ?? progress.warmTtlMs
-    if (b) {
-      b.live = undefined  // gen done — clear the in-flight line; the stat line rests
-      if (b.slowTimer) { clearTimeout(b.slowTimer); b.slowTimer = undefined }
-      b.genCount += 1
-      b.totalDurationMs += wide.durationMs
-      if (typeof wide.executionMs === 'number') b.totalExecMs += wide.executionMs
-      if (typeof wide.costUsd === 'number') b.totalCostUsd += wide.costUsd
-      void this._showBulletin(progress.chatId)
-      this._scheduleBulletinRenewal(progress.chatId)
-    }
-
-    // Apply the chosen warm window to the pod (overrides the reaper's default TTL).
-    const podId = progress.podId ?? wide.podId
-    if (podId) void this._setPodWarmUntil(podId, warmTtlMs)
-
-    setTimeout(() => this.actumProgress.delete(wide.actumId), warmTtlMs + 5_000).unref?.()
+    if (progress?.okTimer) clearTimeout(progress.okTimer)
+    this.actumProgress.delete(wide.actumId)
+    // The bulletin records the gen and applies the chosen warm window to the pod.
+    this.bulletins.onComplete(wide.actumId, { costUsd: wide.costUsd, execMs: wide.executionMs, podId: wide.podId })
   }
 
-  /** Job failed — clear the bulletin's in-flight line, surface the failure, drop tracking. */
   private async _handleActumFail(wide: WideEvent): Promise<void> {
     const progress = this.actumProgress.get(wide.actumId)
-    if (progress) {
-      const b = this.bulletins.get(progress.chatId)
-      if (b) {
-        b.live = undefined
-        if (b.slowTimer) { clearTimeout(b.slowTimer); b.slowTimer = undefined }
-        void this._showBulletin(progress.chatId)
-      }
-    }
+    if (progress?.okTimer) clearTimeout(progress.okTimer)
     this.actumProgress.delete(wide.actumId)
-  }
-
-  /** A warm pod was reaped — freeze the matching session bulletin to its receipt. */
-  private _handlePodReaped(externusId: string): void {
-    for (const b of this.bulletins.values()) {
-      if (b.podInfo.podId === externusId && !b.ended) {
-        if (b.renewTimer) clearTimeout(b.renewTimer)
-        if (b.settleTimer) { clearTimeout(b.settleTimer); b.settleTimer = undefined }
-        if (b.slowTimer) { clearTimeout(b.slowTimer); b.slowTimer = undefined }
-        b.live = undefined
-        b.ended = true
-        void this._showBulletin(b.chatId)
-      }
-    }
+    this.bulletins.onFail(wide.actumId)
   }
 
   // -------------------------------------------------------------------------

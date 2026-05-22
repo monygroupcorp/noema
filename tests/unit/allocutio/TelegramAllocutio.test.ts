@@ -528,10 +528,9 @@ test('Stream primitive with running status reacts 👌 on command message when c
   router.triggerStep(ctx, step)
   await new Promise(r => setImmediate(r))
 
-  // Should NOT send a message — the reaction replaces the Stream card
-  assert.equal(sender.sent.length, 0, 'Should not send a message when reacting with 👌')
   // The cold-start 👌 is deferred (~800ms) so a warm signal can preempt it with 🔥.
-  // No warm signal here → 👌 lands after the timer.
+  // No warm signal here → 👌 lands after the timer. (The bulletin posts its own
+  // setup message at registration — that's a separate concern from the reaction.)
   await new Promise(r => setTimeout(r, 900))
   const thumbsUp = sender.reactions.find(r => r.emoji === '👌' && r.messageId === 50)
   assert.ok(thumbsUp, 'Should react 👌 on the original command message (deferred)')
@@ -1099,10 +1098,12 @@ test('pod-locked creates the session bulletin with the warm stepper + confirm', 
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'provisioning', elapsedMs: 0 })
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 } })
   await new Promise(r => setImmediate(r))
-  const bul = sender.sent.find(s => /RTX 4090/.test(s.text))
-  assert.ok(bul, 'bulletin posted with pod info')
+  // Bulletin posts at registration then edits in pod info — check both surfaces.
+  const bul = [...sender.sent, ...sender.edited].find(s => /RTX 4090/.test(s.text))
+  assert.ok(bul, 'bulletin shows the Found line with pod info')
   const data = ((bul!.extra as { reply_markup: { inline_keyboard: Array<Array<{ callback_data: string }>> } }).reply_markup.inline_keyboard).flat().map(b => b.callback_data)
   assert.ok(data.includes('bul:confirm'), 'setup state shows confirm')
   assert.ok(data.includes('bul:inc'), 'setup state shows stepper')
@@ -1134,15 +1135,16 @@ test('a new pod after a receipt starts a FRESH bulletin (does not reanimate the 
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'provisioning', elapsedMs: 0 })
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 } })
   await new Promise(r => setImmediate(r))
 
   // Close the session → receipt frozen.
   bus.emit('pod.reaped', { externusId: 'pod-1' })
   await new Promise(r => setImmediate(r))
   const receiptMsgId = sender.edited.at(-1)!.messageId
-  sender.sent.length = 0
-  sender.edited.length = 0
+  const editsBefore = sender.edited.length
+  const sentBefore = sender.sent.length   // don't reset (the mock derives ids from length)
 
   // A new generation on a new pod must post a NEW bulletin, not edit the receipt.
   router.triggerStep(
@@ -1150,11 +1152,13 @@ test('a new pod after a receipt starts a FRESH bulletin (does not reanimate the 
     { primitives: [{ kind: 'Stream', label: 'g', actumId: 'a2', status: 'running' }] },
   )
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a2', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-2', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  bus.emit('actum.stage', { actumId: 'a2', stage: 'provisioning', elapsedMs: 0 })
+  bus.emit('actum.stage', { actumId: 'a2', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-2', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 } })
   await new Promise(r => setImmediate(r))
 
-  assert.ok(sender.sent.length >= 1, 'a fresh bulletin is sent as a new message')
-  assert.ok(!sender.edited.some(e => e.messageId === receiptMsgId), 'the old receipt is never edited back to life')
+  assert.ok(sender.sent.length > sentBefore, 'a fresh bulletin is posted as a new message')
+  assert.ok(!sender.edited.slice(editsBefore).some(e => e.messageId === receiptMsgId),
+    'the old receipt is never edited back to life')
 })
 
 test('pod.reaped freezes the matching session bulletin to a receipt', async () => {
@@ -1260,6 +1264,7 @@ test('GPU + rate live in the Found journal line; no vendor noise or location', a
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'provisioning', elapsedMs: 0 })
   bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'NVIDIA GeForce RTX 4090', region: 'EU-RO-1', costPerHr: 0.69, phaseMs: 30_000 } })
   await new Promise(r => setImmediate(r))
   bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, executionMs: 12000, coldStart: true, costUsd: 0.08, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
