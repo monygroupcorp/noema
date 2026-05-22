@@ -33,6 +33,7 @@ fi
 : "${MONGODB_URI:?set MONGODB_URI (local or scratch DB) in .env.fake}"
 
 export DEV_FAKE_POD=1            # simulate pods — no real GPU, no cost
+export DEV_FAKE_STEP_MS="${DEV_FAKE_STEP_MS:-2500}"  # pace each simulated stage so you can watch the arc
 export DEV_FREE_EXECUTION=1      # skip the balance check in dev
 export DB_NAME="${DB_NAME:-noema_fake}"
 export PORT="${PORT:-3001}"

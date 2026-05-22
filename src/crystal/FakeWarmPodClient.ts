@@ -38,7 +38,7 @@ export class FakeWarmPodClient implements RunPodClient {
   }
 
   private async _run(jobId: string, actumId: string | undefined, params: Parameters<FakeWarmPodClient['submit']>[0]): Promise<void> {
-    const step = this.opts.stepMs ?? 800
+    const step = this.opts.stepMs ?? (Number(process.env.DEV_FAKE_STEP_MS) || 800)
     const warmTtlMs = this.opts.warmTtlMs ?? 60_000
     const gpuType = this.materia.gpu || this.opts.gpuType || 'NVIDIA GeForce RTX 4090'
     const region = this.opts.region ?? 'EU-RO-1'

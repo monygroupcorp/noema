@@ -44,7 +44,7 @@ export class FakeRunPodClient implements RunPodClient {
   }
 
   private async _run(podId: string, params: Parameters<FakeRunPodClient['submit']>[0]): Promise<void> {
-    const step = this.opts.stepMs ?? 800
+    const step = this.opts.stepMs ?? (Number(process.env.DEV_FAKE_STEP_MS) || 800)
     const gpuType = this.opts.gpuType ?? 'NVIDIA GeForce RTX 4090'
     const region = this.opts.region ?? 'EU-RO-1'
     const costPerHr = this.opts.costPerHr ?? 0.69
