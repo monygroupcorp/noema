@@ -18,7 +18,7 @@ import type { Scholiorum } from './types/scholium.js'
 import type { ColloquiumStore, DictumStore } from './types/colloquium.js'
 import type { MemoriaStore } from './types/anima.js'
 import type { IntelligentiumStore } from './types/intelligendi.js'
-import type { MateriaStore } from './types/materia.js'
+import type { Materia, MateriaStore } from './types/materia.js'
 import type { DeploymentumStore } from './types/deploymentum.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
 import { MongoDeploymentum } from './crystal/MongoDeploymentum.js'
@@ -115,6 +115,8 @@ export interface ContainerConfig {
   runpodR2?: import('./crystal/SecurePodClient.js').R2Config
   /** Warm-window TTL (ms) passed to warm-pod jobs — default 60_000. */
   runpodWarmTtlMs?: number
+  /** Override the warm-pod client factory (dev fake mode swaps in FakeWarmPodClient). */
+  warmFactory?: (materia: Materia, materiae: MateriaStore) => RunPodClient
   /** Collection name for acta — default 'acta' */
   actaCollection?: string
   /** Collection name for modi — default 'modi' */
@@ -248,10 +250,12 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
       {
         webhookUrl: config.runpodWebhookUrl,
         praefectus,
-        warmFactory: (m) => new WarmPodClient(m, materiae, undefined, {
-          r2: config.runpodR2,
-          warmTtlMs: config.runpodWarmTtlMs,
-        }),
+        warmFactory: config.warmFactory
+          ? (m) => config.warmFactory!(m, materiae)
+          : (m) => new WarmPodClient(m, materiae, undefined, {
+              r2: config.runpodR2,
+              warmTtlMs: config.runpodWarmTtlMs,
+            }),
         imageRefOf,
         deployments,
       },

@@ -34,6 +34,7 @@ import { sessionSpendHook } from './ledger/hooks/sessionSpend.js'
 import { spellRoyaltyHook } from './ledger/hooks/spellRoyalty.js'
 import { SecurePodClient, makeSecurePodSshFactory, type R2Config } from './crystal/SecurePodClient.js'
 import { FakeRunPodClient } from './crystal/FakeRunPodClient.js'
+import { FakeWarmPodClient } from './crystal/FakeWarmPodClient.js'
 import { terminatePod, listRunPodPods } from './crystal/terminatePod.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
 import { startIdleReaper } from './crystal/idleReaper.js'
@@ -87,7 +88,7 @@ const templateRegistry = new WorkflowTemplateRegistry(
 // RunPod SECURE pod client — provisions a GPU machine, SSHes in, runs ComfyUI
 // ---------------------------------------------------------------------------
 
-import type { MateriaStore } from './types/materia.js'
+import type { Materia, MateriaStore } from './types/materia.js'
 
 const RUNPOD_R2: R2Config | undefined =
   R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_OUTPUTS_BUCKET
@@ -226,9 +227,14 @@ async function main(): Promise<void> {
   // DEV_FAKE_POD: simulate the whole pod lifecycle locally (no real GPU, $0) so the
   // Telegram UX can be iterated for free. Falls back to the real SECURE cursor otherwise.
   const runpodClient = process.env.DEV_FAKE_POD
-    ? new FakeRunPodClient()
+    ? new FakeRunPodClient(undefined, { warmTtlMs: RUNPOD_WARM_TTL_MS }, materiae)
     : (RUNPOD_API_KEY ? makeSecureRunPodClient(materiae) : undefined)
   if (process.env.DEV_FAKE_POD) log.warn('DEV_FAKE_POD active — pods are simulated, no real GPU will be provisioned')
+
+  // In fake mode, warm reuse must NOT build a real WarmPodClient (it would SSH).
+  const fakeWarmFactory = process.env.DEV_FAKE_POD
+    ? (m: Materia, ms: MateriaStore) => new FakeWarmPodClient(m, ms, undefined, { warmTtlMs: RUNPOD_WARM_TTL_MS })
+    : undefined
 
   const podTerminator = RUNPOD_API_KEY
     ? (podId: string) => terminatePod(RUNPOD_API_KEY!, podId)
@@ -245,6 +251,7 @@ async function main(): Promise<void> {
       runpodWebhookUrl: RUNPOD_WEBHOOK_URL,
       runpodR2: RUNPOD_R2,
       runpodWarmTtlMs: RUNPOD_WARM_TTL_MS,
+      ...(fakeWarmFactory ? { warmFactory: fakeWarmFactory } : {}),
     } : {}),
     ...(openaiClient ? { openaiClient } : {}),
     ...(embed ? { embed } : {}),
@@ -396,6 +403,11 @@ async function main(): Promise<void> {
   if (RUNPOD_API_KEY) {
     startIdleReaper(materiae, (externusId) => terminatePod(RUNPOD_API_KEY, externusId), 30_000)
     log.info('idle-pod reaper started', { warmTtlMs: RUNPOD_WARM_TTL_MS })
+  } else if (process.env.DEV_FAKE_POD) {
+    // Fake mode has no real pods to kill; reapIdle still flips the Materia to
+    // terminated and emits pod.reaped so the bulletin freezes to a receipt.
+    startIdleReaper(materiae, async () => {}, 10_000)
+    log.warn('idle-pod reaper started (fake mode)', { warmTtlMs: RUNPOD_WARM_TTL_MS })
   }
   app.use('/internal', createLiveRouter(INTERNAL_SECRET))
   app.use('/internal/analytics', createAnalyticsRouter(wideStore, INTERNAL_SECRET))
