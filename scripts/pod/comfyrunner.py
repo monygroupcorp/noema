@@ -182,6 +182,37 @@ def _tail_comfy_log(n: int = 40) -> str:
     except Exception:
         return "(comfyui.log unavailable)"
 
+
+def _check_history_complete(job_id: str, prompt_id: str) -> bool:
+    """Authoritative completion backstop: poll ComfyUI /history. The WS terminal
+    event (execution_success/error) can be missed — scoped to a clientId or lost
+    across a reconnect — leaving the job hung while ComfyUI has actually finished.
+    Returns True if the prompt is done (success or error), having set comfy_event."""
+    try:
+        hist = _http_get(f"{COMFYUI_URL}/history/{prompt_id}", timeout=5)
+    except Exception:
+        return False
+    entry = hist.get(prompt_id)
+    if not entry:
+        return False
+    status = entry.get("status", {})
+    str_status = status.get("status_str")
+    if str_status == "error":
+        with _lock:
+            job = _jobs.get(job_id)
+            if job:
+                job["comfy_error"] = "ComfyUI reported an execution error"
+                job["comfy_event"].set()
+        return True
+    if status.get("completed") or str_status == "success":
+        with _lock:
+            job = _jobs.get(job_id)
+            if job:
+                job["comfy_complete"] = True
+                job["comfy_event"].set()
+        return True
+    return False
+
 # ── ComfyUI WebSocket listener ─────────────────────────────────────────────────
 
 def _append_event(job_id: str, event: dict) -> None:
@@ -504,12 +535,17 @@ def _process_job(job_spec: dict) -> None:
         #    (before any node runs); climbing = executing but slow.
         comfy_event = _jobs[job_id]["comfy_event"]
         deadline = time.time() + JOB_TIMEOUT
-        while not comfy_event.wait(timeout=20):
+        while not comfy_event.wait(timeout=15):
             if time.time() >= deadline:
                 raise RuntimeError(
                     f"job {job_id} timed out after {JOB_TIMEOUT}s waiting for ComfyUI. "
                     f"comfyui.log tail:\n{_tail_comfy_log()}"
                 )
+            # Backstop: the WS execution_success/error event can be missed (it's
+            # scoped to a clientId / lost across a reconnect), leaving the job hung
+            # while ComfyUI has actually finished. Poll /history authoritatively.
+            if _check_history_complete(job_id, prompt_id):
+                break
             with _lock:
                 nodes_executed = sum(1 for e in _jobs[job_id]["events"] if e.get("type") == "node")
             _append_event(job_id, {"type": "waiting", "elapsedS": int(time.time() - start), "nodesExecuted": nodes_executed})
