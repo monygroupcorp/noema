@@ -101,3 +101,4 @@ typings/
 .tern-port
 .release-please-manifest.json
 release-please-config.json
+.env.fake
