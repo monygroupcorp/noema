@@ -1,3 +1,5 @@
+import { REACTION } from '../../lexicon/symbols.js'
+
 /** Fire-and-forget reaction on a message (the adapter wires the platform call). */
 export interface ReactionSink { react(chatId: number, messageId: number, emoji: string): void }
 
@@ -33,10 +35,10 @@ export class ReactionController {
     this.pending.set(actumId, entry)
     if (this.warmStash.delete(actumId)) {
       // Warm reuse already known → 🔥, never 👌.
-      this._fire(chatId, commandMessageId, '🔥')
+      this._fire(chatId, commandMessageId, REACTION.fire)
     } else if (commandMessageId !== undefined) {
       // Defer the 👌 so a warm signal arriving just after registration can cancel it.
-      const t = setTimeout(() => this.sink.react(chatId, commandMessageId, '👌'), this.config.okDelayMs ?? OK_DELAY_MS)
+      const t = setTimeout(() => this.sink.react(chatId, commandMessageId, REACTION.ok), this.config.okDelayMs ?? OK_DELAY_MS)
       t.unref?.()
       entry.okTimer = t
     }
@@ -47,7 +49,7 @@ export class ReactionController {
     const p = this.pending.get(actumId)
     if (!p) { this.warmStash.add(actumId); return }
     if (p.okTimer) { clearTimeout(p.okTimer); p.okTimer = undefined }   // never flash 👌
-    this._fire(p.chatId, p.commandMessageId, '🔥')
+    this._fire(p.chatId, p.commandMessageId, REACTION.fire)
   }
 
   /** Job reached a terminal state — cancel any pending 👌 and forget the actum. */

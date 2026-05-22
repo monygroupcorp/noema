@@ -4,6 +4,8 @@ import {
   type Audience, type JournalEntry, type LiveState,
   type BulletinKeyboard, type RenderedBulletin,
 } from './types.js'
+import { GLYPH } from '../symbols.js'
+import { COPY } from '../copy.js'
 
 /** Everything BulletinView needs to render — a pure snapshot of a PodSession. */
 export interface BulletinSnapshot {
@@ -44,41 +46,34 @@ function journalLine(e: JournalEntry): string {
     case 'found': {
       const gpu = shortGpu(e.gpu)
       const rate = typeof e.rate === 'number' ? `$${e.rate.toFixed(2)}/hr` : undefined
-      const who = gpu ? (rate ? `${gpu} for ${rate}` : gpu) : 'a pod'
-      return `Found ${who} in ${fmtDur(e.ms)}`
+      return COPY.bulletin.foundPod(COPY.bulletin.podDescriptor(gpu, rate), fmtDur(e.ms))
     }
     case 'quit':
-      return `Quit pod ${e.podNum} for ${e.reason}`
+      return COPY.bulletin.quitPod(e.podNum, e.reason)
     case 'prepared': {
       const ratio = COLD_TYPICAL_MS > 0 ? e.ms / COLD_TYPICAL_MS : 1
-      const pct = Math.round((ratio - 1) * 100)
-      const cmp = pct > 0 ? `${pct}% > avg` : pct < 0 ? `${-pct}% < avg` : '~avg'
-      return `Prepared Make Setup in ${fmtDur(e.ms)} (${cmp})`
+      return COPY.bulletin.preparedSetup(fmtDur(e.ms), COPY.bulletin.avgComparison(Math.round((ratio - 1) * 100)))
     }
   }
 }
 
 function liveLine(live: LiveState): string {
+  const c = COPY.bulletin.live
   switch (live.kind) {
-    case 'hunting-slow': return 'Hunting for an open GPU — providers are slammed. Hang tight.'
-    case 'initializing': return 'Initializing…'
-    case 'downloading': {
-      const tail = live.slow ? ' — taking longer than usual' : ''
-      return live.n && live.m
-        ? `Connected, downloading models (${live.n}/${live.m})…${tail}`
-        : `Connected, downloading models…${tail}`
-    }
-    case 'plugins':    return 'Loading plugins…'
-    case 'reloading':  return 'Reloading the pod…'
-    case 'generating': return 'Generating…'
-    case 'saving':     return 'Saving your result…'
+    case 'hunting-slow': return c.huntingSlow
+    case 'initializing': return c.initializing
+    case 'downloading':  return c.downloading(live.n, live.m, live.slow)
+    case 'plugins':      return c.plugins
+    case 'reloading':    return c.reloading
+    case 'generating':   return c.generating
+    case 'saving':       return c.saving
   }
 }
 
 function statLine(s: LedgerSummary): string {
-  const segs = [`${s.genCount} gen${s.genCount > 1 ? 's' : ''}`]
-  if (s.hasExec) segs.push(`exec ~${fmtDur(s.avgExecMs)} avg`)
-  if (s.hasCost) { segs.push(`${moneyFine(s.avgCostUsd)} ea`); segs.push(`${money(s.totalCostUsd)} total`) }
+  const segs = [COPY.bulletin.stat.gens(s.genCount)]
+  if (s.hasExec) segs.push(COPY.bulletin.stat.execAvg(fmtDur(s.avgExecMs)))
+  if (s.hasCost) { segs.push(COPY.bulletin.stat.each(moneyFine(s.avgCostUsd))); segs.push(COPY.bulletin.stat.total(money(s.totalCostUsd))) }
   return segs.join(' · ')
 }
 
@@ -97,26 +92,26 @@ export const BulletinView = {
 
     // 2. Execution stats — appears once a gen completes; per-gen average falls as
     //    warm gens accumulate (the cost-averaging story made self-evident).
-    if (s.ledger.genCount > 0) lines.push((s.ended ? 'Session receipt · ' : '') + statLine(s.ledger))
+    if (s.ledger.genCount > 0) lines.push((s.ended ? COPY.bulletin.receiptPrefix : '') + statLine(s.ledger))
 
     // 3. Live line (in-flight), else the resting warm nudge / setup prompt.
     if (!s.ended) {
       if (s.live) {
         lines.push(liveLine(s.live))
       } else if (!s.confirmed) {
-        lines.push('Set how long to keep the pod warm, then ✓.')
+        lines.push(COPY.bulletin.setupPrompt)
       } else {
         const idx = Math.max(0, WARM_LADDER_MS.indexOf(s.warmTtlMs))
         const marginal = typeof s.rateUsdPerHr === 'number'
-          ? ` · next gen ~${moneyFine(s.rateUsdPerHr * WARM_TYPICAL_SEC / 3600)}`
+          ? COPY.bulletin.nextGen(moneyFine(s.rateUsdPerHr * WARM_TYPICAL_SEC / 3600))
           : ''
-        lines.push(`Warm ${WARM_LADDER_LABEL[idx]}${marginal} — keep cooking.`)
+        lines.push(COPY.bulletin.keepCooking(WARM_LADDER_LABEL[idx], marginal))
       }
     } else if (s.ledger.genCount === 0) {
-      lines.push('Pod shut down.')   // closed before any gen — the stat line never showed
+      lines.push(COPY.bulletin.podShutDown)   // closed before any gen — the stat line never showed
     }
 
-    return { text: lines.join('\n') || 'Pod active.', keyboard: keyboard(s) }
+    return { text: lines.join('\n') || COPY.bulletin.podActive, keyboard: keyboard(s) }
   },
 }
 
@@ -125,9 +120,9 @@ function keyboard(s: BulletinSnapshot): BulletinKeyboard {
   if (!s.confirmed) {
     const idx = Math.max(0, WARM_LADDER_MS.indexOf(s.warmTtlMs))
     return [
-      [ { label: '⏱ ‹', data: 'bul:dec' }, { label: `warm: ${WARM_LADDER_LABEL[idx]}`, data: 'bul:noop' }, { label: '› ⏱', data: 'bul:inc' } ],
-      [ { label: '✓', data: 'bul:confirm' } ],
+      [ { label: GLYPH.warmDec, data: 'bul:dec' }, { label: `warm: ${WARM_LADDER_LABEL[idx]}`, data: 'bul:noop' }, { label: GLYPH.warmInc, data: 'bul:inc' } ],
+      [ { label: GLYPH.confirm, data: 'bul:confirm' } ],
     ]
   }
-  return [[ { label: '⟳', data: 'bul:refresh' }, { label: '⏱', data: 'bul:time' }, { label: '✕', data: 'bul:kill' } ]]
+  return [[ { label: GLYPH.refresh, data: 'bul:refresh' }, { label: GLYPH.time, data: 'bul:time' }, { label: GLYPH.kill, data: 'bul:kill' } ]]
 }
