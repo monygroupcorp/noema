@@ -16,37 +16,13 @@ import type { MateriaStore } from '../types/materia.js'
 import type { Actum } from '../types/actum.js'
 import { classifyError } from '../lib/classifyError.js'
 import { BulletinManager, type BulletinSink } from './bulletin/BulletinManager.js'
-import type { BulletinKeyboard } from './bulletin/types.js'
+import { DeliveryMenu, type DeliverySink } from './delivery/DeliveryMenu.js'
+import type { UiKeyboard } from './ui/Keyboard.js'
 
 const log = makeLogger('telegram:allocutio')
 
 // Delivery menu: a single morphing 3-button row. Default → Info/Rate/Wrench;
 // Rate → the fixed rating emojis; Wrench → Back/Tweak/Rerun.
-const RATE_EMOJI: Record<string, string> = { beautiful: '😻', funny: '😹', negative: '😿' }
-
-function deliveryKeyboard(actumId: string, state: 'default' | 'rate' | 'wrench', rateGlyph = '♥'): InlineKeyboard {
-  switch (state) {
-    case 'rate':
-      return inlineKeyboard([[
-        btn(RATE_EMOJI.beautiful, `dm:rated:${actumId}:beautiful`),
-        btn(RATE_EMOJI.funny,     `dm:rated:${actumId}:funny`),
-        btn(RATE_EMOJI.negative,  `dm:rated:${actumId}:negative`),
-      ]])
-    case 'wrench':
-      return inlineKeyboard([[
-        btn('←', `dm:back:${actumId}`),
-        btn('✎', `dm:tweak:${actumId}`),
-        btn('↻', `dm:rerun:${actumId}`),
-      ]])
-    default:
-      return inlineKeyboard([[
-        btn('ℹ',       `dm:info:${actumId}`),
-        btn(rateGlyph, `dm:rate:${actumId}`),
-        btn('⚙',       `dm:wrench:${actumId}`),
-      ]])
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Static text
 // ---------------------------------------------------------------------------
@@ -249,17 +225,13 @@ function renderPrimitive(primitive: Primitive): RenderResult {
     }
 
     case 'Result': {
-      // Single morphing delivery row — starts on the default Info/Rate/Wrench.
+      // The delivery menu's morphing row is attached by _sendResult; here just text.
       const text = primitive.textContent
         ? primitive.textContent
         : primitive.media?.length
           ? primitive.label
           : 'Done.'
-
-      return {
-        text,
-        extra: { reply_markup: deliveryKeyboard(primitive.actumId, 'default') },
-      }
+      return { text }
     }
   }
 }
@@ -353,6 +325,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // The session bulletin (the flagship HUD) lives in its own subsystem now; this
   // adapter only feeds it lifecycle events and renders for it (see _bulletinSink).
   private readonly bulletins: BulletinManager
+  private readonly delivery: DeliveryMenu
 
   // Per-actum reaction bookkeeping: just enough to drive the 👌/🔥 reaction on the
   // command message (the bulletin owns everything else).
@@ -361,17 +334,6 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     commandMessageId?: number
     /** Pending speculative 👌 reaction — cancelled if a warm signal preempts it with 🔥. */
     okTimer?: ReturnType<typeof setTimeout>
-  }>()
-
-  // Delivery-menu state per result, keyed by actumId — backs Info caption toggle
-  // and remembers the chosen rating glyph for the morphing row.
-  private readonly resultMeta = new Map<string, {
-    chatId: number
-    messageId: number
-    caption: string
-    isMedia: boolean
-    showingStats: boolean
-    rateGlyph: string
   }>()
 
   constructor(deps: {
@@ -402,6 +364,14 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       autoSettleMs: deps.autoSettleMs,
     })
 
+    // The delivery menu: owns the morphing result row + Info/rating state; we give
+    // it a sink and a rerun hook into the flow router.
+    this.delivery = new DeliveryMenu({
+      sink: this._deliverySink(),
+      acta: deps.acta,
+      rerun: (actumId, presserUserId, chatId) => this._rerun(actumId, presserUserId, chatId),
+    })
+
     // Wire router callbacks
     this.router.onStep((ctx, step) => { void this._handleStep(ctx, step) })
     this.router.onResolution((ctx, resolution) => { void this._handleResolution(ctx, resolution) })
@@ -413,21 +383,52 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     bus.on('pod.reaped', ({ externusId }) => { this.bulletins.onReaped(externusId) })
   }
 
+  /** Map a neutral UI keyboard to Telegram's inline-keyboard shape. */
+  private _toInline(kb: UiKeyboard): InlineKeyboard {
+    return inlineKeyboard(kb.map(row => row.map(b => btn(b.label, b.data))))
+  }
+
   /** How the bulletin manager puts messages on Telegram (BulletinSink). */
   private _bulletinSink(): BulletinSink {
-    const toInline = (kb: BulletinKeyboard) => inlineKeyboard(kb.map(row => row.map(b => btn(b.label, b.data))))
     return {
       post: async (chatId, text, kb) => {
         try {
-          const msg = await this.sender.sendMessage(chatId, text, { reply_markup: toInline(kb) })
+          const msg = await this.sender.sendMessage(chatId, text, { reply_markup: this._toInline(kb) })
           return msg.message_id
         } catch { return null }
       },
       edit: async (chatId, messageId, text, kb) => {
-        await this.sender.editMessageText(chatId, messageId, text, { reply_markup: toInline(kb) }).catch(() => {})
+        await this.sender.editMessageText(chatId, messageId, text, { reply_markup: this._toInline(kb) }).catch(() => {})
       },
       remove: async (chatId, messageId) => { void this.sender.deleteMessage?.(chatId, messageId).catch(() => {}) },
     }
+  }
+
+  /** How the delivery menu edits a delivered result (DeliverySink). */
+  private _deliverySink(): DeliverySink {
+    return {
+      editMarkup: async (chatId, messageId, kb) => {
+        await this.sender.editMessageReplyMarkup?.(chatId, messageId, this._toInline(kb)).catch(() => {})
+      },
+      editCaption: async (chatId, messageId, text, kb) => {
+        await this.sender.editMessageCaption?.(chatId, messageId, text, { reply_markup: this._toInline(kb) }).catch(() => {})
+      },
+      editText: async (chatId, messageId, text, kb) => {
+        await this.sender.editMessageText(chatId, messageId, text, { reply_markup: this._toInline(kb) }).catch(() => {})
+      },
+    }
+  }
+
+  /** Re-run an actum under the presser (presser pays), prefilled with its modus + params. */
+  private async _rerun(actumId: string, presserUserId: string, chatId: number): Promise<void> {
+    this.chatIds.set(`telegram:${presserUserId}`, chatId)
+    const actum = await this.deps.acta?.findById(actumId).catch(() => null)
+    if (!actum) return
+    const identity = await this.identity.resolve(presserUserId)
+    // Lands in CONFIGURE prefilled with the original params; the presser submits → they pay.
+    await this.router.enter('execute', 'telegram', presserUserId, identity, {
+      state: { modusId: actum.modusId, aditus: actum.aditus, browsePageIndex: 0 },
+    })
   }
 
   /** Resolve a pod's Materia and stamp its warm deadline (backs the warm-window buttons). */
@@ -631,9 +632,10 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       return
     }
 
-    // Delivery menu — morphing row + Info stats
+    // Delivery menu — morphing row + Info stats. Data: dm:<action>:<actumId>[:<type>]
     if (query.data.startsWith('dm:') && chatId) {
-      await this._handleDeliveryMenu(query, chatId)
+      const [, action, actumId, ratedType] = query.data.split(':')
+      await this.delivery.handle(actumId, action, { ratedType, presserUserId: String(query.from.id) })
       return
     }
 
@@ -761,12 +763,16 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     chatId: number,
     primitive: Extract<Primitive, { kind: 'Result' }>
   ): Promise<void> {
-    const { text: keyboardText, extra } = renderPrimitive(primitive)
+    const { text: bodyText } = renderPrimitive(primitive)
+    // The delivery menu owns the morphing row; we just attach its initial keyboard.
+    const extra = { reply_markup: this._toInline(this.delivery.initialKeyboard(primitive.actumId)) }
+    const track = (messageId: number, caption: string, isMedia: boolean) =>
+      this.delivery.track(primitive.actumId, { chatId, messageId, caption, isMedia })
 
     if (!primitive.media || primitive.media.length === 0) {
       // Text-only result (chatgpt, caption, etc.)
-      const sent = await this.sender.sendMessage(chatId, keyboardText, extra)
-      this._trackResult(primitive.actumId, chatId, sent.message_id, keyboardText, false)
+      const sent = await this.sender.sendMessage(chatId, bodyText, extra)
+      track(sent.message_id, bodyText, false)
       return
     }
 
@@ -781,7 +787,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         } else {
           sent = await this.sender.sendDocument(chatId, m.url, { caption: m.caption, ...extra })
         }
-        this._trackResult(primitive.actumId, chatId, sent.message_id, m.caption ?? '', true)
+        track(sent.message_id, m.caption ?? '', true)
       } catch {
         await this.sender.sendMessage(chatId, m.url, extra)
       }
@@ -803,108 +809,6 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     }
     // Send keyboard as follow-up text message (Telegram limitation)
     await this.sender.sendMessage(chatId, '—', extra)
-  }
-
-  /** Remember a delivered result so the morphing menu (Info toggle, rating glyph) can edit it. */
-  private _trackResult(actumId: string, chatId: number, messageId: number, caption: string, isMedia: boolean): void {
-    this.resultMeta.set(actumId, { chatId, messageId, caption, isMedia, showingStats: false, rateGlyph: '♥' })
-  }
-
-  // -------------------------------------------------------------------------
-  // _handleDeliveryMenu — the morphing delivery row (Info / Rate / Wrench)
-  // -------------------------------------------------------------------------
-
-  private async _handleDeliveryMenu(
-    query: NonNullable<TelegramUpdate['callback_query']>,
-    chatId: number,
-  ): Promise<void> {
-    const parts = (query.data ?? '').split(':')   // dm:<action>:<actumId>[:<type>]
-    const action = parts[1]
-    const actumId = parts[2]
-    const messageId = query.message?.message_id
-    const meta = this.resultMeta.get(actumId)
-    const editMarkup = (state: 'default' | 'rate' | 'wrench', glyph?: string) => {
-      if (messageId !== undefined) {
-        void this.sender.editMessageReplyMarkup?.(chatId, messageId, deliveryKeyboard(actumId, state, glyph)).catch(() => {})
-      }
-    }
-
-    switch (action) {
-      case 'rate':   editMarkup('rate'); return
-      case 'wrench': editMarkup('wrench'); return
-      case 'back':   editMarkup('default', meta?.rateGlyph); return
-      case 'info':   await this._toggleInfo(actumId); return
-      case 'rated': {
-        const type = parts[3]
-        const glyph = RATE_EMOJI[type] ?? '♥'
-        if (meta) meta.rateGlyph = glyph
-        // Rating is feedback on a specific result — it must NOT route through the
-        // user's flow (router.handle), which during AWAITING_COMPLETION renders the
-        // "Working…" step and can re-deliver. Just reflect the choice on the button;
-        // durable rating persistence is a separate (ratings-store) follow-up.
-        editMarkup('default', glyph)
-        return
-      }
-      case 'tweak':
-      case 'rerun':
-        await this._rerunForPresser(query, chatId, actumId)
-        return
-    }
-  }
-
-  /** Toggle the result's caption between the image caption and a DB-sourced stats block. */
-  private async _toggleInfo(actumId: string): Promise<void> {
-    const meta = this.resultMeta.get(actumId)
-    if (!meta) return
-    const keyboard = deliveryKeyboard(actumId, 'default', meta.rateGlyph)
-    const text = meta.showingStats ? meta.caption : await this._formatGenStats(actumId)
-    meta.showingStats = !meta.showingStats
-    try {
-      if (meta.isMedia) {
-        await this.sender.editMessageCaption?.(meta.chatId, meta.messageId, text, { reply_markup: keyboard })
-      } else {
-        await this.sender.editMessageText(meta.chatId, meta.messageId, text, { reply_markup: keyboard })
-      }
-    } catch { /* edit is best-effort */ }
-  }
-
-  /** Build the Info stats block from the durable actum record. */
-  private async _formatGenStats(actumId: string): Promise<string> {
-    const actum = await this.deps.acta?.findById(actumId).catch(() => null)
-    if (!actum) return 'Stats unavailable.'
-    const e = actum.executio ?? {}
-    const lines: string[] = [`Modus: ${actum.modusId}`]
-    const ms = e.executionMs ?? actum.duratio
-    if (typeof ms === 'number') lines.push(`Generation: ${(ms / 1000).toFixed(1)}s`)
-    lines.push(`Pod: ${e.coldStart ? 'cold start' : 'warm'}`)
-    if (e.gpuType) lines.push(`GPU: ${e.gpuType}`)
-    if (typeof e.costPerHr === 'number' && typeof actum.duratio === 'number') {
-      lines.push(`Cost: ~$${(e.costPerHr * actum.duratio / 3_600_000).toFixed(3)}`)
-    }
-    if (typeof e.modelsReused === 'number') {
-      lines.push(`Models: ${e.modelsReused} reused, ${e.modelsDownloaded ?? 0} downloaded`)
-    }
-    const seed = (actum.aditus as Record<string, unknown> | undefined)?.input_seed
-    if (seed !== undefined) lines.push(`Seed: ${seed}`)
-    return lines.join('\n')
-  }
-
-  /** Tweak/Rerun: run under the PRESSER (presser pays), prefilled with the actum's modus + params. */
-  private async _rerunForPresser(
-    query: NonNullable<TelegramUpdate['callback_query']>,
-    chatId: number,
-    actumId: string,
-  ): Promise<void> {
-    const userId = String(query.from.id)
-    this.chatIds.set(`telegram:${userId}`, chatId)
-    const actum = await this.deps.acta?.findById(actumId).catch(() => null)
-    if (!actum) return
-    const identity = await this.identity.resolve(userId)
-    // Lands in CONFIGURE prefilled with the original params; the presser submits → they pay.
-    // (True one-tap auto-submit Rerun is a small ExecuteFlow follow-up.)
-    await this.router.enter('execute', 'telegram', userId, identity, {
-      state: { modusId: actum.modusId, aditus: actum.aditus, browsePageIndex: 0 },
-    })
   }
 
   // -------------------------------------------------------------------------
