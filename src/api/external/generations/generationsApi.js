@@ -24,7 +24,7 @@ function createGenerationsApi(dependencies) {
         }
 
         // 2. Tool Validation
-        const tool = toolRegistry.getTool(toolId);
+        const tool = toolRegistry.getToolById(toolId);
         if (!tool) {
             return res.status(404).json({ error: { code: 'NOT_FOUND', message: `Tool with ID '${toolId}' not found.` } });
         }
