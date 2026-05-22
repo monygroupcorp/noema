@@ -21,6 +21,8 @@ import { ReactionController } from './reactions/ReactionController.js'
 import type { UiKeyboard } from '../lexicon/ui/Keyboard.js'
 import { inlineKeyboard, btn, renderPrimitive, decodeCallbackData, type InlineKeyboard } from './telegramRender.js'
 import { CommandRouter } from './commands/CommandRouter.js'
+import { REACTION } from '../lexicon/symbols.js'
+import { COPY } from '../lexicon/copy.js'
 import type { TelegramUpdate, TelegramSender, IdentityResolver, RouterDeps } from './telegramTypes.js'
 // Re-export the adapter contracts so existing importers (index, TelegramSenderAdapter) keep working.
 export type { TelegramUpdate, TelegramSender, IdentityResolver, RouterDeps } from './telegramTypes.js'
@@ -117,7 +119,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       cancel: (userId) => this.router.clear('telegram', userId),
       sendMessage: (chatId, text, extra) => this.sender.sendMessage(chatId, text, extra),
       sendStart: (chatId) => this._sendStart(chatId),
-      ack: (chatId, messageId) => { void this._react(chatId, messageId, '👌') },
+      ack: (chatId, messageId) => { void this._react(chatId, messageId, REACTION.ok) },
     })
 
     // Wire router callbacks
@@ -273,7 +275,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // registration can later land the 👌/🔥 on it. The command surface itself lives
     // in CommandRouter.
     if (messageId !== undefined) {
-      void this._react(chatId, messageId, '🤔')
+      void this._react(chatId, messageId, REACTION.thinking)
       this.lastCommandMessageIds.set(`telegram:${userId}`, messageId)
     }
     await this.commands.dispatch(userId, chatId, text, messageId)
@@ -314,13 +316,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     // Pod invite button — send a forwardable invite message
     if (query.data.startsWith('pod_invite:') && chatId) {
-      const inviteText = [
-        'A StationThis pod is warming up.',
-        'Send /make [your prompt] to queue your generation on this pod.',
-        '',
-        'Powered by noema.',
-      ].join('\n')
-      void this.sender.sendMessage(chatId, inviteText).catch(() => {})
+      void this.sender.sendMessage(chatId, COPY.status.podInvite).catch(() => {})
       return
     }
 
@@ -373,7 +369,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       // Stream(running) → register the actum with the reaction + bulletin subsystems.
       if (primitive.kind === 'Stream' && primitive.status === 'running') {
         const commandMessageId = this.lastCommandMessageIds.get(userKey)
-        if (commandMessageId === undefined) await this.sender.sendMessage(chatId, '⏳ Working on it…')
+        if (commandMessageId === undefined) await this.sender.sendMessage(chatId, COPY.status.working)
         if (primitive.actumId) {
           this.reactions.register(primitive.actumId, chatId, commandMessageId)
           this.bulletins.register(chatId, primitive.actumId, ctx.platformUserId)
@@ -531,7 +527,7 @@ Generate AI art, chat with models, explore creative tools.`
 
     switch (resolution.kind) {
       case 'complete':
-        await this.sender.sendMessage(chatId, '✅ Done.')
+        await this.sender.sendMessage(chatId, COPY.status.done)
         break
       case 'abandon':
         // Silent — abandon fires on implicit context replacement (e.g. /make while already in a flow).

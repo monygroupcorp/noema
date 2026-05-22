@@ -1,20 +1,7 @@
 import { inlineKeyboard, btn } from '../telegramRender.js'
+import { COPY, HELP_TEXT } from '../../lexicon/copy.js'
 
-export const HELP_TEXT = `\
-noema
-
-  Creative
-  /make    — generate images and art
-  /chat    — chat with an AI model
-  /flows   — browse all available tools
-
-  Account
-  /status  — view balance and account
-  /wallet  — manage connected wallets
-
-  /cancel  — cancel current action
-  /help    — show this message\
-`
+export { HELP_TEXT }
 
 const DEFAULT_MAKE_MODUS = 'runmake.flux-schnell'
 
@@ -75,27 +62,27 @@ export class CommandRouter {
       case '/cancel':
       case '/stop':
         this.deps.cancel(userId)
-        await this.deps.sendMessage(chatId, 'Cancelled.')
+        await this.deps.sendMessage(chatId, COPY.command.cancelled)
         return
 
       case '/status':
-        await this.deps.sendMessage(chatId, 'Balance and account info coming soon.', {
+        await this.deps.sendMessage(chatId, COPY.command.statusComingSoon, {
           reply_markup: inlineKeyboard([[btn('connect wallet', 'a:connect_wallet'), btn('top up', 'a:topup')]]),
         })
         return
 
       case '/wallet':
-        await this.deps.sendMessage(chatId, 'Wallet management coming soon.', {
+        await this.deps.sendMessage(chatId, COPY.command.walletComingSoon, {
           reply_markup: inlineKeyboard([[btn('connect wallet', 'a:connect_wallet'), btn('balance', 'a:balance')]]),
         })
         return
 
       case '/help':
-        await this.deps.sendMessage(chatId, HELP_TEXT)
+        await this.deps.sendMessage(chatId, COPY.command.help)
         return
 
       default:
-        await this.deps.sendMessage(chatId, `Unknown command. Type /help to see what's available.`)
+        await this.deps.sendMessage(chatId, COPY.command.unknown)
         return
     }
   }
