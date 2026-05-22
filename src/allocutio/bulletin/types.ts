@@ -38,9 +38,10 @@ export type LiveState =
   | { kind: 'generating' }
   | { kind: 'saving' }
 
-/** A neutral keyboard: rows of buttons with a label + callback data. Adapter maps it. */
-export type BulletinButton = { label: string; data: string }
-export type BulletinKeyboard = BulletinButton[][]
+// The bulletin keyboard is just the shared neutral UI keyboard (aliased for history).
+import type { UiButton, UiKeyboard } from '../ui/Keyboard.js'
+export type BulletinButton = UiButton
+export type BulletinKeyboard = UiKeyboard
 
 /** A fully-rendered bulletin: text + keyboard. Pure output of BulletinView. */
 export interface RenderedBulletin {
