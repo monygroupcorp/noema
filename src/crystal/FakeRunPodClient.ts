@@ -63,7 +63,16 @@ export class FakeRunPodClient implements RunPodClient {
     emit('pod-locked', { podId, gpuType, region, costPerHr }); await sleep(step)
     emit('ssh-ready'); await sleep(step / 2)
     emit('bootstrapping'); await sleep(step)
-    for (let i = 1; i <= 4; i++) { emit(`downloading:${i}/4`, { etaMs: (4 - i) * step }); await sleep(step) }
+    for (let i = 1; i <= 4; i++) {
+      emit(`downloading:${i}/4`, { etaMs: (4 - i) * step }); await sleep(step)
+      // DEV_FAKE_BAIL: demo the hero beat — a sluggish pod is cut loose mid-download
+      // and a fresh one grabbed (the throttle auto-bail, given a voice).
+      if (i === 2 && process.env.DEV_FAKE_BAIL) {
+        emit('pod-bailed'); await sleep(step)
+        emit('provisioning'); await sleep(step)
+        emit('pod-locked', { podId: `${podId}b`, gpuType, region, costPerHr }); await sleep(step / 2)
+      }
+    }
     emit('comfy-ready'); await sleep(step / 2)
     emit('inferring'); await sleep(step)
 

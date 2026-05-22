@@ -23,6 +23,12 @@ const WARM_LADDER_MS    = [1_000, 5_000, 30_000, 60_000, 300_000, 600_000, 1_800
 const WARM_LADDER_LABEL = ['1s', '5s', '30s', '1m', '5m', '10m', '30m']
 const WARM_DEFAULT_MS    = 60_000  // 1m
 const AUTO_SETTLE_MS     = 20_000  // confirm the warm window if untouched for this long
+// Typical cold-start (provision + model download) — the baseline the "luck" verdict
+// races against. Hardcoded for now; later a rolling average from wide_events.
+const COLD_TYPICAL_MS    = 7 * 60_000  // ~7m
+// Typical warm-reuse compute window — used to estimate the marginal cost of the
+// next gen ("next gen ~$X") so the cost-averaging nudge has a number.
+const WARM_TYPICAL_SEC   = 25
 
 // Delivery menu: a single morphing 3-button row. Default → Info/Rate/Wrench;
 // Rate → the fixed rating emojis; Wrench → Back/Tweak/Rerun.
@@ -371,7 +377,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     renewTimer?: ReturnType<typeof setTimeout>
     ended: boolean                            // receipt state — pod gone, buttons stripped
     activity?: string                         // current in-flight stage phrase (cleared on complete)
-    lastEditMs?: number                       // throttle in-flight edits (terminal edits bypass)
+    lastShownActivity?: string                // last activity text actually rendered (dedupe repeats)
+    lastEditMs?: number                       // throttle identical in-flight edits
     settleTimer?: ReturnType<typeof setTimeout> // auto-confirm the warm window if untouched
   }>()
 
@@ -983,40 +990,59 @@ Generate AI art, chat with models, explore creative tools.`
     this._ensureBulletin(chatId, progress.hostUserId, progress.podInfo)
     const b = this.bulletins.get(chatId)
     if (!b) return
-    b.activity = this._activityLine(data.stage, data.info)
+    b.activity = this._activityLine(data.stage, data.info, data.elapsedMs, progress.isCold)
 
-    // Throttle in-flight edits to ~1/3s (Telegram 429s on faster), but always
-    // render lock-in (pod header just appeared) so the GPU/price shows promptly.
+    // Render on every meaningful change (a new activity phrase, or pod lock-in),
+    // but throttle identical repeats to ~1/3s so heartbeat events don't 429 us.
     const now = Date.now()
     const isLockIn = !!(data.info && (data.info.gpuType || typeof data.info.costPerHr === 'number' || data.info.podId))
-    if (isLockIn || b.lastEditMs === undefined || now - b.lastEditMs >= 3000) {
+    const changed = b.activity !== b.lastShownActivity
+    if (isLockIn || changed || b.lastEditMs === undefined || now - b.lastEditMs >= 3000) {
       b.lastEditMs = now
+      b.lastShownActivity = b.activity
       void this._showBulletin(chatId)
     }
     this._scheduleBulletinRenewal(chatId)
   }
 
-  /** Short phrase for the bulletin's in-flight activity line. */
-  private _activityLine(stage: string, info?: StageInfo): string {
+  /**
+   * The concierge voice for line 3. Dry & competent: the provider is the fickle
+   * variable, never us. The cold-start arc reads like a guide fishing a moody sea —
+   * the bite (pod-locked), the race (downloading vs typical), cutting a bad pod
+   * loose (bail), and a luck verdict once it boots.
+   */
+  private _activityLine(stage: string, info?: StageInfo, elapsedMs = 0, isCold = false): string {
     const fmt = (sec: number) => sec >= 60 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${sec}s`
+    const elapsed = fmt(Math.round(elapsedMs / 1000))
+
     if (stage.startsWith('downloading:')) {
+      // The race: how are we doing against the typical cold start?
       const [n, m] = stage.slice(12).split('/').map(Number)
-      const eta = (typeof info?.etaMs === 'number' && info.etaMs > 0) ? ` · ~${fmt(Math.round(info.etaMs / 1000))} left` : ''
-      return `Downloading models (${n}/${m})...${eta}`
+      return `Loading models (${n}/${m}) · ${elapsed} in, usually ~${fmt(COLD_TYPICAL_MS / 1000)}.`
     }
+    if (stage === 'comfy-ready' && isCold) {
+      // Boot verdict — the luck payoff, judged against the typical cold start.
+      const ratio = COLD_TYPICAL_MS > 0 ? elapsedMs / COLD_TYPICAL_MS : 1
+      const verdict = ratio < 0.7 ? 'faster than usual.'
+        : ratio <= 1.1 ? 'about typical.'
+        : 'slow side today. Make it count.'
+      return `Booted in ${elapsed} — ${verdict}`
+    }
+
     const lines: Record<string, string> = {
-      'provisioning':     'Provisioning cold pod...',
-      'pod-locked':       'Setting up runtime...',
-      'ssh-ready':        'Pod online. Setting up runtime...',
-      'bootstrapping':    'Bootstrapping runtime...',
-      'downloading':      'Downloading models...',
-      'installing-nodes': 'Loading plugins...',
-      'restarting':       'Reloading runtime...',
-      'comfy-ready':      'Models loaded. Generating...',
-      'inferring':        'Generating image...',
-      'uploading':        'Saving result...',
+      'provisioning':     'Hunting for an open GPU — providers are slammed. Hang tight.',
+      'pod-locked':       "Got one. Let's see how it runs.",
+      'ssh-ready':        'Setting up the pod…',
+      'bootstrapping':    'Setting up the pod…',
+      'downloading':      'Loading models…',
+      'installing-nodes': 'Loading plugins…',
+      'restarting':       'Reloading the pod…',
+      'pod-bailed':       "This pod's dragging — grabbing a fresh one.",
+      'comfy-ready':      'Making your image now.',
+      'inferring':        'Making your image now.',
+      'uploading':        'Saving your result…',
     }
-    return lines[stage] ?? `Working... (${stage})`
+    return lines[stage] ?? `Working… (${stage})`
   }
 
   // -------------------------------------------------------------------------
@@ -1050,15 +1076,23 @@ Generate AI art, chat with models, explore creative tools.`
     return `$${usd.toFixed(2)}`
   }
 
+  /** Finer money for per-gen figures, where sub-cent precision tells the averaging story. */
+  private _moneyFine(usd: number): string {
+    if (usd <= 0) return '$0.00'
+    return `$${usd.toFixed(usd < 0.1 ? 3 : 2)}`
+  }
+
   private _renderBulletin(b: NonNullable<ReturnType<(typeof this.bulletins)['get']>>): string {
-    const fmt = (sec: number) => sec >= 60 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${sec}s`
     const lines: string[] = []
 
-    // 1. Spend-first session summary (only once there's something to total).
+    // 1. Spend/value — leads with spend, but the per-gen average is the star: it
+    //    falls with each warm gen, making the cost-averaging story self-evident.
     if (b.genCount > 0) {
-      const spend = b.totalCostUsd > 0 ? `Spent ${this._money(b.totalCostUsd)} · ` : ''
-      const totals = `${b.genCount} gen${b.genCount > 1 ? 's' : ''} · ${fmt(Math.round(b.totalDurationMs / 1000))}`
-      lines.push(b.ended ? `Session receipt: ${spend}${totals}` : `${spend}${totals}`)
+      const segs: string[] = []
+      if (b.totalCostUsd > 0) segs.push(`Spent ${this._money(b.totalCostUsd)}`)
+      segs.push(`${b.genCount} gen${b.genCount > 1 ? 's' : ''}`)
+      if (b.totalCostUsd > 0) segs.push(`${this._moneyFine(b.totalCostUsd / b.genCount)} each`)
+      lines.push((b.ended ? 'Session receipt: ' : '') + segs.join(' · '))
     }
 
     // 2. Pod identity — GPU + hourly rate. No location (confusing to the user).
@@ -1077,9 +1111,16 @@ Generate AI art, chat with models, explore creative tools.`
         lines.push(b.activity)
       } else {
         const idx = Math.max(0, WARM_LADDER_MS.indexOf(b.warmTtlMs))
-        lines.push(b.confirmed
-          ? `Warm ${WARM_LADDER_LABEL[idx]} after each result.`
-          : `Set how long to keep the pod warm, then ✓.`)
+        if (!b.confirmed) {
+          lines.push('Set how long to keep the pod warm, then ✓.')
+        } else {
+          // Cost-averaging nudge: the pod's warm, so the next gen is nearly free —
+          // keep cooking to drive the per-gen average down.
+          const marginal = typeof b.podInfo.costPerHr === 'number'
+            ? ` · next gen ~${this._moneyFine(b.podInfo.costPerHr * WARM_TYPICAL_SEC / 3600)}`
+            : ''
+          lines.push(`Warm ${WARM_LADDER_LABEL[idx]}${marginal} — keep cooking.`)
+        }
       }
     }
     return lines.join('\n') || 'Pod active.'

@@ -1188,6 +1188,49 @@ test('actum.complete tallies the gen into the bulletin totals', async () => {
   assert.match(txt, /1 gen/, 'bulletin shows the session gen count')
 })
 
+test('cold-start narrative: provider-blame, race cue, and boot verdict', async () => {
+  const { allocutio, router, sender } = makeAllocutio({ withPodControls: true })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  router.triggerStep(
+    { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' } as FlowContext,
+    { primitives: [{ kind: 'Stream', label: 'g', actumId: 'a1', status: 'running' }] },
+  )
+  await new Promise(r => setImmediate(r))
+
+  const textAfter = async (stage: string, info?: object, elapsedMs = 0) => {
+    sender.sent.length = 0; sender.edited.length = 0
+    bus.emit('actum.stage', { actumId: 'a1', stage, elapsedMs, ...(info ? { info } : {}) } as unknown as Parameters<typeof bus.emit>[1])
+    await new Promise(r => setImmediate(r))
+    await new Promise(r => setTimeout(r, 5))
+    return [...sender.sent, ...sender.edited].map(m => m.text).join('\n')
+  }
+
+  assert.match(await textAfter('provisioning'), /Hunting for an open GPU — providers are slammed/)
+  assert.match(await textAfter('pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 }), /Got one/)
+  assert.match(await textAfter('downloading:3/4', undefined, 120_000), /Loading models \(3\/4\) · 2m 0s in, usually ~7m/)
+  // Cold boot under 70% of the ~7m typical → "faster than usual".
+  assert.match(await textAfter('comfy-ready', undefined, 60_000), /Booted in 1m 0s — faster than usual/)
+})
+
+test('per-gen average falls across gens and the idle nudge shows marginal cost', async () => {
+  const { allocutio, router, sender } = makeAllocutio({ withPodControls: true })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  lockPod(allocutio, router, 'a1')
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  await new Promise(r => setImmediate(r))
+  // Confirm so the idle nudge (not the setup prompt) renders.
+  await allocutio.receive(bulCb(123, 'bul:confirm'))
+  await new Promise(r => setImmediate(r))
+
+  // One cold gen — average == total.
+  bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, costUsd: 0.08, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
+  await new Promise(r => setImmediate(r))
+  let txt = sender.edited.at(-1)!.text
+  assert.match(txt, /Spent \$0\.08 · 1 gen · \$0\.080 each/)
+  assert.match(txt, /next gen ~\$0\.005 — keep cooking/)
+})
+
 test('bulletin renders spend-first, short GPU, no location, with price', async () => {
   const { allocutio, router, sender } = makeAllocutio({ withPodControls: true })
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
