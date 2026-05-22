@@ -58,6 +58,31 @@ test('info toggles caption ↔ stats on a media result', async () => {
   assert.equal(s.captions.at(-1)!.text, 'my pic', 'toggles back to the caption')
 })
 
+test('SECURITY: a dm action from a foreign chat is refused (no cross-chat replay)', async () => {
+  const calls: Array<{ actumId: string }> = []
+  const s = makeSink()
+  const m = new DeliveryMenu({ sink: s.sink, rerun: async (actumId) => { calls.push({ actumId }) } })
+  m.track('a1', { chatId: 456, messageId: 77, caption: 'pic', isMedia: true })
+
+  // Attacker in chat 999 crafts dm:rerun:a1 / dm:rate:a1 for a result delivered to 456.
+  await m.handle('a1', 'rerun', { presserUserId: '999', chatId: 999 })
+  await m.handle('a1', 'rate', { chatId: 999 })
+  assert.equal(calls.length, 0, 'foreign-chat rerun is refused')
+  assert.equal(s.markups.length, 0, 'foreign-chat morph is refused')
+
+  // Same actumId from its own chat works.
+  await m.handle('a1', 'rerun', { presserUserId: '123', chatId: 456 })
+  assert.equal(calls.length, 1, 'same-chat rerun is allowed')
+})
+
+test('SECURITY: an unknown actumId is a no-op (not in the delivered set)', async () => {
+  const s = makeSink()
+  const m = new DeliveryMenu({ sink: s.sink, rerun: async () => {} })
+  await m.handle('ghost', 'info', { chatId: 456 })
+  await m.handle('ghost', 'rate', { chatId: 456 })
+  assert.equal(s.markups.length + s.captions.length + s.texts.length, 0)
+})
+
 test('rerun/tweak invoke the rerun callback with the presser', async () => {
   const calls: Array<{ actumId: string; presser: string }> = []
   const m = new DeliveryMenu({ sink: makeSink().sink, rerun: async (actumId, presser) => { calls.push({ actumId, presser }) } })

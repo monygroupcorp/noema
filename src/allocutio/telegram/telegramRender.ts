@@ -144,12 +144,6 @@ export function decodeCallbackData(data: string): PrimitiveEvent | null {
   if (data.startsWith('ps:')) {
     return { kind: 'paginate', action: 'select', selectedId: data.slice(3) }
   }
-  // Result action: ra:actumId:ratingType
-  if (data.startsWith('ra:')) {
-    const [, actumId, ratingType] = data.split(':')
-    return { kind: 'result_action', actumId, actionId: `rate_${ratingType}` }
-  }
-
   if (data.startsWith('a:')) {
     const parts = data.split(':')
     const actionId = parts[1]

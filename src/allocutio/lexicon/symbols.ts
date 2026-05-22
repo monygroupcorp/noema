@@ -29,4 +29,4 @@ export const RATING: Record<string, string> = { beautiful: '😻', funny: '😹'
  *   thinking (received) → ok (cold accepted) | fire (warm reuse).
  * A non-reaction surface (web) expresses the same beats differently, same meaning.
  */
-export const REACTION = { thinking: '🤔', ok: '👌', fire: '🔥' } as const
+export const REACTION = { thinking: '🤔', ok: '👌', fire: '🔥', error: '😨' } as const
