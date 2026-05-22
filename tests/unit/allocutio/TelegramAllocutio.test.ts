@@ -1188,7 +1188,7 @@ test('actum.complete tallies the gen into the bulletin totals', async () => {
   assert.match(txt, /1 gen/, 'bulletin shows the session gen count')
 })
 
-test('cold-start narrative: provider-blame, race cue, and boot verdict', async () => {
+test('cold-start journal: silent hunt, committed Found/Prepared lines, live line', async () => {
   const { allocutio, router, sender } = makeAllocutio({ withPodControls: true })
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   router.triggerStep(
@@ -1197,19 +1197,45 @@ test('cold-start narrative: provider-blame, race cue, and boot verdict', async (
   )
   await new Promise(r => setImmediate(r))
 
-  const textAfter = async (stage: string, info?: object, elapsedMs = 0) => {
+  const textAfter = async (stage: string, info?: object) => {
     sender.sent.length = 0; sender.edited.length = 0
-    bus.emit('actum.stage', { actumId: 'a1', stage, elapsedMs, ...(info ? { info } : {}) } as unknown as Parameters<typeof bus.emit>[1])
+    bus.emit('actum.stage', { actumId: 'a1', stage, elapsedMs: 0, ...(info ? { info } : {}) } as unknown as Parameters<typeof bus.emit>[1])
     await new Promise(r => setImmediate(r))
-    await new Promise(r => setTimeout(r, 5))
-    return [...sender.sent, ...sender.edited].map(m => m.text).join('\n')
+    return [...sender.sent, ...sender.edited].map(m => m.text).at(-1) ?? ''
   }
 
-  assert.match(await textAfter('provisioning'), /Hunting for an open GPU — providers are slammed/)
-  assert.match(await textAfter('pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 }), /Got one/)
-  assert.match(await textAfter('downloading:3/4', undefined, 120_000), /Loading models \(3\/4\) · 2m 0s in, usually ~7m/)
-  // Cold boot under 70% of the ~7m typical → "faster than usual".
-  assert.match(await textAfter('comfy-ready', undefined, 60_000), /Booted in 1m 0s — faster than usual/)
+  // Hunt is silent unless it drags — provisioning shows no "Hunting" line yet.
+  const prov = await textAfter('provisioning')
+  assert.ok(!/Hunting/.test(prov), 'fast hunt stays quiet')
+  // pod-locked commits the Found line (with the synthetic 30s hunt) + live Initializing.
+  const locked = await textAfter('pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  assert.match(locked, /Found RTX 4090 for \$0\.69\/hr in 30s/)
+  assert.match(locked, /Initializing/)
+  // download → connected live line; the Found line persists above it.
+  const dl = await textAfter('downloading:3/4')
+  assert.match(dl, /Found RTX 4090 for \$0\.69\/hr in 30s/)
+  assert.match(dl, /Connected, downloading models \(3\/4\)/)
+  // comfy-ready commits the Prepared line (4.5m) + live Generating.
+  const ready = await textAfter('comfy-ready', { phaseMs: 4.5 * 60_000 })
+  assert.match(ready, /Prepared Make Setup in 4\.5m/)
+  assert.match(ready, /Generating/)
+})
+
+test('bail erases the Found line, records a permanent Quit-pod meta line', async () => {
+  const { allocutio, router, sender } = makeAllocutio({ withPodControls: true })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  lockPod(allocutio, router, 'a1')
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'provisioning', elapsedMs: 0 })
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 } })
+  await new Promise(r => setImmediate(r))
+  sender.edited.length = 0
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-bailed', elapsedMs: 0 })
+  await new Promise(r => setImmediate(r))
+
+  const txt = sender.edited.at(-1)!.text
+  assert.ok(!/Found RTX 4090/.test(txt), 'the bailed pod\'s Found line is erased')
+  assert.match(txt, /Quit pod 1 for download throttle/, 'a permanent meta line records the bail')
 })
 
 test('per-gen average falls across gens and the idle nudge shows marginal cost', async () => {
@@ -1217,33 +1243,31 @@ test('per-gen average falls across gens and the idle nudge shows marginal cost',
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 } })
   await new Promise(r => setImmediate(r))
-  // Confirm so the idle nudge (not the setup prompt) renders.
-  await allocutio.receive(bulCb(123, 'bul:confirm'))
+  await allocutio.receive(bulCb(123, 'bul:confirm'))  // confirm → idle nudge, not setup prompt
   await new Promise(r => setImmediate(r))
 
-  // One cold gen — average == total.
-  bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, costUsd: 0.08, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
+  bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, executionMs: 12000, costUsd: 0.08, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
   await new Promise(r => setImmediate(r))
-  let txt = sender.edited.at(-1)!.text
-  assert.match(txt, /Spent \$0\.08 · 1 gen · \$0\.080 each/)
-  assert.match(txt, /next gen ~\$0\.005 — keep cooking/)
+  const txt = sender.edited.at(-1)!.text
+  assert.match(txt, /1 gen · exec ~12s avg · \$0\.080 ea · \$0\.08 total/, 'stat line with falling per-gen average')
+  assert.match(txt, /next gen ~\$0\.005 — keep cooking/, 'idle nudge shows marginal cost')
 })
 
-test('bulletin renders spend-first, short GPU, no location, with price', async () => {
+test('GPU + rate live in the Found journal line; no vendor noise or location', async () => {
   const { allocutio, router, sender } = makeAllocutio({ withPodControls: true })
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'NVIDIA GeForce RTX 4090', region: 'EU-RO-1', costPerHr: 0.69 } })
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'NVIDIA GeForce RTX 4090', region: 'EU-RO-1', costPerHr: 0.69, phaseMs: 30_000 } })
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, coldStart: true, costUsd: 0.08, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
+  bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, executionMs: 12000, coldStart: true, costUsd: 0.08, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
   await new Promise(r => setImmediate(r))
 
   const txt = [...sender.sent.map(s => s.text), ...sender.edited.map(e => e.text)].join('\n---\n')
-  assert.match(txt, /Spent \$0\.08 · 1 gen/, 'spend-first summary line')
-  assert.match(txt, /RTX 4090 · \$0\.69\/hr/, 'short GPU name + hourly rate')
+  assert.match(txt, /Found RTX 4090 for \$0\.69\/hr/, 'GPU + rate in the Found line')
+  assert.match(txt, /1 gen .* \$0\.08 total/, 'stat line carries the cost')
   assert.ok(!/EU-RO-1/.test(txt), 'location is dropped (confusing to the user)')
   assert.ok(!/NVIDIA|GeForce/.test(txt), 'vendor noise is stripped from the GPU name')
 })

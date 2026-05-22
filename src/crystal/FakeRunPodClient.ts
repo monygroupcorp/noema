@@ -59,8 +59,11 @@ export class FakeRunPodClient implements RunPodClient {
     const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
     log.info('fake cold pod run starting', { podId })
+    // Synthetic phase durations so the bulletin shows believable "in 30s" / "4.5m"
+    // summaries (the fake's real wall-clock is only seconds). phaseMs at pod-locked
+    // is the hunt time; at comfy-ready it's the prep (init + download) time.
     emit('provisioning'); await sleep(step)
-    emit('pod-locked', { podId, gpuType, region, costPerHr }); await sleep(step)
+    emit('pod-locked', { podId, gpuType, region, costPerHr, phaseMs: 30_000 }); await sleep(step)
     emit('ssh-ready'); await sleep(step / 2)
     emit('bootstrapping'); await sleep(step)
     for (let i = 1; i <= 4; i++) {
@@ -70,10 +73,10 @@ export class FakeRunPodClient implements RunPodClient {
       if (i === 2 && process.env.DEV_FAKE_BAIL) {
         emit('pod-bailed'); await sleep(step)
         emit('provisioning'); await sleep(step)
-        emit('pod-locked', { podId: `${podId}b`, gpuType, region, costPerHr }); await sleep(step / 2)
+        emit('pod-locked', { podId: `${podId}b`, gpuType, region, costPerHr, phaseMs: 28_000 }); await sleep(step / 2)
       }
     }
-    emit('comfy-ready'); await sleep(step / 2)
+    emit('comfy-ready', { phaseMs: 4.5 * 60_000 }); await sleep(step / 2)
     emit('inferring'); await sleep(step)
 
     const executionMs = step
