@@ -169,7 +169,6 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     }
   }
 
-  /** Re-run an actum under the presser (presser pays), prefilled with its modus + params. */
   /** Enter the execute flow for a user, optionally prefilled — the single path used by
    *  slash commands and start-screen shortcuts alike. */
   private async _enterExecute(userId: string, state?: Record<string, unknown>): Promise<void> {
@@ -177,6 +176,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     await this.router.enter('execute', 'telegram', userId, identity, state ? { state } : undefined)
   }
 
+  /** Re-run an actum under the presser (presser pays), prefilled with its modus + params. */
   private async _rerun(actumId: string, presserUserId: string, chatId: number): Promise<void> {
     this.chatIds.set(`telegram:${presserUserId}`, chatId)
     const actum = await this.deps.acta?.findById(actumId).catch(() => null)
@@ -218,7 +218,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     } catch (err) {
       log.error('TelegramAllocutio error', { error: String(err) })
       if (chatId) {
-        if (messageId) void this._react(chatId, messageId, '😨')
+        if (messageId) void this._react(chatId, messageId, REACTION.error)
         await this.sender
           .sendMessage(chatId, classifyError(err))
           .catch(() => {})
@@ -310,7 +310,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // Delivery menu — morphing row + Info stats. Data: dm:<action>:<actumId>[:<type>]
     if (query.data.startsWith('dm:') && chatId) {
       const [, action, actumId, ratedType] = query.data.split(':')
-      await this.delivery.handle(actumId, action, { ratedType, presserUserId: String(query.from.id) })
+      // Pass the callback's own chat so the menu can refuse cross-chat actumIds.
+      await this.delivery.handle(actumId, action, { ratedType, presserUserId: String(query.from.id), chatId })
       return
     }
 

@@ -46,21 +46,28 @@ export class DeliveryMenu {
     this.meta.set(actumId, { ...m, showingStats: false, rateGlyph: '♥' })
   }
 
-  /** Handle a `dm:` callback. `action` is the verb; `ratedType`/`presserUserId` as needed. */
-  async handle(actumId: string, action: string, opts: { ratedType?: string; presserUserId?: string } = {}): Promise<void> {
+  /**
+   * Handle a `dm:` callback. `chatId` is the chat the callback came FROM — it must
+   * match the chat the result was delivered to, or the action is refused. Without
+   * this, `actumId` (attacker-controllable callback data) keyed into a process-global
+   * map would let a member of one chat morph/rerun/inspect another chat's result.
+   */
+  async handle(actumId: string, action: string, opts: { ratedType?: string; presserUserId?: string; chatId?: number } = {}): Promise<void> {
     const meta = this.meta.get(actumId)
-    const morph = (state: MenuState, glyph?: string) => {
-      if (meta) void this.deps.sink.editMarkup(meta.chatId, meta.messageId, menuKeyboard(actumId, state, glyph)).catch(() => {})
-    }
+    // Authorize: only act on a result we delivered, and only from its own chat.
+    if (!meta || (opts.chatId !== undefined && meta.chatId !== opts.chatId)) return
+
+    const morph = (state: MenuState, glyph?: string) =>
+      void this.deps.sink.editMarkup(meta.chatId, meta.messageId, menuKeyboard(actumId, state, glyph)).catch(() => {})
 
     switch (action) {
       case 'rate':   morph('rate'); return
       case 'wrench': morph('wrench'); return
-      case 'back':   morph('default', meta?.rateGlyph); return
+      case 'back':   morph('default', meta.rateGlyph); return
       case 'info':   await this._toggleInfo(actumId); return
       case 'rated': {
         const glyph = RATE_EMOJI[opts.ratedType ?? ''] ?? '♥'
-        if (meta) meta.rateGlyph = glyph
+        meta.rateGlyph = glyph
         // Rating is feedback on a result — it must NOT route through the user's flow
         // (which can re-deliver during AWAITING_COMPLETION). Just reflect the choice;
         // durable rating persistence is a separate (ratings-store) follow-up.
@@ -69,7 +76,7 @@ export class DeliveryMenu {
       }
       case 'tweak':
       case 'rerun':
-        if (opts.presserUserId && meta) await this.deps.rerun(actumId, opts.presserUserId, meta.chatId)
+        if (opts.presserUserId) await this.deps.rerun(actumId, opts.presserUserId, meta.chatId)
         return
     }
   }
