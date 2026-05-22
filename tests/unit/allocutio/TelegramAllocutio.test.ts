@@ -1165,3 +1165,59 @@ test('warm signal arriving before registration still reacts 🔥 (not 👌)', as
   const last = sender.reactions.filter(r => r.messageId === 50).at(-1)
   assert.equal(last?.emoji, '🔥', 'warm reuse should end on 🔥 (replacing the initial 👌)')
 })
+
+// =============================================================================
+// Phase 4a — session bulletin
+// =============================================================================
+function bulCb(fromId: number, data: string): Parameters<TelegramAllocutio['receive']>[0] {
+  return { update_id: 9, callback_query: { id: 'cb', from: { id: fromId }, message: { message_id: 777, chat: { id: 456 } }, data } } as unknown as Parameters<TelegramAllocutio['receive']>[0]
+}
+function lockPod(allocutio: TelegramAllocutio, router: ReturnType<typeof makeRouter>, actumId: string) {
+  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
+  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId, status: 'running' }] })
+}
+
+test('pod-locked creates the session bulletin with the warm stepper + confirm', async () => {
+  const { allocutio, router, sender } = makeAllocutio({ withPodControls: true })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  lockPod(allocutio, router, 'a1')
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  await new Promise(r => setImmediate(r))
+  const bul = sender.sent.find(s => /RTX 4090/.test(s.text))
+  assert.ok(bul, 'bulletin posted with pod info')
+  const data = ((bul!.extra as { reply_markup: { inline_keyboard: Array<Array<{ callback_data: string }>> } }).reply_markup.inline_keyboard).flat().map(b => b.callback_data)
+  assert.ok(data.includes('bul:confirm'), 'setup state shows confirm')
+  assert.ok(data.includes('bul:inc'), 'setup state shows stepper')
+})
+
+test('bul:kill is host-only and terminates the pod (freezes receipt)', async () => {
+  const { allocutio, router, terminated } = makeAllocutio({ withPodControls: true })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  lockPod(allocutio, router, 'a1')
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  await new Promise(r => setImmediate(r))
+
+  await allocutio.receive(bulCb(999, 'bul:kill'))   // not the host
+  await new Promise(r => setImmediate(r))
+  assert.deepEqual(terminated, [], 'non-host kill is ignored')
+
+  await allocutio.receive(bulCb(123, 'bul:kill'))   // the host
+  await new Promise(r => setImmediate(r))
+  assert.deepEqual(terminated, ['pod-1'], 'host kill terminates the session pod')
+})
+
+test('actum.complete tallies the gen into the bulletin totals', async () => {
+  const { allocutio, router, sender } = makeAllocutio({ withPodControls: true })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  lockPod(allocutio, router, 'a1')
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  await new Promise(r => setImmediate(r))
+  sender.edited.length = 0
+  bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, coldStart: true, costUsd: 0.09, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
+  await new Promise(r => setImmediate(r))
+  const txt = sender.edited.map(m => m.text).join('\n')
+  assert.match(txt, /1 gen/, 'bulletin shows the session gen count')
+})
