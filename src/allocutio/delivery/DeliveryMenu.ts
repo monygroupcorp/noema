@@ -13,7 +13,7 @@ export interface DeliveryDeps {
   sink: DeliverySink
   acta?: { findById(id: string): Promise<Actum | null> }
   /** Re-run the actum under the presser (presser pays). Adapter wires the flow router. */
-  rerun: (actumId: string, presserUserId: string) => Promise<void>
+  rerun: (actumId: string, presserUserId: string, chatId: number) => Promise<void>
 }
 
 interface ResultMeta {
@@ -69,7 +69,7 @@ export class DeliveryMenu {
       }
       case 'tweak':
       case 'rerun':
-        if (opts.presserUserId) await this.deps.rerun(actumId, opts.presserUserId)
+        if (opts.presserUserId && meta) await this.deps.rerun(actumId, opts.presserUserId, meta.chatId)
         return
     }
   }
