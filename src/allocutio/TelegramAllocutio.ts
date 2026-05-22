@@ -20,29 +20,9 @@ import { DeliveryMenu, type DeliverySink } from './delivery/DeliveryMenu.js'
 import { ReactionController } from './reactions/ReactionController.js'
 import type { UiKeyboard } from './ui/Keyboard.js'
 import { inlineKeyboard, btn, renderPrimitive, decodeCallbackData, type InlineKeyboard } from './telegramRender.js'
+import { CommandRouter } from './commands/CommandRouter.js'
 
 const log = makeLogger('telegram:allocutio')
-
-// Delivery menu: a single morphing 3-button row. Default → Info/Rate/Wrench;
-// Rate → the fixed rating emojis; Wrench → Back/Tweak/Rerun.
-// ---------------------------------------------------------------------------
-// Static text
-// ---------------------------------------------------------------------------
-
-const HELP_TEXT = `\
-noema
-
-  Creative
-  /make    — generate images and art
-  /chat    — chat with an AI model
-  /flows   — browse all available tools
-
-  Account
-  /status  — view balance and account
-  /wallet  — manage connected wallets
-  /cancel  — cancel current action
-  /help    — show this message\
-`
 
 // ---------------------------------------------------------------------------
 // Telegram Update (minimal typing)
@@ -161,6 +141,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   private readonly bulletins: BulletinManager
   private readonly delivery: DeliveryMenu
   private readonly reactions: ReactionController
+  private readonly commands: CommandRouter
 
   constructor(deps: {
     router: RouterDeps
@@ -200,6 +181,18 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     // The 👌/🔥 reaction choreography on the command message.
     this.reactions = new ReactionController({ react: (c, m, e) => this._react(c, m, e) })
+
+    // The slash-command surface → flow router.
+    this.commands = new CommandRouter({
+      enterExecute: async (userId, state) => {
+        const identity = await this.identity.resolve(userId)
+        await this.router.enter('execute', 'telegram', userId, identity, state ? { state } : undefined)
+      },
+      cancel: (userId) => this.router.clear('telegram', userId),
+      sendMessage: (chatId, text, extra) => this.sender.sendMessage(chatId, text, extra),
+      sendStart: (chatId) => this._sendStart(chatId),
+      ack: (chatId, messageId) => { void this._react(chatId, messageId, '👌') },
+    })
 
     // Wire router callbacks
     this.router.onStep((ctx, step) => { void this._handleStep(ctx, step) })
@@ -343,96 +336,14 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // -------------------------------------------------------------------------
 
   private async _handleCommand(userId: string, chatId: number, text: string, messageId?: number): Promise<void> {
-    // React with 🤔 to acknowledge receipt
+    // Reaction-prep: 🤔 on receipt + remember the command message so the Stream
+    // registration can later land the 👌/🔥 on it. The command surface itself lives
+    // in CommandRouter.
     if (messageId !== undefined) {
       void this._react(chatId, messageId, '🤔')
-      // Store command message ID for async reaction (Feature 3)
       this.lastCommandMessageIds.set(`telegram:${userId}`, messageId)
     }
-
-    // Extract command (strip leading / and any @bot_username suffix, plus args)
-    const [rawCmd] = text.split(' ')
-    const cmd = rawCmd.split('@')[0].toLowerCase()
-
-    switch (cmd) {
-      case '/start': {
-        await this._sendStart(chatId)
-        if (messageId !== undefined) void this._react(chatId, messageId, '👌')
-        break
-      }
-
-      case '/run':
-      case '/make': {
-        const identity = await this.identity.resolve(userId)
-        // Parse prompt from command: /make <prompt text>
-        const promptText = text.replace(/^\/(?:make|run)(?:@\S+)?\s*/i, '').trim()
-        const defaultModusId = 'runmake.flux-schnell'
-        const initialState = promptText
-          ? { modusId: defaultModusId, aditus: { prompt: promptText }, browsePageIndex: 0 }
-          : { modusId: defaultModusId, aditus: {}, browsePageIndex: 0 }
-        await this.router.enter('execute', 'telegram', userId, identity, { state: initialState })
-        // No 👌 here: the "accepted" reaction is owned by the Stream registration
-        // (👌 for a cold start, 🔥 for a warm reuse) so a warm run never flashes 👌.
-        break
-      }
-
-      case '/chat': {
-        const identity = await this.identity.resolve(userId)
-        // Pre-set chatgpt modus so the user lands directly on the prompt field
-        await this.router.enter('execute', 'telegram', userId, identity, {
-          state: { modusId: 'modus.chatgpt', aditus: {}, browsePageIndex: 0 },
-        })
-        if (messageId !== undefined) void this._react(chatId, messageId, '👌')
-        break
-      }
-
-      case '/flows': {
-        const identity = await this.identity.resolve(userId)
-        await this.router.enter('execute', 'telegram', userId, identity)
-        if (messageId !== undefined) void this._react(chatId, messageId, '👌')
-        break
-      }
-
-      case '/cancel':
-      case '/stop': {
-        this.router.clear('telegram', userId)
-        await this.sender.sendMessage(chatId, 'Cancelled.')
-        break
-      }
-
-      case '/status': {
-        await this.sender.sendMessage(chatId,
-          'Balance and account info coming soon.',
-          { reply_markup: inlineKeyboard([[
-            btn('connect wallet', 'a:connect_wallet'),
-            btn('top up',        'a:topup'),
-          ]]) },
-        )
-        break
-      }
-
-      case '/wallet': {
-        await this.sender.sendMessage(chatId,
-          'Wallet management coming soon.',
-          { reply_markup: inlineKeyboard([[
-            btn('connect wallet', 'a:connect_wallet'),
-            btn('balance',        'a:balance'),
-          ]]) },
-        )
-        break
-      }
-
-      case '/help': {
-        await this.sender.sendMessage(chatId, HELP_TEXT)
-        break
-      }
-
-      default:
-        await this.sender.sendMessage(chatId,
-          `Unknown command. Type /help to see what's available.`
-        )
-        break
-    }
+    await this.commands.dispatch(userId, chatId, text, messageId)
   }
 
   // -------------------------------------------------------------------------
