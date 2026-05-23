@@ -83,8 +83,8 @@ const MATERIA: Materia = {
   imageRef: 'stationthis/flux:v1',
   impetusPerSecond: 1n,
   status: 'idle',
-  bootCostImpetus: 200n,        // bootShare = ceil(200/5) = 40
-  bootRecovered: 0n,
+  // bootCostImpetus / bootRecovered intentionally omitted — Phase C dropped
+  // per-pod boot accounting; guest pricing now reads only WARM_SURCHARGE_IMPETUS.
 }
 
 const MODUS: Modus = {
@@ -173,7 +173,8 @@ test('warm-path guest: dispatch stamp survives onMetrics merges', async () => {
 
   // Dispatch stamp survives both onMetrics reports.
   assert.equal(stored.executio?.pricingTier, 'guest')
-  assert.equal(stored.executio?.finalImpetus, 1000n + 40n, 'base + bootShare(200/5)=40')
+  assert.equal(stored.executio?.baseImpetus, 1000n, 'base stashed alongside final')
+  assert.equal(stored.executio?.finalImpetus, 1000n + 80n, 'base + WARM_SURCHARGE_IMPETUS')
 
   // Pod-telemetry merged in too — proof the merge actually merges, not just
   // preserves. The latest onMetrics snapshot wins on the keys it sets.

@@ -29,6 +29,7 @@
 import type { Actum } from './actum'
 import type { Modo } from './modo'
 import type { Signum, Signa } from './significandi'
+import type { HostKey } from './hospitium'
 
 // ---------------------------------------------------------------------------
 // Event types
@@ -45,10 +46,22 @@ export interface SignumEventPayload {
   execution_spend: {
     actum: Actum
     modo?: Modo
-    /** Total impetus points charged for this execution */
+    /** Total impetus points charged for this execution (base + warm surcharge if guest tier). */
     impetus: bigint
-    /** animaId of the session host — present when executing inside another anima's modo */
-    modoHostAnimaId?: string
+    /**
+     * Base impetus before any hosting surcharge. hostCutHook taxes this (not
+     * `impetus`) so the surcharge isn't double-compensated — the host receives
+     * the surcharge separately via hospitiumHook. Stamped at dispatch on
+     * `actum.executio.baseImpetus`; equals `impetus` for owner/admin tiers.
+     */
+    baseImpetus: bigint
+    /**
+     * Host of the pod this execution ran on — full HostKey so both identified
+     * (animaId) and anonymous (commitment) hosts collect via the same payload.
+     * Present only when the execution ran on a hosted pod with a guest-tier
+     * pricing decision; absent on owner/admin/no-Hospitium paths.
+     */
+    modoHostKey?: HostKey
     /** animaId of the modus author — for spell royalty */
     modusAuctorAnimaId?: string
     /** animaIds of intella authors — for model royalty, equal-split across all */

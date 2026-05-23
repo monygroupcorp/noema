@@ -15,13 +15,26 @@
 export const IMPETUS_USD_RATE = 0.000337
 
 /**
- * Target number of guest gens across which a host's cold-start cost is amortized:
+ * Flat per-guest-gen surcharge for landing on a warm pod (skip cold start).
+ * Set platform-wide, not derived from this specific pod's accounting — guests
+ * pay "the going rate to skip cold start anywhere," predictable across pods.
  *
- *   bootShare(materia) = ceil(materia.bootCostImpetus / BOOT_AMORTIZE_OVER)
- *
- * The surcharge stops once `Materia.bootRecovered >= bootCostImpetus`. Smaller =
- * faster recovery, higher per-guest premium; larger = gentler per guest, more
- * gens before host breaks even. 5 is a defensible starting point — dial later.
+ * 80 impetus ≈ $0.027. Calibrate by observation; revisit when we have data.
+ */
+export const WARM_SURCHARGE_IMPETUS = 80n
+
+/**
+ * Percentage of WARM_SURCHARGE_IMPETUS that flows to the host as the ambassador
+ * bonus on every guest gen (hospitiumHook → `forma:'reward'` to animaId or
+ * `forma:'arcanum'` to commitment, depending on HostKey discriminant). Platform
+ * retains the rest. Symmetric with the 20% platform skim on hostCut.
+ */
+export const HOST_BONUS_RATE = 80n
+
+/**
+ * @deprecated Phase A/B leftover — the per-pod cold-start amortization model
+ * was replaced by the flat `WARM_SURCHARGE_IMPETUS`. Kept exported so any
+ * stragglers grep cleanly; remove in a follow-up cleanup PR.
  */
 export const BOOT_AMORTIZE_OVER = 5n
 
@@ -52,19 +65,18 @@ export function computeBootCostImpetus(billedMs: number, costPerHrUsd: number): 
 }
 
 /**
- * The bootShare a guest pays per gen until the host's cold start is recovered.
- * Returns 0 once `bootRecovered >= bootCostImpetus`.
+ * @deprecated Phase A/B leftover. Phase C uses a flat `WARM_SURCHARGE_IMPETUS`
+ * instead — guest pricing no longer reads per-pod boot accounting. Retained
+ * for a transitional window; remove in a follow-up cleanup PR.
  */
 export function bootShare(bootCostImpetus = 0n, bootRecovered = 0n): bigint {
   if (bootCostImpetus <= 0n) return 0n
   if (bootRecovered >= bootCostImpetus) return 0n
-  // ceil division of bigints: (a + b - 1n) / b
   return (bootCostImpetus + BOOT_AMORTIZE_OVER - 1n) / BOOT_AMORTIZE_OVER
 }
 
-// ── The hosting tier decision (Phase B) ─────────────────────────────────────
+// ── The hosting tier decision (Phase B + Phase C reframe) ───────────────────
 
-import type { Materia } from '../types/materia.js'
 import type { Hospitium, HostKey } from '../types/hospitium.js'
 
 export type PricingTier = 'owner' | 'admin' | 'guest'
@@ -94,22 +106,21 @@ export function tierOf(runnerKey: HostKey | undefined, hospitium: Hospitium | nu
 }
 
 /**
- * The impetus a runner pays for one gen, given their tier + the pod's bootCost.
- * Owner + admin pay base; guest pays base + the amortizing bootShare.
+ * The impetus a runner pays for one gen. Guests pay the flat WARM_SURCHARGE
+ * on top of the base reservation; owner + admin pay base. No Materia read —
+ * the surcharge is platform-set, not per-pod.
  */
-export function impetusFor(tier: PricingTier, materia: Materia, baseImpetus: bigint): bigint {
-  if (tier !== 'guest') return baseImpetus
-  return baseImpetus + bootShare(materia.bootCostImpetus, materia.bootRecovered)
+export function impetusFor(tier: PricingTier, baseImpetus: bigint): bigint {
+  return tier === 'guest' ? baseImpetus + WARM_SURCHARGE_IMPETUS : baseImpetus
 }
 
 /**
- * The `modoHostAnimaId` value the spend event should carry — only set on guest
- * runs with an identified host. Anonymous-host payouts wait for Phase C, which
- * widens the spend payload to a full HostKey and branches the hostCutHook to
- * mint an arcanum signum.
+ * The host's key for the spend event payload. Only set on guest runs with a
+ * Hospitium; passes through both `{animaId}` (identified host → reward signum)
+ * and `{commitment}` (anonymous host → arcanum signum) unchanged. The host-bound
+ * hooks (hostCutHook, hospitiumHook) branch on the discriminant.
  */
-export function modoHostFor(tier: PricingTier, hospitium: Hospitium | null): { animaId: string } | undefined {
+export function modoHostFor(tier: PricingTier, hospitium: Hospitium | null): HostKey | undefined {
   if (tier !== 'guest' || !hospitium) return undefined
-  if ('animaId' in hospitium.hostKey) return { animaId: hospitium.hostKey.animaId }
-  return undefined
+  return hospitium.hostKey
 }

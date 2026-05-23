@@ -188,20 +188,28 @@ export interface ActumExecutio {
    */
   billedMs?: number
 
-  // ── Hosting / pricing decision (Phase B) ────────────────────────────────────
+  // ── Hosting / pricing decision (Phase B + Phase C reframe) ──────────────────
   // Stamped at dispatch by RunPodCursor when the actum lands on a warm Materia
   // with a paired Hospitium. The completor reads these to emit execution_spend
-  // with the right impetus + host destination. Both fields are NON-IDENTITY by
-  // construction — `pricingTier` is one of three labels and `finalImpetus` is a
-  // number; the host's identity is re-derived from Hospitium at emit time.
+  // with the right impetus + host destination. All three fields are NON-IDENTITY
+  // by construction — `pricingTier` is one of three labels; `baseImpetus` and
+  // `finalImpetus` are numbers; the host's identity is re-derived from Hospitium
+  // at emit time.
 
   /** Which pricing tier this run was assigned at dispatch — drives the spend math. */
   pricingTier?: 'owner' | 'admin' | 'guest'
 
   /**
-   * The impetus actually spent on this run (base for owner/admin, base + bootShare
-   * for guest). Distinct from `actum.impetus`, which is the reservation upper
-   * bound locked at incept. Refund of the diff is Phase C.
+   * Base impetus before any hosting surcharge — equals `actum.impetus` reservation.
+   * Carried separately so hostCutHook can tax base only (not the warm surcharge,
+   * which is independently compensated via hospitiumHook).
+   */
+  baseImpetus?: bigint
+
+  /**
+   * Total impetus actually spent on this run. Guest = baseImpetus + WARM_SURCHARGE_IMPETUS;
+   * owner/admin = baseImpetus. Distinct from `actum.impetus`, which is the
+   * reservation upper bound; the completor caps at that.
    */
   finalImpetus?: bigint
 }

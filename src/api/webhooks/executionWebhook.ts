@@ -158,21 +158,30 @@ export async function handleExecutionWebhook(
         modusAuctorAnimaId = modus?.auctor
       }
 
-      // Hosting payout (Phase B): for guest runs on an identified host's pod,
-      // resolve the host's anima from Hospitium at emit time — host identity is
-      // NEVER on the actum or materia, only on the Hospitium side-table. The
-      // discriminating rule lives in `modoHostFor` so Phase C only needs to widen
-      // its return type (to HostKey | undefined) for commitment-hosts to earn too.
-      let modoHostAnimaId: string | undefined
+      // Hosting payout (Phase C): resolve the host's full HostKey from Hospitium
+      // at emit time — host identity is NEVER on the actum or materia. The
+      // host-bound hooks (hostCutHook, hospitiumHook) branch on the discriminant
+      // to mint reward (identified) or arcanum (commitment) signa.
+      let modoHostKey: import('../../types/hospitium.js').HostKey | undefined
       if (deps.hospitia && completed.executio?.pricingTier && completed.materiamId) {
         const hospitium = await deps.hospitia.findByMateriaId(completed.materiamId).catch(() => null)
-        modoHostAnimaId = modoHostFor(completed.executio.pricingTier, hospitium)?.animaId
+        modoHostKey = modoHostFor(completed.executio.pricingTier, hospitium)
       }
+
+      // baseImpetus is stamped at dispatch on executio. Owner/admin paths that
+      // never went through cursor stamping fall back to the spend amount itself.
+      const baseImpetus = completed.executio?.baseImpetus ?? completed.impetus
 
       if (deps.nexus && deps.signorum) {
         const royaltySigna = await deps.nexus.emit({
           type: 'execution_spend',
-          payload: { actum: completed, impetus: completed.impetus, modusAuctorAnimaId, modoHostAnimaId },
+          payload: {
+            actum: completed,
+            impetus: completed.impetus,
+            baseImpetus,
+            modusAuctorAnimaId,
+            modoHostKey,
+          },
         })
         let allSigna = royaltySigna
         // Fire royalty_fired so platformSkimHook can take its cut
