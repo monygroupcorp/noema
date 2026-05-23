@@ -8,6 +8,7 @@ import type { Modorum } from '../../types/modus.js'
 import type { ModoStore } from '../../types/modo.js'
 import type { HospitiumStore } from '../../types/hospitium.js'
 import { createVestigiumFromActum } from '../../execution/hooks/vestigiumHook.js'
+import { modoHostFor } from '../../ledger/rates.js'
 
 type AuctorKey = { animaId: string } | { commitment: string }
 
@@ -159,12 +160,13 @@ export async function handleExecutionWebhook(
 
       // Hosting payout (Phase B): for guest runs on an identified host's pod,
       // resolve the host's anima from Hospitium at emit time — host identity is
-      // NEVER on the actum or materia, only on the Hospitium side-table. Phase C
-      // widens the spend payload to a full HostKey so commitment-hosts also earn.
+      // NEVER on the actum or materia, only on the Hospitium side-table. The
+      // discriminating rule lives in `modoHostFor` so Phase C only needs to widen
+      // its return type (to HostKey | undefined) for commitment-hosts to earn too.
       let modoHostAnimaId: string | undefined
-      if (deps.hospitia && completed.executio?.pricingTier === 'guest' && completed.materiamId) {
+      if (deps.hospitia && completed.executio?.pricingTier && completed.materiamId) {
         const hospitium = await deps.hospitia.findByMateriaId(completed.materiamId).catch(() => null)
-        if (hospitium && 'animaId' in hospitium.hostKey) modoHostAnimaId = hospitium.hostKey.animaId
+        modoHostAnimaId = modoHostFor(completed.executio.pricingTier, hospitium)?.animaId
       }
 
       if (deps.nexus && deps.signorum) {
