@@ -1,21 +1,34 @@
 import type { Collection, Document } from 'mongodb'
 import type { Materia, MateriaStore, PodPolicy } from '../types/materia.js'
 
-// bigint is not a BSON type — stored as decimal string, converted on read/write
-type MateriaDoc = Omit<Materia, 'impetusPerSecond'> & { impetusPerSecond: string }
+// bigint is not a BSON type — every bigint field is stored as a decimal string and
+// converted on read/write. The list below is the complete set of bigint fields on
+// Materia; any new bigint must be added here OR Mongo will throw on insert.
+const BIGINT_FIELDS = ['impetusPerSecond', 'bootCostImpetus', 'bootRecovered'] as const
+
+type MateriaDoc = Omit<Materia, typeof BIGINT_FIELDS[number]> & {
+  impetusPerSecond: string
+  bootCostImpetus?: string
+  bootRecovered?: string
+}
 
 function toDoc(m: Partial<Materia>): Record<string, unknown> {
-  const { impetusPerSecond, ...rest } = m
-  return {
-    ...rest,
-    ...(impetusPerSecond !== undefined ? { impetusPerSecond: impetusPerSecond.toString() } : {}),
+  const out: Record<string, unknown> = { ...m }
+  for (const f of BIGINT_FIELDS) {
+    const v = (m as Record<string, unknown>)[f]
+    if (typeof v === 'bigint') out[f] = v.toString()
   }
+  return out
 }
 
 function fromDoc(doc: Document): Materia {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { _id, impetusPerSecond, ...rest } = doc as MateriaDoc & { _id: unknown }
-  return { ...rest, impetusPerSecond: BigInt(impetusPerSecond) } as Materia
+  const { _id: _omit, ...rest } = doc as MateriaDoc & { _id: unknown }
+  const out: Record<string, unknown> = { ...rest }
+  for (const f of BIGINT_FIELDS) {
+    const v = (rest as Record<string, unknown>)[f]
+    if (typeof v === 'string') out[f] = BigInt(v)
+  }
+  return out as unknown as Materia
 }
 
 export class MongoMateria implements MateriaStore {
@@ -35,7 +48,12 @@ export class MongoMateria implements MateriaStore {
 
   async update(
     id: string,
-    patch: Partial<Pick<Materia, 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum' | 'podPolicy' | 'shareToken' | 'warmUntil'>>
+    patch: Partial<Pick<Materia,
+      | 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum'
+      | 'podPolicy' | 'shareToken' | 'warmUntil'
+      | 'hostAnimaId' | 'groupChatId' | 'adminAnimaIds' | 'openToNonAdmins'
+      | 'bootCostImpetus' | 'bootRecovered'
+    >>
   ): Promise<Materia> {
     const result = await this.col.findOneAndUpdate(
       { id },
