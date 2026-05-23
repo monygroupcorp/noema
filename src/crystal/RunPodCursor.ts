@@ -144,7 +144,13 @@ export class RunPodCursor implements Cursor {
         await this.actorum.update(actum.id, { externusJobId: newPodId }).catch(() => {})
       },
       onMetrics: async (executio) => {
-        await this.actorum.update(actum.id, { executio }).catch(() => {})
+        // MERGE, never replace — the dispatch stamp ({pricingTier, finalImpetus})
+        // lives in the same executio object and would be wiped by a naïve overwrite
+        // from the client's pod-telemetry view. The client always sends the full
+        // accumulated snapshot of *its* fields; we preserve the dispatch fields.
+        const cur = await this.actorum.findById(actum.id).catch(() => null)
+        const merged: ActumExecutio = { ...(cur?.executio ?? {}), ...executio }
+        await this.actorum.update(actum.id, { executio: merged }).catch(() => {})
       },
     })
 
