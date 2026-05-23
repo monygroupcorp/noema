@@ -1,11 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  IMPETUS_USD_RATE, BOOT_AMORTIZE_OVER,
+  IMPETUS_USD_RATE, BOOT_AMORTIZE_OVER, WARM_SURCHARGE_IMPETUS, HOST_BONUS_RATE,
   impetusPerSecondFromHourly, computeBootCostImpetus, bootShare,
   tierOf, impetusFor, modoHostFor,
 } from '../../../src/ledger/rates.js'
-import type { Materia } from '../../../src/types/materia.js'
 import type { Hospitium } from '../../../src/types/hospitium.js'
 
 test('IMPETUS_USD_RATE matches the documented unit (1pt = $0.000337)', () => {
@@ -41,12 +40,11 @@ test('BOOT_AMORTIZE_OVER is the spec default (5)', () => {
   assert.equal(BOOT_AMORTIZE_OVER, 5n)
 })
 
-// ─── Phase B pricing decision: tierOf / impetusFor / modoHostFor ─────────────
-
-const mat = (bootCostImpetus = 0n): Materia => ({
-  id: 'm1', genus: 'runpod', externusId: 'p1', gpu: 'RTX 4090', vramGb: 24, ramGb: 32,
-  impetusPerSecond: 0n, status: 'idle', bootCostImpetus,
-}) as Materia
+// ─── Phase C pricing decision: tierOf / impetusFor / modoHostFor ─────────────
+//
+// The per-pod boot accounting (mat(bootCostImpetus)) is gone. Pricing reads
+// only the tier; the surcharge is a platform constant. The Materia fixture
+// stays out of these tests entirely.
 
 const hosp = (hostKey: Hospitium['hostKey'], adminAnimaIds?: string[]): Hospitium => ({
   id: 'h1', materiaId: 'm1', hostKey, adminAnimaIds, inceptum: new Date(),
@@ -80,22 +78,24 @@ test('tierOf: guest — defensive fallback when runnerKey or hospitium is missin
   assert.equal(tierOf(undefined, null), 'guest')
 })
 
-test('impetusFor: owner/admin pay base; guest pays base + bootShare', () => {
-  const m = mat(239n)   // → bootShare 48
-  assert.equal(impetusFor('owner', m, 100n), 100n)
-  assert.equal(impetusFor('admin', m, 100n), 100n)
-  assert.equal(impetusFor('guest', m, 100n), 148n)
+test('WARM_SURCHARGE_IMPETUS and HOST_BONUS_RATE are the spec defaults', () => {
+  assert.equal(WARM_SURCHARGE_IMPETUS, 80n)
+  assert.equal(HOST_BONUS_RATE, 80n)
 })
 
-test('impetusFor: guest with no bootCost falls back to base (legacy pods, fully recovered)', () => {
-  assert.equal(impetusFor('guest', mat(0n), 100n), 100n)
+test('impetusFor: owner/admin pay base; guest pays base + WARM_SURCHARGE_IMPETUS', () => {
+  assert.equal(impetusFor('owner', 100n), 100n)
+  assert.equal(impetusFor('admin', 100n), 100n)
+  assert.equal(impetusFor('guest', 100n), 100n + WARM_SURCHARGE_IMPETUS)
 })
 
-test('modoHostFor: only set for guest tier + identified host (Phase B scope)', () => {
+test('modoHostFor: only set for guest tier; passes through both HostKey shapes', () => {
+  // identified host
   assert.deepEqual(modoHostFor('guest', hosp({ animaId: 'a' })), { animaId: 'a' })
+  // anonymous host — Phase C: commitment-hosts now also flow through (was undefined in Phase B)
+  assert.deepEqual(modoHostFor('guest', hosp({ commitment: 'C1' })), { commitment: 'C1' })
+  // owner / admin / no Hospitium → undefined
   assert.equal(modoHostFor('owner', hosp({ animaId: 'a' })), undefined)
   assert.equal(modoHostFor('admin', hosp({ animaId: 'a' })), undefined)
-  // Anonymous host: Phase B leaves it unset — Phase C extends the spend payload.
-  assert.equal(modoHostFor('guest', hosp({ commitment: 'C1' })), undefined)
   assert.equal(modoHostFor('guest', null), undefined)
 })

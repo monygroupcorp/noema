@@ -27,6 +27,7 @@ import { makeLogger } from './lib/logger.js'
 import { withTrace, makeTraceContext } from './lib/trace.js'
 
 import { hostCutHook } from './ledger/hooks/hostCut.js'
+import { hospitiumHook } from './ledger/hooks/hospitium.js'
 import { modelRoyaltyHook } from './ledger/hooks/modelRoyalty.js'
 import { platformSkimHook } from './ledger/hooks/platformSkim.js'
 import { referralSplitHook } from './ledger/hooks/referralSplit.js'
@@ -301,6 +302,7 @@ async function main(): Promise<void> {
   // 4. Create Nexus, register hooks
   const nexus = new Nexus()
   nexus.on('execution_spend', hostCutHook)
+  nexus.on('execution_spend', hospitiumHook)
   nexus.on('execution_spend', spellRoyaltyHook)
   nexus.on('execution_spend', modelRoyaltyHook)
   nexus.on('royalty_fired', platformSkimHook)

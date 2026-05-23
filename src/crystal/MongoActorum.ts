@@ -7,15 +7,25 @@ import type { Actorum } from '../types/cursus.js'
 // bigint introduced in Phase B for the dispatch-time pricing decision.
 type ActumDoc = Omit<Actum, 'impetus'> & { impetus: string }
 
+// bigint fields nested inside ActumExecutio — extend this list rather than
+// hand-walking each one; serializer mirror code below stays a single line.
+const EXECUTIO_BIGINT_FIELDS = ['baseImpetus', 'finalImpetus'] as const
+
 function executioToDoc(e?: Actum['executio']): Record<string, unknown> | undefined {
   if (!e) return undefined
-  const { finalImpetus, ...rest } = e
-  return { ...rest, ...(finalImpetus !== undefined ? { finalImpetus: finalImpetus.toString() } : {}) }
+  const out: Record<string, unknown> = { ...e }
+  for (const k of EXECUTIO_BIGINT_FIELDS) {
+    const v = (e as Record<string, unknown>)[k]
+    if (typeof v === 'bigint') out[k] = v.toString()
+  }
+  return out
 }
 function executioFromDoc(e?: Record<string, unknown>): Actum['executio'] | undefined {
   if (!e) return undefined
   const out: Record<string, unknown> = { ...e }
-  if (typeof e.finalImpetus === 'string') out.finalImpetus = BigInt(e.finalImpetus)
+  for (const k of EXECUTIO_BIGINT_FIELDS) {
+    if (typeof e[k] === 'string') out[k] = BigInt(e[k] as string)
+  }
   return out as Actum['executio']
 }
 

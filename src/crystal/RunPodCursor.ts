@@ -125,10 +125,17 @@ export class RunPodCursor implements Cursor {
     if (materia && this.config.hospitia) {
       const hospitium = await this.config.hospitia.findByMateriaId(materia.id).catch(() => null)
       const tier = tierOf(hostKey, hospitium)
-      const finalImpetus = impetusFor(tier, materia, actum.impetus)
+      const finalImpetus = impetusFor(tier, actum.impetus)
+      // Stash baseImpetus (= actum.impetus reservation) alongside finalImpetus so
+      // the spend hooks can tax base without reverse-engineering the surcharge.
       await this.actorum.update(actum.id, {
         materiamId: materia.id,
-        executio: { ...(actum.executio ?? {}), pricingTier: tier, finalImpetus },
+        executio: {
+          ...(actum.executio ?? {}),
+          pricingTier: tier,
+          baseImpetus: actum.impetus,
+          finalImpetus,
+        },
       }).catch(() => {})
     } else if (materia) {
       // No hospitia configured — at least record which Materia we landed on.
