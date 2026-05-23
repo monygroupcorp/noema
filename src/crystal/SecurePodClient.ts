@@ -1,13 +1,15 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { RunPodClient } from './RunPodCursor.js'
+import type { RunPodClient, ProvisioningContext } from './RunPodCursor.js'
 import type { MateriaStore } from '../types/materia.js'
+import type { HospitiumStore } from '../types/hospitium.js'
 import type { ActumExecutio } from '../types/actum.js'
 import { makeLogger } from '../lib/logger.js'
 import { getTrace } from '../lib/trace.js'
 import { bus } from '../lib/bus.js'
 import { terminatePod as _terminatePodUtil } from './terminatePod.js'
 import { submitToRunner, awaitViaStream, isCompiledSpec, type R2Config } from './comfyrunnerClient.js'
+import { computeBootCostImpetus } from '../ledger/rates.js'
 
 const COMFYRUNNER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/comfyrunner.py')
 
@@ -111,9 +113,19 @@ export class SecurePodClient implements RunPodClient {
     private readonly sshFactory: (info: SshInfo) => SshTransportLike,
     private readonly fetchFn: typeof fetch = globalThis.fetch,
     private readonly materiae?: MateriaStore,
+    /** Hospitium side-table — when present, a host-guest bond record is created
+     *  alongside each warm-parked Materia so dispatch can find the host's anima
+     *  without putting identity on the pod's row. */
+    private readonly hospitia?: HospitiumStore,
   ) {}
 
-  async submit(params: { input: unknown; webhook?: string; onPodActive?: (podId: string) => Promise<void>; onMetrics?: (executio: ActumExecutio) => Promise<void> }): Promise<{ id: string }> {
+  async submit(params: {
+    input: unknown
+    webhook?: string
+    provisioningContext?: ProvisioningContext
+    onPodActive?: (podId: string) => Promise<void>
+    onMetrics?: (executio: ActumExecutio) => Promise<void>
+  }): Promise<{ id: string }> {
     // Derive image from spec if available, else fall back to config
     const specOciRef = isCompiledSpec(params.input)
       ? ((params.input as unknown as { image?: { ociRef?: string } }).image?.ociRef)
@@ -154,7 +166,7 @@ export class SecurePodClient implements RunPodClient {
     let runnerAcceptedJob = false
     const runWithRetry = async () => {
       try {
-        await this._runBackground(podId!, imageName, params.input, params.webhook, undefined, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics)
+        await this._runBackground(podId!, imageName, params.input, params.webhook, undefined, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.provisioningContext)
       } catch (firstErr) {
         // Once comfyrunner accepted the job it OWNS the run and the webhook. A
         // dropped SSE stream after that point means we lost visibility, not that
@@ -181,7 +193,7 @@ export class SecurePodClient implements RunPodClient {
           // Update DB so the retry pod is tracked; webhook will fire with retryPodId
           await params.onPodActive?.(retryPodId).catch(() => {})
           try {
-            await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics)
+            await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.provisioningContext)
             return
           } catch (runErr) {
             if (runnerAcceptedJob && !(runErr as { isThrottleError?: boolean }).isThrottleError) {
@@ -345,6 +357,7 @@ export class SecurePodClient implements RunPodClient {
     externusJobId?: string,
     onRunnerAccepted?: (accepted: boolean) => void,
     onMetrics?: (executio: ActumExecutio) => Promise<void>,
+    provisioningContext?: ProvisioningContext,
   ): Promise<void> {
     const startMs = Date.now()
     let ssh: SshTransportLike | null = null
@@ -400,7 +413,10 @@ export class SecurePodClient implements RunPodClient {
     } finally {
       await ssh?.close().catch(() => {})
       if (jobSucceeded && this.config.keepWarm && this.materiae && sshInfo) {
-        await this.materiae.create({
+        // Boot wall-clock — the cost we now ask future guests to amortize.
+        const coldStartMs = Date.now() - startMs
+        const bootCostImpetus = computeBootCostImpetus(coldStartMs, sshInfo.costPerHr ?? 0)
+        const materia = await this.materiae.create({
           genus: 'runpod',
           externusId: podId,
           gpu: sshInfo.gpuType ?? (this.config.gpuTypeIds ?? DEFAULT_GPU_TYPE_IDS)[0] ?? '',
@@ -412,7 +428,18 @@ export class SecurePodClient implements RunPodClient {
           impetusPerSecond: this.config.impetusPerSecond ?? 0n,
           status: 'idle',
           warmUntil: new Date(Date.now() + (this.config.warmTtlMs ?? 60_000)),
-        }).catch(() => {})
+          bootCostImpetus,
+          ...(provisioningContext?.groupChatId ? { groupChatId: provisioningContext.groupChatId } : {}),
+        }).catch(() => undefined)
+        // Pair the Materia with a Hospitium when we know the host's anima — the
+        // identity sits off-pod by design (see types/hospitium.ts).
+        if (materia && this.hospitia && provisioningContext?.hostAnimaId) {
+          await this.hospitia.create({
+            materiaId: materia.id,
+            hostAnimaId: provisioningContext.hostAnimaId,
+            inceptum: new Date(),
+          }).catch(() => undefined)
+        }
       } else {
         await this._terminatePod(podId)
       }

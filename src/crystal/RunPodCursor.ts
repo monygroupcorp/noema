@@ -5,6 +5,7 @@ import type { Cursor, CursorResult, Actorum } from '../types/cursus.js'
 import type { Materia } from '../types/materia.js'
 import type { DeploymentumStore } from '../types/deploymentum.js'
 import type { Praefectus } from './Praefectus.js'
+import { getTrace } from '../lib/trace.js'
 
 /**
  * RunPodClient — the injectable seam between the cursor and any GPU pod substrate.
@@ -14,6 +15,19 @@ import type { Praefectus } from './Praefectus.js'
  *
  * `webhook` is the ONLY thing that differs between deployment contexts (normal vs TEE).
  */
+/**
+ * Hosting-context the cursor hands the client at submit. Identity-bearing — the
+ * client stamps it into the Hospitium side-table at warm-park, so the dispatch
+ * layer can answer "who is the host" without putting animaId on Materia/Modo.
+ * Sourced from the trace context, not from any durable schema.
+ */
+export interface ProvisioningContext {
+  hostAnimaId?: string
+  /** Group chat id when the provisioning originated in a group — stamped onto
+   *  Materia.groupChatId for the hosting-tier dispatch decision later. */
+  groupChatId?: string
+}
+
 export interface RunPodClient {
   submit(params: {
     input: unknown
@@ -21,6 +35,8 @@ export interface RunPodClient {
      * Normal deployment: our server (e.g. https://api.noema.io/webhooks/runpod)
      * TEE deployment: the TEE pod's local endpoint. */
     webhook?: string
+    /** See ProvisioningContext — passed for hosting/economic bookkeeping. */
+    provisioningContext?: ProvisioningContext
     /**
      * Called when the active pod changes — i.e. when a retry provisions a new pod.
      * Callers should update actum.externusJobId to the new podId so the DB always
@@ -80,9 +96,15 @@ export class RunPodCursor implements Cursor {
     }
 
     const client = await this._resolveClient(modus, actum)
+    // Identity + chat context reach the client via the trace, never via schema columns.
+    const trace = getTrace()
+    const provCtx: ProvisioningContext | undefined = (trace?.animaId || trace?.groupChatId)
+      ? { hostAnimaId: trace.animaId, groupChatId: trace.groupChatId }
+      : undefined
     const { id: externusJobId } = await client.submit({
       input,
       webhook: this.config.webhookUrl,
+      provisioningContext: provCtx,
       onPodActive: async (newPodId) => {
         // Retry pod is now active — update so boot recovery and reconciliation see the right pod
         await this.actorum.update(actum.id, { externusJobId: newPodId }).catch(() => {})
