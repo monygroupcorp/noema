@@ -22,7 +22,9 @@ import { getTrace } from '../lib/trace.js'
  * Sourced from the trace context, not from any durable schema.
  */
 export interface ProvisioningContext {
-  hostAnimaId?: string
+  /** The economic owner of this provisioning — identified anima or anonymous
+   *  arcanum commitment. Stamped onto the paired Hospitium at warm-park. */
+  hostKey?: { animaId: string } | { commitment: string }
   /** Group chat id when the provisioning originated in a group — stamped onto
    *  Materia.groupChatId for the hosting-tier dispatch decision later. */
   groupChatId?: string
@@ -98,8 +100,12 @@ export class RunPodCursor implements Cursor {
     const client = await this._resolveClient(modus, actum)
     // Identity + chat context reach the client via the trace, never via schema columns.
     const trace = getTrace()
-    const provCtx: ProvisioningContext | undefined = (trace?.animaId || trace?.groupChatId)
-      ? { hostAnimaId: trace.animaId, groupChatId: trace.groupChatId }
+    const hostKey: ProvisioningContext['hostKey'] | undefined =
+      trace?.animaId    ? { animaId:    trace.animaId    } :
+      trace?.commitment ? { commitment: trace.commitment } :
+      undefined
+    const provCtx: ProvisioningContext | undefined = (hostKey || trace?.groupChatId)
+      ? { ...(hostKey ? { hostKey } : {}), ...(trace?.groupChatId ? { groupChatId: trace.groupChatId } : {}) }
       : undefined
     const { id: externusJobId } = await client.submit({
       input,

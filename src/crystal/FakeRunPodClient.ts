@@ -130,11 +130,12 @@ export class FakeRunPodClient implements RunPodClient {
         bootCostImpetus,
         ...(params.provisioningContext?.groupChatId ? { groupChatId: params.provisioningContext.groupChatId } : {}),
       }).catch(err => { log.warn('fake materia create failed', { error: String(err) }); return undefined })
-      // Hospitium pairs identity (hostAnima) to the materia off-pod by design.
-      if (materia && this.hospitia && params.provisioningContext?.hostAnimaId) {
+      // Hospitium pairs the host (identified or anonymous-arcanum) to the materia
+      // off-pod by design.
+      if (materia && this.hospitia && params.provisioningContext?.hostKey) {
         await this.hospitia.create({
           materiaId: materia.id,
-          hostAnimaId: params.provisioningContext.hostAnimaId,
+          hostKey: params.provisioningContext.hostKey,
           inceptum: new Date(),
         }).catch(err => log.warn('fake hospitium create failed', { error: String(err) }))
       }

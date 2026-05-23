@@ -431,12 +431,13 @@ export class SecurePodClient implements RunPodClient {
           bootCostImpetus,
           ...(provisioningContext?.groupChatId ? { groupChatId: provisioningContext.groupChatId } : {}),
         }).catch(() => undefined)
-        // Pair the Materia with a Hospitium when we know the host's anima — the
-        // identity sits off-pod by design (see types/hospitium.ts).
-        if (materia && this.hospitia && provisioningContext?.hostAnimaId) {
+        // Pair the Materia with a Hospitium when we know the host — identified
+        // (animaId) or anonymous-arcanum (commitment). Either way, the identity
+        // sits off-pod by design (see types/hospitium.ts).
+        if (materia && this.hospitia && provisioningContext?.hostKey) {
           await this.hospitia.create({
             materiaId: materia.id,
-            hostAnimaId: provisioningContext.hostAnimaId,
+            hostKey: provisioningContext.hostKey,
             inceptum: new Date(),
           }).catch(() => undefined)
         }

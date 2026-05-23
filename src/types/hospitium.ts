@@ -29,6 +29,17 @@
  * `execution_spend`; updated when the host refreshes the admin set; never read
  * by the pod itself.
  */
+/**
+ * Either side of the AuctorKey union — identified anima OR anonymous arcanum
+ * commitment. A host who runs identified receives hostCut as a `reward` signum to
+ * their anima; a host who runs anonymously receives hostCut as an `arcanum` signum
+ * keyed by the commitment (queryable via Signorum.balance({commitment})). Both
+ * modes are first-class — no de-anonymizing pressure to earn from hosting.
+ */
+export type HostKey =
+  | { animaId: string }
+  | { commitment: string }
+
 export interface Hospitium {
   id: string
 
@@ -36,10 +47,11 @@ export interface Hospitium {
   materiaId: string
 
   /**
-   * The anima that provisioned the pod — receives `hostCut` and accrues
-   * `Materia.bootRecovered` as guests cook. The economic owner.
+   * The economic owner — receives hostCut + accrues Materia.bootRecovered as guests
+   * cook. Identified (animaId) or anonymous (commitment). The hostCut payout path
+   * branches on this at signum-emission time.
    */
-  hostAnimaId: string
+  hostKey: HostKey
 
   /**
    * Snapshot of the group chat's admins (animaIds) at provision time, resolved

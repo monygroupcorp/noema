@@ -2,9 +2,12 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import type { LogEntry } from './logger.js'
 
 export interface TraceContext {
-  // Identity — flows into every log line automatically
+  // Identity — flows into every log line automatically. animaId and commitment
+  // are the two sides of the AuctorKey union: identified vs anonymous-arcanum.
+  // At most one is set per dispatch.
   actumId?:      string
   animaId?:      string
+  commitment?:   string
   platform?:     'telegram' | 'discord' | 'api'
 
   /**

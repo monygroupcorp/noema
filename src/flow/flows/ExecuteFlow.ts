@@ -339,10 +339,13 @@ export class ExecuteFlow implements Flow {
 
     // 3. Run — propagate identity + actum id through the trace context so the
     // cursor (and anything downstream) can read them without putting identity on
-    // any durable schema (Materia/Modo/Actum stay identity-blind).
-    const animaId = 'animaId' in ctx.identity ? ctx.identity.animaId : undefined
+    // any durable schema (Materia/Modo/Actum stay identity-blind). The auctor key
+    // is a union — identified (animaId) or anonymous arcanum (commitment); we
+    // carry both sides as separate optional fields, at most one set.
+    const animaId    = 'animaId'    in ctx.identity ? ctx.identity.animaId    : undefined
+    const commitment = 'commitment' in ctx.identity ? ctx.identity.commitment : undefined
     const cursorResult = await withTrace(
-      makeTraceContext({ ...getTrace(), animaId, actumId: actum.id }),
+      makeTraceContext({ ...getTrace(), animaId, commitment, actumId: actum.id }),
       () => cursor.run(actum),
     )
 
