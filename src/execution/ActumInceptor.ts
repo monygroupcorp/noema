@@ -26,7 +26,7 @@ export class ActumInceptor {
 
   async initiate(params: Inceptio): Promise<Actum> {
     const { modorum, cursorum, signorum, acta } = this.deps
-    const { modusId, versio, aditus, by, modoId, computeStrategy: strategyOverride, gpuClass: gpuOverride } = params
+    const { modusId, versio, aditus, by, modoId, computeStrategy: strategyOverride, gpuClass: gpuOverride, shareTokenHint } = params
 
     // 1. Resolve modus
     const modus = await modorum.find(modusId, versio)
@@ -99,6 +99,7 @@ export class ActumInceptor {
         ...(computeStrategy ? { computeStrategy } : {}),
         ...(gpuClass ? { gpuClass } : {}),
         ...(nullifier ? { nullifier } : {}),
+        ...(shareTokenHint ? { shareTokenHint } : {}),
       })
       log.info('actum initiated', {
         actumId:     actum.id,
@@ -132,7 +133,7 @@ export class ActumInceptor {
   ): Promise<Actum> {
     if (!modus) throw new Error('modus is null')
     const { acta } = this.deps
-    const { aditus, by, modoId, computeStrategy: strategyOverride, gpuClass: gpuOverride } = params
+    const { aditus, by, modoId, computeStrategy: strategyOverride, gpuClass: gpuOverride, shareTokenHint } = params
 
     if (!('arcanumProof' in by)) throw new Error('expected arcanumProof path')
     const { arcanumProof } = by
@@ -175,6 +176,7 @@ export class ActumInceptor {
         nullifier: nullifierHash,
         ...(computeStrategy ? { computeStrategy } : {}),
         ...(gpuClass ? { gpuClass } : {}),
+        ...(shareTokenHint ? { shareTokenHint } : {}),
       })
     } catch (err) {
       // Actum creation failed — do NOT mark nullifier spent; proof can be retried

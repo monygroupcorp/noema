@@ -3,13 +3,14 @@ import assert from 'node:assert/strict'
 import { CommandRouter } from '../../../../src/allocutio/telegram/commands/CommandRouter.js'
 
 function make() {
-  const calls: Record<string, unknown[]> = { enter: [], cancel: [], msg: [], start: [], ack: [] }
+  const calls: Record<string, unknown[]> = { enter: [], cancel: [], msg: [], start: [], ack: [], shareToken: [] }
   const router = new CommandRouter({
     enterExecute: async (userId, state) => { calls.enter.push({ userId, state }) },
     cancel: (userId) => { calls.cancel.push(userId) },
     sendMessage: async (chatId, text) => { calls.msg.push({ chatId, text }) },
     sendStart: async (chatId) => { calls.start.push(chatId) },
     ack: (chatId, messageId) => { calls.ack.push({ chatId, messageId }) },
+    setPendingShareToken: (userId, token) => { calls.shareToken.push({ userId, token }) },
   })
   return { router, calls }
 }
@@ -48,6 +49,27 @@ test('/cancel clears the flow and confirms', async () => {
   await router.dispatch('u1', 456, '/cancel')
   assert.deepEqual(calls.cancel, ['u1'])
   assert.match((calls.msg[0] as { text: string }).text, /Cancelled/)
+})
+
+test('/start pod_<token> stashes a valid share token; sends the start screen', async () => {
+  const { router, calls } = make()
+  // 16-char base32-ish token (matches mintShareToken() format).
+  await router.dispatch('u1', 456, '/start pod_abcdefghjkmnpqrs', 50)
+  assert.deepEqual(calls.shareToken, [{ userId: 'u1', token: 'abcdefghjkmnpqrs' }])
+  assert.equal(calls.start.length, 1, 'start screen still shown')
+})
+
+test('/start with a malformed share-token deep link is ignored (no stash)', async () => {
+  const { router, calls } = make()
+  // Wrong prefix:
+  await router.dispatch('u1', 456, '/start hello', 50)
+  // Wrong length:
+  await router.dispatch('u1', 456, '/start pod_short', 50)
+  // Bad chars (uppercase / look-alikes):
+  await router.dispatch('u1', 456, '/start pod_ABCDEFGHJKMNPQRS', 50)
+  await router.dispatch('u1', 456, '/start pod_il0123456789abcd', 50)
+  assert.equal(calls.shareToken.length, 0, 'no malformed token reaches setPendingShareToken')
+  assert.equal(calls.start.length, 4, 'each /start still sends the start screen')
 })
 
 test('@botname suffix and casing are tolerated; unknown → help hint', async () => {

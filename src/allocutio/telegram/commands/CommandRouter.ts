@@ -1,9 +1,11 @@
 import { inlineKeyboard, btn } from '../telegramRender.js'
 import { COPY, HELP_TEXT } from '../../lexicon/copy.js'
+import { SHARE_TOKEN_ALPHABET, SHARE_TOKEN_LENGTH } from '../../../crystal/shareToken.js'
 
 export { HELP_TEXT }
 
 const DEFAULT_MAKE_MODUS = 'runmake.flux-schnell'
+const SHARE_TOKEN_RE = new RegExp(`^pod_([${SHARE_TOKEN_ALPHABET}]{${SHARE_TOKEN_LENGTH}})$`)
 
 /** What a command needs to do — the adapter wires these to the flow router + sender. */
 export interface CommandDeps {
@@ -15,6 +17,12 @@ export interface CommandDeps {
   sendStart(chatId: number): Promise<void>
   /** Acknowledge a command on its message (👌). Skipped for /make — its ack is the Stream reaction. */
   ack(chatId: number, messageId: number): void
+  /**
+   * Stash a deep-link share token for the user. Their next /make consumes it +
+   * routes onto the host's pod via Praefectus.findByShareToken. Token shape is
+   * validated against SHARE_TOKEN_ALPHABET+LENGTH before reaching here.
+   */
+  setPendingShareToken?(userId: string, token: string): void
 }
 
 /**
@@ -30,10 +38,18 @@ export class CommandRouter {
     const ack = () => { if (messageId !== undefined) this.deps.ack(chatId, messageId) }
 
     switch (cmd) {
-      case '/start':
+      case '/start': {
+        // Telegram deep links arrive as `/start <arg>` (e.g. /start pod_<token>).
+        // Validate strictly — attacker-controllable input.
+        const arg = text.split(/\s+/)[1] ?? ''
+        const m = arg.match(SHARE_TOKEN_RE)
+        if (m && this.deps.setPendingShareToken) {
+          this.deps.setPendingShareToken(userId, m[1])
+        }
         await this.deps.sendStart(chatId)
         ack()
         return
+      }
 
       case '/run':
       case '/make': {
