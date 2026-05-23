@@ -429,6 +429,7 @@ async function main(): Promise<void> {
     signorum: ring.signorum,
     modorum: ring.modorum,
     modos: ring.modos,
+    hospitia: ring.hospitia,
     vestigiorum: ring.vestigiorum,
     collectioRouter: ring.collectioCursor,
   }))
