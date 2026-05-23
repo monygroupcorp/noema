@@ -6,6 +6,7 @@ import type { Signorum } from '../../types/significandi.js'
 import type { Vestigiorum } from '../../types/vestigium.js'
 import type { Modorum } from '../../types/modus.js'
 import type { ModoStore } from '../../types/modo.js'
+import type { HospitiumStore } from '../../types/hospitium.js'
 import { createVestigiumFromActum } from '../../execution/hooks/vestigiumHook.js'
 
 type AuctorKey = { animaId: string } | { commitment: string }
@@ -32,6 +33,8 @@ export interface ExecutionWebhookDeps {
   modorum?: Modorum
   /** Optional: session store — updates impetusAccrued when async jobs complete. */
   modos?: ModoStore
+  /** Optional: identity-bearing hosting side-table — resolves modoHostAnimaId at emit. */
+  hospitia?: HospitiumStore
   /** Optional: routes collection actum completions back to CollectioCursor. */
   collectioRouter?: {
     findCollectioIdForActum(actumId: string): string | null
@@ -154,10 +157,20 @@ export async function handleExecutionWebhook(
         modusAuctorAnimaId = modus?.auctor
       }
 
+      // Hosting payout (Phase B): for guest runs on an identified host's pod,
+      // resolve the host's anima from Hospitium at emit time — host identity is
+      // NEVER on the actum or materia, only on the Hospitium side-table. Phase C
+      // widens the spend payload to a full HostKey so commitment-hosts also earn.
+      let modoHostAnimaId: string | undefined
+      if (deps.hospitia && completed.executio?.pricingTier === 'guest' && completed.materiamId) {
+        const hospitium = await deps.hospitia.findByMateriaId(completed.materiamId).catch(() => null)
+        if (hospitium && 'animaId' in hospitium.hostKey) modoHostAnimaId = hospitium.hostKey.animaId
+      }
+
       if (deps.nexus && deps.signorum) {
         const royaltySigna = await deps.nexus.emit({
           type: 'execution_spend',
-          payload: { actum: completed, impetus: exitus.impetus, modusAuctorAnimaId },
+          payload: { actum: completed, impetus: completed.impetus, modusAuctorAnimaId, modoHostAnimaId },
         })
         let allSigna = royaltySigna
         // Fire royalty_fired so platformSkimHook can take its cut
@@ -165,7 +178,7 @@ export async function handleExecutionWebhook(
           const royaltyValor = royaltySigna.reduce((sum, s) => sum + s.valor, 0n)
           const skimSigna = await deps.nexus.emit({
             type: 'royalty_fired',
-            payload: { actumId: completed.id, royaltyValor, baseValor: exitus.impetus },
+            payload: { actumId: completed.id, royaltyValor, baseValor: completed.impetus },
           })
           if (skimSigna.length) allSigna = [...allSigna, ...skimSigna]
         }

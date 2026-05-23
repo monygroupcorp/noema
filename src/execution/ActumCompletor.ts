@@ -21,7 +21,7 @@ export class ActumCompletor {
 
   async complete(actum: Actum, result: Exitus): Promise<Actum> {
     const { acta, signorum, nexus } = this.deps
-    const { exitus, impetus, duratio, materiamId } = result
+    const { exitus, impetus: reportedImpetus, duratio, materiamId } = result
     const now = new Date()
 
     const current = await acta.findById(actum.id)
@@ -29,14 +29,23 @@ export class ActumCompletor {
       throw new Error(`Actum '${actum.id}' is already completus — double-completion rejected`)
     }
 
-    // Cursor cost contract: actual must never exceed the quoted reservation
-    if (impetus > actum.impetus) {
+    // Cursor cost contract: cursor's reported actual must never exceed the
+    // reservation. (The dispatch-time decision below may further refine this.)
+    if (reportedImpetus > actum.impetus) {
       throw new Error(
-        `Cursor overcharge: actual impetus ${impetus} exceeds reservation ${actum.impetus}`
+        `Cursor overcharge: actual impetus ${reportedImpetus} exceeds reservation ${actum.impetus}`
       )
     }
 
-    // Settle signa: spend all locked, refund the delta to the original identity
+    // Honor the dispatch-time pricing decision when present (Phase B): a guest
+    // run's finalImpetus = base + bootShare is the right spend amount. Cap at the
+    // reservation so we never settle more than was locked.
+    const dispatched = actum.executio?.finalImpetus
+    const rawImpetus = dispatched !== undefined ? dispatched : reportedImpetus
+    const impetus = rawImpetus > actum.impetus ? actum.impetus : rawImpetus
+
+    // Settle signa: spend all locked at `impetus`, refund the delta to the original
+    // identity (signorum.settle handles the refund of unused lock).
     if (actum.signaConsumed.length) {
       await signorum.settle(actum.signaConsumed, impetus, actum.id)
     }
