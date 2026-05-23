@@ -28,6 +28,13 @@ export interface BusEvents {
   'actum.fail':      [wide: WideEvent]
   /** Idle reaper terminated a warm pod — lets the UI freeze its bulletin to a receipt. */
   'pod.reaped':      [data: { externusId: string }]
+  /**
+   * A cold pod just parked warm: Materia + (optionally) Hospitium were just created.
+   * Subscribers handle late-binding hosting metadata that depends on platform state —
+   * notably, resolving the group chat's admin set into the Hospitium when groupChatId
+   * is present. Carries materiaId so subscribers can target the right record.
+   */
+  'pod.parked':      [data: { materiaId: string; groupChatId?: string }]
 }
 
 class TypedBus extends EventEmitter {

@@ -440,6 +440,12 @@ export class SecurePodClient implements RunPodClient {
             inceptum: new Date(),
           }).catch(() => undefined)
         }
+        // Late-binding hosting metadata (e.g. group admin resolution) hangs off
+        // pod.parked so the crystal core stays platform-neutral.
+        if (materia) bus.emit('pod.parked', {
+          materiaId: materia.id,
+          ...(provisioningContext?.groupChatId ? { groupChatId: provisioningContext.groupChatId } : {}),
+        })
       } else {
         await this._terminatePod(podId)
       }

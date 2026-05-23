@@ -14,6 +14,7 @@ import { bus, type StageInfo } from '../../lib/bus.js'
 import { withTrace, getTrace, makeTraceContext } from '../../lib/trace.js'
 import type { WideEvent } from '../../lib/wide.js'
 import type { MateriaStore } from '../../types/materia.js'
+import type { HospitiumStore } from '../../types/hospitium.js'
 import type { Actum } from '../../types/actum.js'
 import { classifyError } from '../../lib/classifyError.js'
 import { BulletinManager, type BulletinSink } from '../lexicon/bulletin/BulletinManager.js'
@@ -55,6 +56,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     /** Cancel an in-flight actum — fails it (releases reserved signa). Returns true if it
      *  actually refunded (false if the actum was already terminal). Backs destroy/retry. */
     cancelActum?: (actumId: string, reason: string) => Promise<boolean>
+    /** Host-guest bond store — when present, group provisionings get their admin set
+     *  resolved + stamped into Hospitium.adminAnimaIds on pod.parked. */
+    hospitia?: HospitiumStore
     /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
     autoSettleMs?: number
   }
@@ -85,6 +89,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     terminatePod?: (podId: string) => Promise<void>
     acta?: { findById(id: string): Promise<Actum | null> }
     cancelActum?: (actumId: string, reason: string) => Promise<boolean>
+    /** Host-guest bond store — when present, group provisionings get their admin set
+     *  resolved + stamped into Hospitium.adminAnimaIds on pod.parked. */
+    hospitia?: HospitiumStore
     /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
     autoSettleMs?: number
   }) {
@@ -132,6 +139,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     bus.on('actum.complete', (wide) => { void this._handleActumComplete(wide) })
     bus.on('actum.fail', (wide) => { void this._handleActumFail(wide) })
     bus.on('pod.reaped', ({ externusId }) => { this.bulletins.onReaped(externusId) })
+    // Late-binding hosting metadata: resolve group admins and stamp Hospitium.
+    bus.on('pod.parked', (data) => { void this._handlePodParked(data) })
   }
 
   /** Map a neutral UI keyboard to Telegram's inline-keyboard shape. */
@@ -521,6 +530,34 @@ Generate AI art, chat with models, explore creative tools.`
   private async _handleActumFail(wide: WideEvent): Promise<void> {
     this.reactions.clear(wide.actumId)
     this.bulletins.onFail(wide.actumId)
+  }
+
+  /**
+   * pod.parked: a cold pod just warm-parked. When the provisioning happened in a
+   * group, resolve the chat's admin set into the Hospitium's adminAnimaIds — that
+   * grants admins at-cost access on subsequent /makes (Phase B will read it).
+   * Group-only and hospitia-required; quietly no-ops otherwise.
+   */
+  private async _handlePodParked(data: { materiaId: string; groupChatId?: string }): Promise<void> {
+    const { materiaId, groupChatId } = data
+    if (!groupChatId || !this.deps.hospitia || !this.sender.getChatAdministrators) return
+    const chatId = Number(groupChatId)
+    if (!Number.isFinite(chatId)) return
+
+    try {
+      const admins = await this.sender.getChatAdministrators(chatId)
+      const animaIds: string[] = []
+      for (const a of admins) {
+        const key = await this.identity.resolve(String(a.user.id)).catch(() => null)
+        if (key && 'animaId' in key) animaIds.push(key.animaId)
+      }
+      const unique = Array.from(new Set(animaIds))
+      if (unique.length > 0) {
+        await this.deps.hospitia.update(materiaId, { adminAnimaIds: unique }).catch(() => {})
+      }
+    } catch (err) {
+      log.warn('pod.parked admin resolution failed', { materiaId, error: String(err) })
+    }
   }
 
   // -------------------------------------------------------------------------
