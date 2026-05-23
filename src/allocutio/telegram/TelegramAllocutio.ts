@@ -72,6 +72,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // last command message: platform:userId → messageId of the most recent command message
   private readonly lastCommandMessageIds = new Map<string, number>()
 
+  // Deep-link share tokens: /start pod_<token> stashes here; the user's next
+  // /make consumes it onto state.shareTokenHint. TTL'd so abandoned tokens age out.
+  private readonly pendingShareTokens = new Map<string, { token: string; expiresAt: number }>()
+  private static readonly PENDING_SHARE_TOKEN_TTL_MS = 5 * 60 * 1000
+
   // The session bulletin (HUD), the delivery menu, and the command-message reaction
   // choreography each live in their own subsystem now; this adapter just feeds them.
   private readonly bulletins: BulletinManager
@@ -124,6 +129,12 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // The slash-command surface → flow router.
     this.commands = new CommandRouter({
       enterExecute: (userId, state) => this._enterExecute(userId, state),
+      setPendingShareToken: (userId, token) => {
+        this.pendingShareTokens.set(`telegram:${userId}`, {
+          token,
+          expiresAt: Date.now() + TelegramAllocutio.PENDING_SHARE_TOKEN_TTL_MS,
+        })
+      },
       cancel: (userId) => this.router.clear('telegram', userId),
       sendMessage: (chatId, text, extra) => this.sender.sendMessage(chatId, text, extra),
       sendStart: (chatId) => this._sendStart(chatId),
@@ -183,6 +194,16 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
    *  slash commands and start-screen shortcuts alike. */
   private async _enterExecute(userId: string, state?: Record<string, unknown>): Promise<void> {
     const identity = await this.identity.resolve(userId)
+    // Drain any pending deep-link share token onto the next flow's state. Expired
+    // tokens are silently dropped (the user just gets a normal cold start).
+    const userKey = `telegram:${userId}`
+    const pending = this.pendingShareTokens.get(userKey)
+    if (pending) {
+      this.pendingShareTokens.delete(userKey)
+      if (Date.now() < pending.expiresAt) {
+        state = { ...(state ?? {}), shareTokenHint: pending.token }
+      }
+    }
     await this.router.enter('execute', 'telegram', userId, identity, state ? { state } : undefined)
   }
 

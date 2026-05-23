@@ -245,4 +245,10 @@ export interface Inceptio {
    * Absent = use the Modus default.
    */
   gpuClass?: GpuClass
+  /**
+   * Opaque routing hint when the runner deep-linked into a specific host's pod
+   * (e.g. /start pod_<token>). The cursor uses Praefectus.findByShareToken to
+   * dispatch onto the host's Materia. Non-identity by construction.
+   */
+  shareTokenHint?: string
 }

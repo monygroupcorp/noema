@@ -104,6 +104,14 @@ export interface Actum {
   aditus: Record<string, unknown>
 
   /**
+   * Opaque routing hint when the runner deep-linked into a specific host's pod
+   * (e.g. /start pod_<token>). Non-identity by design — the token is an
+   * unguessable random string that the cursor passes to Praefectus.findByShareToken
+   * at dispatch. Absent for ordinary `/make` invocations.
+   */
+  shareTokenHint?: string
+
+  /**
    * The external system's job identifier — set when cursor returns { kind: 'async' }.
    * Used by the webhook inbound handler to look up the Actum for completion.
    * "externus" = external; this ID lives in the external system, not ours.

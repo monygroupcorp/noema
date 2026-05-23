@@ -29,6 +29,8 @@ interface ExecuteFlowState {
   result?: Record<string, unknown>
   browsePageIndex: number
   priorMessages?: Array<{ role: 'user' | 'assistant'; content: string }>
+  /** Deep-link routing hint from a /start pod_<token>; consumed by the inceptor. */
+  shareTokenHint?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -327,6 +329,7 @@ export class ExecuteFlow implements Flow {
       aditus: state.aditus,
       by: ctx.identity,
       modoId: ctx.modoId,
+      ...(state.shareTokenHint ? { shareTokenHint: state.shareTokenHint } : {}),
     })
 
     state.actumId = actum.id
