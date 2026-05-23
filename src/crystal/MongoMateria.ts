@@ -51,7 +51,7 @@ export class MongoMateria implements MateriaStore {
     patch: Partial<Pick<Materia,
       | 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum'
       | 'podPolicy' | 'shareToken' | 'warmUntil'
-      | 'hostAnimaId' | 'groupChatId' | 'adminAnimaIds' | 'openToNonAdmins'
+      | 'groupChatId' | 'openToNonAdmins'
       | 'bootCostImpetus' | 'bootRecovered'
     >>
   ): Promise<Materia> {

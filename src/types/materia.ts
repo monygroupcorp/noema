@@ -134,35 +134,23 @@ export interface Materia {
    */
   warmUntil?: Date
 
-  // ── Hosting metadata ───────────────────────────────────────────────────────
-  // Stamped at warm-park so the dispatch layer can answer "who owns this pod, who
-  // rides at-cost, who pays the boot-amortizing guest surcharge" without walking
-  // back through the modo. See docs/plans/2026-05-22-bulletin-hosting-conjunction.md.
-
-  /**
-   * The anima that provisioned this pod — receives `hostCut` and `bootRecovered`
-   * credit when guests run on it. Durable owner reference.
-   */
-  hostAnimaId?: string
+  // ── Hosting metadata (identity-blind half) ─────────────────────────────────
+  // Stamped at warm-park. The identity-bearing fields (hostAnimaId, adminAnimaIds)
+  // live OUT of Materia by design — see Hospitium — so the pod's own operational
+  // record never carries anima identifiers (preserves the "Materia has no animaId"
+  // invariant above). The Materia carries only chat context, boot economics, and
+  // the user-toggled openToNonAdmins flag.
 
   /**
    * Platform group identifier when the pod was provisioned in a group chat
-   * (e.g. Telegram chat id). Absent for DM provisioning. Used together with
-   * `adminAnimaIds` to recognize the group's admins at dispatch time.
+   * (e.g. a Telegram chat id). Absent for DM provisioning. Combined with the
+   * paired Hospitium.adminAnimaIds to recognize the group's admins at dispatch.
    */
   groupChatId?: string
 
   /**
-   * Snapshot of the group's admins (animaIds) at provision, resolved via the
-   * platform sender. Group admins ride this pod **at cost** — base impetus, no
-   * `modoHostAnimaId` on their executions, no boot-amortizing surcharge. Refreshed
-   * on the bulletin's `manage` action.
-   */
-  adminAnimaIds?: string[]
-
-  /**
    * Whether the group host has opened the pod to non-admins. When true, members of
-   * `groupChatId` beyond `adminAnimaIds` may dispatch at guest pricing
+   * `groupChatId` beyond the Hospitium's admin set may dispatch at guest pricing
    * (base + bootShare). Independent of `podPolicy` (which governs external sharing).
    */
   openToNonAdmins?: boolean
@@ -195,7 +183,7 @@ export interface MateriaStore {
   update(id: string, patch: Partial<Pick<Materia,
     | 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum'
     | 'podPolicy' | 'shareToken' | 'warmUntil'
-    | 'hostAnimaId' | 'groupChatId' | 'adminAnimaIds' | 'openToNonAdmins'
+    | 'groupChatId' | 'openToNonAdmins'
     | 'bootCostImpetus' | 'bootRecovered'
   >>): Promise<Materia>
   /**
