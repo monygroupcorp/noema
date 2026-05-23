@@ -37,6 +37,7 @@ import { FakeRunPodClient } from './crystal/FakeRunPodClient.js'
 import { FakeWarmPodClient } from './crystal/FakeWarmPodClient.js'
 import { terminatePod, listRunPodPods } from './crystal/terminatePod.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
+import { MongoHospitium } from './crystal/MongoHospitium.js'
 import { startIdleReaper } from './crystal/idleReaper.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { Compiler } from './crystal/Compiler.js'
@@ -89,13 +90,14 @@ const templateRegistry = new WorkflowTemplateRegistry(
 // ---------------------------------------------------------------------------
 
 import type { Materia, MateriaStore } from './types/materia.js'
+import type { HospitiumStore } from './types/hospitium.js'
 
 const RUNPOD_R2: R2Config | undefined =
   R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_OUTPUTS_BUCKET
     ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_OUTPUTS_BUCKET!, publicUrl: R2_PUBLIC_URL }
     : undefined
 
-function makeSecureRunPodClient(materiae?: MateriaStore): SecurePodClient {
+function makeSecureRunPodClient(materiae?: MateriaStore, hospitia?: HospitiumStore): SecurePodClient {
   const r2 = RUNPOD_R2
 
   return new SecurePodClient(
@@ -110,6 +112,7 @@ function makeSecureRunPodClient(materiae?: MateriaStore): SecurePodClient {
     makeSecurePodSshFactory(RUNPOD_SSH_KEY_PATH),
     globalThis.fetch,
     materiae,
+    hospitia,
   )
 }
 
@@ -211,6 +214,9 @@ async function main(): Promise<void> {
   // Create materiae + intellae stores before container so they can be shared
   const materiaCol = mongo.db(DB_NAME).collection('materiae')
   const materiae = new MongoMateria(materiaCol)
+  // Hospitium pairs identity-bearing hosting metadata to each Materia, off-pod.
+  const hospitiaCol = mongo.db(DB_NAME).collection('hospitia')
+  const hospitia = new MongoHospitium(hospitiaCol)
 
   const intellaeCol = mongo.db(DB_NAME).collection('intellae')
   const intellae = new MongoIntella(intellaeCol)
@@ -227,8 +233,8 @@ async function main(): Promise<void> {
   // DEV_FAKE_POD: simulate the whole pod lifecycle locally (no real GPU, $0) so the
   // Telegram UX can be iterated for free. Falls back to the real SECURE cursor otherwise.
   const runpodClient = process.env.DEV_FAKE_POD
-    ? new FakeRunPodClient(undefined, { warmTtlMs: RUNPOD_WARM_TTL_MS }, materiae)
-    : (RUNPOD_API_KEY ? makeSecureRunPodClient(materiae) : undefined)
+    ? new FakeRunPodClient(undefined, { warmTtlMs: RUNPOD_WARM_TTL_MS }, materiae, hospitia)
+    : (RUNPOD_API_KEY ? makeSecureRunPodClient(materiae, hospitia) : undefined)
   if (process.env.DEV_FAKE_POD) log.warn('DEV_FAKE_POD active — pods are simulated, no real GPU will be provisioned')
 
   // In fake mode, warm reuse must NOT build a real WarmPodClient (it would SSH).
@@ -245,6 +251,7 @@ async function main(): Promise<void> {
     dbName: DB_NAME,
     compile: compile as ContainerConfig['compile'],
     materiae,   // pre-created, shared with SecurePodClient
+    hospitia,   // pre-created, shared with SecurePodClient + TelegramAllocutio
     terminatePod: podTerminator,
     ...(runpodClient && RUNPOD_WEBHOOK_URL ? {
       runpodClient,
@@ -361,6 +368,7 @@ async function main(): Promise<void> {
     identity: identityResolver,
     botStartupTime,
     materiae,
+    hospitia,
     terminatePod: RUNPOD_API_KEY ? (podId) => terminatePod(RUNPOD_API_KEY, podId) : undefined,
     acta: ring.actorum,
     cancelActum: async (actumId, reason) => {

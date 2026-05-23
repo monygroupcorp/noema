@@ -19,8 +19,10 @@ import type { ColloquiumStore, DictumStore } from './types/colloquium.js'
 import type { MemoriaStore } from './types/anima.js'
 import type { IntelligentiumStore } from './types/intelligendi.js'
 import type { Materia, MateriaStore } from './types/materia.js'
+import type { HospitiumStore } from './types/hospitium.js'
 import type { DeploymentumStore } from './types/deploymentum.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
+import { MongoHospitium } from './crystal/MongoHospitium.js'
 import { MongoDeploymentum } from './crystal/MongoDeploymentum.js'
 import { Praefectus } from './crystal/Praefectus.js'
 import { WarmPodClient } from './crystal/WarmPodClient.js'
@@ -85,6 +87,8 @@ export interface Ring {
   arcanumTree: MongoArcanumTree
   arcanumVerifier: ArcanumVerifier
   materiae: MateriaStore
+  /** Identity-bearing hosting metadata (host + admins) — see types/hospitium.ts. */
+  hospitia: HospitiumStore
   deployments: DeploymentumStore
   collectioCursor: CollectioCursor
 }
@@ -147,6 +151,8 @@ export interface ContainerConfig {
   intelligentiaeCollection?: string
   /** Collection name for materiae — default 'materiae' */
   materiaCollection?: string
+  /** Collection name for hospitia (identity-bearing hosting metadata) — default 'hospitia' */
+  hospitiaCollection?: string
   /** Collection name for deployments — default 'deployments' */
   deploymentsCollection?: string
   /** Collection name for arcanum Merkle tree leaves — default 'arcanum_leaves' */
@@ -163,6 +169,11 @@ export interface ContainerConfig {
    * Pass this when the same store instance needs to be shared with SecurePodClient (keep-warm mode).
    */
   materiae?: MateriaStore
+  /**
+   * Pre-created HospitiumStore — share-with-test injection point. When absent, the
+   * container creates a MongoHospitium against `hospitiaCollection`.
+   */
+  hospitia?: HospitiumStore
   /**
    * Terminate a RunPod pod by ID. Injected so ActumCompletor can kill orphaned pods when
    * failing an actum (boot recovery, manual expiry). Absent: pods are left running on fail().
@@ -227,6 +238,9 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const materiaCol: Collection = db.collection(config.materiaCollection ?? 'materiae')
   const materiae = config.materiae ?? new MongoMateria(materiaCol)
   const praefectus = new Praefectus(materiae)
+
+  const hospitiaCol: Collection = db.collection(config.hospitiaCollection ?? 'hospitia')
+  const hospitia = config.hospitia ?? new MongoHospitium(hospitiaCol)
 
   const deploymentsCol: Collection = db.collection(config.deploymentsCollection ?? 'deployments')
   const deployments = new MongoDeploymentum(deploymentsCol)
@@ -299,7 +313,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     colloquia, dicta, memoriae, intelligendi,
     cursorum, completor, inceptor, arcanumIssuer,
     arcanumTree, arcanumVerifier,
-    materiae, deployments,
+    materiae, hospitia, deployments,
     collectioCursor,
   }
 }
