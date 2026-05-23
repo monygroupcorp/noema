@@ -2,17 +2,39 @@ import type { Collection, Document } from 'mongodb'
 import type { Actum, ActumStatus } from '../types/actum.js'
 import type { Actorum } from '../types/cursus.js'
 
-// bigint is not a BSON type — stored as decimal string, converted on read/write
+// bigint is not a BSON type — stored as decimal string, converted on read/write.
+// Top-level `impetus` is required; `executio.finalImpetus` is an optional nested
+// bigint introduced in Phase B for the dispatch-time pricing decision.
 type ActumDoc = Omit<Actum, 'impetus'> & { impetus: string }
 
+function executioToDoc(e?: Actum['executio']): Record<string, unknown> | undefined {
+  if (!e) return undefined
+  const { finalImpetus, ...rest } = e
+  return { ...rest, ...(finalImpetus !== undefined ? { finalImpetus: finalImpetus.toString() } : {}) }
+}
+function executioFromDoc(e?: Record<string, unknown>): Actum['executio'] | undefined {
+  if (!e) return undefined
+  const out: Record<string, unknown> = { ...e }
+  if (typeof e.finalImpetus === 'string') out.finalImpetus = BigInt(e.finalImpetus)
+  return out as Actum['executio']
+}
+
 function toDoc(a: Omit<Actum, 'inceptum'>): Omit<ActumDoc, 'inceptum'> {
-  const { impetus, ...rest } = a
-  return { ...rest, impetus: impetus.toString() }
+  const { impetus, executio, ...rest } = a
+  return {
+    ...rest,
+    impetus: impetus.toString(),
+    ...(executio !== undefined ? { executio: executioToDoc(executio) as Actum['executio'] } : {}),
+  }
 }
 
 function fromDoc(doc: Document): Actum {
-  const { _id, impetus, ...rest } = doc as ActumDoc & { _id: unknown }
-  return { ...rest, impetus: BigInt(impetus) } as Actum
+  const { _id: _omit, impetus, executio, ...rest } = doc as ActumDoc & { _id: unknown; executio?: Record<string, unknown> }
+  return {
+    ...rest,
+    impetus: BigInt(impetus),
+    ...(executio !== undefined ? { executio: executioFromDoc(executio) } : {}),
+  } as Actum
 }
 
 export class MongoActorum implements Actorum {
@@ -29,9 +51,10 @@ export class MongoActorum implements Actorum {
     id: string,
     patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'deploymentHash' | 'executio'>>
   ): Promise<Actum> {
-    const { impetus, ...rest } = patch
+    const { impetus, executio, ...rest } = patch
     const $set: Record<string, unknown> = { ...rest }
     if (impetus !== undefined) $set.impetus = impetus.toString()
+    if (executio !== undefined) $set.executio = executioToDoc(executio)
 
     const result = await this.col.findOneAndUpdate(
       { id },

@@ -272,6 +272,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
             }),
         imageRefOf,
         deployments,
+        hospitia,
       },
     )
     const tesseraCursor = new TesseraCursor(runpodCursor, modos, signorum)
