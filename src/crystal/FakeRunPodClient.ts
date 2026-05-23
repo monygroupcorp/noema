@@ -1,9 +1,11 @@
-import type { RunPodClient } from './RunPodCursor.js'
+import type { RunPodClient, ProvisioningContext } from './RunPodCursor.js'
 import type { ActumExecutio } from '../types/actum.js'
 import type { MateriaStore } from '../types/materia.js'
+import type { HospitiumStore } from '../types/hospitium.js'
 import { bus } from '../lib/bus.js'
 import { getTrace } from '../lib/trace.js'
 import { makeLogger } from '../lib/logger.js'
+import { computeBootCostImpetus } from '../ledger/rates.js'
 
 const log = makeLogger('cursor:fake')
 
@@ -35,9 +37,18 @@ export class FakeRunPodClient implements RunPodClient {
     private readonly fetchFn: typeof fetch = globalThis.fetch,
     private readonly opts: FakeOpts = {},
     private readonly materiae?: MateriaStore,
+    /** Optional Hospitium side-table — mirrors SecurePodClient so the fake produces
+     *  a faithful host-guest bond record at warm-park. */
+    private readonly hospitia?: HospitiumStore,
   ) {}
 
-  async submit(params: { input: unknown; webhook?: string; onPodActive?: (podId: string) => Promise<void>; onMetrics?: (e: ActumExecutio) => Promise<void> }): Promise<{ id: string }> {
+  async submit(params: {
+    input: unknown
+    webhook?: string
+    provisioningContext?: ProvisioningContext
+    onPodActive?: (podId: string) => Promise<void>
+    onMetrics?: (e: ActumExecutio) => Promise<void>
+  }): Promise<{ id: string }> {
     const podId = `fake-${Date.now().toString(36)}`
     void this._run(podId, params).catch(err => log.error('fake run failed', { error: String(err) }))
     return { id: podId }
@@ -103,7 +114,10 @@ export class FakeRunPodClient implements RunPodClient {
     // imageId:imageVersion === imageRefOf(modus), so the warm match hits.
     if (this.materiae) {
       const ociRef = (params.input as { image?: { ociRef?: string } })?.image?.ociRef
-      await this.materiae.create({
+      // Synthetic billed cold-start (matches what we report via onMetrics) so the
+      // bootCostImpetus stamped on the materia looks realistic in the mock.
+      const bootCostImpetus = computeBootCostImpetus(7 * 60_000, costPerHr)
+      const materia = await this.materiae.create({
         genus: 'runpod',
         externusId: podId,
         gpu: gpuType,
@@ -113,8 +127,18 @@ export class FakeRunPodClient implements RunPodClient {
         impetusPerSecond: 0n,
         status: 'idle',
         warmUntil: new Date(Date.now() + warmTtlMs),
-      }).catch(err => log.warn('fake materia create failed', { error: String(err) }))
-      log.info('fake pod parked warm', { podId, imageRef: ociRef, warmTtlMs })
+        bootCostImpetus,
+        ...(params.provisioningContext?.groupChatId ? { groupChatId: params.provisioningContext.groupChatId } : {}),
+      }).catch(err => { log.warn('fake materia create failed', { error: String(err) }); return undefined })
+      // Hospitium pairs identity (hostAnima) to the materia off-pod by design.
+      if (materia && this.hospitia && params.provisioningContext?.hostAnimaId) {
+        await this.hospitia.create({
+          materiaId: materia.id,
+          hostAnimaId: params.provisioningContext.hostAnimaId,
+          inceptum: new Date(),
+        }).catch(err => log.warn('fake hospitium create failed', { error: String(err) }))
+      }
+      log.info('fake pod parked warm', { podId, imageRef: ociRef, warmTtlMs, bootCostImpetus: bootCostImpetus.toString() })
     }
   }
 }

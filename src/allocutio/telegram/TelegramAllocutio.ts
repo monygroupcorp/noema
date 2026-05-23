@@ -11,6 +11,7 @@ import type { Allocutio, Nuntius, Responsum } from '../../types/allocutio.js'
 import type { Inceptio } from '../../types/cursus.js'
 import { makeLogger } from '../../lib/logger.js'
 import { bus, type StageInfo } from '../../lib/bus.js'
+import { withTrace, getTrace, makeTraceContext } from '../../lib/trace.js'
 import type { WideEvent } from '../../lib/wide.js'
 import type { MateriaStore } from '../../types/materia.js'
 import type { Actum } from '../../types/actum.js'
@@ -209,20 +210,36 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       update.message?.message_id ??
       update.callback_query?.message?.message_id
 
-    try {
-      if (update.message) {
-        await this._handleMessage(update.message)
-      } else if (update.callback_query) {
-        await this._handleCallbackQuery(update.callback_query)
+    // When the dispatch comes from a group/supergroup, enrich the trace context
+    // with groupChatId so warm-park stamps Materia.groupChatId without putting
+    // chat info on the Actum schema. DMs leave it absent.
+    const chatType = update.message?.chat.type
+    const groupChatId = (chatType === 'group' || chatType === 'supergroup') && chatId
+      ? String(chatId)
+      : undefined
+
+    const dispatch = async () => {
+      try {
+        if (update.message) {
+          await this._handleMessage(update.message)
+        } else if (update.callback_query) {
+          await this._handleCallbackQuery(update.callback_query)
+        }
+      } catch (err) {
+        log.error('TelegramAllocutio error', { error: String(err) })
+        if (chatId) {
+          if (messageId) void this._react(chatId, messageId, REACTION.error)
+          await this.sender
+            .sendMessage(chatId, classifyError(err))
+            .catch(() => {})
+        }
       }
-    } catch (err) {
-      log.error('TelegramAllocutio error', { error: String(err) })
-      if (chatId) {
-        if (messageId) void this._react(chatId, messageId, REACTION.error)
-        await this.sender
-          .sendMessage(chatId, classifyError(err))
-          .catch(() => {})
-      }
+    }
+
+    if (groupChatId) {
+      await withTrace(makeTraceContext({ ...getTrace(), groupChatId }), dispatch)
+    } else {
+      await dispatch()
     }
   }
 

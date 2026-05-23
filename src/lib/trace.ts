@@ -7,6 +7,14 @@ export interface TraceContext {
   animaId?:      string
   platform?:     'telegram' | 'discord' | 'api'
 
+  /**
+   * Group-chat identifier when the dispatch originated in a group (e.g. a Telegram
+   * group/supergroup chat id). Absent for DMs. Carried in the trace so warm-park
+   * can stamp Materia.groupChatId without putting platform context on the durable
+   * schemas (Actum/Modo stay platform-neutral).
+   */
+  groupChatId?:  string
+
   // Timing — each stage stamps itself here; used for wide event in Phase 2
   startTs:       number
   provisionMs?:  number

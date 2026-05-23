@@ -5,6 +5,7 @@ import type { Signorum } from '../../types/significandi.js'
 import type { Actorum, ActumCompletor, Cursorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
 import { classifyError } from '../../lib/classifyError.js'
+import { withTrace, getTrace, makeTraceContext } from '../../lib/trace.js'
 
 // ---------------------------------------------------------------------------
 // ExecuteFlow state types
@@ -336,8 +337,14 @@ export class ExecuteFlow implements Flow {
 
     const cursor = cursorum.resolve(modus)
 
-    // 3. Run
-    const cursorResult = await cursor.run(actum)
+    // 3. Run — propagate identity + actum id through the trace context so the
+    // cursor (and anything downstream) can read them without putting identity on
+    // any durable schema (Materia/Modo/Actum stay identity-blind).
+    const animaId = 'animaId' in ctx.identity ? ctx.identity.animaId : undefined
+    const cursorResult = await withTrace(
+      makeTraceContext({ ...getTrace(), animaId, actumId: actum.id }),
+      () => cursor.run(actum),
+    )
 
     if (cursorResult.kind === 'sync') {
       // 4a. Sync: complete immediately
