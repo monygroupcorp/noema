@@ -3,9 +3,11 @@ import type { Actum, ActumExecutio } from '../types/actum.js'
 import type { Modo } from '../types/modo.js'
 import type { Cursor, CursorResult, Actorum } from '../types/cursus.js'
 import type { Materia } from '../types/materia.js'
+import type { HospitiumStore, HostKey } from '../types/hospitium.js'
 import type { DeploymentumStore } from '../types/deploymentum.js'
 import type { Praefectus } from './Praefectus.js'
 import { getTrace } from '../lib/trace.js'
+import { tierOf, impetusFor } from '../ledger/rates.js'
 
 /**
  * RunPodClient — the injectable seam between the cursor and any GPU pod substrate.
@@ -67,6 +69,13 @@ interface Config {
   imageRefOf?: (modus: Modus) => string | undefined
   /** When set, compiled specs are persisted by hash before submission. */
   deployments?: DeploymentumStore
+  /**
+   * Identity-bearing hosting metadata, side-table to Materia. When present, the
+   * cursor reads it at dispatch to compute the three-tier pricing decision
+   * (owner/admin/guest) and stamps the result on actum.executio for the
+   * completor to use at emit time. Materia stays identity-blind.
+   */
+  hospitia?: HospitiumStore
 }
 
 export class RunPodCursor implements Cursor {
@@ -97,16 +106,35 @@ export class RunPodCursor implements Cursor {
       })
     }
 
-    const client = await this._resolveClient(modus, actum)
+    const { client, materia } = await this._resolveClient(modus, actum)
     // Identity + chat context reach the client via the trace, never via schema columns.
     const trace = getTrace()
-    const hostKey: ProvisioningContext['hostKey'] | undefined =
+    const hostKey: HostKey | undefined =
       trace?.animaId    ? { animaId:    trace.animaId    } :
       trace?.commitment ? { commitment: trace.commitment } :
       undefined
     const provCtx: ProvisioningContext | undefined = (hostKey || trace?.groupChatId)
       ? { ...(hostKey ? { hostKey } : {}), ...(trace?.groupChatId ? { groupChatId: trace.groupChatId } : {}) }
       : undefined
+
+    // Phase B dispatch decision: when we know the pod (warm match) AND have a
+    // hospitia store, compute the pricing tier + finalImpetus and stamp them on
+    // the actum so the completor emits execution_spend with the right numbers.
+    // We stash ONLY non-identity values on the actum — host identity is re-derived
+    // from Hospitium at emit time (see ActumCompletor).
+    if (materia && this.config.hospitia) {
+      const hospitium = await this.config.hospitia.findByMateriaId(materia.id).catch(() => null)
+      const tier = tierOf(hostKey, hospitium)
+      const finalImpetus = impetusFor(tier, materia, actum.impetus)
+      await this.actorum.update(actum.id, {
+        materiamId: materia.id,
+        executio: { ...(actum.executio ?? {}), pricingTier: tier, finalImpetus },
+      }).catch(() => {})
+    } else if (materia) {
+      // No hospitia configured — at least record which Materia we landed on.
+      await this.actorum.update(actum.id, { materiamId: materia.id }).catch(() => {})
+    }
+
     const { id: externusJobId } = await client.submit({
       input,
       webhook: this.config.webhookUrl,
@@ -125,25 +153,46 @@ export class RunPodCursor implements Cursor {
     return { kind: 'async', externusJobId }
   }
 
-  private async _resolveClient(modus: Modus, actum: Actum): Promise<RunPodClient> {
+  /**
+   * Route the actum to a client + (when warm) the Materia it landed on. The
+   * Materia surfaces back to the caller so dispatch can stamp materiamId and
+   * read the paired Hospitium for the pricing decision.
+   *
+   * Priority:
+   *   1. shareTokenHint — explicit deep-link routing to a specific host's pod.
+   *   2. computeStrategy='performance' — always cold (dedicated, never warm).
+   *   3. Praefectus warm match (economy pool or standard).
+   *   4. Cold fallback via this.client.
+   */
+  private async _resolveClient(modus: Modus, actum: Actum): Promise<{ client: RunPodClient; materia?: Materia }> {
     const { praefectus, warmFactory, imageRefOf } = this.config
 
-    // 'performance' always cold-starts a dedicated pod — never touch the warm pool.
-    if (actum.computeStrategy === 'performance') return this.client
+    // 1. Deep-link routing wins when present + valid. Expired/revoked tokens
+    //    silently fall through to normal routing (no surprise failure for the user).
+    if (actum.shareTokenHint && praefectus && warmFactory) {
+      const warm = await praefectus.findByShareToken(actum.shareTokenHint).catch(() => null)
+      if (warm) return { client: warmFactory(warm), materia: warm }
+    }
 
+    // 2. 'performance' always cold-starts a dedicated pod — never touch the warm pool.
+    if (actum.computeStrategy === 'performance') return { client: this.client }
+
+    // 3. Praefectus warm match (economy or standard).
     if (praefectus && imageRefOf) {
       const imageRef = imageRefOf(modus)
       if (imageRef) {
         const forEconomy = actum.computeStrategy === 'economy'
         const warm = await praefectus.findWarm(imageRef, forEconomy ? { forEconomy: true } : undefined)
-        if (warm && warmFactory) return warmFactory(warm)
+        if (warm && warmFactory) return { client: warmFactory(warm), materia: warm }
 
         // Economy jobs must not silently fall back to a cold-start pod —
         // the user elected to wait for warm capacity, not to be billed full price.
         if (forEconomy) throw new EconomyUnavailableError(imageRef)
       }
     }
-    return this.client
+
+    // 4. Cold fallback — Materia will be created on warm-park (see SecurePodClient).
+    return { client: this.client }
   }
 }
 
