@@ -133,6 +133,54 @@ export interface Materia {
    * a user may extend it at commission time.
    */
   warmUntil?: Date
+
+  // ── Hosting metadata ───────────────────────────────────────────────────────
+  // Stamped at warm-park so the dispatch layer can answer "who owns this pod, who
+  // rides at-cost, who pays the boot-amortizing guest surcharge" without walking
+  // back through the modo. See docs/plans/2026-05-22-bulletin-hosting-conjunction.md.
+
+  /**
+   * The anima that provisioned this pod — receives `hostCut` and `bootRecovered`
+   * credit when guests run on it. Durable owner reference.
+   */
+  hostAnimaId?: string
+
+  /**
+   * Platform group identifier when the pod was provisioned in a group chat
+   * (e.g. Telegram chat id). Absent for DM provisioning. Used together with
+   * `adminAnimaIds` to recognize the group's admins at dispatch time.
+   */
+  groupChatId?: string
+
+  /**
+   * Snapshot of the group's admins (animaIds) at provision, resolved via the
+   * platform sender. Group admins ride this pod **at cost** — base impetus, no
+   * `modoHostAnimaId` on their executions, no boot-amortizing surcharge. Refreshed
+   * on the bulletin's `manage` action.
+   */
+  adminAnimaIds?: string[]
+
+  /**
+   * Whether the group host has opened the pod to non-admins. When true, members of
+   * `groupChatId` beyond `adminAnimaIds` may dispatch at guest pricing
+   * (base + bootShare). Independent of `podPolicy` (which governs external sharing).
+   */
+  openToNonAdmins?: boolean
+
+  /**
+   * The cold-start cost the host paid, denominated in impetus points (= seconds of
+   * pod-time at the documented rate). Stamped once at warm-park from
+   * `billedMs × costPerHr` of the provisioning actum. Drives the guest
+   * boot-amortization surcharge: `bootShare = ceil(bootCostImpetus / BOOT_AMORTIZE_OVER)`.
+   */
+  bootCostImpetus?: bigint
+
+  /**
+   * Running tally of `bootShare` credited back to the host across guest runs. Once
+   * `bootRecovered >= bootCostImpetus`, the surcharge stops (host has been made
+   * whole on the boot). Absent ≡ 0.
+   */
+  bootRecovered?: bigint
 }
 
 /** "Materiae" — nominative plural of materia */
@@ -144,7 +192,12 @@ export type Materiae = Materia[]
 export interface MateriaStore {
   create(input: Omit<Materia, 'id'>): Promise<Materia>
   findById(id: string): Promise<Materia | null>
-  update(id: string, patch: Partial<Pick<Materia, 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum' | 'podPolicy' | 'shareToken' | 'warmUntil'>>): Promise<Materia>
+  update(id: string, patch: Partial<Pick<Materia,
+    | 'status' | 'sshHost' | 'sshPort' | 'imageRef' | 'terminatum'
+    | 'podPolicy' | 'shareToken' | 'warmUntil'
+    | 'hostAnimaId' | 'groupChatId' | 'adminAnimaIds' | 'openToNonAdmins'
+    | 'bootCostImpetus' | 'bootRecovered'
+  >>): Promise<Materia>
   /**
    * Atomically claim an idle Materia matching the given spec, transitioning it
    * to 'active' in a single findOneAndUpdate. Prevents two concurrent requests
