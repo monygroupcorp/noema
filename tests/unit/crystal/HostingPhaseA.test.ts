@@ -51,7 +51,7 @@ describe('Phase A — warm-park annotation', () => {
     expect((parked as unknown as Record<string, unknown>).adminAnimaIds).toBeUndefined()
   })
 
-  it('creates the paired Hospitium when provisioningContext.hostAnimaId is provided', async () => {
+  it('creates the paired Hospitium for an identified host (hostKey = { animaId })', async () => {
     const materiae = memoryMateriae()
     const hospitia = memoryHospitia()
     const client = new FakeRunPodClient(okFetch, { stepMs: 1, warmTtlMs: 50 }, materiae, hospitia)
@@ -59,15 +59,34 @@ describe('Phase A — warm-park annotation', () => {
       await client.submit({
         input: INPUT,
         webhook: 'http://localhost/wh',
-        provisioningContext: { hostAnimaId: 'host-1' },
+        provisioningContext: { hostKey: { animaId: 'host-1' } },
       })
       await new Promise(r => setTimeout(r, 100))
     })
     expect(hospitia.all()).toHaveLength(1)
     const h = hospitia.all()[0]
-    expect(h.hostAnimaId).toBe('host-1')
+    expect(h.hostKey).toEqual({ animaId: 'host-1' })
     expect(h.materiaId).toBe(materiae.all()[0].id)
     expect(h.inceptum).toBeInstanceOf(Date)
+  })
+
+  it('creates the paired Hospitium for an anonymous host (hostKey = { commitment })', async () => {
+    const materiae = memoryMateriae()
+    const hospitia = memoryHospitia()
+    const client = new FakeRunPodClient(okFetch, { stepMs: 1, warmTtlMs: 50 }, materiae, hospitia)
+    const commitment = '0xabc123anon'
+    await withTrace(makeTraceContext({ actumId: 'a1', commitment }), async () => {
+      await client.submit({
+        input: INPUT,
+        webhook: 'http://localhost/wh',
+        provisioningContext: { hostKey: { commitment } },
+      })
+      await new Promise(r => setTimeout(r, 100))
+    })
+    expect(hospitia.all()).toHaveLength(1)
+    expect(hospitia.all()[0].hostKey).toEqual({ commitment })
+    // Materia stays identity-blind even when the host is anonymous.
+    expect((materiae.all()[0] as unknown as Record<string, unknown>).hostAnimaId).toBeUndefined()
   })
 
   it('stamps Materia.groupChatId when the provisioning context carries one', async () => {
@@ -78,7 +97,7 @@ describe('Phase A — warm-park annotation', () => {
       await client.submit({
         input: INPUT,
         webhook: 'http://localhost/wh',
-        provisioningContext: { hostAnimaId: 'host-1', groupChatId: 'g-456' },
+        provisioningContext: { hostKey: { animaId: 'host-1' }, groupChatId: 'g-456' },
       })
       await new Promise(r => setTimeout(r, 100))
     })
@@ -86,7 +105,7 @@ describe('Phase A — warm-park annotation', () => {
     expect(parked.groupChatId).toBe('g-456')
     // Identity still off-pod — only the chat id (not identity) is on Materia.
     expect((parked as unknown as Record<string, unknown>).adminAnimaIds).toBeUndefined()
-    expect(hospitia.all()[0].hostAnimaId).toBe('host-1')
+    expect(hospitia.all()[0].hostKey).toEqual({ animaId: 'host-1' })
   })
 
   it('DM provisioning leaves groupChatId absent on the Materia', async () => {
@@ -96,7 +115,7 @@ describe('Phase A — warm-park annotation', () => {
       await client.submit({
         input: INPUT,
         webhook: 'http://localhost/wh',
-        provisioningContext: { hostAnimaId: 'host-1' },
+        provisioningContext: { hostKey: { animaId: 'host-1' } },
       })
       await new Promise(r => setTimeout(r, 100))
     })
@@ -114,7 +133,7 @@ describe('Phase A — warm-park annotation', () => {
         await client.submit({
           input: INPUT,
           webhook: 'http://localhost/wh',
-          provisioningContext: { hostAnimaId: 'host-1', groupChatId: 'g-456' },
+          provisioningContext: { hostKey: { animaId: 'host-1' }, groupChatId: 'g-456' },
         })
         await new Promise(r => setTimeout(r, 100))
       })
@@ -124,7 +143,7 @@ describe('Phase A — warm-park annotation', () => {
     expect(events[0].groupChatId).toBe('g-456')
   })
 
-  it('skips Hospitium creation when no hostAnimaId is in the provisioning context (anonymous run)', async () => {
+  it('skips Hospitium creation when no hostKey is in the provisioning context (e.g. true anonymous run with no commitment claimed)', async () => {
     const materiae = memoryMateriae()
     const hospitia = memoryHospitia()
     const client = new FakeRunPodClient(okFetch, { stepMs: 1, warmTtlMs: 50 }, materiae, hospitia)
