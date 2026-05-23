@@ -538,8 +538,12 @@ Generate AI art, chat with models, explore creative tools.`
    * grants admins at-cost access on subsequent /makes (Phase B will read it).
    * Group-only and hospitia-required; quietly no-ops otherwise.
    */
-  private async _handlePodParked(data: { materiaId: string; groupChatId?: string }): Promise<void> {
-    const { materiaId, groupChatId } = data
+  private async _handlePodParked(data: { materiaId: string; groupChatId?: string; platform?: 'telegram' | 'discord' | 'api' }): Promise<void> {
+    const { materiaId, groupChatId, platform } = data
+    // Multi-platform safety: only handle pods this adapter's platform provisioned.
+    // Absent platform on the event is permitted (legacy / unattributed emit), so
+    // we accept it; an explicit non-telegram platform is filtered out.
+    if (platform && platform !== 'telegram') return
     if (!groupChatId || !this.deps.hospitia || !this.sender.getChatAdministrators) return
     const chatId = Number(groupChatId)
     if (!Number.isFinite(chatId)) return

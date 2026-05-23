@@ -122,14 +122,14 @@ describe('Phase A — warm-park annotation', () => {
     expect(materiae.all()[0].groupChatId).toBeUndefined()
   })
 
-  it('emits pod.parked after warm-park, carrying materiaId + groupChatId', async () => {
+  it('emits pod.parked carrying materiaId + groupChatId + source platform (cross-platform self-scoping)', async () => {
     const materiae = memoryMateriae()
     const client = new FakeRunPodClient(okFetch, { stepMs: 1, warmTtlMs: 50 }, materiae)
-    const events: Array<{ materiaId: string; groupChatId?: string }> = []
-    const listener = (d: { materiaId: string; groupChatId?: string }) => events.push(d)
+    const events: Array<{ materiaId: string; groupChatId?: string; platform?: string }> = []
+    const listener = (d: { materiaId: string; groupChatId?: string; platform?: string }) => events.push(d)
     bus.on('pod.parked', listener)
     try {
-      await withTrace(makeTraceContext({ actumId: 'a1', animaId: 'host-1', groupChatId: 'g-456' }), async () => {
+      await withTrace(makeTraceContext({ actumId: 'a1', animaId: 'host-1', groupChatId: 'g-456', platform: 'telegram' }), async () => {
         await client.submit({
           input: INPUT,
           webhook: 'http://localhost/wh',
@@ -141,6 +141,27 @@ describe('Phase A — warm-park annotation', () => {
     expect(events).toHaveLength(1)
     expect(events[0].materiaId).toBe(materiae.all()[0].id)
     expect(events[0].groupChatId).toBe('g-456')
+    expect(events[0].platform).toBe('telegram')
+  })
+
+  it('omits platform on the event when the trace has no platform set (e.g. legacy / api flow)', async () => {
+    const materiae = memoryMateriae()
+    const client = new FakeRunPodClient(okFetch, { stepMs: 1, warmTtlMs: 50 }, materiae)
+    const events: Array<{ platform?: string }> = []
+    const listener = (d: { platform?: string }) => events.push(d)
+    bus.on('pod.parked', listener)
+    try {
+      await withTrace(makeTraceContext({ actumId: 'a1', animaId: 'host-1' }), async () => {
+        await client.submit({
+          input: INPUT,
+          webhook: 'http://localhost/wh',
+          provisioningContext: { hostKey: { animaId: 'host-1' } },
+        })
+        await new Promise(r => setTimeout(r, 100))
+      })
+    } finally { bus.off('pod.parked', listener) }
+    expect(events).toHaveLength(1)
+    expect(events[0].platform).toBeUndefined()
   })
 
   it('skips Hospitium creation when no hostKey is in the provisioning context (e.g. true anonymous run with no commitment claimed)', async () => {

@@ -140,10 +140,15 @@ export class FakeRunPodClient implements RunPodClient {
         }).catch(err => log.warn('fake hospitium create failed', { error: String(err) }))
       }
       // Late-binding hosting metadata (group admin resolution etc.) hangs off pod.parked.
-      if (materia) bus.emit('pod.parked', {
-        materiaId: materia.id,
-        ...(params.provisioningContext?.groupChatId ? { groupChatId: params.provisioningContext.groupChatId } : {}),
-      })
+      // platform from the trace lets multi-platform processes' adapters self-scope.
+      if (materia) {
+        const platform = getTrace()?.platform
+        bus.emit('pod.parked', {
+          materiaId: materia.id,
+          ...(params.provisioningContext?.groupChatId ? { groupChatId: params.provisioningContext.groupChatId } : {}),
+          ...(platform ? { platform } : {}),
+        })
+      }
       log.info('fake pod parked warm', { podId, imageRef: ociRef, warmTtlMs, bootCostImpetus: bootCostImpetus.toString() })
     }
   }
