@@ -32,9 +32,10 @@ export interface BusEvents {
    * A cold pod just parked warm: Materia + (optionally) Hospitium were just created.
    * Subscribers handle late-binding hosting metadata that depends on platform state —
    * notably, resolving the group chat's admin set into the Hospitium when groupChatId
-   * is present. Carries materiaId so subscribers can target the right record.
+   * is present. `platform` is the source surface (telegram/discord/api) so each
+   * adapter can scope its handler to its own pods in multi-platform processes.
    */
-  'pod.parked':      [data: { materiaId: string; groupChatId?: string }]
+  'pod.parked':      [data: { materiaId: string; groupChatId?: string; platform?: 'telegram' | 'discord' | 'api' }]
 }
 
 class TypedBus extends EventEmitter {
