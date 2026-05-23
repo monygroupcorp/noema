@@ -44,6 +44,12 @@ export interface TelegramSender {
   sendMediaGroup(chatId: number, media: unknown[]): Promise<void>
   setMessageReaction?(chatId: number, messageId: number, reaction: unknown[]): Promise<void>
   getFileLink(fileId: string): Promise<string>
+  /**
+   * Resolve a group/supergroup's admin list — used after warm-park to stamp the
+   * Hospitium.adminAnimaIds set. Optional: surfaces only on platforms where
+   * "chat admins" is a first-class concept.
+   */
+  getChatAdministrators?(chatId: number): Promise<Array<{ user: { id: number } }>>
 }
 
 /** IdentityResolver — maps a Telegram user id → AuctorKey. */

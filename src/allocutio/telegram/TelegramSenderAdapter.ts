@@ -38,5 +38,8 @@ export function makeTelegramSender(tg: Telegram): TelegramSender {
 
     getFileLink: (fileId) =>
       tg.getFileLink(fileId).then(u => u.toString()),
+
+    getChatAdministrators: (chatId) =>
+      tg.getChatAdministrators(chatId).then(arr => arr.map(a => ({ user: { id: a.user.id } }))),
   }
 }

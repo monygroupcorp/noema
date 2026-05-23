@@ -4,6 +4,7 @@ import type { Materia, MateriaStore } from '../../../src/types/materia.js'
 import type { Hospitium, HospitiumStore } from '../../../src/types/hospitium.js'
 import { bus } from '../../../src/lib/bus.js'
 import { withTrace, makeTraceContext } from '../../../src/lib/trace.js'
+import { bus } from '../../../src/lib/bus.js'
 
 /** Minimal in-memory MateriaStore — same shape as the FakeWarmPodClient test. */
 function memoryMateriae(): MateriaStore & { all(): Materia[] } {
@@ -100,6 +101,27 @@ describe('Phase A — warm-park annotation', () => {
       await new Promise(r => setTimeout(r, 100))
     })
     expect(materiae.all()[0].groupChatId).toBeUndefined()
+  })
+
+  it('emits pod.parked after warm-park, carrying materiaId + groupChatId', async () => {
+    const materiae = memoryMateriae()
+    const client = new FakeRunPodClient(okFetch, { stepMs: 1, warmTtlMs: 50 }, materiae)
+    const events: Array<{ materiaId: string; groupChatId?: string }> = []
+    const listener = (d: { materiaId: string; groupChatId?: string }) => events.push(d)
+    bus.on('pod.parked', listener)
+    try {
+      await withTrace(makeTraceContext({ actumId: 'a1', animaId: 'host-1', groupChatId: 'g-456' }), async () => {
+        await client.submit({
+          input: INPUT,
+          webhook: 'http://localhost/wh',
+          provisioningContext: { hostAnimaId: 'host-1', groupChatId: 'g-456' },
+        })
+        await new Promise(r => setTimeout(r, 100))
+      })
+    } finally { bus.off('pod.parked', listener) }
+    expect(events).toHaveLength(1)
+    expect(events[0].materiaId).toBe(materiae.all()[0].id)
+    expect(events[0].groupChatId).toBe('g-456')
   })
 
   it('skips Hospitium creation when no hostAnimaId is in the provisioning context (anonymous run)', async () => {
