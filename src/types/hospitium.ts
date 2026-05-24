@@ -67,6 +67,21 @@ export interface Hospitium {
 
   /** Mirrors Materia.terminatum when the pod is reaped — kept for audit. */
   terminatum?: Date
+
+  /**
+   * Continuous cost the host has accrued for this studio running (impetus points).
+   * Incremented by the studio billing tick (`StudioBilling`) every 60s + on phase
+   * transitions: `secondsElapsed × Materia.impetusPerSecond`. Mirrored against the
+   * earnings (sum of hostCut + hospitium signa) for the bulletin's net display.
+   */
+  costAccrued?: bigint
+
+  /**
+   * When the last billing tick was settled. Used by `StudioBilling` to compute
+   * `secondsSinceLastTick × impetusPerSecond` for the next tick — survives
+   * process restarts so we don't double-bill or skip windows.
+   */
+  lastBilledAt?: Date
 }
 
 /** "Hospitia" — nominative plural of hospitium. */
@@ -78,5 +93,10 @@ export type Hospitia = Hospitium[]
 export interface HospitiumStore {
   create(input: Omit<Hospitium, 'id'>): Promise<Hospitium>
   findByMateriaId(materiaId: string): Promise<Hospitium | null>
-  update(materiaId: string, patch: Partial<Pick<Hospitium, 'adminAnimaIds' | 'terminatum'>>): Promise<Hospitium>
+  update(
+    materiaId: string,
+    patch: Partial<Pick<Hospitium, 'adminAnimaIds' | 'terminatum' | 'costAccrued' | 'lastBilledAt'>>,
+  ): Promise<Hospitium>
+  /** Active hospitia (Materia not terminated) — used by the billing ticker. */
+  findActive(): Promise<Hospitium[]>
 }

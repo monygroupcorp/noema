@@ -31,7 +31,10 @@ class FakeHospitium implements HospitiumStore {
   async findByMateriaId(materiaId: string): Promise<Hospitium | null> {
     return this.byMateria.get(materiaId) ?? null
   }
-  async update(materiaId: string, patch: Partial<Pick<Hospitium, 'adminAnimaIds' | 'terminatum'>>): Promise<Hospitium> {
+  async findActive(): Promise<Hospitium[]> {
+    return [...this.byMateria.values()].filter(h => !h.terminatum)
+  }
+  async update(materiaId: string, patch: Partial<Pick<Hospitium, 'adminAnimaIds' | 'terminatum' | 'costAccrued' | 'lastBilledAt'>>): Promise<Hospitium> {
     const cur = this.byMateria.get(materiaId)
     if (!cur) throw new Error(`not found`)
     const next = { ...cur, ...patch }

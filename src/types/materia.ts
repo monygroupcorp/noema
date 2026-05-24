@@ -169,6 +169,14 @@ export interface Materia {
    * whole on the boot). Absent ≡ 0.
    */
   bootRecovered?: bigint
+
+  /**
+   * Drain-mode flag set when the host's balance can no longer cover continuous
+   * studio billing. While true, new guest gens are refused at admission; any
+   * in-flight gens are allowed to finish; the idle reaper terminates the studio
+   * when the queue drains. Default = false / absent.
+   */
+  drainOnly?: boolean
 }
 
 /** "Materiae" — nominative plural of materia */
@@ -185,6 +193,7 @@ export interface MateriaStore {
     | 'podPolicy' | 'shareToken' | 'warmUntil'
     | 'groupChatId' | 'openToNonAdmins'
     | 'bootCostImpetus' | 'bootRecovered'
+    | 'drainOnly'
   >>): Promise<Materia>
   /**
    * Atomically claim an idle Materia matching the given spec, transitioning it

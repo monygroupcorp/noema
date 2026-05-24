@@ -47,6 +47,9 @@ class FakeHospitium implements HospitiumStore {
   async findByMateriaId(materiaId: string): Promise<Hospitium | null> {
     return this.byMateria.get(materiaId) ?? null
   }
+  async findActive(): Promise<Hospitium[]> {
+    return [...this.byMateria.values()].filter(h => !h.terminatum)
+  }
   async update(): Promise<Hospitium> { throw new Error('not used') }
 }
 

@@ -36,6 +36,12 @@ export interface BusEvents {
    * adapter can scope its handler to its own pods in multi-platform processes.
    */
   'pod.parked':      [data: { materiaId: string; groupChatId?: string; platform?: 'telegram' | 'discord' | 'api' }]
+  /**
+   * Studio billing engaged drain-only mode — the host's balance can no longer
+   * cover continuous billing. New guest gens refused; in-flight allowed; idle
+   * reaper terminates when the queue drains.
+   */
+  'studio.draining': [data: { materiaId: string }]
 }
 
 class TypedBus extends EventEmitter {
