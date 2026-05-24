@@ -20,6 +20,20 @@ export interface BulletinDeps {
   terminatePod?: (podId: string) => Promise<void>
   cancelActum?: (actumId: string, reason: string) => Promise<boolean>
   setPodWarmUntil?: (podId: string, ttlMs: number) => Promise<void>
+  /**
+   * Set the studio's `drainOnly` flag — refuses new guest gens; in-flight finish;
+   * idle reaper terminates when the queue drains. Wired to Materia.update in the
+   * adapter; absent in tests where we only assert the bulletin's local state.
+   */
+  drainStudio?: (podId: string) => Promise<void>
+  /**
+   * Mint or fetch a share-token URL for the studio. Wired to the Phase B share-token
+   * machinery in the adapter. Returns the full URL (including the `pod_<token>` deep
+   * link). Optional — Share submenu falls back to a "share unavailable" message.
+   */
+  fetchShareUrl?: (podId: string) => Promise<string | null>
+  /** Resolve the loadout summary text for `Mod • → View loadout`. */
+  fetchLoadout?: (podId: string) => Promise<string | undefined>
   /** No-interaction window before the warm choice auto-confirms. Default 20s. */
   autoSettleMs?: number
   now?: () => number
@@ -146,7 +160,30 @@ export class BulletinManager {
         this._armAutoSettle(chatId)
         await this._render(chatId)
         return
-      case 'kill':
+
+      // ── Top-3 submenu openers (Phase D bulletin sprint) ───────────────────
+      case 'mod':
+      case 'share':
+      case 'destroy':
+        if (!isHost) return
+        s.openSubmenu(action)
+        // Lazy-fetch loadout summary on mod-open so it's ready when View loadout fires.
+        if (action === 'mod' && s.podId && this.deps.fetchLoadout) {
+          void this.deps.fetchLoadout(s.podId).then(text => { s.setLoadoutSummary(text); void this._render(chatId) })
+        }
+        await this._render(chatId)
+        return
+
+      case 'submenu.back':
+        if (!isHost) return
+        s.openSubmenu(null)
+        s.setLoadoutSummary(undefined)
+        await this._render(chatId)
+        return
+
+      // ── Destroy submenu ───────────────────────────────────────────────────
+      case 'destroy.now':
+      case 'kill':            // backwards-compat alias from before the submenu existed
         if (!isHost) return
         if (s.podId) void this.deps.terminatePod?.(s.podId)
         // Cancel-on-destroy: refund any gen still in flight on this chat's pod.
@@ -156,7 +193,41 @@ export class BulletinManager {
           }
         }
         cb.timers.cancelAll()
+        s.openSubmenu(null)
         s.end()
+        await this._render(chatId)
+        return
+
+      case 'destroy.drain':
+        if (!isHost) return
+        // Flag the studio drain-only — admission refuses new gens; idle reaper
+        // terminates when the queue drains. Bulletin stays alive; the host can
+        // still see in-flight gens complete.
+        if (s.podId) void this.deps.drainStudio?.(s.podId)
+        s.openSubmenu(null)
+        await this._render(chatId)
+        return
+
+      // ── Share submenu (uses Phase B shareToken machinery) ─────────────────
+      case 'share.copy':
+      case 'share.forward':
+        if (!isHost) return
+        // Both variants share the same source URL; the platform adapter decides
+        // how to surface it (Copy → reply with link; Forward → telegram-share intent).
+        // BulletinManager's job is just to close the submenu after the action;
+        // the adapter does the actual sending via its own sender contract.
+        if (s.podId && this.deps.fetchShareUrl) {
+          void this.deps.fetchShareUrl(s.podId).catch(() => null)
+        }
+        s.openSubmenu(null)
+        await this._render(chatId)
+        return
+
+      // ── Mod submenu stub (View loadout shows current image in body) ───────
+      case 'mod.view':
+        if (!isHost) return
+        // The fetch was kicked off when the submenu opened; just re-render so
+        // it appears even if it raced past the open render.
         await this._render(chatId)
         return
     }

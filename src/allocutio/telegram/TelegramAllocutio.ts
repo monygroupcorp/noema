@@ -112,6 +112,14 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       terminatePod: deps.terminatePod,
       cancelActum: deps.cancelActum,
       setPodWarmUntil: (podId, ttlMs) => this._setPodWarmUntil(podId, ttlMs),
+      // drainStudio / fetchShareUrl / fetchLoadout: intentionally not wired in
+      // this sprint. The bulletin shows the submenus and routes the actions
+      // (Destroy/Share/Mod open + back) so the UX is navigable; the backend
+      // surfaces (drain-only flag write, share-URL mint, loadout summary) land
+      // in a follow-up that threads the necessary crystal services to the
+      // adapter (Materia lookup by externusId for drain, shareToken for share,
+      // imageRef for mod.view). Until then, those buttons close the submenu
+      // without effect — Destroy → Now still works via the kill path.
       autoSettleMs: deps.autoSettleMs,
     })
 

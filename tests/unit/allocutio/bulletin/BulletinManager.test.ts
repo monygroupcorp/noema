@@ -84,14 +84,94 @@ test('pod.reaped freezes the matching bulletin', async () => {
   assert.equal(cb(s.lastKb()).length, 0, 'reaped → frozen, no buttons')
 })
 
-test('auto-settle flips the keyboard to confirmed after the window', async () => {
+test('auto-settle flips the keyboard to the confirmed top-3 after the window', async () => {
   const s = makeSink()
   const m = new BulletinManager({ sink: s.sink, autoSettleMs: 30 })
   m.register(456, 'a1', '123')
   assert.ok(cb(s.lastKb()).includes('bul:confirm'), 'setup keyboard before settle')
   await tick(60)
-  assert.ok(cb(s.lastKb()).includes('bul:kill') && !cb(s.lastKb()).includes('bul:confirm'),
-    'auto-settle flipped to the confirmed control row')
+  const after = cb(s.lastKb())
+  assert.ok(after.includes('bul:mod') && after.includes('bul:share') && after.includes('bul:destroy'),
+    'auto-settle landed on the spec\'d top-3 [Mod] [Share] [Destroy]')
+  assert.ok(!after.includes('bul:confirm'), 'no longer in setup state')
+})
+
+test('destroy submenu: open → Now terminates + cancels in-flight; receipt frozen', async () => {
+  const terminated: string[] = []
+  const cancelled: string[] = []
+  const s = makeSink()
+  const m = new BulletinManager({
+    sink: s.sink,
+    terminatePod: async (p) => { terminated.push(p) },
+    cancelActum: async (a) => { cancelled.push(a); return true },
+    autoSettleMs: 30,
+  })
+  m.register(456, 'a1', '123')
+  m.onStage('a1', 'provisioning')
+  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  await tick(60)   // confirm via auto-settle so the top-3 is rendered
+
+  // Open the destroy submenu — must show submenu actions, not yet destroyed.
+  await m.handleControl(456, '123', 'destroy')
+  assert.ok(cb(s.lastKb()).includes('bul:destroy.now'), 'destroy submenu visible')
+  assert.deepEqual(terminated, [], 'opening the submenu must not act')
+
+  // Confirm the destroy.
+  await m.handleControl(456, '123', 'destroy.now')
+  assert.deepEqual(terminated, ['pod-1'])
+  assert.deepEqual(cancelled, ['a1'])
+  assert.equal(cb(s.lastKb()).length, 0, 'receipt has no buttons')
+})
+
+test('destroy submenu: Drain sets drain-only, does NOT terminate immediately', async () => {
+  const terminated: string[] = []
+  const drained: string[] = []
+  const s = makeSink()
+  const m = new BulletinManager({
+    sink: s.sink,
+    terminatePod: async (p) => { terminated.push(p) },
+    drainStudio:  async (p) => { drained.push(p) },
+    autoSettleMs: 30,
+  })
+  m.register(456, 'a1', '123')
+  m.onStage('a1', 'provisioning')
+  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  await tick(60)
+  await m.handleControl(456, '123', 'destroy')
+  await m.handleControl(456, '123', 'destroy.drain')
+  assert.deepEqual(drained, ['pod-1'], 'drain hook fired')
+  assert.deepEqual(terminated, [], 'pod is NOT terminated immediately on drain')
+  const after = cb(s.lastKb())
+  assert.ok(after.includes('bul:destroy'), 'returns to top-3 (submenu closed)')
+})
+
+test('submenu.back closes any open submenu', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, autoSettleMs: 30 })
+  m.register(456, 'a1', '123')
+  await tick(60)
+  await m.handleControl(456, '123', 'share')
+  assert.ok(cb(s.lastKb()).includes('bul:share.copy'), 'submenu opened')
+  await m.handleControl(456, '123', 'submenu.back')
+  assert.ok(!cb(s.lastKb()).includes('bul:share.copy'), 'back closed submenu')
+  assert.ok(cb(s.lastKb()).includes('bul:destroy'), 'top-3 restored')
+})
+
+test('non-host cannot open submenus or invoke destructive actions', async () => {
+  const terminated: string[] = []
+  const s = makeSink()
+  const m = new BulletinManager({
+    sink: s.sink,
+    terminatePod: async (p) => { terminated.push(p) },
+    autoSettleMs: 30,
+  })
+  m.register(456, 'a1', '123')
+  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  await tick(60)
+  await m.handleControl(456, '999', 'destroy')        // not the host
+  assert.ok(!cb(s.lastKb()).includes('bul:destroy.now'), 'submenu not opened for non-host')
+  await m.handleControl(456, '999', 'destroy.now')    // direct attempt
+  assert.deepEqual(terminated, [], 'destroy is host-only')
 })
 
 test('a fresh actum after a receipt opens a new bulletin (new message)', async () => {

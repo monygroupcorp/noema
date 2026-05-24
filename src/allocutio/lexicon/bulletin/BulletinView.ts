@@ -2,10 +2,10 @@ import type { LedgerSummary } from './Ledger.js'
 import {
   WARM_LADDER_MS, WARM_LADDER_LABEL, WARM_TYPICAL_SEC, COLD_TYPICAL_MS,
   type Audience, type JournalEntry, type LiveState,
-  type BulletinKeyboard, type RenderedBulletin,
+  type RenderedBulletin,
 } from './types.js'
-import { GLYPH } from '../symbols.js'
 import { COPY } from '../copy.js'
+import { affordancesFor, packAffordances, type ActiveSubmenu } from './affordances.js'
 
 /** Everything BulletinView needs to render — a pure snapshot of a PodSession. */
 export interface BulletinSnapshot {
@@ -17,6 +17,10 @@ export interface BulletinSnapshot {
   rateUsdPerHr?: number     // drives the "next gen ~$X" marginal estimate
   ended: boolean
   audience: Audience        // seam — only 'host' is wired today
+  /** Which submenu is currently expanded on the bulletin (`null` = top-3). */
+  activeSubmenu: ActiveSubmenu
+  /** OCI image / loadout descriptor — shown in the body when `Mod • → View loadout` is invoked. */
+  loadoutSummary?: string
 }
 
 // ── formatting ───────────────────────────────────────────────────────────────
@@ -111,18 +115,9 @@ export const BulletinView = {
       lines.push(COPY.bulletin.podShutDown)   // closed before any gen — the stat line never showed
     }
 
-    return { text: lines.join('\n') || COPY.bulletin.podActive, keyboard: keyboard(s) }
-  },
-}
+    // Mod • → View loadout shows the loadout summary as a body line when set.
+    if (s.activeSubmenu === 'mod' && s.loadoutSummary) lines.push(s.loadoutSummary)
 
-function keyboard(s: BulletinSnapshot): BulletinKeyboard {
-  if (s.ended) return []
-  if (!s.confirmed) {
-    const idx = Math.max(0, WARM_LADDER_MS.indexOf(s.warmTtlMs))
-    return [
-      [ { label: GLYPH.warmDec, data: 'bul:dec' }, { label: `warm: ${WARM_LADDER_LABEL[idx]}`, data: 'bul:noop' }, { label: GLYPH.warmInc, data: 'bul:inc' } ],
-      [ { label: GLYPH.confirm, data: 'bul:confirm' } ],
-    ]
-  }
-  return [[ { label: GLYPH.refresh, data: 'bul:refresh' }, { label: GLYPH.time, data: 'bul:time' }, { label: GLYPH.kill, data: 'bul:kill' } ]]
+    return { text: lines.join('\n') || COPY.bulletin.podActive, keyboard: packAffordances(affordancesFor(s)) }
+  },
 }

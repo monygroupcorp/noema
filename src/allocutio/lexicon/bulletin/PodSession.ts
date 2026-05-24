@@ -1,6 +1,7 @@
 import type { StageInfo } from '../../../lib/bus.js'
 import { Ledger } from './Ledger.js'
 import type { BulletinSnapshot } from './BulletinView.js'
+import type { ActiveSubmenu } from './affordances.js'
 import {
   WARM_LADDER_MS, WARM_DEFAULT_MS, DL_SLOW_MS,
   type Audience, type JournalEntry, type LiveState,
@@ -28,6 +29,8 @@ export class PodSession {
   private _warmTtlMs = WARM_DEFAULT_MS
   private _confirmed = false
   private _ended = false
+  private _activeSubmenu: ActiveSubmenu = null
+  private _loadoutSummary?: string
 
   constructor(readonly hostUserId: string, readonly audience: Audience = 'host') {}
 
@@ -36,6 +39,7 @@ export class PodSession {
   get warmTtlMs(): number { return this._warmTtlMs }
   get confirmed(): boolean { return this._confirmed }
   get ended(): boolean { return this._ended }
+  get activeSubmenu(): ActiveSubmenu { return this._activeSubmenu }
 
   /** Advance the journal/live for a pod lifecycle stage. */
   onStage(stage: string, info?: StageInfo, now: number = Date.now()): void {
@@ -106,8 +110,14 @@ export class PodSession {
     this._warmTtlMs = WARM_LADDER_MS[idx]
   }
   setConfirmed(v: boolean): void { this._confirmed = v }
-  end(): void { this._ended = true; this.live = null }
+  end(): void { this._ended = true; this.live = null; this._activeSubmenu = null }
   clearLive(): void { this.live = null }
+
+  /** Open a submenu (Mod / Share / Destroy) or close one (null). */
+  openSubmenu(which: ActiveSubmenu): void { this._activeSubmenu = which }
+
+  /** Set the loadout summary text — shown in the body when `mod.view` is invoked. */
+  setLoadoutSummary(text: string | undefined): void { this._loadoutSummary = text }
 
   snapshot(): BulletinSnapshot {
     return {
@@ -119,6 +129,8 @@ export class PodSession {
       rateUsdPerHr: this.pod.rate,
       ended: this._ended,
       audience: this.audience,
+      activeSubmenu: this._activeSubmenu,
+      ...(this._loadoutSummary ? { loadoutSummary: this._loadoutSummary } : {}),
     }
   }
 
