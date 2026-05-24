@@ -38,6 +38,7 @@ import type { HostKey } from './hospitium'
 export type SignumEventType =
   | 'execution_spend'    // a modus ran and was paid for
   | 'session_spend'      // pod-time accrued on a modo
+  | 'studio_spend'       // continuous per-time host debit for a studio being alive
   | 'deposit_confirmed'  // inbound credit landed
   | 'royalty_fired'      // internal — triggers platform skim hook
 
@@ -73,6 +74,22 @@ export interface SignumEventPayload {
     /** Seconds of pod-time being billed in this tick */
     seconds: number
     impetus: bigint
+  }
+
+  studio_spend: {
+    /** The studio (Materia) being billed. */
+    materiaId: string
+    /** Identified or anonymous host receiving the debit. */
+    hostKey: HostKey
+    /**
+     * Impetus to debit, **already clamped to the host's available balance** by the
+     * caller (StudioBilling ticker). The hook is pure — it cannot read balance —
+     * so clamping happens upstream. The ticker also decides whether a shortfall
+     * (clamped < requested) should engage drainOnly mode on the Materia.
+     */
+    impetus: bigint
+    /** Seconds of compute being billed in this tick (for diagnostics + analytics). */
+    seconds: number
   }
 
   deposit_confirmed: {

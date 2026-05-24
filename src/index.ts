@@ -29,6 +29,7 @@ import { withTrace, makeTraceContext } from './lib/trace.js'
 import { hostCutHook } from './ledger/hooks/hostCut.js'
 import { hospitiumHook } from './ledger/hooks/hospitium.js'
 import { modelRoyaltyHook } from './ledger/hooks/modelRoyalty.js'
+import { studioSpendHook } from './ledger/hooks/studioSpend.js'
 import { platformSkimHook } from './ledger/hooks/platformSkim.js'
 import { referralSplitHook } from './ledger/hooks/referralSplit.js'
 import { sessionSpendHook } from './ledger/hooks/sessionSpend.js'
@@ -40,6 +41,7 @@ import { terminatePod, listRunPodPods } from './crystal/terminatePod.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
 import { MongoHospitium } from './crystal/MongoHospitium.js'
 import { startIdleReaper } from './crystal/idleReaper.js'
+import { startStudioBilling } from './crystal/StudioBilling.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { Compiler } from './crystal/Compiler.js'
 import { WorkflowTemplateRegistry } from './crystal/WorkflowTemplateRegistry.js'
@@ -307,6 +309,7 @@ async function main(): Promise<void> {
   nexus.on('execution_spend', modelRoyaltyHook)
   nexus.on('royalty_fired', platformSkimHook)
   nexus.on('session_spend', sessionSpendHook)
+  nexus.on('studio_spend', studioSpendHook)
   nexus.on('deposit_confirmed', referralSplitHook)
 
   // 4. Seed canonical modi + essentiae + intellae
@@ -419,6 +422,19 @@ async function main(): Promise<void> {
     startIdleReaper(materiae, async () => {}, 10_000)
     log.warn('idle-pod reaper started (fake mode)', { warmTtlMs: RUNPOD_WARM_TTL_MS })
   }
+
+  // Studio billing tick — the host's continuous per-time cost meter. Every 60s
+  // walks active Hospitia and debits the host secondsSinceLastTick × impetusPerSecond.
+  // Without this, hosts pay nothing for studios sitting warm — the platform absorbs
+  // the underlying compute cost. See docs/plans/2026-05-24-studio-billing-tick-sprint.md.
+  startStudioBilling({
+    hospitia: ring.hospitia,
+    materiae,
+    signorum: ring.signorum,
+    nexus,
+  }, 60_000)
+  log.info('studio billing started', { tickMs: 60_000 })
+
   app.use('/internal', createLiveRouter(INTERNAL_SECRET))
   app.use('/internal/analytics', createAnalyticsRouter(wideStore, INTERNAL_SECRET))
 
