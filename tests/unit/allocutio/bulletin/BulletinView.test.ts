@@ -7,6 +7,7 @@ const base: BulletinSnapshot = {
   journal: [], live: null,
   ledger: { genCount: 0, totalCostUsd: 0, avgCostUsd: 0, avgExecMs: 0, hasCost: false, hasExec: false },
   warmTtlMs: WARM_DEFAULT_MS, confirmed: false, ended: false, audience: 'host',
+  activeSubmenu: null,
 }
 const cb = (kb: BulletinKeyboard) => kb.flat().map(b => b.data)
 
@@ -37,7 +38,7 @@ test('prepared line renders the % vs the typical baseline', () => {
   assert.match(text, /Prepared Make Setup in 4\.5m \(36% < avg\)/)
 })
 
-test('confirmed idle: stat line + nudge with marginal cost; confirmed keyboard', () => {
+test('confirmed idle: stat line + nudge with marginal cost; top-3 [Mod] [Share] [Destroy]', () => {
   const { text, keyboard } = BulletinView.render({
     ...base, confirmed: true, rateUsdPerHr: 0.69,
     journal: [{ kind: 'found', gpu: 'RTX 4090', rate: 0.69, ms: 30_000 }],
@@ -45,7 +46,26 @@ test('confirmed idle: stat line + nudge with marginal cost; confirmed keyboard',
   })
   assert.match(text, /1 gen · exec ~12s avg · \$0\.080 ea · \$0\.08 total/)
   assert.match(text, /next gen ~\$0\.005 — keep cooking/)
-  assert.deepEqual(cb(keyboard).sort(), ['bul:kill', 'bul:refresh', 'bul:time'].sort())
+  assert.deepEqual(cb(keyboard).sort(), ['bul:destroy', 'bul:mod', 'bul:share'].sort())
+})
+
+test('destroy submenu renders Now / Drain / ← Back', () => {
+  const { keyboard } = BulletinView.render({ ...base, confirmed: true, activeSubmenu: 'destroy' })
+  assert.deepEqual(cb(keyboard).sort(), ['bul:destroy.drain', 'bul:destroy.now', 'bul:submenu.back'].sort())
+})
+
+test('share submenu renders Copy link / Forward / ← Back', () => {
+  const { keyboard } = BulletinView.render({ ...base, confirmed: true, activeSubmenu: 'share' })
+  assert.deepEqual(cb(keyboard).sort(), ['bul:share.copy', 'bul:share.forward', 'bul:submenu.back'].sort())
+})
+
+test('mod submenu renders View loadout / ← Back; loadoutSummary appears in body when set', () => {
+  const { text, keyboard } = BulletinView.render({
+    ...base, confirmed: true, activeSubmenu: 'mod',
+    loadoutSummary: 'flux-schnell on H100',
+  })
+  assert.deepEqual(cb(keyboard).sort(), ['bul:mod.view', 'bul:submenu.back'].sort())
+  assert.match(text, /flux-schnell on H100/)
 })
 
 test('receipt with gens: "Session receipt ·" prefix and no keyboard', () => {
