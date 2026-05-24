@@ -374,6 +374,9 @@ async function main(): Promise<void> {
     botStartupTime,
     materiae,
     hospitia,
+    signorum: ring.signorum,
+    modorum: ring.modorum,
+    actorum: ring.actorum,
     terminatePod: RUNPOD_API_KEY ? (podId) => terminatePod(RUNPOD_API_KEY, podId) : undefined,
     acta: ring.actorum,
     cancelActum: async (actumId, reason) => {

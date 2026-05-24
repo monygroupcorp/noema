@@ -1296,5 +1296,7 @@ test('warm window auto-settles (confirms) if the host does not interact', async 
   const settled = sender.edited.at(-1)
   assert.ok(settled, 'auto-settle re-rendered the bulletin')
   const btns = ((settled!.extra as { reply_markup: { inline_keyboard: Array<Array<{ callback_data: string }>> } }).reply_markup.inline_keyboard).flat().map(b => b.callback_data)
-  assert.ok(btns.includes('bul:kill') && !btns.includes('bul:confirm'), 'auto-settle flips to the confirmed control row')
+  assert.ok(btns.includes('bul:destroy') && btns.includes('bul:mod') && btns.includes('bul:share'),
+    'auto-settle lands on the spec\'d top-3 [Mod] [Share] [Destroy]')
+  assert.ok(!btns.includes('bul:confirm'), 'no longer in setup state')
 })

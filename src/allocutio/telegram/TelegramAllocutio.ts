@@ -16,6 +16,11 @@ import type { WideEvent } from '../../lib/wide.js'
 import type { MateriaStore } from '../../types/materia.js'
 import type { HospitiumStore } from '../../types/hospitium.js'
 import type { Actum } from '../../types/actum.js'
+import type { Signorum } from '../../types/significandi.js'
+import type { Modorum } from '../../types/modus.js'
+import type { Actorum } from '../../types/cursus.js'
+import { aggregateStatus } from '../lexicon/status/aggregate.js'
+import { StatusView } from '../lexicon/status/StatusView.js'
 import { classifyError } from '../../lib/classifyError.js'
 import { BulletinManager, type BulletinSink } from '../lexicon/bulletin/BulletinManager.js'
 import { DeliveryMenu, type DeliverySink } from '../lexicon/delivery/DeliveryMenu.js'
@@ -77,6 +82,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   private readonly pendingShareTokens = new Map<string, { token: string; expiresAt: number }>()
   private static readonly PENDING_SHARE_TOKEN_TTL_MS = 5 * 60 * 1000
 
+  // /status message ids per (chat, user) — enables Refresh-in-place edits.
+  private readonly statusMessages = new Map<string, { chatId: number; messageId: number }>()
+
   // The session bulletin (HUD), the delivery menu, and the command-message reaction
   // choreography each live in their own subsystem now; this adapter just feeds them.
   private readonly bulletins: BulletinManager
@@ -97,6 +105,13 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     /** Host-guest bond store — when present, group provisionings get their admin set
      *  resolved + stamped into Hospitium.adminAnimaIds on pod.parked. */
     hospitia?: HospitiumStore
+    /** Ledger — used by /status to read balance + earnings. Optional; absent → /status
+     *  falls back to the legacy "coming soon" stub. */
+    signorum?: Signorum
+    /** Registry of modi — used by /status to resolve modus labels on gen rows. */
+    modorum?: Modorum
+    /** Actorum — used by /status to look up the user's in-flight actums. */
+    actorum?: Actorum
     /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
     autoSettleMs?: number
   }) {
@@ -147,6 +162,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       sendMessage: (chatId, text, extra) => this.sender.sendMessage(chatId, text, extra),
       sendStart: (chatId) => this._sendStart(chatId),
       ack: (chatId, messageId) => { void this._react(chatId, messageId, REACTION.ok) },
+      showStatus: (userId, chatId) => this._showStatus(userId, chatId),
     })
 
     // Wire router callbacks
@@ -362,6 +378,12 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       return
     }
 
+    // /status HUD — refresh / cancel:<actumId> / bulletin:<studioId> / join:<studioId> / history / settings
+    if (query.data.startsWith('stat:') && chatId) {
+      await this._handleStatusCallback(query.data.slice(5), userId, chatId)
+      return
+    }
+
     // Delivery menu — morphing row + Info stats. Data: dm:<action>:<actumId>[:<type>]
     if (query.data.startsWith('dm:') && chatId) {
       const [, action, actumId, ratedType] = query.data.split(':')
@@ -508,6 +530,80 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   }
 
   // -------------------------------------------------------------------------
+  // ── /status HUD ─────────────────────────────────────────────────────────
+  // Aggregates the user's app state, renders via StatusView, sends as a chat
+  // message. Subsequent Refresh button edits the same message in place.
+  private async _showStatus(userId: string, chatId: number): Promise<void> {
+    if (!this.deps.signorum || !this.deps.hospitia || !this.deps.actorum || !this.deps.modorum || !this.deps.materiae) {
+      // Missing crystal deps for full status — fall back to a friendly stub.
+      await this.sender.sendMessage(chatId, '`/status` is unavailable in this build (missing crystal services).')
+      return
+    }
+    const auctorKey = await this.identity.resolve(userId).catch(() => null)
+    const snapshot = await aggregateStatus(
+      {
+        signorum: this.deps.signorum,
+        hospitia: this.deps.hospitia,
+        materiae: this.deps.materiae,
+        actorum:  this.deps.actorum,
+        modorum:  this.deps.modorum,
+      },
+      {
+        auctorKey,
+        // TODO: feed in-flight actumIds for this user once we have per-anima
+        // gen indexing. Today the section renders empty.
+        inFlightActumIds: [],
+      },
+    )
+    const { text, keyboard } = StatusView.render(snapshot)
+    const reply_markup = keyboard.length ? this._toInline(keyboard) : undefined
+    const key = `telegram:${userId}`
+    const sent = await this.sender.sendMessage(chatId, text, reply_markup ? { reply_markup } : undefined)
+    const sentId = (sent as { message_id?: number } | undefined)?.message_id
+    if (typeof sentId === 'number') {
+      this.statusMessages.set(key, { chatId, messageId: sentId })
+    }
+  }
+
+  private async _handleStatusCallback(action: string, userId: string, chatId: number): Promise<void> {
+    if (action === 'refresh') {
+      // Re-aggregate and edit the existing message in place.
+      const key = `telegram:${userId}`
+      const tracked = this.statusMessages.get(key)
+      if (!tracked || !this.deps.signorum || !this.deps.hospitia || !this.deps.actorum || !this.deps.modorum || !this.deps.materiae) {
+        // No tracked message or missing deps — fall back to a fresh /status.
+        await this._showStatus(userId, chatId)
+        return
+      }
+      const auctorKey = await this.identity.resolve(userId).catch(() => null)
+      const snapshot = await aggregateStatus(
+        { signorum: this.deps.signorum, hospitia: this.deps.hospitia, materiae: this.deps.materiae, actorum: this.deps.actorum, modorum: this.deps.modorum },
+        { auctorKey, inFlightActumIds: [] },
+      )
+      const { text, keyboard } = StatusView.render(snapshot)
+      const reply_markup = keyboard.length ? this._toInline(keyboard) : undefined
+      await this.sender.editMessageText(tracked.chatId, tracked.messageId, text, reply_markup ? { reply_markup } : undefined).catch(() => {})
+      return
+    }
+
+    if (action.startsWith('cancel:')) {
+      const actumId = action.slice(7)
+      if (this.deps.cancelActum) {
+        await this.deps.cancelActum(actumId, 'cancelled by user via /status').catch(() => {})
+      }
+      // Re-render so the cancelled gen drops out of the list.
+      await this._handleStatusCallback('refresh', userId, chatId)
+      return
+    }
+
+    if (action.startsWith('bulletin:') || action.startsWith('join:') || action === 'history' || action === 'settings') {
+      // V1 stubs — surface progress on these in later sprints. Acknowledge so
+      // the user sees something happen.
+      await this.sender.sendMessage(chatId, `\`${action}\` — coming soon.`)
+      return
+    }
+  }
+
   // _sendStart — welcome message with quick-start buttons
   // -------------------------------------------------------------------------
 
