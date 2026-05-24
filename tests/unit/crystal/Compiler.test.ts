@@ -228,14 +228,14 @@ function makeIntellarum(records: Record<string, Partial<Intella>>): Intellarum {
 test('compile() resolves model URL from Intellarum registry when set', async () => {
   const registryUrl = 'https://registry.example.com/unet/flux1-schnell.safetensors'
   const intellarum = makeIntellarum({
-    'intella.flux-schnell': {
+    'intella.flux-schnell-fp8-scaled': {
       sources: [{ provenance: 'miladystation', uri: registryUrl }],
       dest: 'unet/flux1-schnell.safetensors',
     },
   })
   const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'test' })
-  const unet = spec.models.find(m => m.id === 'intella.flux-schnell')
+  const unet = spec.models.find(m => m.id === 'intella.flux-schnell-fp8-scaled')
   assert.equal(unet?.url, registryUrl)
 })
 
@@ -243,20 +243,20 @@ test('compile() falls back to template URL when Intellarum returns null for mode
   const intellarum = makeIntellarum({})
   const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'test' })
-  const unet = spec.models.find(m => m.id === 'intella.flux-schnell')
+  const unet = spec.models.find(m => m.id === 'intella.flux-schnell-fp8-scaled')
   assert.ok(unet?.url?.includes('miladystation2.net'), `expected template URL fallback, got: ${unet?.url}`)
 })
 
 test('compile() uses dest from Intellarum record when registry resolves model', async () => {
   const intellarum = makeIntellarum({
-    'intella.flux-schnell': {
+    'intella.flux-schnell-fp8-scaled': {
       sources: [{ provenance: 'huggingface', uri: 'https://huggingface.co/flux1-schnell.safetensors' }],
       dest: 'unet/flux1-schnell.safetensors',
     },
   })
   const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'test' })
-  const unet = spec.models.find(m => m.id === 'intella.flux-schnell')
+  const unet = spec.models.find(m => m.id === 'intella.flux-schnell-fp8-scaled')
   assert.equal(unet?.dest, 'unet/flux1-schnell.safetensors')
 })
 

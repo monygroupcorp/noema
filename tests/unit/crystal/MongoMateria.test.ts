@@ -132,13 +132,16 @@ test('update patches shareToken', async () => {
 
 // ── findWarm ──────────────────────────────────────────────────────────────────
 
-test('findWarm returns an idle materia with matching imageRef', async () => {
+test('findWarm atomically claims the idle materia (idle → active) and returns it', async () => {
   const input = makeInput({ status: 'idle', imageRef: 'stationthis/flux-comfyui:v1' })
   const created = await store.create(input)
   const found = await store.findWarm({ imageRef: 'stationthis/flux-comfyui:v1' })
   assert.ok(found)
   assert.equal(found.id, created.id)
-  assert.equal(found.status, 'idle')
+  // findWarm performs the claim as part of the find — the returned doc reflects
+  // the post-transition state. This prevents two concurrent requests from both
+  // winning the same warm pod.
+  assert.equal(found.status, 'active')
 })
 
 test('findWarm returns null when no idle materia exists', async () => {

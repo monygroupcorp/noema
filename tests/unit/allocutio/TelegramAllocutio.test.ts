@@ -637,7 +637,11 @@ test('Resolution complete sends completion message', async () => {
 })
 
 // 15. Resolution 'abandon' → sends "Cancelled." message
-test('Resolution abandon sends Cancelled. message', async () => {
+test('Resolution abandon is silent (implicit context replacement)', async () => {
+  // Abandon fires on implicit context replacement — e.g. /make while already in
+  // another flow. The user already saw their new command; emitting "Cancelled."
+  // for the displaced one would be noise. Explicit /cancel has its own message,
+  // sent directly from the CommandRouter, not from the abandon resolution path.
   const { allocutio, router, sender } = makeAllocutio()
 
   await allocutio.receive(msgUpdate(123, 456, '/run'))
@@ -654,9 +658,7 @@ test('Resolution abandon sends Cancelled. message', async () => {
   router.triggerResolution(ctx, { kind: 'abandon' })
   await new Promise(r => setImmediate(r))
 
-  assert.ok(sender.sent.length > 0, 'Should send a message on abandon')
-  const msg = sender.sent[0]
-  assert.equal(msg.text, 'Cancelled.', 'Should send exactly "Cancelled."')
+  assert.equal(sender.sent.length, 0, 'abandon resolution should not emit a message')
 })
 
 // =============================================================================

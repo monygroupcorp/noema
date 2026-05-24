@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest'
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
 import { WarmPodClient } from '../../../src/crystal/WarmPodClient.js'
 import type { Materia, MateriaStore } from '../../../src/types/materia.js'
 import { bus } from '../../../src/lib/bus.js'
@@ -47,27 +48,26 @@ function makeMateriaStore(materia: Materia): MateriaStore & { updates: Array<{ i
   } as MateriaStore & { updates: Array<{ id: string; patch: unknown }> }
 }
 
-/**
- * Mock fetch for comfyrunner endpoints on the warm pod.
- * Handles: GET /health, POST /job, GET /job/:id/stream, POST <webhook>
- */
+interface FetchCall { url: string; method: string }
+
 function makeComfyrunnerFetch(externusId: string, opts: {
   healthStatus?: string
   jobAccepted?: boolean
   sseEvents?: Array<Record<string, unknown>>
   webhookPayloads?: unknown[]
-} = {}) {
+} = {}): { fetch: typeof fetch; calls: FetchCall[]; webhookPayloads: unknown[] } {
   const {
     healthStatus = 'ready',
     jobAccepted = true,
     sseEvents = [{ type: 'complete' }],
     webhookPayloads = [],
   } = opts
-
   const runnerBase = `https://${externusId}-8080.proxy.runpod.net`
+  const calls: FetchCall[] = []
 
-  const fetch = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+  const fetch = (async (url: string, init?: RequestInit): Promise<Response> => {
     const method = (init?.method ?? 'GET').toUpperCase()
+    calls.push({ url, method })
 
     if (method === 'GET' && url === `${runnerBase}/health`) {
       return new Response(JSON.stringify({ status: healthStatus }), { status: 200 })
@@ -78,154 +78,130 @@ function makeComfyrunnerFetch(externusId: string, opts: {
     if (method === 'GET' && url.startsWith(`${runnerBase}/job/`)) {
       return makeSseStream(sseEvents)
     }
-    // webhook capture
     if (method === 'POST') {
       webhookPayloads.push(JSON.parse((init?.body as string) ?? '{}'))
       return new Response('{}', { status: 200 })
     }
-
     return new Response('Not found', { status: 404 })
   }) as unknown as typeof fetch
 
-  return { fetch, webhookPayloads }
+  return { fetch, calls, webhookPayloads }
 }
 
 // ── submit() ──────────────────────────────────────────────────────────────────
 
-describe('submit()', () => {
-  it('returns the per-submission jobId immediately (must match the webhook id)', async () => {
-    const materia = makeMateria()
-    const { fetch } = makeComfyrunnerFetch('pod-xyz')
-    const client = new WarmPodClient(materia, makeMateriaStore(materia), fetch)
-    const result = await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
-    // jobId is `${externusId}-${Date.now()}` — the id comfyrunner fires the webhook
-    // with, so the actum's externusJobId must equal it (not the bare externusId).
-    expect(result.id).toMatch(/^pod-xyz-\d+$/)
-  })
-
-  it('emits a warm-pod-found stage so the UI can react 🔥', async () => {
-    const materia = makeMateria()
-    const { fetch } = makeComfyrunnerFetch('pod-xyz')
-    const client = new WarmPodClient(materia, makeMateriaStore(materia), fetch)
-    const stages: string[] = []
-    const listener = (d: { stage: string }) => stages.push(d.stage)
-    bus.on('actum.stage', listener)
-    await withTrace(makeTraceContext({ actumId: 'actum-warm' }), async () => {
-      await client.submit({ input: {} })
-    })
-    bus.off('actum.stage', listener)
-    expect(stages).toContain('warm-pod-found')
-  })
-
-  it('polls /health then POSTs to /job', async () => {
-    const materia = makeMateria()
-    const { fetch } = makeComfyrunnerFetch('pod-xyz')
-    const client = new WarmPodClient(materia, makeMateriaStore(materia), fetch)
-    await client.submit({ input: {} })
-    await new Promise(r => setTimeout(r, 50))
-
-    const calls = (fetch as ReturnType<typeof vi.fn>).mock.calls.map(([url, opts]) => ({
-      url,
-      method: (opts?.method ?? 'GET').toUpperCase(),
-    }))
-    expect(calls.some(c => c.url.includes('/health') && c.method === 'GET')).toBe(true)
-    expect(calls.some(c => c.url.includes('/job') && !c.url.includes('/stream') && c.method === 'POST')).toBe(true)
-  })
-
-  it('awaits the SSE stream after submitting the job', async () => {
-    const materia = makeMateria()
-    const { fetch } = makeComfyrunnerFetch('pod-xyz')
-    const client = new WarmPodClient(materia, makeMateriaStore(materia), fetch)
-    await client.submit({ input: {} })
-    await new Promise(r => setTimeout(r, 50))
-
-    const calls = (fetch as ReturnType<typeof vi.fn>).mock.calls.map(([url]) => url as string)
-    expect(calls.some(u => u.includes('/job/') && u.includes('/stream'))).toBe(true)
-  })
+test('submit returns the per-submission jobId immediately (must match the webhook id)', async () => {
+  const materia = makeMateria()
+  const { fetch } = makeComfyrunnerFetch('pod-xyz')
+  const client = new WarmPodClient(materia, makeMateriaStore(materia), fetch)
+  const result = await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  // jobId is `${externusId}-${Date.now()}` — the id comfyrunner fires the webhook with
+  assert.match(result.id, /^pod-xyz-\d+$/)
 })
 
-// ── Materia status ─────────────────────────────────────────────────────────────
-
-describe('Materia status after job', () => {
-  it('sets status to idle after stream completes (economy pod)', async () => {
-    const materia = makeMateria({ podPolicy: 'economy' })
-    const store = makeMateriaStore(materia)
-    const { fetch } = makeComfyrunnerFetch('pod-xyz')
-    const client = new WarmPodClient(materia, store, fetch)
+test('submit emits a warm-pod-found stage so the UI can react 🔥', async () => {
+  const materia = makeMateria()
+  const { fetch } = makeComfyrunnerFetch('pod-xyz')
+  const client = new WarmPodClient(materia, makeMateriaStore(materia), fetch)
+  const stages: string[] = []
+  const listener = (d: { stage: string }): void => { stages.push(d.stage) }
+  bus.on('actum.stage', listener)
+  await withTrace(makeTraceContext({ actumId: 'actum-warm' }), async () => {
     await client.submit({ input: {} })
-    await new Promise(r => setTimeout(r, 100))
-    const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
-    expect(idleUpdate).toBeDefined()
   })
+  bus.off('actum.stage', listener)
+  assert.ok(stages.includes('warm-pod-found'), `stages missing warm-pod-found: ${stages.join(',')}`)
+})
 
-  it('sets status to idle when no podPolicy set (default)', async () => {
-    const materia = makeMateria()  // no podPolicy
-    const store = makeMateriaStore(materia)
-    const { fetch } = makeComfyrunnerFetch('pod-xyz')
-    const client = new WarmPodClient(materia, store, fetch)
-    await client.submit({ input: {} })
-    await new Promise(r => setTimeout(r, 100))
-    const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
-    expect(idleUpdate).toBeDefined()
-  })
+test('submit polls /health then POSTs to /job', async () => {
+  const materia = makeMateria()
+  const { fetch, calls } = makeComfyrunnerFetch('pod-xyz')
+  const client = new WarmPodClient(materia, makeMateriaStore(materia), fetch)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 50))
+  assert.ok(calls.some(c => c.url.includes('/health') && c.method === 'GET'), 'no /health GET')
+  assert.ok(calls.some(c => c.url.includes('/job') && !c.url.includes('/stream') && c.method === 'POST'), 'no /job POST')
+})
 
-  it('sets status to terminated for private pod', async () => {
-    const materia = makeMateria({ podPolicy: 'private' })
-    const store = makeMateriaStore(materia)
-    const { fetch } = makeComfyrunnerFetch('pod-xyz')
-    const client = new WarmPodClient(materia, store, fetch)
-    await client.submit({ input: {} })
-    await new Promise(r => setTimeout(r, 100))
-    const terminatedUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'terminated')
-    expect(terminatedUpdate).toBeDefined()
-    const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
-    expect(idleUpdate).toBeUndefined()
-  })
+test('submit awaits the SSE stream after submitting the job', async () => {
+  const materia = makeMateria()
+  const { fetch, calls } = makeComfyrunnerFetch('pod-xyz')
+  const client = new WarmPodClient(materia, makeMateriaStore(materia), fetch)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 50))
+  assert.ok(calls.some(c => c.url.includes('/job/') && c.url.includes('/stream')), 'no /job/:id/stream GET')
+})
 
-  it('sets status to terminated for private pod even on failure', async () => {
-    const materia = makeMateria({ podPolicy: 'private' })
-    const store = makeMateriaStore(materia)
-    const { fetch } = makeComfyrunnerFetch('pod-xyz', {
-      healthStatus: 'starting',  // never ready → triggers failure
-    })
-    const client = new WarmPodClient(materia, store, fetch, { runnerReadyTimeoutMs: 50, runnerPollIntervalMs: 0 })
-    await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
-    await new Promise(r => setTimeout(r, 300))
-    const terminatedUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'terminated')
-    expect(terminatedUpdate).toBeDefined()
-  })
+// ── Materia status after job ──────────────────────────────────────────────────
+
+test('Materia status: sets to idle after stream completes (economy pod)', async () => {
+  const materia = makeMateria({ podPolicy: 'economy' })
+  const store = makeMateriaStore(materia)
+  const { fetch } = makeComfyrunnerFetch('pod-xyz')
+  const client = new WarmPodClient(materia, store, fetch)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 100))
+  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
+  assert.ok(idleUpdate, 'expected an idle status update')
+})
+
+test('Materia status: sets to idle when no podPolicy set (default)', async () => {
+  const materia = makeMateria()
+  const store = makeMateriaStore(materia)
+  const { fetch } = makeComfyrunnerFetch('pod-xyz')
+  const client = new WarmPodClient(materia, store, fetch)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 100))
+  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
+  assert.ok(idleUpdate, 'expected an idle status update')
+})
+
+test('Materia status: sets to terminated for private pod', async () => {
+  const materia = makeMateria({ podPolicy: 'private' })
+  const store = makeMateriaStore(materia)
+  const { fetch } = makeComfyrunnerFetch('pod-xyz')
+  const client = new WarmPodClient(materia, store, fetch)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 100))
+  const terminatedUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'terminated')
+  assert.ok(terminatedUpdate, 'expected terminated update')
+  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
+  assert.equal(idleUpdate, undefined, 'should NOT mark idle for private pods')
+})
+
+test('Materia status: sets to terminated for private pod even on failure', async () => {
+  const materia = makeMateria({ podPolicy: 'private' })
+  const store = makeMateriaStore(materia)
+  const { fetch } = makeComfyrunnerFetch('pod-xyz', { healthStatus: 'starting' })
+  const client = new WarmPodClient(materia, store, fetch, { runnerReadyTimeoutMs: 50, runnerPollIntervalMs: 0 })
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+  const terminatedUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'terminated')
+  assert.ok(terminatedUpdate, 'expected terminated update')
 })
 
 // ── webhook behaviour ─────────────────────────────────────────────────────────
 
-describe('webhook behaviour', () => {
-  it('fires FAILED webhook when comfyrunner health never becomes ready', async () => {
-    const materia = makeMateria()
-    const store = makeMateriaStore(materia)
-    const webhookPayloads: unknown[] = []
-    const { fetch } = makeComfyrunnerFetch('pod-xyz', {
-      healthStatus: 'starting',
-      webhookPayloads,
-    })
-    const client = new WarmPodClient(materia, store, fetch, { runnerReadyTimeoutMs: 50, runnerPollIntervalMs: 0 })
-    await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
-    await new Promise(r => setTimeout(r, 300))
-    const failed = (webhookPayloads as Array<{ status?: string }>).find(p => p.status === 'FAILED')
-    expect(failed).toBeDefined()
-  })
+test('webhook: fires FAILED when comfyrunner health never becomes ready', async () => {
+  const materia = makeMateria()
+  const store = makeMateriaStore(materia)
+  const webhookPayloads: unknown[] = []
+  const { fetch } = makeComfyrunnerFetch('pod-xyz', { healthStatus: 'starting', webhookPayloads })
+  const client = new WarmPodClient(materia, store, fetch, { runnerReadyTimeoutMs: 50, runnerPollIntervalMs: 0 })
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+  const failed = (webhookPayloads as Array<{ status?: string }>).find(p => p.status === 'FAILED')
+  assert.ok(failed, 'expected a FAILED webhook')
+})
 
-  it('does NOT fire FAILED webhook when comfyrunner accepted the job (comfyrunner owns it)', async () => {
-    const materia = makeMateria()
-    const store = makeMateriaStore(materia)
-    const webhookPayloads: unknown[] = []
-    // comfyrunner accepts job but SSE stream returns an error
-    const { fetch } = makeComfyrunnerFetch('pod-xyz', {
-      sseEvents: [{ type: 'error', error: 'OOM' }],
-      webhookPayloads,
-    })
-    const client = new WarmPodClient(materia, store, fetch)
-    await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
-    await new Promise(r => setTimeout(r, 200))
-    expect((webhookPayloads as Array<{ status?: string }>).some(p => p.status === 'FAILED')).toBe(false)
-  })
+test('webhook: does NOT fire FAILED when comfyrunner accepted the job (comfyrunner owns it)', async () => {
+  const materia = makeMateria()
+  const store = makeMateriaStore(materia)
+  const webhookPayloads: unknown[] = []
+  // comfyrunner accepts job but SSE stream returns an error
+  const { fetch } = makeComfyrunnerFetch('pod-xyz', { sseEvents: [{ type: 'error', error: 'OOM' }], webhookPayloads })
+  const client = new WarmPodClient(materia, store, fetch)
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 200))
+  assert.equal((webhookPayloads as Array<{ status?: string }>).some(p => p.status === 'FAILED'), false)
 })
