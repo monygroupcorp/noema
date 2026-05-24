@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest'
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
 import { startIdleReaper } from '../../../src/crystal/idleReaper.js'
 import type { Materia, MateriaStore } from '../../../src/types/materia.js'
 
@@ -9,48 +10,49 @@ function fakeMateria(over: Partial<Materia>): Materia {
   }
 }
 
-describe('startIdleReaper', () => {
-  it('terminates each pod the store reaps as idle-expired', async () => {
-    const reaped = [
-      fakeMateria({ id: 'm1', externusId: 'pod-1' }),
-      fakeMateria({ id: 'm2', externusId: 'pod-2' }),
-    ]
-    const store = { reapIdle: vi.fn().mockResolvedValueOnce(reaped).mockResolvedValue([]) } as unknown as MateriaStore
-    const terminated: string[] = []
-    const terminate = vi.fn(async (id: string) => { terminated.push(id) })
+// Minimal MateriaStore stub — the reaper only calls reapIdle.
+function makeStore(reapResults: Materia[][]): MateriaStore {
+  let i = 0
+  return {
+    async reapIdle() { return reapResults[i++] ?? [] },
+  } as unknown as MateriaStore
+}
 
-    const stop = startIdleReaper(store, terminate, 40)
-    await new Promise(r => setTimeout(r, 100))
-    stop()
+const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-    expect((store.reapIdle as ReturnType<typeof vi.fn>)).toHaveBeenCalled()
-    expect(terminated).toEqual(['pod-1', 'pod-2'])
-  })
+test('startIdleReaper terminates each pod the store reaps as idle-expired', async () => {
+  const reaped = [
+    fakeMateria({ id: 'm1', externusId: 'pod-1' }),
+    fakeMateria({ id: 'm2', externusId: 'pod-2' }),
+  ]
+  const store = makeStore([reaped])
+  const terminated: string[] = []
+  const stop = startIdleReaper(store, async (id) => { terminated.push(id) }, 40)
+  await wait(100)
+  stop()
+  assert.deepEqual(terminated, ['pod-1', 'pod-2'])
+})
 
-  it('does nothing when no pods are reapable', async () => {
-    const store = { reapIdle: vi.fn().mockResolvedValue([]) } as unknown as MateriaStore
-    const terminate = vi.fn(async () => {})
+test('startIdleReaper does nothing when no pods are reapable', async () => {
+  const store = makeStore([])
+  let calls = 0
+  const stop = startIdleReaper(store, async () => { calls++ }, 40)
+  await wait(100)
+  stop()
+  assert.equal(calls, 0)
+})
 
-    const stop = startIdleReaper(store, terminate, 40)
-    await new Promise(r => setTimeout(r, 100))
-    stop()
-
-    expect(terminate).not.toHaveBeenCalled()
-  })
-
-  it('keeps sweeping even if a terminate call throws', async () => {
-    const store = {
-      reapIdle: vi.fn()
-        .mockResolvedValueOnce([fakeMateria({ id: 'm1', externusId: 'pod-1' })])
-        .mockResolvedValue([]),
-    } as unknown as MateriaStore
-    const terminate = vi.fn(async () => { throw new Error('runpod 500') })
-
-    const stop = startIdleReaper(store, terminate, 40)
-    await new Promise(r => setTimeout(r, 100))
-    stop()
-
-    // sweep ran more than once despite the terminate throwing
-    expect((store.reapIdle as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1)
-  })
+test('startIdleReaper keeps sweeping even if a terminate call throws', async () => {
+  let sweepCount = 0
+  const store: MateriaStore = {
+    async reapIdle() {
+      sweepCount++
+      return sweepCount === 1 ? [fakeMateria({ id: 'm1', externusId: 'pod-1' })] : []
+    },
+  } as unknown as MateriaStore
+  const stop = startIdleReaper(store, async () => { throw new Error('runpod 500') }, 40)
+  await wait(100)
+  stop()
+  // sweep ran more than once despite the terminate throwing
+  assert.ok(sweepCount > 1, `expected multiple sweeps, got ${sweepCount}`)
 })

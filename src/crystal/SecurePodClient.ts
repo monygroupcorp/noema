@@ -117,6 +117,9 @@ export class SecurePodClient implements RunPodClient {
      *  alongside each warm-parked Materia so dispatch can find the host's anima
      *  without putting identity on the pod's row. */
     private readonly hospitia?: HospitiumStore,
+    /** Injectable pod-terminate function — defaults to the RunPod REST call. The
+     *  seam exists so tests can swap a spy without module-mocking gymnastics. */
+    private readonly terminatePodFn: (apiKey: string, podId: string) => Promise<void> = _terminatePodUtil,
   ) {}
 
   async submit(params: {
@@ -344,7 +347,7 @@ export class SecurePodClient implements RunPodClient {
   }
 
   private async _terminatePod(podId: string): Promise<void> {
-    await _terminatePodUtil(this.config.apiKey, podId)
+    await this.terminatePodFn(this.config.apiKey, podId)
   }
 
   // externusJobId: the job ID stored on the actum (always the first pod's ID, even on retries)

@@ -23,7 +23,11 @@ function makeActum(overrides: Partial<Actum> = {}): Actum {
     id: 'actum-test-1',
     modusId: 'runmake.flux-schnell',
     modusVersiono: '1.0.0',
-    impetus: 0n,
+    // Reservation upper-bound. Phase B added a cap in ActumCompletor: the
+    // settled impetus is never above this. The default needs to comfortably
+    // cover anything any test reports via executionTime; otherwise the cap
+    // squashes the spend to 0 and downstream hooks see no impetus to royalty-tax.
+    impetus: 100_000n,
     signaConsumed: [],
     aditus: { prompt: 'a cat' },
     status: 'nascens',
@@ -47,7 +51,15 @@ function makeCompletor(): CompletorMock {
     failed: [],
     async complete(actum, exitus) {
       mock.completed.push({ actumId: actum.id, exitus })
-      return { ...actum, status: 'completus' as const }
+      // Mirror the real ActumCompletor: settles actum.impetus to the
+      // dispatch-stamped finalImpetus when present, else the reported impetus,
+      // capped at the reservation. Hooks downstream read `completed.impetus`
+      // and would see stale data if we left the reservation untouched.
+      const reported = exitus.impetus
+      const dispatched = actum.executio?.finalImpetus
+      const raw = dispatched ?? reported
+      const settled = raw > actum.impetus ? actum.impetus : raw
+      return { ...actum, status: 'completus' as const, impetus: settled }
     },
     async fail(actum, error) {
       mock.failed.push({ actumId: actum.id, error })
@@ -93,7 +105,10 @@ test('COMPLETED payload calls completor.complete and returns 200', async () => {
   assert.equal(result.body.success, true)
   assert.equal(completor.completed.length, 1)
   assert.equal(completor.completed[0].actumId, 'actum-test-1')
-  assert.deepEqual(completor.completed[0].exitus.exitus, { outputs: [{ url: 'https://example.com/out.png' }] })
+  // The webhook normalizes RunPod output items into a typed exitus shape: any
+  // single .png URL becomes `{imageUrl}`; videos/audio land under their own keys.
+  // (Multi-image runs add imageUrl2, imageUrl3, …)
+  assert.deepEqual(completor.completed[0].exitus.exitus, { imageUrl: 'https://example.com/out.png' })
 })
 
 // 2. Valid FAILED payload → calls completor.fail(), returns 200
@@ -329,7 +344,7 @@ test('flowRouter.handleActumComplete is called with complete result when COMPLET
   assert.equal(flowRouter.calls[0].actumId, 'actum-test-1')
   assert.deepEqual(flowRouter.calls[0].result, {
     kind: 'complete',
-    exitus: { outputs: [{ url: 'https://example.com/out.png' }] },
+    exitus: { imageUrl: 'https://example.com/out.png' },
   })
 })
 

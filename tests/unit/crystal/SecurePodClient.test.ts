@@ -1,14 +1,29 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { test, beforeEach } from 'node:test'
+import assert from 'node:assert/strict'
 import { SecurePodClient } from '../../../src/crystal/SecurePodClient.js'
 import type { SecurePodConfig, SshTransportLike } from '../../../src/crystal/SecurePodClient.js'
 
-vi.mock('../../../src/crystal/terminatePod.js', () => ({
-  terminatePod: vi.fn().mockResolvedValue(undefined),
-  listRunPodPods: vi.fn().mockResolvedValue([]),
-}))
+// ── terminatePod spy ──────────────────────────────────────────────────────────
+// SecurePodClient takes terminatePodFn as a constructor dep; we pass a spy
+// to assert on calls without module mocking.
 
-import { terminatePod as _terminatePod } from '../../../src/crystal/terminatePod.js'
-const terminatePodMock = _terminatePod as ReturnType<typeof vi.fn>
+interface TerminateSpy {
+  fn: (apiKey: string, podId: string) => Promise<void>
+  calls: Array<{ apiKey: string; podId: string }>
+  reset(): void
+}
+function makeTerminateSpy(): TerminateSpy {
+  const calls: Array<{ apiKey: string; podId: string }> = []
+  return {
+    fn: async (apiKey, podId) => { calls.push({ apiKey, podId }) },
+    calls,
+    reset() { calls.length = 0 },
+  }
+}
+
+// Shared across tests so `beforeEach` can reset it like vi.fn().mockClear()
+let terminateSpy: TerminateSpy
+beforeEach(() => { terminateSpy = makeTerminateSpy() })
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -25,16 +40,16 @@ function makeSseStream(events: Array<Record<string, unknown>>): Response {
   return new Response(stream, { status: 200 })
 }
 
-function makeSshTransport(overrides: Partial<SshTransportLike> = {}): SshTransportLike & { execCalls: string[]; closeCalled: boolean } {
+function makeSshTransport(overrides: Partial<SshTransportLike> = {}): SshTransportLike & { execCalls: string[]; get closeCalled(): boolean } {
   const execCalls: string[] = []
-  let closeCalled = false
+  let _closeCalled = false
   return {
     execCalls,
-    get closeCalled() { return closeCalled },
+    get closeCalled() { return _closeCalled },
     async exec(cmd: string) { execCalls.push(cmd); return '' },
-    async close() { closeCalled = true },
+    async close() { _closeCalled = true },
     ...overrides,
-  } as SshTransportLike & { execCalls: string[]; closeCalled: boolean }
+  } as SshTransportLike & { execCalls: string[]; get closeCalled(): boolean }
 }
 
 function makeConfig(overrides: Partial<SecurePodConfig> = {}): SecurePodConfig {
@@ -54,34 +69,27 @@ function makeConfig(overrides: Partial<SecurePodConfig> = {}): SecurePodConfig {
   }
 }
 
-/**
- * Full mock fetch for the SecurePodClient flow:
- *   POST /pods          → provision
- *   GET  /pods/:id      → SSH-ready status
- *   DELETE /pods/:id    → terminate
- *   GET  <runner>/health → {status:'ready'}
- *   POST <runner>/job    → 200
- *   GET  <runner>/job/:jobId/stream → SSE stream
- *   POST <webhook>       → capture
- */
+interface FetchCall { url: string; method: string; body?: string }
+
 function makeFetchMock(podId = 'pod-xyz', opts: {
   sshReadyAfterCalls?: number
   runnerHealthStatus?: string
   sseEvents?: Array<Record<string, unknown>>
   webhookPayloads?: unknown[]
-} = {}) {
+} = {}): { fetch: typeof fetch; calls: FetchCall[]; webhookPayloads: unknown[] } {
   const {
     sshReadyAfterCalls = 1,
     runnerHealthStatus = 'ready',
     sseEvents = [{ type: 'complete' }],
     webhookPayloads = [],
   } = opts
-
   let statusCalls = 0
   const runnerBase = `https://${podId}-8080.proxy.runpod.net`
+  const calls: FetchCall[] = []
 
-  const fetch = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+  const fetch = (async (url: string, init?: RequestInit): Promise<Response> => {
     const method = (init?.method ?? 'GET').toUpperCase()
+    calls.push({ url, method, body: init?.body as string | undefined })
 
     if (method === 'POST' && url.includes('rest.runpod.io') && url.includes('/pods') && !url.includes(podId)) {
       return new Response(JSON.stringify({ id: podId }), { status: 200 })
@@ -110,217 +118,211 @@ function makeFetchMock(podId = 'pod-xyz', opts: {
       webhookPayloads.push(JSON.parse((init?.body as string) ?? '{}'))
       return new Response('{}', { status: 200 })
     }
-
     return new Response('Not found', { status: 404 })
   }) as unknown as typeof fetch
 
-  return { fetch, webhookPayloads }
+  return { fetch, calls, webhookPayloads }
 }
 
-beforeEach(() => terminatePodMock.mockClear())
+function makeClient(
+  config: SecurePodConfig,
+  ssh: () => SshTransportLike,
+  fetch: typeof fetch,
+  materiae?: ConstructorParameters<typeof SecurePodClient>[3],
+): SecurePodClient {
+  return new SecurePodClient(config, ssh, fetch, materiae, undefined, terminateSpy.fn)
+}
 
 // ── provisioning ──────────────────────────────────────────────────────────────
 
-describe('submit() provisioning', () => {
-  it('provisions a SECURE pod via RunPod REST API', async () => {
-    const { fetch } = makeFetchMock()
-    const client = new SecurePodClient(makeConfig(), () => makeSshTransport(), fetch)
-    await client.submit({ input: {} })
-    const provision = (fetch as ReturnType<typeof vi.fn>).mock.calls.find(
-      ([url, opts]) => (opts?.method ?? 'GET').toUpperCase() === 'POST' && (url as string).includes('rest.runpod.io'),
-    )
-    expect(provision).toBeDefined()
-  })
+test('submit provisions a SECURE pod via RunPod REST API', async () => {
+  const { fetch, calls } = makeFetchMock()
+  const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
+  await client.submit({ input: {} })
+  const provision = calls.find(c => c.method === 'POST' && c.url.includes('rest.runpod.io'))
+  assert.ok(provision, 'expected a provision POST')
+})
 
-  it('returns pod ID immediately', async () => {
-    const { fetch } = makeFetchMock('pod-abc')
-    const client = new SecurePodClient(makeConfig(), () => makeSshTransport(), fetch)
-    const result = await client.submit({ input: {} })
-    expect(result.id).toBe('pod-abc')
-  })
+test('submit returns pod ID immediately', async () => {
+  const { fetch } = makeFetchMock('pod-abc')
+  const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
+  const result = await client.submit({ input: {} })
+  assert.equal(result.id, 'pod-abc')
+})
 
-  it('throws when RunPod returns an error', async () => {
-    const failFetch = vi.fn(async () =>
-      new Response('{"error":"no capacity"}', { status: 500 }),
-    ) as unknown as typeof fetch
-    const client = new SecurePodClient(makeConfig(), () => makeSshTransport(), failFetch)
-    await expect(client.submit({ input: {} })).rejects.toThrow(/pod provision failed/i)
-  })
+test('submit throws when RunPod returns an error', async () => {
+  const failFetch = (async () => new Response('{"error":"no capacity"}', { status: 500 })) as unknown as typeof fetch
+  const client = makeClient(makeConfig(), () => makeSshTransport(), failFetch)
+  await assert.rejects(() => client.submit({ input: {} }), /pod provision failed/i)
+})
 
-  it('provisions with SECURE cloudType by default', async () => {
-    let provisionBody: unknown
-    const fetchFn = vi.fn(async (url: string, opts?: RequestInit): Promise<Response> => {
-      if ((opts?.method ?? 'GET').toUpperCase() === 'POST' && (url as string).includes('rest.runpod.io')) {
-        provisionBody = JSON.parse(opts?.body as string)
-        return new Response(JSON.stringify({ id: 'pod-1' }), { status: 200 })
-      }
-      if ((url as string).includes('/pods/pod-1')) {
-        return new Response(JSON.stringify({
-          desiredStatus: 'RUNNING', publicIp: '1.2.3.4', portMappings: { '22': 22, '8080': 8080 },
-        }), { status: 200 })
-      }
-      if ((url as string).includes('health')) return new Response('{"status":"ready"}', { status: 200 })
-      if ((opts?.method ?? 'GET').toUpperCase() === 'POST') return new Response('{}', { status: 200 })
-      if ((url as string).includes('/job/')) return makeSseStream([{ type: 'complete' }])
-      if ((opts?.method ?? 'GET').toUpperCase() === 'DELETE') return new Response('{}', { status: 200 })
-      return new Response('{}', { status: 200 })
-    }) as unknown as typeof fetch
+test('submit provisions with SECURE cloudType by default', async () => {
+  let provisionBody: unknown
+  const fetchFn = (async (url: string, opts?: RequestInit): Promise<Response> => {
+    if ((opts?.method ?? 'GET').toUpperCase() === 'POST' && url.includes('rest.runpod.io')) {
+      provisionBody = JSON.parse(opts?.body as string)
+      return new Response(JSON.stringify({ id: 'pod-1' }), { status: 200 })
+    }
+    if (url.includes('/pods/pod-1')) {
+      return new Response(JSON.stringify({
+        desiredStatus: 'RUNNING', publicIp: '1.2.3.4', portMappings: { '22': 22, '8080': 8080 },
+      }), { status: 200 })
+    }
+    if (url.includes('health')) return new Response('{"status":"ready"}', { status: 200 })
+    if ((opts?.method ?? 'GET').toUpperCase() === 'POST') return new Response('{}', { status: 200 })
+    if (url.includes('/job/')) return makeSseStream([{ type: 'complete' }])
+    if ((opts?.method ?? 'GET').toUpperCase() === 'DELETE') return new Response('{}', { status: 200 })
+    return new Response('{}', { status: 200 })
+  }) as unknown as typeof fetch
 
-    const client = new SecurePodClient(makeConfig({ cloudType: undefined }), () => makeSshTransport(), fetchFn)
-    await client.submit({ input: {} })
-    expect((provisionBody as { cloudType: string }).cloudType).toBe('SECURE')
-  })
+  const client = makeClient(makeConfig({ cloudType: undefined }), () => makeSshTransport(), fetchFn)
+  await client.submit({ input: {} })
+  assert.equal((provisionBody as { cloudType: string }).cloudType, 'SECURE')
 })
 
 // ── SSH bootstrap ─────────────────────────────────────────────────────────────
 
-describe('SSH bootstrap', () => {
-  it('closes SSH after bootstrap completes', async () => {
-    const { fetch } = makeFetchMock()
-    const ssh = makeSshTransport()
-    const client = new SecurePodClient(makeConfig(), () => ssh, fetch)
-    await client.submit({ input: {} })
-    await new Promise(r => setTimeout(r, 50))
-    expect(ssh.closeCalled).toBe(true)
-  })
+test('SSH bootstrap: closes SSH after bootstrap completes', async () => {
+  const { fetch } = makeFetchMock()
+  const ssh = makeSshTransport()
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 50))
+  assert.equal(ssh.closeCalled, true)
+})
 
-  it('runs bootstrap exec commands before submitting to comfyrunner', async () => {
-    const { fetch } = makeFetchMock()
-    const ssh = makeSshTransport()
-    const client = new SecurePodClient(makeConfig(), () => ssh, fetch)
-    await client.submit({ input: {} })
-    await new Promise(r => setTimeout(r, 50))
-    expect(ssh.execCalls.length).toBeGreaterThan(0)
-    expect(ssh.execCalls.some(c => c.includes('git'))).toBe(true)
-  })
+test('SSH bootstrap: runs exec commands before submitting to comfyrunner', async () => {
+  const { fetch } = makeFetchMock()
+  const ssh = makeSshTransport()
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 50))
+  assert.ok(ssh.execCalls.length > 0, 'expected exec calls during bootstrap')
+  assert.ok(ssh.execCalls.some(c => c.includes('git')), 'expected git exec')
+})
 
-  it('terminates pod and fires FAILED webhook when bootstrap SSH throws', async () => {
-    const brokenSsh = makeSshTransport({ async exec(cmd) { if (cmd === 'true') return ''; throw new Error('ECONNREFUSED') } })
-    const webhookPayloads: unknown[] = []
-    const { fetch } = makeFetchMock('pod-fail', { webhookPayloads })
-    const client = new SecurePodClient(makeConfig(), () => brokenSsh, fetch)
-    await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
-    await new Promise(r => setTimeout(r, 300))
-    expect(terminatePodMock).toHaveBeenCalled()
-    const failed = (webhookPayloads as Array<{ status?: string }>).find(p => p.status === 'FAILED')
-    expect(failed).toBeDefined()
-  })
+test('SSH bootstrap: terminates pod + fires FAILED webhook when SSH throws', async () => {
+  const brokenSsh = makeSshTransport({ async exec(cmd) { if (cmd === 'true') return ''; throw new Error('ECONNREFUSED') } })
+  const webhookPayloads: unknown[] = []
+  const { fetch } = makeFetchMock('pod-fail', { webhookPayloads })
+  const client = makeClient(makeConfig(), () => brokenSsh, fetch)
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+  assert.ok(terminateSpy.calls.length > 0, 'expected terminatePod call')
+  const failed = (webhookPayloads as Array<{ status?: string }>).find(p => p.status === 'FAILED')
+  assert.ok(failed, 'expected a FAILED webhook')
+})
 
-  it('does NOT fire FAILED webhook after comfyrunner accepts the job', async () => {
-    // comfyrunner accepts job but stream returns an error — comfyrunner owns the webhook
-    const webhookPayloads: unknown[] = []
-    const { fetch } = makeFetchMock('pod-accepted', {
-      webhookPayloads,
-      sseEvents: [{ type: 'error', error: 'OOM' }],
-    })
-    const client = new SecurePodClient(makeConfig(), () => makeSshTransport(), fetch)
-    await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
-    await new Promise(r => setTimeout(r, 300))
-    expect((webhookPayloads as Array<{ status?: string }>).some(p => p.status === 'FAILED')).toBe(false)
-  })
+test('SSH bootstrap: does NOT fire FAILED after comfyrunner accepted (comfyrunner owns webhook)', async () => {
+  const webhookPayloads: unknown[] = []
+  const { fetch } = makeFetchMock('pod-accepted', { webhookPayloads, sseEvents: [{ type: 'error', error: 'OOM' }] })
+  const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+  assert.equal((webhookPayloads as Array<{ status?: string }>).some(p => p.status === 'FAILED'), false)
+})
 
-  it('does NOT provision a new pod after comfyrunner accepted the job (no retry cascade)', async () => {
-    // comfyrunner accepts then the stream errors. comfyrunner owns the job —
-    // Crystal must NOT re-provision (that spawns redundant pods + re-downloads).
-    const { fetch } = makeFetchMock('pod-accepted', { sseEvents: [{ type: 'error', error: 'OOM' }] })
-    const client = new SecurePodClient(makeConfig(), () => makeSshTransport(), fetch)
-    await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
-    await new Promise(r => setTimeout(r, 300))
-    const provisionCalls = (fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
-      ([url, opts]) => (opts?.method ?? 'GET').toUpperCase() === 'POST'
-        && (url as string).includes('rest.runpod.io') && (url as string).includes('/pods'),
-    )
-    expect(provisionCalls.length).toBe(1)
-  })
+test('SSH bootstrap: no re-provision after comfyrunner accepted (no retry cascade)', async () => {
+  const { fetch, calls } = makeFetchMock('pod-accepted', { sseEvents: [{ type: 'error', error: 'OOM' }] })
+  const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+  const provisionCalls = calls.filter(c =>
+    c.method === 'POST' && c.url.includes('rest.runpod.io') && c.url.includes('/pods'),
+  )
+  assert.equal(provisionCalls.length, 1)
 })
 
 // ── pod lifecycle ─────────────────────────────────────────────────────────────
 
-describe('pod lifecycle', () => {
-  it('terminates pod after job completes', async () => {
-    const { fetch } = makeFetchMock('pod-term')
-    const client = new SecurePodClient(makeConfig(), () => makeSshTransport(), fetch)
-    await client.submit({ input: {} })
-    await new Promise(r => setTimeout(r, 100))
-    expect(terminatePodMock).toHaveBeenCalledWith('test-key', 'pod-term')
-  })
+test('pod lifecycle: terminates pod after job completes', async () => {
+  const { fetch } = makeFetchMock('pod-term')
+  const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 100))
+  assert.ok(terminateSpy.calls.some(c => c.apiKey === 'test-key' && c.podId === 'pod-term'),
+    `expected terminate('test-key', 'pod-term'); calls=${JSON.stringify(terminateSpy.calls)}`)
+})
 
-  it('terminates pod even when SSH never becomes ready', async () => {
-    const { fetch } = makeFetchMock('pod-ssh-timeout', { sshReadyAfterCalls: 9999 })
-    const client = new SecurePodClient(
-      makeConfig({ sshReadyTimeoutMs: 50, sshPollIntervalMs: 10 }),
-      () => makeSshTransport(),
-      fetch,
-    )
-    await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
-    await new Promise(r => setTimeout(r, 300))
-    expect(terminatePodMock).toHaveBeenCalled()
-  })
+test('pod lifecycle: terminates pod even when SSH never becomes ready', async () => {
+  const { fetch } = makeFetchMock('pod-ssh-timeout', { sshReadyAfterCalls: 9999 })
+  const client = makeClient(
+    makeConfig({ sshReadyTimeoutMs: 50, sshPollIntervalMs: 10 }),
+    () => makeSshTransport(),
+    fetch,
+  )
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+  assert.ok(terminateSpy.calls.length > 0, 'expected terminatePod call')
+})
 
-  it('terminates pod when comfyrunner never becomes ready', async () => {
-    const { fetch } = makeFetchMock('pod-norunner', { runnerHealthStatus: 'starting' })
-    const client = new SecurePodClient(
-      makeConfig({ comfyReadyTimeoutMs: 50, comfyPollIntervalMs: 0 }),
-      () => makeSshTransport(),
-      fetch,
-    )
-    await client.submit({ input: {} })
-    await new Promise(r => setTimeout(r, 300))
-    expect(terminatePodMock).toHaveBeenCalled()
-  })
+test('pod lifecycle: terminates pod when comfyrunner never becomes ready', async () => {
+  const { fetch } = makeFetchMock('pod-norunner', { runnerHealthStatus: 'starting' })
+  const client = makeClient(
+    makeConfig({ comfyReadyTimeoutMs: 50, comfyPollIntervalMs: 0 }),
+    () => makeSshTransport(),
+    fetch,
+  )
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 300))
+  assert.ok(terminateSpy.calls.length > 0, 'expected terminatePod call')
 })
 
 // ── keepWarm ──────────────────────────────────────────────────────────────────
 
-describe('keepWarm', () => {
-  function makeMateriaStore() {
-    const createCalls: unknown[] = []
-    return {
-      createCalls,
-      async create(input: unknown) { createCalls.push(input); return { ...input as object, id: 'mat-new' } },
-      async findById() { return null },
-      async update() { return null as never },
-      async findWarm() { return null },
-    }
+function makeWarmMateriaStore(): {
+  createCalls: unknown[]
+  create(input: unknown): Promise<{ id: string }>
+  findById(): Promise<null>
+  update(): Promise<never>
+  findWarm(): Promise<null>
+} {
+  const createCalls: unknown[] = []
+  return {
+    createCalls,
+    async create(input) { createCalls.push(input); return { ...(input as object), id: 'mat-new' } },
+    async findById() { return null },
+    async update() { return null as never },
+    async findWarm() { return null },
   }
+}
 
-  it('registers Materia as idle after job completes (no termination)', async () => {
-    const { fetch } = makeFetchMock('pod-warm')
-    const store = makeMateriaStore()
-    const client = new SecurePodClient(makeConfig({ keepWarm: true }), () => makeSshTransport(), fetch, store)
-    await client.submit({ input: {} })
-    await new Promise(r => setTimeout(r, 100))
-    expect(store.createCalls.length).toBe(1)
-    expect((store.createCalls[0] as { status: string }).status).toBe('idle')
-    expect(terminatePodMock).not.toHaveBeenCalled()
-  })
+test('keepWarm: registers Materia as idle after job completes (no termination)', async () => {
+  const { fetch } = makeFetchMock('pod-warm')
+  const store = makeWarmMateriaStore()
+  const client = makeClient(makeConfig({ keepWarm: true }), () => makeSshTransport(), fetch, store as never)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 100))
+  assert.equal(store.createCalls.length, 1)
+  assert.equal((store.createCalls[0] as { status: string }).status, 'idle')
+  assert.equal(terminateSpy.calls.length, 0)
+})
 
-  it('registered Materia has imageRef matching config.imageName', async () => {
-    const { fetch } = makeFetchMock('pod-warm-img')
-    const store = makeMateriaStore()
-    const client = new SecurePodClient(makeConfig({ keepWarm: true, imageName: 'test/image:v2' }), () => makeSshTransport(), fetch, store)
-    await client.submit({ input: {} })
-    await new Promise(r => setTimeout(r, 100))
-    expect((store.createCalls[0] as { imageRef: string }).imageRef).toBe('test/image:v2')
-  })
+test('keepWarm: registered Materia has imageRef matching config.imageName', async () => {
+  const { fetch } = makeFetchMock('pod-warm-img')
+  const store = makeWarmMateriaStore()
+  const client = makeClient(makeConfig({ keepWarm: true, imageName: 'test/image:v2' }), () => makeSshTransport(), fetch, store as never)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 100))
+  assert.equal((store.createCalls[0] as { imageRef: string }).imageRef, 'test/image:v2')
+})
 
-  it('registered Materia has correct externusId', async () => {
-    const { fetch } = makeFetchMock('pod-warm-id')
-    const store = makeMateriaStore()
-    const client = new SecurePodClient(makeConfig({ keepWarm: true }), () => makeSshTransport(), fetch, store)
-    await client.submit({ input: {} })
-    await new Promise(r => setTimeout(r, 100))
-    expect((store.createCalls[0] as { externusId: string }).externusId).toBe('pod-warm-id')
-  })
+test('keepWarm: registered Materia has correct externusId', async () => {
+  const { fetch } = makeFetchMock('pod-warm-id')
+  const store = makeWarmMateriaStore()
+  const client = makeClient(makeConfig({ keepWarm: true }), () => makeSshTransport(), fetch, store as never)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 100))
+  assert.equal((store.createCalls[0] as { externusId: string }).externusId, 'pod-warm-id')
+})
 
-  it('terminates pod (does not register Materia) when bootstrap SSH throws', async () => {
-    const brokenSsh = makeSshTransport({ async exec(cmd) { if (cmd === 'true') return ''; throw new Error('SSH refused') } })
-    const { fetch } = makeFetchMock('pod-warm-fail')
-    const store = makeMateriaStore()
-    const client = new SecurePodClient(makeConfig({ keepWarm: true }), () => brokenSsh, fetch, store)
-    await client.submit({ input: {} })
-    await new Promise(r => setTimeout(r, 300))
-    expect(terminatePodMock).toHaveBeenCalled()
-    expect(store.createCalls.length).toBe(0)
-  })
+test('keepWarm: terminates pod (no Materia registered) when bootstrap SSH throws', async () => {
+  const brokenSsh = makeSshTransport({ async exec(cmd) { if (cmd === 'true') return ''; throw new Error('SSH refused') } })
+  const { fetch } = makeFetchMock('pod-warm-fail')
+  const store = makeWarmMateriaStore()
+  const client = makeClient(makeConfig({ keepWarm: true }), () => brokenSsh, fetch, store as never)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 300))
+  assert.ok(terminateSpy.calls.length > 0, 'expected terminatePod call')
+  assert.equal(store.createCalls.length, 0)
 })
