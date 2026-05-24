@@ -23,6 +23,12 @@ export interface CommandDeps {
    * validated against SHARE_TOKEN_ALPHABET+LENGTH before reaching here.
    */
   setPendingShareToken?(userId: string, token: string): void
+  /**
+   * Render and send the /status user HUD for this user/chat. Optional — when
+   * absent, /status falls back to the legacy "coming soon" stub. Wired by
+   * TelegramAllocutio against the status aggregator + StatusView.
+   */
+  showStatus?(userId: string, chatId: number): Promise<void>
 }
 
 /**
@@ -82,9 +88,14 @@ export class CommandRouter {
         return
 
       case '/status':
-        await this.deps.sendMessage(chatId, COPY.command.statusComingSoon, {
-          reply_markup: inlineKeyboard([[btn('connect wallet', 'a:connect_wallet'), btn('top up', 'a:topup')]]),
-        })
+        if (this.deps.showStatus) {
+          await this.deps.showStatus(userId, chatId)
+        } else {
+          // Fallback for tests/contexts that don't wire the status aggregator.
+          await this.deps.sendMessage(chatId, COPY.command.statusComingSoon, {
+            reply_markup: inlineKeyboard([[btn('connect wallet', 'a:connect_wallet'), btn('top up', 'a:topup')]]),
+          })
+        }
         return
 
       case '/wallet':
