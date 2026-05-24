@@ -12,21 +12,21 @@ it has a natural home elsewhere.
 
 | surface | owns | audience |
 |---|---|---|
-| **Bulletin** | one pod's posture + host controls | host only |
-| **`/arm` preflight** | configuring a pod *before* it provisions | future host |
+| **Bulletin** | one studio's posture + host controls | host only |
+| **`/arm` preflight** | configuring a studio *before* it provisions | future host |
 | **`/status`** | the user's state across the app | the user, always |
 | **DeliveryMenu + Info tab** | one result's actions + provenance | gen author + viewers |
 
-The bulletin doesn't carry user-state. `/status` doesn't carry pod-internal
-controls. DeliveryMenu doesn't carry pod controls. Each surface stays focused.
+The bulletin doesn't carry user-state. `/status` doesn't carry studio-internal
+controls. DeliveryMenu doesn't carry studio controls. Each surface stays focused.
 
-## Bulletin — pod posture HUD
+## Bulletin — studio posture HUD
 
-The host's view of their pod. Guests never see a bulletin.
+The host's view of their studio. Guests never see a bulletin.
 
 ### Layout
 
-- **Body** — pod stage, warm window, current gens, lifetime/session earnings.
+- **Body** — studio stage, warm window, current gens, lifetime/session earnings.
   Varies by state (provisioning info vs running gens vs idle countdown), but
   the body is non-interactive.
 - **Action row — single shape, always three buttons:**
@@ -42,7 +42,7 @@ returns one fixed-arity object.
 
 ### What lives inside each `•`
 
-- **Mod •** — modifications to the pod's loadout
+- **Mod •** — modifications to the studio's loadout
   - Add / swap base model
   - Add LoRA
   - Add / swap workflow
@@ -52,7 +52,7 @@ returns one fixed-arity object.
   - Locked during Running (additions queue but don't trigger; revisit when model-queue layer lands)
 
 - **Share •** — invite/promote
-  - Copy share link (the pod_<token> deep link)
+  - Copy share link (the `pod_<token>` deep link — internal token format, kept under that name for the Phase B CommandRouter parser; user-visible URL only)
   - Telegram-share intent (forward to chat)
   - Current guests / queue depth (read-only)
   - Pricing toggles (private+/admin-at-cost/open-to-non-admins, when group-context hosting lands)
@@ -65,15 +65,15 @@ returns one fixed-arity object.
 
 ### What does NOT belong on the bulletin
 
-- **Cancel-gen** — per-gen, not per-pod; lives on `/status` where the user sees
+- **Cancel-gen** — per-gen, not per-studio; lives on `/status` where the user sees
   their own gens with per-row cancel
 - **Balance** — user-state; lives on `/status`
-- **Other pods you could join** — user-state; lives on `/status` (Joinable section)
+- **Other studios you could join** — user-state; lives on `/status` (Joinable section)
 - **History / past gens** — user-state; `/status` footer → History
 
-## `/arm` preflight — pod-first host's entry
+## `/arm` preflight — studio-first host's entry
 
-A wizard for configuring a pod *before* it spawns. Reuses the bulletin's
+A wizard for configuring a studio *before* it spawns. Reuses the bulletin's
 `Mod •` and `Share •` submenus rendered as a wizard rather than as a HUD.
 Same components, different shell.
 
@@ -86,7 +86,7 @@ Same components, different shell.
    open-to-non-admins toggle (in groups), warm window.
 4. Wizard step 3: **Confirm** — review estimated cold-start cost + warm cost
    per minute. `[Launch]` or `[Back]`.
-5. On launch: pod provisions; bulletin appears in Provisioning state with the
+5. On launch: studio provisions; bulletin appears in Provisioning state with the
    loadout + sharing already applied.
 
 The `/arm` flow has **zero unique business logic** — it's purely a wizard
@@ -103,11 +103,11 @@ The user's view of their own state, across all their activity.
 Balance: 1,240 impetus ($0.42)
 
 YOUR GENS (3)
-  • gen #abc — queued on @host1's pod — ETA 30s  [Cancel]
-  • gen #def — running on your pod        — 12s   [Cancel]
-  • gen #ghi — queued on @host2's pod — ETA 4m    [Cancel]
+  • gen #abc — queued on @host1's studio — ETA 30s  [Cancel]
+  • gen #def — running on your studio        — 12s    [Cancel]
+  • gen #ghi — queued on @host2's studio — ETA 4m    [Cancel]
 
-YOUR PODS (1)
+YOUR STUDIOS (1)
   • flux-v1 on H100 — idle, 38s warm — 2 guests today, +148 earned  [Bulletin]
 
 JOINABLE (2)
@@ -122,13 +122,13 @@ JOINABLE (2)
 
 - **Balance** — current impetus, USD equivalent
 - **Your gens** — queued + running, with per-row Cancel
-- **Your pods** — link out to the pod's bulletin
-- **Joinable** — warm pods you have access to (your group's, share links you've redeemed, public economy pool)
+- **Your studios** — link out to the studio's bulletin
+- **Joinable** — warm studios you have access to (your group's, share links you've redeemed, public economy pool)
 - **Footer** — Refresh / History (past gens) / Settings (notification prefs, default warm window, etc.)
 
 ### What `/status` does NOT own
 
-- **Pod controls** (Mod, Destroy) — those live on the bulletin
+- **Studio controls** (Mod, Destroy) — those live on the bulletin
 - **Result actions** (download, copy, rate) — those live on DeliveryMenu
 - **Result provenance** — that lives in DeliveryMenu's Info tab
 
@@ -137,7 +137,7 @@ JOINABLE (2)
 Already exists (commits `f6922172` / `739781f7`); separate concern from bulletin.
 
 - Existing surface; Phase C just made sure the gen's spend math is right
-- Info tab is the right place for "this gen ran on @host's pod" attribution
+- Info tab is the right place for "this gen ran on @host's studio" attribution
 
 This spec doesn't redesign DeliveryMenu; it just establishes it as a separate
 surface so the bulletin doesn't grow result-side affordances.
@@ -155,7 +155,7 @@ src/allocutio/lexicon/bulletin/
     destroy/                  — NEW: Destroy submenu (Now/Drain/Cancel)
 
 src/allocutio/lexicon/status/  — NEW
-  StatusView.ts                — pure render: balance + gens + pods + joinable
+  StatusView.ts                — pure render: balance + gens + studios + joinable
   affordances.ts               — per-row Cancel/Join/Bulletin actions
 
 src/allocutio/telegram/commands/
