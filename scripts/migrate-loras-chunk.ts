@@ -17,10 +17,14 @@
 //     npx tsx scripts/migrate-loras-chunk.ts --n 10     # smaller chunk
 //     npx tsx scripts/migrate-loras-chunk.ts --commit   # writes to noema_fake
 //
-// Source DB:    LEGACY_MONGODB_URI / LEGACY_DB_NAME (env, REQUIRED)
-//                                    LEGACY_LORAS_COLLECTION (default 'loraModels')
-// Target DB:    MONGODB_URI         / DB_NAME            (env, REQUIRED for --commit)
-//                                    TARGET_INTELLAE_COLLECTION (default 'intellae')
+// Source DB:    LEGACY_MONGODB_URI ?? MONGO_PASS ?? MONGODB_URI   (URI; one required)
+//               LEGACY_DB_NAME     ?? MONGO_DB_NAME               (db name; one required)
+//                                    LEGACY_LORAS_COLLECTION       (default 'loraModels')
+// Target DB:    MONGODB_URI         / DB_NAME                      (env, REQUIRED for --commit)
+//                                    TARGET_INTELLAE_COLLECTION    (default 'intellae')
+//
+// `MONGO_PASS` is the legacy stationthisdeluxebot app's preferred env name —
+// the script honors it so running with the legacy app's existing .env works.
 
 import { MongoClient, type Collection, type Document } from 'mongodb'
 import {
@@ -95,14 +99,27 @@ function summarizeIntella(i: IntellaV2): string {
 async function main(): Promise<void> {
   const args = parseArgs()
 
-  const SOURCE_URI = process.env.LEGACY_MONGODB_URI
-  const SOURCE_DB  = process.env.LEGACY_DB_NAME
-  if (!SOURCE_URI || !SOURCE_DB) {
-    console.error('LEGACY_MONGODB_URI and LEGACY_DB_NAME are required')
+  // Source: legacy stationthisdeluxebot DB. Honor the legacy MONGO_PASS env name,
+  // fall back to the explicit LEGACY_MONGODB_URI, then the generic MONGODB_URI.
+  const SOURCE_URI =
+    process.env.LEGACY_MONGODB_URI ??
+    process.env.MONGO_PASS ??
+    process.env.MONGODB_URI
+  const SOURCE_DB =
+    process.env.LEGACY_DB_NAME ??
+    process.env.MONGO_DB_NAME
+  if (!SOURCE_URI) {
+    console.error('source URI required — set LEGACY_MONGODB_URI, MONGO_PASS, or MONGODB_URI')
+    process.exit(1)
+  }
+  if (!SOURCE_DB) {
+    console.error('source DB name required — set LEGACY_DB_NAME or MONGO_DB_NAME')
     process.exit(1)
   }
   const SOURCE_COLL = process.env.LEGACY_LORAS_COLLECTION ?? 'loraModels'
 
+  // Target: crystal noema_fake (or whatever DB_NAME is set to). Distinct env
+  // for explicitness — never accidentally write to the legacy DB.
   const TARGET_URI = process.env.MONGODB_URI
   const TARGET_DB  = process.env.DB_NAME ?? 'noema_fake'
   const TARGET_COLL = process.env.TARGET_INTELLAE_COLLECTION ?? 'intellae'
