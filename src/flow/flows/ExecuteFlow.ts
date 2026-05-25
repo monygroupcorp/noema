@@ -341,12 +341,17 @@ export class ExecuteFlow implements Flow {
 
     state.actumId = actum.id
 
-    // 1b. ActumIndex — identified runs append to the per-anima aggregation so
-    // `/status` can list YOUR GENS. Commitment runs skip (separate privacy story).
-    // The remove site is the completion webhook (terminal status clears the entry).
-    if (this.deps.actumIndex && 'animaId' in ctx.identity) {
+    // 1b. ActumIndex — both identified and anonymous runs append to the per-
+    // AuctorKey aggregation so `/status` can list YOUR GENS for either side.
+    // Indexing a commitment doesn't leak: every spend already carries the
+    // commitment as the arcanum signum's `testis`. The remove site is the
+    // completion webhook (terminal status clears the entry).
+    if (this.deps.actumIndex) {
+      const branch = 'animaId' in ctx.identity
+        ? { animaId:    ctx.identity.animaId }
+        : { commitment: ctx.identity.commitment }
       void this.deps.actumIndex.record({
-        animaId:  ctx.identity.animaId,
+        ...branch,
         actumId:  actum.id,
         modusId:  actum.modusId,
         createdAt: actum.inceptum,
