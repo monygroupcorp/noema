@@ -222,6 +222,7 @@ function makeIntellarum(records: Record<string, Partial<Intella>>): Intellarum {
     async list() { return [] },
     async canonical() { return [] },
     async findByTrigger() { return [] },
+    async triggerMap() { return new Map() },
   }
 }
 
@@ -275,4 +276,118 @@ test('compile() throws MODEL_NOT_RESOLVED when Intellarum set, model missing, an
     () => compiler.compile(essentiaNoUrl, { prompt: 'test' }),
     (err: unknown) => err instanceof CompilerError && err.code === 'MODEL_NOT_RESOLVED'
   )
+})
+
+// ── compile() — LoRA trigger resolution on loraCapable templates ─────────────
+
+/** Build an Intellarum that returns a trigger map for a fixed set of LoRAs. */
+function makeLoraIntellarum(loras: Array<Partial<{ id: string; slug: string; trigger: string; defaultWeight: number; access: 'public' | 'private'; ownerAnimaId: string }>>) {
+  type Intella = import('../../../src/types/intelligendi.js').Intella
+  type Intellae = import('../../../src/types/intelligendi.js').Intellae
+  const records = loras.map(l => ({
+    id: l.id ?? `intella.${l.slug ?? l.trigger}`,
+    nomen: l.slug ?? 'lora',
+    genus: 'lora' as const,
+    architectura: 'lora' as const,
+    parametri: 0,
+    sources: [{ provenance: 'miladystation' as const, uri: `https://example.com/${l.slug}.safetensors` }],
+    dest: `models/loras/${l.slug}.safetensors`,
+    sizeGb: 0.1,
+    versio: '1.0.0',
+    canonica: true,
+    natum: new Date(),
+    trigger: l.trigger ?? l.slug,
+    slug: l.slug ?? l.trigger,
+    defaultWeight: l.defaultWeight ?? 1.0,
+    access: l.access ?? 'public',
+    ...(l.ownerAnimaId ? { ownerAnimaId: l.ownerAnimaId } : {}),
+  } as Intella))
+
+  return {
+    async find(id: string) { return records.find(r => r.id === id) ?? null },
+    async list() { return records },
+    async canonical() { return records },
+    async findByTrigger() { return [] },
+    async triggerMap(_baseIntellaId: string, _animaId?: string): Promise<Map<string, Intellae>> {
+      const m = new Map<string, Intellae>()
+      for (const r of records) {
+        for (const raw of (r.trigger ?? '').split(',')) {
+          const k = raw.trim().toLowerCase()
+          if (!k) continue
+          const b = m.get(k); if (b) b.push(r); else m.set(k, [r])
+        }
+      }
+      return m
+    },
+  }
+}
+
+function makeLoraEssentia(): Essentia {
+  return makeEssentia({
+    intellaId: 'intella.flux-base',
+    runpodSpec: {
+      imageId: 'runpod/pytorch',
+      imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+      workflowTemplate: 'lora-test',
+      workflowTemplateVersion: '1',
+      seedInputKey: 'input_seed',
+      defaultCookFlags: { batchSize: 1, seedStrategy: 'fixed', seedPlaceholder: 42, privateMode: false, vramGb: 24 },
+    },
+  })
+}
+
+test('compile() on loraCapable template + matching trigger: rewrites prompt + appends LoRA to models', async () => {
+  const intellarum = makeLoraIntellarum([
+    { slug: 'milady-v3', trigger: 'milady', defaultWeight: 1.0 },
+  ])
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait, milady style' })
+
+  // Prompt embedded into the CLIP node now contains the <lora:...> tag
+  const node22 = r.spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
+  assert.match(node22.inputs.clip_l as string, /<lora:milady-v3:1>/)
+
+  // Model list gained the LoRA, sorted next to the unet base
+  const lora = r.spec.models.find(m => m.role === 'lora')
+  assert.ok(lora, 'expected the resolved LoRA in spec.models')
+  assert.equal(lora!.id, 'intella.milady-v3')
+
+  // Surfaced upward
+  assert.equal(r.appliedLoras?.length, 1)
+  assert.equal(r.appliedLoras?.[0].slug, 'milady-v3')
+})
+
+test('compile() on loraCapable template with no trigger hit: prompt unchanged, no extra models', async () => {
+  const intellarum = makeLoraIntellarum([
+    { slug: 'milady-v3', trigger: 'milady', defaultWeight: 1.0 },
+  ])
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait of a cat' })
+
+  const node22 = r.spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
+  assert.equal(node22.inputs.clip_l, 'a portrait of a cat')
+  assert.equal(r.spec.models.filter(m => m.role === 'lora').length, 0)
+  assert.equal(r.appliedLoras, undefined, 'no LoRAs applied → field omitted')
+})
+
+test('compile() on NOT-loraCapable template: resolver does not run even with matching triggers', async () => {
+  const intellarum = makeLoraIntellarum([
+    { slug: 'milady-v3', trigger: 'milady', defaultWeight: 1.0 },
+  ])
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  // flux-schnell (default) is not loraCapable
+  const r = await compiler.compile(makeEssentia(), { prompt: 'a portrait, milady style' })
+  const node22 = r.spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
+  assert.equal(node22.inputs.clip_l, 'a portrait, milady style', 'prompt unchanged')
+  assert.equal(r.spec.models.filter(m => m.role === 'lora').length, 0)
+})
+
+test('compile() honors animaId for private-LoRA conflict resolution', async () => {
+  const intellarum = makeLoraIntellarum([
+    { slug: 'pub-shared',  trigger: 'shared', access: 'public' },
+    { slug: 'my-shared',   trigger: 'shared', access: 'private', ownerAnimaId: 'anima-alice' },
+  ])
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const r = await compiler.compile(makeLoraEssentia(), { prompt: 'shared style' }, { animaId: 'anima-alice' })
+  assert.equal(r.appliedLoras?.[0].slug, 'my-shared', 'private owner wins')
 })

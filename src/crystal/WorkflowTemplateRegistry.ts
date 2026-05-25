@@ -10,6 +10,18 @@ export interface WorkflowTemplate {
   slotMap: Record<string, string>
   requiredModels: Array<{ role: string; id: string; url?: string; dest: string }>
   platformHints?: Record<string, unknown>
+  /**
+   * True when the workflow has a multi-LoRA loader / extraction node configured
+   * to consume `<lora:slug:weight>` tokens embedded in the prompt text. When set,
+   * the Compiler runs the LoRA trigger resolver against `aditus.prompt` before
+   * slot substitution: matching trigger words are rewritten in-place to the
+   * `<lora:slug:weight>` form, and the resolved Intellae are appended to the
+   * required-models list so any missing ones download on the next dispatch.
+   *
+   * Workflows without the multi-LoRA node leave this absent/false; their prompts
+   * pass through untouched.
+   */
+  loraCapable?: boolean
 }
 
 export class WorkflowTemplateError extends Error {

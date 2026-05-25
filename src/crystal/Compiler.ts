@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import type { Essentia } from '../types/essendi.js'
 import type { Intellarum } from '../types/intelligendi.js'
 import { WorkflowTemplateRegistry, WorkflowTemplateError } from './WorkflowTemplateRegistry.js'
+import { resolveLoraTriggers, type ResolvedLora } from './loraResolver.js'
 
 function deepSort(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(deepSort)
@@ -36,6 +37,16 @@ export interface CompiledSpec {
 export interface CompileResult {
   hash: string
   spec: CompiledSpec
+  /** LoRAs the trigger resolver applied (empty when the workflow isn't loraCapable
+   *  or the prompt didn't match any). Surfaces upward for analytics + bulletin. */
+  appliedLoras?: ResolvedLora[]
+  /** Resolver warnings (multi-public conflicts, stripped inline tags). */
+  loraWarnings?: string[]
+}
+
+export interface CompileOptions {
+  /** The runner's anima — scopes private-LoRA conflict resolution. */
+  animaId?: string
 }
 
 export class CompilerError extends Error {
@@ -65,6 +76,7 @@ export class Compiler {
   async compile(
     essentia: Essentia,
     aditus: Record<string, unknown>,
+    opts: CompileOptions = {},
   ): Promise<CompileResult> {
     if (!essentia.runpodSpec) {
       throw new CompilerError('MISSING_RUNPOD_SPEC', `Essentia '${essentia.id}' has no runpodSpec`)
@@ -94,11 +106,33 @@ export class Compiler {
 
     const seed = this._resolveSeed(essentia, aditus, cookFlags)
 
+    // ── LoRA trigger resolution (when the template is loraCapable) ─────────
+    // Walks `aditus.prompt`, rewrites trigger words into `<lora:slug:weight>`
+    // tokens that the workflow's multi-LoRA extraction node will consume.
+    // The resolved LoRAs are then appended to `requiredModels` so any missing
+    // weights download on this dispatch.
+    let appliedLoras: ResolvedLora[] = []
+    let loraWarnings: string[] = []
+    let promptForSlots = aditus
+    if (template.loraCapable && this.intellarum && essentia.intellaId && typeof aditus.prompt === 'string') {
+      const map = await this.intellarum.triggerMap(essentia.intellaId, opts.animaId)
+      const r = resolveLoraTriggers(aditus.prompt, { triggerMap: map, ...(opts.animaId ? { animaId: opts.animaId } : {}) })
+      appliedLoras = r.appliedLoras
+      loraWarnings = r.warnings
+      if (r.modifiedPrompt !== aditus.prompt) {
+        promptForSlots = { ...aditus, prompt: r.modifiedPrompt }
+      }
+    }
+
     const seedKey = runpodSpec.seedInputKey ?? 'input_seed'
-    const slotInputs = { ...aditus, [seedKey]: seed }
+    const slotInputs = { ...promptForSlots, [seedKey]: seed }
     const inputTemplate = this._applySlotMap(template, slotInputs)
 
-    const models = await this._resolveModels(template.requiredModels ?? [])
+    // Required models = template's static set + LoRAs from prompt resolution.
+    // The intella's `sources[0].uri` and `dest` are filled in by `_resolveModels`
+    // via the same Intellarum.find() path used for static models.
+    const loraRefs = await this._loraIntellaeToRefs(appliedLoras)
+    const models = await this._resolveModels([...(template.requiredModels ?? []), ...loraRefs])
 
     const spec: CompiledSpec = {
       image,
@@ -114,10 +148,30 @@ export class Compiler {
     }
 
     const hash = `sha256:${this._hashSpec(spec)}`
-    return { hash, spec }
+    return {
+      hash,
+      spec,
+      ...(appliedLoras.length > 0 ? { appliedLoras } : {}),
+      ...(loraWarnings.length > 0 ? { loraWarnings } : {}),
+    }
   }
 
   // ── private ──────────────────────────────────────────────────────────────
+
+  /**
+   * Convert resolver output into model refs that `_resolveModels` can consume.
+   * Each Intella's full record is already in the trigger map, but `_resolveModels`
+   * also queries Intellarum to resolve URL + dest, so we only need to pass `id`
+   * here. Role is the LoRA's slug to keep download paths human-readable.
+   */
+  private async _loraIntellaeToRefs(
+    applied: ResolvedLora[],
+  ): Promise<Array<{ role: string; id: string; dest: string }>> {
+    if (applied.length === 0) return []
+    // Skip placeholder IDs (inline tags resolved against the cached map alone).
+    const real = applied.filter(a => a.intellaId !== 'INLINE_TAG')
+    return real.map(a => ({ role: 'lora', id: a.intellaId, dest: `models/loras/${a.slug}.safetensors` }))
+  }
 
   private async _resolveModels(
     refs: Array<{ role: string; id: string; url?: string; dest: string; sizeBytes?: number }>,
