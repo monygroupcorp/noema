@@ -237,9 +237,13 @@ Every gen using an Intella fires up to five separate royalty signa. The model ro
 
 | rail | recipient | mutable? | rate (`src/ledger/rates.ts`) | when |
 |---|---|---|---|---|
-| **Author** | `authorAnimaIds` per `authorRoyaltySplits` | immutable | `MODEL_AUTHOR_RATE` (e.g. 10%) | always when non-canonica |
-| **Owner** | `ownerAnimaId` | **transferable** | `MODEL_OWNER_RATE` (e.g. 5%) | when `ownerAnimaId` is set |
-| **Importer** | `importerAnimaId` | typically not changed | `MODEL_IMPORTER_RATE` (e.g. 1%, the "baby royalty") | when `importerAnimaId` is set |
+| **Author** | `authorAnimaIds` per `authorRoyaltySplits` | immutable | `MODEL_AUTHOR_RATE = 5%` | always when non-canonica |
+| **Owner** | `ownerAnimaId` | transferable (transfer endpoint deferred to v2; schema field present so migration sets it) | `MODEL_OWNER_RATE = 5%` | when `ownerAnimaId` is set |
+| **Importer** | `importerAnimaId` | typically not changed | `MODEL_IMPORTER_RATE = 1%` ("baby royalty" for catalogue curation) | when `importerAnimaId` is set |
+
+Rates are **uniform across genus** — an LLM Intella, an image LoRA, and a ControlNet all pay the same percentages. No per-type carve-outs in v1.
+
+**Default behavior for non-transferred models:** since `ownerAnimaId` is set to the first author at creation (see migration mapping in §13), the same anima receives both the author rail (5%) AND the owner rail (5%) — effectively 10% to a single creator. After ownership transfers ship in v2, the two rails diverge.
 
 Plus two more (already / elsewhere):
 - **Parent** — single hop only (v1). When `parentIntellaId` + `parentRoyaltyShare > 0`, the parent's `authorAnimaIds` get `parentRoyaltyShare` basis points of THIS gen's spend. (Not THIS model's payout — direct from the spend, so the math is concrete: `(spend × parentRoyaltyShare) / 10000` goes to parent authors.)
@@ -260,16 +264,23 @@ All splits use **basis points** (integers 0..10_000, sum to 10_000). Avoids floa
 - `authorRoyaltySplits`: when multiple authors. Absent ⇒ even split. Present ⇒ keys must be subset of `authorAnimaIds`, values sum to 10_000.
 - `parentRoyaltyShare`: single basis-point value (0..10_000); the slice of the gen's spend that flows to parent's authors.
 
-### Ownership transfer
+### Ownership transfer — schema present, endpoint deferred to v2
 
-Transfer endpoint (separate sprint to build) takes `(intellaId, toAnimaId, kind, saleValor?)` and:
-1. Authenticates current `ownerAnimaId`.
-2. If `kind === 'sale'`, settles `saleValor` from buyer → seller via an explicit signum.
-3. Updates `ownerAnimaId = toAnimaId`.
-4. Appends to `ownershipHistory`.
-5. Bumps `mutatum`.
+The schema supports transfers (`ownerAnimaId` mutable, `ownershipHistory[]` append-only, `transferable: boolean` gate) so v2 can ship transfers without a schema migration. **The transfer endpoint itself is NOT part of v1.** No transfers happen until v2 lands.
 
-`transferable: false` rejects this transaction. Canonical models can't be sold.
+Implications for v1:
+- `ownerAnimaId` is set at creation to the first author (single-author) or curated owner (multi-author); never changes.
+- `ownershipHistory[]` carries the single synthetic initial-assignment entry from migration; never grows.
+- `transferable: boolean` is set per `canonica` (false / true) — read but never enforced (no transfers to enforce against yet).
+- The owner royalty rail STILL fires in v1, just always to the original creator since owner has never diverged from author. (See "Default behavior" above.)
+
+When v2 ships the transfer endpoint, the contract is:
+1. Authenticate current `ownerAnimaId`.
+2. If `kind === 'sale'`, settle `saleValor` from buyer → seller via an explicit signum.
+3. Update `ownerAnimaId = toAnimaId`.
+4. Append to `ownershipHistory`.
+5. Bump `mutatum`.
+6. `transferable: false` rejects the call (canonical models can never be sold).
 
 ### Canonical models
 
@@ -531,8 +542,9 @@ Legacy had three overlapping fields. Mapping by exhaustive case:
 
 ## 14. Out of scope (deferred)
 
+- **Ownership transfer endpoint** — schema supports it (`ownerAnimaId` mutable, `ownershipHistory[]`, `transferable`); endpoint + sale settlement land in v2. v1 sets owner = author at creation and never changes it.
 - **Marketplace pricing** — `legacyMonetization` preserves the data; marketplace sprint defines a typed `pricing?` block and reshapes.
-- **Coetus (groups)** — `access.kind: 'group'` parks as private until Coetus ships.
+- **Coetus (groups) with dynamic membership** — `access.kind: 'group'` parks as private until Coetus ships in v2. The eventual model is dynamic membership (a member of a Coetus is whoever the Coetus says, computed at access-check time, not a static snapshot on the Intella).
 - **Collections** — legacy `collectionId` stashed on `legacy`; revisit when crystal models collections.
 - **Weight migration ops** — moving `.safetensors` bytes off ComfyUI Deploy → R2/S3. Separate project. `sources[]` lets URIs migrate without schema changes.
 - **Multi-base LoRAs** — one LoRA usable across multiple architectures. Modeled as multiple Intellae for v1 (one per base).
@@ -564,9 +576,17 @@ Legacy had three overlapping fields. Mapping by exhaustive case:
 
 ## 16. Still open (revisit when implementing)
 
-1. **`MODEL_AUTHOR_RATE` / `OWNER_RATE` / `IMPORTER_RATE` exact values** — placeholder 10/5/1%, but real numbers want product input.
-2. **Per-genus royalty rates** — should an LLM Intella have a higher or lower author rate than an image LoRA? Probably no for v1.
-3. **`access.kind: 'group'` semantics** — current parks as private with empty sharedWith. The Coetus type design will inform whether group membership is a static list or a dynamic query.
-4. **`tags[].source: 'auto'` producer** — dropped pending a concrete plan.
-5. **Multi-author conflict policy** — when `authorAnimaIds.length > 1`, who can edit metadata? Single-owner model means `ownerAnimaId` controls writes; authors are immutable contributors. v1 lives with that.
-6. **Deprecation cascades** — when a base checkpoint is deprecated, what happens to LoRAs that point at it via `baseIntellaId`? They become hard-to-use but the records persist. Worth a separate policy note when the deprecation sprint lands.
+Resolved at v2 spec time (2026-05-25):
+
+| was | resolution |
+|---|---|
+| Royalty rate values | **5% author / 5% owner / 1% importer**, uniform across genus |
+| Per-genus royalty rate variance | **no**, same rates everywhere |
+| `access.kind: 'group'` semantics | **dynamic membership**, deferred to v2 with Coetus |
+| Ownership transfer flow | **deferred to v2**; schema present, endpoint not built |
+
+Genuinely still open:
+
+1. **`tags[].source: 'auto'` producer** — dropped from the enum pending a concrete plan (CLIP-derived? LLM-derived?). Re-add when we commit.
+2. **Multi-author conflict policy** — when `authorAnimaIds.length > 1`, who can edit metadata? Single-owner model means `ownerAnimaId` controls writes; authors are immutable contributors. v1 lives with that.
+3. **Deprecation cascades** — when a base checkpoint is deprecated, what happens to LoRAs that point at it via `baseIntellaId`? They become hard-to-use but the records persist. Worth a separate policy note when the deprecation sprint lands.
