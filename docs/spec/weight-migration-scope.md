@@ -11,9 +11,14 @@
 
 - **245 LoRA records** in the legacy `noema.loraModels` catalogue.
 - **Estimated total disk:** ~92 GB (per-architecture defaults; real bytes likely 50–200% of this).
-- **Already at miladystation:** 25 records (~3 GB) — **no move needed**, just metadata cleanup to mark provenance correctly.
-- **Movable:** 56 records (~17 GB) — bytes live at civitai (44) or huggingface (12); HEAD + reupload.
-- **Lost / unresolvable:** 163 records (~75 GB) — no URL in legacy. Either rummage through old infra to find them, or accept the loss.
+- **All 245 recoverable** — bytes live in one of four places, all accessible:
+  - **25 already at miladystation** (~3 GB): metadata-only fix
+  - **44 at Civitai** (~7 GB): mirror via the public CDN
+  - **12 at HuggingFace** (~7 GB): mirror via HF
+  - **163 in ComfyUI Deploy storage** (~75 GB): mirror via the **CD API** (we have access)
+  - 1 outlier URL — manual triage
+- **Upload path convention:** `models.miladystation2` paths **mirror ComfyUI Deploy's structure** (LoRAs at `models/loras/<slug>.safetensors`, etc.). Migration `dest` field already matches.
+- **`contentHash` policy: EAGER** — stamp sha256 during the mirror pass while we have the bytes in hand. No lazy backfill.
 - **Other surprises:** 1 record with a non-CDN URL, 6 records with `migratedFrom` meta-migration data, 3 with `rewardStats` usage data, 216 with a legacy `version` field (currently dropped by migration — should map to `versio`).
 
 ---
@@ -28,7 +33,7 @@ Source-of-truth bucket per legacy record (mutually exclusive, in order checked):
 | `civitai` (Civitai's CDN) | 44 | 18% | ~7 GB | URL points at Civitai. Bytes are there now; permanence unknown (Civitai can pull). **Pull + reupload to miladystation.** |
 | `huggingface` (via `publishedTo.huggingfaceRepo`) | 12 | 5% | ~7 GB | We published these to HF after training. Bytes are at HF. **HEAD-request to get real size, then pull + reupload.** |
 | `other_url` | 1 | <1% | unknown | One record with a URL that doesn't match any known CDN pattern. Manual review. |
-| `no_url` (orphans + unattributed) | 163 | 67% | ~75 GB | No URL anywhere in legacy. Records exist with metadata (slug, triggers, checkpoint) but no link to the bytes. **Most of the catalogue.** |
+| `no_url` (bytes in ComfyUI Deploy storage) | 163 | 67% | ~75 GB | No URL in legacy because the legacy runtime resolved bytes via slug + a ComfyUI Deploy convention. Bytes are still in CD storage; **recoverable via the CD API** using `slug` as the lookup key. |
 
 Estimated sizes are derived from per-architecture defaults in the migration script (FLUX≈0.5 GB, SDXL/Illustrious/Pony≈0.15 GB, SD1.5≈0.1 GB, KONTEXT≈0.5 GB). Real bytes likely vary 50–200%.
 
@@ -69,17 +74,24 @@ Same shape as civitai. HF is more bandwidth-friendly (no auth needed for public,
 
 One record with an unusual URL. Triage manually.
 
-### Bucket 5: `no_url` (163 records, ~75 GB) — **the hard one**
+### Bucket 5: `no_url` (163 records, ~75 GB) — **mirror via ComfyUI Deploy API**
 
-These records have no resolvable byte source in legacy. Three sub-cases to investigate:
+Legacy runtime resolved bytes via `slug` + a ComfyUI Deploy convention rather than recording a URL. Bytes are still in CD storage; CD has an API we have access to.
 
-1. **Files exist in ComfyUI Deploy storage but the URL wasn't recorded** — the legacy runtime probably resolved bytes via slug + a deployment-side convention. If ComfyUI Deploy still has them, we can pull (via API or filesystem access) using slug as the key.
-2. **Files are on a previous server** — disk we no longer have, backup we can find.
-3. **Files are gone** — the catalogue entry exists but the bytes don't. The slug + triggerWords are catalogue metadata only.
+For each:
+1. Query CD API with `slug` (or whatever CD's identifier-by-slug endpoint is)
+2. Download the bytes
+3. Compute `sha256` while streaming (eager `contentHash` policy)
+4. PUT to `models.miladystation2/<dest>` — `dest` already follows ComfyUI's path convention (`models/loras/<slug>.safetensors`)
+5. Update the record:
+   - `sources[0] = { provenance: 'miladystation', uri: '<new miladystation URL>' }`
+   - `sources[1] = { provenance: 'comfyuideploy', uri: '<original CD reference>' }` (fallback)
+   - `contentHash = <sha256>`
+   - `sizeGb = <real bytes / 1e9, rounded to 0.001>`
 
-**Recommendation:** before deciding, scan ComfyUI Deploy storage for files matching the 163 slugs. The intersection tells us how many are recoverable. If most are recoverable, this is just a download. If most aren't, we accept the loss + either drop the records or keep them as catalogue-metadata-only entries with a `blocked: true` flag.
+**Effort:** moderate. 163 files × ~75 GB sequential pull through CD's API; depends on CD's bandwidth + rate limits. Sequential is fine; parallel only if CD permits.
 
-**Effort:** unknown until ComfyUI Deploy storage is enumerated.
+This was the gate that just opened. With CD API access confirmed, **the full 245-record catalogue is recoverable** — no records lost.
 
 ---
 
@@ -100,22 +112,49 @@ Surfaced by surveying distinct keys across the 245-record catalogue. Worth a fol
 
 ## Bottom-line scope for the weight-migration sprint
 
-Three tiers of work:
+Five tiers of work, fully scoped (no gates):
 
 1. **Trivial — rehost the 25 already-at-miladystation records** (metadata only, ~minutes)
-2. **Mirror the 56 retrievable records** (Civitai + HF; ~14 GB; sequential pull + reupload; ~few hours)
-3. **Investigate the 163 no-URL records** — scan ComfyUI Deploy storage by slug, decide drop-or-recover. **This is the gate; depending on what we find, the sprint is 1 day or 1 week.**
+2. **Mirror the 44 Civitai records** (~7 GB; rate-limit-defensive batching since limits are unknown — pilot 5 first, observe, then bulk)
+3. **Mirror the 12 HuggingFace records** (~7 GB; sequential pull + reupload; ~hour)
+4. **Mirror the 163 CD records** via the CD API (~75 GB; the bulk of the bytes; sequential pull through CD)
+5. **Triage the 1 outlier URL** (a few minutes)
 
 Plus the small follow-up patches:
 
-4. **`version` → `versio` mapping** (216 records affected; tiny code change)
-5. **`migratedFrom` + `rewardStats` preservation** (9 records affected; tiny code change)
+6. **`version` → `versio` mapping** (216 records affected; tiny code change in `legacyToIntella`)
+7. **`migratedFrom` + `rewardStats` preservation** (9 records affected; tiny code change)
+
+### Bytes-in-flight estimate
+
+| bucket | est. bytes | upload bytes |
+|---|---|---|
+| miladystation (metadata only) | 0 download | 0 upload |
+| Civitai | ~7 GB | ~7 GB |
+| HuggingFace | ~7 GB | ~7 GB |
+| ComfyUI Deploy | ~75 GB | ~75 GB |
+| outlier | unknown | unknown |
+| **Total** | **~89 GB** | **~89 GB** |
+
+Roughly a day of sequential pull-and-push at typical bandwidth, longer if CD rate-limits us. Worth parallelizing where the source CDN permits.
+
+### `contentHash` policy: eager
+
+Every byte that passes through the mirror script gets sha256-d in flight and stamped on the Intella record. No lazy backfill. By the end of the sprint every record has both real `sizeGb` and `contentHash`.
 
 ---
 
-## Open questions for the next sprint
+## Resolutions to v1 open questions (2026-05-25)
 
-1. **ComfyUI Deploy filesystem/API access** — do we have credentials + a method to enumerate stored .safetensors files by slug? If yes, the 163 no-URL bucket becomes recoverable. If no, that's the gate.
-2. **Civitai API rate limits** — does the user account have enough quota for a 44-LoRA bulk download? Otherwise we batch over time.
-3. **`models.miladystation2` write access + path convention** — what's the upload path / bucket structure? Migration needs to know.
-4. **`contentHash` policy** — stamp during migration (slower, accurate) or stamp lazily by the comfyrunner after first download (faster, eventual consistency)? Spec §3 says lazy; weight migration is a chance to do it eagerly while we have the bytes.
+| was open | resolved |
+|---|---|
+| ComfyUI Deploy access | **Yes** — we have the CD API. 163 no-URL bucket recoverable via slug lookup. |
+| Civitai rate limits | **Unknown** — pilot 5 records, observe headers/429s, then batch defensively. |
+| `models.miladystation2` upload convention | **Mirror ComfyUI's path structure** — `models/loras/<slug>.safetensors`, `models/checkpoints/<slug>.safetensors`, etc. The migration's `dest` field already matches. |
+| `contentHash` policy | **Eager** — compute during mirror pass while bytes are in flight. No lazy backfill. |
+
+## Still genuinely open (sprint-time decisions)
+
+1. **Parallelism per source** — Civitai unknown; HF/CD permit parallel pulls but at what concurrency? Start sequential, dial up cautiously.
+2. **Retry/resume policy** — if the script dies mid-mirror, do we restart from scratch or resume from `contentHash != null`? Resume is easy with the idempotent upsert; mostly a config flag.
+3. **CD records' `sources[1]` fallback** — the original CD reference. Worth keeping for a transitional period (if our mirror has a hiccup, runtime can fall back); decommission when miladystation is proven stable.
