@@ -98,7 +98,10 @@ interface IntellaBase {
   sources: Array<{ provenance: string; uri: string }>   // ordered fallback for the primary
   dest: string                                          // primary path; defaultDestFor(genus, slug) is the convention
   artifacts?: Array<{ role: string; uri: string; dest: string; sizeGb?: number }>  // sidecars
-  sizeGb: number                                        // total disk footprint; rounded to 0.001 (~MB precision)
+  sizeGb: number                                        // total disk footprint; rounded to 0.001 (~MB precision).
+                                                        //   Required — bulletin/wait estimates depend on it.
+                                                        //   Migrated records: per-architecture defaults (FLUX≈0.5, SDXL≈0.15,
+                                                        //   SD1.5≈0.1, KONTEXT≈0.5, Illustrious≈0.15); weight-migration backfills real bytes.
 
   // ── Display ──────────────────────────────────────────────────────────────
   description?: string
@@ -573,7 +576,7 @@ The legacy `loraModels` collection (`src/core/services/db/loRAModelDb.js`) gives
 | `usageCount` | `usageCount` | |
 | `rating: {avg, count}` | `rating` | shape compatible |
 | `visibility` + `permissionType` + `accessControl` | consolidated into `access` | **collision rule**: see "Access consolidation" below |
-| `createdBy` + `importedFrom.source` | depends on source — see "Authorship branching" below | platform-trained vs HF/Civitai-imported map to different `authorAnimaIds` |
+| `createdBy` + `importedFrom.source` (with `trainedFrom`/`publishedTo` heuristic fallback) | depends on source — see "Authorship branching" below | platform-trained vs HF/Civitai-imported map to different `authorAnimaIds`; missing source is inferred from training-pipeline / publish artifacts |
 | `ownedBy` (if diverges from `createdBy`) | `ownerAnimaId` | overrides the default; explicit current rights holder |
 | `collectionId` | `legacy.collectionId` | revisit when Collections land in crystal |
 | `monetization` (full block) | `legacyMonetization` (verbatim) | marketplace sprint re-imports |
@@ -595,7 +598,8 @@ The legacy `loraModels` collection (`src/core/services/db/loRAModelDb.js`) gives
 |---|---|---|---|---|
 | `'platform-training'` | `[createdBy]` | `ownedBy ?? createdBy` | absent | trainer trained on our platform; they ARE the author |
 | `'huggingface'` / `'civitai'` / `'r2'` / `'user-upload'` / `'community'` | `[]` (**authorless**) | `ownedBy ?? createdBy` | `createdBy` | external author can't be attributed to an anima; importer becomes owner |
-| absent / unknown | `[]` (defensive) | `ownedBy ?? createdBy` | `createdBy` (if can't tell — treat as imported) | preserve owner stream; log for forensics |
+| absent + `trainedFrom` OR `publishedTo` set | `[createdBy]` (**heuristic**) | `ownedBy ?? createdBy` | absent | predates `importedFrom` field, but training-pipeline metadata or HF publish proves on-platform training; inferred platform-trained |
+| absent / unknown (none of the above) | `[]` (defensive) | `ownedBy ?? createdBy` | `createdBy` | preserve owner stream; log warning for forensics |
 
 For canonical platform-baked models (createdBy = PLATFORM_ANIMA_ID), the migration sets `canonica: true` and leaves `ownerAnimaId` undefined; the royalty hook routes to `PLATFORM_ANIMA_ID` directly.
 
@@ -674,3 +678,4 @@ Genuinely still open:
 1. **`tags[].source: 'auto'` producer** — dropped from the enum pending a concrete plan (CLIP-derived? LLM-derived?). Re-add when we commit.
 2. **Multi-author conflict policy** — when `authorAnimaIds.length > 1`, who can edit metadata? Single-owner model means `ownerAnimaId` controls writes; authors are immutable contributors. v1 lives with that.
 3. **Deprecation cascades** — when a base checkpoint is deprecated, what happens to LoRAs that point at it via `baseIntellaId`? They become hard-to-use but the records persist. Worth a separate policy note when the deprecation sprint lands.
+4. **Trigger-resolver upgrade for non-alphanumeric triggers** — real legacy data carries triggers like `artist:moriimee`, `1990s \(style\)`, `retro artstyle`. The current `loraResolver.ts` tokenizer can't reach them. Needs a substring-scan path with weight-modifier lookahead. Migration preserves the raw strings; resolver needs to grow. Tracked in `intella-schema-revisions-queue.md`.
