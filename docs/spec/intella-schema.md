@@ -4,7 +4,7 @@
 **Status:** locked shape; catalogue migration writes against this.
 **Scope:** the canonical record for every model weight crystal knows about — LoRAs, base checkpoints, VAEs, ControlNets, embeddings, upscalers, audio/video/LLM weights. North star for the migration from the legacy `loraModels` collection.
 
-**v2 changes (post-review):** triggerWords as a real array, three-rail royalty model (author/owner/importer) with ownership transfers, single-axis access (the legacy public/private/listed mess consolidated), basis-point splits, `architectura` inherits from the base for LoRAs, slug uniqueness, single-hop parent cap, `publicProjection` for read-path safety, `legacyMonetization` escape hatch.
+**v2 changes (post-review):** triggerWords as a real array; **single-rail royalty (5% per model, capped at 10% across the workflow) to `ownerAnimaId`**; **imported models are "authorless"** — `authorAnimaIds: []`, importer becomes owner; single-axis access (the legacy public/private/listed mess consolidated); basis-point everywhere; `architectura` inherits from the base for LoRAs; slug uniqueness; single-hop parent royalty; `publicProjection` for read-path safety; `legacyMonetization` escape hatch; ownership transfer endpoint deferred to v2 (schema present).
 
 ---
 
@@ -39,9 +39,9 @@ The read-path inventory the spec has to satisfy.
 |---|---|---|
 | Identity | `id`, `versio`, `contentHash` | every read |
 | Type taxonomy | `genus`, `architectura` (base-only), `paramCount` | dispatch, royalty, display |
-| Authorship (rail 1) | `authorAnimaIds[]`, `authorRoyaltySplits?` | `modelRoyaltyHook` |
-| Ownership (rail 2) | `ownerAnimaId?`, `ownershipHistory[]`, `transferable` | `modelRoyaltyHook`, transfer endpoint |
-| Importer (rail 3) | `importerAnimaId?` | `modelRoyaltyHook` |
+| Authorship (credit) | `authorAnimaIds[]` (empty for authorless imports; informational) | display, lineage |
+| Ownership (royalty recipient) | `ownerAnimaId?`, `ownershipHistory[]`, `transferable` | `modelRoyaltyHook`, transfer endpoint (v2) |
+| Importer (audit) | `importerAnimaId?` (records who pulled it from HF/Civitai; NOT a payment rail) | display, audit |
 | Derivative | `parentIntellaId?`, `parentRoyaltyShare?` | `modelRoyaltyHook` |
 | Corpus | `corpusId?` | dataset royalty (separate event, off-Intella) |
 | Access | `access` (discriminated union) | `findByTrigger`, `triggerMap`, Explore |
@@ -69,17 +69,19 @@ interface IntellaBase {
   paramCount?: number             // literal parameter count, when known (e.g., 12_000_000_000 for a 12B LoRA)
                                   //   — drop the legacy "size class" overload; sizeGb is the disk metric
 
-  // ── Authorship: 3 distinct rails (see §5) ────────────────────────────────
-  authorAnimaIds: string[]                          // immutable; original creators (empty for canonical platform models)
-  authorRoyaltySplits?: Record<string, number>      // animaId → basis points (sum=10_000); absent = even split
-  ownerAnimaId?: string                             // mutable; current rights holder; can be transferred/sold
-  ownershipHistory?: OwnershipTransfer[]            // audit trail of transfers; append-only
-  transferable: boolean                             // false for canonical platform models; true otherwise
-  importerAnimaId?: string                          // who added this to crystal (HF/Civitai pulls); single, immutable
+  // ── Authorship + ownership (see §5) ──────────────────────────────────────
+  // Single royalty rail (5% per model, capped at 10% across the workflow) routes
+  // to ownerAnimaId. authorAnimaIds is informational (credit, lineage, display);
+  // importerAnimaId is informational (audit). Neither drives payment.
+  authorAnimaIds: string[]                          // original creators (empty = authorless / imported); credit/lineage only
+  ownerAnimaId?: string                             // current rights holder; receives the per-model royalty
+  ownershipHistory?: OwnershipTransfer[]            // append-only audit; v1 carries only the initial-assignment entry
+  transferable: boolean                             // false for canonica; true otherwise (v2 enforces at the transfer endpoint)
+  importerAnimaId?: string                          // who added this to the catalogue; audit only, NOT a payment rail
   parentIntellaId?: string                          // direct parent for derivatives
-  parentRoyaltyShare?: number                       // basis points (0..10_000); single-hop only (v1 cap)
+  parentRoyaltyShare?: number                       // basis points (0..10_000); flat slice of THIS gen's spend to parent's ownerAnimaId; single-hop
   corpusId?: string                                 // FK → Corpus (training dataset)
-  canonica: boolean                                 // platform-canonical: all royalty rails routed to platform anima
+  canonica: boolean                                 // platform-canonical: royalty routes to PLATFORM_ANIMA_ID, ignoring author/owner/importer
 
   // ── Provenance ───────────────────────────────────────────────────────────
   importedFrom?: {
@@ -229,50 +231,127 @@ export type Intella =
 
 ---
 
-## 5. Authorship & royalty — three rails
+## 5. Royalty model — one rail per model, capped across the workflow
 
-Every gen using an Intella fires up to five separate royalty signa. The model royalty hook produces them; the platform-skim hook still claws back its slice from royaltyValor as today.
+### How it works
 
-### The three rails on the Intella itself
+Every gen pays a **model royalty surcharge** on top of compute cost. Per model:
 
-| rail | recipient | mutable? | rate (`src/ledger/rates.ts`) | when |
-|---|---|---|---|---|
-| **Author** | `authorAnimaIds` per `authorRoyaltySplits` | immutable | `MODEL_AUTHOR_RATE = 5%` | always when non-canonica |
-| **Owner** | `ownerAnimaId` | transferable (transfer endpoint deferred to v2; schema field present so migration sets it) | `MODEL_OWNER_RATE = 5%` | when `ownerAnimaId` is set |
-| **Importer** | `importerAnimaId` | typically not changed | `MODEL_IMPORTER_RATE = 1%` ("baby royalty" for catalogue curation) | when `importerAnimaId` is set |
+```
+royaltyPerModel = min(MODEL_ROYALTY_RATE, MODEL_ROYALTY_CAP / N) × X
+```
 
-Rates are **uniform across genus** — an LLM Intella, an image LoRA, and a ControlNet all pay the same percentages. No per-type carve-outs in v1.
+where:
+- `X` = compute cost (= `seconds × impetusPerSecond` = `baseImpetus`)
+- `N` = number of distinct intellae used in the gen
+- `MODEL_ROYALTY_RATE = 5%` (per model when uncapped)
+- `MODEL_ROYALTY_CAP = 10%` (total surcharge across all models in the workflow)
 
-**Default behavior for non-transferred models:** since `ownerAnimaId` is set to the first author at creation (see migration mapping in §13), the same anima receives both the author rail (5%) AND the owner rail (5%) — effectively 10% to a single creator. After ownership transfers ship in v2, the two rails diverge.
+User pays `X + (total surcharge)`. The surcharge funds the per-model signa.
 
-Plus two more (already / elsewhere):
-- **Parent** — single hop only (v1). When `parentIntellaId` + `parentRoyaltyShare > 0`, the parent's `authorAnimaIds` get `parentRoyaltyShare` basis points of THIS gen's spend. (Not THIS model's payout — direct from the spend, so the math is concrete: `(spend × parentRoyaltyShare) / 10000` goes to parent authors.)
-- **Corpus** — dataset author cut. Handled by Corpus, fired off `execution_spend` with `intellaId → corpusId` lookup. Out of this spec's scope.
+### Worked examples
 
-### Why three rails and not "everyone in `authorAnimaIds`"
+| N models | per-model | total surcharge | user pays |
+|---|---|---|---|
+| 1 | 5% × X | 5% × X | 1.05 × X |
+| 2 | 5% × X | 10% × X | 1.10 × X |
+| 3 | 3.33% × X | 10% × X | 1.10 × X |
+| 4 | 2.5% × X | 10% × X | 1.10 × X |
+| 5 | 2.0% × X | 10% × X | 1.10 × X |
 
-Originally we had one list. The user surfaced three distinct economic realities:
+Cap binds at N ≥ 3. Each model still gets its share, just diluted.
 
-- **Author** is immutable — you trained it, you get author-royalty forever. Cannot be reassigned.
-- **Owner** is the *current rights holder* — can be transferred, sold, or bequeathed. Initially the same anima as the (single-author case) author, but they diverge the moment ownership transfers.
-- **Importer** rewards the platform-curation labor of pulling a model in from HF/Civitai and registering it. Small but persistent. Removes the perverse incentive where importing community LoRAs is unpaid work.
+### Who receives it — single rail to `ownerAnimaId`
 
-### Royalty splits
+Per model, the entire surcharge slice goes to **the current `ownerAnimaId`** as one signum. No internal split between author/owner/importer rails — there's just the owner stream.
 
-All splits use **basis points** (integers 0..10_000, sum to 10_000). Avoids float rounding bugs.
+| model origin | how the spec captures it | who gets the 5% |
+|---|---|---|
+| User trained on the platform | `authorAnimaIds: [trainer]`, `ownerAnimaId: trainer`, `importerAnimaId: undefined` | the trainer |
+| User imported from HF/Civitai/etc. — **authorless** | `authorAnimaIds: []`, `ownerAnimaId: importer`, `importerAnimaId: importer` | the importer (= owner) |
+| Platform-canonical | `canonica: true`, `authorAnimaIds: []`, `ownerAnimaId: undefined` | the platform anima (`PLATFORM_ANIMA_ID`) |
 
-- `authorRoyaltySplits`: when multiple authors. Absent ⇒ even split. Present ⇒ keys must be subset of `authorAnimaIds`, values sum to 10_000.
-- `parentRoyaltyShare`: single basis-point value (0..10_000); the slice of the gen's spend that flows to parent's authors.
+The "baby royalty" framing the earlier spec used for importers was a separate-rail design. Simpler truth: when an importer pulls a model into the catalogue, **they become its owner**, and the model is **authorless** (no on-platform creator earned the training labor). The full per-model surcharge then flows to them. UI displays this as "imported by @userX" rather than "by @userX."
+
+`importerAnimaId` is retained on the schema for **audit** (record of who curated the catalogue entry) but is NOT a payment rail. The owner stream is the only model royalty stream.
+
+### Complementary to modus royalty
+
+This model royalty is one of two parallel royalty surfaces:
+
+- **Model royalty** (this spec) — for the WEIGHTS used. Surcharge on compute, per Intella, capped at 10% workflow-wide. Recipient: `Intella.ownerAnimaId`. Emitted by `modelRoyaltyHook`.
+- **Modus royalty** — for the WORKFLOW/SPELL used. Surcharge per custom modus, recipient: `Modus.auctor`. Emitted by `spellRoyaltyHook`.
+
+Both exist independently and stack. A guest running a custom spell with a custom LoRA pays compute + model surcharge + modus surcharge. Each surcharge incentivizes a different kind of creative labor: training the weights, designing the workflow.
+
+### Parent royalty (derivative chain)
+
+Single-hop, separate from the per-model surcharge:
+
+```
+parentSurcharge = (parentRoyaltyShare / 10_000) × X
+```
+
+Flows direct to the parent's `ownerAnimaId`. Independent of the workflow cap. Default `parentRoyaltyShare = 0` (no derivative obligation).
+
+### Canonical models
+
+`canonica: true` ⇒
+- The per-model surcharge routes to `PLATFORM_ANIMA_ID`.
+- `authorAnimaIds`, `ownerAnimaId`, `importerAnimaId` are IGNORED at hook time — they may be set for audit but don't affect routing.
+- `transferable: false` (canonical can't be sold).
+
+`canonica` is the single source of truth for "is this platform-owned." No more "or only contains platform anima" soft invariant.
+
+### Rate constants (`src/ledger/rates.ts`)
+
+```ts
+export const MODEL_ROYALTY_RATE = 500n   // basis points; 5% per model
+export const MODEL_ROYALTY_CAP  = 1000n  // basis points; 10% total across the workflow
+```
+
+Basis points everywhere; integer math; no float rounding.
+
+### Hook behavior (informational; lives in `modelRoyaltyHook`)
+
+```
+on execution_spend:
+  intellae = distinct intellae used in this gen
+  N        = intellae.length
+  X        = event.payload.baseImpetus
+  if N == 0: return []
+
+  perModel = min(MODEL_ROYALTY_RATE, MODEL_ROYALTY_CAP / N) × X / 10_000
+
+  for each intella in intellae:
+    recipientAnimaId = intella.canonica
+      ? PLATFORM_ANIMA_ID
+      : intella.ownerAnimaId   // skip emit if unset (non-canonica with no owner — see invariant 3)
+    emit signum {
+      animaId: recipientAnimaId,
+      forma: 'reward',
+      valor: perModel,
+      auctor: 'nexus:modelRoyalty',
+      contextId: intella.id,    // per-intella attribution
+    }
+
+  // Parent rail (separate from the cap)
+  for each intella with parentIntellaId + parentRoyaltyShare > 0:
+    parent       = lookup(intella.parentIntellaId)
+    parentValor  = (intella.parentRoyaltyShare / 10_000) × X
+    recipient    = parent.canonica ? PLATFORM_ANIMA_ID : parent.ownerAnimaId
+    emit signum { animaId: recipient, forma: 'reward', valor: parentValor,
+                  auctor: 'nexus:modelRoyalty.parent', contextId: parent.id }
+```
 
 ### Ownership transfer — schema present, endpoint deferred to v2
 
-The schema supports transfers (`ownerAnimaId` mutable, `ownershipHistory[]` append-only, `transferable: boolean` gate) so v2 can ship transfers without a schema migration. **The transfer endpoint itself is NOT part of v1.** No transfers happen until v2 lands.
+The schema supports transfers (`ownerAnimaId` mutable, `ownershipHistory[]` append-only, `transferable: boolean` gate) so v2 can ship transfers without a schema migration. **The transfer endpoint itself is NOT part of v1.**
 
 Implications for v1:
-- `ownerAnimaId` is set at creation to the first author (single-author) or curated owner (multi-author); never changes.
+- `ownerAnimaId` is set at creation; never changes until v2.
 - `ownershipHistory[]` carries the single synthetic initial-assignment entry from migration; never grows.
-- `transferable: boolean` is set per `canonica` (false / true) — read but never enforced (no transfers to enforce against yet).
-- The owner royalty rail STILL fires in v1, just always to the original creator since owner has never diverged from author. (See "Default behavior" above.)
+- `transferable: boolean` is set per `canonica` — read but not enforced yet.
 
 When v2 ships the transfer endpoint, the contract is:
 1. Authenticate current `ownerAnimaId`.
@@ -280,24 +359,17 @@ When v2 ships the transfer endpoint, the contract is:
 3. Update `ownerAnimaId = toAnimaId`.
 4. Append to `ownershipHistory`.
 5. Bump `mutatum`.
-6. `transferable: false` rejects the call (canonical models can never be sold).
-
-### Canonical models
-
-`canonica: true` ⇒
-- All royalty rails route to the platform anima (`PLATFORM_ANIMA_ID` env). `authorAnimaIds`, `ownerAnimaId`, `importerAnimaId` are IGNORED at hook time — they may be set for audit but don't affect routing.
-- `transferable: false` — invariant; enforced at write time.
-
-`canonica` is the single source of truth for "is this platform-owned." No more "or only contains platform anima" soft invariant.
+6. `transferable: false` rejects the call.
 
 ### Invariants
 
-1. `authorRoyaltySplits` present ⇒ keys ⊆ `authorAnimaIds`, values sum to 10_000.
-2. `parentRoyaltyShare` present ⇒ `parentIntellaId` present.
-3. `canonica: true` ⇒ `transferable: false`.
-4. `ownershipHistory` is append-only; entries never edited or removed.
+1. `parentRoyaltyShare` present ⇒ `parentIntellaId` present.
+2. `canonica: true` ⇒ `transferable: false` AND surcharge routes to `PLATFORM_ANIMA_ID`.
+3. Non-canonica with no `ownerAnimaId`: surcharge is **dropped** for that model (no payment fires). Migration ensures `ownerAnimaId` is populated for non-canonica.
+4. `ownershipHistory` is append-only.
 5. `ownerAnimaId` matches the last `toAnimaId` in `ownershipHistory` (when both present).
-6. `importerAnimaId` is set by the upload/import endpoint at creation; not normally re-assignable (admin override allowed but rare).
+6. `importerAnimaId` is set by the upload/import endpoint at creation; not normally re-assignable. NOT a payment rail.
+7. `authorAnimaIds` is **empty** for authorless (imported) models. Non-empty only when the platform observed the training.
 
 ---
 
@@ -501,19 +573,31 @@ The legacy `loraModels` collection (`src/core/services/db/loRAModelDb.js`) gives
 | `usageCount` | `usageCount` | |
 | `rating: {avg, count}` | `rating` | shape compatible |
 | `visibility` + `permissionType` + `accessControl` | consolidated into `access` | **collision rule**: see "Access consolidation" below |
-| `createdBy` | `authorAnimaIds[0]` + `ownerAnimaId` (initial) | createdBy is the original creator AND initial owner |
-| `ownedBy` (if diverges from createdBy) | `ownerAnimaId` | overrides createdBy as initial owner |
+| `createdBy` + `importedFrom.source` | depends on source — see "Authorship branching" below | platform-trained vs HF/Civitai-imported map to different `authorAnimaIds` |
+| `ownedBy` (if diverges from `createdBy`) | `ownerAnimaId` | overrides the default; explicit current rights holder |
 | `collectionId` | `legacy.collectionId` | revisit when Collections land in crystal |
 | `monetization` (full block) | `legacyMonetization` (verbatim) | marketplace sprint re-imports |
 | `importedFrom.{source, url, originalAuthor, importedAt}` | `importedFrom` | shape compatible; `source` enum check |
 | `publishedTo.{huggingfaceRepo, uploadedAt}` | `legacy.publishedTo` | not first-class |
 | `moderation.{flagged, issues, reviewedBy, reviewedAt}` | `blocked` (= flagged) + `reviewState` heuristic + `moderationNotes` (issues joined) | |
 | `createdAt` | `natum` | |
-| (none) | `importerAnimaId` | when `importedFrom.source !== 'platform-training'`, set to `createdBy` (the user who imported); else absent |
+| (none) | `importerAnimaId` | when `importedFrom.source !== 'platform-training'`, set to `createdBy` (the user who imported); else absent. Audit only — NOT a payment rail. |
 | (none) | `transferable` | `!canonica` — derived from canonica during migration |
 | (none) | `canonica` | `true` when `createdBy === PLATFORM_ANIMA_ID`; else `false` |
 | (none) | `contentRating` | `'untriaged'` for everything legacy unless `moderation.flagged === false` AND reviewed → `'sfw'` |
 | (none) | `ownershipHistory` | Synthetic initial entry: `[{toAnimaId: ownerAnimaId, transferredAt: natum, kind: 'transfer'}]` |
+
+### Authorship branching by `importedFrom.source`
+
+`createdBy` in legacy means "the user who first registered this record." That's not the same thing as "who trained the weights" for community LoRAs. Mapping branches on origin:
+
+| `importedFrom.source` | `authorAnimaIds` | `ownerAnimaId` | `importerAnimaId` | rationale |
+|---|---|---|---|---|
+| `'platform-training'` | `[createdBy]` | `ownedBy ?? createdBy` | absent | trainer trained on our platform; they ARE the author |
+| `'huggingface'` / `'civitai'` / `'r2'` / `'user-upload'` / `'community'` | `[]` (**authorless**) | `ownedBy ?? createdBy` | `createdBy` | external author can't be attributed to an anima; importer becomes owner |
+| absent / unknown | `[]` (defensive) | `ownedBy ?? createdBy` | `createdBy` (if can't tell — treat as imported) | preserve owner stream; log for forensics |
+
+For canonical platform-baked models (createdBy = PLATFORM_ANIMA_ID), the migration sets `canonica: true` and leaves `ownerAnimaId` undefined; the royalty hook routes to `PLATFORM_ANIMA_ID` directly.
 
 ### Access consolidation (the legacy 3-key mess)
 
@@ -567,9 +651,9 @@ Legacy had three overlapping fields. Mapping by exhaustive case:
 | id format dual | UUID (new) + ObjectId-hex (migrated); never collide |
 | legacyMonetization missing from type | added as `unknown` escape hatch |
 | publicProjection unspecified | added as schema-level function |
-| author vs owner vs importer | three rails (this v2's headline change) |
+| author vs owner vs importer rails | **collapsed to one rail** — 5% per model to `ownerAnimaId`, capped at 10% workflow-wide; imported models are *authorless* (importer becomes owner); `importerAnimaId` retained for audit only |
 | ownership transfer | `ownershipHistory[]`, `transferable` flag |
-| importer royalty | `importerAnimaId` + `MODEL_IMPORTER_RATE` |
+| importer royalty | folded into ownership — imported models are *authorless*, importer becomes owner, single 5% rail (capped 10% workflow-wide) |
 | 3 legacy access keys | one `access` discriminated union + collision table |
 
 ---
