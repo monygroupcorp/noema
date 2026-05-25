@@ -206,6 +206,14 @@ export interface Intellarum {
    * Absent animaId returns public LoRAs only.
    */
   findByTrigger(trigger: string, baseIntellaId: string, animaId?: string): Promise<Intellae>
+  /**
+   * Bulk-load the trigger map for a base model: every LoRA the caller can
+   * access (public + their own private), keyed by lowercased trigger word.
+   * Used by the prompt-time LoRA resolver to avoid one findByTrigger query
+   * per prompt token. A trigger may map to multiple Intellae — the resolver
+   * picks the best one (private-owner > shared > public, by recency).
+   */
+  triggerMap(baseIntellaId: string, animaId?: string): Promise<Map<string, Intellae>>
 }
 
 // =============================================================================

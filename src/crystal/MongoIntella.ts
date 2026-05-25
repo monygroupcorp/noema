@@ -41,6 +41,38 @@ export class MongoIntella implements Intellarum {
     return docs.map(fromDoc)
   }
 
+  async triggerMap(baseIntellaId: string, animaId?: string): Promise<Map<string, Intellae>> {
+    // One query: every accessible LoRA for this base. We group client-side; the
+    // collection is small enough (low thousands) that the network round-trip
+    // dominates anyway. If this becomes a hot path, swap to an aggregation that
+    // groups on the server.
+    const query: Record<string, unknown> = {
+      genus: 'lora',
+      baseIntellaId,
+      trigger: { $exists: true, $ne: '' },
+      $or: [
+        { access: 'public' },
+        ...(animaId ? [{ ownerAnimaId: animaId }] : []),
+      ],
+    }
+    const docs = await this.col.find(query).toArray()
+    const map = new Map<string, Intellae>()
+    for (const doc of docs) {
+      const intella = fromDoc(doc)
+      // A single Intella can declare multiple triggers as a comma-separated list
+      // (legacy convention from the JS resolver). Split, lower, dedupe — one
+      // map entry per token so resolvers can hit by any alias.
+      for (const raw of (intella.trigger ?? '').split(',')) {
+        const key = raw.trim().toLowerCase()
+        if (!key) continue
+        const bucket = map.get(key)
+        if (bucket) bucket.push(intella)
+        else map.set(key, [intella])
+      }
+    }
+    return map
+  }
+
   /** Insert or fully replace an Intella record. Used for seeding canonical models. */
   async upsert(intella: Intella): Promise<void> {
     await this.col.replaceOne({ id: intella.id }, intella, { upsert: true })
