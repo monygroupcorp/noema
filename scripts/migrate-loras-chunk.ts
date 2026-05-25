@@ -43,6 +43,7 @@ const CHECKPOINT_TO_BASE_INTELLA_ID: Record<string, string> = {
   'SD1.5':        'intella.sd15-base',
   'KONTEXT':      'intella.kontext-base',
   'ILLUSTRIOUS':  'intella.illustrious-base',
+  'PONYXL':       'intella.pony-base',     // XL-derived but architecturally diverged; needs its own base intella seed
 }
 
 // Rough per-architecture LoRA size estimates (GB). Legacy has no size info;
@@ -54,6 +55,7 @@ const DEFAULT_LORA_SIZE_GB_BY_CHECKPOINT: Record<string, number> = {
   'SD1.5':        0.1,   // ~50–150MB
   'KONTEXT':      0.5,   // similar to FLUX
   'ILLUSTRIOUS':  0.15,  // similar to SDXL
+  'PONYXL':       0.15,  // XL-derived, same size class as SDXL
 }
 
 const PLATFORM_ANIMA_IDS = new Set<string>(
