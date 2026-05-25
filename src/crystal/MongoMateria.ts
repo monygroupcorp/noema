@@ -53,6 +53,8 @@ export class MongoMateria implements MateriaStore {
       | 'podPolicy' | 'shareToken' | 'warmUntil'
       | 'groupChatId' | 'openToNonAdmins'
       | 'bootCostImpetus' | 'bootRecovered'
+      | 'drainOnly'
+      | 'installedModels' | 'volumeUsedGb' | 'volumeCapGb'
     >>
   ): Promise<Materia> {
     const result = await this.col.findOneAndUpdate(

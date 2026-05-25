@@ -177,6 +177,19 @@ export interface Materia {
    * when the queue drains. Default = false / absent.
    */
   drainOnly?: boolean
+
+  // ── Inventory (Phase D wrap-up) ────────────────────────────────────────────
+  // What's actually downloaded onto this studio's persistent volume. Maintained
+  // by the completion webhook from `ActumExecutio.modelsInstalled` reports, then
+  // surfaced in the bulletin's `Mod • → View loadout` and on `/status` studio rows.
+  // No identity flows through here — these are content identifiers (intellaIds).
+
+  /** intellaIds present on the studio's volume. Set-union semantics on merge. */
+  installedModels?: string[]
+  /** Sum of intella sizes currently on disk (GB), for bulletin "X% used" displays. */
+  volumeUsedGb?: number
+  /** Disk ceiling for this pod type. Stamped at provision; informs eviction policy later. */
+  volumeCapGb?: number
 }
 
 /** "Materiae" — nominative plural of materia */
@@ -194,6 +207,7 @@ export interface MateriaStore {
     | 'groupChatId' | 'openToNonAdmins'
     | 'bootCostImpetus' | 'bootRecovered'
     | 'drainOnly'
+    | 'installedModels' | 'volumeUsedGb' | 'volumeCapGb'
   >>): Promise<Materia>
   /**
    * Atomically claim an idle Materia matching the given spec, transitioning it

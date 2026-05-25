@@ -19,6 +19,9 @@ import type { Actum } from '../../types/actum.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Modorum } from '../../types/modus.js'
 import type { Actorum } from '../../types/cursus.js'
+import type { Intellarum } from '../../types/intelligendi.js'
+import type { ActumIndexStore } from '../../types/actumIndex.js'
+import { mintShareToken } from '../../crystal/shareToken.js'
 import { aggregateStatus } from '../lexicon/status/aggregate.js'
 import { StatusView } from '../lexicon/status/StatusView.js'
 import { classifyError } from '../../lib/classifyError.js'
@@ -112,6 +115,13 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     modorum?: Modorum
     /** Actorum — used by /status to look up the user's in-flight actums. */
     actorum?: Actorum
+    /** Intellarum — resolves intellaIds in `Mod • → View loadout` into human labels. */
+    intellarum?: Intellarum
+    /** Per-anima dispatch index — when present, /status YOUR GENS populates
+     *  from here and per-row Cancel works. */
+    actumIndex?: ActumIndexStore
+    /** Bot's @username — used to compose `https://t.me/<bot>?start=pod_<token>` share links. */
+    botUsername?: string
     /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
     autoSettleMs?: number
   }) {
@@ -127,14 +137,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       terminatePod: deps.terminatePod,
       cancelActum: deps.cancelActum,
       setPodWarmUntil: (podId, ttlMs) => this._setPodWarmUntil(podId, ttlMs),
-      // drainStudio / fetchShareUrl / fetchLoadout: intentionally not wired in
-      // this sprint. The bulletin shows the submenus and routes the actions
-      // (Destroy/Share/Mod open + back) so the UX is navigable; the backend
-      // surfaces (drain-only flag write, share-URL mint, loadout summary) land
-      // in a follow-up that threads the necessary crystal services to the
-      // adapter (Materia lookup by externusId for drain, shareToken for share,
-      // imageRef for mod.view). Until then, those buttons close the submenu
-      // without effect — Destroy → Now still works via the kill path.
+      drainStudio:   (podId) => this._drainStudio(podId),
+      fetchShareUrl: (podId) => this._fetchShareUrl(podId),
+      fetchLoadout:  (podId) => this._fetchLoadout(podId),
       autoSettleMs: deps.autoSettleMs,
     })
 
@@ -249,6 +254,66 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     const pods = await this.deps.materiae.findActive().catch(() => [])
     const m = pods.find(p => p.externusId === podId)
     if (m) await this.deps.materiae.update(m.id, { warmUntil: new Date(Date.now() + ttlMs) }).catch(() => {})
+  }
+
+  // ── Bulletin backend hooks (Phase D wrap-up) ───────────────────────────────
+  // The bulletin lexicon defines the action surface; these methods do the real
+  // work. Each is keyed by RunPod's `podId` (the Materia.externusId) since
+  // that's the identifier the bulletin tracks on its session.
+
+  /** Destroy → Drain: set Materia.drainOnly so the idle reaper terminates once
+   *  the queue empties. New guest gens are refused at admission. */
+  private async _drainStudio(podId: string): Promise<void> {
+    if (!this.deps.materiae) return
+    const pods = await this.deps.materiae.findActive().catch(() => [])
+    const m = pods.find(p => p.externusId === podId)
+    if (!m) return
+    await this.deps.materiae.update(m.id, { drainOnly: true }).catch(() => {})
+    const { bus } = await import('../../lib/bus.js')
+    bus.emit('studio.draining', { materiaId: m.id })
+  }
+
+  /** Share → Copy link: mint a shareToken on the Materia if one isn't there
+   *  yet, then compose the `https://t.me/<bot>?start=pod_<token>` deep link
+   *  CommandRouter already knows how to consume. Returns null when we can't
+   *  compose (no botUsername or no Materia found). */
+  private async _fetchShareUrl(podId: string): Promise<string | null> {
+    if (!this.deps.materiae || !this.deps.botUsername) return null
+    const pods = await this.deps.materiae.findActive().catch(() => [])
+    const m = pods.find(p => p.externusId === podId)
+    if (!m) return null
+    let token = m.shareToken
+    if (!token) {
+      token = mintShareToken()
+      await this.deps.materiae.update(m.id, { shareToken: token }).catch(() => {})
+    }
+    return `https://t.me/${this.deps.botUsername}?start=pod_${token}`
+  }
+
+  /** Mod • → View loadout: read Materia.installedModels, resolve each via
+   *  intellarum.find for a human label, return a one-line summary. */
+  private async _fetchLoadout(podId: string): Promise<string | undefined> {
+    if (!this.deps.materiae) return undefined
+    const pods = await this.deps.materiae.findActive().catch(() => [])
+    const m = pods.find(p => p.externusId === podId)
+    if (!m) return undefined
+    const ids = m.installedModels ?? []
+    if (ids.length === 0) return 'Loadout: empty (no models installed yet)'
+    if (!this.deps.intellarum) {
+      // Fallback to raw ids when no registry — better than nothing.
+      return `Loadout: ${ids.length} model${ids.length === 1 ? '' : 's'} (${ids.slice(0, 3).join(', ')}${ids.length > 3 ? `, +${ids.length - 3}` : ''})`
+    }
+    const intellae = await Promise.all(ids.map(id => this.deps.intellarum!.find(id).catch(() => null)))
+    const base   = intellae.find(i => i?.genus !== 'lora')
+    const loras  = intellae.filter((i): i is NonNullable<typeof i> => !!i && i.genus === 'lora')
+    const parts: string[] = []
+    if (base) parts.push(base.nomen)
+    if (loras.length) {
+      const names = loras.slice(0, 3).map(l => l.nomen ?? l.slug ?? l.id)
+      const more  = loras.length > 3 ? `, +${loras.length - 3}` : ''
+      parts.push(`${loras.length} LoRA${loras.length === 1 ? '' : 's'} (${names.join(', ')}${more})`)
+    }
+    return parts.length ? `Loadout: ${parts.join(' + ')}` : `Loadout: ${ids.length} models`
   }
 
   // -------------------------------------------------------------------------
@@ -547,13 +612,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         materiae: this.deps.materiae,
         actorum:  this.deps.actorum,
         modorum:  this.deps.modorum,
+        ...(this.deps.actumIndex ? { actumIndex: this.deps.actumIndex } : {}),
       },
-      {
-        auctorKey,
-        // TODO: feed in-flight actumIds for this user once we have per-anima
-        // gen indexing. Today the section renders empty.
-        inFlightActumIds: [],
-      },
+      // inFlightActumIds is the fallback when actumIndex isn't wired — aggregator
+      // prefers the index when present (identified runs only).
+      { auctorKey, inFlightActumIds: [] },
     )
     const { text, keyboard } = StatusView.render(snapshot)
     const reply_markup = keyboard.length ? this._toInline(keyboard) : undefined
@@ -577,7 +640,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       }
       const auctorKey = await this.identity.resolve(userId).catch(() => null)
       const snapshot = await aggregateStatus(
-        { signorum: this.deps.signorum, hospitia: this.deps.hospitia, materiae: this.deps.materiae, actorum: this.deps.actorum, modorum: this.deps.modorum },
+        {
+          signorum: this.deps.signorum, hospitia: this.deps.hospitia, materiae: this.deps.materiae,
+          actorum: this.deps.actorum, modorum: this.deps.modorum,
+          ...(this.deps.actumIndex ? { actumIndex: this.deps.actumIndex } : {}),
+        },
         { auctorKey, inFlightActumIds: [] },
       )
       const { text, keyboard } = StatusView.render(snapshot)

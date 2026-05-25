@@ -169,6 +169,13 @@ export interface ActumExecutio {
   modelsDownloaded?: number
   /** Count of models already present on the pod (warm reuse). */
   modelsReused?: number
+  /**
+   * intellaIds present on the studio's volume after this run. The webhook
+   * set-unions this into `Materia.installedModels` so the bulletin's
+   * `Mod • → View loadout` reflects reality. Optional — older comfyrunners
+   * that don't report it cause no harm.
+   */
+  modelsInstalled?: string[]
   /** Total bytes fetched this run. */
   downloadBytes?: number
   /** comfyrunner-reported inference time. */

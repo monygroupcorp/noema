@@ -23,6 +23,7 @@ import type { HospitiumStore } from './types/hospitium.js'
 import type { DeploymentumStore } from './types/deploymentum.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
 import { MongoHospitium } from './crystal/MongoHospitium.js'
+import { MongoActumIndex } from './crystal/MongoActumIndex.js'
 import { MongoDeploymentum } from './crystal/MongoDeploymentum.js'
 import { Praefectus } from './crystal/Praefectus.js'
 import { WarmPodClient } from './crystal/WarmPodClient.js'
@@ -89,6 +90,9 @@ export interface Ring {
   materiae: MateriaStore
   /** Identity-bearing hosting metadata (host + admins) — see types/hospitium.ts. */
   hospitia: HospitiumStore
+  /** Per-anima dispatch index — populates /status YOUR GENS without touching
+   *  the modo/actum privacy chain. See types/actumIndex.ts. */
+  actumIndex: import('./types/actumIndex.js').ActumIndexStore
   deployments: DeploymentumStore
   collectioCursor: CollectioCursor
 }
@@ -153,6 +157,8 @@ export interface ContainerConfig {
   materiaCollection?: string
   /** Collection name for hospitia (identity-bearing hosting metadata) — default 'hospitia' */
   hospitiaCollection?: string
+  /** Collection name for the per-anima dispatch index — default 'actum_index' */
+  actumIndexCollection?: string
   /** Collection name for deployments — default 'deployments' */
   deploymentsCollection?: string
   /** Collection name for arcanum Merkle tree leaves — default 'arcanum_leaves' */
@@ -174,6 +180,9 @@ export interface ContainerConfig {
    * container creates a MongoHospitium against `hospitiaCollection`.
    */
   hospitia?: HospitiumStore
+  /** Pre-built per-anima dispatch index store. Container builds a Mongo-backed
+   *  one against `actumIndexCollection` when this is absent. */
+  actumIndex?: import('./types/actumIndex.js').ActumIndexStore
   /**
    * Terminate a RunPod pod by ID. Injected so ActumCompletor can kill orphaned pods when
    * failing an actum (boot recovery, manual expiry). Absent: pods are left running on fail().
@@ -241,6 +250,9 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   const hospitiaCol: Collection = db.collection(config.hospitiaCollection ?? 'hospitia')
   const hospitia = config.hospitia ?? new MongoHospitium(hospitiaCol)
+
+  const actumIndexCol: Collection = db.collection(config.actumIndexCollection ?? 'actum_index')
+  const actumIndex = config.actumIndex ?? new MongoActumIndex(actumIndexCol)
 
   const deploymentsCol: Collection = db.collection(config.deploymentsCollection ?? 'deployments')
   const deployments = new MongoDeploymentum(deploymentsCol)
@@ -314,7 +326,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     colloquia, dicta, memoriae, intelligendi,
     cursorum, completor, inceptor, arcanumIssuer,
     arcanumTree, arcanumVerifier,
-    materiae, hospitia, deployments,
+    materiae, hospitia, actumIndex, deployments,
     collectioCursor,
   }
 }

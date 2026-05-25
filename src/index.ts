@@ -360,6 +360,7 @@ async function main(): Promise<void> {
     completor: ring.completor,
     cursorum: ring.cursorum,
     inceptor: ring.inceptor,
+    actumIndex: ring.actumIndex,
   })
   router.register(executeFlow)
 
@@ -377,6 +378,9 @@ async function main(): Promise<void> {
     signorum: ring.signorum,
     modorum: ring.modorum,
     actorum: ring.actorum,
+    intellarum: intellae,
+    actumIndex: ring.actumIndex,
+    ...(process.env.TELEGRAM_BOT_USERNAME ? { botUsername: process.env.TELEGRAM_BOT_USERNAME } : {}),
     terminatePod: RUNPOD_API_KEY ? (podId) => terminatePod(RUNPOD_API_KEY, podId) : undefined,
     acta: ring.actorum,
     cancelActum: async (actumId, reason) => {
@@ -451,6 +455,8 @@ async function main(): Promise<void> {
     modorum: ring.modorum,
     modos: ring.modos,
     hospitia: ring.hospitia,
+    materiae,
+    actumIndex: ring.actumIndex,
     vestigiorum: ring.vestigiorum,
     collectioRouter: ring.collectioCursor,
   }))
