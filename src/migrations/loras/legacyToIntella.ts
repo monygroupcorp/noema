@@ -174,6 +174,12 @@ export interface MigrationLookups {
   checkpointToBaseIntellaId: Record<string, string>
   /** animaIds the platform considers "itself" — used to detect canonica. */
   platformAnimaIds: Set<string>
+  /**
+   * Rough per-architecture default LoRA file size (GB). Legacy records have no
+   * size info; bulletin wait estimates need *something*. These are estimates
+   * — the weight-migration sprint backfills real values when files land in R2.
+   */
+  defaultLoraSizeGbByCheckpoint?: Record<string, number>
 }
 
 // ─ Migration log (collected per-transform; surfaces collisions + drops) ────
@@ -199,7 +205,16 @@ export function legacyToIntella(
   const createdBy = doc.createdBy ? toIdString(doc.createdBy) : undefined
   const ownedBy   = doc.ownedBy   ? toIdString(doc.ownedBy)   : undefined
   const isPlatformAnima = createdBy ? lookups.platformAnimaIds.has(createdBy) : false
-  const importSource = normalizeSource(doc.importedFrom?.source, warnings)
+  let importSource = normalizeSource(doc.importedFrom?.source, warnings)
+
+  // Heuristic: when importedFrom.source is missing, infer 'platform-training'
+  // from the presence of `trainedFrom` (training-pipeline metadata) or
+  // `publishedTo` (we published this model out, implying we trained it first).
+  // Rescues author attribution for records that predate the importedFrom field.
+  if (!importSource && (doc.trainedFrom || doc.publishedTo)) {
+    importSource = 'platform-training'
+    warnings.push('importedFrom.source missing — inferred platform-training from trainedFrom/publishedTo')
+  }
 
   let authorAnimaIds: string[]
   let ownerAnimaId: string | undefined
@@ -218,11 +233,11 @@ export function legacyToIntella(
     ownerAnimaId   = ownedBy ?? createdBy
     importerAnimaId = undefined
   } else {
-    // Imported (HF/Civitai/etc.) OR origin unknown — authorless.
+    // Imported (HF/Civitai/etc.) OR origin unknown after heuristic — authorless.
     authorAnimaIds = []
     ownerAnimaId   = ownedBy ?? createdBy
     importerAnimaId = createdBy
-    if (!importSource) warnings.push('importedFrom.source missing — treating as authorless import')
+    if (!importSource) warnings.push('importedFrom.source missing AND no trainedFrom/publishedTo — treating as authorless import')
   }
 
   // ─ Access consolidation (spec §13 collision table) ─────────────────────
@@ -308,6 +323,10 @@ export function legacyToIntella(
 
   const dest = defaultDestFor('lora', slug)
 
+  // ─ Rough size estimate by architecture (real bytes land in weight migration)
+  const checkpointKey = (doc.checkpoint ?? '').toUpperCase()
+  const estimatedSizeGb = lookups.defaultLoraSizeGbByCheckpoint?.[checkpointKey] ?? 0.2
+
   // ─ Build the Intella ─────────────────────────────────────────────────
   const intella: IntellaV2 = {
     id,
@@ -328,7 +347,7 @@ export function legacyToIntella(
 
     sources,
     dest,
-    sizeGb: 0,   // unknown from legacy; populated by weight-migration later
+    sizeGb: estimatedSizeGb,   // rough per-architecture estimate; weight-migration backfills real bytes
 
     description: doc.description,
     tags,

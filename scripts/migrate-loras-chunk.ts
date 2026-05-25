@@ -45,6 +45,17 @@ const CHECKPOINT_TO_BASE_INTELLA_ID: Record<string, string> = {
   'ILLUSTRIOUS':  'intella.illustrious-base',
 }
 
+// Rough per-architecture LoRA size estimates (GB). Legacy has no size info;
+// bulletin wait estimates need a number that's roughly right. Weight migration
+// (separate sprint) replaces these with real bytes once files land in R2.
+const DEFAULT_LORA_SIZE_GB_BY_CHECKPOINT: Record<string, number> = {
+  'FLUX':         0.5,   // ~200MB–1GB; depends on rank, take a middle value
+  'SDXL':         0.15,  // ~50–300MB
+  'SD1.5':        0.1,   // ~50–150MB
+  'KONTEXT':      0.5,   // similar to FLUX
+  'ILLUSTRIOUS':  0.15,  // similar to SDXL
+}
+
 const PLATFORM_ANIMA_IDS = new Set<string>(
   (process.env.PLATFORM_ANIMA_IDS ?? process.env.PLATFORM_ANIMA_ID ?? 'platform')
     .split(',')
@@ -159,6 +170,7 @@ async function main(): Promise<void> {
     const lookups: MigrationLookups = {
       checkpointToBaseIntellaId: CHECKPOINT_TO_BASE_INTELLA_ID,
       platformAnimaIds: PLATFORM_ANIMA_IDS,
+      defaultLoraSizeGbByCheckpoint: DEFAULT_LORA_SIZE_GB_BY_CHECKPOINT,
     }
 
     const transformed: Array<{ intella: IntellaV2; log: MigrationLogEntry }> = []

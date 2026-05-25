@@ -131,24 +131,47 @@ This is consistent with the spec. But it means the test fixture for "platform-tr
 
 ---
 
-## Summary — recommended spec patches before `--commit`
+## Summary — resolutions (2026-05-25 post-review)
 
-In priority order:
+| # | obs | resolution | landed in |
+|---|---|---|---|
+| 1 | Trigger words with colons / escaped parens / spaces don't survive the v1 resolver tokenizer | **KNOWN GAP, deferred to resolver upgrade.** Migration preserves the raw legacy strings verbatim in `params.triggerWords` — these triggers are baked into the model weights, the resolver has to learn them. Tracked as a follow-up sprint (substring-match tokenizer + weight-modifier lookahead for multi-token triggers). | revisions queue (this doc) |
+| 2 | 60% of records lack `importedFrom.source` | **Heuristic added.** When source is missing AND (`trainedFrom` OR `publishedTo`) is set → infer `'platform-training'`. Re-dry-run after the patch flipped 12 of 15 affected records from authorless to platform-trained. | spec §13 + `legacyToIntella` |
+| 3 | Civitai imports marked `visibility: 'private'` | **Intentional.** User confirmed: the curator's personal stash; deliberately not polluting the public menu (mostly SDXL, somewhat spicy). Migration preserves as-is. | no change |
+| 4 | Single-curator concentration on owner royalty | **Confirmed intentional.** The curator anima IS the platform operator; their owner royalty is effectively the platform's royalty. No change. | no change |
+| 5 | Legacy slug munging produces unique slugs naturally | Doc-only acknowledgement. | revisions queue (this doc) |
+| 6 | `sizeGb` empty in legacy but spec says required | **Migration populates from per-architecture defaults** (FLUX≈0.5, SDXL≈0.15, SD1.5≈0.1, KONTEXT≈0.5, Illustrious≈0.15). Weight-migration sprint replaces with real bytes. | spec §3 + `legacyToIntella` |
+| 7 | `sources[]` derivation works for all 25 | No change. | — |
+| 8 | All 25 records authorless after first dry-run | Heuristic from Obs 2 fixed this: now 12 platform-trained + 13 authorless. | — |
 
-1. **§13 mapping**: add the `trainedFrom`/`publishedTo` heuristic for inferring `importedFrom.source = 'platform-training'` when missing (Observation 2).
-2. **§3 type**: drop `sizeGb` from required to optional (Observation 6).
-3. **§3 + transform**: preserve original triggers on `legacy.originalTriggers` and drop only the resolver-unfriendly ones from `params.triggerWords` (Observation 1).
-4. **Confirm with user**: are Civitai imports supposed to be private? If not, override in migration (Observation 3).
-5. **Note in §13**: legacy slug munging already gives uniqueness (Observation 5, doc-only).
+## Re-dry-run results after the patches
 
-Observations 4, 7, 8 don't need spec changes — they're real-world notes.
+```
+total: 25
+canonica: 0
+authorless: 13        ← was 25
+platformTrained: 12   ← was 0 (heuristic recovered 12 records)
+withImporter: 13
+privateAccess: 12     ← 10 Civitai + 2 others, all intentional
+unlistedAccess: 0
+publicAccess: 13
+withMonetization: 0
+noSourceUri: 0
+withWarnings: 15      ← 12 heuristic-inferred + 3 fully unattributable
+```
 
----
+Authorship rail now fires for the 12 platform-trained records (5% owner royalty → user's curator anima). Remaining 13 authorless = 10 Civitai imports (curator becomes owner) + 3 legacy records too sparse to attribute.
 
-## Open question for the user (blocking `--commit`)
+## Known gap deferred to a separate sprint
 
-**Civitai imports as private — intentional or bug?**
+**Trigger-word resolver upgrade.** The legacy carries triggers like `artist:moriimee`, `1990s \(style\)`, `retro artstyle`. They're baked into the model weights and can't be reshaped. Our v1 resolver tokenizer can't reach them. Needs:
 
-All 10 Civitai records in the chunk are `visibility: 'private'` in legacy. If we commit the migration as-is, they remain private in crystal (usable only by the curator). If the intent was public, we override during migration.
+- Substring-scan over `triggerMap` keys (not word-tokenize)
+- Weight-modifier lookahead `(\:\d+\.?\d*)?` after the matched trigger
+- Tests for: trigger-with-colon, multi-word trigger, trigger-with-escaped-parens
 
-Until this is answered, the migration shouldn't `--commit`. Dry-run is fine for now.
+Until this lands, those LoRAs are slug-only (users have to type `<lora:slug:weight>` explicitly). Spec note added to §15 / revisions queue.
+
+## Status
+
+Spec + transform patched. Re-dry-run output shows real-world records now mapping correctly. Ready to `--commit` to `noema_fake.intellae` when the user signals go.
