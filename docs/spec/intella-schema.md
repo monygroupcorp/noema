@@ -306,6 +306,18 @@ Flows direct to the parent's `ownerAnimaId`. Independent of the workflow cap. De
 
 `canonica` is the single source of truth for "is this platform-owned." No more "or only contains platform anima" soft invariant.
 
+#### Phantom anima as deflationary sink (operator policy)
+
+`PLATFORM_ANIMA_ID` is an env value. Two intentional configurations:
+
+1. **Unset / set to a sentinel (`'platform'`)** — the canonical royalty signum credits an anima that no one has a key for. Points leave the user's wallet, the signum is auditable, but the credits can never be spent. **Functionally point destruction** — deflationary pressure on the impetus economy, the platform's cut withdrawn from circulation.
+
+2. **Set to a real anima id** — the canonical royalty signum credits that anima, who can spend its balance like any other. **Direct routing** — the platform operator collects the cut as live points.
+
+Both are valid policies. (1) suits a closed economy where canonical-model use should shrink the points pool. (2) suits an operator who wants to compound the platform's cut into platform operations. Switching between them at runtime requires no schema change — just flip the env value.
+
+For migrated orphan records that lack any provenance (no `createdBy`, no `importedFrom`, no `trainedFrom`, no `publishedTo`), the catalogue-migration `legacyToIntella` defaults them to `canonica: true`. Whether those records' royalty pays a real anima or is destroyed is the operator's runtime decision.
+
 ### Rate constants (`src/ledger/rates.ts`)
 
 ```ts
