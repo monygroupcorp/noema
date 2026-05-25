@@ -56,12 +56,12 @@ export async function aggregateStatus(
     return emptySnapshot(now)
   }
 
-  // Resolve the in-flight actum list: prefer the per-anima index (works for
-  // identified runs across any platform); fall back to the adapter's hint when
-  // the index isn't wired or the caller is on the commitment rail.
+  // Resolve the in-flight actum list: prefer the index (works for both
+  // identified runs and anonymous commitment runs), fall back to the
+  // adapter's hint when the index isn't wired.
   let actumIds = input.inFlightActumIds
-  if (deps.actumIndex && 'animaId' in input.auctorKey) {
-    const entries = await deps.actumIndex.findFor(input.auctorKey.animaId).catch(() => [])
+  if (deps.actumIndex) {
+    const entries = await deps.actumIndex.findFor(input.auctorKey).catch(() => [])
     if (entries.length > 0) actumIds = entries.map(e => e.actumId)
   }
 

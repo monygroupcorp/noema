@@ -164,6 +164,32 @@ test('gens: when actumIndex is wired, aggregator pulls user gens from the index'
   assert.equal(snap.gens[0].actumId, 'act-from-index')
 })
 
+test('gens: anonymous (commitment) runs index + show on /status', async () => {
+  const deps = makeDeps()
+  const COMMIT = { commitment: '0xanon' } as const
+  await deps.modorum.register({
+    id: 'm.flux', nomen: 'Flux', genus: 'atomicus', versio: '1.0.0',
+    contentHash: 'h', aditus: {}, exitus: {}, canonica: true,
+    auctor: 'a', natum: new Date(), mutatum: new Date(),
+  })
+  await deps.actorum.create({
+    id: 'act-anon', modusId: 'm.flux', modusVersiono: '1.0.0',
+    impetus: 100n, signaConsumed: [], aditus: {}, status: 'nascens',
+    expirat: new Date(Date.now() + 60_000),
+  })
+  const { MemoryActumIndex } = await import('../../../../src/execution/MemoryActumIndex.js')
+  const actumIndex = new MemoryActumIndex()
+  await actumIndex.record({
+    commitment: COMMIT.commitment, actumId: 'act-anon', modusId: 'm.flux', createdAt: new Date(),
+  })
+  const snap = await aggregateStatus(
+    { ...deps, actumIndex },
+    { auctorKey: COMMIT, inFlightActumIds: [] },
+  )
+  assert.equal(snap.gens.length, 1, 'commitment-side gens populate /status')
+  assert.equal(snap.gens[0].actumId, 'act-anon')
+})
+
 test('studios: per-studio earnings sum signa with contextId === materiaId', async () => {
   const deps = makeDeps()
   deps.materiae.add({
