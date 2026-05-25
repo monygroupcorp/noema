@@ -221,12 +221,25 @@ export function legacyToIntella(
   let importerAnimaId: string | undefined
   let canonica = false
 
+  // Orphan detection — no createdBy AND no provenance whatsoever. These are
+  // "original stock" records the catalogue has carried forever with no
+  // attribution. Per user: treat them as platform-canonical; royalty routes
+  // via PLATFORM_ANIMA_ID at runtime (env set to the desired recipient anima).
+  const isOrphan = !createdBy && !importSource && !doc.trainedFrom && !doc.publishedTo
+
   if (isPlatformAnima) {
     // Platform-canonical: royalty routes to PLATFORM_ANIMA_ID; explicit fields ignored.
     canonica = true
     authorAnimaIds = []
     ownerAnimaId = undefined
     importerAnimaId = undefined
+  } else if (isOrphan) {
+    // Original-stock orphan with no createdBy + no provenance: canonical platform stock.
+    canonica = true
+    authorAnimaIds = []
+    ownerAnimaId = undefined
+    importerAnimaId = undefined
+    warnings.push('orphan record (no createdBy + no provenance) — marked canonica: platform royalty applies')
   } else if (importSource === 'platform-training') {
     // User trained on the platform → they're the author.
     authorAnimaIds = createdBy ? [createdBy] : []
