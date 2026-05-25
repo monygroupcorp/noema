@@ -77,11 +77,20 @@ export class ActumCompletor {
     }
 
     if (nexus) {
+      // Phase C widened the payload: baseImpetus is mandatory + modoHostKey is
+      // optional. The completor only fires this when its caller (cursors that
+      // don't go through the webhook path) emits directly. The webhook path is
+      // what production uses — it builds the full payload (baseImpetus pulled
+      // from executio, modoHostKey resolved from Hospitium). Here we approximate
+      // baseImpetus from the dispatch stamp when present, else from the settled
+      // impetus (owner/admin paths where final === base).
+      const baseImpetus = completed.executio?.baseImpetus ?? impetus
       await nexus.emit({
         type: 'execution_spend',
         payload: {
           actum: completed,
           impetus,
+          baseImpetus,
         },
       })
     }
