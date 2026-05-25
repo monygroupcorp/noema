@@ -44,6 +44,13 @@ export interface ExecuteFlowDeps {
   completor: ActumCompletor
   cursorum: Cursorum
   inceptor: { initiate: ActumInceptor['initiate'] }
+  /**
+   * Optional per-anima aggregation index. When present + the runner has an
+   * animaId, we record the dispatched actum so `/status` can list YOUR GENS
+   * without ever touching the modo/actum row's identity (privacy invariant
+   * stays intact — see `src/types/actumIndex.ts`). Commitment runs skip.
+   */
+  actumIndex?: import('../../types/actumIndex.js').ActumIndexStore
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +340,18 @@ export class ExecuteFlow implements Flow {
     })
 
     state.actumId = actum.id
+
+    // 1b. ActumIndex — identified runs append to the per-anima aggregation so
+    // `/status` can list YOUR GENS. Commitment runs skip (separate privacy story).
+    // The remove site is the completion webhook (terminal status clears the entry).
+    if (this.deps.actumIndex && 'animaId' in ctx.identity) {
+      void this.deps.actumIndex.record({
+        animaId:  ctx.identity.animaId,
+        actumId:  actum.id,
+        modusId:  actum.modusId,
+        createdAt: actum.inceptum,
+      }).catch(() => {})
+    }
 
     // 2. Resolve modus and cursor
     const modus = await modorum.find(actum.modusId, actum.modusVersiono)

@@ -478,6 +478,56 @@ test('no signa issued when modus has no auctor', async () => {
   assert.equal(platformSigna.length, 0)
 })
 
+// 19b. Inventory merge: comfyrunner's modelsInstalled report set-unions into Materia.installedModels
+test('COMPLETED with modelsInstalled report — Materia.installedModels gets set-union merged', async () => {
+  const { actorum } = makeLedgerDeps()
+  // Pre-existing model on the studio + a brand-new one in this run's report.
+  const materia = { id: 'mat-7', externusId: 'pod-7', installedModels: ['intella.base'] }
+  const updates: Array<{ id: string; patch: Record<string, unknown> }> = []
+  const materiae = {
+    async findById(id: string) { return id === materia.id ? materia : null },
+    async update(id: string, patch: Record<string, unknown>) { updates.push({ id, patch }); return { ...materia, ...patch } },
+    // unused by the webhook merge path
+    async create() { throw new Error('not used') },
+    async findWarm() { return null },
+    async findActive() { return [] },
+    async reapIdle() { return [] },
+  }
+
+  await seedActum(actorum, makeActum({
+    materiamId: materia.id,
+    executio: { modelsInstalled: ['intella.base', 'intella.milady'] },
+  } as Partial<Actum> & { executio?: { modelsInstalled?: string[] } }))
+
+  await handleExecutionWebhook(
+    makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 1000 }),
+    { actorum, completor: makeCompletor(), materiae: materiae as never },
+  )
+
+  assert.equal(updates.length, 1, 'merge update fired')
+  const merged = updates[0].patch.installedModels as string[]
+  assert.deepEqual(merged.sort(), ['intella.base', 'intella.milady'].sort(), 'set-union with existing')
+})
+
+test('COMPLETED with NO modelsInstalled report — Materia untouched', async () => {
+  const { actorum } = makeLedgerDeps()
+  const updates: Array<{ id: string; patch: Record<string, unknown> }> = []
+  const materiae = {
+    async findById() { return { id: 'mat-x', externusId: 'p', installedModels: ['intella.base'] } },
+    async update(id: string, patch: Record<string, unknown>) { updates.push({ id, patch }); return null as never },
+    async create() { throw new Error('not used') },
+    async findWarm() { return null },
+    async findActive() { return [] },
+    async reapIdle() { return [] },
+  }
+  await seedActum(actorum, makeActum({ materiamId: 'mat-x' }))
+  await handleExecutionWebhook(
+    makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 1000 }),
+    { actorum, completor: makeCompletor(), materiae: materiae as never },
+  )
+  assert.equal(updates.length, 0, 'no update when nothing to merge')
+})
+
 // 20. No signa issued on FAILED
 test('no signa issued on FAILED', async () => {
   const { nexus, signorum, modorum, actorum } = makeLedgerDeps()

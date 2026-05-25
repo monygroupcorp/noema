@@ -7,6 +7,8 @@ import type { Vestigiorum } from '../../types/vestigium.js'
 import type { Modorum } from '../../types/modus.js'
 import type { ModoStore } from '../../types/modo.js'
 import type { HospitiumStore } from '../../types/hospitium.js'
+import type { MateriaStore } from '../../types/materia.js'
+import type { ActumIndexStore } from '../../types/actumIndex.js'
 import { createVestigiumFromActum } from '../../execution/hooks/vestigiumHook.js'
 import { modoHostFor } from '../../ledger/rates.js'
 
@@ -36,6 +38,12 @@ export interface ExecutionWebhookDeps {
   modos?: ModoStore
   /** Optional: identity-bearing hosting side-table — resolves modoHostAnimaId at emit. */
   hospitia?: HospitiumStore
+  /** Optional: studio store — merges `executio.modelsInstalled` reports into
+   *  `Materia.installedModels` so the bulletin Mod • → View loadout reflects reality. */
+  materiae?: MateriaStore
+  /** Optional: per-anima dispatch index — entry is removed on terminal status
+   *  so `/status` YOUR GENS only shows in-flight work. */
+  actumIndex?: ActumIndexStore
   /** Optional: routes collection actum completions back to CollectioCursor. */
   collectioRouter?: {
     findCollectioIdForActum(actumId: string): string | null
@@ -211,6 +219,25 @@ export async function handleExecutionWebhook(
         createVestigiumFromActum(completed, identity, deps.vestigiorum).catch(() => {})
       }
 
+      // Studio inventory merge: comfyrunner reports the post-run installed model
+      // list via `executio.modelsInstalled`. Set-union into Materia.installedModels
+      // so the bulletin Mod • → View loadout reflects what's actually on disk and
+      // /status studio rows can show a real loadout summary. No identity flows here.
+      const reported = completed.executio?.modelsInstalled
+      if (deps.materiae && completed.materiamId && reported && reported.length > 0) {
+        const materia = await deps.materiae.findById(completed.materiamId).catch(() => null)
+        if (materia) {
+          const next = new Set<string>(materia.installedModels ?? [])
+          for (const id of reported) next.add(id)
+          if (next.size !== (materia.installedModels?.length ?? 0)) {
+            await deps.materiae.update(materia.id, { installedModels: [...next] }).catch(() => {})
+          }
+        }
+      }
+
+      // Drop the actumIndex entry — terminal status, no longer "in flight".
+      if (deps.actumIndex) await deps.actumIndex.remove(actum.id).catch(() => {})
+
       return { status: 200, body: { success: true } }
     }
 
@@ -222,6 +249,9 @@ export async function handleExecutionWebhook(
         const collectioId = deps.collectioRouter.findCollectioIdForActum(actum.id)
         if (collectioId) await deps.collectioRouter.onActumCompleta(collectioId, actum.id, false)
       }
+
+      // Drop the actumIndex entry — terminal status, no longer "in flight".
+      if (deps.actumIndex) await deps.actumIndex.remove(actum.id).catch(() => {})
 
       return { status: 200, body: { success: true } }
     }

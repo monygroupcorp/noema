@@ -137,3 +137,48 @@ test('takenAt: respects injected clock', async () => {
   const snap = await aggregateStatus(deps, { auctorKey: ALICE, inFlightActumIds: [], now: () => fixed })
   assert.equal(snap.takenAt.getTime(), fixed.getTime())
 })
+
+test('gens: when actumIndex is wired, aggregator pulls user gens from the index', async () => {
+  const deps = makeDeps()
+  await deps.modorum.register({
+    id: 'm.flux', nomen: 'Flux', genus: 'atomicus', versio: '1.0.0',
+    contentHash: 'h', aditus: {}, exitus: {}, canonica: true,
+    auctor: 'a', natum: new Date(), mutatum: new Date(),
+  })
+  await deps.actorum.create({
+    id: 'act-from-index', modusId: 'm.flux', modusVersiono: '1.0.0',
+    impetus: 100n, signaConsumed: [], aditus: {}, status: 'agens',
+    expirat: new Date(Date.now() + 60_000),
+  })
+  const { MemoryActumIndex } = await import('../../../../src/execution/MemoryActumIndex.js')
+  const actumIndex = new MemoryActumIndex()
+  await actumIndex.record({
+    animaId: ALICE.animaId, actumId: 'act-from-index', modusId: 'm.flux', createdAt: new Date(),
+  })
+  // inFlightActumIds is empty — the aggregator must consult the index.
+  const snap = await aggregateStatus(
+    { ...deps, actumIndex },
+    { auctorKey: ALICE, inFlightActumIds: [] },
+  )
+  assert.equal(snap.gens.length, 1)
+  assert.equal(snap.gens[0].actumId, 'act-from-index')
+})
+
+test('studios: per-studio earnings sum signa with contextId === materiaId', async () => {
+  const deps = makeDeps()
+  deps.materiae.add({
+    id: 'mat-1', genus: 'pod', externusId: 'p-1', gpu: 'H100', vramGb: 80, ramGb: 200,
+    impetusPerSecond: 4n, status: 'idle', imageRef: 'noema/flux-v1:abc',
+  })
+  await deps.hospitia.create({ materiaId: 'mat-1', hostKey: ALICE, inceptum: new Date(), costAccrued: 50n })
+  // Seed: 40 hostCut on mat-1, 64 hospitium on mat-1, 100 hostCut on another studio (must be excluded).
+  await deps.signorum.issue({ animaId: ALICE.animaId, forma: 'reward', valor: 40n,  auctor: 'nexus:hostCut',   contextId: 'mat-1'     })
+  await deps.signorum.issue({ animaId: ALICE.animaId, forma: 'reward', valor: 64n,  auctor: 'nexus:hospitium', contextId: 'mat-1'     })
+  await deps.signorum.issue({ animaId: ALICE.animaId, forma: 'reward', valor: 100n, auctor: 'nexus:hostCut',   contextId: 'mat-other' })
+
+  const snap = await aggregateStatus(deps, { auctorKey: ALICE, inFlightActumIds: [] })
+  assert.equal(snap.studios.length, 1)
+  // earnings(mat-1) = 40 + 64 = 104;  net = 104 − costAccrued(50) = 54
+  assert.equal(snap.studios[0].netImpetus, 54n)
+  assert.equal(snap.studios[0].guestsToday, 1, 'one hostCut signum on mat-1 = one guest served')
+})

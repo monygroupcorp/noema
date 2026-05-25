@@ -18,6 +18,7 @@ import type { HospitiumStore, HostKey } from '../../../types/hospitium.js'
 import type { MateriaStore, Materia } from '../../../types/materia.js'
 import type { Actorum } from '../../../types/cursus.js'
 import type { Modorum } from '../../../types/modus.js'
+import type { ActumIndexStore } from '../../../types/actumIndex.js'
 import type { AuctorKey } from '../../../flow/types.js'
 import { IMPETUS_USD_RATE } from '../../../ledger/rates.js'
 import type { StatusSnapshot, GenEntry, StudioEntry } from './types.js'
@@ -28,13 +29,18 @@ export interface StatusAggregateDeps {
   materiae: MateriaStore
   actorum: Actorum
   modorum: Modorum
+  /** Optional per-anima dispatch index. When present, the aggregator looks up
+   *  the user's in-flight actums itself; the adapter-supplied list becomes
+   *  unnecessary. Absent → falls back to the input's `inFlightActumIds`. */
+  actumIndex?: ActumIndexStore
 }
 
 export interface StatusAggregateInput {
   /** Identity to aggregate for. `null` = anonymous user with no signed-in
    *  context; we still return zero-state so the UI can render "sign in" copy. */
   auctorKey: AuctorKey | null
-  /** Adapter-supplied in-flight gen list — see file header. */
+  /** Adapter-supplied in-flight gen list. Used as a fallback when no
+   *  `actumIndex` is on `deps`; otherwise the aggregator queries the index. */
   inFlightActumIds: string[]
   /** Optional now-clock for testability. */
   now?: () => Date
@@ -50,11 +56,20 @@ export async function aggregateStatus(
     return emptySnapshot(now)
   }
 
+  // Resolve the in-flight actum list: prefer the per-anima index (works for
+  // identified runs across any platform); fall back to the adapter's hint when
+  // the index isn't wired or the caller is on the commitment rail.
+  let actumIds = input.inFlightActumIds
+  if (deps.actumIndex && 'animaId' in input.auctorKey) {
+    const entries = await deps.actumIndex.findFor(input.auctorKey.animaId).catch(() => [])
+    if (entries.length > 0) actumIds = entries.map(e => e.actumId)
+  }
+
   // Run independent queries in parallel — they share no state.
   const [balanceImpetus, hospitia, gens] = await Promise.all([
     deps.signorum.balance(input.auctorKey),
     deps.hospitia.findActive(),
-    buildGens(deps, input.inFlightActumIds),
+    buildGens(deps, actumIds),
   ])
 
   const studios = await buildStudios(deps, hospitia, input.auctorKey, now)
@@ -124,6 +139,9 @@ async function buildStudios(
   const mine = allHospitia.filter(h => hostKeyMatches(h.hostKey, who))
   if (mine.length === 0) return []
 
+  // One history fetch covers every studio — filter client-side by contextId.
+  const history = await deps.signorum.history(who).catch(() => [])
+
   const rows: StudioEntry[] = []
   for (const h of mine) {
     const m = await deps.materiae.findById(h.materiaId).catch(() => null)
@@ -142,20 +160,27 @@ async function buildStudios(
       m.status === 'active' ? 'running' :
       'idle'
 
-    // Net = earnings (signa with hostCut/hospitium auctor on this host) - costAccrued.
-    // For v1, earnings are aggregated across ALL of this host's studios — per-studio
-    // attribution would require materiaId on the signa (a Phase D refinement). We
-    // surface a rough "this studio's net" by attributing nothing here and showing
-    // only costAccrued; bulletin gets the rich earnings view later.
+    // Per-studio earnings: signa from hostCut + hospitium with this materia
+    // tagged in their `contextId`. costAccrued lives on Hospitium. Net is the
+    // simple subtraction — bulletin renders the same number when it lands.
+    const earnings = history
+      .filter(s => s.contextId === h.materiaId &&
+                   (s.auctor === 'nexus:hostCut' || s.auctor === 'nexus:hospitium'))
+      .reduce((sum, s) => sum + s.valor, 0n)
     const cost = h.costAccrued ?? 0n
-    const netImpetus = -cost   // negative until per-studio earnings attribution lands
+    const netImpetus = earnings - cost
     const netUsd = Number(netImpetus) * IMPETUS_USD_RATE
+
+    // Guests served = count of hostCut signa for this studio (one per guest gen).
+    const guestsToday = history.filter(
+      s => s.contextId === h.materiaId && s.auctor === 'nexus:hostCut',
+    ).length
 
     rows.push({
       studioId: h.materiaId,
       label, status,
       ...(warmRemainingMs !== undefined ? { warmRemainingMs } : {}),
-      guestsToday: 0,     // v1: not attributed per-studio yet
+      guestsToday,
       netImpetus,
       netUsd,
     })

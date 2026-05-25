@@ -106,6 +106,16 @@ export interface Signum {
   expensum?: Date
   /** FK → Actum. The execution that consumed this signum. */
   actumId?: string
+
+  /**
+   * Generic "context" identifier for hook-issued signa — what THING this signum
+   * was emitted in the context of. Set by hostCutHook + hospitiumHook to the
+   * `materiamId` of the run, so `/status` can sum per-studio earnings and the
+   * bulletin earnings panel can render per-studio nets. NOT identity (it's a
+   * Materia.id), so privacy invariants are untouched. Free-form by design —
+   * future hooks may use it for other resource ids (modusId, intellaId, etc.).
+   */
+  contextId?: string
 }
 
 /** "Signa" — nominative/accusative plural. Your credits. */
