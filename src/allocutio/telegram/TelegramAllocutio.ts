@@ -67,6 +67,18 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     /** Host-guest bond store — when present, group provisionings get their admin set
      *  resolved + stamped into Hospitium.adminAnimaIds on pod.parked. */
     hospitia?: HospitiumStore
+    /** Ledger — used by /status to read balance + earnings. Optional. */
+    signorum?: Signorum
+    /** Registry of modi — used by /status to resolve modus labels on gen rows. */
+    modorum?: Modorum
+    /** Actorum — used by /status to look up the user's in-flight actums. */
+    actorum?: Actorum
+    /** Intellarum — resolves intellaIds in `Mod • → View loadout` to human labels. */
+    intellarum?: Intellarum
+    /** Per-anima dispatch index — populates /status YOUR GENS + per-row Cancel. */
+    actumIndex?: ActumIndexStore
+    /** Bot's @username — composes `https://t.me/<bot>?start=pod_<token>` share links. */
+    botUsername?: string
     /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
     autoSettleMs?: number
   }
