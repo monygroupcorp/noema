@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { CommandRouter } from '../../../../src/allocutio/telegram/commands/CommandRouter.js'
 
 function make() {
-  const calls: Record<string, unknown[]> = { enter: [], cancel: [], msg: [], start: [], ack: [], shareToken: [] }
+  const calls: Record<string, unknown[]> = { enter: [], cancel: [], msg: [], start: [], ack: [], shareToken: [], arm: [] }
   const router = new CommandRouter({
     enterExecute: async (userId, state) => { calls.enter.push({ userId, state }) },
     cancel: (userId) => { calls.cancel.push(userId) },
@@ -11,6 +11,7 @@ function make() {
     sendStart: async (chatId) => { calls.start.push(chatId) },
     ack: (chatId, messageId) => { calls.ack.push({ chatId, messageId }) },
     setPendingShareToken: (userId, token) => { calls.shareToken.push({ userId, token }) },
+    arm: (userId, chatId) => { calls.arm.push({ userId, chatId }) },
   })
   return { router, calls }
 }
@@ -78,4 +79,11 @@ test('@botname suffix and casing are tolerated; unknown → help hint', async ()
   assert.equal(calls.enter.length, 1, 'case + @suffix still routes /make')
   await router.dispatch('u1', 456, '/frobnicate')
   assert.match((calls.msg.at(-1) as { text: string }).text, /Unknown command/)
+})
+
+test('/arm opens the standalone Mod • menu and acks', async () => {
+  const { router, calls } = make()
+  await router.dispatch('u1', 456, '/arm', 50)
+  assert.deepEqual(calls.arm, [{ userId: 'u1', chatId: 456 }])
+  assert.equal(calls.ack.length, 1)
 })

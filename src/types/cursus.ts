@@ -36,7 +36,7 @@
 // =============================================================================
 
 import type { Modus } from './modus.js'
-import type { Actum, ComputeStrategy, GpuClass } from './actum.js'
+import type { Actum, ComputeStrategy, GpuClass, ModelRef } from './actum.js'
 import type { Modo } from './modo.js'
 import type { ArcanumSpendProof } from '../arcanum/types.js'
 
@@ -251,4 +251,9 @@ export interface Inceptio {
    * dispatch onto the host's Materia. Non-identity by construction.
    */
   shareTokenHint?: string
+  /**
+   * Models the host pinned onto the studio loadout via `Mod • → Add`. Stored on the Actum
+   * and unioned into `spec.models` by the Compiler. Absent for ordinary `/make`.
+   */
+  pinnedModels?: ModelRef[]
 }

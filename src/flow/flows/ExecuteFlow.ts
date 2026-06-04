@@ -1,5 +1,6 @@
 import type { Flow, FlowContext, Step, Resolution, PrimitiveEvent, Primitive } from '../types.js'
 import type { Modorum } from '../../types/modus.js'
+import type { ModelRef } from '../../types/actum.js'
 import { validateAditus } from '../../execution/validateAditus.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Actorum, ActumCompletor, Cursorum } from '../../types/cursus.js'
@@ -31,6 +32,13 @@ interface ExecuteFlowState {
   priorMessages?: Array<{ role: 'user' | 'assistant'; content: string }>
   /** Deep-link routing hint from a /start pod_<token>; consumed by the inceptor. */
   shareTokenHint?: string
+  /**
+   * Models the host queued onto the session loadout via `Mod • → Add`. Passed to the
+   * inceptor at submit (first-class, alongside shareTokenHint) → stored on the Actum →
+   * unioned into `spec.models` by the Compiler. `dest` is a fallback the Compiler
+   * overrides from the resolved Intella.
+   */
+  pinnedModels?: ModelRef[]
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +104,7 @@ export class ExecuteFlow implements Flow {
         browsePageIndex: 0,
         mode: existing.mode,
         category: existing.category,
+        ...(existing.pinnedModels ? { pinnedModels: existing.pinnedModels } : {}),
       }
       ctx.state = state
       const modus = await this._resolveModus(state)
@@ -126,6 +135,7 @@ export class ExecuteFlow implements Flow {
         browsePageIndex: 0,
         mode: existing.mode,
         category: existing.category,
+        ...(existing.pinnedModels ? { pinnedModels: existing.pinnedModels } : {}),
       }
       ctx.state = state
       return this._buildConfigureStep(state)
@@ -330,13 +340,16 @@ export class ExecuteFlow implements Flow {
   private async _submit(ctx: FlowContext, state: ExecuteFlowState): Promise<Step | Resolution> {
     const { inceptor, modorum, cursorum, completor } = this.deps
 
-    // 1. Initiate — balance check + lock signa + create Actum
+    // 1. Initiate — balance check + lock signa + create Actum. Pinned models (Mod • → Add)
+    // ride a first-class field alongside shareTokenHint → stored on the Actum → unioned into
+    // spec.models by the Compiler. (Not smuggled through aditus — validateAditus would strip it.)
     const actum = await inceptor.initiate({
       modusId: state.modusId!,
       aditus: state.aditus,
       by: ctx.identity,
       modoId: ctx.modoId,
       ...(state.shareTokenHint ? { shareTokenHint: state.shareTokenHint } : {}),
+      ...(state.pinnedModels?.length ? { pinnedModels: state.pinnedModels } : {}),
     })
 
     state.actumId = actum.id

@@ -65,6 +65,22 @@ export function computeBootCostImpetus(billedMs: number, costPerHrUsd: number): 
 }
 
 /**
+ * Convert a USD amount into valor (impetus points) credited to a user — the
+ * shared USD→valor step every funding rail funnels through after its own
+ * token→USD conversion (ETH, ERC-20, OCT all land here identically).
+ *
+ *   valor = floor(usd / IMPETUS_USD_RATE)      // IMPETUS_USD_RATE === USD_PER_POINT
+ *
+ * FLOOR, unlike the cost helpers above which ceil: a deposit credits whole
+ * points and rounds *down*, so a rounding step never over-credits the user.
+ * Negative input clamps to 0n (a deposit can't subtract balance).
+ */
+export function usdToValor(usd: number): bigint {
+  if (!(usd > 0)) return 0n
+  return BigInt(Math.floor(usd / IMPETUS_USD_RATE))
+}
+
+/**
  * @deprecated Phase A/B leftover. Phase C uses a flat `WARM_SURCHARGE_IMPETUS`
  * instead — guest pricing no longer reads per-pod boot accounting. Retained
  * for a transitional window; remove in a follow-up cleanup PR.

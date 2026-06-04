@@ -174,3 +174,90 @@ test('setLoraWeight: unchanged when slug not present', () => {
   const out = setLoraWeight('cat dog', 'milady-v3', 0.5)
   assert.equal(out, 'cat dog')
 })
+
+// ── substring-scan: legacy multi-char / multi-word triggers ─────────────────
+//
+// The tokenizer-only Pass 2 can't reach triggers containing colons, spaces,
+// or escaped parens. Pass 1.5 (`_substringScan`) handles these in-place.
+
+const COLON_TRIGGER  = makeIntella({ id: 'i.colon',  slug: 'moriimee-v1', trigger: 'artist:moriimee', access: 'public', defaultWeight: 1.0 })
+const PARENS_TRIGGER = makeIntella({ id: 'i.parens', slug: 'nineties-v1', trigger: '1990s \\(style\\)', access: 'public', defaultWeight: 1.0 })
+const SPACE_TRIGGER  = makeIntella({ id: 'i.space',  slug: 'retro-arts',  trigger: 'retro artstyle', access: 'public', defaultWeight: 1.0 })
+
+test('substring scan: colon-trigger resolves', () => {
+  const r = resolveLoraTriggers('a moody scene, artist:moriimee mood', { triggerMap: mapOf(COLON_TRIGGER) })
+  assert.match(r.modifiedPrompt, /<lora:moriimee-v1:1>/)
+  assert.equal(r.appliedLoras.length, 1)
+  assert.equal(r.appliedLoras[0].slug, 'moriimee-v1')
+  // Trigger text preserved for CLIP
+  assert.match(r.modifiedPrompt, /artist:moriimee/)
+})
+
+test('substring scan: escaped-parens trigger resolves', () => {
+  const r = resolveLoraTriggers('1990s \\(style\\) photo', { triggerMap: mapOf(PARENS_TRIGGER) })
+  assert.match(r.modifiedPrompt, /<lora:nineties-v1:1>/)
+  assert.equal(r.appliedLoras.length, 1)
+})
+
+test('substring scan: multi-word trigger resolves', () => {
+  const r = resolveLoraTriggers('a retro artstyle scene', { triggerMap: mapOf(SPACE_TRIGGER) })
+  assert.match(r.modifiedPrompt, /<lora:retro-arts:1>/)
+  assert.equal(r.appliedLoras.length, 1)
+})
+
+test('substring scan: explicit weight modifier applied', () => {
+  const r = resolveLoraTriggers('artist:moriimee:0.5 mood', { triggerMap: mapOf(COLON_TRIGGER) })
+  assert.match(r.modifiedPrompt, /<lora:moriimee-v1:0.5>/)
+  assert.equal(r.appliedLoras[0].weight, 0.5)
+})
+
+test('substring scan: exclamation modifier (+0.2 each, two = +0.4)', () => {
+  const r = resolveLoraTriggers('artist:moriimee!! mood', { triggerMap: mapOf(COLON_TRIGGER) })
+  assert.equal(r.appliedLoras[0].weight, 1.4)
+  // Modifier consumed
+  assert.ok(!r.modifiedPrompt.includes('!'))
+})
+
+test('substring scan: :0.0 silences (no LoRA, keeps trigger text)', () => {
+  const r = resolveLoraTriggers('artist:moriimee:0.0 mood', { triggerMap: mapOf(COLON_TRIGGER) })
+  assert.equal(r.appliedLoras.length, 0)
+  assert.ok(!r.modifiedPrompt.includes('<lora:'))
+  assert.match(r.modifiedPrompt, /artist:moriimee/)
+})
+
+test('substring scan: overlapping triggers — longer wins', () => {
+  // Both 'art' and 'artist:moriimee' would match starting at the 'a' of 'artist:'.
+  // The longer (`artist:moriimee`) must win.
+  const shortKey = makeIntella({ id: 'i.short', slug: 'art-generic', trigger: 'art:short', access: 'public', defaultWeight: 1.0 })
+  const r = resolveLoraTriggers('artist:moriimee scene', { triggerMap: mapOf(shortKey, COLON_TRIGGER) })
+  assert.equal(r.appliedLoras.length, 1)
+  assert.equal(r.appliedLoras[0].slug, 'moriimee-v1')
+})
+
+test('substring scan: same trigger twice — LoRA applied once', () => {
+  const r = resolveLoraTriggers('artist:moriimee cat, artist:moriimee dog', { triggerMap: mapOf(COLON_TRIGGER) })
+  const tagCount = (r.modifiedPrompt.match(/<lora:moriimee-v1:1>/g) ?? []).length
+  assert.equal(tagCount, 1)
+  assert.equal(r.appliedLoras.length, 1)
+})
+
+test('substring scan: trigger with regex metacharacters is escaped (no false matches)', () => {
+  // The trigger contains `\(` `\)` — must be regex-escaped, not interpreted.
+  // A prompt with a literal `(style)` should NOT match `1990s \(style\)`.
+  const r = resolveLoraTriggers('a (style) thing', { triggerMap: mapOf(PARENS_TRIGGER) })
+  assert.equal(r.appliedLoras.length, 0)
+  assert.ok(!r.modifiedPrompt.includes('<lora:'))
+})
+
+test('substring scan: private colon-trigger requires owner animaId', () => {
+  const priv = makeIntella({
+    id: 'i.privcolon', slug: 'priv-moriimee', trigger: 'artist:moriimee',
+    access: 'private', ownerAnimaId: 'anima-alice', defaultWeight: 1.0,
+  })
+  // Owner sees it
+  const r1 = resolveLoraTriggers('artist:moriimee mood', {
+    triggerMap: mapOf(priv), animaId: 'anima-alice',
+  })
+  assert.equal(r1.appliedLoras.length, 1)
+  assert.equal(r1.appliedLoras[0].slug, 'priv-moriimee')
+})

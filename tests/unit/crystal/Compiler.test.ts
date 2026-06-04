@@ -391,3 +391,91 @@ test('compile() honors animaId for private-LoRA conflict resolution', async () =
   const r = await compiler.compile(makeLoraEssentia(), { prompt: 'shared style' }, { animaId: 'anima-alice' })
   assert.equal(r.appliedLoras?.[0].slug, 'my-shared', 'private owner wins')
 })
+
+// ── compile() against a v2-shape Intella record via MongoIntella shim ───────
+//
+// Item 3 of the trigger-resolution sprint: end-to-end verify that records
+// written in v2 shape (the migration's output) are picked up by the resolver
+// and surface in spec.models, with no shape errors along the way.
+
+import { MongoClient } from 'mongodb'
+import { MongoIntella } from '../../../src/crystal/MongoIntella.js'
+
+const MONGO_URI = process.env.MONGO_PASS ?? process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
+const V2_DB  = 'noemaplane_test'
+const V2_COL = 'intellae_compiler_v2'
+
+test('compile() resolves a v2-shape LoRA record from MongoIntella + injects into spec.models', async () => {
+  const client = new MongoClient(MONGO_URI)
+  await client.connect()
+  try {
+    const col = client.db(V2_DB).collection(V2_COL)
+    await col.deleteMany({})
+    // Insert a v2-shape doc — the shape the chunk migration writes
+    await col.insertOne({
+      id: 'intella.v2-compiler',
+      nomen: 'milady v2',
+      genus: 'lora',
+      architectura: 'flux',
+      parametri: 0,
+      sources: [{ provenance: 'miladystation', uri: 'https://example.com/milady-v2.safetensors' }],
+      dest: 'models/loras/milady-v2.safetensors',
+      sizeGb: 0.2,
+      versio: '1.0.0',
+      canonica: false,
+      natum: new Date('2026-01-01'),
+      params: {
+        triggerWords: ['miladyy'],
+        slug: 'milady-v2',
+        defaultWeight: 1.0,
+        baseIntellaId: 'intella.flux-base',
+      },
+      access: { kind: 'public' },
+    })
+
+    const intellarum = new MongoIntella(col)
+    const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+    const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait, miladyy style' })
+
+    // Resolver hit the v2 record — applied LoRA surfaces
+    assert.equal(r.appliedLoras?.length, 1)
+    assert.equal(r.appliedLoras?.[0].slug, 'milady-v2')
+    // Tag injected into the CLIP prompt
+    const node22 = r.spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
+    assert.match(node22.inputs.clip_l as string, /<lora:milady-v2:1>/)
+    // spec.models gained the LoRA entry from the v2 record
+    const lora = r.spec.models.find(m => m.role === 'lora')
+    assert.ok(lora, 'expected the resolved LoRA in spec.models')
+    assert.equal(lora!.id, 'intella.v2-compiler')
+
+    await col.deleteMany({})
+  } finally {
+    await client.close()
+  }
+})
+
+// ── compile() — pinned models (Mod • → Add, via opts.pinnedModels) ───────────
+
+test('compile() unions opts.pinnedModels into spec.models', async () => {
+  const intellarum = makeLoraIntellarum([{ slug: 'extra', trigger: 'zzz' }])
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const r = await compiler.compile(makeEssentia(), { prompt: 'a cat' },
+    { pinnedModels: [{ role: 'lora', id: 'intella.extra', dest: 'models/loras/extra.safetensors' }] })
+  const pinned = r.spec.models.find(m => m.id === 'intella.extra')
+  assert.ok(pinned, 'pinned model resolved into spec.models')
+  assert.equal(pinned!.url, 'https://example.com/extra.safetensors', 'url resolved from the Intella, not the rough dest')
+})
+
+test('compile() dedupes a pinned model already present from prompt LoRA resolution', async () => {
+  const intellarum = makeLoraIntellarum([{ slug: 'milady-v3', trigger: 'milady' }])
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait, milady style' },
+    { pinnedModels: [{ role: 'lora', id: 'intella.milady-v3', dest: 'models/loras/milady-v3.safetensors' }] })
+  assert.equal(r.spec.models.filter(m => m.id === 'intella.milady-v3').length, 1, 'not duplicated')
+})
+
+test('compile() with no pinnedModels behaves exactly as before', async () => {
+  const compiler = makeCompiler(42)
+  const r = await compiler.compile(makeEssentia(), { prompt: 'a cat' })
+  assert.ok(Array.isArray(r.spec.models) && r.spec.models.length > 0)
+})
