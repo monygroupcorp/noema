@@ -5,14 +5,12 @@
  * Provisions a Noema account, clones a workspace, creates an AgentAccount
  * record, debits the treasury, and credits the agent's economy account.
  *
- * Mount point: POST /:treasuryId/agents (mounted at /api/treasury)
+ * Mount point: POST /:treasuryId/agents (full path /api/v1/treasury/:treasuryId/agents)
  */
 
 const express = require('express');
 const { pointsToUsd } = require('./agentUtils');
 const { fireSessionCallback } = require('../../../core/services/agents/agentSessionCallback');
-
-const DEFAULT_STARTER_WORKSPACE_SLUG = process.env.DEFAULT_STARTER_WORKSPACE_SLUG || '745218a5';
 
 /**
  * Create Agent Provisioning API router.
@@ -21,6 +19,7 @@ const DEFAULT_STARTER_WORKSPACE_SLUG = process.env.DEFAULT_STARTER_WORKSPACE_SLU
  * @param {object} deps.treasuryDb
  * @param {object} deps.agentAccountDb
  * @param {object} deps.workspacesDb
+ * @param {object} deps.workspaceFactory   - WorkspaceFactory singleton; performs the NFT-aware clone (agent-context strip, $NFT_* substitution, private spell clones, R2 image mirror).
  * @param {object} deps.agentJwtVerifier
  * @param {object} deps.economyService
  * @param {object} deps.internalApiClient
@@ -32,6 +31,7 @@ function createAgentProvisioningApi({
   treasuryDb,
   agentAccountDb,
   workspacesDb,
+  workspaceFactory,
   agentJwtVerifier,
   economyService,
   internalApiClient,
@@ -99,8 +99,8 @@ function createAgentProvisioningApi({
         if (existing.status === 'active') {
           return res.status(200).json({
             agentAccountId: existing.agentAccountId,
-            manifestURI: `https://noema.art/api/agents/${existing.agentAccountId}/manifest`,
-            revokeURI: `https://noema.art/api/sessions/${existing.agentAccountId}/revoke`,
+            manifestURI: `https://noema.art/api/v1/agents/${existing.agentAccountId}/manifest`,
+            revokeURI: `https://noema.art/api/v1/sessions/${existing.agentAccountId}/revoke`,
             balance: { amount: pointsToUsd(existing.balance), currency: 'USDC' },
           });
         }
@@ -140,8 +140,8 @@ function createAgentProvisioningApi({
               scope,
               issuedAt: Math.floor(Date.now() / 1000),
               expiresAt: Math.floor(new Date(exp * 1000).getTime() / 1000),
-              manifestURI: `https://noema.art/api/agents/${existing.agentAccountId}/manifest`,
-              revokeURI: `https://noema.art/api/sessions/${existing.agentAccountId}/revoke`,
+              manifestURI: `https://noema.art/api/v1/agents/${existing.agentAccountId}/manifest`,
+              revokeURI: `https://noema.art/api/v1/sessions/${existing.agentAccountId}/revoke`,
               billing: {
                 model: 'treasury-funded',
                 treasuryRef: treasury.treasuryId,
@@ -154,8 +154,8 @@ function createAgentProvisioningApi({
           });
           return res.status(202).json({
             agentAccountId: existing.agentAccountId,
-            manifestURI: `https://noema.art/api/agents/${existing.agentAccountId}/manifest`,
-            revokeURI: `https://noema.art/api/sessions/${existing.agentAccountId}/revoke`,
+            manifestURI: `https://noema.art/api/v1/agents/${existing.agentAccountId}/manifest`,
+            revokeURI: `https://noema.art/api/v1/sessions/${existing.agentAccountId}/revoke`,
             balance: { amount: pointsToUsd(starterGrant), currency: 'USDC' },
           });
         }
@@ -178,37 +178,27 @@ function createAgentProvisioningApi({
       const card = await fetchAgentCard(treasury.issuerDomain, tokenId);
       const cardProfile = card?.profile || { name: 'CAMEL Agent', description: '', image: null };
 
-      // Step 8 — Clone starter workspace (per-treasury slug, with global fallback)
-      const starterSlug = treasury.starterWorkspaceSlug || DEFAULT_STARTER_WORKSPACE_SLUG;
-      let masterSnapshot;
-      try {
-        const master = await workspacesDb.findOne({ slug: starterSlug });
-        if (!master) throw new Error('Master workspace not found');
-        masterSnapshot = JSON.parse(JSON.stringify(master.snapshot)); // deep clone
-      } catch (err) {
-        log.error('[agentProvisioning] Starter workspace not found', { starterSlug, error: err.message });
-        return res.status(503).json({ error: { code: 'TEMPLATE_NOT_FOUND', message: 'Agent workspace template unavailable' } });
-      }
-
-      // Inject NFT card values into snapshot
-      if (masterSnapshot.toolWindows) {
-        const descWindow = masterSnapshot.toolWindows.find(w => w.templateWindowId === 'w-3');
-        if (descWindow && cardProfile.description) descWindow.value = cardProfile.description;
-      }
-
+      // Step 8 — Clone starter workspace via WorkspaceFactory (agent-context strip, NFT image
+      // binding, $NFT_* placeholder substitution, private spell clones, R2 image mirror).
+      const agentDoc = {
+        _id: noemaAccountId,
+        agentId,
+        agentTokenId: tokenId,
+        contractAddress: agentAdapter,
+        chainId: agentChainId,
+        profile: cardProfile,
+        scope: scope || [],
+        starterWorkspaceSlug: treasury.starterWorkspaceSlug,
+      };
+      const tokenUri = jwtPayload.tokenURI || card?.tokenURI || null;
       let workspaceSlug;
       try {
-        const ws = await workspacesDb.createWorkspace({
-          snapshot: masterSnapshot,
-          name: `${cardProfile.name || 'CAMEL Agent'} #${tokenId}`,
-          ownerId: noemaAccountId,
-          origin: { slug: starterSlug },
-          visibility: 'private',
-        });
+        const ws = await workspaceFactory.provisionAgentWorkspace({ agentDoc, tokenUri });
         workspaceSlug = ws.slug;
       } catch (err) {
-        log.error('[agentProvisioning] Workspace clone failed', { error: err.message });
-        return res.status(503).json({ error: { code: 'WORKSPACE_CREATION_FAILED', message: 'Failed to create agent workspace' } });
+        log.error('[agentProvisioning] WorkspaceFactory.provisionAgentWorkspace failed', { error: err.message });
+        const code = err.code === 'NOT_FOUND' ? 'TEMPLATE_NOT_FOUND' : 'WORKSPACE_CREATION_FAILED';
+        return res.status(503).json({ error: { code, message: 'Failed to create agent workspace' } });
       }
 
       // Step 9 — Create AgentAccount record
@@ -235,8 +225,8 @@ function createAgentProvisioningApi({
           if (racedAccount && racedAccount.status === 'active') {
             return res.status(200).json({
               agentAccountId: racedAccount.agentAccountId,
-              manifestURI: `https://noema.art/api/agents/${racedAccount.agentAccountId}/manifest`,
-              revokeURI: `https://noema.art/api/sessions/${racedAccount.agentAccountId}/revoke`,
+              manifestURI: `https://noema.art/api/v1/agents/${racedAccount.agentAccountId}/manifest`,
+              revokeURI: `https://noema.art/api/v1/sessions/${racedAccount.agentAccountId}/revoke`,
               balance: { amount: pointsToUsd(racedAccount.balance), currency: 'USDC' },
             });
           }
@@ -314,8 +304,8 @@ function createAgentProvisioningApi({
           scope,
           issuedAt: Math.floor(Date.now() / 1000),
           expiresAt: Math.floor(new Date(exp * 1000).getTime() / 1000),
-          manifestURI: `https://noema.art/api/agents/${agentAccountId}/manifest`,
-          revokeURI: `https://noema.art/api/sessions/${agentAccountId}/revoke`,
+          manifestURI: `https://noema.art/api/v1/agents/${agentAccountId}/manifest`,
+          revokeURI: `https://noema.art/api/v1/sessions/${agentAccountId}/revoke`,
           billing: {
             model: 'treasury-funded',
             treasuryRef: treasury.treasuryId,
@@ -330,8 +320,8 @@ function createAgentProvisioningApi({
       // Step 14 — Return response
       return res.status(202).json({
         agentAccountId,
-        manifestURI: `https://noema.art/api/agents/${agentAccountId}/manifest`,
-        revokeURI: `https://noema.art/api/sessions/${agentAccountId}/revoke`,
+        manifestURI: `https://noema.art/api/v1/agents/${agentAccountId}/manifest`,
+        revokeURI: `https://noema.art/api/v1/sessions/${agentAccountId}/revoke`,
         balance: { amount: pointsToUsd(starterGrant), currency: 'USDC' },
       });
 

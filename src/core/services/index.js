@@ -62,6 +62,8 @@ const { GenerationExecutionService } = require('./generationExecutionService');
 const { economyService } = require('./store/economy/EconomyService');
 const { DelegationService } = require('./agents/DelegationService');
 const { AgentJwtVerifier } = require('./agents/agentJwtVerifier');
+const { WorkspaceFactory } = require('./agents/WorkspaceFactory');
+const { IpfsService } = require('./ipfs/IpfsService');
 const notificationEvents = require('../events/notificationEvents');
 const { startDragnet } = require('./charging/agentOwnerDragnet');
 const { startFaucet } = require('./agents/agentFaucetWorker');
@@ -374,6 +376,14 @@ async function initializeServices(options = {}) {
       logger,
     });
     const agentJwtVerifier = new AgentJwtVerifier({ logger });
+    const workspaceFactory = new WorkspaceFactory({
+      workspacesDb: initializedDbServices.data.workspaces,
+      spellsDb: initializedDbServices.data.spells,
+      userCoreDb: initializedDbServices.data.userCore,
+      storageService,
+      ipfsService: new IpfsService(logger),
+      logger,
+    });
     const generationExecutionService = new GenerationExecutionService({
       db: initializedDbServices.data,
       toolRegistry,
@@ -578,6 +588,7 @@ async function initializeServices(options = {}) {
       embellishmentTaskService, // Add embellishment task service
       generationExecutionService, // Phase 8: in-process execution
       agentJwtVerifier, // multi-issuer ES256 JWT verifier (ERC-8004 agent onboarding)
+      workspaceFactory, // factory clone of starter workspace with NFT bindings on agent provisioning
       economyService, // economy ledger (agent provisioning + faucet credits)
     });
     
@@ -663,6 +674,7 @@ async function initializeServices(options = {}) {
       embellishmentTaskService, // expose EmbellishmentTaskService
       economyService, // expose for treasury/agent APIs
       agentJwtVerifier, // ES256 JWT verifier for agent provisioning (any issuer)
+      workspaceFactory, // factory clone of starter workspace with NFT bindings on agent provisioning
     };
 
     // DIAGNOSTIC LOGGING REMOVED

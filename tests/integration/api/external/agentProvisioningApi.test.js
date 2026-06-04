@@ -53,6 +53,19 @@ function makeMockWorkspacesDb(overrides = {}) {
       return null;
     },
     createWorkspace: async () => ({ _id: 'fake-ws-id', slug: 'new-workspace-slug' }),
+    deleteWorkspace: async () => ({ deletedCount: 1 }),
+    ...overrides,
+  };
+}
+
+function makeMockWorkspaceFactory(overrides = {}) {
+  return {
+    provisionAgentWorkspace: async ({ agentDoc, tokenUri } = {}) => ({
+      _lastAgentDoc: agentDoc,
+      _lastTokenUri: tokenUri,
+      workspaceId: 'fake-ws-id',
+      slug: 'new-workspace-slug',
+    }),
     ...overrides,
   };
 }
@@ -106,6 +119,7 @@ function createTestApp({
   treasuryDbOverrides = {},
   agentAccountDbOverrides = {},
   workspacesDbOverrides = {},
+  workspaceFactoryOverrides = {},
   jwtPayload = DEFAULT_JWT_PAYLOAD,
   jwtVerifierOverrides = {},
   economyServiceOverrides = {},
@@ -119,6 +133,7 @@ function createTestApp({
     treasuryDb: makeMockTreasuryDb(treasury, treasuryDbOverrides),
     agentAccountDb: makeMockAgentAccountDb(agentAccountDbOverrides),
     workspacesDb: makeMockWorkspacesDb(workspacesDbOverrides),
+    workspaceFactory: makeMockWorkspaceFactory(workspaceFactoryOverrides),
     agentJwtVerifier: makeMockAgentJwtVerifier(jwtPayload, jwtVerifierOverrides),
     economyService: makeMockEconomyService(economyServiceOverrides),
     internalApiClient: makeMockInternalApiClient(internalApiClientOverrides),
@@ -327,14 +342,8 @@ describe('Agent Provisioning API', () => {
   // 10. Workspace creation fails
   test('Workspace creation fails → 503 WORKSPACE_CREATION_FAILED', async () => {
     const app = createTestApp({
-      workspacesDbOverrides: {
-        findOne: async ({ slug }) => {
-          if (slug === '745218a5') {
-            return { slug: '745218a5', snapshot: { toolWindows: [] } };
-          }
-          return null;
-        },
-        createWorkspace: async () => { throw new Error('MongoDB error'); },
+      workspaceFactoryOverrides: {
+        provisionAgentWorkspace: async () => { throw new Error('MongoDB error'); },
       },
     });
     const res = await supertest(app)
@@ -344,6 +353,24 @@ describe('Agent Provisioning API', () => {
 
     assert.equal(res.status, 503);
     assert.equal(res.body.error.code, 'WORKSPACE_CREATION_FAILED');
+  });
+
+  // 10b. Template workspace missing → 503 TEMPLATE_NOT_FOUND
+  test('Template workspace missing → 503 TEMPLATE_NOT_FOUND', async () => {
+    const app = createTestApp({
+      workspaceFactoryOverrides: {
+        provisionAgentWorkspace: async () => {
+          throw Object.assign(new Error('Template workspace not found'), { code: 'NOT_FOUND' });
+        },
+      },
+    });
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents')
+      .set('Authorization', 'Bearer valid-token')
+      .send();
+
+    assert.equal(res.status, 503);
+    assert.equal(res.body.error.code, 'TEMPLATE_NOT_FOUND');
   });
 
   // 11. Race condition: debitBalance returns false
@@ -375,15 +402,6 @@ describe('Agent Provisioning API', () => {
   test('Card fetch failure → still returns 202 (fallback values used)', async () => {
     const app = createTestApp({
       agentCardFetcher: async () => null,
-      workspacesDbOverrides: {
-        findOne: async ({ slug }) => {
-          if (slug === '745218a5') {
-            return { slug: '745218a5', snapshot: { toolWindows: [] } };
-          }
-          return null;
-        },
-        createWorkspace: async () => ({ _id: 'fake', slug: 'new-slug' }),
-      },
     });
 
     const res = await supertest(app)
@@ -393,6 +411,34 @@ describe('Agent Provisioning API', () => {
 
     assert.equal(res.status, 202);
     assert.ok(res.body.agentAccountId);
+  });
+
+  // 12b. WorkspaceFactory receives synthesized agentDoc with JWT/card-derived NFT context
+  test('WorkspaceFactory receives synthesized agentDoc with JWT/card-derived NFT context', async () => {
+    let captured = null;
+    const app = createTestApp({
+      workspaceFactoryOverrides: {
+        provisionAgentWorkspace: async ({ agentDoc, tokenUri }) => {
+          captured = { agentDoc, tokenUri };
+          return { workspaceId: 'fake-ws-id', slug: 'new-workspace-slug' };
+        },
+      },
+    });
+
+    const res = await supertest(app)
+      .post('/treasury/camel-1/agents')
+      .set('Authorization', 'Bearer valid-token')
+      .send();
+
+    assert.equal(res.status, 202);
+    assert.ok(captured, 'WorkspaceFactory.provisionAgentWorkspace was called');
+    assert.equal(captured.agentDoc.agentId, '999888777');
+    assert.equal(captured.agentDoc.agentTokenId, '42');
+    assert.equal(captured.agentDoc.chainId, 1);
+    assert.equal(captured.agentDoc.contractAddress, '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef');
+    assert.deepEqual(captured.agentDoc.scope, ['generate', 'read']);
+    assert.equal(captured.agentDoc.profile.name, 'Test Agent');
+    assert.equal(captured.tokenUri, null, 'tokenUri null when neither JWT nor card carry one');
   });
 
   // 13. creditPoints failure → still returns 202 (non-fatal)
