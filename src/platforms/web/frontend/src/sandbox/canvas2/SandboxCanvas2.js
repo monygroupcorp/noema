@@ -844,6 +844,17 @@ export class SandboxCanvas2 extends Component {
   }
 
   _inputSchema(win) {
+    // Spell windows have no `tool`; their connectable inputs are the spell's
+    // exposed inputs, keyed `nodeId__paramKey` to match the factory binding
+    // resolver (WorkspaceFactory._cloneSpells) and the spell parameterMappings.
+    if (win.type === 'spell') {
+      const schema = {};
+      for (const inp of win.spell?.exposedInputs || []) {
+        if (!inp?.nodeId || !inp?.paramKey) continue;
+        schema[`${inp.nodeId}__${inp.paramKey}`] = { type: inp.type, required: true, name: inp.paramKey };
+      }
+      return schema;
+    }
     return win.tool?.inputSchema || win.tool?.metadata?.inputSchema || {};
   }
 
