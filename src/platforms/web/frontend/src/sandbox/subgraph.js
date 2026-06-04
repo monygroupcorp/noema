@@ -153,7 +153,7 @@ function buildPrimitiveNode(win) {
  *     primitiveOutputType?: string,
  *   }>,
  *   connections: Array<{ fromWindowId: string, fromOutput: string, toWindowId: string, toInput: string, type?: string }>,
- *   autoExposed: Array<{ nodeId: string, paramKey: string }>,
+ *   autoExposed: Array<{ nodeId: string, paramKey: string, type?: string }>,
  * }}
  */
 export function serializeSubgraph(engine, selectedNodeIds) {
@@ -229,7 +229,8 @@ export function serializeSubgraph(engine, selectedNodeIds) {
             if (!paramDef?.required) continue;
             const mapping = (node.parameterMappings || {})[paramKey];
             if (mapping) continue; // already has a static or nodeOutput
-            autoExposed.push({ nodeId, paramKey });
+            // Carry the param type so spell windows can render typed input anchors.
+            autoExposed.push({ nodeId, paramKey, ...(paramDef.type && { type: paramDef.type }) });
         }
     }
 

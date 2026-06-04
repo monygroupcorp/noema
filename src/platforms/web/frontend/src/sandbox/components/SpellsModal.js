@@ -202,9 +202,15 @@ export class SpellsModal extends Component {
           const node = (subgraph?.nodes || []).find(n => n.id === nodeId);
           const originalMapping = node?.parameterMappings?.[paramKey];
           const defaultValue = originalMapping?.type === 'static' ? originalMapping.value : undefined;
-          return defaultValue !== undefined
-            ? { nodeId, paramKey, defaultValue }
-            : { nodeId, paramKey };
+          // Carry the param type so spell windows can render typed input anchors
+          // (lets agent-context / upstream wires target this input on-canvas).
+          const type = node?.inputSchema?.[paramKey]?.type;
+          return {
+            nodeId,
+            paramKey,
+            ...(type && { type }),
+            ...(defaultValue !== undefined && { defaultValue }),
+          };
         });
 
       const body = {
