@@ -49,6 +49,13 @@ export interface RunpodSpec {
   /** Docker image version tag */
   imageVersion: string
   /**
+   * The on-pod runtime this spec targets — 'ComfyUI' (default) | 'llama.cpp' | 'vLLM' | …. Selects
+   * which runner the pod bootstraps and which client the dispatch layer submits to. RESERVED: the
+   * second-runtime work establishes this field now; the runner dispatch + bootstrap that consume it
+   * land in a GPU sprint. Absent → 'ComfyUI'.
+   */
+  runtime?: string
+  /**
    * Workflow template identifier — looked up in the template registry.
    * Corresponds to templateId in the workflow JSON on disk / in the DB.
    */

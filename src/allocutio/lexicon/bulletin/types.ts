@@ -38,6 +38,161 @@ export type LiveState =
   | { kind: 'generating' }
   | { kind: 'saving' }
 
+/**
+ * A model queued onto the session's loadout via `Mod • → Add`, not yet installed.
+ * `intellaId` is an Intella id (the same id-space as `Materia.installedModels` and
+ * what `Compiler._resolveModels` resolves), so the view can de-dupe queued-vs-installed
+ * and the dispatch path can stamp it onto `aditus._pinnedModels`. `genus` is narrowed
+ * to the two kinds the picker offers: a base `'model'` or a `'lora'`.
+ */
+export interface PendingModel {
+  intellaId: string
+  nomen: string
+  genus: 'model' | 'lora'
+}
+
+/**
+ * Loadout — the studio's model base, shown when the host opens `Mod •`. It REPLACES the
+ * bulletin body with a spec view: the container image, the inferred runtime shape, and the
+ * installed models grouped by architectura (unet / gguf / lora / …). Pure data; the view
+ * formats it. The adapter gathers it from `Materia.imageRef` + `installedModels`.
+ */
+export interface Loadout {
+  /** Container image the studio booted, e.g. 'stationthis/flux-comfyui:v1'. */
+  image?: string
+  /** Runtime shape inferred from the image — 'ComfyUI' | 'llama.cpp' | 'vLLM' | …. */
+  runtime?: string
+  /**
+   * Base models grouped by architectura (unet / gguf / …), each carrying the LoRAs trained
+   * for it (LoRAs are subordinate to their base via `baseIntellaId`). Empty = nothing installed.
+   */
+  categories: Array<{
+    architectura: string
+    bases: Array<{ nomen: string; loras: string[] }>
+  }>
+  /** LoRAs whose base model isn't installed — shown flat at the end so nothing is lost. */
+  looseLoras?: string[]
+  /** Accumulated weight footprint in GB (∑ flow footprints) vs the GPU's `Materia.vramGb` capacity.
+   *  The VRAM-budget stub — surfaced for info; co-hosting will enforce footprint ≤ capacity. */
+  vramGb?: number
+}
+
+/**
+ * Picker state for `Mod • → Add` — a sub-state of the `mod` submenu (active when
+ * `activeSubmenu === 'mod'` and this is set). Pure data: the adapter fills `items`
+ * (the CURRENT page, already sliced) and `pageCount` from the catalog, and the view
+ * renders one button per item plus filter/nav rows. `query` is set when the items
+ * came from a search rather than a browse. This shape is platform-neutral and is the
+ * piece a follow-up extracts into a shared `lexicon/picker/` module for `/arm` + other
+ * endpoints to reuse.
+ */
+/**
+ * Arm wizard — `/arm` configures a studio's *shape* before models: pick the container image,
+ * then the runtime/config, THEN add models (the picker). Image + config define the instance;
+ * models are downstream. v1 has one image + one config (ComfyUI), but the steps are real so a
+ * second image / a `llama-server` runtime slots in. Once config is chosen, the wizard hands off
+ * to the Mod • loadout/Add menu.
+ */
+/**
+ * A curated quick-start flow shown on the /arm preset step. `id` is the base family it scopes the
+ * model menu to (e.g. 'intella.flux-base'); the special id `'custom'` drops into the manual
+ * image→config path. The detail fields back the flow's detail card (what it bundles before you
+ * commit) — a flow is a base + LoRAs + a runtime/config + an image, so an advanced host can read
+ * the full shape first. All detail fields are optional (the chooser only needs id + label).
+ */
+export interface ArmPreset {
+  id: string
+  label: string
+  /** One-line summary shown on the detail card. */
+  blurb?: string
+  /** The base model(s) / nodes this flow installs. */
+  models?: string[]
+  /** The runtime/config it provisions (e.g. 'ComfyUI'). */
+  config?: string
+  /** The container image it runs on. */
+  image?: string
+  /** Rough weight footprint in GB (∑ model sizes) — the VRAM-budget stub; inert until co-hosting. */
+  vramGb?: number
+}
+
+export interface ArmState {
+  step: 'preset' | 'flowdetail' | 'image' | 'config'
+  /**
+   * Curated quick-start presets shown FIRST (e.g. FLUX / SDXL / Z-Image) — each a recognizable
+   * flow abstracting image+config+base. Tapping a name opens its detail card ('flowdetail'); the
+   * `+` commits it. `'custom'` drops into the manual image→config path (for advanced hosts — and,
+   * later, composing multiple flows/configs on one studio).
+   */
+  presets: ArmPreset[]
+  /** The preset whose detail card is open (step 'flowdetail'). */
+  flow?: ArmPreset
+  /** A transient notice on the chooser (e.g. a runtime-conflict rejection), cleared on next add/nav. */
+  note?: string
+  /** Available container images (Custom path — popular/only-one first). */
+  images: string[]
+  /** The chosen image (set at the 'config' step). */
+  image?: string
+  /** Available runtimes/configs for the chosen image (e.g. 'ComfyUI', later 'llama-server'). */
+  configs: string[]
+}
+
+/**
+ * Model detail card — shown when the host taps a model's name in the list (a `detail` sub-stage
+ * of the picker). Sources the reliably-populated structural fields; description appears when the
+ * record carries one. Ratings / comments / example images are a later content sprint.
+ */
+export interface ModelDetail {
+  intellaId: string
+  nomen: string
+  genus: 'model' | 'lora'
+  mount?: string        // ComfyUI folder (dest's first segment)
+  base?: string         // base model nomen (LoRAs)
+  trigger?: string      // LoRA trigger word
+  sizeGb?: number
+  provenance?: string   // sources[0].provenance
+  sourceUri?: string    // sources[0].uri
+  auctor?: string
+  versio?: string
+  description?: string
+}
+
+export interface PickerState {
+  /** 'categories' = choose a model type; 'list' = the paginated models; 'detail' = one model's card. */
+  stage: 'categories' | 'list' | 'detail'
+  /** Mount-location categories, popular-first (stage 'categories'). */
+  categories: string[]
+  /** The chosen mount/category (stage 'list'); undefined while choosing one. */
+  mount?: string
+  /** The current page's candidates (already sliced to page size; stage 'list'). */
+  items: PendingModel[]
+  /** 0-based page index. */
+  page: number
+  /** Total pages available for the current mount/query. */
+  pageCount: number
+  /** The search term, when results came from a search (flat across mounts; overrides mount). */
+  query?: string
+  /** The model card, when `stage === 'detail'` (the list state behind it is preserved for Back). */
+  detail?: ModelDetail
+  /**
+   * LoRA list base filter — the base families present in the data, derived from the loras'
+   * `baseIntellaId` (e.g. FLUX/SDXL/Illustrious), each with a count, plus an "All bases" entry.
+   * Set ⟺ the mount supports base filtering (the LoRA folder), which is also when the filter
+   * button shows. `baseFilter` is the selected family id (`''` = all); the button cycles them.
+   */
+  baseFamilies?: Array<{ id: string; label: string }>
+  baseFilter?: string
+  /** Transient one-line result of an "add by trigger" reply (e.g. "Added: milady · no match: foo"),
+   *  shown under the list and cleared on the next navigation. */
+  note?: string
+  /**
+   * Monotonic generation of the displayed item set — bumped whenever the items change
+   * (page/mount/search/filter). Encoded into each pick button's id (`mod.pick:<token>:<i>`);
+   * a tap whose token ≠ the current one is a stale button from a superseded view and is
+   * rejected, so a page-relative index can never resolve to the wrong model.
+   */
+  token: number
+}
+
 // The bulletin keyboard is just the shared neutral UI keyboard (aliased for history).
 import type { UiButton, UiKeyboard } from '../ui/Keyboard.js'
 export type BulletinButton = UiButton

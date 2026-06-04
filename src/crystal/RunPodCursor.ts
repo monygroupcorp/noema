@@ -1,5 +1,5 @@
 import type { Modus, Modorum } from '../types/modus.js'
-import type { Actum, ActumExecutio } from '../types/actum.js'
+import type { Actum, ActumExecutio, ModelRef } from '../types/actum.js'
 import type { Modo } from '../types/modo.js'
 import type { Cursor, CursorResult, Actorum } from '../types/cursus.js'
 import type { Materia } from '../types/materia.js'
@@ -8,6 +8,10 @@ import type { DeploymentumStore } from '../types/deploymentum.js'
 import type { Praefectus } from './Praefectus.js'
 import { getTrace } from '../lib/trace.js'
 import { tierOf, impetusFor } from '../ledger/rates.js'
+import { isCompiledSpec } from './comfyrunnerClient.js'
+import { makeLogger } from '../lib/logger.js'
+
+const log = makeLogger('cursor:runpod')
 
 /**
  * RunPodClient — the injectable seam between the cursor and any GPU pod substrate.
@@ -67,6 +71,9 @@ interface Config {
   warmFactory?: (materia: Materia) => RunPodClient
   /** Extracts the OCI image ref from a modus for Praefectus matching. Returns undefined to skip warm routing. */
   imageRefOf?: (modus: Modus) => string | undefined
+  /** Admission gate: before dispatching a gen onto a reused WARM pod, ensure the models it needs
+   *  are installed (awaiting any in-flight live-apply install). No-op on a cold start. */
+  admitWarm?: (materia: Materia, models: Array<{ id?: string }>) => Promise<void>
   /** When set, compiled specs are persisted by hash before submission. */
   deployments?: DeploymentumStore
   /**
@@ -81,7 +88,7 @@ interface Config {
 export class RunPodCursor implements Cursor {
   constructor(
     private readonly client: RunPodClient,
-    private readonly compile: (modus: Modus, aditus: Record<string, unknown>) => Promise<{ hash: string; input: unknown }>,
+    private readonly compile: (modus: Modus, aditus: Record<string, unknown>, pinnedModels?: ModelRef[]) => Promise<{ hash: string; input: unknown }>,
     private readonly modorum: Modorum,
     private readonly actorum: Actorum,
     private readonly config: Config,
@@ -96,7 +103,7 @@ export class RunPodCursor implements Cursor {
     const modus = await this.modorum.find(actum.modusId, actum.modusVersiono)
     if (!modus) throw new Error(`Modus '${actum.modusId}' not found`)
 
-    const { hash, input } = await this.compile(modus, actum.aditus)
+    const { hash, input } = await this.compile(modus, actum.aditus, actum.pinnedModels)
 
     if (this.config.deployments) {
       await this.config.deployments.upsert({
@@ -140,6 +147,15 @@ export class RunPodCursor implements Cursor {
     } else if (materia) {
       // No hospitia configured — at least record which Materia we landed on.
       await this.actorum.update(actum.id, { materiamId: materia.id }).catch(() => {})
+    }
+
+    // B4 admission gate: a reused warm pod may be missing a model this gen needs (one added live
+    // and still downloading, or never installed). Await its install — serialized with any in-flight
+    // live-apply — so the job's preflight finds the weights present instead of racing a concurrent
+    // download. No-op on a cold start (no materia) or when nothing's missing.
+    if (materia && this.config.admitWarm && isCompiledSpec(input)) {
+      await this.config.admitWarm(materia, input.models).catch(err =>
+        log.warn('warm admission install failed; job preflight will retry the download', { materiaId: materia.id, error: String(err) }))
     }
 
     const { id: externusJobId } = await client.submit({

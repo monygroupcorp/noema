@@ -114,6 +114,11 @@ export class FakeRunPodClient implements RunPodClient {
     // imageId:imageVersion === imageRefOf(modus), so the warm match hits.
     if (this.materiae) {
       const ociRef = (params.input as { image?: { ociRef?: string } })?.image?.ociRef
+      // The compiled spec's models are exactly what this pod "downloaded" — seed the studio's
+      // installedModels from them so the bulletin's Mod • loadout reflects a real model base
+      // (and pinned models from Mod • → Add show as installed after a fake gen).
+      const installedModels = ((params.input as { models?: Array<{ id?: string }> })?.models ?? [])
+        .map(m => m.id).filter((id): id is string => !!id)
       // Synthetic billed cold-start (matches what we report via onMetrics) so the
       // bootCostImpetus stamped on the materia looks realistic in the mock.
       const bootCostImpetus = computeBootCostImpetus(7 * 60_000, costPerHr)
@@ -128,6 +133,7 @@ export class FakeRunPodClient implements RunPodClient {
         status: 'idle',
         warmUntil: new Date(Date.now() + warmTtlMs),
         bootCostImpetus,
+        ...(installedModels.length ? { installedModels } : {}),
         ...(params.provisioningContext?.groupChatId ? { groupChatId: params.provisioningContext.groupChatId } : {}),
       }).catch(err => { log.warn('fake materia create failed', { error: String(err) }); return undefined })
       // Hospitium pairs the host (identified or anonymous-arcanum) to the materia

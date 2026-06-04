@@ -26,6 +26,20 @@ import { aggregateStatus } from '../lexicon/status/aggregate.js'
 import { StatusView } from '../lexicon/status/StatusView.js'
 import { classifyError } from '../../lib/classifyError.js'
 import { BulletinManager, type BulletinSink } from '../lexicon/bulletin/BulletinManager.js'
+import type { Loadout, PendingModel } from '../lexicon/bulletin/types.js'
+import { BulletinModelCatalog } from './BulletinModelCatalog.js'
+
+/** Infer the runtime shape from a studio's container image name (best-effort label for the
+ *  loadout view). ComfyUI is the common one today; vLLM / llama.cpp / Diffusers are coming. */
+function inferRuntime(image?: string): string | undefined {
+  if (!image) return undefined
+  const s = image.toLowerCase()
+  if (s.includes('comfy')) return 'ComfyUI'
+  if (s.includes('llama')) return 'llama.cpp'
+  if (s.includes('vllm'))  return 'vLLM'
+  if (s.includes('diffus')) return 'Diffusers'
+  return undefined
+}
 import { DeliveryMenu, type DeliverySink } from '../lexicon/delivery/DeliveryMenu.js'
 import { ReactionController } from './reactions/ReactionController.js'
 import type { UiKeyboard } from '../lexicon/ui/Keyboard.js'
@@ -97,6 +111,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   private readonly pendingShareTokens = new Map<string, { token: string; expiresAt: number }>()
   private static readonly PENDING_SHARE_TOKEN_TTL_MS = 5 * 60 * 1000
 
+  // Mod • → Add catalog + search (list/search deps + force-reply reply-capture).
+  private readonly modelCatalog: BulletinModelCatalog
+
   // /status message ids per (chat, user) — enables Refresh-in-place edits.
   private readonly statusMessages = new Map<string, { chatId: number; messageId: number }>()
 
@@ -115,6 +132,12 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     botStartupTime?: number
     materiae?: MateriaStore
     terminatePod?: (podId: string) => Promise<void>
+    /** `/arm` Start — provision a warm studio (no gen) with the loadout. Container-wired
+     *  (fake: create a warm Materia; real: SecurePodClient provision+park). Absent → no Start. */
+    provisionStudio?: (opts: { models: PendingModel[]; runtime?: string }) => Promise<{ podId: string; gpuType?: string; costPerHr?: number; provisionMs?: number } | null>
+    /** Live model-apply — download model(s) onto a warm pod (no gen) + merge into installedModels.
+     *  Container-wired (fake: simulated; real: comfyrunner /install). Absent → adds always queue. */
+    installStudioModels?: (podId: string, intellaIds: string[]) => Promise<{ installedModels: string[] } | null>
     acta?: { findById(id: string): Promise<Actum | null> }
     cancelActum?: (actumId: string, reason: string) => Promise<boolean>
     /** Host-guest bond store — when present, group provisionings get their admin set
@@ -142,6 +165,12 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     this.sender = deps.sender
     this.identity = deps.identity
 
+    // Mod • → Add catalog/search backend (own module — keeps this adapter lean).
+    this.modelCatalog = new BulletinModelCatalog({
+      intellarum: deps.intellarum,
+      sender: this.sender,
+    })
+
     // The bulletin subsystem: it owns the journal/ledger/timers/render; we give it a
     // sink (how to put messages on Telegram) and the pod-control deps it needs.
     this.bulletins = new BulletinManager({
@@ -152,6 +181,21 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       drainStudio:   (podId) => this._drainStudio(podId),
       fetchShareUrl: (podId) => this._fetchShareUrl(podId),
       fetchLoadout:  (podId) => this._fetchLoadout(podId),
+      listCategories: () => this.modelCatalog.listCategories(),
+      listMount: (mount, opts) => this.modelCatalog.listMount(mount, opts),
+      searchModels: (query) => this.modelCatalog.search(query),
+      resolveTriggers: (text, opts) => this.modelCatalog.resolveTriggers(text, opts),
+      fetchDetail: (intellaId) => this.modelCatalog.detail(intellaId),
+      // /arm wizard — flows derived from the base models actually in the catalog (one per family,
+      // each with a detail card), then Custom for the manual image→config path. `id` is the base
+      // family each flow scopes the model menu to. The list grows as new base weights are added.
+      listPresets: () => this.modelCatalog.listFlows(),
+      listImages: async () => this.modelCatalog.listImages(),
+      listConfigs: async (image) => this.modelCatalog.configsForImage(image),
+      startStudio: (_chatId, opts) => (deps.provisionStudio ? deps.provisionStudio(opts) : Promise.resolve(null)),
+      ...(deps.installStudioModels ? { installModels: (podId, ids) => deps.installStudioModels!(podId, ids) } : {}),
+      promptSearch: (chatId, hostUserId) => this.modelCatalog.promptSearch(chatId, hostUserId),
+      promptTrigger: (chatId, hostUserId) => this.modelCatalog.promptTrigger(chatId, hostUserId),
       autoSettleMs: deps.autoSettleMs,
     })
 
@@ -180,6 +224,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       sendStart: (chatId) => this._sendStart(chatId),
       ack: (chatId, messageId) => { void this._react(chatId, messageId, REACTION.ok) },
       showStatus: (userId, chatId) => this._showStatus(userId, chatId),
+      arm: (userId, chatId) => { this.chatIds.set(`telegram:${userId}`, chatId); void this.bulletins.arm(chatId, userId) },
     })
 
     // Wire router callbacks
@@ -245,6 +290,23 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         state = { ...(state ?? {}), shareTokenHint: pending.token }
       }
     }
+
+    // Mod • → Add: fold the chat's queued loadout onto the flow as `pinnedModels`. The
+    // Compiler unions them into spec.models so the missing weights download on this gen.
+    // Cleared at dispatch (queued once, not re-applied). Skipped for the chat modus — the
+    // pending loadout belongs to the image studio in this chat, not a /chat turn.
+    const chatId = this.chatIds.get(userKey)
+    if (chatId !== undefined && (state?.modusId as string | undefined) !== 'modus.chatgpt') {
+      const queued = this.bulletins.pendingModelsFor(chatId)
+      if (queued.length > 0) {
+        const pinnedModels = queued.map(m => m.genus === 'lora'
+          ? { role: 'lora',       id: m.intellaId, dest: `models/loras/${m.intellaId}.safetensors` }
+          : { role: 'checkpoint', id: m.intellaId, dest: `models/checkpoints/${m.intellaId}.safetensors` })
+        state = { ...(state ?? {}), pinnedModels }
+        this.bulletins.clearPendingFor(chatId)
+      }
+    }
+
     await this.router.enter('execute', 'telegram', userId, identity, state ? { state } : undefined)
   }
 
@@ -302,30 +364,49 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     return `https://t.me/${this.deps.botUsername}?start=pod_${token}`
   }
 
-  /** Mod • → View loadout: read Materia.installedModels, resolve each via
-   *  intellarum.find for a human label, return a one-line summary. */
-  private async _fetchLoadout(podId: string): Promise<string | undefined> {
+  /** Mod • body: the studio's loadout (model base) — container image, inferred runtime,
+   *  and installed models grouped by mount location. The view formats it. */
+  private async _fetchLoadout(podId: string): Promise<Loadout | undefined> {
     if (!this.deps.materiae) return undefined
     const pods = await this.deps.materiae.findActive().catch(() => [])
     const m = pods.find(p => p.externusId === podId)
     if (!m) return undefined
+
     const ids = m.installedModels ?? []
-    if (ids.length === 0) return 'Loadout: empty (no models installed yet)'
-    if (!this.deps.intellarum) {
-      // Fallback to raw ids when no registry — better than nothing.
-      return `Loadout: ${ids.length} model${ids.length === 1 ? '' : 's'} (${ids.slice(0, 3).join(', ')}${ids.length > 3 ? `, +${ids.length - 3}` : ''})`
+    // Show a friendly image LABEL (not the raw OCI ref — a 'ghcr.io/…' would auto-link in Telegram).
+    // Prefer the runtime stamped on the Materia; fall back to inferring it from the image.
+    const runtime = m.runtime ?? inferRuntime(m.imageRef)
+    const header = { ...(m.imageRef ? { image: this.modelCatalog.imageLabel(m.imageRef) } : {}), ...(runtime ? { runtime } : {}) }
+    if (ids.length === 0 || !this.deps.intellarum) return { ...header, categories: [] }
+
+    const intellae = (await Promise.all(ids.map(id => this.deps.intellarum!.find(id).catch(() => null))))
+      .filter((i): i is NonNullable<typeof i> => !!i)
+    const nameOf = (i: typeof intellae[number]) => i.nomen || i.slug || i.id
+    // Mount location = the meaningful ComfyUI folder (unet / vae / loras / clip / checkpoints …),
+    // normalizing the migrated 'models/<folder>/…' prefix so loras don't land under a moot 'models'.
+    const mountOf = (i: typeof intellae[number]) => (i.dest ?? '').replace(/^models\//, '').split('/')[0] || i.architectura || i.genus || 'other'
+
+    // LoRAs are subordinate to their base (Intella.baseIntellaId). Bucket them by base id.
+    const lorasByBase = new Map<string, string[]>()
+    for (const i of intellae) {
+      if (i.genus !== 'lora') continue
+      const key = i.baseIntellaId ?? '∅'
+      const arr = lorasByBase.get(key); if (arr) arr.push(nameOf(i)); else lorasByBase.set(key, [nameOf(i)])
     }
-    const intellae = await Promise.all(ids.map(id => this.deps.intellarum!.find(id).catch(() => null)))
-    const base   = intellae.find(i => i?.genus !== 'lora')
-    const loras  = intellae.filter((i): i is NonNullable<typeof i> => !!i && i.genus === 'lora')
-    const parts: string[] = []
-    if (base) parts.push(base.nomen)
-    if (loras.length) {
-      const names = loras.slice(0, 3).map(l => l.nomen ?? l.slug ?? l.id)
-      const more  = loras.length > 3 ? `, +${loras.length - 3}` : ''
-      parts.push(`${loras.length} LoRA${loras.length === 1 ? '' : 's'} (${names.join(', ')}${more})`)
+    // Group base models by mount location; nest each base's LoRAs beneath it.
+    const byMount = new Map<string, Array<{ nomen: string; loras: string[] }>>()
+    const installedBaseIds = new Set<string>()
+    for (const i of intellae) {
+      if (i.genus === 'lora') continue
+      installedBaseIds.add(i.id)
+      const mount = mountOf(i)
+      const base = { nomen: nameOf(i), loras: lorasByBase.get(i.id) ?? [] }
+      const arr = byMount.get(mount); if (arr) arr.push(base); else byMount.set(mount, [base])
     }
-    return parts.length ? `Loadout: ${parts.join(' + ')}` : `Loadout: ${ids.length} models`
+    const categories = [...byMount].map(([architectura, bases]) => ({ architectura, bases }))
+    // LoRAs whose base isn't installed (or has no baseIntellaId) → flat fallback.
+    const looseLoras = [...lorasByBase].flatMap(([baseId, names]) => installedBaseIds.has(baseId) ? [] : names)
+    return { ...header, categories, ...(looseLoras.length ? { looseLoras } : {}) }
   }
 
   // -------------------------------------------------------------------------
@@ -391,6 +472,21 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // Store chatId for later use (rendering)
     this.chatIds.set(`telegram:${userId}`, chatId)
 
+    // Mod • → Add: a reply to a force-reply prompt carries either a search term or trigger word(s).
+    const repliedTo = message.reply_to_message?.message_id
+    if (repliedTo !== undefined) {
+      const reply = this.modelCatalog.takeReply(repliedTo, chatId, userId, text)
+      if (reply !== null) {
+        // Clear the exchange so the chat stays clean: the prompt (force-reply object) and
+        // the host's reply both vanish; the picker re-renders with the results.
+        void this.sender.deleteMessage?.(chatId, repliedTo).catch(() => {})
+        void this.sender.deleteMessage?.(chatId, message.message_id).catch(() => {})
+        if (reply.kind === 'trigger') await this.bulletins.applyPickerTriggers(chatId, reply.text)
+        else await this.bulletins.applyPickerSearch(chatId, reply.text)
+        return
+      }
+    }
+
     if (text.startsWith('/')) {
       await this._handleCommand(userId, chatId, text, message.message_id)
     } else {
@@ -448,9 +544,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     if (!query.data) return
 
-    // Session bulletin — warm stepper / confirm / refresh / time / kill
+    // Session bulletin — warm stepper / confirm / refresh / kill / Mod • picker.
+    // Slice off the `bul:` prefix rather than split on ':' — picker ids carry their own
+    // colon suffix (`mod.pick:3`, `mod.filter:lora`, `mod.page:next`) that a split would drop.
     if (query.data.startsWith('bul:') && chatId) {
-      const action = query.data.split(':')[1] ?? ''
+      const action = query.data.slice(4)
       await this.bulletins.handleControl(chatId, String(query.from.id), action)
       return
     }

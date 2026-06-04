@@ -326,3 +326,35 @@ test('keepWarm: terminates pod (no Materia registered) when bootstrap SSH throws
   assert.ok(terminateSpy.calls.length > 0, 'expected terminatePod call')
   assert.equal(store.createCalls.length, 0)
 })
+
+// ── provisionStudio (/arm Start, Part A) ───────────────────────────────────────
+
+test('provisionStudio provisions + parks a warm Materia WITHOUT submitting a job', async () => {
+  const { fetch, calls } = makeFetchMock('pod-studio')
+  const store = makeWarmMateriaStore()
+  const client = makeClient(makeConfig({ keepWarm: true }), () => makeSshTransport(), fetch, store as never)
+  const res = await client.provisionStudio({ runtime: 'ComfyUI' })
+
+  assert.ok(res, 'returns pod telemetry')
+  assert.equal(res!.podId, 'pod-studio')
+  assert.equal(typeof res!.provisionMs, 'number')
+  assert.equal(store.createCalls.length, 1, 'a warm Materia was parked')
+  const parked = store.createCalls[0] as { status: string; externusId: string; runtime?: string }
+  assert.equal(parked.status, 'idle', 'parked idle (warm), not running a gen')
+  assert.equal(parked.externusId, 'pod-studio')
+  assert.equal(parked.runtime, 'ComfyUI', 'runtime stamped on the studio')
+  assert.equal(terminateSpy.calls.length, 0, 'a healthy provision is not terminated')
+  // No gen ran: comfyrunner /job is never POSTed.
+  assert.ok(!calls.some(c => c.method === 'POST' && c.url.endsWith('/job')), 'no job submitted')
+})
+
+test('provisionStudio terminates the pod and returns null when bootstrap fails', async () => {
+  const brokenSsh = makeSshTransport({ async exec(cmd) { if (cmd === 'true') return ''; throw new Error('SSH refused') } })
+  const { fetch } = makeFetchMock('pod-studio-fail')
+  const store = makeWarmMateriaStore()
+  const client = makeClient(makeConfig({ keepWarm: true }), () => brokenSsh, fetch, store as never)
+  const res = await client.provisionStudio({})
+  assert.equal(res, null, 'returns null on failure')
+  assert.equal(store.createCalls.length, 0, 'nothing parked')
+  assert.ok(terminateSpy.calls.length > 0, 'the half-provisioned pod is terminated')
+})

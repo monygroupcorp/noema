@@ -19,6 +19,10 @@ function makeSink() {
 }
 const tick = (ms: number) => new Promise(r => setTimeout(r, ms))
 const cb = (kb: BulletinKeyboard) => kb.flat().map(b => b.data)
+/** The pick action (no `bul:` prefix) for the i-th item in the current keyboard — carries
+ *  the live generation token, so tests drive picks the way the adapter would. */
+const pickAction = (kb: BulletinKeyboard, i: number): string =>
+  cb(kb).map(d => d.slice(4)).find(a => a.startsWith('mod.pick:') && a.endsWith(`:${i}`))!
 
 test('register posts the setup bulletin; stages drive the journal; complete shows stats', async () => {
   const s = makeSink()
@@ -185,4 +189,503 @@ test('a fresh actum after a receipt opens a new bulletin (new message)', async (
 
   m.register(456, 'a2', '123')                // new session → new post
   assert.equal(s.posts.length, postsBefore + 1, 'fresh bulletin is a new message')
+})
+
+// ── Mod • → Add picker ───────────────────────────────────────────────────────
+
+const CHECKPOINTS = [
+  { intellaId: 'intella.flux', nomen: 'FLUX', genus: 'model' as const },
+  { intellaId: 'intella.sdxl', nomen: 'SDXL', genus: 'model' as const },
+]
+const LORAS = Array.from({ length: 20 }, (_, i) => ({ intellaId: `intella.l${i}`, nomen: `LoRA ${i}`, genus: 'lora' as const }))
+const catalogDeps = () => ({
+  listCategories: async () => ['checkpoints', 'loras'],
+  listMount: async (mount: string, opts: { baseFilter?: string }) =>
+    mount === 'loras'
+      ? { items: LORAS, baseFamilies: [{ id: '', label: 'All bases (20)' }, { id: 'intella.flux-base', label: 'FLUX (20)' }], baseFilter: opts.baseFilter ?? '' }
+      : { items: CHECKPOINTS },
+  searchModels: async (q: string) => LORAS.filter(l => l.nomen.toLowerCase().includes(q.toLowerCase())),
+})
+
+/** Register → confirm → open the Mod • submenu, host-side. Returns sink + manager. */
+async function modOpen(extra: Record<string, unknown> = {}) {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, autoSettleMs: 999_999, ...extra })
+  m.register(456, 'a1', '123')
+  m.onStage('a1', 'provisioning')
+  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  m.onComplete('a1', { costUsd: 0.08, execMs: 12_000, podId: 'pod-1' })
+  await m.handleControl(456, '123', 'confirm')
+  await m.handleControl(456, '123', 'mod')
+  return { s, m }
+}
+
+test('mod.add opens the category stage; mod.cat descends into a paginated list', async () => {
+  const { s, m } = await modOpen(catalogDeps())
+  await m.handleControl(456, '123', 'mod.add')
+  let data = cb(s.lastKb())
+  assert.ok(data.includes('bul:mod.cat:checkpoints') && data.includes('bul:mod.cat:loras'), 'mount categories shown')
+  assert.ok(!data.some(d => d.startsWith('bul:mod.pick:')), 'no items at the category stage')
+  assert.match(s.lastText(), /Add a model — pick a type/)
+
+  await m.handleControl(456, '123', 'mod.cat:loras')
+  data = cb(s.lastKb())
+  assert.equal(data.filter(d => d.startsWith('bul:mod.pick:')).length, 8, 'page size 8')
+  assert.ok(data.includes('bul:mod.basefilter'), 'LoRA mount shows the base filter')
+  assert.ok(data.includes('bul:mod.page:next') && !data.includes('bul:mod.page:prev'), 'first of 3 pages')
+  assert.match(s.lastText(), /loras · page 1\/3/)
+
+  await m.handleControl(456, '123', 'mod.page:next')
+  assert.match(s.lastText(), /page 2\/3/)
+  assert.ok(cb(s.lastKb()).includes('bul:mod.page:prev'), 'Prev appears on page 2')
+})
+
+test('mod.basefilter cycles through the base families (re-fetches per selection)', async () => {
+  const calls: Array<string | undefined> = []
+  const families = [{ id: '', label: 'All bases (20)' }, { id: 'intella.flux-base', label: 'FLUX (20)' }]
+  const deps = { ...catalogDeps(), listMount: async (mount: string, opts: { baseFilter?: string }) => { calls.push(opts.baseFilter); return mount === 'loras' ? { items: LORAS, baseFamilies: families, baseFilter: opts.baseFilter ?? '' } : { items: CHECKPOINTS } } }
+  const { s, m } = await modOpen(deps)
+  await m.handleControl(456, '123', 'mod.add')
+  await m.handleControl(456, '123', 'mod.cat:loras')   // default → All
+  await m.handleControl(456, '123', 'mod.basefilter')  // All → FLUX
+  await m.handleControl(456, '123', 'mod.basefilter')  // FLUX → All (wraps)
+  assert.deepEqual(calls, [undefined, 'intella.flux-base', ''], 'fetches default, then flux, then back to all')
+})
+
+test('mod.pick (＋) queues the item and STAYS in the list for rapid-add', async () => {
+  const { s, m } = await modOpen(catalogDeps())
+  await m.handleControl(456, '123', 'mod.add')
+  await m.handleControl(456, '123', 'mod.cat:checkpoints')
+  await m.handleControl(456, '123', pickAction(s.lastKb(), 1))   // SDXL
+  assert.deepEqual([...m.pendingModelsFor(456)].map(p => p.intellaId), ['intella.sdxl'])
+  const data = cb(s.lastKb())
+  assert.ok(data.some(d => d.startsWith('bul:mod.pick:')), 'still in the list (not closed)')
+  assert.match(s.lastText(), /Standby: SDXL/, 'queued tail shows below the list')
+})
+
+test('add-by-trigger resolves trigger word(s) → standby, stays in the list, shows the result', async () => {
+  const resolveTriggers = async (text: string) => {
+    const toks = text.toLowerCase().split(/[\s,]+/).filter(Boolean)
+    return {
+      matched: toks.includes('milady') ? [{ intellaId: 'intella.milady', nomen: 'Milady', genus: 'lora' as const }] : [],
+      unmatched: toks.filter(t => t !== 'milady'),
+    }
+  }
+  const { s, m } = await modOpen({ ...catalogDeps(), resolveTriggers, promptTrigger: async () => {} })
+  await m.handleControl(456, '123', 'mod.add')
+  await m.handleControl(456, '123', 'mod.cat:loras')
+  await m.applyPickerTriggers(456, 'milady mld retro')
+  assert.deepEqual([...m.pendingModelsFor(456)].map(p => p.intellaId), ['intella.milady'], 'matched LoRA added to standby')
+  assert.match(s.lastText(), /Added: Milady/, 'result line shows what was added')
+  assert.match(s.lastText(), /no match: mld, retro/, 'unmatched tokens surfaced')
+  assert.match(s.lastText(), /Standby: Milady/, 'also lands in the standby tail')
+  assert.ok(cb(s.lastKb()).some(d => d.startsWith('bul:mod.pick:')), 'stays in the list for rapid add')
+})
+
+test('mod.trigger surfaces the trigger prompt, host-only', async () => {
+  let prompted = 0
+  const { m } = await modOpen({ ...catalogDeps(), promptTrigger: async () => { prompted++ } })
+  await m.handleControl(456, '123', 'mod.add')
+  await m.handleControl(456, '999', 'mod.trigger')   // not the host
+  assert.equal(prompted, 0, 'a guest cannot open the trigger prompt')
+  await m.handleControl(456, '123', 'mod.trigger')   // the host
+  assert.equal(prompted, 1, 'the host opens the trigger prompt')
+})
+
+test('Mod • Add on a WARM studio installs live (no gen), not Standby', async () => {
+  const installed: Array<{ podId: string; ids: string[] }> = []
+  const deps = {
+    ...catalogDeps(),
+    installModels: async (podId: string, ids: string[]) => { installed.push({ podId, ids }); return { installedModels: ids } },
+    fetchLoadout: async () => ({ categories: [], image: 'img', runtime: 'ComfyUI' }),
+  }
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...deps })
+  m.register(456, 'a1', '123')
+  await m.handleControl(456, '123', 'confirm')                              // confirmed
+  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 })
+  m.onComplete('a1', { costUsd: 0.05, execMs: 10_000, podId: 'pod-1' })     // gen done → warm-idle
+  await m.handleControl(456, '123', 'mod')
+  await m.handleControl(456, '123', 'mod.add')
+  await m.handleControl(456, '123', 'mod.cat:checkpoints')
+  await m.handleControl(456, '123', pickAction(s.lastKb(), 1))              // + SDXL
+  await tick(20)                                                            // let the background install settle
+  assert.deepEqual(installed, [{ podId: 'pod-1', ids: ['intella.sdxl'] }], 'installed live onto the warm pod')
+  assert.equal(m.pendingModelsFor(456).length, 0, 'not queued to Standby — it went straight to the pod')
+})
+
+test('mod.pick with an out-of-range index is a no-op (correct token, bad index)', async () => {
+  const { s, m } = await modOpen(catalogDeps())
+  await m.handleControl(456, '123', 'mod.add'); await m.handleControl(456, '123', 'mod.cat:checkpoints')
+  const token = pickAction(s.lastKb(), 0).split(':')[1]   // mod.pick:<token>:0
+  await m.handleControl(456, '123', `mod.pick:${token}:99`)
+  assert.deepEqual([...m.pendingModelsFor(456)], [], 'nothing queued')
+  assert.ok(cb(s.lastKb()).some(d => d.startsWith('bul:mod.pick:')), 'picker still open')
+})
+
+test('mod.pick with a stale token is rejected (button from a superseded view)', async () => {
+  const { s, m } = await modOpen(catalogDeps())
+  await m.handleControl(456, '123', 'mod.add'); await m.handleControl(456, '123', 'mod.cat:loras')
+  const stale = pickAction(s.lastKb(), 0)              // valid for the studio-base page
+  await m.handleControl(456, '123', 'mod.basefilter')  // supersede it — new token, new items
+  await m.handleControl(456, '123', stale)              // tap the OLD button
+  assert.deepEqual([...m.pendingModelsFor(456)], [], 'stale-token pick queues nothing')
+  assert.ok(cb(s.lastKb()).some(d => d.startsWith('bul:mod.pick:')), 'still showing the LoRA list')
+})
+
+test('picking a second base model replaces the first (FCFS) via the manager', async () => {
+  const { s, m } = await modOpen(catalogDeps())
+  await m.handleControl(456, '123', 'mod.add'); await m.handleControl(456, '123', 'mod.cat:checkpoints')
+  await m.handleControl(456, '123', pickAction(s.lastKb(), 0))   // FLUX
+  await m.handleControl(456, '123', 'mod.add'); await m.handleControl(456, '123', 'mod.cat:checkpoints')
+  await m.handleControl(456, '123', pickAction(s.lastKb(), 1))   // SDXL replaces FLUX
+  assert.deepEqual([...m.pendingModelsFor(456)].map(p => p.intellaId), ['intella.sdxl'])
+})
+
+test('submenu.back walks list → categories → loadout → top-3', async () => {
+  const { s, m } = await modOpen(catalogDeps())
+  await m.handleControl(456, '123', 'mod.add'); await m.handleControl(456, '123', 'mod.cat:loras')
+  await m.handleControl(456, '123', 'submenu.back')   // list → categories
+  let data = cb(s.lastKb())
+  assert.ok(data.includes('bul:mod.cat:loras') && !data.some(d => d.startsWith('bul:mod.pick:')), 'back at the category stage')
+
+  await m.handleControl(456, '123', 'submenu.back')   // categories → loadout (close picker)
+  data = cb(s.lastKb())
+  assert.ok(data.includes('bul:mod.add') && !data.some(d => d.startsWith('bul:mod.cat:')), 'back on mod rows')
+
+  await m.handleControl(456, '123', 'submenu.back')   // submenu → top-3
+  assert.deepEqual(cb(s.lastKb()).sort(), ['bul:destroy', 'bul:mod', 'bul:share'].sort())
+})
+
+test('picker actions are host-only', async () => {
+  const { s, m } = await modOpen(catalogDeps())
+  await m.handleControl(456, '999', 'mod.add')   // not the host
+  assert.ok(!cb(s.lastKb()).some(d => d.startsWith('bul:mod.cat:')), 'no picker for a guest')
+})
+
+test('absent catalog deps → category stage opens with no types (just Search/Back)', async () => {
+  const { s, m } = await modOpen()   // no listCategories/listMount/searchModels
+  await m.handleControl(456, '123', 'mod.add')
+  const data = cb(s.lastKb())
+  assert.match(s.lastText(), /Add a model — pick a type/)
+  assert.ok(!data.some(d => d.startsWith('bul:mod.cat:')) && data.includes('bul:mod.search'))
+})
+
+test('applyPickerSearch runs the query (flat) and shows results with the term in the header', async () => {
+  const { s, m } = await modOpen(catalogDeps())
+  await m.handleControl(456, '123', 'mod.add')
+  await m.applyPickerSearch(456, 'LoRA 1')   // matches "LoRA 1" + "LoRA 10".."LoRA 19" = 11
+  assert.match(s.lastText(), /Search “LoRA 1”/)
+  const picks = cb(s.lastKb()).filter(d => d.startsWith('bul:mod.pick:'))
+  assert.equal(picks.length, 8, 'first page of 11 matches')
+  assert.ok(!cb(s.lastKb()).includes('bul:mod.basefilter'), 'no base filter on flat search results')
+})
+
+test('mod.detail opens the card; back returns to the list; mod.detailadd queues + closes', async () => {
+  const deps = { ...catalogDeps(), fetchDetail: async (id: string) => ({ intellaId: id, nomen: id === 'intella.flux' ? 'FLUX' : 'SDXL', genus: 'model' as const, mount: 'checkpoints', sizeGb: 6.5, provenance: 'miladystation' }) }
+  const { s, m } = await modOpen(deps)
+  await m.handleControl(456, '123', 'mod.add')
+  await m.handleControl(456, '123', 'mod.cat:checkpoints')
+  const detailId = cb(s.lastKb()).map(d => d.slice(4)).find(a => a.startsWith('mod.detail:') && a.endsWith(':0'))!
+  await m.handleControl(456, '123', detailId)   // tap FLUX's name
+  assert.match(s.lastText(), /FLUX/)
+  assert.match(s.lastText(), /Type: checkpoints/)
+  assert.ok(cb(s.lastKb()).includes('bul:mod.detailadd') && !cb(s.lastKb()).some(d => d.startsWith('bul:mod.pick:')), 'card, not list')
+
+  await m.handleControl(456, '123', 'submenu.back')   // card → list
+  assert.ok(cb(s.lastKb()).some(d => d.startsWith('bul:mod.detail:')), 'back on the list')
+
+  const detailId2 = cb(s.lastKb()).map(d => d.slice(4)).find(a => a.startsWith('mod.detail:') && a.endsWith(':0'))!
+  await m.handleControl(456, '123', detailId2)
+  await m.handleControl(456, '123', 'mod.detailadd')
+  assert.deepEqual([...m.pendingModelsFor(456)].map(p => p.intellaId), ['intella.flux'], 'added from the card')
+  assert.ok(!cb(s.lastKb()).some(d => d.startsWith('bul:mod.detail')), 'picker closed after add')
+})
+
+test('opening Mod • fetches the loadout and shows it as the body', async () => {
+  const loadout = { image: 'stationthis/flux-comfyui:v1', runtime: 'ComfyUI', categories: [{ architectura: 'unet', bases: [{ nomen: 'FLUX1-dev', loras: ['petravoice'] }] }] }
+  // modOpen sends 'mod' last; with fetchLoadout wired, the loadout fills the body on open.
+  const { s } = await modOpen({ fetchLoadout: async () => loadout })
+  await tick(0)   // let the lazy fetch's .then resolve + re-render
+  assert.match(s.lastText(), /Image: stationthis\/flux-comfyui:v1/)
+  assert.match(s.lastText(), /unet\n {2}FLUX1-dev\n {4}LoRA\n {6}petravoice/)
+})
+
+test('clearPendingFor empties the queued loadout', async () => {
+  const { s, m } = await modOpen(catalogDeps())
+  await m.handleControl(456, '123', 'mod.add')
+  await m.handleControl(456, '123', 'mod.cat:checkpoints')
+  await m.handleControl(456, '123', pickAction(s.lastKb(), 0))
+  assert.equal(m.pendingModelsFor(456).length, 1)
+  m.clearPendingFor(456)
+  assert.equal(m.pendingModelsFor(456).length, 0)
+})
+
+// ── /arm — preset-first wizard (preset → models, or Custom → image → config) ─
+
+const armDeps = () => ({
+  ...catalogDeps(),
+  listPresets: async () => [
+    { id: 'intella.flux-base', label: 'FLUX', blurb: 'FLUX flow.', models: ['FLUX.1 Schnell'], config: 'ComfyUI', image: 'PyTorch 2.4' },
+    { id: 'custom', label: 'Custom' },
+  ],
+  listImages: async () => ['img-a'],
+  listConfigs: async () => ['ComfyUI'],
+})
+
+test('/arm leads with presets; adding a flow stays on the chooser, then Proceed → Mod • menu', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, autoSettleMs: 30, ...armDeps() })
+  await m.arm(456, '123')
+  assert.ok(cb(s.lastKb()).includes('bul:arm.preset:0'), 'preset step shown first')
+  assert.match(s.lastText(), /choose a flow/)
+  assert.ok(!cb(s.lastKb()).includes('bul:arm.proceed'), 'no Proceed until a flow is added')
+  await tick(60)   // past auto-settle — nothing churns/reaps
+  await m.handleControl(456, '123', 'arm.preset:0')   // FLUX ＋ → stays on the chooser
+  assert.ok(cb(s.lastKb()).includes('bul:arm.preset:0'), 'still on the chooser — can add more flows')
+  assert.ok(cb(s.lastKb()).includes('bul:arm.proceed'), 'Proceed appears once a flow is added')
+  await m.handleControl(456, '123', 'arm.proceed')    // forward → Mod • menu
+  assert.ok(cb(s.lastKb()).includes('bul:mod.add'), 'Proceed → Mod • menu')
+})
+
+test('flows stack: add FLUX + Custom, both layered into one loadout, surfaced on the chooser', async () => {
+  const s = makeSink()
+  const deps = { ...armDeps(), listPresets: async () => [
+    { id: 'intella.flux-base', label: 'FLUX', models: ['FLUX.1 Schnell'], config: 'ComfyUI' },
+    { id: 'intella.sdxl-base', label: 'SDXL', models: ['SDXL base 1.0'], config: 'ComfyUI' },
+  ] }
+  const m = new BulletinManager({ sink: s.sink, ...deps })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:0')   // + FLUX
+  await m.handleControl(456, '123', 'arm.preset:1')   // + SDXL — stays, layered
+  assert.match(s.lastText(), /Added: FLUX, SDXL/, 'both flows surfaced on the chooser')
+  await m.handleControl(456, '123', 'arm.proceed')
+  const body = s.lastText()
+  assert.match(body, /FLUX\.1 Schnell/, 'FLUX base in the loadout')
+  assert.match(body, /SDXL base 1\.0/, 'SDXL base also in the loadout')
+})
+
+test('a studio is one runtime — a cross-runtime flow is rejected with a notice, not stacked', async () => {
+  const deps = { ...armDeps(), listPresets: async () => [
+    { id: 'flux', label: 'FLUX', models: ['FLUX.1 Schnell'], config: 'ComfyUI', image: 'PyTorch 2.4' },
+    { id: 'smollm', label: 'SmolLM2', models: ['SmolLM2 135M'], config: 'llama.cpp', image: 'llama.cpp server' },
+  ] }
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...deps })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:0')   // + FLUX (ComfyUI)
+  await m.handleControl(456, '123', 'arm.preset:1')   // + SmolLM2 (llama.cpp) → conflict
+  assert.match(s.lastText(), /This studio runs ComfyUI/, 'rejection notice shown')
+  assert.match(s.lastText(), /llama\.cpp/, 'names the runtime the flow needs')
+  await m.handleControl(456, '123', 'arm.proceed')
+  assert.match(s.lastText(), /FLUX\.1 Schnell/, 'FLUX stayed in the loadout')
+  assert.doesNotMatch(s.lastText(), /SmolLM2/, 'the conflicting flow was not added')
+})
+
+test('same-runtime flows still stack (two ComfyUI flows)', async () => {
+  const deps = { ...armDeps(), listPresets: async () => [
+    { id: 'flux', label: 'FLUX', models: ['FLUX.1 Schnell'], config: 'ComfyUI', image: 'PyTorch 2.4' },
+    { id: 'sdxl', label: 'SDXL', models: ['SDXL base 1.0'], config: 'ComfyUI', image: 'PyTorch 2.4' },
+  ] }
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...deps })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:0')
+  await m.handleControl(456, '123', 'arm.preset:1')
+  assert.match(s.lastText(), /Added: FLUX, SDXL/, 'both stack — same runtime, no conflict')
+})
+
+test('the flow chooser lays out like the model list — name → detail, ＋ → commit; Custom is single', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...armDeps() })
+  await m.arm(456, '123')
+  const kb = cb(s.lastKb())
+  assert.ok(kb.includes('bul:arm.flow:0'), 'FLUX name opens its detail card')
+  assert.ok(kb.includes('bul:arm.preset:0'), 'FLUX ＋ commits the flow directly')
+  assert.ok(kb.includes('bul:arm.preset:1'), 'Custom is a single commit button')
+  assert.ok(!kb.includes('bul:arm.flow:1'), 'Custom has no detail card')
+  assert.ok(kb.includes('bul:arm.cancel') && !kb.includes('bul:arm.back'), 'first layer offers Cancel, not Back')
+})
+
+test('a flow detail card shows what it bundles; Add returns to the chooser with it added', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...armDeps() })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.flow:0')    // open FLUX detail
+  assert.match(s.lastText(), /FLUX\.1 Schnell/, 'detail lists the bundled model')
+  assert.ok(cb(s.lastKb()).includes('bul:arm.flowadd'), 'detail offers Add this flow')
+  assert.ok(cb(s.lastKb()).includes('bul:arm.back'), 'detail backs to the chooser')
+  await m.handleControl(456, '123', 'arm.flowadd')   // add → back to chooser
+  assert.ok(cb(s.lastKb()).includes('bul:arm.flow:0'), 'lands back on the chooser to layer more')
+  assert.ok(cb(s.lastKb()).includes('bul:arm.proceed'), 'Proceed available once added')
+  await m.handleControl(456, '123', 'arm.proceed')
+  assert.ok(cb(s.lastKb()).includes('bul:mod.add'), 'Proceed lands in the Mod • menu')
+})
+
+test('committing a flow renders the resolved spec (image + runtime + models) like a Custom build', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...armDeps() })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:0')   // FLUX ＋
+  await m.handleControl(456, '123', 'arm.proceed')    // → Mod • menu
+  const body = s.lastText()
+  assert.match(body, /Runtime: ComfyUI/, 'config shows as the runtime')
+  assert.match(body, /FLUX\.1 Schnell/, 'the bundled base model is listed')
+  assert.doesNotMatch(body, /No models installed/, 'a flow lands pre-filled, not empty')
+})
+
+test('Custom config lands on the same spec view (image + runtime, models added after)', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...armDeps() })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:1')   // Custom → image
+  await m.handleControl(456, '123', 'arm.image:0')    // → config
+  await m.handleControl(456, '123', 'arm.config:0')   // → Mod • menu
+  const body = s.lastText()
+  assert.match(body, /Image: img-a/, 'the chosen image shows')
+  assert.match(body, /Runtime: ComfyUI/, 'the chosen config shows as runtime')
+})
+
+test('cancel from the first layer dismisses cleanly — "cancelled", never "Pod shut down"', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...armDeps() })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.cancel')
+  assert.equal(cb(s.lastKb()).length, 0, 'the /arm wizard is dismissed')
+  assert.match(s.lastText(), /cancel/i, 'reads as cancelled')
+  assert.doesNotMatch(s.lastText(), /shut down/i, 'never a pod shut-down — no pod ever existed')
+})
+
+test('Custom after a flow skips the image chooser (image is fixed) → straight to config', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...armDeps() })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:0')   // + FLUX (fixes the image)
+  await m.handleControl(456, '123', 'arm.preset:1')   // Custom → should SKIP image
+  assert.ok(cb(s.lastKb()).includes('bul:arm.config:0'), 'lands on the config step, not the image step')
+  assert.ok(!cb(s.lastKb()).includes('bul:arm.image:0'), 'image chooser is skipped — a studio is one image')
+  await m.handleControl(456, '123', 'arm.back')       // back from config → chooser, not the skipped image step
+  assert.ok(cb(s.lastKb()).includes('bul:arm.preset:0'), 'back skips the absent image step, returns to the chooser')
+})
+
+test('/arm Custom → image → config → models', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...armDeps() })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:1')   // Custom
+  assert.ok(cb(s.lastKb()).includes('bul:arm.image:0'), 'Custom → image step')
+  await m.handleControl(456, '123', 'arm.image:0')
+  assert.ok(cb(s.lastKb()).includes('bul:arm.config:0'), 'config step')
+  await m.handleControl(456, '123', 'arm.config:0')
+  assert.ok(cb(s.lastKb()).includes('bul:mod.add'), 'lands in the Mod • menu')
+})
+
+test('/arm preset auto-scopes the LoRA list to the preset base family', async () => {
+  // listMount echoes the requested baseFilter so we can assert the scope reached it.
+  const seen: Array<string | undefined> = []
+  const deps = { ...armDeps(), listMount: async (mount: string, opts: { baseFilter?: string }) => { if (mount === 'loras') seen.push(opts.baseFilter); return mount === 'loras' ? { items: LORAS, baseFamilies: [{ id: '', label: 'All' }, { id: 'intella.flux-base', label: 'FLUX' }], baseFilter: opts.baseFilter ?? '' } : { items: CHECKPOINTS } } }
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...deps })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:0')   // + FLUX → armBase = intella.flux-base
+  await m.handleControl(456, '123', 'arm.proceed')    // → Mod • menu
+  await m.handleControl(456, '123', 'mod.add')
+  await m.handleControl(456, '123', 'mod.cat:loras')
+  assert.deepEqual(seen, ['intella.flux-base'], 'loras opened scoped to the preset base, not All')
+})
+
+test('/arm back walks config → image → preset → dismiss', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...armDeps() })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:1')   // Custom → image
+  await m.handleControl(456, '123', 'arm.image:0')    // → config
+  await m.handleControl(456, '123', 'arm.back')       // config → image
+  assert.ok(cb(s.lastKb()).includes('bul:arm.image:0'), 'back at the image step')
+  await m.handleControl(456, '123', 'arm.back')       // image → preset
+  assert.ok(cb(s.lastKb()).includes('bul:arm.preset:0'), 'back at the preset step')
+  await m.handleControl(456, '123', 'arm.back')       // preset → dismiss
+  assert.equal(cb(s.lastKb()).length, 0, '/arm menu dismissed')
+})
+
+test('back from the Mod • menu of an armed studio returns to the flow chooser (layer another flow)', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...armDeps() })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:0')   // + FLUX
+  await m.handleControl(456, '123', 'arm.proceed')    // → Mod • menu
+  // queue a model so we can prove the loadout survives the hop back to the chooser
+  await m.handleControl(456, '123', 'mod.add')
+  await m.handleControl(456, '123', 'mod.cat:checkpoints')
+  await m.handleControl(456, '123', pickAction(s.lastKb(), 0))
+  await m.handleControl(456, '123', 'submenu.back')   // list → categories
+  await m.handleControl(456, '123', 'submenu.back')   // categories → Mod • menu
+  await m.handleControl(456, '123', 'submenu.back')   // Mod • → flow chooser (not the top-3)
+  assert.ok(cb(s.lastKb()).includes('bul:arm.preset:0'), 'back from Mod • re-opens the flow + Custom chooser')
+  assert.equal(m.pendingModelsFor(456).length, 1, 'the queued loadout survives the hop back')
+})
+
+test('a failed Start leaves the studio reading "armed", never the warm "keep cooking" nudge', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({
+    sink: s.sink, ...armDeps(),
+    startStudio: async () => null,   // provision failed → no pod bound
+  })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:0')   // + FLUX
+  await m.handleControl(456, '123', 'arm.proceed')    // → Mod • menu
+  await m.handleControl(456, '123', 'mod.start')      // attempt → fails → activeSubmenu null, still armed
+  assert.match(s.lastText(), /armed/i, 'a pod-less armed studio says it is armed')
+  assert.doesNotMatch(s.lastText(), /keep cooking/i, 'does not imply a warm pod is resting')
+})
+
+test('/arm Start provisions a warm studio without a gen, then hides Start', async () => {
+  const s = makeSink()
+  const provisioned: Array<{ models: unknown[] }> = []
+  const m = new BulletinManager({
+    sink: s.sink, ...armDeps(),
+    startStudio: async (_c: number, opts: { models: unknown[] }) => {
+      provisioned.push(opts)
+      return { podId: 'studio-1', gpuType: 'RTX 4090', costPerHr: 0.69, provisionMs: 20_000 }
+    },
+  })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:0')   // + FLUX
+  await m.handleControl(456, '123', 'arm.proceed')    // → Mod • menu
+  assert.ok(cb(s.lastKb()).includes('bul:mod.start'), 'an armed, pod-less studio offers Start')
+  // build a one-model loadout, then walk back to the Mod • menu and launch
+  await m.handleControl(456, '123', 'mod.add')
+  await m.handleControl(456, '123', 'mod.cat:checkpoints')
+  await m.handleControl(456, '123', pickAction(s.lastKb(), 0))
+  await m.handleControl(456, '123', 'submenu.back')   // list → categories
+  await m.handleControl(456, '123', 'submenu.back')   // categories → Mod • menu
+  await m.handleControl(456, '123', 'mod.start')
+  assert.equal(provisioned.length, 1, 'provisioner invoked exactly once')
+  assert.equal(provisioned[0].models.length, 1, 'the queued loadout is handed to the provisioner')
+  assert.equal(m.pendingModelsFor(456).length, 0, 'pending loadout consumed on launch')
+  await m.handleControl(456, '123', 'mod')            // reopen Mod •
+  assert.ok(!cb(s.lastKb()).includes('bul:mod.start'), 'Start gone once a pod is bound')
+})
+
+test('a /make session never offers Start (only armed studios do)', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...armDeps() })
+  m.register(456, 'a1', '123')
+  await m.handleControl(456, '123', 'confirm')
+  await m.handleControl(456, '123', 'mod')
+  assert.ok(!cb(s.lastKb()).includes('bul:mod.start'), 'a /make session is gen-provisioned, never armed-Start')
+})
+
+test('a loadout built via /arm carries into the next /make (the live session is reused)', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, ...armDeps() })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:0')   // + FLUX
+  await m.handleControl(456, '123', 'arm.proceed')    // → model menu
+  await m.handleControl(456, '123', 'mod.add')
+  await m.handleControl(456, '123', 'mod.cat:checkpoints')
+  await m.handleControl(456, '123', pickAction(s.lastKb(), 0))
+  assert.equal(m.pendingModelsFor(456).length, 1, 'queued via the armed session')
+  m.register(456, 'a1', '123')   // /make on the same chat reuses the live armed session
+  assert.equal(m.pendingModelsFor(456).length, 1, 'pending loadout survives into the gen')
 })

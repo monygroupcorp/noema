@@ -43,6 +43,7 @@ function makeSender() {
   const reactions: Array<{ chatId: number; messageId: number; emoji: string }> = []
   const captions: Array<{ chatId: number; messageId: number; caption: string; extra?: unknown }> = []
   const markups: Array<{ chatId: number; messageId: number; reply_markup: unknown }> = []
+  const deleted: Array<{ chatId: number; messageId: number }> = []
 
   return {
     sent,
@@ -52,6 +53,10 @@ function makeSender() {
     videos,
     mediaGroups,
     reactions,
+    deleted,
+    deleteMessage: async (chatId: number, messageId: number) => {
+      deleted.push({ chatId, messageId })
+    },
     sendMessage: async (chatId: number, text: string, extra?: unknown) => {
       sent.push({ chatId, text, extra })
       return { message_id: 100 + sent.length }
@@ -228,7 +233,7 @@ function staleMsgUpdate(userId: number, chatId: number, text: string, pastSecond
 // =============================================================================
 // Helper: build TelegramAllocutio wired with router callbacks
 // =============================================================================
-function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number } = {}) {
+function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown } = {}) {
   const sender = makeSender()
   const identity = makeIdentity()
   const router = makeRouter()
@@ -255,6 +260,7 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
     botStartupTime: opts.botStartupTime,
     ...(opts.autoSettleMs !== undefined ? { autoSettleMs: opts.autoSettleMs } : {}),
     acta,
+    ...(opts.intellarum ? { intellarum: opts.intellarum as unknown as import('../../../src/types/intelligendi.js').Intellarum } : {}),
     ...(opts.withPodControls ? {
       materiae: materiae as unknown as import('../../../src/types/materia.js').MateriaStore,
       terminatePod: async (podId: string) => { terminated.push(podId) },
@@ -1301,4 +1307,224 @@ test('warm window auto-settles (confirms) if the host does not interact', async 
   assert.ok(btns.includes('bul:destroy') && btns.includes('bul:mod') && btns.includes('bul:share'),
     'auto-settle lands on the spec\'d top-3 [Mod] [Share] [Destroy]')
   assert.ok(!btns.includes('bul:confirm'), 'no longer in setup state')
+})
+
+// =============================================================================
+// Mod • → Add picker (item 4: adapter wiring + colon-suffix parsing + force-reply search)
+// =============================================================================
+
+function fakeIntellarum() {
+  const ALL = [
+    { id: 'intella.flux', nomen: 'FLUX Schnell', genus: 'model', architectura: 'dit', dest: 'checkpoints/flux.safetensors' },
+    { id: 'intella.sdxl', nomen: 'SDXL', genus: 'model', architectura: 'dit', dest: 'checkpoints/sdxl.safetensors' },
+    { id: 'intella.milady', nomen: 'Milady', genus: 'lora', dest: 'loras/milady.safetensors', baseIntellaId: 'intella.flux', slug: 'milady', trigger: 'milady' },
+    { id: 'intella.retro', nomen: 'Retro Style', genus: 'lora', dest: 'loras/retro.safetensors', baseIntellaId: 'intella.flux', slug: 'retro', trigger: 'retro artstyle' },
+  ]
+  return {
+    async list(_genus?: string) { return ALL },   // the catalog filters by mount itself
+    async find(id: string) { return ALL.find(x => x.id === id) ?? null },
+    async canonical() { return [] },
+    async findByTrigger() { return [] },
+    async triggerMap() { return new Map() },
+  }
+}
+function kbDataOf(extra: unknown): string[] {
+  const kb = (extra as { reply_markup?: { inline_keyboard?: Array<Array<{ callback_data: string }>> } })?.reply_markup?.inline_keyboard ?? []
+  return kb.flat().map(b => b.callback_data)
+}
+function lastKb(sender: ReturnType<typeof makeSender>): string[] {
+  const m = [...sender.sent, ...sender.edited].at(-1)
+  return kbDataOf(m?.extra)
+}
+function lastText(sender: ReturnType<typeof makeSender>): string {
+  return [...sender.sent, ...sender.edited].at(-1)?.text ?? ''
+}
+/** True if the keyboard has a pick button for the i-th item (token-agnostic). */
+function hasPick(data: string[], i: number): boolean {
+  return data.some(d => new RegExp(`^bul:mod\\.pick:\\d+:${i}$`).test(d))
+}
+/** The full `bul:mod.pick:<token>:<i>` callback data for the i-th item in the live keyboard. */
+function pickCb(sender: ReturnType<typeof makeSender>, i: number): string {
+  return lastKb(sender).find(d => new RegExp(`^bul:mod\\.pick:\\d+:${i}$`).test(d))!
+}
+/** /make → lock pod → confirm → open Mod • submenu, all host-side on chat 456. */
+async function bootMod() {
+  const h = makeAllocutio({ withPodControls: true, autoSettleMs: 999_999, intellarum: fakeIntellarum() })
+  await h.allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  lockPod(h.allocutio, h.router, 'a1')
+  await new Promise(r => setImmediate(r))
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'provisioning', elapsedMs: 0 })
+  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 } })
+  await new Promise(r => setImmediate(r))
+  await h.allocutio.receive(bulCb(123, 'bul:confirm'))
+  await new Promise(r => setImmediate(r))
+  await h.allocutio.receive(bulCb(123, 'bul:mod'))
+  await new Promise(r => setImmediate(r))
+  return h
+}
+
+test('Mod • → Add opens the category stage through the adapter', async () => {
+  const h = await bootMod()
+  await h.allocutio.receive(bulCb(123, 'bul:mod.add'))
+  await new Promise(r => setImmediate(r))
+  const data = lastKb(h.sender)
+  assert.ok(data.includes('bul:mod.cat:checkpoints') && data.includes('bul:mod.cat:loras'), 'mount categories shown')
+  assert.match(lastText(h.sender), /Add a model — pick a type/)
+})
+
+test('bul:mod.cat:<mount> + bul:mod.pick:<i> queue the model — colon suffixes survive the parser', async () => {
+  // The old `split(":")[1]` parser would truncate `mod.cat:checkpoints` / `mod.pick:T:1`.
+  // This pins the slice(4) fix end-to-end through the two-stage nav.
+  const h = await bootMod()
+  await h.allocutio.receive(bulCb(123, 'bul:mod.add'))
+  await new Promise(r => setImmediate(r))
+  await h.allocutio.receive(bulCb(123, 'bul:mod.cat:checkpoints'))
+  await new Promise(r => setImmediate(r))
+  await h.allocutio.receive(bulCb(123, pickCb(h.sender, 1)))   // SDXL
+  await new Promise(r => setImmediate(r))
+  assert.match(lastText(h.sender), /Standby: SDXL/)
+  assert.ok(lastKb(h.sender).some(d => d.startsWith('bul:mod.pick:')), 'stays in the list for rapid-add')
+})
+
+test('bul:mod.cat:loras lists LoRAs through the adapter', async () => {
+  const h = await bootMod()
+  await h.allocutio.receive(bulCb(123, 'bul:mod.add'))
+  await new Promise(r => setImmediate(r))
+  await h.allocutio.receive(bulCb(123, 'bul:mod.cat:loras'))
+  await new Promise(r => setImmediate(r))
+  assert.match(lastText(h.sender), /loras/)
+  assert.ok(hasPick(lastKb(h.sender), 0), 'LoRA rows shown')
+})
+
+test('Mod • → Add → Search: force-reply prompt, then the reply routes to the picker', async () => {
+  const h = await bootMod()
+  await h.allocutio.receive(bulCb(123, 'bul:mod.add'))
+  await new Promise(r => setImmediate(r))
+
+  await h.allocutio.receive(bulCb(123, 'bul:mod.search'))
+  await new Promise(r => setImmediate(r))
+  const prompt = h.sender.sent.at(-1)!
+  assert.ok((prompt.extra as { reply_markup?: { force_reply?: boolean } })?.reply_markup?.force_reply, 'sent a force-reply prompt')
+  const promptId = 100 + h.sender.sent.length   // mock derives message_id = 100 + sent.length
+
+  // Host replies to that prompt with a search term.
+  await h.allocutio.receive({
+    update_id: 10,
+    message: {
+      message_id: 5, from: { id: 123 }, chat: { id: 456, type: 'private' },
+      text: 'milady', date: Math.floor(Date.now() / 1000), reply_to_message: { message_id: promptId },
+    },
+  } as unknown as Parameters<TelegramAllocutio['receive']>[0])
+  await new Promise(r => setImmediate(r))
+
+  assert.match(lastText(h.sender), /Search “milady”/)
+  assert.ok(hasPick(lastKb(h.sender), 0), 'the matching LoRA is offered')
+  // The exchange is cleaned up: both the force-reply prompt and the host's reply are deleted.
+  assert.ok(h.sender.deleted.some(d => d.messageId === promptId), 'force-reply prompt deleted')
+  assert.ok(h.sender.deleted.some(d => d.messageId === 5), "host's reply deleted")
+})
+
+test('a reply to an unrelated message is NOT captured as a picker search', async () => {
+  const h = await bootMod()
+  await h.allocutio.receive(bulCb(123, 'bul:mod.add'))
+  await new Promise(r => setImmediate(r))
+  await h.allocutio.receive({
+    update_id: 11,
+    message: {
+      message_id: 6, from: { id: 123 }, chat: { id: 456, type: 'private' },
+      text: 'just chatting', date: Math.floor(Date.now() / 1000), reply_to_message: { message_id: 99999 },
+    },
+  } as unknown as Parameters<TelegramAllocutio['receive']>[0])
+  await new Promise(r => setImmediate(r))
+  assert.ok(!/Search “/.test(lastText(h.sender)), 'unmatched reply did not run a search')
+})
+
+test('search spans base models too — _searchModels unions model + lora genera', async () => {
+  // "flux" matches a base model (genus 'model'); a regression dropping the models half
+  // of the union would make this return nothing.
+  const h = await bootMod()
+  await h.allocutio.receive(bulCb(123, 'bul:mod.add'))
+  await new Promise(r => setImmediate(r))
+  await h.allocutio.receive(bulCb(123, 'bul:mod.search'))
+  await new Promise(r => setImmediate(r))
+  const promptId = 100 + h.sender.sent.length
+  await h.allocutio.receive({
+    update_id: 12,
+    message: {
+      message_id: 7, from: { id: 123 }, chat: { id: 456, type: 'private' },
+      text: 'flux', date: Math.floor(Date.now() / 1000), reply_to_message: { message_id: promptId },
+    },
+  } as unknown as Parameters<TelegramAllocutio['receive']>[0])
+  await new Promise(r => setImmediate(r))
+  assert.match(lastText(h.sender), /Search “flux”/)
+  assert.ok(hasPick(lastKb(h.sender), 0), 'the matching base model is offered from a search')
+})
+
+test('a non-host reply to the search prompt is ignored (group safety)', async () => {
+  const h = await bootMod()
+  await h.allocutio.receive(bulCb(123, 'bul:mod.add'))
+  await new Promise(r => setImmediate(r))
+  await h.allocutio.receive(bulCb(123, 'bul:mod.search'))
+  await new Promise(r => setImmediate(r))
+  const promptId = 100 + h.sender.sent.length
+  // A different group member (id 999) replies to the host's prompt.
+  await h.allocutio.receive({
+    update_id: 13,
+    message: {
+      message_id: 8, from: { id: 999 }, chat: { id: 456, type: 'private' },
+      text: 'milady', date: Math.floor(Date.now() / 1000), reply_to_message: { message_id: promptId },
+    },
+  } as unknown as Parameters<TelegramAllocutio['receive']>[0])
+  await new Promise(r => setImmediate(r))
+  assert.ok(!/Search “/.test(lastText(h.sender)), 'a guest cannot drive the host picker search')
+})
+
+test('a queued model is stamped onto the flow as pinnedModels at /make, then cleared (item 5)', async () => {
+  const h = await bootMod()
+  await h.allocutio.receive(bulCb(123, 'bul:mod.add'))
+  await new Promise(r => setImmediate(r))
+  await h.allocutio.receive(bulCb(123, 'bul:mod.cat:checkpoints'))
+  await new Promise(r => setImmediate(r))
+  await h.allocutio.receive(bulCb(123, pickCb(h.sender, 1)))   // queue SDXL (a base model)
+  await new Promise(r => setImmediate(r))
+
+  // /make in the same chat → _enterExecute folds the pending loadout onto the flow state.
+  await h.allocutio.receive(msgUpdate(123, 456, '/make a cat', 60))
+  await new Promise(r => setImmediate(r))
+  const enter1 = h.router.calls.filter(c => c.method === 'enter').at(-1)!
+  const state1 = (enter1.args[4] as { state?: { pinnedModels?: Array<{ id: string; role: string }> } })?.state
+  const pin = state1?.pinnedModels?.find(p => p.id === 'intella.sdxl')
+  assert.ok(pin, 'queued base model stamped as pinnedModels')
+  assert.equal(pin!.role, 'checkpoint', 'a base model maps to role checkpoint')
+
+  // Cleared at dispatch — the next /make does NOT re-apply it.
+  await h.allocutio.receive(msgUpdate(123, 456, '/make another', 61))
+  await new Promise(r => setImmediate(r))
+  const enter2 = h.router.calls.filter(c => c.method === 'enter').at(-1)!
+  const state2 = (enter2.args[4] as { state?: { pinnedModels?: unknown } })?.state
+  assert.ok(!state2?.pinnedModels, 'pending cleared — not re-applied on the next gen')
+})
+
+test('/chat does not consume the studio pending loadout', async () => {
+  const h = await bootMod()
+  await h.allocutio.receive(bulCb(123, 'bul:mod.add'))
+  await new Promise(r => setImmediate(r))
+  await h.allocutio.receive(bulCb(123, 'bul:mod.cat:checkpoints'))
+  await new Promise(r => setImmediate(r))
+  await h.allocutio.receive(bulCb(123, pickCb(h.sender, 1)))   // queue a model
+  await new Promise(r => setImmediate(r))
+
+  await h.allocutio.receive(msgUpdate(123, 456, '/chat', 62))
+  await new Promise(r => setImmediate(r))
+  const enterChat = h.router.calls.filter(c => c.method === 'enter').at(-1)!
+  const stateChat = (enterChat.args[4] as { state?: { pinnedModels?: unknown; modusId?: string } })?.state
+  assert.equal(stateChat?.modusId, 'modus.chatgpt')
+  assert.ok(!stateChat?.pinnedModels, '/chat is not a studio gen — pending left intact')
+
+  // The loadout is still queued: a subsequent /make picks it up.
+  await h.allocutio.receive(msgUpdate(123, 456, '/make a cat', 63))
+  await new Promise(r => setImmediate(r))
+  const enterMake = h.router.calls.filter(c => c.method === 'enter').at(-1)!
+  const stateMake = (enterMake.args[4] as { state?: { pinnedModels?: Array<{ id: string }> } })?.state
+  assert.ok(stateMake?.pinnedModels?.some(p => p.id === 'intella.sdxl'), '/make still gets the queued model')
 })

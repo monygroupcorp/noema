@@ -3,7 +3,9 @@ import type { Materia, MateriaStore } from '../types/materia.js'
 import type { ActumExecutio } from '../types/actum.js'
 import type { R2Config } from './SecurePodClient.js'
 import { SecurePodClient } from './SecurePodClient.js'
-import { submitToRunner, awaitViaStream } from './comfyrunnerClient.js'
+import { submitToRunner, awaitViaStream, installViaRunner, type InstallResult } from './comfyrunnerClient.js'
+import type { ModelRef } from '../types/actum.js'
+import type { ModelInstallClient, InstallProgress } from './ModelInstaller.js'
 import { makeLogger } from '../lib/logger.js'
 import { bus } from '../lib/bus.js'
 import { getTrace } from '../lib/trace.js'
@@ -31,7 +33,7 @@ function sleep(ms: number): Promise<void> {
  * webhook directly from the pod. Crystal subscribes to the SSE stream only to
  * track lifecycle (terminate vs keep-warm) and emit stage events to the bus.
  */
-export class WarmPodClient implements RunPodClient {
+export class WarmPodClient implements RunPodClient, ModelInstallClient {
   constructor(
     private readonly materia: Materia,
     private readonly materiae: MateriaStore,
@@ -73,6 +75,18 @@ export class WarmPodClient implements RunPodClient {
     // webhook keyed by jobId, and the actum's externusJobId must match it so the
     // completion webhook can find the actum. (externusId would 404 every time.)
     return { id: jobId }
+  }
+
+  /**
+   * Download-only model install onto this warm pod (no gen). Waits for the runner, then POSTs the
+   * refs to comfyrunner `/install`. Returns the download tally; the caller (ModelInstaller) merges
+   * the ids into `Materia.installedModels`. (Real progress streaming is a later refinement — the
+   * `/install` endpoint returns a final tally for now; `onProgress` is honored by the fake client.)
+   */
+  async installModels(models: ModelRef[], _onProgress?: (p: InstallProgress) => void): Promise<InstallResult> {
+    const runnerBase = this._runnerBase()
+    await this._waitForRunner(runnerBase)
+    return installViaRunner(this.fetchFn, runnerBase, models, this.config.jobTimeoutMs)
   }
 
   // ── private ──────────────────────────────────────────────────────────────
