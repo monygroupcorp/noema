@@ -622,11 +622,12 @@ function initializeExternalApi(dependencies) {
   logger.debug('External Agent Delegation API mounted at /agents.');
 
   // CAMEL agent provisioning (public — CAMEL JWT assertion is the credential)
-  if (dependencies.db?.data?.treasury && dependencies.db?.data?.agentAccount && dependencies.agentJwtVerifier) {
+  if (dependencies.db?.data?.treasury && dependencies.db?.data?.agentAccount && dependencies.agentJwtVerifier && dependencies.workspaceFactory) {
     const agentProvisioningRouter = createAgentProvisioningApi({
       treasuryDb: dependencies.db.data.treasury,
       agentAccountDb: dependencies.db.data.agentAccount,
       workspacesDb: dependencies.db.data.workspaces,
+      workspaceFactory: dependencies.workspaceFactory,
       agentJwtVerifier: dependencies.agentJwtVerifier,
       economyService: dependencies.economyService,
       internalApiClient,
@@ -635,7 +636,7 @@ function initializeExternalApi(dependencies) {
     externalApiRouter.use('/treasury', agentProvisioningRouter);
     logger.debug('External Agent Provisioning API mounted at /treasury.');
   } else {
-    logger.warn('External Agent Provisioning API not mounted due to missing DB or agentJwtVerifier dependencies.');
+    logger.warn('External Agent Provisioning API not mounted due to missing DB, agentJwtVerifier, or workspaceFactory dependencies.');
   }
 
   // CAMEL agent session manifest + revoke (public — agentAccountId is the implicit credential)
@@ -693,6 +694,7 @@ function initializeExternalApi(dependencies) {
       x402PaymentLogDb: dependencies.db?.data?.x402PaymentLog,
       userCoreDb: dependencies.db?.data?.userCore,
       cookCollectionsDb: dependencies.db?.data?.cookCollections,
+      agentAccountDb: dependencies.db?.data?.agentAccount,
       castsDb: dependencies.db?.data?.casts,
       generationOutputsDb: dependencies.db?.data?.generationOutputs,
       spellsService: dependencies.spellsService,

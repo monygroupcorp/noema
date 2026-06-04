@@ -37,7 +37,7 @@ class WorkspaceFactory {
    * @returns {Promise<{ slug: string, workspaceId: ObjectId }>}
    */
   async provisionAgentWorkspace({ agentDoc, tokenUri }) {
-    const template = await this._loadTemplate();
+    const template = await this._loadTemplate(agentDoc.starterWorkspaceSlug);
     this.logger.info(`[WorkspaceFactory] Provisioning from template ${template.slug} r${template.revision ?? 1}`);
 
     const { placeholders, portMap } = await this._buildPlaceholderMap(tokenUri, agentDoc);
@@ -214,15 +214,16 @@ class WorkspaceFactory {
       const existing = agentWinsByTemplateId.get(tmplWin.id);
 
       if (existing) {
-        // Window exists in both: template controls structure, agent controls position + overrides
+        // Re-clone spell from template so admin improvements propagate; old clone is orphaned
+        const base = await this._cloneWindowSpell(
+          { ...tmplWin, templateWindowId: tmplWin.id },
+          agentDoc
+        );
         mergedWindows.push({
-          ...tmplWin,
-          templateWindowId: tmplWin.id,
+          ...base,
           // Preserve agent-controlled fields
           ...(existing.position !== undefined && { position: existing.position }),
           ...(existing.agentOverrides && { agentOverrides: existing.agentOverrides }),
-          // Keep the agent's own cloned spell (not the template's spell reference)
-          ...(existing.isSpell && existing.spell ? { isSpell: true, spell: existing.spell } : {}),
         });
         changes.updated.push(tmplWin.id);
       } else {
@@ -318,7 +319,13 @@ class WorkspaceFactory {
   // Private — provision helpers
   // ---------------------------------------------------------------------------
 
-  async _loadTemplate() {
+  async _loadTemplate(preferredSlug) {
+    // Precedence: per-treasury/agent override → env var → isAgentTemplate flag.
+    if (preferredSlug) {
+      const ws = await this.workspacesDb.findBySlug(preferredSlug);
+      if (!ws) throw Object.assign(new Error(`Template workspace not found: ${preferredSlug}`), { code: 'NOT_FOUND' });
+      return ws;
+    }
     const envSlug = process.env.AGENT_STARTER_WORKSPACE_SLUG;
     if (envSlug) {
       const ws = await this.workspacesDb.findBySlug(envSlug);
@@ -349,9 +356,28 @@ class WorkspaceFactory {
       '$NFT_TOKEN_ID': portMap.nftTokenId,
       '$NFT_NAME': portMap.nftName,
       '$NFT_IMAGE': portMap.nftImage,
+      '$NFT_DESCRIPTION': portMap.nftDescription,
     };
 
-    if (!tokenUri) return { placeholders, portMap };
+    if (!tokenUri) {
+      // CAMEL-style flow: no IPFS metadata, but agent card may carry a direct image URL.
+      // Mirror to R2 so the spell keeps working even if the source disappears; fall back
+      // to the direct URL if the mirror fails.
+      const fallbackImage = agentDoc.profile?.image;
+      if (fallbackImage) {
+        let resolvedImage = fallbackImage;
+        if (this.storageService) {
+          try {
+            resolvedImage = await this._mirrorImageToR2(fallbackImage, agentDoc._id?.toString());
+          } catch (err) {
+            this.logger.warn(`[WorkspaceFactory] CAMEL fallback image R2 mirror failed: ${err.message}`);
+          }
+        }
+        portMap.nftImage = resolvedImage;
+        placeholders['$NFT_IMAGE'] = resolvedImage;
+      }
+      return { placeholders, portMap };
+    }
 
     try {
       const meta = await this.ipfsService.fetchJson(tokenUri);
@@ -512,14 +538,29 @@ class WorkspaceFactory {
     return bindingsByWindowId;
   }
 
-  async _mirrorImageToR2(ipfsUrl, agentId) {
+  async _mirrorImageToR2(sourceUrl, agentId) {
     if (!this.storageService) throw new Error('storageService not configured');
-    const { stream, contentType } = await this.ipfsService.fetchStream(ipfsUrl);
-    const safeCid = ipfsUrl.replace(/^ipfs:\/\//, '').replace(/\//g, '_');
-    const key = `agent-nft-images/${agentId || 'unknown'}/${safeCid}`;
+    const { stream, contentType } = await this.ipfsService.fetchStream(sourceUrl);
+    const key = `agent-nft-images/${agentId || 'unknown'}/${this._deriveR2Key(sourceUrl)}`;
     const { permanentUrl } = await this.storageService.uploadFromStream(stream, key, contentType);
-    this.logger.debug(`[WorkspaceFactory] Mirrored IPFS → R2: ${key}`);
+    this.logger.debug(`[WorkspaceFactory] Mirrored → R2: ${key}`);
     return permanentUrl;
+  }
+
+  _deriveR2Key(sourceUrl) {
+    if (sourceUrl.startsWith('ipfs://')) {
+      return sourceUrl.replace(/^ipfs:\/\//, '').replace(/\//g, '_');
+    }
+    // For http(s) URLs: short SHA-256 hash + original basename so the key is stable
+    // and the extension survives (helps content-type sniffing on serve).
+    const hash = require('crypto').createHash('sha256').update(sourceUrl).digest('hex').slice(0, 16);
+    let basename = 'image';
+    try {
+      const u = new URL(sourceUrl);
+      const tail = u.pathname.split('/').filter(Boolean).pop();
+      if (tail) basename = tail.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+    } catch (_) { /* keep default */ }
+    return `${hash}-${basename}`;
   }
 }
 

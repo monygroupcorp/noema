@@ -401,9 +401,10 @@ describe('WorkspaceFactory.mergeTemplateUpdate() — happy paths', () => {
     assert.deepEqual(w1.agentOverrides, { title: 'My Custom Title', color: '#ff0000' });
   });
 
-  test("preserves the agent's own cloned spell through merge (not replaced by template's)", async () => {
+  test('re-clones the template spell on merge so admin improvements propagate (fresh private clone)', async () => {
     const templateSpellId = makeId();
-    const templateSpell = makeSpell(templateSpellId);
+    // Distinct template steps prove the merged window's spell descends from the template, not the agent's old clone.
+    const templateSpell = makeSpell(templateSpellId, { steps: [{ type: 'prompt', value: 'template-improved' }] });
     const agentSpellId = makeId();
     const agentSpell = makeSpell(agentSpellId, { steps: [{ type: 'prompt', value: 'agent-customized' }] });
 
@@ -430,7 +431,15 @@ describe('WorkspaceFactory.mergeTemplateUpdate() — happy paths', () => {
 
     const ws = factory.workspacesDb._getStored();
     const w1 = ws.snapshot.toolWindows.find(w => w.templateWindowId === 'w1');
-    assert.equal(w1.spell._id.toString(), agentSpell._id.toString(), "agent's spell must be kept");
+
+    // The window must point at a NEW clone — neither the template's spell nor the agent's old clone.
+    assert.notEqual(w1.spell._id.toString(), templateSpell._id.toString(), 'must not reference the template spell directly');
+    assert.notEqual(w1.spell._id.toString(), agentSpell._id.toString(), 'agent\'s stale clone must be replaced');
+
+    // The fresh clone must descend from the TEMPLATE (admin improvements propagate).
+    const created = factory.spellsDb._created.find(s => s._id.toString() === w1.spell._id.toString());
+    assert.ok(created, 'merged window references a freshly created spell');
+    assert.deepEqual(created.steps, templateSpell.steps, 'clone carries the template\'s improved steps');
   });
 
   test('preserves agent-added windows (no templateWindowId) through merge', async () => {
