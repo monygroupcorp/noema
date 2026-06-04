@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.10.7](https://github.com/monygroupcorp/noema/compare/v4.10.6...v4.10.7) (2026-06-04)
+
+
+### Bug Fixes
+
+* **agents:** complete CAMEL go-live surface — JWKS override, provisioned-agent resolution, cast tagging ([d4d9c8b](https://github.com/monygroupcorp/noema/commit/d4d9c8b5951c6d464fd9adbc97037a5905646fe3))
+* **agents:** route CAMEL onboarding through WorkspaceFactory ([aca6ab6](https://github.com/monygroupcorp/noema/commit/aca6ab66491290dd7f0868b1016cdde801c5fa62))
+* **sandbox:** render typed input anchors on spell windows ([8b23bbc](https://github.com/monygroupcorp/noema/commit/8b23bbcf02eed28386eb64e909d0b82e4df418c4))
+
 ## [4.10.6](https://github.com/monygroupcorp/noema/compare/v4.10.5...v4.10.6) (2026-05-22)
 
 
