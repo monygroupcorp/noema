@@ -7,10 +7,11 @@ class CastsDB extends BaseDB {
     this.logger = logger || console;
   }
 
-  async createCast({ spellId, initiatorAccountId, status='running', metadata={} }){
+  async createCast({ spellId, initiatorAccountId, agentAccountId, status='running', metadata={} }){
     const doc={
       spellId: new ObjectId(spellId),
       initiatorAccountId: new ObjectId(initiatorAccountId),
+      ...(agentAccountId && { agentAccountId }),
       status,
       metadata,
       startedAt:new Date(),
