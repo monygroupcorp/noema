@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { Essentia } from '../types/essendi.js'
 import type { Intellarum } from '../types/intelligendi.js'
+import type { ModelRef } from '../types/actum.js'
 import { WorkflowTemplateRegistry, WorkflowTemplateError } from './WorkflowTemplateRegistry.js'
 import { resolveLoraTriggers, type ResolvedLora } from './loraResolver.js'
 
@@ -32,6 +33,9 @@ export interface CompiledSpec {
   cookFlags: Record<string, unknown>
   seed: number
   sourceTool: { id: string; versio: string }
+  /** On-pod runtime this spec targets ('ComfyUI' default). RESERVED for the second-runtime dispatch
+   *  (the runner that consumes it lands in a GPU sprint); carried now so the abstraction is whole. */
+  runtime: string
 }
 
 export interface CompileResult {
@@ -47,6 +51,9 @@ export interface CompileResult {
 export interface CompileOptions {
   /** The runner's anima — scopes private-LoRA conflict resolution. */
   animaId?: string
+  /** Models the host pinned onto the studio loadout via `Mod • → Add`. Unioned into
+   *  `spec.models` (deduped against the template + prompt-resolved LoRAs). */
+  pinnedModels?: ModelRef[]
 }
 
 export class CompilerError extends Error {
@@ -128,11 +135,15 @@ export class Compiler {
     const slotInputs = { ...promptForSlots, [seedKey]: seed }
     const inputTemplate = this._applySlotMap(template, slotInputs)
 
-    // Required models = template's static set + LoRAs from prompt resolution.
+    // Required models = template's static set + LoRAs from prompt resolution + any models
+    // the host pinned onto the session via `Mod • → Add` (ride `aditus._pinnedModels`).
     // The intella's `sources[0].uri` and `dest` are filled in by `_resolveModels`
     // via the same Intellarum.find() path used for static models.
     const loraRefs = await this._loraIntellaeToRefs(appliedLoras)
-    const models = await this._resolveModels([...(template.requiredModels ?? []), ...loraRefs])
+    const baseRefs = [...(template.requiredModels ?? []), ...loraRefs]
+    const seen = new Set(baseRefs.map(r => r.id))
+    const pinnedRefs = (opts.pinnedModels ?? []).filter(r => !seen.has(r.id))
+    const models = await this._resolveModels([...baseRefs, ...pinnedRefs])
 
     const spec: CompiledSpec = {
       image,
@@ -145,6 +156,7 @@ export class Compiler {
       cookFlags,
       seed,
       sourceTool: { id: essentia.id, versio: essentia.versio },
+      runtime: runpodSpec.runtime ?? 'ComfyUI',
     }
 
     const hash = `sha256:${this._hashSpec(spec)}`

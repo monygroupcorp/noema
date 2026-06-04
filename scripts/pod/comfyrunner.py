@@ -346,6 +346,83 @@ def _model_present(model: dict) -> bool:
     return os.path.isfile(p) and os.path.getsize(p) > 0
 
 
+# Per-dest download locks — serialize fetches of the SAME file so the live-apply install (/install)
+# and a job's preflight (_ensure_models) can never download the same weight concurrently (which
+# would corrupt it or waste bandwidth). Different files still download in parallel.
+_DEST_LOCKS_GUARD = threading.Lock()
+_DEST_LOCKS: dict = {}
+
+
+def _dest_lock(dest: str) -> threading.Lock:
+    with _DEST_LOCKS_GUARD:
+        lk = _DEST_LOCKS.get(dest)
+        if lk is None:
+            lk = threading.Lock()
+            _DEST_LOCKS[dest] = lk
+        return lk
+
+
+def _download_model(model: dict, job_id: str) -> "str | None":
+    """Download one model to its dest, serialized per-dest. Re-checks presence inside the lock so a
+    file another path just finished is skipped. Returns an error string, or None on success."""
+    dest_path = _model_path(model["dest"])
+    with _dest_lock(model["dest"]):
+        if os.path.isfile(dest_path) and os.path.getsize(dest_path) > 0:
+            return None  # finished by another path (a concurrent job/install) while we waited
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        t0 = time.time()
+        _append_event(job_id, {"type": "downloading", "dest": model["dest"], "total": model.get("sizeBytes", 0)})
+        MIN_BPS = 5 * 1024 * 1024
+        size_bytes = model.get("sizeBytes", 0)
+        timeout = max(900, int(size_bytes / MIN_BPS * 1.5)) if size_bytes else 2400
+        try:
+            if shutil.which("aria2c"):
+                subprocess.run(
+                    ["aria2c", "-x16", "-s16", "--allow-overwrite=true", "-q", model["url"], "-o", dest_path],
+                    check=True, timeout=timeout,
+                )
+            else:
+                subprocess.run(["wget", "-q", model["url"], "-O", dest_path], check=True, timeout=timeout)
+            _append_event(job_id, {"type": "downloaded", "dest": model["dest"], "elapsedMs": int((time.time() - t0) * 1000)})
+            return None
+        except Exception as e:
+            return f"{model['dest']}: {e}"
+
+
+def _install_models(models: list, job_id: str = "live-install") -> dict:
+    """Download-only model apply (B1) — fetch any missing models in parallel and return the tally,
+    WITHOUT running a workflow. Idempotent (present files are skipped, partial fetches resume).
+    Mirrors `_ensure_models`' download path; shares the per-dest lock so it never races a job."""
+    if not models:
+        return {"modelsDownloaded": 0, "modelsReused": 0, "downloadMs": 0, "downloadBytes": 0}
+    missing = [m for m in models if not _model_present(m)]
+    reused = len(models) - len(missing)
+    t0 = time.time()
+    errors: list = []
+    threads: list = []
+
+    def _dl(model: dict) -> None:
+        err = _download_model(model, job_id)
+        if err:
+            errors.append(err)
+
+    for m in missing:
+        t = threading.Thread(target=_dl, args=(m,), daemon=True)
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join()
+
+    if errors:
+        raise RuntimeError(f"install failed: {'; '.join(errors)}")
+    return {
+        "modelsDownloaded": len(missing),
+        "modelsReused": reused,
+        "downloadMs": int((time.time() - t0) * 1000),
+        "downloadBytes": sum(m.get("sizeBytes", 0) for m in missing),
+    }
+
+
 def _ensure_models(models: list, job_id: str) -> None:
     if not models:
         return
@@ -362,28 +439,9 @@ def _ensure_models(models: list, job_id: str) -> None:
     threads: list[threading.Thread] = []
 
     def _download(model: dict) -> None:
-        dest_path = _model_path(model["dest"])
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        t0 = time.time()
-        _append_event(job_id, {"type": "downloading", "dest": model["dest"], "total": model.get("sizeBytes", 0)})
-        MIN_BPS = 5 * 1024 * 1024
-        size_bytes = model.get("sizeBytes", 0)
-        timeout = max(900, int(size_bytes / MIN_BPS * 1.5)) if size_bytes else 2400
-        try:
-            if shutil.which("aria2c"):
-                subprocess.run(
-                    ["aria2c", "-x16", "-s16", "--allow-overwrite=true", "-q", model["url"], "-o", dest_path],
-                    check=True, timeout=timeout,
-                )
-            else:
-                subprocess.run(
-                    ["wget", "-q", model["url"], "-O", dest_path],
-                    check=True, timeout=timeout,
-                )
-            elapsed = int((time.time() - t0) * 1000)
-            _append_event(job_id, {"type": "downloaded", "dest": model["dest"], "elapsedMs": elapsed})
-        except Exception as e:
-            errors.append(f"{model['dest']}: {e}")
+        err = _download_model(model, job_id)   # per-dest lock shared with the /install path
+        if err:
+            errors.append(err)
 
     # Periodic aggregate progress so the client can detect a throttled pod mid-download
     # (the per-file downloaded events only fire on completion — far too late on a crawl).
@@ -656,6 +714,8 @@ class Handler(BaseHTTPRequestHandler):
                 return ("job-poll", job_id)
         if p == "/job":
             return ("job-list", None)
+        if p == "/install":
+            return ("install", None)
         return ("unknown", None)
 
     def do_GET(self):
@@ -732,7 +792,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         route, _ = self._parse_path()
-        if route != "job-list":
+        if route not in ("job-list", "install"):
             self._send_json(404, {"error": "not found"})
             return
 
@@ -741,6 +801,24 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
         except Exception:
             self._send_json(400, {"error": "invalid JSON"})
+            return
+
+        # POST /install — download-only model apply (B1). No workflow run; returns the tally.
+        if route == "install":
+            if not _comfyui_ready.is_set():
+                self._send_json(503, {"error": "ComfyUI not ready yet"})
+                return
+            models = body.get("models") or []
+            if not isinstance(models, list):
+                self._send_json(400, {"error": "models must be a list"})
+                return
+            try:
+                result = _install_models(models)
+                self._send_json(200, result)
+                log.info(f"install complete: {result.get('modelsDownloaded')} downloaded, {result.get('modelsReused')} reused")
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+                log.error(f"install failed: {e}")
             return
 
         for field in ("jobId", "workflow"):

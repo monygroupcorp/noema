@@ -186,6 +186,10 @@ export interface Materia {
 
   /** intellaIds present on the studio's volume. Set-union semantics on merge. */
   installedModels?: string[]
+  /** The on-pod runtime this studio serves ('ComfyUI' | 'llama.cpp' | …). Stamped at provision; a
+   *  warm pod is only reusable by gens of the same runtime. RESERVED: recorded now, consumed by the
+   *  runner dispatch in a GPU sprint. */
+  runtime?: string
   /** Sum of intella sizes currently on disk (GB), for bulletin "X% used" displays. */
   volumeUsedGb?: number
   /** Disk ceiling for this pod type. Stamped at provision; informs eviction policy later. */

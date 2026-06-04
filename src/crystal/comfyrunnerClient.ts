@@ -1,6 +1,7 @@
 import { makeLogger } from '../lib/logger.js'
 import { getTrace } from '../lib/trace.js'
 import { bus } from '../lib/bus.js'
+import type { ModelRef } from '../types/actum.js'
 
 export interface R2Config {
   /** Full R2 endpoint URL: https://<accountId>.r2.cloudflarestorage.com */
@@ -36,7 +37,7 @@ const THROTTLE_WINDOW_MS = Number(process.env.THROTTLE_WINDOW_MS ?? 45_000)
 
 export interface CompiledSpecLike {
   workflow: { inputTemplate: Record<string, unknown> }
-  models: Array<{ url: string; dest: string; sizeBytes?: number }>
+  models: Array<{ id?: string; url: string; dest: string; sizeBytes?: number }>
   customNodes?: Array<{ url: string; name?: string }>
 }
 
@@ -81,6 +82,38 @@ export async function submitToRunner(
     const text = await res.text().catch(() => '')
     throw new Error(`comfyrunner POST /job returned ${res.status}: ${text}`)
   }
+}
+
+/** The tally comfyrunner's /install returns — a download-only model apply (no workflow run). */
+export interface InstallResult {
+  modelsDownloaded: number
+  modelsReused: number
+  downloadMs?: number
+  downloadBytes?: number
+}
+
+/**
+ * Download-only model install on an already-running pod. POSTs the model refs to comfyrunner's
+ * `/install`, which runs its `_ensure_models` preflight (skip-present / resume-partial) WITHOUT
+ * executing a workflow, and returns the download tally. Mirrors `submitToRunner`'s transport.
+ */
+export async function installViaRunner(
+  fetchFn: typeof fetch,
+  runnerBase: string,
+  models: ModelRef[],
+  timeoutMs = 45 * 60 * 1000,
+): Promise<InstallResult> {
+  const res = await fetchFn(`${runnerBase}/install`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ models }),
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`comfyrunner POST /install returned ${res.status}: ${text}`)
+  }
+  return await res.json() as InstallResult
 }
 
 /**

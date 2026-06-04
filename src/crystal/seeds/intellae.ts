@@ -116,9 +116,62 @@ export const INTELLA_CLIP_L: Intella = {
   natum: new Date('2025-01-01'),
 }
 
+// ── LLM base models (llama.cpp runtime) ──────────────────────────────────────
+// The first non-ComfyUI family. A GGUF chat model served by llama.cpp — deliberately TINY so a
+// real pod downloads it in seconds (cheap to spin up). Establishes the second runtime in the
+// catalog so /arm + the model explorer become runtime-aware. (Inference needs the llama-server
+// pod runner — a GPU sprint; the catalog/UI abstraction lands now.)
+export const INTELLA_SMOLLM2_135M: Intella = {
+  id: 'intella.smollm2-135m-instruct',
+  nomen: 'SmolLM2 135M Instruct (Q8)',
+  genus: 'model',
+  architectura: 'gguf',
+  parametri: 135_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct-GGUF/resolve/main/smollm2-135m-instruct-q8_0.gguf',
+      format: 'gguf',
+      meta: { repo: 'HuggingFaceTB/SmolLM2-135M-Instruct-GGUF', branch: 'main', filename: 'smollm2-135m-instruct-q8_0.gguf' },
+    },
+  ],
+  dest: 'gguf/smollm2-135m-instruct-q8_0.gguf',
+  sizeGb: 0.145,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2025-01-01'),
+}
+
+// A small, SELF-CONTAINED ComfyUI checkpoint (VAE + CLIP baked into one ~4GB file) — the cheap
+// image-gen flow for validation, so we're not downloading FLUX's ~34GB (24GB unet + 9.8GB T5-XXL)
+// just to exercise the gen/warm-add plumbing. (Verify the HF URL before a real run — SD1.5 re-host
+// paths have shifted since runwayml pulled the original.)
+export const INTELLA_SD15: Intella = {
+  id: 'intella.sd15-v1-5',
+  nomen: 'Stable Diffusion 1.5 (pruned emaonly)',
+  genus: 'model',
+  architectura: 'sd15',
+  parametri: 860_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'stable-diffusion-v1-5/stable-diffusion-v1-5', branch: 'main', filename: 'v1-5-pruned-emaonly.safetensors' },
+    },
+  ],
+  dest: 'checkpoints/v1-5-pruned-emaonly.safetensors',
+  sizeGb: 4.27,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2025-01-01'),
+}
+
 export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_FLUX_SCHNELL,
   INTELLA_FLUX_VAE,
   INTELLA_T5XXL,
   INTELLA_CLIP_L,
+  INTELLA_SD15,
+  INTELLA_SMOLLM2_135M,
 ]

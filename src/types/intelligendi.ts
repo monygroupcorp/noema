@@ -68,8 +68,8 @@ export interface IntellaSource {
    * Must match Intella.contentHash when set.
    */
   sha256?: string
-  /** File format — determines how ComfyUI loads it */
-  format?: 'safetensors' | 'ckpt' | 'pt' | 'bin'
+  /** File format — determines how the runtime loads it ('gguf' = llama.cpp/LLM weights) */
+  format?: 'safetensors' | 'ckpt' | 'pt' | 'bin' | 'gguf'
   /**
    * Provenance-specific metadata for re-fetching or scraping.
    * civitai:    { modelId: number, versionId: number }
@@ -96,6 +96,13 @@ export interface Intella {
    * Examples: 'unet', 'transformer', 'dit' (diffusion transformer), 'llm-causal'
    */
   architectura: string
+  /**
+   * Human-readable description, when the record carries one (v2 migration output, English
+   * `description` field — an outlier in this otherwise-Latin type, matching the migrated data).
+   * Surfaced on the Mod • model detail card. Often a thin auto-stub on migrated LoRAs; richer
+   * text is a later content sprint. Preserved through the MongoIntella v2→v1 projection (`...rest`).
+   */
+  description?: string
   /**
    * The weight — how many trained parameters the model has.
    * "parametri" = parameters in Latin (from Greek parametros, measuring alongside).

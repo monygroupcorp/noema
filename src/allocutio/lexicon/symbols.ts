@@ -17,8 +17,15 @@ export const GLYPH = {
   rate:    '♥',     // default rating affordance (before a choice)
   wrench:  '⚙',
   back:    '←',
+  cancel:  '⊗',     // dismiss a wizard from its first layer (U+2297 — circled times, monochrome)
   tweak:   '✎',
   rerun:   '↻',
+  add:     '+',     // add a model directly from a list row
+  start:   '▸',     // launch an armed studio (U+25B8 — text triangle, no emoji variant unlike ▶)
+  search:  '⌕',     // open the search prompt (U+2315 — monochrome, not the emoji 🔍)
+  trigger: '⌗',     // add LoRAs by trigger word(s) (U+2317 — monochrome viewdata square)
+  prev:    '‹',     // previous page (U+2039 — text chevron, no emoji presentation unlike ◀)
+  next:    '›',     // next page (U+203A)
 } as const
 
 /** Rating glyphs — the fixed feedback set on a delivered result. */

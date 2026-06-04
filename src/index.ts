@@ -37,6 +37,9 @@ import { spellRoyaltyHook } from './ledger/hooks/spellRoyalty.js'
 import { SecurePodClient, makeSecurePodSshFactory, type R2Config } from './crystal/SecurePodClient.js'
 import { FakeRunPodClient } from './crystal/FakeRunPodClient.js'
 import { FakeWarmPodClient } from './crystal/FakeWarmPodClient.js'
+import { WarmPodClient } from './crystal/WarmPodClient.js'
+import { ModelInstaller } from './crystal/ModelInstaller.js'
+import { InstallCoordinator } from './crystal/InstallCoordinator.js'
 import { terminatePod, listRunPodPods } from './crystal/terminatePod.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
 import { MongoHospitium } from './crystal/MongoHospitium.js'
@@ -224,12 +227,12 @@ async function main(): Promise<void> {
   const intellaeCol = mongo.db(DB_NAME).collection('intellae')
   const intellae = new MongoIntella(intellaeCol)
   const compiler = new Compiler(templateRegistry, undefined, intellae)
-  const compile = async (modus: unknown, aditus: Record<string, unknown>): Promise<{ hash: string; input: unknown }> => {
+  const compile = async (modus: unknown, aditus: Record<string, unknown>, pinnedModels?: import('./types/actum.js').ModelRef[]): Promise<{ hash: string; input: unknown }> => {
     const essentia = modus as Essentia
     if (!essentia.runpodSpec) {
       throw new Error(`Modus '${essentia.id}' has no runpodSpec — cannot compile for RunPod`)
     }
-    const { hash, spec } = await compiler.compile(essentia, aditus)
+    const { hash, spec } = await compiler.compile(essentia, aditus, pinnedModels ? { pinnedModels } : {})
     return { hash, input: spec }
   }
 
@@ -249,6 +252,18 @@ async function main(): Promise<void> {
     ? (podId: string) => terminatePod(RUNPOD_API_KEY!, podId)
     : undefined
 
+  // Live model-apply (Part B) — install model(s) onto a warm pod (no gen). Fake mode simulates the
+  // download; real posts to comfyrunner /install via WarmPodClient. The ModelInstaller resolves
+  // intella ids → download refs and persists the installedModels union; the InstallCoordinator
+  // serializes installs PER POD so the live-apply path (Mod • Add) and the gen-admission gate
+  // (B4) never double-download the same file. Shared by both, so a gen awaits an in-flight add.
+  const warmInstallClientFor = fakeWarmFactory
+    ? (m: Materia) => fakeWarmFactory(m, materiae)
+    : (m: Materia) => new WarmPodClient(m, materiae)
+  const installCoordinator = (runpodClient || process.env.DEV_FAKE_POD)
+    ? new InstallCoordinator(new ModelInstaller({ intellarum: intellae, materiae, clientFor: warmInstallClientFor }))
+    : undefined
+
   const ring = createContainer(mongo, {
     mongoUri: MONGODB_URI as string,
     dbName: DB_NAME,
@@ -262,6 +277,7 @@ async function main(): Promise<void> {
       runpodR2: RUNPOD_R2,
       runpodWarmTtlMs: RUNPOD_WARM_TTL_MS,
       ...(fakeWarmFactory ? { warmFactory: fakeWarmFactory } : {}),
+      ...(installCoordinator ? { admitWarm: (m: Materia, models: Array<{ id?: string }>) => installCoordinator.ensureForGen(m, models) } : {}),
     } : {}),
     ...(openaiClient ? { openaiClient } : {}),
     ...(embed ? { embed } : {}),
@@ -368,6 +384,52 @@ async function main(): Promise<void> {
   const tgBot = new Telegraf(BOT_TOKEN as string)
   const identityResolver = new TelegramIdentityResolver(ring)
 
+  // `/arm` Start — provision a warm studio (no gen) with the chosen loadout. Fake mode parks a
+  // warm Materia directly (the loadout = installedModels); the real provision-only path
+  // (SecurePodClient provision+park, Part A real) is wired here when DEV_FAKE_POD is off.
+  const provisionStudio = process.env.DEV_FAKE_POD
+    ? async (opts: { models: Array<{ intellaId: string }>; runtime?: string }) => {
+        const podId = `studio-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        const installedModels = opts.models.map(m => m.intellaId)
+        const runtime = opts.runtime ?? 'ComfyUI'
+        const imageRef = runtime === 'llama.cpp' ? 'ghcr.io/ggml-org/llama.cpp:server-cuda' : 'runpod/pytorch:2.4.0-cuda12.4'
+        await materiae.create({
+          genus: 'runpod', externusId: podId, gpu: 'RTX 4090', vramGb: 24, ramGb: 32,
+          imageRef, runtime, impetusPerSecond: 0n, status: 'idle',
+          warmUntil: new Date(Date.now() + RUNPOD_WARM_TTL_MS), bootCostImpetus: 0n,
+          ...(installedModels.length ? { installedModels } : {}),
+        }).catch(err => { log.warn('fake studio provision failed', { error: String(err) }); return undefined })
+        return { podId, gpuType: 'RTX 4090', costPerHr: 0.69, provisionMs: 20_000 }
+      }
+    : (runpodClient instanceof SecurePodClient
+        // Real provision-only studio (Part A): SecurePodClient.provisionStudio provisions + parks a
+        // warm pod (no gen); the Standby picks then download live onto it via the InstallCoordinator.
+        ? async (opts: { models: Array<{ intellaId: string }>; runtime?: string }) => {
+            const res = await runpodClient.provisionStudio({ ...(opts.runtime ? { runtime: opts.runtime } : {}) })
+              .catch(err => { log.warn('studio provision failed', { error: String(err) }); return null })
+            if (!res) return null
+            if (opts.models.length && installCoordinator) {
+              const pods = await materiae.findActive().catch(() => [])
+              const m = pods.find(p => p.externusId === res.podId)
+              if (m) await installCoordinator.installLive(m, opts.models.map(x => x.intellaId)).catch(() => {})
+            }
+            return res
+          }
+        : undefined)
+
+  // Live model-apply (Part B / B3) — Mod • Add on a warm studio installs onto the running pod.
+  // Routes through the shared InstallCoordinator (built above) so it serializes per pod with the
+  // gen-admission gate (B4) — no double-download of the same file.
+  const installStudioModels = installCoordinator
+    ? async (podId: string, intellaIds: string[]) => {
+        const pods = await materiae.findActive().catch(() => [])
+        const m = pods.find(p => p.externusId === podId)
+        if (!m) return null
+        const { installedModels } = await installCoordinator.installLive(m, intellaIds)
+        return { installedModels }
+      }
+    : undefined
+
   const allocutio = new TelegramAllocutio({
     router: routerDeps,
     sender: makeTelegramSender(tgBot.telegram),
@@ -375,6 +437,8 @@ async function main(): Promise<void> {
     botStartupTime,
     materiae,
     hospitia,
+    ...(provisionStudio ? { provisionStudio } : {}),
+    ...(installStudioModels ? { installStudioModels } : {}),
     signorum: ring.signorum,
     modorum: ring.modorum,
     actorum: ring.actorum,

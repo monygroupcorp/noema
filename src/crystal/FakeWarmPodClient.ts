@@ -1,6 +1,8 @@
 import type { RunPodClient } from './RunPodCursor.js'
 import type { Materia, MateriaStore } from '../types/materia.js'
-import type { ActumExecutio } from '../types/actum.js'
+import type { ActumExecutio, ModelRef } from '../types/actum.js'
+import type { InstallResult } from './comfyrunnerClient.js'
+import type { ModelInstallClient, InstallProgress } from './ModelInstaller.js'
 import type { FakeOpts } from './FakeRunPodClient.js'
 import { bus } from '../lib/bus.js'
 import { getTrace } from '../lib/trace.js'
@@ -17,7 +19,7 @@ const log = makeLogger('cursor:fake:warm')
  * fires a COMPLETED webhook, and re-arms the Materia's idle warm window so the
  * idle reaper sweeps it after the chosen TTL. No SSH, no comfyrunner, no $.
  */
-export class FakeWarmPodClient implements RunPodClient {
+export class FakeWarmPodClient implements RunPodClient, ModelInstallClient {
   constructor(
     private readonly materia: Materia,
     private readonly materiae: MateriaStore,
@@ -35,6 +37,21 @@ export class FakeWarmPodClient implements RunPodClient {
 
     void this._run(jobId, actumId, params).catch(err => log.error('fake warm run failed', { error: String(err) }))
     return { id: jobId }
+  }
+
+  /** Simulate a download-only install onto the warm pod — steps through the models emitting
+   *  progress (drives the bulletin's "installing…" tail), no real download, no $. */
+  async installModels(models: ModelRef[], onProgress?: (p: InstallProgress) => void): Promise<InstallResult> {
+    const step = this.opts.stepMs ?? (Number(process.env.DEV_FAKE_STEP_MS) || 800)
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+    let done = 0
+    for (const m of models) {
+      await sleep(step / 2)
+      done += 1
+      onProgress?.({ done, total: models.length, current: m.id })
+    }
+    log.info('fake install complete', { podId: this.materia.externusId, count: done })
+    return { modelsDownloaded: done, modelsReused: 0, downloadMs: done * Math.round(step / 2), downloadBytes: models.reduce((n, m) => n + (m.sizeBytes ?? 0), 0) }
   }
 
   private async _run(jobId: string, actumId: string | undefined, params: Parameters<FakeWarmPodClient['submit']>[0]): Promise<void> {

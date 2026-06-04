@@ -59,9 +59,76 @@ export const COPY = {
 
     setupPrompt: `Set how long to keep the pod warm, then ${GLYPH.confirm}.`,
     keepCooking: (label: string, marginal: string): string => `Warm ${label}${marginal} — keep cooking.`,
+    /** Armed via /arm but no pod provisioned yet — Mod • → add models, then ▸ Start. */
+    armedIdle: `Studio armed — add models, then ${GLYPH.start} Start to launch.`,
     nextGen: (money: string): string => ` · next gen ~${money}`,
     podShutDown: 'Pod shut down.',
     podActive: 'Pod active.',
+
+    // /arm wizard headers (body text; option buttons live in affordances.ts).
+    arm: {
+      pickPreset: 'Arm a studio — choose a flow',
+      /** Feedback on the chooser as flows are layered (stay-and-add, like the model list). */
+      added: (flows: string[]): string => `Added: ${flows.join(', ')} — add more, or Proceed ›`,
+      /** Rejection when a flow's runtime differs from the armed studio. One studio runs one runtime
+       *  today; running both at once (co-hosting) is a future multi-runtime studio. */
+      runtimeConflict: (have: string, need: string): string =>
+        `⚠ This studio runs ${have}. Running ${need} alongside it needs a co-hosting studio (coming) — for now, arm a separate one.`,
+      pickImage:  'Custom — pick an image',
+      pickConfig: (image: string): string => `Image: ${image}\nPick a runtime`,
+      /** Flow detail card (preset name tapped) — what the flow bundles before committing. */
+      flow: {
+        models: 'Models',
+        config: (config: string): string => `Runtime: ${config}`,
+        image:  (image: string): string => `Image: ${image}`,
+        vram:   (gb: number): string => `Weights: ~${gb} GB`,
+      },
+    },
+    /** An armed studio dismissed before it ever provisioned — not a pod shut-down. */
+    armCancelled: 'Setup cancelled.',
+
+    // Mod • → Add model picker (body text; button labels live in affordances.ts).
+    mod: {
+      /** Loadout view (shown on Mod • open): the studio's model base. */
+      loadoutImage:   (image: string): string => `Image: ${image}`,
+      loadoutRuntime: (runtime: string): string => `Runtime: ${runtime}`,
+      loadoutEmpty:   (): string => 'No models installed on this studio yet.',
+      /** Subsection title under a base model, listing the LoRAs trained for it. */
+      loraSection:    'LoRA',
+      /** The "Standby: …" tail — models picked but not yet installed (no pod provisioned yet, so
+       *  "queued" would overstate it). Merged into the loadout when the studio is launched. */
+      queued: (names: string[]): string => `Standby: ${names.join(', ')}`,
+      /** The "Installing: …" tail — models downloading LIVE onto a warm pod (no gen). */
+      installing: (names: string[]): string => `Installing: ${names.join(', ')}…`,
+      /** Category stage header — choose a model type (mount location). */
+      pickType: 'Add a model — pick a type',
+      /** List stage header — the mount being browsed (or the search term) + page position. */
+      listTitle: (mount: string | undefined, page: number, pageCount: number, query?: string): string => {
+        const what = query ? `Search “${query}”` : (mount ?? 'models')
+        const pages = pageCount > 1 ? ` · page ${page + 1}/${pageCount}` : ''
+        return `${what}${pages}`
+      },
+      pickerEmpty: (query?: string): string => query ? `No models match “${query}”.` : 'No models available.',
+      /** Model detail card (Mod • → tap a model name). Lines omitted when their field is absent. */
+      detail: {
+        type:    (mount: string): string => `Type: ${mount}`,
+        base:    (base: string): string => `Base: ${base}`,
+        trigger: (t: string): string => `Trigger: ${t}`,
+        size:    (gb: number): string => `Size: ${gb} GB`,
+        from:    (provenance: string): string => `From: ${provenance}`,
+        by:      (auctor: string): string => `By: ${auctor}`,
+      },
+      /** Force-reply prompt the host replies to with a search term. */
+      searchPrompt: 'Reply with a model name to search.',
+      /** Force-reply prompt for adding LoRAs by trigger word(s). */
+      triggerPrompt: 'Reply with trigger word(s), space- or comma-separated.',
+      /** The one-line result of an add-by-trigger reply, shown under the list. */
+      triggerResult: (added: string[], unmatched: string[]): string => {
+        const a = added.length ? `Added: ${added.join(', ')}` : 'No triggers matched'
+        const u = unmatched.length ? ` · no match: ${unmatched.join(', ')}` : ''
+        return a + u
+      },
+    },
   },
 
   // ── the delivery menu's Info stats block ─────────────────────────────────────

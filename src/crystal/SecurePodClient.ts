@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { RunPodClient, ProvisioningContext } from './RunPodCursor.js'
-import type { MateriaStore } from '../types/materia.js'
+import type { Materia, MateriaStore } from '../types/materia.js'
 import type { HospitiumStore } from '../types/hospitium.js'
 import type { ActumExecutio } from '../types/actum.js'
 import { makeLogger } from '../lib/logger.js'
@@ -225,7 +225,84 @@ export class SecurePodClient implements RunPodClient {
     return { id: podId }
   }
 
+  /**
+   * `/arm` Start — provision a warm studio with NO gen (Part A real). Provisions a pod, bootstraps
+   * comfyrunner to ready, then parks it warm (an idle `Materia`) — the same record `submit` builds
+   * on a successful gen, minus the job. Returns pod telemetry for the bulletin journal, or null on
+   * failure (the pod is terminated). Models are applied afterward via the live-install path.
+   */
+  async provisionStudio(opts: { runtime?: string; provisioningContext?: ProvisioningContext } = {}): Promise<{ podId: string; gpuType?: string; costPerHr?: number; provisionMs: number } | null> {
+    const imageName = this.config.imageName ?? 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
+    let prov: { podId: string; sshInfo: SshInfo; provisionMs: number }
+    try {
+      prov = await this._provisionAndBootstrap(imageName, opts.provisioningContext)
+    } catch (err) {
+      log.warn('studio provision failed', { error: (err as Error).message })
+      return null
+    }
+    const materia = await this._parkWarm(prov.podId, prov.sshInfo, imageName, prov.provisionMs, opts.runtime, opts.provisioningContext)
+    if (!materia) { await this._terminatePod(prov.podId).catch(() => {}); return null }
+    return {
+      podId: prov.podId,
+      ...(prov.sshInfo.gpuType ? { gpuType: prov.sshInfo.gpuType } : {}),
+      ...(typeof prov.sshInfo.costPerHr === 'number' ? { costPerHr: prov.sshInfo.costPerHr } : {}),
+      provisionMs: prov.provisionMs,
+    }
+  }
+
   // ── private ──────────────────────────────────────────────────────────────
+
+  /**
+   * Provision a pod and bring comfyrunner to ready WITHOUT submitting a job — the front half of the
+   * gen path (provision-with-retries → SSH → bootstrap → /health ready). Emits the same stages.
+   * Terminates the pod and rethrows on any failure so no pod leaks. (`submit` keeps its own inline
+   * version because it interleaves job retry/throttle logic; this is the provision-only path.)
+   */
+  private async _provisionAndBootstrap(
+    imageName: string,
+    _provisioningContext?: ProvisioningContext,
+  ): Promise<{ podId: string; sshInfo: SshInfo; provisionMs: number }> {
+    const startMs = Date.now()
+    const emitStage = (stage: string, info?: import('../lib/bus.js').StageInfo) => {
+      const ctx = getTrace()
+      if (ctx?.actumId) bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - (ctx.startTs ?? startMs), info })
+    }
+
+    // Provision with retries — SECURE for attempts 1-2, COMMUNITY/any-GPU on the last (mirrors submit).
+    const maxAttempts = this.config.podRetries ?? 3
+    let podId: string | undefined
+    let lastErr: Error | undefined
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const isFallback = attempt >= maxAttempts
+      try {
+        podId = await this._provisionPod(imageName, isFallback ? 'COMMUNITY' : undefined, isFallback ? null : undefined)
+        break
+      } catch (err) {
+        lastErr = err as Error
+        log.warn(`studio provision attempt ${attempt}/${maxAttempts} failed`, { error: lastErr.message })
+      }
+    }
+    if (!podId) throw lastErr ?? new Error('pod provision failed')
+
+    let ssh: SshTransportLike | null = null
+    try {
+      emitStage('provisioning')
+      const sshInfo = await this._waitForSsh(podId)
+      emitStage('pod-locked', { gpuType: sshInfo.gpuType, region: sshInfo.region, costPerHr: sshInfo.costPerHr, podId })
+      ssh = await this._waitForSshd(sshInfo)
+      emitStage('bootstrapping')
+      await this._bootstrap(ssh, podId)
+      await ssh.close()
+      ssh = null
+      await this._waitForRunner(SecurePodClient.runnerBase(podId))
+      emitStage('comfy-ready')
+      return { podId, sshInfo, provisionMs: Date.now() - startMs }
+    } catch (err) {
+      await ssh?.close().catch(() => {})
+      await this._terminatePod(podId).catch(() => {})   // don't leak a half-provisioned pod
+      throw err
+    }
+  }
 
   private async _postWebhook(url: string, body: unknown): Promise<void> {
     const retries = this.config.webhookRetries ?? 3
@@ -417,48 +494,67 @@ export class SecurePodClient implements RunPodClient {
       await ssh?.close().catch(() => {})
       if (jobSucceeded && this.config.keepWarm && this.materiae && sshInfo) {
         // Boot wall-clock — the cost we now ask future guests to amortize.
-        const coldStartMs = Date.now() - startMs
-        const bootCostImpetus = computeBootCostImpetus(coldStartMs, sshInfo.costPerHr ?? 0)
-        const materia = await this.materiae.create({
-          genus: 'runpod',
-          externusId: podId,
-          gpu: sshInfo.gpuType ?? (this.config.gpuTypeIds ?? DEFAULT_GPU_TYPE_IDS)[0] ?? '',
-          vramGb: 0,
-          ramGb: 0,
-          imageRef: imageName,
-          sshHost: sshInfo.host,
-          sshPort: sshInfo.port,
-          impetusPerSecond: this.config.impetusPerSecond ?? 0n,
-          status: 'idle',
-          warmUntil: new Date(Date.now() + (this.config.warmTtlMs ?? 60_000)),
-          bootCostImpetus,
-          ...(provisioningContext?.groupChatId ? { groupChatId: provisioningContext.groupChatId } : {}),
-        }).catch(() => undefined)
-        // Pair the Materia with a Hospitium when we know the host — identified
-        // (animaId) or anonymous-arcanum (commitment). Either way, the identity
-        // sits off-pod by design (see types/hospitium.ts).
-        if (materia && this.hospitia && provisioningContext?.hostKey) {
-          await this.hospitia.create({
-            materiaId: materia.id,
-            hostKey: provisioningContext.hostKey,
-            inceptum: new Date(),
-          }).catch(() => undefined)
-        }
-        // Late-binding hosting metadata (e.g. group admin resolution) hangs off
-        // pod.parked so the crystal core stays platform-neutral. We carry the
-        // source platform so multi-platform processes' adapters scope themselves.
-        if (materia) {
-          const platform = getTrace()?.platform
-          bus.emit('pod.parked', {
-            materiaId: materia.id,
-            ...(provisioningContext?.groupChatId ? { groupChatId: provisioningContext.groupChatId } : {}),
-            ...(platform ? { platform } : {}),
-          })
-        }
+        const runtime = isCompiledSpec(input) ? (input as unknown as { runtime?: string }).runtime : undefined
+        await this._parkWarm(podId, sshInfo, imageName, Date.now() - startMs, runtime, provisioningContext)
       } else {
         await this._terminatePod(podId)
       }
     }
+  }
+
+  /**
+   * Create the warm `Materia` for a ready pod (status idle, warm window, boot-cost), pair a
+   * `Hospitium` when the host is known, and emit `pod.parked`. Shared by the gen path (where
+   * `bootMs` is the actual cold-start wall-clock) and the provision-only `/arm` Start path (where
+   * it's the provision+bootstrap elapsed — an estimate, reconciled later). `runtime` records which
+   * on-pod runtime the studio serves. Returns the Materia (or undefined on create failure).
+   */
+  private async _parkWarm(
+    podId: string,
+    sshInfo: SshInfo,
+    imageName: string,
+    bootMs: number,
+    runtime?: string,
+    provisioningContext?: ProvisioningContext,
+  ): Promise<Materia | undefined> {
+    if (!this.materiae) return undefined
+    const bootCostImpetus = computeBootCostImpetus(bootMs, sshInfo.costPerHr ?? 0)
+    const materia = await this.materiae.create({
+      genus: 'runpod',
+      externusId: podId,
+      gpu: sshInfo.gpuType ?? (this.config.gpuTypeIds ?? DEFAULT_GPU_TYPE_IDS)[0] ?? '',
+      vramGb: 0,
+      ramGb: 0,
+      imageRef: imageName,
+      sshHost: sshInfo.host,
+      sshPort: sshInfo.port,
+      impetusPerSecond: this.config.impetusPerSecond ?? 0n,
+      status: 'idle',
+      warmUntil: new Date(Date.now() + (this.config.warmTtlMs ?? 60_000)),
+      bootCostImpetus,
+      ...(runtime ? { runtime } : {}),
+      ...(provisioningContext?.groupChatId ? { groupChatId: provisioningContext.groupChatId } : {}),
+    }).catch(() => undefined)
+    // Pair the Materia with a Hospitium when we know the host — identified (animaId) or
+    // anonymous-arcanum (commitment). Either way, identity sits off-pod (see types/hospitium.ts).
+    if (materia && this.hospitia && provisioningContext?.hostKey) {
+      await this.hospitia.create({
+        materiaId: materia.id,
+        hostKey: provisioningContext.hostKey,
+        inceptum: new Date(),
+      }).catch(() => undefined)
+    }
+    // Late-binding hosting metadata (e.g. group admin resolution) hangs off pod.parked so the
+    // crystal core stays platform-neutral; carry the source platform for adapter scoping.
+    if (materia) {
+      const platform = getTrace()?.platform
+      bus.emit('pod.parked', {
+        materiaId: materia.id,
+        ...(provisioningContext?.groupChatId ? { groupChatId: provisioningContext.groupChatId } : {}),
+        ...(platform ? { platform } : {}),
+      })
+    }
+    return materia
   }
 
   // Port appearing in RunPod API does not mean sshd is accepting connections yet.

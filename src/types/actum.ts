@@ -24,6 +24,21 @@
 import type { GpuClass } from './materia.js'
 export type { GpuClass }
 
+/**
+ * ModelRef — one model the Compiler must ensure is on the pod's volume: a role
+ * (`unet` / `lora` / `checkpoint` / …), the Intella id to resolve, and the volume
+ * `dest`. `url` + `dest` are filled in by `Compiler._resolveModels` from the Intella
+ * record when only the id is known (as for host-pinned models). The shape mirrors a
+ * workflow template's `requiredModels[]` entry.
+ */
+export interface ModelRef {
+  role: string
+  id: string
+  url?: string
+  dest: string
+  sizeBytes?: number
+}
+
 export type ActumStatus =
   | 'nascens'     // initializing — execution has started, not yet running
   | 'agens'       // running — modus is actively executing on materia
@@ -110,6 +125,14 @@ export interface Actum {
    * at dispatch. Absent for ordinary `/make` invocations.
    */
   shareTokenHint?: string
+
+  /**
+   * Models the host pinned onto the studio's loadout via `Mod • → Add`, threaded from
+   * dispatch to the Compiler (which unions them into `spec.models` so any missing weights
+   * download on this gen). First-class + typed — NOT smuggled through `aditus`. Absent for
+   * ordinary `/make` invocations.
+   */
+  pinnedModels?: ModelRef[]
 
   /**
    * The external system's job identifier — set when cursor returns { kind: 'async' }.

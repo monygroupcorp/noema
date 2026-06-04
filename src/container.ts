@@ -106,7 +106,7 @@ export interface ContainerConfig {
    * Compile a Modus + aditus into the RunPod job input payload.
    * Bridges to the Fractal Tool Compiler. Injected to avoid circular deps.
    */
-  compile: (modus: Modus, aditus: Record<string, unknown>) => Promise<{ hash: string; input: unknown }>
+  compile: (modus: Modus, aditus: Record<string, unknown>, pinnedModels?: import('./types/actum.js').ModelRef[]) => Promise<{ hash: string; input: unknown }>
   /**
    * RunPod SECURE pod client — provisions a GPU pod, runs the workflow via SSH,
    * and POSTs the result to webhookUrl. Absent: RunPod tools will throw at run().
@@ -125,6 +125,9 @@ export interface ContainerConfig {
   runpodWarmTtlMs?: number
   /** Override the warm-pod client factory (dev fake mode swaps in FakeWarmPodClient). */
   warmFactory?: (materia: Materia, materiae: MateriaStore) => RunPodClient
+  /** Admission gate for a gen reusing a warm pod — install any models it needs that aren't on the
+   *  pod yet (awaiting in-flight live-apply installs). Wired to the shared InstallCoordinator. */
+  admitWarm?: (materia: Materia, models: Array<{ id?: string }>) => Promise<void>
   /** Collection name for acta — default 'acta' */
   actaCollection?: string
   /** Collection name for modi — default 'modi' */
@@ -283,6 +286,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
               warmTtlMs: config.runpodWarmTtlMs,
             }),
         imageRefOf,
+        ...(config.admitWarm ? { admitWarm: config.admitWarm } : {}),
         deployments,
         hospitia,
       },
