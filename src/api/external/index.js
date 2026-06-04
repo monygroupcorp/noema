@@ -573,23 +573,6 @@ function initializeExternalApi(dependencies) {
     logger.warn('External Spells API router not mounted due to missing dependencies.');
   }
 
-  // Mount the Cook API router (JWT/API key protected)
-  const cookApiRouter = createCookApiRouter(dependencies);
-  if (cookApiRouter) {
-    externalApiRouter.use('/', authenticateUserOrApiKey, cookApiRouter); // ensure req.user is populated
-    logger.debug('External Cook API router mounted (collections & cooks endpoints).');
-  } else {
-    logger.warn('External Cook API router not mounted due to missing dependencies.');
-  }
-
-  // Mount the Batch API router (JWT/API key protected)
-  const batchApiRouter = createBatchApiRouter(dependencies);
-  if (batchApiRouter) {
-    externalApiRouter.use('/', authenticateUserOrApiKey, batchApiRouter);
-    logger.debug('External Batch API router mounted (batch endpoints).');
-  } else {
-    logger.warn('External Batch API router not mounted due to missing dependencies.');
-  }
   const reviewQueueRouter = createReviewQueueApiRouter({ ...dependencies, authenticateUserOrApiKey });
   if (reviewQueueRouter) {
     externalApiRouter.use('/', reviewQueueRouter);
@@ -669,6 +652,28 @@ function initializeExternalApi(dependencies) {
     logger.debug('External Agent Card Federation API mounted at / (GET /treasury/:id/agents/:id, GET /agents/:id/capabilities).');
   } else {
     logger.warn('External Agent Card Federation API not mounted due to missing DB dependencies.');
+  }
+
+  // Mount the Cook API router (JWT/API key protected)
+  // NOTE: mounted at the catch-all '/' with a hard-rejecting auth gate, so it MUST be
+  // registered AFTER every public router above (CAMEL agent surface, workspaces). Otherwise
+  // its Noema-only gate shadows those public routes (403 before they are ever reached).
+  // See docs/plans/2026-06-04-external-api-auth-architecture.md (Phase 0).
+  const cookApiRouter = createCookApiRouter(dependencies);
+  if (cookApiRouter) {
+    externalApiRouter.use('/', authenticateUserOrApiKey, cookApiRouter); // ensure req.user is populated
+    logger.debug('External Cook API router mounted (collections & cooks endpoints).');
+  } else {
+    logger.warn('External Cook API router not mounted due to missing dependencies.');
+  }
+
+  // Mount the Batch API router (JWT/API key protected) — also a '/' catch-all, keep after public routers.
+  const batchApiRouter = createBatchApiRouter(dependencies);
+  if (batchApiRouter) {
+    externalApiRouter.use('/', authenticateUserOrApiKey, batchApiRouter);
+    logger.debug('External Batch API router mounted (batch endpoints).');
+  } else {
+    logger.warn('External Batch API router not mounted due to missing dependencies.');
   }
 
   // Partner presign (no auth — domain-locked + rate limited)
