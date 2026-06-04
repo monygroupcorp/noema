@@ -18,7 +18,7 @@ class SpellsService {
     /**
      * Compute implicit exposed inputs for a spell whose `exposedInputs`
      * field is empty. Walks each step, looks up the current tool schema,
-     * and returns `[{nodeId, paramKey}]` entries for every required input
+     * and returns `[{nodeId, paramKey, type?}]` entries for every required input
      * that has neither a static value nor an upstream wire.
      *
      * Mirrors the client-side auto-expose logic in
@@ -27,7 +27,7 @@ class SpellsService {
      *
      * @private
      * @param {Object} spell
-     * @returns {Array<{nodeId: string, paramKey: string}>}
+     * @returns {Array<{nodeId: string, paramKey: string, type?: string}>}
      */
     _computeImplicitExposedInputs(spell) {
         if (!spell || !Array.isArray(spell.steps) || spell.steps.length === 0) return [];
@@ -47,7 +47,9 @@ class SpellsService {
             for (const [paramKey, paramDef] of Object.entries(schema)) {
                 if (!paramDef?.required) continue;
                 if (mappings[paramKey]) continue; // already has a static or nodeOutput
-                exposed.push({ nodeId, paramKey });
+                // Carry the param type so spell windows can render typed input anchors
+                // (mirrors the client-side autoExpose in subgraph.js).
+                exposed.push({ nodeId, paramKey, ...(paramDef.type && { type: paramDef.type }) });
             }
         }
         return exposed;
@@ -182,9 +184,10 @@ class SpellsService {
                     castMetadata.spellSlug = spell.slug || spell.name;
                 }
 
-                const newCast = await castsDbToUse.createCast({ 
+                const newCast = await castsDbToUse.createCast({
                     spellId: spell._id.toString(), // Use spell._id instead of slug
                     initiatorAccountId: context.masterAccountId,
+                    ...(context.agentAccountId && { agentAccountId: context.agentAccountId }),
                     metadata: castMetadata
                 });
                 castId = newCast._id.toString();

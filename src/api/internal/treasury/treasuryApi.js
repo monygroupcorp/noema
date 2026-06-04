@@ -203,6 +203,29 @@ function createAgentsApi(deps = {}) {
     logger,
   });
 
+  async function _findAgentDoc(agentId) {
+    const legacyDoc = await deps.db?.userCore?.findByAgentId(agentId).catch(() => null);
+    if (legacyDoc) return legacyDoc;
+
+    const provDoc = await deps.db?.agentAccount?.findByAgentId(agentId).catch(() => null);
+    if (!provDoc || provDoc.status !== 'active') return null;
+
+    const { ObjectId: OID } = require('mongodb');
+    return {
+      _id:                  OID.isValid(provDoc.noemaAccountId) ? new OID(provDoc.noemaAccountId) : provDoc.noemaAccountId,
+      agentId:              provDoc.agentId,
+      agentChainId:         provDoc.agentChainId || null,
+      agentAdapter:         provDoc.agentAdapter || null,
+      agentTokenId:         provDoc.tokenId || null,
+      agentCollection:      null,
+      agentOwnerAddress:    provDoc.ownerAddress || null,
+      starterWorkspaceSlug: provDoc.workspaceSlug,
+      profile:              null,
+      scope:                provDoc.scope || [],
+      _provisionedDoc:      provDoc,
+    };
+  }
+
   // Auth services — challenge/verify owner session
   const onChainVerifier = new OnChainVerifier({ logger });
   const challengeService = new ChallengeService();
@@ -256,9 +279,9 @@ function createAgentsApi(deps = {}) {
   router.patch('/:agentId/payout-policy', multisig, async (req, res) => {
     try {
       const { mode, withdrawAddress, split } = req.body;
-      const agentDoc = await deps.db?.userCore?.findByAgentId(req.params.agentId);
-      if (!agentDoc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: `Agent ${req.params.agentId} not found` } });
-      const updated = await deps.db.userCore.updatePayoutPolicy(agentDoc._id, { mode, withdrawAddress, split });
+      const legacyDoc = await deps.db?.userCore?.findByAgentId(req.params.agentId).catch(() => null);
+      if (!legacyDoc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: `Agent ${req.params.agentId} not found` } });
+      const updated = await deps.db.userCore.updatePayoutPolicy(legacyDoc._id, { mode, withdrawAddress, split });
       res.json(updated);
     } catch (err) { handleErr(res, err, 'PATCH /agents/:agentId/payout-policy'); }
   });
@@ -334,7 +357,7 @@ function createAgentsApi(deps = {}) {
   router.get('/:agentId/workspace/sync-status', async (req, res) => {
     if (!workspaceFactory) return res.status(503).json({ error: { code: 'UNAVAILABLE', message: 'Workspace service not configured' } });
     try {
-      const agentDoc = await deps.db?.userCore?.findByAgentId(req.params.agentId);
+      const agentDoc = await _findAgentDoc(req.params.agentId);
       if (!agentDoc?.starterWorkspaceSlug) {
         return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent has no starter workspace' } });
       }
@@ -351,7 +374,7 @@ function createAgentsApi(deps = {}) {
   router.post('/:agentId/workspace/merge-template', multisig, async (req, res) => {
     if (!workspaceFactory) return res.status(503).json({ error: { code: 'UNAVAILABLE', message: 'Workspace service not configured' } });
     try {
-      const agentDoc = await deps.db?.userCore?.findByAgentId(req.params.agentId);
+      const agentDoc = await _findAgentDoc(req.params.agentId);
       if (!agentDoc?.starterWorkspaceSlug) {
         return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent has no starter workspace' } });
       }
@@ -371,7 +394,7 @@ function createAgentsApi(deps = {}) {
    */
   router.post('/:agentId/auth/challenge', async (req, res) => {
     try {
-      const agentDoc = await deps.db?.userCore?.findByAgentId(req.params.agentId);
+      const agentDoc = await _findAgentDoc(req.params.agentId);
       if (!agentDoc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent not found' } });
       const challenge = verifySvc.issueChallenge(agentDoc);
       res.json(challenge);
@@ -390,7 +413,7 @@ function createAgentsApi(deps = {}) {
       if (!nonce || !signature) {
         return res.status(400).json({ error: { code: 'INVALID_PARAMS', message: 'nonce and signature are required' } });
       }
-      const agentDoc = await deps.db?.userCore?.findByAgentId(req.params.agentId);
+      const agentDoc = await _findAgentDoc(req.params.agentId);
       if (!agentDoc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent not found' } });
       const result = await verifySvc.verify(agentDoc, { nonce, signature });
       res.json(result);
@@ -407,15 +430,15 @@ function createAgentsApi(deps = {}) {
    */
   router.get('/:agentId/card', async (req, res) => {
     try {
-      const agentDoc = await deps.db?.userCore?.findByAgentId(req.params.agentId);
+      const agentDoc = await _findAgentDoc(req.params.agentId);
       if (!agentDoc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent not found' } });
       res.json({
-        agentId: agentDoc.agentId,
-        agentChainId: agentDoc.agentChainId,
-        agentTokenId: agentDoc.agentTokenId,
-        agentCollection: agentDoc.agentCollection,
-        profile: agentDoc.profile || {},
-        scope: agentDoc.scope || [],
+        agentId:              agentDoc.agentId,
+        agentChainId:         agentDoc.agentChainId,
+        agentTokenId:         agentDoc.agentTokenId,
+        agentCollection:      agentDoc.agentCollection,
+        profile:              agentDoc.profile || {},
+        scope:                agentDoc.scope || [],
         starterWorkspaceSlug: agentDoc.starterWorkspaceSlug || null,
       });
     } catch (err) { handleErr(res, err, 'GET /agents/:agentId/card'); }

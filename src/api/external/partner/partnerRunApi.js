@@ -96,7 +96,7 @@ async function getStepWeights(spell, generationOutputsDb) {
  * @param {string} dependencies.receiverAddress - Address to receive payments
  * @param {string} [dependencies.network] - Network ID (defaults to Base mainnet)
  */
-function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerDb, x402PaymentLogDb, userCoreDb, cookCollectionsDb, castsDb, generationOutputsDb, spellsService, receiverAddress, network = NETWORKS.BASE_MAINNET }) {
+function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerDb, x402PaymentLogDb, userCoreDb, cookCollectionsDb, agentAccountDb, castsDb, generationOutputsDb, spellsService, receiverAddress, network = NETWORKS.BASE_MAINNET }) {
   if (!receiverAddress) throw new Error('partnerRunApi requires receiverAddress');
 
   const router = express.Router();
@@ -249,9 +249,14 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
       const grossPoints = usdcAtomicToPoints(grossAmount);
       let agentDoc = null;
       let agentCollection = null;
+      let agentAccountDoc = null;
       // Look up agent if agentId provided in request body — skip if unavailable
       if (userCoreDb && req.body?.agentId) {
         agentDoc = await userCoreDb.findByAgentId(req.body.agentId).catch(() => null);
+      }
+      // Fall back to provisioned agentAccountDb for ERC-8004 agents not in userCoreDb
+      if (!agentDoc && agentAccountDb && req.body?.agentId) {
+        agentAccountDoc = await agentAccountDb.findByAgentId(req.body.agentId).catch(() => null);
       }
       if (agentDoc?.agentCollection && cookCollectionsDb) {
         agentCollection = await cookCollectionsDb.findById(agentDoc.agentCollection).catch(() => null);
@@ -278,6 +283,8 @@ function createPartnerRunApi({ spellsDb, partnerDb, uploadRecordDb, splitLedgerD
           masterAccountId: spell.ownedBy?.toString(),
           inputs,
           runId,
+          // Tag cast with provisioned agentAccountId so it appears in gallery feed
+          ...(agentAccountDoc?.agentAccountId && { agentAccountId: agentAccountDoc.agentAccountId }),
           // Forward optional caller-supplied webhook for result delivery
           ...(req.body.webhookUrl && { webhookUrl: req.body.webhookUrl }),
         };

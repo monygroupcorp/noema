@@ -10,6 +10,9 @@
 //   GET   /gallery/:collectionAddress                      — collection gallery iframe
 //   GET   /gallery/:collectionAddress/feed                 — gallery JSON feed (CORS: *)
 //   PATCH /gallery/:collectionAddress/casts/:castId/hide   — hide cast from gallery (owner JWT)
+//   PATCH /gallery/:collectionAddress/casts/:castId/unhide — unhide cast from gallery (owner JWT)
+//   PATCH /gallery/:collectionAddress/casts/:castId/pin    — pin cast to top of gallery (owner JWT)
+//   PATCH /gallery/:collectionAddress/casts/:castId/unpin  — unpin cast from gallery (owner JWT)
 //   GET  /:agentId                        — iframe mini-app HTML shell
 //   GET  /:agentId/workspace              — workspace + spells JSON (CORS: *)
 //   POST /:agentId/spells/:slug/cast      — guest-safe cast via agent account (CORS: *)
@@ -1242,7 +1245,39 @@ function createWidgetApi(deps = {}) {
     // ── Helper ───────────────────────────────────────────────────────────────
 
     async function findAgent(agentId) {
-        return deps.db?.userCore?.findByAgentId(agentId) || null;
+        const legacyDoc = await deps.db?.userCore?.findByAgentId(agentId).catch(() => null);
+        if (legacyDoc) return legacyDoc;
+
+        if (!deps.db?.agentAccount) return null;
+        const provDoc = await deps.db.agentAccount.findByAgentId(agentId).catch(() => null);
+        if (!provDoc || provDoc.status !== 'active') return null;
+
+        const { ObjectId: OID } = require('mongodb');
+        return {
+            _id: OID.isValid(provDoc.noemaAccountId) ? new OID(provDoc.noemaAccountId) : provDoc.noemaAccountId,
+            agentId:              provDoc.agentId,
+            agentChainId:         provDoc.agentChainId || null,
+            agentAdapter:         provDoc.agentAdapter || null,
+            agentTokenId:         provDoc.tokenId || null,
+            agentCollection:      null,
+            agentOwnerAddress:    provDoc.ownerAddress || null,
+            starterWorkspaceSlug: provDoc.workspaceSlug,
+            displayName:          provDoc.tokenId ? `Agent #${provDoc.tokenId}` : provDoc.agentId,
+            scope:                provDoc.scope || [],
+            _provisionedDoc:      provDoc,
+        };
+    }
+
+    async function _verifyGalleryOwner(payload, addr) {
+        if (deps.db?.userCore) {
+            const doc = await deps.db.userCore.findByAgentId(payload.sub).catch(() => null);
+            if (doc && (doc.agentCollection || '').toLowerCase() === addr) return true;
+        }
+        if (deps.db?.agentAccount) {
+            const doc = await deps.db.agentAccount.findByAgentId(payload.sub).catch(() => null);
+            if (doc && doc.status === 'active' && (doc.agentAdapter || '').toLowerCase() === addr) return true;
+        }
+        return false;
     }
 
     function handleErr(res, err, label) {
@@ -1583,8 +1618,13 @@ function createWidgetApi(deps = {}) {
             const runId = require('crypto').randomUUID();
 
             // Agent/collection owner rev-share — before dispatch
+            // For provisioned ERC-8004 agents, synthesize a collection-like object from the
+            // noemaAccountId so distributeAgentOwnerReward credits them directly instead of
+            // falling through to the split_ledger unclaimed path.
             let agentCollection = null;
-            if (agentDoc.agentCollection && deps.db?.cookCollections) {
+            if (agentDoc._provisionedDoc?.noemaAccountId) {
+                agentCollection = { userId: agentDoc._provisionedDoc.noemaAccountId };
+            } else if (agentDoc.agentCollection && deps.db?.cookCollections) {
                 agentCollection = await deps.db.cookCollections.findById(agentDoc.agentCollection);
             }
             await distributeAgentOwnerReward({
@@ -1983,30 +2023,57 @@ function createWidgetApi(deps = {}) {
         cors(res);
         try {
             const addr = req.params.collectionAddress.toLowerCase();
-            if (!deps.db?.userCore || !deps.db?.casts) return res.json({ items: [] });
+            if (!deps.db?.casts) return res.json({ items: [] });
 
-            const agents = await deps.db.userCore.findByAccountType('agent', { agentCollection: addr });
-            if (!agents.length) return res.json({ items: [] });
+            // Gather agents from legacy userCore (pre-ERC-8004) and provisioned agentAccountDb
+            const [legacyAgents, provisionedAgents] = await Promise.all([
+                deps.db.userCore
+                    ? deps.db.userCore.findByAccountType('agent', { agentCollection: addr })
+                    : Promise.resolve([]),
+                deps.db.agentAccount
+                    ? deps.db.agentAccount.findByCollection(addr)
+                    : Promise.resolve([]),
+            ]);
 
-            const agentById = {};
-            agents.forEach(a => { agentById[a._id.toString()] = a; });
-            const agentIds = agents.map(a => a._id);
+            // Build noemaId → display metadata map
+            const metaByNoemaId = {};
+            for (const a of legacyAgents) {
+                metaByNoemaId[a._id.toString()] = {
+                    agentId:   a.agentId || null,
+                    agentName: a.displayName || a.agentId || null,
+                };
+            }
+            for (const a of provisionedAgents) {
+                metaByNoemaId[a.noemaAccountId] = {
+                    agentId:   a.agentId || null,
+                    agentName: a.tokenId ? `Agent #${a.tokenId}` : (a.agentId || null),
+                };
+            }
+
+            const noemaIds = Object.keys(metaByNoemaId);
+            if (!noemaIds.length) return res.json({ items: [] });
+
+            const { ObjectId: OID } = require('mongodb');
+            const noemaObjectIds = noemaIds
+                .map(id => { try { return new OID(id); } catch { return null; } })
+                .filter(Boolean);
 
             const raw = await deps.db.casts.aggregate([
-                { $match: { initiatorAccountId: { $in: agentIds }, status: 'completed', 'output.url': { $exists: true }, galleryHidden: { $ne: true } } },
-                { $sort: { updatedAt: -1 } },
+                { $match: { initiatorAccountId: { $in: noemaObjectIds }, status: 'completed', 'output.url': { $exists: true }, galleryHidden: { $ne: true } } },
+                { $sort: { galleryPinned: -1, updatedAt: -1 } },
                 { $limit: 60 },
-                { $project: { _id: 0, castId: { $toString: '$_id' }, initiatorAccountId: 1, url: '$output.url', updatedAt: 1 } },
+                { $project: { _id: 0, castId: { $toString: '$_id' }, initiatorAccountId: 1, url: '$output.url', updatedAt: 1, galleryPinned: 1 } },
             ]);
 
             const items = raw.map(r => {
-                const agentDoc = agentById[r.initiatorAccountId?.toString()] || {};
+                const meta = metaByNoemaId[r.initiatorAccountId?.toString()] || {};
                 return {
                     castId:    r.castId,
                     url:       r.url,
                     updatedAt: r.updatedAt,
-                    agentId:   agentDoc.agentId || null,
-                    agentName: agentDoc.displayName || agentDoc.agentId || null,
+                    agentId:   meta.agentId || null,
+                    agentName: meta.agentName || null,
+                    pinned:    r.galleryPinned || false,
                 };
             });
 
@@ -2039,12 +2106,8 @@ function createWidgetApi(deps = {}) {
                 return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Owner session required' } });
             }
 
-            // Confirm the agent in the token belongs to this collection
-            if (deps.db?.userCore) {
-                const agentDoc = await deps.db.userCore.findByAgentId(payload.sub);
-                if (!agentDoc || (agentDoc.agentCollection || '').toLowerCase() !== addr) {
-                    return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Agent not in this collection' } });
-                }
+            if (!await _verifyGalleryOwner(payload, addr)) {
+                return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Agent not in this collection' } });
             }
 
             if (deps.db?.casts) {
@@ -2059,6 +2122,129 @@ function createWidgetApi(deps = {}) {
         } catch (err) {
             logger.error(`[WidgetApi] PATCH gallery hide: ${err.message}`);
             res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to hide cast' } });
+        }
+    });
+
+    // Unhide a cast from the collection gallery (requires owner JWT for any agent in the collection)
+    router.patch('/gallery/:collectionAddress/casts/:castId/unhide', async (req, res) => {
+        cors(res);
+        try {
+            const addr   = req.params.collectionAddress.toLowerCase();
+            const castId = req.params.castId;
+
+            const secret = process.env.AGENT_SESSION_SECRET || process.env.JWT_SECRET;
+            if (!secret) return res.status(500).json({ error: { code: 'CONFIG_ERROR', message: 'Session secret not configured' } });
+
+            const auth  = req.headers.authorization || '';
+            const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+            if (!token) return res.status(401).json({ error: { code: 'MISSING_TOKEN', message: 'Authorization header required' } });
+
+            let payload;
+            try { payload = jwt.verify(token, secret, { algorithms: ['HS256'] }); }
+            catch { return res.status(401).json({ error: { code: 'TOKEN_INVALID', message: 'Invalid or expired token' } }); }
+
+            if (payload.tier !== 'agent_owner') {
+                return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Owner session required' } });
+            }
+
+            if (!await _verifyGalleryOwner(payload, addr)) {
+                return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Agent not in this collection' } });
+            }
+
+            if (deps.db?.casts) {
+                const { ObjectId: OID } = require('mongodb');
+                await deps.db.casts.updateOne(
+                    { _id: new OID(castId) },
+                    { $set: { galleryHidden: false, updatedAt: new Date() } }
+                );
+            }
+
+            res.json({ ok: true });
+        } catch (err) {
+            logger.error(`[WidgetApi] PATCH gallery unhide: ${err.message}`);
+            res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to unhide cast' } });
+        }
+    });
+
+    // Pin a cast to the top of the gallery (requires owner JWT for any agent in the collection)
+    router.patch('/gallery/:collectionAddress/casts/:castId/pin', async (req, res) => {
+        cors(res);
+        try {
+            const addr   = req.params.collectionAddress.toLowerCase();
+            const castId = req.params.castId;
+
+            const secret = process.env.AGENT_SESSION_SECRET || process.env.JWT_SECRET;
+            if (!secret) return res.status(500).json({ error: { code: 'CONFIG_ERROR', message: 'Session secret not configured' } });
+
+            const auth  = req.headers.authorization || '';
+            const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+            if (!token) return res.status(401).json({ error: { code: 'MISSING_TOKEN', message: 'Authorization header required' } });
+
+            let payload;
+            try { payload = jwt.verify(token, secret, { algorithms: ['HS256'] }); }
+            catch { return res.status(401).json({ error: { code: 'TOKEN_INVALID', message: 'Invalid or expired token' } }); }
+
+            if (payload.tier !== 'agent_owner') {
+                return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Owner session required' } });
+            }
+
+            if (!await _verifyGalleryOwner(payload, addr)) {
+                return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Agent not in this collection' } });
+            }
+
+            if (deps.db?.casts) {
+                const { ObjectId: OID } = require('mongodb');
+                await deps.db.casts.updateOne(
+                    { _id: new OID(castId) },
+                    { $set: { galleryPinned: true, updatedAt: new Date() } }
+                );
+            }
+
+            res.json({ ok: true });
+        } catch (err) {
+            logger.error(`[WidgetApi] PATCH gallery pin: ${err.message}`);
+            res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to pin cast' } });
+        }
+    });
+
+    // Unpin a cast from the top of the gallery (requires owner JWT for any agent in the collection)
+    router.patch('/gallery/:collectionAddress/casts/:castId/unpin', async (req, res) => {
+        cors(res);
+        try {
+            const addr   = req.params.collectionAddress.toLowerCase();
+            const castId = req.params.castId;
+
+            const secret = process.env.AGENT_SESSION_SECRET || process.env.JWT_SECRET;
+            if (!secret) return res.status(500).json({ error: { code: 'CONFIG_ERROR', message: 'Session secret not configured' } });
+
+            const auth  = req.headers.authorization || '';
+            const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+            if (!token) return res.status(401).json({ error: { code: 'MISSING_TOKEN', message: 'Authorization header required' } });
+
+            let payload;
+            try { payload = jwt.verify(token, secret, { algorithms: ['HS256'] }); }
+            catch { return res.status(401).json({ error: { code: 'TOKEN_INVALID', message: 'Invalid or expired token' } }); }
+
+            if (payload.tier !== 'agent_owner') {
+                return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Owner session required' } });
+            }
+
+            if (!await _verifyGalleryOwner(payload, addr)) {
+                return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Agent not in this collection' } });
+            }
+
+            if (deps.db?.casts) {
+                const { ObjectId: OID } = require('mongodb');
+                await deps.db.casts.updateOne(
+                    { _id: new OID(castId) },
+                    { $set: { galleryPinned: false, updatedAt: new Date() } }
+                );
+            }
+
+            res.json({ ok: true });
+        } catch (err) {
+            logger.error(`[WidgetApi] PATCH gallery unpin: ${err.message}`);
+            res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to unpin cast' } });
         }
     });
 

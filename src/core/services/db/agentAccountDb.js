@@ -133,6 +133,10 @@ class AgentAccountDB extends BaseDB {
     return this.count({ treasuryId, status: 'active' });
   }
 
+  async findByCollection(collectionAddress) {
+    return this.findMany({ agentAdapter: collectionAddress.toLowerCase(), status: 'active' });
+  }
+
   async addBalance(agentAccountId, points) {
     return this.updateOne(
       { agentAccountId },

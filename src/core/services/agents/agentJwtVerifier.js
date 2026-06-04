@@ -166,14 +166,30 @@ class AgentJwtVerifier {
    * @returns {Promise<Array>} - Array of JWK objects
    */
   async _doFetchJwks(issuerDomain, cacheKey) {
-    if (!isValidIssuerDomain(issuerDomain)) {
-      this._jwksCache.delete(cacheKey);
-      throw new JwksUnavailableError(
-        `Refusing to fetch JWKS: issuerDomain '${issuerDomain}' failed hostname validation`,
-        { issuerDomain }
-      );
+    // Dev override: AGENT_JWKS_OVERRIDE={"localtest.me":"http://localhost:3456"} redirects
+    // the JWKS fetch for a given domain to an arbitrary URL (HTTP allowed).  Never set in prod.
+    let url;
+    const overrideEnv = process.env.AGENT_JWKS_OVERRIDE;
+    if (overrideEnv) {
+      try {
+        const overrides = JSON.parse(overrideEnv);
+        if (overrides[issuerDomain]) {
+          url = overrides[issuerDomain].replace(/\/$/, '') + '/.well-known/jwks.json';
+          this.logger.warn(`[AgentJwtVerifier] Using JWKS override for ${issuerDomain}: ${url}`);
+        }
+      } catch { /* malformed env value — fall through to normal path */ }
     }
-    const url = `https://${issuerDomain}/.well-known/jwks.json`;
+
+    if (!url) {
+      if (!isValidIssuerDomain(issuerDomain)) {
+        this._jwksCache.delete(cacheKey);
+        throw new JwksUnavailableError(
+          `Refusing to fetch JWKS: issuerDomain '${issuerDomain}' failed hostname validation`,
+          { issuerDomain }
+        );
+      }
+      url = `https://${issuerDomain}/.well-known/jwks.json`;
+    }
 
     let response;
     try {
