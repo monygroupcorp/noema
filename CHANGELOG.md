@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.10.8](https://github.com/monygroupcorp/noema/compare/v4.10.7...v4.10.8) (2026-06-04)
+
+
+### Bug Fixes
+
+* **agents:** de-shadow public CAMEL routes from cook/batch auth catch-all ([b89faa1](https://github.com/monygroupcorp/noema/commit/b89faa143eb1e6c52ec52a43a8ca9ba82005cb42))
+
 ## [4.10.7](https://github.com/monygroupcorp/noema/compare/v4.10.6...v4.10.7) (2026-06-04)
 
 
