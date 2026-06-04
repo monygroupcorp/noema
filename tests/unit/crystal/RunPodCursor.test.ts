@@ -436,3 +436,17 @@ test('run() passes input (not full compile result) to client.submit', async () =
   await cursor.run(makeActum())
   assert.deepEqual((client.calls[0] as { input: unknown }).input, compiledInput)
 })
+
+test('run threads actum.pinnedModels into compile (Mod • → Add)', async () => {
+  // Proves the dispatch→spec bridge's cursor leg: the cursor holds the actum, so it passes
+  // actum.pinnedModels as compile's 3rd arg → Compiler unions them into spec.models.
+  const seen: Array<unknown> = []
+  const compile = async (_m: Modus, _aditus: Record<string, unknown>, pinnedModels?: import('../../../src/types/actum.js').ModelRef[]) => {
+    seen.push(pinnedModels)
+    return { hash: 'sha256:abc', input: { workflow: {} } }
+  }
+  const cursor = new RunPodCursor(makeClient(), compile, makeModorum(), makeActorum(), BASE_CONFIG)
+  const pinned = [{ role: 'checkpoint', id: 'intella.sdxl', dest: 'models/checkpoints/sdxl.safetensors' }]
+  await cursor.run(makeActum({ pinnedModels: pinned }))
+  assert.deepEqual(seen[0], pinned, 'actum.pinnedModels passed to compile')
+})

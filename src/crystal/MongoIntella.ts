@@ -1,10 +1,99 @@
 import type { Collection, Document } from 'mongodb'
 import type { Intella, Intellae, IntellaGenus, Intellarum } from '../types/intelligendi.js'
 
-function fromDoc(doc: Document): Intella {
+// =============================================================================
+// V2 → V1 backward-compat shim
+// =============================================================================
+//
+// The chunk migration's output uses the v2 schema (`docs/spec/intella-schema.md`):
+//   - LoRA-activation fields nested under `params.{triggerWords[], slug,
+//     defaultWeight, baseIntellaId}`
+//   - Access as a discriminated union `{ kind: 'public' | 'private' | ... }`
+//
+// The current `Intella` TypeScript type and every read site downstream
+// (resolver, Compiler, bulletin) still expects v1 shape: flat `trigger` (string,
+// comma-separated), `slug`, `defaultWeight`, `baseIntellaId`, `access: 'public'
+// | 'private'`, `ownerAnimaId`. Until the proper type refactor lands (separate
+// sprint), this shim normalizes v2 records to v1 at read time.
+//
+// Two places need updating, not just one:
+//   1. `fromDoc` — project the document shape on the way out
+//   2. The query builders for `findByTrigger` / `triggerMap` — `$or` over both
+//      shapes so v2 records actually match. Without this, projecting on the way
+//      out is moot because v2 docs never get returned.
+//
+// v1 records pass through both layers unchanged.
+
+interface V2Doc {
+  params?: {
+    triggerWords?: string[]
+    slug?: string
+    defaultWeight?: number
+    baseIntellaId?: string
+  }
+  access?: { kind?: string; ownerAnimaId?: string } | string
+  ownerAnimaId?: string
+  [key: string]: unknown
+}
+
+function isV2(doc: Document): boolean {
+  const d = doc as V2Doc
+  return Array.isArray(d.params?.triggerWords)
+}
+
+/** Collapse the v2 access discriminated union into the v1 binary axis. */
+function collapseAccess(access: V2Doc['access']): 'public' | 'private' | undefined {
+  if (access === undefined) return undefined
+  if (typeof access === 'string') return access === 'public' ? 'public' : 'private'
+  // discriminated union: only 'public' projects to v1 public; 'unlisted',
+  // 'private', 'group', 'hidden' all collapse to private (resolver-conservative —
+  // never wider than the source). The resolver's per-anima visibility still
+  // gates final selection.
+  return access.kind === 'public' ? 'public' : 'private'
+}
+
+function projectV2ToV1(doc: Document): Intella {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, ...rest } = doc as Document & { _id: unknown }
-  return rest as Intella
+  if (!isV2(rest as Document)) return rest as Intella
+
+  const d = rest as V2Doc
+  const p = d.params ?? {}
+  const accessV1 = collapseAccess(d.access)
+  const ownerAnimaId =
+    (typeof d.access === 'object' && d.access?.ownerAnimaId) || d.ownerAnimaId
+
+  const projected: Record<string, unknown> = {
+    ...rest,
+    // v1 expects a comma-separated trigger string; the resolver's caller-side
+    // map builder (MongoIntella.triggerMap) splits on comma before lower/dedupe.
+    trigger: (p.triggerWords ?? []).join(','),
+    slug: p.slug,
+    defaultWeight: p.defaultWeight,
+    baseIntellaId: p.baseIntellaId,
+  }
+  if (accessV1) projected.access = accessV1
+  if (ownerAnimaId) projected.ownerAnimaId = ownerAnimaId
+  // Drop the v2-only nested params block from the projection so consumers don't
+  // see both shapes simultaneously.
+  delete projected.params
+  return projected as unknown as Intella
+}
+
+/**
+ * Build the access half of a $or query: matches a public record (v1 OR v2)
+ * plus (when animaId given) any private record owned by that anima.
+ */
+function buildAccessOrClauses(animaId: string | undefined): Record<string, unknown>[] {
+  const clauses: Record<string, unknown>[] = [
+    { access: 'public' },              // v1
+    { 'access.kind': 'public' },       // v2
+  ]
+  if (animaId) {
+    clauses.push({ ownerAnimaId: animaId })            // v1
+    clauses.push({ 'access.ownerAnimaId': animaId })   // v2
+  }
+  return clauses
 }
 
 export class MongoIntella implements Intellarum {
@@ -12,56 +101,61 @@ export class MongoIntella implements Intellarum {
 
   async find(id: string): Promise<Intella | null> {
     const doc = await this.col.findOne({ id })
-    return doc ? fromDoc(doc) : null
+    return doc ? projectV2ToV1(doc) : null
   }
 
   async list(genus?: IntellaGenus): Promise<Intellae> {
     const query = genus !== undefined ? { genus } : {}
     const docs = await this.col.find(query).toArray()
-    return docs.map(fromDoc)
+    return docs.map(projectV2ToV1)
   }
 
   async canonical(): Promise<Intellae> {
     const docs = await this.col.find({ canonica: true }).toArray()
-    return docs.map(fromDoc)
+    return docs.map(projectV2ToV1)
   }
 
   async findByTrigger(trigger: string, baseIntellaId: string, animaId?: string): Promise<Intellae> {
     const triggerLower = trigger.toLowerCase()
+    // Substring-match against either v1's flat `trigger` string or v2's
+    // `params.triggerWords[]` array. Mongo's $regex on an array matches when
+    // any element matches.
     const query: Record<string, unknown> = {
       genus: 'lora',
-      baseIntellaId,
-      trigger: { $regex: new RegExp(triggerLower, 'i') },
-      $or: [
-        { access: 'public' },
-        ...(animaId ? [{ ownerAnimaId: animaId }] : []),
+      $and: [
+        {
+          $or: [
+            // v1: flat baseIntellaId + comma-joined trigger string
+            { baseIntellaId, trigger: { $regex: new RegExp(triggerLower, 'i') } },
+            // v2: nested params.baseIntellaId + array element regex
+            { 'params.baseIntellaId': baseIntellaId, 'params.triggerWords': { $regex: new RegExp(triggerLower, 'i') } },
+          ],
+        },
+        { $or: buildAccessOrClauses(animaId) },
       ],
     }
     const docs = await this.col.find(query).toArray()
-    return docs.map(fromDoc)
+    return docs.map(projectV2ToV1)
   }
 
   async triggerMap(baseIntellaId: string, animaId?: string): Promise<Map<string, Intellae>> {
-    // One query: every accessible LoRA for this base. We group client-side; the
-    // collection is small enough (low thousands) that the network round-trip
-    // dominates anyway. If this becomes a hot path, swap to an aggregation that
-    // groups on the server.
     const query: Record<string, unknown> = {
       genus: 'lora',
-      baseIntellaId,
-      trigger: { $exists: true, $ne: '' },
-      $or: [
-        { access: 'public' },
-        ...(animaId ? [{ ownerAnimaId: animaId }] : []),
+      $and: [
+        {
+          $or: [
+            { baseIntellaId, trigger: { $exists: true, $ne: '' } },
+            { 'params.baseIntellaId': baseIntellaId, 'params.triggerWords.0': { $exists: true } },
+          ],
+        },
+        { $or: buildAccessOrClauses(animaId) },
       ],
     }
     const docs = await this.col.find(query).toArray()
     const map = new Map<string, Intellae>()
     for (const doc of docs) {
-      const intella = fromDoc(doc)
-      // A single Intella can declare multiple triggers as a comma-separated list
-      // (legacy convention from the JS resolver). Split, lower, dedupe — one
-      // map entry per token so resolvers can hit by any alias.
+      const intella = projectV2ToV1(doc)
+      // Comma-split the (projected) trigger string into per-alias map keys.
       for (const raw of (intella.trigger ?? '').split(',')) {
         const key = raw.trim().toLowerCase()
         if (!key) continue

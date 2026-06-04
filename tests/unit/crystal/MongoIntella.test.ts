@@ -130,3 +130,108 @@ test('upsert() updates an existing Intella when id already exists', async () => 
   const result = await intellae.find('intella.upsert-existing')
   assert.equal(result?.nomen, 'Updated')
 })
+
+// ── v2 → v1 shim ────────────────────────────────────────────────────────────
+//
+// The chunk migration writes v2-shape records (`params.triggerWords[]`, nested
+// `access.kind`, `params.baseIntellaId`). MongoIntella must surface them in
+// v1 shape so downstream consumers don't have to care.
+
+function makeV2LoraDoc(overrides: Record<string, unknown> = {}) {
+  return {
+    id: `intella.v2-${Math.random().toString(36).slice(2)}`,
+    nomen: 'v2 Test LoRA',
+    genus: 'lora',
+    architectura: 'flux',  // inherited from base in real v2; included here for v1 type compat
+    parametri: 0,
+    sources: [{ provenance: 'huggingface', uri: 'https://hf.co/x.safetensors' }],
+    dest: 'models/loras/v2.safetensors',
+    sizeGb: 0.2,
+    versio: '1.0.0',
+    canonica: false,
+    natum: new Date('2026-01-01'),
+    params: {
+      triggerWords: ['miladyy', 'mld'],
+      slug: 'milady-v3',
+      defaultWeight: 0.8,
+      baseIntellaId: 'intella.flux-schnell',
+    },
+    access: { kind: 'public' },
+    ...overrides,
+  }
+}
+
+test('shim: find() projects v2 doc to v1 shape', async () => {
+  const v2 = makeV2LoraDoc({ id: 'intella.v2-find' })
+  await col.insertOne(v2)
+  const result = await intellae.find('intella.v2-find')
+  assert.ok(result)
+  // v1 flat fields present
+  assert.equal(result.trigger, 'miladyy,mld')
+  assert.equal(result.slug, 'milady-v3')
+  assert.equal(result.defaultWeight, 0.8)
+  assert.equal(result.baseIntellaId, 'intella.flux-schnell')
+  assert.equal(result.access, 'public')
+  // v2 nested block dropped from projection
+  assert.equal('params' in result, false)
+})
+
+test('shim: v1 records pass through unchanged', async () => {
+  // A pure v1-shape doc (flat trigger / access / baseIntellaId).
+  const v1 = {
+    ...makeIntella({ id: 'intella.v1-pass', genus: 'lora' }),
+    trigger: 'milady',
+    slug: 'milady-v1',
+    defaultWeight: 1.0,
+    baseIntellaId: 'intella.flux-schnell',
+    access: 'public',
+  }
+  await col.insertOne({ ...v1 })
+  const result = await intellae.find('intella.v1-pass')
+  assert.ok(result)
+  assert.equal(result.trigger, 'milady')
+  assert.equal(result.slug, 'milady-v1')
+  assert.equal(result.access, 'public')
+})
+
+test('shim: triggerMap() finds v2 records and keys by each triggerWord', async () => {
+  await col.insertOne(makeV2LoraDoc({ id: 'intella.v2-tmap' }))
+  const map = await intellae.triggerMap('intella.flux-schnell')
+  // Both array entries become map keys
+  assert.ok(map.has('miladyy'), 'expected map to contain "miladyy" key')
+  assert.ok(map.has('mld'), 'expected map to contain "mld" key')
+  // Each key resolves to an Intella with v1-shape fields
+  const entry = map.get('miladyy')![0]
+  assert.equal(entry.slug, 'milady-v3')
+  assert.equal(entry.defaultWeight, 0.8)
+})
+
+test('shim: triggerMap() finds v2 PRIVATE record only for owner animaId', async () => {
+  const priv = makeV2LoraDoc({
+    id: 'intella.v2-priv',
+    access: { kind: 'private', ownerAnimaId: 'anima-alice' },
+    params: {
+      triggerWords: ['privateword'],
+      slug: 'priv-v1',
+      defaultWeight: 1.0,
+      baseIntellaId: 'intella.flux-schnell',
+    },
+  })
+  await col.insertOne(priv)
+  // Without animaId — should NOT find
+  const mapAnon = await intellae.triggerMap('intella.flux-schnell')
+  assert.equal(mapAnon.has('privateword'), false)
+  // With owner animaId — should find
+  const mapAlice = await intellae.triggerMap('intella.flux-schnell', 'anima-alice')
+  assert.ok(mapAlice.has('privateword'))
+  const entry = mapAlice.get('privateword')![0]
+  assert.equal(entry.access, 'private')
+  assert.equal(entry.ownerAnimaId, 'anima-alice')
+})
+
+test('shim: findByTrigger() matches against v2 triggerWords array', async () => {
+  await col.insertOne(makeV2LoraDoc({ id: 'intella.v2-find-trigger' }))
+  const results = await intellae.findByTrigger('miladyy', 'intella.flux-schnell')
+  assert.equal(results.length, 1)
+  assert.equal(results[0].slug, 'milady-v3')
+})

@@ -62,6 +62,141 @@ const SPLIT_KEEP_DELIMITERS     = /(\s+|[.,!?()[\]{}'"]+)/g
 const PLAIN_WORD_TOKEN          = /^[a-zA-Z0-9_][a-zA-Z0-9_-]*$/
 const ALL_DOTS                  = /^\.+$/
 const ALL_EXCLAMATIONS          = /^!+$/
+const PLAIN_TRIGGER_KEY         = /^[a-z0-9_-]+$/
+const REGEX_META                = /[.*+?^${}()|[\]\\]/g
+
+/**
+ * Pick the winning Intella from a set of candidates sharing one trigger key.
+ * Private (owned by animaId) > shared private > public; ties by `mutatum`
+ * descending. A multi-public match emits a warning naming the winner.
+ */
+function pickIntella(
+  candidates: Intellae,
+  animaId: string | undefined,
+  warnings: string[],
+  triggerKey: string,
+): Intella | undefined {
+  const owned   = candidates.filter(i => i.access === 'private' && i.ownerAnimaId === animaId)
+  const shared  = candidates.filter(i => i.access === 'private' && i.ownerAnimaId !== animaId)
+  const publics = candidates.filter(i => i.access === 'public')
+  const byRecency = (a: Intella, b: Intella) =>
+    (b.mutatum?.getTime() ?? b.natum.getTime()) - (a.mutatum?.getTime() ?? a.natum.getTime())
+
+  if (owned.length)  { owned.sort(byRecency);  return owned[0] }
+  if (shared.length) { shared.sort(byRecency); return shared[0] }
+  if (publics.length) {
+    publics.sort(byRecency)
+    if (publics.length > 1) {
+      warnings.push(`Multiple public LoRAs for trigger '${triggerKey}'. Slugs: ${publics.map(l => l.slug).join(', ')}. Using: ${publics[0].slug}.`)
+    }
+    return publics[0]
+  }
+  return undefined
+}
+
+/**
+ * Substring scan for triggers the tokenizer can't reach — keys containing
+ * colons, spaces, escaped parens, dots, or other regex metacharacters.
+ * Examples from real legacy data: `artist:moriimee`, `1990s \(style\)`,
+ * `retro artstyle`.
+ *
+ * Plain alphanumeric keys (e.g. `milady`) are left for Pass 2 — substring
+ * scanning those would risk matching inside larger words.
+ *
+ * Returns the prompt with matched triggers (+ optional weight modifier)
+ * replaced by `<lora:slug:weight>` tags. Mutates `state` to record the
+ * applied LoRAs and emitted warnings.
+ */
+interface ScanState {
+  applied: ResolvedLora[]
+  lorasApplied: Set<string>
+  warnings: string[]
+}
+
+function _substringScan(
+  prompt: string,
+  triggerMap: Map<string, Intellae>,
+  animaId: string | undefined,
+  state: ScanState,
+): string {
+  const specialKeys = Array.from(triggerMap.keys())
+    .filter(k => !PLAIN_TRIGGER_KEY.test(k))
+    .sort((a, b) => b.length - a.length)
+  if (specialKeys.length === 0) return prompt
+
+  type Match = {
+    start: number
+    end: number
+    key: string
+    userWeight: number | null
+    dotExclOffset: number
+  }
+  const matches: Match[] = []
+
+  for (const key of specialKeys) {
+    const escaped = key.replace(REGEX_META, '\\$&')
+    // Trigger optionally followed by :N.N (explicit weight), !+ (boost), or .+ (drop).
+    const re = new RegExp(`${escaped}(?::(\\d*\\.?\\d+)|(!+)|(\\.+))?`, 'gi')
+    let m: RegExpExecArray | null
+    while ((m = re.exec(prompt)) !== null) {
+      const userWeight = m[1] !== undefined ? parseFloat(m[1]) : null
+      const dotExclOffset = m[2] ? 0.2 * m[2].length : (m[3] ? -0.2 * m[3].length : 0)
+      matches.push({ start: m.index, end: m.index + m[0].length, key, userWeight, dotExclOffset })
+      if (m[0].length === 0) re.lastIndex++
+    }
+  }
+
+  // Greedy left-to-right, longest-trigger-wins on tie at the same start.
+  matches.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start))
+  const accepted: Match[] = []
+  let cursor = 0
+  for (const m of matches) {
+    if (m.start < cursor) continue
+    accepted.push(m)
+    cursor = m.end
+  }
+
+  const parts: string[] = []
+  let lastIndex = 0
+  for (const m of accepted) {
+    parts.push(prompt.substring(lastIndex, m.start))
+    const candidates = triggerMap.get(m.key) ?? []
+    const chosen = pickIntella(candidates, animaId, state.warnings, m.key)
+
+    if (!chosen?.slug) {
+      // No accessible LoRA — keep the matched text verbatim (including any
+      // weight modifier we consumed for inspection).
+      parts.push(prompt.substring(m.start, m.end))
+    } else if (m.userWeight === 0.0) {
+      // :0.0 silences — keep the original trigger text, drop the modifier.
+      parts.push(m.key)
+    } else if (state.lorasApplied.has(chosen.slug)) {
+      // Already applied via an earlier occurrence — drop the trigger from the
+      // prompt; modifier (if any) is consumed.
+    } else {
+      const baseWeight  = chosen.defaultWeight ?? 1.0
+      const finalWeight = m.userWeight !== null
+        ? m.userWeight
+        : Math.round((baseWeight + m.dotExclOffset) * 100) / 100
+      const loraTag = `<lora:${chosen.slug}:${finalWeight}>`
+      state.applied.push({
+        slug: chosen.slug,
+        weight: finalWeight,
+        originalWord: prompt.substring(m.start, m.end),
+        replacedWord: loraTag,
+        intellaId: chosen.id,
+        ...(chosen.ownerAnimaId ? { ownerAnimaId: chosen.ownerAnimaId } : {}),
+      })
+      state.lorasApplied.add(chosen.slug)
+      parts.push(loraTag)
+      // Preserve the trigger text after the tag for CLIP — mirrors Pass 2.
+      parts.push(m.key)
+    }
+    lastIndex = m.end
+  }
+  parts.push(prompt.substring(lastIndex))
+  return parts.join('')
+}
 
 /**
  * Pure trigger resolver. Returns the modified prompt + the LoRAs that ended
@@ -125,9 +260,20 @@ export function resolveLoraTriggers(
   }
   finalPromptParts.push(prompt.substring(lastIndex))
 
-  // ── Pass 2: walk remaining text for trigger words ────────────────────────
+  // ── Pass 1.5: substring scan for legacy multi-char / multi-word triggers ─
+  // Triggers like `artist:moriimee`, `1990s \(style\)`, `retro artstyle` —
+  // anything the tokenizer can't reach — are resolved here, in-place, before
+  // Pass 2 runs. The resulting <lora:...> tags pass through Pass 2 untouched
+  // (the existing inline-tag short-circuit catches them).
   let currentText = finalPromptParts.join('')
   finalPromptParts.length = 0
+  currentText = _substringScan(currentText, triggerMap, animaId, {
+    applied: appliedLoras,
+    lorasApplied: lorasAppliedThisRun,
+    warnings,
+  })
+
+  // ── Pass 2: walk remaining text for trigger words ────────────────────────
 
   const segments = currentText.split(SPLIT_KEEP_DELIMITERS).filter(s => s && s.length > 0)
   // Merge `trigger:` + `.` + `4` → `trigger:.4` and `word` + `..` → `word..`
@@ -190,22 +336,7 @@ export function resolveLoraTriggers(
     if (userWeight === 0.0) { finalPromptParts.push(segment); continue }
 
     const candidates = triggerMap.get(baseToken) ?? []
-    const owned     = candidates.filter(i => i.access === 'private' && i.ownerAnimaId === animaId)
-    const shared    = candidates.filter(i => i.access === 'private' && i.ownerAnimaId !== animaId)
-    const publics   = candidates.filter(i => i.access === 'public')
-    const byRecency = (a: Intella, b: Intella) =>
-      (b.mutatum?.getTime() ?? b.natum.getTime()) - (a.mutatum?.getTime() ?? a.natum.getTime())
-
-    let chosen: Intella | undefined
-    if      (owned.length)   { owned.sort(byRecency);   chosen = owned[0] }
-    else if (shared.length)  { shared.sort(byRecency);  chosen = shared[0] }
-    else if (publics.length) {
-      publics.sort(byRecency); chosen = publics[0]
-      if (publics.length > 1) {
-        warnings.push(`Multiple public LoRAs for trigger '${baseToken}'. Slugs: ${publics.map(l => l.slug).join(', ')}. Using: ${publics[0].slug}.`)
-      }
-    }
-
+    const chosen     = pickIntella(candidates, animaId, warnings, baseToken)
     if (!chosen?.slug) { finalPromptParts.push(segment); continue }
 
     if (lorasAppliedThisRun.has(chosen.slug)) {

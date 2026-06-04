@@ -705,3 +705,18 @@ test('state.step transitions through full sync flow', async () => {
   await flow.handle(ctx, { kind: 'form', values: { prompt: 'a cat' } })
   assert.equal((ctx.state as { step: string }).step, 'RESULT')
 })
+
+test('Mod • → Add: state.pinnedModels flows through _submit to inceptor.initiate', async () => {
+  // Proves the dispatch→spec bridge's flow leg: pinned models carried from entry state
+  // into the initiate call (sibling of shareTokenHint), so they land on the Actum.
+  let captured: { pinnedModels?: unknown } | undefined
+  const deps = makeDeps({
+    inceptor: { initiate: async (input) => { captured = input as { pinnedModels?: unknown }; return makeActum() } },
+  })
+  const flow = new ExecuteFlow(deps)
+  const pinned = [{ role: 'lora', id: 'intella.milady', dest: 'models/loras/milady.safetensors' }]
+  // Pre-filled /make shortcut: modusId + non-empty aditus → validate + submit directly.
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: { prompt: 'a cat' }, pinnedModels: pinned } })
+  await flow.enter(ctx)
+  assert.deepEqual(captured?.pinnedModels, pinned, 'pinned models reach initiate')
+})

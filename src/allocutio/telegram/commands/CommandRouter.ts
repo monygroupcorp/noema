@@ -29,6 +29,12 @@ export interface CommandDeps {
    * TelegramAllocutio against the status aggregator + StatusView.
    */
   showStatus?(userId: string, chatId: number): Promise<void>
+  /**
+   * Open the standalone Mod • loadout/Add menu — a pod-less, warm-clock-less session for
+   * building a loadout before (or independent of) a gen. The pending loadout carries to the
+   * next /make. Optional — absent in tests/contexts without the bulletin manager.
+   */
+  arm?(userId: string, chatId: number): void
 }
 
 /**
@@ -79,6 +85,15 @@ export class CommandRouter {
       case '/flows':
         await this.deps.enterExecute(userId)
         ack()
+        return
+
+      case '/arm':
+        if (this.deps.arm) {
+          this.deps.arm(userId, chatId)
+          ack()
+        } else {
+          await this.deps.sendMessage(chatId, COPY.command.unknown)
+        }
         return
 
       case '/cancel':
