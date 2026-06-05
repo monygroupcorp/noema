@@ -8,7 +8,7 @@ const base: BulletinSnapshot = {
   ledger: { genCount: 0, totalCostUsd: 0, avgCostUsd: 0, avgExecMs: 0, hasCost: false, hasExec: false },
   warmTtlMs: WARM_DEFAULT_MS, confirmed: false, ended: false, audience: 'host',
   activeSubmenu: null, pendingModels: [], installing: [],
-  canStart: false, everHadPod: false, cancelled: false,
+  canStart: false, starting: false, everHadPod: false, cancelled: false,
 }
 const cb = (kb: BulletinKeyboard) => kb.flat().map(b => b.data)
 

@@ -625,6 +625,40 @@ test('back from the Mod • menu of an armed studio returns to the flow chooser 
   assert.equal(m.pendingModelsFor(456).length, 1, 'the queued loadout survives the hop back')
 })
 
+test('▸ Start immediately shows "provisioning…" (not the armed copy) while the cold start runs', async () => {
+  const s = makeSink()
+  let release!: () => void
+  const gate = new Promise<{ podId: string }>(r => { release = () => r({ podId: 'studio-x' }) })
+  const m = new BulletinManager({ sink: s.sink, ...armDeps(), startStudio: () => gate })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:0')
+  await m.handleControl(456, '123', 'arm.proceed')
+  const pending = m.handleControl(456, '123', 'mod.start')   // do NOT await the full provision
+  await tick(5)
+  assert.match(s.lastText(), /Provisioning/, 'shows provisioning the instant Start is pressed')
+  assert.doesNotMatch(s.lastText(), /add models, then/, 'not the armed "press Start" copy anymore')
+  release()
+  await pending
+  assert.doesNotMatch(s.lastText(), /Provisioning/, 'flips off provisioning once the pod parks warm')
+})
+
+test('Destroy during provisioning kills the provisioned pod (no orphan billing)', async () => {
+  const s = makeSink()
+  const terminated: string[] = []
+  let release!: () => void
+  const gate = new Promise<{ podId: string }>(r => { release = () => r({ podId: 'studio-orphan' }) })
+  const m = new BulletinManager({ sink: s.sink, ...armDeps(), startStudio: () => gate, terminatePod: async (p: string) => { terminated.push(p) } })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:0')
+  await m.handleControl(456, '123', 'arm.proceed')
+  const pending = m.handleControl(456, '123', 'mod.start')   // provisioning in flight
+  await tick(5)
+  await m.handleControl(456, '123', 'destroy.now')           // cancel mid-provision → session ends
+  release()                                                  // provision finishes into a dead session
+  await pending
+  assert.deepEqual(terminated, ['studio-orphan'], 'the orphaned pod is terminated promptly, not left to the reaper')
+})
+
 test('a failed Start leaves the studio reading "armed", never the warm "keep cooking" nudge', async () => {
   const s = makeSink()
   const m = new BulletinManager({

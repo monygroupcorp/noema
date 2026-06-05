@@ -607,9 +607,16 @@ export class BulletinManager {
     this._closePicker(chatId)
     s.setLoadout(undefined)
     s.openSubmenu(null)
-    await this._render(chatId)   // immediate: the menu closes while we provision
+    s.beginStarting()            // provisioning in flight → body shows "provisioning…", Start hidden
+    await this._render(chatId)   // immediate: the host sees provisioning start, not the armed copy
     const res = this.deps.startStudio ? await this.deps.startStudio(chatId, { models, ...(runtime ? { runtime } : {}) }).catch(() => null) : null
-    if (res?.podId && !s.ended) {
+    if (res?.podId && s.ended) {
+      // Cancelled/Destroyed mid-provision — the pod finished provisioning into a session that's
+      // already gone. Kill it NOW so it doesn't bill for the whole warm window before the reaper.
+      void this.deps.terminatePod?.(res.podId).catch(() => {})
+      return
+    }
+    if (res?.podId) {
       s.onStage('provisioning', undefined, this.now())
       s.onStage('pod-locked', {
         podId: res.podId,
@@ -617,7 +624,9 @@ export class BulletinManager {
         ...(typeof res.costPerHr === 'number' ? { costPerHr: res.costPerHr } : {}),
         ...(typeof res.provisionMs === 'number' ? { phaseMs: res.provisionMs } : {}),
       }, this.now())
-      s.markReady()   // up + resting warm, no gen
+      s.markReady()   // up + resting warm, no gen (clears the starting flag)
+    } else {
+      s.endStarting()   // provisioning failed/unavailable → back to armed-idle so the host can retry
     }
     await this._render(chatId)
   }
