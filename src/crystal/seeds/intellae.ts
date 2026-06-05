@@ -169,8 +169,8 @@ export const INTELLA_SD15: Intella = {
 
 // A real SD1.5 LoRA (CivitAI "armored dress" v2.0) — tiny (~13.5 MB), so the SD1.5 base filter has a
 // LoRA to show and the warm-add `/install` has something cheap to download. Tagged `sd15` so it
-// buckets under the SD1.5 flow. (CivitAI downloads may need an API token for the real fetch — that
-// auth is part of the URL-import work; the canonical download URL is recorded here.)
+// buckets under the SD1.5 flow. Mirrored to our R2 (models.miladystation2.net) as source[0] so the
+// pod downloads AUTH-FREE — the CivitAI origin (source[1]) needs an API token and would 401 a pod.
 export const INTELLA_LORA_ARMORED_DRESS: Intella = {
   id: 'intella.lora.armored-dress',
   nomen: 'Armored Dress (v2.0)',
@@ -178,6 +178,11 @@ export const INTELLA_LORA_ARMORED_DRESS: Intella = {
   architectura: 'lora',
   parametri: 0,
   sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/loras/armored_dress_V02.safetensors',
+      format: 'safetensors',
+    },
     {
       provenance: 'civitai',
       uri: 'https://civitai.com/api/download/models/1165788',
