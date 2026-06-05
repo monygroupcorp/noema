@@ -134,7 +134,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     terminatePod?: (podId: string) => Promise<void>
     /** `/arm` Start — provision a warm studio (no gen) with the loadout. Container-wired
      *  (fake: create a warm Materia; real: SecurePodClient provision+park). Absent → no Start. */
-    provisionStudio?: (opts: { models: PendingModel[]; runtime?: string }) => Promise<{ podId: string; gpuType?: string; costPerHr?: number; provisionMs?: number } | null>
+    provisionStudio?: (opts: { models: PendingModel[]; runtime?: string }, onStage?: (stage: string, info?: StageInfo) => void) => Promise<{ podId: string; gpuType?: string; costPerHr?: number; provisionMs?: number } | null>
     /** Live model-apply — download model(s) onto a warm pod (no gen) + merge into installedModels.
      *  Container-wired (fake: simulated; real: comfyrunner /install). Absent → adds always queue. */
     installStudioModels?: (podId: string, intellaIds: string[]) => Promise<{ installedModels: string[] } | null>
@@ -192,7 +192,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       listPresets: () => this.modelCatalog.listFlows(),
       listImages: async () => this.modelCatalog.listImages(),
       listConfigs: async (image) => this.modelCatalog.configsForImage(image),
-      startStudio: (_chatId, opts) => (deps.provisionStudio ? deps.provisionStudio(opts) : Promise.resolve(null)),
+      startStudio: (_chatId, opts, onStage) => (deps.provisionStudio ? deps.provisionStudio(opts, onStage) : Promise.resolve(null)),
       ...(deps.installStudioModels ? { installModels: (podId, ids) => deps.installStudioModels!(podId, ids) } : {}),
       promptSearch: (chatId, hostUserId) => this.modelCatalog.promptSearch(chatId, hostUserId),
       promptTrigger: (chatId, hostUserId) => this.modelCatalog.promptTrigger(chatId, hostUserId),

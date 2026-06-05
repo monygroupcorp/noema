@@ -107,6 +107,10 @@ function sleep(ms: number): Promise<void> {
 // SecurePodClient
 // ---------------------------------------------------------------------------
 
+/** Stage callback for `/arm` provisioning — lets the bulletin stream live stages (pod-locked →
+ *  bootstrapping → comfy-ready) without an actum/trace, at parity with the /make gen path. */
+export type StudioStageCb = (stage: string, info?: import('../lib/bus.js').StageInfo) => void
+
 export class SecurePodClient implements RunPodClient {
   constructor(
     private readonly config: SecurePodConfig,
@@ -231,11 +235,14 @@ export class SecurePodClient implements RunPodClient {
    * on a successful gen, minus the job. Returns pod telemetry for the bulletin journal, or null on
    * failure (the pod is terminated). Models are applied afterward via the live-install path.
    */
-  async provisionStudio(opts: { runtime?: string; provisioningContext?: ProvisioningContext } = {}): Promise<{ podId: string; gpuType?: string; costPerHr?: number; provisionMs: number } | null> {
+  async provisionStudio(
+    opts: { runtime?: string; provisioningContext?: ProvisioningContext } = {},
+    onStage?: StudioStageCb,
+  ): Promise<{ podId: string; gpuType?: string; costPerHr?: number; provisionMs: number } | null> {
     const imageName = this.config.imageName ?? 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
     let prov: { podId: string; sshInfo: SshInfo; provisionMs: number }
     try {
-      prov = await this._provisionAndBootstrap(imageName, opts.provisioningContext)
+      prov = await this._provisionAndBootstrap(imageName, onStage)
     } catch (err) {
       log.warn('studio provision failed', { error: (err as Error).message })
       return null
@@ -260,12 +267,13 @@ export class SecurePodClient implements RunPodClient {
    */
   private async _provisionAndBootstrap(
     imageName: string,
-    _provisioningContext?: ProvisioningContext,
+    onStage?: StudioStageCb,
   ): Promise<{ podId: string; sshInfo: SshInfo; provisionMs: number }> {
     const startMs = Date.now()
     const emitStage = (stage: string, info?: import('../lib/bus.js').StageInfo) => {
       const ctx = getTrace()
       if (ctx?.actumId) bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - (ctx.startTs ?? startMs), info })
+      onStage?.(stage, info)   // direct callback for the /arm bulletin (no actumId/trace in that path)
     }
 
     // Provision with retries — SECURE for attempts 1-2, COMMUNITY/any-GPU on the last (mirrors submit).
