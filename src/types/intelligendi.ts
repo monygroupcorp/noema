@@ -188,6 +188,10 @@ export interface Intella {
    */
   corpusId?: string
 
+  /** Discovery/classification tags (e.g. base family 'flux'/'sd15', 'trained'). The catalog derives
+   *  a model's base family from these (the import sets them; canonical seeds set them directly). */
+  tags?: Array<{ tag: string; source?: string }>
+
   /** "natum" = born — when this model was registered */
   natum: Date
   /** "mutatum" = changed — when this model's metadata was last updated */

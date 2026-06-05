@@ -167,6 +167,34 @@ export const INTELLA_SD15: Intella = {
   natum: new Date('2025-01-01'),
 }
 
+// A real SD1.5 LoRA (CivitAI "armored dress" v2.0) — tiny (~13.5 MB), so the SD1.5 base filter has a
+// LoRA to show and the warm-add `/install` has something cheap to download. Tagged `sd15` so it
+// buckets under the SD1.5 flow. (CivitAI downloads may need an API token for the real fetch — that
+// auth is part of the URL-import work; the canonical download URL is recorded here.)
+export const INTELLA_LORA_ARMORED_DRESS: Intella = {
+  id: 'intella.lora.armored-dress',
+  nomen: 'Armored Dress (v2.0)',
+  genus: 'lora',
+  architectura: 'lora',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'civitai',
+      uri: 'https://civitai.com/api/download/models/1165788',
+      format: 'safetensors',
+      meta: { modelId: '92654', modelVersionId: '1165788' },
+    },
+  ],
+  dest: 'loras/armored_dress_V02.safetensors',
+  sizeGb: 0.0135,
+  versio: '2.0.0',
+  trigger: 'gothic armor,armored_dress,armored skirt,gauntlets,breastplate',
+  baseIntellaId: 'intella.sd15-v1-5',
+  tags: [{ tag: 'sd15', source: 'curator' }, { tag: 'lora', source: 'curator' }],
+  canonica: true,
+  natum: new Date('2025-01-01'),
+}
+
 export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_FLUX_SCHNELL,
   INTELLA_FLUX_VAE,
@@ -174,4 +202,5 @@ export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_CLIP_L,
   INTELLA_SD15,
   INTELLA_SMOLLM2_135M,
+  INTELLA_LORA_ARMORED_DRESS,
 ]
