@@ -236,7 +236,7 @@ export class SecurePodClient implements RunPodClient {
    * failure (the pod is terminated). Models are applied afterward via the live-install path.
    */
   async provisionStudio(
-    opts: { runtime?: string; provisioningContext?: ProvisioningContext } = {},
+    opts: { runtime?: string; warmMs?: number; provisioningContext?: ProvisioningContext } = {},
     onStage?: StudioStageCb,
   ): Promise<{ podId: string; gpuType?: string; costPerHr?: number; provisionMs: number } | null> {
     const imageName = this.config.imageName ?? 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
@@ -247,7 +247,7 @@ export class SecurePodClient implements RunPodClient {
       log.warn('studio provision failed', { error: (err as Error).message })
       return null
     }
-    const materia = await this._parkWarm(prov.podId, prov.sshInfo, imageName, prov.provisionMs, opts.runtime, opts.provisioningContext)
+    const materia = await this._parkWarm(prov.podId, prov.sshInfo, imageName, prov.provisionMs, opts.runtime, opts.warmMs, opts.provisioningContext)
     if (!materia) { await this._terminatePod(prov.podId).catch(() => {}); return null }
     return {
       podId: prov.podId,
@@ -503,7 +503,7 @@ export class SecurePodClient implements RunPodClient {
       if (jobSucceeded && this.config.keepWarm && this.materiae && sshInfo) {
         // Boot wall-clock — the cost we now ask future guests to amortize.
         const runtime = isCompiledSpec(input) ? (input as unknown as { runtime?: string }).runtime : undefined
-        await this._parkWarm(podId, sshInfo, imageName, Date.now() - startMs, runtime, provisioningContext)
+        await this._parkWarm(podId, sshInfo, imageName, Date.now() - startMs, runtime, undefined, provisioningContext)
       } else {
         await this._terminatePod(podId)
       }
@@ -523,6 +523,7 @@ export class SecurePodClient implements RunPodClient {
     imageName: string,
     bootMs: number,
     runtime?: string,
+    warmMs?: number,
     provisioningContext?: ProvisioningContext,
   ): Promise<Materia | undefined> {
     if (!this.materiae) return undefined
@@ -538,7 +539,7 @@ export class SecurePodClient implements RunPodClient {
       sshPort: sshInfo.port,
       impetusPerSecond: this.config.impetusPerSecond ?? 0n,
       status: 'idle',
-      warmUntil: new Date(Date.now() + (this.config.warmTtlMs ?? 60_000)),
+      warmUntil: new Date(Date.now() + (warmMs ?? this.config.warmTtlMs ?? 60_000)),
       bootCostImpetus,
       ...(runtime ? { runtime } : {}),
       ...(provisioningContext?.groupChatId ? { groupChatId: provisioningContext.groupChatId } : {}),

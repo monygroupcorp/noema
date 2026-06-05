@@ -704,6 +704,22 @@ test('/arm Start provisions a warm studio without a gen, then hides Start', asyn
   assert.ok(!cb(s.lastKb()).includes('bul:mod.start'), 'Start gone once a pod is bound')
 })
 
+test('armed Mod • menu offers a warm-window stepper; the chosen window flows to Start', async () => {
+  const s = makeSink()
+  let startedWarmMs: number | undefined
+  const m = new BulletinManager({ sink: s.sink, ...armDeps(), startStudio: async (_c, opts) => { startedWarmMs = opts.warmMs; return { podId: 'p1' } } })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.preset:0')
+  await m.handleControl(456, '123', 'arm.proceed')
+  const kb = cb(s.lastKb())
+  assert.ok(kb.includes('bul:mod.start'), 'Start offered')
+  assert.ok(kb.includes('bul:dec') && kb.includes('bul:inc'), 'warm-window stepper present in the armed menu')
+  assert.ok(s.lastKb().flat().some(b => /warm:/.test(b.label)), 'shows the warm window label')
+  await m.handleControl(456, '123', 'inc')           // bump the window up
+  await m.handleControl(456, '123', 'mod.start')
+  assert.equal(typeof startedWarmMs, 'number', 'the host-chosen warm window is passed to provisioning')
+})
+
 test('a /make session never offers Start (only armed studios do)', async () => {
   const s = makeSink()
   const m = new BulletinManager({ sink: s.sink, ...armDeps() })
