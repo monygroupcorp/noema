@@ -85,7 +85,7 @@ export function affordancesFor(s: BulletinSnapshot): Affordance[][] {
   if (s.activeSubmenu === 'mod' && s.picker) return pickerAffordances(s.picker)
 
   // Submenu open → render that submenu's affordances.
-  if (s.activeSubmenu) return submenuAffordances(s.activeSubmenu, s.canStart)
+  if (s.activeSubmenu) return submenuAffordances(s.activeSubmenu, s.canStart, s.warmTtlMs)
 
   // Active state: the locked single top-3. State variance lives in the body.
   return [[
@@ -95,7 +95,7 @@ export function affordancesFor(s: BulletinSnapshot): Affordance[][] {
   ]]
 }
 
-function submenuAffordances(which: Exclude<ActiveSubmenu, null>, canStart = false): Affordance[][] {
+function submenuAffordances(which: Exclude<ActiveSubmenu, null>, canStart = false, warmTtlMs = WARM_LADDER_MS[0]): Affordance[][] {
   switch (which) {
     case 'destroy':
       // Never an immediate action — always confirms via the submenu.
@@ -121,9 +121,18 @@ function submenuAffordances(which: Exclude<ActiveSubmenu, null>, canStart = fals
     case 'mod': {
       // Opening Mod • already shows the loadout/spec as the body (no separate "View
       // loadout" button — it'd be redundant). `Add model` opens the picker sub-state.
-      // An armed, not-yet-provisioned studio also offers `[▶ Start]` to launch it.
+      // An armed, not-yet-provisioned studio also offers a warm-window stepper + `[▸ Start]`
+      // so the host sets how long it stays warm BEFORE launching (else it reaps on the default).
       const rows: Affordance[][] = [[{ id: 'mod.add', label: 'Add model', kind: 'action', scope: 'host' }]]
-      if (canStart) rows.push([{ id: 'mod.start', label: `${GLYPH.start} Start studio`, kind: 'action', scope: 'host' }])
+      if (canStart) {
+        const idx = Math.max(0, WARM_LADDER_MS.indexOf(warmTtlMs))
+        rows.push([
+          { id: 'dec',  label: GLYPH.warmDec, kind: 'action', scope: 'host' },
+          { id: 'noop', label: `warm: ${WARM_LADDER_LABEL[idx]}`, kind: 'noop' },
+          { id: 'inc',  label: GLYPH.warmInc, kind: 'action', scope: 'host' },
+        ])
+        rows.push([{ id: 'mod.start', label: `${GLYPH.start} Start studio`, kind: 'action', scope: 'host' }])
+      }
       rows.push([{ id: 'submenu.back', label: '← Back', kind: 'action', scope: 'host' }])
       return rows
     }

@@ -388,7 +388,7 @@ async function main(): Promise<void> {
   // warm Materia directly (the loadout = installedModels); the real provision-only path
   // (SecurePodClient provision+park, Part A real) is wired here when DEV_FAKE_POD is off.
   const provisionStudio = process.env.DEV_FAKE_POD
-    ? async (opts: { models: Array<{ intellaId: string }>; runtime?: string }) => {
+    ? async (opts: { models: Array<{ intellaId: string }>; runtime?: string; warmMs?: number }) => {
         const podId = `studio-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
         const installedModels = opts.models.map(m => m.intellaId)
         const runtime = opts.runtime ?? 'ComfyUI'
@@ -396,7 +396,7 @@ async function main(): Promise<void> {
         await materiae.create({
           genus: 'runpod', externusId: podId, gpu: 'RTX 4090', vramGb: 24, ramGb: 32,
           imageRef, runtime, impetusPerSecond: 0n, status: 'idle',
-          warmUntil: new Date(Date.now() + RUNPOD_WARM_TTL_MS), bootCostImpetus: 0n,
+          warmUntil: new Date(Date.now() + (opts.warmMs ?? RUNPOD_WARM_TTL_MS)), bootCostImpetus: 0n,
           ...(installedModels.length ? { installedModels } : {}),
         }).catch(err => { log.warn('fake studio provision failed', { error: String(err) }); return undefined })
         return { podId, gpuType: 'RTX 4090', costPerHr: 0.69, provisionMs: 20_000 }
@@ -404,8 +404,8 @@ async function main(): Promise<void> {
     : (runpodClient instanceof SecurePodClient
         // Real provision-only studio (Part A): SecurePodClient.provisionStudio provisions + parks a
         // warm pod (no gen); the Standby picks then download live onto it via the InstallCoordinator.
-        ? async (opts: { models: Array<{ intellaId: string }>; runtime?: string }, onStage?: StudioStageCb) => {
-            const res = await runpodClient.provisionStudio({ ...(opts.runtime ? { runtime: opts.runtime } : {}) }, onStage)
+        ? async (opts: { models: Array<{ intellaId: string }>; runtime?: string; warmMs?: number }, onStage?: StudioStageCb) => {
+            const res = await runpodClient.provisionStudio({ ...(opts.runtime ? { runtime: opts.runtime } : {}), ...(opts.warmMs ? { warmMs: opts.warmMs } : {}) }, onStage)
               .catch(err => { log.warn('studio provision failed', { error: String(err) }); return null })
             if (!res) return null
             if (opts.models.length && installCoordinator) {
