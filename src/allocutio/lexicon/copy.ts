@@ -61,6 +61,8 @@ export const COPY = {
     keepCooking: (label: string, marginal: string): string => `Warm ${label}${marginal} — keep cooking.`,
     /** Armed via /arm but no pod provisioned yet — Mod • → add models, then ▸ Start. */
     armedIdle: `Studio armed — add models, then ${GLYPH.start} Start to launch.`,
+    /** ▸ Start pressed — provisioning in flight (cold start: provision + bootstrap can take minutes). */
+    provisioning: 'Provisioning your studio… (a cold start can take a few minutes).',
     nextGen: (money: string): string => ` · next gen ~${money}`,
     podShutDown: 'Pod shut down.',
     podActive: 'Pod active.',

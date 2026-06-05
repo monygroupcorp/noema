@@ -25,6 +25,8 @@ export interface BulletinSnapshot {
   activeSubmenu: ActiveSubmenu
   /** True for an armed, not-yet-provisioned studio — Mod • shows `[▶ Start]`. */
   canStart: boolean
+  /** True while a Started studio is provisioning (cold start in flight) — body reads "provisioning…". */
+  starting: boolean
   /** The studio's model base — when set, the `mod` submenu replaces the bulletin body with it. */
   loadout?: Loadout
   /** Models queued onto the loadout via `Mod • → Add`, not yet installed. Rendered as a
@@ -227,6 +229,9 @@ export const BulletinView = {
         lines.push(liveLine(s.live))
       } else if (!s.confirmed) {
         lines.push(COPY.bulletin.setupPrompt)
+      } else if (s.starting) {
+        // ▶ Start pressed — a real cold start is in flight (clone + deps can take minutes).
+        lines.push(COPY.bulletin.provisioning)
       } else if (s.canStart) {
         // Armed via /arm, no pod yet — don't imply a warm pod is resting.
         lines.push(COPY.bulletin.armedIdle)

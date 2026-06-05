@@ -38,6 +38,7 @@ export class PodSession {
   private _arm: ArmState | null = null
   private _armBase?: string   // base family chosen via an arm preset — scopes the model menu's loras
   private _armed = false      // true for an /arm-originated session — gates the `[▶ Start]` affordance
+  private _starting = false   // `▶ Start` pressed, provisioning in flight (cold start can take minutes)
   private _pickerEpoch = 0   // monotonic across the session — never reused, so stale pick tokens can't collide
 
   constructor(readonly hostUserId: string, readonly audience: Audience = 'host') {}
@@ -124,7 +125,13 @@ export class PodSession {
   }
   setConfirmed(v: boolean): void { this._confirmed = v }
   /** A studio is up and resting warm (no gen in flight) — e.g. after `/arm` Start provisioned it. */
-  markReady(): void { this.live = null; this._phase = 'idle' }
+  markReady(): void { this.live = null; this._phase = 'idle'; this._starting = false }
+  /** `▸ Start` pressed — provisioning is in flight (cold start can take minutes). Gates the Start
+   *  affordance + the armed-idle copy off, and renders a "provisioning…" line, until the pod parks
+   *  warm (`markReady`) or provisioning fails (`endStarting`, back to armed). */
+  beginStarting(): void { this._starting = true }
+  endStarting(): void { this._starting = false }
+  get starting(): boolean { return this._starting }
   end(): void { this._ended = true; this.live = null; this._activeSubmenu = null; this._picker = null; this._arm = null; this._armBase = undefined }
   clearLive(): void { this.live = null }
 
@@ -249,7 +256,7 @@ export class PodSession {
   /** An /arm-originated studio that's been armed but not yet provisioned (no pod). Gates the
    *  `[▸ Start]` affordance and makes the flow chooser the parent of the Mod • menu on Back. */
   get isArmedIdle(): boolean {
-    return this._armed && this._confirmed && !this._ended && !this.pod.podId
+    return this._armed && this._confirmed && !this._ended && !this.pod.podId && !this._starting
   }
   /** Step back: config → image (or straight to preset when a flow already fixed the image, so the
    *  skipped image step isn't surfaced on the way back); image/flowdetail → preset; preset →
@@ -342,6 +349,7 @@ export class PodSession {
       // A confirmed, pod-less session is an armed studio that hasn't been Started yet — the
       // Mod • menu offers `[▶ Start]`. A live (pod-bound) session never shows it.
       canStart: this.isArmedIdle,
+      starting: this._starting,
       pendingModels: this._pendingModels,
       installing: this._installing,
       ...(this._loadout ? { loadout: this._loadout } : {}),
