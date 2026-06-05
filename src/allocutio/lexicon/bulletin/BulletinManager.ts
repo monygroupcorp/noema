@@ -57,7 +57,7 @@ export interface BulletinDeps {
   fetchDetail?: (intellaId: string) => Promise<ModelDetail | undefined>
   /** `/arm` Start: provision a warm studio (no gen) with the chosen loadout. Returns the pod
    *  it parked (+ telemetry for the journal), or null if provisioning failed/unavailable. */
-  startStudio?: (chatId: number, opts: { models: PendingModel[]; runtime?: string }) => Promise<{ podId: string; gpuType?: string; costPerHr?: number; provisionMs?: number } | null>
+  startStudio?: (chatId: number, opts: { models: PendingModel[]; runtime?: string }, onStage?: (stage: string, info?: StageInfo) => void) => Promise<{ podId: string; gpuType?: string; costPerHr?: number; provisionMs?: number } | null>
   /** Live model-apply: download model(s) onto a warm pod (no gen) and merge into installedModels.
    *  Returns the new installed set, or null on failure/unavailable. */
   installModels?: (podId: string, intellaIds: string[]) => Promise<{ installedModels: string[] } | null>
@@ -607,9 +607,17 @@ export class BulletinManager {
     this._closePicker(chatId)
     s.setLoadout(undefined)
     s.openSubmenu(null)
-    s.beginStarting()            // provisioning in flight → body shows "provisioning…", Start hidden
-    await this._render(chatId)   // immediate: the host sees provisioning start, not the armed copy
-    const res = this.deps.startStudio ? await this.deps.startStudio(chatId, { models, ...(runtime ? { runtime } : {}) }).catch(() => null) : null
+    s.beginStarting()                                  // provisioning in flight → "provisioning…", Start hidden
+    s.onStage('provisioning', undefined, this.now())
+    await this._render(chatId)                         // immediate: provisioning starts, not the armed copy
+    // Stream the provision's stages onto the bulletin LIVE (pod-locked → bootstrapping → comfy-ready),
+    // at parity with the /make gen path. Ignored once the session has ended (cancelled mid-provision).
+    const onStage = (stage: string, info?: StageInfo) => {
+      if (s.ended) return
+      s.onStage(stage, info, this.now())
+      void this._render(chatId)
+    }
+    const res = this.deps.startStudio ? await this.deps.startStudio(chatId, { models, ...(runtime ? { runtime } : {}) }, onStage).catch(() => null) : null
     if (res?.podId && s.ended) {
       // Cancelled/Destroyed mid-provision — the pod finished provisioning into a session that's
       // already gone. Kill it NOW so it doesn't bill for the whole warm window before the reaper.
@@ -617,18 +625,19 @@ export class BulletinManager {
       return
     }
     if (res?.podId) {
-      s.onStage('provisioning', undefined, this.now())
+      // Ensure the pod is locked-in on the journal (in case the live callback didn't carry telemetry).
       s.onStage('pod-locked', {
         podId: res.podId,
         ...(res.gpuType ? { gpuType: res.gpuType } : {}),
         ...(typeof res.costPerHr === 'number' ? { costPerHr: res.costPerHr } : {}),
         ...(typeof res.provisionMs === 'number' ? { phaseMs: res.provisionMs } : {}),
       }, this.now())
-      s.markReady()   // up + resting warm, no gen (clears the starting flag)
+      s.markReady()                          // up + resting warm, no gen (clears the starting flag)
+      await this._render(chatId, { renew: true })   // FRESH message → push notification: ready to cook
     } else {
-      s.endStarting()   // provisioning failed/unavailable → back to armed-idle so the host can retry
+      s.endStarting()                        // provisioning failed/unavailable → back to armed-idle to retry
+      await this._render(chatId)
     }
-    await this._render(chatId)
   }
 
   /** Close the picker and drop its cached list + fetch generation (stays in the `mod` submenu). */

@@ -34,7 +34,7 @@ import { platformSkimHook } from './ledger/hooks/platformSkim.js'
 import { referralSplitHook } from './ledger/hooks/referralSplit.js'
 import { sessionSpendHook } from './ledger/hooks/sessionSpend.js'
 import { spellRoyaltyHook } from './ledger/hooks/spellRoyalty.js'
-import { SecurePodClient, makeSecurePodSshFactory, type R2Config } from './crystal/SecurePodClient.js'
+import { SecurePodClient, makeSecurePodSshFactory, type R2Config, type StudioStageCb } from './crystal/SecurePodClient.js'
 import { FakeRunPodClient } from './crystal/FakeRunPodClient.js'
 import { FakeWarmPodClient } from './crystal/FakeWarmPodClient.js'
 import { WarmPodClient } from './crystal/WarmPodClient.js'
@@ -404,8 +404,8 @@ async function main(): Promise<void> {
     : (runpodClient instanceof SecurePodClient
         // Real provision-only studio (Part A): SecurePodClient.provisionStudio provisions + parks a
         // warm pod (no gen); the Standby picks then download live onto it via the InstallCoordinator.
-        ? async (opts: { models: Array<{ intellaId: string }>; runtime?: string }) => {
-            const res = await runpodClient.provisionStudio({ ...(opts.runtime ? { runtime: opts.runtime } : {}) })
+        ? async (opts: { models: Array<{ intellaId: string }>; runtime?: string }, onStage?: StudioStageCb) => {
+            const res = await runpodClient.provisionStudio({ ...(opts.runtime ? { runtime: opts.runtime } : {}) }, onStage)
               .catch(err => { log.warn('studio provision failed', { error: String(err) }); return null })
             if (!res) return null
             if (opts.models.length && installCoordinator) {

@@ -7,15 +7,18 @@ function makeSink() {
   const posts: Array<{ chatId: number; text: string; kb: BulletinKeyboard }> = []
   const edits: Array<{ chatId: number; messageId: number; text: string; kb: BulletinKeyboard }> = []
   const removed: number[] = []
+  // Chronological timeline of what's actually on screen — a renew posts a FRESH message AFTER
+  // edits, so the last-shown must follow real order, not posts-then-edits.
+  const shown: Array<{ text: string; kb: BulletinKeyboard }> = []
   let nextId = 100
   const sink: BulletinSink = {
-    async post(chatId, text, kb) { posts.push({ chatId, text, kb }); return ++nextId },
-    async edit(chatId, messageId, text, kb) { edits.push({ chatId, messageId, text, kb }) },
+    async post(chatId, text, kb) { posts.push({ chatId, text, kb }); shown.push({ text, kb }); return ++nextId },
+    async edit(chatId, messageId, text, kb) { edits.push({ chatId, messageId, text, kb }); shown.push({ text, kb }) },
     async remove(_chatId, messageId) { removed.push(messageId) },
   }
-  const lastText = () => [...posts, ...edits].at(-1)?.text ?? ''
-  const lastKb = () => [...posts, ...edits].at(-1)?.kb ?? []
-  return { sink, posts, edits, removed, lastText, lastKb }
+  const lastText = () => shown.at(-1)?.text ?? ''
+  const lastKb = () => shown.at(-1)?.kb ?? []
+  return { sink, posts, edits, removed, shown, lastText, lastKb }
 }
 const tick = (ms: number) => new Promise(r => setTimeout(r, ms))
 const cb = (kb: BulletinKeyboard) => kb.flat().map(b => b.data)
