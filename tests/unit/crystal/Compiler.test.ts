@@ -14,7 +14,7 @@ const REAL_WORKFLOWS = path.join(__dirname, '../../../src/crystal/workflows')
 
 function makeEssentia(overrides: Partial<Essentia> = {}): Essentia {
   return {
-    id: 'runmake.flux-schnell',
+    id: 'flux-schnell',
     nomen: 'FLUX Schnell',
     genus: 'atomicus',
     versio: '1.0.0',

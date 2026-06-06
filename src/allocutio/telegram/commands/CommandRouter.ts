@@ -4,7 +4,7 @@ import { SHARE_TOKEN_ALPHABET, SHARE_TOKEN_LENGTH } from '../../../crystal/share
 
 export { HELP_TEXT }
 
-const DEFAULT_MAKE_MODUS = 'runmake.flux-schnell'
+const DEFAULT_MAKE_MODUS = 'flux-schnell'
 const SHARE_TOKEN_RE = new RegExp(`^pod_([${SHARE_TOKEN_ALPHABET}]{${SHARE_TOKEN_LENGTH}})$`)
 
 /** What a command needs to do — the adapter wires these to the flow router + sender. */

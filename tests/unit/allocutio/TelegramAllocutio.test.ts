@@ -246,7 +246,7 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
   }
 
   const fakeActum = {
-    id: 'actum-1', modusId: 'runmake.flux-schnell', modusVersiono: '1', impetus: 0n,
+    id: 'actum-1', modusId: 'flux-schnell', modusVersiono: '1', impetus: 0n,
     signaConsumed: [], aditus: { input_seed: 4242 }, status: 'completus', inceptum: new Date(),
     expirat: new Date(), duratio: 12000,
     executio: { coldStart: false, executionMs: 9000, gpuType: 'RTX 4090', costPerHr: 0.69, modelsReused: 4, modelsDownloaded: 0 },
@@ -1063,7 +1063,7 @@ test('dm:tweak runs under the presser (presser pays) prefilled with the modus', 
   const enter = router.calls.find(c => c.method === 'enter')
   assert.ok(enter, 'should enter execute for the presser')
   assert.equal((enter!.args[2]), '123', 'under the presser userId')
-  assert.equal(((enter!.args[4] as { state: { modusId: string } }).state.modusId), 'runmake.flux-schnell')
+  assert.equal(((enter!.args[4] as { state: { modusId: string } }).state.modusId), 'flux-schnell')
 })
 
 // =============================================================================

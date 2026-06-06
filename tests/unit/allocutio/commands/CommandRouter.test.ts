@@ -19,7 +19,7 @@ function make() {
 test('/make parses the prompt and enters execute prefilled (no ack)', async () => {
   const { router, calls } = make()
   await router.dispatch('u1', 456, '/make a red fox', 50)
-  assert.deepEqual(calls.enter, [{ userId: 'u1', state: { modusId: 'runmake.flux-schnell', aditus: { prompt: 'a red fox' }, browsePageIndex: 0 } }])
+  assert.deepEqual(calls.enter, [{ userId: 'u1', state: { modusId: 'flux-schnell', aditus: { prompt: 'a red fox' }, browsePageIndex: 0 } }])
   assert.equal(calls.ack.length, 0, '/make ack is owned by the Stream reaction')
 })
 

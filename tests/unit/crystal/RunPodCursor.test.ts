@@ -13,7 +13,7 @@ import { Praefectus } from '../../../src/crystal/Praefectus.js'
 
 function makeModus(overrides: Partial<Modus> = {}): Modus {
   return {
-    id: 'runmake.flux-schnell',
+    id: 'flux-schnell',
     nomen: 'Flux Schnell',
     genus: 'atomicus',
     versio: '1.0.0',
@@ -31,7 +31,7 @@ function makeModus(overrides: Partial<Modus> = {}): Modus {
 function makeActum(overrides: Partial<Actum> = {}): Actum {
   return {
     id: 'actum-test-1',
-    modusId: 'runmake.flux-schnell',
+    modusId: 'flux-schnell',
     modusVersiono: '1.0.0',
     impetus: 0n,
     signaConsumed: [],
@@ -170,7 +170,7 @@ test('run compiles modus + actum.aditus before submitting', async () => {
   }
   const cursor = new RunPodCursor(makeClient(), compile, makeModorum(), makeActorum(), BASE_CONFIG)
   await cursor.run(makeActum({ aditus: { prompt: 'a dog', steps: 4 } }))
-  assert.equal((compiledModus as Modus).id, 'runmake.flux-schnell')
+  assert.equal((compiledModus as Modus).id, 'flux-schnell')
   assert.deepEqual(compiledAditus, { prompt: 'a dog', steps: 4 })
 })
 

@@ -14,7 +14,7 @@ import type { Tractus } from '../../../src/types/collectio.js'
 function makeCollectio(overrides: Partial<Collectio> = {}): Collectio {
   return {
     id: 'col-1',
-    modusId: 'runmake.flux-schnell',
+    modusId: 'flux-schnell',
     aditusBase: {},
     tractus: [],
     numerus: 3,
