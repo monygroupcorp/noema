@@ -6,6 +6,8 @@ export { HELP_TEXT }
 
 const DEFAULT_MAKE_MODUS = 'flux-schnell'
 const SHARE_TOKEN_RE = new RegExp(`^pod_([${SHARE_TOKEN_ALPHABET}]{${SHARE_TOKEN_LENGTH}})$`)
+/** A flow slug is a clean lowercase id (`flux-schnell`, `sd1-5`) — no dots/spaces. */
+const FLOW_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/
 
 /** What a command needs to do — the adapter wires these to the flow router + sender. */
 export interface CommandDeps {
@@ -35,6 +37,13 @@ export interface CommandDeps {
    * next /make. Optional — absent in tests/contexts without the bulletin manager.
    */
   arm?(userId: string, chatId: number): void
+  /**
+   * List the runnable flow slugs (canonical atomic Modorum entries) for /run
+   * validation + usage hints. Optional — when absent, /run skips validation and
+   * lets the downstream flow handle an unknown modus. Wired by TelegramAllocutio
+   * against the modus registry.
+   */
+  flows?(): Promise<string[]>
 }
 
 /**
@@ -63,10 +72,9 @@ export class CommandRouter {
         return
       }
 
-      case '/run':
       case '/make': {
         // Parse an optional prompt: /make <prompt text>
-        const prompt = text.replace(/^\/(?:make|run)(?:@\S+)?\s*/i, '').trim()
+        const prompt = text.replace(/^\/make(?:@\S+)?\s*/i, '').trim()
         await this.deps.enterExecute(userId, {
           modusId: DEFAULT_MAKE_MODUS,
           aditus: prompt ? { prompt } : {},
@@ -74,6 +82,39 @@ export class CommandRouter {
         })
         // No ack here: the "accepted" reaction (👌 cold / 🔥 warm) is owned by the
         // Stream registration, so a warm run never flashes 👌.
+        return
+      }
+
+      case '/run': {
+        // Universal runner: /run <flow-slug> [prompt]. First token is the flow slug;
+        // the remainder (if any) is the prompt. /make keeps running its bound default.
+        const rest = text.replace(/^\/run(?:@\S+)?\s*/i, '').trim()
+        const [slug, ...promptParts] = rest ? rest.split(/\s+/) : []
+        const prompt = promptParts.join(' ')
+
+        // Bare /run or a non-slug-shaped token → usage (with an ack; no run dispatched).
+        if (!slug || !FLOW_SLUG_RE.test(slug)) {
+          await this.deps.sendMessage(chatId, COPY.command.runUsage)
+          ack()
+          return
+        }
+
+        // When the flow registry is wired, reject unknown slugs with the available list.
+        if (this.deps.flows) {
+          const available = await this.deps.flows()
+          if (!available.includes(slug)) {
+            await this.deps.sendMessage(chatId, COPY.command.runUnknown(slug, available))
+            ack()
+            return
+          }
+        }
+
+        await this.deps.enterExecute(userId, {
+          modusId: slug,
+          aditus: prompt ? { prompt } : {},
+          browsePageIndex: 0,
+        })
+        // No ack here — same as /make: the Stream reaction owns the accepted signal.
         return
       }
 

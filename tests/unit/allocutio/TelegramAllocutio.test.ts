@@ -275,11 +275,11 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
 // Tests
 // =============================================================================
 
-// 1. /run command → calls FlowRouter.enter('execute', ...) with correct platform/userId
-test('/run command calls router.enter with execute intent', async () => {
+// 1. /make command → calls FlowRouter.enter('execute', ...) with correct platform/userId
+test('/make command calls router.enter with execute intent', async () => {
   const { allocutio, router } = makeAllocutio()
 
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
 
   const enterCall = router.calls.find(c => c.method === 'enter')
   assert.ok(enterCall, 'router.enter should have been called')
@@ -293,7 +293,7 @@ test('/cancel command calls router.clear and sends Cancelled.', async () => {
   const { allocutio, router, sender } = makeAllocutio()
 
   // Set up an active flow first so clear has something to do
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
   router.calls.length = 0  // reset call log
 
   await allocutio.receive(msgUpdate(123, 456, '/cancel'))
@@ -312,7 +312,7 @@ test('text message while flow active fires prompt event to router', async () => 
   const { allocutio, router } = makeAllocutio()
 
   // Enter a flow first
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
 
   await allocutio.receive(msgUpdate(123, 456, 'hello world'))
 
@@ -338,7 +338,7 @@ test('Select primitive sends inline keyboard with s:id callback_data', async () 
   const { allocutio, router, sender } = makeAllocutio()
 
   // Enter a flow
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
 
   // Get the flow context that was created
   const ctx: FlowContext = {
@@ -381,7 +381,7 @@ test('Select primitive sends inline keyboard with s:id callback_data', async () 
 test('Confirm primitive sends Yes/No buttons with cy and cn callback_data', async () => {
   const { allocutio, router, sender } = makeAllocutio()
 
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
 
   const ctx: FlowContext = {
     intent: 'execute',
@@ -418,7 +418,7 @@ test('Confirm primitive sends Yes/No buttons with cy and cn callback_data', asyn
 test('Paginate primitive sends Prev/Next buttons with pp and pn callback_data', async () => {
   const { allocutio, router, sender } = makeAllocutio()
 
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
 
   const ctx: FlowContext = {
     intent: 'execute',
@@ -461,7 +461,7 @@ test('callback_query s:someId fires select event to router', async () => {
   const { allocutio, router } = makeAllocutio()
 
   // Set up active flow
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
   router.calls.length = 0
 
   await allocutio.receive(cbUpdate(123, 456, 's:opt-42'))
@@ -477,7 +477,7 @@ test('callback_query s:someId fires select event to router', async () => {
 test('callback_query cy fires confirm true event to router', async () => {
   const { allocutio, router } = makeAllocutio()
 
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
   router.calls.length = 0
 
   await allocutio.receive(cbUpdate(123, 456, 'cy'))
@@ -493,7 +493,7 @@ test('callback_query cy fires confirm true event to router', async () => {
 test('callback_query pn fires paginate next event to router', async () => {
   const { allocutio, router } = makeAllocutio()
 
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
   router.calls.length = 0
 
   await allocutio.receive(cbUpdate(123, 456, 'pn'))
@@ -510,7 +510,7 @@ test('Stream primitive with running status reacts 👌 on command message when c
   const { allocutio, router, sender } = makeAllocutio()
 
   // Send a /run command with a specific message ID — this stores the command message ID
-  await allocutio.receive(msgUpdate(123, 456, '/run', 50))
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
 
   const ctx: FlowContext = {
     intent: 'execute',
@@ -546,7 +546,7 @@ test('Stream primitive with running status reacts 👌 on command message when c
 test('Stream primitive with complete status sends completion text', async () => {
   const { allocutio, router, sender } = makeAllocutio()
 
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
 
   const ctx: FlowContext = {
     intent: 'execute',
@@ -581,7 +581,7 @@ test('Stream primitive with complete status sends completion text', async () => 
 test('Detail primitive sends message with action buttons', async () => {
   const { allocutio, router, sender } = makeAllocutio()
 
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
 
   const ctx: FlowContext = {
     intent: 'execute',
@@ -622,7 +622,7 @@ test('Detail primitive sends message with action buttons', async () => {
 test('Resolution complete sends completion message', async () => {
   const { allocutio, router, sender } = makeAllocutio()
 
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
 
   const ctx: FlowContext = {
     intent: 'execute',
@@ -650,7 +650,7 @@ test('Resolution abandon is silent (implicit context replacement)', async () => 
   // sent directly from the CommandRouter, not from the abandon resolution path.
   const { allocutio, router, sender } = makeAllocutio()
 
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
 
   const ctx: FlowContext = {
     intent: 'execute',
@@ -677,7 +677,7 @@ test('botStartupTime filters stale messages — no router call', async () => {
   const { allocutio, router } = makeAllocutio({ botStartupTime })
 
   // message date is 5 minutes in the past (before startup)
-  await allocutio.receive(staleMsgUpdate(123, 456, '/run', 300))
+  await allocutio.receive(staleMsgUpdate(123, 456, '/make', 300))
 
   const enterCall = router.calls.find(c => c.method === 'enter')
   assert.equal(enterCall, undefined, 'stale message should be dropped, router.enter should not be called')
@@ -689,7 +689,7 @@ test('botStartupTime passes fresh messages through', async () => {
   const { allocutio, router } = makeAllocutio({ botStartupTime })
 
   // message date is now (after startup)
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
 
   const enterCall = router.calls.find(c => c.method === 'enter')
   assert.ok(enterCall, 'fresh message should be processed')
@@ -700,7 +700,7 @@ test('photo message while flow active fires prompt with file url', async () => {
   const { allocutio, router } = makeAllocutio()
 
   // Enter a flow first
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
   router.calls.length = 0
 
   // Send a photo
@@ -729,7 +729,7 @@ test('photo message with no active flow is a no-op', async () => {
 test('Result primitive with textContent sends text via sendMessage', async () => {
   const { allocutio, router, sender } = makeAllocutio()
 
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
 
   const ctx: FlowContext = {
     intent: 'execute',
@@ -770,7 +770,7 @@ test('Result primitive with textContent sends text via sendMessage', async () =>
 test('Result primitive with single image calls sendPhoto', async () => {
   const { allocutio, router, sender } = makeAllocutio()
 
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
 
   const ctx: FlowContext = {
     intent: 'execute',
@@ -814,7 +814,7 @@ test('Result primitive with single image falls back to sendMessage when sendPhot
     throw new Error('Permission denied')
   }
 
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
 
   const ctx: FlowContext = {
     intent: 'execute',
@@ -851,7 +851,7 @@ test('Result primitive with single image falls back to sendMessage when sendPhot
 test('Result primitive with multiple images calls sendMediaGroup and follow-up sendMessage', async () => {
   const { allocutio, router, sender } = makeAllocutio()
 
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
 
   const ctx: FlowContext = {
     intent: 'execute',
@@ -916,7 +916,7 @@ test('plain text while flow in RESULT state routes to router.handle as prompt', 
   const { allocutio, router } = makeAllocutio()
 
   // Enter a flow — router will have an active context for this user
-  await allocutio.receive(msgUpdate(123, 456, '/run'))
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
   router.calls.length = 0
 
   // Send plain text while flow is active (simulates RESULT state)
@@ -933,7 +933,7 @@ test('plain text while flow in RESULT state routes to router.handle as prompt', 
 test('_react called with 🤔 emoji on command receipt', async () => {
   const { allocutio, sender } = makeAllocutio()
 
-  await allocutio.receive(msgUpdate(123, 456, '/run', 77))
+  await allocutio.receive(msgUpdate(123, 456, '/make', 77))
 
   // Reaction should have been set (may be async)
   await new Promise(r => setImmediate(r))
