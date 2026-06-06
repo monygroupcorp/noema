@@ -11,7 +11,9 @@
     "test:unit": "npx tsx --test tests/unit/**/*.test.ts tests/unit/**/**/*.test.ts",
     "test:runpod": "node --test tests/unit/runpod/*.test.js tests/unit/workflow/*.test.js",
     "test:crystal": "./scripts/run-with-env.sh npx tsx --test 'tests/unit/crystal/*.test.ts' 'tests/unit/crystal/**/*.test.ts' 'tests/unit/lib/**/*.test.ts' 'tests/unit/api/**/*.test.ts' 'tests/unit/analytics/**/*.test.ts'",
-    "dashboard": "node scripts/dashboard.js"
+    "dashboard": "node scripts/dashboard.js",
+    "typecheck": "tsc --noEmit",
+    "test:hermetic": "npx tsx --test 'tests/unit/allocutio/**/*.test.ts' 'tests/unit/architecture/**/*.test.ts' 'tests/unit/crystal/workflowTemplates.test.ts' 'tests/unit/crystal/InstallCoordinator.test.ts' 'tests/unit/crystal/ModelInstaller.test.ts'"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.840.0",
