@@ -152,6 +152,11 @@ export const COPY = {
     statusComingSoon: 'Balance and account info coming soon.',
     walletComingSoon: 'Wallet management coming soon.',
     unknown: `Unknown command. Type /help to see what's available.`,
+    /** Bare or malformed /run — show how to call the universal runner. */
+    runUsage: `Usage: /run <flow> [prompt]\nExample: /run flux-schnell a red fox`,
+    /** /run with a well-formed but unknown slug — list what's actually runnable. */
+    runUnknown: (slug: string, available: string[]): string =>
+      `Unknown flow '${slug}'.${available.length ? ` Try: ${available.join(', ')}` : ''}`,
   },
 
   // ── transient status (acks, invites) ─────────────────────────────────────────

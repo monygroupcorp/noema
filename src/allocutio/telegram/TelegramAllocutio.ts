@@ -225,6 +225,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       ack: (chatId, messageId) => { void this._react(chatId, messageId, REACTION.ok) },
       showStatus: (userId, chatId) => this._showStatus(userId, chatId),
       arm: (userId, chatId) => { this.chatIds.set(`telegram:${userId}`, chatId); void this.bulletins.arm(chatId, userId) },
+      // /run validation + usage hints: the runnable flow slugs are the canonical
+      // atomic Modorum entries. Omitted when the registry isn't wired.
+      ...(deps.modorum ? {
+        flows: async () => (await deps.modorum!.list({ genus: 'atomicus', canonica: true })).map(m => m.id),
+      } : {}),
     })
 
     // Wire router callbacks
