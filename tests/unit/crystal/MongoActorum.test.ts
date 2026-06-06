@@ -14,7 +14,7 @@ let acta: MongoActorum
 function makeActum(overrides: Record<string, unknown> = {}) {
   return {
     id: `actum-${Math.random().toString(36).slice(2)}`,
-    modusId: 'runmake.flux-schnell',
+    modusId: 'flux-schnell',
     modusVersiono: '1.0.0',
     impetus: 0n,
     signaConsumed: [],

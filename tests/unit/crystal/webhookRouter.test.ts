@@ -8,7 +8,7 @@ import type { Exitus } from '../../../src/types/cursus.js'
 function makeActum(overrides: Partial<Actum> = {}): Actum {
   return {
     id: 'actum-router-1',
-    modusId: 'runmake.flux-schnell',
+    modusId: 'flux-schnell',
     modusVersiono: '1.0.0',
     impetus: 0n,
     signaConsumed: [],

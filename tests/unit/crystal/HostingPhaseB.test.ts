@@ -62,7 +62,7 @@ async function runScenario(opts: ScenarioOpts) {
   const base = opts.baseImpetus ?? 1000n
   const actum: Actum = {
     id: 'actum-b-1',
-    modusId: 'runmake.flux-schnell',
+    modusId: 'flux-schnell',
     modusVersiono: '1.0.0',
     impetus: base,                  // reservation cap
     signaConsumed: [],

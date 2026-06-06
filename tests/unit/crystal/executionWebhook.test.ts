@@ -21,7 +21,7 @@ import { platformSkimHook } from '../../../src/ledger/hooks/platformSkim.js'
 function makeActum(overrides: Partial<Actum> = {}): Actum {
   return {
     id: 'actum-test-1',
-    modusId: 'runmake.flux-schnell',
+    modusId: 'flux-schnell',
     modusVersiono: '1.0.0',
     // Reservation upper-bound. Phase B added a cap in ActumCompletor: the
     // settled impetus is never above this. The default needs to comfortably
@@ -390,7 +390,7 @@ test('flowRouter is optional — works fine when absent', async () => {
 // the completor and flowRouter boundaries (those are tested independently).
 
 const TEST_MODUS: Modus = {
-  id: 'runmake.flux-schnell',
+  id: 'flux-schnell',
   nomen: 'Flux Schnell',
   genus: 'atomicus',
   versio: '1.0.0',
