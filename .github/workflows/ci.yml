@@ -5,6 +5,19 @@ on:
     branches: [main]
 
 jobs:
+  # Hermetic gate — no live DB, no secrets. The fast feedback loop agents (and humans) must pass.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install --legacy-peer-deps
+      - run: npm run typecheck         # tsc --noEmit (src/) — was unchecked in CI before
+      - run: npm run test:hermetic     # adapter + architecture/boundary + template/install guards (no live DB)
+
   test:
     runs-on: ubuntu-latest
     steps:
