@@ -2,6 +2,8 @@
 
 - **Status:** accepted
 - **Date:** 2026-06-05
+- **Revised:** 2026-06-05 — replaced the "new `Anima.verba` field" instinct with the owner-keyed
+  preference model below, after a principled pass (preserve crystal core, minimize surface area).
 
 ## Context
 
@@ -29,38 +31,58 @@ nouns.
 
 ## Decision
 
-The customization layer is **three distinct things**, each on an existing primitive. They compose
-along the precedence chain already documented on `Anima.affines`:
+The customization layer is **one substance — user-saved modus configuration — at three altitudes**,
+not three separate inventions. The altitudes form a pointer chain, each link already a crystal citizen:
 
-> **cast-time input > affines > platform preferences (verb binding) > modus defaults**
+```
+verb  ─points at─→  flow (Modus)  ─configures─→  porta (params)
+/make               sd1-5                        steps=8, cfg=2
+```
+
+They compose along the precedence chain already documented on `Anima.affines`:
+
+> **cast-time input > saved overrides > verb binding > modus defaults**
 
 1. **Parameter surface = `Modus.aditus` (`Porta`).** Surfacing "any parameter" is an adapter view
    that renders one field per `Porta`, prefilled from `Porta.default`. No new type. The simple verb
    (`/make <prompt>`) pre-fills the required Porta and defaults the rest.
 
-2. **Sticky per-flow tweaks = `Anima.affines`.** Shape is already
-   `{ [modusId]: { [inputKey]: override } }` — a user's remembered aditus overrides for a given flow.
-   Applied by precedence above modus defaults, below cast-time input. No new type.
+2. **A named saved version = a derived `Modus`** (the **full case**, chosen 2026-06-05). It is a
+   real `Modorum` entry: `canonica: false`, the tweaks baked into the `Porta.default`s — shareable,
+   versioned, content-addressed, royalty-able via the `fonteId`/fork chain. **Editing it is
+   `register()` with a bumped `versio` + recomputed `contentHash`, never `Modorum.update()`**
+   (`update()` deliberately only accepts non-definitional fields). The content-addressing *is* the
+   feature: a quote always matches the exact flow that ran. `/run <my-slug>` runs it; `/flows` browses
+   it for free.
 
-3. **A named saved version = a derived `Modus`** (the **full case**, chosen 2026-06-05). It is a
-   real `Modorum` entry: `auctor: <animaId>`, `canonica: false`, the tweaks baked into the
-   `Porta.default`s. Therefore it is shareable, versioned, content-addressed, and royalty-able via the
-   `fonteId`/fork chain. **Editing a saved version is `register()` with a bumped `versio` + recomputed
-   `contentHash`, never `Modorum.update()`** — `update()` deliberately only accepts non-definitional
-   fields (`computeStrategy`/`gpuClass`/`podPolicy`). The content-addressing *is* the feature: a quote
-   always matches the exact flow that ran. `/run <my-slug>` runs it; `/flows` browses it for free.
+3. **Ownership is `{ animaId } | { commitment }` — reused, not invented.** This union already exists
+   in `Collectio.by`. Identified souls own by `animaId`; **anonymous users own by their arcanum
+   `commitment` (H(secret))** — the load-bearing requirement, since the anon side has no `anima`.
+   - **Widen `Modus.auctor`** from `string` to this union, so a user-owned saved flow works for anon
+     and identified alike. A field-type change adopting a shape the crystal already uses — **not a new
+     noun.**
+   - **Lift preferences off `Anima` onto the same owner key.** `Anima.affines`
+     (`{ [modusId]: { [inputKey]: override } }`) is the sticky per-flow param cache — but on `anima`
+     it cannot reach anon users. Re-home it (and its peers) under the `{animaId}|{commitment}` owner.
 
-4. **Verb→flow binding = a per-user verb map, keyed by verb-intent (NOT modusId).** This is the only
-   genuinely-new state. It does not fit `affines` (modusId-keyed) and `Memoria.praeferentia` is
-   distilled/learned, not authoritative config. It is a **new field on `Anima`** (e.g.
-   `verba?: Record<verb, modusId>`) — a *field*, not a noun, consistent with how `affines` already
-   lives on the soul and survives platform changes. Default table (the platform's taste) lives in the
-   command layer as `CANON_VERBS`; resolution is
-   `resolveVerb(user, verb) = anima.verba?.[verb] ?? CANON_VERBS[verb]`.
+4. **Verb→flow binding = a peer of `affines`, same shape, one altitude up.** It is the *only* new
+   state, and it is NOT a bespoke field: `affines` = `{ modusId → {key→val} }`; verb-bindings =
+   `{ verb → modusId }` — both are owner-keyed override maps. Since anon support forces preferences
+   onto the owner key anyway (item 3), the verb-binding is **one more entry in that same owner-keyed
+   preference bag**, not a new surface. The platform default table (`CANON_VERBS`, the taste) stays as
+   command-layer code; resolution is `resolveVerb(owner, verb) = binding[verb] ?? CANON_VERBS[verb]`.
 
-   **Verb-rebind and saved versions are separate layers.** You rebind a verb *to point at* a flow
-   (canonical or your own saved derived Modus). Do not fuse the two: rebind is a light map; a saved
-   version is a first-class flow.
+   **Verb-rebind and saved versions stay distinct layers.** You rebind a verb *to point at* a flow
+   (canonical or your own saved derived Modus). The verb-binding is the thinnest possible map; the
+   saved version is a first-class `Modus`. Do not fuse them.
+
+### The reusable principle (apply to every feature buildout)
+
+Before adding a field or noun, walk it down to the crystal: is this genuinely new substance, or an
+existing primitive at a different altitude? Does an existing union/shape already cover the case
+(here, `{animaId}|{commitment}` for "owned by identified-or-anon")? Add only what survives that
+reduction — here, two reuses (the owner union, the `affines` shape) and one tiny map, **no new nouns,
+no new concepts.**
 
 ## Consequences
 
@@ -71,8 +93,10 @@ along the precedence chain already documented on `Anima.affines`:
 - Sequencing (decided 2026-06-05): **verb table + rebind first** (light, independent of the param
   panel) → param panel (`aditus` form) → saved versions (derived Modus) → cook/Collectio.
 - The hermetically-testable seam (the `CANON_VERBS` table + `resolveVerb`/`bindVerb` resolution) lives
-  in `CommandRouter` with injected deps (the TASK-002 optional-dep pattern). The `Anima.verba` field +
-  `AnimaStore` wiring + the actual rebind affordance are adapter/crystal-store work, validated on
-  staging — not part of the agent gate.
+  in `CommandRouter` with injected deps (the TASK-002 optional-dep pattern) and is **agnostic to where
+  bindings persist** — so TASK-003 is safe to build before the persistence decision lands. The
+  persistence follow-on is: widen `Modus.auctor` to `{animaId}|{commitment}`, re-home preferences
+  (`affines` + verb-bindings) under that owner key, and wire `resolveVerb`/`bindVerb` against it
+  (with the `CANON_VERBS` fallback). Adapter/crystal-store work, validated on staging — not the agent gate.
 - Remaining elemental verbs (`effect`/`animate`/`direct`/`compose`) are thin handlers over shape A,
   **gated on their default flows existing** (only `make`+`chat` have flows today).

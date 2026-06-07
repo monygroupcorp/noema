@@ -64,10 +64,11 @@ npx tsc --noEmit && npm run test:hermetic
 ```
 
 ## Out of scope (do NOT do — these are the follow-ons / separate specs)
-- **Persistence wiring** (the natural next task): add `verba?: Record<string, string>` to `Anima`
-  (a *field*, not a noun — see ADR-0003), extend `AnimaStore.update`, and wire `resolveVerb`/`bindVerb`
-  in `TelegramAllocutio` against the anima store (with the `CANON_VERBS` fallback). Non-hermetic →
-  staging.
+- **Persistence wiring** (the natural next task — see ADR-0003 §3–4): widen `Modus.auctor` to
+  `{ animaId } | { commitment }` (the existing `Collectio.by` union — anon-capable ownership), re-home
+  preferences (`affines` + the verb-binding map) under that owner key, and wire
+  `resolveVerb`/`bindVerb` in `TelegramAllocutio` against it (with the `CANON_VERBS` fallback).
+  No new nouns. Non-hermetic → staging.
 - Adding the remaining elemental verbs (`effect`/`animate`/`direct`/`compose`) — gated on their
   default flows existing (only `make`+`chat` have flows today).
 - The `aditus` parameter panel (surface every Porta) — separate spec.

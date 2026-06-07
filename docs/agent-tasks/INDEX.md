@@ -10,8 +10,9 @@ real GPU/pod is validated separately on staging. Read `AGENTS.md` first.
 | [TASK-003](TASK-003-canon-verb-table-rebind.md) | Canon-verb default table + per-user rebind (the seam) | ready | — (persistence → staging) |
 
 ## Backlog (not yet written as specs)
-- **Verb-binding persistence** — `Anima.verba` field + `AnimaStore.update` + `TelegramAllocutio`
-  wiring of `resolveVerb`/`bindVerb` (the TASK-003 follow-on; non-hermetic → staging). See ADR-0003.
+- **Verb-binding persistence** — widen `Modus.auctor` to `{animaId}|{commitment}` (anon-capable),
+  re-home preferences (`affines` + verb-bindings) under that owner key, wire `resolveVerb`/`bindVerb`
+  (the TASK-003 follow-on; non-hermetic → staging). No new nouns. See ADR-0003.
 - **`aditus` parameter panel** — render an editable form from `Modus.aditus` (every `Porta`, not just
   `prompt`); the simple verb is the degenerate case. The foundation for saved versions. See ADR-0003.
 - **Saved versions = derived `Modus`** — "save as my version" registers a user-owned Modus
