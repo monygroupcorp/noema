@@ -157,6 +157,16 @@ export const COPY = {
     /** /run with a well-formed but unknown slug — list what's actually runnable. */
     runUnknown: (slug: string, available: string[]): string =>
       `Unknown flow '${slug}'.${available.length ? ` Try: ${available.join(', ')}` : ''}`,
+    /** Bare or malformed /bind — show how to rebind a verb. */
+    bindUsage: `Usage: /bind <verb> <flow>\nExample: /bind make sd1-5`,
+    /** /bind with an unrecognized verb — list the verbs that can be rebound. */
+    bindUnknownVerb: (verb: string, verbs: string[]): string =>
+      `Unknown verb '${verb}'.${verbs.length ? ` Try: ${verbs.join(', ')}` : ''}`,
+    /** /bind to a well-formed but unknown flow — list what's actually runnable. */
+    bindUnknownFlow: (slug: string, available: string[]): string =>
+      `Unknown flow '${slug}'.${available.length ? ` Try: ${available.join(', ')}` : ''}`,
+    /** /bind succeeded — confirm the verb now points at the flow. */
+    bindOk: (verb: string, slug: string): string => `/${verb} now runs ${slug}.`,
   },
 
   // ── transient status (acks, invites) ─────────────────────────────────────────

@@ -2,8 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { CommandRouter } from '../../../../src/allocutio/telegram/commands/CommandRouter.js'
 
-function make(extra?: { flows?: () => Promise<string[]> }) {
-  const calls: Record<string, unknown[]> = { enter: [], cancel: [], msg: [], start: [], ack: [], shareToken: [], arm: [] }
+function make(extra?: {
+  flows?: () => Promise<string[]>
+  resolveVerb?: (userId: string, verb: string) => Promise<string | undefined>
+  bindVerb?: (userId: string, verb: string, modusId: string) => Promise<void>
+}) {
+  const calls: Record<string, unknown[]> = { enter: [], cancel: [], msg: [], start: [], ack: [], shareToken: [], arm: [], bind: [] }
   const router = new CommandRouter({
     enterExecute: async (userId, state) => { calls.enter.push({ userId, state }) },
     cancel: (userId) => { calls.cancel.push(userId) },
@@ -13,6 +17,10 @@ function make(extra?: { flows?: () => Promise<string[]> }) {
     setPendingShareToken: (userId, token) => { calls.shareToken.push({ userId, token }) },
     arm: (userId, chatId) => { calls.arm.push({ userId, chatId }) },
     ...(extra?.flows ? { flows: extra.flows } : {}),
+    ...(extra?.resolveVerb ? { resolveVerb: extra.resolveVerb } : {}),
+    ...(extra?.bindVerb
+      ? { bindVerb: async (userId: string, verb: string, modusId: string) => { calls.bind.push({ userId, verb, modusId }); await extra.bindVerb!(userId, verb, modusId) } }
+      : {}),
   })
   return { router, calls }
 }
@@ -128,4 +136,59 @@ test('/run with a flows dep rejects an unknown flow, no enter', async () => {
   await router.dispatch('u1', 456, '/run nope', 50)
   assert.equal(calls.enter.length, 0)
   assert.match((calls.msg.at(-1) as { text: string }).text, /Unknown flow 'nope'/)
+})
+
+// ── verb table + rebind (TASK-003) ───────────────────────────────────────────
+
+test('/make with no resolveVerb dep uses the CANON_VERBS default (unchanged)', async () => {
+  const { router, calls } = make()
+  await router.dispatch('u1', 456, '/make a cat', 50)
+  assert.deepEqual(calls.enter, [{ userId: 'u1', state: { modusId: 'flux-schnell', aditus: { prompt: 'a cat' }, browsePageIndex: 0 } }])
+})
+
+test('/make with resolveVerb override runs the bound flow', async () => {
+  const { router, calls } = make({ resolveVerb: async () => 'sd1-5' })
+  await router.dispatch('u1', 456, '/make a cat', 50)
+  assert.deepEqual(calls.enter, [{ userId: 'u1', state: { modusId: 'sd1-5', aditus: { prompt: 'a cat' }, browsePageIndex: 0 } }])
+})
+
+test('/make with resolveVerb returning undefined falls back to the default', async () => {
+  const { router, calls } = make({ resolveVerb: async () => undefined })
+  await router.dispatch('u1', 456, '/make a cat', 50)
+  assert.equal((calls.enter[0] as { state: { modusId: string } }).state.modusId, 'flux-schnell')
+})
+
+test('/bind make sd1-5 persists the binding, confirms, and acks (no enter)', async () => {
+  const { router, calls } = make({ flows: async () => ['flux-schnell', 'sd1-5'], bindVerb: async () => {} })
+  await router.dispatch('u1', 456, '/bind make sd1-5', 50)
+  assert.deepEqual(calls.bind, [{ userId: 'u1', verb: 'make', modusId: 'sd1-5' }])
+  assert.equal(calls.enter.length, 0, '/bind never enters execute')
+  assert.match((calls.msg.at(-1) as { text: string }).text, /\/make now runs sd1-5/)
+  assert.equal(calls.ack.length, 1)
+})
+
+test('/bind with an unknown verb sends an error and does not bind', async () => {
+  const { router, calls } = make({ flows: async () => ['flux-schnell', 'sd1-5'], bindVerb: async () => {} })
+  await router.dispatch('u1', 456, '/bind nope sd1-5', 50)
+  assert.equal(calls.bind.length, 0)
+  assert.match((calls.msg.at(-1) as { text: string }).text, /Unknown verb 'nope'/)
+})
+
+test('/bind with a bad slug or unknown flow sends an error and does not bind', async () => {
+  const bad = make({ flows: async () => ['flux-schnell', 'sd1-5'], bindVerb: async () => {} })
+  await bad.router.dispatch('u1', 456, '/bind make Bad.Slug', 50)
+  assert.equal(bad.calls.bind.length, 0)
+  assert.match((bad.calls.msg.at(-1) as { text: string }).text, /Usage: \/bind/)
+
+  const unknown = make({ flows: async () => ['flux-schnell', 'sd1-5'], bindVerb: async () => {} })
+  await unknown.router.dispatch('u1', 456, '/bind make ghost-flow', 50)
+  assert.equal(unknown.calls.bind.length, 0)
+  assert.match((unknown.calls.msg.at(-1) as { text: string }).text, /Unknown flow 'ghost-flow'/)
+})
+
+test('/bind with NO bindVerb dep reports the command unavailable and does not throw', async () => {
+  const { router, calls } = make({ flows: async () => ['flux-schnell', 'sd1-5'] })
+  await router.dispatch('u1', 456, '/bind make sd1-5', 50)
+  assert.equal(calls.enter.length, 0)
+  assert.match((calls.msg.at(-1) as { text: string }).text, /Unknown command/)
 })
