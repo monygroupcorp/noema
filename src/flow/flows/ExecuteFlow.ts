@@ -1,5 +1,5 @@
 import type { Flow, FlowContext, Step, Resolution, PrimitiveEvent, Primitive } from '../types.js'
-import type { Modorum } from '../../types/modus.js'
+import type { Modorum, Forma } from '../../types/modus.js'
 import type { ModelRef } from '../../types/actum.js'
 import { validateAditus } from '../../execution/validateAditus.js'
 import type { Signorum } from '../../types/significandi.js'
@@ -26,6 +26,19 @@ interface ExecuteFlowState {
   category?: string
   modusId?: string
   aditus: Record<string, unknown>
+  /**
+   * The flow-card "editing field" marker. When set (via an `a:edit_<key>` tap),
+   * the next `prompt`/photo reply fills THIS field rather than the next unfilled
+   * required one (the hot-path default). Cleared once the field is filled.
+   */
+  editingField?: string
+  /**
+   * An entry image sourced from the Telegram envelope (attached photo / replied-to
+   * photo). Mapped onto the first `type:'image'` Porta in `enter`, so the image is
+   * neither re-requested (gap-fill) nor shown as unfilled (card). A parameter, not
+   * new vocabulary.
+   */
+  entryImageUrl?: string
   actumId?: string
   result?: Record<string, unknown>
   browsePageIndex: number
@@ -95,23 +108,6 @@ export class ExecuteFlow implements Flow {
   async enter(ctx: FlowContext): Promise<Step> {
     const existing = ctx.state as Partial<ExecuteFlowState> | undefined
 
-    // Pre-filled shortcut: modusId + non-empty aditus → validate and submit directly
-    if (existing?.modusId && existing.aditus && Object.keys(existing.aditus as Record<string, unknown>).length > 0 && !Array.isArray((existing.aditus as Record<string, unknown>).messages)) {
-      const state: ExecuteFlowState = {
-        step: 'CONFIGURE',
-        modusId: existing.modusId,
-        aditus: {},
-        browsePageIndex: 0,
-        mode: existing.mode,
-        category: existing.category,
-        ...(existing.pinnedModels ? { pinnedModels: existing.pinnedModels } : {}),
-      }
-      ctx.state = state
-      const modus = await this._resolveModus(state)
-      state.aditus = validateAditus(modus.aditus, existing.aditus as Record<string, unknown>)
-      return this._submit(ctx, state) as Promise<Step>
-    }
-
     // Conversational reply shortcut: modusId + messages[] already set → skip form, submit directly
     if (existing?.modusId && Array.isArray(existing.aditus?.messages)) {
       const state: ExecuteFlowState = {
@@ -126,19 +122,53 @@ export class ExecuteFlow implements Flow {
       return this._submit(ctx, state) as Promise<Step>
     }
 
-    // Direct entry with modusId pre-set (spell shortcut)
+    // Entry with modusId pre-set (slash command / spell shortcut). One CONFIGURE
+    // state, three presentations keyed on how much of the *required* aditus is
+    // already satisfied:
+    //   • complete  → fast-path submit (no card)        — /make a cat
+    //   • partial   → sequential gap-fill prompt         — fill the next required field
+    //   • empty     → the flow card                      — bare /make, /run <flow>
     if (existing?.modusId) {
       const state: ExecuteFlowState = {
         step: 'CONFIGURE',
         modusId: existing.modusId,
-        aditus: existing.aditus ?? {},
-        browsePageIndex: 0,
+        aditus: { ...(existing.aditus ?? {}) },
+        browsePageIndex: existing.browsePageIndex ?? 0,
         mode: existing.mode,
         category: existing.category,
         ...(existing.pinnedModels ? { pinnedModels: existing.pinnedModels } : {}),
+        ...(existing.shareTokenHint ? { shareTokenHint: existing.shareTokenHint } : {}),
       }
       ctx.state = state
-      return this._buildConfigureStep(state)
+      const modus = await this._resolveModus(state)
+
+      // Map an envelope-borne entry image onto the first image Porta, so it counts
+      // as filled (neither re-requested nor shown as unfilled). No image Porta → ignore.
+      if (existing.entryImageUrl) {
+        const imageKey = Object.entries(modus.aditus).find(([, p]) => p.type === 'image')?.[0]
+        if (imageKey && !(imageKey in state.aditus)) {
+          state.aditus[imageKey] = existing.entryImageUrl
+        }
+      }
+
+      const hadAnyAditus = Object.keys(state.aditus).length > 0
+
+      // Cold entry — nothing given → the flow card. Surface every Porta; the user
+      // tweaks fields and taps Execute once all required have a value.
+      if (!hadAnyAditus) {
+        return this._buildConfigureStep(state)
+      }
+
+      // Required-complete → fast-path submit. We validate-and-strip first so the
+      // submitted aditus is canonical (defaults applied, unknowns dropped).
+      if (this._requiredSatisfied(modus.aditus, state.aditus)) {
+        state.aditus = validateAditus(modus.aditus, state.aditus)
+        return this._submit(ctx, state) as Promise<Step>
+      }
+
+      // Partial — some aditus given but a required field is still missing →
+      // sequential gap-fill (prompt for the next unfilled required field, not the card).
+      return this._buildConfigureStep(state, false)
     }
 
     // Fresh entry
@@ -149,6 +179,13 @@ export class ExecuteFlow implements Flow {
     }
     ctx.state = state
     return this._buildSelectModeStep()
+  }
+
+  /** True when every required Porta has a value in `aditus` (or a schema default). */
+  private _requiredSatisfied(schema: Forma, aditus: Record<string, unknown>): boolean {
+    return Object.entries(schema).every(([key, porta]) =>
+      !porta.required || key in aditus || porta.default !== undefined
+    )
   }
 
   // ── handle ────────────────────────────────────────────────────────────────
@@ -247,23 +284,96 @@ export class ExecuteFlow implements Flow {
   }
 
   private async _handleConfigure(ctx: FlowContext, state: ExecuteFlowState, event: PrimitiveEvent): Promise<Step | Resolution> {
-    // Accept plain text as the value for the first unfilled required field
+    const modus = await this._resolveModus(state)
+
+    // ── Flow-card actions ───────────────────────────────────────────────────
+    if (event.kind === 'action') {
+      // Tap a field's edit button → mark which field the next reply fills, then
+      // ask for it (force-reply / send-a-photo). The card render mechanism reuses
+      // the same input path the gap-fill walks.
+      if (event.actionId.startsWith('edit_')) {
+        const key = event.actionId.slice('edit_'.length)
+        if (key in modus.aditus) {
+          state.editingField = key
+          const porta = modus.aditus[key]
+          const label = porta.description ?? porta.label ?? key
+          const text = porta.type === 'image'
+            ? `Send a photo for ${label}`
+            : `Reply with ${label}`
+          return { primitives: [{ kind: 'Prompt', label: text }] }
+        }
+        return this._buildConfigureStep(state)
+      }
+
+      // Execute tap → validate (rejects on a missing required field, so a half-filled
+      // card cannot submit) and submit exactly as the fast path does.
+      if (event.actionId === 'execute') {
+        const validated = validateAditus(modus.aditus, state.aditus)  // throws if a required field is missing
+        state.aditus = validated
+        return this._runBalanceGateAndSubmit(ctx, state, modus)
+      }
+
+      return this._buildConfigureStep(state)
+    }
+
+    // ── Value input (form bundle, or a single prompt/photo reply) ────────────
     let formValues: Record<string, unknown>
+    let viaEditMarker = false
     if (event.kind === 'form') {
       formValues = event.values
     } else if (event.kind === 'prompt') {
-      const modus = await this._resolveModus(state)
-      const firstRequired = Object.entries(modus.aditus).find(([k, p]) => p.required && !(k in state.aditus))
-      if (!firstRequired) return this._buildConfigureStep(state)
-      formValues = { [firstRequired[0]]: event.text }
+      // The editing marker (card edit) targets THAT field; absent it, fill the
+      // next unfilled required field (the hot-path gap-fill default).
+      if (state.editingField && state.editingField in modus.aditus) {
+        formValues = { [state.editingField]: event.text }
+        viaEditMarker = true
+        state.editingField = undefined
+      } else {
+        const firstRequired = Object.entries(modus.aditus).find(([k, p]) => p.required && !(k in state.aditus))
+        if (!firstRequired) return this._buildConfigureStep(state)
+        formValues = { [firstRequired[0]]: event.text }
+      }
     } else {
       return this._buildConfigureStep(state)
     }
 
-    // Merge form values into aditus, then validate and strip against schema
-    const modus = await this._resolveModus(state)
-    const validated = validateAditus(modus.aditus, { ...state.aditus, ...formValues })
-    state.aditus = validated
+    // Coerce each supplied value through its own one-key schema slice (so `steps='8'`
+    // becomes the int `8`), then merge. We can't validateAditus the whole schema here —
+    // a card edit fills one field at a time and may leave required fields unset, which
+    // validateAditus would reject. The full validate happens at submit / Execute.
+    const coerced: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(formValues)) {
+      const porta = modus.aditus[key]
+      if (porta) {
+        Object.assign(coerced, validateAditus({ [key]: porta }, { [key]: value }))
+      } else {
+        coerced[key] = value
+      }
+    }
+    state.aditus = { ...state.aditus, ...coerced }
+
+    // Card edit → re-render the card (explicit Execute tap submits). Gap-fill →
+    // walk to the next required field, or submit once all required are filled.
+    if (viaEditMarker) {
+      return this._buildConfigureStep(state)
+    }
+
+    const stillMissing = Object.entries(modus.aditus).find(([k, p]) => p.required && !(k in state.aditus) && p.default === undefined)
+    if (stillMissing) {
+      // Keep walking required fields with the sequential prompt (not the card).
+      return this._buildConfigureStep(state, false)
+    }
+
+    state.aditus = validateAditus(modus.aditus, state.aditus)
+    return this._runBalanceGateAndSubmit(ctx, state, modus)
+  }
+
+  /** Balance gate (shared by gap-fill auto-submit and the card's Execute tap) → submit. */
+  private async _runBalanceGateAndSubmit(
+    ctx: FlowContext,
+    state: ExecuteFlowState,
+    modus: Awaited<ReturnType<ExecuteFlow['_resolveModus']>>,
+  ): Promise<Step | Resolution> {
 
     // Balance check — skipped in dev when DEV_FREE_EXECUTION is set
     const balance = await this.deps.signorum.balance(ctx.identity)
@@ -447,7 +557,15 @@ export class ExecuteFlow implements Flow {
     }
   }
 
-  private async _buildConfigureStep(state: ExecuteFlowState): Promise<Step> {
+  /**
+   * Build the CONFIGURE step. Two presentations off one primitive:
+   *   • `asCard: true`  → carry `values` (the current aditus). The adapter renders the
+   *     full flow card (every Porta + its current/default value, per-field edit buttons,
+   *     an Execute button gated on all-required-filled).
+   *   • `asCard: false` → omit `values`. The adapter renders the legacy single-field
+   *     gap-fill prompt (ask for the next unfilled required field).
+   */
+  private async _buildConfigureStep(state: ExecuteFlowState, asCard = true): Promise<Step> {
     const modus = await this._resolveModus(state)
 
     const fields = Object.entries(modus.aditus).map(([key, porta]) => ({
@@ -463,6 +581,7 @@ export class ExecuteFlow implements Flow {
         kind: 'Form',
         label: `Configure ${modus.nomen}`,
         fields,
+        ...(asCard ? { values: { ...state.aditus } } : {}),
       }],
     }
   }

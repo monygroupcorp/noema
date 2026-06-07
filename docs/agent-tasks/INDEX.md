@@ -8,7 +8,7 @@ real GPU/pod is validated separately on staging. Read `AGENTS.md` first.
 | [TASK-001](TASK-001-gen-sd15.md) | Add the SD1.5 txt2img gen-flow (Essentia + template) | done | — (real gen → staging) |
 | [TASK-002](TASK-002-run-resolver.md) | `/run <flow> [prompt]` — the universal flow runner | done | — |
 | [TASK-003](TASK-003-canon-verb-table-rebind.md) | Canon-verb default table + per-user rebind (the seam) | done | — (persistence → staging) |
-| [TASK-004](TASK-004-flow-card-aditus-panel.md) | The flow card — surface every `Porta`, execute when ready | ready | — |
+| [TASK-004](TASK-004-flow-card-aditus-panel.md) | The flow card — surface every `Porta`, execute when ready | done | — |
 
 ## Backlog (not yet written as specs)
 - **TASK-005 · Save-as** — the flow card's "save as canon verb" / "save as my flow" buttons →

@@ -15,9 +15,11 @@ export interface TelegramUpdate {
     from?: { id: number; username?: string; first_name?: string }
     chat: { id: number; type: string }
     text?: string
+    /** A command can ride an attached photo's caption — a different field from `text`. */
+    caption?: string
     date: number
     photo?: Array<{ file_id: string; width: number; height: number }>
-    reply_to_message?: { message_id: number }
+    reply_to_message?: { message_id: number; photo?: Array<{ file_id: string; width: number; height: number }> }
   }
   callback_query?: {
     id: string
