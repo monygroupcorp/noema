@@ -10,7 +10,8 @@ This repo (`noema-crystal`) is built on a small, deliberate domain model called 
 2. `docs/crystal-master-plan.md` — the canonical primitives + ring architecture.
 3. `src/types/index.ts` — the Latin declension rules (store names = genitive plural).
 4. `docs/adr/` — the durable decisions (naming, boundaries) you must honor.
-5. `docs/agent-tasks/INDEX.md` — the task board; pick a task, follow its spec.
+5. `docs/capability-map.md` — the signature matrix + canon verbs (command surface + gen-flow backlog).
+6. `docs/agent-tasks/INDEX.md` — the task board; pick a task, follow its spec.
 
 > Note: `docs/plans/` is **local scratch (gitignored)** — not authoritative. Durable decisions live
 > in `docs/adr/`; executable work lives in `docs/agent-tasks/`.
