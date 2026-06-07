@@ -706,6 +706,177 @@ test('state.step transitions through full sync flow', async () => {
   assert.equal((ctx.state as { step: string }).step, 'RESULT')
 })
 
+// ---------------------------------------------------------------------------
+// Flow card (TASK-004) — cold/hot entry, edit markers, execute gating
+// ---------------------------------------------------------------------------
+
+// A fixture with one required (prompt) + one optional with a default (steps).
+function makeCardModus(overrides: Partial<Modus> = {}): Modus {
+  return makeModus({
+    aditus: {
+      prompt: { type: 'text', required: true, description: 'The prompt' },
+      steps: { type: 'int', required: false, default: 20, description: 'Steps' },
+    },
+    ...overrides,
+  })
+}
+
+// A two-required fixture (prompt + negative) for gap-fill walking.
+function makeTwoRequiredModus(): Modus {
+  return makeModus({
+    aditus: {
+      prompt: { type: 'text', required: true, description: 'The prompt' },
+      negative: { type: 'text', required: true, description: 'Negative prompt' },
+    },
+  })
+}
+
+// An image-Porta fixture (image required, prompt optional) for entry-image mapping.
+function makeImageModus(): Modus {
+  return makeModus({
+    aditus: {
+      image: { type: 'image', required: true, description: 'Source image' },
+      strength: { type: 'float', required: false, default: 0.8, description: 'Strength' },
+    },
+  })
+}
+
+function depsFor(modus: Modus): ExecuteFlowDeps {
+  return makeDeps({
+    modorum: {
+      find: async () => modus,
+      register: async () => {},
+      list: async () => [],
+    },
+  })
+}
+
+test('cold entry (empty aditus) → Form card listing all fields, no Execute action', async () => {
+  const flow = new ExecuteFlow(depsFor(makeCardModus()))
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, browsePageIndex: 0 } })
+  const step = await flow.enter(ctx)
+  const p = step.primitives[0]
+  assert.equal(p.kind, 'Form')
+  if (p.kind === 'Form') {
+    // lists ALL aditus fields
+    assert.ok(p.fields.some(f => f.key === 'prompt'))
+    assert.ok(p.fields.some(f => f.key === 'steps'))
+    // carries values (card mode), and a required field (prompt) is unfilled
+    assert.ok(p.values !== undefined, 'card carries values')
+    assert.equal(p.values!.prompt, undefined, 'required prompt is unfilled')
+  }
+})
+
+test('cold entry then fill the required field → card now exposes Execute', async () => {
+  const flow = new ExecuteFlow(depsFor(makeCardModus()))
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, browsePageIndex: 0 } })
+  await flow.enter(ctx)
+
+  // Edit the prompt field, then reply with a value.
+  await flow.handle(ctx, { kind: 'action', actionId: 'edit_prompt' })
+  const step = await flow.handle(ctx, { kind: 'prompt', text: 'a cat' })
+  assertStep(step)
+  const p = step.primitives[0]
+  assert.equal(p.kind, 'Form')
+  if (p.kind === 'Form') {
+    assert.equal(p.values!.prompt, 'a cat', 'prompt filled')
+    // all required now satisfied → renderer would show Execute (values present + required filled)
+    const allRequiredFilled = p.fields.filter(f => f.required).every(f => p.values![f.key] !== undefined)
+    assert.ok(allRequiredFilled, 'all required filled → Execute available')
+  }
+})
+
+test('edit a specific optional field → sets that field, not the prompt field', async () => {
+  const flow = new ExecuteFlow(depsFor(makeCardModus()))
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, browsePageIndex: 0 } })
+  await flow.enter(ctx)
+
+  await flow.handle(ctx, { kind: 'action', actionId: 'edit_steps' })
+  await flow.handle(ctx, { kind: 'prompt', text: '8' })
+
+  const state = ctx.state as { aditus: Record<string, unknown> }
+  assert.equal(state.aditus.steps, 8, 'steps filled (coerced to int) — not prompt')
+  assert.equal(state.aditus.prompt, undefined, 'prompt untouched')
+})
+
+test('hot entry, all required present → fast-path submit, no card (regression guard)', async () => {
+  const flow = new ExecuteFlow(depsFor(makeCardModus()))
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: { prompt: 'a cat' }, browsePageIndex: 0 } })
+  const step = await flow.enter(ctx)
+  const p = step.primitives[0]
+  assert.ok(p.kind === 'Result' || p.kind === 'Stream', `expected submit (Result/Stream), got ${p.kind}`)
+})
+
+test('hot entry, a required field missing → gap-fill prompt (no card), then submit', async () => {
+  const flow = new ExecuteFlow(depsFor(makeTwoRequiredModus()))
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: { prompt: 'a cat' }, browsePageIndex: 0 } })
+  const step = await flow.enter(ctx)
+  const p = step.primitives[0]
+  assert.equal(p.kind, 'Form')
+  if (p.kind === 'Form') {
+    assert.equal(p.values, undefined, 'gap-fill path renders single prompt (no card values)')
+  }
+
+  // Reply with the missing field → auto-submit (gap-fill walks all required)
+  const result = await flow.handle(ctx, { kind: 'prompt', text: 'blurry' })
+  assertStep(result)
+  const p2 = result.primitives[0]
+  assert.ok(p2.kind === 'Result' || p2.kind === 'Stream', `expected submit, got ${p2.kind}`)
+})
+
+test('execute gating: a:execute with a required field empty does NOT submit (validation rejects)', async () => {
+  const flow = new ExecuteFlow(depsFor(makeCardModus()))
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, browsePageIndex: 0 } })
+  await flow.enter(ctx)
+
+  await assert.rejects(
+    () => flow.handle(ctx, { kind: 'action', actionId: 'execute' }),
+    /required field/,
+    'execute with an empty required field must reject (no submit)',
+  )
+})
+
+test('entry image maps onto the image Porta → counts as filled, not re-requested', async () => {
+  const flow = new ExecuteFlow(depsFor(makeImageModus()))
+  // Only the image is required; it arrives via the envelope → should fast-path submit.
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, entryImageUrl: 'https://img/x.png', browsePageIndex: 0 } })
+  const step = await flow.enter(ctx)
+  const p = step.primitives[0]
+  assert.ok(p.kind === 'Result' || p.kind === 'Stream', `image filled → submit, got ${p.kind}`)
+  const state = ctx.state as { aditus: Record<string, unknown> }
+  assert.equal(state.aditus.image, 'https://img/x.png', 'image Porta pre-filled from entryImageUrl')
+})
+
+test('entry image with another missing required → gap-fill asks only for the other field', async () => {
+  const modus = makeModus({
+    aditus: {
+      image: { type: 'image', required: true, description: 'Source image' },
+      prompt: { type: 'text', required: true, description: 'The prompt' },
+    },
+  })
+  const flow = new ExecuteFlow(depsFor(modus))
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, entryImageUrl: 'https://img/x.png', browsePageIndex: 0 } })
+  const step = await flow.enter(ctx)
+  const p = step.primitives[0]
+  assert.equal(p.kind, 'Form')
+  const state = ctx.state as { aditus: Record<string, unknown> }
+  assert.equal(state.aditus.image, 'https://img/x.png', 'image already filled')
+  // A prompt reply fills the remaining required field → submit
+  const result = await flow.handle(ctx, { kind: 'prompt', text: 'make it cyberpunk' })
+  assertStep(result)
+  const p2 = result.primitives[0]
+  assert.ok(p2.kind === 'Result' || p2.kind === 'Stream', `expected submit after prompt, got ${p2.kind}`)
+})
+
+test('entry image with no image Porta is ignored', async () => {
+  const flow = new ExecuteFlow(depsFor(makeCardModus()))  // no image Porta
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, entryImageUrl: 'https://img/x.png', browsePageIndex: 0 } })
+  const step = await flow.enter(ctx)
+  const state = ctx.state as { aditus: Record<string, unknown> }
+  assert.equal(Object.keys(state.aditus).length, 0, 'no image Porta → entry image ignored')
+  assert.equal(step.primitives[0].kind, 'Form', 'falls into the cold card')
+})
+
 test('Mod • → Add: state.pinnedModels flows through _submit to inceptor.initiate', async () => {
   // Proves the dispatch→spec bridge's flow leg: pinned models carried from entry state
   // into the initiate call (sibling of shareTokenHint), so they land on the Actum.

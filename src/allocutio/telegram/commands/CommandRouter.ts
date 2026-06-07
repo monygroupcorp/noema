@@ -74,9 +74,12 @@ export interface CommandDeps {
 export class CommandRouter {
   constructor(private readonly deps: CommandDeps) {}
 
-  async dispatch(userId: string, chatId: number, text: string, messageId?: number): Promise<void> {
+  async dispatch(userId: string, chatId: number, text: string, messageId?: number, entryImageUrl?: string): Promise<void> {
     const cmd = text.split(' ')[0].split('@')[0].toLowerCase()
     const ack = () => { if (messageId !== undefined) this.deps.ack(chatId, messageId) }
+    // An entry image (attached photo / replied-to photo) rides into the flow state on
+    // the verbs that accept one; ExecuteFlow maps it onto the first image Porta.
+    const entry = entryImageUrl !== undefined ? { entryImageUrl } : {}
 
     switch (cmd) {
       case '/start': {
@@ -104,6 +107,7 @@ export class CommandRouter {
           modusId,
           aditus: prompt ? { prompt } : {},
           browsePageIndex: 0,
+          ...entry,
         })
         // No ack here: the "accepted" reaction (👌 cold / 🔥 warm) is owned by the
         // Stream registration, so a warm run never flashes 👌.
@@ -138,6 +142,7 @@ export class CommandRouter {
           modusId: slug,
           aditus: prompt ? { prompt } : {},
           browsePageIndex: 0,
+          ...entry,
         })
         // No ack here — same as /make: the Stream reaction owns the accepted signal.
         return
@@ -188,7 +193,7 @@ export class CommandRouter {
 
       case '/chat': {
         const modusId = (await this.deps.resolveVerb?.(userId, 'chat')) ?? CANON_VERBS.chat
-        await this.deps.enterExecute(userId, { modusId, aditus: {}, browsePageIndex: 0 })
+        await this.deps.enterExecute(userId, { modusId, aditus: {}, browsePageIndex: 0, ...entry })
         ack()
         return
       }

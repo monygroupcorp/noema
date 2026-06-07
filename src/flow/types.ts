@@ -37,7 +37,18 @@ export type Primitive =
   | { kind: 'MultiSelect'; label: string; options: Array<{ id: string; label: string }> }
   | { kind: 'Paginate';    label: string; items: Array<{ id: string; label: string; description?: string }>; page: number; totalPages: number }
   | { kind: 'Confirm';     label: string; question: string }
-  | { kind: 'Form';        label: string; fields: Array<{ key: string; label: string; type: string; required: boolean; default?: unknown }> }
+  | {
+      kind: 'Form'
+      label: string
+      fields: Array<{ key: string; label: string; type: string; required: boolean; default?: unknown }>
+      /**
+       * The current aditus (the values collected so far). When present, the adapter
+       * renders the flow card: each field shows its current-or-default value, required
+       * ones are marked, and an Execute affordance appears only once every required
+       * field has a value. A field on an existing primitive — not a new primitive (ADR-0001).
+       */
+      values?: Record<string, unknown>
+    }
   | { kind: 'Detail';      label: string; content: string; actions: Array<{ id: string; label: string }> }
   | { kind: 'Stream';      label: string; actumId: string; status: 'running' | 'complete' | 'failed'; content?: string }
   | { kind: 'Prompt';      label: string; placeholder?: string }

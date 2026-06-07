@@ -1528,3 +1528,86 @@ test('/chat does not consume the studio pending loadout', async () => {
   const stateMake = (enterMake.args[4] as { state?: { pinnedModels?: Array<{ id: string }> } })?.state
   assert.ok(stateMake?.pinnedModels?.some(p => p.id === 'intella.sdxl'), '/make still gets the queued model')
 })
+
+// =============================================================================
+// Envelope-borne commands + entry images (TASK-004)
+// =============================================================================
+
+// A photo message whose caption carries the command.
+function captionCmdUpdate(userId: number, chatId: number, caption: string, fileIds: string[], messageId = 1): TelegramUpdate {
+  return {
+    update_id: 5,
+    message: {
+      message_id: messageId,
+      from: { id: userId, username: 'tester' },
+      chat: { id: chatId, type: 'private' },
+      caption,
+      date: Math.floor(Date.now() / 1000),
+      photo: fileIds.map((file_id, i) => ({ file_id, width: (i + 1) * 100, height: (i + 1) * 100 })),
+    },
+  }
+}
+
+// A text command fired as a reply to a photo message.
+function replyToPhotoCmdUpdate(userId: number, chatId: number, text: string, fileIds: string[], messageId = 1): TelegramUpdate {
+  return {
+    update_id: 6,
+    message: {
+      message_id: messageId,
+      from: { id: userId, username: 'tester' },
+      chat: { id: chatId, type: 'private' },
+      text,
+      date: Math.floor(Date.now() / 1000),
+      reply_to_message: { message_id: messageId - 1, photo: fileIds.map((file_id, i) => ({ file_id, width: (i + 1) * 100, height: (i + 1) * 100 })) },
+    },
+  }
+}
+
+test('caption command: a photo whose caption is /run … dispatches the command', async () => {
+  const { allocutio, router } = makeAllocutio()
+  await allocutio.receive(captionCmdUpdate(123, 456, '/run sd1-5 a cat', ['photo-1']))
+
+  const enterCall = router.calls.find(c => c.method === 'enter')
+  assert.ok(enterCall, 'caption-borne /run should dispatch + enter execute')
+  const state = (enterCall!.args[4] as { state?: { modusId?: string; aditus?: Record<string, unknown> } })?.state
+  assert.equal(state?.modusId, 'sd1-5')
+  assert.equal(state?.aditus?.prompt, 'a cat')
+})
+
+test('attached image fills entryImageUrl on the flow state', async () => {
+  const { allocutio, router } = makeAllocutio()
+  await allocutio.receive(captionCmdUpdate(123, 456, '/run sd1-5', ['photo-lo', 'photo-hi']))
+
+  const enterCall = router.calls.find(c => c.method === 'enter')
+  const state = (enterCall!.args[4] as { state?: { entryImageUrl?: string } })?.state
+  assert.ok(state?.entryImageUrl?.endsWith('photo-hi'), 'highest-res attached photo becomes entryImageUrl')
+})
+
+test('reply-to image: a text command replying to a photo sources the image', async () => {
+  const { allocutio, router } = makeAllocutio()
+  await allocutio.receive(replyToPhotoCmdUpdate(123, 456, '/run sd1-5', ['rep-1']))
+
+  const enterCall = router.calls.find(c => c.method === 'enter')
+  const state = (enterCall!.args[4] as { state?: { entryImageUrl?: string } })?.state
+  assert.ok(state?.entryImageUrl?.endsWith('rep-1'), 'replied-to photo becomes entryImageUrl')
+})
+
+test('attached photo takes precedence over a replied-to photo', async () => {
+  const { allocutio, router } = makeAllocutio()
+  // both an attached photo and a replied-to photo present
+  await allocutio.receive({
+    update_id: 7,
+    message: {
+      message_id: 10,
+      from: { id: 123, username: 'tester' },
+      chat: { id: 456, type: 'private' },
+      caption: '/run sd1-5',
+      date: Math.floor(Date.now() / 1000),
+      photo: [{ file_id: 'attached-hi', width: 200, height: 200 }],
+      reply_to_message: { message_id: 9, photo: [{ file_id: 'replied-hi', width: 200, height: 200 }] },
+    },
+  })
+  const enterCall = router.calls.find(c => c.method === 'enter')
+  const state = (enterCall!.args[4] as { state?: { entryImageUrl?: string } })?.state
+  assert.ok(state?.entryImageUrl?.endsWith('attached-hi'), 'attached photo wins over replied-to')
+})

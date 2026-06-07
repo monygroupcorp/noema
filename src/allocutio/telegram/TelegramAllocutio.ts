@@ -472,7 +472,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     const userId = String(message.from?.id ?? message.chat.id)
     const chatId = message.chat.id
-    const text = message.text ?? ''
+    // A command can ride a photo's caption (a different field from `text`), so read both —
+    // `/effect …` typed under an attached image would otherwise be silently dropped.
+    const text = message.text ?? message.caption ?? ''
 
     // Store chatId for later use (rendering)
     this.chatIds.set(`telegram:${userId}`, chatId)
@@ -493,7 +495,18 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     }
 
     if (text.startsWith('/')) {
-      await this._handleCommand(userId, chatId, text, message.message_id)
+      // Capture an entry image from the command's envelope (the deprecated-bot UX):
+      // an attached photo takes precedence over a replied-to photo. Resolved to a
+      // download URL and threaded into the flow, where it pre-fills the image Porta.
+      const envelopePhoto = (message.photo && message.photo.length > 0)
+        ? message.photo
+        : message.reply_to_message?.photo
+      let entryImageUrl: string | undefined
+      if (envelopePhoto && envelopePhoto.length > 0) {
+        const largest = envelopePhoto[envelopePhoto.length - 1]  // highest res
+        entryImageUrl = (await this._resolveFileUrl(largest.file_id)) ?? undefined
+      }
+      await this._handleCommand(userId, chatId, text, message.message_id, entryImageUrl)
     } else {
       // Photo message while flow active → resolve file URL → prompt event
       if (message.photo && message.photo.length > 0) {
@@ -519,7 +532,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // Command handler
   // -------------------------------------------------------------------------
 
-  private async _handleCommand(userId: string, chatId: number, text: string, messageId?: number): Promise<void> {
+  private async _handleCommand(userId: string, chatId: number, text: string, messageId?: number, entryImageUrl?: string): Promise<void> {
     // Reaction-prep: 🤔 on receipt + remember the command message so the Stream
     // registration can later land the 👌/🔥 on it. The command surface itself lives
     // in CommandRouter.
@@ -527,7 +540,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       void this._react(chatId, messageId, REACTION.thinking)
       this.lastCommandMessageIds.set(`telegram:${userId}`, messageId)
     }
-    await this.commands.dispatch(userId, chatId, text, messageId)
+    await this.commands.dispatch(userId, chatId, text, messageId, entryImageUrl)
   }
 
   // -------------------------------------------------------------------------
