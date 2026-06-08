@@ -20,13 +20,16 @@
 
 ## Deliverables
 1. **Make `flows()` per-user.** Change the `CommandDeps.flows` signature
-   `flows?(): Promise<string[]>` → `flows?(userId: string): Promise<string[]>`, and have the `/run`
-   handler call `await this.deps.flows?.(userId)` (it already has `userId`). The unknown-flow message is
-   unchanged.
-2. **Wire it to canonical + the user's owned flows** (`TelegramAllocutio.ts`):
+   `flows?(): Promise<string[]>` → `flows?(userId: string): Promise<string[]>`. **There are TWO call
+   sites — update both:** the `/run` handler (CommandRouter.ts:133) AND the `/bind` handler
+   (CommandRouter.ts:174, which validates the bind target). Both already have `userId` in scope — pass
+   it. (Binding a verb to your *own* saved flow is desirable, so `/bind` getting owned flows is correct.)
+   The unknown-flow message is unchanged.
+2. **Wire it to canonical + the user's owned flows** (`TelegramAllocutio.ts`) — identity is in scope
+   (there's already a `resolveOwner: (userId) => this.identity.resolve(userId)` at ~line 215):
    ```ts
    flows: async (userId) => {
-     const owner = await deps.identity.resolve(userId)
+     const owner = await this.identity.resolve(userId)
      const [canon, owned] = await Promise.all([
        deps.modorum!.list({ genus: 'atomicus', canonica: true }),
        deps.modorum!.list({ genus: 'atomicus', auctor: owner }),
@@ -46,6 +49,8 @@
     `enterExecute({ modusId:'owned-slug', … })` (NOT rejected).
   - `/run nope` where the mock omits it → `sendMessage` (unknown), NO enter (regression guard).
   - bare `/run` → usage (unchanged).
+  - `/bind`'s existing flows-validation case still passes with the new `flows(userId)` signature
+    (update the mock to accept `userId`; binding to an owned flow resolves).
 
 ## Verify
 ```bash

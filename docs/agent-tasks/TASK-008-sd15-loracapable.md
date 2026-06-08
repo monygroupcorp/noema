@@ -25,7 +25,9 @@ Make a template able to declare a custom-node pack that actually reaches the pod
    `comfyrunnerClient.ts:69` → the runner's `_ensure_custom_nodes`, `scripts/pod/comfyrunner.py:303`,
    which already installs them).
 3. **Test** (`tests/unit/crystal/Compiler.test.ts`): a template with `customNodes` → `CompiledSpec.customNodes`
-   carries them; absent → empty/undefined (no regression).
+   carries them; absent → empty/undefined (no regression). Note: if `_hashSpec` (Compiler.ts:269)
+   includes the new field, update any hash-snapshot assertion (the field is part of the deployment
+   definition, so including it in the hash is correct).
 
 **Part 1 acceptance:** `npx tsc --noEmit` clean; `npm run test:hermetic` green incl. the new case.
 
