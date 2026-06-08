@@ -18,6 +18,9 @@ real GPU/pod is validated separately on staging. Read `AGENTS.md` first.
   layer (widen `Modus.auctor` to `{animaId}|{commitment}`, the owner-keyed store). See ADR-0003.
 - **TASK-007 · Prompt affixes** — `Porta.praefixum`/`suffixum` woven at compile via the `TraitMixer`
   seam, surfaced in the Save-as menu. Purely additive on TASK-006 (sets fields TASK-006 leaves unset).
+- **Trigger-resolution convergence** — once `familia` is populated (TASK-005), drop
+  `BulletinModelCatalog`'s tag-derived family workaround and converge its `resolveTriggers(…,{family})`
+  onto the crystal `triggerMap(familia)` (its own "swap once it's set" TODO). Allocutio ring; follow-up.
 - **Verb-binding persistence** — widen `Modus.auctor` to `{animaId}|{commitment}` (anon-capable),
   re-home preferences (`affines` + verb-bindings) under that owner key, wire `resolveVerb`/`bindVerb`
   (the TASK-003 follow-on; non-hermetic → staging). No new nouns. See ADR-0003.
