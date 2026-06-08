@@ -11,10 +11,17 @@ real GPU/pod is validated separately on staging. Read `AGENTS.md` first.
 | [TASK-004](TASK-004-flow-card-aditus-panel.md) | The flow card — surface every `Porta`, execute when ready | done | — |
 | [TASK-005](TASK-005-intellae-manifest.md) | `intellae` manifest + `familia` — flow declares its weights; family drives LoRA compat (drop `intellaId`) | done | — (Mongo re-key + install → staging) |
 | [TASK-006](TASK-006-save-as.md) | Save-as — flow card / delivery-info menu → a derived `Modus` (owner-keyed persistence) | done* | *hermetic done; Mongo `auctor` + e2e `/run <slug>` pending staging. "save as verb" rides the verb-rebind wiring follow-up |
+| [TASK-008](TASK-008-sd15-loracapable.md) | Make the SD1.5 gen template LoRA-capable (staging fix — triggers couldn't fire) | ready | — (real LoRA apply → staging) |
+| [TASK-009](TASK-009-run-resolves-owned-flows.md) | `/run` resolves a user's own saved flows (staging fix — `canonica` filter rejected them) | ready | — (real `list({auctor})` → staging) |
 
 ## Backlog (not yet written as specs)
 - **Verb-rebind persistence wiring** — sibling follow-up on TASK-006's `auctor` foundation: wire
   TASK-003's `resolveVerb`/`bindVerb` to the owner-keyed store. See ADR-0003.
+- **Bulletin staged-progress regression** (staging 2026-06-08) — a cold `/make` mis-renders as a warm
+  reuse ("keep cooking" + "found in 0s"), no live provisioning/download lines. The bulletin *engine* is
+  unchanged; it's a stage-FEED regression introduced in TASK-002→006. Fix = git-archaeology: diff the
+  feed path (ExecuteFlow submit → Stream → `_handleActumStage` → `bulletins.register`/`onStage`) against
+  the known-good `fdfd…`/`fd50359d`/~`e72b6019` state and reconnect. NOT a rewrite, NOT a guess. Deferred.
 - **TASK-007 · Prompt affixes** — `Porta.praefixum`/`suffixum` woven at compile via the `TraitMixer`
   seam, surfaced in the Save-as menu. Purely additive on TASK-006 (sets fields TASK-006 leaves unset).
 - **Trigger-resolution convergence** — once `familia` is populated (TASK-005), drop
