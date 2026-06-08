@@ -15,7 +15,7 @@ real GPU/pod is validated separately on staging. Read `AGENTS.md` first.
 | [TASK-009](TASK-009-run-resolves-owned-flows.md) | `/run` resolves a user's own saved flows (staging fix — `canonica` filter rejected them) | done* | *hermetic done; real `list({auctor})` → staging |
 | [TASK-010](TASK-010-verb-rebind-store.md) | Wire `/bind` rebind to a persistent owner-keyed store (`Consuetudo`) | done* | *hermetic done; Mongo + real `/bind`→`/make` → staging |
 | [TASK-007](TASK-007-prompt-affixes.md) | Prompt affixes — flow-baked prefix/suffix on a text `Porta` (finishes save-a-style) | done* | *hermetic done; real gen → staging |
-| [TASK-011](TASK-011-bulletin-render-serialization.md) | Serialize bulletin renders (fix scrambled provisioning play-by-play) | ready | — (visual → staging) |
+| [TASK-011](TASK-011-bulletin-render-serialization.md) | Serialize bulletin renders (fix scrambled provisioning play-by-play) | done* | *hermetic done; visual confirm → staging |
 
 ## Backlog (not yet written as specs)
 - **Trigger-resolution convergence** — now that `familia` is populated (TASK-005/008), drop

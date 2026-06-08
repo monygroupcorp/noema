@@ -35,10 +35,12 @@ test('register posts the setup bulletin; stages drive the journal; complete show
 
   m.onStage('a1', 'provisioning', undefined)
   m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  await tick(0)   // renders are serialized — let the chained stage edits drain
   assert.match(s.lastText(), /Found RTX 4090 for \$0\.69\/hr in 30s/)
   assert.match(s.lastText(), /Initializing/)
 
   m.onComplete('a1', { costUsd: 0.08, execMs: 12_000, podId: 'pod-1' })
+  await tick(0)
   assert.match(s.lastText(), /1 gen · exec ~12s avg · \$0\.080 ea · \$0\.08 total/)
 })
 
@@ -54,6 +56,7 @@ test('warm reuse on a live session does NOT add a second Found line', async () =
   m.register(456, 'a2', '123')
   m.onStage('a2', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 })
   m.onComplete('a2', { costUsd: 0.005, execMs: 11_000, podId: 'pod-1' })
+  await tick(0)   // serialized renders — drain the chain before reading the screen
 
   const foundCount = (s.lastText().match(/Found /g) ?? []).length
   assert.equal(foundCount, 1, 'only the cold start commits a Found line')
@@ -88,6 +91,7 @@ test('pod.reaped freezes the matching bulletin', async () => {
   m.onStage('a1', 'provisioning')
   m.onStage('a1', 'pod-locked', { podId: 'pod-9', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   m.onReaped('pod-9')
+  await tick(0)   // serialized renders — let the receipt edit drain
   assert.equal(cb(s.lastKb()).length, 0, 'reaped → frozen, no buttons')
 })
 
@@ -741,4 +745,106 @@ test('a loadout built via /arm carries into the next /make (the live session is 
   assert.equal(m.pendingModelsFor(456).length, 1, 'queued via the armed session')
   m.register(456, 'a1', '123')   // /make on the same chat reuses the live armed session
   assert.equal(m.pendingModelsFor(456).length, 1, 'pending loadout survives into the gen')
+})
+
+// ── Render serialization (TASK-011) ──────────────────────────────────────────
+// A deferred sink: every edit/post records its text + call order and returns a promise
+// the test resolves by hand, so we can observe how many renders are in flight at once.
+function makeDeferredSink() {
+  const calls: Array<{ kind: 'post' | 'edit'; text: string; resolve: () => void }> = []
+  let inFlight = 0
+  let maxInFlight = 0
+  let nextId = 100
+  const enqueue = (kind: 'post' | 'edit', text: string): Promise<void> => {
+    inFlight += 1
+    maxInFlight = Math.max(maxInFlight, inFlight)
+    return new Promise<void>(res => {
+      calls.push({ kind, text, resolve: () => { inFlight -= 1; res() } })
+    })
+  }
+  const sink: BulletinSink = {
+    async post(_chatId, text) { await enqueue('post', text); return ++nextId },
+    async edit(_chatId, _messageId, text) { await enqueue('edit', text) },
+    async remove() {},
+  }
+  return {
+    sink, calls,
+    pending: () => inFlight,
+    maxInFlight: () => maxInFlight,
+  }
+}
+
+test('renders are serialized per chat — at most one sink edit in flight, stages land in order', async () => {
+  const d = makeDeferredSink()
+  const m = new BulletinManager({ sink: d.sink })
+
+  // register posts the setup bulletin (deferred). Resolve it so a messageId is set.
+  m.register(456, 'a1', '123')
+  assert.equal(d.pending(), 1, 'register issued exactly one post')
+  assert.equal(d.calls[0].kind, 'post')
+  d.calls[0].resolve()
+  await tick(0)
+
+  // The three provisioning stages. In production they arrive across real awaits; the bug was that
+  // their concurrent, un-awaited renders could land out of order under sink latency. We drive them
+  // through the deferred sink and prove (a) at most one edit is ever in flight, and (b) the sink
+  // receives the stage texts in stage order — the scramble cannot happen.
+  // The provisioning play-by-play, with DISTINCT rendered frames (so none dedupes away):
+  // pod-locked (commits the Found line + Initializing) → downloading 1/3 → downloading 2/3.
+  // (`provisioning` is silent in the /make path — hunting renders no journal line — so it would
+  // dedupe against the setup frame; we drive the visible, ordered stages.)
+  m.onStage('a1', 'provisioning')   // silent hunt — no frame change
+  const stages: Array<() => void> = [
+    () => m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 }),
+    () => m.onStage('a1', 'downloading:1/3'),
+    () => m.onStage('a1', 'downloading:2/3'),
+  ]
+
+  const order: string[] = []
+  let i = 1   // calls[0] was the register post (already resolved)
+  stages[0]()
+  for (let step = 0; step < stages.length; step++) {
+    // This stage's render begins and calls the sink (then blocks on the deferred edit).
+    while (d.calls.length <= i) await tick(0)
+    assert.equal(d.pending(), 1, `exactly one render in flight at step ${step} (serialized)`)
+
+    // While this edit is unresolved, fire the NEXT stage — its render must NOT issue a sink call
+    // (it is chained behind the in-flight one), proving serialization.
+    if (step + 1 < stages.length) {
+      stages[step + 1]()
+      await tick(0); await tick(0)
+      assert.equal(d.calls.length, i + 1, `the next stage's edit is NOT requested until the prior resolves (step ${step})`)
+      assert.equal(d.pending(), 1, `still exactly one in flight after the next stage is queued (step ${step})`)
+    }
+
+    order.push(d.calls[i].text)
+    d.calls[i].resolve()   // → the chained next-stage render now starts
+    i += 1
+  }
+  await tick(0); await tick(0)
+  assert.equal(order.length, stages.length, 'every stage rendered exactly once, in order')
+  assert.equal(d.maxInFlight(), 1, 'never more than one sink call in flight at any time')
+
+  // Delivered in stage order: pod-locked (Found + Initializing) → downloading 1/3 → downloading 2/3.
+  // No earlier frame overtakes a later one.
+  assert.match(order[0], /Found RTX 4090 for \$0\.69\/hr in 30s/, 'first frame is the Found (pod-locked) state')
+  assert.match(order[0], /Initializing/, 'pod-locked frame is initializing')
+  assert.match(order[1], /downloading models \(1\/3\)/, 'second frame is downloading 1/3')
+  assert.match(order[2], /downloading models \(2\/3\)/, 'third frame is downloading 2/3')
+  assert.match(order[2], /Found RTX 4090/, 'the committed Found line persists into the final frame')
+
+  // Tear down the chat so the hop-to-bottom renew timer (armed by the register post) doesn't
+  // outlive the test, and resolve any final receipt edit it queues.
+  void m.handleControl(456, '123', 'destroy.now')   // cancelAll() kills the renew timer
+  await tick(0)
+  for (const c of d.calls) c.resolve()
+})
+
+test('an awaited register path still lands a final render through the serialized wrapper', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink })
+  m.register(456, 'a1', '123')
+  await tick(0)
+  assert.equal(s.posts.length, 1, 'register posted the bulletin')
+  assert.match(s.lastText(), /Set how long to keep the pod warm/)
 })

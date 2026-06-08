@@ -124,6 +124,7 @@ export class BulletinManager {
       cb?.timers.cancelAll()
       this.pickerCache.delete(chatId)
       this.pickerFetchGen.delete(chatId)
+      this._renderTail.delete(chatId)   // fresh session → fresh render chain
       cb = { session: new PodSession(hostUserId, audience), messageId: null, timers: new TimerRegistry() }
       this.chats.set(chatId, cb)
       this._armAutoSettle(chatId)
@@ -141,6 +142,7 @@ export class BulletinManager {
     this.chats.get(chatId)?.timers.cancelAll()
     this.pickerCache.delete(chatId)
     this.pickerFetchGen.delete(chatId)
+    this._renderTail.delete(chatId)   // fresh session → fresh render chain
     const session = new PodSession(hostUserId)
     this.chats.set(chatId, { session, messageId: null, timers: new TimerRegistry() })
     // Begin at the preset step (curated flows; Custom → image → config → then the model menu).
@@ -230,7 +232,7 @@ export class BulletinManager {
         this.pickerCache.delete(chatId)
         this.pickerFetchGen.delete(chatId)
         cb.session.end()
-        void this._render(chatId)
+        void this._render(chatId).then(() => { this._renderTail.delete(chatId) })
       }
     }
   }
@@ -295,6 +297,7 @@ export class BulletinManager {
       cb.timers.cancelAll()
       s.cancel()
       await this._render(chatId)
+      this._renderTail.delete(chatId)   // dismissed → drop the chain
       return
     }
     // /arm wizard: image chosen → advance to the config step with that image's runtimes.
@@ -404,6 +407,7 @@ export class BulletinManager {
           s.armBack()                  // config → image / flowdetail → preset
         }
         await this._render(chatId)
+        if (s.ended) this._renderTail.delete(chatId)   // dismissed → drop the chain
         return
 
       case 'submenu.back':
@@ -499,6 +503,7 @@ export class BulletinManager {
         s.openSubmenu(null)
         s.end()
         await this._render(chatId)
+        this._renderTail.delete(chatId)   // terminal receipt landed → drop the chain
         return
 
       case 'destroy.drain':
@@ -702,7 +707,26 @@ export class BulletinManager {
     cb.timers.arm('renew', RENEW_MS, () => { void this._render(chatId, { renew: true }) })
   }
 
-  private async _render(chatId: number, opts: { renew?: boolean } = {}): Promise<void> {
+  /** Per-chat render tail — chains renders so a slow edit can't be overtaken by a later one
+   *  (the provisioning play-by-play lands in stage order under real API latency). */
+  private readonly _renderTail = new Map<number, Promise<void>>()
+
+  /**
+   * Serialize renders per chat so a slow edit can't be overtaken by a later one. When the chain
+   * is idle the render starts synchronously (the sink call is issued before this returns, as the
+   * call sites have always relied on); when one is already in flight the new render chains behind
+   * it. `await`-ing this resolves when THIS render's edit completes.
+   */
+  private _render(chatId: number, opts: { renew?: boolean } = {}): Promise<void> {
+    const tail = this._renderTail.get(chatId)
+    const run = (tail ?? this._renderNow(chatId, opts))   // idle → start now; busy → chain
+      .then(tail ? () => this._renderNow(chatId, opts) : undefined)
+      .catch(() => {})   // a failed render must NOT wedge the chain
+    this._renderTail.set(chatId, run)
+    return run
+  }
+
+  private async _renderNow(chatId: number, opts: { renew?: boolean } = {}): Promise<void> {
     const cb = this.chats.get(chatId)
     if (!cb) return
     const { text, keyboard } = BulletinView.render(cb.session.snapshot())
