@@ -13,7 +13,8 @@ real GPU/pod is validated separately on staging. Read `AGENTS.md` first.
 | [TASK-006](TASK-006-save-as.md) | Save-as — flow card / delivery-info menu → a derived `Modus` (owner-keyed persistence) | done* | *hermetic done; Mongo `auctor` + e2e `/run <slug>` pending staging. "save as verb" rides the verb-rebind wiring follow-up |
 | [TASK-008](TASK-008-sd15-loracapable.md) | Port the LoRA-apply layer — `customNodes` plumbing + cozyness LoRA chain | done* | *hermetic done; real on-pod LoRA apply (Coziness installs per-job) → staging |
 | [TASK-009](TASK-009-run-resolves-owned-flows.md) | `/run` resolves a user's own saved flows (staging fix — `canonica` filter rejected them) | done* | *hermetic done; real `list({auctor})` → staging |
-| [TASK-010](TASK-010-verb-rebind-store.md) | Wire `/bind` rebind to a persistent owner-keyed store (unblocks rebind + "save as canon verb") | done* | *hermetic done; Mongo + real `/bind`→`/make` → staging |
+| [TASK-010](TASK-010-verb-rebind-store.md) | Wire `/bind` rebind to a persistent owner-keyed store (`Consuetudo`) | done* | *hermetic done; Mongo + real `/bind`→`/make` → staging |
+| [TASK-007](TASK-007-prompt-affixes.md) | Prompt affixes — flow-baked prefix/suffix on a text `Porta` (finishes save-a-style) | ready | — (real gen → staging) |
 
 ## Backlog (not yet written as specs)
 - **Bulletin staged-progress regression** (staging 2026-06-08) — a cold `/make` mis-renders as a warm
