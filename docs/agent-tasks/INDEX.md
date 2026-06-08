@@ -9,7 +9,7 @@ real GPU/pod is validated separately on staging. Read `AGENTS.md` first.
 | [TASK-002](TASK-002-run-resolver.md) | `/run <flow> [prompt]` — the universal flow runner | done | — |
 | [TASK-003](TASK-003-canon-verb-table-rebind.md) | Canon-verb default table + per-user rebind (the seam) | done | — (persistence → staging) |
 | [TASK-004](TASK-004-flow-card-aditus-panel.md) | The flow card — surface every `Porta`, execute when ready | done | — |
-| [TASK-005](TASK-005-intellae-manifest.md) | The `intellae` manifest — flow declares the models it needs | ready | — (real install → staging) |
+| [TASK-005](TASK-005-intellae-manifest.md) | `intellae` manifest + `familia` — flow declares its weights; family drives LoRA compat (drop `intellaId`) | ready | — (Mongo re-key + install → staging) |
 
 ## Backlog (not yet written as specs)
 - **TASK-006 · Save-as** — the flow card / delivery-info "save as canon verb" / "save as my flow" menu
