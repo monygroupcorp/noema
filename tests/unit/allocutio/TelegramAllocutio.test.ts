@@ -164,6 +164,16 @@ function makeRouter() {
     hasContext: (platform: Platform, userId: string) =>
       activeContexts.has(`${platform}:${userId}`),
 
+    peek: (platform: Platform, userId: string) =>
+      activeContexts.get(`${platform}:${userId}`) ?? null,
+
+    // Test helper: seed a card-state context for the Save-as-from-card path.
+    seedContext(platform: Platform, userId: string, state: unknown) {
+      activeContexts.set(`${platform}:${userId}`, {
+        intent: 'execute' as Intent, state, identity: { animaId: 'a' }, platform, platformUserId: userId,
+      })
+    },
+
     // Test helpers: fire events from router to the allocutio
     triggerStep(ctx: FlowContext, step: Step) { stepCb?.(ctx, step) },
     triggerResolution(ctx: FlowContext, res: Resolution) { resCb?.(ctx, res) },
@@ -233,7 +243,7 @@ function staleMsgUpdate(userId: number, chatId: number, text: string, pastSecond
 // =============================================================================
 // Helper: build TelegramAllocutio wired with router callbacks
 // =============================================================================
-function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown } = {}) {
+function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown } = {}) {
   const sender = makeSender()
   const identity = makeIdentity()
   const router = makeRouter()
@@ -261,6 +271,7 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
     ...(opts.autoSettleMs !== undefined ? { autoSettleMs: opts.autoSettleMs } : {}),
     acta,
     ...(opts.intellarum ? { intellarum: opts.intellarum as unknown as import('../../../src/types/intelligendi.js').Intellarum } : {}),
+    ...(opts.modorum ? { modorum: opts.modorum as unknown as import('../../../src/types/modus.js').Modorum } : {}),
     ...(opts.withPodControls ? {
       materiae: materiae as unknown as import('../../../src/types/materia.js').MateriaStore,
       terminatePod: async (podId: string) => { terminated.push(podId) },
@@ -1036,7 +1047,7 @@ test('dm:wrench morphs the row to Back / Tweak / Rerun', async () => {
   await allocutio.receive(cbTo(201, 'dm:wrench:actum-1'))
   const m = sender.markups.at(-1)!.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> }
   assert.deepEqual(m.inline_keyboard.flat().map(b => b.callback_data),
-    ['dm:back:actum-1', 'dm:tweak:actum-1', 'dm:rerun:actum-1'])
+    ['dm:back:actum-1', 'dm:tweak:actum-1', 'dm:rerun:actum-1', 'dm:save:actum-1'])
 })
 
 test('dm:info edits the caption to DB-sourced stats', async () => {
@@ -1610,4 +1621,52 @@ test('attached photo takes precedence over a replied-to photo', async () => {
   const enterCall = router.calls.find(c => c.method === 'enter')
   const state = (enterCall!.args[4] as { state?: { entryImageUrl?: string } })?.state
   assert.ok(state?.entryImageUrl?.endsWith('attached-hi'), 'attached photo wins over replied-to')
+})
+
+// =============================================================================
+// Save-as — both entry points open the menu seeded from actum / card state
+// =============================================================================
+
+function makeModorumMock() {
+  const base = {
+    id: 'flux-schnell', nomen: 'FLUX', genus: 'atomicus', versio: '1.0.0', contentHash: 'h',
+    ministerium: 'runpod', canonica: true, intellae: [{ id: 'intella.flux', role: 'unet' }],
+    aditus: { prompt: { type: 'text', required: true } }, exitus: { image: { type: 'image' } },
+    natum: new Date(), mutatum: new Date(),
+  }
+  const registered: unknown[] = []
+  return {
+    registered,
+    modorum: {
+      async find(id: string) { return id === 'flux-schnell' ? base : null },
+      async register(m: unknown) { registered.push(m) },
+      async list() { return [] },
+      async update() { throw new Error('unused') },
+    },
+  }
+}
+
+test('dm:save opens the Save-as menu seeded from the actum (force-reply name prompt)', async () => {
+  const mm = makeModorumMock()
+  const { allocutio, router, sender } = makeAllocutio({ modorum: mm.modorum })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  router.triggerStep(flowCtx, resultStep('actum-1'))
+  await new Promise(r => setImmediate(r))
+
+  await allocutio.receive(cbTo(201, 'dm:save:actum-1'))
+  const prompt = sender.sent.at(-1)!
+  assert.deepEqual((prompt.extra as { reply_markup?: unknown }).reply_markup, { force_reply: true })
+})
+
+test('a:saveas opens the Save-as menu seeded from the active flow card state', async () => {
+  const mm = makeModorumMock()
+  const { allocutio, router, sender } = makeAllocutio({ modorum: mm.modorum })
+  // Seed an active flow card context the adapter peeks for modusId + aditus.
+  router.seedContext('telegram', '123', { modusId: 'flux-schnell', aditus: { steps: 8 } })
+
+  await allocutio.receive(cbTo(99, 'a:saveas'))
+  const prompt = sender.sent.at(-1)!
+  assert.deepEqual((prompt.extra as { reply_markup?: unknown }).reply_markup, { force_reply: true })
+  // No flow-router handle for saveas — the menu is force-reply driven, not a flow step.
+  assert.ok(!router.calls.some(c => c.method === 'handle'), 'a:saveas must not route to the flow')
 })

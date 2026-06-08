@@ -14,6 +14,8 @@ export interface DeliveryDeps {
   acta?: { findById(id: string): Promise<Actum | null> }
   /** Re-run the actum under the presser (presser pays). Adapter wires the flow router. */
   rerun: (actumId: string, presserUserId: string, chatId: number) => Promise<void>
+  /** Save the actum's configuration as a derived, user-owned Modus. Adapter wires SaveAsMenu. */
+  save?: (actumId: string, presserUserId: string, chatId: number) => Promise<void>
 }
 
 interface ResultMeta {
@@ -77,6 +79,9 @@ export class DeliveryMenu {
       case 'tweak':
       case 'rerun':
         if (opts.presserUserId) await this.deps.rerun(actumId, opts.presserUserId, meta.chatId)
+        return
+      case 'save':
+        if (opts.presserUserId) await this.deps.save?.(actumId, opts.presserUserId, meta.chatId)
         return
     }
   }

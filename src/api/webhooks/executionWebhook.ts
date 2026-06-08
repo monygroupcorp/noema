@@ -163,7 +163,10 @@ export async function handleExecutionWebhook(
       let modusAuctorAnimaId: string | undefined
       if (deps.modorum) {
         const modus = await deps.modorum.find(actum.modusId)
-        modusAuctorAnimaId = modus?.auctor
+        // `Modus.auctor` is now the `{ animaId } | { commitment }` owner union.
+        // Royalty routing addresses identified authors only; anon-owned (commitment)
+        // saved flows have no animaId to route to here.
+        modusAuctorAnimaId = modus?.auctor && 'animaId' in modus.auctor ? modus.auctor.animaId : undefined
       }
 
       // Hosting payout (Phase C): resolve the host's full HostKey from Hospitium

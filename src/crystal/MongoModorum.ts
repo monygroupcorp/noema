@@ -45,7 +45,13 @@ export class MongoModorum implements Modorum {
     const query: Record<string, unknown> = {}
     if (filter?.genus !== undefined) query.genus = filter.genus
     if (filter?.canonica !== undefined) query.canonica = filter.canonica
-    if (filter?.auctor !== undefined) query.auctor = filter.auctor
+    // `auctor` is the `{ animaId } | { commitment }` owner union — stored as a nested
+    // object. Query the discriminant field directly so `list({ auctor })` matches by
+    // owner regardless of which side of the union is set.
+    if (filter?.auctor !== undefined) {
+      if ('animaId' in filter.auctor) query['auctor.animaId'] = filter.auctor.animaId
+      else query['auctor.commitment'] = filter.auctor.commitment
+    }
 
     const docs = await this.col.find(query).toArray()
     return docs.map(fromDoc)

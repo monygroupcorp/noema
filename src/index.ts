@@ -364,6 +364,7 @@ async function main(): Promise<void> {
     handle: (platform, userId, event) => router.handle(platform, userId, event),
     clear: (platform, userId) => router.clear(platform, userId),
     hasContext: (platform, userId) => store.get(platform, userId) !== null,
+    peek: (platform, userId) => store.get(platform, userId) ?? null,
     onStep: (cb) => { stepCb = cb },
     onResolution: (cb) => { resCb = cb },
   }

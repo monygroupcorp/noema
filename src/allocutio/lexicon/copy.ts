@@ -169,6 +169,33 @@ export const COPY = {
     bindOk: (verb: string, slug: string): string => `/${verb} now runs ${slug}.`,
   },
 
+  // ── save-as (flow card / delivery info → a derived, user-owned Modus) ──────────
+  saveAs: {
+    /** Force-reply prompt asking the user to name their saved flow. */
+    namePrompt: 'Name your flow (lowercase letters, numbers, dashes). Reply to this message.',
+    /** Shown when the chosen name yields an invalid slug. */
+    badName: 'That name has characters I can\'t use. Try lowercase letters, numbers, and dashes.',
+    /** Review header — followed by the model + porta listing and the prompt-mode toggle. */
+    reviewHeader: (slug: string): string => `Save as /${slug}?`,
+    /** Section label for the weight manifest in the review. */
+    modelsLabel: 'Models',
+    /** Section label for the captured config in the review. */
+    configLabel: 'Settings',
+    /** Prompt-mode toggle labels. */
+    promptOpen: 'Prompt: open (ask each run)',
+    promptPinned: 'Prompt: pinned (baked in)',
+    /** Placeholder for the (TASK-007) prompt-affix row — not built here. */
+    affixPlaceholder: 'Prefix / suffix — coming soon',
+    /** Global-uniqueness collision — no two flows share a slug. No register happens. */
+    nameTaken: (slug: string): string => `The name /${slug} is taken. Pick another.`,
+    /** Register succeeded — confirm the new runnable slug. */
+    saved: (slug: string): string => `Saved. Run it any time with /run ${slug}.`,
+    /** Button labels. */
+    saveButton: 'Save as…',
+    confirmButton: 'Save',
+    cancelButton: '✕',
+  },
+
   // ── transient status (acks, invites) ─────────────────────────────────────────
   status: {
     working: '⏳ Working on it…',

@@ -24,7 +24,9 @@
 
 import type { ComputeStrategy, GpuClass } from './actum.js'
 import type { PodPolicy } from './materia.js'
+import type { AuctorKey } from '../flow/types.js'
 export type { ComputeStrategy, GpuClass, PodPolicy }
+export type { AuctorKey }
 
 /** Whether a modus is a leaf operation or a tree of other modi */
 export type ModusGenus = 'atomicus' | 'compositus'
@@ -157,8 +159,20 @@ export interface Modus {
   /** What happens to the warm pod after a job on this flow completes. Absent: 'economy'. */
   podPolicy?: PodPolicy
 
-  /** "auctor" = author/creator in Latin — the animaId of who created this modus */
-  auctor?: string
+  /**
+   * "auctor" = author/creator in Latin — the OWNER of this modus.
+   * Reuses the crystal's identity union (`AuctorKey` = `{ animaId } | { commitment }`,
+   * the same shape `Collectio.by` carries): identified souls own by `animaId`,
+   * anonymous users own by their arcanum `commitment` (H(secret)). Canonical
+   * platform modi leave this undefined.
+   */
+  auctor?: AuctorKey
+  /**
+   * "fonte" = source/spring in Latin — the parent `Modus.id` a saved (derived)
+   * flow was forked from. Provenance + the ADR-0003 fork chain (royalties). Absent
+   * on canonical modi and any modus authored from scratch.
+   */
+  fonte?: string
   /** True = platform-owned canonical modus. False = community-published. */
   canonica: boolean
 
