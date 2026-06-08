@@ -20,6 +20,7 @@ import type { Signorum } from '../../types/significandi.js'
 import type { Modorum } from '../../types/modus.js'
 import type { Actorum } from '../../types/cursus.js'
 import type { Intellarum } from '../../types/intelligendi.js'
+import type { Consuetudinum } from '../../types/consuetudo.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
 import { mintShareToken } from '../../crystal/shareToken.js'
 import { aggregateStatus } from '../lexicon/status/aggregate.js'
@@ -92,6 +93,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     intellarum?: Intellarum
     /** Per-anima dispatch index — populates /status YOUR GENS + per-row Cancel. */
     actumIndex?: ActumIndexStore
+    /** Owner-keyed verb→flow bindings — backs /bind persistence + per-user /make resolution. */
+    consuetudinum?: Consuetudinum
     /** Bot's @username — composes `https://t.me/<bot>?start=pod_<token>` share links. */
     botUsername?: string
     /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
@@ -157,6 +160,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     /** Per-anima dispatch index — when present, /status YOUR GENS populates
      *  from here and per-row Cancel works. */
     actumIndex?: ActumIndexStore
+    /** Owner-keyed verb→flow bindings — backs /bind persistence + per-user /make
+     *  resolution. Absent → /bind reports unavailable, every verb uses the default. */
+    consuetudinum?: Consuetudinum
     /** Bot's @username — used to compose `https://t.me/<bot>?start=pod_<token>` share links. */
     botUsername?: string
     /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
@@ -254,6 +260,12 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
           ])
           return [...new Set([...canon, ...owned].map(m => m.id))]
         },
+      } : {}),
+      // Owner-keyed verb bindings: /make resolution + /bind persistence. Omitted
+      // when the store isn't wired (so tests/contexts without it use the defaults).
+      ...(deps.consuetudinum ? {
+        resolveVerb: async (userId, verb) => deps.consuetudinum!.resolve(await this.identity.resolve(userId), verb),
+        bindVerb: async (userId, verb, modusId) => deps.consuetudinum!.bind(await this.identity.resolve(userId), verb, modusId),
       } : {}),
     })
 
