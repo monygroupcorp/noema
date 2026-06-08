@@ -15,6 +15,13 @@ Two moves that make a flow **self-describing** and kill a shoehorned field:
    ('flux','sd15',…), which already exists loosely as `Intella.tags` (`intelligendi.ts:191`). Formalize
    it as `Intella.familia`, key compat on it, and `intellaId` disappears.
 
+   **This fixes a live gap, not just a refactor:** `BulletinModelCatalog` already documents that
+   `baseIntellaId` is **empty across the imported catalog** and that "family lives in tags. Swap once
+   it's set" (lines 19/186/238) — so the crystal's `triggerMap(baseIntellaId)` join is effectively dead
+   on real data, and the allocutio side already keys its own `resolveTriggers(text, { family })` on
+   family. Populating `familia` + re-keying `triggerMap` makes the crystal path actually work and lets
+   the allocutio workaround converge onto it later.
+
 **Composite-ready by construction** (the "don't box ourselves" requirement). A `compositus` flow
 (flux → sdxl → z-image) spans multiple families; LoRA trigger resolution must be **per-prompt-input**,
 filtered to the family of the step that input feeds — a flux-path trigger word resolves only flux LoRAs.
@@ -45,7 +52,11 @@ this per-input; this task must not assume single-flow-global-family.
 
 ## Deliverables
 1. **`Intella.familia?: string`** (`intelligendi.ts`) — the model family ('flux','sd15','sdxl','z-image',…;
-   canonical lowercase). The compat classification, formalized from the loose `tags` family value.
+   canonical lowercase). Formalize it from the existing **family `tag`** value (e.g. the Armored Dress
+   LoRA is tagged `'sd15'`; `intella.sd15-v1-5` likewise). **Do NOT derive it from `architectura`** —
+   that field is *structural* ('unet'/'dit') and is inconsistently set to a family on some seeds; this
+   task untangles exactly that. **Compat is string equality**, so a base weight and its compatible LoRAs
+   MUST carry the *identical* `familia` string — pin the canonical values.
 2. **`Modus.intellae?: Array<{ id: string; role: string }>`** (`modus.ts`) — the physical weight
    manifest. `role` ∈ existing strings (`checkpoint`/`unet`/`vae`/`clip`/`lora`/…). Doc: atomic → full
    weight set; composite → union across `gradus`. **Remove `Essentia.intellaId`.**
@@ -58,11 +69,13 @@ this per-input; this task must not assume single-flow-global-family.
    - Source the weight set from `essentia.intellae` (not `template.requiredModels`); enrich each ref's
      `url`/`dest` from a matching `template.requiredModels` entry by id when present (fallback);
      `_resolveModels` unchanged.
-   - Derive the flow's family from its **base-role weight** (`role` ∈ `checkpoint|unet`) via
-     `Intella.familia`, and call `triggerMap(familia)` (replacing `triggerMap(essentia.intellaId)`).
-     Add a small helper (e.g. `flowFamilia(essentia, intellarum)`). The resolver call is otherwise
-     unchanged — it already takes the (now family-keyed) map per prompt. Add a comment noting composite
-     compilation calls this **per prompt-input** with that input's family.
+   - Derive the flow's family **role-agnostically**: the distinct non-empty `familia` across the flow's
+     `intellae` weights (atomic → one; composite → the union). Do NOT hardcode `role ∈ checkpoint|unet`.
+     Call `triggerMap(familia)` (replacing `triggerMap(essentia.intellaId)`) with the atomic flow's one
+     family. The resolver call is otherwise unchanged — it already takes the (now family-keyed) map per
+     prompt. Add a comment noting composite compilation calls this **per prompt-input** with that input's
+     family. **Fetch-once:** the weights' Intellae are already loaded in `_resolveModels` — derive the
+     family from those records, don't add a second N+1 lookup pass (reorder if needed).
 5. **Seeds** (`seeds/intellae.ts`, `seeds/essentiae.ts`): set `familia` on base weights
    (`intella.flux-schnell-fp8-scaled` → `'flux'`, `intella.sd15-v1-5` → `'sd15'`) and on the Armored
    Dress LoRA (`'sd15'`); add `intellae` to the 2 flow seeds (flux → its 4 weights; sd1-5 → its
