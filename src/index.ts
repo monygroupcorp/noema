@@ -46,6 +46,7 @@ import { MongoHospitium } from './crystal/MongoHospitium.js'
 import { startIdleReaper } from './crystal/idleReaper.js'
 import { startStudioBilling } from './crystal/StudioBilling.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
+import { MongoConsuetudinum } from './crystal/MongoConsuetudinum.js'
 import { Compiler } from './crystal/Compiler.js'
 import { WorkflowTemplateRegistry } from './crystal/WorkflowTemplateRegistry.js'
 import { CANONICAL_INTELLAE } from './crystal/seeds/intellae.js'
@@ -226,6 +227,10 @@ async function main(): Promise<void> {
 
   const intellaeCol = mongo.db(DB_NAME).collection('intellae')
   const intellae = new MongoIntella(intellaeCol)
+
+  // Owner-keyed verb→flow bindings — backs /bind persistence + per-user /make resolution.
+  const consuetudinumCol = mongo.db(DB_NAME).collection('consuetudinum')
+  const consuetudinum = new MongoConsuetudinum(consuetudinumCol)
   const compiler = new Compiler(templateRegistry, undefined, intellae)
   const compile = async (modus: unknown, aditus: Record<string, unknown>, pinnedModels?: import('./types/actum.js').ModelRef[]): Promise<{ hash: string; input: unknown }> => {
     const essentia = modus as Essentia
@@ -445,6 +450,7 @@ async function main(): Promise<void> {
     actorum: ring.actorum,
     intellarum: intellae,
     actumIndex: ring.actumIndex,
+    consuetudinum,
     ...(process.env.TELEGRAM_BOT_USERNAME ? { botUsername: process.env.TELEGRAM_BOT_USERNAME } : {}),
     terminatePod: RUNPOD_API_KEY ? (podId) => terminatePod(RUNPOD_API_KEY, podId) : undefined,
     acta: ring.actorum,
