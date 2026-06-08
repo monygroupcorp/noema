@@ -101,6 +101,25 @@ export interface Modus {
   gradus?: Gradus[]
 
   /**
+   * The physical WEIGHT manifest — the set of Intellae this flow downloads onto
+   * the pod before inference. Each entry is an `{ id, role }` ref:
+   *   - `id`   FK → Intella (the registered weight record; url/dest resolve from it)
+   *   - `role` the weight's slot — existing strings: 'checkpoint' | 'unet' | 'vae'
+   *            | 'clip' | 'lora' | … (matches a ComfyUI model loader / download dir)
+   *
+   * Atomic flow → its full weight set (flux = unet + vae + 2×clip; sd1.5 = the
+   * single self-contained checkpoint). Composite flow → the union across `gradus`
+   * children. This REPLACES the workflow template's `requiredModels` *list* as the
+   * source of truth: the flow declares what it downloads. The template's
+   * `requiredModels` survives only as a url/dest fallback (keyed by id).
+   *
+   * The flow's model FAMILY is DERIVED from these weights' `Intella.familia`
+   * (never declared here) — single source of truth, zero drift. (See the
+   * Compiler's family-derivation step.)
+   */
+  intellae?: Array<{ id: string; role: string }>
+
+  /**
    * Which execution service (cursor) handles this modus.
    * "ministerium" = service/office in Latin — the function assigned to this modus.
    * Maps to a registered Cursor in the Cursorum.

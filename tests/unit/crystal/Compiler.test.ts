@@ -26,6 +26,12 @@ function makeEssentia(overrides: Partial<Essentia> = {}): Essentia {
     exitus: { image: { type: 'image' } },
     natum: new Date(),
     mutatum: new Date(),
+    intellae: [
+      { id: 'intella.flux-schnell-fp8-scaled', role: 'unet' },
+      { id: 'intella.flux-vae', role: 'vae' },
+      { id: 'intella.t5xxl-fp16', role: 'clip' },
+      { id: 'intella.clip-l', role: 'clip' },
+    ],
     runpodSpec: {
       imageId: 'runpod/pytorch',
       imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
@@ -216,6 +222,7 @@ function makeIntellarum(records: Record<string, Partial<Intella>>): Intellarum {
         sizeGb: rec.sizeGb ?? 1,
         versio: rec.versio ?? '1.0.0',
         canonica: rec.canonica ?? true,
+        ...(rec.familia ? { familia: rec.familia } : {}),
         natum: new Date(),
       }
     },
@@ -281,7 +288,7 @@ test('compile() throws MODEL_NOT_RESOLVED when Intellarum set, model missing, an
 // ── compile() — LoRA trigger resolution on loraCapable templates ─────────────
 
 /** Build an Intellarum that returns a trigger map for a fixed set of LoRAs. */
-function makeLoraIntellarum(loras: Array<Partial<{ id: string; slug: string; trigger: string; defaultWeight: number; access: 'public' | 'private'; ownerAnimaId: string }>>) {
+function makeLoraIntellarum(loras: Array<Partial<{ id: string; slug: string; trigger: string; defaultWeight: number; access: 'public' | 'private'; ownerAnimaId: string; familia: string }>>) {
   type Intella = import('../../../src/types/intelligendi.js').Intella
   type Intellae = import('../../../src/types/intelligendi.js').Intellae
   const records = loras.map(l => ({
@@ -289,6 +296,8 @@ function makeLoraIntellarum(loras: Array<Partial<{ id: string; slug: string; tri
     nomen: l.slug ?? 'lora',
     genus: 'lora' as const,
     architectura: 'lora' as const,
+    // Default to the flux family so the lora-test flow (a flux flow) matches.
+    familia: l.familia ?? 'flux',
     parametri: 0,
     sources: [{ provenance: 'miladystation' as const, uri: `https://example.com/${l.slug}.safetensors` }],
     dest: `models/loras/${l.slug}.safetensors`,
@@ -303,14 +312,36 @@ function makeLoraIntellarum(loras: Array<Partial<{ id: string; slug: string; tri
     ...(l.ownerAnimaId ? { ownerAnimaId: l.ownerAnimaId } : {}),
   } as Intella))
 
+  // The flux-family base weight the lora-test flow declares. Carries familia
+  // 'flux' so the Compiler derives the flow family from it (fetch-once).
+  const fluxBase = {
+    id: 'intella.flux-base',
+    nomen: 'flux base',
+    genus: 'model' as const,
+    architectura: 'dit' as const,
+    familia: 'flux',
+    parametri: 0,
+    sources: [{ provenance: 'miladystation' as const, uri: 'https://example.com/flux-base.safetensors' }],
+    dest: 'unet/flux-base.safetensors',
+    sizeGb: 1,
+    versio: '1.0.0',
+    canonica: true,
+    natum: new Date(),
+  } as Intella
+
   return {
-    async find(id: string) { return records.find(r => r.id === id) ?? null },
+    async find(id: string) {
+      if (id === fluxBase.id) return fluxBase
+      return records.find(r => r.id === id) ?? null
+    },
     async list() { return records },
     async canonical() { return records },
     async findByTrigger() { return [] },
-    async triggerMap(_baseIntellaId: string, _animaId?: string): Promise<Map<string, Intellae>> {
+    // Family-keyed: only return LoRAs whose familia matches the requested family.
+    async triggerMap(familia: string, _animaId?: string): Promise<Map<string, Intellae>> {
       const m = new Map<string, Intellae>()
       for (const r of records) {
+        if (r.familia !== familia) continue
         for (const raw of (r.trigger ?? '').split(',')) {
           const k = raw.trim().toLowerCase()
           if (!k) continue
@@ -324,7 +355,7 @@ function makeLoraIntellarum(loras: Array<Partial<{ id: string; slug: string; tri
 
 function makeLoraEssentia(): Essentia {
   return makeEssentia({
-    intellaId: 'intella.flux-base',
+    intellae: [{ id: 'intella.flux-base', role: 'unet' }],
     runpodSpec: {
       imageId: 'runpod/pytorch',
       imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
@@ -382,6 +413,61 @@ test('compile() on NOT-loraCapable template: resolver does not run even with mat
   assert.equal(r.spec.models.filter(m => m.role === 'lora').length, 0)
 })
 
+// ── compile() — weight manifest sourced from essentia.intellae ───────────────
+
+test('compile() sources the weight set from essentia.intellae (flux → 4 weights)', async () => {
+  const compiler = makeCompiler(42)
+  const { spec } = await compiler.compile(makeEssentia(), { prompt: 'a cat' })
+  // 4 declared flux weights: unet + vae + 2×clip
+  assert.equal(spec.models.length, 4)
+  assert.deepEqual(
+    spec.models.map(m => m.id).sort(),
+    ['intella.clip-l', 'intella.flux-schnell-fp8-scaled', 'intella.t5xxl-fp16', 'intella.flux-vae'].sort(),
+  )
+})
+
+test('compile() weight set follows essentia.intellae, not the template list (sd1-5 → 1)', async () => {
+  const compiler = makeCompiler(42)
+  // An sd1-5-shaped flow declaring exactly one checkpoint weight.
+  const sd15 = makeEssentia({
+    intellae: [{ id: 'intella.sd15-v1-5', role: 'checkpoint' }],
+    runpodSpec: {
+      ...makeEssentia().runpodSpec!,
+      workflowTemplate: 'sd15',
+      workflowTemplateVersion: '1',
+    },
+  })
+  const { spec } = await compiler.compile(sd15, { prompt: 'a cat' })
+  assert.equal(spec.models.length, 1)
+  assert.equal(spec.models[0].id, 'intella.sd15-v1-5')
+  assert.equal(spec.models[0].role, 'checkpoint')
+})
+
+// ── compile() — LoRA compat keys on the DERIVED family ───────────────────────
+
+test('compile() applies a LoRA whose familia matches the flow-derived family (flux)', async () => {
+  const intellarum = makeLoraIntellarum([
+    { slug: 'fluxlora', trigger: 'fluxtrigger', familia: 'flux' },
+  ])
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait, fluxtrigger style' })
+  assert.equal(r.appliedLoras?.length, 1)
+  assert.equal(r.appliedLoras?.[0].slug, 'fluxlora')
+})
+
+test('compile() does NOT apply a LoRA of a different family even on the same trigger word', async () => {
+  // Same trigger word, but declared for a non-flux family. The lora-test flow is
+  // flux-derived, so triggerMap('flux') must not return this sd15 LoRA.
+  const intellarum = makeLoraIntellarum([
+    { slug: 'sd15lora', trigger: 'fluxtrigger', familia: 'sd15' },
+  ])
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait, fluxtrigger style' })
+  assert.equal(r.appliedLoras, undefined, 'cross-family LoRA must NOT be offered')
+  const node22 = r.spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
+  assert.equal(node22.inputs.clip_l, 'a portrait, fluxtrigger style', 'prompt unchanged')
+})
+
 test('compile() honors animaId for private-LoRA conflict resolution', async () => {
   const intellarum = makeLoraIntellarum([
     { slug: 'pub-shared',  trigger: 'shared', access: 'public' },
@@ -411,12 +497,30 @@ test('compile() resolves a v2-shape LoRA record from MongoIntella + injects into
   try {
     const col = client.db(V2_DB).collection(V2_COL)
     await col.deleteMany({})
+    // The flux base weight the lora-test flow declares — carries familia 'flux'
+    // so the Compiler derives the flow family (fetch-once) and asks
+    // triggerMap('flux') for the matching LoRAs.
+    await col.insertOne({
+      id: 'intella.flux-base',
+      nomen: 'flux base',
+      genus: 'model',
+      architectura: 'dit',
+      familia: 'flux',
+      parametri: 0,
+      sources: [{ provenance: 'miladystation', uri: 'https://example.com/flux-base.safetensors' }],
+      dest: 'unet/flux-base.safetensors',
+      sizeGb: 1,
+      versio: '1.0.0',
+      canonica: true,
+      natum: new Date('2026-01-01'),
+    })
     // Insert a v2-shape doc — the shape the chunk migration writes
     await col.insertOne({
       id: 'intella.v2-compiler',
       nomen: 'milady v2',
       genus: 'lora',
       architectura: 'flux',
+      familia: 'flux',
       parametri: 0,
       sources: [{ provenance: 'miladystation', uri: 'https://example.com/milady-v2.safetensors' }],
       dest: 'models/loras/milady-v2.safetensors',

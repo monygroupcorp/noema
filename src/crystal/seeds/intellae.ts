@@ -4,8 +4,9 @@ import type { Intella } from '../../types/intelligendi.js'
 // Canonical Intellae — platform base models
 //
 // These are the platform-owned compute substrates. Every canonical Essentia
-// points to one of these via intellaId. LoRA Intellae point to one of these
-// via baseIntellaId.
+// lists the ones it needs in its `intellae` weight manifest. LoRA compat keys
+// on `familia` (the model-family string), which base weights and their LoRAs
+// share identically.
 //
 // Source order convention:
 //   [0] models.miladystation2.net — our R2 mirror (always first when cached)
@@ -13,26 +14,22 @@ import type { Intella } from '../../types/intelligendi.js'
 // =============================================================================
 
 export const INTELLA_FLUX_SCHNELL: Intella = {
-  id: 'intella.flux-schnell',
-  nomen: 'FLUX.1 Schnell',
+  id: 'intella.flux-schnell-fp8-scaled',
+  nomen: 'FLUX.1 Schnell (fp8 scaled)',
   genus: 'model',
   architectura: 'dit',
+  // family — the LoRA-compat key (NOT architectura, which is the structural 'dit')
+  familia: 'flux',
   parametri: 12_000_000_000,
   sources: [
     {
       provenance: 'miladystation',
-      uri: 'https://models.miladystation2.net/unet/flux1-schnell.safetensors',
+      uri: 'https://models.miladystation2.net/unet/flux1-schnell-fp8-scaled.safetensors',
       format: 'safetensors',
-    },
-    {
-      provenance: 'huggingface',
-      uri: 'https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors',
-      format: 'safetensors',
-      meta: { repo: 'black-forest-labs/FLUX.1-schnell', branch: 'main', filename: 'flux1-schnell.safetensors' },
     },
   ],
-  dest: 'unet/flux1-schnell.safetensors',
-  sizeGb: 24,
+  dest: 'unet/flux1-schnell-fp8-scaled.safetensors',
+  sizeGb: 17,
   versio: '1.0.0',
   canonica: true,
   natum: new Date('2025-01-01'),
@@ -151,6 +148,9 @@ export const INTELLA_SD15: Intella = {
   nomen: 'Stable Diffusion 1.5 (pruned emaonly)',
   genus: 'model',
   architectura: 'sd15',
+  // family — the LoRA-compat key. Carries the SAME string as compatible LoRAs
+  // (e.g. the Armored Dress LoRA below).
+  familia: 'sd15',
   parametri: 860_000_000,
   sources: [
     {
@@ -194,6 +194,9 @@ export const INTELLA_LORA_ARMORED_DRESS: Intella = {
   sizeGb: 0.0135,
   versio: '2.0.0',
   trigger: 'gothic armor,armored_dress,armored skirt,gauntlets,breastplate',
+  // family — IDENTICAL string to the SD1.5 base above; this is the compat key.
+  // baseIntellaId stays as provenance (which exact base it trained on).
+  familia: 'sd15',
   baseIntellaId: 'intella.sd15-v1-5',
   tags: [{ tag: 'sd15', source: 'curator' }, { tag: 'lora', source: 'curator' }],
   canonica: true,

@@ -143,6 +143,7 @@ function makeV2LoraDoc(overrides: Record<string, unknown> = {}) {
     nomen: 'v2 Test LoRA',
     genus: 'lora',
     architectura: 'flux',  // inherited from base in real v2; included here for v1 type compat
+    familia: 'flux',       // compat key — what triggerMap/findByTrigger now query on
     parametri: 0,
     sources: [{ provenance: 'huggingface', uri: 'https://hf.co/x.safetensors' }],
     dest: 'models/loras/v2.safetensors',
@@ -196,7 +197,7 @@ test('shim: v1 records pass through unchanged', async () => {
 
 test('shim: triggerMap() finds v2 records and keys by each triggerWord', async () => {
   await col.insertOne(makeV2LoraDoc({ id: 'intella.v2-tmap' }))
-  const map = await intellae.triggerMap('intella.flux-schnell')
+  const map = await intellae.triggerMap('flux')
   // Both array entries become map keys
   assert.ok(map.has('miladyy'), 'expected map to contain "miladyy" key')
   assert.ok(map.has('mld'), 'expected map to contain "mld" key')
@@ -219,10 +220,10 @@ test('shim: triggerMap() finds v2 PRIVATE record only for owner animaId', async 
   })
   await col.insertOne(priv)
   // Without animaId — should NOT find
-  const mapAnon = await intellae.triggerMap('intella.flux-schnell')
+  const mapAnon = await intellae.triggerMap('flux')
   assert.equal(mapAnon.has('privateword'), false)
   // With owner animaId — should find
-  const mapAlice = await intellae.triggerMap('intella.flux-schnell', 'anima-alice')
+  const mapAlice = await intellae.triggerMap('flux', 'anima-alice')
   assert.ok(mapAlice.has('privateword'))
   const entry = mapAlice.get('privateword')![0]
   assert.equal(entry.access, 'private')
@@ -231,7 +232,7 @@ test('shim: triggerMap() finds v2 PRIVATE record only for owner animaId', async 
 
 test('shim: findByTrigger() matches against v2 triggerWords array', async () => {
   await col.insertOne(makeV2LoraDoc({ id: 'intella.v2-find-trigger' }))
-  const results = await intellae.findByTrigger('miladyy', 'intella.flux-schnell')
+  const results = await intellae.findByTrigger('miladyy', 'flux')
   assert.equal(results.length, 1)
   assert.equal(results[0].slug, 'milady-v3')
 })
