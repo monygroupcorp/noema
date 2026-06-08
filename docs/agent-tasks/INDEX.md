@@ -15,13 +15,9 @@ real GPU/pod is validated separately on staging. Read `AGENTS.md` first.
 | [TASK-009](TASK-009-run-resolves-owned-flows.md) | `/run` resolves a user's own saved flows (staging fix — `canonica` filter rejected them) | done* | *hermetic done; real `list({auctor})` → staging |
 | [TASK-010](TASK-010-verb-rebind-store.md) | Wire `/bind` rebind to a persistent owner-keyed store (`Consuetudo`) | done* | *hermetic done; Mongo + real `/bind`→`/make` → staging |
 | [TASK-007](TASK-007-prompt-affixes.md) | Prompt affixes — flow-baked prefix/suffix on a text `Porta` (finishes save-a-style) | done* | *hermetic done; real gen → staging |
+| [TASK-011](TASK-011-bulletin-render-serialization.md) | Serialize bulletin renders (fix scrambled provisioning play-by-play) | ready | — (visual → staging) |
 
 ## Backlog (not yet written as specs)
-- **Bulletin staged-progress regression** (staging 2026-06-08) — a cold `/make` mis-renders as a warm
-  reuse ("keep cooking" + "found in 0s"), no live provisioning/download lines. The bulletin *engine* is
-  unchanged; it's a stage-FEED regression introduced in TASK-002→006. Fix = git-archaeology: diff the
-  feed path (ExecuteFlow submit → Stream → `_handleActumStage` → `bulletins.register`/`onStage`) against
-  the known-good `fdfd…`/`fd50359d`/~`e72b6019` state and reconnect. NOT a rewrite, NOT a guess. Deferred.
 - **Trigger-resolution convergence** — now that `familia` is populated (TASK-005/008), drop
   `BulletinModelCatalog`'s tag-derived family workaround and converge its `resolveTriggers(…,{family})`
   onto the crystal `triggerMap(familia)` (its own "swap once it's set" TODO). Allocutio ring; follow-up.
