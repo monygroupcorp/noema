@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { Essentia } from '../types/essendi.js'
-import type { Intellarum } from '../types/intelligendi.js'
+import type { Intella, Intellarum } from '../types/intelligendi.js'
 import type { ModelRef } from '../types/actum.js'
 import { WorkflowTemplateRegistry, WorkflowTemplateError } from './WorkflowTemplateRegistry.js'
 import { resolveLoraTriggers, type ResolvedLora } from './loraResolver.js'
@@ -113,16 +113,52 @@ export class Compiler {
 
     const seed = this._resolveSeed(essentia, aditus, cookFlags)
 
+    // ── Weight manifest = the FLOW's declared weights (`Modus.intellae`) ───
+    // The flow declares what it downloads. Each declared weight's url/dest is
+    // enriched from a matching `template.requiredModels` entry by id (fallback);
+    // `_resolveModels` then overrides from the registered Intella when present.
+    // Precedence: Intella > template fallback > MODEL_NOT_RESOLVED.
+    const templateFallback = new Map(
+      (template.requiredModels ?? []).map(m => [m.id, m] as const),
+    )
+    const weightRefs = (essentia.intellae ?? []).map(w => {
+      const fb = templateFallback.get(w.id)
+      return {
+        role: w.role,
+        id: w.id,
+        ...(fb?.url ? { url: fb.url } : {}),
+        dest: fb?.dest ?? '',
+      }
+    })
+
+    // Resolve the base weights FIRST — this loads each weight's Intella record
+    // (the same find() the family derivation needs), so we derive the family
+    // fetch-once from those records rather than a second N+1 pass.
+    const { resolved: baseWeights, records } = await this._resolveModelsWithRecords(weightRefs)
+
+    // ── Derive the flow's model family (role-agnostic) ─────────────────────
+    // The distinct non-empty `familia` across the flow's weights (atomic → one;
+    // composite → the union). NOT hardcoded to role ∈ checkpoint|unet.
+    const families = Array.from(
+      new Set(weightRefs.map(w => records.get(w.id)?.familia).filter((f): f is string => !!f)),
+    )
+
     // ── LoRA trigger resolution (when the template is loraCapable) ─────────
     // Walks `aditus.prompt`, rewrites trigger words into `<lora:slug:weight>`
     // tokens that the workflow's multi-LoRA extraction node will consume.
-    // The resolved LoRAs are then appended to `requiredModels` so any missing
+    // The resolved LoRAs are then appended to the weight set so any missing
     // weights download on this dispatch.
+    //
+    // COMPOSITE NOTE: an atomic flow has exactly one family, so we call
+    // `triggerMap(families[0])`. Composite compilation (`_compileComposed`,
+    // future) calls this PER PROMPT-INPUT with that input's step family — the
+    // map is already family-keyed and the resolver is already per-prompt, so it
+    // plugs in here with no rework.
     let appliedLoras: ResolvedLora[] = []
     let loraWarnings: string[] = []
     let promptForSlots = aditus
-    if (template.loraCapable && this.intellarum && essentia.intellaId && typeof aditus.prompt === 'string') {
-      const map = await this.intellarum.triggerMap(essentia.intellaId, opts.animaId)
+    if (template.loraCapable && this.intellarum && families.length > 0 && typeof aditus.prompt === 'string') {
+      const map = await this.intellarum.triggerMap(families[0], opts.animaId)
       const r = resolveLoraTriggers(aditus.prompt, { triggerMap: map, ...(opts.animaId ? { animaId: opts.animaId } : {}) })
       appliedLoras = r.appliedLoras
       loraWarnings = r.warnings
@@ -135,15 +171,17 @@ export class Compiler {
     const slotInputs = { ...promptForSlots, [seedKey]: seed }
     const inputTemplate = this._applySlotMap(template, slotInputs)
 
-    // Required models = template's static set + LoRAs from prompt resolution + any models
-    // the host pinned onto the session via `Mod • → Add` (ride `aditus._pinnedModels`).
-    // The intella's `sources[0].uri` and `dest` are filled in by `_resolveModels`
-    // via the same Intellarum.find() path used for static models.
+    // models = the resolved base weights + LoRAs from prompt resolution + any
+    // models the host pinned onto the session via `Mod • → Add`. LoRA + pinned
+    // refs go through the same Intellarum.find() resolution path.
     const loraRefs = await this._loraIntellaeToRefs(appliedLoras)
-    const baseRefs = [...(template.requiredModels ?? []), ...loraRefs]
-    const seen = new Set(baseRefs.map(r => r.id))
+    const seen = new Set([...weightRefs.map(r => r.id), ...loraRefs.map(r => r.id)])
     const pinnedRefs = (opts.pinnedModels ?? []).filter(r => !seen.has(r.id))
-    const models = await this._resolveModels([...baseRefs, ...pinnedRefs])
+    const extraModels = await this._resolveModels([...loraRefs, ...pinnedRefs])
+    const models = [...baseWeights, ...extraModels].sort((a, b) => {
+      const r = a.role.localeCompare(b.role)
+      return r !== 0 ? r : a.id.localeCompare(b.id)
+    })
 
     const spec: CompiledSpec = {
       image,
@@ -188,15 +226,38 @@ export class Compiler {
   private async _resolveModels(
     refs: Array<{ role: string; id: string; url?: string; dest: string; sizeBytes?: number }>,
   ): Promise<Array<{ role: string; id: string; url: string; dest: string; sizeBytes?: number }>> {
+    const { resolved } = await this._resolveModelsWithRecords(refs)
+    return resolved.sort((a, b) => {
+      const r = a.role.localeCompare(b.role)
+      return r !== 0 ? r : a.id.localeCompare(b.id)
+    })
+  }
+
+  /**
+   * Resolve refs to download entries AND return the loaded Intella records by id.
+   * Precedence per ref: Intella (registry) > template fallback (ref.url/dest) >
+   * MODEL_NOT_RESOLVED. Surfacing the records lets the caller derive the flow
+   * family fetch-once (no second find() pass). Result order matches `refs`.
+   */
+  private async _resolveModelsWithRecords(
+    refs: Array<{ role: string; id: string; url?: string; dest: string; sizeBytes?: number }>,
+  ): Promise<{
+    resolved: Array<{ role: string; id: string; url: string; dest: string; sizeBytes?: number }>
+    records: Map<string, Intella>
+  }> {
     const resolved: Array<{ role: string; id: string; url: string; dest: string; sizeBytes?: number }> = []
+    const records = new Map<string, Intella>()
     for (const ref of refs) {
       let url = ref.url
       let dest = ref.dest
       if (this.intellarum) {
         const intella = await this.intellarum.find(ref.id)
-        if (intella && intella.sources.length > 0) {
-          url = intella.sources[0].uri
-          dest = intella.dest
+        if (intella) {
+          records.set(ref.id, intella)
+          if (intella.sources.length > 0) {
+            url = intella.sources[0].uri
+            dest = intella.dest
+          }
         }
       }
       if (!url) {
@@ -204,10 +265,7 @@ export class Compiler {
       }
       resolved.push({ role: ref.role, id: ref.id, url, dest, sizeBytes: ref.sizeBytes })
     }
-    return resolved.sort((a, b) => {
-      const r = a.role.localeCompare(b.role)
-      return r !== 0 ? r : a.id.localeCompare(b.id)
-    })
+    return { resolved, records }
   }
 
   private _resolveSeed(

@@ -144,10 +144,26 @@ export interface Intella {
   auctor?: string
 
   /**
+   * The model FAMILY this Intella belongs to ('flux','sd15','sdxl','z-image',…;
+   * canonical lowercase). Formalizes the loose family `tag` (see `tags`) into a
+   * first-class compat key.
+   *
+   * This is the LoRA-compatibility key: a base-weight Intella and the LoRA
+   * Intellae compatible with it carry the IDENTICAL `familia` string (compat is
+   * exact string equality). The Compiler derives a flow's family from the
+   * `familia` of the weights it declares (`Modus.intellae`) and asks
+   * `Intellarum.triggerMap(familia)` for the matching LoRAs.
+   *
+   * NOT `architectura` — that field is *structural* ('unet'/'dit'/'transformer')
+   * and is inconsistently set; `familia` is the model-family axis specifically.
+   */
+  familia?: string
+
+  /**
    * For genus 'lora': the base model this LoRA was trained against.
    * FK → Intella. A LoRA cannot run without its base model also being loaded.
-   * Determines workflow compatibility — only run in workflows whose base
-   * Essentia.intellaId matches (or is compatible with) this baseIntellaId.
+   * PROVENANCE only — records which exact base the LoRA trained on. It is NO
+   * LONGER the compatibility key; compat now keys on `familia` (above).
    */
   baseIntellaId?: string
 
@@ -212,19 +228,25 @@ export interface Intellarum {
   canonical(): Promise<Intellae>
   /**
    * Resolve all LoRA intellae that match a trigger word and are compatible
-   * with the given base model (via baseIntellaId).
+   * with the given model FAMILY (via `familia` — exact string equality).
    * animaId scopes results to public + private LoRAs the user can access.
    * Absent animaId returns public LoRAs only.
    */
-  findByTrigger(trigger: string, baseIntellaId: string, animaId?: string): Promise<Intellae>
+  findByTrigger(trigger: string, familia: string, animaId?: string): Promise<Intellae>
   /**
-   * Bulk-load the trigger map for a base model: every LoRA the caller can
-   * access (public + their own private), keyed by lowercased trigger word.
-   * Used by the prompt-time LoRA resolver to avoid one findByTrigger query
-   * per prompt token. A trigger may map to multiple Intellae — the resolver
-   * picks the best one (private-owner > shared > public, by recency).
+   * Bulk-load the trigger map for a model FAMILY: every LoRA the caller can
+   * access (public + their own private) whose `familia` matches, keyed by
+   * lowercased trigger word. Used by the prompt-time LoRA resolver to avoid one
+   * findByTrigger query per prompt token. A trigger may map to multiple
+   * Intellae — the resolver picks the best one (private-owner > shared > public,
+   * by recency).
+   *
+   * Keyed on `familia` (not a flow-global base id) so a COMPOSITE flow can call
+   * it per prompt-input with that input's step family — flux-path triggers
+   * resolve only flux LoRAs. (Composite compilation is a future task; the
+   * signature is family-keyed now so it plugs in with no rework.)
    */
-  triggerMap(baseIntellaId: string, animaId?: string): Promise<Map<string, Intellae>>
+  triggerMap(familia: string, animaId?: string): Promise<Map<string, Intellae>>
 }
 
 // =============================================================================

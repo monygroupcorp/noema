@@ -19,18 +19,22 @@ for (const file of files) {
       templateId: string; version: string
       inputTemplate: Record<string, unknown>
       slotMap: Record<string, string>
-      requiredModels: Array<{ role?: string; id?: string; url?: string; dest?: string }>
+      requiredModels?: Array<{ role?: string; id?: string; url?: string; dest?: string }>
     }
 
     // filename === <templateId>-v<version>.json (the registry resolves by this convention)
     assert.equal(file, `${t.templateId}-v${t.version}.json`, 'filename must match templateId-vVersion')
     assert.ok(t.inputTemplate && typeof t.inputTemplate === 'object', 'has inputTemplate (the ComfyUI graph)')
     assert.ok(t.slotMap && typeof t.slotMap === 'object', 'has slotMap')
-    assert.ok(Array.isArray(t.requiredModels), 'has requiredModels[]')
 
-    // every requiredModel declares role + id + dest (url is optional — a present model needs no URL)
-    for (const m of t.requiredModels) {
-      assert.ok(m.role && m.id && m.dest, `requiredModel needs role+id+dest: ${JSON.stringify(m)}`)
+    // requiredModels is now an OPTIONAL url/dest fallback table (the flow's
+    // Modus.intellae is the source of truth). When present, each entry that
+    // carries url info still declares role + id + dest.
+    if (t.requiredModels !== undefined) {
+      assert.ok(Array.isArray(t.requiredModels), 'requiredModels, when present, is an array')
+      for (const m of t.requiredModels) {
+        assert.ok(m.role && m.id && m.dest, `requiredModel needs role+id+dest: ${JSON.stringify(m)}`)
+      }
     }
 
     // every slotMap pointer is a JSON pointer that resolves to a real path in inputTemplate

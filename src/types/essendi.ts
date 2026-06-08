@@ -39,9 +39,9 @@ export type EssentiaCategoria =
  * the container image, the ComfyUI workflow template reference, and the
  * cook flags that control GPU selection and inference behaviour.
  *
- * Required models come from the workflow template itself (requiredModels[])
- * — not duplicated here. The template is the single source of truth for
- * what weights must be present before inference starts.
+ * Required models come from the FLOW's own weight manifest (`Modus.intellae`)
+ * — the flow declares what it downloads. The workflow template's
+ * `requiredModels[]` survives only as a url/dest fallback (keyed by id).
  */
 export interface RunpodSpec {
   /** Docker image ID — e.g. 'runpod/pytorch' */
@@ -85,8 +85,10 @@ export interface RunpodSpec {
  * Extends Modus with:
  *   - genus is always 'atomicus' (essentiae are leaves, never trees)
  *   - categoria declares what it produces
- *   - intellaId links to the base model it requires to run
  *   - runpodSpec carries the execution substrate for RunPod workflows
+ *
+ * The weights an essentia requires live on `Modus.intellae` (the weight
+ * manifest); the LoRA-compat family is derived from those weights' `familia`.
  *
  * "essentia" = essence/being in Latin — the thing that simply IS,
  * the irreducible expression the platform knows how to execute.
@@ -95,13 +97,6 @@ export interface Essentia extends Modus {
   /** Essentiae are always atomic — they execute one thing */
   genus: 'atomicus'
   categoria: EssentiaCategoria
-  /**
-   * FK → Intella. The base model this essentia requires.
-   * Optional: some essentiae are pure logic with no model dependency.
-   * For LoRA-accepting workflows: this is the base model Intella —
-   * compatible LoRAs are those whose baseIntellaId matches this id.
-   */
-  intellaId?: string
   /**
    * RunPod execution substrate. Present when ministerium === 'runpod'.
    * Carries the container image, workflow template reference, and cook flags.

@@ -115,20 +115,20 @@ export class MongoIntella implements Intellarum {
     return docs.map(projectV2ToV1)
   }
 
-  async findByTrigger(trigger: string, baseIntellaId: string, animaId?: string): Promise<Intellae> {
+  async findByTrigger(trigger: string, familia: string, animaId?: string): Promise<Intellae> {
     const triggerLower = trigger.toLowerCase()
-    // Substring-match against either v1's flat `trigger` string or v2's
-    // `params.triggerWords[]` array. Mongo's $regex on an array matches when
-    // any element matches.
+    // Compat keys on the model FAMILY (`familia`, exact equality), not the old
+    // baseIntellaId join. Trigger still substring-matches either v1's flat
+    // `trigger` string or v2's `params.triggerWords[]` array (Mongo's $regex on
+    // an array matches when any element matches).
     const query: Record<string, unknown> = {
       genus: 'lora',
+      familia,
       $and: [
         {
           $or: [
-            // v1: flat baseIntellaId + comma-joined trigger string
-            { baseIntellaId, trigger: { $regex: new RegExp(triggerLower, 'i') } },
-            // v2: nested params.baseIntellaId + array element regex
-            { 'params.baseIntellaId': baseIntellaId, 'params.triggerWords': { $regex: new RegExp(triggerLower, 'i') } },
+            { trigger: { $regex: new RegExp(triggerLower, 'i') } },           // v1 flat string
+            { 'params.triggerWords': { $regex: new RegExp(triggerLower, 'i') } }, // v2 array
           ],
         },
         { $or: buildAccessOrClauses(animaId) },
@@ -138,14 +138,16 @@ export class MongoIntella implements Intellarum {
     return docs.map(projectV2ToV1)
   }
 
-  async triggerMap(baseIntellaId: string, animaId?: string): Promise<Map<string, Intellae>> {
+  async triggerMap(familia: string, animaId?: string): Promise<Map<string, Intellae>> {
+    // Compat keys on the model FAMILY (`familia`, exact equality).
     const query: Record<string, unknown> = {
       genus: 'lora',
+      familia,
       $and: [
         {
           $or: [
-            { baseIntellaId, trigger: { $exists: true, $ne: '' } },
-            { 'params.baseIntellaId': baseIntellaId, 'params.triggerWords.0': { $exists: true } },
+            { trigger: { $exists: true, $ne: '' } },          // v1 flat string
+            { 'params.triggerWords.0': { $exists: true } },   // v2 array
           ],
         },
         { $or: buildAccessOrClauses(animaId) },

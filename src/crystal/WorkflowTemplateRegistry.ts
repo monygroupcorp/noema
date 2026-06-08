@@ -8,7 +8,14 @@ export interface WorkflowTemplate {
   seedInputKey?: string
   inputTemplate: Record<string, unknown>
   slotMap: Record<string, string>
-  requiredModels: Array<{ role: string; id: string; url?: string; dest: string }>
+  /**
+   * url/dest FALLBACK only — NOT the source of the weight list. The flow's
+   * `Modus.intellae` is the source of truth for which weights download; the
+   * Compiler enriches each declared weight's url/dest from a matching entry here
+   * (by id) when the Intella registry can't resolve it. Optional: a flow whose
+   * weights all resolve from the registry needs no fallback table.
+   */
+  requiredModels?: Array<{ role: string; id: string; url?: string; dest: string }>
   platformHints?: Record<string, unknown>
   /**
    * True when the workflow has a multi-LoRA loader / extraction node configured

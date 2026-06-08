@@ -4,7 +4,7 @@ import type { Essentia } from '../../types/essendi.js'
 // Canonical Essentiae — platform atomic operations
 //
 // Each Essentia is the crystal representation of a platform tool.
-// intellaId points to the base model Intella required to run it.
+// intellae[] is the weight manifest — the Intellae the flow downloads.
 // runpodSpec carries the container + workflow template reference.
 //
 // contentHash is omitted here — computed and set on first registration
@@ -21,7 +21,14 @@ export const ESSENTIA_RUNMAKE_FLUX_SCHNELL: Essentia = {
   canonica: true,
   categoria: 'image',
 
-  intellaId: 'intella.flux-schnell',
+  // The flow's weight manifest — what it downloads. Family is DERIVED from these
+  // weights' `Intella.familia` (the unet base carries 'flux').
+  intellae: [
+    { id: 'intella.flux-schnell-fp8-scaled', role: 'unet' },
+    { id: 'intella.flux-vae',                role: 'vae' },
+    { id: 'intella.t5xxl-fp16',              role: 'clip' },
+    { id: 'intella.clip-l',                  role: 'clip' },
+  ],
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation' },
@@ -64,7 +71,11 @@ export const ESSENTIA_RUNMAKE_SD15: Essentia = {
   canonica: true,
   categoria: 'image',
 
-  intellaId: 'intella.sd15-v1-5',
+  // The flow's weight manifest — a single self-contained SD1.5 checkpoint.
+  // Family ('sd15') is DERIVED from this weight's `Intella.familia`.
+  intellae: [
+    { id: 'intella.sd15-v1-5', role: 'checkpoint' },
+  ],
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation' },
