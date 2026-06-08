@@ -52,6 +52,12 @@ loraCapable templates' `customNodes`. Delivery is **per-job** in production: `_e
 `dockerfiles/flux-comfyui-runtime/Dockerfile` is revived, add a Coziness `git clone` layer so cold pods
 skip the per-job clone. Noted there as a backlog comment.)
 
+**FIRST read the reference exports** (the wiring above is orientation, NOT the source of truth):
+`docs/reference/old-workflows/sdxl` is the port template for **sd15** (same checkpoint-based graph) and
+`docs/reference/old-workflows/fluxi2i` for **flux**. Copy the **exact** `LoraTextExtractor` +
+`MultiLoraLoader` node definitions from there — full `inputs`, the precise hashed `class_type`
+(`-b1f83aa2` / `-70bf3d77`), and any widget defaults — do NOT hand-write them from the sketch.
+
 Then, for `sd15-v1.json` (and `flux-schnell-v1.json`):
 - insert the `LoraTextExtractor` → `MultiLoraLoader` chain into `inputTemplate` per the wiring above;
   route the `slotMap` `prompt` into `LoraTextExtractor.text` (NOT directly into the text-encode);
