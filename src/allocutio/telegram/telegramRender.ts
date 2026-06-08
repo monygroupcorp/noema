@@ -99,7 +99,7 @@ export function renderPrimitive(primitive: Primitive): RenderResult {
         const rows: InlineButton[][] = primitive.fields.map(f => [btn(`✎ ${f.label}`, `a:edit_${f.key}`)])
         const allRequiredFilled = requiredFields.every(f => isFilled(f.key) || f.default !== undefined)
         if (allRequiredFilled) {
-          rows.push([btn('▶ Execute', 'a:execute')])
+          rows.push([btn('▶ Execute', 'a:execute'), btn('💾 Save as…', 'a:saveas')])
         }
         return { text, extra: { reply_markup: inlineKeyboard(rows) } }
       }

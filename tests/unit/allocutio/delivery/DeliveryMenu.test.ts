@@ -21,7 +21,7 @@ const data = (kb: UiKeyboard) => kb.flat().map(b => b.data)
 test('menuKeyboard morphs default → rate → wrench', () => {
   assert.deepEqual(data(menuKeyboard('a1', 'default')), ['dm:info:a1', 'dm:rate:a1', 'dm:wrench:a1'])
   assert.deepEqual(data(menuKeyboard('a1', 'rate')), ['dm:rated:a1:beautiful', 'dm:rated:a1:funny', 'dm:rated:a1:negative'])
-  assert.deepEqual(data(menuKeyboard('a1', 'wrench')), ['dm:back:a1', 'dm:tweak:a1', 'dm:rerun:a1'])
+  assert.deepEqual(data(menuKeyboard('a1', 'wrench')), ['dm:back:a1', 'dm:tweak:a1', 'dm:rerun:a1', 'dm:save:a1'])
 })
 
 test('rate/wrench/back morph the row on the tracked message', async () => {
@@ -33,7 +33,7 @@ test('rate/wrench/back morph the row on the tracked message', async () => {
   assert.deepEqual(data(s.markups.at(-1)!.kb), ['dm:rated:a1:beautiful', 'dm:rated:a1:funny', 'dm:rated:a1:negative'])
   assert.equal(s.markups.at(-1)!.messageId, 77)
   await m.handle('a1', 'wrench')
-  assert.deepEqual(data(s.markups.at(-1)!.kb), ['dm:back:a1', 'dm:tweak:a1', 'dm:rerun:a1'])
+  assert.deepEqual(data(s.markups.at(-1)!.kb), ['dm:back:a1', 'dm:tweak:a1', 'dm:rerun:a1', 'dm:save:a1'])
 })
 
 test('rated reflects the glyph on the default row and persists it for back', async () => {

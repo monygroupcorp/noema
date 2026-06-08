@@ -41,6 +41,7 @@ function inferRuntime(image?: string): string | undefined {
   return undefined
 }
 import { DeliveryMenu, type DeliverySink } from '../lexicon/delivery/DeliveryMenu.js'
+import { SaveAsMenu, type SaveAsSeed } from './SaveAsMenu.js'
 import { ReactionController } from './reactions/ReactionController.js'
 import type { UiKeyboard } from '../lexicon/ui/Keyboard.js'
 import { inlineKeyboard, btn, renderPrimitive, decodeCallbackData, type InlineKeyboard } from './telegramRender.js'
@@ -121,6 +122,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // choreography each live in their own subsystem now; this adapter just feeds them.
   private readonly bulletins: BulletinManager
   private readonly delivery: DeliveryMenu
+  private readonly saveAs?: SaveAsMenu
   private readonly reactions: ReactionController
   private readonly commands: CommandRouter
 
@@ -199,12 +201,28 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       autoSettleMs: deps.autoSettleMs,
     })
 
+    // Save-as: flow card / delivery-info → a derived, user-owned Modus. Owns its own
+    // force-reply name capture + draft registry (NOT the flow router). Needs the
+    // registry to fork from + register into; absent when modorum isn't wired.
+    if (deps.modorum) {
+      this.saveAs = new SaveAsMenu({
+        sink: {
+          sendMessage: (chatId, text, extra) => this.sender.sendMessage(chatId, text, extra),
+          editMessageText: (chatId, messageId, text, extra) => this.sender.editMessageText(chatId, messageId, text, extra),
+          deleteMessage: (chatId, messageId) => this.sender.deleteMessage?.(chatId, messageId) ?? Promise.resolve(),
+        },
+        modorum: deps.modorum,
+        resolveOwner: (userId) => this.identity.resolve(userId),
+      })
+    }
+
     // The delivery menu: owns the morphing result row + Info/rating state; we give
-    // it a sink and a rerun hook into the flow router.
+    // it a sink, a rerun hook into the flow router, and a save hook into SaveAsMenu.
     this.delivery = new DeliveryMenu({
       sink: this._deliverySink(),
       acta: deps.acta,
       rerun: (actumId, presserUserId, chatId) => this._rerun(actumId, presserUserId, chatId),
+      ...(this.saveAs ? { save: (actumId, presserUserId, chatId) => this._saveAs(actumId, presserUserId, chatId) } : {}),
     })
 
     // The 👌/🔥 reaction choreography on the command message.
@@ -325,6 +343,34 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     await this.router.enter('execute', 'telegram', presserUserId, identity, {
       state: { modusId: actum.modusId, aditus: actum.aditus, browsePageIndex: 0 },
     })
+  }
+
+  /** Delivery-info entry: open Save-as seeded from the Actum's modus + aditus + pinnedModels. */
+  private async _saveAs(actumId: string, presserUserId: string, chatId: number): Promise<void> {
+    if (!this.saveAs) return
+    const actum = await this.deps.acta?.findById(actumId).catch(() => null)
+    if (!actum) return
+    const seed: SaveAsSeed = {
+      baseModusId: actum.modusId,
+      aditus: actum.aditus,
+      // First-class field (actum.ts:135) — NOT smuggled through aditus._pinnedModels.
+      ...(actum.pinnedModels?.length ? { pinned: actum.pinnedModels.map(m => ({ id: m.id })) } : {}),
+    }
+    await this.saveAs.open(chatId, presserUserId, seed)
+  }
+
+  /** Flow-card entry: open Save-as seeded from the active flow's card state. */
+  private async _saveAsFromCard(userId: string, chatId: number): Promise<void> {
+    if (!this.saveAs) return
+    const ctx = this.router.peek('telegram', userId)
+    const state = ctx?.state as { modusId?: string; aditus?: Record<string, unknown>; pinnedModels?: Array<{ id: string }> } | undefined
+    if (!state?.modusId) return
+    const seed: SaveAsSeed = {
+      baseModusId: state.modusId,
+      aditus: state.aditus ?? {},
+      ...(state.pinnedModels?.length ? { pinned: state.pinnedModels.map(m => ({ id: m.id })) } : {}),
+    }
+    await this.saveAs.open(chatId, userId, seed)
   }
 
   /** Resolve a pod's Materia and stamp its warm deadline (backs the warm-window buttons). */
@@ -481,6 +527,16 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     // Mod • → Add: a reply to a force-reply prompt carries either a search term or trigger word(s).
     const repliedTo = message.reply_to_message?.message_id
+    if (repliedTo !== undefined && this.saveAs) {
+      // Save-as name reply (force-reply) → derive slug + render the review. Clears the
+      // exchange (prompt + reply) so the chat stays clean; the review message remains.
+      const took = await this.saveAs.takeReply(repliedTo, chatId, userId, text)
+      if (took) {
+        void this.sender.deleteMessage?.(chatId, repliedTo).catch(() => {})
+        void this.sender.deleteMessage?.(chatId, message.message_id).catch(() => {})
+        return
+      }
+    }
     if (repliedTo !== undefined) {
       const reply = this.modelCatalog.takeReply(repliedTo, chatId, userId, text)
       if (reply !== null) {
@@ -585,6 +641,13 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       return
     }
 
+    // Save-as review — prompt-mode toggle / Save (collision check + register) / Cancel.
+    // Keyed on the review message the button rode on (the SaveAsMenu owns the draft).
+    if (query.data.startsWith('sa:') && chatId && query.message?.message_id !== undefined) {
+      await this.saveAs?.handle(query.message.message_id, query.data.slice(3), chatId, userId)
+      return
+    }
+
     // Pod invite button — send a forwardable invite message
     if (query.data.startsWith('pod_invite:') && chatId) {
       void this.sender.sendMessage(chatId, COPY.status.podInvite).catch(() => {})
@@ -593,6 +656,14 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     const event = decodeCallbackData(query.data)
     if (!event) return
+
+    // Flow-card "Save as…" — open the Save-as menu seeded from the active flow's card
+    // state (modusId + aditus + pinnedModels). Intercepted here, NOT routed to the flow
+    // (the menu is force-reply driven, with no active flow step of its own).
+    if (event.kind === 'action' && event.actionId === 'saveas' && chatId) {
+      await this._saveAsFromCard(userId, chatId)
+      return
+    }
 
     // Store the message ID for in-place editing on the next step
     if (query.message?.message_id !== undefined) {

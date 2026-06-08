@@ -74,6 +74,8 @@ export interface RouterDeps {
   handle(platform: Platform, userId: string, event: PrimitiveEvent): Promise<void>
   clear(platform: Platform, userId: string): void
   hasContext(platform: Platform, userId: string): boolean
+  /** Read the active flow's context without mutating it (e.g. to seed Save-as from the card state). */
+  peek(platform: Platform, userId: string): FlowContext | null
   onStep(cb: (ctx: FlowContext, step: Step) => void): void
   onResolution(cb: (ctx: FlowContext, res: Resolution) => void): void
 }
