@@ -555,6 +555,13 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         void this.sender.deleteMessage?.(chatId, message.message_id).catch(() => {})
         return
       }
+      // Save-as affix reply (prefix/suffix force-reply) → update the draft + re-render.
+      const tookAffix = await this.saveAs.takeAffixReply(repliedTo, chatId, userId, text)
+      if (tookAffix) {
+        void this.sender.deleteMessage?.(chatId, repliedTo).catch(() => {})
+        void this.sender.deleteMessage?.(chatId, message.message_id).catch(() => {})
+        return
+      }
     }
     if (repliedTo !== undefined) {
       const reply = this.modelCatalog.takeReply(repliedTo, chatId, userId, text)

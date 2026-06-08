@@ -30,7 +30,7 @@ export interface SaveAsSeed {
   pinned?: Array<{ id: string }>
 }
 
-/** A draft awaiting confirmation — the named, slugged seed + chosen prompt mode. */
+/** A draft awaiting confirmation — the named, slugged seed + chosen prompt mode + affixes. */
 interface Draft {
   chatId: number
   userId: string
@@ -39,12 +39,26 @@ interface Draft {
   slug: string
   name: string
   promptMode: PromptMode
+  /** Flow-baked prompt prefix/suffix (UI sets the prompt Porta only). */
+  praefixum?: string
+  suffixum?: string
+  /** The review message this draft is rendered on (so affix replies can find it). */
+  reviewMessageId?: number
 }
 
 interface PendingName {
   chatId: number
   userId: string
   seed: SaveAsSeed
+  expiresAt: number
+}
+
+/** A live force-reply asking for a prompt affix — points back at the draft's review. */
+interface PendingAffix {
+  chatId: number
+  userId: string
+  reviewMessageId: number
+  which: 'prefix' | 'suffix'
   expiresAt: number
 }
 
@@ -74,6 +88,8 @@ export class SaveAsMenu {
   private readonly pendingNames = new Map<number, PendingName>()
   /** Drafts awaiting Save/Cancel: review message_id → the draft. */
   private readonly drafts = new Map<number, Draft>()
+  /** Live force-reply affix prompts: prompt message_id → the awaiting affix. */
+  private readonly pendingAffixes = new Map<number, PendingAffix>()
 
   constructor(private readonly deps: SaveAsDeps) {}
 
@@ -118,9 +134,38 @@ export class SaveAsMenu {
 
     const draft: Draft = { chatId, userId, base, seed: entry.seed, slug, name, promptMode: 'open' }
     const sent = await this.deps.sink
-      .sendMessage(chatId, this._reviewText(draft), { reply_markup: this._reviewKeyboard() })
+      .sendMessage(chatId, this._reviewText(draft), { reply_markup: this._reviewKeyboard(draft) })
       .catch(() => null)
-    if (sent) this.drafts.set(sent.message_id, draft)
+    if (sent) {
+      draft.reviewMessageId = sent.message_id
+      this.drafts.set(sent.message_id, draft)
+    }
+    return true
+  }
+
+  /**
+   * Consume a reply to a live affix (prefix/suffix) force-reply. Updates the draft
+   * on the referenced review message and re-renders it. A lone "-" clears the affix.
+   * Returns true when the reply was ours.
+   */
+  async takeAffixReply(repliedTo: number, chatId: number, userId: string, text: string): Promise<boolean> {
+    const entry = this.pendingAffixes.get(repliedTo)
+    if (!entry) return false
+    if (entry.expiresAt < Date.now()) { this.pendingAffixes.delete(repliedTo); return false }
+    if (entry.chatId !== chatId || entry.userId !== userId) return false
+
+    const draft = this.drafts.get(entry.reviewMessageId)
+    if (!draft) { this.pendingAffixes.delete(repliedTo); return true }
+    this.pendingAffixes.delete(repliedTo)
+
+    const raw = text.trim()
+    const value = raw === '' || raw === '-' ? undefined : raw
+    if (entry.which === 'prefix') draft.praefixum = value
+    else draft.suffixum = value
+
+    await this.deps.sink
+      .editMessageText?.(chatId, entry.reviewMessageId, this._reviewText(draft), { reply_markup: this._reviewKeyboard(draft) })
+      .catch(() => {})
     return true
   }
 
@@ -136,8 +181,22 @@ export class SaveAsMenu {
     switch (action) {
       case 'toggle':
         draft.promptMode = draft.promptMode === 'open' ? 'pinned' : 'open'
-        await this.deps.sink.editMessageText?.(chatId, messageId, this._reviewText(draft), { reply_markup: this._reviewKeyboard() }).catch(() => {})
+        await this.deps.sink.editMessageText?.(chatId, messageId, this._reviewText(draft), { reply_markup: this._reviewKeyboard(draft) }).catch(() => {})
         return true
+      case 'prefix':
+      case 'suffix': {
+        const prompt = action === 'prefix' ? COPY.saveAs.prefixPrompt : COPY.saveAs.suffixPrompt
+        const sent = await this.deps.sink
+          .sendMessage(chatId, prompt, { reply_markup: { force_reply: true } })
+          .catch(() => null)
+        if (sent) {
+          this.pendingAffixes.set(sent.message_id, {
+            chatId, userId, reviewMessageId: messageId, which: action,
+            expiresAt: Date.now() + SaveAsMenu.TTL_MS,
+          })
+        }
+        return true
+      }
       case 'cancel':
         this.drafts.delete(messageId)
         await this.deps.sink.deleteMessage?.(chatId, messageId).catch(() => {})
@@ -166,6 +225,8 @@ export class SaveAsMenu {
       owner,
       aditus: draft.seed.aditus,
       promptMode: draft.promptMode,
+      ...(draft.praefixum !== undefined ? { promptPraefixum: draft.praefixum } : {}),
+      ...(draft.suffixum !== undefined ? { promptSuffixum: draft.suffixum } : {}),
       pinned: draft.seed.pinned,
     })
     await this.deps.modorum.register(modus)
@@ -195,14 +256,21 @@ export class SaveAsMenu {
       COPY.saveAs.configLabel,
       config,
       '',
-      COPY.saveAs.affixPlaceholder,
+      COPY.saveAs.affixLabel,
+      COPY.saveAs.affixPrefixLine(draft.praefixum),
+      COPY.saveAs.affixSuffixLine(draft.suffixum),
     ].join('\n')
   }
 
-  private _reviewKeyboard(): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
+  private _reviewKeyboard(draft: Draft): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
+    const modeLabel = draft.promptMode === 'open' ? COPY.saveAs.promptOpen : COPY.saveAs.promptPinned
     return {
       inline_keyboard: [
-        [{ text: COPY.saveAs.promptOpen, callback_data: 'sa:toggle' }],
+        [{ text: modeLabel, callback_data: 'sa:toggle' }],
+        [
+          { text: COPY.saveAs.setPrefixButton, callback_data: 'sa:prefix' },
+          { text: COPY.saveAs.setSuffixButton, callback_data: 'sa:suffix' },
+        ],
         [
           { text: COPY.saveAs.confirmButton, callback_data: 'sa:save' },
           { text: COPY.saveAs.cancelButton, callback_data: 'sa:cancel' },

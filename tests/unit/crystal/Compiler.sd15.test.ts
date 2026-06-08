@@ -144,6 +144,55 @@ test('compile() on sd15 + a familia:sd15 LoRA trigger: applies it + rewrites the
   assert.ok(r.spec.models.find(m => m.role === 'lora'), 'LoRA in spec.models')
 })
 
+// ── Prompt affix weave (TASK-007) ─────────────────────────────────────────────
+
+/** Clone the sd15 essentia with affixes baked onto the prompt Porta. */
+function withPromptAffix(affix: { praefixum?: string; suffixum?: string }): Essentia {
+  return {
+    ...ESSENTIA_RUNMAKE_SD15,
+    aditus: {
+      ...ESSENTIA_RUNMAKE_SD15.aditus,
+      prompt: { ...ESSENTIA_RUNMAKE_SD15.aditus.prompt, ...affix },
+    },
+  }
+}
+
+test('weave: a prompt Porta suffixum is woven after the user prompt in the slotted text node', async () => {
+  const compiler = makeCompiler()
+  const { spec } = await compiler.compile(withPromptAffix({ suffixum: 'watercolor, masterpiece' }), { prompt: 'a fox' })
+  const node10 = spec.workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
+  assert.equal(node10.inputs.text, 'a fox, watercolor, masterpiece')
+})
+
+test('weave: a prompt Porta praefixum is woven before the user prompt', async () => {
+  const compiler = makeCompiler()
+  const { spec } = await compiler.compile(withPromptAffix({ praefixum: 'masterpiece' }), { prompt: 'a fox' })
+  const node10 = spec.workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
+  assert.equal(node10.inputs.text, 'masterpiece, a fox')
+})
+
+test('weave: no affixes → prompt unchanged (no-op)', async () => {
+  const compiler = makeCompiler()
+  const { spec } = await compiler.compile(ESSENTIA_RUNMAKE_SD15, { prompt: 'a fox' })
+  const node10 = spec.workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
+  assert.equal(node10.inputs.text, 'a fox')
+})
+
+test('weave-before-lora: a trigger word inside a suffixum resolves into an applied LoRA', async () => {
+  // The user's prompt has NO trigger; the flow-baked suffix carries the trigger word.
+  // Because the weave runs BEFORE resolveLoraTriggers, the LoRA is applied.
+  const intellarum = makeSd15Intellarum([{ slug: 'sd15style', trigger: 'sdtrigger', familia: 'sd15' }])
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const essentia = withPromptAffix({ suffixum: 'sdtrigger, masterpiece' })
+  const r = await compiler.compile(essentia, { prompt: 'a portrait' })
+
+  assert.equal(r.appliedLoras?.length, 1)
+  assert.equal(r.appliedLoras?.[0].slug, 'sd15style')
+  const node10 = r.spec.workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
+  assert.match(node10.inputs.text as string, /<lora:sd15style:1>/)
+  assert.ok(r.spec.models.find(m => m.role === 'lora'), 'LoRA in spec.models')
+})
+
 test('compile() on sd15 does NOT apply a familia:flux LoRA on the same trigger word', async () => {
   const intellarum = makeSd15Intellarum([{ slug: 'fluxstyle', trigger: 'sdtrigger', familia: 'flux' }])
   const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)

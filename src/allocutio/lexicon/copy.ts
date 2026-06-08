@@ -184,8 +184,16 @@ export const COPY = {
     /** Prompt-mode toggle labels. */
     promptOpen: 'Prompt: open (ask each run)',
     promptPinned: 'Prompt: pinned (baked in)',
-    /** Placeholder for the (TASK-007) prompt-affix row — not built here. */
-    affixPlaceholder: 'Prefix / suffix — coming soon',
+    /** Affix section in the review — flow-baked prompt prefix/suffix. */
+    affixLabel: 'Prompt wrap',
+    affixPrefixLine: (v?: string): string => `• Prefix: ${v && v.trim() ? v : '—'}`,
+    affixSuffixLine: (v?: string): string => `• Suffix: ${v && v.trim() ? v : '—'}`,
+    /** Force-reply prompts for setting the prefix/suffix. */
+    prefixPrompt: 'Reply with the prompt PREFIX to weave before each run\'s prompt (or "-" to clear).',
+    suffixPrompt: 'Reply with the prompt SUFFIX to weave after each run\'s prompt (or "-" to clear).',
+    /** Affix-setter button labels. */
+    setPrefixButton: 'Set prefix',
+    setSuffixButton: 'Set suffix',
     /** Global-uniqueness collision — no two flows share a slug. No register happens. */
     nameTaken: (slug: string): string => `The name /${slug} is taken. Pick another.`,
     /** Register succeeded — confirm the new runnable slug. */

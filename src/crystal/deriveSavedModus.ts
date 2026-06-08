@@ -34,6 +34,14 @@ export interface DeriveSavedModusOpts {
    * `'open'` leaves the `prompt` Porta a fresh required input (no default).
    */
   promptMode: PromptMode
+  /**
+   * Flow-baked prefix/suffix to weave around the **prompt** Porta's value at
+   * compile time (`Porta.praefixum`/`suffixum`). Independent of `promptMode` —
+   * an `open` prompt may still carry a suffix; the wrapper applies to whatever
+   * the user types at run time. Absent → the prompt Porta carries no affix.
+   */
+  promptPraefixum?: string
+  promptSuffixum?: string
   /** LoRAs the user pinned onto the loadout — folded into `intellae` as `{ id, role: 'lora' }`. */
   pinned?: Array<{ id: string }>
   /** Semantic version for the derived flow. Defaults to '1.0.0' (a fresh fork). */
@@ -54,7 +62,13 @@ export function deriveSavedModus<M extends Modus>(base: M, opts: DeriveSavedModu
       const captured = opts.aditus[key]
       const isPrompt = key === 'prompt'
       const apply = captured !== undefined && (!isPrompt || opts.promptMode === 'pinned')
-      return [key, apply ? { ...porta, default: captured } : { ...porta }]
+      const next = apply ? { ...porta, default: captured } : { ...porta }
+      // Flow-baked affixes ride onto the prompt Porta, independent of promptMode.
+      if (isPrompt) {
+        if (opts.promptPraefixum !== undefined) next.praefixum = opts.promptPraefixum
+        if (opts.promptSuffixum !== undefined) next.suffixum = opts.promptSuffixum
+      }
+      return [key, next]
     })
   )
 
