@@ -36,6 +36,10 @@ export interface CompiledSpec {
   /** On-pod runtime this spec targets ('ComfyUI' default). RESERVED for the second-runtime dispatch
    *  (the runner that consumes it lands in a GPU sprint); carried now so the abstraction is whole. */
   runtime: string
+  /** Custom-node packs the workflow's graph depends on, forwarded from the template.
+   *  `comfyrunnerClient.submitToRunner` ships these to the runner's `_ensure_custom_nodes`.
+   *  Omitted when the template declares none. */
+  customNodes?: Array<{ url: string; name?: string }>
 }
 
 export interface CompileResult {
@@ -195,6 +199,9 @@ export class Compiler {
       seed,
       sourceTool: { id: essentia.id, versio: essentia.versio },
       runtime: runpodSpec.runtime ?? 'ComfyUI',
+      ...(template.customNodes && template.customNodes.length > 0
+        ? { customNodes: template.customNodes }
+        : {}),
     }
 
     const hash = `sha256:${this._hashSpec(spec)}`

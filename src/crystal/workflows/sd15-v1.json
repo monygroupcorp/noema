@@ -3,14 +3,20 @@
   "version": "1",
   "displayName": "Stable Diffusion 1.5 text-to-image (512x512, 20 steps)",
   "seedInputKey": "input_seed",
+  "loraCapable": true,
+  "customNodes": [
+    { "url": "https://github.com/skfoo/ComfyUI-Coziness", "name": "ComfyUI-Coziness" }
+  ],
   "inputTemplate": {
-    "3":  { "class_type": "KSampler",             "inputs": { "seed": 88888888, "steps": 20, "cfg": 7.5, "sampler_name": "euler", "scheduler": "normal", "denoise": 1, "model": ["4", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["5", 0] } },
+    "3":  { "class_type": "KSampler",             "inputs": { "seed": 88888888, "steps": 20, "cfg": 7.5, "sampler_name": "euler", "scheduler": "normal", "denoise": 1, "model": ["11", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["5", 0] } },
     "4":  { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "v1-5-pruned-emaonly.safetensors" } },
     "5":  { "class_type": "EmptyLatentImage",       "inputs": { "width": 512, "height": 512, "batch_size": 1 } },
-    "6":  { "class_type": "CLIPTextEncode",         "inputs": { "text": "PLACEHOLDER", "clip": ["4", 1] } },
-    "7":  { "class_type": "CLIPTextEncode",         "inputs": { "text": "", "clip": ["4", 1] } },
+    "6":  { "class_type": "CLIPTextEncode",         "inputs": { "text": ["10", 0], "clip": ["11", 1] } },
+    "7":  { "class_type": "CLIPTextEncode",         "inputs": { "text": "", "clip": ["11", 1] } },
     "8":  { "class_type": "VAEDecode",              "inputs": { "samples": ["3", 0], "vae": ["4", 2] } },
-    "9":  { "class_type": "SaveImage",              "inputs": { "filename_prefix": "runmake", "images": ["8", 0] } }
+    "9":  { "class_type": "SaveImage",              "inputs": { "filename_prefix": "runmake", "images": ["8", 0] } },
+    "10": { "class_type": "LoraTextExtractor-b1f83aa2", "inputs": { "text": "PLACEHOLDER" } },
+    "11": { "class_type": "MultiLoraLoader-70bf3d77",   "inputs": { "model": ["4", 0], "clip": ["4", 1], "text": ["10", 1] } }
   },
   "slotMap": {
     "/3/inputs/seed":   "input_seed",
@@ -18,7 +24,7 @@
     "/3/inputs/cfg":    "guidance",
     "/5/inputs/width":  "width",
     "/5/inputs/height": "height",
-    "/6/inputs/text":   "prompt"
+    "/10/inputs/text":  "prompt"
   },
   "requiredModels": [
     { "role": "checkpoint", "id": "intella.sd15-v1-5", "url": "https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors", "dest": "checkpoints/v1-5-pruned-emaonly.safetensors" }

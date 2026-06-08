@@ -29,6 +29,15 @@ export interface WorkflowTemplate {
    * pass through untouched.
    */
   loraCapable?: boolean
+  /**
+   * Custom-node packs the workflow's graph depends on (e.g. the comfyui-coziness
+   * MultiLoraLoader). The Compiler forwards these onto `CompiledSpec.customNodes`,
+   * which `comfyrunnerClient.submitToRunner` ships to the runner; the runner's
+   * `_ensure_custom_nodes` git-clones + pip-installs each on the first job per pod
+   * (idempotent thereafter, no image rebuild). Absent on workflows that need only
+   * stock ComfyUI nodes.
+   */
+  customNodes?: Array<{ url: string; name?: string }>
 }
 
 export class WorkflowTemplateError extends Error {

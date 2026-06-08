@@ -11,7 +11,7 @@ real GPU/pod is validated separately on staging. Read `AGENTS.md` first.
 | [TASK-004](TASK-004-flow-card-aditus-panel.md) | The flow card — surface every `Porta`, execute when ready | done | — |
 | [TASK-005](TASK-005-intellae-manifest.md) | `intellae` manifest + `familia` — flow declares its weights; family drives LoRA compat (drop `intellaId`) | done | — (Mongo re-key + install → staging) |
 | [TASK-006](TASK-006-save-as.md) | Save-as — flow card / delivery-info menu → a derived `Modus` (owner-keyed persistence) | done* | *hermetic done; Mongo `auctor` + e2e `/run <slug>` pending staging. "save as verb" rides the verb-rebind wiring follow-up |
-| [TASK-008](TASK-008-sd15-loracapable.md) | Port the LoRA-apply layer — `customNodes` plumbing + cozyness LoRA chain (loras non-functional on ALL crystal flows) | P1 + P2 ready | graph + pack URL known; per-job install (no image rebuild) |
+| [TASK-008](TASK-008-sd15-loracapable.md) | Port the LoRA-apply layer — `customNodes` plumbing + cozyness LoRA chain | done* | *hermetic done; real on-pod LoRA apply (Coziness installs per-job) → staging |
 | [TASK-009](TASK-009-run-resolves-owned-flows.md) | `/run` resolves a user's own saved flows (staging fix — `canonica` filter rejected them) | done* | *hermetic done; real `list({auctor})` → staging |
 
 ## Backlog (not yet written as specs)
