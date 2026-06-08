@@ -4,6 +4,22 @@ import type { Intella, Intellarum } from '../types/intelligendi.js'
 import type { ModelRef } from '../types/actum.js'
 import { WorkflowTemplateRegistry, WorkflowTemplateError } from './WorkflowTemplateRegistry.js'
 import { resolveLoraTriggers, type ResolvedLora } from './loraResolver.js'
+import type { Porta } from '../types/modus.js'
+
+/**
+ * Weave a Porta's flow-baked affixes around a runtime value. The user supplies
+ * `value`; the flow supplies `porta.praefixum`/`porta.suffixum`. Only text Portae
+ * with a string value are woven — anything else (or affixes absent) passes through
+ * unchanged (no-op). Pieces are trimmed, empties dropped, comma-joined.
+ */
+function weaveAffixes(value: unknown, porta: Porta): unknown {
+  if (porta.type !== 'text' || typeof value !== 'string') return value
+  if (porta.praefixum === undefined && porta.suffixum === undefined) return value
+  return [porta.praefixum, value, porta.suffixum]
+    .map(s => (s ?? '').trim())
+    .filter(Boolean)
+    .join(', ')
+}
 
 function deepSort(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(deepSort)
@@ -147,8 +163,18 @@ export class Compiler {
       new Set(weightRefs.map(w => records.get(w.id)?.familia).filter((f): f is string => !!f)),
     )
 
+    // ── Affix weave (flow-baked prefix/suffix on text Portae) ──────────────
+    // BEFORE lora resolution: rewrite each text Porta's value to weave its
+    // `praefixum`/`suffixum` around the user-supplied value. Done first so a
+    // trigger word living inside an affix still resolves into a `<lora:…>` tag
+    // below. Affixes absent → value unchanged (no-op).
+    const wovenAditus: Record<string, unknown> = { ...aditus }
+    for (const [key, porta] of Object.entries(essentia.aditus)) {
+      if (key in wovenAditus) wovenAditus[key] = weaveAffixes(wovenAditus[key], porta)
+    }
+
     // ── LoRA trigger resolution (when the template is loraCapable) ─────────
-    // Walks `aditus.prompt`, rewrites trigger words into `<lora:slug:weight>`
+    // Walks `wovenAditus.prompt`, rewrites trigger words into `<lora:slug:weight>`
     // tokens that the workflow's multi-LoRA extraction node will consume.
     // The resolved LoRAs are then appended to the weight set so any missing
     // weights download on this dispatch.
@@ -160,14 +186,14 @@ export class Compiler {
     // plugs in here with no rework.
     let appliedLoras: ResolvedLora[] = []
     let loraWarnings: string[] = []
-    let promptForSlots = aditus
-    if (template.loraCapable && this.intellarum && families.length > 0 && typeof aditus.prompt === 'string') {
+    let promptForSlots: Record<string, unknown> = wovenAditus
+    if (template.loraCapable && this.intellarum && families.length > 0 && typeof wovenAditus.prompt === 'string') {
       const map = await this.intellarum.triggerMap(families[0], opts.animaId)
-      const r = resolveLoraTriggers(aditus.prompt, { triggerMap: map, ...(opts.animaId ? { animaId: opts.animaId } : {}) })
+      const r = resolveLoraTriggers(wovenAditus.prompt, { triggerMap: map, ...(opts.animaId ? { animaId: opts.animaId } : {}) })
       appliedLoras = r.appliedLoras
       loraWarnings = r.warnings
-      if (r.modifiedPrompt !== aditus.prompt) {
-        promptForSlots = { ...aditus, prompt: r.modifiedPrompt }
+      if (r.modifiedPrompt !== wovenAditus.prompt) {
+        promptForSlots = { ...wovenAditus, prompt: r.modifiedPrompt }
       }
     }
 

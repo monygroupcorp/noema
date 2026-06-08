@@ -39,6 +39,16 @@ export interface Porta {
   default?: unknown
   label?: string        // short display name shown on the canvas port
   description?: string  // longer helper text / tooltip
+  /**
+   * Flow-baked text woven AROUND this (text) Porta's value at compile time. The
+   * user supplies the variable; the flow supplies the wrapper. On a 'text' Porta
+   * carrying a string value the Compiler rewrites it to
+   * `[praefixum, value, suffixum].map(trim).filter(Boolean).join(', ')`, BEFORE
+   * LoRA trigger resolution (so a trigger word inside an affix still resolves).
+   * Absent → value unchanged (no-op). This is how a saved flow carries a "style".
+   */
+  praefixum?: string    // "praefixum" = prefixed — text woven before the value
+  suffixum?: string     // "suffixum" = suffixed — text woven after the value
 }
 
 /**

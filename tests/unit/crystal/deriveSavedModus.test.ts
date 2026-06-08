@@ -85,6 +85,37 @@ test('open prompt → prompt Porta has NO default (stays a fresh required input)
   assert.equal(d.aditus.steps.default, 8)
 })
 
+test('promptSuffixum bakes onto the prompt Porta (open mode, no default)', () => {
+  const d = deriveSavedModus(base(), {
+    slug: 'styled', name: 'Styled', owner,
+    aditus: { prompt: 'a red fox', steps: 8 }, promptMode: 'open',
+    promptSuffixum: 'watercolor, masterpiece',
+  })
+  assert.equal(d.aditus.prompt.suffixum, 'watercolor, masterpiece')
+  assert.equal(d.aditus.prompt.default, undefined)  // open → still a fresh required input
+  assert.equal(d.aditus.prompt.required, true)
+})
+
+test('promptPraefixum + promptSuffixum bake on (pinned mode, with default)', () => {
+  const d = deriveSavedModus(base(), {
+    slug: 'styled2', name: 'Styled2', owner,
+    aditus: { prompt: 'a red fox', steps: 8 }, promptMode: 'pinned',
+    promptPraefixum: 'masterpiece', promptSuffixum: 'watercolor',
+  })
+  assert.equal(d.aditus.prompt.praefixum, 'masterpiece')
+  assert.equal(d.aditus.prompt.suffixum, 'watercolor')
+  assert.equal(d.aditus.prompt.default, 'a red fox')  // pinned → default still baked
+})
+
+test('no affix opts → prompt Porta carries no praefixum/suffixum', () => {
+  const d = deriveSavedModus(base(), {
+    slug: 'plain', name: 'Plain', owner,
+    aditus: { prompt: 'a red fox' }, promptMode: 'pinned',
+  })
+  assert.equal(d.aditus.prompt.praefixum, undefined)
+  assert.equal(d.aditus.prompt.suffixum, undefined)
+})
+
 test('contentHash equals hashModus(result) and differs from the base', () => {
   const d = deriveSavedModus(base(), {
     slug: 'hashed', name: 'Hashed', owner,

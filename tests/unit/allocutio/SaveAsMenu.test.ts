@@ -117,6 +117,46 @@ test('prompt-mode toggle flips open ↔ pinned (re-renders the review)', async (
   assert.equal(registered[0].aditus.prompt.default, 'a red fox')
 })
 
+test('setting a suffix → derived prompt Porta carries the suffixum; placeholder copy gone', async () => {
+  const s = makeSink()
+  const { modorum, registered } = makeModorum()
+  const menu = new SaveAsMenu({ sink: s.sink, modorum, resolveOwner: async () => ({ animaId: 'a' }) })
+
+  await menu.open(10, 'u1', SEED)
+  await menu.takeReply(100, 10, 'u1', 'styled')   // review at message_id 101
+  // Tap "Set suffix" → posts a force-reply prompt (next message_id 102).
+  await menu.handle(101, 'suffix', 10, 'u1')
+  const affixPrompt = s.sent.at(-1)!
+  assert.deepEqual((affixPrompt.extra as { reply_markup?: unknown }).reply_markup, { force_reply: true })
+  // Reply to that prompt with the suffix text → re-renders the review.
+  const took = await menu.takeAffixReply(102, 10, 'u1', 'watercolor, masterpiece')
+  assert.equal(took, true)
+
+  await menu.handle(101, 'save', 10, 'u1')
+  assert.equal(registered.length, 1)
+  assert.equal(registered[0].aditus.prompt.suffixum, 'watercolor, masterpiece')
+
+  // The "coming soon" placeholder copy is gone everywhere.
+  const allText = [...s.sent.map(m => m.text), ...s.edited.map(m => m.text)].join('\n')
+  assert.doesNotMatch(allText, /coming soon/i)
+})
+
+test('affix reply "-" clears the affix', async () => {
+  const s = makeSink()
+  const { modorum, registered } = makeModorum()
+  const menu = new SaveAsMenu({ sink: s.sink, modorum, resolveOwner: async () => ({ animaId: 'a' }) })
+
+  await menu.open(10, 'u1', SEED)
+  await menu.takeReply(100, 10, 'u1', 'styled')
+  await menu.handle(101, 'prefix', 10, 'u1')
+  await menu.takeAffixReply(102, 10, 'u1', 'masterpiece')
+  await menu.handle(101, 'prefix', 10, 'u1')          // prompt id 103
+  await menu.takeAffixReply(103, 10, 'u1', '-')        // clear
+
+  await menu.handle(101, 'save', 10, 'u1')
+  assert.equal(registered[0].aditus.prompt.praefixum, undefined)
+})
+
 test('invalid name → badName reply, no review, no register', async () => {
   const s = makeSink()
   const { modorum, registered } = makeModorum()
