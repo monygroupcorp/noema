@@ -57,12 +57,13 @@ function makeCompiler(fixedSeed?: number) {
 
 // ── compile() — slot substitution ────────────────────────────────────────────
 
-test('compile() embeds prompt into CLIPTextEncodeFlux nodes via slotMap', async () => {
+test('compile() embeds prompt into the LoraTextExtractor node via slotMap', async () => {
+  // flux now routes the prompt through the cozyness LoraTextExtractor (node 20);
+  // the CLIPTextEncodeFlux node (22) reads the extractor's cleaned-text output.
   const compiler = makeCompiler(42)
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'a glowing cat' })
-  const node22 = spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
-  assert.equal(node22.inputs.clip_l, 'a glowing cat')
-  assert.equal(node22.inputs.t5xxl, 'a glowing cat')
+  const node20 = spec.workflow.inputTemplate['20'] as { inputs: Record<string, unknown> }
+  assert.equal(node20.inputs.text, 'a glowing cat')
 })
 
 test('compile() embeds width and height into EmptyLatentImage', async () => {
@@ -402,12 +403,35 @@ test('compile() on loraCapable template with no trigger hit: prompt unchanged, n
 })
 
 test('compile() on NOT-loraCapable template: resolver does not run even with matching triggers', async () => {
+  // flux-schnell-no-url is the remaining non-loraCapable real template. Its
+  // declared model carries no familia, so even a matching trigger map is ignored.
   const intellarum = makeLoraIntellarum([
     { slug: 'milady-v3', trigger: 'milady', defaultWeight: 1.0 },
   ])
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
-  // flux-schnell (default) is not loraCapable
-  const r = await compiler.compile(makeEssentia(), { prompt: 'a portrait, milady style' })
+  // Extend the resolver-intellarum so the no-url flow's base weight resolves.
+  const baseIntellarum = {
+    ...intellarum,
+    async find(id: string) {
+      if (id === 'intella.flux-schnell') {
+        return {
+          id, nomen: 'flux schnell', genus: 'model' as const, architectura: 'dit' as const,
+          parametri: 0, sources: [{ provenance: 'miladystation' as const, uri: 'https://example.com/flux-schnell.safetensors' }],
+          dest: 'unet/flux1-schnell.safetensors', sizeGb: 1, versio: '1.0.0', canonica: true, natum: new Date(),
+        } as Intella
+      }
+      return intellarum.find(id)
+    },
+  }
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, baseIntellarum)
+  const noUrl = makeEssentia({
+    intellae: [{ id: 'intella.flux-schnell', role: 'unet' }],
+    runpodSpec: {
+      ...makeEssentia().runpodSpec!,
+      workflowTemplate: 'flux-schnell-no-url',
+      workflowTemplateVersion: '1',
+    },
+  })
+  const r = await compiler.compile(noUrl, { prompt: 'a portrait, milady style' })
   const node22 = r.spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
   assert.equal(node22.inputs.clip_l, 'a portrait, milady style', 'prompt unchanged')
   assert.equal(r.spec.models.filter(m => m.role === 'lora').length, 0)
@@ -577,6 +601,10 @@ test('compile() dedupes a pinned model already present from prompt LoRA resoluti
     { pinnedModels: [{ role: 'lora', id: 'intella.milady-v3', dest: 'models/loras/milady-v3.safetensors' }] })
   assert.equal(r.spec.models.filter(m => m.id === 'intella.milady-v3').length, 1, 'not duplicated')
 })
+
+// NOTE: customNodes plumbing (Part 1) + sd15 familia-gating (Part 2) coverage lives
+// in the DB-free, hermetic-gated tests/unit/crystal/Compiler.sd15.test.ts so the
+// `npm run test:hermetic` gate exercises them without a MongoDB dependency.
 
 test('compile() with no pinnedModels behaves exactly as before', async () => {
   const compiler = makeCompiler(42)
