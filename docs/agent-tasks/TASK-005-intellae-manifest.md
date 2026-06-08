@@ -1,94 +1,96 @@
-# TASK-005: The `intellae` manifest — the flow declares the weights it needs
+# TASK-005: The `intellae` manifest + `familia` — the flow declares its weights; family drives LoRA compat
 
 - **Status:** ready
 - **Owner:** none
-- **Gated by:** — (hermetic: Compiler + template tests prove the weight set now comes from the flow.
-  The real install is unchanged in shape and validated on staging.)
+- **Gated by:** — (hermetic: Compiler + template tests prove weights come from the flow and LoRA compat
+  keys on `familia`. The Mongo query re-key + real install are validated on staging.)
 
-A flow record should be the **authoritative, atomic, swappable** declaration of the weights it needs
-to run. Today the weight *list* lives in the workflow template's `requiredModels[]` (`essendi.ts:42`
-even says so), not on the flow. This task **moves that list onto the flow** as `Modus.intellae`.
-Motivating case (your words): a `compositus` flow — flux image → sdxl upscale — needs the **union of
-two model families' weights**, which belongs on the flow, not split across templates.
+Two moves that make a flow **self-describing** and kill a shoehorned field:
+1. **Weights onto the flow.** The weight list lives in `template.requiredModels[]` today (`essendi.ts:42`);
+   move it to `Modus.intellae`. The flow declares what it downloads.
+2. **`familia` becomes the LoRA-compat key; drop `Essentia.intellaId`.** The flow's only use of
+   `intellaId` is the LoRA trigger join (`Compiler.ts:125`); its documented purpose
+   (`intelligendi.ts:149–152`) is "run only in workflows whose base `Essentia.intellaId` matches this
+   `baseIntellaId`." That's a single-purpose join key — and the real concept is **model family**
+   ('flux','sd15',…), which already exists loosely as `Intella.tags` (`intelligendi.ts:191`). Formalize
+   it as `Intella.familia`, key compat on it, and `intellaId` disappears.
 
-## Two distinct concepts — do NOT conflate them (this is the crux)
+**Composite-ready by construction** (the "don't box ourselves" requirement). A `compositus` flow
+(flux → sdxl → z-image) spans multiple families; LoRA trigger resolution must be **per-prompt-input**,
+filtered to the family of the step that input feeds — a flux-path trigger word resolves only flux LoRAs.
+The mapping already exists: `slotMap` gives prompt-input → graph node; the gradus gives node → step →
+family. So trigger resolution must key on a **`familia` passed per call**, never a flow-global id.
+`resolveLoraTriggers(prompt, { triggerMap })` is *already* per-prompt — we only change how the
+triggerMap is keyed (intellaId → familia). Composite compilation itself is the future task that calls
+this per-input; this task must not assume single-flow-global-family.
 
-Grounding (`flux-schnell-v1.json`, `sd15-v1.json`, `seeds/essentiae.ts`) shows the flow has **two
-different model concerns**, and they are NOT the same id:
-
-1. **Physical weight set** — what actually downloads. flux = `unet` (`intella.flux-schnell-fp8-scaled`)
-   + `vae` + 2× `clip`; sd1-5 = one `checkpoint`. This currently lives in `template.requiredModels`.
-   **→ This is what `Modus.intellae` becomes.**
-2. **Base-family pointer** — `Essentia.intellaId` (`intella.flux-schnell`), the *logical family* LoRAs
-   key their compatibility against (`Compiler.ts:125 triggerMap(intellaId)`). It is **not** one of the
-   physical weights (flux's weight is `…-fp8-scaled`, the family is `…flux-schnell`). **→ KEEP it
-   unchanged.** It is a separate concept; the trigger map stays exactly as-is.
-
-So: **`intellae` = downloadable weights** (replaces the `requiredModels` list); **`intellaId` = base
-family** (untouched). No `baseIntellaId` helper, no removal, no allocutio changes.
-
-**Out of bounds (different concept entirely):** `intellaId` as a generic run/trace FK on `Actum`,
-`Vestigium`, `Materia`, `significandi`, `rag/`, migrations — "which model a run used." Do not touch.
-Also untouched: trigger-word LoRAs (resolved per-dispatch at compile, `Compiler.ts:116–146`) and
-general LoRA compat — they stay dynamic, NOT in the manifest.
-
-## The key grounding (the change is small)
-- `Compiler._resolveModels` (`Compiler.ts:188–211`) **already** fills `url` + `dest` from the `Intella`
-  record (`intella.sources[0].uri`, `intella.dest`). So `Intella` already owns *where a weight lives*.
-  The only mis-homed thing is the **list of weight ids** — `template.requiredModels` → `Modus.intellae`.
+## Design (confirmed)
+- `familia` lives on `Intella` (weight + LoRA). A flow's family is **derived, never declared**: atomic →
+  its base-role weight's `familia`; composite → the union across gradus children. (No `familia` field on
+  `Modus` — single source of truth, zero drift.)
+- `Modus.intellae` = the physical weight manifest (replaces the `requiredModels` *list*).
+- **Install** = flat union of weights (composite: union across steps, derived). **Trigger filtering** =
+  per-input by step family. Same manifest, two uses.
 
 ## Read first
 - `AGENTS.md`, `docs/adr/0001`, `0003`, `0004`.
-- `src/types/modus.ts` (where `intellae` goes — on `Modus`, since `compositus` modi need it too).
-- `src/types/essendi.ts` (`Essentia.intellaId` — STAYS; clarify its doc as "base family").
-- `src/crystal/Compiler.ts:112–211`; `src/crystal/WorkflowTemplateRegistry.ts`.
+- `src/types/modus.ts` (add `intellae` — on `Modus`, composites need it), `src/types/essendi.ts`
+  (`Essentia.intellaId` — removed), `src/types/intelligendi.ts` (add `Intella.familia`; the `Intellarum`
+  interface — `triggerMap`/`findByTrigger` signatures; LoRA `baseIntellaId` + `tags`).
+- `src/crystal/Compiler.ts:112–211`, `src/crystal/MongoIntella.ts:118–155` (the `baseIntellaId` queries),
+  `src/crystal/loraResolver.ts`, `WorkflowTemplateRegistry.ts`.
 - `src/crystal/workflows/{flux-schnell-v1,sd15-v1,flux-schnell-no-url-v1,lora-test-v1}.json`,
-  `src/crystal/seeds/essentiae.ts`.
+  `src/crystal/seeds/{essentiae,intellae}.ts`.
 - `tests/unit/crystal/{Compiler.test,Compiler.sd15.test,workflowTemplates.test,WorkflowTemplateRegistry.test}.ts`.
 
 ## Deliverables
-1. **Add `Modus.intellae?: Array<{ id: string; role: string }>`** (`src/types/modus.ts`) — the flow's
-   physical weight manifest. `role` matches existing `requiredModels.role` strings (`'checkpoint'`,
-   `'unet'`, `'vae'`, `'clip'`, `'lora'`, …). Doc: atomic flow → its full weight set; `compositus` →
-   the union across `gradus` children. (NOT the base family; NOT trigger LoRAs.)
-2. **Compiler sources the weight set from `essentia.intellae`** (not `template.requiredModels`):
-   change `baseRefs = [...(template.requiredModels ?? []), ...loraRefs]` →
-   `baseRefs = [...intellaeRefs, ...loraRefs]`, where each `intellae` entry becomes a ref
-   `{ id, role }` **enriched with `url`/`dest` from a matching `template.requiredModels` entry by id
-   when present** (preserves the url/dest fallback for unregistered Intellae). `_resolveModels` is
-   unchanged (it still overrides `url`/`dest` from the `Intella` record). Trigger map at line 125 stays
-   `essentia.intellaId` — **unchanged**.
-3. **Templates keep `requiredModels` as an OPTIONAL url/dest fallback** (make it `?` on
-   `WorkflowTemplate`), no longer the source of the list. Migrate the 2 flow seeds to carry `intellae`:
-   `flux-schnell` → the 4 weights (`unet`/`vae`/`clip`/`clip`, ids from `flux-schnell-v1.json`);
-   `sd1-5` → `[{ id:'intella.sd15-v1-5', role:'checkpoint' }]`. Leave the workflow JSONs intact (their
-   `requiredModels` remains as the fallback table).
-4. **Tests.** Update `Compiler.sd15.test.ts` / `WorkflowTemplateRegistry.test.ts` /
-   `workflowTemplates.test.ts` (and `Compiler.test.ts`) for the new source. Add a case proving
-   `CompiledSpec.models` is assembled from `essentia.intellae` (flux → its 4 weights; sd1-5 → 1), that
-   a trigger-word LoRA still resolves+appends (regression — `intellaId` path unchanged), and that an
-   unregistered-Intella falls back to the template's `requiredModels` url/dest. **Add the DB-free
-   Compiler/template tests to the hermetic gate** in `package.json` — `Compiler.sd15.test.ts` +
-   `WorkflowTemplateRegistry.test.ts` are DB-free; **verify `Compiler.test.ts` runs green bare
-   (`env -i`) before gating it — it matched a mongo/env pattern, so exclude it if it needs a DB.**
+1. **`Intella.familia?: string`** (`intelligendi.ts`) — the model family ('flux','sd15','sdxl','z-image',…;
+   canonical lowercase). The compat classification, formalized from the loose `tags` family value.
+2. **`Modus.intellae?: Array<{ id: string; role: string }>`** (`modus.ts`) — the physical weight
+   manifest. `role` ∈ existing strings (`checkpoint`/`unet`/`vae`/`clip`/`lora`/…). Doc: atomic → full
+   weight set; composite → union across `gradus`. **Remove `Essentia.intellaId`.**
+3. **Re-key LoRA compat to `familia`.** Change `Intellarum.triggerMap(baseIntellaId)` →
+   `triggerMap(familia)` and `findByTrigger(trigger, baseIntellaId, …)` → `findByTrigger(trigger,
+   familia, …)`; update `MongoIntella` to query LoRAs by `familia` (was `baseIntellaId` /
+   `params.baseIntellaId`). `LoRA.baseIntellaId` may remain as *provenance* (which exact base it trained
+   on) but is **no longer the compat key**.
+4. **Compiler** (`Compiler.ts`):
+   - Source the weight set from `essentia.intellae` (not `template.requiredModels`); enrich each ref's
+     `url`/`dest` from a matching `template.requiredModels` entry by id when present (fallback);
+     `_resolveModels` unchanged.
+   - Derive the flow's family from its **base-role weight** (`role` ∈ `checkpoint|unet`) via
+     `Intella.familia`, and call `triggerMap(familia)` (replacing `triggerMap(essentia.intellaId)`).
+     Add a small helper (e.g. `flowFamilia(essentia, intellarum)`). The resolver call is otherwise
+     unchanged — it already takes the (now family-keyed) map per prompt. Add a comment noting composite
+     compilation calls this **per prompt-input** with that input's family.
+5. **Seeds** (`seeds/intellae.ts`, `seeds/essentiae.ts`): set `familia` on base weights
+   (`intella.flux-schnell-fp8-scaled` → `'flux'`, `intella.sd15-v1-5` → `'sd15'`) and on the Armored
+   Dress LoRA (`'sd15'`); add `intellae` to the 2 flow seeds (flux → its 4 weights; sd1-5 → its
+   checkpoint). Make `WorkflowTemplate.requiredModels` optional (url/dest fallback only).
+6. **Tests + gate.** Update `Compiler.sd15.test.ts` / `Compiler.test.ts` / `WorkflowTemplateRegistry.test.ts`
+   / `workflowTemplates.test.ts`. Add cases: weights sourced from `intellae` (flux→4, sd1-5→1); the
+   trigger map is built from the **derived `familia`** (a flux flow resolves a flux-family LoRA, and a
+   mismatched-family LoRA is NOT offered); url/dest fallback still works. **Gate the DB-free tests** in
+   `package.json` (`Compiler.sd15.test.ts`, `WorkflowTemplateRegistry.test.ts`; verify `Compiler.test.ts`
+   runs green bare with `env -i` before gating it — it matched a mongo/env pattern).
 
 ## Acceptance (hermetic — this is "done")
 - `npx tsc --noEmit` clean.
-- `npm run test:hermetic` green (bare), including the newly-gated tests, with:
-  - `flux-schnell` compile → `CompiledSpec.models` = its 4 weights, sourced from `intellae` (template
-    `requiredModels` removed/ignored as the list source).
-  - `sd1-5` compile → its 1 checkpoint, sourced from `intellae`.
-  - trigger-word LoRA still resolves + appends (uses unchanged `essentia.intellaId`).
-  - unregistered-Intella → url/dest still resolve via the template `requiredModels` fallback.
+- `npm run test:hermetic` green (bare), incl. the newly-gated tests, with:
+  - `flux-schnell`/`sd1-5` compile → `CompiledSpec.models` from `intellae` (4 / 1 weights).
+  - trigger resolution keys on the **derived family** — flux flow + flux LoRA trigger → applied; same
+    trigger declared for a different family → NOT applied (family filtering works).
+  - unregistered-Intella → url/dest via the template `requiredModels` fallback.
+  - `tsc` proves no remaining reader of `Essentia.intellaId` (it's gone) and `triggerMap` takes `familia`.
 
-## Verify
-```bash
-npx tsc --noEmit && npm run test:hermetic
-```
+## Composite-readiness (verify, don't build)
+The interfaces this task ships must let composites plug in with no rework: `triggerMap(familia)` is
+callable per-step; `intellae` derives a per-step family; install is a derivable union. **Do NOT build**
+`Compiler._compileComposed`, multi-prompt-input templates, or per-input resolution here — note in code
+where they attach.
 
 ## Out of scope (do NOT do)
-- **Removing or renaming `Essentia.intellaId`** — it's the base family, a separate concept (kept).
-- The run/trace `intellaId` FKs (`Actum`/`Vestigium`/`Materia`/`significandi`/`rag`/migrations).
+- The run/trace `intellaId` FKs (`Actum`/`Vestigium`/`Materia`/`significandi`/`rag`/migrations) — different concept.
 - Allocutio catalog/arm `intellaId` reads — generic Intella refs, not flow declarations.
-- `compositus` trigger-family resolution (a composite spanning two families) — future.
+- Composite compilation / per-input resolution / fuzzy family-compat graph — future.
 - Save-as (TASK-006), prompt affixes (TASK-007), real on-pod install (staging).
