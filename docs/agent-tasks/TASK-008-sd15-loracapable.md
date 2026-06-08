@@ -1,6 +1,6 @@
 # TASK-008: Port the LoRA-apply layer — `customNodes` plumbing + the cozyness MultiLoRALoader node
 
-- **Status:** Part 1 ready (hermetic); **Part 2 BLOCKED on assets** (cozyness pack URL + node graph)
+- **Status:** Part 1 ready (hermetic); **Part 2 ready** (graph + pack URL both known as of 2026-06-08)
 - **Owner:** none
 
 **Staging finding (2026-06-08), deepened:** LoRA resolution is built (Compiler injects `<lora:slug:weight>`
@@ -45,8 +45,12 @@ CLIPTextEncode:     clip  ← MultiLoraLoader[1],  text ← LoraTextExtractor[0]
 So the Compiler-injected `<lora:slug:weight>` prompt feeds `LoraTextExtractor.text`; the loader's
 model/clip outputs drive the sampler + text-encode.
 
-**Still needed (NOT in the JSON export):** the **cozyness custom-node pack git URL** for the template's
-`customNodes` (so the pod installs `LoraTextExtractor`/`MultiLoraLoader`).
+**Pack URL (provided 2026-06-08):** `https://github.com/skfoo/ComfyUI-Coziness` — declare it in the
+loraCapable templates' `customNodes`. Delivery is **per-job** in production: `_ensure_custom_nodes`
+(`comfyrunner.py:303`) `git clone`s + `pip install`s it on the first LoRA job per pod, idempotent after
+— **no image rebuild required.** (Future optimization, NOT this task: when the parked baked image
+`dockerfiles/flux-comfyui-runtime/Dockerfile` is revived, add a Coziness `git clone` layer so cold pods
+skip the per-job clone. Noted there as a backlog comment.)
 
 Then, for `sd15-v1.json` (and `flux-schnell-v1.json`):
 - insert the `LoraTextExtractor` → `MultiLoraLoader` chain into `inputTemplate` per the wiring above;
