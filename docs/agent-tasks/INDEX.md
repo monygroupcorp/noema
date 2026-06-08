@@ -10,12 +10,11 @@ real GPU/pod is validated separately on staging. Read `AGENTS.md` first.
 | [TASK-003](TASK-003-canon-verb-table-rebind.md) | Canon-verb default table + per-user rebind (the seam) | done | — (persistence → staging) |
 | [TASK-004](TASK-004-flow-card-aditus-panel.md) | The flow card — surface every `Porta`, execute when ready | done | — |
 | [TASK-005](TASK-005-intellae-manifest.md) | `intellae` manifest + `familia` — flow declares its weights; family drives LoRA compat (drop `intellaId`) | done | — (Mongo re-key + install → staging) |
+| [TASK-006](TASK-006-save-as.md) | Save-as — flow card / delivery-info menu → a derived `Modus` (owner-keyed persistence) | ready | — (Mongo `auctor` + e2e → staging) |
 
 ## Backlog (not yet written as specs)
-- **TASK-006 · Save-as** — the flow card / delivery-info "save as canon verb" / "save as my flow" menu
-  → register a derived `Modus` (owner-stamped, `fonte` parent, captures the `intellae` manifest +
-  config defaults + prompt mode; global-unique name). Builds on TASK-005. Gated on the persistence
-  layer (widen `Modus.auctor` to `{animaId}|{commitment}`, the owner-keyed store). See ADR-0003.
+- **Verb-rebind persistence wiring** — sibling follow-up on TASK-006's `auctor` foundation: wire
+  TASK-003's `resolveVerb`/`bindVerb` to the owner-keyed store. See ADR-0003.
 - **TASK-007 · Prompt affixes** — `Porta.praefixum`/`suffixum` woven at compile via the `TraitMixer`
   seam, surfaced in the Save-as menu. Purely additive on TASK-006 (sets fields TASK-006 leaves unset).
 - **Trigger-resolution convergence** — once `familia` is populated (TASK-005), drop
