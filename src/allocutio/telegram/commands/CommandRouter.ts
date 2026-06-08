@@ -45,12 +45,13 @@ export interface CommandDeps {
    */
   arm?(userId: string, chatId: number): void
   /**
-   * List the runnable flow slugs (canonical atomic Modorum entries) for /run
-   * validation + usage hints. Optional — when absent, /run skips validation and
-   * lets the downstream flow handle an unknown modus. Wired by TelegramAllocutio
-   * against the modus registry.
+   * List the runnable flow slugs for a user — the canonical atomic Modorum
+   * entries plus the caller's own saved (`canonica:false`, owned) flows — for /run
+   * + /bind validation and usage hints. Optional — when absent, /run skips
+   * validation and lets the downstream flow handle an unknown modus. Wired by
+   * TelegramAllocutio against the modus registry, keyed by the resolved owner.
    */
-  flows?(): Promise<string[]>
+  flows?(userId: string): Promise<string[]>
   /**
    * Resolve a user's override flow for a canon verb (e.g. their /bind make sd1-5).
    * Returns the override flowId, or undefined to fall through to the CANON_VERBS
@@ -130,7 +131,7 @@ export class CommandRouter {
 
         // When the flow registry is wired, reject unknown slugs with the available list.
         if (this.deps.flows) {
-          const available = await this.deps.flows()
+          const available = await this.deps.flows(userId)
           if (!available.includes(slug)) {
             await this.deps.sendMessage(chatId, COPY.command.runUnknown(slug, available))
             ack()
@@ -171,7 +172,7 @@ export class CommandRouter {
           return
         }
         if (this.deps.flows) {
-          const available = await this.deps.flows()
+          const available = await this.deps.flows(userId)
           if (!available.includes(slug)) {
             await this.deps.sendMessage(chatId, COPY.command.bindUnknownFlow(slug, available))
             ack()

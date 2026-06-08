@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { CommandRouter } from '../../../../src/allocutio/telegram/commands/CommandRouter.js'
 
 function make(extra?: {
-  flows?: () => Promise<string[]>
+  flows?: (userId: string) => Promise<string[]>
   resolveVerb?: (userId: string, verb: string) => Promise<string | undefined>
   bindVerb?: (userId: string, verb: string, modusId: string) => Promise<void>
 }) {
@@ -136,6 +136,21 @@ test('/run with a flows dep rejects an unknown flow, no enter', async () => {
   await router.dispatch('u1', 456, '/run nope', 50)
   assert.equal(calls.enter.length, 0)
   assert.match((calls.msg.at(-1) as { text: string }).text, /Unknown flow 'nope'/)
+})
+
+test('/run resolves the callers own saved flow — flows(userId) returns it, so it enters', async () => {
+  // flows() is per-user: the mock keys the owned slug off the caller's userId.
+  let seenUserId: string | undefined
+  const { router, calls } = make({
+    flows: async (userId) => {
+      seenUserId = userId
+      return userId === 'u1' ? ['flux-schnell', 'owned-slug'] : ['flux-schnell']
+    },
+  })
+  await router.dispatch('u1', 456, '/run owned-slug', 50)
+  assert.equal(seenUserId, 'u1', 'flows() receives the caller userId')
+  assert.deepEqual(calls.enter, [{ userId: 'u1', state: { modusId: 'owned-slug', aditus: {}, browsePageIndex: 0 } }])
+  assert.equal(calls.msg.length, 0, 'an owned flow is not rejected')
 })
 
 // ── verb table + rebind (TASK-003) ───────────────────────────────────────────

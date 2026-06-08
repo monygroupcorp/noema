@@ -246,7 +246,14 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       // /run validation + usage hints: the runnable flow slugs are the canonical
       // atomic Modorum entries. Omitted when the registry isn't wired.
       ...(deps.modorum ? {
-        flows: async () => (await deps.modorum!.list({ genus: 'atomicus', canonica: true })).map(m => m.id),
+        flows: async (userId) => {
+          const owner = await this.identity.resolve(userId)
+          const [canon, owned] = await Promise.all([
+            deps.modorum!.list({ genus: 'atomicus', canonica: true }),
+            deps.modorum!.list({ genus: 'atomicus', auctor: owner }),
+          ])
+          return [...new Set([...canon, ...owned].map(m => m.id))]
+        },
       } : {}),
     })
 
