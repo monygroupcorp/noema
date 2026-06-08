@@ -23,7 +23,9 @@ the ADR-0003 saved-version (full case) and is the task that builds the **owner-k
 ## Read first
 - `AGENTS.md`, ADR-0001, ADR-0003.
 - `src/types/modus.ts` (`Modus.auctor` — widen; add `fonte`; `Modorum.register/find/list`),
-  `src/types/collectio.ts` (the `{ animaId } | { commitment }` union to reuse).
+  `src/flow/types.ts:103` (the `AuctorKey` type to reuse), `src/types/actumIndex.ts:27` (precedent for
+  importing `AuctorKey` into `src/types`), `src/types/actum.ts:135` (`Actum.pinnedModels`, first-class),
+  `src/api/webhooks/executionWebhook.ts:163–166` (the one `Modus.auctor` reader to migrate).
 - `src/crystal/hashModus.ts` (contentHash for the built Modus), `src/crystal/MongoModorum.ts`
   (`register`; `auctor` (de)serialization + the `list` filter).
 - `src/allocutio/lexicon/delivery/DeliveryMenu.ts` (the `rerun` hook + `dm:` cases — add `save`),
@@ -33,14 +35,19 @@ the ADR-0003 saved-version (full case) and is the task that builds the **owner-k
   `state.pinnedModels`).
 
 ## Deliverables
-1. **Owner-keyed persistence (the foundation).**
-   - Widen `Modus.auctor?: string` → `?: { animaId: string } | { commitment: string }` (the exact
-     `Collectio.by` union — anon owns via arcanum `commitment`). Canonical modi leave it undefined.
+1. **Owner-keyed persistence (the foundation — mostly reuse).**
+   - Widen `Modus.auctor?: string` → `?: AuctorKey`, the **existing** type at `src/flow/types.ts:103`
+     (`{ animaId } | { commitment }`). Import it the way `src/types/actumIndex.ts:27` already does (no
+     layering issue — that precedent exists). Do NOT define a fresh union. Canonical modi leave it undefined.
+   - **Migrate the one in-scope reader:** `src/api/webhooks/executionWebhook.ts:166`
+     (`modusAuctorAnimaId = modus?.auctor`) → `modus?.auctor && 'animaId' in modus.auctor ?
+     modus.auctor.animaId : undefined`. (The other `auctor` hits are DIFFERENT fields — `Intella.auctor`
+     = model author string; ledger-entry `auctor` = 'nexus:…'. Leave them.)
    - Add `Modus.fonte?: string` — the parent modusId a saved flow was derived from (provenance + the
      ADR-0003 fork chain).
-   - Update `MongoModorum` to (de)serialize the union and support `list({ auctor })` by owner.
-   - An owner-resolution helper in the adapter: `userId → { animaId } | { commitment }` via
-     `identity.resolve` (identified → `animaId`; anon → `commitment`). Injected, like other deps.
+   - Update `MongoModorum` to (de)serialize `auctor` as the union and support `list({ auctor })` by owner.
+   - **Owner is free:** `identity.resolve(userId)` already returns the `AuctorKey` (it's what `_rerun`
+     uses). No new helper — the save flow uses `await identity.resolve(presserUserId)` as the `auctor`.
 2. **The derived-Modus builder** (crystal, pure): `deriveSavedModus(base, opts)` →
    - copy `base` wholesale (genus, `runpodSpec`/`gradus`, `exitus`, `ministerium`, …), then override:
      `id = slug`, `nomen = name`, `auctor = owner`, `canonica = false`, `fonte = base.id`, fresh `versio`.
@@ -48,7 +55,9 @@ the ADR-0003 saved-version (full case) and is the task that builds the **owner-k
    - `aditus = base.aditus` with `Porta.default` set from `opts.aditus` values: **config always; the
      `prompt` Porta only when `promptMode === 'pinned'`** (open → leave it as a fresh required input).
    - `contentHash = hashModus(result)`. (Edit-a-saved-flow later = re-register w/ bumped versio — ADR-0003.)
-3. **The consistent Save-as menu** (allocutio flow — same menu from both entries):
+3. **The consistent Save-as menu** (same menu from both entries) — built on the **force-reply /
+   `takeReply` pattern** (like Mod• add-by-trigger, `TelegramAllocutio:483`), NOT the flow router (the
+   delivery-info entry has no active flow context):
    - **name** (force-reply) → derive a slug (`FLOW_SLUG_RE`).
    - **review**: list the `intellae` (models, incl. pinned LoRAs) + the porta (config values) + the
      **prompt-mode toggle** (open ↔ pinned).
@@ -59,7 +68,8 @@ the ADR-0003 saved-version (full case) and is the task that builds the **owner-k
    - Flow card: an `a:saveas` button → open the menu seeded from `state.aditus` + `state.modusId` +
      `state.pinnedModels`.
    - Delivery info tab: a **`save`** hook on `DeliveryMenu` (mirror `rerun`) + a `dm:save:<actumId>`
-     case + a "Save as…" button; seed from the Actum's `modusId` + `aditus` (+ `aditus._pinnedModels`).
+     case + a "Save as…" button; seed from the Actum's `modusId` + `aditus` + **`actum.pinnedModels`**
+     (first-class field, actum.ts:135 — NOT `aditus._pinnedModels`).
 5. **Optional "save as canon verb"** — after register, offer to bind a canon verb to the new flow via
    the TASK-003 `bindVerb` seam. (Distinct from naming a flow — ADR-0003: rebind points a verb *at* a flow.)
 6. **Copy** in `copy.ts` (`command.*`/a `saveAs.*` block): name prompt, review header, prompt-mode
@@ -91,3 +101,7 @@ npx tsc --noEmit && npm run test:hermetic
   `auctor` foundation (note it; don't build it here).
 - Marketplace/sharing/visibility/royalties beyond storing `fonte`.
 - Editing an existing saved flow (re-register flow) — future.
+- `Intella.auctor` (model-author string) and ledger-entry `auctor` ('nexus:…') — DIFFERENT fields,
+  not `Modus.auctor`. Do not touch.
+- `/flows` listing a user's owned saved flows — a follow-up; the core deliverable is that the registered
+  flow is **`/run <slug>`-able** (TASK-002 already resolves any `Modorum` id).
