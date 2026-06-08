@@ -22,18 +22,11 @@ real GPU/pod is validated separately on staging. Read `AGENTS.md` first.
   unchanged; it's a stage-FEED regression introduced in TASK-002→006. Fix = git-archaeology: diff the
   feed path (ExecuteFlow submit → Stream → `_handleActumStage` → `bulletins.register`/`onStage`) against
   the known-good `fdfd…`/`fd50359d`/~`e72b6019` state and reconnect. NOT a rewrite, NOT a guess. Deferred.
-- **TASK-007 · Prompt affixes** — `Porta.praefixum`/`suffixum` woven at compile via the `TraitMixer`
-  seam, surfaced in the Save-as menu. Purely additive on TASK-006 (sets fields TASK-006 leaves unset).
-- **Trigger-resolution convergence** — once `familia` is populated (TASK-005), drop
+- **Trigger-resolution convergence** — now that `familia` is populated (TASK-005/008), drop
   `BulletinModelCatalog`'s tag-derived family workaround and converge its `resolveTriggers(…,{family})`
   onto the crystal `triggerMap(familia)` (its own "swap once it's set" TODO). Allocutio ring; follow-up.
-- **Verb-binding persistence** — widen `Modus.auctor` to `{animaId}|{commitment}` (anon-capable),
-  re-home preferences (`affines` + verb-bindings) under that owner key, wire `resolveVerb`/`bindVerb`
-  (the TASK-003 follow-on; non-hermetic → staging). No new nouns. See ADR-0003.
-- **`aditus` parameter panel** — render an editable form from `Modus.aditus` (every `Porta`, not just
-  `prompt`); the simple verb is the degenerate case. The foundation for saved versions. See ADR-0003.
-- **Saved versions = derived `Modus`** — "save as my version" registers a user-owned Modus
-  (`auctor`, `canonica:false`, pinned `Porta.default`s); edit = re-register w/ bumped `versio`. See ADR-0003.
+- **Re-home `Anima.affines` onto `Consuetudo`** — fold per-modus param overrides into the owner-keyed
+  store (TASK-010) so all account preferences share one anon-capable home. `Consuetudo` is shaped for it.
 - **`/cook` (Collectio)** — `Modus × Tractus[]` grid → N `Acta` via `TraitEngine` + `CollectioCursor`.
 - **`/spell` (compositus `Modus`)** — run/author a `gradus`-chained flow (authored via `Tabula`).
 - Gen-flows for other catalog bases (SDXL, Illustrious, …) — same shape as TASK-001, **gated on
