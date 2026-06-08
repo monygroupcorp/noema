@@ -31,16 +31,29 @@ Make a template able to declare a custom-node pack that actually reaches the pod
 
 **Part 1 acceptance:** `npx tsc --noEmit` clean; `npm run test:hermetic` green incl. the new case.
 
-## Part 2 — wire the cozyness MultiLoRALoader into the gen templates (BLOCKED on assets)
-**Needs from the user / old system (NOT inventable):**
-- the **cozyness custom-node pack git URL** (for `customNodes`),
-- the **`MultiLoRALoader` node's graph shape** — its `class_type`, inputs (model + clip + the
-  lora-tag text), outputs — i.e. a reference workflow JSON that actually applies loras.
+## Part 2 — wire the cozyness LoRA chain into the gen templates (graph KNOWN; pack URL still needed)
+**Graph truth** (extracted from `docs/reference/old-workflows/sdxl` + `fluxi2i`): it's a **two-node
+chain**, `class_type`s `LoraTextExtractor-b1f83aa2` → `MultiLoraLoader-70bf3d77`:
+```
+CheckpointLoaderSimple → model[0], clip[1]
+LoraTextExtractor:  text ← <the prompt>           → [0]=cleaned text (tags stripped), [1]=lora-tag text
+MultiLoraLoader:    model ← ckpt[0], clip ← ckpt[1], text ← LoraTextExtractor[1]
+                                                    → [0]=model+loras, [1]=clip+loras
+KSampler:           model ← MultiLoraLoader[0]
+CLIPTextEncode:     clip  ← MultiLoraLoader[1],  text ← LoraTextExtractor[0] (cleaned)
+```
+So the Compiler-injected `<lora:slug:weight>` prompt feeds `LoraTextExtractor.text`; the loader's
+model/clip outputs drive the sampler + text-encode.
 
-Then, for the lora-capable gen templates (`flux-schnell-v1.json`, `sd15-v1.json`):
-- insert the MultiLoRALoader node into `inputTemplate`, wired so the `<lora:…>`-bearing prompt feeds it
-  and its model/clip outputs drive the sampler;
-- set `loraCapable: true`; declare the cozyness pack in the template's `customNodes`;
+**Still needed (NOT in the JSON export):** the **cozyness custom-node pack git URL** for the template's
+`customNodes` (so the pod installs `LoraTextExtractor`/`MultiLoraLoader`).
+
+Then, for `sd15-v1.json` (and `flux-schnell-v1.json`):
+- insert the `LoraTextExtractor` → `MultiLoraLoader` chain into `inputTemplate` per the wiring above;
+  route the `slotMap` `prompt` into `LoraTextExtractor.text` (NOT directly into the text-encode);
+- set `loraCapable: true`; declare the cozyness pack in `customNodes` (Part 1 plumbing carries it).
+- **Strip the slop:** the old flows wire inputs through `ComfyUIDeployExternal*` nodes (comfydeploy-
+  specific) — DROP those; crystal inputs come via `slotMap`, not graph nodes.
 - add a Compiler test: an sd15 flow + a `familia:'sd15'` LoRA trigger → `appliedLoras` includes it; a
   `familia:'flux'` LoRA with the same trigger → not applied (first real sd15 coverage of the familia re-key).
 
