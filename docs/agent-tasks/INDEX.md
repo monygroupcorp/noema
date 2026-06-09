@@ -69,9 +69,11 @@ _None — pick up a Backlog item below and graduate it to a numbered TASK spec._
   capacity) that essentiae reference version-pinned (`fundamentumId` + `fundamentumVersio`); the form half
   (workflowTemplate/seedInputKey/cookFlags) hoisted onto the Essentia; `runtime` single-sourced on the
   fundament. New `Fundamentorum` registry (Mongo + Memory), seeds, indexes, Compiler resolution, container
-  warm-pod matching. DB migrated on `noemaplane` (canonical + saved flows). **Still open:** ground the
-  **adapter** `/arm` chooser on `Fundamenta` — `BulletinModelCatalog.listFlows()` still synthesizes
-  `ArmPreset` cards from raw weights; it should project the canonical `Essentiae`/`Fundamenta` from the
-  registries instead, and `ArmPreset` collapses to a thin presentation projection of a `Fundamentum`
-  (the deferred `StudioBase` rename — now clearly an adapter view-model, ADR-0005 §adapter-follow-up).
+  warm-pod matching. DB migrated on `noemaplane` (canonical + saved flows). **Adapter grounding DONE**
+  (commit on `chainengine-migration`): `BulletinModelCatalog.listFlows()` now PROJECTS the canonical
+  `Fundamenta` from the registry (each card = a fundament: id + family + resolved weights + runtime +
+  vram + LoRA-availability) instead of synthesizing from raw weights; `ArmPreset` gained a `familia`
+  field for picker scoping. **Only cosmetic bit left:** rename the `ArmPreset` *type* → `StudioBase`
+  (it's now a thin presentation projection of a `Fundamentum`, ADR-0005 §adapter-follow-up) — pure
+  churn across ~17 refs, no behavior change.
 - **Per-user verb-rebind UI/settings flow** — beyond the `/bind` command seam.
