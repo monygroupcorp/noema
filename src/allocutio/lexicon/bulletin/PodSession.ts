@@ -4,7 +4,7 @@ import type { BulletinSnapshot } from './BulletinView.js'
 import type { ActiveSubmenu } from './affordances.js'
 import {
   WARM_LADDER_MS, WARM_DEFAULT_MS, DL_SLOW_MS,
-  type Audience, type JournalEntry, type LiveState, type PendingModel, type PickerState, type Loadout, type ModelDetail, type ArmState, type ArmPreset,
+  type Audience, type JournalEntry, type LiveState, type PendingModel, type PickerState, type Loadout, type ModelDetail, type ArmState, type StudioBase,
 } from './types.js'
 
 /** Coarse phase of a pod's life — drives timer orchestration in the manager. */
@@ -196,7 +196,7 @@ export class PodSession {
   // ── /arm wizard (image → config → then the model menu) ─────────────────────
 
   /** Begin the arm wizard at the preset step (curated quick-starts; Custom → manual path). */
-  beginArm(presets: ArmPreset[], images: string[]): void {
+  beginArm(presets: StudioBase[], images: string[]): void {
     this._confirmed = true
     this._armed = true
     this._activeSubmenu = null
@@ -240,7 +240,7 @@ export class PodSession {
   /** Done picking flows → hand off to the Mod • loadout/Add menu (the loadout is already built). */
   proceedArm(): void { this.finishArm() }
   /** Open a flow's detail card — what it bundles (base/models + config) before committing. */
-  openFlowDetail(preset: ArmPreset): void {
+  openFlowDetail(preset: StudioBase): void {
     if (this._arm) this._arm = { ...this._arm, step: 'flowdetail', flow: preset }
   }
   /** Custom chosen → drop into the manual image step. */

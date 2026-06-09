@@ -100,7 +100,7 @@ export interface Loadout {
  * manual image→config path. The detail fields back the card (what the fundament bundles before you
  * commit). All detail fields are optional (the chooser only needs id + label).
  */
-export interface ArmPreset {
+export interface StudioBase {
   id: string
   label: string
   /** The model family this fundament serves — scopes the LoRA picker (`armBase`). Absent on Custom. */
@@ -125,9 +125,9 @@ export interface ArmState {
    * `+` commits it. `'custom'` drops into the manual image→config path (for advanced hosts — and,
    * later, composing multiple flows/configs on one studio).
    */
-  presets: ArmPreset[]
+  presets: StudioBase[]
   /** The preset whose detail card is open (step 'flowdetail'). */
-  flow?: ArmPreset
+  flow?: StudioBase
   /** A transient notice on the chooser (e.g. a runtime-conflict rejection), cleared on next add/nav. */
   note?: string
   /** Available container images (Custom path — popular/only-one first). */

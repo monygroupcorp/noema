@@ -1,7 +1,7 @@
 import type { LedgerSummary } from './Ledger.js'
 import {
   WARM_LADDER_MS, WARM_LADDER_LABEL, WARM_TYPICAL_SEC, COLD_TYPICAL_MS,
-  type Audience, type JournalEntry, type LiveState, type PendingModel, type PickerState, type Loadout, type ModelDetail, type ArmState, type ArmPreset,
+  type Audience, type JournalEntry, type LiveState, type PendingModel, type PickerState, type Loadout, type ModelDetail, type ArmState, type StudioBase,
   type RenderedBulletin,
 } from './types.js'
 import { COPY } from '../copy.js'
@@ -146,7 +146,7 @@ function detailLines(d: ModelDetail): string[] {
 
 /** The /arm flow detail card — a flow is a base + models + a runtime/config + an image, laid out
  *  so an advanced host reads the full shape before committing. Lines omitted when absent. */
-function flowDetailLines(p: ArmPreset): string[] {
+function flowDetailLines(p: StudioBase): string[] {
   const C = COPY.bulletin.arm.flow
   const out = [p.label]
   if (p.blurb)            out.push('', p.blurb)

@@ -5,7 +5,7 @@ import { TimerRegistry } from './TimerRegistry.js'
 import { COPY } from '../copy.js'
 import {
   AUTO_SETTLE_MS, HUNT_SLOW_MS,
-  type Audience, type BulletinKeyboard, type PendingModel, type Loadout, type ModelDetail, type ArmPreset,
+  type Audience, type BulletinKeyboard, type PendingModel, type Loadout, type ModelDetail, type StudioBase,
 } from './types.js'
 
 /** The only I/O the bulletin subsystem needs — the platform adapter implements it. */
@@ -63,7 +63,7 @@ export interface BulletinDeps {
   installModels?: (podId: string, intellaIds: string[]) => Promise<{ installedModels: string[] } | null>
   /** `/arm` wizard: curated quick-start presets (flows), available container images, and the
    *  runtimes/configs for a chosen image (Custom path). */
-  listPresets?: () => Promise<ArmPreset[]>
+  listPresets?: () => Promise<StudioBase[]>
   listImages?: () => Promise<string[]>
   listConfigs?: (image: string) => Promise<string[]>
   /** Surface a search prompt the host replies to (force-reply in Telegram); the adapter
@@ -168,7 +168,7 @@ export class BulletinManager {
 
   /** A committed flow resolves to the same spec a Custom build-out arrives at: container image +
    *  runtime + the base models it bundles, grouped under the flow as one architectura. */
-  private _loadoutFromPreset(p: ArmPreset): Loadout {
+  private _loadoutFromPreset(p: StudioBase): Loadout {
     return {
       ...(p.image ? { image: p.image } : {}),
       ...(p.config ? { runtime: p.config } : {}),
@@ -181,7 +181,7 @@ export class BulletinManager {
 
   /** Add a flow to the armed loadout, or — if its runtime conflicts with what's already armed
    *  (one pod = one runtime) — leave the loadout untouched and surface a notice on the chooser. */
-  private _addFlowOrNote(s: PodSession, preset: ArmPreset): void {
+  private _addFlowOrNote(s: PodSession, preset: StudioBase): void {
     const have = s.loadout?.runtime
     // armBase scopes the LoRA picker — it's the model FAMILY, not the fundament id (ADR-0005).
     const added = s.addFlow(preset.familia ?? preset.id, this._loadoutFromPreset(preset))
