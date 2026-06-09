@@ -44,6 +44,21 @@ test('register posts the setup bulletin; stages drive the journal; complete show
   assert.match(s.lastText(), /1 gen · exec ~12s avg · \$0\.080 ea · \$0\.08 total/)
 })
 
+test('gen-path race: stages that arrive BEFORE register are buffered + replayed in order', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink })
+  // The gen path (cursor.run) fires 'provisioning' the instant it detaches — before the Stream
+  // primitive renders + registers. Without buffering these drop (no actumChat yet), the session
+  // never enters 'hunting', and the later 'pod-locked' is misread as a WARM reuse ("generating").
+  m.onStage('a1', 'provisioning', undefined)
+  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  m.register(456, 'a1', '123')   // Stream primitive renders → replays the buffered stages in order
+  await tick(0)
+  assert.match(s.lastText(), /Found RTX 4090 for \$0\.69\/hr in 30s/, 'cold Found line from the replayed provisioning→pod-locked')
+  assert.match(s.lastText(), /Initializing/, 'prep stage — NOT a warm "generating"')
+  assert.doesNotMatch(s.lastText(), /keep cooking/i, 'not mis-rendered as a warm idle pod')
+})
+
 test('warm reuse on a live session does NOT add a second Found line', async () => {
   const s = makeSink()
   const m = new BulletinManager({ sink: s.sink })
