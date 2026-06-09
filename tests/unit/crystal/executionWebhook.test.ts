@@ -398,7 +398,7 @@ const TEST_MODUS: Modus = {
   aditus: {},
   exitus: {},
   canonica: true,
-  auctor: 'anima-flux-author',
+  auctor: { animaId: 'anima-flux-author' },   // auctor is the {animaId}|{commitment} owner union
   natum: new Date(),
   mutatum: new Date(),
 }

@@ -166,7 +166,8 @@ export async function handleExecutionWebhook(
         // `Modus.auctor` is now the `{ animaId } | { commitment }` owner union.
         // Royalty routing addresses identified authors only; anon-owned (commitment)
         // saved flows have no animaId to route to here.
-        modusAuctorAnimaId = modus?.auctor && 'animaId' in modus.auctor ? modus.auctor.animaId : undefined
+        modusAuctorAnimaId = modus?.auctor && typeof modus.auctor === 'object' && 'animaId' in modus.auctor
+          ? modus.auctor.animaId : undefined   // typeof guard: legacy stringy data can't crash the webhook
       }
 
       // Hosting payout (Phase C): resolve the host's full HostKey from Hospitium
