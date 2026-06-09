@@ -1,7 +1,14 @@
 # ADR-0001: Speak the crystal — no new nouns
 
-- **Status:** accepted
+- **Status:** accepted (the "studio base" clause is **superseded by ADR-0005**)
 - **Date:** 2026-06-05
+
+> **Update (ADR-0005, 2026-06-09):** the clause below ruling studio-base a *presentation-only*
+> concept (`ArmPreset`→`StudioBase`, "not a domain noun") is superseded. Deeper analysis showed
+> `Essentia.runpodSpec` was a provider-poisoned, scope-conflated encoding of a genuinely missing
+> **crystal-core** primitive — now `Fundamentum` (ADR-0005). The rest of this ADR stands: speak the
+> crystal, "flow" === `Modus`/`Essentia`, "studio" === `Materia`, single-source `runtime`, and the
+> ban on a redundant `Workflow`/`Studio` type.
 
 ## Context
 

@@ -33,50 +33,19 @@ export type EssentiaCategoria =
   | 'chain'   // on-chain operation (transaction, contract call)
 
 /**
- * RunpodSpec — the RunPod execution substrate for an Essentia.
- *
- * Everything the RunPodCursor.compile step needs to build a deployment:
- * the container image, the ComfyUI workflow template reference, and the
- * cook flags that control GPU selection and inference behaviour.
- *
- * Required models come from the FLOW's own weight manifest (`Modus.intellae`)
- * — the flow declares what it downloads. The workflow template's
- * `requiredModels[]` survives only as a url/dest fallback (keyed by id).
+ * CookFlags — per-flow defaults for GPU selection + inference behaviour, merged with
+ * per-request `_cookFlags` overrides at compile time. The flow's own FORM, not substrate.
  */
-export interface RunpodSpec {
-  /** Docker image ID — e.g. 'runpod/pytorch' */
-  imageId: string
-  /** Docker image version tag */
-  imageVersion: string
-  /**
-   * The on-pod runtime this spec targets — 'ComfyUI' (default) | 'llama.cpp' | 'vLLM' | …. Selects
-   * which runner the pod bootstraps and which client the dispatch layer submits to. RESERVED: the
-   * second-runtime work establishes this field now; the runner dispatch + bootstrap that consume it
-   * land in a GPU sprint. Absent → 'ComfyUI'.
-   */
-  runtime?: string
-  /**
-   * Workflow template identifier — looked up in the template registry.
-   * Corresponds to templateId in the workflow JSON on disk / in the DB.
-   */
-  workflowTemplate: string
-  workflowTemplateVersion: string
-  /**
-   * Which aditus field holds the seed value.
-   * Default: 'input_seed'. Passed to the slot map resolver.
-   */
-  seedInputKey?: string
-  /** Default cook flags — merged with per-request _cookFlags overrides */
-  defaultCookFlags?: {
-    batchSize?: number
-    /** 'shuffle' = random each run, 'fixed' = always seedPlaceholder, 'increment' = base + pieceIndex */
-    seedStrategy?: 'shuffle' | 'fixed' | 'increment'
-    seedPlaceholder?: number
-    privateMode?: boolean
-    /** Minimum VRAM in GB — used by GPUScheduler for pod selection */
-    vramGb?: number
-    maxPricePerHr?: number
-  }
+export interface CookFlags {
+  batchSize?: number
+  /** 'shuffle' = random each run, 'fixed' = always seedPlaceholder, 'increment' = base + pieceIndex */
+  seedStrategy?: 'shuffle' | 'fixed' | 'increment'
+  seedPlaceholder?: number
+  privateMode?: boolean
+  /** Minimum VRAM in GB — used by GPUScheduler for pod selection. (The fundament also declares a
+   *  capacity via `Fundamentum.vramGb`; this stays for the request-time scheduler path.) */
+  vramGb?: number
+  maxPricePerHr?: number
 }
 
 /**
@@ -85,10 +54,15 @@ export interface RunpodSpec {
  * Extends Modus with:
  *   - genus is always 'atomicus' (essentiae are leaves, never trees)
  *   - categoria declares what it produces
- *   - runpodSpec carries the execution substrate for RunPod workflows
+ *   - a version-pinned reference to the `Fundamentum` it runs on (the substrate), plus its own
+ *     execution FORM (workflow template, seed key, cook flags)
  *
- * The weights an essentia requires live on `Modus.intellae` (the weight
- * manifest); the LoRA-compat family is derived from those weights' `familia`.
+ * Per ADR-0005, the SUBSTRATE (image + runtime + base/support weights) was lifted out of the old
+ * provider-named `runpodSpec` into `Fundamentum`; the Essentia now REFERENCES it (id + versio, the
+ * same discipline as the template ref) so a family of essentiae share one fundament. The form half
+ * — `workflowTemplate`, `seedInputKey`, `defaultCookFlags` — stays here. The provider name (runpod)
+ * lives only on the `Cursor` / `Materia.genus`. Base weights live on the `Fundamentum`; any
+ * flow-specific extra weights may still ride `Modus.intellae`.
  *
  * "essentia" = essence/being in Latin — the thing that simply IS,
  * the irreducible expression the platform knows how to execute.
@@ -97,12 +71,25 @@ export interface Essentia extends Modus {
   /** Essentiae are always atomic — they execute one thing */
   genus: 'atomicus'
   categoria: EssentiaCategoria
+
   /**
-   * RunPod execution substrate. Present when ministerium === 'runpod'.
-   * Carries the container image, workflow template reference, and cook flags.
-   * Absent for non-RunPod essentiae (OpenAI, Replicate, local, etc.).
+   * The compute substrate this flow runs on — a version-pinned reference into `Fundamentorum`.
+   * Present for pod-hosted flows (ministerium === 'runpod'); absent for API-hosted essentiae
+   * (OpenAI, Replicate, …). Replaces the former provider-named `runpodSpec` envelope (ADR-0005).
    */
-  runpodSpec?: RunpodSpec
+  fundamentumId?: string
+  fundamentumVersio?: string
+
+  /**
+   * Workflow template identifier — looked up in the template registry (templateId in the workflow
+   * JSON / DB). The flow's own FORM: which graph runs on the fundament. Required for pod flows.
+   */
+  workflowTemplate?: string
+  workflowTemplateVersion?: string
+  /** Which aditus field holds the seed value. Default: 'input_seed'. Passed to the slot map resolver. */
+  seedInputKey?: string
+  /** Default cook flags — merged with per-request `_cookFlags` overrides. */
+  defaultCookFlags?: CookFlags
 }
 
 /** "Essentiae" — nominative plural of essentia */

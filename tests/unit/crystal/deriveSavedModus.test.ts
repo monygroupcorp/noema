@@ -133,9 +133,10 @@ test('builder does not mutate the base modus', () => {
   assert.equal(JSON.stringify(b), before)
 })
 
-test('subtype fields (e.g. categoria/runpodSpec) copy through wholesale', () => {
-  const b = base({ ...({ categoria: 'image', runpodSpec: { workflowTemplate: 'sd15' } } as Partial<Modus>) })
+test('subtype fields (e.g. categoria + the fundament ref) copy through wholesale', () => {
+  const b = base({ ...({ categoria: 'image', fundamentumId: 'sd15-comfyui', fundamentumVersio: '1.0.0', workflowTemplate: 'sd15' } as Partial<Modus>) })
   const d = deriveSavedModus(b, { slug: 's2', name: 'S2', owner, aditus: {}, promptMode: 'open' })
   assert.equal((d as unknown as { categoria?: string }).categoria, 'image')
-  assert.deepEqual((d as unknown as { runpodSpec?: unknown }).runpodSpec, { workflowTemplate: 'sd15' })
+  assert.equal((d as unknown as { fundamentumId?: string }).fundamentumId, 'sd15-comfyui')
+  assert.equal((d as unknown as { workflowTemplate?: string }).workflowTemplate, 'sd15')
 })
