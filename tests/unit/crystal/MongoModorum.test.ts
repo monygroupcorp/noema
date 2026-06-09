@@ -160,9 +160,9 @@ test('list filters by genus', async () => {
 })
 
 test('list filters by auctor', async () => {
-  await modorum.register(makeModus({ id: 'owned.tool', auctor: 'anima-123', contentHash: 'h1' }))
-  await modorum.register(makeModus({ id: 'other.tool', auctor: 'anima-456', contentHash: 'h2' }))
-  const mine = await modorum.list({ auctor: 'anima-123' })
+  await modorum.register(makeModus({ id: 'owned.tool', auctor: { animaId: 'anima-123' }, contentHash: 'h1' }))
+  await modorum.register(makeModus({ id: 'other.tool', auctor: { animaId: 'anima-456' }, contentHash: 'h2' }))
+  const mine = await modorum.list({ auctor: { animaId: 'anima-123' } })
   assert.equal(mine.length, 1)
   assert.equal(mine[0].id, 'owned.tool')
 })
