@@ -194,8 +194,10 @@ export const COPY = {
     /** Affix-setter button labels. */
     setPrefixButton: 'Set prefix',
     setSuffixButton: 'Set suffix',
-    /** Global-uniqueness collision — no two flows share a slug. No register happens. */
-    nameTaken: (slug: string): string => `The name /${slug} is taken. Pick another.`,
+    /** Global-uniqueness collision — no two flows share a slug. No register happens; the draft
+     *  stays alive and this rides a fresh force-reply so the host renames in place. */
+    nameTaken: (slug: string): string =>
+      `The name /${slug} is taken. Reply with a different name (lowercase letters, numbers, dashes).`,
     /** Register succeeded — confirm the new runnable slug. */
     saved: (slug: string): string => `Saved. Run it any time with /run ${slug}.`,
     /** Button labels. */

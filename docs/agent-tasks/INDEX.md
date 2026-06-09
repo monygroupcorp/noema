@@ -31,9 +31,10 @@ a GPU/pod or real Mongo is validated on staging (or `test:crystal` locally), not
 _None — pick up a Backlog item below and graduate it to a numbered TASK spec._
 
 ## Backlog — Bugs / Polish
-- **Save-as collision kicks you out of the menu** — on a name collision the menu reports "name taken"
-  but **ends the draft**; the host has to start the whole Save-as over. Should re-prompt for a new name
-  *in place* (keep the draft + its prefix/suffix/prompt-mode). Small `SaveAsMenu` fix.
+- ~~**Save-as collision kicks you out of the menu**~~ — **FIXED** (commit on `chainengine-migration`).
+  On a slug clash the draft is now kept alive and `SaveAsMenu._repromptName` re-asks for a name *in
+  place* via a fresh force-reply, carrying the draft's prompt-mode + affixes forward (`PendingName.keep`).
+  Covered by two new hermetic tests in `tests/unit/allocutio/SaveAsMenu.test.ts`.
 - **Save-as menu polish (bigger, future)** — once flows expose **all their knobs as inputs** (the full
   `aditus` Porta set, not just prompt), the Save-as review will have many pieces (per-Porta values,
   pin/affix per field, model loadout). Needs a deliberate UX pass then — pagination/sectioning, clear
