@@ -7,9 +7,13 @@ test('cold lifecycle: silent hunt → Found → prep → ready, journal commits 
   s.onStage('provisioning', undefined, 0)
   assert.equal(s.phase, 'hunting')
   assert.equal(s.snapshot().live, null, 'fast hunt is silent')
+  // The silent hunt must still surface "Provisioning…" (not fall through to the warm "keep
+  // cooking" line) — the `/make` cold path relies on the stage, not the /arm Start button.
+  assert.equal(s.snapshot().starting, true, 'provisioning stage drives the starting/provisioning display')
 
   s.onStage('pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 }, 1000)
   let snap = s.snapshot()
+  assert.equal(snap.starting, false, 'starting clears at pod-locked so it cannot leak into warm-idle')
   assert.deepEqual(snap.journal[0], { kind: 'found', gpu: 'RTX 4090', rate: 0.69, ms: 30_000 })
   assert.deepEqual(snap.live, { kind: 'initializing' })
   assert.equal(s.phase, 'prep')
