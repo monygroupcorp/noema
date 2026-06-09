@@ -5,9 +5,6 @@ import type { ModelRef } from '../types/actum.js'
 import { WorkflowTemplateRegistry, WorkflowTemplateError } from './WorkflowTemplateRegistry.js'
 import { resolveLoraTriggers, type ResolvedLora } from './loraResolver.js'
 import type { Porta } from '../types/modus.js'
-import { makeLogger } from '../lib/logger.js'
-
-const log = makeLogger('compiler:lora')
 
 /**
  * Weave a Porta's flow-baked affixes around a runtime value. The user supplies
@@ -190,21 +187,11 @@ export class Compiler {
     let appliedLoras: ResolvedLora[] = []
     let loraWarnings: string[] = []
     let promptForSlots: Record<string, unknown> = wovenAditus
-    const loraEligible = !!(template.loraCapable && this.intellarum && families.length > 0 && typeof wovenAditus.prompt === 'string')
-    // TEMP DIAGNOSTIC (remove once sd1-5 LoRA resolution is confirmed): why didn't the LoRA resolve?
-    log.info('lora preflight', {
-      modusId: essentia.id, loraCapable: !!template.loraCapable, hasIntellarum: !!this.intellarum,
-      families, promptType: typeof wovenAditus.prompt, eligible: loraEligible,
-    })
-    if (loraEligible) {
-      const map = await this.intellarum!.triggerMap(families[0], opts.animaId)
-      const r = resolveLoraTriggers(wovenAditus.prompt as string, { triggerMap: map, ...(opts.animaId ? { animaId: opts.animaId } : {}) })
+    if (template.loraCapable && this.intellarum && families.length > 0 && typeof wovenAditus.prompt === 'string') {
+      const map = await this.intellarum.triggerMap(families[0], opts.animaId)
+      const r = resolveLoraTriggers(wovenAditus.prompt, { triggerMap: map, ...(opts.animaId ? { animaId: opts.animaId } : {}) })
       appliedLoras = r.appliedLoras
       loraWarnings = r.warnings
-      log.info('lora resolved', {
-        modusId: essentia.id, family: families[0], triggerKeys: [...map.keys()],
-        applied: appliedLoras.map(l => l.slug), warnings: loraWarnings, prompt: wovenAditus.prompt,
-      })
       if (r.modifiedPrompt !== wovenAditus.prompt) {
         promptForSlots = { ...wovenAditus, prompt: r.modifiedPrompt }
       }

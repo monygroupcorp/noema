@@ -191,6 +191,10 @@ export const INTELLA_LORA_ARMORED_DRESS: Intella = {
     },
   ],
   dest: 'loras/armored_dress_V02.safetensors',
+  // slug = the on-disk filename stem (models/loras/{slug}.safetensors); REQUIRED — the trigger
+  // resolver builds `<lora:{slug}:weight>` and skips any LoRA without one, so omitting it makes
+  // the LoRA un-triggerable (the 2026-06-09 live bug).
+  slug: 'armored_dress_V02',
   sizeGb: 0.0135,
   versio: '2.0.0',
   trigger: 'gothic armor,armored_dress,armored skirt,gauntlets,breastplate',
