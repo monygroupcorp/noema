@@ -78,7 +78,10 @@ function pickIntella(
 ): Intella | undefined {
   const owned   = candidates.filter(i => i.access === 'private' && i.ownerAnimaId === animaId)
   const shared  = candidates.filter(i => i.access === 'private' && i.ownerAnimaId !== animaId)
-  const publics = candidates.filter(i => i.access === 'public')
+  // Canonical (platform-curated) Intellae are public by definition — seeded LoRAs set no `access`
+  // field, so without `|| i.canonica` they fall into no bucket and the trigger silently no-ops.
+  // (Mirrors the same canonica=public rule in MongoIntella.buildAccessOrClauses.)
+  const publics = candidates.filter(i => i.access === 'public' || i.canonica)
   const byRecency = (a: Intella, b: Intella) =>
     (b.mutatum?.getTime() ?? b.natum.getTime()) - (a.mutatum?.getTime() ?? a.natum.getTime())
 
