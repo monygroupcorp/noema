@@ -1,5 +1,6 @@
 import type { Collection, Document } from 'mongodb'
 import type { Intella, Intellae, IntellaGenus, Intellarum } from '../types/intelligendi.js'
+import { inferFamilia } from './inferFamilia.js'
 
 // =============================================================================
 // V2 → V1 backward-compat shim
@@ -172,8 +173,14 @@ export class MongoIntella implements Intellarum {
     return map
   }
 
-  /** Insert or fully replace an Intella record. Used for seeding canonical models. */
+  /** Insert or fully replace an Intella record. Used for seeding canonical models. Self-heals
+   *  the first-class `familia` from the tag/name heuristic when a record arrives without one, so
+   *  every write seam keeps `familia` populated and `triggerMap` (which keys on it) stays whole. */
   async upsert(intella: Intella): Promise<void> {
-    await this.col.replaceOne({ id: intella.id }, intella, { upsert: true })
+    const record = intella.familia ? intella : (() => {
+      const familia = inferFamilia(intella)
+      return familia ? { ...intella, familia } : intella
+    })()
+    await this.col.replaceOne({ id: record.id }, record, { upsert: true })
   }
 }
