@@ -32,7 +32,7 @@ export class MongoAnima implements AnimaStore {
 
   async update(
     id: string,
-    patch: Partial<Pick<Anima, 'nomen' | 'affines' | 'memoriaRef' | 'custos'>>
+    patch: Partial<Pick<Anima, 'nomen' | 'memoriaRef' | 'custos'>>
   ): Promise<Anima> {
     const mutatum = new Date()
     const result = await this.col.findOneAndUpdate(

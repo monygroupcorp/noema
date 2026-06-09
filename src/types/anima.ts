@@ -32,14 +32,6 @@ export interface Anima {
   nomen: string
 
   /**
-   * Soul-level tool affinities — default input overrides per modus.
-   * "affines" = related/attached things in Latin — what this soul is drawn to.
-   * Shape: { [modusId]: { [inputKey]: overrideValue } }
-   * Precedence: cast-time input > affines > platform preferences > modus defaults
-   */
-  affines: Record<string, Record<string, unknown>>
-
-  /**
    * Pointer to this soul's memory volume on Materia.
    * Contains: RAG index, conversation history, agent memory chunks.
    * "memoria" = memory in Latin. The ref is a volume path or R2 key.
@@ -67,7 +59,7 @@ export interface AnimaStore {
   create(input: Omit<Anima, 'id' | 'natum' | 'mutatum'>): Promise<Anima>
   find(id: string): Promise<Anima | null>
   findByCustos(custos: string): Promise<Anima | null>
-  update(id: string, patch: Partial<Pick<Anima, 'nomen' | 'affines' | 'memoriaRef' | 'custos'>>): Promise<Anima>
+  update(id: string, patch: Partial<Pick<Anima, 'nomen' | 'memoriaRef' | 'custos'>>): Promise<Anima>
 }
 
 /**

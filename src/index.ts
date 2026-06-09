@@ -136,7 +136,6 @@ class TelegramIdentityResolver implements IdentityResolver {
 
     const anima = await this.ring.animae.create({
       nomen: `tg:${telegramUserId}`,
-      affines: {},
     })
     await this.ring.personae.findOrCreate('telegram', telegramUserId, { animaId: anima.id })
     return { animaId: anima.id }

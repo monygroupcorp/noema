@@ -57,7 +57,12 @@ _None — pick up a Backlog item below and graduate it to a numbered TASK spec._
   files have no family — left alone; idempotent on re-run). Added `(genus,familia)` index in `ensureIndexes`.
   Note: prod `noema` should not host an `intellae` collection at all (legacy boot-seed artifact) — no prod
   backfill needed; the live app DB is a separate cleanup.
-- **Re-home `Anima.affines` onto `Consuetudo`** — one owner-keyed home for all account preferences.
+- ~~**Re-home `Anima.affines` onto `Consuetudo`**~~ — **DONE** (commit on `chainengine-migration`). `affines`
+  (per-modus input overrides) moved off the `Anima` record — where it was a required-but-never-read field —
+  onto `Consuetudinum` as `resolveAffines`/`setAffines` (anon-capable, AuctorKey-keyed). Mongo + Memory impls;
+  the two doc kinds share the collection, disambiguated by `verb` (rebinds carry a string `verb`, affines docs
+  `verb:null`). Covered by new MemoryConsuetudinum (hermetic) + MongoConsuetudinum (DB) tests incl. the
+  cross-read/collision guard.
 - **Crystal-alignment passes** — rename `ArmPreset`→`StudioBase`; single-source `runtime`; ground
   studio-bases in `Modorum` (ADR-0001).
 - **Per-user verb-rebind UI/settings flow** — beyond the `/bind` command seam.

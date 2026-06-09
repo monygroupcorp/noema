@@ -14,11 +14,13 @@ function auctorKeyQuery(owner: AuctorKey): Record<string, unknown> {
 }
 
 /**
- * MongoConsuetudinum — owner-keyed verb→flow bindings, keyed by AuctorKey.
+ * MongoConsuetudinum — owner-keyed established defaults, keyed by AuctorKey.
  *
- * One document per (owner, verb). `bind` upserts; `resolve` reads. The shape
- * leaves room to later re-home `Anima.affines` onto the same owner-keyed bag
- * (future — not built now).
+ * Two doc kinds share the collection, disambiguated by `verb`:
+ *   - verb→flow rebind: `{ auctorKey, verb: <string>, modusId }` — one per (owner, verb).
+ *   - per-modus affines: `{ auctorKey, verb: null, modusId, affines }` — one per (owner, modus).
+ * `verb: null` matches both null and missing in Mongo, so the affines query never
+ * collides with a verb-rebind doc (which carries a string `verb`), and vice-versa.
  */
 export class MongoConsuetudinum implements Consuetudinum {
   constructor(private col: Collection) {}
@@ -32,6 +34,19 @@ export class MongoConsuetudinum implements Consuetudinum {
     await this.col.updateOne(
       { ...auctorKeyQuery(owner), verb },
       { $set: { auctorKey: auctorKeyDoc(owner), verb, modusId, mutatum: new Date() } },
+      { upsert: true },
+    )
+  }
+
+  async resolveAffines(owner: AuctorKey, modusId: string): Promise<Record<string, unknown> | undefined> {
+    const doc = await this.col.findOne({ ...auctorKeyQuery(owner), modusId, verb: null })
+    return doc ? (doc.affines as Record<string, unknown>) : undefined
+  }
+
+  async setAffines(owner: AuctorKey, modusId: string, affines: Record<string, unknown>): Promise<void> {
+    await this.col.updateOne(
+      { ...auctorKeyQuery(owner), modusId, verb: null },
+      { $set: { auctorKey: auctorKeyDoc(owner), verb: null, modusId, affines, mutatum: new Date() } },
       { upsert: true },
     )
   }
