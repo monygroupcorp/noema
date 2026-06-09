@@ -24,12 +24,11 @@ a GPU/pod or real Mongo is validated on staging (or `test:crystal` locally), not
 | [TASK-009](TASK-009-run-resolves-owned-flows.md) | `/run` resolves a user's own saved flows | done · live ✓ |
 | [TASK-010](TASK-010-verb-rebind-store.md) | `/bind` rebind persisted via `Consuetudo` | done · live ✓ |
 | [TASK-011](TASK-011-bulletin-render-serialization.md) | Serialize bulletin renders (provisioning play-by-play) | done · live ✓ |
+| [TASK-012](TASK-012-test-crystal-in-ci.md) | Add `test:crystal` (DB layer) to CI | done |
 
 ## Ready (specced — pick up next)
 
-| ID | Title | Notes |
-|---|---|---|
-| [TASK-012](TASK-012-test-crystal-in-ci.md) | Add `test:crystal` (DB layer) to CI | ⚠ closes the gate gap that let 3 live bugs through. **Handoff-ready for a fresh session.** |
+_None — pick up a Backlog item below and graduate it to a numbered TASK spec._
 
 ## Backlog — Bugs / Polish
 - **Save-as collision kicks you out of the menu** — on a name collision the menu reports "name taken"

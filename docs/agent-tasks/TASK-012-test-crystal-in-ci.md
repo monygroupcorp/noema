@@ -1,6 +1,9 @@
 # TASK-012: Add `test:crystal` (the DB layer) to CI
 
-- **Status:** ready — **handoff-ready for a fresh session** (self-contained; no prior conversation needed)
+- **Status:** done — new `crystal-db` job added to `.github/workflows/ci.yml` (option (b): `npm run test:crystal`
+  as-is against a `mongo:7` service container). `run-with-env.sh` already no-ops the `.env` load when absent, so
+  no script change was needed. Locally verified: 808/808 green; the deliberate `{canonica:true}` revert turned the
+  job red (2 failures — the canonical-LoRA guards), confirming it guards the layer.
 - **Owner:** none
 - **Gated by:** — (this IS a CI/test-infra task; success = the new CI job runs `test:crystal` green against
   a MongoDB service container)
