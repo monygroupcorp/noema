@@ -66,9 +66,14 @@ export class PodSession {
       this.phaseStartMs = now
       this.live = null            // hunt is silent unless it drags (manager arms the timer)
       this._phase = 'hunting'
+      // A cold start is in flight — render "Provisioning…" during the otherwise-silent hunt
+      // (the `/make` path never calls beginStarting; only `/arm`'s ▸ Start did). Cleared at
+      // pod-locked so it can't leak into the warm-idle "keep cooking" state afterward.
+      this._starting = true
       return
     }
     if (stage === 'pod-locked') {
+      this._starting = false      // hunt over — let `live` drive the display from here
       if (this._phase === 'hunting') {
         // Cold start (or bail replacement): commit the Found line + enter prep.
         this.journal.push({ kind: 'found', gpu: this.pod.gpu, rate: this.pod.rate, ms: this._phaseMs(info, now) })
