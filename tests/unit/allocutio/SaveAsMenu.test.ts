@@ -90,7 +90,7 @@ test('a fresh slug → derive + register called with the built Modus', async () 
   assert.match(reviewMsg.text, /my-doodoo/)
 })
 
-test('duplicate slug → "name taken", NO register', async () => {
+test('duplicate slug → re-prompts for a name in place (force-reply), NO register', async () => {
   const s = makeSink()
   const { modorum, registered } = makeModorum({ existing: new Set(['my-doodoo']) })
   const menu = new SaveAsMenu({ sink: s.sink, modorum, resolveOwner: async () => ({ animaId: 'a' }) })
@@ -99,8 +99,38 @@ test('duplicate slug → "name taken", NO register', async () => {
   await menu.takeReply(100, 10, 'u1', 'My DooDoo')
   await menu.handle(101, 'save', 10, 'u1')
 
+  // Nothing registered; instead of a dead-end, a fresh force-reply name prompt is posted.
   assert.equal(registered.length, 0)
-  assert.match(s.edited.at(-1)!.text, /taken/i)
+  const reprompt = s.sent.at(-1)!
+  assert.match(reprompt.text, /taken/i)
+  assert.deepEqual((reprompt.extra as { reply_markup?: unknown }).reply_markup, { force_reply: true })
+})
+
+test('duplicate slug → re-prompt keeps the draft\'s prompt-mode + affixes; a new name saves them', async () => {
+  const s = makeSink()
+  const { modorum, registered } = makeModorum({ existing: new Set(['taken-name']) })
+  const menu = new SaveAsMenu({ sink: s.sink, modorum, resolveOwner: async () => ({ animaId: 'a' }) })
+
+  // Message ids are deterministic: only sendMessage increments (starts at 100).
+  await menu.open(10, 'u1', SEED)                      // namePrompt → 100
+  await menu.takeReply(100, 10, 'u1', 'taken-name')    // review     → 101
+  // Do real work on the draft: flip to pinned + set a suffix.
+  await menu.handle(101, 'toggle', 10, 'u1')           // open → pinned (edit, no new id)
+  await menu.handle(101, 'suffix', 10, 'u1')           // affix prompt → 102
+  await menu.takeAffixReply(102, 10, 'u1', 'watercolor')
+
+  // Tap Save → collision → re-prompt force-reply → 103 (the old review 101 is retired).
+  await menu.handle(101, 'save', 10, 'u1')
+  assert.equal(registered.length, 0)
+
+  // Reply with a fresh, free name → rebuilds the review → 104, then Save registers WITH the kept work.
+  await menu.takeReply(103, 10, 'u1', 'fresh-name')
+  await menu.handle(104, 'save', 10, 'u1')
+
+  assert.equal(registered.length, 1)
+  assert.equal(registered[0].id, 'fresh-name')
+  assert.equal(registered[0].aditus.prompt.default, 'a red fox')        // pinned mode preserved
+  assert.equal(registered[0].aditus.prompt.suffixum, 'watercolor')      // suffix preserved
 })
 
 test('prompt-mode toggle flips open ↔ pinned (re-renders the review)', async () => {

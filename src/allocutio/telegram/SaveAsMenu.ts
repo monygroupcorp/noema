@@ -50,6 +50,9 @@ interface PendingName {
   chatId: number
   userId: string
   seed: SaveAsSeed
+  /** When re-prompting after a slug collision, carry the in-progress draft's settings
+   *  forward so the host doesn't lose their prompt-mode / affix work to a name clash. */
+  keep?: { promptMode: PromptMode; praefixum?: string; suffixum?: string }
   expiresAt: number
 }
 
@@ -132,7 +135,11 @@ export class SaveAsMenu {
     const base = await this.deps.modorum.find(entry.seed.baseModusId).catch(() => null)
     if (!base) return true
 
-    const draft: Draft = { chatId, userId, base, seed: entry.seed, slug, name, promptMode: 'open' }
+    const draft: Draft = {
+      chatId, userId, base, seed: entry.seed, slug, name,
+      promptMode: entry.keep?.promptMode ?? 'open',
+      ...(entry.keep ? { praefixum: entry.keep.praefixum, suffixum: entry.keep.suffixum } : {}),
+    }
     const sent = await this.deps.sink
       .sendMessage(chatId, this._reviewText(draft), { reply_markup: this._reviewKeyboard(draft) })
       .catch(() => null)
@@ -202,7 +209,8 @@ export class SaveAsMenu {
         await this.deps.sink.deleteMessage?.(chatId, messageId).catch(() => {})
         return true
       case 'save':
-        this.drafts.delete(messageId)
+        // The draft is removed only on the success path inside _save — a slug collision
+        // keeps it alive and re-prompts for a new name in place.
         await this._save(draft, messageId)
         return true
     }
@@ -214,10 +222,11 @@ export class SaveAsMenu {
     // Global uniqueness — no two flows share a slug. `find(slug)` must be null.
     const clash = await this.deps.modorum.find(draft.slug).catch(() => null)
     if (clash) {
-      await this.deps.sink.editMessageText?.(draft.chatId, messageId, COPY.saveAs.nameTaken(draft.slug)).catch(() => {})
+      await this._repromptName(draft, messageId)
       return
     }
 
+    this.drafts.delete(messageId)
     const owner = await this.deps.resolveOwner(draft.userId)
     const modus = deriveSavedModus(draft.base, {
       slug: draft.slug,
@@ -231,6 +240,27 @@ export class SaveAsMenu {
     })
     await this.deps.modorum.register(modus)
     await this.deps.sink.editMessageText?.(draft.chatId, messageId, COPY.saveAs.saved(draft.slug)).catch(() => {})
+  }
+
+  /**
+   * Slug collision → keep the draft's work (prompt-mode + affixes + seed), retire the stale
+   * review message, and re-ask for a name *in place* via a fresh force-reply. The reply lands
+   * back in `takeReply`, which rebuilds the review with the carried-forward settings applied.
+   */
+  private async _repromptName(draft: Draft, reviewMessageId: number): Promise<void> {
+    this.drafts.delete(reviewMessageId)
+    await this.deps.sink.deleteMessage?.(draft.chatId, reviewMessageId).catch(() => {})
+    const sent = await this.deps.sink
+      .sendMessage(draft.chatId, COPY.saveAs.nameTaken(draft.slug), { reply_markup: { force_reply: true } })
+      .catch(() => null)
+    if (!sent) return
+    this.pendingNames.set(sent.message_id, {
+      chatId: draft.chatId,
+      userId: draft.userId,
+      seed: draft.seed,
+      keep: { promptMode: draft.promptMode, praefixum: draft.praefixum, suffixum: draft.suffixum },
+      expiresAt: Date.now() + SaveAsMenu.TTL_MS,
+    })
   }
 
   // ── render ──────────────────────────────────────────────────────────────────
