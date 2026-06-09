@@ -1,39 +1,56 @@
 # Agent task board
 
-Tasks follow `TEMPLATE.md`. A task is **done** when its hermetic acceptance passes; anything needing a
-real GPU/pod is validated separately on staging. Read `AGENTS.md` first.
+The durable, cross-session source of truth for what's done, what's ready to pick up, and what's queued.
+**A fresh session should:** read `AGENTS.md` → this board → the chosen task's `TASK-NNN-*.md` spec (which is
+self-contained: Read-these-files → Deliverables → Acceptance → Out-of-scope). Tasks follow `TEMPLATE.md`.
 
-| ID | Title | Status | Gated by |
-|---|---|---|---|
-| [TASK-001](TASK-001-gen-sd15.md) | Add the SD1.5 txt2img gen-flow (Essentia + template) | done | — (real gen → staging) |
-| [TASK-002](TASK-002-run-resolver.md) | `/run <flow> [prompt]` — the universal flow runner | done | — |
-| [TASK-003](TASK-003-canon-verb-table-rebind.md) | Canon-verb default table + per-user rebind (the seam) | done | — (persistence → staging) |
-| [TASK-004](TASK-004-flow-card-aditus-panel.md) | The flow card — surface every `Porta`, execute when ready | done | — |
-| [TASK-005](TASK-005-intellae-manifest.md) | `intellae` manifest + `familia` — flow declares its weights; family drives LoRA compat (drop `intellaId`) | done | — (Mongo re-key + install → staging) |
-| [TASK-006](TASK-006-save-as.md) | Save-as — flow card / delivery-info menu → a derived `Modus` (owner-keyed persistence) | done* | *hermetic done; Mongo `auctor` + e2e `/run <slug>` pending staging. "save as verb" rides the verb-rebind wiring follow-up |
-| [TASK-008](TASK-008-sd15-loracapable.md) | Port the LoRA-apply layer — `customNodes` plumbing + cozyness LoRA chain | done* | *hermetic done; real on-pod LoRA apply (Coziness installs per-job) → staging |
-| [TASK-009](TASK-009-run-resolves-owned-flows.md) | `/run` resolves a user's own saved flows (staging fix — `canonica` filter rejected them) | done* | *hermetic done; real `list({auctor})` → staging |
-| [TASK-010](TASK-010-verb-rebind-store.md) | Wire `/bind` rebind to a persistent owner-keyed store (`Consuetudo`) | done* | *hermetic done; Mongo + real `/bind`→`/make` → staging |
-| [TASK-007](TASK-007-prompt-affixes.md) | Prompt affixes — flow-baked prefix/suffix on a text `Porta` (finishes save-a-style) | done* | *hermetic done; real gen → staging |
-| [TASK-011](TASK-011-bulletin-render-serialization.md) | Serialize bulletin renders (fix scrambled provisioning play-by-play) | done* | *hermetic done; visual confirm → staging |
+**Lifecycle:** a Backlog item graduates to a numbered `TASK-NNN` spec when picked up → **ready** → **done**
+when its hermetic acceptance passes. "live ✓" = also confirmed on real staging hardware. Anything needing
+a GPU/pod or real Mongo is validated on staging (or `test:crystal` locally), not the hermetic gate — see
+[[feedback_local_integration_repro]] for why DB/compile-time bugs get a local repro, not a staging trip.
 
-## Backlog (not yet written as specs)
-- **⚠ Add `test:crystal` (DB layer) to CI** — the agent gate runs only `test:hermetic`, so the DB layer
-  (`MongoIntella`/`MongoModorum`/`executionWebhook`/…, which need a real Mongo via `scripts/run-with-env.sh`)
-  is **never run in CI**. This let TWO real bugs reach staging unnoticed (2026-06-09): the canonical-LoRA
-  access filter (`{canonica:true}` clause) and TASK-006's stale string-`auctor` fixtures — both green on
-  hermetic, broken/failing on `test:crystal`. **Do:** add a CI job in `.github/workflows/ci.yml` with a
-  MongoDB **service container** + the env `test:crystal` needs, running `npm run test:crystal` on every
-  push. Closes the gap where hermetic mocks diverge from real Mongo query/serialization behavior.
-- **Trigger-resolution convergence** — now that `familia` is populated (TASK-005/008), drop
-  `BulletinModelCatalog`'s tag-derived family workaround and converge its `resolveTriggers(…,{family})`
-  onto the crystal `triggerMap(familia)` (its own "swap once it's set" TODO). Allocutio ring; follow-up.
-- **Re-home `Anima.affines` onto `Consuetudo`** — fold per-modus param overrides into the owner-keyed
-  store (TASK-010) so all account preferences share one anon-capable home. `Consuetudo` is shaped for it.
+## Shipped (TASK-002→011 — the command-flow + flow-authoring + LoRA + preferences + bulletin stack)
+
+| ID | Title | Status |
+|---|---|---|
+| [TASK-001](TASK-001-gen-sd15.md) | SD1.5 txt2img gen-flow (Essentia + template) | done · live ✓ |
+| [TASK-002](TASK-002-run-resolver.md) | `/run <flow> [prompt]` universal runner | done · live ✓ |
+| [TASK-003](TASK-003-canon-verb-table-rebind.md) | Canon-verb default table + rebind seam | done |
+| [TASK-004](TASK-004-flow-card-aditus-panel.md) | Flow card — surface every `Porta`, execute when ready | done · live ✓ |
+| [TASK-005](TASK-005-intellae-manifest.md) | `intellae` manifest + `familia` (drop `intellaId`) | done · live ✓ |
+| [TASK-006](TASK-006-save-as.md) | Save-as → derived `Modus` (owner-keyed persistence) | done · live ✓ |
+| [TASK-007](TASK-007-prompt-affixes.md) | Prompt affixes — flow-baked prefix/suffix | done · live ✓ |
+| [TASK-008](TASK-008-sd15-loracapable.md) | LoRA-apply layer — `customNodes` + cozyness chain | done · live ✓ |
+| [TASK-009](TASK-009-run-resolves-owned-flows.md) | `/run` resolves a user's own saved flows | done · live ✓ |
+| [TASK-010](TASK-010-verb-rebind-store.md) | `/bind` rebind persisted via `Consuetudo` | done · live ✓ |
+| [TASK-011](TASK-011-bulletin-render-serialization.md) | Serialize bulletin renders (provisioning play-by-play) | done · live ✓ |
+
+## Ready (specced — pick up next)
+
+| ID | Title | Notes |
+|---|---|---|
+| [TASK-012](TASK-012-test-crystal-in-ci.md) | Add `test:crystal` (DB layer) to CI | ⚠ closes the gate gap that let 3 live bugs through. **Handoff-ready for a fresh session.** |
+
+## Backlog — Bugs / Polish
+- **Save-as collision kicks you out of the menu** — on a name collision the menu reports "name taken"
+  but **ends the draft**; the host has to start the whole Save-as over. Should re-prompt for a new name
+  *in place* (keep the draft + its prefix/suffix/prompt-mode). Small `SaveAsMenu` fix.
+- **Save-as menu polish (bigger, future)** — once flows expose **all their knobs as inputs** (the full
+  `aditus` Porta set, not just prompt), the Save-as review will have many pieces (per-Porta values,
+  pin/affix per field, model loadout). Needs a deliberate UX pass then — pagination/sectioning, clear
+  pin-vs-open per knob. Revisit when the param-rich flows land.
+
+## Backlog — Features
 - **`/cook` (Collectio)** — `Modus × Tractus[]` grid → N `Acta` via `TraitEngine` + `CollectioCursor`.
 - **`/spell` (compositus `Modus`)** — run/author a `gradus`-chained flow (authored via `Tabula`).
-- Gen-flows for other catalog bases (SDXL, Illustrious, …) — same shape as TASK-001, **gated on
-  acquiring those base weights** (only FLUX + SD1.5 have weights today).
-- Crystal-alignment passes (rename `ArmPreset`→`StudioBase`; single-source `runtime`; ground
-  studio-bases in `Modorum`) — see ADR-0001.
-- Per-user verb rebind UI/settings flow (beyond the `/bind` command seam in TASK-003).
+- **Gen-flows for more catalog bases** (SDXL/Illustrious/Chroma/Flux-Kontext/Wan-video/…) — port from
+  `docs/reference/old-workflows/` per the INVENTORY; gated on the comfydeploy **custom-node pack manifest**
+  (pull via API) + base weights. Same shape as TASK-001/008.
+
+## Backlog — Follow-ups / cleanup
+- **Trigger-resolution convergence** — drop `BulletinModelCatalog`'s tag-derived family workaround now
+  that `familia` is populated; converge its `resolveTriggers(…,{family})` onto crystal `triggerMap(familia)`.
+- **Re-home `Anima.affines` onto `Consuetudo`** — one owner-keyed home for all account preferences.
+- **Crystal-alignment passes** — rename `ArmPreset`→`StudioBase`; single-source `runtime`; ground
+  studio-bases in `Modorum` (ADR-0001).
+- **Per-user verb-rebind UI/settings flow** — beyond the `/bind` command seam.
