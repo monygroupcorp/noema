@@ -88,6 +88,9 @@ function buildAccessOrClauses(animaId: string | undefined): Record<string, unkno
   const clauses: Record<string, unknown>[] = [
     { access: 'public' },              // v1
     { 'access.kind': 'public' },       // v2
+    { canonica: true },                // platform-curated Intellae are public by definition —
+                                       // seeded LoRAs set no `access` field, so without this they'd
+                                       // be filtered out of trigger resolution entirely.
   ]
   if (animaId) {
     clauses.push({ ownerAnimaId: animaId })            // v1

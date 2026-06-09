@@ -207,6 +207,21 @@ test('shim: triggerMap() finds v2 records and keys by each triggerWord', async (
   assert.equal(entry.defaultWeight, 0.8)
 })
 
+test('triggerMap() returns a CANONICAL LoRA that sets no access field (seed parity)', async () => {
+  // Seeded LoRAs (canonica:true) carry no `access` field. Without the canonica access-clause
+  // they're filtered out of trigger resolution → /run sd1-5 <trigger> never downloads the LoRA
+  // (the live 2026-06-09 bug). canonica = platform-public.
+  await col.insertOne({
+    ...makeIntella({ id: 'intella.lora.armored', genus: 'lora', canonica: true }),
+    familia: 'sd15',
+    trigger: 'armored_dress,gauntlets',
+    // intentionally NO access field
+  })
+  const map = await intellae.triggerMap('sd15')
+  assert.ok(map.has('armored_dress'), 'canonical LoRA (no access) must resolve by its trigger')
+  assert.equal(map.get('armored_dress')![0].id, 'intella.lora.armored')
+})
+
 test('shim: triggerMap() finds v2 PRIVATE record only for owner animaId', async () => {
   const priv = makeV2LoraDoc({
     id: 'intella.v2-priv',
