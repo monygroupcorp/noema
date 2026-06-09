@@ -53,8 +53,10 @@ _None — pick up a Backlog item below and graduate it to a numbered TASK spec._
   Custom/no-family path). The tag heuristic is single-sourced in `src/crystal/inferFamilia.ts` and is now
   used only to POPULATE the first-class `familia` — `MongoIntella.upsert` self-heals it on write, and
   `scripts/migrations/2026_06_backfill_intella_familia.ts` bulk-backfills (requires explicit `--db`; refuses
-  `noema` prod without `--prod`). **Pending:** run the backfill against `noemaplane` (dev) when ready; the
-  prod `noema` backfill is a deliberate ops step. Added `(genus,familia)` index in `ensureIndexes`.
+  `noema` prod without `--prod`). Backfill **applied to `noemaplane` (dev)** 2026-06-09 (3 set; 2 support
+  files have no family — left alone; idempotent on re-run). Added `(genus,familia)` index in `ensureIndexes`.
+  Note: prod `noema` should not host an `intellae` collection at all (legacy boot-seed artifact) — no prod
+  backfill needed; the live app DB is a separate cleanup.
 - **Re-home `Anima.affines` onto `Consuetudo`** — one owner-keyed home for all account preferences.
 - **Crystal-alignment passes** — rename `ArmPreset`→`StudioBase`; single-source `runtime`; ground
   studio-bases in `Modorum` (ADR-0001).
