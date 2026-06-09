@@ -104,6 +104,11 @@ interface ChatBulletin {
 export class BulletinManager {
   private readonly chats = new Map<number, ChatBulletin>()
   private readonly actumChat = new Map<string, number>()   // actumId → chatId
+  // Stages that arrived before register() (the gen path fires 'provisioning' the instant
+  // cursor.run detaches, before the Stream primitive renders + registers). Buffered here and
+  // replayed on register — without this the first stage drops and the session misreads the
+  // cold start as a warm reuse. Capped per actum; cleared on register.
+  private readonly _pendingStages = new Map<string, Array<{ stage: string; info?: StageInfo }>>()
   /** Full candidate list (+ resolved base families/filter for a LoRA mount) backing the open
    *  picker list, per chat — so page turns don't refetch. */
   private readonly pickerCache = new Map<number, { all: PendingModel[]; base?: { families: Array<{ id: string; label: string }>; filter: string } }>()
@@ -128,6 +133,16 @@ export class BulletinManager {
       cb = { session: new PodSession(hostUserId, audience), messageId: null, timers: new TimerRegistry() }
       this.chats.set(chatId, cb)
       this._armAutoSettle(chatId)
+    }
+    // Replay any stages that fired before this register (see _pendingStages) — in order, so the
+    // session enters 'hunting' on the buffered 'provisioning' and reads the cold start correctly.
+    const pending = this._pendingStages.get(actumId)
+    if (pending) {
+      this._pendingStages.delete(actumId)
+      for (const { stage, info } of pending) cb.session.onStage(stage, info, this.now())
+      if (cb.session.phase === 'hunting') {
+        cb.timers.arm('slowHunt', HUNT_SLOW_MS, () => { cb.session.markHuntSlow(); void this._render(chatId) })
+      }
     }
     void this._render(chatId)
   }
@@ -184,7 +199,12 @@ export class BulletinManager {
 
   onStage(actumId: string, stage: string, info?: StageInfo): void {
     const chatId = this.actumChat.get(actumId)
-    if (chatId === undefined) return
+    if (chatId === undefined) {
+      // Stage before register → buffer for replay (capped so a never-registered actum can't grow it).
+      const buf = this._pendingStages.get(actumId) ?? []
+      if (buf.length < 50) { buf.push({ stage, info }); this._pendingStages.set(actumId, buf) }
+      return
+    }
     const cb = this.chats.get(chatId)
     if (!cb) return
     cb.session.onStage(stage, info, this.now())
