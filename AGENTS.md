@@ -22,15 +22,18 @@ This repo (`noema-crystal`) is built on a small, deliberate domain model called 
 |---|---|---|
 | **model** | `Intella` / `Intellarum` | a weight (base / lora / embedding) |
 | **flow** | `Essentia` / `Modus` (a `Modorum` entry) | an executable workflow — `/make`, `/run` target |
-| **studio** | `Materia` (+ `Hospitium`) | a warm GPU pod with installed models |
-| **studio base** | adapter `StudioBase` (today `ArmPreset` — rename pending) | what `/arm` composes: image + runtime + base/support `Intella`e |
+| **studio** | `Materia` (+ `Hospitium`) | a warm GPU pod — the live *instance* of a `Fundamentum` |
+| **fundament** | `Fundamentum` / `Fundamentorum` | provider-neutral compute substrate: image + runtime + base/support `Intella`e + capacity (ADR-0005). A flow references one version-pinned; a family shares it |
+| **studio base** | adapter view-model (today `ArmPreset`) — a presentation projection *of* a `Fundamentum` | what `/arm` shows: a card for a fundament. Grounding pending (still synthesized from raw weights) |
 | **run** | `Actum` | one flow execution |
-| **runtime** | `string`, **canonical on `RunpodSpec.runtime`** | the on-pod server (ComfyUI / llama.cpp / …) |
+| **runtime** | `string`, **canonical on `Fundamentum.runtime`** | the on-pod server (ComfyUI / llama.cpp / …) |
 | **dispatch** | `Cursor` / `Cursorum` | the execution backend (RunPod, OpenAI, …) |
 | **compile** | `Compiler` → `CompiledSpec` | flow + `aditus` → pod job |
 
 **Rules:** "flow" means an `Essentia`/`Modus` — never a UI preset. Do **not** introduce a
-`Workflow`/`Blueprint`/`Studio` *type*; `studio`=`Materia`, `flow`=`Essentia`. See ADR-0001.
+`Workflow`/`Blueprint`/`Studio` *type*; `studio`=`Materia`, `flow`=`Essentia`, `substrate`=`Fundamentum`.
+See ADR-0001 + ADR-0005 (why `Fundamentum` is the one sanctioned new primitive — it un-poisons the
+provider-named `runpodSpec`, it does not invent a parallel vocabulary).
 
 ## Module boundaries
 

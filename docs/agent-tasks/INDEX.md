@@ -63,6 +63,15 @@ _None — pick up a Backlog item below and graduate it to a numbered TASK spec._
   the two doc kinds share the collection, disambiguated by `verb` (rebinds carry a string `verb`, affines docs
   `verb:null`). Covered by new MemoryConsuetudinum (hermetic) + MongoConsuetudinum (DB) tests incl. the
   cross-read/collision guard.
-- **Crystal-alignment passes** — rename `ArmPreset`→`StudioBase`; single-source `runtime`; ground
-  studio-bases in `Modorum` (ADR-0001).
+- **Crystal-alignment passes** — *partly done.* **`Fundamentum` substrate primitive landed** (ADR-0005,
+  commits on `chainengine-migration`): the provider-named, scope-conflated `Essentia.runpodSpec` was
+  decomposed into a first-class provider-neutral `Fundamentum` (image + runtime + base/support weights +
+  capacity) that essentiae reference version-pinned (`fundamentumId` + `fundamentumVersio`); the form half
+  (workflowTemplate/seedInputKey/cookFlags) hoisted onto the Essentia; `runtime` single-sourced on the
+  fundament. New `Fundamentorum` registry (Mongo + Memory), seeds, indexes, Compiler resolution, container
+  warm-pod matching. DB migrated on `noemaplane` (canonical + saved flows). **Still open:** ground the
+  **adapter** `/arm` chooser on `Fundamenta` — `BulletinModelCatalog.listFlows()` still synthesizes
+  `ArmPreset` cards from raw weights; it should project the canonical `Essentiae`/`Fundamenta` from the
+  registries instead, and `ArmPreset` collapses to a thin presentation projection of a `Fundamentum`
+  (the deferred `StudioBase` rename — now clearly an adapter view-model, ADR-0005 §adapter-follow-up).
 - **Per-user verb-rebind UI/settings flow** — beyond the `/bind` command seam.
