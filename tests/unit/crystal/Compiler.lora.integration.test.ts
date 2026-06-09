@@ -17,6 +17,11 @@ import { MongoIntella } from '../../../src/crystal/MongoIntella.js'
 import { WorkflowTemplateRegistry } from '../../../src/crystal/WorkflowTemplateRegistry.js'
 import { CANONICAL_INTELLAE } from '../../../src/crystal/seeds/intellae.js'
 import { ESSENTIA_RUNMAKE_SD15 } from '../../../src/crystal/seeds/essentiae.js'
+import { CANONICAL_FUNDAMENTA } from '../../../src/crystal/seeds/fundamenta.js'
+import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js'
+
+// The substrate registry the flow's fundamentumId resolves against (image + base weights).
+const FUNDS = new MemoryFundamentorum(CANONICAL_FUNDAMENTA)
 
 const URI = process.env.MONGO_PASS ?? process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
 const DB = 'noemaplane_test'
@@ -43,7 +48,7 @@ async function seedCanonical(): Promise<void> {
 
 test('REPRO: /run sd1-5 with the Armored Dress trigger resolves the LoRA into spec.models', async () => {
   await seedCanonical()
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
   const { spec } = await compiler.compile(
     ESSENTIA_RUNMAKE_SD15,
     { prompt: 'a knight wearing armored_dress' },
@@ -59,7 +64,7 @@ test('REPRO: /run sd1-5 with the Armored Dress trigger resolves the LoRA into sp
 
 test('REPRO: a prompt with NO trigger word resolves only the checkpoint (no false-positive LoRA)', async () => {
   await seedCanonical()
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
   const { spec } = await compiler.compile(ESSENTIA_RUNMAKE_SD15, { prompt: 'a serene mountain lake' }, { animaId: 'anima-test' })
   const ids = spec.models.map(m => m.id)
   assert.ok(ids.includes('intella.sd15-v1-5'))

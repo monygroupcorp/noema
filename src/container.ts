@@ -30,6 +30,7 @@ import { WarmPodClient } from './crystal/WarmPodClient.js'
 
 import { MongoActorum } from './crystal/MongoActorum.js'
 import { MongoModorum } from './crystal/MongoModorum.js'
+import { MongoFundamentorum } from './crystal/MongoFundamentorum.js'
 import { MongoSignorum } from './crystal/MongoSignorum.js'
 import { MongoAnima } from './crystal/MongoAnima.js'
 import { MongoPersona } from './crystal/MongoPersona.js'
@@ -218,6 +219,10 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const modiCol: Collection = db.collection(config.modiCollection ?? 'modi')
   const modorum = new MongoModorum(modiCol)
 
+  // Compute-substrate registry (ADR-0005) — resolves a flow's referenced Fundamentum
+  // for warm-pod image matching (the image moved off the flow onto its fundament).
+  const fundamentorum = new MongoFundamentorum(db.collection('fundamenta'))
+
   const signaCol: Collection = db.collection(config.signaCollection ?? 'signa')
   const signorum = new MongoSignorum(signaCol)
 
@@ -263,11 +268,13 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   // ── Execution rail ─────────────────────────────────────────────────────────
   const cursorum = new SimpleCursorum()
 
-  const imageRefOf = (modus: Modus): string | undefined => {
-    const spec = (modus as { runpodSpec?: { imageId?: string; imageVersion?: string } }).runpodSpec
-    return spec?.imageId && spec.imageVersion
-      ? `${spec.imageId}:${spec.imageVersion}`
-      : undefined
+  // The warm-pod match key = the flow's substrate image, resolved from its referenced
+  // Fundamentum (ADR-0005 moved image/runtime off the flow onto the fundament).
+  const imageRefOf = async (modus: Modus): Promise<string | undefined> => {
+    const ref = modus as { fundamentumId?: string; fundamentumVersio?: string }
+    if (!ref.fundamentumId) return undefined
+    const f = await fundamentorum.find(ref.fundamentumId, ref.fundamentumVersio)
+    return f?.imageId && f.imageVersion ? `${f.imageId}:${f.imageVersion}` : undefined
   }
 
   if (config.runpodClient && config.runpodWebhookUrl) {

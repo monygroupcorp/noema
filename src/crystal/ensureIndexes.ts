@@ -95,6 +95,10 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('intellae').createIndex({ genus: 1 }),
     db.collection('intellae').createIndex({ genus: 1, familia: 1 }),  // triggerMap/findByTrigger key on (genus,familia)
 
+    // fundamenta — compute-substrate registry (ADR-0005), resolved by (id, versio)
+    db.collection('fundamenta').createIndex({ id: 1, versio: 1 }, { unique: true }),
+    db.collection('fundamenta').createIndex({ canonica: 1 }),
+
     // arcanum_leaves — ZK Merkle tree leaf records
     db.collection('arcanum_leaves').createIndex({ leafIndex: 1 }, { unique: true }),
     db.collection('arcanum_leaves').createIndex({ commitment: 1 }, { unique: true }),

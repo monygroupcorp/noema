@@ -5,14 +5,23 @@ import { fileURLToPath } from 'node:url'
 import { Compiler } from '../../../src/crystal/Compiler.js'
 import { WorkflowTemplateRegistry } from '../../../src/crystal/WorkflowTemplateRegistry.js'
 import { ESSENTIA_RUNMAKE_SD15 } from '../../../src/crystal/seeds/essentiae.js'
+import { CANONICAL_FUNDAMENTA, FUNDAMENTUM_SD15_COMFYUI } from '../../../src/crystal/seeds/fundamenta.js'
+import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js'
 import type { Intellarum, Intella, Intellae } from '../../../src/types/intelligendi.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REAL_WORKFLOWS = path.join(__dirname, '../../../src/crystal/workflows')
 
+// The substrate registry the Compiler resolves a flow's referenced Fundamentum from
+// (base weights + image + runtime live on the fundament now — ADR-0005).
+const FUNDS = new MemoryFundamentorum(CANONICAL_FUNDAMENTA)
+
 function makeCompiler(fixedSeed = 42) {
   const registry = new WorkflowTemplateRegistry(REAL_WORKFLOWS)
-  return new Compiler(registry, () => fixedSeed)
+  return new Compiler(registry, () => fixedSeed, undefined, FUNDS)
+}
+function compilerWith(intellarum: Intellarum, funds: MemoryFundamentorum = FUNDS) {
+  return new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, funds)
 }
 
 /**
@@ -110,15 +119,21 @@ test('compile() omits spec.customNodes when the template declares none', async (
     async findByTrigger() { return [] },
     async triggerMap() { return new Map() },
   }
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  // A custom fundament whose base weight is the flux unet (so the manifest = just that one),
+  // matching the minimal intellarum above.
+  const nourlFund = {
+    ...FUNDAMENTUM_SD15_COMFYUI,
+    id: 'nourl-fund',
+    intellae: [{ id: 'intella.flux-schnell', role: 'unet' }],
+  }
+  const compiler = compilerWith(intellarum, new MemoryFundamentorum([nourlFund]))
   const noUrl: Essentia = {
     ...ESSENTIA_RUNMAKE_SD15,
-    intellae: [{ id: 'intella.flux-schnell', role: 'unet' }],
-    runpodSpec: {
-      ...ESSENTIA_RUNMAKE_SD15.runpodSpec!,
-      workflowTemplate: 'flux-schnell-no-url',
-      workflowTemplateVersion: '1',
-    },
+    fundamentumId: 'nourl-fund',
+    fundamentumVersio: nourlFund.versio,
+    intellae: [],
+    workflowTemplate: 'flux-schnell-no-url',
+    workflowTemplateVersion: '1',
   }
   const { spec } = await compiler.compile(noUrl, { prompt: 'a cat' })
   assert.equal(spec.customNodes, undefined, 'no customNodes declared → field omitted')
@@ -128,7 +143,7 @@ test('compile() omits spec.customNodes when the template declares none', async (
 
 test('compile() on sd15 + a familia:sd15 LoRA trigger: applies it + rewrites the prompt into the extractor', async () => {
   const intellarum = makeSd15Intellarum([{ slug: 'sd15style', trigger: 'sdtrigger', familia: 'sd15' }])
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = compilerWith(intellarum)
   const r = await compiler.compile(ESSENTIA_RUNMAKE_SD15, { prompt: 'a portrait, sdtrigger style' })
 
   // applied + surfaced
@@ -182,7 +197,7 @@ test('weave-before-lora: a trigger word inside a suffixum resolves into an appli
   // The user's prompt has NO trigger; the flow-baked suffix carries the trigger word.
   // Because the weave runs BEFORE resolveLoraTriggers, the LoRA is applied.
   const intellarum = makeSd15Intellarum([{ slug: 'sd15style', trigger: 'sdtrigger', familia: 'sd15' }])
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = compilerWith(intellarum)
   const essentia = withPromptAffix({ suffixum: 'sdtrigger, masterpiece' })
   const r = await compiler.compile(essentia, { prompt: 'a portrait' })
 
@@ -195,7 +210,7 @@ test('weave-before-lora: a trigger word inside a suffixum resolves into an appli
 
 test('compile() on sd15 does NOT apply a familia:flux LoRA on the same trigger word', async () => {
   const intellarum = makeSd15Intellarum([{ slug: 'fluxstyle', trigger: 'sdtrigger', familia: 'flux' }])
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = compilerWith(intellarum)
   const r = await compiler.compile(ESSENTIA_RUNMAKE_SD15, { prompt: 'a portrait, sdtrigger style' })
   assert.equal(r.appliedLoras, undefined, 'cross-family (flux) LoRA must NOT be offered on an sd15 flow')
   const node10 = r.spec.workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }

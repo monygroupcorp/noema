@@ -1,0 +1,92 @@
+// =============================================================================
+// FUNDAMENTUM — the provider-neutral compute substrate a flow runs on
+// =============================================================================
+//
+// "fundamentum" = foundation, groundwork (Latin, 2nd decl. neuter; pl. fundamenta,
+// gen. pl. fundamentorum). The THIRD layer of pod provisioning, made first-class:
+//
+//   the flow            — recipe (ports, template)         → Modus / Essentia
+//   the substrate SPEC  — image + runtime + base weights   → Fundamentum  ← here
+//   the substrate INST. — the live pod                     → Materia
+//
+// Before ADR-0005 the spec was mis-encoded as `Essentia.runpodSpec`: provider-named
+// (a flow definition must NOT name "runpod" — that belongs on the Cursor / Materia.genus)
+// and scope-conflated (it mixed the shareable environment with flow-specific form).
+// `Fundamentum` is the environment half, extracted and de-provider-ized; the form half
+// (workflowTemplate, seedInputKey, cookFlags) stays on the Essentia.
+//
+// An Essentia REFERENCES a Fundamentum, version-pinned (`fundamentumId` +
+// `fundamentumVersio`) — the same id+version discipline it uses for workflowTemplate.
+// So a FAMILY of essentiae (flux-schnell, flux-dev, …) share one fundament:
+//   - co-host key = fundamentum id equality (O(1), not a structural deep-compare)
+//   - single-source edits (bump the fundament once; roll flows forward deliberately)
+//   - Modus.contentHash stays meaningful ("flow-logic X on flux-comfyui@v3")
+//   - the TEE attestatio signs a named, hashed substrate
+//   - HOW to instantiate it (RunPod vs Vast.ai) lives in the Cursor — zero flow changes.
+//
+// The LoRA-compat FAMILY of a fundament (and thus the flows on it) is DERIVED from its
+// base weights' `Intella.familia` — never declared here. Single source, zero drift.
+// =============================================================================
+
+import type { AuctorKey } from '../flow/types.js'
+
+/**
+ * Fundamentum — a compute-substrate specification. Provider-NEUTRAL: it says WHAT
+ * environment (image + runtime + base/support weights + capacity), never WHICH provider.
+ */
+export interface Fundamentum {
+  id: string
+  /** "nomen" = name in Latin — display label (e.g. "FLUX · ComfyUI"). */
+  nomen?: string
+  /** Semantic version string e.g. "1.0.0". Flows pin a version (see Essentia.fundamentumVersio). */
+  versio: string
+  /** Content-addressed hash of the substrate definition. Locks it; the TEE attestation signs it. */
+  contentHash?: string
+
+  /** Docker image — provider-neutral OCI coordinates. e.g. imageId 'runpod/pytorch'. */
+  imageId: string
+  imageVersion: string
+
+  /**
+   * The on-pod runtime this substrate serves — 'ComfyUI' (default) | 'llama.cpp' | 'vLLM' | ….
+   * Canonical home for `runtime` (ADR-0001 single-source); Materia stamps a copy at provision.
+   */
+  runtime?: string
+
+  /**
+   * The base/support WEIGHT manifest this substrate provisions — the shared `Intellae` a whole
+   * family of flows sits on (flux = unet + vae + 2×clip; sd1.5 = the self-contained checkpoint).
+   * Each entry is an `{ id, role }` ref (FK → Intella). LoRAs are NOT here — they are added per-run.
+   * The fundament's (and its flows') FAMILY derives from these weights' `Intella.familia`.
+   */
+  intellae?: Array<{ id: string; role: string }>
+
+  /** Minimum VRAM in GB the substrate needs — drives GPU/pod selection (capacity hint). */
+  vramGb?: number
+
+  /** True = platform-canonical fundament. False = a user-authored one (the /arm custom path). */
+  canonica: boolean
+  /** "auctor" = author/creator — owner of a user-authored fundament. Canonical ones leave it undefined. */
+  auctor?: AuctorKey
+
+  /** "natum" = born — when this fundament was first registered. */
+  natum: Date
+  /** "mutatum" = changed — when this fundament was last modified. */
+  mutatum: Date
+}
+
+/** "Fundamenta" — nominative plural of fundamentum. */
+export type Fundamenta = Fundamentum[]
+
+/**
+ * Fundamentorum — genitive plural "of the foundations." The registry that owns, stores,
+ * and resolves all substrate specs. Mirrors Modorum's shape (find/register/list).
+ */
+export interface Fundamentorum {
+  /** Resolve a fundament by id (and optional pinned versio). */
+  find(id: string, versio?: string): Promise<Fundamentum | null>
+  /** Persist (upsert) a fundament. */
+  register(fundamentum: Fundamentum): Promise<void>
+  /** List fundamenta, optionally filtered by canonical/owner. */
+  list(filter?: Partial<Pick<Fundamentum, 'canonica' | 'auctor'>>): Promise<Fundamenta>
+}

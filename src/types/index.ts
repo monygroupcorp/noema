@@ -47,6 +47,7 @@
 
 export * from './modus'
 export * from './essendi'
+export * from './fundamentum'
 export * from './intelligendi'
 export * from './significandi'
 export * from './actum'

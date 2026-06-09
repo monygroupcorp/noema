@@ -4,13 +4,33 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Compiler, CompilerError } from '../../../src/crystal/Compiler.js'
 import { WorkflowTemplateRegistry } from '../../../src/crystal/WorkflowTemplateRegistry.js'
+import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js'
 import type { Essentia } from '../../../src/types/essendi.js'
+import type { Fundamentum } from '../../../src/types/fundamentum.js'
 import type { Intellarum, Intella } from '../../../src/types/intelligendi.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REAL_WORKFLOWS = path.join(__dirname, '../../../src/crystal/workflows')
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// The substrate the test essentia references (ADR-0005). Carries the image + runtime;
+// base weights stay on `makeEssentia().intellae` here (as flow extras) so the existing
+// weight-resolution assertions are unchanged — see Compiler.sd15/the union test for the
+// fundament-carries-weights path.
+const TEST_FUND: Fundamentum = {
+  id: 'test-fund',
+  versio: '1.0.0',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'ComfyUI',
+  intellae: [],
+  vramGb: 24,
+  canonica: true,
+  natum: new Date('2025-01-01'),
+  mutatum: new Date('2025-01-01'),
+}
+const FUNDS = new MemoryFundamentorum([TEST_FUND])
 
 function makeEssentia(overrides: Partial<Essentia> = {}): Essentia {
   return {
@@ -32,19 +52,17 @@ function makeEssentia(overrides: Partial<Essentia> = {}): Essentia {
       { id: 'intella.t5xxl-fp16', role: 'clip' },
       { id: 'intella.clip-l', role: 'clip' },
     ],
-    runpodSpec: {
-      imageId: 'runpod/pytorch',
-      imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
-      workflowTemplate: 'flux-schnell',
-      workflowTemplateVersion: '1',
-      seedInputKey: 'input_seed',
-      defaultCookFlags: {
-        batchSize: 1,
-        seedStrategy: 'shuffle',
-        seedPlaceholder: 88888888,
-        privateMode: false,
-        vramGb: 24,
-      },
+    fundamentumId: 'test-fund',
+    fundamentumVersio: '1.0.0',
+    workflowTemplate: 'flux-schnell',
+    workflowTemplateVersion: '1',
+    seedInputKey: 'input_seed',
+    defaultCookFlags: {
+      batchSize: 1,
+      seedStrategy: 'shuffle',
+      seedPlaceholder: 88888888,
+      privateMode: false,
+      vramGb: 24,
     },
     ...overrides,
   }
@@ -52,7 +70,7 @@ function makeEssentia(overrides: Partial<Essentia> = {}): Essentia {
 
 function makeCompiler(fixedSeed?: number) {
   const registry = new WorkflowTemplateRegistry(REAL_WORKFLOWS)
-  return new Compiler(registry, fixedSeed !== undefined ? () => fixedSeed : undefined)
+  return new Compiler(registry, fixedSeed !== undefined ? () => fixedSeed : undefined, undefined, FUNDS)
 }
 
 // ── compile() — slot substitution ────────────────────────────────────────────
@@ -100,7 +118,7 @@ test('compile() uses explicit input_seed when provided', async () => {
 })
 
 test('compile() generates random seed when input_seed absent (shuffle strategy)', async () => {
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS))
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), undefined, undefined, FUNDS)
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'test' })
   assert.equal(typeof spec.seed, 'number')
   assert.ok(spec.seed >= 0)
@@ -108,10 +126,7 @@ test('compile() generates random seed when input_seed absent (shuffle strategy)'
 
 test('compile() uses fixed seedPlaceholder when strategy is fixed', async () => {
   const essentia = makeEssentia({
-    runpodSpec: {
-      ...makeEssentia().runpodSpec!,
-      defaultCookFlags: { seedStrategy: 'fixed', seedPlaceholder: 77777777 },
-    },
+    defaultCookFlags: { seedStrategy: 'fixed', seedPlaceholder: 77777777 },
   })
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(essentia, { prompt: 'test' })
@@ -170,21 +185,18 @@ test('compile() produces different hash when prompt differs', async () => {
 
 // ── compile() — error paths ───────────────────────────────────────────────────
 
-test('compile() throws when runpodSpec absent on essentia', async () => {
+test('compile() throws when the fundament reference is absent on essentia', async () => {
   const compiler = makeCompiler(1)
-  const essentia = makeEssentia({ runpodSpec: undefined })
+  const essentia = makeEssentia({ fundamentumId: undefined })
   await assert.rejects(
     () => compiler.compile(essentia, { prompt: 'test' }),
-    /runpodSpec/i
+    /fundamentum/i
   )
 })
 
 test('compile() uses increment strategy: baseSeed + pieceIndex', async () => {
   const essentia = makeEssentia({
-    runpodSpec: {
-      ...makeEssentia().runpodSpec!,
-      defaultCookFlags: { seedStrategy: 'increment' },
-    },
+    defaultCookFlags: { seedStrategy: 'increment' },
   })
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(essentia, {
@@ -196,9 +208,7 @@ test('compile() uses increment strategy: baseSeed + pieceIndex', async () => {
 
 test('compile() throws CompilerError when template not found', async () => {
   const compiler = makeCompiler(1)
-  const essentia = makeEssentia({
-    runpodSpec: { ...makeEssentia().runpodSpec!, workflowTemplate: 'nonexistent' },
-  })
+  const essentia = makeEssentia({ workflowTemplate: 'nonexistent' })
   await assert.rejects(
     () => compiler.compile(essentia, { prompt: 'test' }),
     (err: unknown) => err instanceof CompilerError && err.code === 'TEMPLATE_NOT_FOUND'
@@ -242,7 +252,7 @@ test('compile() resolves model URL from Intellarum registry when set', async () 
       dest: 'unet/flux1-schnell.safetensors',
     },
   })
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'test' })
   const unet = spec.models.find(m => m.id === 'intella.flux-schnell-fp8-scaled')
   assert.equal(unet?.url, registryUrl)
@@ -250,7 +260,7 @@ test('compile() resolves model URL from Intellarum registry when set', async () 
 
 test('compile() falls back to template URL when Intellarum returns null for model', async () => {
   const intellarum = makeIntellarum({})
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'test' })
   const unet = spec.models.find(m => m.id === 'intella.flux-schnell-fp8-scaled')
   assert.ok(unet?.url?.includes('miladystation2.net'), `expected template URL fallback, got: ${unet?.url}`)
@@ -263,7 +273,7 @@ test('compile() uses dest from Intellarum record when registry resolves model', 
       dest: 'unet/flux1-schnell.safetensors',
     },
   })
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'test' })
   const unet = spec.models.find(m => m.id === 'intella.flux-schnell-fp8-scaled')
   assert.equal(unet?.dest, 'unet/flux1-schnell.safetensors')
@@ -272,13 +282,10 @@ test('compile() uses dest from Intellarum record when registry resolves model', 
 test('compile() throws MODEL_NOT_RESOLVED when Intellarum set, model missing, and template has no url', async () => {
   const intellarum = makeIntellarum({})
   const registry = new WorkflowTemplateRegistry(REAL_WORKFLOWS)
-  const compiler = new Compiler(registry, () => 42, intellarum)
+  const compiler = new Compiler(registry, () => 42, intellarum, FUNDS)
   const essentiaNoUrl = makeEssentia({
-    runpodSpec: {
-      ...makeEssentia().runpodSpec!,
-      workflowTemplate: 'flux-schnell-no-url',
-      workflowTemplateVersion: '1',
-    },
+    workflowTemplate: 'flux-schnell-no-url',
+    workflowTemplateVersion: '1',
   })
   await assert.rejects(
     () => compiler.compile(essentiaNoUrl, { prompt: 'test' }),
@@ -357,14 +364,10 @@ function makeLoraIntellarum(loras: Array<Partial<{ id: string; slug: string; tri
 function makeLoraEssentia(): Essentia {
   return makeEssentia({
     intellae: [{ id: 'intella.flux-base', role: 'unet' }],
-    runpodSpec: {
-      imageId: 'runpod/pytorch',
-      imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
-      workflowTemplate: 'lora-test',
-      workflowTemplateVersion: '1',
-      seedInputKey: 'input_seed',
-      defaultCookFlags: { batchSize: 1, seedStrategy: 'fixed', seedPlaceholder: 42, privateMode: false, vramGb: 24 },
-    },
+    workflowTemplate: 'lora-test',
+    workflowTemplateVersion: '1',
+    seedInputKey: 'input_seed',
+    defaultCookFlags: { batchSize: 1, seedStrategy: 'fixed', seedPlaceholder: 42, privateMode: false, vramGb: 24 },
   })
 }
 
@@ -372,7 +375,7 @@ test('compile() on loraCapable template + matching trigger: rewrites prompt + ap
   const intellarum = makeLoraIntellarum([
     { slug: 'milady-v3', trigger: 'milady', defaultWeight: 1.0 },
   ])
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
   const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait, milady style' })
 
   // Prompt embedded into the CLIP node now contains the <lora:...> tag
@@ -393,7 +396,7 @@ test('compile() on loraCapable template with no trigger hit: prompt unchanged, n
   const intellarum = makeLoraIntellarum([
     { slug: 'milady-v3', trigger: 'milady', defaultWeight: 1.0 },
   ])
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
   const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait of a cat' })
 
   const node22 = r.spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
@@ -422,14 +425,11 @@ test('compile() on NOT-loraCapable template: resolver does not run even with mat
       return intellarum.find(id)
     },
   }
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, baseIntellarum)
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, baseIntellarum, FUNDS)
   const noUrl = makeEssentia({
     intellae: [{ id: 'intella.flux-schnell', role: 'unet' }],
-    runpodSpec: {
-      ...makeEssentia().runpodSpec!,
-      workflowTemplate: 'flux-schnell-no-url',
-      workflowTemplateVersion: '1',
-    },
+    workflowTemplate: 'flux-schnell-no-url',
+    workflowTemplateVersion: '1',
   })
   const r = await compiler.compile(noUrl, { prompt: 'a portrait, milady style' })
   const node22 = r.spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
@@ -455,11 +455,8 @@ test('compile() weight set follows essentia.intellae, not the template list (sd1
   // An sd1-5-shaped flow declaring exactly one checkpoint weight.
   const sd15 = makeEssentia({
     intellae: [{ id: 'intella.sd15-v1-5', role: 'checkpoint' }],
-    runpodSpec: {
-      ...makeEssentia().runpodSpec!,
-      workflowTemplate: 'sd15',
-      workflowTemplateVersion: '1',
-    },
+    workflowTemplate: 'sd15',
+    workflowTemplateVersion: '1',
   })
   const { spec } = await compiler.compile(sd15, { prompt: 'a cat' })
   assert.equal(spec.models.length, 1)
@@ -473,7 +470,7 @@ test('compile() applies a LoRA whose familia matches the flow-derived family (fl
   const intellarum = makeLoraIntellarum([
     { slug: 'fluxlora', trigger: 'fluxtrigger', familia: 'flux' },
   ])
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
   const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait, fluxtrigger style' })
   assert.equal(r.appliedLoras?.length, 1)
   assert.equal(r.appliedLoras?.[0].slug, 'fluxlora')
@@ -485,7 +482,7 @@ test('compile() does NOT apply a LoRA of a different family even on the same tri
   const intellarum = makeLoraIntellarum([
     { slug: 'sd15lora', trigger: 'fluxtrigger', familia: 'sd15' },
   ])
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
   const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait, fluxtrigger style' })
   assert.equal(r.appliedLoras, undefined, 'cross-family LoRA must NOT be offered')
   const node22 = r.spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
@@ -497,7 +494,7 @@ test('compile() honors animaId for private-LoRA conflict resolution', async () =
     { slug: 'pub-shared',  trigger: 'shared', access: 'public' },
     { slug: 'my-shared',   trigger: 'shared', access: 'private', ownerAnimaId: 'anima-alice' },
   ])
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
   const r = await compiler.compile(makeLoraEssentia(), { prompt: 'shared style' }, { animaId: 'anima-alice' })
   assert.equal(r.appliedLoras?.[0].slug, 'my-shared', 'private owner wins')
 })
@@ -562,7 +559,7 @@ test('compile() resolves a v2-shape LoRA record from MongoIntella + injects into
     })
 
     const intellarum = new MongoIntella(col)
-    const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+    const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
     const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait, miladyy style' })
 
     // Resolver hit the v2 record — applied LoRA surfaces
@@ -586,7 +583,7 @@ test('compile() resolves a v2-shape LoRA record from MongoIntella + injects into
 
 test('compile() unions opts.pinnedModels into spec.models', async () => {
   const intellarum = makeLoraIntellarum([{ slug: 'extra', trigger: 'zzz' }])
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
   const r = await compiler.compile(makeEssentia(), { prompt: 'a cat' },
     { pinnedModels: [{ role: 'lora', id: 'intella.extra', dest: 'models/loras/extra.safetensors' }] })
   const pinned = r.spec.models.find(m => m.id === 'intella.extra')
@@ -596,7 +593,7 @@ test('compile() unions opts.pinnedModels into spec.models', async () => {
 
 test('compile() dedupes a pinned model already present from prompt LoRA resolution', async () => {
   const intellarum = makeLoraIntellarum([{ slug: 'milady-v3', trigger: 'milady' }])
-  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum)
+  const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
   const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait, milady style' },
     { pinnedModels: [{ role: 'lora', id: 'intella.milady-v3', dest: 'models/loras/milady-v3.safetensors' }] })
   assert.equal(r.spec.models.filter(m => m.id === 'intella.milady-v3').length, 1, 'not duplicated')

@@ -3,9 +3,11 @@ import type { Essentia } from '../../types/essendi.js'
 // =============================================================================
 // Canonical Essentiae — platform atomic operations
 //
-// Each Essentia is the crystal representation of a platform tool.
-// intellae[] is the weight manifest — the Intellae the flow downloads.
-// runpodSpec carries the container + workflow template reference.
+// Each Essentia is the crystal representation of a platform tool. It REFERENCES
+// its compute substrate (`Fundamentum`, see seeds/fundamenta.ts) by id+versio —
+// the substrate carries the image, runtime, and base/support weights. The
+// Essentia keeps its own FORM: workflowTemplate + seedInputKey + cookFlags.
+// (Decomposed from the former provider-named `runpodSpec` — ADR-0005.)
 //
 // contentHash is omitted here — computed and set on first registration
 // via hashModus() in Phase 2. Left undefined in seeds for staging.
@@ -21,14 +23,10 @@ export const ESSENTIA_RUNMAKE_FLUX_SCHNELL: Essentia = {
   canonica: true,
   categoria: 'image',
 
-  // The flow's weight manifest — what it downloads. Family is DERIVED from these
-  // weights' `Intella.familia` (the unet base carries 'flux').
-  intellae: [
-    { id: 'intella.flux-schnell-fp8-scaled', role: 'unet' },
-    { id: 'intella.flux-vae',                role: 'vae' },
-    { id: 'intella.t5xxl-fp16',              role: 'clip' },
-    { id: 'intella.clip-l',                  role: 'clip' },
-  ],
+  // Substrate: the FLUX·ComfyUI fundament carries image + runtime + base weights.
+  // Family ('flux') derives from the fundament's weights' `Intella.familia`.
+  fundamentumId: 'flux-comfyui',
+  fundamentumVersio: '1.0.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation' },
@@ -42,19 +40,16 @@ export const ESSENTIA_RUNMAKE_FLUX_SCHNELL: Essentia = {
     image: { type: 'image', description: 'Generated image' },
   },
 
-  runpodSpec: {
-    imageId: 'runpod/pytorch',
-    imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
-    workflowTemplate: 'flux-schnell',
-    workflowTemplateVersion: '1',
-    seedInputKey: 'input_seed',
-    defaultCookFlags: {
-      batchSize: 1,
-      seedStrategy: 'shuffle',
-      seedPlaceholder: 88888888,
-      privateMode: false,
-      vramGb: 24,
-    },
+  // Form: which workflow graph runs on the fundament, + seed/cook defaults.
+  workflowTemplate: 'flux-schnell',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultCookFlags: {
+    batchSize: 1,
+    seedStrategy: 'shuffle',
+    seedPlaceholder: 88888888,
+    privateMode: false,
+    vramGb: 24,
   },
 
   natum: new Date('2025-01-01'),
@@ -71,11 +66,10 @@ export const ESSENTIA_RUNMAKE_SD15: Essentia = {
   canonica: true,
   categoria: 'image',
 
-  // The flow's weight manifest — a single self-contained SD1.5 checkpoint.
-  // Family ('sd15') is DERIVED from this weight's `Intella.familia`.
-  intellae: [
-    { id: 'intella.sd15-v1-5', role: 'checkpoint' },
-  ],
+  // Substrate: the SD1.5·ComfyUI fundament (self-contained checkpoint).
+  // Family ('sd15') derives from the fundament's weight's `Intella.familia`.
+  fundamentumId: 'sd15-comfyui',
+  fundamentumVersio: '1.0.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation' },
@@ -90,20 +84,16 @@ export const ESSENTIA_RUNMAKE_SD15: Essentia = {
     image: { type: 'image', description: 'Generated image' },
   },
 
-  runpodSpec: {
-    imageId: 'runpod/pytorch',
-    imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
-    runtime: 'ComfyUI',
-    workflowTemplate: 'sd15',
-    workflowTemplateVersion: '1',
-    seedInputKey: 'input_seed',
-    defaultCookFlags: {
-      batchSize: 1,
-      seedStrategy: 'shuffle',
-      seedPlaceholder: 88888888,
-      privateMode: false,
-      vramGb: 8,
-    },
+  // Form: which workflow graph runs on the fundament, + seed/cook defaults.
+  workflowTemplate: 'sd15',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultCookFlags: {
+    batchSize: 1,
+    seedStrategy: 'shuffle',
+    seedPlaceholder: 88888888,
+    privateMode: false,
+    vramGb: 8,
   },
 
   natum: new Date('2025-01-01'),

@@ -118,20 +118,18 @@ test('register preserves undefined impetusFixum', async () => {
 test('register preserves extra fields (Essentia extensions)', async () => {
   const m = makeModus({
     categoria: 'image',
-    intellaId: 'intella.flux-schnell',
-    runpodSpec: {
-      imageId: 'runpod/pytorch',
-      imageVersion: '2.4.0',
-      workflowTemplate: 'flux-schnell',
-      workflowTemplateVersion: '1',
-    },
+    fundamentumId: 'flux-comfyui',
+    fundamentumVersio: '1.0.0',
+    workflowTemplate: 'flux-schnell',
+    workflowTemplateVersion: '1',
   } as any)
   await modorum.register(m)
   const found = await modorum.find('test.modus') as any
   assert.ok(found)
   assert.equal(found.categoria, 'image')
-  assert.equal(found.intellaId, 'intella.flux-schnell')
-  assert.deepEqual(found.runpodSpec, m.runpodSpec)
+  assert.equal(found.fundamentumId, 'flux-comfyui')
+  assert.equal(found.fundamentumVersio, '1.0.0')
+  assert.equal(found.workflowTemplate, 'flux-schnell')
 })
 
 // ── list ──────────────────────────────────────────────────────────────────────

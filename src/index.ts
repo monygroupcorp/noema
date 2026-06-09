@@ -23,6 +23,7 @@ import { startAnalyticsListener } from './analytics/analyticsListener.js'
 import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
 import { CANONICAL_MODI } from './crystal/seeds/modi.js'
 import { CANONICAL_ESSENTIAE } from './crystal/seeds/essentiae.js'
+import { CANONICAL_FUNDAMENTA } from './crystal/seeds/fundamenta.js'
 import { makeLogger } from './lib/logger.js'
 import { withTrace, makeTraceContext } from './lib/trace.js'
 
@@ -47,6 +48,7 @@ import { startIdleReaper } from './crystal/idleReaper.js'
 import { startStudioBilling } from './crystal/StudioBilling.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { MongoConsuetudinum } from './crystal/MongoConsuetudinum.js'
+import { MongoFundamentorum } from './crystal/MongoFundamentorum.js'
 import { Compiler } from './crystal/Compiler.js'
 import { WorkflowTemplateRegistry } from './crystal/WorkflowTemplateRegistry.js'
 import { CANONICAL_INTELLAE } from './crystal/seeds/intellae.js'
@@ -230,11 +232,13 @@ async function main(): Promise<void> {
   // Owner-keyed verb→flow bindings — backs /bind persistence + per-user /make resolution.
   const consuetudinumCol = mongo.db(DB_NAME).collection('consuetudinum')
   const consuetudinum = new MongoConsuetudinum(consuetudinumCol)
-  const compiler = new Compiler(templateRegistry, undefined, intellae)
+  // Compute-substrate registry (ADR-0005) — the Fundamenta essentiae reference for image/runtime/weights.
+  const fundamentorum = new MongoFundamentorum(mongo.db(DB_NAME).collection('fundamenta'))
+  const compiler = new Compiler(templateRegistry, undefined, intellae, fundamentorum)
   const compile = async (modus: unknown, aditus: Record<string, unknown>, pinnedModels?: import('./types/actum.js').ModelRef[]): Promise<{ hash: string; input: unknown }> => {
     const essentia = modus as Essentia
-    if (!essentia.runpodSpec) {
-      throw new Error(`Modus '${essentia.id}' has no runpodSpec — cannot compile for RunPod`)
+    if (!essentia.fundamentumId) {
+      throw new Error(`Modus '${essentia.id}' has no fundamentumId — cannot compile for a pod`)
     }
     const { hash, spec } = await compiler.compile(essentia, aditus, pinnedModels ? { pinnedModels } : {})
     return { hash, input: spec }
@@ -332,11 +336,16 @@ async function main(): Promise<void> {
   nexus.on('studio_spend', studioSpendHook)
   nexus.on('deposit_confirmed', referralSplitHook)
 
-  // 4. Seed canonical modi + essentiae + intellae
+  // 4. Seed canonical modi + essentiae + intellae + fundamenta
   for (const modus of CANONICAL_MODI) {
     await ring.modorum.register(modus)
   }
   log.info(`Seeded ${CANONICAL_MODI.length} canonical modi`)
+
+  for (const fundamentum of CANONICAL_FUNDAMENTA) {
+    await fundamentorum.register(fundamentum)
+  }
+  log.info(`Seeded ${CANONICAL_FUNDAMENTA.length} canonical fundamenta`)
 
   for (const essentia of CANONICAL_ESSENTIAE) {
     await ring.modorum.register(essentia)

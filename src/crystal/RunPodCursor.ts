@@ -70,7 +70,7 @@ interface Config {
   /** Builds a WarmPodClient for a given Materia — required when praefectus is set. */
   warmFactory?: (materia: Materia) => RunPodClient
   /** Extracts the OCI image ref from a modus for Praefectus matching. Returns undefined to skip warm routing. */
-  imageRefOf?: (modus: Modus) => string | undefined
+  imageRefOf?: (modus: Modus) => string | undefined | Promise<string | undefined>
   /** Admission gate: before dispatching a gen onto a reused WARM pod, ensure the models it needs
    *  are installed (awaiting any in-flight live-apply install). No-op on a cold start. */
   admitWarm?: (materia: Materia, models: Array<{ id?: string }>) => Promise<void>
@@ -208,7 +208,7 @@ export class RunPodCursor implements Cursor {
 
     // 3. Praefectus warm match (economy or standard).
     if (praefectus && imageRefOf) {
-      const imageRef = imageRefOf(modus)
+      const imageRef = await imageRefOf(modus)
       if (imageRef) {
         const forEconomy = actum.computeStrategy === 'economy'
         const warm = await praefectus.findWarm(imageRef, forEconomy ? { forEconomy: true } : undefined)

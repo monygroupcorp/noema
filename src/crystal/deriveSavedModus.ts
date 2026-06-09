@@ -7,7 +7,7 @@
 // `Porta.default`s, owned by an `AuctorKey`, linked to its parent via `fonte`.
 //
 // Pure + crystal-only: no I/O, no new nouns. Copies the base wholesale (genus,
-// runpodSpec/gradus, exitus, ministerium, categoria, … — every field rides along
+// the fundament ref/gradus, exitus, ministerium, categoria, … — every field rides along
 // the spread), then overrides identity/provenance, folds the pinned loadout into
 // the weight manifest, and bakes the captured config into the input schema.
 //
@@ -52,7 +52,7 @@ export interface DeriveSavedModusOpts {
  * Derive a user-owned saved Modus from a base.
  *
  * Generic over the concrete Modus subtype (e.g. `Essentia`) so subtype fields
- * (runpodSpec, categoria, …) copy through and the return type is preserved.
+ * (fundamentumId, categoria, …) copy through and the return type is preserved.
  */
 export function deriveSavedModus<M extends Modus>(base: M, opts: DeriveSavedModusOpts): M {
   // The config bakes into the input schema as Porta defaults. The `prompt` Porta is

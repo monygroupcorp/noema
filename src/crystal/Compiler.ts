@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { Essentia } from '../types/essendi.js'
+import type { Fundamentum, Fundamentorum } from '../types/fundamentum.js'
 import type { Intella, Intellarum } from '../types/intelligendi.js'
 import type { ModelRef } from '../types/actum.js'
 import { WorkflowTemplateRegistry, WorkflowTemplateError } from './WorkflowTemplateRegistry.js'
@@ -96,6 +97,7 @@ export class Compiler {
     private readonly templates: WorkflowTemplateRegistry,
     randomSeed?: () => number,
     private readonly intellarum?: Intellarum,
+    private readonly fundamentorum?: Fundamentorum,
   ) {
     this.randomSeed = randomSeed ?? (() => Math.floor(Math.random() * 0x100000000))
   }
@@ -105,20 +107,33 @@ export class Compiler {
     aditus: Record<string, unknown>,
     opts: CompileOptions = {},
   ): Promise<CompileResult> {
-    if (!essentia.runpodSpec) {
-      throw new CompilerError('MISSING_RUNPOD_SPEC', `Essentia '${essentia.id}' has no runpodSpec`)
+    // ── Resolve the substrate (Fundamentum) the flow runs on (ADR-0005) ────
+    // The flow references its fundament by id+versio; the registry resolves it.
+    // The image + runtime + base weights come from HERE; the flow's own form
+    // (template, seed key, cook flags) stays on the Essentia.
+    if (!essentia.fundamentumId) {
+      throw new CompilerError('MISSING_FUNDAMENTUM', `Essentia '${essentia.id}' has no fundamentumId`)
+    }
+    if (!essentia.workflowTemplate) {
+      throw new CompilerError('MISSING_WORKFLOW_TEMPLATE', `Essentia '${essentia.id}' has no workflowTemplate`)
+    }
+    const fundamentum: Fundamentum | null = this.fundamentorum
+      ? await this.fundamentorum.find(essentia.fundamentumId, essentia.fundamentumVersio)
+      : null
+    if (!fundamentum) {
+      throw new CompilerError('FUNDAMENTUM_NOT_FOUND',
+        `Fundamentum '${essentia.fundamentumId}'${essentia.fundamentumVersio ? `@${essentia.fundamentumVersio}` : ''} not found for Essentia '${essentia.id}'`)
     }
 
-    const { runpodSpec } = essentia
     const image = {
-      imageId: runpodSpec.imageId,
-      imageVersion: runpodSpec.imageVersion,
-      ociRef: `${runpodSpec.imageId}:${runpodSpec.imageVersion}`,
+      imageId: fundamentum.imageId,
+      imageVersion: fundamentum.imageVersion,
+      ociRef: `${fundamentum.imageId}:${fundamentum.imageVersion}`,
     }
 
     let template
     try {
-      template = this.templates.get(runpodSpec.workflowTemplate, runpodSpec.workflowTemplateVersion)
+      template = this.templates.get(essentia.workflowTemplate, essentia.workflowTemplateVersion ?? '1')
     } catch (err) {
       if (err instanceof WorkflowTemplateError) {
         throw new CompilerError(err.code, err.message)
@@ -127,21 +142,24 @@ export class Compiler {
     }
 
     const cookFlags: Record<string, unknown> = {
-      ...(runpodSpec.defaultCookFlags ?? {}),
+      ...(essentia.defaultCookFlags ?? {}),
       ...((aditus._cookFlags as Record<string, unknown>) ?? {}),
     }
 
     const seed = this._resolveSeed(essentia, aditus, cookFlags)
 
-    // ── Weight manifest = the FLOW's declared weights (`Modus.intellae`) ───
-    // The flow declares what it downloads. Each declared weight's url/dest is
-    // enriched from a matching `template.requiredModels` entry by id (fallback);
+    // ── Weight manifest = the FUNDAMENT's base weights ∪ the flow's own extras ─
+    // Base/support weights live on the `Fundamentum` (shared substrate); a flow may
+    // add its own extra weights via `Modus.intellae`. Each declared weight's url/dest
+    // is enriched from a matching `template.requiredModels` entry by id (fallback);
     // `_resolveModels` then overrides from the registered Intella when present.
     // Precedence: Intella > template fallback > MODEL_NOT_RESOLVED.
     const templateFallback = new Map(
       (template.requiredModels ?? []).map(m => [m.id, m] as const),
     )
-    const weightRefs = (essentia.intellae ?? []).map(w => {
+    const manifest = [...(fundamentum.intellae ?? []), ...(essentia.intellae ?? [])]
+      .filter((w, i, all) => all.findIndex(o => o.id === w.id) === i)   // de-dupe by id, base-first
+    const weightRefs = manifest.map(w => {
       const fb = templateFallback.get(w.id)
       return {
         role: w.role,
@@ -197,7 +215,7 @@ export class Compiler {
       }
     }
 
-    const seedKey = runpodSpec.seedInputKey ?? 'input_seed'
+    const seedKey = essentia.seedInputKey ?? 'input_seed'
     const slotInputs = { ...promptForSlots, [seedKey]: seed }
     const inputTemplate = this._applySlotMap(template, slotInputs)
 
@@ -224,7 +242,7 @@ export class Compiler {
       cookFlags,
       seed,
       sourceTool: { id: essentia.id, versio: essentia.versio },
-      runtime: runpodSpec.runtime ?? 'ComfyUI',
+      runtime: fundamentum.runtime ?? 'ComfyUI',
       ...(template.customNodes && template.customNodes.length > 0
         ? { customNodes: template.customNodes }
         : {}),
@@ -306,7 +324,7 @@ export class Compiler {
     aditus: Record<string, unknown>,
     cookFlags: Record<string, unknown>,
   ): number {
-    const seedKey = essentia.runpodSpec?.seedInputKey ?? 'input_seed'
+    const seedKey = essentia.seedInputKey ?? 'input_seed'
     const explicit = aditus[seedKey]
     if (explicit !== undefined && explicit !== null && explicit !== '' && explicit !== -1) {
       return Number(explicit)
@@ -317,7 +335,7 @@ export class Compiler {
       case 'shuffle':
         return this.randomSeed()
       case 'fixed': {
-        const placeholder = cookFlags.seedPlaceholder ?? essentia.runpodSpec?.defaultCookFlags?.seedPlaceholder ?? 88888888
+        const placeholder = cookFlags.seedPlaceholder ?? essentia.defaultCookFlags?.seedPlaceholder ?? 88888888
         return Number(placeholder)
       }
       case 'increment': {
