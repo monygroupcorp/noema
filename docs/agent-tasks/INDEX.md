@@ -18,6 +18,13 @@ real GPU/pod is validated separately on staging. Read `AGENTS.md` first.
 | [TASK-011](TASK-011-bulletin-render-serialization.md) | Serialize bulletin renders (fix scrambled provisioning play-by-play) | done* | *hermetic done; visual confirm → staging |
 
 ## Backlog (not yet written as specs)
+- **⚠ Add `test:crystal` (DB layer) to CI** — the agent gate runs only `test:hermetic`, so the DB layer
+  (`MongoIntella`/`MongoModorum`/`executionWebhook`/…, which need a real Mongo via `scripts/run-with-env.sh`)
+  is **never run in CI**. This let TWO real bugs reach staging unnoticed (2026-06-09): the canonical-LoRA
+  access filter (`{canonica:true}` clause) and TASK-006's stale string-`auctor` fixtures — both green on
+  hermetic, broken/failing on `test:crystal`. **Do:** add a CI job in `.github/workflows/ci.yml` with a
+  MongoDB **service container** + the env `test:crystal` needs, running `npm run test:crystal` on every
+  push. Closes the gap where hermetic mocks diverge from real Mongo query/serialization behavior.
 - **Trigger-resolution convergence** — now that `familia` is populated (TASK-005/008), drop
   `BulletinModelCatalog`'s tag-derived family workaround and converge its `resolveTriggers(…,{family})`
   onto the crystal `triggerMap(familia)` (its own "swap once it's set" TODO). Allocutio ring; follow-up.
