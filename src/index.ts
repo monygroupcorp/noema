@@ -457,6 +457,7 @@ async function main(): Promise<void> {
     modorum: ring.modorum,
     actorum: ring.actorum,
     intellarum: intellae,
+    fundamentorum,
     actumIndex: ring.actumIndex,
     consuetudinum,
     ...(process.env.TELEGRAM_BOT_USERNAME ? { botUsername: process.env.TELEGRAM_BOT_USERNAME } : {}),

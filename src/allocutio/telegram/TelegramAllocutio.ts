@@ -20,6 +20,7 @@ import type { Signorum } from '../../types/significandi.js'
 import type { Modorum } from '../../types/modus.js'
 import type { Actorum } from '../../types/cursus.js'
 import type { Intellarum } from '../../types/intelligendi.js'
+import type { Fundamentorum } from '../../types/fundamentum.js'
 import type { Consuetudinum } from '../../types/consuetudo.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
 import { mintShareToken } from '../../crystal/shareToken.js'
@@ -157,6 +158,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     actorum?: Actorum
     /** Intellarum — resolves intellaIds in `Mod • → View loadout` into human labels. */
     intellarum?: Intellarum
+    /** Fundamentorum — the compute-substrate registry the `/arm` chooser projects (ADR-0005). */
+    fundamentorum?: Fundamentorum
     /** Per-anima dispatch index — when present, /status YOUR GENS populates
      *  from here and per-row Cancel works. */
     actumIndex?: ActumIndexStore
@@ -176,6 +179,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // Mod • → Add catalog/search backend (own module — keeps this adapter lean).
     this.modelCatalog = new BulletinModelCatalog({
       intellarum: deps.intellarum,
+      fundamentorum: deps.fundamentorum,
       sender: this.sender,
     })
 

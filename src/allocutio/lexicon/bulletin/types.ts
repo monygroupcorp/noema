@@ -94,18 +94,20 @@ export interface Loadout {
  * to the Mod • loadout/Add menu.
  */
 /**
- * A curated quick-start flow shown on the /arm preset step. `id` is the base family it scopes the
- * model menu to (e.g. 'intella.flux-base'); the special id `'custom'` drops into the manual
- * image→config path. The detail fields back the flow's detail card (what it bundles before you
- * commit) — a flow is a base + LoRAs + a runtime/config + an image, so an advanced host can read
- * the full shape first. All detail fields are optional (the chooser only needs id + label).
+ * A `/arm` chooser card — a presentation projection of a `Fundamentum` (ADR-0005): the compute
+ * substrate a host can provision a studio from. `id` is the fundament id (e.g. 'flux-comfyui');
+ * `familia` is the model family it scopes the LoRA menu to (e.g. 'flux'); `'custom'` drops into the
+ * manual image→config path. The detail fields back the card (what the fundament bundles before you
+ * commit). All detail fields are optional (the chooser only needs id + label).
  */
 export interface ArmPreset {
   id: string
   label: string
+  /** The model family this fundament serves — scopes the LoRA picker (`armBase`). Absent on Custom. */
+  familia?: string
   /** One-line summary shown on the detail card. */
   blurb?: string
-  /** The base model(s) / nodes this flow installs. */
+  /** The base/support weights this fundament provisions. */
   models?: string[]
   /** The runtime/config it provisions (e.g. 'ComfyUI'). */
   config?: string

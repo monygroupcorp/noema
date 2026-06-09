@@ -183,7 +183,8 @@ export class BulletinManager {
    *  (one pod = one runtime) — leave the loadout untouched and surface a notice on the chooser. */
   private _addFlowOrNote(s: PodSession, preset: ArmPreset): void {
     const have = s.loadout?.runtime
-    const added = s.addFlow(preset.id, this._loadoutFromPreset(preset))
+    // armBase scopes the LoRA picker — it's the model FAMILY, not the fundament id (ADR-0005).
+    const added = s.addFlow(preset.familia ?? preset.id, this._loadoutFromPreset(preset))
     if (!added && have && preset.config) s.setArmNote(COPY.bulletin.arm.runtimeConflict(have, preset.config))
   }
 
