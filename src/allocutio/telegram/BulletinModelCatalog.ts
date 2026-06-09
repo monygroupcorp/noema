@@ -12,6 +12,7 @@
 // =============================================================================
 
 import type { Intellarum, Intella } from '../../types/intelligendi.js'
+import type { Fundamentorum } from '../../types/fundamentum.js'
 import type { PendingModel, ModelDetail, ArmPreset } from '../lexicon/bulletin/types.js'
 import { familiaOf } from '../../crystal/inferFamilia.js'
 import { COPY } from '../lexicon/copy.js'
@@ -30,10 +31,6 @@ const STUDIO_IMAGES: StudioImage[] = [
 // loadout FOOTPRINT is `Loadout.vramGb` / `ArmPreset.vramGb` (sum of model sizes, added below).
 // Co-hosting decisions (does footprint ≤ capacity?) consume both once the real runner lands — inert today.
 
-/** The runtime a model runs under — GGUF weights → llama.cpp; everything else → ComfyUI. */
-function runtimeOf(i: Intella): string {
-  return (i.architectura === 'gguf' || mountOf(i) === 'gguf') ? 'llama.cpp' : 'ComfyUI'
-}
 /** The container image (label) for a runtime — the first (most general) image that supports it,
  *  so a studio is provisioned co-host-capable where possible. */
 function imageForRuntime(runtime: string): string {
@@ -74,7 +71,7 @@ export class BulletinModelCatalog {
   private readonly pending = new Map<number, { chatId: number; hostUserId: string; kind: 'search' | 'trigger'; expiresAt: number }>()
   private static readonly TTL_MS = 5 * 60 * 1000
 
-  constructor(private readonly deps: { intellarum?: Intellarum; sender: PromptSender }) {}
+  constructor(private readonly deps: { intellarum?: Intellarum; fundamentorum?: Fundamentorum; sender: PromptSender }) {}
 
   /** Mod • → Add (category stage): the mount-location types present in the catalog, ordered
    *  popular-first (most-populated mount first). Absent intellarum → no categories. */
@@ -86,52 +83,43 @@ export class BulletinModelCatalog {
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([mount]) => mount)
   }
 
-  /** `/arm` flow chooser: one curated flow per base-model family actually present in the catalog
-   *  (e.g. FLUX while only FLUX.1 Schnell is installed), each carrying its real base models, LoRA
-   *  count, and the default runtime/image — then Custom for the manual builder. The list grows on
-   *  its own as new base weights (SDXL, Z-Image, …) are added; no fictional entries. */
+  /** `/arm` chooser: project each canonical `Fundamentum` (the compute substrate, ADR-0005) into a
+   *  card — its base/support weights, family, LoRA count, runtime/image — then Custom for the manual
+   *  builder. Grounded on the `Fundamentorum` registry (NOT synthesized from raw weights): a fundament
+   *  exists because flows reference it, so the list IS the set of armable substrates, and grows as new
+   *  fundamenta are seeded. The user picks in flow/family vocab; what gets provisioned is a fundament. */
   async listFlows(): Promise<ArmPreset[]> {
     const custom: ArmPreset = { id: 'custom', label: 'Custom' }
-    if (!this.deps.intellarum) return [custom]
-    const all = await this.deps.intellarum.list().catch(() => [])
+    if (!this.deps.fundamentorum) return [custom]
+    const funds = await this.deps.fundamentorum.list({ canonica: true }).catch(() => [])
+    const all = this.deps.intellarum ? await this.deps.intellarum.list().catch(() => []) : []
+    const byId = new Map(all.map(i => [i.id, i]))
+    // LoRA availability per family — surfaced on the card so a host sees what they can layer.
     const loraCount = new Map<string, number>()
     for (const i of all) if (i.genus === 'lora') { const f = familyOf(i); if (f) loraCount.set(f, (loraCount.get(f) ?? 0) + 1) }
 
-    // Support files (VAE / CLIP / text encoders) a flow loads alongside its base. Family-named
-    // ones (e.g. "FLUX VAE") attach only to their family; generic/shared encoders (T5-XXL, CLIP-L
-    // — no family marker) attach to every flow that needs them. (A real workflow/Essentia store
-    // will declare the exact set per flow; until then we infer it from mount + family.)
-    const SUPPORT_MOUNTS = new Set(['vae', 'clip', 'text_encoders', 'text_encoder'])
-    const supports = all.filter(i => SUPPORT_MOUNTS.has(mountOf(i)))
-
-    // Group real base models by family → one flow each. The flow's RUNTIME comes from its base
-    // (GGUF → llama.cpp, else ComfyUI); image + config follow. Support files (VAE/CLIP) and LoRAs
-    // are image-gen concepts — only a ComfyUI flow carries them.
-    const byFamily = new Map<string, Intella[]>()
-    for (const b of all) {
-      if (b.genus !== 'model') continue
-      const fam = familyOf(b) ?? b.id
-      byFamily.set(fam, [...(byFamily.get(fam) ?? []), b])
-    }
-    const flows: ArmPreset[] = [...byFamily.entries()].map(([fam, bases]) => {
-      const runtime = runtimeOf(bases[0])
-      const isComfy = runtime === 'ComfyUI'
-      // Only a bare diffusion model (`unet/`) needs external VAE/CLIP; a `checkpoints/` file bakes
-      // them in (self-contained). This keeps FLUX's shared encoders off an SD1.5 checkpoint flow.
-      const needsSupport = isComfy && mountOf(bases[0]) === 'unet'
-      const support = needsSupport ? supports.filter(s => { const f = familyOf(s); return f === fam || f === undefined }) : []
-      const models = [...bases.map(b => b.nomen || b.slug || b.id), ...support.map(s => s.nomen || s.id)]
-      const label = baseFamilyName(fam)
-      const loras = loraCount.get(fam) ?? 0
-      // Rough weight footprint (sum of model sizes) — the inert VRAM-budget stub for co-hosting.
-      const vramGb = Math.round([...bases, ...support].reduce((n, i) => n + (i.sizeGb ?? 0), 0) * 10) / 10
+    const flows: ArmPreset[] = funds.map(f => {
+      // Resolve the fundament's weight manifest to display names; derive its family from the base
+      // weights' `Intella.familia` (single source — same as the Compiler).
+      const weights = (f.intellae ?? []).map(w => byId.get(w.id)).filter((w): w is Intella => !!w)
+      const familia = weights.map(w => familyOf(w)).find((x): x is string => !!x)
+      const models = weights.length ? weights.map(w => w.nomen || w.slug || w.id) : (f.intellae ?? []).map(w => w.id)
+      const runtime = f.runtime ?? 'ComfyUI'
+      const label = baseFamilyName(familia ?? f.id)
+      const loras = familia ? (loraCount.get(familia) ?? 0) : 0
+      const vramGb = f.vramGb ?? Math.round(weights.reduce((n, w) => n + (w.sizeGb ?? 0), 0) * 10) / 10
       const loraTail = loras ? `, ${loras} LoRAs available.` : '.'
-      const blurb = !isComfy
-        ? `${label} — ${bases.length} model${bases.length === 1 ? '' : 's'} · ${runtime}.`
-        : support.length
-          ? `${label} — ${bases.length} base + ${support.length} VAE/CLIP${loraTail}`
-          : `${label} — self-contained checkpoint${loraTail}`
-      return { id: fam, label, blurb, models, config: runtime, image: imageForRuntime(runtime), ...(vramGb > 0 ? { vramGb } : {}) }
+      const blurb = `${label} — ${models.length} weight${models.length === 1 ? '' : 's'} · ${runtime}${loraTail}`
+      return {
+        id: f.id,
+        ...(familia ? { familia } : {}),
+        label,
+        blurb,
+        models,
+        config: runtime,
+        image: imageForRuntime(runtime),
+        ...(vramGb > 0 ? { vramGb } : {}),
+      }
     })
     flows.push(custom)
     return flows

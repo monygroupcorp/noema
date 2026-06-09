@@ -2,45 +2,71 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { BulletinModelCatalog } from '../../../src/allocutio/telegram/BulletinModelCatalog.js'
 import type { Intellarum } from '../../../src/types/intelligendi.js'
+import type { Fundamentorum, Fundamentum } from '../../../src/types/fundamentum.js'
 
 const CATALOG = [
-  { id: 'intella.flux-schnell', nomen: 'FLUX.1 Schnell', genus: 'model', architectura: 'dit', dest: 'unet/flux.safetensors' },
-  { id: 'intella.flux-vae', nomen: 'FLUX VAE', genus: 'embedding', architectura: 'vae', dest: 'vae/ae.safetensors' },
+  { id: 'intella.flux-schnell', nomen: 'FLUX.1 Schnell', genus: 'model', architectura: 'dit', dest: 'unet/flux.safetensors', sizeGb: 24 },
+  { id: 'intella.flux-vae', nomen: 'FLUX VAE', genus: 'embedding', architectura: 'vae', dest: 'vae/ae.safetensors', sizeGb: 0.3 },
   { id: 'intella.clip-l', nomen: 'CLIP-L (text encoder)', genus: 'embedding', architectura: 'transformer', dest: 'clip/clip_l.safetensors' },
   { id: 'intella.sd15', nomen: 'Stable Diffusion 1.5', genus: 'model', architectura: 'sd15', dest: 'checkpoints/v1-5-pruned-emaonly.safetensors' },
-  { id: 'intella.smollm2', nomen: 'SmolLM2 135M Instruct', genus: 'model', architectura: 'gguf', dest: 'gguf/smollm2.gguf' },
+  { id: 'intella.smollm2', nomen: 'SmolLM2 135M Instruct', genus: 'model', architectura: 'gguf', dest: 'gguf/smollm2.gguf', sizeGb: 0.145 },
   { id: 'l1', nomen: 'drifella', genus: 'lora', dest: 'loras/drifella.safetensors', tags: [{ tag: 'flux' }] },
 ]
-const intellarum = { async list() { return CATALOG as never }, async find() { return null } } as unknown as Intellarum
-const sender = { async sendMessage() { return { message_id: 1 } } }
-const cat = () => new BulletinModelCatalog({ intellarum, sender })
+const intellarum = {
+  async list() { return CATALOG as never },
+  async find(id: string) { return (CATALOG.find(c => c.id === id) ?? null) as never },
+} as unknown as Intellarum
 
-test('listFlows derives one flow per base family, each with its own runtime', async () => {
+// Two canonical fundamenta — the substrates /arm projects (a ComfyUI flux stack + a llama.cpp LLM).
+const FUNDS: Fundamentum[] = [
+  {
+    id: 'flux-comfyui', versio: '1.0.0', imageId: 'runpod/pytorch', imageVersion: '2.4', runtime: 'ComfyUI',
+    intellae: [{ id: 'intella.flux-schnell', role: 'unet' }, { id: 'intella.flux-vae', role: 'vae' }],
+    vramGb: 24, canonica: true, natum: new Date('2025-01-01'), mutatum: new Date('2025-01-01'),
+  },
+  {
+    id: 'smollm-llama', versio: '1.0.0', imageId: 'ghcr.io/ggml', imageVersion: 'srv', runtime: 'llama.cpp',
+    intellae: [{ id: 'intella.smollm2', role: 'gguf' }],
+    vramGb: 1, canonica: true, natum: new Date('2025-01-01'), mutatum: new Date('2025-01-01'),
+  },
+]
+const fundamentorum = {
+  async list() { return FUNDS as never },
+  async find(id: string) { return (FUNDS.find(f => f.id === id) ?? null) as never },
+  async register() {},
+} as unknown as Fundamentorum
+const sender = { async sendMessage() { return { message_id: 1 } } }
+const cat = () => new BulletinModelCatalog({ intellarum, fundamentorum, sender })
+
+test('listFlows projects one card per canonical Fundamentum, carrying its id, family + runtime', async () => {
   const flows = await cat().listFlows()
   const byLabel = Object.fromEntries(flows.map(f => [f.label, f]))
-  assert.ok(byLabel['FLUX'],   'a FLUX flow (ComfyUI)')
-  assert.ok(byLabel['SmolLM2'], 'a SmolLM2 flow (llama.cpp)')
-  assert.equal(byLabel['FLUX'].config, 'ComfyUI', 'FLUX runs under ComfyUI')
-  assert.equal(byLabel['SmolLM2'].config, 'llama.cpp', 'a GGUF model routes to the llama.cpp runtime')
+  assert.equal(byLabel['FLUX'].id, 'flux-comfyui', 'card id is the fundament id (not the family)')
+  assert.equal(byLabel['FLUX'].familia, 'flux', 'familia scopes the LoRA picker (armBase)')
+  assert.equal(byLabel['FLUX'].config, 'ComfyUI', 'runtime comes from the fundament')
+  assert.equal(byLabel['SmolLM2'].id, 'smollm-llama')
+  assert.equal(byLabel['SmolLM2'].familia, 'smollm')
+  assert.equal(byLabel['SmolLM2'].config, 'llama.cpp')
   assert.equal(flows.at(-1)?.id, 'custom', 'Custom is last')
 })
 
-test('a ComfyUI flow bundles VAE/CLIP; a llama.cpp flow does not', async () => {
+test("the card lists the fundament's resolved weight manifest (names, not ids)", async () => {
   const flows = await cat().listFlows()
-  const flux = flows.find(f => f.label === 'FLUX')!
+  assert.deepEqual(flows.find(f => f.label === 'FLUX')!.models, ['FLUX.1 Schnell', 'FLUX VAE'])
   const smol = flows.find(f => f.label === 'SmolLM2')!
-  assert.ok(flux.models?.some(m => /VAE/.test(m)) && flux.models?.some(m => /CLIP/.test(m)), 'FLUX carries its support models')
-  assert.deepEqual(smol.models, ['SmolLM2 135M Instruct'], 'the LLM flow is just the GGUF model — no VAE/CLIP')
+  assert.deepEqual(smol.models, ['SmolLM2 135M Instruct'])
   assert.match(smol.blurb ?? '', /llama\.cpp/, 'blurb names the runtime')
 })
 
-test('a checkpoint flow is self-contained — no external VAE/CLIP attached (FLUX encoders stay off it)', async () => {
+test('the card surfaces LoRA availability for its family', async () => {
   const flows = await cat().listFlows()
-  const sd = flows.find(f => f.label === 'SD1.5')!
-  assert.ok(sd, 'SD1.5 derives as its own ComfyUI flow')
-  assert.equal(sd.config, 'ComfyUI', 'image-gen runtime')
-  assert.deepEqual(sd.models, ['Stable Diffusion 1.5'], 'just the checkpoint — VAE/CLIP are baked in, FLUX encoders excluded')
-  assert.match(sd.blurb ?? '', /self-contained checkpoint/, 'blurb reflects it')
+  assert.match(flows.find(f => f.label === 'FLUX')!.blurb ?? '', /1 LoRA/, 'one flux LoRA (drifella) available')
+  assert.doesNotMatch(flows.find(f => f.label === 'SmolLM2')!.blurb ?? '', /LoRA/, 'no LoRAs for the LLM family')
+})
+
+test('no fundamentorum → only the Custom card (nothing to project)', async () => {
+  const flows = await new BulletinModelCatalog({ intellarum, sender }).listFlows()
+  assert.deepEqual(flows, [{ id: 'custom', label: 'Custom' }])
 })
 
 test('imageLabel maps a raw OCI ref to a friendly label (no bare URL to auto-link)', () => {
@@ -99,14 +125,19 @@ test('resolveTriggers without a family falls back to a flat scan over all LoRAs'
   assert.deepEqual(unmatched, ['missing'])
 })
 
-test('listFlows stamps a rough VRAM footprint (the inert budget stub)', async () => {
-  const withSizes = [
-    { id: 'intella.flux-schnell', nomen: 'FLUX.1 Schnell', genus: 'model', architectura: 'dit', dest: 'unet/flux.safetensors', sizeGb: 24 },
-    { id: 'intella.flux-vae', nomen: 'FLUX VAE', genus: 'embedding', architectura: 'vae', dest: 'vae/ae.safetensors', sizeGb: 0.3 },
-    { id: 'intella.smollm2', nomen: 'SmolLM2 135M Instruct', genus: 'model', architectura: 'gguf', dest: 'gguf/smollm2.gguf', sizeGb: 0.145 },
-  ]
-  const ir = { async list() { return withSizes as never }, async find() { return null } } as unknown as Intellarum
-  const flows = await new BulletinModelCatalog({ intellarum: ir, sender }).listFlows()
-  assert.equal(flows.find(f => f.label === 'FLUX')?.vramGb, 24.3, 'FLUX footprint = base + VAE')
-  assert.equal(flows.find(f => f.label === 'SmolLM2')?.vramGb, 0.1, 'the tiny GGUF is ~0.1 GB')
+test('the card carries the VRAM footprint declared on the fundament', async () => {
+  const flows = await cat().listFlows()
+  assert.equal(flows.find(f => f.label === 'FLUX')?.vramGb, 24, 'from Fundamentum.vramGb')
+  assert.equal(flows.find(f => f.label === 'SmolLM2')?.vramGb, 1)
+})
+
+test('vramGb falls back to summing the resolved weight sizes when the fundament omits it', async () => {
+  const noVram: Fundamentum[] = [{
+    id: 'flux-comfyui', versio: '1.0.0', imageId: 'runpod/pytorch', imageVersion: '2.4', runtime: 'ComfyUI',
+    intellae: [{ id: 'intella.flux-schnell', role: 'unet' }, { id: 'intella.flux-vae', role: 'vae' }],
+    canonica: true, natum: new Date('2025-01-01'), mutatum: new Date('2025-01-01'),
+  }]
+  const fr = { async list() { return noVram as never }, async find() { return noVram[0] as never }, async register() {} } as unknown as Fundamentorum
+  const flows = await new BulletinModelCatalog({ intellarum, fundamentorum: fr, sender }).listFlows()
+  assert.equal(flows.find(f => f.label === 'FLUX')?.vramGb, 24.3, 'sum of resolved weight sizes (24 + 0.3)')
 })
