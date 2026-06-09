@@ -13,7 +13,7 @@
 
 import type { Intellarum, Intella } from '../../types/intelligendi.js'
 import type { Fundamentorum } from '../../types/fundamentum.js'
-import type { PendingModel, ModelDetail, ArmPreset } from '../lexicon/bulletin/types.js'
+import type { PendingModel, ModelDetail, StudioBase } from '../lexicon/bulletin/types.js'
 import { familiaOf } from '../../crystal/inferFamilia.js'
 import { COPY } from '../lexicon/copy.js'
 
@@ -28,7 +28,7 @@ const STUDIO_IMAGES: StudioImage[] = [
   { label: 'llama.cpp server (CUDA)', runtimes: ['llama.cpp'],            ociRef: 'ghcr.io/ggml-org/llama.cpp:server-cuda' },
 ]
 // VRAM-budget stub: the GPU CAPACITY is `Materia.vramGb` (already modeled, e.g. 24 for a 4090); the
-// loadout FOOTPRINT is `Loadout.vramGb` / `ArmPreset.vramGb` (sum of model sizes, added below).
+// loadout FOOTPRINT is `Loadout.vramGb` / `StudioBase.vramGb` (sum of model sizes, added below).
 // Co-hosting decisions (does footprint ≤ capacity?) consume both once the real runner lands — inert today.
 
 /** The container image (label) for a runtime — the first (most general) image that supports it,
@@ -88,8 +88,8 @@ export class BulletinModelCatalog {
    *  builder. Grounded on the `Fundamentorum` registry (NOT synthesized from raw weights): a fundament
    *  exists because flows reference it, so the list IS the set of armable substrates, and grows as new
    *  fundamenta are seeded. The user picks in flow/family vocab; what gets provisioned is a fundament. */
-  async listFlows(): Promise<ArmPreset[]> {
-    const custom: ArmPreset = { id: 'custom', label: 'Custom' }
+  async listFlows(): Promise<StudioBase[]> {
+    const custom: StudioBase = { id: 'custom', label: 'Custom' }
     if (!this.deps.fundamentorum) return [custom]
     const funds = await this.deps.fundamentorum.list({ canonica: true }).catch(() => [])
     const all = this.deps.intellarum ? await this.deps.intellarum.list().catch(() => []) : []
@@ -98,7 +98,7 @@ export class BulletinModelCatalog {
     const loraCount = new Map<string, number>()
     for (const i of all) if (i.genus === 'lora') { const f = familyOf(i); if (f) loraCount.set(f, (loraCount.get(f) ?? 0) + 1) }
 
-    const flows: ArmPreset[] = funds.map(f => {
+    const flows: StudioBase[] = funds.map(f => {
       // Resolve the fundament's weight manifest to display names; derive its family from the base
       // weights' `Intella.familia` (single source — same as the Compiler).
       const weights = (f.intellae ?? []).map(w => byId.get(w.id)).filter((w): w is Intella => !!w)

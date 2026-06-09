@@ -73,7 +73,7 @@ _None — pick up a Backlog item below and graduate it to a numbered TASK spec._
   (commit on `chainengine-migration`): `BulletinModelCatalog.listFlows()` now PROJECTS the canonical
   `Fundamenta` from the registry (each card = a fundament: id + family + resolved weights + runtime +
   vram + LoRA-availability) instead of synthesizing from raw weights; `ArmPreset` gained a `familia`
-  field for picker scoping. **Only cosmetic bit left:** rename the `ArmPreset` *type* → `StudioBase`
-  (it's now a thin presentation projection of a `Fundamentum`, ADR-0005 §adapter-follow-up) — pure
-  churn across ~17 refs, no behavior change.
+  field for picker scoping. **`ArmPreset` type renamed → `StudioBase`** (it's now a thin presentation
+  projection of a `Fundamentum`, ADR-0005 §adapter-follow-up). **This whole crystal-alignment item is
+  now DONE.**
 - **Per-user verb-rebind UI/settings flow** — beyond the `/bind` command seam.

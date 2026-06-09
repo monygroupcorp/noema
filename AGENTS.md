@@ -24,7 +24,7 @@ This repo (`noema-crystal`) is built on a small, deliberate domain model called 
 | **flow** | `Essentia` / `Modus` (a `Modorum` entry) | an executable workflow — `/make`, `/run` target |
 | **studio** | `Materia` (+ `Hospitium`) | a warm GPU pod — the live *instance* of a `Fundamentum` |
 | **fundament** | `Fundamentum` / `Fundamentorum` | provider-neutral compute substrate: image + runtime + base/support `Intella`e + capacity (ADR-0005). A flow references one version-pinned; a family shares it |
-| **studio base** | adapter view-model (today `ArmPreset`) — a presentation projection *of* a `Fundamentum` | what `/arm` shows: a card for a fundament. Grounding pending (still synthesized from raw weights) |
+| **studio base** | adapter view-model `StudioBase` — a presentation projection *of* a `Fundamentum` | what `/arm` shows: a card for a fundament, projected from the `Fundamentorum` registry |
 | **run** | `Actum` | one flow execution |
 | **runtime** | `string`, **canonical on `Fundamentum.runtime`** | the on-pod server (ComfyUI / llama.cpp / …) |
 | **dispatch** | `Cursor` / `Cursorum` | the execution backend (RunPod, OpenAI, …) |
