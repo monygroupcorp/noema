@@ -48,8 +48,13 @@ _None — pick up a Backlog item below and graduate it to a numbered TASK spec._
   (pull via API) + base weights. Same shape as TASK-001/008.
 
 ## Backlog — Follow-ups / cleanup
-- **Trigger-resolution convergence** — drop `BulletinModelCatalog`'s tag-derived family workaround now
-  that `familia` is populated; converge its `resolveTriggers(…,{family})` onto crystal `triggerMap(familia)`.
+- ~~**Trigger-resolution convergence**~~ — **DONE** (commit on `chainengine-migration`). `resolveTriggers`
+  now defers to crystal `Intellarum.triggerMap(familia)` when a base family is set (flat scan only on the
+  Custom/no-family path). The tag heuristic is single-sourced in `src/crystal/inferFamilia.ts` and is now
+  used only to POPULATE the first-class `familia` — `MongoIntella.upsert` self-heals it on write, and
+  `scripts/migrations/2026_06_backfill_intella_familia.ts` bulk-backfills (requires explicit `--db`; refuses
+  `noema` prod without `--prod`). **Pending:** run the backfill against `noemaplane` (dev) when ready; the
+  prod `noema` backfill is a deliberate ops step. Added `(genus,familia)` index in `ensureIndexes`.
 - **Re-home `Anima.affines` onto `Consuetudo`** — one owner-keyed home for all account preferences.
 - **Crystal-alignment passes** — rename `ArmPreset`→`StudioBase`; single-source `runtime`; ground
   studio-bases in `Modorum` (ADR-0001).

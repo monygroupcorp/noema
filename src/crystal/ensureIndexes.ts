@@ -93,6 +93,7 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('intellae').createIndex({ id: 1 }, { unique: true }),
     db.collection('intellae').createIndex({ canonica: 1 }),
     db.collection('intellae').createIndex({ genus: 1 }),
+    db.collection('intellae').createIndex({ genus: 1, familia: 1 }),  // triggerMap/findByTrigger key on (genus,familia)
 
     // arcanum_leaves — ZK Merkle tree leaf records
     db.collection('arcanum_leaves').createIndex({ leafIndex: 1 }, { unique: true }),

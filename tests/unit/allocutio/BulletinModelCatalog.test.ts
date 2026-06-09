@@ -60,6 +60,45 @@ test('an image advertises the SET of runtimes it can serve (capability, not 1:1)
   assert.deepEqual(c.configsForImage(llama), ['llama.cpp'], 'the lean image is single-runtime')
 })
 
+test('resolveTriggers with a base family defers to the crystal triggerMap (familia-keyed)', async () => {
+  // The studio is armed to FLUX → resolution must go through triggerMap('flux'), NOT a tag scan.
+  const lora = { id: 'l1', nomen: 'drifella', genus: 'lora', dest: 'loras/drifella.safetensors', trigger: 'drifella' }
+  let askedFamilia: string | undefined
+  const ir = {
+    async list() { throw new Error('list() must not be used on the family path') },
+    async find() { return null },
+    async triggerMap(familia: string) {
+      askedFamilia = familia
+      return new Map([['drifella', [lora]]]) as never
+    },
+  } as unknown as Intellarum
+
+  const { matched, unmatched } = await new BulletinModelCatalog({ intellarum: ir, sender })
+    .resolveTriggers('drifella, nope', { family: 'flux' })
+
+  assert.equal(askedFamilia, 'flux', 'queried the trigger map for the studio family')
+  assert.deepEqual(matched.map(m => m.nomen), ['drifella'])
+  assert.deepEqual(unmatched, ['nope'])
+})
+
+test('resolveTriggers without a family falls back to a flat scan over all LoRAs', async () => {
+  const withTriggers = [
+    ...CATALOG,
+    { id: 'l2', nomen: 'painterly', genus: 'lora', dest: 'loras/painterly.safetensors', trigger: 'painterly, oilpaint' },
+  ]
+  const ir = {
+    async list() { return withTriggers as never },
+    async find() { return null },
+    async triggerMap() { throw new Error('triggerMap must not be used without a family') },
+  } as unknown as Intellarum
+
+  const { matched, unmatched } = await new BulletinModelCatalog({ intellarum: ir, sender })
+    .resolveTriggers('oilpaint missing', {})
+
+  assert.deepEqual(matched.map(m => m.nomen), ['painterly'], 'a comma-split alias resolves')
+  assert.deepEqual(unmatched, ['missing'])
+})
+
 test('listFlows stamps a rough VRAM footprint (the inert budget stub)', async () => {
   const withSizes = [
     { id: 'intella.flux-schnell', nomen: 'FLUX.1 Schnell', genus: 'model', architectura: 'dit', dest: 'unet/flux.safetensors', sizeGb: 24 },

@@ -13,12 +13,8 @@
 
 import type { Intellarum, Intella } from '../../types/intelligendi.js'
 import type { PendingModel, ModelDetail, ArmPreset } from '../lexicon/bulletin/types.js'
+import { familiaOf } from '../../crystal/inferFamilia.js'
 import { COPY } from '../lexicon/copy.js'
-
-/** Recognized base-model families. The data encodes a model's family in its TAGS (and, for base
- *  models, its name) — NOT in `baseIntellaId`, which is empty across the imported catalog.
- *  Image-gen families first, then LLM families (which route to the llama.cpp runtime). */
-const FAMILY_TAGS = ['flux', 'sdxl', 'sd3', 'sd15', 'pony', 'illustrious', 'kontext', 'hunyuan', 'wan', 'ltx', 'noobai', 'smollm', 'qwen', 'llama', 'mistral', 'gemma', 'phi']
 
 /** A studio's container image + the SET of on-pod runtimes it can serve. Compatibility is declared,
  *  not auto-detected: a general PyTorch/CUDA image hosts both ComfyUI and llama-server (they're just
@@ -44,19 +40,9 @@ function imageForRuntime(runtime: string): string {
   return (STUDIO_IMAGES.find(im => im.runtimes.includes(runtime)) ?? STUDIO_IMAGES[0]).label
 }
 
-/** Lowercased tag strings on an Intella (tags are `{tag, source}` objects, untyped on v1). */
-function tagsOf(i: Intella): string[] {
-  const raw = (i as { tags?: Array<string | { tag?: string }> }).tags ?? []
-  return raw.map(t => (typeof t === 'string' ? t : t?.tag ?? '')).filter(Boolean).map(t => t.toLowerCase())
-}
-/** The base family of a model/LoRA — a recognized tag first, else inferred from its name/dest. */
-function familyOf(i: Intella): string | undefined {
-  const tags = tagsOf(i)
-  const tagged = FAMILY_TAGS.find(f => tags.includes(f))
-  if (tagged) return tagged
-  const hay = `${i.nomen ?? ''} ${i.dest ?? ''} ${i.architectura ?? ''}`.toLowerCase()
-  return FAMILY_TAGS.find(f => hay.includes(f))
-}
+/** The base family of a model/LoRA — the first-class `familia`, falling back to the tag/name
+ *  heuristic for any record not yet backfilled (`familiaOf`, single-sourced in crystal). */
+const familyOf = familiaOf
 
 /** The slice of the sender this needs — just enough to post the force-reply prompt. */
 interface PromptSender {
@@ -231,25 +217,31 @@ export class BulletinModelCatalog {
     return all.filter(i => [i.nomen, i.slug, i.trigger].some(f => f?.toLowerCase().includes(q))).map(toPendingModel)
   }
 
-  /** Mod • → Add → By trigger: resolve trigger word(s) to LoRAs the way the gen does — comma-split
-   *  each LoRA's `trigger` into aliases, lowercased, then match the host's space/comma-separated
-   *  tokens. Scoped to the studio's base `family` when given (so a flux studio resolves flux LoRAs).
-   *  (Mirrors `Intellarum.triggerMap`'s splitting; it can't be used directly here because it keys on
-   *  `baseIntellaId`, which is empty across this catalog — family lives in tags. Swap once it's set.)
-   *  Returns the matched models (deduped, first hit per alias) and any tokens that matched nothing. */
+  /** Mod • → Add → By trigger: resolve trigger word(s) to LoRAs the way the gen does. With a base
+   *  `family` (an armed studio), defer to the crystal `Intellarum.triggerMap(familia)` — the SAME
+   *  familia-keyed, access-scoped resolution the Compiler uses, so the picker and the gen agree.
+   *  Without one (a Custom studio, no preset family chosen yet) fall back to a flat alias scan over
+   *  every LoRA in the catalog. Returns matches (deduped, first hit per alias) + tokens that hit nothing. */
   async resolveTriggers(text: string, opts: { family?: string } = {}): Promise<{ matched: PendingModel[]; unmatched: string[] }> {
     if (!this.deps.intellarum) return { matched: [], unmatched: [] }
     const tokens = [...new Set(text.toLowerCase().split(/[\s,]+/).map(t => t.trim()).filter(Boolean))]
     if (!tokens.length) return { matched: [], unmatched: [] }
-    const all = await this.deps.intellarum.list().catch(() => [])
-    const index = new Map<string, Intella>()   // alias → first LoRA carrying it (scoped to family)
-    for (const i of all) {
-      if (i.genus !== 'lora') continue
-      if (opts.family && familyOf(i) !== opts.family) continue
-      for (const alias of (i.trigger ?? '').split(',').map(a => a.trim().toLowerCase()).filter(Boolean)) {
-        if (!index.has(alias)) index.set(alias, i)
+
+    const index = new Map<string, Intella>()   // alias → first LoRA carrying it
+    if (opts.family) {
+      // Crystal's trigger map is already alias-keyed (comma-split, lowercased) and familia-scoped.
+      const map = await this.deps.intellarum.triggerMap(opts.family).catch(() => new Map<string, Intella[]>())
+      for (const [alias, bucket] of map) if (bucket[0] && !index.has(alias)) index.set(alias, bucket[0])
+    } else {
+      const all = await this.deps.intellarum.list().catch(() => [])
+      for (const i of all) {
+        if (i.genus !== 'lora') continue
+        for (const alias of (i.trigger ?? '').split(',').map(a => a.trim().toLowerCase()).filter(Boolean)) {
+          if (!index.has(alias)) index.set(alias, i)
+        }
       }
     }
+
     const matched: PendingModel[] = []
     const unmatched: string[] = []
     const seen = new Set<string>()

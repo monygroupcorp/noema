@@ -131,6 +131,30 @@ test('upsert() updates an existing Intella when id already exists', async () => 
   assert.equal(result?.nomen, 'Updated')
 })
 
+test('upsert() self-heals familia from tags when a record arrives without one', async () => {
+  // A record with a family tag but no first-class familia → upsert infers + persists it, so
+  // triggerMap (which keys on familia) finds it. This keeps the write seam whole going forward.
+  const lora = makeIntella({
+    id: 'intella.heal-tagged', genus: 'lora', canonica: false,
+    tags: [{ tag: 'flux' }],
+    trigger: 'healme',
+  })
+  delete (lora as { familia?: string }).familia
+  await intellae.upsert(lora)
+  const stored = await col.findOne({ id: 'intella.heal-tagged' })
+  assert.equal(stored?.familia, 'flux', 'familia inferred from the flux tag and persisted')
+})
+
+test('upsert() leaves an explicit familia untouched and adds none when nothing is inferable', async () => {
+  await intellae.upsert(makeIntella({ id: 'intella.heal-explicit', familia: 'sdxl', tags: [{ tag: 'flux' }] }))
+  assert.equal((await col.findOne({ id: 'intella.heal-explicit' }))?.familia, 'sdxl', 'explicit familia wins over tags')
+
+  const bare = makeIntella({ id: 'intella.heal-none', nomen: 'Generic Thing', dest: 'models/x.safetensors' })
+  delete (bare as { familia?: string }).familia
+  await intellae.upsert(bare)
+  assert.equal('familia' in (await col.findOne({ id: 'intella.heal-none' }))!, false, 'no familia field when nothing inferable')
+})
+
 // ── v2 → v1 shim ────────────────────────────────────────────────────────────
 //
 // The chunk migration writes v2-shape records (`params.triggerWords[]`, nested
