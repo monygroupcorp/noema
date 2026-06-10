@@ -20,11 +20,15 @@ operations. We do NOT mirror the bot's interaction model (tap-an-affordance, mor
 
 ## The shape: one crystal facade, two protocols
 
-A single **agent-shaped facade** over the execution rail + stores, in crystal vocabulary — e.g.
-`invokeFlow(auctor, modusId|verb, aditus, opts) → {actumId}`, `getRun(id)`, `listFlows()`,
-`describeFlow(id) → tool schema`, `listModels(filter)`, `resolveLora(trigger, familia)`,
-`provisionStudio(auctor, {fundamentumId, models?, warm?})`, `saveFlow(auctor, {fromRun, name, affixes, promptMode})`,
-`rerun`, `rate`, `bind`, `status`. Both protocol adapters call this one facade:
+A single **agent-shaped facade** over the execution rail + stores, in crystal vocabulary. It has two halves:
+*discovery* (so the agent learns what's choosable) and *action*.
+- **Discovery:** `listFlows()` / `describeFlow(id) → tool schema`, `listFundamenta()`, `listModels(filter)`,
+  `resolveLora(trigger, familia)`, `listImages()` / runtimes. These feed the agent the valid values.
+- **Action:** `invokeFlow(auctor, modusId|verb, aditus, opts) → {actumId}`, `getRun(id)`,
+  `provisionStudio(auctor, {fundamentumId, models?, warm?})`, `saveFlow(auctor, {fromRun, name, affixes, promptMode})`,
+  `rerun`, `rate`, `bind`, `status`.
+
+Both protocol adapters call this one facade:
 
 - **MCP adapter** — flows = MCP tools, catalog = MCP resources. The emerging agent standard; supersedes the
   legacy MCP/tools surface in `src/api/` with a crystal-native one.
@@ -36,6 +40,20 @@ type/required/default/label/description) and output (`exitus`). A pure `aditusTo
 derives the MCP tool `inputSchema` AND the REST validation/OpenAPI — one function, both protocols. The agent
 reads the schema and submits **complete** params; no interactive per-`Porta` stepping.
 
+**Discoverable, not blind — surface the choices, not just the operations.** A wizard does two jobs:
+*stepping* (drop it) and *enumerating the valid options* at each step (keep it). Collapsing `/arm` into one
+`POST /v1/studios` is only usable if the agent can first learn *which* `fundamentumId`s, models, images, and
+runtimes exist — otherwise it's calling blind. So every enumerable axis is a **discovery resource** and, where
+the domain is bounded, the input schema carries the values inline:
+- **Discovery resources / MCP resources:** `GET /v1/fundamenta` (substrates for provisioning),
+  `GET /v1/flows` (+ `describeFlow` → aditus schema), `GET /v1/models` & `/v1/loras` (filterable catalog),
+  `GET /v1/images` / runtimes-for-image (the Custom-studio axes). These are the API twin of "the wizard shows
+  you the choices" — each former wizard *step* becomes a queryable resource feeding the one provision call.
+- **Schema enums:** `aditusToJsonSchema` (and the studio/provision input schema) emit JSON-Schema `enum`
+  (or `examples` + a link/`$ref` to the discovery resource) wherever the domain is a known bounded set — so an
+  agent reading the tool schema sees the allowed values without a second guess. This is the hard requirement:
+  no operation may expect an opaque id the agent has no way to enumerate.
+
 ## The collapse (Telegram surface → one API op)
 
 | Telegram (medium-constrained) | Agent API |
@@ -44,8 +62,8 @@ reads the schema and submits **complete** params; no interactive per-`Porta` ste
 | Flow card — `Porta`-by-`Porta` panel | the flow's JSON-Schema input, submitted whole |
 | Delivery menu (info/rate/wrench→rerun/tweak/save) | `GET /v1/runs/:id` (+ stats); `POST /v1/runs/:id:rerun`; `POST …/rating`; `POST /v1/flows {fromRun}` |
 | Save-as force-reply sequence (name→review→toggle→confirm) | `POST /v1/flows {fromRun, name, affixes, promptMode}` — one call |
-| `/arm` wizard (preset→detail→image→config→picker→start) | `POST /v1/studios {fundamentumId, models?, warmMs?}` — one shot |
-| Mod• picker (categories→list→detail→page→search→trigger) | `GET /v1/models?familia=&kind=&q=` ; `GET /v1/loras?trigger=` |
+| `/arm` wizard (preset→detail→image→config→picker→start) | discover the choices: `GET /v1/fundamenta`, `GET /v1/images`/runtimes — then one shot `POST /v1/studios {fundamentumId, models?, warmMs?}` |
+| Mod• picker (categories→list→detail→page→search→trigger) | `GET /v1/models?familia=&kind=&q=` ; `GET /v1/loras?trigger=` (the picker *was* browse+filter; here it's a query) |
 | Bulletin HUD (journal/live line/affordances/submenus) | `GET /v1/runs/:id/stream` (SSE) ; `GET /v1/studios/:id` |
 | `/status` HUD | `GET /v1/me/status` |
 | `/bind` | `PUT /v1/me/bindings/:verb {modusId}` |
@@ -83,24 +101,32 @@ through `Inceptio.identity`. JWT is just one accepted input (the web platform pa
 
 ## Phasing (each graduates to a TASK-NNN)
 
-1. **Facade + IdentityResolver + flow-as-tool schema + core run resources (REST).** `invokeFlow`/`getRun`,
-   `listFlows`/`describeFlow`, `aditusToJsonSchema`, reusing the rail. *Acceptance (hermetic):* mocked ring +
-   in-memory store; each credential → invoke returns an actumId; schema derived from a real `Essentia.aditus`;
-   anon commitment accepted.
+1. **Facade (discovery + invoke) + IdentityResolver + flow-as-tool schema + core run resources (REST).**
+   `listFlows`/`describeFlow` + `invokeFlow`/`getRun`, `aditusToJsonSchema` (with `enum`s for bounded fields),
+   reusing the rail. Discovery is in from the start — an agent must be able to list flows and read a flow's
+   schema before invoking. *Acceptance (hermetic):* mocked ring + in-memory store; `listFlows` enumerates the
+   seeds; schema derived from a real `Essentia.aditus`; each credential → invoke returns an actumId; anon
+   commitment accepted.
 2. **SSE run streaming + `BulletinBusProjector`.** Project the existing bus events into a neutral run-event
    stream; `GET /v1/runs/:id/stream`. Reconnect replays from durable `Actum` stage history.
 3. **MCP adapter over the same facade.** Flows = tools (inputSchema from `aditusToJsonSchema`), catalog =
    resources, run handle + progress. Crystal-native; supersedes the legacy MCP surface.
-4. **Management ops (capability-parity close-out).** `provisionStudio` (one-shot), `saveFlow`,
-   `listModels`/`resolveLora` queries, `bind`, `status`. *Acceptance:* an agent script does the full arc
-   (describe a flow → invoke → stream → rate → save-as → provision a studio → run on it) over REST + MCP.
+4. **Management ops + remaining discovery (capability-parity close-out).** `provisionStudio` (one-shot) +
+   its discovery (`listFundamenta`, `listImages`/runtimes); `listModels`/`resolveLora` queries; `saveFlow`;
+   `bind`; `status`. *Acceptance:* an agent script does the full arc *blind-start* — discover fundamenta →
+   provision a studio → discover + describe a flow → invoke → stream → rate → save-as → run on the studio —
+   over REST + MCP, never needing an id it couldn't enumerate.
 
 ## Risks / guardrails
 
-1. **Don't re-sprawl.** The discipline is to *resist* mirroring Telegram surfaces; keep the op set small and
-   declarative. If an op only exists to reproduce a chat affordance, drop it.
-2. **MCP async contract** — handle-vs-await per `Modus.deliveryMode`; decide before building the MCP adapter.
-3. **One facade, not two** — MCP and REST must call the same facade, or they drift. The facade is the contract.
+1. **No opaque ids (discoverability).** Every operation that takes an id (`fundamentumId`, `modusId`, a model
+   id, an image) MUST have a discovery resource that enumerates it, and bounded fields carry `enum`s in the
+   schema. An agent must be able to start blind and learn every choosable value. This is the half of the
+   wizard we keep.
+2. **Don't re-sprawl.** Resist mirroring Telegram surfaces; keep the op set small and declarative. If an op
+   only exists to reproduce a chat affordance (a morph, a step, a page turn), drop it.
+3. **MCP async contract** — handle-vs-await per `Modus.deliveryMode`; decide before building the MCP adapter.
+4. **One facade, not two** — MCP and REST must call the same facade, or they drift. The facade is the contract.
 
 ## Verification boundary
 
