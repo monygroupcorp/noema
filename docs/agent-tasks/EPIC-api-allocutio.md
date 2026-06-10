@@ -196,11 +196,30 @@ One resolver, multiple credential acceptors → crystal `AuctorKey = {animaId} |
 `X-API-Key`, web3 signature, arcanum commitment. **Anon (commitment) supported day one** — it flows straight
 through `Inceptio.identity`. JWT is just one accepted input (the web platform path), not a separate model.
 
-## IdentityResolver
+## Saved flows (agent-authored tools)
 
-One resolver, multiple credential acceptors → crystal `AuctorKey = {animaId} | {commitment}`: web JWT,
-`X-API-Key`, web3 signature, arcanum commitment. **Anon (commitment) supported day one** — it flows straight
-through `Inceptio.identity`. JWT is just one accepted input (the web platform path), not a separate model.
+`saveFlow` is the agent **authoring its own reusable flows** — a derived `Modus` (`deriveSavedModus`): base flow
++ captured config + a prompt wrapper + pinned models, **owner-keyed** (`AuctorKey`), with a global-unique slug
+and a `fonte` link to its parent. One declarative call replaces the bot's name→review→toggle→affix→confirm dance:
+`POST /v1/flows { fromRun | fromConfig, name, affixes, promptMode, pinnedModels? }`.
+- **`fromRun`** — derive from an existing run (captures its modus + aditus + pinned models).
+- **`fromConfig`** — compose from scratch (base `modusId` + `aditus` + affixes), *no run required* — the natural
+  agent "author a tool" path.
+
+**Affixes = the flow-baked prompt wrapper** (`Porta.praefixum`/`suffixum`): text the *flow* supplies, woven around
+the value the *caller* supplies at compile time — `[prefix, value, suffix].map(trim).filter().join(', ')`, woven
+BEFORE LoRA trigger resolution (a trigger word in an affix still resolves). The "style" mechanism, invisible to
+the caller. Per-`Porta` in full (`{[porta]:{prefix,suffix}}`); the common case is the prompt (`{prefix,suffix}`).
+
+**Prompt mode:** `open` (prompt stays an input, affixes wrap it → a reusable *tool*) vs `pinned` (captured prompt
+baked as the default → a *preset*).
+
+**The payoff — a self-extending toolset:** a saved flow IS a first-class `Modus`, so the instant it's created it's
+a discoverable tool — it appears in `listFlows`/`describeFlow` and MCP `tools/list`, its baked config reflected in
+its schema (pinned prompt → the prompt `Porta` has a default; affixes hidden, applied at compile). An agent can
+mint its own tools. **Guardrail:** saved flows are **owner-scoped by default** (in *that* `AuctorKey`'s catalog,
+anon/commitment included) — publishing to the shared catalog is a separate, deliberate act (the `fonte` fork-chain
++ royalties, ADR-0003), so an agent minting tools can't pollute everyone's discovery.
 
 ## Documentation & sync (docs ↔ skill ↔ surface)
 
