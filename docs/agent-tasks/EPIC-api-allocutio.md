@@ -22,7 +22,11 @@
   reconnect replay). `GET /v1/runs/:id/stream` (SSE) + `options.webhookUrl` on `POST /runs` + poll
   (`GET /v1/runs/:id`). Hub wired over the real `bus` + a `fetch` poster (in-process, single instance).
   Contract/docs updated for the new routes; hermetic-tested (incl. real-HTTP SSE).
-- **Phase 3** — MCP adapter (verb tools + `crystal://` resources). Pending.
+- **Phase 3 — DONE** (commit `c38c3136`): MCP adapter over the same `CrystalApi`. A small verb tool-set
+  (`run_flow`/`get_run`/`list_flows`/`describe_flow`, zod inputSchemas) — NOT a tool per flow; the catalog
+  is `crystal://flows[/{id}]` resources. Stateless per-request streamable-HTTP transport, mounted `/v1/mcp`,
+  optional auth (public tools work; run_flow/get_run enforce). `@modelcontextprotocol/sdk` v1.25.3.
+  Hermetic-tested incl. a real in-memory client↔server protocol test. SKILL updated for MCP + SSE/webhook.
 - **Phase 4** — execution strategy + studios + remaining discovery + quote/cap. Pending.
 
 ## Context / why
