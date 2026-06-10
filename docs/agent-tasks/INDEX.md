@@ -41,6 +41,14 @@ _None — pick up a Backlog item below and graduate it to a numbered TASK spec._
   pin-vs-open per knob. Revisit when the param-rich flows land.
 
 ## Backlog — Features
+- **[API parity (`ApiAllocutio`)](EPIC-api-allocutio.md)** — crystal-native HTTP adapter on the ring at
+  Telegram parity (commands + live surfaces). **The architecture already anticipates it:** `Platform`
+  includes `'rest'`, `Nuntius` models `'http'`, and `affordancesFor()` is already pure data — Telegram is
+  the only thing that packs it into inline keyboards, so one JSON affordance protocol (`GET /v1/surface/:id`
+  + `POST …/act`) covers every interactive surface. SSE spine (WS optional later); unified
+  credential→`AuctorKey` resolver (JWT/API-key/web3/anon); separate from legacy `src/api`. Phased: (1)
+  stateless commands + auth, (2) `chatId→SurfaceId` session refactor *(riskiest — own PR, gated on the
+  Telegram suite first)*, (3) affordance protocol + SSE, (4) parity close-out. Full spec in the linked epic.
 - **`/cook` (Collectio)** — `Modus × Tractus[]` grid → N `Acta` via `TraitEngine` + `CollectioCursor`.
 - **`/spell` (compositus `Modus`)** — run/author a `gradus`-chained flow (authored via `Tabula`).
 - **Gen-flows for more catalog bases** (SDXL/Illustrious/Chroma/Flux-Kontext/Wan-video/…) — port from
