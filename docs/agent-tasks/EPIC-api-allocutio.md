@@ -40,10 +40,10 @@
 - **Phase 4c — PARTIAL** (commit `11a15039`): **studioId-targeted runs DONE** — `invokeFlow`/`run_flow` take a
   `studioId` → `Inceptio.modoId` (the rail already routes it); hermetic-tested. Also threaded `maxImpetus`
   through MCP `run_flow`. **Still pending (GPU-real, NOT a clean fan-out):**
-  - **Studio provisioning** (`POST /v1/studios`) needs a *neutral ring-level studio-open service* composing
-    `TesseraCursor.openModo` (Modo + budget tessera) + the `provisionStudio` hook (Materia/pod) + `Hospitium`
-    (owner attribution — how `status` finds your studios) + billing. Today only the chatId-coupled
-    `BulletinManager` does this — i.e. this is the BulletinManager decomposition the original plan flagged.
+  - **Studio provisioning** (`POST /v1/studios`) is gated on **`Conductor`** (ADR-0006) — the ring anchor that
+    composes the (already crystal-native, AuctorKey-keyed) `Materia`+`Hospitium`+`Modo`+budget pieces into one
+    verb both adapters call. Lighter than first framed: the primitives exist; `Conductor` gives them a named
+    home + single door (and renames the plain-English `StudioBilling`→`Census`, pod-client role→`Procurator`).
   - **Mid-run watchdog** — DE-RISKED: `openModo` takes a budget tessera and `StudioBilling` already
     drain-terminates a session on budget exhaustion, so opening a studio with `budget = maxImpetus` IS the
     cap. No new subsystem — just wire `maxImpetus → tessera budget` once provisioning exists. The harder
