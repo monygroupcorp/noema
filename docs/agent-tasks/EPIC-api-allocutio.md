@@ -27,7 +27,16 @@
   is `crystal://flows[/{id}]` resources. Stateless per-request streamable-HTTP transport, mounted `/v1/mcp`,
   optional auth (public tools work; run_flow/get_run enforce). `@modelcontextprotocol/sdk` v1.25.3.
   Hermetic-tested incl. a real in-memory client↔server protocol test. SKILL updated for MCP + SSE/webhook.
-- **Phase 4** — execution strategy + studios + remaining discovery + quote/cap. Pending.
+- **Phase 4a — DONE** (commit `9b15a452`): remaining discovery + quote/cap. `quote` (`POST /v1/runs/quote`
+  + MCP `quote`) via the cursor's side-effect-free upper-bound reservation; `maxImpetus` admission cap on
+  invoke (`economy.cap_too_low`); `listFundamenta` (`GET /v1/fundamenta` + `crystal://fundamenta`) and the
+  filterable `listModels` (`GET /v1/models` + `crystal://models` + MCP `list_models`) over the real
+  `IntelligentiumStore`. Exposed `ring.fundamentorum`. Contract/docs/drift updated. Hermetic-tested.
+- **Phase 4b — PENDING** (GPU-real / deep-rail, staging-validated): studio provisioning (`POST /v1/studios`
+  + studioId-targeted runs over the existing `provisionStudio` hook), the **mid-run watchdog** that enforces
+  `maxImpetus` during execution (ties to studio billing / idle reap), and the account ops `saveFlow`
+  (`POST /v1/flows` via `deriveSavedModus`), `bind` (`PUT /v1/me/bindings/:verb`), `status` (`GET /v1/me/status`
+  via `aggregateStatus`). Hermetically wireable except the live provisioning + watchdog.
 
 ## Context / why
 
