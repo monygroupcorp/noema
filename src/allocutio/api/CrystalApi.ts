@@ -124,13 +124,11 @@ export class CrystalApi {
     return toRun(a)
   }
 
-  /** A run is owned by an auctor iff a signum it consumed belongs to that auctor's
-   *  ledger history. (`history` includes spent signa, so this holds post-completion.) */
-  private async _owns(auctor: AuctorKey, a: Actum): Promise<boolean> {
-    const consumed = a.signaConsumed ?? []
-    if (consumed.length === 0) return false
-    const owned = new Set((await this.deps.signorum.history(auctor)).map((s) => s.id))
-    return consumed.some((id) => owned.has(id))
+  /** A run is owned by an auctor iff a signum it consumed belongs to that auctor.
+   *  A targeted membership check (not a full-history scan); spent signa still match,
+   *  so it holds post-completion. */
+  private _owns(auctor: AuctorKey, a: Actum): Promise<boolean> {
+    return this.deps.signorum.ownsAny(auctor, a.signaConsumed ?? [])
   }
 
   /** List the canonical atomic flows as compact summaries. */

@@ -120,8 +120,8 @@ function makeDeps(over: Partial<CrystalApiDeps> = {}): {
     },
     // The owner (`auctor`) owns signum 'sig-1'; any other identity owns nothing.
     signorum: ({
-      history: async (by: AuctorKey) =>
-        'animaId' in by && by.animaId === 'anima-1' ? [{ id: 'sig-1' }] : [],
+      ownsAny: async (by: AuctorKey, ids: string[]) =>
+        'animaId' in by && by.animaId === 'anima-1' && ids.includes('sig-1'),
     } as unknown) as CrystalApiDeps['signorum'],
     ...over,
   }
@@ -196,7 +196,7 @@ test('getRun is owner-scoped: a non-owner gets not_found.run (no IDOR), even for
     (e: unknown) => e instanceof ApiError && e.code === 'not_found.run',
   )
   // An anonymous commitment owner that DOES own the consumed signum can read it.
-  const anonDeps = { ...deps, signorum: ({ history: async () => [{ id: 'sig-1' }] } as unknown) as CrystalApiDeps['signorum'] }
+  const anonDeps = { ...deps, signorum: ({ ownsAny: async (_by: AuctorKey, ids: string[]) => ids.includes('sig-1') } as unknown) as CrystalApiDeps['signorum'] }
   const anonRun = await new CrystalApi(anonDeps).getRun({ commitment: 'c-1' }, 'act-known')
   assert.equal(anonRun.status, 'complete')
 })

@@ -151,3 +151,24 @@ test('history excludes signa from other animaIds', async () => {
   const hist = await s.history({ animaId: 'anima-1' })
   assert.equal(hist.length, 1)
 })
+
+// ── ownsAny (the API's run owner-scope oracle) ───────────────────────────────
+
+test('ownsAny: true iff one of the ids belongs to the identity', async () => {
+  const s = new MemorySignorum()
+  const mine = await s.issue(makeSignum({ animaId: 'anima-1' }))
+  const theirs = await s.issue(makeSignum({ animaId: 'anima-2' }))
+
+  assert.equal(await s.ownsAny({ animaId: 'anima-1' }, [mine.id]), true)
+  assert.equal(await s.ownsAny({ animaId: 'anima-1' }, ['unknown', mine.id]), true, 'any match → true')
+  assert.equal(await s.ownsAny({ animaId: 'anima-1' }, [theirs.id]), false, 'not my signum')
+  assert.equal(await s.ownsAny({ animaId: 'anima-1' }, []), false, 'empty → false')
+})
+
+test('ownsAny: anonymous commitment matches its arcanum signum (by testis)', async () => {
+  const s = new MemorySignorum()
+  const anon = await s.issue(makeSignum({ animaId: undefined, forma: 'arcanum', testis: 'c-1' }))
+  assert.equal(await s.ownsAny({ commitment: 'c-1' }, [anon.id]), true)
+  assert.equal(await s.ownsAny({ commitment: 'c-2' }, [anon.id]), false, 'wrong commitment')
+  assert.equal(await s.ownsAny({ animaId: 'anima-1' }, [anon.id]), false, 'identified cannot claim an anon signum')
+})
