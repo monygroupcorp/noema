@@ -17,7 +17,7 @@ const fakeApi: ApiFacade = {
   async invokeFlow(): Promise<Run> {
     return { id: 'r1', status: 'complete', modusId: 'flux-schnell' }
   },
-  async getRun(id: string): Promise<Run> {
+  async getRun(_auctor: AuctorKey, id: string): Promise<Run> {
     if (id === 'r1') return { id: 'r1', status: 'complete', modusId: 'flux-schnell' }
     throw Errors.notFoundRun(id)
   },

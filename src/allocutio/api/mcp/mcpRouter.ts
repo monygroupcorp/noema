@@ -45,8 +45,17 @@ export function createMcpRouter(deps: McpRouterDeps): Router {
       void server.close()
     })
 
-    await server.connect(transport)
-    await transport.handleRequest(req, res, req.body)
+    try {
+      await server.connect(transport)
+      await transport.handleRequest(req, res, req.body)
+    } catch {
+      // Express 4 doesn't catch async rejections — without this the request hangs.
+      if (!res.headersSent) {
+        res.status(500).json({ error: { code: 'internal.error', message: 'MCP transport error' } })
+      } else {
+        res.end()
+      }
+    }
   }
 
   router.post('/', handle)

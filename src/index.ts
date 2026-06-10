@@ -21,6 +21,7 @@ import { IdentityResolver as ApiIdentityResolver } from './allocutio/api/Identit
 import { createApiRouter } from './allocutio/api/apiRouter.js'
 import { makeCredentialAcceptors } from './allocutio/api/apiAcceptors.js'
 import { RunEventHub } from './allocutio/api/RunEventHub.js'
+import { isSafeWebhookUrl } from './allocutio/api/webhookGuard.js'
 import { createMcpRouter } from './allocutio/api/mcp/mcpRouter.js'
 import { bus } from './lib/bus.js'
 import { createHash } from 'node:crypto'
@@ -509,6 +510,7 @@ async function main(): Promise<void> {
     cursorum: ring.cursorum,
     completor: ring.completor,
     actorum: ring.actorum,
+    signorum: ring.signorum,
     actumIndex: ring.actumIndex,
     consuetudinum,
   })
@@ -542,6 +544,7 @@ async function main(): Promise<void> {
   const runHub = new RunEventHub({
     bus,
     postWebhook: async (url, body) => {
+      if (!isSafeWebhookUrl(url)) return   // SSRF guard: https + public host only
       await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

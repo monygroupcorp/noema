@@ -19,8 +19,9 @@ import type { Cursorum, ActumCompletor, Actorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
 import type { Consuetudinum } from '../../types/consuetudo.js'
+import type { Signorum } from '../../types/significandi.js'
 import type { AuctorKey } from '../../flow/types.js'
-import type { ComputeStrategy, GpuClass, ModelRef } from '../../types/actum.js'
+import type { Actum, ComputeStrategy, GpuClass, ModelRef } from '../../types/actum.js'
 import type { Inceptio } from '../../types/cursus.js'
 
 import { dispatchInceptio } from '../../execution/dispatchInceptio.js'
@@ -37,6 +38,9 @@ export interface CrystalApiDeps {
   cursorum: Cursorum
   completor: ActumCompletor
   actorum: Actorum
+  /** The ledger — used to owner-scope `getRun` (a run is yours iff you own one of the
+   *  signa it consumed). Identity-blind Actum means ownership lives in the ledger. */
+  signorum: Signorum
   /** Optional per-AuctorKey aggregation index (passed through to dispatchInceptio). */
   actumIndex?: ActumIndexStore
   /** Optional owner-keyed verb→flow rebinds; falls through to CANON_VERBS when absent. */
@@ -106,11 +110,27 @@ export class CrystalApi {
     return toRun(actum)
   }
 
-  /** Fetch a run by id and project it. Unknown id → `not_found.run`. */
-  async getRun(id: string): Promise<Run> {
+  /**
+   * Fetch a run by id and project it — OWNER-SCOPED. A caller may read a run only
+   * if they own it (else `not_found.run`, never revealing that it exists). The Actum
+   * is deliberately identity-blind, so ownership is checked against the ledger: the
+   * run is yours iff you own one of the signa it consumed. Works for both `animaId`
+   * and anon `commitment` (the arcanum signum the spend nullified is in your history),
+   * preserving anonymity. Unknown id → `not_found.run`.
+   */
+  async getRun(auctor: AuctorKey, id: string): Promise<Run> {
     const a = await this.deps.actorum.findById(id)
-    if (!a) throw Errors.notFoundRun(id)
+    if (!a || !(await this._owns(auctor, a))) throw Errors.notFoundRun(id)
     return toRun(a)
+  }
+
+  /** A run is owned by an auctor iff a signum it consumed belongs to that auctor's
+   *  ledger history. (`history` includes spent signa, so this holds post-completion.) */
+  private async _owns(auctor: AuctorKey, a: Actum): Promise<boolean> {
+    const consumed = a.signaConsumed ?? []
+    if (consumed.length === 0) return false
+    const owned = new Set((await this.deps.signorum.history(auctor)).map((s) => s.id))
+    return consumed.some((id) => owned.has(id))
   }
 
   /** List the canonical atomic flows as compact summaries. */

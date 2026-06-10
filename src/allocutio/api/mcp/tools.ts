@@ -83,7 +83,7 @@ export async function getRunTool(
 ): Promise<McpResult> {
   if (!auctor) return errResult('auth.missing', 'authentication required')
   try {
-    return ok({ run: await api.getRun(args.id) })
+    return ok({ run: await api.getRun(auctor, args.id) })
   } catch (e) {
     if (e instanceof ApiError) return errResult(e.code, e.message)
     return errResult('internal.error', String(e))

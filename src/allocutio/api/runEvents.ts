@@ -18,6 +18,9 @@ export interface RunEvent {
  * events that don't belong to the run-observation surface.
  */
 export function busToRunEvent(event: string, payload: any): RunEvent | null {
+  // Defensive: a malformed event with no actumId can't be keyed per-run — drop it.
+  if (!payload || typeof payload.actumId !== 'string') return null
+
   if (event === 'actum.stage') {
     const ev: RunEvent = {
       runId: payload.actumId,
