@@ -31,6 +31,12 @@ export class MemorySignorum implements Signorum {
     return this.forIdentity(by)
   }
 
+  async ownsAny(by: { animaId: string } | { commitment: string }, signumIds: string[]): Promise<boolean> {
+    if (signumIds.length === 0) return false
+    const ids = new Set(signumIds)
+    return this.forIdentity(by).some(s => ids.has(s.id))
+  }
+
   async lock(signaIds: string[], actumId: string): Promise<void> {
     // Validate all exist before mutating any (atomicity)
     for (const id of signaIds) {

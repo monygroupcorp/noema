@@ -148,6 +148,12 @@ export interface Signorum {
   /** Full ledger history for an identity — all signa ever issued */
   history(by: { animaId: string } | { commitment: string }): Promise<Signa>
   /**
+   * Does this identity own ANY of the given signa? A targeted membership check
+   * (`id ∈ signumIds AND owned-by`) — the cheap ownership oracle the API uses to
+   * owner-scope a run without loading the identity's whole history. Empty ids → false.
+   */
+  ownsAny(by: { animaId: string } | { commitment: string }, signumIds: string[]): Promise<boolean>
+  /**
    * Settle a completed actum's locked signa against the actual impetus consumed.
    * Spends all provided signa and issues a refund signum for any delta
    * (totalLocked − actualImpetus) back to the same identity.

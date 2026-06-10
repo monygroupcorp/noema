@@ -54,6 +54,12 @@ export class MongoSignorum implements Signorum {
     return docs.map(d => fromDoc(d as Record<string, unknown>))
   }
 
+  async ownsAny(by: { animaId: string } | { commitment: string }, signumIds: string[]): Promise<boolean> {
+    if (signumIds.length === 0) return false
+    const doc = await this.col.findOne({ id: { $in: signumIds }, ...identityQuery(by) }, { projection: { _id: 1 } })
+    return doc !== null
+  }
+
   async createMany(signa: Array<Omit<Signum, 'id' | 'natum' | 'status'>>): Promise<Signum[]> {
     if (signa.length === 0) return []
     const now = new Date()
