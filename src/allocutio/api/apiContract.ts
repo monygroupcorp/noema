@@ -256,6 +256,15 @@ export const API_CONTRACT: ApiContract = {
       auth: false,
     },
     {
+      method: 'POST',
+      path: '/mcp',
+      summary:
+        'MCP (Model Context Protocol) JSON-RPC endpoint — agent tool-use over the same facade. ' +
+        'Tools: run_flow / get_run / list_flows / describe_flow. Resources: crystal://flows and ' +
+        'crystal://flows/{id}. Stateless streamable-HTTP transport; not a typed REST op.',
+      auth: true,
+    },
+    {
       method: 'GET',
       path: '/flows',
       summary: 'List the runnable flows (discovery).',

@@ -252,6 +252,12 @@ The live OpenAPI 3.1 description of this surface (self-describing).
 
 - **Auth:** public
 
+### POST /v1/mcp
+
+MCP (Model Context Protocol) JSON-RPC endpoint — agent tool-use over the same facade. Tools: run_flow / get_run / list_flows / describe_flow. Resources: crystal://flows and crystal://flows/{id}. Stateless streamable-HTTP transport; not a typed REST op.
+
+- **Auth:** required
+
 ### GET /v1/flows
 
 List the runnable flows (discovery).
