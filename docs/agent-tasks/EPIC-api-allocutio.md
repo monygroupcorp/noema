@@ -32,11 +32,15 @@
   invoke (`economy.cap_too_low`); `listFundamenta` (`GET /v1/fundamenta` + `crystal://fundamenta`) and the
   filterable `listModels` (`GET /v1/models` + `crystal://models` + MCP `list_models`) over the real
   `IntelligentiumStore`. Exposed `ring.fundamentorum`. Contract/docs/drift updated. Hermetic-tested.
-- **Phase 4b — PENDING** (GPU-real / deep-rail, staging-validated): studio provisioning (`POST /v1/studios`
-  + studioId-targeted runs over the existing `provisionStudio` hook), the **mid-run watchdog** that enforces
-  `maxImpetus` during execution (ties to studio billing / idle reap), and the account ops `saveFlow`
-  (`POST /v1/flows` via `deriveSavedModus`), `bind` (`PUT /v1/me/bindings/:verb`), `status` (`GET /v1/me/status`
-  via `aggregateStatus`). Hermetically wireable except the live provisioning + watchdog.
+- **Phase 4b — DONE** (commit `43b480e8`): the account ops. `saveFlow` (`POST /v1/flows` + MCP `save_flow`)
+  — derive an owner-keyed Modus from an owned run or a base flow via `deriveSavedModus` (collision →
+  `conflict.slug_taken`); `bind` (`PUT /v1/me/bindings/:verb` + MCP `bind`) via the owner-keyed `Consuetudinum`;
+  `status` (`GET /v1/me/status` + MCP `status`) via `aggregateStatus`, JSON-projected. Added ring deps
+  `hospitia` + `materiae`. Contract/docs/drift updated. Hermetic-tested.
+- **Phase 4c — PENDING** (GPU-real / deep-rail, staging-validated only): studio provisioning (`POST /v1/studios`
+  + studioId-targeted runs via `Inceptio.modoId` over the existing `provisionStudio` hook) and the **mid-run
+  watchdog** that enforces `maxImpetus` *during* execution (ties to studio billing / idle reap). These can't be
+  hermetic — they need a live pod; validate on staging like the rest of the GPU rail.
 
 ## Context / why
 
