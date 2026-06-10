@@ -70,14 +70,14 @@ export interface Hospitium {
 
   /**
    * Continuous cost the host has accrued for this studio running (impetus points).
-   * Incremented by the studio billing tick (`StudioBilling`) every 60s + on phase
+   * Incremented by the studio billing tick (`Census`) every 60s + on phase
    * transitions: `secondsElapsed × Materia.impetusPerSecond`. Mirrored against the
    * earnings (sum of hostCut + hospitium signa) for the bulletin's net display.
    */
   costAccrued?: bigint
 
   /**
-   * When the last billing tick was settled. Used by `StudioBilling` to compute
+   * When the last billing tick was settled. Used by `Census` to compute
    * `secondsSinceLastTick × impetusPerSecond` for the next tick — survives
    * process restarts so we don't double-bill or skip windows.
    */

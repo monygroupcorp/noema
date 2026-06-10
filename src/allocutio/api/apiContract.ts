@@ -342,6 +342,56 @@ const StatusViewSchema: JsonSchema = {
   required: ['balanceImpetus', 'balanceUsd', 'gens', 'studios', 'joinable', 'takenAt'],
 }
 
+/** The request body for `POST /v1/studios`. */
+const ProvisionStudioRequestSchema: JsonSchema = {
+  type: 'object',
+  description:
+    'Lease a hosted warm studio. Everything is optional — the simplest call leases a default ' +
+    'studio capped at the balance. Discover fundamentumId via GET /v1/fundamenta and models via ' +
+    'GET /v1/models (no opaque ids).',
+  properties: {
+    fundamentumId: { type: 'string', description: 'Compute substrate to arm on (its runtime is inherited). Enumerate via GET /v1/fundamenta.' },
+    models: { type: 'array', items: { type: 'string' }, description: 'Model ids (intellaId) to install live onto the studio. Enumerate via GET /v1/models.' },
+    warmMs: { type: 'number', description: 'How long to hold the studio warm (ms).' },
+    maxImpetus: { type: 'string', description: 'Hard spend cap = the session budget (impetus). The studio drain-terminates at the cap. Omitted → the full balance.' },
+    runtime: { type: 'string', description: 'Override the on-pod runtime explicitly (else inherited from the fundamentum).' },
+  },
+}
+
+/** One studio (leased or live) — the projection both /studios ops return. */
+const StudioViewSchema: JsonSchema = {
+  type: 'object',
+  description: 'A hosted studio. `studioId` is what POST /v1/runs { studioId } targets.',
+  properties: {
+    studioId: { type: 'string', description: 'The studio id (a Modo session) — pass as run.studioId.' },
+    podId: { type: 'string', description: 'The underlying pod id.' },
+    status: { type: 'string', description: 'Session status (claiming | warming | active | idle | hibernating | terminated).' },
+    gpu: { type: 'string', description: 'GPU model the studio runs on.' },
+    runtime: { type: 'string', description: 'On-pod runtime (ComfyUI / llama.cpp / …).' },
+    imageRef: { type: 'string', description: 'The pod image reference.' },
+    warmUntil: { type: 'string', format: 'date-time', description: 'When the warm window expires.' },
+    budgetImpetus: { type: 'string', description: 'The authorized session budget (the maxImpetus cap), as a string.' },
+    impetusPerSecond: { type: 'string', description: 'Continuous burn rate (impetus/sec) while warm.' },
+  },
+  required: ['studioId', 'status', 'budgetImpetus'],
+}
+
+/** The response body for `POST /v1/studios`. */
+const StudioEnvelopeSchema: JsonSchema = {
+  type: 'object',
+  description: 'A newly leased studio.',
+  properties: { studio: StudioViewSchema },
+  required: ['studio'],
+}
+
+/** The response body for `GET /v1/studios`. */
+const StudiosListSchema: JsonSchema = {
+  type: 'object',
+  description: "The caller's live studios.",
+  properties: { studios: { type: 'array', items: StudioViewSchema } },
+  required: ['studios'],
+}
+
 /** The error envelope every failed request carries (mirrors `errors.ts#ApiErrorBody`). */
 const ErrorEnvelopeSchema: JsonSchema = {
   type: 'object',
@@ -466,6 +516,21 @@ export const API_CONTRACT: ApiContract = {
       auth: true,
       response: StatusViewSchema,
     },
+    {
+      method: 'POST',
+      path: '/studios',
+      summary: 'Lease a hosted warm studio (a persistent GPU session) for fast repeated runs. maxImpetus is the session budget — the studio drain-terminates at the cap.',
+      auth: true,
+      request: ProvisionStudioRequestSchema,
+      response: StudioEnvelopeSchema,
+    },
+    {
+      method: 'GET',
+      path: '/studios',
+      summary: "List the authenticated caller's live hosted studios.",
+      auth: true,
+      response: StudiosListSchema,
+    },
   ],
   // Mirrors the request-error taxonomy in `errors.ts`. Append-only.
   errorCodes: [
@@ -475,10 +540,14 @@ export const API_CONTRACT: ApiContract = {
     { code: 'input.malformed', httpStatus: 400 },
     { code: 'input.invalid_aditus', httpStatus: 422 },
     { code: 'not_found.flow', httpStatus: 404 },
+    { code: 'not_found.fundamentum', httpStatus: 404 },
+    { code: 'not_found.studio', httpStatus: 404 },
     { code: 'not_found.run', httpStatus: 404 },
     { code: 'economy.insufficient_signa', httpStatus: 402 },
     { code: 'economy.cap_too_low', httpStatus: 422 },
     { code: 'conflict.slug_taken', httpStatus: 409 },
+    { code: 'capacity.no_pods', httpStatus: 503, retryable: true },
+    { code: 'internal.unavailable', httpStatus: 503, retryable: true },
     { code: 'internal.error', httpStatus: 500, retryable: true },
   ],
 }

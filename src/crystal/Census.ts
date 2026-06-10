@@ -1,24 +1,32 @@
 import type { MateriaStore, Materia } from '../types/materia.js'
 import type { HospitiumStore, Hospitium } from '../types/hospitium.js'
 import type { Signorum } from '../types/significandi.js'
+import type { ModoStore } from '../types/modo.js'
 import type { Nexus } from '../types/nexus.js'
 import { bus } from '../lib/bus.js'
 import { makeLogger } from '../lib/logger.js'
 
-const log = makeLogger('crystal:studio-billing')
+const log = makeLogger('crystal:census')
 
 /** Materia statuses for which we run the billing meter. Terminated/null = skip. */
 const BILLABLE_STATUSES = new Set(['idle', 'active', 'provisioning', 'bootstrapping'])
 
-export interface StudioBillingDeps {
+export interface CensusDeps {
   hospitia: HospitiumStore
   materiae: MateriaStore
   signorum: Signorum
   nexus: Nexus
+  /** Session store — when present, Census ALSO enforces the studio's budget tessera
+   *  (`maxImpetus` watchdog): a studio whose accrued spend crosses its authorized
+   *  `sessionBudget` drains, independent of the host's balance. Absent → balance-only. */
+  modos?: ModoStore
 }
 
 /**
- * Studio billing tick — the host's continuous per-time cost meter.
+ * Census — the host's continuous per-time cost reckoning (the studio billing tick).
+ *
+ * "census" = the periodic Roman assessment/reckoning; here, the recurring
+ * assessment of impetus against each live hosted session.
  *
  * Every `intervalMs` (default 60s), walks active Hospitia and bills the host
  * `secondsSinceLastTick × Materia.impetusPerSecond` impetus. Implements:
@@ -35,19 +43,19 @@ export interface StudioBillingDeps {
  *
  * Returns a stop function (clears the interval). Same shape as `idleReaper`.
  */
-export function startStudioBilling(
-  deps: StudioBillingDeps,
+export function startCensus(
+  deps: CensusDeps,
   intervalMs = 60_000,
 ): () => void {
   const tick = async (): Promise<void> => {
     try {
       const active = await deps.hospitia.findActive()
       for (const h of active) {
-        await billOne(deps, h).catch(err =>
-          log.warn('studio billing tick failed', { materiaId: h.materiaId, error: String(err) }))
+        await censere(deps, h).catch(err =>
+          log.warn('census tick failed', { materiaId: h.materiaId, error: String(err) }))
       }
     } catch (err) {
-      log.warn('studio billing sweep failed', { error: String(err) })
+      log.warn('census sweep failed', { error: String(err) })
     }
   }
 
@@ -57,12 +65,12 @@ export function startStudioBilling(
 }
 
 /**
- * Bill a single Hospitium for one tick. Exported for direct invocation on phase
- * transitions (so we don't lose impetus straddling a 60s window when state
- * changes mid-window). Idempotent on no-elapsed-time.
+ * Assess (reckon + bill) a single Hospitium for one tick. Exported for direct
+ * invocation on phase transitions (so we don't lose impetus straddling a 60s
+ * window when state changes mid-window). Idempotent on no-elapsed-time.
  */
-export async function billOne(
-  deps: StudioBillingDeps,
+export async function censere(
+  deps: CensusDeps,
   hospitium: Hospitium,
   now: Date = new Date(),
 ): Promise<{ requested: bigint; charged: bigint; drainEngaged: boolean }> {
@@ -108,16 +116,41 @@ export async function billOne(
     lastBilledAt: now,
   }).catch(() => {})
 
-  // Drain-on-zero: short-fall means the host couldn't cover the full ask.
-  // Engage drainOnly mode so admission control refuses new guest gens; idle
-  // reaper terminates when the queue drains.
+  // Two drain triggers, both engaging the SAME drainOnly mode (admission control
+  // refuses new guest gens; the idle reaper terminates once the queue drains):
+  //   1. Balance shortfall — the host couldn't cover the full ask this tick.
+  //   2. Budget exhaustion (the `maxImpetus` watchdog) — the studio's total accrued
+  //      spend (warm-time `costAccrued` + run `impetusAccrued`) crossed the
+  //      authorized session budget (the tessera valor). Only when a `modos` store
+  //      is wired; absent → balance-only behavior (unchanged).
+  const balanceShortfall = charged < requested
+  const budgetExhausted = await isOverBudget(deps, materia, newCost)
   let drainEngaged = false
-  if (charged < requested && !materia.drainOnly) {
+  if ((balanceShortfall || budgetExhausted) && !materia.drainOnly) {
     await deps.materiae.update(materia.id, { drainOnly: true }).catch(() => {})
     bus.emit('studio.draining', { materiaId: materia.id })
-    log.info('studio entered drain mode', { materiaId: materia.id, requested: requested.toString(), charged: charged.toString() })
+    log.info('studio entered drain mode', {
+      materiaId: materia.id, reason: budgetExhausted ? 'budget' : 'balance',
+      requested: requested.toString(), charged: charged.toString(),
+    })
     drainEngaged = true
   }
 
   return { requested, charged, drainEngaged }
+}
+
+/**
+ * The `maxImpetus` watchdog check: true when the studio's bound session has a
+ * budget tessera AND its total accrued spend (this tick's warm-time cost +
+ * accumulated run impetus) has reached/exceeded it. Returns false when no `modos`
+ * store is wired, no bound session exists, or the session opened with no budget.
+ */
+async function isOverBudget(deps: CensusDeps, materia: Materia, costAccruedNow: bigint): Promise<boolean> {
+  if (!deps.modos) return false
+  const modo = (await deps.modos.findActive().catch(() => []))
+    .find(m => m.materiamId === materia.id)
+  if (!modo) return false
+  const budget = await deps.signorum.sessionBudget(modo.id).catch(() => 0n)
+  if (budget <= 0n) return false
+  return costAccruedNow + modo.impetusAccrued >= budget
 }

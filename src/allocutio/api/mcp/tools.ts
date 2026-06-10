@@ -191,3 +191,38 @@ export async function statusTool(
     return errResult('internal.error', String(e))
   }
 }
+
+export interface ProvisionStudioArgs {
+  fundamentumId?: string
+  models?: string[]
+  warmMs?: number
+  maxImpetus?: string | number
+  runtime?: string
+}
+
+export async function provisionStudioTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+  args: ProvisionStudioArgs,
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    return ok({ studio: await api.provisionStudio(auctor, args) })
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}
+
+export async function listStudiosTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    return ok({ studios: await api.listStudios(auctor) })
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}

@@ -27,6 +27,8 @@ import { MongoActumIndex } from './crystal/MongoActumIndex.js'
 import { MongoDeploymentum } from './crystal/MongoDeploymentum.js'
 import { Praefectus } from './crystal/Praefectus.js'
 import { WarmPodClient } from './crystal/WarmPodClient.js'
+import { Conductor } from './crystal/Conductor.js'
+import type { Procurator } from './crystal/Procurator.js'
 
 import { MongoActorum } from './crystal/MongoActorum.js'
 import { MongoModorum } from './crystal/MongoModorum.js'
@@ -97,6 +99,10 @@ export interface Ring {
   actumIndex: import('./types/actumIndex.js').ActumIndexStore
   deployments: DeploymentumStore
   collectioCursor: CollectioCursor
+  /** Studio-lifecycle anchor (ADR-0006) — present only when a Procurator
+   *  (provisionStudio-capable pod client) is wired. Composes Materia + Hospitium
+   *  + Modo + budget tessera into one verb both adapters call. */
+  conductor?: Conductor
 }
 
 export interface ContainerConfig {
@@ -130,6 +136,9 @@ export interface ContainerConfig {
   /** Admission gate for a gen reusing a warm pod — install any models it needs that aren't on the
    *  pod yet (awaiting in-flight live-apply installs). Wired to the shared InstallCoordinator. */
   admitWarm?: (materia: Materia, models: Array<{ id?: string }>) => Promise<void>
+  /** Install models live onto a just-leased studio pod (the InstallCoordinator seam) — handed to
+   *  the `Conductor` so `conducere` installs the loadout after park. Wired to the same coordinator. */
+  installLive?: (materia: Materia, intellaIds: string[]) => Promise<unknown>
   /** Collection name for acta — default 'acta' */
   actaCollection?: string
   /** Collection name for modi — default 'modi' */
@@ -268,6 +277,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   // ── Execution rail ─────────────────────────────────────────────────────────
   const cursorum = new SimpleCursorum()
+  let conductor: Conductor | undefined
 
   // The warm-pod match key = the flow's substrate image, resolved from its referenced
   // Fundamentum (ADR-0005 moved image/runtime off the flow onto the fundament).
@@ -302,6 +312,24 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     const tesseraCursor = new TesseraCursor(runpodCursor, modos, signorum)
     cursorum.register('runpod', runpodCursor)
     cursorum.register('tessera', tesseraCursor)
+
+    // Studio-lifecycle anchor (ADR-0006). The pod client doubles as the Procurator
+    // when it can provision studios (SecurePodClient / FakeRunPodClient); the
+    // TesseraCursor is the Modo opener. Absent provisionStudio → no Conductor.
+    const procurator = config.runpodClient && 'provisionStudio' in config.runpodClient
+      ? (config.runpodClient as unknown as Procurator)
+      : undefined
+    if (procurator) {
+      conductor = new Conductor({
+        procurator,
+        opener: tesseraCursor,
+        materiae,
+        modos,
+        hospitia,
+        ...(config.installLive ? { installLive: config.installLive } : {}),
+        ...(config.terminatePod ? { terminate: config.terminatePod } : {}),
+      })
+    }
   }
 
   if (config.openaiClient) {
@@ -341,5 +369,6 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     materiae, hospitia, actumIndex, deployments,
     fundamentorum,
     collectioCursor,
+    ...(conductor ? { conductor } : {}),
   }
 }

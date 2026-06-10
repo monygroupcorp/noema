@@ -20,6 +20,7 @@ import type { Inceptio, Cursor } from '../../../../src/types/cursus.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Fundamentum } from '../../../../src/types/fundamentum.js'
 import type { Intelligens } from '../../../../src/types/intelligendi.js'
+import type { StudioHandle } from '../../../../src/crystal/Conductor.js'
 
 const auctor: AuctorKey = { animaId: 'anima-1' }
 
@@ -519,4 +520,139 @@ test('status returns a JSON-safe view with balanceImpetus as a string', async ()
   assert.ok(Array.isArray(view.studios), 'studios must be an array')
   assert.ok(Array.isArray(view.joinable), 'joinable must be an array')
   assert.ok(typeof view.takenAt === 'string', 'takenAt must be a string')
+})
+
+// ── provisionStudio / listStudios ─────────────────────────────────────────────
+
+// A minimal StudioHandle (only the fields toStudioView projects).
+function makeHandle(over: { studioId?: string } = {}): StudioHandle {
+  return ({
+    studioId: over.studioId ?? 'modo-abc',
+    modo: { status: 'idle' },
+    materia: {
+      externusId: 'pod-xyz',
+      gpu: 'RTX 4090',
+      runtime: 'ComfyUI',
+      imageRef: 'runpod/pytorch:2.1.0',
+      impetusPerSecond: 2n,
+      warmUntil: new Date('2026-06-10T01:00:00Z'),
+    },
+    provision: { podId: 'pod-xyz', provisionMs: 1234 },
+  } as unknown) as StudioHandle
+}
+
+// A fake conductor recording the ConduceOpts it received.
+function makeConductor(
+  over: {
+    conducere?: (auctor: AuctorKey, opts: { budget: bigint }) => Promise<StudioHandle | null>
+    find?: (auctor: AuctorKey) => Promise<StudioHandle[]>
+  } = {},
+): { conductor: CrystalApiDeps['conductor']; received: { budget?: bigint } } {
+  const received: { budget?: bigint } = {}
+  const conductor = ({
+    conducere: over.conducere ?? (async (_a: AuctorKey, opts: { budget: bigint }) => {
+      received.budget = opts.budget
+      return makeHandle()
+    }),
+    find: over.find ?? (async () => []),
+  } as unknown) as CrystalApiDeps['conductor']
+  return { conductor, received }
+}
+
+// A fake signorum with balance + sessionBudget (the studio path needs both).
+function studioSignorum(over: { balance?: bigint; sessionBudget?: bigint } = {}): CrystalApiDeps['signorum'] {
+  return ({
+    ownsAny: async () => false,
+    balance: async () => over.balance ?? 100n,
+    sessionBudget: async () => over.sessionBudget ?? 0n,
+    history: async () => [],
+  } as unknown) as CrystalApiDeps['signorum']
+}
+
+test('provisionStudio leases a studio and projects a JSON-safe StudioView', async () => {
+  const { conductor, received } = makeConductor()
+  const { deps } = makeDeps({ conductor, signorum: studioSignorum({ balance: 100n }) })
+  const api = new CrystalApi(deps)
+
+  const view = await api.provisionStudio(auctor, {})
+
+  assert.equal(view.studioId, 'modo-abc')
+  assert.equal(view.podId, 'pod-xyz')
+  assert.equal(view.status, 'idle')
+  assert.equal(view.gpu, 'RTX 4090')
+  assert.equal(view.runtime, 'ComfyUI')
+  assert.equal(view.imageRef, 'runpod/pytorch:2.1.0')
+  assert.equal(view.warmUntil, '2026-06-10T01:00:00.000Z')
+  // budget = balance (no maxImpetus), projected bigint→string
+  assert.equal(view.budgetImpetus, '100')
+  assert.equal(received.budget, 100n)
+  // impetusPerSecond bigint→string
+  assert.equal(view.impetusPerSecond, '2')
+})
+
+test('provisionStudio without a conductor throws internal.unavailable; listStudios returns []', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  await assert.rejects(
+    () => api.provisionStudio(auctor, {}),
+    (e: unknown) => e instanceof ApiError && e.code === 'internal.unavailable',
+  )
+  assert.deepEqual(await api.listStudios(auctor), [])
+})
+
+test('provisionStudio with an unknown fundamentumId throws not_found.fundamentum', async () => {
+  const { conductor } = makeConductor()
+  const { deps } = makeDeps({ conductor, signorum: studioSignorum() })
+  const api = new CrystalApi(deps)
+
+  await assert.rejects(
+    () => api.provisionStudio(auctor, { fundamentumId: 'ghost-substrate' }),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.fundamentum',
+  )
+})
+
+test('provisionStudio with a zero balance and no maxImpetus throws economy.insufficient_signa', async () => {
+  const { conductor } = makeConductor()
+  const { deps } = makeDeps({ conductor, signorum: studioSignorum({ balance: 0n }) })
+  const api = new CrystalApi(deps)
+
+  await assert.rejects(
+    () => api.provisionStudio(auctor, {}),
+    (e: unknown) => e instanceof ApiError && e.code === 'economy.insufficient_signa',
+  )
+})
+
+test('provisionStudio when conducere returns null throws capacity.no_pods', async () => {
+  const { conductor } = makeConductor({ conducere: async () => null })
+  const { deps } = makeDeps({ conductor, signorum: studioSignorum({ balance: 100n }) })
+  const api = new CrystalApi(deps)
+
+  await assert.rejects(
+    () => api.provisionStudio(auctor, {}),
+    (e: unknown) => e instanceof ApiError && e.code === 'capacity.no_pods',
+  )
+})
+
+test('provisionStudio threads maxImpetus as the conducere budget', async () => {
+  const { conductor, received } = makeConductor()
+  const { deps } = makeDeps({ conductor, signorum: studioSignorum({ balance: 100n }) })
+  const api = new CrystalApi(deps)
+
+  const view = await api.provisionStudio(auctor, { maxImpetus: 42n })
+  assert.equal(received.budget, 42n, 'maxImpetus is the session budget passed to conducere')
+  assert.equal(view.budgetImpetus, '42')
+})
+
+test('listStudios maps conductor.find handles with per-studio sessionBudget', async () => {
+  const { conductor } = makeConductor({
+    find: async () => [makeHandle({ studioId: 'modo-1' }), makeHandle({ studioId: 'modo-2' })],
+  })
+  const { deps } = makeDeps({ conductor, signorum: studioSignorum({ sessionBudget: 77n }) })
+  const api = new CrystalApi(deps)
+
+  const studios = await api.listStudios(auctor)
+  assert.equal(studios.length, 2)
+  assert.deepEqual(studios.map((s) => s.studioId).sort(), ['modo-1', 'modo-2'])
+  assert.equal(studios[0].budgetImpetus, '77', 'budget comes from signorum.sessionBudget')
 })

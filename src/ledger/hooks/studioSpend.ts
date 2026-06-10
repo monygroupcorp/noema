@@ -5,7 +5,7 @@ const PLATFORM_ANIMA_ID = process.env.PLATFORM_ANIMA_ID ?? 'platform'
 /**
  * studioSpendHook — emits the two-sided ledger entries for one studio billing tick.
  *
- * Fires on `studio_spend` events from the `StudioBilling` ticker (which has
+ * Fires on `studio_spend` events from the `Census` ticker (which has
  * already clamped `impetus` to the host's available balance). The hook is pure:
  * given the (clamped) impetus + hostKey, it returns
  *

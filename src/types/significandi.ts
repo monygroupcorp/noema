@@ -132,6 +132,14 @@ export interface Signorum {
    * Returns sum of all valid Signum.valor for the given identity.
    */
   balance(by: { animaId: string } | { commitment: string }): Promise<bigint>
+  /**
+   * The authorized budget for a Modo session — the sum of VALID `tessera` valor
+   * scoped to `modoId` (0n if none). The tessera is the anonymous bearer budget a
+   * studio opens with (no animaId/commitment, so it's invisible to `balance`);
+   * `Census` reads it to drain-terminate a studio whose accrued spend has crossed
+   * its cap. This is the `maxImpetus` watchdog at the session altitude.
+   */
+  sessionBudget(modoId: string): Promise<bigint>
   /** Issue a new signum — the only write operation besides spend */
   issue(signum: Omit<Signum, 'id' | 'natum' | 'status'>): Promise<Signum>
   /**

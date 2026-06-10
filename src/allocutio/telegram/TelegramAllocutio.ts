@@ -6,7 +6,7 @@
 // Handles command parsing, callback_query decoding, and primitive rendering.
 // =============================================================================
 
-import type { Primitive, Step, Resolution, FlowContext } from '../../flow/types.js'
+import type { Primitive, Step, Resolution, FlowContext, AuctorKey } from '../../flow/types.js'
 import type { Allocutio, Nuntius, Responsum } from '../../types/allocutio.js'
 import type { Inceptio } from '../../types/cursus.js'
 import { makeLogger } from '../../lib/logger.js'
@@ -138,9 +138,10 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     botStartupTime?: number
     materiae?: MateriaStore
     terminatePod?: (podId: string) => Promise<void>
-    /** `/arm` Start — provision a warm studio (no gen) with the loadout. Container-wired
-     *  (fake: create a warm Materia; real: SecurePodClient provision+park). Absent → no Start. */
-    provisionStudio?: (opts: { models: PendingModel[]; runtime?: string; warmMs?: number }, onStage?: (stage: string, info?: StageInfo) => void) => Promise<{ podId: string; gpuType?: string; costPerHr?: number; provisionMs?: number } | null>
+    /** `/arm` Start — lease a warm studio (no gen) for `auctor` via the `Conductor`
+     *  (ADR-0006): provision the Materia + bind a Hospitium keyed by the host + open a
+     *  budgeted Modo. Container-wired (fake or real Procurator). Absent → no Start. */
+    provisionStudio?: (auctor: AuctorKey, opts: { models: PendingModel[]; runtime?: string; warmMs?: number }, onStage?: (stage: string, info?: StageInfo) => void) => Promise<{ podId: string; gpuType?: string; costPerHr?: number; provisionMs?: number } | null>
     /** Live model-apply — download model(s) onto a warm pod (no gen) + merge into installedModels.
      *  Container-wired (fake: simulated; real: comfyrunner /install). Absent → adds always queue. */
     installStudioModels?: (podId: string, intellaIds: string[]) => Promise<{ installedModels: string[] } | null>
@@ -204,7 +205,14 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       listPresets: () => this.modelCatalog.listFlows(),
       listImages: async () => this.modelCatalog.listImages(),
       listConfigs: async (image) => this.modelCatalog.configsForImage(image),
-      startStudio: (_chatId, opts, onStage) => (deps.provisionStudio ? deps.provisionStudio(opts, onStage) : Promise.resolve(null)),
+      startStudio: async (hostUserId, opts, onStage) => {
+        if (!deps.provisionStudio) return null
+        // Resolve the host's AuctorKey here so the studio is bound to its owner
+        // (the host-less-studio fix) — the lifecycle itself lives in the Conductor.
+        const auctor = await this.identity.resolve(hostUserId).catch(() => null)
+        if (!auctor) return null
+        return deps.provisionStudio(auctor, opts, onStage)
+      },
       ...(deps.installStudioModels ? { installModels: (podId, ids) => deps.installStudioModels!(podId, ids) } : {}),
       promptSearch: (chatId, hostUserId) => this.modelCatalog.promptSearch(chatId, hostUserId),
       promptTrigger: (chatId, hostUserId) => this.modelCatalog.promptTrigger(chatId, hostUserId),

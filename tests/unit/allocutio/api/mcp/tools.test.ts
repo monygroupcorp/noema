@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { runFlowTool, getRunTool, listFlowsTool, describeFlowTool, quoteTool, listFundamentaTool, listModelsTool, saveFlowTool, bindTool, statusTool } from '../../../../../src/allocutio/api/mcp/tools.js'
+import { runFlowTool, getRunTool, listFlowsTool, describeFlowTool, quoteTool, listFundamentaTool, listModelsTool, saveFlowTool, bindTool, statusTool, provisionStudioTool, listStudiosTool } from '../../../../../src/allocutio/api/mcp/tools.js'
 import { ApiError } from '../../../../../src/allocutio/api/errors.js'
 import type { CrystalApi } from '../../../../../src/allocutio/api/CrystalApi.js'
 import type { AuctorKey } from '../../../../../src/flow/types.js'
@@ -46,6 +46,8 @@ function makeFakeApi(overrides: Partial<{
   saveFlow: CrystalApi['saveFlow']
   bind: CrystalApi['bind']
   status: CrystalApi['status']
+  provisionStudio: CrystalApi['provisionStudio']
+  listStudios: CrystalApi['listStudios']
 }> = {}): CrystalApi {
   return {
     invokeFlow: overrides.invokeFlow ?? (async () => fakeRun),
@@ -69,6 +71,8 @@ function makeFakeApi(overrides: Partial<{
       joinable: [],
       takenAt: new Date().toISOString(),
     })),
+    provisionStudio: overrides.provisionStudio ?? (async () => ({ studioId: 'modo-1', status: 'idle', budgetImpetus: '100' })),
+    listStudios: overrides.listStudios ?? (async () => [{ studioId: 'modo-1', status: 'idle', budgetImpetus: '100' }]),
   } as unknown as CrystalApi
 }
 
@@ -310,4 +314,63 @@ test('statusTool without auctor returns auth.missing error', async () => {
   const result = await statusTool(api, undefined)
   assert.equal(result.isError, true)
   assert.ok(result.content[0].text.includes('auth.missing'))
+})
+
+// ---------------------------------------------------------------------------
+// provisionStudioTool
+// ---------------------------------------------------------------------------
+
+test('provisionStudioTool with auctor returns ok result with studio', async () => {
+  const api = makeFakeApi()
+  const result = await provisionStudioTool(api, auctor, {})
+  assert.equal(result.isError, undefined)
+  const parsed = JSON.parse(result.content[0].text)
+  assert.equal(parsed.studio.studioId, 'modo-1')
+  assert.equal(parsed.studio.budgetImpetus, '100')
+})
+
+test('provisionStudioTool without auctor returns auth.missing error', async () => {
+  const api = makeFakeApi()
+  const result = await provisionStudioTool(api, undefined, {})
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('auth.missing'))
+})
+
+test('provisionStudioTool propagates ApiError from api.provisionStudio', async () => {
+  const api = makeFakeApi({
+    provisionStudio: async () => { throw new ApiError('capacity.no_pods', 'No GPU capacity available to provision a studio', 503) },
+  })
+  const result = await provisionStudioTool(api, auctor, {})
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('capacity.no_pods'))
+})
+
+// ---------------------------------------------------------------------------
+// listStudiosTool
+// ---------------------------------------------------------------------------
+
+test('listStudiosTool with auctor returns ok result with studios', async () => {
+  const api = makeFakeApi()
+  const result = await listStudiosTool(api, auctor)
+  assert.equal(result.isError, undefined)
+  const parsed = JSON.parse(result.content[0].text)
+  assert.ok(Array.isArray(parsed.studios))
+  assert.equal(parsed.studios.length, 1)
+  assert.equal(parsed.studios[0].studioId, 'modo-1')
+})
+
+test('listStudiosTool without auctor returns auth.missing error', async () => {
+  const api = makeFakeApi()
+  const result = await listStudiosTool(api, undefined)
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('auth.missing'))
+})
+
+test('listStudiosTool propagates ApiError from api.listStudios', async () => {
+  const api = makeFakeApi({
+    listStudios: async () => { throw new ApiError('internal.unavailable', 'Studio provisioning is not available on this deployment', 503) },
+  })
+  const result = await listStudiosTool(api, auctor)
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('internal.unavailable'))
 })

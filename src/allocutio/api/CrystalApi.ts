@@ -24,6 +24,7 @@ import type { Fundamentorum } from '../../types/fundamentum.js'
 import type { Intelligens, IntelligentiumStore, IntelligensGenus } from '../../types/intelligendi.js'
 import type { HospitiumStore } from '../../types/hospitium.js'
 import type { MateriaStore } from '../../types/materia.js'
+import type { Conductor, StudioHandle } from '../../crystal/Conductor.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { Actum, ComputeStrategy, GpuClass, ModelRef } from '../../types/actum.js'
 import type { Inceptio } from '../../types/cursus.js'
@@ -54,6 +55,9 @@ export interface CrystalApiDeps {
   /** Hosting + live-pod registries — back the `status` aggregation. */
   hospitia: HospitiumStore
   materiae: MateriaStore
+  /** Studio-lifecycle anchor (ADR-0006) — backs `provisionStudio`/`listStudios`. Absent
+   *  when no Procurator (provision-capable pod client) is wired → studio ops are unavailable. */
+  conductor?: Conductor
   /** Optional per-AuctorKey aggregation index (passed through to dispatchInceptio). */
   actumIndex?: ActumIndexStore
   /** Optional owner-keyed verb→flow rebinds; falls through to CANON_VERBS when absent. */
@@ -314,6 +318,50 @@ export class CrystalApi {
       takenAt: snap.takenAt.toISOString(),
     }
   }
+
+  /**
+   * Lease a hosted studio for the caller (the agent twin of the bot's `/arm` Start) —
+   * the `Conductor` provisions a warm pod, binds it to the caller (Hospitium), installs
+   * the loadout, and opens a budgeted `Modo` session. Returns the studio handle; its
+   * `studioId` is what `POST /v1/runs { studioId }` targets.
+   *
+   * The `maxImpetus` cap IS the session budget (the tessera): `Census` drain-terminates
+   * the studio once accrued spend crosses it (the watchdog). Absent → the caller's full
+   * balance is the budget. A zero budget is refused (`economy.insufficient_signa`).
+   */
+  async provisionStudio(auctor: AuctorKey, opts: ProvisionStudioOpts = {}): Promise<StudioView> {
+    if (!this.deps.conductor) throw Errors.studioUnavailable()
+
+    // A fundamentum (when given) supplies the runtime + must resolve (no opaque ids).
+    let runtime = opts.runtime
+    if (opts.fundamentumId) {
+      const f = await this.deps.fundamentorum.find(opts.fundamentumId).catch(() => null)
+      if (!f) throw Errors.notFoundFundamentum(opts.fundamentumId)
+      runtime = runtime ?? f.runtime
+    }
+
+    const balance = await this.deps.signorum.balance(auctor)
+    const budget = opts.maxImpetus !== undefined ? BigInt(opts.maxImpetus) : balance
+    if (budget <= 0n) throw Errors.insufficientSigna({ available: balance.toString() })
+
+    const handle = await this.deps.conductor.conducere(auctor, {
+      budget,
+      ...(opts.models?.length ? { models: opts.models } : {}),
+      ...(opts.warmMs !== undefined ? { warmMs: opts.warmMs } : {}),
+      ...(runtime ? { runtime } : {}),
+    })
+    if (!handle) throw Errors.capacityNoPods()
+    return toStudioView(handle, budget)
+  }
+
+  /** The caller's live studios (the agent twin of the bulletin's studio list). Empty when
+   *  no provisioning rail is wired. */
+  async listStudios(auctor: AuctorKey): Promise<StudioView[]> {
+    if (!this.deps.conductor) return []
+    const handles = await this.deps.conductor.find(auctor)
+    return Promise.all(handles.map(async (h) =>
+      toStudioView(h, await this.deps.signorum.sessionBudget(h.studioId).catch(() => 0n))))
+  }
 }
 
 /** Inputs for `saveFlow`. Source the base from an owned run OR an explicit flow id. */
@@ -335,6 +383,53 @@ export interface StatusView {
   studios: unknown[]
   joinable: unknown[]
   takenAt: string
+}
+
+/** Inputs for `provisionStudio`. Everything optional — the simplest call leases a default
+ *  studio capped at the caller's balance; each knob is opt-in (north-star). */
+export interface ProvisionStudioOpts {
+  /** Compute substrate to arm on — resolved to its runtime (enumerable via `listFundamenta`). */
+  fundamentumId?: string
+  /** Models (intellaId) to install live onto the studio (enumerable via `listModels`). */
+  models?: string[]
+  /** How long to hold the studio warm (ms). */
+  warmMs?: number
+  /** Hard spend cap = the session budget (the tessera). Census drains the studio at the cap.
+   *  Omitted → the caller's full balance. */
+  maxImpetus?: bigint | string | number
+  /** Override the on-pod runtime explicitly (else inherited from the fundamentum). */
+  runtime?: string
+}
+
+/** JSON-safe projection of a leased/live studio (bigint→string, Date→ISO). */
+export interface StudioView {
+  /** The studio's id — what `POST /v1/runs { studioId }` targets (a Modo id). */
+  studioId: string
+  podId?: string
+  status: string
+  gpu?: string
+  runtime?: string
+  imageRef?: string
+  warmUntil?: string
+  /** The authorized session budget (impetus) — the `maxImpetus` cap. */
+  budgetImpetus: string
+  /** The studio's continuous burn rate (impetus/sec) while warm. */
+  impetusPerSecond?: string
+}
+
+function toStudioView(h: StudioHandle, budget: bigint): StudioView {
+  const m = h.materia
+  return {
+    studioId: h.studioId,
+    ...(m.externusId ? { podId: m.externusId } : {}),
+    status: h.modo.status,
+    ...(m.gpu ? { gpu: m.gpu } : {}),
+    ...(m.runtime ? { runtime: m.runtime } : {}),
+    ...(m.imageRef ? { imageRef: m.imageRef } : {}),
+    ...(m.warmUntil ? { warmUntil: new Date(m.warmUntil).toISOString() } : {}),
+    budgetImpetus: budget.toString(),
+    ...(m.impetusPerSecond !== undefined ? { impetusPerSecond: m.impetusPerSecond.toString() } : {}),
+  }
 }
 
 /** name → global-unique slug candidate (lowercase, dash-joined alnum). */

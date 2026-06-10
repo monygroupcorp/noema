@@ -8,7 +8,7 @@ import { Errors } from '../../../../src/allocutio/api/errors.js'
 import type { Run } from '../../../../src/allocutio/api/types.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
-import type { ModelCard, SaveFlowOpts, StatusView } from '../../../../src/allocutio/api/CrystalApi.js'
+import type { ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView } from '../../../../src/allocutio/api/CrystalApi.js'
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -59,7 +59,18 @@ const fakeApi: ApiFacade = {
       takenAt: new Date().toISOString(),
     }
   },
+  async provisionStudio(_auctor: AuctorKey, opts: ProvisionStudioOpts): Promise<StudioView> {
+    lastProvisionOpts = opts
+    if (opts.runtime === 'no-pods') throw Errors.capacityNoPods()
+    return { studioId: 'modo-1', status: 'idle', budgetImpetus: '100' }
+  },
+  async listStudios(_auctor: AuctorKey): Promise<StudioView[]> {
+    return [{ studioId: 'modo-1', status: 'idle', budgetImpetus: '100' }]
+  },
 }
+
+// Records the opts the router forwarded to provisionStudio.
+let lastProvisionOpts: ProvisionStudioOpts | undefined
 
 const fakeIdentity: Identity = {
   async resolve(creds: Credentials): Promise<AuctorKey> {
@@ -320,6 +331,57 @@ test('GET /v1/me/status without auth returns 401', async () => {
     const res = await request(`${url}/v1/me/status`)
     assert.equal(res.status, 401)
     assert.equal(res.body.error.code, 'auth.missing')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/studios with auth returns 201 { studio } and passes the body through', async () => {
+  const { server, url } = await createServer()
+  try {
+    lastProvisionOpts = undefined
+    const res = await request(`${url}/v1/studios`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'k' },
+      body: { fundamentumId: 'flux-comfyui', models: ['flux-dev'], warmMs: 60000, maxImpetus: '50' },
+    })
+    assert.equal(res.status, 201)
+    assert.equal(res.body.studio.studioId, 'modo-1')
+    assert.equal(res.body.studio.budgetImpetus, '100')
+    assert.deepEqual(lastProvisionOpts, {
+      fundamentumId: 'flux-comfyui',
+      models: ['flux-dev'],
+      warmMs: 60000,
+      maxImpetus: '50',
+    })
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /v1/studios with auth returns 200 { studios }', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/studios`, { headers: { 'x-api-key': 'k' } })
+    assert.equal(res.status, 200)
+    assert.ok(Array.isArray(res.body.studios))
+    assert.equal(res.body.studios.length, 1)
+    assert.equal(res.body.studios[0].studioId, 'modo-1')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/studios maps an ApiError to its httpStatus + { error }', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/studios`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'k' },
+      body: { runtime: 'no-pods' },
+    })
+    assert.equal(res.status, 503)
+    assert.equal(res.body.error.code, 'capacity.no_pods')
   } finally {
     await closeServer(server)
   }

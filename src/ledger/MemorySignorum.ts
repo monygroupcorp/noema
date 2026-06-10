@@ -31,6 +31,12 @@ export class MemorySignorum implements Signorum {
     return this.forIdentity(by)
   }
 
+  async sessionBudget(modoId: string): Promise<bigint> {
+    return Array.from(this.store.values())
+      .filter(s => s.forma === 'tessera' && s.modoId === modoId && s.status === 'valid')
+      .reduce((sum, s) => sum + s.valor, 0n)
+  }
+
   async ownsAny(by: { animaId: string } | { commitment: string }, signumIds: string[]): Promise<boolean> {
     if (signumIds.length === 0) return false
     const ids = new Set(signumIds)

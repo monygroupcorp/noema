@@ -57,11 +57,18 @@ export const Errors = {
   invalidAditus: (details?: Record<string, unknown>) =>
     new ApiError('input.invalid_aditus', 'Inputs do not match the flow schema', 422, { details }),
   notFoundFlow: (id: string) => new ApiError('not_found.flow', `Flow '${id}' not found`, 404),
+  notFoundFundamentum: (id: string) => new ApiError('not_found.fundamentum', `Fundamentum '${id}' not found`, 404),
+  notFoundStudio: (id: string) => new ApiError('not_found.studio', `Studio '${id}' not found`, 404),
   conflictSlug: (slug: string) => new ApiError('conflict.slug_taken', `The slug '${slug}' is already taken`, 409),
   notFoundRun: (id: string) => new ApiError('not_found.run', `Run '${id}' not found`, 404),
   insufficientSigna: (details?: Record<string, unknown>) =>
     new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
   capTooLow: (details?: Record<string, unknown>) =>
     new ApiError('economy.cap_too_low', 'maxImpetus is below the estimated reservation', 422, { details }),
+  /** No GPU capacity could be procured for a studio (provision failed / no pods). Retryable. */
+  capacityNoPods: (details?: Record<string, unknown>) =>
+    new ApiError('capacity.no_pods', 'No GPU capacity available to provision a studio', 503, { retryable: true, retryAfter: 30, ...(details ? { details } : {}) }),
+  /** The deployment has no studio-provisioning rail wired (no Procurator). */
+  studioUnavailable: () => new ApiError('internal.unavailable', 'Studio provisioning is not available on this deployment', 503, { retryable: true }),
   internal: (message = 'Internal error') => new ApiError('internal.error', message, 500, { retryable: true }),
 } as const

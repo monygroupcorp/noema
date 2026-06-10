@@ -1,4 +1,5 @@
 import type { RunPodClient, ProvisioningContext } from './RunPodCursor.js'
+import type { Procurator, StudioStageCb, StudioProvision } from './Procurator.js'
 import type { ActumExecutio } from '../types/actum.js'
 import type { MateriaStore } from '../types/materia.js'
 import type { HospitiumStore } from '../types/hospitium.js'
@@ -32,7 +33,8 @@ export interface FakeOpts {
  * routed to a warm pod (FakeWarmPodClient) and the idle reaper can sweep it.
  * No SSH, no comfyrunner, no $.
  */
-export class FakeRunPodClient implements RunPodClient {
+export class FakeRunPodClient implements RunPodClient, Procurator {
+  private studioSeq = 0
   constructor(
     private readonly fetchFn: typeof fetch = globalThis.fetch,
     private readonly opts: FakeOpts = {},
@@ -41,6 +43,66 @@ export class FakeRunPodClient implements RunPodClient {
      *  a faithful host-guest bond record at warm-park. */
     private readonly hospitia?: HospitiumStore,
   ) {}
+
+  /**
+   * Provision-only studio (no gen) — the fake `Procurator` half, mirroring
+   * `SecurePodClient.provisionStudio`: stream the provisioning stages, park a warm
+   * Materia, and pair a Hospitium keyed by `hostKey`. Returns the parked pod's
+   * handle so `Conductor.conducere` can find the Materia + open the Modo.
+   */
+  async provisionStudio(
+    opts: { runtime?: string; warmMs?: number; provisioningContext?: ProvisioningContext } = {},
+    onStage?: StudioStageCb,
+  ): Promise<StudioProvision | null> {
+    const step = this.opts.stepMs ?? (Number(process.env.DEV_FAKE_STEP_MS) || 800)
+    const gpuType = this.opts.gpuType ?? 'NVIDIA GeForce RTX 4090'
+    const region = this.opts.region ?? 'EU-RO-1'
+    const costPerHr = this.opts.costPerHr ?? 0.69
+    const warmTtlMs = opts.warmMs ?? this.opts.warmTtlMs ?? 60_000
+    const runtime = opts.runtime ?? 'ComfyUI'
+    const imageRef = runtime === 'llama.cpp'
+      ? 'ghcr.io/ggml-org/llama.cpp:server-cuda'
+      : 'runpod/pytorch:2.4.0-cuda12.4'
+    const podId = `studio-fake-${Date.now().toString(36)}-${this.studioSeq++}`
+
+    const actumId = getTrace()?.actumId
+    const start = Date.now()
+    const emit = (stage: string, info?: Record<string, unknown>) => {
+      if (actumId) bus.emit('actum.stage', { actumId, stage, elapsedMs: Date.now() - start, info })
+      onStage?.(stage, info)
+    }
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+    emit('provisioning'); await sleep(step)
+    emit('pod-locked', { podId, gpuType, region, costPerHr, phaseMs: 30_000 }); await sleep(step)
+    emit('bootstrapping'); await sleep(step)
+    emit('comfy-ready', { phaseMs: 4.5 * 60_000 })
+
+    if (this.materiae) {
+      const materia = await this.materiae.create({
+        genus: 'runpod', externusId: podId, gpu: gpuType, vramGb: 24, ramGb: 32,
+        imageRef, runtime, impetusPerSecond: 0n, status: 'idle',
+        warmUntil: new Date(Date.now() + warmTtlMs), bootCostImpetus: 0n,
+        ...(opts.provisioningContext?.groupChatId ? { groupChatId: opts.provisioningContext.groupChatId } : {}),
+      }).catch(err => { log.warn('fake studio provision failed', { error: String(err) }); return undefined })
+      if (!materia) return null
+      if (this.hospitia && opts.provisioningContext?.hostKey) {
+        await this.hospitia.create({
+          materiaId: materia.id,
+          hostKey: opts.provisioningContext.hostKey,
+          inceptum: new Date(),
+        }).catch(err => log.warn('fake studio hospitium create failed', { error: String(err) }))
+      }
+      const platform = getTrace()?.platform
+      bus.emit('pod.parked', {
+        materiaId: materia.id,
+        ...(opts.provisioningContext?.groupChatId ? { groupChatId: opts.provisioningContext.groupChatId } : {}),
+        ...(platform ? { platform } : {}),
+      })
+      log.info('fake studio parked warm', { podId, imageRef, runtime, warmTtlMs })
+    }
+    return { podId, gpuType, costPerHr, provisionMs: Date.now() - start }
+  }
 
   async submit(params: {
     input: unknown
