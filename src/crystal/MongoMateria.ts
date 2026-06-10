@@ -88,12 +88,16 @@ export class MongoMateria implements MateriaStore {
 
   async reapIdle(now: Date): Promise<Materia[]> {
     const reaped: Materia[] = []
-    // One atomic claim per pod: an idle pod past its deadline flips to terminated.
-    // A concurrent findWarm (idle→active) on the same pod simply wins the race and
-    // this loop's filter no longer matches it.
+    // One atomic claim per pod: reap an idle pod when EITHER it's past its warm
+    // deadline OR it's been drained (`drainOnly` — budget/balance exhausted, see
+    // Census). Draining makes `maxImpetus` a HARD cap: a budget-exhausted idle
+    // studio dies on the next sweep instead of billing on to `warmUntil`. A pod
+    // running a gen is `status:'active'` so it's never reaped mid-job — it drains,
+    // finishes, goes idle, then this matches. A concurrent findWarm (idle→active)
+    // wins the race and this filter no longer matches it.
     for (;;) {
       const doc = await this.col.findOneAndUpdate(
-        { status: 'idle', warmUntil: { $lte: now } },
+        { status: 'idle', $or: [{ warmUntil: { $lte: now } }, { drainOnly: true }] },
         { $set: { status: 'terminated', terminatum: now } },
         { returnDocument: 'after' },
       )
