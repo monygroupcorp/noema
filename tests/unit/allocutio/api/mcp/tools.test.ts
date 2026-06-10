@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { runFlowTool, getRunTool, listFlowsTool, describeFlowTool, quoteTool, listFundamentaTool, listModelsTool } from '../../../../../src/allocutio/api/mcp/tools.js'
+import { runFlowTool, getRunTool, listFlowsTool, describeFlowTool, quoteTool, listFundamentaTool, listModelsTool, saveFlowTool, bindTool, statusTool } from '../../../../../src/allocutio/api/mcp/tools.js'
 import { ApiError } from '../../../../../src/allocutio/api/errors.js'
 import type { CrystalApi } from '../../../../../src/allocutio/api/CrystalApi.js'
 import type { AuctorKey } from '../../../../../src/flow/types.js'
@@ -43,6 +43,9 @@ function makeFakeApi(overrides: Partial<{
   quote: CrystalApi['quote']
   listFundamenta: CrystalApi['listFundamenta']
   listModels: CrystalApi['listModels']
+  saveFlow: CrystalApi['saveFlow']
+  bind: CrystalApi['bind']
+  status: CrystalApi['status']
 }> = {}): CrystalApi {
   return {
     invokeFlow: overrides.invokeFlow ?? (async () => fakeRun),
@@ -56,6 +59,16 @@ function makeFakeApi(overrides: Partial<{
     listModels: overrides.listModels ?? (async () => [
       { intellaId: 'flux-dev', nomen: 'FLUX Dev', genus: 'checkpoint', basis: 'flux' },
     ]),
+    saveFlow: overrides.saveFlow ?? (async () => ({ id: 'my-flow' })),
+    bind: overrides.bind ?? (async (_a, verb, modusId) => ({ verb, modusId })),
+    status: overrides.status ?? (async () => ({
+      balanceImpetus: '42',
+      balanceUsd: 0,
+      gens: [],
+      studios: [],
+      joinable: [],
+      takenAt: new Date().toISOString(),
+    })),
   } as unknown as CrystalApi
 }
 
@@ -221,4 +234,80 @@ test('listModelsTool passes filter args through to api.listModels', async () => 
   })
   await listModelsTool(api, { genus: 'lora', basis: 'flux' })
   assert.deepEqual(capturedArgs, { genus: 'lora', basis: 'flux' })
+})
+
+// ---------------------------------------------------------------------------
+// saveFlowTool
+// ---------------------------------------------------------------------------
+
+test('saveFlowTool with auctor returns ok result with id', async () => {
+  const api = makeFakeApi()
+  const result = await saveFlowTool(api, auctor, { name: 'My Flow', modusId: 'flux-schnell' })
+  assert.equal(result.isError, undefined)
+  const parsed = JSON.parse(result.content[0].text)
+  assert.equal(parsed.id, 'my-flow')
+})
+
+test('saveFlowTool without auctor returns auth.missing error', async () => {
+  const api = makeFakeApi()
+  const result = await saveFlowTool(api, undefined, { name: 'My Flow', modusId: 'flux-schnell' })
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('auth.missing'))
+})
+
+test('saveFlowTool propagates ApiError from api.saveFlow', async () => {
+  const api = makeFakeApi({
+    saveFlow: async () => { throw new ApiError('conflict.slug_taken', "The slug 'x' is already taken", 409) },
+  })
+  const result = await saveFlowTool(api, auctor, { name: 'x', modusId: 'flux-schnell' })
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('conflict.slug_taken'))
+})
+
+// ---------------------------------------------------------------------------
+// bindTool
+// ---------------------------------------------------------------------------
+
+test('bindTool with auctor returns ok result with verb and modusId', async () => {
+  const api = makeFakeApi()
+  const result = await bindTool(api, auctor, { verb: 'make', modusId: 'flux-schnell' })
+  assert.equal(result.isError, undefined)
+  const parsed = JSON.parse(result.content[0].text)
+  assert.equal(parsed.verb, 'make')
+  assert.equal(parsed.modusId, 'flux-schnell')
+})
+
+test('bindTool without auctor returns auth.missing error', async () => {
+  const api = makeFakeApi()
+  const result = await bindTool(api, undefined, { verb: 'make', modusId: 'flux-schnell' })
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('auth.missing'))
+})
+
+test('bindTool propagates ApiError from api.bind', async () => {
+  const api = makeFakeApi({
+    bind: async () => { throw new ApiError('input.malformed', "'nope' is not a rebindable verb", 400) },
+  })
+  const result = await bindTool(api, auctor, { verb: 'nope', modusId: 'flux-schnell' })
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('input.malformed'))
+})
+
+// ---------------------------------------------------------------------------
+// statusTool
+// ---------------------------------------------------------------------------
+
+test('statusTool with auctor returns ok result with balanceImpetus', async () => {
+  const api = makeFakeApi()
+  const result = await statusTool(api, auctor)
+  assert.equal(result.isError, undefined)
+  const parsed = JSON.parse(result.content[0].text)
+  assert.equal(parsed.balanceImpetus, '42')
+})
+
+test('statusTool without auctor returns auth.missing error', async () => {
+  const api = makeFakeApi()
+  const result = await statusTool(api, undefined)
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('auth.missing'))
 })

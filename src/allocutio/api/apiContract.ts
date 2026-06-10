@@ -34,7 +34,7 @@ export interface JsonSchema {
 
 /** One HTTP operation on the `/v1` surface. */
 export interface RouteSpec {
-  method: 'GET' | 'POST'
+  method: 'GET' | 'POST' | 'PUT'
   /** The path, RELATIVE to the `/v1` mount (e.g. `/runs`, `/runs/:id`). */
   path: string
   summary: string
@@ -272,6 +272,75 @@ const ModelsListSchema: JsonSchema = {
   required: ['models'],
 }
 
+/** The request body for `POST /v1/flows` (save a reusable owner-keyed flow). */
+const SaveFlowRequestSchema: JsonSchema = {
+  type: 'object',
+  description: 'Save a reusable owner-keyed flow derived from an owned run or a base flow.',
+  properties: {
+    fromRun: { type: 'string', description: 'Derive from an owned run (copies its modusId + aditus).' },
+    modusId: { type: 'string', description: 'Derive from an explicit base flow id.' },
+    name: { type: 'string', description: 'Human-readable name; yields a global-unique slug.' },
+    aditus: { type: 'object', additionalProperties: true, description: 'Input defaults to bake into the saved flow.' },
+    promptMode: { type: 'string', enum: ['open', 'pinned'] as const, description: 'Whether the prompt field is open or pinned.' },
+    affix: {
+      type: 'object',
+      description: 'Prompt prefix/suffix to fold into every run of this flow.',
+      properties: {
+        prefix: { type: 'string' },
+        suffix: { type: 'string' },
+      },
+    },
+    pinnedModels: {
+      type: 'array',
+      description: 'Model pins baked into the saved flow.',
+      items: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    },
+  },
+  required: ['name'],
+}
+
+/** The response body for `POST /v1/flows`. */
+const SaveFlowResponseSchema: JsonSchema = {
+  type: 'object',
+  description: 'The id of the newly created flow.',
+  properties: { id: { type: 'string', description: 'The slug id of the saved flow.' } },
+  required: ['id'],
+}
+
+/** The request body for `PUT /v1/me/bindings/:verb`. */
+const BindRequestSchema: JsonSchema = {
+  type: 'object',
+  description: 'Rebind a canon verb to a specific flow.',
+  properties: { modusId: { type: 'string', description: 'The flow id to bind this verb to.' } },
+  required: ['modusId'],
+}
+
+/** The response body for `PUT /v1/me/bindings/:verb`. */
+const BindResponseSchema: JsonSchema = {
+  type: 'object',
+  description: 'The resulting verb → flow binding.',
+  properties: {
+    verb: { type: 'string', description: 'The verb that was rebound.' },
+    modusId: { type: 'string', description: 'The flow it now resolves to.' },
+  },
+  required: ['verb', 'modusId'],
+}
+
+/** The response body for `GET /v1/me/status`. */
+const StatusViewSchema: JsonSchema = {
+  type: 'object',
+  description: "The caller's account snapshot — balance, in-flight gens, studios.",
+  properties: {
+    balanceImpetus: { type: 'string', description: 'Spendable impetus balance, serialised as a string.' },
+    balanceUsd: { type: 'number', description: 'USD-equivalent balance (informational).' },
+    gens: { type: 'array', description: 'In-flight generation entries.', items: { type: 'object', additionalProperties: true } },
+    studios: { type: 'array', description: 'Active studio entries.', items: { type: 'object', additionalProperties: true } },
+    joinable: { type: 'array', description: 'Joinable studio invites.', items: { type: 'object', additionalProperties: true } },
+    takenAt: { type: 'string', format: 'date-time', description: 'When the snapshot was taken.' },
+  },
+  required: ['balanceImpetus', 'balanceUsd', 'gens', 'studios', 'joinable', 'takenAt'],
+}
+
 /** The error envelope every failed request carries (mirrors `errors.ts#ApiErrorBody`). */
 const ErrorEnvelopeSchema: JsonSchema = {
   type: 'object',
@@ -373,6 +442,29 @@ export const API_CONTRACT: ApiContract = {
       auth: false,
       response: ModelsListSchema,
     },
+    {
+      method: 'POST',
+      path: '/flows',
+      summary: 'Save a reusable owner-keyed flow derived from an owned run (fromRun) or a base flow (modusId).',
+      auth: true,
+      request: SaveFlowRequestSchema,
+      response: SaveFlowResponseSchema,
+    },
+    {
+      method: 'PUT',
+      path: '/me/bindings/:verb',
+      summary: 'Rebind a canon verb (make, chat) to a specific flow for the authenticated caller.',
+      auth: true,
+      request: BindRequestSchema,
+      response: BindResponseSchema,
+    },
+    {
+      method: 'GET',
+      path: '/me/status',
+      summary: "Return the authenticated caller's account snapshot — balance, in-flight gens, and studios.",
+      auth: true,
+      response: StatusViewSchema,
+    },
   ],
   // Mirrors the request-error taxonomy in `errors.ts`. Append-only.
   errorCodes: [
@@ -385,6 +477,7 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.run', httpStatus: 404 },
     { code: 'economy.insufficient_signa', httpStatus: 402 },
     { code: 'economy.cap_too_low', httpStatus: 422 },
+    { code: 'conflict.slug_taken', httpStatus: 409 },
     { code: 'internal.error', httpStatus: 500, retryable: true },
   ],
 }

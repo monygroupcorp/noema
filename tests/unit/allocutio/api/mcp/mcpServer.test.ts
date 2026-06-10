@@ -48,6 +48,16 @@ const fakeApi: CrystalApi = {
     if (id !== 'flux-schnell') throw Object.assign(new Error(`not found`), { code: 'not_found.flow' })
     return fakeSchema as never
   },
+  saveFlow: async () => ({ id: 'my-flow' }),
+  bind: async (_a: unknown, verb: string, modusId: string) => ({ verb, modusId }),
+  status: async () => ({
+    balanceImpetus: '0',
+    balanceUsd: 0,
+    gens: [],
+    studios: [],
+    joinable: [],
+    takenAt: new Date().toISOString(),
+  }),
 } as unknown as CrystalApi
 
 const auctor: AuctorKey = { animaId: 'a1' }
@@ -70,11 +80,11 @@ async function makeClient(auctorArg?: AuctorKey | null) {
 // Tests
 // ---------------------------------------------------------------------------
 
-test('listTools returns all 7 tool names', async () => {
+test('listTools returns all 10 tool names', async () => {
   const { client } = await makeClient()
   const { tools } = await client.listTools()
   const names = tools.map((t) => t.name).sort()
-  assert.deepEqual(names, ['describe_flow', 'get_run', 'list_flows', 'list_fundamenta', 'list_models', 'quote', 'run_flow'])
+  assert.deepEqual(names, ['bind', 'describe_flow', 'get_run', 'list_flows', 'list_fundamenta', 'list_models', 'quote', 'run_flow', 'save_flow', 'status'])
 })
 
 test('list_flows tool returns the flow catalog', async () => {

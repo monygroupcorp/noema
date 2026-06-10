@@ -16,7 +16,7 @@ import express, { type Request, type Response, type Router } from 'express'
 
 import type { Run } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
-import type { InvokeTarget, InvokeOpts, ModelCard } from './CrystalApi.js'
+import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView } from './CrystalApi.js'
 import { ApiError, Errors } from './errors.js'
 import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
 import { API_CONTRACT } from './apiContract.js'
@@ -41,6 +41,9 @@ export interface ApiFacade {
   ): Promise<{ impetus: string }>
   listFundamenta(): Promise<Array<{ id: string; nomen?: string; versio: string; runtime?: string; imageId: string; imageVersion: string; vramGb?: number }>>
   listModels(filter?: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number }): Promise<ModelCard[]>
+  saveFlow(auctor: AuctorKey, opts: SaveFlowOpts): Promise<{ id: string }>
+  bind(auctor: AuctorKey, verb: string, modusId: string): Promise<{ verb: string; modusId: string }>
+  status(auctor: AuctorKey): Promise<StatusView>
 }
 
 /** The slice of IdentityResolver this router needs. */
@@ -211,6 +214,33 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     '/flows/:id',
     wrap(async (req, res) => {
       res.json(await api.describeFlow(String(req.params.id)))
+    }),
+  )
+
+  // POST /v1/flows — save a reusable owner-keyed flow (auth required).
+  router.post(
+    '/flows',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      res.status(201).json(await api.saveFlow(auctor, req.body ?? {}))
+    }),
+  )
+
+  // PUT /v1/me/bindings/:verb — rebind a canon verb to a flow (auth required).
+  router.put(
+    '/me/bindings/:verb',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      res.json(await api.bind(auctor, String(req.params.verb), req.body?.modusId))
+    }),
+  )
+
+  // GET /v1/me/status — the caller's account snapshot (auth required).
+  router.get(
+    '/me/status',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      res.json(await api.status(auctor))
     }),
   )
 

@@ -15,6 +15,9 @@ import {
   quoteTool,
   listFundamentaTool,
   listModelsTool,
+  saveFlowTool,
+  bindTool,
+  statusTool,
 } from './tools.js'
 
 export function buildMcpServer(api: CrystalApi, auctor: AuctorKey | undefined): McpServer {
@@ -103,6 +106,44 @@ export function buildMcpServer(api: CrystalApi, auctor: AuctorKey | undefined): 
       },
     },
     (args) => listModelsTool(api, args),
+  )
+
+  server.registerTool(
+    'save_flow',
+    {
+      description: 'Save a reusable owner-keyed flow from an owned run (fromRun) or a base flow (modusId).',
+      inputSchema: {
+        fromRun: z.string().optional(),
+        modusId: z.string().optional(),
+        name: z.string(),
+        aditus: z.record(z.string(), z.unknown()).optional(),
+        promptMode: z.enum(['open', 'pinned']).optional(),
+        affix: z.object({ prefix: z.string().optional(), suffix: z.string().optional() }).optional(),
+        pinnedModels: z.array(z.object({ id: z.string() })).optional(),
+      },
+    },
+    (args) => saveFlowTool(api, auctor, args),
+  )
+
+  server.registerTool(
+    'bind',
+    {
+      description: 'Rebind a canon verb (make, chat) to a specific flow for the authenticated caller.',
+      inputSchema: {
+        verb: z.string(),
+        modusId: z.string(),
+      },
+    },
+    (args) => bindTool(api, auctor, args),
+  )
+
+  server.registerTool(
+    'status',
+    {
+      description: "Return the authenticated caller's account snapshot — balance, in-flight gens, and studios.",
+      inputSchema: {},
+    },
+    (_args) => statusTool(api, auctor),
   )
 
   // ── Resources ─────────────────────────────────────────────────────────────

@@ -57,6 +57,7 @@ export const Errors = {
   invalidAditus: (details?: Record<string, unknown>) =>
     new ApiError('input.invalid_aditus', 'Inputs do not match the flow schema', 422, { details }),
   notFoundFlow: (id: string) => new ApiError('not_found.flow', `Flow '${id}' not found`, 404),
+  conflictSlug: (slug: string) => new ApiError('conflict.slug_taken', `The slug '${slug}' is already taken`, 409),
   notFoundRun: (id: string) => new ApiError('not_found.run', `Run '${id}' not found`, 404),
   insufficientSigna: (details?: Record<string, unknown>) =>
     new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
