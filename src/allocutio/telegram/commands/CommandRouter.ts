@@ -1,17 +1,10 @@
 import { inlineKeyboard, btn } from '../telegramRender.js'
 import { COPY, HELP_TEXT } from '../../lexicon/copy.js'
 import { SHARE_TOKEN_ALPHABET, SHARE_TOKEN_LENGTH } from '../../../crystal/shareToken.js'
+import { CANON_VERBS } from '../../../crystal/canonVerbs.js'
 
 export { HELP_TEXT }
 
-/**
- * CANON_VERBS — the platform's taste: each canon verb's default flow (verb → flowId).
- * Seeded ONLY with verbs whose flows exist today. The remaining elemental verbs
- * (`effect`/`animate`/`direct`/`compose`) are deliberately omitted — they're a one-line
- * add here once their default flow ships (ADR-0003). A per-user rebind (resolveVerb)
- * overrides this; absent an override, this table is the answer.
- */
-const CANON_VERBS: Record<string, string> = { make: 'flux-schnell', chat: 'modus.chatgpt' }
 const SHARE_TOKEN_RE = new RegExp(`^pod_([${SHARE_TOKEN_ALPHABET}]{${SHARE_TOKEN_LENGTH}})$`)
 /** A flow slug is a clean lowercase id (`flux-schnell`, `sd1-5`) — no dots/spaces. */
 const FLOW_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/
