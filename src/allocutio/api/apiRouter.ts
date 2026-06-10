@@ -21,6 +21,7 @@ import { ApiError, Errors } from './errors.js'
 import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
 import { API_CONTRACT } from './apiContract.js'
 import { generateOpenApi } from './docgen.js'
+import type { RunEventHub } from './RunEventHub.js'
 
 /** The slice of CrystalApi this router needs. Mirrors its method signatures. */
 export interface ApiFacade {
@@ -40,7 +41,7 @@ export interface Identity {
   resolve(creds: Credentials): Promise<AuctorKey>
 }
 
-export function createApiRouter(deps: { api: ApiFacade; identity: Identity }): Router {
+export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?: RunEventHub }): Router {
   const { api, identity } = deps
   const router = express.Router()
 
@@ -79,9 +80,70 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity }): R
         aditus ?? {},
         { pinnedModels, computeStrategy, gpuClass },
       )
+      const webhookUrl = req.body?.options?.webhookUrl
+      if (deps.hub && typeof webhookUrl === 'string' && webhookUrl.length > 0) {
+        deps.hub.setWebhook(run.id, webhookUrl)
+      }
       res.status(200).json({ run })
     }),
   )
+
+  // GET /v1/runs/:id/stream — SSE stream of run events.
+  router.get('/runs/:id/stream', async (req, res): Promise<void> => {
+    // Auth + run fetch BEFORE setting SSE headers so errors can be JSON.
+    let auctor: AuctorKey
+    try {
+      auctor = await auth(req)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        res.status(err.httpStatus).json({ error: err.toBody() })
+      } else {
+        res.status(500).json({ error: Errors.internal().toBody() })
+      }
+      return
+    }
+    void auctor // used only for auth side-effect
+
+    if (!deps.hub) {
+      res.status(501).json({ error: { code: 'internal.error', message: 'streaming unavailable' } })
+      return
+    }
+
+    const id = String(req.params.id)
+    let run: Run
+    try {
+      run = await api.getRun(id)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        res.status(err.httpStatus).json({ error: err.toBody() })
+      } else {
+        res.status(500).json({ error: Errors.internal().toBody() })
+      }
+      return
+    }
+
+    // Switch to SSE mode — no JSON errors past this point.
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    if (typeof (res as any).flushHeaders === 'function') (res as any).flushHeaders()
+
+    // Initial snapshot frame.
+    res.write('data: ' + JSON.stringify({ kind: 'snapshot', run }) + '\n\n')
+
+    // Replay buffered events.
+    for (const ev of deps.hub.recentFor(id)) {
+      res.write('data: ' + JSON.stringify(ev) + '\n\n')
+    }
+
+    // Live subscription.
+    const off = deps.hub.subscribe(id, ev => {
+      res.write('data: ' + JSON.stringify(ev) + '\n\n')
+      if (ev.terminal) res.end()
+    })
+
+    req.on('close', off)
+  })
 
   // GET /v1/runs/:id — fetch a run (requires a caller identity).
   router.get(

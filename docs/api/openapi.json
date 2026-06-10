@@ -145,6 +145,17 @@
                     "type": "string",
                     "description": "Optional GPU-class override."
                   },
+                  "options": {
+                    "type": "object",
+                    "description": "Per-run observation options.",
+                    "properties": {
+                      "webhookUrl": {
+                        "type": "string",
+                        "format": "uri",
+                        "description": "Fire-and-forget completion POST target — receives the terminal run event."
+                      }
+                    }
+                  },
                   "commitment": {
                     "type": "string",
                     "description": "Anonymous arcanum spend commitment (auth)."
@@ -286,6 +297,65 @@
             }
           }
         ]
+      }
+    },
+    "/runs/{id}/stream": {
+      "get": {
+        "summary": "Server-Sent Events stream of run events (an initial snapshot, then stage/complete/failed frames). Content-Type: text/event-stream; the stream ends on the terminal event.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success."
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "The live OpenAPI 3.1 description of this surface (self-describing).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success."
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/flows": {

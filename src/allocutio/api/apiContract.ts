@@ -128,6 +128,17 @@ const RunsRequestSchema: JsonSchema = {
     },
     computeStrategy: { type: 'string', description: 'Optional compute-strategy override.' },
     gpuClass: { type: 'string', description: 'Optional GPU-class override.' },
+    options: {
+      type: 'object',
+      description: 'Per-run observation options.',
+      properties: {
+        webhookUrl: {
+          type: 'string',
+          format: 'uri',
+          description: 'Fire-and-forget completion POST target — receives the terminal run event.',
+        },
+      },
+    },
     commitment: { type: 'string', description: 'Anonymous arcanum spend commitment (auth).' },
     web3: {
       type: 'object',
@@ -229,6 +240,20 @@ export const API_CONTRACT: ApiContract = {
       summary: 'Fetch a run by id (poll for completion).',
       auth: true,
       response: RunEnvelopeSchema,
+    },
+    {
+      method: 'GET',
+      path: '/runs/:id/stream',
+      summary:
+        'Server-Sent Events stream of run events (an initial snapshot, then stage/complete/failed ' +
+        'frames). Content-Type: text/event-stream; the stream ends on the terminal event.',
+      auth: true,
+    },
+    {
+      method: 'GET',
+      path: '/openapi.json',
+      summary: 'The live OpenAPI 3.1 description of this surface (self-describing).',
+      auth: false,
     },
     {
       method: 'GET',
