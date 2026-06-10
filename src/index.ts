@@ -21,6 +21,7 @@ import { IdentityResolver as ApiIdentityResolver } from './allocutio/api/Identit
 import { createApiRouter } from './allocutio/api/apiRouter.js'
 import { makeCredentialAcceptors } from './allocutio/api/apiAcceptors.js'
 import { RunEventHub } from './allocutio/api/RunEventHub.js'
+import { createMcpRouter } from './allocutio/api/mcp/mcpRouter.js'
 import { bus } from './lib/bus.js'
 import { createHash } from 'node:crypto'
 import { createLiveRouter } from './api/internal/liveRouter.js'
@@ -549,6 +550,9 @@ async function main(): Promise<void> {
     },
   })
   app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub }))
+  // MCP adapter (/v1/mcp) — the same facade as REST, exposed as MCP tools + crystal://
+  // resources for agent tool-use (Phase 3). Stateless per-request streamable-HTTP transport.
+  app.use('/v1/mcp', createMcpRouter({ api: crystalApi, identity: apiResolver }))
 
   const INTERNAL_SECRET = process.env.INTERNAL_SECRET
   const wideStore = new WideEventStore(mongo.db(DB_NAME))
