@@ -145,6 +145,10 @@
                     "type": "string",
                     "description": "Optional GPU-class override."
                   },
+                  "maxImpetus": {
+                    "type": "string",
+                    "description": "Hard spend cap — admission refuses if the estimated reservation exceeds this value."
+                  },
                   "options": {
                     "type": "object",
                     "description": "Per-run observation options.",
@@ -517,6 +521,220 @@
           }
         ]
       }
+    },
+    "/runs/quote": {
+      "post": {
+        "summary": "Estimate a run cost (impetus) without dispatching — call before invoke to budget.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The estimated impetus cost for the run.",
+                  "properties": {
+                    "impetus": {
+                      "type": "string",
+                      "description": "Upper-bound reservation cost, serialised as a string."
+                    }
+                  },
+                  "required": [
+                    "impetus"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Estimate a run cost without dispatching. Provide a target (modusId or verb) and inputs.",
+                "properties": {
+                  "modusId": {
+                    "type": "string",
+                    "description": "Explicit flow id to quote (wins over verb)."
+                  },
+                  "verb": {
+                    "type": "string",
+                    "description": "A canon verb to resolve to a flow."
+                  },
+                  "aditus": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "The flow's inputs — same shape as POST /runs aditus."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fundamenta": {
+      "get": {
+        "summary": "List the canonical compute substrates (fundamenta) available for flows.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "fundamenta": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "nomen": {
+                            "type": "string",
+                            "description": "Display label."
+                          },
+                          "versio": {
+                            "type": "string",
+                            "description": "Semantic version."
+                          },
+                          "runtime": {
+                            "type": "string",
+                            "description": "On-pod runtime (e.g. ComfyUI)."
+                          },
+                          "imageId": {
+                            "type": "string",
+                            "description": "Docker image id."
+                          },
+                          "imageVersion": {
+                            "type": "string",
+                            "description": "Docker image version."
+                          },
+                          "vramGb": {
+                            "type": "number",
+                            "description": "Minimum VRAM in GB."
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "versio",
+                          "imageId",
+                          "imageVersion"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "fundamenta"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models": {
+      "get": {
+        "summary": "Browse the model weight catalog, optionally filtered by genus, basis, fundamentumId, trigger, or free-text query.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "intellaId": {
+                            "type": "string"
+                          },
+                          "nomen": {
+                            "type": "string",
+                            "description": "Display name."
+                          },
+                          "genus": {
+                            "type": "string",
+                            "description": "Weight class (lora, checkpoint, vae, …)."
+                          },
+                          "basis": {
+                            "type": "string",
+                            "description": "Base model family this weight is compatible with."
+                          },
+                          "trigger": {
+                            "type": "string",
+                            "description": "Trigger words (LoRA only)."
+                          },
+                          "description": {
+                            "type": "string",
+                            "description": "Human-readable description."
+                          }
+                        },
+                        "required": [
+                          "intellaId",
+                          "nomen",
+                          "genus"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "models"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -663,6 +881,10 @@
     {
       "code": "economy.insufficient_signa",
       "httpStatus": 402
+    },
+    {
+      "code": "economy.cap_too_low",
+      "httpStatus": 422
     },
     {
       "code": "internal.error",

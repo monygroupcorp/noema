@@ -16,7 +16,7 @@ import express, { type Request, type Response, type Router } from 'express'
 
 import type { Run } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
-import type { InvokeTarget, InvokeOpts } from './CrystalApi.js'
+import type { InvokeTarget, InvokeOpts, ModelCard } from './CrystalApi.js'
 import { ApiError, Errors } from './errors.js'
 import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
 import { API_CONTRACT } from './apiContract.js'
@@ -34,6 +34,13 @@ export interface ApiFacade {
   getRun(auctor: AuctorKey, id: string): Promise<Run>
   listFlows(): Promise<unknown[]>
   describeFlow(id: string): Promise<unknown>
+  quote(
+    auctor: AuctorKey,
+    target: InvokeTarget,
+    aditus: Record<string, unknown>,
+  ): Promise<{ impetus: string }>
+  listFundamenta(): Promise<Array<{ id: string; nomen?: string; versio: string; runtime?: string; imageId: string; imageVersion: string; vramGb?: number }>>
+  listModels(filter?: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number }): Promise<ModelCard[]>
 }
 
 /** The slice of IdentityResolver this router needs. */
@@ -73,12 +80,12 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     '/runs',
     wrap(async (req, res) => {
       const auctor = await auth(req)
-      const { modusId, verb, aditus, pinnedModels, computeStrategy, gpuClass } = req.body ?? {}
+      const { modusId, verb, aditus, pinnedModels, computeStrategy, gpuClass, maxImpetus } = req.body ?? {}
       const run = await api.invokeFlow(
         auctor,
         { modusId, verb },
         aditus ?? {},
-        { pinnedModels, computeStrategy, gpuClass },
+        { pinnedModels, computeStrategy, gpuClass, ...(maxImpetus !== undefined ? { maxImpetus } : {}) },
       )
       const webhookUrl = req.body?.options?.webhookUrl
       if (deps.hub && typeof webhookUrl === 'string' && webhookUrl.length > 0) {
@@ -156,6 +163,40 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   // from the same API_CONTRACT the committed docs + drift-check use, so it can't lag.
   const OPENAPI = generateOpenApi(API_CONTRACT)
   router.get('/openapi.json', (_req, res) => { res.json(OPENAPI) })
+
+  // POST /v1/runs/quote — cost estimate without dispatching (auth required).
+  router.post(
+    '/runs/quote',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      const { modusId, verb, aditus } = req.body ?? {}
+      res.json(await api.quote(auctor, { modusId, verb }, aditus ?? {}))
+    }),
+  )
+
+  // GET /v1/fundamenta — list compute substrates (public).
+  router.get(
+    '/fundamenta',
+    wrap(async (_req, res) => {
+      res.json({ fundamenta: await api.listFundamenta() })
+    }),
+  )
+
+  // GET /v1/models — filterable model catalog (public).
+  router.get(
+    '/models',
+    wrap(async (req, res) => {
+      const { genus, basis, fundamentumId, trigger, q, limit } = req.query as Record<string, string | undefined>
+      const filter: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number } = {}
+      if (genus !== undefined) filter.genus = genus
+      if (basis !== undefined) filter.basis = basis
+      if (fundamentumId !== undefined) filter.fundamentumId = fundamentumId
+      if (trigger !== undefined) filter.trigger = trigger
+      if (q !== undefined) filter.q = q
+      if (limit !== undefined) filter.limit = Number(limit)
+      res.json({ models: await api.listModels(filter) })
+    }),
+  )
 
   // GET /v1/flows — public flow discovery (no auth).
   router.get(

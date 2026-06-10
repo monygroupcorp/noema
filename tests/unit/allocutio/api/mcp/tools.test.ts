@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { runFlowTool, getRunTool, listFlowsTool, describeFlowTool } from '../../../../../src/allocutio/api/mcp/tools.js'
+import { runFlowTool, getRunTool, listFlowsTool, describeFlowTool, quoteTool, listFundamentaTool, listModelsTool } from '../../../../../src/allocutio/api/mcp/tools.js'
 import { ApiError } from '../../../../../src/allocutio/api/errors.js'
 import type { CrystalApi } from '../../../../../src/allocutio/api/CrystalApi.js'
 import type { AuctorKey } from '../../../../../src/flow/types.js'
@@ -40,12 +40,22 @@ function makeFakeApi(overrides: Partial<{
   getRun: CrystalApi['getRun']
   listFlows: CrystalApi['listFlows']
   describeFlow: CrystalApi['describeFlow']
+  quote: CrystalApi['quote']
+  listFundamenta: CrystalApi['listFundamenta']
+  listModels: CrystalApi['listModels']
 }> = {}): CrystalApi {
   return {
     invokeFlow: overrides.invokeFlow ?? (async () => fakeRun),
     getRun: overrides.getRun ?? (async () => fakeRun),
     listFlows: overrides.listFlows ?? (async () => fakeFlows),
     describeFlow: overrides.describeFlow ?? (async () => fakeSchema as never),
+    quote: overrides.quote ?? (async () => ({ impetus: '99' })),
+    listFundamenta: overrides.listFundamenta ?? (async () => [
+      { id: 'flux-comfyui', nomen: 'FLUX · ComfyUI', versio: '1.0.0', imageId: 'runpod/pytorch', imageVersion: '2.1.0' },
+    ]),
+    listModels: overrides.listModels ?? (async () => [
+      { intellaId: 'flux-dev', nomen: 'FLUX Dev', genus: 'checkpoint', basis: 'flux' },
+    ]),
   } as unknown as CrystalApi
 }
 
@@ -146,4 +156,69 @@ test('describeFlowTool with unknown id returns not_found.flow error', async () =
   const result = await describeFlowTool(api, { id: 'unknown' })
   assert.equal(result.isError, true)
   assert.ok(result.content[0].text.includes('not_found.flow'))
+})
+
+// ---------------------------------------------------------------------------
+// quoteTool
+// ---------------------------------------------------------------------------
+
+test('quoteTool with auctor returns ok result with impetus', async () => {
+  const api = makeFakeApi()
+  const result = await quoteTool(api, auctor, { modusId: 'flux-schnell', aditus: { prompt: 'hi' } })
+  assert.equal(result.isError, undefined)
+  const parsed = JSON.parse(result.content[0].text)
+  assert.equal(parsed.impetus, '99')
+})
+
+test('quoteTool without auctor returns auth.missing error', async () => {
+  const api = makeFakeApi()
+  const result = await quoteTool(api, undefined, { modusId: 'flux-schnell' })
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('auth.missing'))
+})
+
+test('quoteTool propagates ApiError from api.quote', async () => {
+  const api = makeFakeApi({
+    quote: async () => { throw new ApiError('not_found.flow', "Flow 'x' not found", 404) },
+  })
+  const result = await quoteTool(api, auctor, { modusId: 'x' })
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('not_found.flow'))
+})
+
+// ---------------------------------------------------------------------------
+// listFundamentaTool
+// ---------------------------------------------------------------------------
+
+test('listFundamentaTool returns fundamenta without requiring auctor', async () => {
+  const api = makeFakeApi()
+  const result = await listFundamentaTool(api)
+  assert.equal(result.isError, undefined)
+  const parsed = JSON.parse(result.content[0].text)
+  assert.ok(Array.isArray(parsed.fundamenta))
+  assert.equal(parsed.fundamenta.length, 1)
+  assert.equal(parsed.fundamenta[0].id, 'flux-comfyui')
+})
+
+// ---------------------------------------------------------------------------
+// listModelsTool
+// ---------------------------------------------------------------------------
+
+test('listModelsTool returns models without requiring auctor', async () => {
+  const api = makeFakeApi()
+  const result = await listModelsTool(api, {})
+  assert.equal(result.isError, undefined)
+  const parsed = JSON.parse(result.content[0].text)
+  assert.ok(Array.isArray(parsed.models))
+  assert.equal(parsed.models.length, 1)
+  assert.equal(parsed.models[0].intellaId, 'flux-dev')
+})
+
+test('listModelsTool passes filter args through to api.listModels', async () => {
+  let capturedArgs: unknown
+  const api = makeFakeApi({
+    listModels: async (args) => { capturedArgs = args; return [] },
+  })
+  await listModelsTool(api, { genus: 'lora', basis: 'flux' })
+  assert.deepEqual(capturedArgs, { genus: 'lora', basis: 'flux' })
 })

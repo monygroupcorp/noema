@@ -70,11 +70,11 @@ async function makeClient(auctorArg?: AuctorKey | null) {
 // Tests
 // ---------------------------------------------------------------------------
 
-test('listTools returns all 4 tool names', async () => {
+test('listTools returns all 7 tool names', async () => {
   const { client } = await makeClient()
   const { tools } = await client.listTools()
   const names = tools.map((t) => t.name).sort()
-  assert.deepEqual(names, ['describe_flow', 'get_run', 'list_flows', 'run_flow'])
+  assert.deepEqual(names, ['describe_flow', 'get_run', 'list_flows', 'list_fundamenta', 'list_models', 'quote', 'run_flow'])
 })
 
 test('list_flows tool returns the flow catalog', async () => {
