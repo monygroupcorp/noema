@@ -421,7 +421,10 @@ export interface StudioView {
   warmUntil?: string
   /** The authorized session budget (impetus) — the `maxImpetus` cap. */
   budgetImpetus: string
-  /** The studio's continuous burn rate (impetus/sec) while warm. */
+  /** The pod's real hourly USD cost — the source of truth for warm-time billing. */
+  costPerHr?: number
+  /** Coarse burn-rate hint (impetus/sec). Billing is per-window from `costPerHr`;
+   *  this rounds up, so prefer `costPerHr` for an accurate rate. */
   impetusPerSecond?: string
 }
 
@@ -438,6 +441,7 @@ function toStudioView(h: StudioHandle, budget: bigint): StudioView {
     ...(m.imageRef ? { imageRef: m.imageRef } : {}),
     ...(m.warmUntil ? { warmUntil: new Date(m.warmUntil).toISOString() } : {}),
     budgetImpetus: budget.toString(),
+    ...(m.costPerHr !== undefined ? { costPerHr: m.costPerHr } : {}),
     ...(m.impetusPerSecond !== undefined ? { impetusPerSecond: m.impetusPerSecond.toString() } : {}),
   }
 }

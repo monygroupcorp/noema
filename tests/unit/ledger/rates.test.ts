@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   IMPETUS_USD_RATE, BOOT_AMORTIZE_OVER, WARM_SURCHARGE_IMPETUS, HOST_BONUS_RATE,
-  impetusPerSecondFromHourly, computeBootCostImpetus, bootShare,
+  impetusPerSecondFromHourly, impetusForPodMs, computeBootCostImpetus, bootShare,
   tierOf, impetusFor, modoHostFor,
 } from '../../../src/ledger/rates.js'
 import type { Hospitium } from '../../../src/types/hospitium.js'
@@ -26,6 +26,20 @@ test('computeBootCostImpetus is 0 on zero/negative inputs', () => {
   assert.equal(computeBootCostImpetus(0, 0.69), 0n)
   assert.equal(computeBootCostImpetus(-1, 0.69), 0n)
   assert.equal(computeBootCostImpetus(60_000, 0), 0n)
+})
+
+test('impetusForPodMs bills per-window (rounds once) — far less skew than the coarse per-second rate', () => {
+  // 60s on a $0.69/hr pod: 60_000 × 0.69 / 3_600_000 = $0.0115 → ceil(/0.000337) = 35 pts.
+  assert.equal(impetusForPodMs(60_000, 0.69), 35n)
+  // The OLD coarse path billed impetusPerSecondFromHourly(0.69)=1/s × 60 = 60 pts — a +71% skew.
+  assert.equal(impetusPerSecondFromHourly(0.69) * 60n, 60n)
+  // Reference $1.2132/hr pod is exact under both.
+  assert.equal(impetusForPodMs(3_600_000, 1.2132), 3600n)
+})
+
+test('impetusForPodMs is 0 on zero/negative inputs', () => {
+  assert.equal(impetusForPodMs(0, 0.69), 0n)
+  assert.equal(impetusForPodMs(60_000, 0), 0n)
 })
 
 test('bootShare: ceil-divides bootCost by BOOT_AMORTIZE_OVER until recovered', () => {

@@ -70,6 +70,7 @@ function makeDeps(opts: {
   hostBalance: bigint
   hostKey?: HostKey
   status?: Materia['status']
+  costPerHr?: number
 }): CensusDeps & { hospitium: Hospitium; signorum: MemorySignorum; materiae: FakeMateriaStore } {
   const hostKey: HostKey = opts.hostKey ?? { animaId: HOST_ANIMA }
   const materiae = new FakeMateriaStore()
@@ -81,6 +82,7 @@ function makeDeps(opts: {
   const m: Materia = {
     id: MATERIA_ID, genus: 'pod', externusId: 'pod-1', gpu: 'H100', vramGb: 80, ramGb: 200,
     impetusPerSecond: IMPETUS_PER_SECOND, status: opts.status ?? 'idle',
+    ...(opts.costPerHr !== undefined ? { costPerHr: opts.costPerHr } : {}),
   }
   materiae.add(m)
 
@@ -284,4 +286,24 @@ test('budget watchdog: no modos store wired → budget is not enforced (balance-
   const h = (await full.hospitia.findByMateriaId(MATERIA_ID))!
   const res = await censere(balanceOnly as CensusDeps, h, new Date(h.inceptum.getTime() + 60_000))
   assert.equal(res.drainEngaged, false, 'no modos → no budget drain')
+})
+
+// ── 8. Per-window billing from costPerHr (fidelity — rounds once, not per-second)
+test('costPerHr present: bills the elapsed window once (no per-second ceil skew)', async () => {
+  // $4/hr H100, 60s tick: 60_000 × 4 / 3_600_000 = $0.0667 → ceil(/0.000337) = 198 pts.
+  // The legacy per-second path would over-charge: 60 × impetusPerSecond(4) = 240.
+  const deps = makeDeps({ hostBalance: 1_000_000n, costPerHr: 4.0 })
+  await new Promise(r => setTimeout(r, 0))
+  const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
+  const res = await censere(deps, h, new Date(h.inceptum.getTime() + 60_000))
+  assert.equal(res.requested, 198n, 'per-window charge from real cost')
+  assert.equal(res.charged, 198n)
+})
+
+test('no costPerHr (legacy pod): falls back to the per-second impetusPerSecond rate', async () => {
+  const deps = makeDeps({ hostBalance: 1_000_000n })   // no costPerHr
+  await new Promise(r => setTimeout(r, 0))
+  const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
+  const res = await censere(deps, h, new Date(h.inceptum.getTime() + 60_000))
+  assert.equal(res.requested, 60n * IMPETUS_PER_SECOND, 'legacy fallback: 60 × 4 = 240')
 })

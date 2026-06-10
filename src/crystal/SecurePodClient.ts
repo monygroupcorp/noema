@@ -529,10 +529,10 @@ export class SecurePodClient implements RunPodClient, Procurator {
   ): Promise<Materia | undefined> {
     if (!this.materiae) return undefined
     const bootCostImpetus = computeBootCostImpetus(bootMs, sshInfo.costPerHr ?? 0)
-    // The warm-time burn rate Census meters against the host — derived from the pod's
-    // ACTUAL hourly cost, not a static config (which was never set → studios billed
-    // nothing). An explicit config value still wins (tests/overrides); else convert the
-    // live $/hr to impetus/sec; else 0 when the rate is unknown.
+    // `costPerHr` (the pod's real hourly cost) is the source of truth for warm-time
+    // billing — Census charges it per-window. `impetusPerSecond` stays a coarse
+    // display/legacy-fallback figure (config override still wins, else the coarse
+    // conversion, else 0 when the rate is unknown).
     const impetusPerSecond = this.config.impetusPerSecond
       ?? (sshInfo.costPerHr ? impetusPerSecondFromHourly(sshInfo.costPerHr) : 0n)
     const materia = await this.materiae.create({
@@ -545,6 +545,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
       sshHost: sshInfo.host,
       sshPort: sshInfo.port,
       impetusPerSecond,
+      ...(typeof sshInfo.costPerHr === 'number' ? { costPerHr: sshInfo.costPerHr } : {}),
       status: 'idle',
       warmUntil: new Date(Date.now() + (warmMs ?? this.config.warmTtlMs ?? 60_000)),
       bootCostImpetus,

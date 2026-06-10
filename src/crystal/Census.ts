@@ -3,6 +3,7 @@ import type { HospitiumStore, Hospitium } from '../types/hospitium.js'
 import type { Signorum } from '../types/significandi.js'
 import type { ModoStore } from '../types/modo.js'
 import type { Nexus } from '../types/nexus.js'
+import { impetusForPodMs } from '../ledger/rates.js'
 import { bus } from '../lib/bus.js'
 import { makeLogger } from '../lib/logger.js'
 
@@ -85,9 +86,14 @@ export async function censere(
     return { requested: 0n, charged: 0n, drainEngaged: false }
   }
 
-  const requested = BigInt(secondsElapsed) * materia.impetusPerSecond
+  // Bill the elapsed window from the pod's real hourly cost, rounding ONCE — the
+  // fidelity-correct charge (no per-second `ceil` skew). Legacy pods with no stored
+  // `costPerHr` fall back to the coarse per-second rate.
+  const requested = materia.costPerHr
+    ? impetusForPodMs(secondsElapsed * 1000, materia.costPerHr)
+    : BigInt(secondsElapsed) * materia.impetusPerSecond
   if (requested === 0n) {
-    // costPerSecond rounded to zero (free-tier or test pods) — just advance the clock.
+    // Sub-rounding window or a free-tier/test pod — just advance the clock.
     await deps.hospitia.update(hospitium.materiaId, { lastBilledAt: now }).catch(() => {})
     return { requested: 0n, charged: 0n, drainEngaged: false }
   }
