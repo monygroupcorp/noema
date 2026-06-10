@@ -12,9 +12,11 @@
   taxonomy); the `/v1` REST router (runs + flows, error envelope), **mounted live** in `src/index.ts`; the
   contract-first doc pipeline (`apiContract`→`gen:api-docs`→`docs/api/openapi.json`+`reference.md`) with a
   hermetic **drift-check** + `.claude/skills/crystal-api/SKILL.md`. All hermetic-tested.
-  - **Phase-1.x follow-up:** wire the real identified-user credential acceptors (JWT/API-key/web3→animaId)
-    into the mounted `IdentityResolver` (currently only anon `{commitment}` + public discovery are live);
-    validated on staging. Serve `GET /v1/openapi.json`.
+  - **Phase-1.x — DONE** (commit `afb714c2`): `GET /v1/openapi.json` serves the live spec; the mounted
+    `IdentityResolver` now resolves **JWT** (`JWT_SECRET`→`'web'` persona), **API-key** (`ms2_` → read-only
+    users lookup + sha256 → `'api'` persona), and anon `{commitment}` — each via persona find-or-create
+    (`makeCredentialAcceptors`). Verification is defensive (failures → `auth.invalid`). **Remaining:** `web3`
+    (needs a nonce-challenge endpoint). Real auth is staging-validated (the persona-mapping is hermetic-tested).
 - **Phase 2** — observation channels (SSE + webhook + poll). Pending.
 - **Phase 3** — MCP adapter (verb tools + `crystal://` resources). Pending.
 - **Phase 4** — execution strategy + studios + remaining discovery + quote/cap. Pending.
