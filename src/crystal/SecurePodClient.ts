@@ -10,7 +10,7 @@ import { getTrace } from '../lib/trace.js'
 import { bus } from '../lib/bus.js'
 import { terminatePod as _terminatePodUtil } from './terminatePod.js'
 import { submitToRunner, awaitViaStream, isCompiledSpec, type R2Config } from './comfyrunnerClient.js'
-import { computeBootCostImpetus } from '../ledger/rates.js'
+import { computeBootCostImpetus, impetusPerSecondFromHourly } from '../ledger/rates.js'
 
 const COMFYRUNNER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/comfyrunner.py')
 
@@ -529,6 +529,12 @@ export class SecurePodClient implements RunPodClient, Procurator {
   ): Promise<Materia | undefined> {
     if (!this.materiae) return undefined
     const bootCostImpetus = computeBootCostImpetus(bootMs, sshInfo.costPerHr ?? 0)
+    // The warm-time burn rate Census meters against the host — derived from the pod's
+    // ACTUAL hourly cost, not a static config (which was never set → studios billed
+    // nothing). An explicit config value still wins (tests/overrides); else convert the
+    // live $/hr to impetus/sec; else 0 when the rate is unknown.
+    const impetusPerSecond = this.config.impetusPerSecond
+      ?? (sshInfo.costPerHr ? impetusPerSecondFromHourly(sshInfo.costPerHr) : 0n)
     const materia = await this.materiae.create({
       genus: 'runpod',
       externusId: podId,
@@ -538,7 +544,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
       imageRef: imageName,
       sshHost: sshInfo.host,
       sshPort: sshInfo.port,
-      impetusPerSecond: this.config.impetusPerSecond ?? 0n,
+      impetusPerSecond,
       status: 'idle',
       warmUntil: new Date(Date.now() + (warmMs ?? this.config.warmTtlMs ?? 60_000)),
       bootCostImpetus,

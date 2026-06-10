@@ -2,6 +2,7 @@ import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { SecurePodClient } from '../../../src/crystal/SecurePodClient.js'
 import type { SecurePodConfig, SshTransportLike } from '../../../src/crystal/SecurePodClient.js'
+import { impetusPerSecondFromHourly } from '../../../src/ledger/rates.js'
 
 // ── terminatePod spy ──────────────────────────────────────────────────────────
 // SecurePodClient takes terminatePodFn as a constructor dep; we pass a spy
@@ -76,12 +77,14 @@ function makeFetchMock(podId = 'pod-xyz', opts: {
   runnerHealthStatus?: string
   sseEvents?: Array<Record<string, unknown>>
   webhookPayloads?: unknown[]
+  costPerHr?: number
 } = {}): { fetch: typeof fetch; calls: FetchCall[]; webhookPayloads: unknown[] } {
   const {
     sshReadyAfterCalls = 1,
     runnerHealthStatus = 'ready',
     sseEvents = [{ type: 'complete' }],
     webhookPayloads = [],
+    costPerHr,
   } = opts
   let statusCalls = 0
   const runnerBase = `https://${podId}-8080.proxy.runpod.net`
@@ -101,6 +104,7 @@ function makeFetchMock(podId = 'pod-xyz', opts: {
           desiredStatus: 'RUNNING',
           publicIp: '1.2.3.4',
           portMappings: { '22': 12345, '8080': 18080 },
+          ...(costPerHr !== undefined ? { costPerHr } : {}),
         }), { status: 200 })
       }
       return new Response(JSON.stringify({ desiredStatus: 'STARTING' }), { status: 200 })
@@ -346,6 +350,19 @@ test('provisionStudio provisions + parks a warm Materia WITHOUT submitting a job
   assert.equal(terminateSpy.calls.length, 0, 'a healthy provision is not terminated')
   // No gen ran: comfyrunner /job is never POSTed.
   assert.ok(!calls.some(c => c.method === 'POST' && c.url.endsWith('/job')), 'no job submitted')
+})
+
+test('provisionStudio derives Materia.impetusPerSecond from the pod hourly cost (not a static 0)', async () => {
+  const { fetch } = makeFetchMock('pod-rate', { costPerHr: 4.0 })
+  const store = makeWarmMateriaStore()
+  const client = makeClient(makeConfig({ keepWarm: true }), () => makeSshTransport(), fetch, store as never)
+  await client.provisionStudio({})
+
+  const parked = store.createCalls[0] as { impetusPerSecond: bigint }
+  // $4/hr → the canonical rate conversion → 4 impetus/sec. Census meters this against
+  // the host; the old static `config.impetusPerSecond ?? 0n` left every studio free.
+  assert.equal(parked.impetusPerSecond, impetusPerSecondFromHourly(4.0))
+  assert.equal(parked.impetusPerSecond, 4n)
 })
 
 test('provisionStudio terminates the pod and returns null when bootstrap fails', async () => {
