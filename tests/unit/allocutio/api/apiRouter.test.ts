@@ -8,6 +8,7 @@ import { Errors } from '../../../../src/allocutio/api/errors.js'
 import type { Run } from '../../../../src/allocutio/api/types.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
+import type { ModelCard } from '../../../../src/allocutio/api/CrystalApi.js'
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -27,6 +28,20 @@ const fakeApi: ApiFacade = {
   async describeFlow(id: string): Promise<unknown> {
     if (id === 'flux-schnell') return { id, input: { type: 'object' } }
     throw Errors.notFoundFlow(id)
+  },
+  async quote(): Promise<{ impetus: string }> {
+    return { impetus: '42' }
+  },
+  async listFundamenta() {
+    return [
+      { id: 'flux-comfyui', nomen: 'FLUX · ComfyUI', versio: '1.0.0', imageId: 'runpod/pytorch', imageVersion: '2.1.0' },
+    ]
+  },
+  async listModels(): Promise<ModelCard[]> {
+    return [
+      { intellaId: 'flux-dev', nomen: 'FLUX Dev', genus: 'checkpoint', basis: 'flux' },
+      { intellaId: 'flux-lora-1', nomen: 'Flux LoRA 1', genus: 'lora', basis: 'flux' },
+    ]
   },
 }
 
@@ -163,6 +178,62 @@ test('GET /v1/openapi.json returns the live self-describing spec (no auth)', asy
     assert.equal(res.status, 200)
     assert.equal(String(res.body.openapi).startsWith('3.'), true, 'an OpenAPI 3.x document')
     assert.ok(res.body.paths, 'has paths')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/runs/quote with auth returns 200 { impetus }', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/runs/quote`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'k' },
+      body: { modusId: 'flux-schnell', aditus: { prompt: 'hi' } },
+    })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.impetus, '42')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/runs/quote without auth returns 401', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/runs/quote`, {
+      method: 'POST',
+      body: { modusId: 'flux-schnell' },
+    })
+    assert.equal(res.status, 401)
+    assert.equal(res.body.error.code, 'auth.missing')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /v1/fundamenta returns 200 { fundamenta } with no auth', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/fundamenta`)
+    assert.equal(res.status, 200)
+    assert.ok(Array.isArray(res.body.fundamenta))
+    assert.equal(res.body.fundamenta.length, 1)
+    assert.equal(res.body.fundamenta[0].id, 'flux-comfyui')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /v1/models?genus=lora returns 200 { models } with no auth', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/models?genus=lora`)
+    assert.equal(res.status, 200)
+    assert.ok(Array.isArray(res.body.models))
+    // fakeApi.listModels ignores the filter and returns both; we just check envelope shape
+    assert.ok(res.body.models.length >= 1)
+    assert.ok(res.body.models[0].intellaId)
   } finally {
     await closeServer(server)
   }

@@ -14,12 +14,14 @@
 // the public projection types, never the internal Latin primitives.
 // =============================================================================
 
-import type { Modorum } from '../../types/modus.js'
+import type { Modorum, Modus } from '../../types/modus.js'
 import type { Cursorum, ActumCompletor, Actorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
 import type { Consuetudinum } from '../../types/consuetudo.js'
 import type { Signorum } from '../../types/significandi.js'
+import type { Fundamentorum } from '../../types/fundamentum.js'
+import type { Intelligens, IntelligentiumStore, IntelligensGenus } from '../../types/intelligendi.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { Actum, ComputeStrategy, GpuClass, ModelRef } from '../../types/actum.js'
 import type { Inceptio } from '../../types/cursus.js'
@@ -39,8 +41,12 @@ export interface CrystalApiDeps {
   completor: ActumCompletor
   actorum: Actorum
   /** The ledger — used to owner-scope `getRun` (a run is yours iff you own one of the
-   *  signa it consumed). Identity-blind Actum means ownership lives in the ledger. */
+   *  signa it consumed) and to quote a run's cost. Identity-blind Actum → ownership lives here. */
   signorum: Signorum
+  /** Compute-substrate registry — backs `listFundamenta` discovery. */
+  fundamentorum: Fundamentorum
+  /** Weight catalog — backs `listModels` discovery. */
+  intelligendi: IntelligentiumStore
   /** Optional per-AuctorKey aggregation index (passed through to dispatchInceptio). */
   actumIndex?: ActumIndexStore
   /** Optional owner-keyed verb→flow rebinds; falls through to CANON_VERBS when absent. */
@@ -58,6 +64,8 @@ export interface InvokeOpts {
   pinnedModels?: ModelRef[]
   computeStrategy?: ComputeStrategy
   gpuClass?: GpuClass
+  /** Hard spend cap (impetus). Admission refuses if the estimated reservation exceeds it. */
+  maxImpetus?: bigint | string
 }
 
 /** A compact catalog summary of one runnable flow. */
@@ -93,6 +101,15 @@ export class CrystalApi {
       modusId = (await consuetudinum?.resolve(auctor, target.verb)) ?? CANON_VERBS[target.verb]
     }
     if (!modusId) throw Errors.notFoundFlow(target.verb ?? '?')
+
+    // Admission spend cap — refuse before dispatch if the upper-bound estimate exceeds
+    // maxImpetus. (Mid-run enforcement — the watchdog — is a Phase-4b follow-up.)
+    if (opts.maxImpetus !== undefined) {
+      const est = await this._estimate(modusId, aditus)
+      if (est > BigInt(opts.maxImpetus)) {
+        throw Errors.capTooLow({ estimated: est.toString(), maxImpetus: String(opts.maxImpetus) })
+      }
+    }
 
     const inceptio: Inceptio = {
       modusId,
@@ -154,5 +171,94 @@ export class CrystalApi {
     // Modus carries every field describeFlow reads; the cast supplies the
     // index-signature DescribableModus declares for its passthrough meta.
     return describeFlow(m as unknown as DescribableModus)
+  }
+
+  /**
+   * Quote a run's cost WITHOUT dispatching — the upper-bound reservation the cursor
+   * declares for this modus + aditus (side-effect-free; `run().impetus ≤ reserve()`).
+   * Exact for fixed-cost flows, an upper bound for duration-based pod flows.
+   */
+  async quote(auctor: AuctorKey, target: InvokeTarget, aditus: Record<string, unknown>): Promise<{ impetus: string }> {
+    let modusId: string | undefined = target.modusId
+    if (!modusId && target.verb) {
+      modusId = (await this.deps.consuetudinum?.resolve(auctor, target.verb)) ?? CANON_VERBS[target.verb]
+    }
+    if (!modusId) throw Errors.notFoundFlow(target.verb ?? '?')
+    return { impetus: (await this._estimate(modusId, aditus)).toString() }
+  }
+
+  /** The cursor's read-only upper-bound reservation for a modus + aditus. */
+  private async _estimate(modusId: string, aditus: Record<string, unknown>): Promise<bigint> {
+    const modus = await this.deps.modorum.find(modusId)
+    if (!modus) throw Errors.notFoundFlow(modusId)
+    return this.deps.cursorum.resolve(modus).reserve(modus, aditus)
+  }
+
+  /** List the canonical compute substrates (fundamenta) an agent can arm a studio on. */
+  async listFundamenta(): Promise<Array<{ id: string; nomen?: string; versio: string; runtime?: string; imageId: string; imageVersion: string; vramGb?: number }>> {
+    const funds = await this.deps.fundamentorum.list({ canonica: true })
+    return funds.map((f) => ({
+      id: f.id, versio: f.versio, imageId: f.imageId, imageVersion: f.imageVersion,
+      ...(f.nomen ? { nomen: f.nomen } : {}),
+      ...(f.runtime ? { runtime: f.runtime } : {}),
+      ...(f.vramGb !== undefined ? { vramGb: f.vramGb } : {}),
+    }))
+  }
+
+  /**
+   * The filterable model catalog (the agent twin of the bot's picker): by `genus`
+   * (lora/checkpoint/…), `basis` (the base family a weight is for), `fundamentumId`
+   * (resolved to the substrate's base family), `trigger` (a LoRA trigger word, matched
+   * against `verba`), and `q` (free text via the store's search). Each result is a
+   * card so the agent can decide, not just enumerate.
+   */
+  async listModels(filter: { genus?: IntelligensGenus; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number } = {}): Promise<ModelCard[]> {
+    let basis = filter.basis
+    if (!basis && filter.fundamentumId) {
+      const f = await this.deps.fundamentorum.find(filter.fundamentumId).catch(() => null)
+      if (f) {
+        for (const w of f.intellae ?? []) {
+          const wi = await this.deps.intelligendi.find(w.id).catch(() => null)
+          if (wi?.basis) { basis = wi.basis; break }
+        }
+      }
+    }
+    const q = filter.q?.trim()
+    // Free-text → the store's search; otherwise the structured filter. Apply the
+    // remaining constraints in-memory (search isn't field-filtered).
+    const base = q
+      ? await this.deps.intelligendi.search(q)
+      : await this.deps.intelligendi.list({ canonica: true, ...(filter.genus ? { genus: filter.genus } : {}), ...(basis ? { basis } : {}) })
+    const trig = filter.trigger?.trim().toLowerCase()
+    const hits = base.filter((i) => {
+      if (filter.genus && i.genus !== filter.genus) return false
+      if (basis && i.basis !== basis) return false
+      if (trig && !(i.verba ?? []).some((v) => v.toLowerCase() === trig)) return false
+      return true
+    })
+    const limited = filter.limit ? hits.slice(0, filter.limit) : hits
+    return limited.map(toModelCard)
+  }
+}
+
+/** A model catalog card — enough for an agent to decide, not just enumerate. */
+export interface ModelCard {
+  intellaId: string
+  nomen: string
+  genus: string
+  basis?: string
+  trigger?: string
+  description?: string
+}
+
+function toModelCard(i: Intelligens): ModelCard {
+  const trigger = i.verba && i.verba.length ? i.verba.join(', ') : undefined
+  return {
+    intellaId: i.id,
+    nomen: i.nomen || i.id,
+    genus: i.genus,
+    ...(i.basis ? { basis: i.basis } : {}),
+    ...(trigger ? { trigger } : {}),
+    ...(i.descriptio ? { description: i.descriptio } : {}),
   }
 }

@@ -511,6 +511,8 @@ async function main(): Promise<void> {
     completor: ring.completor,
     actorum: ring.actorum,
     signorum: ring.signorum,
+    fundamentorum: ring.fundamentorum,
+    intelligendi: ring.intelligendi,
     actumIndex: ring.actumIndex,
     consuetudinum,
   })

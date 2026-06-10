@@ -60,5 +60,7 @@ export const Errors = {
   notFoundRun: (id: string) => new ApiError('not_found.run', `Run '${id}' not found`, 404),
   insufficientSigna: (details?: Record<string, unknown>) =>
     new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
+  capTooLow: (details?: Record<string, unknown>) =>
+    new ApiError('economy.cap_too_low', 'maxImpetus is below the estimated reservation', 422, { details }),
   internal: (message = 'Internal error') => new ApiError('internal.error', message, 500, { retryable: true }),
 } as const

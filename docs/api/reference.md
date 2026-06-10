@@ -48,6 +48,10 @@ Invoke a flow and return its run handle.
       "type": "string",
       "description": "Optional GPU-class override."
     },
+    "maxImpetus": {
+      "type": "string",
+      "description": "Hard spend cap — admission refuses if the estimated reservation exceeds this value."
+    },
     "options": {
       "type": "object",
       "description": "Per-run observation options.",
@@ -352,6 +356,169 @@ Describe one flow's input/output JSON-Schema (discovery).
 }
 ```
 
+### POST /v1/runs/quote
+
+Estimate a run cost (impetus) without dispatching — call before invoke to budget.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Estimate a run cost without dispatching. Provide a target (modusId or verb) and inputs.",
+  "properties": {
+    "modusId": {
+      "type": "string",
+      "description": "Explicit flow id to quote (wins over verb)."
+    },
+    "verb": {
+      "type": "string",
+      "description": "A canon verb to resolve to a flow."
+    },
+    "aditus": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "The flow's inputs — same shape as POST /runs aditus."
+    }
+  }
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The estimated impetus cost for the run.",
+  "properties": {
+    "impetus": {
+      "type": "string",
+      "description": "Upper-bound reservation cost, serialised as a string."
+    }
+  },
+  "required": [
+    "impetus"
+  ]
+}
+```
+
+### GET /v1/fundamenta
+
+List the canonical compute substrates (fundamenta) available for flows.
+
+- **Auth:** public
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "fundamenta": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "nomen": {
+            "type": "string",
+            "description": "Display label."
+          },
+          "versio": {
+            "type": "string",
+            "description": "Semantic version."
+          },
+          "runtime": {
+            "type": "string",
+            "description": "On-pod runtime (e.g. ComfyUI)."
+          },
+          "imageId": {
+            "type": "string",
+            "description": "Docker image id."
+          },
+          "imageVersion": {
+            "type": "string",
+            "description": "Docker image version."
+          },
+          "vramGb": {
+            "type": "number",
+            "description": "Minimum VRAM in GB."
+          }
+        },
+        "required": [
+          "id",
+          "versio",
+          "imageId",
+          "imageVersion"
+        ]
+      }
+    }
+  },
+  "required": [
+    "fundamenta"
+  ]
+}
+```
+
+### GET /v1/models
+
+Browse the model weight catalog, optionally filtered by genus, basis, fundamentumId, trigger, or free-text query.
+
+- **Auth:** public
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "intellaId": {
+            "type": "string"
+          },
+          "nomen": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "genus": {
+            "type": "string",
+            "description": "Weight class (lora, checkpoint, vae, …)."
+          },
+          "basis": {
+            "type": "string",
+            "description": "Base model family this weight is compatible with."
+          },
+          "trigger": {
+            "type": "string",
+            "description": "Trigger words (LoRA only)."
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable description."
+          }
+        },
+        "required": [
+          "intellaId",
+          "nomen",
+          "genus"
+        ]
+      }
+    }
+  },
+  "required": [
+    "models"
+  ]
+}
+```
+
 ## Error codes
 
 Every failed request returns the uniform envelope `{ error: { code, message, retryable?, retryAfter?, details? } }`. Branch on the stable `code`.
@@ -366,4 +533,5 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `not_found.flow` | 404 | no |
 | `not_found.run` | 404 | no |
 | `economy.insufficient_signa` | 402 | no |
+| `economy.cap_too_low` | 422 | no |
 | `internal.error` | 500 | yes |

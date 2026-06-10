@@ -128,6 +128,7 @@ const RunsRequestSchema: JsonSchema = {
     },
     computeStrategy: { type: 'string', description: 'Optional compute-strategy override.' },
     gpuClass: { type: 'string', description: 'Optional GPU-class override.' },
+    maxImpetus: { type: 'string', description: 'Hard spend cap — admission refuses if the estimated reservation exceeds this value.' },
     options: {
       type: 'object',
       description: 'Per-run observation options.',
@@ -197,6 +198,78 @@ const FlowDescriptionSchema: JsonSchema = {
     fundamentumId: { description: 'An optional substrate reference.' },
   },
   required: ['id', 'nomen', 'versio', 'input'],
+}
+
+/** The request body for `POST /v1/runs/quote`. */
+const QuoteRequestSchema: JsonSchema = {
+  type: 'object',
+  description: 'Estimate a run cost without dispatching. Provide a target (modusId or verb) and inputs.',
+  properties: {
+    modusId: { type: 'string', description: 'Explicit flow id to quote (wins over verb).' },
+    verb: { type: 'string', description: 'A canon verb to resolve to a flow.' },
+    aditus: {
+      type: 'object',
+      additionalProperties: true,
+      description: "The flow's inputs — same shape as POST /runs aditus.",
+    },
+  },
+}
+
+/** The response body for `POST /v1/runs/quote`. */
+const QuoteResponseSchema: JsonSchema = {
+  type: 'object',
+  description: 'The estimated impetus cost for the run.',
+  properties: {
+    impetus: { type: 'string', description: 'Upper-bound reservation cost, serialised as a string.' },
+  },
+  required: ['impetus'],
+}
+
+/** One compute substrate entry (mirrors `CrystalApi.listFundamenta` item shape). */
+const FundamentumCardSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    nomen: { type: 'string', description: 'Display label.' },
+    versio: { type: 'string', description: 'Semantic version.' },
+    runtime: { type: 'string', description: 'On-pod runtime (e.g. ComfyUI).' },
+    imageId: { type: 'string', description: 'Docker image id.' },
+    imageVersion: { type: 'string', description: 'Docker image version.' },
+    vramGb: { type: 'number', description: 'Minimum VRAM in GB.' },
+  },
+  required: ['id', 'versio', 'imageId', 'imageVersion'],
+}
+
+/** The `{ fundamenta }` envelope returned by `GET /v1/fundamenta`. */
+const FundamentaListSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    fundamenta: { type: 'array', items: FundamentumCardSchema },
+  },
+  required: ['fundamenta'],
+}
+
+/** One model catalog card (mirrors `CrystalApi.ModelCard`). */
+const ModelCardSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    intellaId: { type: 'string' },
+    nomen: { type: 'string', description: 'Display name.' },
+    genus: { type: 'string', description: 'Weight class (lora, checkpoint, vae, …).' },
+    basis: { type: 'string', description: 'Base model family this weight is compatible with.' },
+    trigger: { type: 'string', description: 'Trigger words (LoRA only).' },
+    description: { type: 'string', description: 'Human-readable description.' },
+  },
+  required: ['intellaId', 'nomen', 'genus'],
+}
+
+/** The `{ models }` envelope returned by `GET /v1/models`. */
+const ModelsListSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    models: { type: 'array', items: ModelCardSchema },
+  },
+  required: ['models'],
 }
 
 /** The error envelope every failed request carries (mirrors `errors.ts#ApiErrorBody`). */
@@ -278,6 +351,28 @@ export const API_CONTRACT: ApiContract = {
       auth: false,
       response: FlowDescriptionSchema,
     },
+    {
+      method: 'POST',
+      path: '/runs/quote',
+      summary: 'Estimate a run cost (impetus) without dispatching — call before invoke to budget.',
+      auth: true,
+      request: QuoteRequestSchema,
+      response: QuoteResponseSchema,
+    },
+    {
+      method: 'GET',
+      path: '/fundamenta',
+      summary: 'List the canonical compute substrates (fundamenta) available for flows.',
+      auth: false,
+      response: FundamentaListSchema,
+    },
+    {
+      method: 'GET',
+      path: '/models',
+      summary: 'Browse the model weight catalog, optionally filtered by genus, basis, fundamentumId, trigger, or free-text query.',
+      auth: false,
+      response: ModelsListSchema,
+    },
   ],
   // Mirrors the request-error taxonomy in `errors.ts`. Append-only.
   errorCodes: [
@@ -289,6 +384,7 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.flow', httpStatus: 404 },
     { code: 'not_found.run', httpStatus: 404 },
     { code: 'economy.insufficient_signa', httpStatus: 402 },
+    { code: 'economy.cap_too_low', httpStatus: 422 },
     { code: 'internal.error', httpStatus: 500, retryable: true },
   ],
 }

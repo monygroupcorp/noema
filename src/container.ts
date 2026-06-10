@@ -82,6 +82,7 @@ export interface Ring {
   dicta: DictumStore
   memoriae: MemoriaStore
   intelligendi: IntelligentiumStore
+  fundamentorum: import('./types/fundamentum.js').Fundamentorum
   cursorum: Cursorum
   completor: IActumCompletor
   inceptor: IActumInceptor
@@ -338,6 +339,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     cursorum, completor, inceptor, arcanumIssuer,
     arcanumTree, arcanumVerifier,
     materiae, hospitia, actumIndex, deployments,
+    fundamentorum,
     collectioCursor,
   }
 }

@@ -18,6 +18,8 @@ import type { Actum } from '../../../../src/types/actum.js'
 import type { Modus } from '../../../../src/types/modus.js'
 import type { Inceptio, Cursor } from '../../../../src/types/cursus.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
+import type { Fundamentum } from '../../../../src/types/fundamentum.js'
+import type { Intelligens } from '../../../../src/types/intelligendi.js'
 
 const auctor: AuctorKey = { animaId: 'anima-1' }
 
@@ -52,6 +54,56 @@ function nascens(inceptio: Inceptio): Actum {
     inceptum: new Date('2026-06-10T00:00:00Z'),
   }
 }
+
+// ── Fake fundamenta ─────────────────────────────────────────────────────────
+const fakeFundamenta: Fundamentum[] = [
+  {
+    id: 'flux-comfyui',
+    nomen: 'FLUX · ComfyUI',
+    versio: '1.0.0',
+    imageId: 'runpod/pytorch',
+    imageVersion: '2.1.0',
+    runtime: 'ComfyUI',
+    vramGb: 24,
+    canonica: true,
+    natum: new Date('2026-01-01'),
+    mutatum: new Date('2026-01-01'),
+  },
+  {
+    id: 'sd15-comfyui',
+    nomen: 'SD 1.5 · ComfyUI',
+    versio: '1.0.0',
+    imageId: 'runpod/pytorch',
+    imageVersion: '2.1.0',
+    canonica: true,
+    natum: new Date('2026-01-01'),
+    mutatum: new Date('2026-01-01'),
+  },
+]
+
+// ── Fake intelligendi ────────────────────────────────────────────────────────
+function makeIntelligens(over: Partial<Intelligens>): Intelligens {
+  return {
+    id: 'intel-1',
+    nomen: 'Test Model',
+    genus: 'checkpoint',
+    basis: 'flux',
+    canonica: true,
+    privacy: 'public',
+    notae: [],
+    locatio: 'r2://weights/test.safetensors',
+    stellae: 0,
+    natum: new Date('2026-01-01'),
+    mutatum: new Date('2026-01-01'),
+    ...over,
+  }
+}
+
+const fakeIntelligentia: Intelligens[] = [
+  makeIntelligens({ id: 'flux-dev', nomen: 'FLUX Dev', genus: 'checkpoint', basis: 'flux' }),
+  makeIntelligens({ id: 'sd15-base', nomen: 'SD 1.5 Base', genus: 'checkpoint', basis: 'sd15' }),
+  makeIntelligens({ id: 'flux-lora-1', nomen: 'Flux LoRA 1', genus: 'lora', basis: 'flux', verba: ['flux-portrait'] }),
+]
 
 // ── Build the deps ring. Records the last modusId that was dispatched. ───────
 function makeDeps(over: Partial<CrystalApiDeps> = {}): {
@@ -123,6 +175,28 @@ function makeDeps(over: Partial<CrystalApiDeps> = {}): {
       ownsAny: async (by: AuctorKey, ids: string[]) =>
         'animaId' in by && by.animaId === 'anima-1' && ids.includes('sig-1'),
     } as unknown) as CrystalApiDeps['signorum'],
+    fundamentorum: ({
+      find: async (id: string) => fakeFundamenta.find((f) => f.id === id) ?? null,
+      register: async () => {},
+      list: async () => fakeFundamenta,
+    } as unknown) as CrystalApiDeps['fundamentorum'],
+    intelligendi: ({
+      find: async (id: string) => fakeIntelligentia.find((i) => i.id === id) ?? null,
+      list: async (filter?: { genus?: string; basis?: string; canonica?: boolean }) =>
+        fakeIntelligentia.filter((i) => {
+          if (filter?.genus && i.genus !== filter.genus) return false
+          if (filter?.basis && i.basis !== filter.basis) return false
+          if (filter?.canonica !== undefined && i.canonica !== filter.canonica) return false
+          return true
+        }),
+      search: async (q: string) =>
+        fakeIntelligentia.filter((i) =>
+          i.nomen.toLowerCase().includes(q.toLowerCase()) ||
+          (i.descriptio ?? '').toLowerCase().includes(q.toLowerCase()),
+        ),
+      create: async () => { throw new Error('unused') },
+      update: async () => { throw new Error('unused') },
+    } as unknown) as CrystalApiDeps['intelligendi'],
     ...over,
   }
 
@@ -228,4 +302,126 @@ test('describeFlow returns a schema with an input', async () => {
     () => api.describeFlow('ghost'),
     (e: unknown) => e instanceof ApiError && e.code === 'not_found.flow',
   )
+})
+
+// ── quote ────────────────────────────────────────────────────────────────────
+
+test('quote returns { impetus } as a string (cursor.reserve = 5n)', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  const result = await api.quote(auctor, { modusId: 'flux-schnell' }, { prompt: 'hi' })
+  assert.equal(result.impetus, '5')
+})
+
+test('quote by verb resolves through CANON_VERBS', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  const result = await api.quote(auctor, { verb: 'make' }, { prompt: 'hi' })
+  assert.equal(result.impetus, '5')
+})
+
+test('quote with an unknown verb throws not_found.flow', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  await assert.rejects(
+    () => api.quote(auctor, { verb: 'no-such-verb' }, {}),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.flow',
+  )
+})
+
+// ── listFundamenta ───────────────────────────────────────────────────────────
+
+test('listFundamenta maps fields correctly', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  const funds = await api.listFundamenta()
+  assert.equal(funds.length, 2)
+
+  const flux = funds.find((f) => f.id === 'flux-comfyui')!
+  assert.ok(flux, 'flux-comfyui present')
+  assert.equal(flux.nomen, 'FLUX · ComfyUI')
+  assert.equal(flux.versio, '1.0.0')
+  assert.equal(flux.imageId, 'runpod/pytorch')
+  assert.equal(flux.runtime, 'ComfyUI')
+  assert.equal(flux.vramGb, 24)
+
+  // optional fields absent when not set
+  const sd = funds.find((f) => f.id === 'sd15-comfyui')!
+  assert.ok(sd, 'sd15-comfyui present')
+  assert.equal(sd.runtime, undefined)
+  assert.equal(sd.vramGb, undefined)
+})
+
+// ── listModels ───────────────────────────────────────────────────────────────
+
+test('listModels returns all models unfiltered', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  const models = await api.listModels()
+  assert.equal(models.length, 3)
+})
+
+test('listModels filters by genus', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  const models = await api.listModels({ genus: 'lora' } as never)
+  assert.equal(models.length, 1)
+  assert.equal(models[0].intellaId, 'flux-lora-1')
+  assert.equal(models[0].genus, 'lora')
+})
+
+test('listModels filters by basis', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  const models = await api.listModels({ basis: 'sd15' } as never)
+  assert.equal(models.length, 1)
+  assert.equal(models[0].intellaId, 'sd15-base')
+})
+
+test('listModels filters by trigger word', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  const models = await api.listModels({ trigger: 'flux-portrait' } as never)
+  assert.equal(models.length, 1)
+  assert.equal(models[0].intellaId, 'flux-lora-1')
+  assert.ok(models[0].trigger?.includes('flux-portrait'))
+})
+
+test('listModels free-text search via q', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  const models = await api.listModels({ q: 'FLUX Dev' } as never)
+  assert.equal(models.length, 1)
+  assert.equal(models[0].intellaId, 'flux-dev')
+})
+
+// ── invokeFlow maxImpetus cap ─────────────────────────────────────────────────
+
+test('invokeFlow with maxImpetus BELOW the reservation throws economy.cap_too_low', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  // reserve = 5n; cap = 4 → should throw
+  await assert.rejects(
+    () => api.invokeFlow(auctor, { modusId: 'flux-schnell' }, { prompt: 'hi' }, { maxImpetus: 4n }),
+    (e: unknown) => e instanceof ApiError && e.code === 'economy.cap_too_low',
+  )
+})
+
+test('invokeFlow with maxImpetus ABOVE the reservation succeeds', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  // reserve = 5n; cap = 10 → should succeed
+  const run = await api.invokeFlow(auctor, { modusId: 'flux-schnell' }, { prompt: 'hi' }, { maxImpetus: 10n })
+  assert.equal(run.status, 'complete')
 })

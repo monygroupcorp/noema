@@ -12,6 +12,9 @@ import {
   getRunTool,
   listFlowsTool,
   describeFlowTool,
+  quoteTool,
+  listFundamentaTool,
+  listModelsTool,
 } from './tools.js'
 
 export function buildMcpServer(api: CrystalApi, auctor: AuctorKey | undefined): McpServer {
@@ -63,6 +66,45 @@ export function buildMcpServer(api: CrystalApi, auctor: AuctorKey | undefined): 
     (args) => describeFlowTool(api, args),
   )
 
+  server.registerTool(
+    'quote',
+    {
+      description:
+        "Estimate a run's cost (impetus) without dispatching — call before invoke to budget.",
+      inputSchema: {
+        modusId: z.string().optional(),
+        verb: z.string().optional(),
+        aditus: z.record(z.string(), z.unknown()).optional(),
+      },
+    },
+    (args) => quoteTool(api, auctor, args),
+  )
+
+  server.registerTool(
+    'list_fundamenta',
+    {
+      description: 'List all available compute substrates (fundamenta) the platform can run flows on.',
+      inputSchema: {},
+    },
+    (_args) => listFundamentaTool(api),
+  )
+
+  server.registerTool(
+    'list_models',
+    {
+      description: 'Browse the model weight catalog — filter by genus, basis, fundamentum, trigger word, or free text.',
+      inputSchema: {
+        genus: z.string().optional(),
+        basis: z.string().optional(),
+        fundamentumId: z.string().optional(),
+        trigger: z.string().optional(),
+        q: z.string().optional(),
+        limit: z.number().optional(),
+      },
+    },
+    (args) => listModelsTool(api, args),
+  )
+
   // ── Resources ─────────────────────────────────────────────────────────────
 
   server.registerResource(
@@ -92,6 +134,24 @@ export function buildMcpServer(api: CrystalApi, auctor: AuctorKey | undefined): 
         }
       }
     },
+  )
+
+  server.registerResource(
+    'fundamenta',
+    'crystal://fundamenta',
+    { description: 'List of compute substrates (fundamenta) the platform supports' },
+    async (uri) => ({
+      contents: [{ uri: uri.href, text: JSON.stringify(await api.listFundamenta()) }],
+    }),
+  )
+
+  server.registerResource(
+    'models',
+    'crystal://models',
+    { description: 'Full unfiltered model weight catalog' },
+    async (uri) => ({
+      contents: [{ uri: uri.href, text: JSON.stringify(await api.listModels()) }],
+    }),
   )
 
   return server
