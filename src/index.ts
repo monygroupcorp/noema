@@ -520,6 +520,7 @@ async function main(): Promise<void> {
     hospitia: ring.hospitia,
     materiae: ring.materiae,
     actumIndex: ring.actumIndex,
+    modos: ring.modos,
     consuetudinum,
     ...(ring.conductor ? { conductor: ring.conductor } : {}),
   })

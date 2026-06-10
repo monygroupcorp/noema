@@ -92,7 +92,7 @@ test('YOUR STUDIOS: draining status renders explicitly', () => {
   const { text } = StatusView.render({
     ...empty,
     studios: [{
-      studioId: 'mat-1', label: 'flux-v1 on H100', status: 'draining',
+      studioId: 'mat-1', materiaId: 'mat-1', label: 'flux-v1 on H100', status: 'draining',
       guestsToday: 0, netImpetus: -200n, netUsd: -0.0674,
     }],
   })
@@ -119,7 +119,7 @@ test('full snapshot: section ordering balance → gens → studios → joinable 
     ...empty,
     balanceImpetus: 500n, balanceUsd: 0.17,
     gens: [{ actumId: 'a', modusLabel: 'X', studio: null, status: 'nascens' }],
-    studios: [{ studioId: 's', label: 'l', status: 'idle', guestsToday: 0, netImpetus: 0n, netUsd: 0 }],
+    studios: [{ studioId: 's', materiaId: 's', label: 'l', status: 'idle', guestsToday: 0, netImpetus: 0n, netUsd: 0 }],
     joinable: [{ studioId: 'j', label: 'k', hostLabel: '@z', queueDepth: 0 }],
   })
   const idxBalance = text.indexOf('Balance:')

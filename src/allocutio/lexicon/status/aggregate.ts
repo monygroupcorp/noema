@@ -16,6 +16,7 @@
 import type { Signorum } from '../../../types/significandi.js'
 import type { HospitiumStore, HostKey } from '../../../types/hospitium.js'
 import type { MateriaStore, Materia } from '../../../types/materia.js'
+import type { ModoStore } from '../../../types/modo.js'
 import type { Actorum } from '../../../types/cursus.js'
 import type { Modorum } from '../../../types/modus.js'
 import type { ActumIndexStore } from '../../../types/actumIndex.js'
@@ -33,6 +34,10 @@ export interface StatusAggregateDeps {
    *  the user's in-flight actums itself; the adapter-supplied list becomes
    *  unnecessary. Absent → falls back to the input's `inFlightActumIds`. */
   actumIndex?: ActumIndexStore
+  /** Optional session store. When present, each studio is keyed by its bound Modo id
+   *  (the canonical studio handle — what `POST /v1/runs { studioId }` targets, ADR-0006);
+   *  absent → falls back to the Materia id. */
+  modos?: ModoStore
 }
 
 export interface StatusAggregateInput {
@@ -142,6 +147,15 @@ async function buildStudios(
   // One history fetch covers every studio — filter client-side by contextId.
   const history = await deps.signorum.history(who).catch(() => [])
 
+  // The studio's canonical id is its bound Modo's id (ADR-0006) when a session store
+  // is wired; index live Modos by the Materia they're bound to. Absent → Materia id.
+  const modoByMateria = new Map<string, string>()
+  if (deps.modos) {
+    for (const mo of await deps.modos.findActive().catch(() => [])) {
+      if (mo.materiamId) modoByMateria.set(mo.materiamId, mo.id)
+    }
+  }
+
   const rows: StudioEntry[] = []
   for (const h of mine) {
     const m = await deps.materiae.findById(h.materiaId).catch(() => null)
@@ -153,12 +167,7 @@ async function buildStudios(
       ? Math.max(0, new Date(m.warmUntil).getTime() - now.getTime())
       : undefined
 
-    const status: StudioEntry['status'] =
-      m.status === 'terminated' ? 'terminated' :
-      m.drainOnly ? 'draining' :
-      m.status === 'warming' ? 'provisioning' :
-      m.status === 'active' ? 'running' :
-      'idle'
+    const status = materiaStudioStatus(m)
 
     // Per-studio earnings: signa from hostCut + hospitium with this materia
     // tagged in their `contextId`. costAccrued lives on Hospitium. Net is the
@@ -177,7 +186,8 @@ async function buildStudios(
     ).length
 
     rows.push({
-      studioId: h.materiaId,
+      studioId: modoByMateria.get(h.materiaId) ?? h.materiaId,
+      materiaId: h.materiaId,
       label, status,
       ...(warmRemainingMs !== undefined ? { warmRemainingMs } : {}),
       guestsToday,
@@ -186,6 +196,21 @@ async function buildStudios(
     })
   }
   return rows
+}
+
+/**
+ * Map a Materia's live state to the studio-facing status vocabulary — the single
+ * source of truth shared by `/status` (here) and the `/v1/studios` projection, so
+ * both surfaces report a studio's liveness identically.
+ */
+export function materiaStudioStatus(m: Materia): StudioEntry['status'] {
+  return (
+    m.status === 'terminated' ? 'terminated' :
+    m.drainOnly ? 'draining' :
+    m.status === 'warming' ? 'provisioning' :
+    m.status === 'active' ? 'running' :
+    'idle'
+  )
 }
 
 function hostKeyMatches(hk: HostKey, who: AuctorKey): boolean {

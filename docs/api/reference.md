@@ -783,7 +783,7 @@ Lease a hosted warm studio (a persistent GPU session) for fast repeated runs. ma
         },
         "status": {
           "type": "string",
-          "description": "Session status (claiming | warming | active | idle | hibernating | terminated)."
+          "description": "Pod-derived liveness: idle | running | provisioning | draining | terminated."
         },
         "gpu": {
           "type": "string",
@@ -853,7 +853,7 @@ List the authenticated caller's live hosted studios.
           },
           "status": {
             "type": "string",
-            "description": "Session status (claiming | warming | active | idle | hibernating | terminated)."
+            "description": "Pod-derived liveness: idle | running | provisioning | draining | terminated."
           },
           "gpu": {
             "type": "string",

@@ -541,6 +541,23 @@ test('status JSON-projects a studio-bearing snapshot — netImpetus (bigint) is 
   assert.doesNotThrow(() => JSON.stringify(view), 'the whole status view must be JSON-safe (no raw bigint)')
 })
 
+test('status keys a studio by its bound Modo id when modos is wired (matches /v1/studios)', async () => {
+  const materia = { id: 'mat-1', gpu: 'RTX 4090', imageRef: 'img:1', status: 'idle', warmUntil: new Date('2026-06-10T01:00:00Z') }
+  const { deps } = makeDeps({
+    hospitia: ({
+      findActive: async () => [{ id: 'h-1', materiaId: 'mat-1', hostKey: auctor, inceptum: new Date() }],
+      findByMateriaId: async () => null,
+    } as unknown) as CrystalApiDeps['hospitia'],
+    materiae: ({ findById: async (id: string) => (id === 'mat-1' ? materia : null) } as unknown) as CrystalApiDeps['materiae'],
+    modos: ({ findActive: async () => [{ id: 'modo-1', materiamId: 'mat-1', status: 'idle' }] } as unknown) as CrystalApiDeps['modos'],
+  })
+  const api = new CrystalApi(deps)
+
+  const studio = (await api.status(auctor)).studios[0] as { studioId: string; materiaId: string }
+  assert.equal(studio.studioId, 'modo-1', 'studioId is the Modo id — the canonical handle run-targeting uses')
+  assert.equal(studio.materiaId, 'mat-1', 'the Materia id is still exposed for pod-level reference')
+})
+
 // ── provisionStudio / listStudios ─────────────────────────────────────────────
 
 // A minimal StudioHandle (only the fields toStudioView projects).

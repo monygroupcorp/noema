@@ -164,7 +164,9 @@ export class Conductor {
       const modo = modoByMateria.get(h.materiaId)
       if (!modo) continue
       const materia = await this.deps.materiae.findById(h.materiaId).catch(() => null)
-      if (!materia) continue
+      // Skip studios whose pod is gone — `find` reports LIVE studios. The Materia is
+      // the truth about pod liveness; a reaped pod leaves a stale-`idle` Modo behind.
+      if (!materia || materia.status === 'terminated') continue
       out.push({ studioId: modo.id, modo, materia })
     }
     return out
