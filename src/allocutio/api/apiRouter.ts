@@ -19,6 +19,8 @@ import type { AuctorKey } from '../../flow/types.js'
 import type { InvokeTarget, InvokeOpts } from './CrystalApi.js'
 import { ApiError, Errors } from './errors.js'
 import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
+import { API_CONTRACT } from './apiContract.js'
+import { generateOpenApi } from './docgen.js'
 
 /** The slice of CrystalApi this router needs. Mirrors its method signatures. */
 export interface ApiFacade {
@@ -89,6 +91,11 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity }): R
       res.json({ run: await api.getRun(String(req.params.id)) })
     }),
   )
+
+  // GET /v1/openapi.json — the live, self-describing contract (no auth). Generated
+  // from the same API_CONTRACT the committed docs + drift-check use, so it can't lag.
+  const OPENAPI = generateOpenApi(API_CONTRACT)
+  router.get('/openapi.json', (_req, res) => { res.json(OPENAPI) })
 
   // GET /v1/flows — public flow discovery (no auth).
   router.get(

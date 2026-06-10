@@ -155,3 +155,15 @@ test('GET /v1/flows/:id returns 200 with the schema', async () => {
     await closeServer(server)
   }
 })
+
+test('GET /v1/openapi.json returns the live self-describing spec (no auth)', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/openapi.json`)
+    assert.equal(res.status, 200)
+    assert.equal(String(res.body.openapi).startsWith('3.'), true, 'an OpenAPI 3.x document')
+    assert.ok(res.body.paths, 'has paths')
+  } finally {
+    await closeServer(server)
+  }
+})

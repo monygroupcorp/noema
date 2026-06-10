@@ -19,6 +19,8 @@ import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
 import { IdentityResolver as ApiIdentityResolver } from './allocutio/api/IdentityResolver.js'
 import { createApiRouter } from './allocutio/api/apiRouter.js'
+import { makeCredentialAcceptors } from './allocutio/api/apiAcceptors.js'
+import { createHash } from 'node:crypto'
 import { createLiveRouter } from './api/internal/liveRouter.js'
 import { WideEventStore }         from './analytics/WideEventStore.js'
 import { ensureWideIndexes }      from './analytics/ensureWideIndexes.js'
@@ -496,11 +498,8 @@ async function main(): Promise<void> {
   app.get('/api/health', (_req, res) => res.json({ ok: true, v: process.env.BUILD_VERSION ?? 'dev' }))
   app.use('/api/vestigia', createVestigiaRouter(ring.vestigiorum))
 
-  // Crystal Agent API (/v1) — ApiAllocutio Phase 1 (docs/agent-tasks/EPIC-api-allocutio.md).
-  // The agent-shaped facade over the ring + the credential→AuctorKey resolver. Phase 1:
-  // public discovery (GET /v1/flows[/:id]) and anonymous {commitment} runs work now; the
-  // identified-user acceptors (JWT / API-key / web3 → animaId) are a Phase-1.x integration
-  // wired here and validated on staging — until then those credentials report auth.invalid.
+  // Crystal Agent API (/v1) — ApiAllocutio (docs/agent-tasks/EPIC-api-allocutio.md).
+  // The agent-shaped facade over the ring + the credential→AuctorKey resolver.
   const crystalApi = new CrystalApi({
     inceptor: ring.inceptor,
     modorum: ring.modorum,
@@ -510,7 +509,31 @@ async function main(): Promise<void> {
     actumIndex: ring.actumIndex,
     consuetudinum,
   })
-  app.use('/v1', createApiRouter({ api: crystalApi, identity: new ApiIdentityResolver({}) }))
+  // Identified-user acceptors → animaId via a `'web'`/`'api'` persona (create-on-sight).
+  // JWT (env secret) + API-key (read-only users lookup) + anon {commitment} are live; web3
+  // needs a nonce-challenge endpoint (deferred). All verification is defensive — any failure
+  // degrades to auth.invalid, never a crash or a write. Real auth is validated on staging.
+  const verifyApiKeyToAccountId = async (apiKey: string): Promise<string | null> => {
+    try {
+      if (!apiKey.startsWith('ms2_') || apiKey.length < 12) return null
+      const prefix = apiKey.slice(0, 12)
+      const user = await mongo.db(DB_NAME).collection('users').findOne({ 'apiKeys.keyPrefix': prefix })
+      if (!user) return null
+      const hash = createHash('sha256').update(apiKey).digest('hex')
+      const keys = (user.apiKeys ?? []) as Array<{ keyPrefix?: string; keyHash?: string; status?: string }>
+      const match = keys.find(k => k.keyPrefix === prefix && k.keyHash === hash && k.status !== 'inactive')
+      return match ? String(user._id) : null
+    } catch {
+      return null
+    }
+  }
+  const apiResolver = new ApiIdentityResolver(makeCredentialAcceptors({
+    personae: ring.personae,
+    animae: ring.animae,
+    ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
+    verifyApiKeyToAccountId,
+  }))
+  app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver }))
 
   const INTERNAL_SECRET = process.env.INTERNAL_SECRET
   const wideStore = new WideEventStore(mongo.db(DB_NAME))
