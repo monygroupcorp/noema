@@ -86,13 +86,65 @@ analog (e.g. the bulletin's *morphing* — only its *information*, the run's eve
   `BulletinBusProjector` (neutral run-event projection), the SSE endpoint, the contract-first route/tool
   schemas + the `gen:api-docs` generator + the CI drift-check + the SKILL.md.
 
-## Async / streaming
+## Invocation & run contract
 
-A run is an `Actum` resource. REST: `GET /v1/runs/:id` (state) + `GET /v1/runs/:id/stream` (SSE of stage
-events → result), projected from the same bus the bulletin uses (`actum.stage/complete/fail`, `pod.*`) via a
-neutral `BulletinBusProjector`. MCP: a tool call returns a **run handle** (+ progress notifications where the
-client supports them), or awaits completion for fast/sync flows (`Modus.deliveryMode`). **SSE is the spine;
+**Uniform run-handle.** `POST /v1/runs { modusId|verb, aditus, studioId?, options? }` ALWAYS returns a Run (a
+projection of the `Actum`): `{ id, status: pending|running|complete|failed, exitus?, failure?, cost?, modusId,
+createdAt }`. Sync flows are simply born `complete` (exitus inline); everything else is born `pending`. **One
+contract — sync is degenerate async.** This is the *low-regret* choice: it's the superset, so adding a `?wait`
+long-poll or a per-flow sync shortcut later is purely additive, whereas a "block-for-fast" hybrid would have to
+be broken to unify. Decided by the workload: ~2 of 24 runs finish under 5 min, and flows that run **hours to
+days** are an explicit offering — you cannot hold a connection open for that, so the handle is mandatory.
+
+**Three observation channels, caller's choice** (a day-long run won't sit on a socket):
+- **poll** — `GET /v1/runs/:id`. Always available; the floor.
+- **SSE** — `GET /v1/runs/:id/stream`. Live progress while watching (minutes-scale), projected from the same
+  bus the bulletin uses (`actum.stage/complete/fail`, `pod.*`) via a neutral `BulletinBusProjector`. Reconnect
+  replays from durable `Actum` stage history.
+- **webhook** — `options.webhookUrl`. Fire-and-forget completion POST; **essential for the hours/days flows.**
+
+A `?wait=<ms>` long-poll (capped) is optional sugar for the warm-pod fast case. MCP: the invoke tool returns the
+handle; a `getRun` tool + a run resource observe it; progress notifications where the client supports them.
+**Failures are run *states*, not HTTP errors:** a gen that fails → `200` + `status:failed, failure:{code}`;
+request-level problems (unknown modus, invalid aditus, insufficient signa) → `4xx` + `{error:{code}}`. Agents
+branch on a stable `code`, never prose. `Idempotency-Key` dedupes retried invokes. **SSE is the live spine;
 WebSocket is an optional later upgrade.**
+
+## Execution strategy & modes (the platform's modes of use)
+
+Single-run execution is one mode; the platform deliberately encourages several, and they already exist as
+crystal knobs (`GpuClass`, `computeStrategy`, `Materia.podPolicy` = private|economy|link, warm TTL, `Hospitium`,
+`drainOnly`). The slow cold-start is *why* hosting matters — an agent that runs often provisions a warm studio
+once and amortizes the cold start across many fast runs. **Two execution targets:**
+
+- **Ephemeral** — `POST /v1/runs { modusId, aditus, options? }`. The platform sources a pod (cold-start or
+  warm-match), runs, releases per options. The one-shot.
+- **Hosted** — `POST /v1/studios { fundamentumId, warmMs, gpuClass?, podPolicy? }` → a persistent warm `Materia`;
+  then `POST /v1/runs { …, studioId }` targets it (fast, warm). Agent extends/keeps it alive, drains/destroys when
+  done. The "ready for action all day" mode.
+
+**`options`** (all optional) IS the per-run strategy, mapped to existing fields: `gpuClass`,
+`computeStrategy`/`podPolicy` (economy-piggyback | private | link-shared), `warmMs` (hold warm after — turns a
+one-shot into a mini-host), `maxImpetus`/`maxCostUsd` (cap), `webhookUrl`.
+
+**Cost lives at both levels — quote + cap (the gas estimate + gas limit pattern):**
+- `POST /v1/runs/quote { … }` → `{ fixed }` for `impetusFixum`/API flows, or `{ min, max, basis }` for
+  duration-based pod gens (can only be a range up front).
+- `options.maxImpetus`/`maxCostUsd` is a HARD cap — admission refuses below the minimum-viable reservation, and a
+  **mid-run watchdog** kills the pod if accrued impetus would exceed it (reuse the existing reservation + drain/reap).
+  Non-negotiable: an autonomous agent in a loop must not be able to drain an account; the balance is too coarse a backstop.
+- A studio exposes its burn rate (impetus/sec) + boot cost + a budget that drains when the balance can't cover
+  (reuse `drainOnly` + reap).
+
+**Discipline (north-star: build for the full case; the simple case is a config):** `POST /v1/runs { modusId,
+aditus }` with nothing else just works — standard GPU, ephemeral, private, default cap. Every strategy knob is
+opt-in, so the surface is capable + flexible for power operators and trivial for a casual agent.
+
+## IdentityResolver
+
+One resolver, multiple credential acceptors → crystal `AuctorKey = {animaId} | {commitment}`: web JWT,
+`X-API-Key`, web3 signature, arcanum commitment. **Anon (commitment) supported day one** — it flows straight
+through `Inceptio.identity`. JWT is just one accepted input (the web platform path), not a separate model.
 
 ## IdentityResolver
 
@@ -142,15 +194,19 @@ only if the conceptual model moved; the drift-check gates the PR. No phase is "d
    schema before invoking. *Acceptance (hermetic):* mocked ring + in-memory store; `listFlows` enumerates the
    seeds; schema derived from a real `Essentia.aditus`; each credential → invoke returns an actumId; anon
    commitment accepted; **`gen:api-docs` is idempotent (drift-check clean) and the skill renders.**
-2. **SSE run streaming + `BulletinBusProjector`.** Project the existing bus events into a neutral run-event
-   stream; `GET /v1/runs/:id/stream`. Reconnect replays from durable `Actum` stage history.
+2. **Observation channels: SSE + webhook + poll.** `BulletinBusProjector` projects the existing bus events into a
+   neutral run-event stream (`GET /v1/runs/:id/stream`, reconnect replays from durable `Actum` stage history) +
+   `options.webhookUrl` fire-and-forget completion (essential for the hours/days flows) + `GET /v1/runs/:id` poll.
+   *Acceptance:* a run's lifecycle is observable on all three; webhook fires once on terminal state.
 3. **MCP adapter over the same facade.** Flows = tools (inputSchema from `aditusToJsonSchema`), catalog =
-   resources, run handle + progress. Crystal-native; supersedes the legacy MCP surface.
-4. **Management ops + remaining discovery (capability-parity close-out).** `provisionStudio` (one-shot) +
-   its discovery (`listFundamenta`, `listImages`/runtimes); `listModels`/`resolveLora` queries; `saveFlow`;
-   `bind`; `status`. *Acceptance:* an agent script does the full arc *blind-start* — discover fundamenta →
-   provision a studio → discover + describe a flow → invoke → stream → rate → save-as → run on the studio —
-   over REST + MCP, never needing an id it couldn't enumerate.
+   resources, run handle + getRun + progress. Crystal-native; supersedes the legacy MCP surface.
+4. **Execution strategy + studios + remaining discovery (capability-parity close-out).** The two targets
+   (ephemeral run options + hosted `provisionStudio` with `warmMs`/`gpuClass`/`podPolicy`, `studioId`-targeted
+   runs) + `POST /v1/runs/quote` + the `maxImpetus` cap & mid-run watchdog; discovery for `listFundamenta`,
+   `listImages`/runtimes, `listModels`/`resolveLora`; `saveFlow`, `bind`, `status`. *Acceptance:* an agent script
+   does the full arc *blind-start* — quote → provision a hosted studio under a cap → discover + describe a flow →
+   invoke against the studio → observe (webhook) → rate → save-as — over REST + MCP, never needing an id it
+   couldn't enumerate, never exceeding its cap.
 
 ## Risks / guardrails
 
@@ -158,9 +214,13 @@ only if the conceptual model moved; the drift-check gates the PR. No phase is "d
    id, an image) MUST have a discovery resource that enumerates it, and bounded fields carry `enum`s in the
    schema. An agent must be able to start blind and learn every choosable value. This is the half of the
    wizard we keep.
-2. **Don't re-sprawl.** Resist mirroring Telegram surfaces; keep the op set small and declarative. If an op
-   only exists to reproduce a chat affordance (a morph, a step, a page turn), drop it.
-3. **MCP async contract** — handle-vs-await per `Modus.deliveryMode`; decide before building the MCP adapter.
+2. **Runaway spend (the cap is non-negotiable).** Autonomous agents provision GPUs; a buggy loop must not be able
+   to drain an account (the balance is too coarse a backstop). Every run/studio takes a `maxImpetus`/`maxCostUsd`
+   cap, enforced at admission AND mid-run (watchdog kills the pod at the ceiling). Quote (`/runs/quote`) is the
+   informed-consent layer; the cap is the safety net. Ship the cap with the first studio/provision op, not later.
+3. **Don't re-sprawl.** Resist mirroring Telegram surfaces; keep the op set small and declarative. If an op only
+   exists to reproduce a chat affordance (a morph, a step, a page turn), drop it. But DO expose the real platform
+   *modes* (ephemeral / hosted / economy / shared) — those are capability, not chat-sprawl — behind defaulted options.
 4. **One facade, not two** — MCP and REST must call the same facade, or they drift. The facade is the contract.
 
 ## Verification boundary
