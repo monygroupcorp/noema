@@ -313,7 +313,9 @@ export class CrystalApi {
       balanceImpetus: snap.balanceImpetus.toString(),
       balanceUsd: snap.balanceUsd,
       gens: snap.gens,
-      studios: snap.studios,
+      // StudioEntry carries a bigint (`netImpetus`) — stringify it so the whole view
+      // is JSON-safe (res.json/JSON.stringify throw on a raw bigint).
+      studios: snap.studios.map((s) => ({ ...s, netImpetus: s.netImpetus.toString() })),
       joinable: snap.joinable,
       takenAt: snap.takenAt.toISOString(),
     }

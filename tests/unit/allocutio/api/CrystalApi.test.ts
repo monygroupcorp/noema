@@ -522,6 +522,25 @@ test('status returns a JSON-safe view with balanceImpetus as a string', async ()
   assert.ok(typeof view.takenAt === 'string', 'takenAt must be a string')
 })
 
+test('status JSON-projects a studio-bearing snapshot — netImpetus (bigint) is stringified', async () => {
+  // Regression: once a studio is host-attributed (ADR-0006 fix), buildStudios emits a
+  // StudioEntry with a bigint `netImpetus`; the view must stay JSON-safe (res.json throws on bigint).
+  const materia = { id: 'mat-1', gpu: 'NVIDIA GeForce RTX 4090', imageRef: 'img:1', status: 'idle', warmUntil: new Date('2026-06-10T01:00:00Z') }
+  const { deps } = makeDeps({
+    hospitia: ({
+      findActive: async () => [{ id: 'h-1', materiaId: 'mat-1', hostKey: auctor, inceptum: new Date(), costAccrued: 5n }],
+      findByMateriaId: async () => null,
+    } as unknown) as CrystalApiDeps['hospitia'],
+    materiae: ({ findById: async (id: string) => (id === 'mat-1' ? materia : null) } as unknown) as CrystalApiDeps['materiae'],
+  })
+  const api = new CrystalApi(deps)
+
+  const view = await api.status(auctor)
+  assert.equal(view.studios.length, 1, 'the host-attributed studio appears')
+  assert.equal(typeof (view.studios[0] as { netImpetus: unknown }).netImpetus, 'string', 'netImpetus must be stringified')
+  assert.doesNotThrow(() => JSON.stringify(view), 'the whole status view must be JSON-safe (no raw bigint)')
+})
+
 // ── provisionStudio / listStudios ─────────────────────────────────────────────
 
 // A minimal StudioHandle (only the fields toStudioView projects).
