@@ -73,6 +73,8 @@ export interface InvokeOpts {
   gpuClass?: GpuClass
   /** Hard spend cap (impetus). Admission refuses if the estimated reservation exceeds it. */
   maxImpetus?: bigint | string
+  /** Target an existing warm studio (a Modo session) instead of cold-provisioning a pod. */
+  studioId?: string
 }
 
 /** A compact catalog summary of one runnable flow. */
@@ -122,6 +124,7 @@ export class CrystalApi {
       modusId,
       aditus,
       by: auctor,
+      ...(opts.studioId ? { modoId: opts.studioId } : {}),
       ...(opts.pinnedModels?.length ? { pinnedModels: opts.pinnedModels } : {}),
       ...(opts.computeStrategy ? { computeStrategy: opts.computeStrategy } : {}),
       ...(opts.gpuClass ? { gpuClass: opts.gpuClass } : {}),

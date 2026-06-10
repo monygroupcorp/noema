@@ -129,6 +129,7 @@ const RunsRequestSchema: JsonSchema = {
     computeStrategy: { type: 'string', description: 'Optional compute-strategy override.' },
     gpuClass: { type: 'string', description: 'Optional GPU-class override.' },
     maxImpetus: { type: 'string', description: 'Hard spend cap — admission refuses if the estimated reservation exceeds this value.' },
+    studioId: { type: 'string', description: 'Target an existing warm studio (a Modo session) instead of cold-provisioning a pod.' },
     options: {
       type: 'object',
       description: 'Per-run observation options.',

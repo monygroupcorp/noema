@@ -108,10 +108,10 @@ const fakeIntelligentia: Intelligens[] = [
 // ── Build the deps ring. Records the last modusId that was dispatched. ───────
 function makeDeps(over: Partial<CrystalApiDeps> = {}): {
   deps: CrystalApiDeps
-  dispatched: { modusId?: string }
+  dispatched: { modusId?: string; modoId?: string }
   modi: Record<string, Modus>
 } {
-  const dispatched: { modusId?: string } = {}
+  const dispatched: { modusId?: string; modoId?: string } = {}
 
   const modi: Record<string, Modus> = {
     'flux-schnell': makeModus('flux-schnell', { nomen: 'FLUX Schnell' }),
@@ -139,6 +139,7 @@ function makeDeps(over: Partial<CrystalApiDeps> = {}): {
     inceptor: {
       initiate: async (inceptio: Inceptio) => {
         dispatched.modusId = inceptio.modusId
+        dispatched.modoId = inceptio.modoId
         return nascens(inceptio)
       },
     },
@@ -245,6 +246,19 @@ test('invokeFlow by explicit modusId uses it directly', async () => {
 
   assert.equal(dispatched.modusId, 'sd1-5')
   assert.equal(run.modusId, 'sd1-5')
+})
+
+test('invokeFlow with a studioId targets that studio (Inceptio.modoId)', async () => {
+  const { deps, dispatched } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  await api.invokeFlow(auctor, { modusId: 'sd1-5' }, { prompt: 'hi' }, { studioId: 'modo-123' })
+
+  assert.equal(dispatched.modoId, 'modo-123', 'studioId routes to the Modo session')
+
+  // No studioId → a cold (modoId-less) run.
+  await api.invokeFlow(auctor, { modusId: 'sd1-5' }, { prompt: 'hi' })
+  assert.equal(dispatched.modoId, undefined)
 })
 
 test('invokeFlow with an unresolvable verb throws not_found.flow', async () => {

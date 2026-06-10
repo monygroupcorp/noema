@@ -83,12 +83,12 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     '/runs',
     wrap(async (req, res) => {
       const auctor = await auth(req)
-      const { modusId, verb, aditus, pinnedModels, computeStrategy, gpuClass, maxImpetus } = req.body ?? {}
+      const { modusId, verb, aditus, pinnedModels, computeStrategy, gpuClass, maxImpetus, studioId } = req.body ?? {}
       const run = await api.invokeFlow(
         auctor,
         { modusId, verb },
         aditus ?? {},
-        { pinnedModels, computeStrategy, gpuClass, ...(maxImpetus !== undefined ? { maxImpetus } : {}) },
+        { pinnedModels, computeStrategy, gpuClass, ...(maxImpetus !== undefined ? { maxImpetus } : {}), ...(studioId ? { studioId } : {}) },
       )
       const webhookUrl = req.body?.options?.webhookUrl
       if (deps.hub && typeof webhookUrl === 'string' && webhookUrl.length > 0) {

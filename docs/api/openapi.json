@@ -149,6 +149,10 @@
                     "type": "string",
                     "description": "Hard spend cap — admission refuses if the estimated reservation exceeds this value."
                   },
+                  "studioId": {
+                    "type": "string",
+                    "description": "Target an existing warm studio (a Modo session) instead of cold-provisioning a pod."
+                  },
                   "options": {
                     "type": "object",
                     "description": "Per-run observation options.",

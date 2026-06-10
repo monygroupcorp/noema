@@ -37,6 +37,8 @@ export function buildMcpServer(api: CrystalApi, auctor: AuctorKey | undefined): 
         pinnedModels: z.array(z.unknown()).optional(),
         computeStrategy: z.string().optional(),
         gpuClass: z.string().optional(),
+        maxImpetus: z.string().optional(),
+        studioId: z.string().optional(),
       },
     },
     (args) => runFlowTool(api, auctor, args),

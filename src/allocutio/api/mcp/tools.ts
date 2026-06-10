@@ -51,6 +51,8 @@ export interface RunFlowArgs {
   pinnedModels?: unknown[]
   computeStrategy?: string
   gpuClass?: string
+  maxImpetus?: string
+  studioId?: string
 }
 
 export async function runFlowTool(
@@ -68,6 +70,8 @@ export async function runFlowTool(
         pinnedModels: args.pinnedModels as never,
         computeStrategy: args.computeStrategy as never,
         gpuClass: args.gpuClass as never,
+        ...(args.maxImpetus !== undefined ? { maxImpetus: args.maxImpetus } : {}),
+        ...(args.studioId ? { studioId: args.studioId } : {}),
       },
     )
     return ok({ run })
