@@ -365,7 +365,7 @@ const StudioViewSchema: JsonSchema = {
   properties: {
     studioId: { type: 'string', description: 'The studio id (a Modo session) — pass as run.studioId.' },
     podId: { type: 'string', description: 'The underlying pod id.' },
-    status: { type: 'string', description: 'Session status (claiming | warming | active | idle | hibernating | terminated).' },
+    status: { type: 'string', description: 'Pod-derived liveness: idle | running | provisioning | draining | terminated.' },
     gpu: { type: 'string', description: 'GPU model the studio runs on.' },
     runtime: { type: 'string', description: 'On-pod runtime (ComfyUI / llama.cpp / …).' },
     imageRef: { type: 'string', description: 'The pod image reference.' },

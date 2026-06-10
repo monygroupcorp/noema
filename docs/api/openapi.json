@@ -1048,7 +1048,7 @@
                         },
                         "status": {
                           "type": "string",
-                          "description": "Session status (claiming | warming | active | idle | hibernating | terminated)."
+                          "description": "Pod-derived liveness: idle | running | provisioning | draining | terminated."
                         },
                         "gpu": {
                           "type": "string",
@@ -1173,7 +1173,7 @@
                           },
                           "status": {
                             "type": "string",
-                            "description": "Session status (claiming | warming | active | idle | hibernating | terminated)."
+                            "description": "Pod-derived liveness: idle | running | provisioning | draining | terminated."
                           },
                           "gpu": {
                             "type": "string",

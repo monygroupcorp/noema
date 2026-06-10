@@ -153,6 +153,17 @@ test('find returns the auctor\'s leased studios, scoped by host', async () => {
   assert.equal(stranger.length, 0)
 })
 
+test('find excludes studios whose pod (Materia) is terminated — reports LIVE studios only', async () => {
+  const { conductor, materiae } = makeConductor()
+  const handle = await conductor.conducere(AUCTOR, { budget: 1000n })
+  assert.equal((await conductor.find(AUCTOR)).length, 1, 'live studio is listed')
+
+  // Reap the pod (idle reaper / external kill) — the bound Modo stays stale-`idle`.
+  await materiae.update(handle!.materia.id, { status: 'terminated' })
+  const live = await conductor.find(AUCTOR)
+  assert.equal(live.length, 0, 'a terminated-pod studio is no longer listed, despite the stale Modo')
+})
+
 // ── claudere ────────────────────────────────────────────────────────────────
 test('claudere releases the studio: terminates the pod + closes session/materia/hospitium', async () => {
   const terminated: string[] = []

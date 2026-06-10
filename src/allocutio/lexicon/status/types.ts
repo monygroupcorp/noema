@@ -60,8 +60,11 @@ export interface GenEntry {
 
 /** One row under YOUR STUDIOS. */
 export interface StudioEntry {
-  /** Materia.id — the canonical studio identifier. */
+  /** The canonical studio handle — the bound Modo id (ADR-0006), what run-targeting
+   *  uses; falls back to the Materia id when no session store is wired. */
   studioId: string
+  /** The underlying pod (Materia) id — the key for per-studio earnings/guest joins. */
+  materiaId: string
   /** Human-readable label: "flux-v1 on H100" or similar. */
   label: string
   /** Status: idle (warm), running (gen in flight), provisioning, terminated. */

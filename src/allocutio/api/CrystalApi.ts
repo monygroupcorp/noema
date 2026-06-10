@@ -29,7 +29,8 @@ import type { AuctorKey } from '../../flow/types.js'
 import type { Actum, ComputeStrategy, GpuClass, ModelRef } from '../../types/actum.js'
 import type { Inceptio } from '../../types/cursus.js'
 
-import { aggregateStatus } from '../lexicon/status/aggregate.js'
+import { aggregateStatus, materiaStudioStatus } from '../lexicon/status/aggregate.js'
+import type { ModoStore } from '../../types/modo.js'
 import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModus.js'
 import { dispatchInceptio } from '../../execution/dispatchInceptio.js'
 import { toRun } from './runProjection.js'
@@ -60,6 +61,9 @@ export interface CrystalApiDeps {
   conductor?: Conductor
   /** Optional per-AuctorKey aggregation index (passed through to dispatchInceptio). */
   actumIndex?: ActumIndexStore
+  /** Session store — keys studios by their bound Modo id (the canonical studio handle)
+   *  in `status`, so `/v1/me/status` and `/v1/studios` agree on `studioId` (ADR-0006). */
+  modos?: ModoStore
   /** Optional owner-keyed verb→flow rebinds; falls through to CANON_VERBS when absent. */
   consuetudinum?: Consuetudinum
 }
@@ -306,6 +310,7 @@ export class CrystalApi {
         signorum: this.deps.signorum, hospitia: this.deps.hospitia, materiae: this.deps.materiae,
         actorum: this.deps.actorum, modorum: this.deps.modorum,
         ...(this.deps.actumIndex ? { actumIndex: this.deps.actumIndex } : {}),
+        ...(this.deps.modos ? { modos: this.deps.modos } : {}),
       },
       { auctorKey: auctor, inFlightActumIds: [] },
     )
@@ -408,6 +413,7 @@ export interface StudioView {
   /** The studio's id — what `POST /v1/runs { studioId }` targets (a Modo id). */
   studioId: string
   podId?: string
+  /** Pod-derived liveness: idle | running | provisioning | draining | terminated. */
   status: string
   gpu?: string
   runtime?: string
@@ -424,7 +430,9 @@ function toStudioView(h: StudioHandle, budget: bigint): StudioView {
   return {
     studioId: h.studioId,
     ...(m.externusId ? { podId: m.externusId } : {}),
-    status: h.modo.status,
+    // Liveness is the pod's (Materia) truth, not the Modo's — a reaped pod leaves a
+    // stale-`idle` Modo. Shared mapping with /v1/me/status so both agree.
+    status: materiaStudioStatus(m),
     ...(m.gpu ? { gpu: m.gpu } : {}),
     ...(m.runtime ? { runtime: m.runtime } : {}),
     ...(m.imageRef ? { imageRef: m.imageRef } : {}),
