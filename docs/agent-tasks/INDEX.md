@@ -41,14 +41,15 @@ _None — pick up a Backlog item below and graduate it to a numbered TASK spec._
   pin-vs-open per knob. Revisit when the param-rich flows land.
 
 ## Backlog — Features
-- **[API parity (`ApiAllocutio`)](EPIC-api-allocutio.md)** — crystal-native HTTP adapter on the ring at
-  Telegram parity (commands + live surfaces). **The architecture already anticipates it:** `Platform`
-  includes `'rest'`, `Nuntius` models `'http'`, and `affordancesFor()` is already pure data — Telegram is
-  the only thing that packs it into inline keyboards, so one JSON affordance protocol (`GET /v1/surface/:id`
-  + `POST …/act`) covers every interactive surface. SSE spine (WS optional later); unified
-  credential→`AuctorKey` resolver (JWT/API-key/web3/anon); separate from legacy `src/api`. Phased: (1)
-  stateless commands + auth, (2) `chatId→SurfaceId` session refactor *(riskiest — own PR, gated on the
-  Telegram suite first)*, (3) affordance protocol + SSE, (4) parity close-out. Full spec in the linked epic.
+- **[Crystal Agent API (MCP + REST)](EPIC-api-allocutio.md)** — an **API-first, agent-idiomatic** surface
+  over the crystal: **capability** parity with the Telegram bot, NOT a port of its UI. The Telegram surface
+  sprawls because of its medium (inline keyboards + chat → wizards, morphing rows, force-reply); the API has
+  no such limits, so it **collapses** each surface into one direct op (`/arm` wizard → `POST /v1/studios`;
+  the picker → `GET /v1/models?…`; save-as → `POST /v1/flows`). **Flows are tools** — `aditusToJsonSchema`
+  derives both the MCP `inputSchema` and REST validation from a `Modus.aditus`. One crystal facade, two
+  protocols (MCP for agents + REST), over the execution rail (NOT `FlowRouter`/primitive-stepping — agents
+  submit complete intents). SSE for run progress; unified credential→`AuctorKey` resolver (JWT/API-key/web3/anon).
+  Supersedes the legacy `src/api` MCP/tools surface. Phased 1–4; full spec in the linked epic.
 - **`/cook` (Collectio)** — `Modus × Tractus[]` grid → N `Acta` via `TraitEngine` + `CollectioCursor`.
 - **`/spell` (compositus `Modus`)** — run/author a `gradus`-chained flow (authored via `Tabula`).
 - **Gen-flows for more catalog bases** (SDXL/Illustrious/Chroma/Flux-Kontext/Wan-video/…) — port from

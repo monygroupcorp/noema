@@ -1,105 +1,109 @@
-# EPIC: ApiAllocutio — crystal-native HTTP API at Telegram parity
+# EPIC: Crystal Agent API — MCP + REST over the crystal, at capability parity
 
 - **Status:** backlog epic (scoped, not started). Graduates to numbered `TASK-NNN` specs per phase when picked up.
 - **Owner:** none
 
 ## Context / why
 
-Everything a user can do through the Telegram bot (`src/allocutio/telegram/TelegramAllocutio.ts`) should
-be doable over an HTTP API — make/run/chat/status/flows/bind/cancel **and** the stateful, live surfaces
-(bulletin pod-lifecycle HUD, morphing delivery menu, Save-as, `/arm` wizard, Mod• picker). Parity unblocks
-the web platform and the CAMEL agent runtime (both need crystal-native HTTP), and it's cheapest to design
-while the crystal vocabulary is fresh.
+The platform should be drivable by **agents** over an API — capability parity with the Telegram bot, but
+**API-first and agent-idiomatic**, NOT a port of the bot's UI. The consumer is agents (LLM tool-use) and
+general/web callers; the API is how they reach the crystal.
 
-## The finding that shapes everything
+**The shaping insight:** the Telegram surface sprawls largely because of its *medium* — inline keyboards +
+a chat interface force multi-step wizards, morphing button rows, force-reply sequences, and pagination. The
+API has none of those constraints, so it should be **deliberately smaller and more direct**: the sprawl is
+medium-induced, not inherent. One clean operation replaces a whole stateful surface.
 
-The architecture was **built for a second adapter**:
-- `Platform` already includes `'rest'` and `'mcp'` (`src/flow/types.ts:111`); `Nuntius.platforma` already
-  models `'http'` "(authenticated or anonymous)" with `externusConversationId` = session id
-  (`src/types/allocutio.ts:50,100`).
-- Interactive surfaces are **already platform-neutral in logic**: `affordancesFor(snapshot)` returns pure
-  `Affordance[][]` of `{id,label,kind,scope}` (`src/allocutio/lexicon/bulletin/affordances.ts:63`);
-  `BulletinView`/`DeliveryView`/`StatusView` return `{text, keyboard}`. **Telegram is the only thing that
-  packs those into an inline_keyboard.** An API renders the same `Affordance[][]` as JSON and accepts the
-  same `id` back — **no per-surface API work, only one protocol**; every interactive surface falls out of it.
-- The platform-neutral core is reused **as-is**: the ring (`src/container.ts`), `FlowRouter`
-  (`enter/handle/handleActumComplete`), `ExecuteFlow`, the execution rail
-  (`ActumInceptor`→`Cursor`→`ActumCompletor`→`Nexus`), `Consuetudinum` verb resolution, `aggregateStatus`.
+This is **capability parity, not presentation parity.** An agent can do everything a Telegram user can —
+generate, run any flow, manage models/studios, save flows — through declarative, typed, intent-complete
+operations. We do NOT mirror the bot's interaction model (tap-an-affordance, morph-a-row, reply-to-prompt).
 
-**The one real coupling:** the stateful managers key on `chatId: number` (`BulletinManager` ~145 refs;
-`DeliveryMenu` meta; `pickerCache`). That number does triple duty — conversation id + session key + the
-cross-owner authorization scope (`DeliveryMenu.ts:62` `meta.chatId !== opts.chatId`). Generalizing it to a
-`SurfaceId: string` (+ explicit `hostAuctorKey`) is the spine refactor — pure key-type change;
-render/affordance logic untouched.
+## The shape: one crystal facade, two protocols
 
-## Locked decisions
+A single **agent-shaped facade** over the execution rail + stores, in crystal vocabulary — e.g.
+`invokeFlow(auctor, modusId|verb, aditus, opts) → {actumId}`, `getRun(id)`, `listFlows()`,
+`describeFlow(id) → tool schema`, `listModels(filter)`, `resolveLora(trigger, familia)`,
+`provisionStudio(auctor, {fundamentumId, models?, warm?})`, `saveFlow(auctor, {fromRun, name, affixes, promptMode})`,
+`rerun`, `rate`, `bind`, `status`. Both protocol adapters call this one facade:
 
-1. **Full parity in one epic** — commands + all live/stateful surfaces.
-2. **SSE is the spine** for async pod-lifecycle/bulletin updates (one-way push, `GET …/stream`); every
-   client action is a POST. WebSocket is an optional *later* upgrade, out of scope.
-3. **One `IdentityResolver`** accepts web JWT / `X-API-Key` / web3 sig / arcanum commitment and emits the
-   crystal `AuctorKey = {animaId} | {commitment}`. Anon (commitment) supported day one. (JWT is one input
-   credential — composes with crystal-native, does not conflict.)
-4. **Fresh crystal-native surface** mounted on the ring, **separate** from the legacy Express API in
-   `src/api/` (old tools/spells vocabulary). Legacy auth primitives (`jwt.verify`, `/validate-key`,
-   `/web3/verify`) reused **only as credential acceptors** feeding the resolver — no vocabulary entanglement.
+- **MCP adapter** — flows = MCP tools, catalog = MCP resources. The emerging agent standard; supersedes the
+  legacy MCP/tools surface in `src/api/` with a crystal-native one.
+- **REST adapter** — resources (`/v1/runs`, `/v1/flows`, `/v1/models`, `/v1/studios`, `/v1/me/...`) with
+  self-describing JSON-Schema'd inputs. Any HTTP/agent client works.
 
-## The crux: one affordance protocol
+**Flows are tools.** A `Modus`/`Essentia` already carries a typed input schema (`aditus` = `Porta` map:
+type/required/default/label/description) and output (`exitus`). A pure `aditusToJsonSchema(modus.aditus)`
+derives the MCP tool `inputSchema` AND the REST validation/OpenAPI — one function, both protocols. The agent
+reads the schema and submits **complete** params; no interactive per-`Porta` stepping.
 
-One route pair is the API twin of the *entire* inline-keyboard + callback + force-reply plumbing:
-- `GET  /v1/surface/:id` → `{ text, rows: Affordance[][], seq }` — the rendered snapshot.
-- `POST /v1/surface/:id/act { id, value? }` → `202 { seq }` — "tap affordance `id`"; the optional `value`
-  is the force-reply twin (Save-as name/affix, picker search/trigger text).
+## The collapse (Telegram surface → one API op)
 
-Rows go on the wire **verbatim** — no `bul:`/`dm:`/`sa:` prefix (that was Telegram multiplexing one callback
-channel; the API routes by URL path + surface `kind`, then dispatches the bare `id` to the same manager
-method). The owner guard generalizes to *same-SurfaceId AND AuctorKey-owner-match* for `scope:'host'`
-affordances — preserving the existing cross-chat replay protection.
+| Telegram (medium-constrained) | Agent API |
+|---|---|
+| `/make` `/run` `/chat` + interactive aditus gather | `POST /v1/runs {modusId\|verb, aditus, pinnedModels?}` / MCP tool call |
+| Flow card — `Porta`-by-`Porta` panel | the flow's JSON-Schema input, submitted whole |
+| Delivery menu (info/rate/wrench→rerun/tweak/save) | `GET /v1/runs/:id` (+ stats); `POST /v1/runs/:id:rerun`; `POST …/rating`; `POST /v1/flows {fromRun}` |
+| Save-as force-reply sequence (name→review→toggle→confirm) | `POST /v1/flows {fromRun, name, affixes, promptMode}` — one call |
+| `/arm` wizard (preset→detail→image→config→picker→start) | `POST /v1/studios {fundamentumId, models?, warmMs?}` — one shot |
+| Mod• picker (categories→list→detail→page→search→trigger) | `GET /v1/models?familia=&kind=&q=` ; `GET /v1/loras?trigger=` |
+| Bulletin HUD (journal/live line/affordances/submenus) | `GET /v1/runs/:id/stream` (SSE) ; `GET /v1/studios/:id` |
+| `/status` HUD | `GET /v1/me/status` |
+| `/bind` | `PUT /v1/me/bindings/:verb {modusId}` |
 
-## Phases (each graduates to a TASK-NNN when picked up)
-
-1. **Stateless commands + IdentityResolver + mount.** make/run/chat/status/flows/bind/cancel as
-   request/response HTTP, reusing `FlowRouter` exactly as Telegram does; async returns `{actumId, step}`.
-   New: `ApiAllocutio.ts`, `IdentityResolver.ts`, `ApiCommandRouter.ts` (twin of `CommandRouter`, JSON in,
-   same `RouterDeps`), `apiRouter.ts` mounted in `src/index.ts`. Reuses rail + `Consuetudinum` +
-   `aggregateStatus`/`StatusView` + `CANON_VERBS`. *Acceptance (hermetic):* mocked ring + in-memory store;
-   each credential type → `POST /v1/make` returns an actumId; anon commitment accepted.
-2. **Server-side session state (riskiest).** `chatId:number → SurfaceId:string` + `hostAuctorKey` across the
-   4 managers + 2 sink interfaces (key-type change only). Live managers stay **in-process** (they own
-   `TimerRegistry` timers + bus subscriptions that can't serialize); a thin `ApiSessionRegistry` holds
-   SurfaceId↔AuctorKey + last snapshot for replay. **Do NOT reuse `ModoStore`** — `Modo` is deliberately
-   identity-blind (`src/types/modo.ts`). *Land as its own PR gated on Telegram's full suite, before any API code.*
-3. **Affordance protocol + SSE.** The `/v1/surface/:id` + `/act` pair (above). SSE: `GET /v1/stream?surfaceId&since`
-   subscribes to the same bus events (`actum.stage/complete/fail`, `pod.*`); lift the five handler bodies
-   (`TelegramAllocutio` ~936-987) into a neutral `BulletinBusProjector` — Telegram renders to message edits,
-   API to SSE frames. Reconnect replays held snapshot + durable Actum stage history.
-4. **Parity close-out.** `/v1/arm`, picker, save-as, delivery all route through the one `/surface/:id/act`
-   pair — zero new routes. *Acceptance:* a scripted client reproduces a full Telegram session (arm → add
-   models → start → run → rate → save-as → drain) over HTTP, asserting each snapshot matches Telegram's.
+The right column is the whole API. If a surface in the left column has no agent-meaningful op, it has no API
+analog (e.g. the bulletin's *morphing* — only its *information*, the run's event stream, survives).
 
 ## Reuse vs new
 
-| Reuse as-is | Refactor to neutral seam (do NOT duplicate) | Stays Telegram-only | Net-new |
-|---|---|---|---|
-| `FlowRouter`, `ExecuteFlow`, execution rail, `Consuetudinum`, all `*View`/`affordancesFor`, `aggregateStatus` | the 4 managers (`chatId→SurfaceId`+owner); bus→bulletin projection (`BulletinBusProjector`) | `packAffordances`/`_toInline`, callback prefixing, force-reply | `ApiAllocutio`, `ApiCommandRouter`, `apiRouter`, `IdentityResolver`, `ApiEventEmitter`, `ApiSessionRegistry` |
+- **Reuse as-is:** the execution rail (`ActumInceptor`→`Cursor`→`ActumCompletor`→`Nexus`), `Compiler`
+  (affix-weave + LoRA-resolution happen here at compile time, so the agent just supplies `aditus`), and the
+  stores (`Modorum`/`Fundamentorum`/`Intellarum`/`Consuetudinum`), `aggregateStatus`.
+- **Do NOT reuse:** `FlowRouter` + the `Primitive` stepping (Select/Form/Prompt/Stream) — that's the
+  *human-conversational* state machine. The agent path goes straight intent → `Inceptio` → `inceptor.initiate`
+  → `Actum`, bypassing it. Nor the Telegram affordance/keyboard/force-reply plumbing.
+- **Supersede:** the legacy `src/api/` MCP + tools-registry (old tools/spells vocabulary) — the crystal agent
+  API is its go-forward, crystal-native replacement. Legacy auth primitives (`jwt.verify`, `/validate-key`,
+  `/web3/verify`) are reused only as credential acceptors feeding the resolver.
+- **Net-new:** the facade, the MCP adapter, the REST adapter, `aditusToJsonSchema`, `IdentityResolver`,
+  `BulletinBusProjector` (neutral run-event projection), the SSE endpoint.
 
-The managers are the bulk of the value — forking them guarantees drift; extract the neutral seam.
+## Async / streaming
 
-## Biggest risks to weigh before committing
+A run is an `Actum` resource. REST: `GET /v1/runs/:id` (state) + `GET /v1/runs/:id/stream` (SSE of stage
+events → result), projected from the same bus the bulletin uses (`actum.stage/complete/fail`, `pod.*`) via a
+neutral `BulletinBusProjector`. MCP: a tool call returns a **run handle** (+ progress notifications where the
+client supports them), or awaits completion for fast/sync flows (`Modus.deliveryMode`). **SSE is the spine;
+WebSocket is an optional later upgrade.**
 
-1. **`chatId→SurfaceId` crosses Telegram-shared code** (4 managers + 2 sinks). A missed call site silently
-   re-forks state. Mitigation: own PR, gated on Telegram's full suite, before API work. *Open question:*
-   accept shared-code risk (refactor) vs fork a second manager (faster, permanent drift). **Recommend: refactor.**
-2. **Live state is in-process; HTTP wants horizontal scale.** Timers + bus subs don't serialize.
-   Recommend single-instance + sticky routing on SurfaceId for the epic; the `?since=`/durable-replay design
-   keeps distribution open without reshaping the client contract.
-3. **SSE replay completeness** depends on durable `Actum` stage history being a faithful superset of the live
-   bus stream. Audit stage-event durability first; a bounded per-surface ring buffer is a simpler
-   lossless-within-window fallback.
+## IdentityResolver
+
+One resolver, multiple credential acceptors → crystal `AuctorKey = {animaId} | {commitment}`: web JWT,
+`X-API-Key`, web3 signature, arcanum commitment. **Anon (commitment) supported day one** — it flows straight
+through `Inceptio.identity`. JWT is just one accepted input (the web platform path), not a separate model.
+
+## Phasing (each graduates to a TASK-NNN)
+
+1. **Facade + IdentityResolver + flow-as-tool schema + core run resources (REST).** `invokeFlow`/`getRun`,
+   `listFlows`/`describeFlow`, `aditusToJsonSchema`, reusing the rail. *Acceptance (hermetic):* mocked ring +
+   in-memory store; each credential → invoke returns an actumId; schema derived from a real `Essentia.aditus`;
+   anon commitment accepted.
+2. **SSE run streaming + `BulletinBusProjector`.** Project the existing bus events into a neutral run-event
+   stream; `GET /v1/runs/:id/stream`. Reconnect replays from durable `Actum` stage history.
+3. **MCP adapter over the same facade.** Flows = tools (inputSchema from `aditusToJsonSchema`), catalog =
+   resources, run handle + progress. Crystal-native; supersedes the legacy MCP surface.
+4. **Management ops (capability-parity close-out).** `provisionStudio` (one-shot), `saveFlow`,
+   `listModels`/`resolveLora` queries, `bind`, `status`. *Acceptance:* an agent script does the full arc
+   (describe a flow → invoke → stream → rate → save-as → provision a studio → run on it) over REST + MCP.
+
+## Risks / guardrails
+
+1. **Don't re-sprawl.** The discipline is to *resist* mirroring Telegram surfaces; keep the op set small and
+   declarative. If an op only exists to reproduce a chat affordance, drop it.
+2. **MCP async contract** — handle-vs-await per `Modus.deliveryMode`; decide before building the MCP adapter.
+3. **One facade, not two** — MCP and REST must call the same facade, or they drift. The facade is the contract.
 
 ## Verification boundary
 
-Hermetic gate where possible (mocked ring + in-memory session store; the affordance protocol +
-IdentityResolver are pure logic). Phase 2's `chatId→SurfaceId` refactor is verified by **Telegram's existing
-full suite staying green** (no behavior change). Live SSE + real pod lifecycle (Phases 3-4) validated on
-**staging** (a GPU), never the hermetic gate — same boundary as the rest of the repo.
+Hermetic where possible — the facade, `aditusToJsonSchema`, and `IdentityResolver` are pure logic over a
+mocked ring + in-memory store. Live SSE + real pod provisioning are validated on **staging** (a GPU), never
+the hermetic gate — same boundary as the rest of the repo.
