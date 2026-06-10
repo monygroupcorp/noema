@@ -82,11 +82,21 @@ export interface Materia {
   sshPort?: number
 
   /**
-   * Cost of this pod in impetus points per second.
-   * 1 point = $0.000337 = 1 second of RunPod SECURE pod-time.
-   * This is what the session host is billed at-cost (no platform markup on compute).
+   * Cost of this pod in impetus points per second — a COARSE display/legacy figure
+   * (`impetusPerSecondFromHourly` ceils to a whole point/sec). Kept for back-compat
+   * and as the warm-billing fallback for pods with no stored `costPerHr`; the
+   * accurate charge is computed per-window from `costPerHr` (see below).
    */
   impetusPerSecond: bigint
+
+  /**
+   * The pod's real hourly USD cost (from the provider at provision time). The
+   * SOURCE OF TRUTH for warm-time billing: `Census` charges
+   * `impetusForPodMs(secondsElapsed × 1000, costPerHr)` — rounded once per tick, so
+   * the host pays the actual pod cost without the per-second `ceil` skew. Absent on
+   * legacy pods → Census falls back to `impetusPerSecond`.
+   */
+  costPerHr?: number
 
   status: MateriaStatus
 

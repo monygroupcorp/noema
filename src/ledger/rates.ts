@@ -41,9 +41,29 @@ export const BOOT_AMORTIZE_OVER = 5n
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * Convert a pod's hourly USD rate into impetus points per second (the figure
- * stored on `Materia.impetusPerSecond`). Used when provisioning a pod whose
- * hourly cost is known from the provider.
+ * The impetus cost of `ms` milliseconds of pod wall-time at a given hourly USD
+ * rate — rounded ONCE over the whole window:
+ *
+ *   impetus = ceil((ms × costPerHr / 3_600_000) / IMPETUS_USD_RATE)
+ *
+ * This is the fidelity-correct conversion: rounding the *window* (not a per-second
+ * rate) avoids the regressive `ceil`-every-second skew that over-charges cheap
+ * pods. The single canonical pod-time→impetus function; `Census` (warm-time meter)
+ * and boot-cost both bill through it. Ceil so the platform/host is never
+ * under-credited by a rounding step. Zero/negative inputs → 0n.
+ */
+export function impetusForPodMs(ms: number, costPerHrUsd: number): bigint {
+  if (ms <= 0 || costPerHrUsd <= 0) return 0n
+  const usd = (ms / 3_600_000) * costPerHrUsd
+  return BigInt(Math.ceil(usd / IMPETUS_USD_RATE))
+}
+
+/**
+ * Convert a pod's hourly USD rate into impetus points per second. COARSE — it
+ * ceils to a whole impetus/sec, so it over-charges pods below the ~$1.21/hr
+ * reference (a $0.69/hr pod rounds 0.57→1, a +76% skew). Retained only as a
+ * display hint + a legacy fallback for Materiae with no stored `costPerHr`;
+ * actual warm-time billing goes through `impetusForPodMs` (per-window).
  */
 export function impetusPerSecondFromHourly(costPerHrUsd: number): bigint {
   const usdPerSecond = costPerHrUsd / 3600
@@ -51,17 +71,12 @@ export function impetusPerSecondFromHourly(costPerHrUsd: number): bigint {
 }
 
 /**
- * Compute the bootCost (in impetus points) of a cold provisioning — the figure
- * stamped on `Materia.bootCostImpetus` and amortized across guest runs.
- *
- *   bootCostImpetus = ceil((billedMs × costPerHr / 3_600_000) / IMPETUS_USD_RATE)
- *
- * Ceil so the host is never under-credited by a rounding step.
+ * The bootCost (in impetus) of a cold provisioning — stamped on
+ * `Materia.bootCostImpetus` and amortized across guest runs. A window cost, so it
+ * delegates to `impetusForPodMs` (round once over `billedMs`).
  */
 export function computeBootCostImpetus(billedMs: number, costPerHrUsd: number): bigint {
-  if (billedMs <= 0 || costPerHrUsd <= 0) return 0n
-  const usd = (billedMs / 3_600_000) * costPerHrUsd
-  return BigInt(Math.ceil(usd / IMPETUS_USD_RATE))
+  return impetusForPodMs(billedMs, costPerHrUsd)
 }
 
 /**

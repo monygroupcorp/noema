@@ -358,9 +358,10 @@ test('provisionStudio derives Materia.impetusPerSecond from the pod hourly cost 
   const client = makeClient(makeConfig({ keepWarm: true }), () => makeSshTransport(), fetch, store as never)
   await client.provisionStudio({})
 
-  const parked = store.createCalls[0] as { impetusPerSecond: bigint }
-  // $4/hr → the canonical rate conversion → 4 impetus/sec. Census meters this against
-  // the host; the old static `config.impetusPerSecond ?? 0n` left every studio free.
+  const parked = store.createCalls[0] as { impetusPerSecond: bigint; costPerHr?: number }
+  // costPerHr is the billing source of truth — stamped from the pod's live $/hr.
+  assert.equal(parked.costPerHr, 4.0, 'real hourly cost stamped for per-window billing')
+  // impetusPerSecond is kept as a coarse display/legacy-fallback figure ($4/hr → 4/s).
   assert.equal(parked.impetusPerSecond, impetusPerSecondFromHourly(4.0))
   assert.equal(parked.impetusPerSecond, 4n)
 })

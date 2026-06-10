@@ -806,9 +806,13 @@ Lease a hosted warm studio (a persistent GPU session) for fast repeated runs. ma
           "type": "string",
           "description": "The authorized session budget (the maxImpetus cap), as a string."
         },
+        "costPerHr": {
+          "type": "number",
+          "description": "The pod's real hourly USD cost — the source of truth for warm-time billing."
+        },
         "impetusPerSecond": {
           "type": "string",
-          "description": "Continuous burn rate (impetus/sec) while warm."
+          "description": "Coarse burn-rate hint (impetus/sec); billing is per-window from costPerHr. Prefer costPerHr for an accurate rate."
         }
       },
       "required": [
@@ -876,9 +880,13 @@ List the authenticated caller's live hosted studios.
             "type": "string",
             "description": "The authorized session budget (the maxImpetus cap), as a string."
           },
+          "costPerHr": {
+            "type": "number",
+            "description": "The pod's real hourly USD cost — the source of truth for warm-time billing."
+          },
           "impetusPerSecond": {
             "type": "string",
-            "description": "Continuous burn rate (impetus/sec) while warm."
+            "description": "Coarse burn-rate hint (impetus/sec); billing is per-window from costPerHr. Prefer costPerHr for an accurate rate."
           }
         },
         "required": [
