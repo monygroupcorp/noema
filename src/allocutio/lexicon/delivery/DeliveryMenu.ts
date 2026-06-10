@@ -25,6 +25,8 @@ interface ResultMeta {
   isMedia: boolean
   showingStats: boolean
   rateGlyph: string
+  /** How many times this result has been re-run — badged on the gear (default row). */
+  reruns: number
 }
 
 /**
@@ -45,7 +47,7 @@ export class DeliveryMenu {
 
   /** Remember a delivered result so its menu can morph/toggle in place. */
   track(actumId: string, m: { chatId: number; messageId: number; caption: string; isMedia: boolean }): void {
-    this.meta.set(actumId, { ...m, showingStats: false, rateGlyph: '♥' })
+    this.meta.set(actumId, { ...m, showingStats: false, rateGlyph: '♥', reruns: 0 })
   }
 
   /**
@@ -60,7 +62,7 @@ export class DeliveryMenu {
     if (!meta || (opts.chatId !== undefined && meta.chatId !== opts.chatId)) return
 
     const morph = (state: MenuState, glyph?: string) =>
-      void this.deps.sink.editMarkup(meta.chatId, meta.messageId, menuKeyboard(actumId, state, glyph)).catch(() => {})
+      void this.deps.sink.editMarkup(meta.chatId, meta.messageId, menuKeyboard(actumId, state, glyph, meta.reruns)).catch(() => {})
 
     switch (action) {
       case 'rate':   morph('rate'); return
@@ -78,7 +80,13 @@ export class DeliveryMenu {
       }
       case 'tweak':
       case 'rerun':
-        if (opts.presserUserId) await this.deps.rerun(actumId, opts.presserUserId, meta.chatId)
+        if (opts.presserUserId) {
+          await this.deps.rerun(actumId, opts.presserUserId, meta.chatId)
+          // Rerun accepted → bump the run count and snap back to the main row so the gear's
+          // badge confirms the press (otherwise the wrench sub-row just sits there silently).
+          meta.reruns += 1
+          morph('default', meta.rateGlyph)
+        }
         return
       case 'save':
         if (opts.presserUserId) await this.deps.save?.(actumId, opts.presserUserId, meta.chatId)
@@ -90,7 +98,7 @@ export class DeliveryMenu {
   private async _toggleInfo(actumId: string): Promise<void> {
     const meta = this.meta.get(actumId)
     if (!meta) return
-    const keyboard = menuKeyboard(actumId, 'default', meta.rateGlyph)
+    const keyboard = menuKeyboard(actumId, 'default', meta.rateGlyph, meta.reruns)
     const text = meta.showingStats
       ? meta.caption
       : formatStats(await this.deps.acta?.findById(actumId).catch(() => null) ?? null)
