@@ -17,7 +17,11 @@
     users lookup + sha256 → `'api'` persona), and anon `{commitment}` — each via persona find-or-create
     (`makeCredentialAcceptors`). Verification is defensive (failures → `auth.invalid`). **Remaining:** `web3`
     (needs a nonce-challenge endpoint). Real auth is staging-validated (the persona-mapping is hermetic-tested).
-- **Phase 2** — observation channels (SSE + webhook + poll). Pending.
+- **Phase 2 — DONE** (commit `a4bc5ff6`): `busToRunEvent` (pure: `actum.stage/complete/fail`→`RunEvent`) +
+  `RunEventHub` (per-run SSE fan-out, fire-and-forget completion webhooks, a bounded ring buffer for
+  reconnect replay). `GET /v1/runs/:id/stream` (SSE) + `options.webhookUrl` on `POST /runs` + poll
+  (`GET /v1/runs/:id`). Hub wired over the real `bus` + a `fetch` poster (in-process, single instance).
+  Contract/docs updated for the new routes; hermetic-tested (incl. real-HTTP SSE).
 - **Phase 3** — MCP adapter (verb tools + `crystal://` resources). Pending.
 - **Phase 4** — execution strategy + studios + remaining discovery + quote/cap. Pending.
 
