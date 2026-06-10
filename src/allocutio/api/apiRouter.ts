@@ -31,7 +31,7 @@ export interface ApiFacade {
     aditus: Record<string, unknown>,
     opts?: InvokeOpts,
   ): Promise<Run>
-  getRun(id: string): Promise<Run>
+  getRun(auctor: AuctorKey, id: string): Promise<Run>
   listFlows(): Promise<unknown[]>
   describeFlow(id: string): Promise<unknown>
 }
@@ -102,8 +102,6 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
       }
       return
     }
-    void auctor // used only for auth side-effect
-
     if (!deps.hub) {
       res.status(501).json({ error: { code: 'internal.error', message: 'streaming unavailable' } })
       return
@@ -112,7 +110,7 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     const id = String(req.params.id)
     let run: Run
     try {
-      run = await api.getRun(id)
+      run = await api.getRun(auctor, id)   // owner-scoped: 404 if the run isn't yours
     } catch (err) {
       if (err instanceof ApiError) {
         res.status(err.httpStatus).json({ error: err.toBody() })
@@ -145,12 +143,12 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     req.on('close', off)
   })
 
-  // GET /v1/runs/:id — fetch a run (requires a caller identity).
+  // GET /v1/runs/:id — fetch a run (owner-scoped — you only see your own runs).
   router.get(
     '/runs/:id',
     wrap(async (req, res) => {
-      await auth(req)
-      res.json({ run: await api.getRun(String(req.params.id)) })
+      const auctor = await auth(req)
+      res.json({ run: await api.getRun(auctor, String(req.params.id)) })
     }),
   )
 

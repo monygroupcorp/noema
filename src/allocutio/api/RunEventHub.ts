@@ -57,11 +57,14 @@ export class RunEventHub {
       if (webhookUrl) {
         void this.postWebhook(webhookUrl, ev).catch(() => {})
       }
+      // unref so the timer never keeps the process/test event loop alive. (A run that
+      // never emits a terminal event leaks its maps until the actum-expiry reaper
+      // fails it — bounded, and acceptable for in-process single-instance state.)
       setTimeout(() => {
         this.webhooks.delete(ev.runId)
         this.recent.delete(ev.runId)
         this.subscribers.delete(ev.runId)
-      }, CLEANUP_DELAY_MS)
+      }, CLEANUP_DELAY_MS).unref?.()
     }
   }
 

@@ -46,7 +46,7 @@ function nascens(inceptio: Inceptio): Actum {
     modusId: inceptio.modusId,
     modusVersiono: '1.0.0',
     impetus: 0n,
-    signaConsumed: [],
+    signaConsumed: ['sig-1'],
     aditus: inceptio.aditus,
     status: 'nascens',
     inceptum: new Date('2026-06-10T00:00:00Z'),
@@ -118,6 +118,11 @@ function makeDeps(over: Partial<CrystalApiDeps> = {}): {
       findExpired: async () => [],
       findInFlight: async () => [],
     },
+    // The owner (`auctor`) owns signum 'sig-1'; any other identity owns nothing.
+    signorum: ({
+      history: async (by: AuctorKey) =>
+        'animaId' in by && by.animaId === 'anima-1' ? [{ id: 'sig-1' }] : [],
+    } as unknown) as CrystalApiDeps['signorum'],
     ...over,
   }
 
@@ -168,18 +173,32 @@ test('invokeFlow with an unresolvable verb throws not_found.flow', async () => {
   )
 })
 
-test('getRun projects a known actum; unknown id throws not_found.run', async () => {
+test('getRun (owner-scoped) projects the owner\'s run; unknown id throws not_found.run', async () => {
   const { deps } = makeDeps()
   const api = new CrystalApi(deps)
 
-  const run = await api.getRun('act-known')
+  const run = await api.getRun(auctor, 'act-known')
   assert.equal(run.status, 'complete')
   assert.deepEqual(run.exitus, { image: 'x' })
 
   await assert.rejects(
-    () => api.getRun('ghost'),
+    () => api.getRun(auctor, 'ghost'),
     (e: unknown) => e instanceof ApiError && e.code === 'not_found.run',
   )
+})
+
+test('getRun is owner-scoped: a non-owner gets not_found.run (no IDOR), even for a real run', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+  // 'act-known' is real + complete, but this auctor owns none of its signa.
+  await assert.rejects(
+    () => api.getRun({ animaId: 'someone-else' }, 'act-known'),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.run',
+  )
+  // An anonymous commitment owner that DOES own the consumed signum can read it.
+  const anonDeps = { ...deps, signorum: ({ history: async () => [{ id: 'sig-1' }] } as unknown) as CrystalApiDeps['signorum'] }
+  const anonRun = await new CrystalApi(anonDeps).getRun({ commitment: 'c-1' }, 'act-known')
+  assert.equal(anonRun.status, 'complete')
 })
 
 test('listFlows returns only atomicus + canonica flows', async () => {
