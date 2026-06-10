@@ -1,7 +1,23 @@
 # EPIC: Crystal Agent API — MCP + REST over the crystal, at capability parity
 
-- **Status:** backlog epic (scoped, not started). Graduates to numbered `TASK-NNN` specs per phase when picked up.
+- **Status:** **Phase 1 implemented** (on `chainengine-migration`, hermetic-green). Phases 2–4 pending.
 - **Owner:** none
+
+## Implementation status
+
+- **Phase 1 — DONE** (commits `7bd8ea59`→`35ddbcaf`): `dispatchInceptio` (extracted from `ExecuteFlow`,
+  shared so bot+API can't drift); `aditusToJsonSchema`/`describeFlow`; `Run` projection (`toRun`); the
+  `CrystalApi` facade (`invokeFlow`/`getRun`/`listFlows`/`describeFlow`, verb-resolve via `Consuetudinum`
+  + shared `CANON_VERBS`); `IdentityResolver` (Credentials→`AuctorKey`, injectable acceptors, `ApiError`
+  taxonomy); the `/v1` REST router (runs + flows, error envelope), **mounted live** in `src/index.ts`; the
+  contract-first doc pipeline (`apiContract`→`gen:api-docs`→`docs/api/openapi.json`+`reference.md`) with a
+  hermetic **drift-check** + `.claude/skills/crystal-api/SKILL.md`. All hermetic-tested.
+  - **Phase-1.x follow-up:** wire the real identified-user credential acceptors (JWT/API-key/web3→animaId)
+    into the mounted `IdentityResolver` (currently only anon `{commitment}` + public discovery are live);
+    validated on staging. Serve `GET /v1/openapi.json`.
+- **Phase 2** — observation channels (SSE + webhook + poll). Pending.
+- **Phase 3** — MCP adapter (verb tools + `crystal://` resources). Pending.
+- **Phase 4** — execution strategy + studios + remaining discovery + quote/cap. Pending.
 
 ## Context / why
 
