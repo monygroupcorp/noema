@@ -1,16 +1,17 @@
-// Studio billing tick — the host's continuous per-time cost meter.
+// Census — the host's continuous per-time cost reckoning (studio billing tick).
 //
-// Drives billOne() (the per-Hospitium single-tick path used by both the periodic
-// ticker and phase-transition emissions). The full periodic loop is just
-// `setInterval(billOne over findActive())` — covered by exercising billOne in
+// Drives censere() (the per-Hospitium single-assessment path used by both the
+// periodic ticker and phase-transition emissions). The full periodic loop is just
+// `setInterval(censere over findActive())` — covered by exercising censere in
 // isolation with controlled clocks.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { billOne, type StudioBillingDeps } from '../../../src/crystal/StudioBilling.js'
+import { censere, type CensusDeps } from '../../../src/crystal/Census.js'
 import { Nexus } from '../../../src/ledger/Nexus.js'
 import { studioSpendHook } from '../../../src/ledger/hooks/studioSpend.js'
 import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
+import { MemoryModo } from '../../../src/execution/MemoryModo.js'
 import type { Materia, MateriaStore, PodPolicy } from '../../../src/types/materia.js'
 import type { Hospitium, HospitiumStore, HostKey } from '../../../src/types/hospitium.js'
 
@@ -69,7 +70,7 @@ function makeDeps(opts: {
   hostBalance: bigint
   hostKey?: HostKey
   status?: Materia['status']
-}): StudioBillingDeps & { hospitium: Hospitium; signorum: MemorySignorum; materiae: FakeMateriaStore } {
+}): CensusDeps & { hospitium: Hospitium; signorum: MemorySignorum; materiae: FakeMateriaStore } {
   const hostKey: HostKey = opts.hostKey ?? { animaId: HOST_ANIMA }
   const materiae = new FakeMateriaStore()
   const hospitia = new FakeHospitium()
@@ -107,7 +108,7 @@ test('60s tick on solvent host: debits impetusPerSecond × 60; updates Hospitium
   await new Promise(r => setTimeout(r, 0))  // let hospitia.create resolve
 
   const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
-  const res = await billOne(deps, h, new Date(h.inceptum.getTime() + 60_000))
+  const res = await censere(deps, h, new Date(h.inceptum.getTime() + 60_000))
 
   assert.equal(res.requested, 60n * IMPETUS_PER_SECOND, '60s × 4 = 240')
   assert.equal(res.charged, res.requested, 'fully covered by balance')
@@ -133,8 +134,8 @@ test('successive ticks accumulate via lastBilledAt — no skipped windows', asyn
   await new Promise(r => setTimeout(r, 0))
 
   const t0 = (await deps.hospitia.findByMateriaId(MATERIA_ID))!.inceptum.getTime()
-  await billOne(deps, (await deps.hospitia.findByMateriaId(MATERIA_ID))!, new Date(t0 + 60_000))
-  await billOne(deps, (await deps.hospitia.findByMateriaId(MATERIA_ID))!, new Date(t0 + 180_000))
+  await censere(deps, (await deps.hospitia.findByMateriaId(MATERIA_ID))!, new Date(t0 + 60_000))
+  await censere(deps, (await deps.hospitia.findByMateriaId(MATERIA_ID))!, new Date(t0 + 180_000))
 
   // First tick: 60s × 4 = 240; second: 120s × 4 = 480. Total 720.
   const after = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
@@ -151,7 +152,7 @@ test('balance shortfall: clamps to available + sets Materia.drainOnly + emits bu
   bus.once('studio.draining', () => { drainEmitted = true })
 
   const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
-  const res = await billOne(deps, h, new Date(h.inceptum.getTime() + 60_000))
+  const res = await censere(deps, h, new Date(h.inceptum.getTime() + 60_000))
 
   assert.equal(res.requested, 240n)
   assert.equal(res.charged, 100n, 'clamped to available balance')
@@ -174,7 +175,7 @@ test('commitment host: arcanum debit signum on host, no animaId leak', async () 
   await new Promise(r => setTimeout(r, 0))
 
   const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
-  await billOne(deps, h, new Date(h.inceptum.getTime() + 60_000))
+  await censere(deps, h, new Date(h.inceptum.getTime() + 60_000))
 
   const arcanumSigna = await deps.signorum.history({ commitment: HOST_COMMITMENT })
   // Seed signum + debit signum = 2; debit is the negative-valor one
@@ -195,7 +196,7 @@ test('terminated studio is not billed', async () => {
   await new Promise(r => setTimeout(r, 0))
 
   const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
-  const res = await billOne(deps, h, new Date(h.inceptum.getTime() + 60_000))
+  const res = await censere(deps, h, new Date(h.inceptum.getTime() + 60_000))
 
   assert.equal(res.charged, 0n)
   assert.equal((await deps.signorum.balance({ animaId: HOST_ANIMA })), 10_000n, 'balance untouched')
@@ -207,9 +208,80 @@ test('zero elapsed seconds: idempotent no-op (covers phase-transition retries)',
   await new Promise(r => setTimeout(r, 0))
 
   const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
-  // billOne at the same instant as lastBilledAt (inceptum here)
-  const res = await billOne(deps, h, new Date(h.inceptum.getTime()))
+  // censere at the same instant as lastBilledAt (inceptum here)
+  const res = await censere(deps, h, new Date(h.inceptum.getTime()))
 
   assert.equal(res.charged, 0n)
   assert.equal((await deps.signorum.balance({ animaId: HOST_ANIMA })), 10_000n)
+})
+
+// ── 7. maxImpetus watchdog: budget exhaustion drains the studio ──────────────
+// When a `modos` store is wired, Census ALSO enforces the studio's budget tessera:
+// total accrued spend (warm-time costAccrued + run impetusAccrued) crossing the
+// authorized sessionBudget drains the studio — independent of the host's balance.
+async function makeBudgetDeps(opts: {
+  budget: bigint
+  impetusAccrued: bigint
+  impetusPerSecond?: bigint
+  hostBalance?: bigint
+}): Promise<CensusDeps & { modo: { id: string }; materiae: FakeMateriaStore }> {
+  const materiae = new FakeMateriaStore()
+  const hospitia = new FakeHospitium()
+  const signorum = new MemorySignorum()
+  const modos = new MemoryModo()
+  const nexus = new Nexus()
+  nexus.on('studio_spend', studioSpendHook)
+
+  const m: Materia = {
+    id: MATERIA_ID, genus: 'pod', externusId: 'pod-1', gpu: 'H100', vramGb: 80, ramGb: 200,
+    impetusPerSecond: opts.impetusPerSecond ?? 1n, status: 'idle',
+  }
+  materiae.add(m)
+
+  // Solvent host so the balance-shortfall trigger never fires — isolate the budget path.
+  void signorum.issue({ animaId: HOST_ANIMA, forma: 'integer', valor: opts.hostBalance ?? 1_000_000n, auctor: 'test:seed' })
+
+  // A bound session with prior run impetus + a budget tessera for it.
+  const modo = await modos.create({ status: 'idle', materiamId: MATERIA_ID, impetusAccrued: opts.impetusAccrued, acta: [], idleWarmthSec: 300 })
+  await signorum.issue({ forma: 'tessera', valor: opts.budget, auctor: 'system:session', testis: 'tess-1', modoId: modo.id })
+
+  const inceptum = new Date(Date.now() - 60_000)
+  await hospitia.create({ id: 'h-1', materiaId: MATERIA_ID, hostKey: { animaId: HOST_ANIMA }, inceptum })
+
+  return { hospitia, materiae, signorum, nexus, modos, modo }
+}
+
+test('budget watchdog: accrued spend crossing the tessera budget engages drain', async () => {
+  // budget 100; prior run impetus 50; this tick adds 60 warm-time → 110 ≥ 100 → drain.
+  const deps = await makeBudgetDeps({ budget: 100n, impetusAccrued: 50n })
+  const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
+
+  let drainEmitted = false
+  const { bus } = await import('../../../src/lib/bus.js')
+  bus.once('studio.draining', () => { drainEmitted = true })
+
+  const res = await censere(deps, h, new Date(h.inceptum.getTime() + 60_000))
+
+  assert.equal(res.charged, 60n, 'host balance fully covered the warm-time ask')
+  assert.equal(res.drainEngaged, true, 'budget exhaustion drained the studio')
+  assert.equal((await deps.materiae.findById(MATERIA_ID))?.drainOnly, true)
+  assert.equal(drainEmitted, true)
+})
+
+test('budget watchdog: spend under the budget does NOT drain', async () => {
+  // budget 10_000; prior 50 + 60 this tick = 110 ≪ budget → no drain.
+  const deps = await makeBudgetDeps({ budget: 10_000n, impetusAccrued: 50n })
+  const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
+  const res = await censere(deps, h, new Date(h.inceptum.getTime() + 60_000))
+  assert.equal(res.drainEngaged, false)
+  assert.equal((await deps.materiae.findById(MATERIA_ID))?.drainOnly, undefined)
+})
+
+test('budget watchdog: no modos store wired → budget is not enforced (balance-only)', async () => {
+  // Same over-budget numbers, but omit `modos` → Census ignores the tessera entirely.
+  const full = await makeBudgetDeps({ budget: 100n, impetusAccrued: 50n })
+  const { modos: _drop, modo: _m, ...balanceOnly } = full
+  const h = (await full.hospitia.findByMateriaId(MATERIA_ID))!
+  const res = await censere(balanceOnly as CensusDeps, h, new Date(h.inceptum.getTime() + 60_000))
+  assert.equal(res.drainEngaged, false, 'no modos → no budget drain')
 })

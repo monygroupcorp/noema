@@ -1013,6 +1013,221 @@
           }
         }
       }
+    },
+    "/studios": {
+      "post": {
+        "summary": "Lease a hosted warm studio (a persistent GPU session) for fast repeated runs. maxImpetus is the session budget — the studio drain-terminates at the cap.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A newly leased studio.",
+                  "properties": {
+                    "studio": {
+                      "type": "object",
+                      "description": "A hosted studio. `studioId` is what POST /v1/runs { studioId } targets.",
+                      "properties": {
+                        "studioId": {
+                          "type": "string",
+                          "description": "The studio id (a Modo session) — pass as run.studioId."
+                        },
+                        "podId": {
+                          "type": "string",
+                          "description": "The underlying pod id."
+                        },
+                        "status": {
+                          "type": "string",
+                          "description": "Session status (claiming | warming | active | idle | hibernating | terminated)."
+                        },
+                        "gpu": {
+                          "type": "string",
+                          "description": "GPU model the studio runs on."
+                        },
+                        "runtime": {
+                          "type": "string",
+                          "description": "On-pod runtime (ComfyUI / llama.cpp / …)."
+                        },
+                        "imageRef": {
+                          "type": "string",
+                          "description": "The pod image reference."
+                        },
+                        "warmUntil": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When the warm window expires."
+                        },
+                        "budgetImpetus": {
+                          "type": "string",
+                          "description": "The authorized session budget (the maxImpetus cap), as a string."
+                        },
+                        "impetusPerSecond": {
+                          "type": "string",
+                          "description": "Continuous burn rate (impetus/sec) while warm."
+                        }
+                      },
+                      "required": [
+                        "studioId",
+                        "status",
+                        "budgetImpetus"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "studio"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Lease a hosted warm studio. Everything is optional — the simplest call leases a default studio capped at the balance. Discover fundamentumId via GET /v1/fundamenta and models via GET /v1/models (no opaque ids).",
+                "properties": {
+                  "fundamentumId": {
+                    "type": "string",
+                    "description": "Compute substrate to arm on (its runtime is inherited). Enumerate via GET /v1/fundamenta."
+                  },
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Model ids (intellaId) to install live onto the studio. Enumerate via GET /v1/models."
+                  },
+                  "warmMs": {
+                    "type": "number",
+                    "description": "How long to hold the studio warm (ms)."
+                  },
+                  "maxImpetus": {
+                    "type": "string",
+                    "description": "Hard spend cap = the session budget (impetus). The studio drain-terminates at the cap. Omitted → the full balance."
+                  },
+                  "runtime": {
+                    "type": "string",
+                    "description": "Override the on-pod runtime explicitly (else inherited from the fundamentum)."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List the authenticated caller's live hosted studios.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The caller's live studios.",
+                  "properties": {
+                    "studios": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "A hosted studio. `studioId` is what POST /v1/runs { studioId } targets.",
+                        "properties": {
+                          "studioId": {
+                            "type": "string",
+                            "description": "The studio id (a Modo session) — pass as run.studioId."
+                          },
+                          "podId": {
+                            "type": "string",
+                            "description": "The underlying pod id."
+                          },
+                          "status": {
+                            "type": "string",
+                            "description": "Session status (claiming | warming | active | idle | hibernating | terminated)."
+                          },
+                          "gpu": {
+                            "type": "string",
+                            "description": "GPU model the studio runs on."
+                          },
+                          "runtime": {
+                            "type": "string",
+                            "description": "On-pod runtime (ComfyUI / llama.cpp / …)."
+                          },
+                          "imageRef": {
+                            "type": "string",
+                            "description": "The pod image reference."
+                          },
+                          "warmUntil": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "When the warm window expires."
+                          },
+                          "budgetImpetus": {
+                            "type": "string",
+                            "description": "The authorized session budget (the maxImpetus cap), as a string."
+                          },
+                          "impetusPerSecond": {
+                            "type": "string",
+                            "description": "Continuous burn rate (impetus/sec) while warm."
+                          }
+                        },
+                        "required": [
+                          "studioId",
+                          "status",
+                          "budgetImpetus"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "studios"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1153,6 +1368,14 @@
       "httpStatus": 404
     },
     {
+      "code": "not_found.fundamentum",
+      "httpStatus": 404
+    },
+    {
+      "code": "not_found.studio",
+      "httpStatus": 404
+    },
+    {
       "code": "not_found.run",
       "httpStatus": 404
     },
@@ -1167,6 +1390,16 @@
     {
       "code": "conflict.slug_taken",
       "httpStatus": 409
+    },
+    {
+      "code": "capacity.no_pods",
+      "httpStatus": 503,
+      "retryable": true
+    },
+    {
+      "code": "internal.unavailable",
+      "httpStatus": 503,
+      "retryable": true
     },
     {
       "code": "internal.error",

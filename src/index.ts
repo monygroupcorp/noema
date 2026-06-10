@@ -54,7 +54,7 @@ import { terminatePod, listRunPodPods } from './crystal/terminatePod.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
 import { MongoHospitium } from './crystal/MongoHospitium.js'
 import { startIdleReaper } from './crystal/idleReaper.js'
-import { startStudioBilling } from './crystal/StudioBilling.js'
+import { startCensus } from './crystal/Census.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { MongoConsuetudinum } from './crystal/MongoConsuetudinum.js'
 import { MongoFundamentorum } from './crystal/MongoFundamentorum.js'
@@ -294,7 +294,10 @@ async function main(): Promise<void> {
       runpodR2: RUNPOD_R2,
       runpodWarmTtlMs: RUNPOD_WARM_TTL_MS,
       ...(fakeWarmFactory ? { warmFactory: fakeWarmFactory } : {}),
-      ...(installCoordinator ? { admitWarm: (m: Materia, models: Array<{ id?: string }>) => installCoordinator.ensureForGen(m, models) } : {}),
+      ...(installCoordinator ? {
+        admitWarm: (m: Materia, models: Array<{ id?: string }>) => installCoordinator.ensureForGen(m, models),
+        installLive: (m: Materia, ids: string[]) => installCoordinator.installLive(m, ids),
+      } : {}),
     } : {}),
     ...(openaiClient ? { openaiClient } : {}),
     ...(embed ? { embed } : {}),
@@ -407,38 +410,39 @@ async function main(): Promise<void> {
   const tgBot = new Telegraf(BOT_TOKEN as string)
   const identityResolver = new TelegramIdentityResolver(ring)
 
-  // `/arm` Start — provision a warm studio (no gen) with the chosen loadout. Fake mode parks a
-  // warm Materia directly (the loadout = installedModels); the real provision-only path
-  // (SecurePodClient provision+park, Part A real) is wired here when DEV_FAKE_POD is off.
-  const provisionStudio = process.env.DEV_FAKE_POD
-    ? async (opts: { models: Array<{ intellaId: string }>; runtime?: string; warmMs?: number }) => {
-        const podId = `studio-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-        const installedModels = opts.models.map(m => m.intellaId)
-        const runtime = opts.runtime ?? 'ComfyUI'
-        const imageRef = runtime === 'llama.cpp' ? 'ghcr.io/ggml-org/llama.cpp:server-cuda' : 'runpod/pytorch:2.4.0-cuda12.4'
-        await materiae.create({
-          genus: 'runpod', externusId: podId, gpu: 'RTX 4090', vramGb: 24, ramGb: 32,
-          imageRef, runtime, impetusPerSecond: 0n, status: 'idle',
-          warmUntil: new Date(Date.now() + (opts.warmMs ?? RUNPOD_WARM_TTL_MS)), bootCostImpetus: 0n,
-          ...(installedModels.length ? { installedModels } : {}),
-        }).catch(err => { log.warn('fake studio provision failed', { error: String(err) }); return undefined })
-        return { podId, gpuType: 'RTX 4090', costPerHr: 0.69, provisionMs: 20_000 }
+  // `/arm` Start — lease a warm studio (no gen) for the host via the Conductor (ADR-0006).
+  // The Conductor is the single studio-lifecycle anchor: it provisions the Materia, binds a
+  // Hospitium keyed by the host (so a studio is never host-less), installs the loadout live,
+  // and opens a budgeted Modo. The adapter supplies the host AuctorKey + the session budget
+  // (the host's current balance — Census drains the studio when spend crosses it). Present in
+  // both fake and real mode (the pod client doubles as the Procurator); absent → no Start.
+  const provisionStudio = ring.conductor
+    ? async (
+        auctor: AuctorKey,
+        opts: { models: Array<{ intellaId: string }>; runtime?: string; warmMs?: number },
+        onStage?: StudioStageCb,
+      ) => {
+        const budget = await ring.signorum.balance(auctor).catch(() => 0n)
+        const handle = await ring.conductor!.conducere(
+          auctor,
+          {
+            budget,
+            models: opts.models.map(m => m.intellaId),
+            ...(opts.runtime ? { runtime: opts.runtime } : {}),
+            ...(opts.warmMs ? { warmMs: opts.warmMs } : {}),
+          },
+          onStage,
+        ).catch(err => { log.warn('studio lease failed', { error: String(err) }); return null })
+        const p = handle?.provision
+        if (!p) return null
+        return {
+          podId: p.podId,
+          ...(p.gpuType ? { gpuType: p.gpuType } : {}),
+          ...(p.costPerHr !== undefined ? { costPerHr: p.costPerHr } : {}),
+          provisionMs: p.provisionMs,
+        }
       }
-    : (runpodClient instanceof SecurePodClient
-        // Real provision-only studio (Part A): SecurePodClient.provisionStudio provisions + parks a
-        // warm pod (no gen); the Standby picks then download live onto it via the InstallCoordinator.
-        ? async (opts: { models: Array<{ intellaId: string }>; runtime?: string; warmMs?: number }, onStage?: StudioStageCb) => {
-            const res = await runpodClient.provisionStudio({ ...(opts.runtime ? { runtime: opts.runtime } : {}), ...(opts.warmMs ? { warmMs: opts.warmMs } : {}) }, onStage)
-              .catch(err => { log.warn('studio provision failed', { error: String(err) }); return null })
-            if (!res) return null
-            if (opts.models.length && installCoordinator) {
-              const pods = await materiae.findActive().catch(() => [])
-              const m = pods.find(p => p.externusId === res.podId)
-              if (m) await installCoordinator.installLive(m, opts.models.map(x => x.intellaId)).catch(() => {})
-            }
-            return res
-          }
-        : undefined)
+    : undefined
 
   // Live model-apply (Part B / B3) — Mod • Add on a warm studio installs onto the running pod.
   // Routes through the shared InstallCoordinator (built above) so it serializes per pod with the
@@ -517,6 +521,7 @@ async function main(): Promise<void> {
     materiae: ring.materiae,
     actumIndex: ring.actumIndex,
     consuetudinum,
+    ...(ring.conductor ? { conductor: ring.conductor } : {}),
   })
   // Identified-user acceptors → animaId via a `'web'`/`'api'` persona (create-on-sight).
   // JWT (env secret) + API-key (read-only users lookup) + anon {commitment} are live; web3
@@ -578,17 +583,19 @@ async function main(): Promise<void> {
     log.warn('idle-pod reaper started (fake mode)', { warmTtlMs: RUNPOD_WARM_TTL_MS })
   }
 
-  // Studio billing tick — the host's continuous per-time cost meter. Every 60s
-  // walks active Hospitia and debits the host secondsSinceLastTick × impetusPerSecond.
-  // Without this, hosts pay nothing for studios sitting warm — the platform absorbs
-  // the underlying compute cost. See docs/plans/2026-05-24-studio-billing-tick-sprint.md.
-  startStudioBilling({
+  // Census — the host's continuous per-time cost reckoning (studio billing tick).
+  // Every 60s walks active Hospitia and debits the host secondsSinceLastTick ×
+  // impetusPerSecond. Without this, hosts pay nothing for studios sitting warm — the
+  // platform absorbs the underlying compute cost. See
+  // docs/plans/2026-05-24-studio-billing-tick-sprint.md.
+  startCensus({
     hospitia: ring.hospitia,
     materiae,
     signorum: ring.signorum,
     nexus,
+    modos: ring.modos,
   }, 60_000)
-  log.info('studio billing started', { tickMs: 60_000 })
+  log.info('census started', { tickMs: 60_000 })
 
   app.use('/internal', createLiveRouter(INTERNAL_SECRET))
   app.use('/internal/analytics', createAnalyticsRouter(wideStore, INTERNAL_SECRET))

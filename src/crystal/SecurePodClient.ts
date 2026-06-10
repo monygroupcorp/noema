@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { RunPodClient, ProvisioningContext } from './RunPodCursor.js'
+import type { Procurator, StudioStageCb, StudioProvision } from './Procurator.js'
 import type { Materia, MateriaStore } from '../types/materia.js'
 import type { HospitiumStore } from '../types/hospitium.js'
 import type { ActumExecutio } from '../types/actum.js'
@@ -107,11 +108,11 @@ function sleep(ms: number): Promise<void> {
 // SecurePodClient
 // ---------------------------------------------------------------------------
 
-/** Stage callback for `/arm` provisioning — lets the bulletin stream live stages (pod-locked →
- *  bootstrapping → comfy-ready) without an actum/trace, at parity with the /make gen path. */
-export type StudioStageCb = (stage: string, info?: import('../lib/bus.js').StageInfo) => void
+// `StudioStageCb` (the `/arm` provisioning stage callback) is the Procurator role's
+// type — re-exported here for the existing importers.
+export type { StudioStageCb } from './Procurator.js'
 
-export class SecurePodClient implements RunPodClient {
+export class SecurePodClient implements RunPodClient, Procurator {
   constructor(
     private readonly config: SecurePodConfig,
     private readonly sshFactory: (info: SshInfo) => SshTransportLike,
@@ -238,7 +239,7 @@ export class SecurePodClient implements RunPodClient {
   async provisionStudio(
     opts: { runtime?: string; warmMs?: number; provisioningContext?: ProvisioningContext } = {},
     onStage?: StudioStageCb,
-  ): Promise<{ podId: string; gpuType?: string; costPerHr?: number; provisionMs: number } | null> {
+  ): Promise<StudioProvision | null> {
     const imageName = this.config.imageName ?? 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
     let prov: { podId: string; sshInfo: SshInfo; provisionMs: number }
     try {

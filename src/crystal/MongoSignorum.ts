@@ -35,6 +35,11 @@ export class MongoSignorum implements Signorum {
     return docs.reduce((sum, d) => sum + BigInt(d.valor as string), 0n)
   }
 
+  async sessionBudget(modoId: string): Promise<bigint> {
+    const docs = await this.col.find({ forma: 'tessera', modoId, status: 'valid' }).toArray()
+    return docs.reduce((sum, d) => sum + BigInt(d.valor as string), 0n)
+  }
+
   async lock(signaIds: string[], actumId: string): Promise<void> {
     await this.col.updateMany(
       { id: { $in: signaIds }, status: 'valid' },

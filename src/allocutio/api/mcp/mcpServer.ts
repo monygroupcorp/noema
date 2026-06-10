@@ -18,6 +18,8 @@ import {
   saveFlowTool,
   bindTool,
   statusTool,
+  provisionStudioTool,
+  listStudiosTool,
 } from './tools.js'
 
 export function buildMcpServer(api: CrystalApi, auctor: AuctorKey | undefined): McpServer {
@@ -146,6 +148,32 @@ export function buildMcpServer(api: CrystalApi, auctor: AuctorKey | undefined): 
       inputSchema: {},
     },
     (_args) => statusTool(api, auctor),
+  )
+
+  server.registerTool(
+    'provision_studio',
+    {
+      description: 'Lease a hosted warm studio (a persistent GPU session) for fast, repeated runs. ' +
+        'Returns a studioId to pass as run_flow.studioId. maxImpetus is the session budget — the ' +
+        'studio drain-terminates at the cap. Discover fundamentumId via list_fundamenta, models via list_models.',
+      inputSchema: {
+        fundamentumId: z.string().optional(),
+        models: z.array(z.string()).optional(),
+        warmMs: z.number().optional(),
+        maxImpetus: z.union([z.string(), z.number()]).optional(),
+        runtime: z.string().optional(),
+      },
+    },
+    (args) => provisionStudioTool(api, auctor, args),
+  )
+
+  server.registerTool(
+    'list_studios',
+    {
+      description: "List the authenticated caller's live hosted studios (studioId, status, budget, burn rate).",
+      inputSchema: {},
+    },
+    (_args) => listStudiosTool(api, auctor),
   )
 
   // ── Resources ─────────────────────────────────────────────────────────────

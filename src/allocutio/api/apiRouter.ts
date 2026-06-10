@@ -16,7 +16,7 @@ import express, { type Request, type Response, type Router } from 'express'
 
 import type { Run } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
-import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView } from './CrystalApi.js'
+import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView } from './CrystalApi.js'
 import { ApiError, Errors } from './errors.js'
 import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
 import { API_CONTRACT } from './apiContract.js'
@@ -44,6 +44,8 @@ export interface ApiFacade {
   saveFlow(auctor: AuctorKey, opts: SaveFlowOpts): Promise<{ id: string }>
   bind(auctor: AuctorKey, verb: string, modusId: string): Promise<{ verb: string; modusId: string }>
   status(auctor: AuctorKey): Promise<StatusView>
+  provisionStudio(auctor: AuctorKey, opts: ProvisionStudioOpts): Promise<StudioView>
+  listStudios(auctor: AuctorKey): Promise<StudioView[]>
 }
 
 /** The slice of IdentityResolver this router needs. */
@@ -241,6 +243,33 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     wrap(async (req, res) => {
       const auctor = await auth(req)
       res.json(await api.status(auctor))
+    }),
+  )
+
+  // POST /v1/studios — lease a hosted studio (auth required). The maxImpetus cap IS the
+  // session budget — Census drain-terminates the studio at the ceiling (the watchdog).
+  router.post(
+    '/studios',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      const { fundamentumId, models, warmMs, maxImpetus, runtime } = req.body ?? {}
+      const studio = await api.provisionStudio(auctor, {
+        ...(fundamentumId ? { fundamentumId } : {}),
+        ...(Array.isArray(models) ? { models } : {}),
+        ...(warmMs !== undefined ? { warmMs } : {}),
+        ...(maxImpetus !== undefined ? { maxImpetus } : {}),
+        ...(runtime ? { runtime } : {}),
+      })
+      res.status(201).json({ studio })
+    }),
+  )
+
+  // GET /v1/studios — the caller's live studios (auth required).
+  router.get(
+    '/studios',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      res.json({ studios: await api.listStudios(auctor) })
     }),
   )
 

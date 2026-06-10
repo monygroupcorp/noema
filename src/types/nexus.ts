@@ -83,7 +83,7 @@ export interface SignumEventPayload {
     hostKey: HostKey
     /**
      * Impetus to debit, **already clamped to the host's available balance** by the
-     * caller (StudioBilling ticker). The hook is pure — it cannot read balance —
+     * caller (Census ticker). The hook is pure — it cannot read balance —
      * so clamping happens upstream. The ticker also decides whether a shortfall
      * (clamped < requested) should engage drainOnly mode on the Materia.
      */
