@@ -127,10 +127,38 @@ days** are an explicit offering — you cannot hold a connection open for that, 
 
 A `?wait=<ms>` long-poll (capped) is optional sugar for the warm-pod fast case. MCP: the invoke tool returns the
 handle; a `getRun` tool + a run resource observe it; progress notifications where the client supports them.
-**Failures are run *states*, not HTTP errors:** a gen that fails → `200` + `status:failed, failure:{code}`;
-request-level problems (unknown modus, invalid aditus, insufficient signa) → `4xx` + `{error:{code}}`. Agents
-branch on a stable `code`, never prose. `Idempotency-Key` dedupes retried invokes. **SSE is the live spine;
-WebSocket is an optional later upgrade.**
+`Idempotency-Key` dedupes retried invokes. **SSE is the live spine; WebSocket is an optional later upgrade.**
+
+## Error taxonomy
+
+**Two planes, two code-spaces** (different recovery — never conflate):
+- **Request errors** — the *call* was bad/unauthorized/un-admittable → HTTP `4xx/5xx` +
+  `{ error: { code, message, retryable?, retryAfter?, details? } }`.
+- **Run failures** — the call *succeeded*, a run was created, then it *failed during execution* → HTTP `200` +
+  `status:"failed", failure:{ code, message, retryable?, details? }`.
+
+Discipline: validate everything cheap at **admission** (modus exists, `aditus` matches schema, fundament/models
+resolve, signa sufficient) → those are *request* errors with fast feedback; the run-failure space is reserved
+for what can only fail at execution (pod crash, OOM, watchdog, the gen itself). Every error carries a **stable
+string `code`** (agents branch on it, never prose/status) and a **`retryable`** flag (+ `retryAfter`).
+
+**Request errors** (`category.specific`): `auth.{missing,invalid,forbidden}` (401/403); `input.{malformed,
+invalid_aditus,invalid_option}` (400/422); `not_found.{flow,fundamentum,model,run,studio}` (404);
+`economy.insufficient_signa` (**402** — `details.required/available`), `economy.cap_too_low` (422);
+`capacity.{no_pods,economy_unavailable}` (503, **retryable** + `retryAfter`), `capacity.studio_unavailable` (409);
+`conflict.{run_terminal,idempotency_mismatch}` (409); `rate.limited` (429, **retryable**);
+`internal.{error,unavailable}` (500/503, retryable).
+
+**Run failures** (`200` + `status:failed`): `run.pod_failed` (retry, fresh pod), `run.timeout` (retry/raise
+limit), `run.cap_exceeded` (retry with higher `maxImpetus` — the watchdog killed it at the cap), `run.oom`
+(no — bigger `gpuClass`/smaller model), `run.execution_error` (inspect `details`), `run.cancelled`, `run.expired`
+(retry — reaper recovered it).
+
+**Stability:** codes are **append-only, never repurposed** — part of the API contract, emitted into the generated
+spec + `docs/api/errors.md`, so the drift-check guards them like everything else. **MCP mapping:** a request error
+= the tool call errors (`isError` + structured `code`); a run failure = the tool call **succeeds** (returns a run
+handle) and the run later reports `failed` — same two-plane split, so an agent never confuses a bad call with a
+failed gen.
 
 ## Execution strategy & modes (the platform's modes of use)
 
