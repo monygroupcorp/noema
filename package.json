@@ -12,8 +12,9 @@
     "test:runpod": "node --test tests/unit/runpod/*.test.js tests/unit/workflow/*.test.js",
     "test:crystal": "./scripts/run-with-env.sh npx tsx --test 'tests/unit/crystal/*.test.ts' 'tests/unit/crystal/**/*.test.ts' 'tests/unit/lib/**/*.test.ts' 'tests/unit/api/**/*.test.ts' 'tests/unit/analytics/**/*.test.ts'",
     "dashboard": "node scripts/dashboard.js",
+    "gen:api-docs": "npx tsx scripts/gen-api-docs.ts",
     "typecheck": "tsc --noEmit",
-    "test:hermetic": "npx tsx --test 'tests/unit/allocutio/**/*.test.ts' 'tests/unit/architecture/**/*.test.ts' 'tests/unit/flow/ExecuteFlow.test.ts' 'tests/unit/flow/FlowRouter.test.ts' 'tests/unit/flow/FlowContextStore.test.ts' 'tests/unit/crystal/workflowTemplates.test.ts' 'tests/unit/crystal/WorkflowTemplateRegistry.test.ts' 'tests/unit/crystal/Compiler.sd15.test.ts' 'tests/unit/crystal/InstallCoordinator.test.ts' 'tests/unit/crystal/ModelInstaller.test.ts' 'tests/unit/crystal/deriveSavedModus.test.ts' 'tests/unit/crystal/MemoryConsuetudinum.test.ts' 'tests/unit/crystal/inferFamilia.test.ts' 'tests/unit/crystal/MemoryFundamentorum.test.ts' 'tests/unit/execution/dispatchInceptio.test.ts'"
+    "test:hermetic": "npx tsx --test 'tests/unit/allocutio/**/*.test.ts' 'tests/unit/architecture/**/*.test.ts' 'tests/unit/flow/ExecuteFlow.test.ts' 'tests/unit/flow/FlowRouter.test.ts' 'tests/unit/flow/FlowContextStore.test.ts' 'tests/unit/crystal/workflowTemplates.test.ts' 'tests/unit/crystal/WorkflowTemplateRegistry.test.ts' 'tests/unit/crystal/Compiler.sd15.test.ts' 'tests/unit/crystal/InstallCoordinator.test.ts' 'tests/unit/crystal/ModelInstaller.test.ts' 'tests/unit/crystal/deriveSavedModus.test.ts' 'tests/unit/crystal/MemoryConsuetudinum.test.ts' 'tests/unit/crystal/inferFamilia.test.ts' 'tests/unit/crystal/MemoryFundamentorum.test.ts' 'tests/unit/execution/dispatchInceptio.test.ts' 'tests/unit/allocutio/api/apiDocsDrift.test.ts'"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.840.0",

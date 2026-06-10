@@ -1,0 +1,575 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Noema Crystal API",
+    "version": "v1",
+    "description": "The crystal `/v1` REST surface: run flows, discover flows, observe runs. This document is generated from the in-code API contract — do not edit by hand."
+  },
+  "servers": [
+    {
+      "url": "/v1"
+    }
+  ],
+  "paths": {
+    "/runs": {
+      "post": {
+        "summary": "Invoke a flow and return its run handle.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "object",
+                      "description": "The public projection of a run (Actum). JSON-safe and stable.",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "The run identifier."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "running",
+                            "complete",
+                            "failed"
+                          ],
+                          "description": "The run lifecycle status."
+                        },
+                        "modusId": {
+                          "type": "string",
+                          "description": "The flow (modus) this run executes."
+                        },
+                        "exitus": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "description": "The outputs produced by the run — present only when available."
+                        },
+                        "failure": {
+                          "type": "object",
+                          "description": "Populated only when the run failed.",
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ]
+                        },
+                        "cost": {
+                          "type": "string",
+                          "description": "Impetus cost, serialised as a string."
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When the run started, as an ISO-8601 string."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "status",
+                        "modusId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "run"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Invoke a flow. Provide a target (one of modusId or verb) and the inputs (aditus). Anonymous callers may carry a `commitment`; web3 callers a `web3` bundle.",
+                "properties": {
+                  "modusId": {
+                    "type": "string",
+                    "description": "Explicit flow id to run (wins over verb)."
+                  },
+                  "verb": {
+                    "type": "string",
+                    "description": "A canon verb to resolve to a flow."
+                  },
+                  "aditus": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "The flow's inputs, keyed per its input JSON-Schema (see GET /v1/flows/:id)."
+                  },
+                  "pinnedModels": {
+                    "type": "array",
+                    "description": "Optional per-run model pins.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "computeStrategy": {
+                    "type": "string",
+                    "description": "Optional compute-strategy override."
+                  },
+                  "gpuClass": {
+                    "type": "string",
+                    "description": "Optional GPU-class override."
+                  },
+                  "commitment": {
+                    "type": "string",
+                    "description": "Anonymous arcanum spend commitment (auth)."
+                  },
+                  "web3": {
+                    "type": "object",
+                    "description": "A web3 signature bundle (auth).",
+                    "properties": {
+                      "address": {
+                        "type": "string"
+                      },
+                      "signature": {
+                        "type": "string"
+                      },
+                      "nonce": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "address",
+                      "signature",
+                      "nonce"
+                    ]
+                  }
+                },
+                "required": [
+                  "aditus"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}": {
+      "get": {
+        "summary": "Fetch a run by id (poll for completion).",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "object",
+                      "description": "The public projection of a run (Actum). JSON-safe and stable.",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "The run identifier."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "running",
+                            "complete",
+                            "failed"
+                          ],
+                          "description": "The run lifecycle status."
+                        },
+                        "modusId": {
+                          "type": "string",
+                          "description": "The flow (modus) this run executes."
+                        },
+                        "exitus": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "description": "The outputs produced by the run — present only when available."
+                        },
+                        "failure": {
+                          "type": "object",
+                          "description": "Populated only when the run failed.",
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ]
+                        },
+                        "cost": {
+                          "type": "string",
+                          "description": "Impetus cost, serialised as a string."
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When the run started, as an ISO-8601 string."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "status",
+                        "modusId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "run"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/flows": {
+      "get": {
+        "summary": "List the runnable flows (discovery).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "flows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "nomen": {
+                            "type": "string",
+                            "description": "The flow display name."
+                          },
+                          "versio": {
+                            "type": "string",
+                            "description": "The flow version."
+                          },
+                          "categoria": {
+                            "description": "An optional catalog tag."
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "nomen",
+                          "versio"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "flows"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/flows/{id}": {
+      "get": {
+        "summary": "Describe one flow's input/output JSON-Schema (discovery).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A flow's JSON-Schema description — read this before invoking; never guess inputs.",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "nomen": {
+                      "type": "string"
+                    },
+                    "versio": {
+                      "type": "string"
+                    },
+                    "input": {
+                      "type": "object",
+                      "description": "The flow's input JSON-Schema (the shape of `aditus`).",
+                      "additionalProperties": true
+                    },
+                    "output": {
+                      "type": "object",
+                      "description": "The flow's output JSON-Schema — present when the flow declares one.",
+                      "additionalProperties": true
+                    },
+                    "categoria": {
+                      "description": "An optional catalog tag."
+                    },
+                    "fundamentumId": {
+                      "description": "An optional substrate reference."
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "nomen",
+                    "versio",
+                    "input"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Run": {
+        "type": "object",
+        "description": "The public projection of a run (Actum). JSON-safe and stable.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The run identifier."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "complete",
+              "failed"
+            ],
+            "description": "The run lifecycle status."
+          },
+          "modusId": {
+            "type": "string",
+            "description": "The flow (modus) this run executes."
+          },
+          "exitus": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The outputs produced by the run — present only when available."
+          },
+          "failure": {
+            "type": "object",
+            "description": "Populated only when the run failed.",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          },
+          "cost": {
+            "type": "string",
+            "description": "Impetus cost, serialised as a string."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the run started, as an ISO-8601 string."
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "modusId"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "description": "The uniform request-error envelope.",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "A stable `category.specific` code to branch on."
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean",
+                "description": "Whether the same call may succeed if retried."
+              },
+              "retryAfter": {
+                "type": "number",
+                "description": "Suggested back-off in seconds."
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      }
+    }
+  },
+  "x-error-codes": [
+    {
+      "code": "auth.missing",
+      "httpStatus": 401
+    },
+    {
+      "code": "auth.invalid",
+      "httpStatus": 401
+    },
+    {
+      "code": "auth.forbidden",
+      "httpStatus": 403
+    },
+    {
+      "code": "input.malformed",
+      "httpStatus": 400
+    },
+    {
+      "code": "input.invalid_aditus",
+      "httpStatus": 422
+    },
+    {
+      "code": "not_found.flow",
+      "httpStatus": 404
+    },
+    {
+      "code": "not_found.run",
+      "httpStatus": 404
+    },
+    {
+      "code": "economy.insufficient_signa",
+      "httpStatus": 402
+    },
+    {
+      "code": "internal.error",
+      "httpStatus": 500,
+      "retryable": true
+    }
+  ]
+}
