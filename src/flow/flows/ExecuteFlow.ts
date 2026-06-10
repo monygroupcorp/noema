@@ -6,7 +6,7 @@ import type { Signorum } from '../../types/significandi.js'
 import type { Actorum, ActumCompletor, Cursorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
 import { classifyError } from '../../lib/classifyError.js'
-import { withTrace, getTrace, makeTraceContext } from '../../lib/trace.js'
+import { dispatchInceptio } from '../../execution/dispatchInceptio.js'
 
 // ---------------------------------------------------------------------------
 // ExecuteFlow state types
@@ -448,12 +448,12 @@ export class ExecuteFlow implements Flow {
   // ---------------------------------------------------------------------------
 
   private async _submit(ctx: FlowContext, state: ExecuteFlowState): Promise<Step | Resolution> {
-    const { inceptor, modorum, cursorum, completor } = this.deps
-
-    // 1. Initiate — balance check + lock signa + create Actum. Pinned models (Mod • → Add)
-    // ride a first-class field alongside shareTokenHint → stored on the Actum → unioned into
-    // spec.models by the Compiler. (Not smuggled through aditus — validateAditus would strip it.)
-    const actum = await inceptor.initiate({
+    // The neutral initiate→dispatch core lives in `dispatchInceptio` so any facade
+    // (REST/MCP/…) reuses the exact same logic. Pinned models (Mod • → Add) ride a
+    // first-class field alongside shareTokenHint → stored on the Actum → unioned into
+    // spec.models by the Compiler. (Not smuggled through aditus — validateAditus would
+    // strip it.) The actumIndex recording lives inside dispatchInceptio.
+    const { actum, exitus } = await dispatchInceptio(this.deps, {
       modusId: state.modusId!,
       aditus: state.aditus,
       by: ctx.identity,
@@ -464,50 +464,14 @@ export class ExecuteFlow implements Flow {
 
     state.actumId = actum.id
 
-    // 1b. ActumIndex — both identified and anonymous runs append to the per-
-    // AuctorKey aggregation so `/status` can list YOUR GENS for either side.
-    // Indexing a commitment doesn't leak: every spend already carries the
-    // commitment as the arcanum signum's `testis`. The remove site is the
-    // completion webhook (terminal status clears the entry).
-    if (this.deps.actumIndex) {
-      const branch = 'animaId' in ctx.identity
-        ? { animaId:    ctx.identity.animaId }
-        : { commitment: ctx.identity.commitment }
-      void this.deps.actumIndex.record({
-        ...branch,
-        actumId:  actum.id,
-        modusId:  actum.modusId,
-        createdAt: actum.inceptum,
-      }).catch(() => {})
-    }
-
-    // 2. Resolve modus and cursor
-    const modus = await modorum.find(actum.modusId, actum.modusVersiono)
-    if (!modus) throw new Error(`Modus '${actum.modusId}' not found after initiation`)
-
-    const cursor = cursorum.resolve(modus)
-
-    // 3. Run — propagate identity + actum id through the trace context so the
-    // cursor (and anything downstream) can read them without putting identity on
-    // any durable schema (Materia/Modo/Actum stay identity-blind). The auctor key
-    // is a union — identified (animaId) or anonymous arcanum (commitment); we
-    // carry both sides as separate optional fields, at most one set.
-    const animaId    = 'animaId'    in ctx.identity ? ctx.identity.animaId    : undefined
-    const commitment = 'commitment' in ctx.identity ? ctx.identity.commitment : undefined
-    const cursorResult = await withTrace(
-      makeTraceContext({ ...getTrace(), animaId, commitment, actumId: actum.id }),
-      () => cursor.run(actum),
-    )
-
-    if (cursorResult.kind === 'sync') {
-      // 4a. Sync: complete immediately
-      const completed = await completor.complete(actum, cursorResult.exitus)
+    if (exitus !== undefined) {
+      // Sync: dispatch already completed the actum → render the result.
       state.step = 'RESULT'
-      state.result = completed.exitus ?? {}
+      state.result = exitus
       const opts = this._buildReplyOpts(state, state.result)
       return this._buildResultStep(state.result, actum.id, opts)
     } else {
-      // 4b. Async: set waiting state
+      // Async: set waiting state — the completion webhook finishes it.
       state.step = 'AWAITING_COMPLETION'
       ctx.pendingActumId = actum.id
       return {
