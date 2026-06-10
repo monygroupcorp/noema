@@ -37,10 +37,17 @@
   `conflict.slug_taken`); `bind` (`PUT /v1/me/bindings/:verb` + MCP `bind`) via the owner-keyed `Consuetudinum`;
   `status` (`GET /v1/me/status` + MCP `status`) via `aggregateStatus`, JSON-projected. Added ring deps
   `hospitia` + `materiae`. Contract/docs/drift updated. Hermetic-tested.
-- **Phase 4c — PENDING** (GPU-real / deep-rail, staging-validated only): studio provisioning (`POST /v1/studios`
-  + studioId-targeted runs via `Inceptio.modoId` over the existing `provisionStudio` hook) and the **mid-run
-  watchdog** that enforces `maxImpetus` *during* execution (ties to studio billing / idle reap). These can't be
-  hermetic — they need a live pod; validate on staging like the rest of the GPU rail.
+- **Phase 4c — PARTIAL** (commit `11a15039`): **studioId-targeted runs DONE** — `invokeFlow`/`run_flow` take a
+  `studioId` → `Inceptio.modoId` (the rail already routes it); hermetic-tested. Also threaded `maxImpetus`
+  through MCP `run_flow`. **Still pending (GPU-real, NOT a clean fan-out):**
+  - **Studio provisioning** (`POST /v1/studios`) needs a *neutral ring-level studio-open service* composing
+    `TesseraCursor.openModo` (Modo + budget tessera) + the `provisionStudio` hook (Materia/pod) + `Hospitium`
+    (owner attribution — how `status` finds your studios) + billing. Today only the chatId-coupled
+    `BulletinManager` does this — i.e. this is the BulletinManager decomposition the original plan flagged.
+  - **Mid-run watchdog** — DE-RISKED: `openModo` takes a budget tessera and `StudioBilling` already
+    drain-terminates a session on budget exhaustion, so opening a studio with `budget = maxImpetus` IS the
+    cap. No new subsystem — just wire `maxImpetus → tessera budget` once provisioning exists. The harder
+    per-single-cold-run mid-flight kill (non-studio) is a separate rail feature, lower priority.
 
 ## Context / why
 
