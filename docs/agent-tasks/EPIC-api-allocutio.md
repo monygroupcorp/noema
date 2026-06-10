@@ -22,8 +22,9 @@ operations. We do NOT mirror the bot's interaction model (tap-an-affordance, mor
 
 A single **agent-shaped facade** over the execution rail + stores, in crystal vocabulary. It has two halves:
 *discovery* (so the agent learns what's choosable) and *action*.
-- **Discovery:** `listFlows()` / `describeFlow(id) → tool schema`, `listFundamenta()`, `listModels(filter)`,
-  `resolveLora(trigger, familia)`, `listImages()` / runtimes. These feed the agent the valid values.
+- **Discovery:** `listFlows()` / `describeFlow(id) → tool schema`, `listFundamenta()`,
+  `listModels(filter)` (the one filterable catalog — see below; subsumes the old `resolveLora`),
+  `listImages()` / runtimes. These feed the agent the valid values.
 - **Action:** `invokeFlow(auctor, modusId|verb, aditus, opts) → {actumId}`, `getRun(id)`,
   `provisionStudio(auctor, {fundamentumId, models?, warm?})`, `saveFlow(auctor, {fromRun, name, affixes, promptMode})`,
   `rerun`, `rate`, `bind`, `status`.
@@ -54,6 +55,27 @@ the domain is bounded, the input schema carries the values inline:
   agent reading the tool schema sees the allowed values without a second guess. This is the hard requirement:
   no operation may expect an opaque id the agent has no way to enumerate.
 
+## Models discovery (one filterable resource, not a `resolveLora` verb)
+
+The whole categories→list→detail→search→by-trigger picker collapses into **one filterable list**:
+`GET /v1/models` (alias `/v1/loras` ≡ `?genus=lora`), filterable on every axis an agent might arrive with:
+
+| Filter | Meaning | Backed by |
+|---|---|---|
+| `genus` | `lora` \| `checkpoint` \| `vae` \| `clip` \| … | `Intellarum.list(genus)` |
+| `fundamentum` *or* `familia` | "what works on this base/studio" — a LoRA's compat key is `familia`; `fundamentum=flux-comfyui` resolves to its familia | `triggerMap(familia)` / familia filter |
+| `trigger` | match a trigger word (the old `resolveLora`, now a filter) | `findByTrigger(trigger, familia)` |
+| `q` | free text over nomen / slug / trigger / **description** | catalog substring search (+ description) |
+| `page`/`limit` | pagination | — |
+
+Each result is the model's card — `{ intellaId, nomen, genus, familia, base, trigger, sizeGb, description,
+sourceUri, auctor }` — so the agent can *decide*, not just enumerate.
+
+**Discovery ≠ application** (the skill must teach this): listing a LoRA says it *exists*; using it happens at
+invoke time, two ways — (1) **prompt**: drop the discovered `trigger` into `aditus.prompt` and the Compiler's
+`loraResolver` auto-resolves it (familia-scoped) — the same path the bot uses; (2) **explicit**:
+`pinnedModels: [intellaId]` on the run forces it regardless of prompt. The models endpoint is purely discovery.
+
 ## The collapse (Telegram surface → one API op)
 
 | Telegram (medium-constrained) | Agent API |
@@ -63,7 +85,7 @@ the domain is bounded, the input schema carries the values inline:
 | Delivery menu (info/rate/wrench→rerun/tweak/save) | `GET /v1/runs/:id` (+ stats); `POST /v1/runs/:id:rerun`; `POST …/rating`; `POST /v1/flows {fromRun}` |
 | Save-as force-reply sequence (name→review→toggle→confirm) | `POST /v1/flows {fromRun, name, affixes, promptMode}` — one call |
 | `/arm` wizard (preset→detail→image→config→picker→start) | discover the choices: `GET /v1/fundamenta`, `GET /v1/images`/runtimes — then one shot `POST /v1/studios {fundamentumId, models?, warmMs?}` |
-| Mod• picker (categories→list→detail→page→search→trigger) | `GET /v1/models?familia=&kind=&q=` ; `GET /v1/loras?trigger=` (the picker *was* browse+filter; here it's a query) |
+| Mod• picker (categories→list→detail→page→search→trigger) | one filterable `GET /v1/models?genus=&fundamentum=&trigger=&q=` (see Models discovery) — browse+filter becomes a query |
 | Bulletin HUD (journal/live line/affordances/submenus) | `GET /v1/runs/:id/stream` (SSE) ; `GET /v1/studios/:id` |
 | `/status` HUD | `GET /v1/me/status` |
 | `/bind` | `PUT /v1/me/bindings/:verb {modusId}` |
@@ -203,7 +225,8 @@ only if the conceptual model moved; the drift-check gates the PR. No phase is "d
 4. **Execution strategy + studios + remaining discovery (capability-parity close-out).** The two targets
    (ephemeral run options + hosted `provisionStudio` with `warmMs`/`gpuClass`/`podPolicy`, `studioId`-targeted
    runs) + `POST /v1/runs/quote` + the `maxImpetus` cap & mid-run watchdog; discovery for `listFundamenta`,
-   `listImages`/runtimes, `listModels`/`resolveLora`; `saveFlow`, `bind`, `status`. *Acceptance:* an agent script
+   `listImages`/runtimes, and the filterable `listModels` (genus/fundamentum/trigger/q); `saveFlow`, `bind`,
+   `status`. *Acceptance:* an agent script
    does the full arc *blind-start* — quote → provision a hosted studio under a cap → discover + describe a flow →
    invoke against the studio → observe (webhook) → rate → save-as — over REST + MCP, never needing an id it
    couldn't enumerate, never exceeding its cap.
