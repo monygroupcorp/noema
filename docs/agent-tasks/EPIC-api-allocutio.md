@@ -25,14 +25,19 @@ A single **agent-shaped facade** over the execution rail + stores, in crystal vo
 - **Discovery:** `listFlows()` / `describeFlow(id) → tool schema`, `listFundamenta()`,
   `listModels(filter)` (the one filterable catalog — see below; subsumes the old `resolveLora`),
   `listImages()` / runtimes. These feed the agent the valid values.
-- **Action:** `invokeFlow(auctor, modusId|verb, aditus, opts) → {actumId}`, `getRun(id)`,
-  `provisionStudio(auctor, {fundamentumId, models?, warm?})`, `saveFlow(auctor, {fromRun, name, affixes, promptMode})`,
-  `rerun`, `rate`, `bind`, `status`.
+- **Action:** `invokeFlow(auctor, modusId|verb, aditus, opts) → Run`, `getRun(id)`, `cancelRun`, `quote`,
+  `provisionStudio(auctor, {fundamentumId, models?, warm?})`,
+  `saveFlow(auctor, {fromRun|fromConfig, name, affixes, promptMode, pinnedModels?})`, `rerun`, `rate`, `bind`,
+  `status`.
+
+These are the facade *methods*; the REST routes and MCP tool names are the **same ops under different wire
+names** — e.g. `invokeFlow` ↔ `POST /v1/runs` ↔ the `run_flow` MCP tool — because both adapters call this one facade.
 
 Both protocol adapters call this one facade:
 
-- **MCP adapter** — flows = MCP tools, catalog = MCP resources. The emerging agent standard; supersedes the
-  legacy MCP/tools surface in `src/api/` with a crystal-native one.
+- **MCP adapter** — a small **verb tool-set** + the catalog as **resources** (NOT a tool per flow — see *MCP
+  layout* below). The emerging agent standard; supersedes the legacy MCP/tools surface in `src/api/` with a
+  crystal-native one.
 - **REST adapter** — resources (`/v1/runs`, `/v1/flows`, `/v1/models`, `/v1/studios`, `/v1/me/...`) with
   self-describing JSON-Schema'd inputs. Any HTTP/agent client works.
 
@@ -82,7 +87,7 @@ invoke time, two ways — (1) **prompt**: drop the discovered `trigger` into `ad
 |---|---|
 | `/make` `/run` `/chat` + interactive aditus gather | `POST /v1/runs {modusId\|verb, aditus, pinnedModels?}` / MCP tool call |
 | Flow card — `Porta`-by-`Porta` panel | the flow's JSON-Schema input, submitted whole |
-| Delivery menu (info/rate/wrench→rerun/tweak/save) | `GET /v1/runs/:id` (+ stats); `POST /v1/runs/:id:rerun`; `POST …/rating`; `POST /v1/flows {fromRun}` |
+| Delivery menu (info/rate/wrench→rerun/tweak/save) | `GET /v1/runs/:id` (+ stats); `POST /v1/runs/:id/rerun`; `POST /v1/runs/:id/rating`; `POST /v1/flows {fromRun}` |
 | Save-as force-reply sequence (name→review→toggle→confirm) | `POST /v1/flows {fromRun, name, affixes, promptMode}` — one call |
 | `/arm` wizard (preset→detail→image→config→picker→start) | discover the choices: `GET /v1/fundamenta`, `GET /v1/images`/runtimes — then one shot `POST /v1/studios {fundamentumId, models?, warmMs?}` |
 | Mod• picker (categories→list→detail→page→search→trigger) | one filterable `GET /v1/models?genus=&fundamentum=&trigger=&q=` (see Models discovery) — browse+filter becomes a query |
