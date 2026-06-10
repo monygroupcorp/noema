@@ -92,6 +92,35 @@ test('rerun/tweak invoke the rerun callback with the presser', async () => {
   assert.deepEqual(calls, [{ actumId: 'a1', presser: '999' }, { actumId: 'a1', presser: '999' }])
 })
 
+test('menuKeyboard badges the gear with the rerun count', () => {
+  assert.ok(menuKeyboard('a1', 'default', '♥', 0).flat().some(b => b.label === '⚙'), 'no badge at 0')
+  assert.ok(menuKeyboard('a1', 'default', '♥', 3).flat().some(b => b.label === '⚙ 3'), 'count shown at 3')
+})
+
+test('rerun snaps back to the default row and badges the gear with the run count', async () => {
+  const s = makeSink()
+  const m = new DeliveryMenu({ sink: s.sink, rerun: async () => {} })
+  m.track('a1', { chatId: 456, messageId: 77, caption: 'pic', isMedia: true })
+
+  await m.handle('a1', 'rerun', { presserUserId: '123', chatId: 456 })
+  // morphs back to the main row (Info / Rate / Wrench), not stuck in the wrench sub-row
+  assert.deepEqual(data(s.markups.at(-1)!.kb), ['dm:info:a1', 'dm:rate:a1', 'dm:wrench:a1'])
+  assert.ok(s.markups.at(-1)!.kb.flat().some(b => b.label === '⚙ 1'), 'gear badged with the run count')
+
+  await m.handle('a1', 'rerun', { presserUserId: '123', chatId: 456 })
+  assert.ok(s.markups.at(-1)!.kb.flat().some(b => b.label === '⚙ 2'), 'the count increments on each rerun')
+})
+
+test('the gear badge survives an info toggle and a wrench → back hop', async () => {
+  const s = makeSink()
+  const m = new DeliveryMenu({ sink: s.sink, acta: { async findById() { return null } }, rerun: async () => {} })
+  m.track('a1', { chatId: 456, messageId: 77, caption: 'pic', isMedia: true })
+  await m.handle('a1', 'rerun', { presserUserId: '123', chatId: 456 })   // count → 1
+  await m.handle('a1', 'wrench', { chatId: 456 })
+  await m.handle('a1', 'back', { chatId: 456 })
+  assert.ok(s.markups.at(-1)!.kb.flat().some(b => b.label === '⚙ 1'), 'back keeps the badge')
+})
+
 test('formatStats is pure and handles a missing actum', () => {
   assert.equal(formatStats(null), 'Stats unavailable.')
 })

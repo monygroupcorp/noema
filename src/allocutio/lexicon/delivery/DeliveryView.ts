@@ -16,7 +16,7 @@ export type MenuState = 'default' | 'rate' | 'wrench'
  *   wrench  → Back / Tweak / Rerun
  * Pure: data only, no platform calls. (`dm:` = delivery-menu callbacks.)
  */
-export function menuKeyboard(actumId: string, state: MenuState, rateGlyph: string = GLYPH.rate): UiKeyboard {
+export function menuKeyboard(actumId: string, state: MenuState, rateGlyph: string = GLYPH.rate, rerunCount = 0): UiKeyboard {
   switch (state) {
     case 'rate':
       return [[
@@ -35,7 +35,9 @@ export function menuKeyboard(actumId: string, state: MenuState, rateGlyph: strin
       return [[
         { label: GLYPH.info,   data: `dm:info:${actumId}` },
         { label: rateGlyph,    data: `dm:rate:${actumId}` },
-        { label: GLYPH.wrench, data: `dm:wrench:${actumId}` },
+        // The gear badges how many times this result has been re-run — the only feedback that a
+        // rerun was accepted (the row morphs back here from the wrench sub-row on each run).
+        { label: rerunCount > 0 ? `${GLYPH.wrench} ${rerunCount}` : GLYPH.wrench, data: `dm:wrench:${actumId}` },
       ]]
   }
 }
