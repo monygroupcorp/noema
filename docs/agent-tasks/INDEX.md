@@ -41,6 +41,14 @@ _None — pick up a Backlog item below and graduate it to a numbered TASK spec._
   pin-vs-open per knob. Revisit when the param-rich flows land.
 
 ## Backlog — Features
+- **[`Conductor` — studio-lifecycle ring anchor](../adr/0006-conductor-studio-lifecycle.md)** — give the
+  studio lifecycle (provision `Materia` + open `Modo` + bind `Hospitium` + meter) **one** crystal-ring verb
+  both adapters call, and rename the plain-English leaks. `Conductor.conducere(auctor, …)` (lessee that
+  leases + assembles; pairs with the existing `Praefectus`/scheduler); `StudioBilling → Census`;
+  `SecurePodClient`/`WarmPodClient` ring role `→ Procurator`. No new noun (a studio *is* a `Modo`); the
+  `maxImpetus` watchdog falls out (budget tessera + `Census` drain). Kills the per-caller re-orchestration
+  drift (the `dispatchInceptio` pattern) + fixes the host-less-studio bug. Unblocks API Phase 4c
+  (`POST /v1/studios`). Decision + scope in ADR-0006.
 - **[Crystal Agent API (MCP + REST)](EPIC-api-allocutio.md)** — an **API-first, agent-idiomatic** surface
   over the crystal: **capability** parity with the Telegram bot, NOT a port of its UI. The Telegram surface
   sprawls because of its medium (inline keyboards + chat → wizards, morphing rows, force-reply); the API has
