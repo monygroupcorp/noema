@@ -83,7 +83,8 @@ analog (e.g. the bulletin's *morphing* — only its *information*, the run's eve
   API is its go-forward, crystal-native replacement. Legacy auth primitives (`jwt.verify`, `/validate-key`,
   `/web3/verify`) are reused only as credential acceptors feeding the resolver.
 - **Net-new:** the facade, the MCP adapter, the REST adapter, `aditusToJsonSchema`, `IdentityResolver`,
-  `BulletinBusProjector` (neutral run-event projection), the SSE endpoint.
+  `BulletinBusProjector` (neutral run-event projection), the SSE endpoint, the contract-first route/tool
+  schemas + the `gen:api-docs` generator + the CI drift-check + the SKILL.md.
 
 ## Async / streaming
 
@@ -99,14 +100,48 @@ One resolver, multiple credential acceptors → crystal `AuctorKey = {animaId} |
 `X-API-Key`, web3 signature, arcanum commitment. **Anon (commitment) supported day one** — it flows straight
 through `Inceptio.identity`. JWT is just one accepted input (the web platform path), not a separate model.
 
+## Documentation & sync (docs ↔ skill ↔ surface)
+
+**Principle: one source of truth (the surface); generate the rest; a CI drift-check forbids divergence.**
+Never hand-maintain parallel copies — drift is prevented mechanically, not by discipline. Two kinds of truth
+sync differently:
+
+- **Static contract** (*which* ops/tools exist + their I/O shapes) → lives in **code**: each route/MCP tool
+  is **one typed schema** that drives runtime validation AND the OpenAPI doc AND the MCP `tools/list` manifest.
+  (`aditusToJsonSchema` is the flow-input case — contract-first everywhere: define once, derive all.)
+- **Dynamic catalog** (*which* flows/fundamenta/models exist) → lives in the registries; exposed only via the
+  **discovery endpoints**. NEVER baked into docs or the skill (it would stale the instant a flow is seeded) —
+  the agent fetches it live.
+
+The pipeline (all generated from the surface):
+1. **Contract-first** — one typed schema per route/tool feeds validation + spec; no second copy.
+2. **The API serves its own spec** — `GET /v1/openapi.json` + MCP `tools/list` + the discovery endpoints are
+   the canonical reference; an agent reads truth at call time, not a doc that may lag.
+3. **`npm run gen:api-docs`** emits the committed `openapi.json` + generated `docs/api/reference.md` from the
+   schemas.
+4. **The skill is *pattern + pointers*, not a catalog dump** (`.claude/skills/<name>/SKILL.md`): it teaches the
+   run lifecycle, the discovery-first habit, and ~3 canonical examples, then points at the self-describing
+   endpoints for specifics. So it stays **stable** when a flow/endpoint is added — it only changes when the
+   *conceptual model* shifts (rare), and is the one human-authored artifact (thin by design).
+
+**Enforcement (load-bearing):** a CI drift-check — `npm run gen:api-docs && git diff --exit-code` —
+regenerates the manifest + reference from the surface and fails if the committed copy is stale. Adding an op
+without regenerating breaks the build. This is what actually keeps surface↔docs in sync; the skill defers to
+the live spec + discovery so catalog/endpoint adds can't stale it.
+
+**Cadence:** *every phase that adds or changes an operation* regenerates (`gen:api-docs`) and updates the skill
+only if the conceptual model moved; the drift-check gates the PR. No phase is "done" with a stale spec.
+
 ## Phasing (each graduates to a TASK-NNN)
 
-1. **Facade (discovery + invoke) + IdentityResolver + flow-as-tool schema + core run resources (REST).**
+1. **Facade (discovery + invoke) + IdentityResolver + flow-as-tool schema + core run resources (REST) + the
+   doc/skill pipeline.** Establish contract-first schemas, `gen:api-docs`, `GET /v1/openapi.json`, the CI
+   drift-check, and the first SKILL.md *in this phase* so the sync discipline exists before the surface grows.
    `listFlows`/`describeFlow` + `invokeFlow`/`getRun`, `aditusToJsonSchema` (with `enum`s for bounded fields),
    reusing the rail. Discovery is in from the start — an agent must be able to list flows and read a flow's
    schema before invoking. *Acceptance (hermetic):* mocked ring + in-memory store; `listFlows` enumerates the
    seeds; schema derived from a real `Essentia.aditus`; each credential → invoke returns an actumId; anon
-   commitment accepted.
+   commitment accepted; **`gen:api-docs` is idempotent (drift-check clean) and the skill renders.**
 2. **SSE run streaming + `BulletinBusProjector`.** Project the existing bus events into a neutral run-event
    stream; `GET /v1/runs/:id/stream`. Reconnect replays from durable `Actum` stage history.
 3. **MCP adapter over the same facade.** Flows = tools (inputSchema from `aditusToJsonSchema`), catalog =
@@ -131,5 +166,6 @@ through `Inceptio.identity`. JWT is just one accepted input (the web platform pa
 ## Verification boundary
 
 Hermetic where possible — the facade, `aditusToJsonSchema`, and `IdentityResolver` are pure logic over a
-mocked ring + in-memory store. Live SSE + real pod provisioning are validated on **staging** (a GPU), never
-the hermetic gate — same boundary as the rest of the repo.
+mocked ring + in-memory store. The **doc/skill drift-check** (`gen:api-docs && git diff --exit-code`) runs in
+the hermetic gate every phase — a stale spec fails the build. Live SSE + real pod provisioning are validated
+on **staging** (a GPU), never the hermetic gate — same boundary as the rest of the repo.
