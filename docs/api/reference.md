@@ -48,6 +48,17 @@ Invoke a flow and return its run handle.
       "type": "string",
       "description": "Optional GPU-class override."
     },
+    "options": {
+      "type": "object",
+      "description": "Per-run observation options.",
+      "properties": {
+        "webhookUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Fire-and-forget completion POST target — receives the terminal run event."
+        }
+      }
+    },
     "commitment": {
       "type": "string",
       "description": "Anonymous arcanum spend commitment (auth)."
@@ -228,6 +239,18 @@ Fetch a run by id (poll for completion).
   ]
 }
 ```
+
+### GET /v1/runs/:id/stream
+
+Server-Sent Events stream of run events (an initial snapshot, then stage/complete/failed frames). Content-Type: text/event-stream; the stream ends on the terminal event.
+
+- **Auth:** required
+
+### GET /v1/openapi.json
+
+The live OpenAPI 3.1 description of this surface (self-describing).
+
+- **Auth:** public
 
 ### GET /v1/flows
 

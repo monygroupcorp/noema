@@ -20,6 +20,8 @@ import { CrystalApi } from './allocutio/api/CrystalApi.js'
 import { IdentityResolver as ApiIdentityResolver } from './allocutio/api/IdentityResolver.js'
 import { createApiRouter } from './allocutio/api/apiRouter.js'
 import { makeCredentialAcceptors } from './allocutio/api/apiAcceptors.js'
+import { RunEventHub } from './allocutio/api/RunEventHub.js'
+import { bus } from './lib/bus.js'
 import { createHash } from 'node:crypto'
 import { createLiveRouter } from './api/internal/liveRouter.js'
 import { WideEventStore }         from './analytics/WideEventStore.js'
@@ -533,7 +535,20 @@ async function main(): Promise<void> {
     ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
     verifyApiKeyToAccountId,
   }))
-  app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver }))
+  // Run-event hub — projects the bus (actum.stage/complete/fail) into per-run SSE
+  // streams + fire-and-forget completion webhooks (Phase 2). In-process (single
+  // instance), per the epic's distribution note. Webhook POSTs are best-effort.
+  const runHub = new RunEventHub({
+    bus,
+    postWebhook: async (url, body) => {
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    },
+  })
+  app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub }))
 
   const INTERNAL_SECRET = process.env.INTERNAL_SECRET
   const wideStore = new WideEventStore(mongo.db(DB_NAME))
