@@ -122,7 +122,11 @@ export function credentialsFromHeaders(
 
   if (headers.authorization) creds.authorization = headers.authorization
   if (headers['x-api-key']) creds.apiKey = headers['x-api-key']
+  // Anon commitment: body (POST) OR the `x-commitment` header — the header is the
+  // only channel on bodyless requests (GET /runs/:id, the SSE stream), so without
+  // it an anon caller could start a run but never retrieve or observe it.
   if (body?.commitment) creds.commitment = body.commitment
+  else if (headers['x-commitment']) creds.commitment = headers['x-commitment']
   if (body?.web3) creds.web3 = body.web3
 
   return creds

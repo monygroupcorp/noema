@@ -129,6 +129,16 @@ test('credentialsFromHeaders maps authorization, x-api-key, and body.commitment'
   assert.equal(creds.web3, undefined)
 })
 
+test('credentialsFromHeaders reads commitment from the x-commitment header (bodyless GET/stream)', () => {
+  const creds = credentialsFromHeaders({ 'x-commitment': 'cmt-from-header' })
+  assert.equal(creds.commitment, 'cmt-from-header')
+})
+
+test('credentialsFromHeaders prefers body.commitment over the header when both present', () => {
+  const creds = credentialsFromHeaders({ 'x-commitment': 'from-header' }, { commitment: 'from-body' })
+  assert.equal(creds.commitment, 'from-body')
+})
+
 test('credentialsFromHeaders maps body.web3 and tolerates missing fields', () => {
   const web3 = { address: '0xabc', signature: '0xsig', nonce: 'n1' }
   const creds = credentialsFromHeaders({}, { web3 })
