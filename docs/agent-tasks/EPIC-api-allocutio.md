@@ -221,6 +221,29 @@ mint its own tools. **Guardrail:** saved flows are **owner-scoped by default** (
 anon/commitment included) — publishing to the shared catalog is a separate, deliberate act (the `fonte` fork-chain
 + royalties, ADR-0003), so an agent minting tools can't pollute everyone's discovery.
 
+## MCP layout (tools vs resources)
+
+**Don't make every flow a tool.** MCP tool lists load into the LLM's context, so one-tool-per-flow grows
+unboundedly AND churns whenever a flow is seeded/saved — degrading tool-selection and burning tokens. Tools are
+a **small, stable verb set**; the *catalog* lives in **resources**.
+
+- **Tools (verbs, ≈1:1 with REST, stable):** `run_flow`, `get_run`, `list_flows`, `describe_flow`, `list_models`,
+  `list_fundamenta`, `provision_studio`, `save_flow`, `quote`, `cancel_run`, `bind`, `status`. Adding a flow never
+  changes this list.
+- **Resources (read-only catalog):** `crystal://flows`, `crystal://flows/{slug}` (→ the flow's JSON Schema),
+  `crystal://models?genus=&familia=&trigger=&q=`, `crystal://fundamenta`, `crystal://runs/{id}` — resource
+  *templates* for the parameterized ones. The "flows are tools" typed guidance survives via `describe_flow`:
+  discover→invoke (`run_flow(modusId, aditus)`), not a tool per flow.
+- **Ergonomic hybrid (additive, later):** a BOUNDED set of canonical `Essentiae` ALSO as named tools
+  (`run.flux-schnell` + full schema) for one-shot; the long tail + saved flows stay resource-discoverable; and
+  `notifications/tools/list_changed` scopes *an agent's own saved flows* as session tools (the self-extending
+  toolset, without polluting others). Floor = generic `run_flow` + resources; the named subset is a follow-up.
+
+**Naming:** English-legible, matching the REST surface (`/v1/runs`, `/v1/flows` — not `/acta`, `/modi`; an LLM
+reasons better about "run a flow" than Latin). `snake_case` tools, `crystal://` resource scheme; crystal
+vocabulary lives in the *descriptions*, not wire names. **Unifier:** the MCP tool `inputSchema` ≡ the REST body
+schema ≡ `aditusToJsonSchema` output — both adapters call the one facade, so MCP and REST cannot drift.
+
 ## Documentation & sync (docs ↔ skill ↔ surface)
 
 **Principle: one source of truth (the surface); generate the rest; a CI drift-check forbids divergence.**
@@ -267,8 +290,10 @@ only if the conceptual model moved; the drift-check gates the PR. No phase is "d
    neutral run-event stream (`GET /v1/runs/:id/stream`, reconnect replays from durable `Actum` stage history) +
    `options.webhookUrl` fire-and-forget completion (essential for the hours/days flows) + `GET /v1/runs/:id` poll.
    *Acceptance:* a run's lifecycle is observable on all three; webhook fires once on terminal state.
-3. **MCP adapter over the same facade.** Flows = tools (inputSchema from `aditusToJsonSchema`), catalog =
-   resources, run handle + getRun + progress. Crystal-native; supersedes the legacy MCP surface.
+3. **MCP adapter over the same facade.** A small stable **verb tool-set** (`run_flow`/`get_run`/`list_flows`/
+   `describe_flow`/…, inputSchema from `aditusToJsonSchema`) + the **catalog as `crystal://` resources** — NOT a
+   tool per flow. Run handle + `get_run` + progress. Crystal-native; supersedes the legacy MCP surface. (Named
+   canonical-flow tools + per-agent saved-flow tools via `list_changed` are an additive follow-up.)
 4. **Execution strategy + studios + remaining discovery (capability-parity close-out).** The two targets
    (ephemeral run options + hosted `provisionStudio` with `warmMs`/`gpuClass`/`podPolicy`, `studioId`-targeted
    runs) + `POST /v1/runs/quote` + the `maxImpetus` cap & mid-run watchdog; discovery for `listFundamenta`,
@@ -292,6 +317,8 @@ only if the conceptual model moved; the drift-check gates the PR. No phase is "d
    exists to reproduce a chat affordance (a morph, a step, a page turn), drop it. But DO expose the real platform
    *modes* (ephemeral / hosted / economy / shared) — those are capability, not chat-sprawl — behind defaulted options.
 4. **One facade, not two** — MCP and REST must call the same facade, or they drift. The facade is the contract.
+5. **Tool-list is a context cost** — never one MCP tool per flow (it grows + churns in the LLM's context). Tools
+   are a fixed verb set; the catalog is `crystal://` resources. Any named-flow tools are bounded + opt-in.
 
 ## Verification boundary
 
