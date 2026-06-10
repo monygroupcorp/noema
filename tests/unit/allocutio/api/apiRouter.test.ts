@@ -8,7 +8,7 @@ import { Errors } from '../../../../src/allocutio/api/errors.js'
 import type { Run } from '../../../../src/allocutio/api/types.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
-import type { ModelCard } from '../../../../src/allocutio/api/CrystalApi.js'
+import type { ModelCard, SaveFlowOpts, StatusView } from '../../../../src/allocutio/api/CrystalApi.js'
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -42,6 +42,22 @@ const fakeApi: ApiFacade = {
       { intellaId: 'flux-dev', nomen: 'FLUX Dev', genus: 'checkpoint', basis: 'flux' },
       { intellaId: 'flux-lora-1', nomen: 'Flux LoRA 1', genus: 'lora', basis: 'flux' },
     ]
+  },
+  async saveFlow(_auctor: AuctorKey, _opts: SaveFlowOpts): Promise<{ id: string }> {
+    return { id: 'my-flow' }
+  },
+  async bind(_auctor: AuctorKey, verb: string, modusId: string): Promise<{ verb: string; modusId: string }> {
+    return { verb, modusId }
+  },
+  async status(_auctor: AuctorKey): Promise<StatusView> {
+    return {
+      balanceImpetus: '100',
+      balanceUsd: 0.01,
+      gens: [],
+      studios: [],
+      joinable: [],
+      takenAt: new Date().toISOString(),
+    }
   },
 }
 
@@ -234,6 +250,76 @@ test('GET /v1/models?genus=lora returns 200 { models } with no auth', async () =
     // fakeApi.listModels ignores the filter and returns both; we just check envelope shape
     assert.ok(res.body.models.length >= 1)
     assert.ok(res.body.models[0].intellaId)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/flows with auth returns 201 { id }', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/flows`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'k' },
+      body: { modusId: 'flux-schnell', name: 'My Flow' },
+    })
+    assert.equal(res.status, 201)
+    assert.equal(res.body.id, 'my-flow')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/flows without auth returns 401', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/flows`, {
+      method: 'POST',
+      body: { modusId: 'flux-schnell', name: 'My Flow' },
+    })
+    assert.equal(res.status, 401)
+    assert.equal(res.body.error.code, 'auth.missing')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('PUT /v1/me/bindings/make with auth returns 200 { verb, modusId }', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/me/bindings/make`, {
+      method: 'PUT',
+      headers: { 'x-api-key': 'k' },
+      body: { modusId: 'flux-schnell' },
+    })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.verb, 'make')
+    assert.equal(res.body.modusId, 'flux-schnell')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /v1/me/status with auth returns 200 with balanceImpetus', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/me/status`, {
+      headers: { 'x-api-key': 'k' },
+    })
+    assert.equal(res.status, 200)
+    assert.equal(typeof res.body.balanceImpetus, 'string')
+    assert.equal(res.body.balanceImpetus, '100')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /v1/me/status without auth returns 401', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/me/status`)
+    assert.equal(res.status, 401)
+    assert.equal(res.body.error.code, 'auth.missing')
   } finally {
     await closeServer(server)
   }

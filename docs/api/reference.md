@@ -519,6 +519,205 @@ Browse the model weight catalog, optionally filtered by genus, basis, fundamentu
 }
 ```
 
+### POST /v1/flows
+
+Save a reusable owner-keyed flow derived from an owned run (fromRun) or a base flow (modusId).
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Save a reusable owner-keyed flow derived from an owned run or a base flow.",
+  "properties": {
+    "fromRun": {
+      "type": "string",
+      "description": "Derive from an owned run (copies its modusId + aditus)."
+    },
+    "modusId": {
+      "type": "string",
+      "description": "Derive from an explicit base flow id."
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable name; yields a global-unique slug."
+    },
+    "aditus": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Input defaults to bake into the saved flow."
+    },
+    "promptMode": {
+      "type": "string",
+      "enum": [
+        "open",
+        "pinned"
+      ],
+      "description": "Whether the prompt field is open or pinned."
+    },
+    "affix": {
+      "type": "object",
+      "description": "Prompt prefix/suffix to fold into every run of this flow.",
+      "properties": {
+        "prefix": {
+          "type": "string"
+        },
+        "suffix": {
+          "type": "string"
+        }
+      }
+    },
+    "pinnedModels": {
+      "type": "array",
+      "description": "Model pins baked into the saved flow.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    }
+  },
+  "required": [
+    "name"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The id of the newly created flow.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "The slug id of the saved flow."
+    }
+  },
+  "required": [
+    "id"
+  ]
+}
+```
+
+### PUT /v1/me/bindings/:verb
+
+Rebind a canon verb (make, chat) to a specific flow for the authenticated caller.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Rebind a canon verb to a specific flow.",
+  "properties": {
+    "modusId": {
+      "type": "string",
+      "description": "The flow id to bind this verb to."
+    }
+  },
+  "required": [
+    "modusId"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The resulting verb → flow binding.",
+  "properties": {
+    "verb": {
+      "type": "string",
+      "description": "The verb that was rebound."
+    },
+    "modusId": {
+      "type": "string",
+      "description": "The flow it now resolves to."
+    }
+  },
+  "required": [
+    "verb",
+    "modusId"
+  ]
+}
+```
+
+### GET /v1/me/status
+
+Return the authenticated caller's account snapshot — balance, in-flight gens, and studios.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The caller's account snapshot — balance, in-flight gens, studios.",
+  "properties": {
+    "balanceImpetus": {
+      "type": "string",
+      "description": "Spendable impetus balance, serialised as a string."
+    },
+    "balanceUsd": {
+      "type": "number",
+      "description": "USD-equivalent balance (informational)."
+    },
+    "gens": {
+      "type": "array",
+      "description": "In-flight generation entries.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "studios": {
+      "type": "array",
+      "description": "Active studio entries.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "joinable": {
+      "type": "array",
+      "description": "Joinable studio invites.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "takenAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the snapshot was taken."
+    }
+  },
+  "required": [
+    "balanceImpetus",
+    "balanceUsd",
+    "gens",
+    "studios",
+    "joinable",
+    "takenAt"
+  ]
+}
+```
+
 ## Error codes
 
 Every failed request returns the uniform envelope `{ error: { code, message, retryable?, retryAfter?, details? } }`. Branch on the stable `code`.
@@ -534,4 +733,5 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `not_found.run` | 404 | no |
 | `economy.insufficient_signa` | 402 | no |
 | `economy.cap_too_low` | 422 | no |
+| `conflict.slug_taken` | 409 | no |
 | `internal.error` | 500 | yes |

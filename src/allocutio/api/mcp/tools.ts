@@ -11,7 +11,7 @@
 // unauthenticated.
 // =============================================================================
 
-import type { CrystalApi } from '../CrystalApi.js'
+import type { CrystalApi, SaveFlowOpts } from '../CrystalApi.js'
 import type { AuctorKey } from '../../../flow/types.js'
 import type { IntelligensGenus } from '../../../types/intelligendi.js'
 import { ApiError } from '../errors.js'
@@ -141,6 +141,47 @@ export async function listModelsTool(
 ): Promise<McpResult> {
   try {
     return ok({ models: await api.listModels({ ...args, genus: args.genus as IntelligensGenus | undefined }) })
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}
+
+export async function saveFlowTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+  args: SaveFlowOpts,
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    return ok(await api.saveFlow(auctor, args))
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}
+
+export async function bindTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+  args: { verb: string; modusId: string },
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    return ok(await api.bind(auctor, args.verb, args.modusId))
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}
+
+export async function statusTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    return ok(await api.status(auctor))
   } catch (e) {
     if (e instanceof ApiError) return errResult(e.code, e.message)
     return errResult('internal.error', String(e))

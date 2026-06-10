@@ -22,10 +22,14 @@ import type { Consuetudinum } from '../../types/consuetudo.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Fundamentorum } from '../../types/fundamentum.js'
 import type { Intelligens, IntelligentiumStore, IntelligensGenus } from '../../types/intelligendi.js'
+import type { HospitiumStore } from '../../types/hospitium.js'
+import type { MateriaStore } from '../../types/materia.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { Actum, ComputeStrategy, GpuClass, ModelRef } from '../../types/actum.js'
 import type { Inceptio } from '../../types/cursus.js'
 
+import { aggregateStatus } from '../lexicon/status/aggregate.js'
+import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModus.js'
 import { dispatchInceptio } from '../../execution/dispatchInceptio.js'
 import { toRun } from './runProjection.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
@@ -47,6 +51,9 @@ export interface CrystalApiDeps {
   fundamentorum: Fundamentorum
   /** Weight catalog — backs `listModels` discovery. */
   intelligendi: IntelligentiumStore
+  /** Hosting + live-pod registries — back the `status` aggregation. */
+  hospitia: HospitiumStore
+  materiae: MateriaStore
   /** Optional per-AuctorKey aggregation index (passed through to dispatchInceptio). */
   actumIndex?: ActumIndexStore
   /** Optional owner-keyed verb→flow rebinds; falls through to CANON_VERBS when absent. */
@@ -239,6 +246,97 @@ export class CrystalApi {
     const limited = filter.limit ? hits.slice(0, filter.limit) : hits
     return limited.map(toModelCard)
   }
+
+  /**
+   * Save a reusable, owner-keyed flow — the agent twin of the bot's Save-as. Derive a
+   * new Modus from a base (an owned run via `fromRun`, or an explicit `modusId`), baking
+   * the captured `aditus` as input defaults + folding pinned LoRAs + prompt affixes. The
+   * chosen name yields a global-unique slug (collision → `conflict.slug_taken`).
+   */
+  async saveFlow(auctor: AuctorKey, opts: SaveFlowOpts): Promise<{ id: string }> {
+    let baseModusId = opts.modusId
+    let aditus = opts.aditus ?? {}
+    let pinned = opts.pinnedModels
+    if (opts.fromRun) {
+      const a = await this.deps.actorum.findById(opts.fromRun)
+      if (!a || !(await this._owns(auctor, a))) throw Errors.notFoundRun(opts.fromRun)
+      baseModusId = a.modusId
+      if (opts.aditus === undefined) aditus = a.aditus ?? {}
+      if (pinned === undefined && a.pinnedModels) pinned = a.pinnedModels.map((m) => ({ id: m.id }))
+    }
+    if (!baseModusId) throw Errors.inputMalformed('saveFlow needs fromRun or modusId')
+    const base = await this.deps.modorum.find(baseModusId)
+    if (!base) throw Errors.notFoundFlow(baseModusId)
+
+    const slug = slugify(opts.name)
+    if (!slug) throw Errors.inputMalformed('name produces an empty slug')
+    if (await this.deps.modorum.find(slug)) throw Errors.conflictSlug(slug)
+
+    const derived = deriveSavedModus(base, {
+      slug, name: opts.name, owner: auctor, aditus,
+      promptMode: opts.promptMode ?? 'open',
+      ...(opts.affix?.prefix ? { promptPraefixum: opts.affix.prefix } : {}),
+      ...(opts.affix?.suffix ? { promptSuffixum: opts.affix.suffix } : {}),
+      ...(pinned ? { pinned } : {}),
+    })
+    await this.deps.modorum.register(derived)
+    return { id: derived.id }
+  }
+
+  /** Rebind one of the caller's canon verbs to a flow (owner-keyed Consuetudinum). */
+  async bind(auctor: AuctorKey, verb: string, modusId: string): Promise<{ verb: string; modusId: string }> {
+    if (!this.deps.consuetudinum) throw Errors.internal('verb binding not configured')
+    if (!(verb in CANON_VERBS)) throw Errors.inputMalformed(`'${verb}' is not a rebindable verb`)
+    if (!(await this.deps.modorum.find(modusId))) throw Errors.notFoundFlow(modusId)
+    await this.deps.consuetudinum.bind(auctor, verb, modusId)
+    return { verb, modusId }
+  }
+
+  /** The caller's account snapshot — balance, in-flight gens, studios (JSON-projected). */
+  async status(auctor: AuctorKey): Promise<StatusView> {
+    const snap = await aggregateStatus(
+      {
+        signorum: this.deps.signorum, hospitia: this.deps.hospitia, materiae: this.deps.materiae,
+        actorum: this.deps.actorum, modorum: this.deps.modorum,
+        ...(this.deps.actumIndex ? { actumIndex: this.deps.actumIndex } : {}),
+      },
+      { auctorKey: auctor, inFlightActumIds: [] },
+    )
+    return {
+      balanceImpetus: snap.balanceImpetus.toString(),
+      balanceUsd: snap.balanceUsd,
+      gens: snap.gens,
+      studios: snap.studios,
+      joinable: snap.joinable,
+      takenAt: snap.takenAt.toISOString(),
+    }
+  }
+}
+
+/** Inputs for `saveFlow`. Source the base from an owned run OR an explicit flow id. */
+export interface SaveFlowOpts {
+  fromRun?: string
+  modusId?: string
+  name: string
+  aditus?: Record<string, unknown>
+  promptMode?: PromptMode
+  affix?: { prefix?: string; suffix?: string }
+  pinnedModels?: Array<{ id: string }>
+}
+
+/** JSON-safe projection of a StatusSnapshot (bigint→string, Date→ISO). */
+export interface StatusView {
+  balanceImpetus: string
+  balanceUsd: number
+  gens: unknown[]
+  studios: unknown[]
+  joinable: unknown[]
+  takenAt: string
+}
+
+/** name → global-unique slug candidate (lowercase, dash-joined alnum). */
+function slugify(name: string): string {
+  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
 /** A model catalog card — enough for an agent to decide, not just enumerate. */

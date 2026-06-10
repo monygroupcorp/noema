@@ -109,6 +109,7 @@ const fakeIntelligentia: Intelligens[] = [
 function makeDeps(over: Partial<CrystalApiDeps> = {}): {
   deps: CrystalApiDeps
   dispatched: { modusId?: string }
+  modi: Record<string, Modus>
 } {
   const dispatched: { modusId?: string } = {}
 
@@ -174,6 +175,8 @@ function makeDeps(over: Partial<CrystalApiDeps> = {}): {
     signorum: ({
       ownsAny: async (by: AuctorKey, ids: string[]) =>
         'animaId' in by && by.animaId === 'anima-1' && ids.includes('sig-1'),
+      balance: async () => 0n,
+      history: async () => [],
     } as unknown) as CrystalApiDeps['signorum'],
     fundamentorum: ({
       find: async (id: string) => fakeFundamenta.find((f) => f.id === id) ?? null,
@@ -197,10 +200,17 @@ function makeDeps(over: Partial<CrystalApiDeps> = {}): {
       create: async () => { throw new Error('unused') },
       update: async () => { throw new Error('unused') },
     } as unknown) as CrystalApiDeps['intelligendi'],
+    hospitia: ({
+      findActive: async () => [],
+      findByMateriaId: async () => null,
+    } as unknown) as CrystalApiDeps['hospitia'],
+    materiae: ({
+      findById: async () => null,
+    } as unknown) as CrystalApiDeps['materiae'],
     ...over,
   }
 
-  return { deps, dispatched }
+  return { deps, dispatched, modi }
 }
 
 test('invokeFlow by canon verb resolves CANON_VERBS default and returns a complete Run', async () => {
@@ -424,4 +434,75 @@ test('invokeFlow with maxImpetus ABOVE the reservation succeeds', async () => {
   // reserve = 5n; cap = 10 → should succeed
   const run = await api.invokeFlow(auctor, { modusId: 'flux-schnell' }, { prompt: 'hi' }, { maxImpetus: 10n })
   assert.equal(run.status, 'complete')
+})
+
+// ── saveFlow ──────────────────────────────────────────────────────────────────
+
+test('saveFlow from modusId registers a derived flow and returns its slug id', async () => {
+  const { deps, modi } = makeDeps()
+  let registered: unknown
+  deps.modorum.register = async (m) => { registered = m; modi[m.id] = m }
+  const api = new CrystalApi(deps)
+
+  const result = await api.saveFlow(auctor, { modusId: 'flux-schnell', name: 'My Flow' })
+  assert.equal(result.id, 'my-flow')
+  assert.ok(registered, 'modorum.register was called')
+  assert.equal((registered as { id: string }).id, 'my-flow')
+})
+
+test('saveFlow with a name whose slug is already taken throws conflict.slug_taken', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  // 'flux-schnell' slug is already in the registry
+  await assert.rejects(
+    () => api.saveFlow(auctor, { modusId: 'flux-schnell', name: 'flux-schnell' }),
+    (e: unknown) => e instanceof ApiError && e.code === 'conflict.slug_taken',
+  )
+})
+
+test('saveFlow fromRun that the auctor does not own throws not_found.run', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  await assert.rejects(
+    () => api.saveFlow({ animaId: 'someone-else' }, { fromRun: 'act-known', name: 'My Flow' }),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.run',
+  )
+})
+
+// ── bind ──────────────────────────────────────────────────────────────────────
+
+test('bind with an unknown verb throws input.malformed', async () => {
+  const { deps } = makeDeps({ consuetudinum: new (await import('../../../../src/crystal/MemoryConsuetudinum.js')).MemoryConsuetudinum() })
+  const api = new CrystalApi(deps)
+
+  await assert.rejects(
+    () => api.bind(auctor, 'nope', 'flux-schnell'),
+    (e: unknown) => e instanceof ApiError && e.code === 'input.malformed',
+  )
+})
+
+test('bind happy path returns { verb, modusId }', async () => {
+  const { deps } = makeDeps({ consuetudinum: new (await import('../../../../src/crystal/MemoryConsuetudinum.js')).MemoryConsuetudinum() })
+  const api = new CrystalApi(deps)
+
+  const result = await api.bind(auctor, 'make', 'flux-schnell')
+  assert.equal(result.verb, 'make')
+  assert.equal(result.modusId, 'flux-schnell')
+})
+
+// ── status ────────────────────────────────────────────────────────────────────
+
+test('status returns a JSON-safe view with balanceImpetus as a string', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  const view = await api.status(auctor)
+  assert.equal(typeof view.balanceImpetus, 'string', 'balanceImpetus must be a string')
+  assert.equal(typeof view.balanceUsd, 'number', 'balanceUsd must be a number')
+  assert.ok(Array.isArray(view.gens), 'gens must be an array')
+  assert.ok(Array.isArray(view.studios), 'studios must be an array')
+  assert.ok(Array.isArray(view.joinable), 'joinable must be an array')
+  assert.ok(typeof view.takenAt === 'string', 'takenAt must be a string')
 })

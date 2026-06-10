@@ -513,6 +513,8 @@ async function main(): Promise<void> {
     signorum: ring.signorum,
     fundamentorum: ring.fundamentorum,
     intelligendi: ring.intelligendi,
+    hospitia: ring.hospitia,
+    materiae: ring.materiae,
     actumIndex: ring.actumIndex,
     consuetudinum,
   })
