@@ -189,3 +189,38 @@ test('findWarm with shareToken returns null for wrong token', async () => {
   const result = await store.findWarm({ shareToken: 'tok-wrong' })
   assert.equal(result, null)
 })
+
+// ── reapIdle ────────────────────────────────────────────────────────────────
+test('reapIdle terminates an idle pod past its warmUntil deadline', async () => {
+  const past = new Date(Date.now() - 60_000)
+  const m = await store.create(makeInput({ status: 'idle', warmUntil: past }))
+  const reaped = await store.reapIdle(new Date())
+  assert.equal(reaped.length, 1)
+  assert.equal(reaped[0].id, m.id)
+  assert.equal((await store.findById(m.id))?.status, 'terminated')
+})
+
+test('reapIdle terminates a drainOnly idle pod even with warmUntil in the FUTURE (maxImpetus hard cap)', async () => {
+  const future = new Date(Date.now() + 60 * 60_000)
+  const m = await store.create(makeInput({ status: 'idle', warmUntil: future, drainOnly: true }))
+  const reaped = await store.reapIdle(new Date())
+  assert.equal(reaped.length, 1, 'a drained studio is reaped immediately, not at warmUntil')
+  assert.equal(reaped[0].id, m.id)
+  assert.equal((await store.findById(m.id))?.status, 'terminated')
+})
+
+test('reapIdle leaves an idle pod that is neither past warmUntil nor draining', async () => {
+  const future = new Date(Date.now() + 60 * 60_000)
+  const m = await store.create(makeInput({ status: 'idle', warmUntil: future }))
+  const reaped = await store.reapIdle(new Date())
+  assert.equal(reaped.length, 0)
+  assert.equal((await store.findById(m.id))?.status, 'idle')
+})
+
+test('reapIdle never reaps a NON-idle (active) pod, even if drainOnly', async () => {
+  const past = new Date(Date.now() - 60_000)
+  const m = await store.create(makeInput({ status: 'active', warmUntil: past, drainOnly: true }))
+  const reaped = await store.reapIdle(new Date())
+  assert.equal(reaped.length, 0, 'an active pod drains-then-reaps only once it goes idle')
+  assert.equal((await store.findById(m.id))?.status, 'active')
+})
