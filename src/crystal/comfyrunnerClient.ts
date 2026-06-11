@@ -35,25 +35,52 @@ export class ThrottleError extends Error {
 const THROTTLE_MIN_MBPS  = Number(process.env.THROTTLE_MIN_MBPS ?? 20)
 const THROTTLE_WINDOW_MS = Number(process.env.THROTTLE_WINDOW_MS ?? 45_000)
 
+/**
+ * The runner's view of a CompiledSpec — either runtime kind (ADR-0007). A spec carries
+ * resolved `models` + one form: `workflow` (ComfyUI graph) or `inference` (LLM call).
+ * `repo` rides on a model when the runtime downloads a whole HF repo (vLLM).
+ */
 export interface CompiledSpecLike {
-  workflow: { inputTemplate: Record<string, unknown> }
-  models: Array<{ id?: string; url: string; dest: string; sizeBytes?: number }>
+  image?: { ociRef?: string }
+  runtime?: string
+  models: Array<{ id?: string; url: string; dest: string; sizeBytes?: number; repo?: string }>
+  workflow?: { inputTemplate: Record<string, unknown> }
+  inference?: Record<string, unknown>
   customNodes?: Array<{ url: string; name?: string }>
 }
 
-export function isCompiledSpec(v: unknown): v is CompiledSpecLike {
+/** A compiled ComfyUI graph spec — has a `workflow` template. */
+export function isComfyUISpec(
+  v: unknown,
+): v is CompiledSpecLike & { workflow: { inputTemplate: Record<string, unknown> } } {
   if (!v || typeof v !== 'object') return false
   const o = v as Record<string, unknown>
-  return (
-    o.workflow !== null && typeof o.workflow === 'object' &&
-    typeof (o.workflow as Record<string, unknown>).inputTemplate === 'object' &&
-    Array.isArray(o.models)
-  )
+  const wf = o.workflow as Record<string, unknown> | undefined
+  return !!wf && typeof wf === 'object' && typeof wf.inputTemplate === 'object' && Array.isArray(o.models)
+}
+
+/** A compiled LLM inference spec — has an `inference` call (ADR-0007). */
+export function isInferenceSpec(
+  v: unknown,
+): v is CompiledSpecLike & { inference: Record<string, unknown> } {
+  if (!v || typeof v !== 'object') return false
+  const o = v as Record<string, unknown>
+  return !!o.inference && typeof o.inference === 'object' && Array.isArray(o.models)
 }
 
 /**
- * POST a job to comfyrunner. Includes the full model + custom-node manifests
- * so the runner can do preflight on warm pods that may be missing models.
+ * A compiled spec of EITHER runtime kind (resolved models + a form). Use this when the concern
+ * is runtime-agnostic — reading `image`/`runtime`, or warm-pod model admission. For the
+ * submission/transport path, branch on the narrow `isComfyUISpec`/`isInferenceSpec` instead.
+ */
+export function isCompiledSpec(v: unknown): v is CompiledSpecLike {
+  return isComfyUISpec(v) || isInferenceSpec(v)
+}
+
+/**
+ * POST a job to the runner. Sends the model manifest (so the runner can preflight on warm pods
+ * that may be missing weights) plus the runtime-appropriate form: `workflow` for a ComfyUI pod,
+ * `inference` for a vLLM pod. A bare object (no compiled envelope) is treated as a raw workflow.
  */
 export async function submitToRunner(
   fetchFn: typeof fetch,
@@ -63,12 +90,22 @@ export async function submitToRunner(
   webhook?: string,
   r2?: R2Config,
 ): Promise<void> {
-  const spec = isCompiledSpec(input) ? input : null
-  const workflow    = spec?.workflow.inputTemplate ?? input
-  const models      = spec?.models ?? []
-  const customNodes = spec?.customNodes ?? []
-
-  const body: Record<string, unknown> = { jobId, workflow, models, customNodes }
+  const body: Record<string, unknown> = { jobId }
+  if (isComfyUISpec(input)) {
+    body.workflow    = input.workflow.inputTemplate
+    body.models      = input.models
+    body.customNodes = input.customNodes ?? []
+    if (input.runtime) body.runtime = input.runtime
+  } else if (isInferenceSpec(input)) {
+    body.inference = input.inference
+    body.models    = input.models
+    if (input.runtime) body.runtime = input.runtime
+  } else {
+    // Legacy: a raw ComfyUI workflow object with no compiled envelope.
+    body.workflow    = input
+    body.models      = []
+    body.customNodes = []
+  }
   if (webhook) body.webhook = webhook
   if (r2)      body.r2 = r2
 

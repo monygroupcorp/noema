@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { submitToRunner, awaitViaStream, isCompiledSpec } from '../../../src/crystal/comfyrunnerClient.js'
+import { submitToRunner, awaitViaStream, isCompiledSpec, isComfyUISpec, isInferenceSpec } from '../../../src/crystal/comfyrunnerClient.js'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -27,6 +27,20 @@ test('isCompiledSpec: false for a plain workflow object', () => {
 })
 test('isCompiledSpec: false for null', () => {
   assert.equal(isCompiledSpec(null), false)
+})
+test('isCompiledSpec: true for an inference spec too (either runtime kind)', () => {
+  assert.equal(isCompiledSpec({ inference: { prompt: 'hi' }, models: [] }), true)
+})
+
+// ── guard split (ADR-0007): isComfyUISpec vs isInferenceSpec ───────────────────
+
+test('isComfyUISpec: only the workflow kind', () => {
+  assert.equal(isComfyUISpec({ workflow: { inputTemplate: {} }, models: [] }), true)
+  assert.equal(isComfyUISpec({ inference: { prompt: 'hi' }, models: [] }), false)
+})
+test('isInferenceSpec: only the inference kind', () => {
+  assert.equal(isInferenceSpec({ inference: { prompt: 'hi' }, models: [] }), true)
+  assert.equal(isInferenceSpec({ workflow: { inputTemplate: {} }, models: [] }), false)
 })
 
 // ── submitToRunner ─────────────────────────────────────────────────────────────
@@ -68,6 +82,28 @@ test('submitToRunner: unpacks a CompiledSpec into workflow/models/customNodes', 
   assert.deepEqual(body.workflow, spec.workflow.inputTemplate)
   assert.deepEqual(body.models, spec.models)
   assert.deepEqual(body.customNodes, spec.customNodes)
+})
+
+test('submitToRunner: routes an inference spec to body.inference (with models+runtime, no workflow)', async () => {
+  let captured: unknown
+  const fetchFn = (async (_url: string, opts?: RequestInit) => {
+    captured = JSON.parse(opts?.body as string)
+    return new Response('{}', { status: 200 })
+  }) as unknown as typeof fetch
+
+  const spec = {
+    runtime: 'vLLM',
+    inference: { prompt: 'describe this', genParams: { max_tokens: 256 } },
+    models: [{ id: 'intella.qwen3-vl-8b', role: 'lm', url: 'https://hf/q', dest: 'transformers/q', repo: 'Qwen/Qwen3-VL-8B-Instruct' }],
+  }
+  await submitToRunner(fetchFn, 'https://pod-8080.proxy.runpod.net', 'job-inf', spec)
+
+  const body = captured as Record<string, unknown>
+  assert.deepEqual(body.inference, spec.inference)
+  assert.deepEqual(body.models, spec.models)              // repo rides along to the executor
+  assert.equal(body.runtime, 'vLLM')
+  assert.equal(body.workflow, undefined, 'no ComfyUI workflow on an inference job')
+  assert.equal(body.customNodes, undefined)
 })
 
 test('submitToRunner: includes webhook and r2 when provided', async () => {
