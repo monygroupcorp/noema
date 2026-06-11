@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.11.0](https://github.com/monygroupcorp/noema/compare/v4.10.8...v4.11.0) (2026-06-11)
+
+
+### Features
+
+* **tools:** add gpt-image-edit (/imgedit) — OpenAI image editing with multi-image reference ([ca5162c](https://github.com/monygroupcorp/noema/commit/ca5162c1c59d25b59a47a24328e10ce924d129af))
+
+
+### Bug Fixes
+
+* **agents:** bake factory NFT binding into step-level parameterMappings ([883e4da](https://github.com/monygroupcorp/noema/commit/883e4da26ea4bc9f7e0ae9745638d3c942d63f3c))
+* **sandbox:** agent-context validator, auto-connect type guard, seeking badge ([2efb868](https://github.com/monygroupcorp/noema/commit/2efb868af21900fd896d87dd9b05450f7500bd67))
+* **telegram:** /cast sources image from attached photo, not only reply ([b81afed](https://github.com/monygroupcorp/noema/commit/b81afed049bd98de40e22a046dc0c66c5530a064))
+
 ## [4.10.8](https://github.com/monygroupcorp/noema/compare/v4.10.7...v4.10.8) (2026-06-04)
 
 
