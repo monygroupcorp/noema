@@ -71,6 +71,14 @@ interface Config {
   warmFactory?: (materia: Materia) => RunPodClient
   /** Extracts the OCI image ref from a modus for Praefectus matching. Returns undefined to skip warm routing. */
   imageRefOf?: (modus: Modus) => string | undefined | Promise<string | undefined>
+  /**
+   * Resolve a studio session (`actum.modoId`) to its pinned, freshly-claimed pod —
+   * the studio's bound `Materia`, atomically claimed (idle→active). Injected so the
+   * cursor stays decoupled from the Modo/Materia stores. Returns null when the studio
+   * has no live, claimable pod (gone, or busy with another run) → routing falls through
+   * to the normal warm-match / cold path. Makes `POST /v1/runs { studioId }` deterministic.
+   */
+  studioPodFor?: (modoId: string) => Promise<Materia | null>
   /** Admission gate: before dispatching a gen onto a reused WARM pod, ensure the models it needs
    *  are installed (awaiting any in-flight live-apply install). No-op on a cold start. */
   admitWarm?: (materia: Materia, models: Array<{ id?: string }>) => Promise<void>
@@ -188,13 +196,22 @@ export class RunPodCursor implements Cursor {
    * read the paired Hospitium for the pricing decision.
    *
    * Priority:
+   *   0. studioId (actum.modoId) — pin to the studio's own bound pod (explicit target).
    *   1. shareTokenHint — explicit deep-link routing to a specific host's pod.
    *   2. computeStrategy='performance' — always cold (dedicated, never warm).
    *   3. Praefectus warm match (economy pool or standard).
    *   4. Cold fallback via this.client.
    */
   private async _resolveClient(modus: Modus, actum: Actum): Promise<{ client: RunPodClient; materia?: Materia }> {
-    const { praefectus, warmFactory, imageRefOf } = this.config
+    const { praefectus, warmFactory, imageRefOf, studioPodFor } = this.config
+
+    // 0. Studio-targeted run: pin to the session's own pod. The agent provisioned this
+    //    studio and is targeting it explicitly — never let an image-match land it
+    //    elsewhere. Falls through if the studio is gone/busy (graceful, not an error).
+    if (actum.modoId && studioPodFor && warmFactory) {
+      const pinned = await studioPodFor(actum.modoId).catch(() => null)
+      if (pinned) return { client: warmFactory(pinned), materia: pinned }
+    }
 
     // 1. Deep-link routing wins when present + valid. Expired/revoked tokens
     //    silently fall through to normal routing (no surprise failure for the user).
