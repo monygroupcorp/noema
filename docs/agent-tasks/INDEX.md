@@ -54,11 +54,15 @@ _None — pick up a Backlog item below and graduate it to a numbered TASK spec._
 - **Crystal Agent API — follow-ups** (epic shipped above; these are the deferred edges):
   - **`web3` credential acceptor** — needs a nonce-challenge endpoint (the one resolver path not yet live).
   - **Identified-auth live test** — JWT path is hermetic-tested; needs `JWT_SECRET` + a token on staging.
-  - **Async studio provision handle** — `POST /v1/studios` blocks the HTTP connection for the whole cold boot
-    (~7 min worst case); make it return a handle like runs (born `provisioning`, observe via SSE/poll).
-  - **True `studioId`→pod pinning** — targeted runs stamp `Inceptio.modoId` but the cursor still warm-matches by
-    image, not by the studio's bound `Modo.materiamId`; fine for one warm studio per image, wrong for multi-studio.
   - **Named canonical-flow MCP tools + per-agent saved-flow tools** (`list_changed`) — the additive ergonomic layer.
+  - ~~**Async studio provision handle**~~ — **DONE** (`efc3c887`): `POST /v1/studios` returns a `provisioning`
+    handle immediately; observe via `GET /v1/studios/:id` (poll) or `options.webhookUrl`. Early host record
+    (ADR-0006, modoId-keyed) owner-scopes in-flight studios with no leak.
+  - ~~**True `studioId`→pod pinning**~~ — **DONE** (`c1e01010`): `RunPodCursor` pins a `modoId`-targeted run to
+    the studio's bound `Materia` (atomic claim), beating the image-match; falls through if gone/busy.
+- **Studio rail — `runner.py` persistent job server** (the highest-leverage GPU perf win, broken off on its own):
+  warm pods accept jobs without re-SSH-bootstrapping each gen. Pod-side Python + the SSH/job protocol; large,
+  scope carefully. See [[project_runpod_pipeline_status]].
 - **`/cook` (Collectio)** — `Modus × Tractus[]` grid → N `Acta` via `TraitEngine` + `CollectioCursor`.
 - **`/spell` (compositus `Modus`)** — run/author a `gradus`-chained flow (authored via `Tabula`).
 - **Gen-flows for more catalog bases** (SDXL/Illustrious/Chroma/Flux-Kontext/Wan-video/…) — port from
