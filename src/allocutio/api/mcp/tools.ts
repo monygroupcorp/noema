@@ -214,6 +214,20 @@ export async function provisionStudioTool(
   }
 }
 
+export async function getStudioTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+  args: { id: string },
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    return ok({ studio: await api.getStudio(auctor, args.id) })
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}
+
 export async function listStudiosTool(
   api: CrystalApi,
   auctor: AuctorKey | undefined,

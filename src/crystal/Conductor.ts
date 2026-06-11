@@ -119,14 +119,20 @@ export class Conductor {
    * transitions via `find`/`getStudio`. The host record is keyed by `modoId` from the
    * start, so an in-flight studio is owner-scoped before its pod parks.
    */
-  async conducereAsync(auctor: AuctorKey, opts: ConduceOpts): Promise<StudioHandle> {
+  async conducereAsync(
+    auctor: AuctorKey,
+    opts: ConduceOpts,
+    onSettled?: (handle: StudioHandle | null) => void,
+  ): Promise<StudioHandle> {
     const { modo, tessera } = await this._open(auctor, opts)
     // Fire-and-forget the boot; status lives on the Modo. (Single-instance: a server
     // restart mid-provision orphans a `warming` Modo — recovery sweep is a follow-up.)
+    // `onSettled` fires on the terminal state (bound or failed) — the webhook seam.
     void (async () => {
       await this.deps.modos.update(modo.id, { status: 'warming' }).catch(() => {})
       const res = await this._provisionBind(modo, opts).catch(() => null)
-      if (!res) await this._fail(modo.id)
+      if (!res) { await this._fail(modo.id); onSettled?.(null); return }
+      onSettled?.({ studioId: modo.id, modo: res.modo, materia: res.materia, tessera, provision: res.provision })
     })()
     return { studioId: modo.id, modo, tessera }
   }

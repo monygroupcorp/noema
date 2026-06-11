@@ -724,7 +724,7 @@ Return the authenticated caller's account snapshot — balance, in-flight gens, 
 
 ### POST /v1/studios
 
-Lease a hosted warm studio (a persistent GPU session) for fast repeated runs. maxImpetus is the session budget — the studio drain-terminates at the cap.
+Lease a hosted warm studio (a persistent GPU session) for fast repeated runs. Returns a provisioning handle immediately; poll GET /v1/studios/:id (or set options.webhookUrl). maxImpetus is the session budget — the studio drain-terminates at the cap.
 
 - **Auth:** required
 
@@ -757,6 +757,16 @@ Lease a hosted warm studio (a persistent GPU session) for fast repeated runs. ma
     "runtime": {
       "type": "string",
       "description": "Override the on-pod runtime explicitly (else inherited from the fundamentum)."
+    },
+    "options": {
+      "type": "object",
+      "description": "Optional per-provision settings.",
+      "properties": {
+        "webhookUrl": {
+          "type": "string",
+          "description": "Fire-and-forget POST when the studio is ready (or failed) — sugar over polling GET /v1/studios/:id."
+        }
+      }
     }
   }
 }
@@ -899,6 +909,78 @@ List the authenticated caller's live hosted studios.
   },
   "required": [
     "studios"
+  ]
+}
+```
+
+### GET /v1/studios/:id
+
+Fetch one of the caller's studios by id (owner-scoped) — poll its status (provisioning → idle) after provisioning.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "A newly leased studio.",
+  "properties": {
+    "studio": {
+      "type": "object",
+      "description": "A hosted studio. `studioId` is what POST /v1/runs { studioId } targets.",
+      "properties": {
+        "studioId": {
+          "type": "string",
+          "description": "The studio id (a Modo session) — pass as run.studioId."
+        },
+        "podId": {
+          "type": "string",
+          "description": "The underlying pod id."
+        },
+        "status": {
+          "type": "string",
+          "description": "Pod-derived liveness: idle | running | provisioning | draining | terminated."
+        },
+        "gpu": {
+          "type": "string",
+          "description": "GPU model the studio runs on."
+        },
+        "runtime": {
+          "type": "string",
+          "description": "On-pod runtime (ComfyUI / llama.cpp / …)."
+        },
+        "imageRef": {
+          "type": "string",
+          "description": "The pod image reference."
+        },
+        "warmUntil": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the warm window expires."
+        },
+        "budgetImpetus": {
+          "type": "string",
+          "description": "The authorized session budget (the maxImpetus cap), as a string."
+        },
+        "costPerHr": {
+          "type": "number",
+          "description": "The pod's real hourly USD cost — the source of truth for warm-time billing."
+        },
+        "impetusPerSecond": {
+          "type": "string",
+          "description": "Coarse burn-rate hint (impetus/sec); billing is per-window from costPerHr. Prefer costPerHr for an accurate rate."
+        }
+      },
+      "required": [
+        "studioId",
+        "status",
+        "budgetImpetus"
+      ]
+    }
+  },
+  "required": [
+    "studio"
   ]
 }
 ```
