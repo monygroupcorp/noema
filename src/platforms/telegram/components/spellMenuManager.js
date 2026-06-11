@@ -881,14 +881,15 @@ function registerHandlers(dispatcherInstances, dependencies) {
                 }
                 logger.info(`[SpellMenu] /cast: Resolved masterAccountId ${masterAccountId}, casting spell "${spellSlug}"`);
                 
-                // Extract image from reply-to-message if present (similar to dynamicCommands)
-                if (msg.reply_to_message) {
-                    const repliedImageUrl = await getTelegramFileUrl(bot, msg);
-                    if (repliedImageUrl) {
-                        // Use input_image as the default key (normalization will map it to the tool's expected key)
-                        paramOverrides.input_image = repliedImageUrl;
-                        logger.info(`[SpellMenu] /cast: Extracted image from replied message: ${repliedImageUrl}`);
-                    }
+                // Extract an image from the envelope — getTelegramFileUrl handles BOTH
+                // a photo attached to the /cast message (command in the caption) AND a
+                // reply-to photo. Previously this only fired on reply_to_message, so a
+                // caption-attached meme was silently dropped.
+                const envelopeImageUrl = await getTelegramFileUrl(bot, msg);
+                if (envelopeImageUrl) {
+                    // Use input_image as the default key (normalization maps it to the tool's expected key)
+                    paramOverrides.input_image = envelopeImageUrl;
+                    logger.info(`[SpellMenu] /cast: Extracted image from envelope: ${envelopeImageUrl}`);
                 }
                 
                 // Call SpellsService to cast the spell
