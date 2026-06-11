@@ -575,7 +575,14 @@ class VllmExecutor(Executor):
         self.root          = os.environ.get("MODEL_ROOT", "/root/models")
         self.url           = os.environ.get("VLLM_URL", "http://localhost:8000")
         self.ready_timeout = int(os.environ.get("VLLM_READY_TIMEOUT", "600"))
-        self.gpu_util      = os.environ.get("VLLM_GPU_UTIL", "")   # set to co-reside under a VRAM budget
+        # vLLM's own default (0.92) is greedy — it wants 92% of TOTAL device memory and refuses to
+        # start if even a little is held by other processes (driver/display, or a co-resident harness).
+        # Default to 0.90 and always pass it; co-residency later derives this from RUNNER_VRAM_GB.
+        self.gpu_util      = os.environ.get("VLLM_GPU_UTIL", "0.90")
+        # Cap the context. Qwen3-VL advertises a 256K max_seq_len → vLLM would demand ~36GB of KV
+        # cache for a single request and refuse to start. Understanding tasks don't need 256K; 16K
+        # keeps the KV cache small enough to fit beside the weights.
+        self.max_model_len = os.environ.get("VLLM_MAX_MODEL_LEN", "16384")
         self._proc: subprocess.Popen | None = None
         self._served_dir = ""
 
@@ -592,7 +599,8 @@ class VllmExecutor(Executor):
         repo = model.get("repo")
         if not repo:
             raise RuntimeError(f"vLLM model '{model['dest']}' has no 'repo' (HF repo id) to download")
-        subprocess.run(["huggingface-cli", "download", repo, "--local-dir", dest_path, "--quiet"],
+        # `huggingface-cli` was removed in recent huggingface_hub — the CLI is now `hf`.
+        subprocess.run(["hf", "download", repo, "--local-dir", dest_path],
                        check=True, timeout=int(model.get("downloadTimeout", 3600)))
 
     def _lm_dir(self, job_spec: dict) -> str:
@@ -607,6 +615,10 @@ class VllmExecutor(Executor):
     def _wait_for_http(self) -> bool:
         deadline = time.time() + self.ready_timeout
         while time.time() < deadline:
+            # Fail fast if the serve subprocess died (OOM, bad flag, KV-cache refusal) instead of
+            # waiting out the full ready timeout.
+            if self._proc is not None and self._proc.poll() is not None:
+                return False
             try:
                 _http_get(f"{self.url}/v1/models", timeout=5)
                 return True
@@ -614,6 +626,16 @@ class VllmExecutor(Executor):
                 pass
             time.sleep(3)
         return False
+
+    def _tail_log(self, n: int = 30) -> str:
+        try:
+            with open("/tmp/vllm.log", "r", errors="replace") as f:
+                return "".join(f.readlines()[-n:]).strip()
+        except Exception:
+            return "(vllm.log unavailable)"
+
+    def fail_detail(self, err_str: str) -> str:
+        return err_str if "vllm.log tail:" in err_str else f"{err_str}\nvllm.log tail:\n{self._tail_log()}"
 
     def load(self, job_spec: dict, job_id: str) -> None:
         _ensure_models(self, job_spec.get("models", []), job_id)
@@ -625,13 +647,17 @@ class VllmExecutor(Executor):
         cmd = ["vllm", "serve", model_dir, "--served-model-name", "default"]
         if self.gpu_util:
             cmd += ["--gpu-memory-utilization", self.gpu_util]
+        if self.max_model_len:
+            cmd += ["--max-model-len", self.max_model_len]
         log.info(f"launching vLLM: {' '.join(cmd)}")
         _append_event(job_id, {"type": "loading-model", "dir": model_dir})
         self._proc = subprocess.Popen(cmd, stdout=open("/tmp/vllm.log", "a"), stderr=subprocess.STDOUT)
         self._served_dir = model_dir
         if not self._wait_for_http():
+            died = self._proc is None or self._proc.poll() is not None
             self._stop_server()
-            raise RuntimeError("vLLM server never became ready")
+            why = "vLLM server exited during startup" if died else "vLLM server never became ready"
+            raise RuntimeError(f"{why}\nvllm.log tail:\n{self._tail_log()}")
 
     def _stop_server(self) -> None:
         if self._proc:
