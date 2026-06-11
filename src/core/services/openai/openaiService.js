@@ -206,6 +206,81 @@ class OpenAIService {
       throw err; // Re-throw sanitized error to be handled by the caller
     }
   }
+
+  /**
+   * Edits/composes images with gpt-image-1/2 via /v1/images/edits.
+   * Accepts one or more source image URLs (first is the base, the rest are
+   * references the prompt can refer to as "the second image", etc.).
+   *
+   * Uses a raw multipart request (not the SDK) so multi-image edits work
+   * regardless of the installed SDK version. Sets moderation:'low' to reduce
+   * false refusals on cartoon/meme content; a hard content-policy block is
+   * surfaced as an error with `.moderationBlocked = true` for graceful handling.
+   *
+   * @param {{ prompt: string, images: string[], model?: string, size?: string, moderation?: 'low'|'auto' }} params
+   * @returns {Promise<{ b64_json: string, usage?: object, model: string }>}
+   */
+  async editImage({ prompt, images, model = 'gpt-image-2', size = '1024x1024', moderation = 'low' }) {
+    const apiKey = process.env.OPENAI_API;
+    if (!apiKey) throw new Error('OpenAIService is not initialized. Please set the OPENAI_API environment variable.');
+    if (!prompt) throw new Error('Prompt is required to edit an image.');
+    const urls = (images || []).filter(Boolean);
+    if (!urls.length) throw new Error('At least one source image is required to edit.');
+
+    // Fetch each source image into a buffer. Request raster formats gpt-image
+    // accepts (png/jpg/webp) — content-negotiating CDNs like OpenSea (seadn)
+    // otherwise serve AVIF, which the edit endpoint rejects.
+    const buffers = [];
+    for (const url of urls) {
+      const r = await fetch(url, { headers: { Accept: 'image/png,image/jpeg,image/webp;q=0.9,*/*;q=0.1' } });
+      if (!r.ok) throw new Error(`Failed to fetch source image (${r.status}) ${url}`);
+      let ct = (r.headers.get('content-type') || 'image/png').split(';')[0];
+      if (!/^image\/(png|jpe?g|webp)$/i.test(ct)) ct = 'image/png'; // best-effort label; OpenAI sniffs the bytes
+      buffers.push({ buf: Buffer.from(await r.arrayBuffer()), type: ct });
+    }
+
+    const buildForm = () => {
+      const form = new FormData();
+      form.append('model', model);
+      form.append('prompt', prompt);
+      form.append('size', size);
+      if (moderation) form.append('moderation', moderation);
+      buffers.forEach((b, i) => form.append('image[]', new Blob([b.buf], { type: b.type }), `image_${i}.png`));
+      return form;
+    };
+
+    this.logger.info(`Requesting image edit with model ${model} (${urls.length} source image(s))...`);
+    const doCall = async () => {
+      const res = await fetch('https://api.openai.com/v1/images/edits', {
+        method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: buildForm(),
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        let parsed = {}; try { parsed = JSON.parse(text); } catch (_) {}
+        const code = parsed?.error?.code || '';
+        const msg = parsed?.error?.message || text.slice(0, 300);
+        const err = new Error(msg.replace(/sk-[a-zA-Z0-9-]{20,}/g, 'sk-***'));
+        err.status = res.status;
+        // OpenAI flags content-policy blocks via these codes / messages.
+        if (/moderation|content[_ ]policy|safety|not allowed/i.test(`${code} ${msg}`)) err.moderationBlocked = true;
+        throw err;
+      }
+      return JSON.parse(text);
+    };
+
+    try {
+      const data = await this._withRetry(doCall, `image edit (${model})`);
+      const b64 = data.data?.[0]?.b64_json;
+      if (!b64) throw new Error('Received an empty image edit response from OpenAI.');
+      return { b64_json: b64, usage: data.usage, model };
+    } catch (error) {
+      if (error.moderationBlocked) throw error; // terminal — handle gracefully upstream
+      const sanitized = String(error.message).replace(/sk-[a-zA-Z0-9-]{20,}/g, 'sk-***');
+      this.logger.error('Error editing image via OpenAI:', sanitized);
+      const err = new Error(sanitized); err.original = error; err.moderationBlocked = error.moderationBlocked;
+      throw err;
+    }
+  }
 }
 
-module.exports = OpenAIService; 
+module.exports = OpenAIService;
