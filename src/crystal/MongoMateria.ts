@@ -66,8 +66,9 @@ export class MongoMateria implements MateriaStore {
     return fromDoc(result)
   }
 
-  async findWarm(spec: { imageRef?: string; podPolicy?: PodPolicy; shareToken?: string }): Promise<Materia | null> {
+  async findWarm(spec: { imageRef?: string; podPolicy?: PodPolicy; shareToken?: string; materiaId?: string }): Promise<Materia | null> {
     const filter: Record<string, unknown> = { status: 'idle' }
+    if (spec.materiaId) filter.id = spec.materiaId
     if (spec.imageRef) filter.imageRef = spec.imageRef
     if (spec.podPolicy) filter.podPolicy = spec.podPolicy
     if (spec.shareToken) filter.shareToken = spec.shareToken

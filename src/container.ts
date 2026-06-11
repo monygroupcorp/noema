@@ -304,6 +304,13 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
               warmTtlMs: config.runpodWarmTtlMs,
             }),
         imageRefOf,
+        // Studio pinning: a studioId-targeted run (actum.modoId) routes to the session's
+        // bound pod, atomically claimed — deterministic even with many warm pods per image.
+        studioPodFor: async (modoId: string) => {
+          const modo = await modos.findById(modoId).catch(() => null)
+          if (!modo?.materiamId) return null
+          return materiae.findWarm({ materiaId: modo.materiamId })
+        },
         ...(config.admitWarm ? { admitWarm: config.admitWarm } : {}),
         deployments,
         hospitia,

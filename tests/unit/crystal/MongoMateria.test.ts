@@ -224,3 +224,14 @@ test('reapIdle never reaps a NON-idle (active) pod, even if drainOnly', async ()
   assert.equal(reaped.length, 0, 'an active pod drains-then-reaps only once it goes idle')
   assert.equal((await store.findById(m.id))?.status, 'active')
 })
+
+test('findWarm by materiaId atomically claims THAT specific idle pod (studio pinning)', async () => {
+  const a = await store.create(makeInput({ status: 'idle', imageRef: 'img:v1' }))
+  await store.create(makeInput({ status: 'idle', imageRef: 'img:v1' }))   // a second same-image pod
+  const claimed = await store.findWarm({ materiaId: a.id })
+  assert.ok(claimed)
+  assert.equal(claimed.id, a.id, 'claimed the exact pod, not the other same-image one')
+  assert.equal(claimed.status, 'active', 'idle → active atomic claim')
+  // A second claim on the now-active pod finds nothing.
+  assert.equal(await store.findWarm({ materiaId: a.id }), null)
+})

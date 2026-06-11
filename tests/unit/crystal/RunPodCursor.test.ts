@@ -276,6 +276,37 @@ test('run() falls back to cold client when Praefectus returns null', async () =>
   assert.equal(warmCalls.length, 0, 'warm client must not be called on cold start')
 })
 
+// ── run() — studio pinning (studioId-targeted) ────────────────────────────────
+test('run() pins a studioId-targeted run to the studio bound pod, not an image-match', async () => {
+  const pinned = makeMateria({ id: 'studio-pod-7', externusId: 'pod-studio' })
+  let warmedWith: Materia | undefined
+  const cursor = new RunPodCursor(makeClient('cold'), makeCompile(), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    warmFactory: (m) => { warmedWith = m; return { async submit() { return { id: 'studio-job' } } } },
+    studioPodFor: async (modoId) => (modoId === 'modo-99' ? pinned : null),
+    // A *different* pod would win the image-match — pinning must beat it.
+    praefectus: makePraefectus(makeMateria({ id: 'wrong-image-match' })),
+    imageRefOf: () => 'stationthis/flux-comfyui:v1',
+  })
+  const result = await cursor.run(makeActum({ modoId: 'modo-99' }))
+  assert.equal((result as { kind: 'async'; externusJobId: string }).externusJobId, 'studio-job')
+  assert.equal(warmedWith?.id, 'studio-pod-7', 'routed to the pinned studio pod')
+})
+
+test('run() falls through to the warm-match when the studio pod is gone/busy (studioPodFor → null)', async () => {
+  let warmedWith: Materia | undefined
+  const cursor = new RunPodCursor(makeClient('cold'), makeCompile(), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    warmFactory: (m) => { warmedWith = m; return { async submit() { return { id: 'fallback-job' } } } },
+    studioPodFor: async () => null,   // studio terminated or busy with another run
+    praefectus: makePraefectus(makeMateria({ id: 'fallback-warm' })),
+    imageRefOf: () => 'stationthis/flux-comfyui:v1',
+  })
+  const result = await cursor.run(makeActum({ modoId: 'modo-gone' }))
+  assert.equal((result as { kind: 'async'; externusJobId: string }).externusJobId, 'fallback-job')
+  assert.equal(warmedWith?.id, 'fallback-warm', 'fell through to the normal image warm-match')
+})
+
 test('run() queries Praefectus with imageRef from imageRefOf', async () => {
   let queriedImageRef: string | undefined
   const fakePraefectus = {

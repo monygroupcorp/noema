@@ -231,10 +231,11 @@ export interface MateriaStore {
    * Standard routing: { imageRef } — any idle pod running that image.
    * Economy routing:  { imageRef, podPolicy: 'economy' } — only economy-pool pods.
    * Link routing:     { shareToken } — the specific pod behind a share link.
+   * Studio routing:   { materiaId } — claim THIS exact pod (a studio's bound pod).
    *
    * Returns null when no matching pod is available.
    */
-  findWarm(spec: { imageRef?: string; podPolicy?: PodPolicy; shareToken?: string }): Promise<Materia | null>
+  findWarm(spec: { imageRef?: string; podPolicy?: PodPolicy; shareToken?: string; materiaId?: string }): Promise<Materia | null>
   /** Return all Materiae that are not terminated — used for graceful shutdown teardown. */
   findActive(): Promise<Materia[]>
   /**
