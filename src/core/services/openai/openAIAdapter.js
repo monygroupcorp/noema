@@ -118,7 +118,42 @@ class OpenAIAdapter {
         costUsd
       };
     }
+    if (action === 'edit') {
+      return this._runEdit(params);
+    }
     throw new Error(`OpenAIAdapter.execute: unknown action '${action}'`);
+  }
+
+  /**
+   * Run a gpt-image-1/2 edit: meme (+ reference images) + prompt -> edited image.
+   * Inputs follow the kontexts convention (input_image, input_second_image,
+   * input_text) so it's a drop-in for image-swap spells. Returns a ToolResult;
+   * a content-policy block is surfaced as a graceful, user-facing failure.
+   * @param {object} params
+   * @returns {Promise<import('../adapterTypes').ToolResult>}
+   */
+  async _runEdit(params) {
+    const prompt = params.input_text ?? params.prompt;
+    const model = params.model || 'gpt-image-2';
+    const size = params.size || '1024x1024';
+    const moderation = params.moderation || 'low';
+    const quality = params.quality || 'medium';
+    const images = [params.input_image, params.input_second_image, params.input_third_image].filter(Boolean);
+    try {
+      const { b64_json } = await this.svc.editImage({ prompt, images, model, size, moderation });
+      const permanentUrl = b64_json ? await this._uploadB64ToR2(b64_json) : null;
+      const image = permanentUrl ? { url: permanentUrl } : { b64_json };
+      const costUsd = this._calculateImageCost(model, size, quality, params.costTable) || 0;
+      return { type: 'image', data: { images: [image] }, status: 'succeeded', costUsd };
+    } catch (err) {
+      if (err.moderationBlocked) {
+        return {
+          type: 'image', data: null, status: 'failed',
+          error: "🛡️ That image tripped OpenAI's content filter (often real faces or celebrities). Try a more cartoonish meme.",
+        };
+      }
+      return { type: 'image', data: null, status: 'failed', error: err.message };
+    }
   }
 
   /**
@@ -131,24 +166,24 @@ class OpenAIAdapter {
    */
   async startJob(params) {
     const { action } = params;
-    if (action !== 'image') {
-      throw new Error(`OpenAIAdapter.startJob only supports action 'image' at the moment`);
+    if (action !== 'image' && action !== 'edit') {
+      throw new Error(`OpenAIAdapter.startJob only supports action 'image' or 'edit'`);
     }
 
     const { randomUUID } = require('crypto');
     const runId = randomUUID();
 
-    // Kick off async generation but do not await
-    const jobPromise = (async () => {
+    // Kick off async generation/edit but do not await
+    const jobPromise = action === 'edit' ? this._runEdit(params) : (async () => {
       try {
         const { prompt, model, size, quality, costTable } = params;
         const resultObj = await this.svc.generateImage({ prompt, model, size, quality, responseFormat: 'b64_json' });
         const permanentUrl = resultObj.b64_json ? await this._uploadB64ToR2(resultObj.b64_json) : null;
         const image = permanentUrl ? { url: permanentUrl } : { b64_json: resultObj.b64_json };
-        
+
         // Calculate cost based on costTable
         const costUsd = costTable ? this._calculateImageCost(model || 'dall-e-3', size || '1024x1024', quality || 'standard', costTable) : 0;
-        
+
         const toolResult = { type: 'image', data: { images: [image] }, status: 'succeeded', costUsd };
         return toolResult;
       } catch (err) {
