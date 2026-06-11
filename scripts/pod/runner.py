@@ -663,7 +663,11 @@ class VllmExecutor(Executor):
             cmd += ["--max-model-len", self.max_model_len]
         log.info(f"launching vLLM: {' '.join(cmd)}")
         _append_event(job_id, {"type": "loading-model", "dir": model_dir})
-        self._proc = subprocess.Popen(cmd, stdout=open("/tmp/vllm.log", "a"), stderr=subprocess.STDOUT)
+        # On Hopper-class GPUs vLLM tries FP8 kernels via DeepGEMM, which isn't in the pip env →
+        # "DeepGEMM backend is not available" crash (verified live on a big pod 2026-06-11). The model
+        # is BF16 (no quantization), so it doesn't need FP8 — disable the path. Env-overridable.
+        serve_env = {**os.environ, "VLLM_USE_DEEP_GEMM": os.environ.get("VLLM_USE_DEEP_GEMM", "0")}
+        self._proc = subprocess.Popen(cmd, stdout=open("/tmp/vllm.log", "a"), stderr=subprocess.STDOUT, env=serve_env)
         self._served_dir = model_dir
         if not self._wait_for_http():
             died = self._proc is None or self._proc.poll() is not None
