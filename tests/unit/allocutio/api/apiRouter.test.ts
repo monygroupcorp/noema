@@ -62,7 +62,11 @@ const fakeApi: ApiFacade = {
   async provisionStudio(_auctor: AuctorKey, opts: ProvisionStudioOpts): Promise<StudioView> {
     lastProvisionOpts = opts
     if (opts.runtime === 'no-pods') throw Errors.capacityNoPods()
-    return { studioId: 'modo-1', status: 'idle', budgetImpetus: '100' }
+    return { studioId: 'modo-1', status: 'provisioning', budgetImpetus: '100' }
+  },
+  async getStudio(_auctor: AuctorKey, studioId: string): Promise<StudioView> {
+    if (studioId === 'ghost') throw Errors.notFoundStudio(studioId)
+    return { studioId, status: 'idle', budgetImpetus: '100', podId: 'pod-1' }
   },
   async listStudios(_auctor: AuctorKey): Promise<StudioView[]> {
     return [{ studioId: 'modo-1', status: 'idle', budgetImpetus: '100' }]
@@ -367,6 +371,21 @@ test('GET /v1/studios with auth returns 200 { studios }', async () => {
     assert.ok(Array.isArray(res.body.studios))
     assert.equal(res.body.studios.length, 1)
     assert.equal(res.body.studios[0].studioId, 'modo-1')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /v1/studios/:id returns the studio; 404 not_found.studio for an unknown id', async () => {
+  const { server, url } = await createServer()
+  try {
+    const ok = await request(`${url}/v1/studios/modo-7`, { headers: { 'x-api-key': 'k' } })
+    assert.equal(ok.status, 200)
+    assert.equal(ok.body.studio.studioId, 'modo-7')
+
+    const missing = await request(`${url}/v1/studios/ghost`, { headers: { 'x-api-key': 'k' } })
+    assert.equal(missing.status, 404)
+    assert.equal(missing.body.error.code, 'not_found.studio')
   } finally {
     await closeServer(server)
   }

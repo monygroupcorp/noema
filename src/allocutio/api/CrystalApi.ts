@@ -24,7 +24,7 @@ import type { Fundamentorum } from '../../types/fundamentum.js'
 import type { Intelligens, IntelligentiumStore, IntelligensGenus } from '../../types/intelligendi.js'
 import type { HospitiumStore } from '../../types/hospitium.js'
 import type { MateriaStore } from '../../types/materia.js'
-import type { Conductor, StudioHandle } from '../../crystal/Conductor.js'
+import type { Conductor, StudioHandle, ConduceOpts } from '../../crystal/Conductor.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { Actum, ComputeStrategy, GpuClass, ModelRef } from '../../types/actum.js'
 import type { Inceptio } from '../../types/cursus.js'
@@ -59,6 +59,9 @@ export interface CrystalApiDeps {
   /** Studio-lifecycle anchor (ADR-0006) — backs `provisionStudio`/`listStudios`. Absent
    *  when no Procurator (provision-capable pod client) is wired → studio ops are unavailable. */
   conductor?: Conductor
+  /** Fire-and-forget webhook poster (the `options.webhookUrl` seam). Absent → no webhook.
+   *  Kept here (not in the crystal ring) so `fetch` stays out of `Conductor`. */
+  notify?: (url: string, body: unknown) => void
   /** Optional per-AuctorKey aggregation index (passed through to dispatchInceptio). */
   actumIndex?: ActumIndexStore
   /** Session store — keys studios by their bound Modo id (the canonical studio handle)
@@ -351,18 +354,34 @@ export class CrystalApi {
     const budget = opts.maxImpetus !== undefined ? BigInt(opts.maxImpetus) : balance
     if (budget <= 0n) throw Errors.insufficientSigna({ available: balance.toString() })
 
-    const handle = await this.deps.conductor.conducere(auctor, {
+    // ASYNC handle: returns a `provisioning` studio immediately; the pod boots in the
+    // background (observe via getStudio/listStudios, or the optional webhook on ready/failed).
+    const conduceOpts: ConduceOpts = {
       budget,
       ...(opts.models?.length ? { models: opts.models } : {}),
       ...(opts.warmMs !== undefined ? { warmMs: opts.warmMs } : {}),
       ...(runtime ? { runtime } : {}),
-    })
-    if (!handle) throw Errors.capacityNoPods()
+    }
+    const webhookUrl = opts.webhookUrl
+    const onSettled = (webhookUrl && this.deps.notify)
+      ? (settled: StudioHandle | null) =>
+          this.deps.notify!(webhookUrl, { studio: settled ? toStudioView(settled, budget) : { studioId: null, status: 'failed' } })
+      : undefined
+    const handle = await this.deps.conductor.conducereAsync(auctor, conduceOpts, onSettled)
     return toStudioView(handle, budget)
   }
 
+  /** One of the caller's studios by id — owner-scoped (a stranger gets `not_found.studio`,
+   *  no leak). Works for an in-flight (provisioning) studio too. */
+  async getStudio(auctor: AuctorKey, studioId: string): Promise<StudioView> {
+    if (!this.deps.conductor) throw Errors.notFoundStudio(studioId)
+    const handle = await this.deps.conductor.getStudio(studioId, auctor)
+    if (!handle) throw Errors.notFoundStudio(studioId)
+    return toStudioView(handle, await this.deps.signorum.sessionBudget(studioId).catch(() => 0n))
+  }
+
   /** The caller's live studios (the agent twin of the bulletin's studio list). Empty when
-   *  no provisioning rail is wired. */
+   *  no provisioning rail is wired. Includes in-flight (provisioning) studios. */
   async listStudios(auctor: AuctorKey): Promise<StudioView[]> {
     if (!this.deps.conductor) return []
     const handles = await this.deps.conductor.find(auctor)
@@ -406,6 +425,10 @@ export interface ProvisionStudioOpts {
   maxImpetus?: bigint | string | number
   /** Override the on-pod runtime explicitly (else inherited from the fundamentum). */
   runtime?: string
+  /** Fire-and-forget completion webhook — POSTed `{ studio }` once the studio is ready
+   *  (or `{ studio: { status: 'failed' } }` if provisioning failed). Optional sugar over
+   *  the poll path (`GET /v1/studios/:id`). */
+  webhookUrl?: string
 }
 
 /** JSON-safe projection of a leased/live studio (bigint→string, Date→ISO). */

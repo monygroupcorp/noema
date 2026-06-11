@@ -19,6 +19,7 @@ import {
   bindTool,
   statusTool,
   provisionStudioTool,
+  getStudioTool,
   listStudiosTool,
 } from './tools.js'
 
@@ -165,6 +166,15 @@ export function buildMcpServer(api: CrystalApi, auctor: AuctorKey | undefined): 
       },
     },
     (args) => provisionStudioTool(api, auctor, args),
+  )
+
+  server.registerTool(
+    'get_studio',
+    {
+      description: 'Fetch one of your studios by id — poll its status (provisioning → idle) after provision_studio. Owner-scoped.',
+      inputSchema: { id: z.string() },
+    },
+    (args) => getStudioTool(api, auctor, args),
   )
 
   server.registerTool(

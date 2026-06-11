@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { runFlowTool, getRunTool, listFlowsTool, describeFlowTool, quoteTool, listFundamentaTool, listModelsTool, saveFlowTool, bindTool, statusTool, provisionStudioTool, listStudiosTool } from '../../../../../src/allocutio/api/mcp/tools.js'
+import { runFlowTool, getRunTool, listFlowsTool, describeFlowTool, quoteTool, listFundamentaTool, listModelsTool, saveFlowTool, bindTool, statusTool, provisionStudioTool, getStudioTool, listStudiosTool } from '../../../../../src/allocutio/api/mcp/tools.js'
 import { ApiError } from '../../../../../src/allocutio/api/errors.js'
 import type { CrystalApi } from '../../../../../src/allocutio/api/CrystalApi.js'
 import type { AuctorKey } from '../../../../../src/flow/types.js'
@@ -47,6 +47,7 @@ function makeFakeApi(overrides: Partial<{
   bind: CrystalApi['bind']
   status: CrystalApi['status']
   provisionStudio: CrystalApi['provisionStudio']
+  getStudio: CrystalApi['getStudio']
   listStudios: CrystalApi['listStudios']
 }> = {}): CrystalApi {
   return {
@@ -71,7 +72,8 @@ function makeFakeApi(overrides: Partial<{
       joinable: [],
       takenAt: new Date().toISOString(),
     })),
-    provisionStudio: overrides.provisionStudio ?? (async () => ({ studioId: 'modo-1', status: 'idle', budgetImpetus: '100' })),
+    provisionStudio: overrides.provisionStudio ?? (async () => ({ studioId: 'modo-1', status: 'provisioning', budgetImpetus: '100' })),
+    getStudio: overrides.getStudio ?? (async (_a, id) => ({ studioId: id, status: 'idle', budgetImpetus: '100' })),
     listStudios: overrides.listStudios ?? (async () => [{ studioId: 'modo-1', status: 'idle', budgetImpetus: '100' }]),
   } as unknown as CrystalApi
 }
@@ -343,6 +345,26 @@ test('provisionStudioTool propagates ApiError from api.provisionStudio', async (
   const result = await provisionStudioTool(api, auctor, {})
   assert.equal(result.isError, true)
   assert.ok(result.content[0].text.includes('capacity.no_pods'))
+})
+
+test('getStudioTool with auctor returns ok result with the studio', async () => {
+  const api = makeFakeApi()
+  const result = await getStudioTool(api, auctor, { id: 'modo-9' })
+  assert.equal(result.isError, undefined)
+  assert.equal(JSON.parse(result.content[0].text).studio.studioId, 'modo-9')
+})
+
+test('getStudioTool without auctor returns auth.missing error', async () => {
+  const result = await getStudioTool(makeFakeApi(), undefined, { id: 'modo-9' })
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('auth.missing'))
+})
+
+test('getStudioTool propagates not_found.studio', async () => {
+  const api = makeFakeApi({ getStudio: async () => { throw new ApiError('not_found.studio', 'Studio not found', 404) } })
+  const result = await getStudioTool(api, auctor, { id: 'ghost' })
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('not_found.studio'))
 })
 
 // ---------------------------------------------------------------------------

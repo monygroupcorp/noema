@@ -355,6 +355,13 @@ const ProvisionStudioRequestSchema: JsonSchema = {
     warmMs: { type: 'number', description: 'How long to hold the studio warm (ms).' },
     maxImpetus: { type: 'string', description: 'Hard spend cap = the session budget (impetus). The studio drain-terminates at the cap. Omitted → the full balance.' },
     runtime: { type: 'string', description: 'Override the on-pod runtime explicitly (else inherited from the fundamentum).' },
+    options: {
+      type: 'object',
+      description: 'Optional per-provision settings.',
+      properties: {
+        webhookUrl: { type: 'string', description: 'Fire-and-forget POST when the studio is ready (or failed) — sugar over polling GET /v1/studios/:id.' },
+      },
+    },
   },
 }
 
@@ -520,7 +527,7 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'POST',
       path: '/studios',
-      summary: 'Lease a hosted warm studio (a persistent GPU session) for fast repeated runs. maxImpetus is the session budget — the studio drain-terminates at the cap.',
+      summary: 'Lease a hosted warm studio (a persistent GPU session) for fast repeated runs. Returns a provisioning handle immediately; poll GET /v1/studios/:id (or set options.webhookUrl). maxImpetus is the session budget — the studio drain-terminates at the cap.',
       auth: true,
       request: ProvisionStudioRequestSchema,
       response: StudioEnvelopeSchema,
@@ -531,6 +538,13 @@ export const API_CONTRACT: ApiContract = {
       summary: "List the authenticated caller's live hosted studios.",
       auth: true,
       response: StudiosListSchema,
+    },
+    {
+      method: 'GET',
+      path: '/studios/:id',
+      summary: "Fetch one of the caller's studios by id (owner-scoped) — poll its status (provisioning → idle) after provisioning.",
+      auth: true,
+      response: StudioEnvelopeSchema,
     },
   ],
   // Mirrors the request-error taxonomy in `errors.ts`. Append-only.

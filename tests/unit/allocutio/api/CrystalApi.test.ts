@@ -577,20 +577,27 @@ function makeHandle(over: { studioId?: string } = {}): StudioHandle {
   } as unknown) as StudioHandle
 }
 
-// A fake conductor recording the ConduceOpts it received.
+// A provisioning (pod-less) handle — what conducereAsync returns immediately.
+function makeProvisioningHandle(over: { studioId?: string } = {}): StudioHandle {
+  return ({ studioId: over.studioId ?? 'modo-abc', modo: { status: 'claiming' } } as unknown) as StudioHandle
+}
+
+// A fake conductor recording the budget it received (provisionStudio is async now).
 function makeConductor(
   over: {
-    conducere?: (auctor: AuctorKey, opts: { budget: bigint }) => Promise<StudioHandle | null>
+    conducereAsync?: (auctor: AuctorKey, opts: { budget: bigint }) => Promise<StudioHandle>
     find?: (auctor: AuctorKey) => Promise<StudioHandle[]>
+    getStudio?: (studioId: string, auctor: AuctorKey) => Promise<StudioHandle | null>
   } = {},
 ): { conductor: CrystalApiDeps['conductor']; received: { budget?: bigint } } {
   const received: { budget?: bigint } = {}
   const conductor = ({
-    conducere: over.conducere ?? (async (_a: AuctorKey, opts: { budget: bigint }) => {
+    conducereAsync: over.conducereAsync ?? (async (_a: AuctorKey, opts: { budget: bigint }) => {
       received.budget = opts.budget
-      return makeHandle()
+      return makeProvisioningHandle()
     }),
     find: over.find ?? (async () => []),
+    getStudio: over.getStudio ?? (async () => null),
   } as unknown) as CrystalApiDeps['conductor']
   return { conductor, received }
 }
@@ -605,7 +612,7 @@ function studioSignorum(over: { balance?: bigint; sessionBudget?: bigint } = {})
   } as unknown) as CrystalApiDeps['signorum']
 }
 
-test('provisionStudio leases a studio and projects a JSON-safe StudioView', async () => {
+test('provisionStudio returns a provisioning handle immediately (async — pod boots in background)', async () => {
   const { conductor, received } = makeConductor()
   const { deps } = makeDeps({ conductor, signorum: studioSignorum({ balance: 100n }) })
   const api = new CrystalApi(deps)
@@ -613,17 +620,12 @@ test('provisionStudio leases a studio and projects a JSON-safe StudioView', asyn
   const view = await api.provisionStudio(auctor, {})
 
   assert.equal(view.studioId, 'modo-abc')
-  assert.equal(view.podId, 'pod-xyz')
-  assert.equal(view.status, 'idle')
-  assert.equal(view.gpu, 'RTX 4090')
-  assert.equal(view.runtime, 'ComfyUI')
-  assert.equal(view.imageRef, 'runpod/pytorch:2.1.0')
-  assert.equal(view.warmUntil, '2026-06-10T01:00:00.000Z')
+  assert.equal(view.status, 'provisioning', 'born provisioning — observe via getStudio')
+  assert.equal(view.podId, undefined, 'no pod bound yet')
   // budget = balance (no maxImpetus), projected bigint→string
   assert.equal(view.budgetImpetus, '100')
   assert.equal(received.budget, 100n)
-  // impetusPerSecond bigint→string
-  assert.equal(view.impetusPerSecond, '2')
+  assert.doesNotThrow(() => JSON.stringify(view), 'JSON-safe')
 })
 
 test('provisionStudio without a conductor throws internal.unavailable; listStudios returns []', async () => {
@@ -659,24 +661,29 @@ test('provisionStudio with a zero balance and no maxImpetus throws economy.insuf
   )
 })
 
-test('provisionStudio when conducere returns null throws capacity.no_pods', async () => {
-  const { conductor } = makeConductor({ conducere: async () => null })
-  const { deps } = makeDeps({ conductor, signorum: studioSignorum({ balance: 100n }) })
+test('getStudio is owner-scoped — returns the caller\'s studio, not_found.studio for a stranger', async () => {
+  const { conductor } = makeConductor({
+    getStudio: async (id) => (id === 'modo-x' ? makeHandle({ studioId: 'modo-x' }) : null),
+  })
+  const { deps } = makeDeps({ conductor, signorum: studioSignorum({ sessionBudget: 50n }) })
   const api = new CrystalApi(deps)
 
+  const view = await api.getStudio(auctor, 'modo-x')
+  assert.equal(view.studioId, 'modo-x')
+  assert.equal(view.budgetImpetus, '50', 'budget from signorum.sessionBudget')
   await assert.rejects(
-    () => api.provisionStudio(auctor, {}),
-    (e: unknown) => e instanceof ApiError && e.code === 'capacity.no_pods',
+    () => api.getStudio(auctor, 'nope'),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.studio',
   )
 })
 
-test('provisionStudio threads maxImpetus as the conducere budget', async () => {
+test('provisionStudio threads maxImpetus as the session budget', async () => {
   const { conductor, received } = makeConductor()
   const { deps } = makeDeps({ conductor, signorum: studioSignorum({ balance: 100n }) })
   const api = new CrystalApi(deps)
 
   const view = await api.provisionStudio(auctor, { maxImpetus: 42n })
-  assert.equal(received.budget, 42n, 'maxImpetus is the session budget passed to conducere')
+  assert.equal(received.budget, 42n, 'maxImpetus is the session budget passed to conducereAsync')
   assert.equal(view.budgetImpetus, '42')
 })
 

@@ -45,6 +45,7 @@ export interface ApiFacade {
   bind(auctor: AuctorKey, verb: string, modusId: string): Promise<{ verb: string; modusId: string }>
   status(auctor: AuctorKey): Promise<StatusView>
   provisionStudio(auctor: AuctorKey, opts: ProvisionStudioOpts): Promise<StudioView>
+  getStudio(auctor: AuctorKey, studioId: string): Promise<StudioView>
   listStudios(auctor: AuctorKey): Promise<StudioView[]>
 }
 
@@ -246,19 +247,23 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     }),
   )
 
-  // POST /v1/studios — lease a hosted studio (auth required). The maxImpetus cap IS the
-  // session budget — Census drain-terminates the studio at the ceiling (the watchdog).
+  // POST /v1/studios — lease a hosted studio (auth required). Returns a `provisioning`
+  // handle immediately; the pod boots in the background (observe via GET /v1/studios/:id
+  // or the optional webhookUrl). maxImpetus IS the session budget — Census drain-
+  // terminates the studio at the ceiling (the watchdog).
   router.post(
     '/studios',
     wrap(async (req, res) => {
       const auctor = await auth(req)
       const { fundamentumId, models, warmMs, maxImpetus, runtime } = req.body ?? {}
+      const webhookUrl = req.body?.options?.webhookUrl ?? req.body?.webhookUrl
       const studio = await api.provisionStudio(auctor, {
         ...(fundamentumId ? { fundamentumId } : {}),
         ...(Array.isArray(models) ? { models } : {}),
         ...(warmMs !== undefined ? { warmMs } : {}),
         ...(maxImpetus !== undefined ? { maxImpetus } : {}),
         ...(runtime ? { runtime } : {}),
+        ...(typeof webhookUrl === 'string' && webhookUrl ? { webhookUrl } : {}),
       })
       res.status(201).json({ studio })
     }),
@@ -270,6 +275,15 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     wrap(async (req, res) => {
       const auctor = await auth(req)
       res.json({ studios: await api.listStudios(auctor) })
+    }),
+  )
+
+  // GET /v1/studios/:id — one of the caller's studios (owner-scoped; poll for ready).
+  router.get(
+    '/studios/:id',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      res.json({ studio: await api.getStudio(auctor, String(req.params.id)) })
     }),
   )
 

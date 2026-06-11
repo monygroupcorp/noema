@@ -523,6 +523,11 @@ async function main(): Promise<void> {
     modos: ring.modos,
     consuetudinum,
     ...(ring.conductor ? { conductor: ring.conductor } : {}),
+    // Fire-and-forget studio-ready/failed webhook (optional sugar over polling).
+    notify: (url, body) => {
+      void fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .catch(err => log.warn('studio webhook failed', { url, error: String(err) }))
+    },
   })
   // Identified-user acceptors → animaId via a `'web'`/`'api'` persona (create-on-sight).
   // JWT (env secret) + API-key (read-only users lookup) + anon {commitment} are live; web3
