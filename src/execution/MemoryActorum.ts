@@ -30,8 +30,11 @@ export class MemoryActorum implements Actorum {
   }
 
   async findByNullifier(nullifier: string): Promise<Actum | null> {
+    // Ignore FAILED (fractus) acta: a failed run refunds its signa (ActumCompletor.fail), so its
+    // arcanum spend is void and the commitment is free to re-spend. Only a live/completed actum
+    // holding the nullifier is a real double-spend.
     for (const actum of this.store.values()) {
-      if (actum.nullifier === nullifier) return actum
+      if (actum.nullifier === nullifier && actum.status !== 'fractus') return actum
     }
     return null
   }
