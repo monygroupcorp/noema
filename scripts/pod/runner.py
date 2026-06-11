@@ -580,9 +580,11 @@ class VllmExecutor(Executor):
         # Default to 0.90 and always pass it; co-residency later derives this from RUNNER_VRAM_GB.
         self.gpu_util      = os.environ.get("VLLM_GPU_UTIL", "0.90")
         # Cap the context. Qwen3-VL advertises a 256K max_seq_len → vLLM would demand ~36GB of KV
-        # cache for a single request and refuse to start. Understanding tasks don't need 256K; 16K
-        # keeps the KV cache small enough to fit beside the weights.
-        self.max_model_len = os.environ.get("VLLM_MAX_MODEL_LEN", "16384")
+        # cache for a single request and refuse to start. Understanding a single image needs only a
+        # few K tokens; 4096 keeps the KV cache (~0.6GB) small enough to fit beside the ~16.65GB of
+        # weights even on a ~20GB pod GPU (16384's 2.25GB KV did NOT fit on a live pod, 2026-06-11).
+        # Override up (VLLM_MAX_MODEL_LEN) on bigger GPUs / for multi-image or long prompts.
+        self.max_model_len = os.environ.get("VLLM_MAX_MODEL_LEN", "4096")
         self._proc: subprocess.Popen | None = None
         self._served_dir = ""
 
@@ -628,11 +630,21 @@ class VllmExecutor(Executor):
         return False
 
     def _tail_log(self, n: int = 30) -> str:
+        # vLLM buries the real cause (a ValueError/OOM in the EngineCore subprocess) ABOVE a generic
+        # "Engine core initialization failed" wrapper, so a blind tail shows only the wrapper. Surface
+        # the actual error lines + the last n lines.
         try:
             with open("/tmp/vllm.log", "r", errors="replace") as f:
-                return "".join(f.readlines()[-n:]).strip()
+                lines = f.readlines()
         except Exception:
             return "(vllm.log unavailable)"
+        pat = ("ValueError", "RuntimeError", "OutOfMemory", "out of memory", "CUDA out of memory",
+               "KV cache", "max seq len", "max_model_len", "no available memory", "OSError", "ImportError")
+        cause = [ln.rstrip() for ln in lines if any(p in ln for p in pat) and "core.py:1165" not in ln]
+        tail = "".join(lines[-n:]).strip()
+        if cause:
+            return "ROOT CAUSE:\n" + "\n".join(cause[-6:]) + "\n--- tail ---\n" + tail
+        return tail
 
     def fail_detail(self, err_str: str) -> str:
         return err_str if "vllm.log tail:" in err_str else f"{err_str}\nvllm.log tail:\n{self._tail_log()}"
