@@ -33,6 +33,20 @@ test('findById returns the created actum', async () => {
   assert.equal(found.id, 'act-1')
 })
 
+test('findByNullifier returns a LIVE actum (blocks double-spend)', async () => {
+  const store = new MemoryActorum()
+  await store.create(makeActum({ id: 'a', nullifier: 'null-x', status: 'agens' }))
+  const found = await store.findByNullifier('null-x')
+  assert.equal(found?.id, 'a')
+})
+
+test('findByNullifier ignores a FAILED (fractus) actum — frees the commitment to re-spend', async () => {
+  const store = new MemoryActorum()
+  // a failed run refunds its signa, so its nullifier must NOT block a retry
+  await store.create(makeActum({ id: 'failed', nullifier: 'null-y', status: 'fractus' }))
+  assert.equal(await store.findByNullifier('null-y'), null)
+})
+
 test('findById returns null for unknown id', async () => {
   const store = new MemoryActorum()
   const found = await store.findById('ghost')

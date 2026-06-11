@@ -86,7 +86,9 @@ export class MongoActorum implements Actorum {
   }
 
   async findByNullifier(nullifier: string): Promise<Actum | null> {
-    const doc = await this.col.findOne({ nullifier })
+    // Exclude FAILED (fractus) acta — a failed run refunds its signa, voiding the arcanum spend, so
+    // the commitment can be re-spent. Only a live/completed actum is a real double-spend.
+    const doc = await this.col.findOne({ nullifier, status: { $ne: 'fractus' } })
     return doc ? fromDoc(doc) : null
   }
 

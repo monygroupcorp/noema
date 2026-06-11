@@ -173,8 +173,9 @@ export interface Actorum {
   /** Find an actum by the external job ID assigned at submission time. */
   findByExternusJobId(externusJobId: string): Promise<Actum | null>
   /**
-   * Find an actum by its nullifier — the spend proof stamped when an arcanum
-   * signum was consumed. Used to reject double-spend attempts.
+   * Find a LIVE actum by its nullifier — the spend proof stamped when an arcanum signum was
+   * consumed. Used to reject double-spend attempts. Excludes FAILED (`fractus`) acta: a failed run
+   * refunds its signa, voiding the spend, so the commitment is free to re-spend.
    */
   findByNullifier(nullifier: string): Promise<Actum | null>
   /**

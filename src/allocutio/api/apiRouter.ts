@@ -18,10 +18,13 @@ import type { Run } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView } from './CrystalApi.js'
 import { ApiError, Errors } from './errors.js'
+import { makeLogger } from '../../lib/logger.js'
 import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
 import { API_CONTRACT } from './apiContract.js'
 import { generateOpenApi } from './docgen.js'
 import type { RunEventHub } from './RunEventHub.js'
+
+const log = makeLogger('api:router')
 
 /** The slice of CrystalApi this router needs. Mirrors its method signatures. */
 export interface ApiFacade {
@@ -70,6 +73,8 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
         if (err instanceof ApiError) {
           res.status(err.httpStatus).json({ error: err.toBody() })
         } else {
+          // Unexpected — log it (otherwise the masked `internal.error` is invisible in the logs).
+          log.error('unhandled API error', { method: req.method, path: req.path, error: String((err as Error)?.stack ?? err) })
           res.status(500).json({ error: Errors.internal().toBody() })
         }
       }
