@@ -53,10 +53,11 @@ export interface StudioHandle {
    *  targets (→ `Inceptio.modoId`). */
   studioId: string
   modo: Modo
-  materia: Materia
+  /** The bound pod — absent while the studio is still provisioning (async path). */
+  materia?: Materia
   /** The budget tessera bound to the session (present on `conducere`, not on `find`). */
   tessera?: Signum
-  /** Provision telemetry (present only on a fresh `conducere`). */
+  /** Provision telemetry (present only on a fresh, completed `conducere`). */
   provision?: StudioProvision
 }
 
@@ -96,31 +97,69 @@ export class Conductor {
   constructor(private readonly deps: ConductorDeps) {}
 
   /**
-   * Lease a studio for `auctor`: procure + park a `Materia` (Hospitium keyed by
-   * the auctor — so a studio is NEVER host-less by construction), install any
-   * models live, open a `Modo` session + budget tessera, and bind the session to
-   * the pod. Returns the studio handle, or `null` if provisioning failed.
+   * Lease a studio for `auctor`, SYNCHRONOUSLY (the bot `/arm` path — streams stages
+   * via `onStage` and returns once the pod is warm). Opens the session + host record,
+   * provisions + binds the pod. Returns the studio handle, or `null` on failure.
    */
   async conducere(
     auctor: AuctorKey,
     opts: ConduceOpts,
     onStage?: StudioStageCb,
   ): Promise<StudioHandle | null> {
+    const { modo, tessera } = await this._open(auctor, opts)
+    const res = await this._provisionBind(modo, opts, onStage)
+    if (!res) { await this._fail(modo.id); return null }
+    return { studioId: modo.id, modo: res.modo, materia: res.materia, tessera, provision: res.provision }
+  }
+
+  /**
+   * Lease a studio ASYNCHRONOUSLY (the API path): open the session + host record and
+   * return the handle IMMEDIATELY (status `claiming`), then provision the pod in the
+   * background — the caller observes the `claiming → warming → idle` (or `terminated`)
+   * transitions via `find`/`getStudio`. The host record is keyed by `modoId` from the
+   * start, so an in-flight studio is owner-scoped before its pod parks.
+   */
+  async conducereAsync(auctor: AuctorKey, opts: ConduceOpts): Promise<StudioHandle> {
+    const { modo, tessera } = await this._open(auctor, opts)
+    // Fire-and-forget the boot; status lives on the Modo. (Single-instance: a server
+    // restart mid-provision orphans a `warming` Modo — recovery sweep is a follow-up.)
+    void (async () => {
+      await this.deps.modos.update(modo.id, { status: 'warming' }).catch(() => {})
+      const res = await this._provisionBind(modo, opts).catch(() => null)
+      if (!res) await this._fail(modo.id)
+    })()
+    return { studioId: modo.id, modo, tessera }
+  }
+
+  /** Open the session (Modo `claiming` + budget tessera) and its host record
+   *  (`Hospitium` keyed by `modoId` + `auctor`, pod attached later). */
+  private async _open(auctor: AuctorKey, opts: ConduceOpts): Promise<{ modo: Modo; tessera: Signum }> {
+    const idleWarmthSec = opts.warmMs ? Math.max(1, Math.floor(opts.warmMs / 1000)) : undefined
+    const { modo, tessera } = await this.deps.opener.openModo(opts.budget, auctor, idleWarmthSec)
+    await this.deps.hospitia.create({ modoId: modo.id, hostKey: auctor, inceptum: new Date() })
+      .catch(err => log.warn('conducere: host record create failed', { studioId: modo.id, error: String(err) }))
+    return { modo, tessera }
+  }
+
+  /** Procure + park the pod, install the loadout, and bind it to the session + host
+   *  record. The Procurator is NOT given a hostKey — the Conductor owns the studio's
+   *  Hospitium (created in `_open`), so the pod-client must not pair a second one. */
+  private async _provisionBind(
+    modo: Modo,
+    opts: ConduceOpts,
+    onStage?: StudioStageCb,
+  ): Promise<{ modo: Modo; materia: Materia; provision: StudioProvision } | null> {
+    const provCtx = opts.groupChatId ? { groupChatId: opts.groupChatId } : undefined
     const provision = await this.deps.procurator.provisionStudio(
       {
         ...(opts.runtime ? { runtime: opts.runtime } : {}),
         ...(opts.warmMs ? { warmMs: opts.warmMs } : {}),
-        provisioningContext: {
-          hostKey: auctor,
-          ...(opts.groupChatId ? { groupChatId: opts.groupChatId } : {}),
-        },
+        ...(provCtx ? { provisioningContext: provCtx } : {}),
       },
       onStage,
     )
     if (!provision) return null
 
-    // The Procurator parked a Materia keyed by externusId = podId. (MateriaStore has
-    // no find-by-externusId; findActive is the parked-pod lookup the bot path uses too.)
     const materia = (await this.deps.materiae.findActive().catch(() => []))
       .find(m => m.externusId === provision.podId)
     if (!materia) {
@@ -128,73 +167,83 @@ export class Conductor {
       return null
     }
 
-    // Install the loadout live onto the warm pod (best-effort — a failed download
-    // doesn't sink the lease; the gen-admission gate retries it).
+    // Install the loadout live (best-effort — a failed download doesn't sink the lease).
     if (opts.models?.length && this.deps.installLive) {
       await this.deps.installLive(materia, opts.models).catch(err =>
         log.warn('conducere: live model install failed', { materiaId: materia.id, error: String(err) }))
     }
 
-    const idleWarmthSec = opts.warmMs ? Math.max(1, Math.floor(opts.warmMs / 1000)) : undefined
-    const { modo, tessera } = await this.deps.opener.openModo(opts.budget, auctor, idleWarmthSec)
-
-    // Bind the session to its pod — the `modo.materiamId` FK + warm-resting status.
+    // Attach the pod to the host record + bind the session, warm + resting.
+    await this.deps.hospitia.bindMateria(modo.id, materia.id)
+      .catch(err => log.warn('conducere: bindMateria failed', { studioId: modo.id, error: String(err) }))
     const bound = await this.deps.modos.update(modo.id, { materiamId: materia.id, status: 'idle' })
+    log.info('studio leased', { studioId: modo.id, materiaId: materia.id, podId: provision.podId })
+    return { modo: bound, materia, provision }
+  }
 
-    log.info('studio leased', { studioId: bound.id, materiaId: materia.id, podId: provision.podId })
-    return { studioId: bound.id, modo: bound, materia, tessera, provision }
+  /** Close a studio whose provisioning failed — the session ends; the (pod-less)
+   *  host record is harmless (no `materiaId` → never billed, never listed). */
+  private async _fail(studioId: string): Promise<void> {
+    await this.deps.modos.update(studioId, { status: 'terminated', terminatum: new Date() }).catch(() => {})
+    log.warn('studio provisioning failed', { studioId })
   }
 
   /**
-   * The auctor's live studios — join `Hospitium`(host = auctor) → `Materia` +
-   * the bound `Modo`. A Hospitium with no Modo (legacy/group-hosted pod) is
-   * skipped — `find` reports leased sessions, the unit `conducere` mints.
+   * The auctor's live studios — their `Hospitium`(host) records joined to the bound
+   * `Modo`. Includes in-flight (provisioning, pod-less) studios; excludes terminated
+   * sessions and reaped pods. Gen-warm pod records (no `modoId`) are not studios.
    */
   async find(auctor: AuctorKey): Promise<StudioHandle[]> {
-    const [hospitia, modos] = await Promise.all([
-      this.deps.hospitia.findActive().catch(() => []),
-      this.deps.modos.findActive().catch(() => []),
-    ])
-    const mine = hospitia.filter(h => hostKeyMatches(h.hostKey, auctor))
-    const modoByMateria = new Map<string, Modo>()
-    for (const m of modos) if (m.materiamId) modoByMateria.set(m.materiamId, m)
-
+    const mine = (await this.deps.hospitia.findActive().catch(() => []))
+      .filter(h => h.modoId && hostKeyMatches(h.hostKey, auctor))
     const out: StudioHandle[] = []
     for (const h of mine) {
-      const modo = modoByMateria.get(h.materiaId)
-      if (!modo) continue
-      const materia = await this.deps.materiae.findById(h.materiaId).catch(() => null)
-      // Skip studios whose pod is gone — `find` reports LIVE studios. The Materia is
-      // the truth about pod liveness; a reaped pod leaves a stale-`idle` Modo behind.
-      if (!materia || materia.status === 'terminated') continue
-      out.push({ studioId: modo.id, modo, materia })
+      const handle = await this._handleFor(h.modoId!, h.materiaId)
+      if (handle) out.push(handle)
     }
     return out
   }
 
+  /** One studio, owner-scoped by its session id — for `GET /v1/studios/:id`. */
+  async getStudio(studioId: string, auctor: AuctorKey): Promise<StudioHandle | null> {
+    const h = await this.deps.hospitia.findByModoId(studioId).catch(() => null)
+    if (!h || !hostKeyMatches(h.hostKey, auctor)) return null
+    return this._handleFor(studioId, h.materiaId)
+  }
+
+  /** Build a live studio handle from a session id + its (maybe-absent) pod. Returns
+   *  null when the session is terminated or its pod was reaped. */
+  private async _handleFor(modoId: string, materiaId?: string): Promise<StudioHandle | null> {
+    const modo = await this.deps.modos.findById(modoId).catch(() => null)
+    if (!modo || modo.status === 'terminated') return null
+    const materia = materiaId ? await this.deps.materiae.findById(materiaId).catch(() => null) : null
+    if (materia && materia.status === 'terminated') return null
+    return { studioId: modo.id, modo, ...(materia ? { materia } : {}) }
+  }
+
   /**
-   * Release a leased studio: verify the caller hosts it, terminate the pod, and
-   * mark the session + pod + hospitium closed. Returns false if the studio isn't
-   * the caller's (or doesn't exist).
+   * Release a studio (owner-scoped by its session id) — terminate the pod and mark
+   * the session + pod + host record closed. Works for an in-flight studio too (cancel).
+   * Returns false if the studio isn't the caller's.
    */
   async claudere(studioId: string, auctor: AuctorKey): Promise<boolean> {
-    const modo = await this.deps.modos.findById(studioId).catch(() => null)
-    if (!modo?.materiamId) return false
-    const hospitium = await this.deps.hospitia.findByMateriaId(modo.materiamId).catch(() => null)
+    const hospitium = await this.deps.hospitia.findByModoId(studioId).catch(() => null)
     if (!hospitium || !hostKeyMatches(hospitium.hostKey, auctor)) return false
 
-    const materia = await this.deps.materiae.findById(modo.materiamId).catch(() => null)
+    const materia = hospitium.materiaId
+      ? await this.deps.materiae.findById(hospitium.materiaId).catch(() => null)
+      : null
     if (materia?.externusId && this.deps.terminate) {
       await this.deps.terminate(materia.externusId).catch(err =>
         log.warn('claudere: pod terminate failed', { podId: materia.externusId, error: String(err) }))
     }
     const now = new Date()
     await Promise.all([
-      this.deps.modos.update(modo.id, { status: 'terminated', terminatum: now }).catch(() => {}),
+      this.deps.modos.update(studioId, { status: 'terminated', terminatum: now }).catch(() => {}),
       materia ? this.deps.materiae.update(materia.id, { status: 'terminated', terminatum: now }).catch(() => {}) : Promise.resolve(),
-      this.deps.hospitia.update(hospitium.materiaId, { terminatum: now }).catch(() => {}),
+      hospitium.materiaId ? this.deps.hospitia.update(hospitium.materiaId, { terminatum: now }).catch(() => {}) : Promise.resolve(),
     ])
-    log.info('studio released', { studioId, materiaId: modo.materiamId })
+    log.info('studio released', { studioId })
     return true
   }
 }

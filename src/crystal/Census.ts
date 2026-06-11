@@ -75,6 +75,9 @@ export async function censere(
   hospitium: Hospitium,
   now: Date = new Date(),
 ): Promise<{ requested: bigint; charged: bigint; drainEngaged: boolean }> {
+  // An in-flight studio record (no pod parked yet) has no `materiaId` — nothing to
+  // bill until its pod binds. Skip it cleanly.
+  if (!hospitium.materiaId) return { requested: 0n, charged: 0n, drainEngaged: false }
   const materia = await deps.materiae.findById(hospitium.materiaId)
   if (!materia || !BILLABLE_STATUSES.has(materia.status)) {
     return { requested: 0n, charged: 0n, drainEngaged: false }

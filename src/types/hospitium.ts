@@ -43,8 +43,20 @@ export type HostKey =
 export interface Hospitium {
   id: string
 
-  /** The Materia this hosting record pairs with. 1:1. */
-  materiaId: string
+  /**
+   * The Materia (pod) this record pairs with. 1:1 — but OPTIONAL: a studio's host
+   * record is created when the studio opens (keyed by `modoId`), before its pod
+   * exists; `materiaId` is attached at park (`bindMateria`). Always present for a
+   * gen-warm pod's record (no `modoId`) and for a bound studio.
+   */
+  materiaId?: string
+
+  /**
+   * The studio session (Modo) this record hosts. Present for STUDIO host records
+   * (created by the `Conductor` at `openModo`, so an in-flight studio is owner-
+   * scoped before its pod parks). Absent for plain gen-warm pod records.
+   */
+  modoId?: string
 
   /**
    * The economic owner — receives hostCut + accrues Materia.bootRecovered as guests
@@ -93,10 +105,17 @@ export type Hospitia = Hospitium[]
 export interface HospitiumStore {
   create(input: Omit<Hospitium, 'id'>): Promise<Hospitium>
   findByMateriaId(materiaId: string): Promise<Hospitium | null>
+  /** Find a studio's host record by its session id (`modoId`) — the owner-scope read
+   *  for a studio, including an in-flight one whose pod hasn't parked yet. */
+  findByModoId(modoId: string): Promise<Hospitium | null>
+  /** Attach the parked pod to a studio's host record (keyed by `modoId`, since the
+   *  in-flight record has no `materiaId` yet). Returns the updated record. */
+  bindMateria(modoId: string, materiaId: string): Promise<Hospitium>
   update(
     materiaId: string,
     patch: Partial<Pick<Hospitium, 'adminAnimaIds' | 'terminatum' | 'costAccrued' | 'lastBilledAt'>>,
   ): Promise<Hospitium>
-  /** Active hospitia (Materia not terminated) — used by the billing ticker. */
+  /** Active hospitia (not terminated) — used by the billing ticker (which skips any
+   *  that have no `materiaId` yet) and by studio listing. */
   findActive(): Promise<Hospitium[]>
 }

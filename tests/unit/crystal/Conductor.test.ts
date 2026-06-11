@@ -37,21 +37,31 @@ class FakeMateriae implements MateriaStore {
 }
 
 class FakeHospitia implements HospitiumStore {
-  byMateria = new Map<string, Hospitium>()
+  records: Hospitium[] = []
   private seq = 0
   async create(input: Omit<Hospitium, 'id'>): Promise<Hospitium> {
-    const h: Hospitium = { id: `h-${++this.seq}`, ...input }; this.byMateria.set(h.materiaId, h); return h
+    const h: Hospitium = { id: `h-${++this.seq}`, ...input }; this.records.push(h); return h
   }
-  async findByMateriaId(materiaId: string): Promise<Hospitium | null> { return this.byMateria.get(materiaId) ?? null }
-  async findActive(): Promise<Hospitium[]> { return [...this.byMateria.values()].filter(h => !h.terminatum) }
+  async findByMateriaId(materiaId: string): Promise<Hospitium | null> {
+    return this.records.find(h => h.materiaId === materiaId) ?? null
+  }
+  async findByModoId(modoId: string): Promise<Hospitium | null> {
+    return this.records.find(h => h.modoId === modoId) ?? null
+  }
+  async bindMateria(modoId: string, materiaId: string): Promise<Hospitium> {
+    const h = this.records.find(r => r.modoId === modoId); if (!h) throw new Error('not found')
+    h.materiaId = materiaId; return h
+  }
+  async findActive(): Promise<Hospitium[]> { return this.records.filter(h => !h.terminatum) }
   async update(materiaId: string, patch: Partial<Pick<Hospitium, 'adminAnimaIds' | 'terminatum' | 'costAccrued' | 'lastBilledAt'>>): Promise<Hospitium> {
-    const cur = this.byMateria.get(materiaId); if (!cur) throw new Error('not found')
-    const next = { ...cur, ...patch }; this.byMateria.set(materiaId, next); return next
+    const h = this.records.find(r => r.materiaId === materiaId); if (!h) throw new Error('not found')
+    Object.assign(h, patch); return h
   }
 }
 
-// Stub Procurator — parks a Materia + Hospitium just like the real provision-park.
-function makeProcurator(materiae: FakeMateriae, hospitia: FakeHospitia, opts: { failAll?: boolean } = {}): Procurator & { stages: string[] } {
+// Stub Procurator — parks a Materia (no Hospitium: the Conductor owns the studio's
+// host record, and is NOT given a hostKey, so a real Procurator wouldn't pair one).
+function makeProcurator(materiae: FakeMateriae, _hospitia: FakeHospitia, opts: { failAll?: boolean } = {}): Procurator & { stages: string[] } {
   const stages: string[] = []
   return {
     stages,
@@ -59,15 +69,12 @@ function makeProcurator(materiae: FakeMateriae, hospitia: FakeHospitia, opts: { 
       if (opts.failAll) return null
       onStage?.('provisioning'); stages.push('provisioning')
       const podId = `pod-${materiae.byId.size + 1}`
-      const materia = await materiae.create({
+      await materiae.create({
         genus: 'runpod', externusId: podId, gpu: 'RTX 4090', vramGb: 24, ramGb: 32,
         imageRef: 'img:1', impetusPerSecond: 4n, status: 'idle',
         warmUntil: new Date(Date.now() + (o.warmMs ?? 60_000)), bootCostImpetus: 0n,
         ...(o.runtime ? { runtime: o.runtime } : {}),
       })
-      if (o.provisioningContext?.hostKey) {
-        await hospitia.create({ materiaId: materia.id, hostKey: o.provisioningContext.hostKey, inceptum: new Date() })
-      }
       onStage?.('comfy-ready'); stages.push('comfy-ready')
       return { podId, gpuType: 'RTX 4090', costPerHr: 0.69, provisionMs: 1234 }
     },
@@ -184,4 +191,46 @@ test('claudere refuses a studio the caller does not host', async () => {
   const handle = await conductor.conducere(AUCTOR, { budget: 1000n })
   const ok = await conductor.claudere(handle!.studioId, { animaId: 'intruder' })
   assert.equal(ok, false)
+})
+
+// ── conducereAsync + getStudio (the async API path) ───────────────────────────
+async function settleStatus(modos: MemoryModo, id: string, want: string): Promise<void> {
+  for (let i = 0; i < 100 && (await modos.findById(id))?.status !== want; i++) {
+    await new Promise(r => setTimeout(r, 5))
+  }
+}
+
+test('conducereAsync returns immediately (claiming, no pod) then binds in the background', async () => {
+  const { conductor, modos, hospitia } = makeConductor()
+  const handle = await conductor.conducereAsync(AUCTOR, { budget: 2000n })
+
+  // Immediately: a studioId + claiming session, no pod yet — but already owner-scoped.
+  assert.equal(handle.studioId, handle.modo.id)
+  assert.equal(handle.modo.status, 'claiming')
+  assert.equal(handle.materia, undefined, 'no pod bound yet')
+  const hostRec = await hospitia.findByModoId(handle.studioId)
+  assert.deepEqual(hostRec?.hostKey, AUCTOR, 'host record exists before the pod parks (owner-scopable in-flight)')
+
+  // The background boot settles → bound + idle.
+  await settleStatus(modos, handle.studioId, 'idle')
+  const settled = await modos.findById(handle.studioId)
+  assert.equal(settled?.status, 'idle')
+  assert.ok(settled?.materiamId, 'modo bound to a materia')
+  assert.ok((await hospitia.findByModoId(handle.studioId))?.materiaId, 'host record got its materiaId bound')
+})
+
+test('conducereAsync marks the studio terminated when provisioning fails', async () => {
+  const { conductor, modos } = makeConductor({ failAll: true })
+  const handle = await conductor.conducereAsync(AUCTOR, { budget: 1000n })
+  await settleStatus(modos, handle.studioId, 'terminated')
+  assert.equal((await modos.findById(handle.studioId))?.status, 'terminated')
+})
+
+test('getStudio is owner-scoped by studioId — in-flight included, strangers refused', async () => {
+  const { conductor } = makeConductor()
+  const handle = await conductor.conducereAsync(AUCTOR, { budget: 1000n })
+  const mine = await conductor.getStudio(handle.studioId, AUCTOR)
+  assert.ok(mine, 'owner reads their provisioning studio')
+  assert.equal(mine!.studioId, handle.studioId)
+  assert.equal(await conductor.getStudio(handle.studioId, { animaId: 'intruder' }), null, 'stranger gets nothing — no leak')
 })

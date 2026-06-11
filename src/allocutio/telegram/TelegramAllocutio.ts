@@ -986,7 +986,14 @@ Generate AI art, chat with models, explore creative tools.`
       }
       const unique = Array.from(new Set(animaIds))
       if (unique.length > 0) {
-        await this.deps.hospitia.update(materiaId, { adminAnimaIds: unique }).catch(() => {})
+        // A studio's host record (ADR-0006) is keyed by its session and binds its
+        // materiaId just after pod.parked — so this update can lose a race with the
+        // bind. Retry once so a group studio doesn't silently miss its admin set.
+        const setAdmins = () => this.deps.hospitia!.update(materiaId, { adminAnimaIds: unique })
+        await setAdmins().catch(async () => {
+          await new Promise(r => setTimeout(r, 500))
+          await setAdmins().catch(() => {})
+        })
       }
     } catch (err) {
       log.warn('pod.parked admin resolution failed', { materiaId, error: String(err) })
