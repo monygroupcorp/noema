@@ -75,6 +75,9 @@ function validateSnapshot(snapshot) {
       if (!win.collection || !win.collection.collectionId) {
         throw new Error(`Collection window at index ${idx} missing collection.collectionId`);
       }
+    } else if (win.type === 'agent-context') {
+      // Agent-context windows are template scaffolding with no tool/spell —
+      // they carry only id/position/type and are valid as-is.
     } else {
       if (!win.toolId && !win.displayName) {
         throw new Error(`Tool window at index ${idx} missing both toolId and displayName`);
