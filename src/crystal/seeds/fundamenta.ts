@@ -63,16 +63,21 @@ export const FUNDAMENTUM_SD15_COMFYUI: Fundamentum = {
  * Compiler.ts:160). "Shared substrate, weights swapped per flow" = shared image+runtime,
  * per-flow weight — not a shared weight manifest.
  *
- * runtime 'vLLM' selects the (pending) TransformersVllmExecutor on the pod (ADR-0007 Part A).
- * imageVersion MUST be pinned to a vLLM release that supports Qwen3-VL before any live run.
+ * runtime 'vLLM' selects the TransformersVllmExecutor on the pod (ADR-0007 Part A).
+ *
+ * IMAGE: a RunPod SSH-ready base (the same `runpod/pytorch` ComfyUI uses), NOT a prebuilt
+ * `vllm/vllm-openai` image. SecurePodClient bootstraps every pod over SSH; the bare vLLM serving
+ * image ships no sshd, so `_waitForSshd` fails ("sshd did not become ready") — verified live
+ * 2026-06-11 (run cede4cce, 3/3 attempts). The bootstrap `pip install vllm` brings vLLM onto the
+ * SSH-capable base instead. (Live-iterate the CUDA/torch tag if vLLM needs a newer one.)
  */
 export const FUNDAMENTUM_QWEN_VL_VLLM: Fundamentum = {
   id: 'qwen-vl-vllm',
   nomen: 'Qwen-VL · vLLM',
   versio: '1.0.0',
   contentHash: '',
-  imageId: 'vllm/vllm-openai',
-  imageVersion: 'latest',   // ⚠ PIN to a Qwen3-VL-capable vLLM tag before live use
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'vLLM',
   intellae: [],             // none shared — the LM is per-Essentia (see note above)
   vramGb: 24,
