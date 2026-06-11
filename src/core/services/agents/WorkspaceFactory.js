@@ -466,23 +466,42 @@ class WorkspaceFactory {
         continue;
       }
 
-      // Apply factory bindings: bake static values into spell, remove from exposedInputs
+      // Apply factory bindings: bake the bound value into the TARGET STEP's
+      // parameterMappings as a `static` input, and remove the bound key from
+      // exposedInputs so the caster isn't asked for it.
+      //
+      // IMPORTANT: the bind must live on the step, not on a spell-level
+      // `parameterMappings` field — the execution engine (ParameterResolver)
+      // only resolves step-level mappings; a top-level spell.parameterMappings
+      // is read nowhere and would be silently dropped at runtime.
       const bindings = factoryBindings?.get(win.id) || [];
       const boundPortKeys = new Set(bindings.map(b => b.portKey));
       const exposedInputs = JSON.parse(JSON.stringify(original.exposedInputs || []));
       const filteredExposedInputs = exposedInputs.filter(
         ei => !boundPortKeys.has(`${ei.nodeId}__${ei.paramKey}`)
       );
-      const parameterMappings = {};
-      for (const b of bindings) parameterMappings[b.portKey] = b.value;
+      const clonedSteps = JSON.parse(JSON.stringify(original.steps || []));
+      for (const b of bindings) {
+        // portKey is `${nodeId}__${paramKey}` (nodeIds carry no `__`).
+        const sep = b.portKey.indexOf('__');
+        if (sep < 0) continue;
+        const nodeId = b.portKey.slice(0, sep);
+        const paramKey = b.portKey.slice(sep + 2);
+        const step = clonedSteps.find(s => s.id === nodeId);
+        if (!step) {
+          this.logger.warn(`[WorkspaceFactory] Factory binding target step "${nodeId}" not found in spell ${original.slug}`);
+          continue;
+        }
+        step.parameterMappings = step.parameterMappings || {};
+        step.parameterMappings[paramKey] = { type: 'static', value: b.value };
+      }
 
       const cloned = await this.spellsDb.createSpell({
         name: original.name,
         description: original.description || '',
         creatorId: agentDoc._id,
-        steps: JSON.parse(JSON.stringify(original.steps || [])),
+        steps: clonedSteps,
         exposedInputs: filteredExposedInputs,
-        ...(bindings.length > 0 && { parameterMappings }),
         tags: original.tags || [],
         visibility: 'private',
       });
