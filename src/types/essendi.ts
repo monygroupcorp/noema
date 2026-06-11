@@ -83,6 +83,10 @@ export interface Essentia extends Modus {
   /**
    * Workflow template identifier — looked up in the template registry (templateId in the workflow
    * JSON / DB). The flow's own FORM: which graph runs on the fundament. Required for pod flows.
+   *
+   * This is the FORM HALF for `runtime: 'ComfyUI'` flows. Non-ComfyUI runtimes carry a different
+   * form half instead (ADR-0007): `inferentia` for 'vLLM'/'llm', a script form for 'python-modelcard'
+   * (pending). Exactly one form half is meaningful per flow, selected by `Fundamentum.runtime`.
    */
   workflowTemplate?: string
   workflowTemplateVersion?: string
@@ -90,6 +94,21 @@ export interface Essentia extends Modus {
   seedInputKey?: string
   /** Default cook flags — merged with per-request `_cookFlags` overrides. */
   defaultCookFlags?: CookFlags
+
+  /**
+   * "inferentia" = inference (Latin). The FORM HALF for LLM/serving runtimes ('vLLM' | 'llm') —
+   * the analogue of `workflowTemplate` for flows that have no ComfyUI graph (ADR-0007 Part B item 4).
+   * The Compiler reads it (instead of a workflow template) when `Fundamentum.runtime` is an LLM
+   * runtime, producing an `InferenceCompiledSpec` rather than a graph spec.
+   */
+  inferentia?: {
+    /** Flow-baked system/instruction prompt, prepended ahead of the user's `aditus.prompt`
+     *  (e.g. ShotVL's "you are a cinematography expert" brief). Absent → no system prompt. */
+    systemPrompt?: string
+    /** Flow-default generation parameters NOT exposed as `aditus` ports (e.g. top_p, repeat_penalty).
+     *  Merged UNDER the user's aditus knobs (max_tokens, temperature…) — user values win. */
+    genParams?: Record<string, unknown>
+  }
 }
 
 /** "Essentiae" — nominative plural of essentia */

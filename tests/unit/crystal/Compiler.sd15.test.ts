@@ -45,7 +45,10 @@ function makeSd15Intellarum(
   const sd15Base = {
     id: 'intella.sd15-v1-5', nomen: 'sd15 base', genus: 'model' as const, architectura: 'unet' as const,
     familia: 'sd15', parametri: 0,
-    sources: [{ provenance: 'huggingface' as const, uri: 'https://example.com/sd15.safetensors' }],
+    // meta.repo PRESENT (mirrors the real INTELLA_SD15) — the ComfyUI path must NOT pick it up:
+    // repo enrichment is inference-only, so the ComfyUI spec stays byte-identical (hash-stable).
+    sources: [{ provenance: 'huggingface' as const, uri: 'https://example.com/sd15.safetensors',
+                meta: { repo: 'stable-diffusion-v1-5/stable-diffusion-v1-5', branch: 'main' } }],
     dest: 'checkpoints/v1-5-pruned-emaonly.safetensors', sizeGb: 1, versio: '1.0.0', canonica: true, natum: new Date(),
   } as Intella
   return {
@@ -90,6 +93,9 @@ test('compile(ESSENTIA_RUNMAKE_SD15) includes the SD1.5 checkpoint in spec.model
   assert.ok(checkpoint, 'expected a checkpoint model in spec.models')
   assert.equal(checkpoint!.id, 'intella.sd15-v1-5')
   assert.equal(checkpoint!.dest, 'checkpoints/v1-5-pruned-emaonly.safetensors')
+  // ADR-0007: repo enrichment is inference-only. Even though this base Intella carries
+  // sources[0].meta.repo, a ComfyUI weight must NOT gain a `repo` key (hash-stability).
+  assert.equal((checkpoint as { repo?: string }).repo, undefined)
 })
 
 // ── customNodes plumbing (Part 1) ─────────────────────────────────────────────

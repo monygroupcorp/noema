@@ -53,8 +53,37 @@ export const FUNDAMENTUM_SD15_COMFYUI: Fundamentum = {
   mutatum: new Date('2025-01-01'),
 }
 
+/**
+ * Qwen-VL · vLLM — the SHARED understanding substrate (ADR-0007).
+ *
+ * One environment (a vLLM/SGLang serving image) for the whole understanding track —
+ * Qwen3-VL, MOSS-Music, ShotVL all sit on it. Unlike the image fundamenta, it pins NO
+ * base weights: the three flows use DIFFERENT checkpoints, so each Essentia carries its
+ * own LM in `Essentia.intellae` (the Compiler merges fundamentum.intellae ∪ essentia.intellae,
+ * Compiler.ts:160). "Shared substrate, weights swapped per flow" = shared image+runtime,
+ * per-flow weight — not a shared weight manifest.
+ *
+ * runtime 'vLLM' selects the (pending) TransformersVllmExecutor on the pod (ADR-0007 Part A).
+ * imageVersion MUST be pinned to a vLLM release that supports Qwen3-VL before any live run.
+ */
+export const FUNDAMENTUM_QWEN_VL_VLLM: Fundamentum = {
+  id: 'qwen-vl-vllm',
+  nomen: 'Qwen-VL · vLLM',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'vllm/vllm-openai',
+  imageVersion: 'latest',   // ⚠ PIN to a Qwen3-VL-capable vLLM tag before live use
+  runtime: 'vLLM',
+  intellae: [],             // none shared — the LM is per-Essentia (see note above)
+  vramGb: 24,
+  canonica: true,
+  natum: new Date('2026-06-11'),
+  mutatum: new Date('2026-06-11'),
+}
+
 /** All canonical fundamenta — seeded on boot (parity with CANONICAL_ESSENTIAE). */
 export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_FLUX_COMFYUI,
   FUNDAMENTUM_SD15_COMFYUI,
+  FUNDAMENTUM_QWEN_VL_VLLM,
 ]

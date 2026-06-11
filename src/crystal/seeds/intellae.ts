@@ -207,6 +207,73 @@ export const INTELLA_LORA_ARMORED_DRESS: Intella = {
   natum: new Date('2025-01-01'),
 }
 
+// ── Understanding-track LMs (vLLM/transformers runtime) — ADR-0007 ───────────
+// The 3 "read a new medium → text" models. Each is a WHOLE HuggingFace repo (multi-file:
+// sharded safetensors + config + tokenizer), not a single file — the TransformersVllmExecutor
+// downloads the repo via `huggingface-cli download {meta.repo}` into `dest`. NOTE: the single-file
+// `sources[].uri`/`format` shape and the ComfyUI-relative `dest` are an imperfect fit for repos
+// (an Intella repo-download follow-up); modeled here as catalog records so the 3 flows are
+// discoverable now, ahead of the executor + the Compiler's non-ComfyUI branch.
+export const INTELLA_QWEN3_VL_8B: Intella = {
+  id: 'intella.qwen3-vl-8b',
+  nomen: 'Qwen3-VL 8B Instruct',
+  genus: 'model',
+  architectura: 'qwen3-vl',
+  parametri: 8_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct',
+      meta: { repo: 'Qwen/Qwen3-VL-8B-Instruct', branch: 'main' },
+    },
+  ],
+  dest: 'transformers/qwen3-vl-8b',   // ⚠ executor-relative dir (not ComfyUI models/) — Gap: model_dest
+  sizeGb: 18,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-06-11'),
+}
+
+export const INTELLA_MOSS_MUSIC_8B: Intella = {
+  id: 'intella.moss-music-8b',
+  nomen: 'MOSS-Music 8B Instruct',
+  genus: 'model',
+  architectura: 'qwen3-audio',   // Qwen3-8B backbone + audio encoder
+  parametri: 9_100_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/OpenMOSS-Team/MOSS-Music-8B-Instruct',
+      meta: { repo: 'OpenMOSS-Team/MOSS-Music-8B-Instruct', branch: 'main' },
+    },
+  ],
+  dest: 'transformers/moss-music-8b',
+  sizeGb: 18,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-06-11'),
+}
+
+export const INTELLA_SHOTVL_7B: Intella = {
+  id: 'intella.shotvl-7b',
+  nomen: 'ShotVL 7B (cinematography)',
+  genus: 'model',
+  architectura: 'qwen2.5-vl',   // fine-tune of Qwen2.5-VL-7B-Instruct
+  parametri: 8_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Vchitect/ShotVL-7B',
+      meta: { repo: 'Vchitect/ShotVL-7B', branch: 'main' },
+    },
+  ],
+  dest: 'transformers/shotvl-7b',
+  sizeGb: 16,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-06-11'),
+}
+
 export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_FLUX_SCHNELL,
   INTELLA_FLUX_VAE,
@@ -215,4 +282,7 @@ export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_SD15,
   INTELLA_SMOLLM2_135M,
   INTELLA_LORA_ARMORED_DRESS,
+  INTELLA_QWEN3_VL_8B,
+  INTELLA_MOSS_MUSIC_8B,
+  INTELLA_SHOTVL_7B,
 ]

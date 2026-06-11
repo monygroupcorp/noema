@@ -22,6 +22,12 @@ function weaveAffixes(value: unknown, porta: Porta): unknown {
     .join(', ')
 }
 
+/** Stable model ordering — by role, then id. Keeps `spec.models` deterministic for hashing. */
+function byRoleThenId(a: { role: string; id: string }, b: { role: string; id: string }): number {
+  const r = a.role.localeCompare(b.role)
+  return r !== 0 ? r : a.id.localeCompare(b.id)
+}
+
 function deepSort(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(deepSort)
   if (value !== null && typeof value === 'object') {
@@ -39,24 +45,62 @@ function deepSort(value: unknown): unknown {
 // Types
 // ---------------------------------------------------------------------------
 
-export interface CompiledSpec {
+/**
+ * CompiledSpec — a runtime-dispatched discriminated union (ADR-0007).
+ *
+ * Shared base = the runtime-invariant half (image + resolved weights + the on-pod runtime tag).
+ * The runtime-specific half is the member: a ComfyUI graph (`workflow`) vs an LLM inference call
+ * (`inference`). A python-modelcard `script` member lands with the generation track.
+ *
+ * Discrimination is STRUCTURAL (presence of `workflow` vs `inference`) — deliberately NOT a `kind`
+ * tag, so the ComfyUI member's JSON key-set is unchanged and its content-address hash (stored on
+ * `Actum`/`Deploymentum`) stays stable across this refactor. Narrow with the transport guards in
+ * comfyrunnerClient — `isComfyUISpec()` / `isInferenceSpec()` (and `isCompiledSpec()` for either kind).
+ */
+export interface CompiledSpecBase {
   image: { imageId: string; imageVersion: string; ociRef: string }
-  models: Array<{ role: string; id: string; url: string; dest: string }>
+  /** Resolved weight manifest. `repo` (HF repo id) is set only for repo-download runtimes
+   *  (vLLM/transformers, via `huggingface-cli`); ComfyUI single-file downloads omit it. */
+  models: Array<{ role: string; id: string; url: string; dest: string; repo?: string }>
+  cookFlags: Record<string, unknown>
+  sourceTool: { id: string; versio: string }
+  /** On-pod runtime this spec targets — the dispatch key (ADR-0005 single-source, ADR-0007 dispatch). */
+  runtime: string
+}
+
+/** ComfyUI graph spec — the original shape (key-set unchanged: hash-stable). */
+export interface ComfyUICompiledSpec extends CompiledSpecBase {
   workflow: {
     templateId: string
     templateVersion: string
     inputTemplate: Record<string, unknown>
   }
-  cookFlags: Record<string, unknown>
   seed: number
-  sourceTool: { id: string; versio: string }
-  /** On-pod runtime this spec targets ('ComfyUI' default). RESERVED for the second-runtime dispatch
-   *  (the runner that consumes it lands in a GPU sprint); carried now so the abstraction is whole. */
-  runtime: string
   /** Custom-node packs the workflow's graph depends on, forwarded from the template.
    *  `comfyrunnerClient.submitToRunner` ships these to the runner's `_ensure_custom_nodes`.
    *  Omitted when the template declares none. */
   customNodes?: Array<{ url: string; name?: string }>
+}
+
+/** LLM/serving inference spec — runtime 'vLLM' | 'llm'. No graph, no seed. */
+export interface InferenceCompiledSpec extends CompiledSpecBase {
+  inference: {
+    /** Flow-baked system/instruction prompt (from `Essentia.inferentia.systemPrompt`). */
+    systemPrompt?: string
+    /** The affix-woven user prompt. */
+    prompt: string
+    /** Non-text inputs (image/audio/video) by ref — the executor fetches/loads each. */
+    media?: Array<{ type: string; ref: string }>
+    /** Resolved generation parameters (max_tokens, temperature, … ∪ flow genParams). */
+    genParams: Record<string, unknown>
+  }
+}
+
+export type CompiledSpec = ComfyUICompiledSpec | InferenceCompiledSpec
+
+/** Narrow a CompiledSpec (or compatible) to the LLM inference member. */
+export function isInferenceSpec(spec: CompiledSpec): spec is InferenceCompiledSpec {
+  return 'inference' in spec && spec.inference != null
 }
 
 export interface CompileResult {
@@ -114,9 +158,6 @@ export class Compiler {
     if (!essentia.fundamentumId) {
       throw new CompilerError('MISSING_FUNDAMENTUM', `Essentia '${essentia.id}' has no fundamentumId`)
     }
-    if (!essentia.workflowTemplate) {
-      throw new CompilerError('MISSING_WORKFLOW_TEMPLATE', `Essentia '${essentia.id}' has no workflowTemplate`)
-    }
     const fundamentum: Fundamentum | null = this.fundamentorum
       ? await this.fundamentorum.find(essentia.fundamentumId, essentia.fundamentumVersio)
       : null
@@ -129,6 +170,25 @@ export class Compiler {
       imageId: fundamentum.imageId,
       imageVersion: fundamentum.imageVersion,
       ociRef: `${fundamentum.imageId}:${fundamentum.imageVersion}`,
+    }
+
+    // ── Dispatch on the substrate's runtime (ADR-0007) ─────────────────────
+    // The runtime-invariant prologue (fundamentum + image) is done; the rest of the
+    // pipeline is runtime-specific. ComfyUI keeps the original inline body below; LLM
+    // runtimes branch to `_compileInference`. An unknown runtime is a hard error — no
+    // silent ComfyUI fallback (ADR-0007 enforcement).
+    const runtime = fundamentum.runtime ?? 'ComfyUI'
+    if (runtime === 'vLLM' || runtime === 'llm') {
+      return this._compileInference(essentia, aditus, opts, fundamentum, image, runtime)
+    }
+    if (runtime !== 'ComfyUI') {
+      throw new CompilerError('UNKNOWN_RUNTIME',
+        `Fundamentum '${fundamentum.id}' declares runtime '${runtime}' — no executor/compile path registered`)
+    }
+
+    // ── ComfyUI path ───────────────────────────────────────────────────────
+    if (!essentia.workflowTemplate) {
+      throw new CompilerError('MISSING_WORKFLOW_TEMPLATE', `Essentia '${essentia.id}' has no workflowTemplate`)
     }
 
     let template
@@ -157,9 +217,7 @@ export class Compiler {
     const templateFallback = new Map(
       (template.requiredModels ?? []).map(m => [m.id, m] as const),
     )
-    const manifest = [...(fundamentum.intellae ?? []), ...(essentia.intellae ?? [])]
-      .filter((w, i, all) => all.findIndex(o => o.id === w.id) === i)   // de-dupe by id, base-first
-    const weightRefs = manifest.map(w => {
+    const weightRefs = this._manifestRefs(fundamentum, essentia).map(w => {
       const fb = templateFallback.get(w.id)
       return {
         role: w.role,
@@ -226,12 +284,9 @@ export class Compiler {
     const seen = new Set([...weightRefs.map(r => r.id), ...loraRefs.map(r => r.id)])
     const pinnedRefs = (opts.pinnedModels ?? []).filter(r => !seen.has(r.id))
     const extraModels = await this._resolveModels([...loraRefs, ...pinnedRefs])
-    const models = [...baseWeights, ...extraModels].sort((a, b) => {
-      const r = a.role.localeCompare(b.role)
-      return r !== 0 ? r : a.id.localeCompare(b.id)
-    })
+    const models = [...baseWeights, ...extraModels].sort(byRoleThenId)
 
-    const spec: CompiledSpec = {
+    const spec: ComfyUICompiledSpec = {
       image,
       models,
       workflow: {
@@ -278,10 +333,18 @@ export class Compiler {
     refs: Array<{ role: string; id: string; url?: string; dest: string; sizeBytes?: number }>,
   ): Promise<Array<{ role: string; id: string; url: string; dest: string; sizeBytes?: number }>> {
     const { resolved } = await this._resolveModelsWithRecords(refs)
-    return resolved.sort((a, b) => {
-      const r = a.role.localeCompare(b.role)
-      return r !== 0 ? r : a.id.localeCompare(b.id)
-    })
+    return resolved.sort(byRoleThenId)
+  }
+
+  /** The flow's base weight manifest: fundament base ∪ flow extras, de-duped by id (base-first).
+   *  Shared by both compile paths (ADR-0007); each maps it differently (ComfyUI enriches from the
+   *  template fallback, inference resolves purely from the Intella registry). */
+  private _manifestRefs(
+    fundamentum: Fundamentum,
+    essentia: Essentia,
+  ): Array<{ role: string; id: string }> {
+    return [...(fundamentum.intellae ?? []), ...(essentia.intellae ?? [])]
+      .filter((w, i, all) => all.findIndex(o => o.id === w.id) === i)
   }
 
   /**
@@ -317,6 +380,102 @@ export class Compiler {
       resolved.push({ role: ref.role, id: ref.id, url, dest, sizeBytes: ref.sizeBytes })
     }
     return { resolved, records }
+  }
+
+  /**
+   * Compile an LLM/serving flow (runtime 'vLLM' | 'llm') into an InferenceCompiledSpec.
+   * No workflow template, no slot map, no seed: the form half is `Essentia.inferentia`
+   * (system prompt + flow gen params) plus the typed `aditus` (prompt, media, knobs).
+   * Shares the weight-manifest resolution + affix weave with the ComfyUI path; diverges
+   * after — there is no graph to slot into. (ADR-0007 A1.)
+   */
+  private async _compileInference(
+    essentia: Essentia,
+    aditus: Record<string, unknown>,
+    opts: CompileOptions,
+    fundamentum: Fundamentum,
+    image: { imageId: string; imageVersion: string; ociRef: string },
+    runtime: string,
+  ): Promise<CompileResult> {
+    const cookFlags: Record<string, unknown> = {
+      ...(essentia.defaultCookFlags ?? {}),
+      ...((aditus._cookFlags as Record<string, unknown>) ?? {}),
+    }
+
+    // ── Weight manifest = fundament base ∪ flow weights (no template fallback) ─
+    // Unlike ComfyUI there is no template to enrich url/dest from — the weights MUST
+    // resolve from the registered Intella (the seeds provide sources[0]).
+    const weightRefs = this._manifestRefs(fundamentum, essentia).map(w => ({ role: w.role, id: w.id, dest: '' }))
+    const { resolved: baseWeights, records } = await this._resolveModelsWithRecords(weightRefs)
+
+    // Enrich with the HF repo id — the pod's vLLM executor downloads the WHOLE repo via
+    // `huggingface-cli download <repo>`, not a single file (so `url`/`dest` alone aren't
+    // enough). Sourced from the Intella's `sources[0].meta.repo`. ComfyUI never sets this
+    // (single-file download), so its spec stays byte-identical — only the inference path adds it.
+    const withRepo = baseWeights.map(m => {
+      const repo = records.get(m.id)?.sources?.[0]?.meta?.repo
+      return typeof repo === 'string' ? { ...m, repo } : m
+    })
+
+    // Host-pinned models (the studio loadout) union in, same as the ComfyUI path.
+    const seen = new Set(weightRefs.map(r => r.id))
+    const pinnedRefs = (opts.pinnedModels ?? []).filter(r => !seen.has(r.id))
+    const extraModels = await this._resolveModels(pinnedRefs)
+    const models = [...withRepo, ...extraModels].sort(byRoleThenId)
+
+    // ── The user prompt, affix-woven (same seam as ComfyUI's text Portae) ──────
+    const promptPorta = essentia.aditus.prompt
+    let prompt = typeof aditus.prompt === 'string' ? aditus.prompt : ''
+    if (promptPorta) prompt = weaveAffixes(prompt, promptPorta) as string
+
+    // ── Media inputs: non-text aditus ports (image/audio/video) present in input ─
+    const mediaTypes = new Set(['image', 'audio', 'video'])
+    const media: Array<{ type: string; ref: string }> = []
+    for (const [key, porta] of Object.entries(essentia.aditus)) {
+      if (!mediaTypes.has(porta.type)) continue
+      const v = aditus[key]
+      if (typeof v === 'string' && v !== '') media.push({ type: porta.type, ref: v })
+    }
+
+    const genParams = this._resolveGenParams(essentia, aditus)
+
+    const spec: InferenceCompiledSpec = {
+      image,
+      models,
+      cookFlags,
+      sourceTool: { id: essentia.id, versio: essentia.versio },
+      runtime,
+      inference: {
+        ...(essentia.inferentia?.systemPrompt ? { systemPrompt: essentia.inferentia.systemPrompt } : {}),
+        prompt,
+        ...(media.length > 0 ? { media } : {}),
+        genParams,
+      },
+    }
+
+    const hash = `sha256:${this._hashSpec(spec)}`
+    return { hash, spec }
+  }
+
+  /**
+   * Resolve generation parameters for an inference flow. Precedence (low→high):
+   * flow `inferentia.genParams` (baked baseline) < each int/float `aditus` knob's
+   * default < the user's explicit `aditus` value. Text/media ports and the cook-flags
+   * envelope are excluded — only the numeric knobs (max_tokens, temperature, …) flow in.
+   */
+  private _resolveGenParams(
+    essentia: Essentia,
+    aditus: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const out: Record<string, unknown> = { ...(essentia.inferentia?.genParams ?? {}) }
+    const knobTypes = new Set(['int', 'float'])
+    for (const [key, porta] of Object.entries(essentia.aditus)) {
+      if (!knobTypes.has(porta.type)) continue
+      const v = aditus[key]
+      if (v !== undefined && v !== null && v !== '') out[key] = v
+      else if (porta.default !== undefined) out[key] = porta.default
+    }
+    return out
   }
 
   private _resolveSeed(
