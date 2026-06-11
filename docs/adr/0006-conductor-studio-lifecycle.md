@@ -1,6 +1,6 @@
 # ADR-0006: `Conductor` — the studio-lifecycle ring anchor (+ `Census`/`Procurator` renames)
 
-- **Status:** accepted (scoped — not yet implemented)
+- **Status:** accepted — **implemented + live-verified on staging 2026-06-10**
 - **Date:** 2026-06-10
 - **Relates to:** ADR-0001 (speak the crystal; "studio" === `Materia`), ADR-0002 (ring/allocutio
   boundary), ADR-0005 (`Fundamentum` — the same "an adapter reinvented a missing crystal layer" pattern).
@@ -86,3 +86,27 @@ just at two altitudes.
    (`Inceptio.modoId`). Wire `maxImpetus → budget`.
 5. Hermetic where possible (the composition + `Census` logic with mocked `Procurator`); live provisioning
    validated on staging, same boundary as the rest of the GPU rail.
+
+## Implementation (done — 2026-06-10)
+
+Shipped on `chainengine-migration`/`staging`. `Conductor` (`src/crystal/Conductor.ts`:
+`conducere`/`find`/`claudere`) composes the ring pieces; `Procurator` interface
+(`src/crystal/Procurator.ts`) is the renamed pod-client role (`SecurePodClient` +
+`FakeRunPodClient` implement it); `StudioBilling → Census` (`src/crystal/Census.ts`). Wired into
+`container.ts` (`ring.conductor`, present iff a Procurator exists). Both adapters migrated: the
+Telegram `/arm` Start resolves `hostUserId → AuctorKey → conducere`, and the API uses
+`CrystalApi.provisionStudio` (`POST/GET /v1/studios`, REST + MCP). The host-less-studio bug is gone
+by construction (Conductor always threads `hostKey = auctor`).
+
+Two things the scope under-stated, both fixed here:
+- **The `maxImpetus` watchdog was NOT actually wired.** The budget tessera was issued by `openModo`
+  and read by nothing — `Census` drained on host *balance* only. Added `Signorum.sessionBudget(modoId)`
+  + a `Census` budget-drain check, and made `MongoMateria.reapIdle` reap `drainOnly` pods on sight so
+  the cap is HARD (a drained idle studio dies on the next ~30s sweep, not at `warmUntil`).
+- **Studio warm-time billing was silently dead.** `Materia.impetusPerSecond` came from a config field
+  that was never set (`?? 0n`), so every pod billed 0/sec. Added `Materia.costPerHr` (the real rate)
+  + the canonical `impetusForPodMs` (round once per window); `Census` now bills accurately from cost.
+
+Live-verified on staging: provision a real RTX-4090 studio → `costPerHr` non-zero → targeted run
+reuses the warm pod → `maxImpetus` drains + reaps within ~90s (spend capped at one Census tick).
+See `feedback`/`project_api_allocutio_live` memory for the live trace.

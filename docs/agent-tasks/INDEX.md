@@ -40,24 +40,25 @@ _None — pick up a Backlog item below and graduate it to a numbered TASK spec._
   pin/affix per field, model loadout). Needs a deliberate UX pass then — pagination/sectioning, clear
   pin-vs-open per knob. Revisit when the param-rich flows land.
 
+## Shipped — Epics (not TASK-NNN-numbered)
+- ~~**[`Conductor` — studio-lifecycle ring anchor](../adr/0006-conductor-studio-lifecycle.md)**~~ — **DONE ·
+  live ✓** (2026-06-10). One ring verb both adapters call (`conducere`/`find`/`claudere`); `StudioBilling →
+  Census`, pod-client role → `Procurator`; host-less bug fixed by construction. Plus two latent bugs the work
+  surfaced: the `maxImpetus` watchdog (was unwired → now a hard cap via `sessionBudget` + `drainOnly` reap) and
+  dead studio billing (`impetusPerSecond` always 0 → now per-window from real `costPerHr`). See ADR-0006 §Implementation.
+- ~~**[Crystal Agent API (MCP + REST)](EPIC-api-allocutio.md)**~~ — **Phases 1–4 DONE · live ✓** (2026-06-10):
+  discovery + invoke + quote + SSE/webhook/poll + MCP + account ops + studios, one facade over REST + MCP,
+  contract-first docs + drift-check. Anon `{commitment}` and real per-pod studio runs proven end-to-end on staging.
+
 ## Backlog — Features
-- **[`Conductor` — studio-lifecycle ring anchor](../adr/0006-conductor-studio-lifecycle.md)** — give the
-  studio lifecycle (provision `Materia` + open `Modo` + bind `Hospitium` + meter) **one** crystal-ring verb
-  both adapters call, and rename the plain-English leaks. `Conductor.conducere(auctor, …)` (lessee that
-  leases + assembles; pairs with the existing `Praefectus`/scheduler); `StudioBilling → Census`;
-  `SecurePodClient`/`WarmPodClient` ring role `→ Procurator`. No new noun (a studio *is* a `Modo`); the
-  `maxImpetus` watchdog falls out (budget tessera + `Census` drain). Kills the per-caller re-orchestration
-  drift (the `dispatchInceptio` pattern) + fixes the host-less-studio bug. Unblocks API Phase 4c
-  (`POST /v1/studios`). Decision + scope in ADR-0006.
-- **[Crystal Agent API (MCP + REST)](EPIC-api-allocutio.md)** — an **API-first, agent-idiomatic** surface
-  over the crystal: **capability** parity with the Telegram bot, NOT a port of its UI. The Telegram surface
-  sprawls because of its medium (inline keyboards + chat → wizards, morphing rows, force-reply); the API has
-  no such limits, so it **collapses** each surface into one direct op (`/arm` wizard → `POST /v1/studios`;
-  the picker → `GET /v1/models?…`; save-as → `POST /v1/flows`). **Flows are tools** — `aditusToJsonSchema`
-  derives both the MCP `inputSchema` and REST validation from a `Modus.aditus`. One crystal facade, two
-  protocols (MCP for agents + REST), over the execution rail (NOT `FlowRouter`/primitive-stepping — agents
-  submit complete intents). SSE for run progress; unified credential→`AuctorKey` resolver (JWT/API-key/web3/anon).
-  Supersedes the legacy `src/api` MCP/tools surface. Phased 1–4; full spec in the linked epic.
+- **Crystal Agent API — follow-ups** (epic shipped above; these are the deferred edges):
+  - **`web3` credential acceptor** — needs a nonce-challenge endpoint (the one resolver path not yet live).
+  - **Identified-auth live test** — JWT path is hermetic-tested; needs `JWT_SECRET` + a token on staging.
+  - **Async studio provision handle** — `POST /v1/studios` blocks the HTTP connection for the whole cold boot
+    (~7 min worst case); make it return a handle like runs (born `provisioning`, observe via SSE/poll).
+  - **True `studioId`→pod pinning** — targeted runs stamp `Inceptio.modoId` but the cursor still warm-matches by
+    image, not by the studio's bound `Modo.materiamId`; fine for one warm studio per image, wrong for multi-studio.
+  - **Named canonical-flow MCP tools + per-agent saved-flow tools** (`list_changed`) — the additive ergonomic layer.
 - **`/cook` (Collectio)** — `Modus × Tractus[]` grid → N `Acta` via `TraitEngine` + `CollectioCursor`.
 - **`/spell` (compositus `Modus`)** — run/author a `gradus`-chained flow (authored via `Tabula`).
 - **Gen-flows for more catalog bases** (SDXL/Illustrious/Chroma/Flux-Kontext/Wan-video/…) — port from

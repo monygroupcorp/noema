@@ -1,6 +1,6 @@
 # EPIC: Crystal Agent API — MCP + REST over the crystal, at capability parity
 
-- **Status:** **Phase 1 implemented** (on `chainengine-migration`, hermetic-green). Phases 2–4 pending.
+- **Status:** **Phases 1–4 COMPLETE** — live-verified on staging (`chainengine-migration`/`staging`, 2026-06-10). Hermetic-green.
 - **Owner:** none
 
 ## Implementation status
@@ -37,17 +37,18 @@
   `conflict.slug_taken`); `bind` (`PUT /v1/me/bindings/:verb` + MCP `bind`) via the owner-keyed `Consuetudinum`;
   `status` (`GET /v1/me/status` + MCP `status`) via `aggregateStatus`, JSON-projected. Added ring deps
   `hospitia` + `materiae`. Contract/docs/drift updated. Hermetic-tested.
-- **Phase 4c — PARTIAL** (commit `11a15039`): **studioId-targeted runs DONE** — `invokeFlow`/`run_flow` take a
-  `studioId` → `Inceptio.modoId` (the rail already routes it); hermetic-tested. Also threaded `maxImpetus`
-  through MCP `run_flow`. **Still pending (GPU-real, NOT a clean fan-out):**
-  - **Studio provisioning** (`POST /v1/studios`) is gated on **`Conductor`** (ADR-0006) — the ring anchor that
-    composes the (already crystal-native, AuctorKey-keyed) `Materia`+`Hospitium`+`Modo`+budget pieces into one
-    verb both adapters call. Lighter than first framed: the primitives exist; `Conductor` gives them a named
-    home + single door (and renames the plain-English `StudioBilling`→`Census`, pod-client role→`Procurator`).
-  - **Mid-run watchdog** — DE-RISKED: `openModo` takes a budget tessera and `StudioBilling` already
-    drain-terminates a session on budget exhaustion, so opening a studio with `budget = maxImpetus` IS the
-    cap. No new subsystem — just wire `maxImpetus → tessera budget` once provisioning exists. The harder
-    per-single-cold-run mid-flight kill (non-studio) is a separate rail feature, lower priority.
+- **Phase 4c — DONE + live-verified** (ADR-0006 `Conductor`; commits `84a1fc5e`→`577339b1`):
+  - **`studioId`-targeted runs** — `invokeFlow`/`run_flow` take a `studioId` → `Inceptio.modoId` (hermetic-tested).
+  - **Studio provisioning** — `POST/GET /v1/studios` (REST + MCP `provision_studio`/`list_studios`) over the
+    new `Conductor` ring anchor (provisions `Materia` + binds `Hospitium` keyed by the host + opens a budgeted
+    `Modo`). Renames landed: `StudioBilling → Census`, pod-client role → `Procurator`. `studioId` is the Modo id,
+    consistent across `/v1/studios` and `/v1/me/status`.
+  - **`maxImpetus` watchdog — now a HARD cap.** The budget tessera was issued but never enforced; added
+    `Signorum.sessionBudget(modoId)` + a `Census` budget-drain check + `reapIdle` reaping `drainOnly` pods, so a
+    budget-exhausted studio drains and is reaped within ~90s (live-verified: spend capped at one Census tick).
+  - **Billing fix (found in passing).** `Materia.impetusPerSecond` was config-`?? 0n` (never set) → studios
+    billed nothing; added `Materia.costPerHr` + per-window `impetusForPodMs` so `Census` bills from real cost
+    (~3% rounding vs the old +76% per-second skew).
 
 ## Context / why
 
