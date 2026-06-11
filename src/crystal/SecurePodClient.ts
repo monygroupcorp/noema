@@ -13,6 +13,9 @@ import { submitToRunner, awaitViaStream, isCompiledSpec, type R2Config } from '.
 import { computeBootCostImpetus, impetusPerSecondFromHourly } from '../ledger/rates.js'
 
 const COMFYRUNNER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/comfyrunner.py')
+// The multi-runtime runner (ADR-0007) — shipped for non-ComfyUI runtimes (vLLM). ComfyUI stays on
+// comfyrunner.py until its cutover is live-verified, so the proven gen path is untouched.
+const RUNNER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/runner.py')
 
 const log = makeLogger('cursor:runpod:secure')
 
@@ -135,9 +138,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     onMetrics?: (executio: ActumExecutio) => Promise<void>
   }): Promise<{ id: string }> {
     // Derive image from spec if available, else fall back to config
-    const specOciRef = isCompiledSpec(params.input)
-      ? ((params.input as unknown as { image?: { ociRef?: string } }).image?.ociRef)
-      : undefined
+    const specOciRef = isCompiledSpec(params.input) ? params.input.image?.ociRef : undefined
     const imageName = specOciRef ?? this.config.imageName ?? 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
 
     const maxAttempts = this.config.podRetries ?? 3
@@ -243,7 +244,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     const imageName = this.config.imageName ?? 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
     let prov: { podId: string; sshInfo: SshInfo; provisionMs: number }
     try {
-      prov = await this._provisionAndBootstrap(imageName, onStage)
+      prov = await this._provisionAndBootstrap(imageName, onStage, opts.runtime)
     } catch (err) {
       log.warn('studio provision failed', { error: (err as Error).message })
       return null
@@ -269,6 +270,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
   private async _provisionAndBootstrap(
     imageName: string,
     onStage?: StudioStageCb,
+    runtime?: string,
   ): Promise<{ podId: string; sshInfo: SshInfo; provisionMs: number }> {
     const startMs = Date.now()
     const emitStage = (stage: string, info?: import('../lib/bus.js').StageInfo) => {
@@ -300,7 +302,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
       emitStage('pod-locked', { gpuType: sshInfo.gpuType, region: sshInfo.region, costPerHr: sshInfo.costPerHr, podId })
       ssh = await this._waitForSshd(sshInfo)
       emitStage('bootstrapping')
-      await this._bootstrap(ssh, podId)
+      await this._bootstrap(ssh, podId, runtime)
       await ssh.close()
       ssh = null
       await this._waitForRunner(SecurePodClient.runnerBase(podId))
@@ -475,7 +477,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
       executio.sshReadyMs = Date.now() - startMs
       reportMetrics()  // persist provision/ssh/podId/costPerHr — survives even if download fails
       emitStage('bootstrapping')
-      await this._bootstrap(ssh, podId)
+      await this._bootstrap(ssh, podId, isCompiledSpec(input) ? input.runtime : undefined)
 
       // SSH only needed for bootstrap — close before HTTP phase
       await ssh.close()
@@ -503,7 +505,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
       await ssh?.close().catch(() => {})
       if (jobSucceeded && this.config.keepWarm && this.materiae && sshInfo) {
         // Boot wall-clock — the cost we now ask future guests to amortize.
-        const runtime = isCompiledSpec(input) ? (input as unknown as { runtime?: string }).runtime : undefined
+        const runtime = isCompiledSpec(input) ? input.runtime : undefined
         await this._parkWarm(podId, sshInfo, imageName, Date.now() - startMs, runtime, undefined, provisioningContext)
       } else {
         await this._terminatePod(podId)
@@ -617,8 +619,17 @@ export class SecurePodClient implements RunPodClient, Procurator {
     throw new Error('comfyrunner did not become ready within timeout')
   }
 
-  private async _bootstrap(ssh: SshTransportLike, podId: string): Promise<void> {
-    log.info('bootstrapping pod', { podId })
+  /** Bootstrap dispatches on the pod's runtime (ADR-0007). ComfyUI keeps the proven comfyrunner.py
+   *  path byte-for-byte; vLLM/llm pods get the multi-runtime runner.py. */
+  private async _bootstrap(ssh: SshTransportLike, podId: string, runtime?: string): Promise<void> {
+    if (runtime === 'vLLM' || runtime === 'llm') {
+      return this._bootstrapVllm(ssh, podId)
+    }
+    return this._bootstrapComfyUI(ssh, podId)
+  }
+
+  private async _bootstrapComfyUI(ssh: SshTransportLike, podId: string): Promise<void> {
+    log.info('bootstrapping pod', { podId, runtime: 'ComfyUI' })
 
     // Install deps, clone ComfyUI, install Python packages (comfyrunner deps included)
     await ssh.exec('which git || (apt-get update -qq && apt-get install -y -qq git)', { timeout: 120_000 })
@@ -634,6 +645,34 @@ export class SecurePodClient implements RunPodClient, Procurator {
       { timeout: 5_000 },
     )
     log.info('comfyrunner started', { podId })
+  }
+
+  /**
+   * vLLM bootstrap (ADR-0007): install the serving stack + upload runner.py — the multi-harness
+   * manager. The runner holds an `Executor` per runtime and lazily loads each (download repo →
+   * `vllm serve` → wait) on first job, bounded by a VRAM budget. Here we install only the vLLM
+   * stack, so in practice this pod runs the vLLM harness (a ComfyUI job would fail to load — no
+   * ComfyUI present). True co-residency (both harnesses on one pod) is a provisioning mode that
+   * installs both stacks — a later, GPU-gated step.
+   *
+   * NOTE: wired but not yet live-verified — the exact `vllm serve` flags + VRAM budget are tuned
+   * on a real pod (the understanding essentiae are catalog-only until then). `RUNNER_VRAM_GB`
+   * should eventually come from the provisioned GPU's real VRAM.
+   */
+  private async _bootstrapVllm(ssh: SshTransportLike, podId: string): Promise<void> {
+    log.info('bootstrapping pod', { podId, runtime: 'vLLM' })
+
+    await ssh.exec('which git || (apt-get update -qq && apt-get install -y -qq git)', { timeout: 120_000 })
+    await ssh.exec('pip install vllm huggingface_hub boto3 -q', { timeout: 900_000 })
+
+    const script = fs.readFileSync(RUNNER_SCRIPT_PATH, 'utf8')
+    const b64 = Buffer.from(script).toString('base64').replace(/\n/g, '')
+    await ssh.exec(`echo '${b64}' | base64 -d > /root/runner.py`, { timeout: 10_000 })
+    await ssh.exec(
+      `RUNPOD_POD_ID=${podId} MODEL_ROOT=/root/models nohup python3 /root/runner.py >> /tmp/runner.log 2>&1 &`,
+      { timeout: 5_000 },
+    )
+    log.info('runner started', { podId })
   }
 }
 
