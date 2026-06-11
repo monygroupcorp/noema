@@ -430,11 +430,16 @@ export interface StudioView {
 
 function toStudioView(h: StudioHandle, budget: bigint): StudioView {
   const m = h.materia
+  // No pod yet (async provisioning): status comes from the session (Modo) — `claiming`/
+  // `warming` → `provisioning`; the pod fields are absent until it binds.
+  if (!m) {
+    return { studioId: h.studioId, status: modoStudioStatus(h.modo), budgetImpetus: budget.toString() }
+  }
   return {
     studioId: h.studioId,
     ...(m.externusId ? { podId: m.externusId } : {}),
-    // Liveness is the pod's (Materia) truth, not the Modo's — a reaped pod leaves a
-    // stale-`idle` Modo. Shared mapping with /v1/me/status so both agree.
+    // Once bound, liveness is the pod's (Materia) truth, not the Modo's — a reaped pod
+    // leaves a stale-`idle` Modo. Shared mapping with /v1/me/status so both agree.
     status: materiaStudioStatus(m),
     ...(m.gpu ? { gpu: m.gpu } : {}),
     ...(m.runtime ? { runtime: m.runtime } : {}),
@@ -444,6 +449,13 @@ function toStudioView(h: StudioHandle, budget: bigint): StudioView {
     ...(m.costPerHr !== undefined ? { costPerHr: m.costPerHr } : {}),
     ...(m.impetusPerSecond !== undefined ? { impetusPerSecond: m.impetusPerSecond.toString() } : {}),
   }
+}
+
+/** Map a Modo's session status to the studio-facing vocabulary (the pre-pod, async case). */
+function modoStudioStatus(modo: { status: string }): string {
+  return modo.status === 'terminated' ? 'terminated'
+    : (modo.status === 'claiming' || modo.status === 'warming') ? 'provisioning'
+    : 'idle'
 }
 
 /** name → global-unique slug candidate (lowercase, dash-joined alnum). */

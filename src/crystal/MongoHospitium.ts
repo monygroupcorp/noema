@@ -42,6 +42,21 @@ export class MongoHospitium implements HospitiumStore {
     return doc ? fromDoc(doc) : null
   }
 
+  async findByModoId(modoId: string): Promise<Hospitium | null> {
+    const doc = await this.col.findOne({ modoId })
+    return doc ? fromDoc(doc) : null
+  }
+
+  async bindMateria(modoId: string, materiaId: string): Promise<Hospitium> {
+    const result = await this.col.findOneAndUpdate(
+      { modoId },
+      { $set: { materiaId } },
+      { returnDocument: 'after' },
+    )
+    if (!result) throw new Error(`Hospitium for modo ${modoId} not found`)
+    return fromDoc(result)
+  }
+
   async update(
     materiaId: string,
     patch: Partial<Pick<Hospitium, 'adminAnimaIds' | 'terminatum' | 'costAccrued' | 'lastBilledAt'>>,

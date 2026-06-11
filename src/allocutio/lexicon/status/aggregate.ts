@@ -158,7 +158,11 @@ async function buildStudios(
 
   const rows: StudioEntry[] = []
   for (const h of mine) {
-    const m = await deps.materiae.findById(h.materiaId).catch(() => null)
+    // Skip an in-flight studio record (opened, pod not yet parked → no `materiaId`):
+    // /status is the economic view of live pods; the focused /v1/studios shows provisioning ones.
+    if (!h.materiaId) continue
+    const materiaId = h.materiaId
+    const m = await deps.materiae.findById(materiaId).catch(() => null)
     if (!m) continue
 
     const label = `${m.imageRef?.split('/').pop()?.split(':')[0] ?? 'studio'} on ${shortGpu(m.gpu)}`
@@ -173,7 +177,7 @@ async function buildStudios(
     // tagged in their `contextId`. costAccrued lives on Hospitium. Net is the
     // simple subtraction — bulletin renders the same number when it lands.
     const earnings = history
-      .filter(s => s.contextId === h.materiaId &&
+      .filter(s => s.contextId === materiaId &&
                    (s.auctor === 'nexus:hostCut' || s.auctor === 'nexus:hospitium'))
       .reduce((sum, s) => sum + s.valor, 0n)
     const cost = h.costAccrued ?? 0n
@@ -182,12 +186,14 @@ async function buildStudios(
 
     // Guests served = count of hostCut signa for this studio (one per guest gen).
     const guestsToday = history.filter(
-      s => s.contextId === h.materiaId && s.auctor === 'nexus:hostCut',
+      s => s.contextId === materiaId && s.auctor === 'nexus:hostCut',
     ).length
 
     rows.push({
-      studioId: modoByMateria.get(h.materiaId) ?? h.materiaId,
-      materiaId: h.materiaId,
+      // The studio's canonical id is its session (Modo) id — now carried directly on the
+      // host record (ADR-0006); the modos-join is a fallback for legacy pod-keyed records.
+      studioId: h.modoId ?? modoByMateria.get(materiaId) ?? materiaId,
+      materiaId,
       label, status,
       ...(warmRemainingMs !== undefined ? { warmRemainingMs } : {}),
       guestsToday,
