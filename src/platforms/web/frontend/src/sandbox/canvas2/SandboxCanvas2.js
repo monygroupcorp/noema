@@ -516,7 +516,11 @@ export class SandboxCanvas2 extends Component {
         const src = isConnecting ? connection : pendingOutputSource;
         if (src) {
           const srcWin = this._engine.windows.get(src.sourceNodeId);
-          const srcName = srcWin?.tool?.displayName || srcWin?.spell?.name || srcWin?.outputType || 'node';
+          // Agent-context nodes have no tool/spell/outputType, so they used to
+          // fall through to a bare 'node' label (or none) — making it look like
+          // nothing was happening. Label them explicitly, preferring the port.
+          const srcName = srcWin?.tool?.displayName || srcWin?.spell?.name || srcWin?.outputType
+            || (srcWin?.type === 'agent-context' ? (src.sourcePort || 'Agent Context') : null) || 'node';
           const typeTag = src.sourceType ? ` · ${src.sourceType}` : '';
           badgeText = `${srcName}${typeTag} → tap an input`;
         } else {
@@ -1206,10 +1210,18 @@ export class SandboxCanvas2 extends Component {
 
     const pending = this.state.pendingInputTarget;
     if (pending) {
-      // New node's output → pending input target
+      // New node's output → pending input target — but ONLY when the output is
+      // type-compatible with the sought input. Without this guard, dropping e.g.
+      // an image primitive while a text input was being sought silently wired
+      // incompatible nodes (and a later delete cascaded the real connections).
+      // On a mismatch we just clear the pending state instead of mis-wiring.
       const outType = normalizeType(win?.tool?.metadata?.outputType || win?.tool?.outputType || win?.outputType);
-      const connId = this._engine._genId('c');
-      this._engine.addCanvasConnection(connId, id, pending.windowId, 'output', pending.key, outType);
+      const wantType = normalizeType(pending.type);
+      const compatible = !wantType || !outType || wantType === outType;
+      if (compatible) {
+        const connId = this._engine._genId('c');
+        this._engine.addCanvasConnection(connId, id, pending.windowId, 'output', pending.key, outType);
+      }
       this.setState({ pendingInputTarget: null });
       return;
     }
