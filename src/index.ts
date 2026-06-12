@@ -662,7 +662,7 @@ async function main(): Promise<void> {
   app.post('/webhooks/alchemy/:chainId', async (req, res) => {
     const result = await handleAlchemyWebhook({
       body:      req.body,
-      rawBody:   (req as { rawBody?: string }).rawBody ?? JSON.stringify(req.body),
+      rawBody:   (req as { rawBody?: string }).rawBody ?? '',
       signature: req.headers['x-alchemy-signature'] as string | undefined,
       chainId:   req.params.chainId,
     }, alchemyDeps)

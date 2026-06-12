@@ -39,6 +39,11 @@ contract CreditVault is OwnableRoles, UUPSUpgradeable, Initializable, Reentrancy
     /// @dev Default referral cut in basis points. Initialized to 500 (5%).
     uint16 public defaultReferralBps;
 
+    /// @dev commitment => already deposited. Prevents front-running: a second payAnonymous
+    ///      with the same commitment would otherwise lock the second depositor's funds forever
+    ///      (the webhook idempotency check skips the second leaf insertion).
+    mapping(bytes32 => bool) public usedCommitments;
+
     // -------------------------------------------------------------------------
     // Constructor
     // -------------------------------------------------------------------------
@@ -86,6 +91,7 @@ contract CreditVault is OwnableRoles, UUPSUpgradeable, Initializable, Reentrancy
     error ZeroAmount();
     error TransferFailed();
     error ZeroAddress();
+    error CommitmentAlreadyUsed();
 
     // -------------------------------------------------------------------------
     // Initializer
@@ -125,6 +131,8 @@ contract CreditVault is OwnableRoles, UUPSUpgradeable, Initializable, Reentrancy
     ///         No payer is recorded — the platform sees only commitment + amount.
     function payAnonymous(bytes32 commitment) external payable nonReentrant {
         if (msg.value == 0) revert ZeroAmount();
+        if (usedCommitments[commitment]) revert CommitmentAlreadyUsed();
+        usedCommitments[commitment] = true;
         emit AnonymousDeposit(commitment, ETH, msg.value);
     }
 
@@ -134,7 +142,9 @@ contract CreditVault is OwnableRoles, UUPSUpgradeable, Initializable, Reentrancy
         external nonReentrant
     {
         if (amount == 0) revert ZeroAmount();
+        if (usedCommitments[commitment]) revert CommitmentAlreadyUsed();
         SafeTransferLib.safeTransferFrom(token, msg.sender, address(this), amount);
+        usedCommitments[commitment] = true;
         emit AnonymousDeposit(commitment, token, amount);
     }
 

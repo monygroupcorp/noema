@@ -163,6 +163,12 @@ export class ActumInceptor {
     const computeStrategy = strategyOverride ?? modus.computeStrategy
     const gpuClass = gpuOverride ?? modus.gpuClass
 
+    // Claim the nullifier first — markSpent must be atomic (DB unique index on nullifierHash).
+    // If two concurrent requests race with the same proof, only one wins here; the second
+    // throws before creating a duplicate actum. If acta.create then fails, the note is
+    // burned rather than double-spent — an acceptable trade under the ZK threat model.
+    await this.deps.arcanumVerifier.markSpent(nullifierHash)
+
     let actum: Actum
     try {
       actum = await acta.create({
@@ -182,12 +188,8 @@ export class ActumInceptor {
         ...(pinnedModels?.length ? { pinnedModels } : {}),
       })
     } catch (err) {
-      // Actum creation failed — do NOT mark nullifier spent; proof can be retried
       throw err
     }
-
-    // Mark nullifier spent AFTER actum is safely persisted
-    await this.deps.arcanumVerifier.markSpent(nullifierHash)
 
     return actum
   }
