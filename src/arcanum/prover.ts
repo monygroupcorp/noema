@@ -19,9 +19,9 @@ import type { ArcanumSpendProof } from './types.js'
 //   snarkjs handles both transparently via its own fetch abstraction.
 //
 // RECIPIENT:
-//   Must be poseidon(modoId, aditusId) — binds the proof to one specific execution.
-//   Cannot be reused for a different run. Compute it server-side in the quote
-//   step and return it to the client; client passes it verbatim here.
+//   sha256(modusId + ':' + JSON.stringify(sortedAditus)), first 31 bytes as BigInt.
+//   Binds the proof to one specific execution — cannot be replayed on a different run.
+//   Compute it server-side in the quote step and return it to the client.
 // =============================================================================
 
 export interface SpendProofOpts {
@@ -79,13 +79,13 @@ export async function generateSpendProof(
 
 /**
  * Compute the recipient field for a spend proof.
- * Must match ActumInceptor._computeRecipient exactly:
- *   sha256(modusId + ':' + JSON.stringify(sortedAditus)), first 31 bytes as BigInt decimal.
+ * sha256(modusId + ':' + JSON.stringify(sortedAditus)), first 31 bytes as BigInt decimal.
  * The server returns this from POST /v1/runs/quote so clients don't need to reimplement it.
+ * This is the canonical implementation — ActumInceptor delegates here.
  */
 export function computeRecipient(modusId: string, aditus: Record<string, unknown>): string {
   const sorted = Object.fromEntries(
-    Object.entries(aditus).sort(([a], [b]) => a.localeCompare(b)),
+    Object.entries(aditus).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
   )
   const payload = `${modusId}:${JSON.stringify(sorted)}`
   const hash = createHash('sha256').update(payload).digest()

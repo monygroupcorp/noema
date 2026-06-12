@@ -12,8 +12,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
-import { createHash } from 'node:crypto'
-
 // File locations (relative to repo root, resolved from __dirname)
 const ARTIFACTS = path.join(process.cwd(), 'src/arcanum/circuit/artifacts')
 const WASM_PATH = path.join(ARTIFACTS, 'arcanum.wasm')
