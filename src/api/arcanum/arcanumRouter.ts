@@ -156,6 +156,25 @@ export function createArcanumRouter(
     }
   })
 
+  // ── GET /tree/leaf/:commitment ───────────────────────────────────────────────
+  //
+  // Poll endpoint for blind-issuance clients: after calling payAnonymous() on-chain,
+  // the client polls here with their commitment until the leaf appears (webhook has
+  // processed the AnonymousDeposit event and inserted it into the Merkle tree).
+  //
+  // Returns the leaf record { commitment, leafIndex, valor, insertedAt } or 404.
+
+  router.get('/tree/leaf/:commitment', async (req, res) => {
+    try {
+      const leaf = await arcanumTree.findLeaf(req.params.commitment)
+      if (!leaf) return res.status(404).json({ error: 'commitment not yet in tree' })
+      return res.json({ leaf })
+    } catch (err) {
+      log.error('findLeaf error', { error: String(err) })
+      return res.status(500).json({ error: 'internal error' })
+    }
+  })
+
   // ── GET /config ───────────────────────────────────────────────────────────────
   //
   // Prover discovery: client fetches this to learn where to get the wasm and zkey.

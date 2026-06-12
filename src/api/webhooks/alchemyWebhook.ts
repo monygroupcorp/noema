@@ -3,14 +3,18 @@ import crypto from 'node:crypto'
 import type { Depositorum, Petitionum, Testimoniorum } from '../../types/catena.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { AnimaStore } from '../../types/anima.js'
+import type { ArcanumTreeStore } from '../../arcanum/ArcanumTree.js'
 
 // ---------------------------------------------------------------------------
 // Known CreditVault event topic hashes (pre-computed)
+// keccak256 of the canonical event signature
 // ---------------------------------------------------------------------------
 
-const TOPIC_PAYMENT      = '0x1266483a1ee1398eb3bf0eb2a3ccbce80bffd031a593fa1b9dad6272b40e3121'
-const TOPIC_NFT_RECEIVED = '0x5302f22244b41ec8834e043efcb52482aa21c2a460a047422c4ae3df50bd44a9'
-const TOPIC_ERC1155      = '0x72d4fe4bd1118f3ff78811cc440bf989b6e515157dab466890aaed7c87ffb78c'
+const TOPIC_PAYMENT          = '0x1266483a1ee1398eb3bf0eb2a3ccbce80bffd031a593fa1b9dad6272b40e3121'
+const TOPIC_NFT_RECEIVED     = '0x5302f22244b41ec8834e043efcb52482aa21c2a460a047422c4ae3df50bd44a9'
+const TOPIC_ERC1155          = '0x72d4fe4bd1118f3ff78811cc440bf989b6e515157dab466890aaed7c87ffb78c'
+// keccak256("AnonymousDeposit(bytes32,address,uint256)")
+const TOPIC_ANON_DEPOSIT     = '0x879aadcc0b21da25bde4bcf799cb142a02d0135f66a1328fef12c8b78636c58d'
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -22,6 +26,8 @@ export interface AlchemyWebhookDeps {
   petitiones: Petitionum
   testimonia: Testimoniorum
   animae: AnimaStore
+  /** Arcanum Merkle tree — receives anonymous deposits (no animaId). */
+  arcanumTree: ArcanumTreeStore
   /** Per-chainId HMAC signing keys. Key: chainId string, value: secret string. */
   signingKeys: Record<string, string>
   /**
@@ -146,11 +152,16 @@ export async function handleAlchemyWebhook(
         } else {
           skipped++
         }
+      } else if (topic0 === TOPIC_ANON_DEPOSIT) {
+        const didProcess = await handleAnonymousDepositLog(log, deps)
+        if (didProcess) {
+          processed++
+        } else {
+          skipped++
+        }
       } else if (topic0 === TOPIC_ERC1155) {
-        // ERC1155 — log and skip for now
         skipped++
       } else {
-        // Unknown topic
         skipped++
       }
     }
@@ -237,6 +248,33 @@ async function handlePaymentLog(
     }
   }
   // If no anima: Depositum stays in 'confirmatum' — credit issued on wallet link
+
+  return true
+}
+
+// ---------------------------------------------------------------------------
+// Anonymous deposit handler
+// ---------------------------------------------------------------------------
+
+async function handleAnonymousDepositLog(
+  log: AlchemyLog,
+  deps: AlchemyWebhookDeps,
+): Promise<boolean> {
+  // topics[1] = commitment (indexed bytes32) — the Poseidon field element
+  const commitment = log.topics[1]  // already 0x-prefixed 32-byte hex
+
+  // Decode non-indexed params: (address token, uint256 amount)
+  const coder = AbiCoder.defaultAbiCoder()
+  const [, amount] = coder.decode(['address', 'uint256'], log.data) as unknown as [string, bigint]
+
+  const valor = BigInt(amount)
+
+  // Idempotency: commitment is unique per note — skip if already in tree
+  const existing = await deps.arcanumTree.findLeaf(commitment)
+  if (existing) return false
+
+  // Insert into Merkle tree — no animaId, no signum, no ledger entry
+  await deps.arcanumTree.insert(commitment, valor)
 
   return true
 }

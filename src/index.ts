@@ -15,6 +15,7 @@ import type { RouterDeps, IdentityResolver } from './allocutio/telegram/Telegram
 import { makeTelegramSender } from './allocutio/telegram/TelegramSenderAdapter.js'
 import type { AuctorKey } from './flow/types.js'
 import { createWebhookRouter } from './api/webhooks/webhookRouter.js'
+import { handleAlchemyWebhook } from './api/webhooks/alchemyWebhook.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
@@ -640,6 +641,33 @@ async function main(): Promise<void> {
 
   app.use('/internal', createLiveRouter(INTERNAL_SECRET))
   app.use('/internal/analytics', createAnalyticsRouter(wideStore, INTERNAL_SECRET))
+
+  // Alchemy address-activity webhook — processes CreditVault events.
+  // Route: POST /webhooks/alchemy/:chainId  (chainId = '1' mainnet, '8453' Base)
+  const ALCHEMY_SIGNING_KEYS: Record<string, string> = {}
+  if (process.env.ALCHEMY_SIGNING_KEY_MAINNET) ALCHEMY_SIGNING_KEYS['1']    = process.env.ALCHEMY_SIGNING_KEY_MAINNET
+  if (process.env.ALCHEMY_SIGNING_KEY_BASE)    ALCHEMY_SIGNING_KEYS['8453'] = process.env.ALCHEMY_SIGNING_KEY_BASE
+  const CREDIT_VAULT = '0x00000001152d633eb2ac3cf91eac9994aeefc021'
+  const alchemyDeps = {
+    deposita:     ring.deposita,
+    signorum:     ring.signorum,
+    petitiones:   ring.petitiones,
+    testimonia:   ring.testimonia,
+    animae:       ring.animae,
+    arcanumTree:  ring.arcanumTree,
+    signingKeys:  ALCHEMY_SIGNING_KEYS,
+    vaultAddresses: { '1': CREDIT_VAULT, '8453': CREDIT_VAULT },
+    ethPriceUsd:  0,  // not yet used — valor stored in wei
+  }
+  app.post('/webhooks/alchemy/:chainId', async (req, res) => {
+    const result = await handleAlchemyWebhook({
+      body:      req.body,
+      rawBody:   (req as { rawBody?: string }).rawBody ?? JSON.stringify(req.body),
+      signature: req.headers['x-alchemy-signature'] as string | undefined,
+      chainId:   req.params.chainId,
+    }, alchemyDeps)
+    res.status(result.status).json(result.body)
+  })
 
   app.use('/webhooks', createWebhookRouter({
     actorum: ring.actorum,
