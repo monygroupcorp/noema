@@ -346,7 +346,7 @@ class CreditService {
           return await this.ethereumService.estimateGasCostInUsd(
             vaultAddress,
             vaultAbi,
-            'pay',
+            'payCoin',
             assetAddress,
             amount
           );
