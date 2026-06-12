@@ -1054,7 +1054,9 @@ class Handler(BaseHTTPRequestHandler):
         if ex is None:
             self._send_json(400, {"error": f"unknown runtime: {runtime}"})
             return
-        form_field = "inference" if ex.runtime == "vLLM" else "workflow"
+        # ComfyUI jobs carry a graph (`workflow`); every serving runtime (vLLM, SGLang) carries an
+        # `inference` body. Keying on "is it ComfyUI" (not "is it vLLM") is what makes sglang work.
+        form_field = "workflow" if ex.runtime == "ComfyUI" else "inference"
         if form_field not in body:
             self._send_json(400, {"error": f"missing field: {form_field}"})
             return

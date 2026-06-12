@@ -187,6 +187,12 @@ export class SecurePodClient implements RunPodClient, Procurator {
           log.warn('lost SSE after comfyrunner accepted job — not retrying; comfyrunner owns the webhook', { podId, error: (firstErr as Error).message })
           return
         }
+        // A permanent (4xx) error is deterministic — a fresh pod hits the same rejection. Fail fast
+        // instead of burning more provisions (each re-runs the heavy bootstrap + model download).
+        if ((firstErr as { permanent?: boolean }).permanent) {
+          log.warn('pod run failed permanently — not retrying', { podId, error: (firstErr as Error).message })
+          throw firstErr
+        }
         log.warn(`pod run attempt 1/${maxAttempts} failed`, { podId, error: (firstErr as Error).message })
         for (let attempt = 2; attempt <= maxAttempts; attempt++) {
           log.info('retrying on new pod', { attempt })
@@ -208,6 +214,10 @@ export class SecurePodClient implements RunPodClient, Procurator {
             if (runnerAcceptedJob && !(runErr as { isThrottleError?: boolean }).isThrottleError) {
               log.warn('lost SSE after comfyrunner accepted job — not retrying; comfyrunner owns the webhook', { podId: retryPodId, error: (runErr as Error).message })
               return
+            }
+            if ((runErr as { permanent?: boolean }).permanent) {
+              log.warn('pod run failed permanently — not retrying', { podId: retryPodId, error: (runErr as Error).message })
+              throw runErr
             }
             log.warn(`pod run attempt ${attempt}/${maxAttempts} failed`, { podId: retryPodId, error: (runErr as Error).message })
             if (attempt === maxAttempts) throw runErr

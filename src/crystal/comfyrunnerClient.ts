@@ -117,7 +117,11 @@ export async function submitToRunner(
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new Error(`comfyrunner POST /job returned ${res.status}: ${text}`)
+    const err = new Error(`comfyrunner POST /job returned ${res.status}: ${text}`) as Error & { permanent?: boolean }
+    // 4xx = a deterministic bad request (e.g. wrong form field) — re-provisioning a fresh pod will
+    // hit the exact same rejection, so mark it permanent so the caller fails fast (no retry waste).
+    if (res.status >= 400 && res.status < 500) err.permanent = true
+    throw err
   }
 }
 
