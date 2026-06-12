@@ -317,6 +317,7 @@ async function startApp() {
         const widgetDeps = {
           logger,
           db: services.db || {},
+          storageService: services.storageService || null,
         };
         platforms.web.app.use('/widget', require('express').json(), createWidgetApi(widgetDeps));
         logger.debug('Widget API mounted at /widget');
