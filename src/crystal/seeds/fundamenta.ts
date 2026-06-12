@@ -86,9 +86,33 @@ export const FUNDAMENTUM_QWEN_VL_VLLM: Fundamentum = {
   mutatum: new Date('2026-06-11'),
 }
 
+/**
+ * MOSS · SGLang — the substrate for custom-architecture audio/LM models that vLLM can't serve.
+ *
+ * MOSS-Music is a bespoke arch (Qwen3-8B + audio encoder) that needs `trust_remote_code`; vLLM has
+ * no native impl for it, but SGLang (MOSS's own recommended serving path) loads it with
+ * `--trust-remote-code` and exposes the SAME OpenAI-compatible API — so it reuses the inference
+ * compile path (runtime 'sglang' → _compileInference). The bootstrap pip-installs sglang.
+ */
+export const FUNDAMENTUM_MOSS_SGLANG: Fundamentum = {
+  id: 'moss-sglang',
+  nomen: 'MOSS · SGLang',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'sglang',
+  intellae: [],   // per-Essentia LM (like the vLLM substrate)
+  vramGb: 24,
+  canonica: true,
+  natum: new Date('2026-06-11'),
+  mutatum: new Date('2026-06-11'),
+}
+
 /** All canonical fundamenta — seeded on boot (parity with CANONICAL_ESSENTIAE). */
 export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_FLUX_COMFYUI,
   FUNDAMENTUM_SD15_COMFYUI,
   FUNDAMENTUM_QWEN_VL_VLLM,
+  FUNDAMENTUM_MOSS_SGLANG,
 ]

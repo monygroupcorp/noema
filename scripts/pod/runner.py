@@ -561,33 +561,27 @@ class ComfyUIExecutor(Executor):
 # VllmExecutor — the LLM/VLM serving harness (consumes spec.inference)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class VllmExecutor(Executor):
-    """Serves a model-BOUND vLLM server. `load` downloads the repo (model['repo']) then launches
-    `vllm serve <dir>` — vLLM needs the model present at launch (unlike ComfyUI). A job for a
-    different model than the one served triggers a relaunch (one model per harness)."""
+class OpenAIServerExecutor(Executor):
+    """Base for OpenAI-compatible serving harnesses (vLLM, SGLang). Model-BOUND: `load` downloads the
+    repo then launches a server that serves /v1/chat/completions; a different model triggers relaunch
+    (one model per harness). Subclasses provide `_serve_cmd` + `_serve_env` + `server_label`/`url`;
+    everything else — download, lifecycle, the chat request — is shared."""
 
-    runtime = "vLLM"
-    default_ewma_ms = 30_000.0   # ~30s prior
+    server_label = "server"   # /tmp/<label>.log + messages
 
     def __init__(self) -> None:
         super().__init__()
-        self.vram_gb = float(os.environ.get("VLLM_VRAM_GB", "20"))
         self.root          = os.environ.get("MODEL_ROOT", "/root/models")
-        self.url           = os.environ.get("VLLM_URL", "http://localhost:8000")
-        self.ready_timeout = int(os.environ.get("VLLM_READY_TIMEOUT", "600"))
-        # vLLM's own default (0.92) is greedy — it wants 92% of TOTAL device memory and refuses to
-        # start if even a little is held by other processes (driver/display, or a co-resident harness).
-        # Default to 0.90 and always pass it; co-residency later derives this from RUNNER_VRAM_GB.
-        self.gpu_util      = os.environ.get("VLLM_GPU_UTIL", "0.90")
-        # Cap the context. Qwen3-VL advertises a 256K max_seq_len → vLLM would demand ~36GB of KV
-        # cache for a single request and refuse to start. Understanding a single image needs only a
-        # few K tokens; 4096 keeps the KV cache (~0.6GB) small enough to fit beside the ~16.65GB of
-        # weights even on a ~20GB pod GPU (16384's 2.25GB KV did NOT fit on a live pod, 2026-06-11).
-        # Override up (VLLM_MAX_MODEL_LEN) on bigger GPUs / for multi-image or long prompts.
-        self.max_model_len = os.environ.get("VLLM_MAX_MODEL_LEN", "4096")
+        self.url           = "http://localhost:8000"   # subclass overrides in __init__
+        self.ready_timeout = int(os.environ.get("SERVER_READY_TIMEOUT", "600"))
         self._proc: subprocess.Popen | None = None
         self._served_dir = ""
 
+    @property
+    def _log_path(self) -> str:
+        return f"/tmp/{self.server_label}.log"
+
+    # ── shared ──
     def model_root(self) -> str:
         return self.root
 
@@ -600,7 +594,7 @@ class VllmExecutor(Executor):
         os.makedirs(dest_path, exist_ok=True)
         repo = model.get("repo")
         if not repo:
-            raise RuntimeError(f"vLLM model '{model['dest']}' has no 'repo' (HF repo id) to download")
+            raise RuntimeError(f"model '{model['dest']}' has no 'repo' (HF repo id) to download")
         # `huggingface-cli` was removed in recent huggingface_hub — the CLI is now `hf`.
         subprocess.run(["hf", "download", repo, "--local-dir", dest_path],
                        check=True, timeout=int(model.get("downloadTimeout", 3600)))
@@ -611,14 +605,14 @@ class VllmExecutor(Executor):
                 return self.model_path(m["dest"])
         models = job_spec.get("models", [])
         if not models:
-            raise RuntimeError("vLLM job has no model to serve")
+            raise RuntimeError("inference job has no model to serve")
         return self.model_path(models[0]["dest"])
 
     def _wait_for_http(self) -> bool:
         deadline = time.time() + self.ready_timeout
         while time.time() < deadline:
-            # Fail fast if the serve subprocess died (OOM, bad flag, KV-cache refusal) instead of
-            # waiting out the full ready timeout.
+            # Fail fast if the serve subprocess died (OOM, bad flag, KV refusal) instead of waiting out
+            # the full ready timeout.
             if self._proc is not None and self._proc.poll() is not None:
                 return False
             try:
@@ -630,16 +624,16 @@ class VllmExecutor(Executor):
         return False
 
     def _tail_log(self, n: int = 30) -> str:
-        # vLLM buries the real cause (a ValueError/OOM in the EngineCore subprocess) ABOVE a generic
-        # "Engine core initialization failed" wrapper, so a blind tail shows only the wrapper. Surface
-        # the actual error lines + the last n lines.
+        # The serving frameworks bury the real cause (a ValueError/OOM in a worker subprocess) ABOVE a
+        # generic wrapper, so a blind tail shows only the wrapper. Surface the real error lines + tail.
         try:
-            with open("/tmp/vllm.log", "r", errors="replace") as f:
+            with open(self._log_path, "r", errors="replace") as f:
                 lines = f.readlines()
         except Exception:
-            return "(vllm.log unavailable)"
+            return f"({self.server_label}.log unavailable)"
         pat = ("ValueError", "RuntimeError", "OutOfMemory", "out of memory", "CUDA out of memory",
-               "KV cache", "max seq len", "max_model_len", "no available memory", "OSError", "ImportError")
+               "KV cache", "max seq len", "max_model_len", "no available memory", "OSError",
+               "ImportError", "not supported", "trust_remote_code")
         cause = [ln.rstrip() for ln in lines if any(p in ln for p in pat) and "core.py:1165" not in ln]
         tail = "".join(lines[-n:]).strip()
         if cause:
@@ -647,8 +641,17 @@ class VllmExecutor(Executor):
         return tail
 
     def fail_detail(self, err_str: str) -> str:
-        return err_str if "vllm.log tail:" in err_str else f"{err_str}\nvllm.log tail:\n{self._tail_log()}"
+        marker = f"{self.server_label}.log tail:"
+        return err_str if marker in err_str else f"{err_str}\n{marker}\n{self._tail_log()}"
 
+    # ── subclass hooks ──
+    def _serve_cmd(self, model_dir: str) -> list:
+        raise NotImplementedError
+
+    def _serve_env(self) -> dict:
+        return {**os.environ}
+
+    # ── lifecycle ──
     def load(self, job_spec: dict, job_id: str) -> None:
         _ensure_models(self, job_spec.get("models", []), job_id)
         model_dir = self._lm_dir(job_spec)
@@ -656,24 +659,17 @@ class VllmExecutor(Executor):
             return   # already serving this model
         if self._proc:
             self._stop_server()   # serving a different model — relaunch
-        cmd = ["vllm", "serve", model_dir, "--served-model-name", "default"]
-        if self.gpu_util:
-            cmd += ["--gpu-memory-utilization", self.gpu_util]
-        if self.max_model_len:
-            cmd += ["--max-model-len", self.max_model_len]
-        log.info(f"launching vLLM: {' '.join(cmd)}")
+        cmd = self._serve_cmd(model_dir)
+        log.info(f"launching {self.server_label}: {' '.join(cmd)}")
         _append_event(job_id, {"type": "loading-model", "dir": model_dir})
-        # On Hopper-class GPUs vLLM tries FP8 kernels via DeepGEMM, which isn't in the pip env →
-        # "DeepGEMM backend is not available" crash (verified live on a big pod 2026-06-11). The model
-        # is BF16 (no quantization), so it doesn't need FP8 — disable the path. Env-overridable.
-        serve_env = {**os.environ, "VLLM_USE_DEEP_GEMM": os.environ.get("VLLM_USE_DEEP_GEMM", "0")}
-        self._proc = subprocess.Popen(cmd, stdout=open("/tmp/vllm.log", "a"), stderr=subprocess.STDOUT, env=serve_env)
+        self._proc = subprocess.Popen(cmd, stdout=open(self._log_path, "a"), stderr=subprocess.STDOUT,
+                                      env=self._serve_env())
         self._served_dir = model_dir
         if not self._wait_for_http():
             died = self._proc is None or self._proc.poll() is not None
             self._stop_server()
-            why = "vLLM server exited during startup" if died else "vLLM server never became ready"
-            raise RuntimeError(f"{why}\nvllm.log tail:\n{self._tail_log()}")
+            why = f"{self.server_label} server exited during startup" if died else f"{self.server_label} server never became ready"
+            raise RuntimeError(f"{why}\n{self.server_label}.log tail:\n{self._tail_log()}")
 
     def _stop_server(self) -> None:
         if self._proc:
@@ -715,13 +711,75 @@ class VllmExecutor(Executor):
     def unload(self) -> None:
         self._stop_server()
 
+
+class VllmExecutor(OpenAIServerExecutor):
+    """vLLM server — for architectures vLLM implements natively (Qwen-VL family, etc.)."""
+
+    runtime = "vLLM"
+    default_ewma_ms = 30_000.0
+    server_label = "vllm"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.vram_gb       = float(os.environ.get("VLLM_VRAM_GB", "20"))
+        self.url           = os.environ.get("VLLM_URL", "http://localhost:8000")
+        # 0.90 (vLLM's own 0.92 default refuses to start if any VRAM is held); co-residency later
+        # derives this from RUNNER_VRAM_GB.
+        self.gpu_util      = os.environ.get("VLLM_GPU_UTIL", "0.90")
+        # 4096 keeps KV (~0.6GB) small enough to fit beside ~16.65GB weights on a ~20GB pod (16384's
+        # 2.25GB KV did NOT fit on a live pod, 2026-06-11). Override up on bigger GPUs.
+        self.max_model_len = os.environ.get("VLLM_MAX_MODEL_LEN", "4096")
+
+    def _serve_cmd(self, model_dir: str) -> list:
+        cmd = ["vllm", "serve", model_dir, "--served-model-name", "default"]
+        if self.gpu_util:
+            cmd += ["--gpu-memory-utilization", self.gpu_util]
+        if self.max_model_len:
+            cmd += ["--max-model-len", self.max_model_len]
+        return cmd
+
+    def _serve_env(self) -> dict:
+        # Hopper GPUs try FP8 kernels via DeepGEMM, which isn't in the pip env → crash. The model is
+        # BF16 (no quant), so disable the path. Env-overridable.
+        return {**os.environ, "VLLM_USE_DEEP_GEMM": os.environ.get("VLLM_USE_DEEP_GEMM", "0")}
+
+
+class SGLangExecutor(OpenAIServerExecutor):
+    """SGLang server — for custom architectures vLLM can't serve (MOSS-Music: Qwen3-8B + audio
+    encoder). `--trust-remote-code` loads the custom modeling code; the OpenAI-compatible API is the
+    same as vLLM's, so the inference path is shared. SGLang is MOSS's own recommended serving path."""
+
+    runtime = "sglang"
+    default_ewma_ms = 30_000.0
+    server_label = "sglang"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.vram_gb        = float(os.environ.get("SGLANG_VRAM_GB", "22"))
+        self.url            = os.environ.get("SGLANG_URL", "http://localhost:30000")
+        self.port           = os.environ.get("SGLANG_PORT", "30000")
+        self.mem_fraction   = os.environ.get("SGLANG_MEM_FRACTION", "0.85")
+        self.context_length = os.environ.get("SGLANG_CONTEXT_LENGTH", "4096")
+
+    def _serve_cmd(self, model_dir: str) -> list:
+        cmd = ["python3", "-m", "sglang.launch_server", "--model-path", model_dir,
+               "--served-model-name", "default", "--trust-remote-code",
+               "--host", "0.0.0.0", "--port", self.port]
+        if self.mem_fraction:
+            cmd += ["--mem-fraction-static", self.mem_fraction]
+        if self.context_length:
+            cmd += ["--context-length", self.context_length]
+        return cmd
+
 # ── Harness registry ──────────────────────────────────────────────────────────
 
 def _build_harnesses() -> "tuple[dict, list]":
     comfy = ComfyUIExecutor()
     vllm = VllmExecutor()
-    registry = {"ComfyUI": comfy, "vLLM": vllm, "llm": vllm}   # vLLM/llm share one harness
-    unique = [comfy, vllm]
+    sglang = SGLangExecutor()
+    registry = {"ComfyUI": comfy, "vLLM": vllm, "llm": vllm,   # vLLM/llm share one harness
+                "sglang": sglang, "transformers": sglang}       # custom-arch models (MOSS)
+    unique = [comfy, vllm, sglang]
     return registry, unique
 
 

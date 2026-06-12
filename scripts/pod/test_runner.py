@@ -242,12 +242,41 @@ class RunJobTests(unittest.TestCase):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class RegistryTests(unittest.TestCase):
-    def test_vllm_and_llm_share_one_harness(self):
+    def test_registry_shares_harnesses_by_runtime(self):
         registry, unique = runner._build_harnesses()
-        self.assertIs(registry["vLLM"], registry["llm"])
-        self.assertEqual(len(unique), 2)
+        self.assertIs(registry["vLLM"], registry["llm"])              # vLLM/llm = one harness
+        self.assertIs(registry["sglang"], registry["transformers"])  # sglang/transformers = one harness
+        self.assertEqual(len(unique), 3)                              # comfy, vllm, sglang
         self.assertIsInstance(registry["ComfyUI"], runner.ComfyUIExecutor)
         self.assertIsInstance(registry["vLLM"], runner.VllmExecutor)
+        self.assertIsInstance(registry["sglang"], runner.SGLangExecutor)
+        # both serving executors share the OpenAI-compatible base
+        self.assertIsInstance(registry["vLLM"], runner.OpenAIServerExecutor)
+        self.assertIsInstance(registry["sglang"], runner.OpenAIServerExecutor)
+
+
+class ServeCmdTests(unittest.TestCase):
+    def test_vllm_serve_cmd(self):
+        ex = runner.VllmExecutor()
+        cmd = ex._serve_cmd("/m/qwen")
+        self.assertEqual(cmd[:3], ["vllm", "serve", "/m/qwen"])
+        self.assertIn("--gpu-memory-utilization", cmd)
+        self.assertIn("--max-model-len", cmd)
+        self.assertEqual(ex._serve_env().get("VLLM_USE_DEEP_GEMM"), "0")
+
+    def test_sglang_serve_cmd_has_trust_remote_code(self):
+        ex = runner.SGLangExecutor()
+        cmd = ex._serve_cmd("/m/moss")
+        self.assertIn("sglang.launch_server", cmd)
+        self.assertIn("--trust-remote-code", cmd)        # the whole point — loads MOSS's custom arch
+        self.assertIn("--model-path", cmd)
+        self.assertIn("/m/moss", cmd)
+        self.assertIn("--mem-fraction-static", cmd)
+
+    def test_both_share_the_openai_run_path(self):
+        # SGLang inherits run() from the base — same /v1/chat/completions request as vLLM
+        self.assertEqual(runner.SGLangExecutor.run, runner.OpenAIServerExecutor.run)
+        self.assertEqual(runner.VllmExecutor.run, runner.OpenAIServerExecutor.run)
 
 
 class VllmRequestShapeTests(unittest.TestCase):
