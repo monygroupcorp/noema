@@ -2166,24 +2166,57 @@ function createWidgetApi(deps = {}) {
                 .map(id => { try { return new OID(id); } catch { return null; } })
                 .filter(Boolean);
 
+            // Fetch completed casts — output.url may not be set yet (lazy-written on first status poll).
             const raw = await deps.db.casts.aggregate([
-                { $match: { initiatorAccountId: { $in: noemaObjectIds }, status: 'completed', 'output.url': { $exists: true }, galleryHidden: { $ne: true } } },
+                { $match: { initiatorAccountId: { $in: noemaObjectIds }, status: 'completed', galleryHidden: { $ne: true } } },
                 { $sort: { galleryPinned: -1, updatedAt: -1 } },
                 { $limit: 60 },
-                { $project: { _id: 0, castId: { $toString: '$_id' }, initiatorAccountId: 1, url: '$output.url', updatedAt: 1, galleryPinned: 1 } },
+                { $project: { castId: { $toString: '$_id' }, initiatorAccountId: 1, url: '$output.url', updatedAt: 1, galleryPinned: 1 } },
             ]);
 
-            const items = raw.map(r => {
-                const meta = metaByNoemaId[r.initiatorAccountId?.toString()] || {};
-                return {
-                    castId:    r.castId,
-                    url:       r.url,
-                    updatedAt: r.updatedAt,
-                    agentId:   meta.agentId || null,
-                    agentName: meta.agentName || null,
-                    pinned:    r.galleryPinned || false,
-                };
-            });
+            // For casts without output.url, resolve from generationOutputs and persist back.
+            const needsResolve = raw.filter(r => !r.url);
+            if (needsResolve.length && deps.db?.generationOutputs) {
+                const castIdStrs = needsResolve.map(r => r.castId);
+                const gens = await deps.db.generationOutputs.findMany(
+                    { 'metadata.castId': { $in: castIdStrs }, status: { $in: ['completed', 'succeeded'] }, responsePayload: { $exists: true } },
+                    { sort: { _id: -1 } }
+                );
+                const genByCastId = {};
+                for (const g of gens) {
+                    const cid = g.metadata?.castId;
+                    if (cid && !genByCastId[cid]) genByCastId[cid] = g;
+                }
+                const writes = [];
+                for (const r of needsResolve) {
+                    const gen = genByCastId[r.castId];
+                    if (!gen?.responsePayload) continue;
+                    const payload = Array.isArray(gen.responsePayload) ? gen.responsePayload[0] : gen.responsePayload;
+                    const imgUrl = payload?.data?.images?.[0]?.url || payload?.data?.url;
+                    if (imgUrl) {
+                        r.url = imgUrl;
+                        writes.push(deps.db.casts.updateOne(
+                            { _id: new OID(r.castId) },
+                            { $set: { output: { type: 'image', url: imgUrl }, updatedAt: new Date() } }
+                        ).catch(() => {}));
+                    }
+                }
+                if (writes.length) await Promise.all(writes);
+            }
+
+            const items = raw
+                .filter(r => r.url)
+                .map(r => {
+                    const meta = metaByNoemaId[r.initiatorAccountId?.toString()] || {};
+                    return {
+                        castId:    r.castId,
+                        url:       r.url,
+                        updatedAt: r.updatedAt,
+                        agentId:   meta.agentId || null,
+                        agentName: meta.agentName || null,
+                        pinned:    r.galleryPinned || false,
+                    };
+                });
 
             res.json({ items });
         } catch (err) {
