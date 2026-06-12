@@ -34,7 +34,7 @@ export type VestigiumVisibility = 'privata' | 'communis' | 'publica'
 // communis → accessible to anyone with the link
 // publica  → listed in the public gallery and searched by strangers
 
-export type VestigiumGenus = 'text' | 'image' | 'video' | 'audio'
+export type VestigiumGenus = 'text' | 'image' | 'video' | 'audio' | '3d'
 
 export type ImpressioKind = 'amor' | 'risus' | 'maeror'
 // amor   = love  (strong positive — "this is exactly what I wanted")

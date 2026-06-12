@@ -34,7 +34,7 @@ export type ModusGenus = 'atomicus' | 'compositus'
 /** A single named port (input or output) on a modus */
 export interface Porta {
   // "porta" = gate/door in Latin — an opening in the modus boundary
-  type: string          // canonical type name: 'text' | 'image' | 'video' | 'audio' | 'int' | 'float'
+  type: string          // canonical type name: 'text' | 'image' | 'video' | 'audio' | '3d' | 'int' | 'float'
   required?: boolean
   default?: unknown
   label?: string        // short display name shown on the canvas port

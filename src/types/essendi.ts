@@ -27,7 +27,8 @@ import type { Modus } from './modus'
 export type EssentiaCategoria =
   | 'image'   // produces image output (FLUX, SDXL, SD15...)
   | 'video'   // produces video output (LTX-Video...)
-  | 'audio'   // produces audio output
+  | 'audio'   // produces audio output (HeartMuLa music...)
+  | '3d'      // produces a 3D mesh output (Hunyuan3D — .glb/.obj)
   | 'text'    // produces text output (LLM inference)
   | 'code'    // produces executable code
   | 'chain'   // on-chain operation (transaction, contract call)
