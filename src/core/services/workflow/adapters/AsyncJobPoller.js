@@ -1,8 +1,18 @@
 /**
  * AsyncJobPoller - Handles async job polling for adapter-based tools
- * 
+ *
  * Polls adapter jobs until completion and updates generation records.
+ *
+ * Billing: spell-step async adapter tools (e.g. OpenAI gpt-image / dall-e) do
+ * NOT flow through the ComfyDeploy webhook, so nothing debited them — the cost
+ * was recorded on the generation but never charged. This poller now debits on
+ * successful completion via the shared chargeGeneration path (idempotency-keyed,
+ * so it can't double-charge anything the webhook or upfront-quote already billed).
  */
+
+const { chargeGeneration } = require('../../charging/chargeGeneration');
+const { getPricingService } = require('../../pricing');
+const { USD_PER_POINT } = require('../../../constants/economy');
 
 class AsyncJobPoller {
     constructor({ logger, generationRecordManager }) {
@@ -69,6 +79,11 @@ class AsyncJobPoller {
                         // NOTE: We don't emit generationUpdated here because the API endpoint (generationOutputsApi.js)
                         // already emits it when the record is updated. Emitting here would cause duplicate handling.
 
+                        // Debit the user on success (these tools are not billed by the comfy webhook).
+                        if (finalStatus === 'completed') {
+                            await this._chargeOnCompletion(generationId, pollRes);
+                        }
+
                         break; // Job completed, exit polling loop
                     }
 
@@ -94,6 +109,73 @@ class AsyncJobPoller {
                 }
             }
         })();
+    }
+
+    /**
+     * Debit the payer for a completed async adapter generation.
+     *
+     * Skips when the cast was already paid upfront (quote), when there's no
+     * payer, or when no usable cost is known. Prices the raw compute cost
+     * through the standard pricing tier and charges via chargeGeneration with a
+     * canonical idempotency key, so re-runs / other charge paths can't duplicate.
+     * Never throws — billing failures are logged, not allowed to break delivery.
+     * @private
+     */
+    async _chargeOnCompletion(generationId, pollRes) {
+        try {
+            const rec = await this.generationRecordManager.getGenerationRecord(generationId);
+            if (!rec) {
+                this.logger.warn(`[AsyncJobPoller] charge: generation ${generationId} not found — skipping debit`);
+                return;
+            }
+            if (rec.metadata?.castChargedUpfront) {
+                this.logger.debug(`[AsyncJobPoller] charge: ${generationId} cast charged upfront — skipping per-step debit`);
+                return;
+            }
+            if (!rec.masterAccountId) {
+                this.logger.warn(`[AsyncJobPoller] charge: ${generationId} has no masterAccountId — skipping debit`);
+                return;
+            }
+
+            // Prefer the actual cost from the run; fall back to the costRate estimate.
+            const costRate = rec.metadata?.costRate;
+            const computeCostUsd = [
+                pollRes?.costUsd,
+                typeof rec.costUsd === 'number' ? rec.costUsd : (rec.costUsd?.$numberDecimal ? Number(rec.costUsd.$numberDecimal) : null),
+                costRate && costRate.unit === 'run' ? costRate.amount : null,
+            ].find(v => typeof v === 'number' && v > 0);
+            if (!computeCostUsd) {
+                this.logger.warn(`[AsyncJobPoller] charge: ${generationId} has no usable cost (costUsd/costRate) — skipping debit`);
+                return;
+            }
+
+            const priced = getPricingService().calculateCost({
+                computeCostUsd,
+                serviceName: rec.serviceName,
+                isMs2User: false, // standard tier; spell-step records don't carry the MS2 flag
+                toolId: rec.toolId,
+            });
+            const basePoints = Math.max(1, Math.round(priced.finalCostUsd / USD_PER_POINT));
+
+            const chargeResult = await chargeGeneration({
+                masterAccountId: rec.masterAccountId,
+                generationRecord: rec,
+                basePoints,
+                toolId: rec.toolId,
+                idempotencyKey: `${generationId}:final-debit`,
+                logger: this.logger,
+            });
+
+            await this.generationRecordManager.updateGenerationRecord(generationId, {
+                pointsSpent: chargeResult.totalPointsCharged,
+                contributorRewardPoints: chargeResult.totalRewards,
+                rewardBreakdown: chargeResult.rewardBreakdown,
+            }).catch(() => {});
+
+            this.logger.info(`[AsyncJobPoller] Debited ${chargeResult.totalPointsCharged} pts for async generation ${generationId} (computeUsd=$${computeCostUsd}, finalUsd=$${priced.finalCostUsd?.toFixed?.(4)})`);
+        } catch (err) {
+            this.logger.error(`[AsyncJobPoller] Charge failed for generation ${generationId}: ${err.message}`);
+        }
     }
 }
 
