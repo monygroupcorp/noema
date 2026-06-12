@@ -771,6 +771,11 @@ class SGLangExecutor(OpenAIServerExecutor):
             cmd += ["--context-length", self.context_length]
         return cmd
 
+    def _serve_env(self) -> dict:
+        # Disable SGLang's DeepGEMM FP8 path (a CUDA-13-built dep that crashes on the CUDA-12.4 base
+        # image — see _bootstrapRunner). BF16 MOSS doesn't need it. Belt to the post-install removal.
+        return {**os.environ, "SGLANG_ENABLE_JIT_DEEPGEMM": os.environ.get("SGLANG_ENABLE_JIT_DEEPGEMM", "0")}
+
 # ── Harness registry ──────────────────────────────────────────────────────────
 
 def _build_harnesses() -> "tuple[dict, list]":
