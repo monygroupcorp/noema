@@ -128,9 +128,15 @@ function buildAppHtml(agentId, mode) {
   .spell-name { font-size: 14px; font-weight: 500; }
   .spell-desc { font-size: 12px; color: #666; margin-top: 3px; }
   .spell-inputs { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-  .spell-input { background: #111; border: 1px solid #2a2a2a; border-radius: 4px; padding: 6px 10px; color: #e8e8e8; font-size: 12px; width: 100%; }
+  .spell-input { background: #111; border: 1px solid #2a2a2a; border-radius: 4px; padding: 6px 10px; color: #e8e8e8; font-size: 12px; width: 100%; box-sizing: border-box; }
   .spell-input:focus { outline: none; border-color: #555; }
   .spell-input::placeholder { color: #444; }
+  .spell-img-pick { position: relative; cursor: pointer; background: #111; border: 1px dashed #444; border-radius: 4px; height: 80px; display: flex; align-items: center; justify-content: center; color: #555; font-size: 12px; overflow: hidden; }
+  .spell-img-pick:hover { border-color: #777; color: #aaa; }
+  .spell-img-pick input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .spell-img-pick img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .spell-img-pick .pick-label { pointer-events: none; }
+  .spell-img-uploading { opacity: .5; pointer-events: none; }
   .spell-cast { margin-top: 4px; padding: 6px 14px; background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 4px; color: #88a; font-size: 12px; cursor: pointer; align-self: flex-start; }
   .spell-cast:hover { background: #1e1e3a; border-color: #44f; color: #aac; }
   .spell-cast:disabled { opacity: .4; cursor: default; }
@@ -466,7 +472,11 @@ function buildAppHtml(agentId, mode) {
               + (s.description ? '<div class="spell-desc">' + esc(s.description) + '</div>' : '');
             html += '<div class="spell-inputs" style="pointer-events:none;opacity:.35">';
             inputs.forEach(function(inp) {
-              html += '<input class="spell-input" placeholder="' + esc(inp.label || inp.paramKey) + '" disabled>';
+              if (inp.type === 'image') {
+                html += '<div class="spell-img-pick" style="height:40px"><span class="pick-label">📷 ' + esc(inp.label || inp.paramKey) + '</span></div>';
+              } else {
+                html += '<input class="spell-input" placeholder="' + esc(inp.label || inp.paramKey) + '" disabled>';
+              }
             });
             html += '<button class="spell-cast" disabled>Cast</button>';
             html += '</div>';
@@ -703,6 +713,12 @@ function buildAppHtml(agentId, mode) {
     var html = spells.map(function(s) {
       var inputs = s.exposedInputs || [];
       var inputsHtml = inputs.map(function(inp) {
+        if (inp.type === 'image') {
+          return '<div class="spell-img-pick" data-key="' + esc(inp.paramKey) + '" data-url="">'
+            + '<input type="file" accept="image/*">'
+            + '<span class="pick-label">📷 ' + esc(inp.label || inp.paramKey) + '</span>'
+            + '</div>';
+        }
         return '<input class="spell-input" data-key="' + esc(inp.paramKey) + '"'
           + ' placeholder="' + esc(inp.label || inp.paramKey) + '"'
           + (inp.defaultValue ? ' value="' + esc(inp.defaultValue) + '"' : '')
@@ -720,10 +736,47 @@ function buildAppHtml(agentId, mode) {
     $content.querySelectorAll('.spell-item').forEach(function(el) {
       var slug = el.dataset.slug;
       var castBtn = el.querySelector('.spell-cast');
+
+      // Wire image pickers: on file select, upload and store URL
+      el.querySelectorAll('.spell-img-pick').forEach(function(picker) {
+        var fileInput = picker.querySelector('input[type=file]');
+        fileInput.addEventListener('change', function() {
+          var file = fileInput.files[0];
+          if (!file) return;
+          var reader = new FileReader();
+          reader.onload = function(e) {
+            var b64 = e.target.result.split(',')[1];
+            picker.classList.add('spell-img-uploading');
+            fetch(BASE_URL + '/widget/' + encodeURIComponent(AGENT_ID) + '/upload', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: b64, contentType: file.type, fileName: file.name }),
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+              picker.classList.remove('spell-img-uploading');
+              if (d.url) {
+                picker.dataset.url = d.url;
+                var label = picker.querySelector('.pick-label');
+                if (label) label.textContent = '';
+                var prev = picker.querySelector('img');
+                if (!prev) { prev = document.createElement('img'); picker.appendChild(prev); }
+                prev.src = d.url;
+              }
+            })
+            .catch(function() { picker.classList.remove('spell-img-uploading'); });
+          };
+          reader.readAsDataURL(file);
+        });
+      });
+
       castBtn.addEventListener('click', function() {
         var inputs = {};
         el.querySelectorAll('.spell-input').forEach(function(inp) {
           inputs[inp.dataset.key] = inp.value;
+        });
+        el.querySelectorAll('.spell-img-pick').forEach(function(picker) {
+          if (picker.dataset.url) inputs[picker.dataset.key] = picker.dataset.url;
         });
         castBtn.disabled = true;
         castBtn.textContent = 'Casting…';
@@ -1783,11 +1836,12 @@ function createWidgetApi(deps = {}) {
             }
 
             // Fetch recent cast outputs for the gallery
+            // initiatorAccountId is stored as a plain string, not ObjectId — match as string
             let recentOutputs = [];
             if (deps.db?.casts) {
                 try {
                     recentOutputs = await deps.db.casts.aggregate([
-                        { $match: { initiatorAccountId: agentDoc._id, status: 'completed', 'output.url': { $exists: true } } },
+                        { $match: { initiatorAccountId: agentDoc._id.toString(), status: 'completed', 'output.url': { $exists: true } } },
                         { $sort: { updatedAt: -1 } },
                         { $limit: 20 },
                         { $project: { _id: 0, castId: { $toString: '$_id' }, url: '$output.url' } },
@@ -1844,12 +1898,27 @@ function createWidgetApi(deps = {}) {
 
             const { status, data } = await _internalReq('GET', `/internal/v1/data/spells/casts/${req.params.castId}`);
 
-            // Attach output URL from the final step's generation record
-            if (data?.status === 'completed' && data?.stepGenerationIds?.length && deps.db?.generationOutputs) {
+            // Attach output URL from the final step's generation record.
+            // stepGenerationIds may be empty on the cast doc even when the spell ran — fall back
+            // to querying by metadata.castId (the pipeline always writes it there).
+            if (data?.status === 'completed' && !data.output && deps.db?.generationOutputs) {
                 try {
                     const { ObjectId: OID } = require('mongodb');
-                    const lastGenId = data.stepGenerationIds[data.stepGenerationIds.length - 1];
-                    const gen = await deps.db.generationOutputs.findOne({ _id: typeof lastGenId === 'string' ? new OID(lastGenId) : lastGenId });
+                    let gen = null;
+
+                    if (data.stepGenerationIds?.length) {
+                        const lastGenId = data.stepGenerationIds[data.stepGenerationIds.length - 1];
+                        gen = await deps.db.generationOutputs.findOne({ _id: typeof lastGenId === 'string' ? new OID(lastGenId) : lastGenId });
+                    }
+
+                    // Fallback: find the last completed generation whose metadata links to this cast
+                    if (!gen) {
+                        gen = await deps.db.generationOutputs.findOne(
+                            { 'metadata.castId': req.params.castId, status: { $in: ['completed', 'succeeded'] }, responsePayload: { $exists: true } },
+                            { sort: { _id: -1 } }
+                        );
+                    }
+
                     if (gen?.responsePayload) {
                         const payload = Array.isArray(gen.responsePayload) ? gen.responsePayload[0] : gen.responsePayload;
                         const imgUrl = payload?.data?.images?.[0]?.url || payload?.data?.url;
@@ -1857,7 +1926,7 @@ function createWidgetApi(deps = {}) {
                         if (imgUrl) data.output = { type: 'image', url: imgUrl };
                         else if (textVal) data.output = { type: 'text', value: typeof textVal === 'string' ? textVal : textVal[0] || '' };
 
-                        // Persist so gallery queries can find it without re-resolving
+                        // Persist output on the cast so the gallery query can find it
                         if (data.output && deps.db?.casts) {
                             try {
                                 await deps.db.casts.updateOne(
@@ -1872,6 +1941,36 @@ function createWidgetApi(deps = {}) {
 
             res.status(status).json(data);
         } catch (err) { handleErr(res, err, 'GET widget cast status'); }
+    });
+
+    // ── Image upload ──────────────────────────────────────────────────────────
+    // Accepts { data: base64, contentType, fileName? } JSON, uploads to R2, returns { url }.
+    // Used by image-type exposed inputs in the spell cast UI.
+
+    router.post('/:agentId/upload', async (req, res) => {
+        cors(res);
+        try {
+            const agentDoc = await findAgent(req.params.agentId);
+            if (!agentDoc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent not found' } });
+
+            if (!deps.storageService) return res.status(503).json({ error: { code: 'UNAVAILABLE', message: 'Upload service not configured' } });
+
+            const { data: b64, contentType, fileName } = req.body || {};
+            if (!b64 || !contentType) return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'data and contentType are required' } });
+
+            const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+            if (!allowed.includes(contentType)) return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Unsupported image type' } });
+
+            const buf = Buffer.from(b64, 'base64');
+            const ext = contentType.split('/')[1] || 'jpg';
+            const key = `widget-uploads/${agentDoc.agentId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+
+            const { Readable } = require('stream');
+            const stream = Readable.from(buf);
+            const url = await deps.storageService.uploadFromStream(stream, key, contentType);
+
+            res.json({ url });
+        } catch (err) { handleErr(res, err, 'POST widget upload'); }
     });
 
     // ── Buy-points proxy ──────────────────────────────────────────────────────
