@@ -96,11 +96,30 @@ export interface InferenceCompiledSpec extends CompiledSpecBase {
   }
 }
 
-export type CompiledSpec = ComfyUICompiledSpec | InferenceCompiledSpec
+/** python-modelcard spec — a cloned repo run as a one-shot CLI (HeartMuLa, Hunyuan3D). */
+export interface ScriptCompiledSpec extends CompiledSpecBase {
+  script: {
+    repo: string
+    entry: string
+    /** Resolved CLI args (fixedArgs ∪ argMap-resolved from aditus). */
+    args: string[]
+    /** File path → content to write before the run (resolved from aditus). */
+    fileInputs?: Record<string, string>
+    output: string
+    outputKind: string
+  }
+}
+
+export type CompiledSpec = ComfyUICompiledSpec | InferenceCompiledSpec | ScriptCompiledSpec
 
 /** Narrow a CompiledSpec (or compatible) to the LLM inference member. */
 export function isInferenceSpec(spec: CompiledSpec): spec is InferenceCompiledSpec {
   return 'inference' in spec && spec.inference != null
+}
+
+/** Narrow a CompiledSpec to the python-modelcard script member. */
+export function isScriptSpec(spec: CompiledSpec): spec is ScriptCompiledSpec {
+  return 'script' in spec && spec.script != null
 }
 
 export interface CompileResult {
@@ -182,6 +201,9 @@ export class Compiler {
     // archs via trust_remote_code) all compile to the same `spec.inference` shape.
     if (runtime === 'vLLM' || runtime === 'llm' || runtime === 'sglang' || runtime === 'transformers') {
       return this._compileInference(essentia, aditus, opts, fundamentum, image, runtime)
+    }
+    if (runtime === 'python-modelcard') {
+      return this._compileScript(essentia, aditus, fundamentum, image, runtime)
     }
     if (runtime !== 'ComfyUI') {
       throw new CompilerError('UNKNOWN_RUNTIME',
@@ -455,6 +477,72 @@ export class Compiler {
       },
     }
 
+    const hash = `sha256:${this._hashSpec(spec)}`
+    return { hash, spec }
+  }
+
+  /**
+   * Compile a python-modelcard flow (runtime 'python-modelcard') into a ScriptCompiledSpec — a
+   * cloned repo run as a one-shot CLI (ADR-0007). Resolves the `Essentia.script` form: fixed args ∪
+   * argMap (aditus→flags) into a flat arg list, and fileInputs (aditus→file content, affix-woven).
+   * Shares the weight-manifest resolution with the other paths. (HeartMuLa, Hunyuan3D.)
+   */
+  private async _compileScript(
+    essentia: Essentia,
+    aditus: Record<string, unknown>,
+    fundamentum: Fundamentum,
+    image: { imageId: string; imageVersion: string; ociRef: string },
+    runtime: string,
+  ): Promise<CompileResult> {
+    const form = essentia.script
+    if (!form) {
+      throw new CompilerError('MISSING_SCRIPT', `Essentia '${essentia.id}' (runtime ${runtime}) has no script form`)
+    }
+    const cookFlags: Record<string, unknown> = {
+      ...(essentia.defaultCookFlags ?? {}),
+      ...((aditus._cookFlags as Record<string, unknown>) ?? {}),
+    }
+
+    // Weight manifest (fundament ∪ flow), resolved from the registry — same as the other paths.
+    const weightRefs = this._manifestRefs(fundamentum, essentia).map(w => ({ role: w.role, id: w.id, dest: '' }))
+    const { resolved: baseWeights, records } = await this._resolveModelsWithRecords(weightRefs)
+    const withRepo = baseWeights.map(m => {
+      const repo = records.get(m.id)?.sources?.[0]?.meta?.repo
+      return typeof repo === 'string' ? { ...m, repo } : m
+    })
+    const models = withRepo.sort(byRoleThenId)
+
+    // CLI args: fixed flags + argMap-resolved (aditus value ?? port default).
+    const args: string[] = [...(form.fixedArgs ?? [])]
+    for (const [key, flag] of Object.entries(form.argMap ?? {})) {
+      const v = aditus[key] ?? essentia.aditus[key]?.default
+      if (v !== undefined && v !== null && v !== '') args.push(flag, String(v))
+    }
+
+    // File inputs: write each aditus value (affix-woven) to its declared path before the run.
+    const fileInputs: Record<string, string> = {}
+    for (const [key, path] of Object.entries(form.fileInputs ?? {})) {
+      const porta = essentia.aditus[key]
+      const raw = aditus[key]
+      const woven = porta ? weaveAffixes(raw, porta) : raw
+      fileInputs[path] = typeof woven === 'string' ? woven : String(woven ?? '')
+    }
+
+    const spec: ScriptCompiledSpec = {
+      image,
+      models,
+      cookFlags,
+      sourceTool: { id: essentia.id, versio: essentia.versio },
+      runtime,
+      script: {
+        repo: form.repo,
+        entry: form.entry,
+        args,
+        ...(Object.keys(fileInputs).length > 0 ? { fileInputs } : {}),
+        output: form.output,
+        outputKind: form.outputKind,
+      },
+    }
     const hash = `sha256:${this._hashSpec(spec)}`
     return { hash, spec }
   }

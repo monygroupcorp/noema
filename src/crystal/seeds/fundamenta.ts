@@ -109,10 +109,36 @@ export const FUNDAMENTUM_MOSS_SGLANG: Fundamentum = {
   mutatum: new Date('2026-06-11'),
 }
 
+/**
+ * HeartMuLa · PyTorch — the python-modelcard substrate (ADR-0007 generation track). A model whose
+ * inference is a cloned repo's one-shot CLI (no ComfyUI graph, no OpenAI server). runtime
+ * 'python-modelcard' → the PythonModelcardExecutor (clone repo + pip install -e . + download the
+ * ckpt weights + run the CLI + collect the .mp3). Carries the 3 HeartMuLa weight repos.
+ */
+export const FUNDAMENTUM_HEARTMULA_PYTORCH: Fundamentum = {
+  id: 'heartmula-pytorch',
+  nomen: 'HeartMuLa · PyTorch',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'python-modelcard',
+  intellae: [
+    { id: 'intella.heartmula-gen', role: 'config' },
+    { id: 'intella.heartmula-3b',  role: 'generator' },
+    { id: 'intella.heartcodec',    role: 'codec' },
+  ],
+  vramGb: 24,
+  canonica: true,
+  natum: new Date('2026-06-12'),
+  mutatum: new Date('2026-06-12'),
+}
+
 /** All canonical fundamenta — seeded on boot (parity with CANONICAL_ESSENTIAE). */
 export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_FLUX_COMFYUI,
   FUNDAMENTUM_SD15_COMFYUI,
   FUNDAMENTUM_QWEN_VL_VLLM,
   FUNDAMENTUM_MOSS_SGLANG,
+  FUNDAMENTUM_HEARTMULA_PYTORCH,
 ]

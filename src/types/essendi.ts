@@ -110,6 +110,30 @@ export interface Essentia extends Modus {
      *  Merged UNDER the user's aditus knobs (max_tokens, temperature…) — user values win. */
     genParams?: Record<string, unknown>
   }
+
+  /**
+   * The FORM HALF for runtime 'python-modelcard' (ADR-0007): a cloned modelcard repo run as a
+   * one-shot CLI. The Compiler reads it (instead of workflowTemplate/inferentia) and produces a
+   * `ScriptCompiledSpec`. Idiosyncratic per model — some read inputs from files (HeartMuLa writes
+   * lyrics.txt/tags.txt), all collect an output artifact.
+   */
+  script?: {
+    /** Git repo to clone — the modelcard's inference code (e.g. github.com/HeartMuLa/heartlib). */
+    repo: string
+    /** Command to run from the repo root (e.g. "python examples/run_music_generation.py"). */
+    entry: string
+    /** Always-passed flags (e.g. ["--model_path=./ckpt", "--version=3B"]). */
+    fixedArgs?: string[]
+    /** aditus key → CLI flag (e.g. { temperature: "--temperature" }). Value taken from aditus/default. */
+    argMap?: Record<string, string>
+    /** aditus key → file path to WRITE its (affix-woven) value into before the run
+     *  (e.g. { lyrics: "assets/lyrics.txt", tags: "assets/tags.txt" }). */
+    fileInputs?: Record<string, string>
+    /** Output artifact path (relative to repo root) the executor collects (e.g. "assets/output.mp3"). */
+    output: string
+    /** The `exitus` kind of the output, for delivery (e.g. "audio", "3d"). */
+    outputKind: string
+  }
 }
 
 /** "Essentiae" — nominative plural of essentia */
