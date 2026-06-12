@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.11](https://github.com/monygroupcorp/noema/compare/v4.11.10...v4.11.11) (2026-06-12)
+
+
+### Bug Fixes
+
+* **widget:** destructure permanentUrl from uploadFromStream result ([37283cd](https://github.com/monygroupcorp/noema/commit/37283cd8ea02f3219fd5c0208dae6262c2b53902))
+
 ## [4.11.10](https://github.com/monygroupcorp/noema/compare/v4.11.9...v4.11.10) (2026-06-12)
 
 
