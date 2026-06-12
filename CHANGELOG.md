@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.7](https://github.com/monygroupcorp/noema/compare/v4.11.6...v4.11.7) (2026-06-12)
+
+
+### Bug Fixes
+
+* **widget:** raise upload body limit to 12mb, surface upload errors in UI ([9a82d7f](https://github.com/monygroupcorp/noema/commit/9a82d7f7466be8128aeed654608425da1d5d78db))
+
 ## [4.11.6](https://github.com/monygroupcorp/noema/compare/v4.11.5...v4.11.6) (2026-06-12)
 
 
