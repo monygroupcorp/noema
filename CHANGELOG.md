@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.8](https://github.com/monygroupcorp/noema/compare/v4.11.7...v4.11.8) (2026-06-12)
+
+
+### Bug Fixes
+
+* **widget:** 12mb upload limit at mount, remove entrance spell preview, reload on back ([ad0576f](https://github.com/monygroupcorp/noema/commit/ad0576f18ea7c5366f707d4c5bad7edac4bf0d70))
+
 ## [4.11.7](https://github.com/monygroupcorp/noema/compare/v4.11.6...v4.11.7) (2026-06-12)
 
 
