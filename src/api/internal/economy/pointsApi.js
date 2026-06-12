@@ -550,9 +550,9 @@ module.exports = function pointsApi(dependencies) {
 
             if (type === 'token') {
                 if (assetAddress === '0x0000000000000000000000000000000000000000') {
-                    // Native ETH: payETH(referralKey) with msg.value
+                    // Native ETH: pay(referralKey) with msg.value
                     logger.info(`[pointsApi] /purchase processing ETH payment for amount: ${amount}`);
-                    const dataEncoded = iface.encodeFunctionData('payETH', [referralKey]);
+                    const dataEncoded = iface.encodeFunctionData('pay', [referralKey]);
                     depositTx = {
                         from: userWalletAddress,
                         to: vaultAddress,
@@ -586,7 +586,7 @@ module.exports = function pointsApi(dependencies) {
                         logger.info(`[pointsApi] /purchase approval required`, { token: assetAddress, amount });
                     }
 
-                    const dataEncoded = iface.encodeFunctionData('pay', [assetAddress, amount, referralKey]);
+                    const dataEncoded = iface.encodeFunctionData('payCoin', [assetAddress, amount, referralKey]);
                     depositTx = {
                         from: userWalletAddress,
                         to: vaultAddress,
