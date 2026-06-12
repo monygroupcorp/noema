@@ -1476,7 +1476,7 @@ function createWidgetApi(deps = {}) {
             const chainId           = '8453'; // Base
             const creditVaultAddress = CREDIT_VAULT_ADDRESSES[chainId];
             const referralKey       = ethers.id(req.params.agentId); // keccak256(utf8(agentId))
-            const selector          = ethers.id('payETH(bytes32)').slice(0, 10);
+            const selector          = ethers.id('pay(bytes32)').slice(0, 10);
             const calldata          = selector + referralKey.slice(2);
 
             res.json({
@@ -1849,12 +1849,34 @@ function createWidgetApi(deps = {}) {
             const _oidMatch = OIDg.isValid(agentDoc._id) ? new OIDg(agentDoc._id) : agentDoc._id;
             if (deps.db?.casts) {
                 try {
-                    recentOutputs = await deps.db.casts.aggregate([
-                        { $match: { initiatorAccountId: _oidMatch, status: 'completed', 'output.url': { $exists: true } } },
+                    const rawOutputs = await deps.db.casts.aggregate([
+                        { $match: { initiatorAccountId: _oidMatch, status: 'completed' } },
                         { $sort: { updatedAt: -1 } },
                         { $limit: 20 },
-                        { $project: { _id: 0, castId: { $toString: '$_id' }, url: '$output.url' } },
+                        { $project: { castId: { $toString: '$_id' }, url: '$output.url', updatedAt: 1 } },
                     ]);
+                    const needsUrl = rawOutputs.filter(r => !r.url);
+                    if (needsUrl.length && deps.db?.generationOutputs) {
+                        const gens = await deps.db.generationOutputs.findMany(
+                            { 'metadata.castId': { $in: needsUrl.map(r => r.castId) }, status: { $in: ['completed', 'succeeded'] }, responsePayload: { $exists: true } },
+                            { sort: { _id: -1 } }
+                        );
+                        const genByCastId = {};
+                        for (const g of gens) { const c = g.metadata?.castId; if (c && !genByCastId[c]) genByCastId[c] = g; }
+                        const writes = [];
+                        for (const r of needsUrl) {
+                            const gen = genByCastId[r.castId];
+                            if (!gen?.responsePayload) continue;
+                            const p = Array.isArray(gen.responsePayload) ? gen.responsePayload[0] : gen.responsePayload;
+                            const imgUrl = p?.data?.images?.[0]?.url || p?.data?.url;
+                            if (imgUrl) {
+                                r.url = imgUrl;
+                                writes.push(deps.db.casts.updateOne({ _id: new OIDg(r.castId) }, { $set: { output: { type: 'image', url: imgUrl }, updatedAt: new Date() } }).catch(() => {}));
+                            }
+                        }
+                        if (writes.length) await Promise.all(writes);
+                    }
+                    recentOutputs = rawOutputs.filter(r => r.url).map(r => ({ castId: r.castId, url: r.url }));
                 } catch (_) {}
             }
 
