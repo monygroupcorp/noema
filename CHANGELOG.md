@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.9](https://github.com/monygroupcorp/noema/compare/v4.11.8...v4.11.9) (2026-06-12)
+
+
+### Bug Fixes
+
+* **widget:** resolve gallery feed from generationOutputs when output.url absent ([d62132a](https://github.com/monygroupcorp/noema/commit/d62132ad93c2f7c573c8d73a6dccd4be429b6796))
+
 ## [4.11.8](https://github.com/monygroupcorp/noema/compare/v4.11.7...v4.11.8) (2026-06-12)
 
 
