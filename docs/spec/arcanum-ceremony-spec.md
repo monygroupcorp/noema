@@ -65,16 +65,19 @@ Wraps `snarkjs.groth16.fullProve()`. Input shape:
   root, nullifierHash, valor, recipient }                 // public
 ```
 
-### Phase 3 — Serve circuit assets
-- `GET /arcanum/circuit/wasm` → streams `arcanum.wasm` (browser prover needs it)
-- `.zkey` served from R2 (too large for API, client fetches directly)
-- Add both URLs to discovery response (`GET /v1/fundamenta` or a new `GET /v1/arcanum/config`)
+### Phase 3 — Serve circuit assets ✅ DONE (2026-06-12)
+- `GET /arcanum/circuit/wasm` → streams `arcanum.wasm` (2MB, immutable cache header)
+- `GET /arcanum/config` → `{ wasmUrl, zkeyUrl, depth:32, ready }` (discovery)
+- `POST /v1/runs/quote` now returns `{ impetus, recipient }` — clients use `recipient` when generating proof
+- `ARCANUM_ZKEY_URL` env var → passed into `/arcanum/config` response for client to know where to fetch .zkey
+- Arcanum router now mounted at `/arcanum` in `index.ts` (was wired but never mounted)
 
-### Phase 4 — End-to-end ZK proof (staging verify)
-1. `POST /arcanum/issue {animaId, valor}` → `ArcanumIssuance` (note + Merkle proof)
-2. `generateSpendProof()` → `ArcanumSpendProof`
-3. `POST /v1/runs { arcanumProof, flowId, aditus }` → real Groth16 verify + run
-4. Confirm: nullifier recorded, run completes, ledger settles
+### Phase 4 — Real ZK proof verified ✅ DONE (2026-06-12)
+- `generateSpendProof()` + `ArcanumVerifier.verify()` with real wasm+zkey: **PASSES** (~970ms in Node)
+- Tampered proof correctly rejected
+- `tests/unit/arcanum/ArcanumProver.real.test.ts` — 2 real Groth16 tests, both green
+- `computeRecipient` in prover.ts verified to match `ActumInceptor._computeRecipient` exactly
+- **Next: staging deploy + live API verify** (issue note → generateSpendProof → POST /v1/runs {arcanumProof})
 
 ### Phase 5 — Blind issuance (spec complete, `docs/arcanum-blind-issuance.md`)
 CreditVault UUPS upgrade → `payETHAnonymous(bytes32 commitment)` → no animaId ever created.  

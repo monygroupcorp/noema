@@ -16,6 +16,7 @@ import { makeTelegramSender } from './allocutio/telegram/TelegramSenderAdapter.j
 import type { AuctorKey } from './flow/types.js'
 import { createWebhookRouter } from './api/webhooks/webhookRouter.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
+import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
 import { IdentityResolver as ApiIdentityResolver } from './allocutio/api/IdentityResolver.js'
 import { createApiRouter } from './allocutio/api/apiRouter.js'
@@ -523,6 +524,10 @@ async function main(): Promise<void> {
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, v: process.env.BUILD_VERSION ?? 'dev' }))
   app.use('/api/vestigia', createVestigiaRouter(ring.vestigiorum))
+  app.use('/arcanum', createArcanumRouter(ring.arcanumIssuer, ring.arcanumTree, {
+    zkeyUrl: process.env.ARCANUM_ZKEY_URL,
+    serverUrl: process.env.WEBHOOK_URL,
+  }))
 
   // Crystal Agent API (/v1) — ApiAllocutio (docs/agent-tasks/EPIC-api-allocutio.md).
   // The agent-shaped facade over the ring + the credential→AuctorKey resolver.

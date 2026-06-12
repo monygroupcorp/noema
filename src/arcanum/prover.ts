@@ -1,5 +1,5 @@
-import { poseidon, computeNullifierHash } from './poseidon.js'
-import type { ArcanumNote } from './types.js'
+import { createHash } from 'node:crypto'
+import { computeNullifierHash } from './poseidon.js'
 import type { ArcanumMerkleProof } from './ArcanumTree.js'
 import type { ArcanumSpendProof } from './types.js'
 
@@ -79,11 +79,17 @@ export async function generateSpendProof(
 
 /**
  * Compute the recipient field for a spend proof.
- * recipient = poseidon(modoId, aditusId) — binds the proof to one execution.
- * The server computes and returns this in the quote response.
+ * Must match ActumInceptor._computeRecipient exactly:
+ *   sha256(modusId + ':' + JSON.stringify(sortedAditus)), first 31 bytes as BigInt decimal.
+ * The server returns this from POST /v1/runs/quote so clients don't need to reimplement it.
  */
-export async function computeRecipient(modoId: string, aditusId: string): Promise<string> {
-  return poseidon([BigInt('0x' + Buffer.from(modoId).toString('hex')), BigInt('0x' + Buffer.from(aditusId).toString('hex'))])
+export function computeRecipient(modusId: string, aditus: Record<string, unknown>): string {
+  const sorted = Object.fromEntries(
+    Object.entries(aditus).sort(([a], [b]) => a.localeCompare(b)),
+  )
+  const payload = `${modusId}:${JSON.stringify(sorted)}`
+  const hash = createHash('sha256').update(payload).digest()
+  return BigInt('0x' + hash.slice(0, 31).toString('hex')).toString()
 }
 
 // =============================================================================

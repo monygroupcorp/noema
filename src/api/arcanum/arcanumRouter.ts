@@ -1,13 +1,29 @@
 import { Router } from 'express'
+import { createReadStream, existsSync } from 'node:fs'
+import path from 'node:path'
 import type { ArcanumIssuer } from '../../ledger/ArcanumIssuer.js'
 import type { ArcanumTreeStore } from '../../arcanum/ArcanumTree.js'
 import { makeLogger } from '../../lib/logger.js'
 
 const log = makeLogger('arcanum:router')
 
+// CommonJS __dirname polyfill (this module is bundled as CJS)
+declare const __dirname: string
+
+const ARTIFACTS_DIR = path.join(__dirname, '..', '..', 'arcanum', 'circuit', 'artifacts')
+const WASM_PATH     = path.join(ARTIFACTS_DIR, 'arcanum.wasm')
+
+export interface ArcanumRouterConfig {
+  /** Public URL where the proving key (.zkey) can be fetched by clients. */
+  zkeyUrl?: string
+  /** Public URL of this server — used to build the wasm URL in /config. */
+  serverUrl?: string
+}
+
 export function createArcanumRouter(
   arcanumIssuer: ArcanumIssuer,
   arcanumTree: ArcanumTreeStore,
+  config: ArcanumRouterConfig = {},
 ): Router {
   const router = Router()
 
@@ -122,6 +138,43 @@ export function createArcanumRouter(
       log.error('getProof error', { error: String(err) })
       return res.status(500).json({ error: 'internal error' })
     }
+  })
+
+  // ── GET /config ───────────────────────────────────────────────────────────────
+  //
+  // Prover discovery: client fetches this to learn where to get the wasm and zkey.
+  //
+  // Returns:
+  //   wasmUrl  string  — URL to fetch arcanum.wasm (for snarkjs in-browser proving)
+  //   zkeyUrl  string  — URL to fetch arcanum_final.zkey (~5MB dev / ~300MB prod)
+  //   depth    number  — Merkle tree depth (32)
+  //   ready    boolean — false when wasm or zkey is not yet configured
+
+  router.get('/config', (_req, res) => {
+    const wasmUrl = config.serverUrl
+      ? `${config.serverUrl.replace(/\/$/, '')}/arcanum/circuit/wasm`
+      : '/arcanum/circuit/wasm'
+    const zkeyUrl = config.zkeyUrl ?? null
+    return res.json({
+      wasmUrl,
+      zkeyUrl,
+      depth: 32,
+      ready: existsSync(WASM_PATH) && zkeyUrl !== null,
+    })
+  })
+
+  // ── GET /circuit/wasm ─────────────────────────────────────────────────────────
+  //
+  // Serve the compiled circuit WASM for client-side proof generation.
+  // 2MB — safe to serve from the API. The proving key (.zkey) is large and lives on R2.
+
+  router.get('/circuit/wasm', (req, res) => {
+    if (!existsSync(WASM_PATH)) {
+      return res.status(404).json({ error: 'wasm not found — run arcanum-trusted-setup.sh' })
+    }
+    res.setHeader('Content-Type', 'application/wasm')
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    createReadStream(WASM_PATH).pipe(res)
   })
 
   return router
