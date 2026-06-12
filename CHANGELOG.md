@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.6](https://github.com/monygroupcorp/noema/compare/v4.11.5...v4.11.6) (2026-06-12)
+
+
+### Bug Fixes
+
+* **widget:** gallery on landing above spells, fix gallery ObjectId query ([f37cfac](https://github.com/monygroupcorp/noema/commit/f37cfac83d9cc8e65672a990fdcaa14a66f551c6))
+
 ## [4.11.5](https://github.com/monygroupcorp/noema/compare/v4.11.4...v4.11.5) (2026-06-12)
 
 
