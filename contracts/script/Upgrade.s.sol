@@ -32,6 +32,10 @@ contract Upgrade is Script {
         console.log("Upgrading CreditVault proxy:", PROXY);
         console.log("Deployer (must be proxy owner):", deployer);
 
+        // Pre-flight: verify ownership before spending gas on implementation deployment.
+        address currentOwner = CreditVault(payable(PROXY)).owner();
+        require(currentOwner == deployer, "deployer is not proxy owner");
+
         vm.startBroadcast(deployerKey);
 
         // 1. Deploy new implementation (constructor calls _disableInitializers).

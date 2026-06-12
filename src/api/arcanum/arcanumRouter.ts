@@ -63,8 +63,15 @@ export function createArcanumRouter(
     try {
       const auctor = await config.resolve(req)
       animaId = auctor.animaId
-    } catch {
-      return res.status(401).json({ error: 'authentication required' })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      // auth.invalid, credential errors, and "identified account required" are 401;
+      // anything else (DB down, resolver misconfigured) is a 500
+      if (/auth|credential|unauthorized|identified account required/i.test(msg)) {
+        return res.status(401).json({ error: 'authentication required' })
+      }
+      log.error('resolve error on /issue', { error: msg })
+      return res.status(500).json({ error: 'internal error' })
     }
 
     const { valor: valorStr, commitment, nullifier } = req.body

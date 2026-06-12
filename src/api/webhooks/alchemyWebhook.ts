@@ -261,13 +261,21 @@ async function handleAnonymousDepositLog(
   deps: AlchemyWebhookDeps,
 ): Promise<boolean> {
   // topics[1] = commitment (indexed bytes32) — the Poseidon field element
+  if (!log.topics[1]) return false  // malformed log — no indexed commitment
   const commitment = log.topics[1]  // already 0x-prefixed 32-byte hex
 
-  // Decode non-indexed params: (address token, uint256 amount)
-  const coder = AbiCoder.defaultAbiCoder()
-  const [, amount] = coder.decode(['address', 'uint256'], log.data) as unknown as [string, bigint]
-
-  const valor = BigInt(amount)
+  // Decode non-indexed params: (address token, uint256 amount).
+  // NOTE: valor is stored in raw on-chain units (wei for ETH, token-decimals for ERC20).
+  // The spend path compares this to reservation in impetus credits — they are not yet
+  // on the same scale. This is safe to deploy but anonymous notes cannot be spent until
+  // an ETH→credits conversion is wired into this handler (see deps.ethPriceUsd).
+  let valor: bigint
+  try {
+    const [, amount] = AbiCoder.defaultAbiCoder().decode(['address', 'uint256'], log.data) as unknown as [string, bigint]
+    valor = BigInt(amount)
+  } catch {
+    return false  // malformed log data — skip rather than 500ing the whole webhook
+  }
 
   // Idempotency: commitment is unique per note — skip if already in tree
   const existing = await deps.arcanumTree.findLeaf(commitment)

@@ -310,6 +310,33 @@ contract CreditVaultTest is Test {
         vm.stopPrank();
     }
 
+    function test_payAnonymous_duplicateCommitment_reverts() public {
+        bytes32 commitment = keccak256("nullifier:secret");
+        vault.payAnonymous{value: 1 ether}(commitment);
+        vm.expectRevert(CreditVault.CommitmentAlreadyUsed.selector);
+        vault.payAnonymous{value: 1 ether}(commitment);
+    }
+
+    function test_payCoinAnonymous_duplicateCommitment_reverts() public {
+        bytes32 commitment = keccak256("nullifier:secret");
+        vm.startPrank(alice);
+        token.approve(address(vault), 200e18);
+        vault.payCoinAnonymous(address(token), 100e18, commitment);
+        vm.expectRevert(CreditVault.CommitmentAlreadyUsed.selector);
+        vault.payCoinAnonymous(address(token), 100e18, commitment);
+        vm.stopPrank();
+    }
+
+    function test_payAnonymous_crossFunction_duplicateCommitment_reverts() public {
+        bytes32 commitment = keccak256("nullifier:secret");
+        vault.payAnonymous{value: 1 ether}(commitment);
+        vm.startPrank(alice);
+        token.approve(address(vault), 100e18);
+        vm.expectRevert(CreditVault.CommitmentAlreadyUsed.selector);
+        vault.payCoinAnonymous(address(token), 100e18, commitment);
+        vm.stopPrank();
+    }
+
     // =========================================================================
     // setDefaultBps
     // =========================================================================
