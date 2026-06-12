@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.5](https://github.com/monygroupcorp/noema/compare/v4.11.4...v4.11.5) (2026-06-12)
+
+
+### Bug Fixes
+
+* **widget:** read exposedInputs from exec (cloned) spell not template ([fd2e7c2](https://github.com/monygroupcorp/noema/commit/fd2e7c215675dddcc6ecff6e9251df06a4cdabbc))
+
 ## [4.11.4](https://github.com/monygroupcorp/noema/compare/v4.11.3...v4.11.4) (2026-06-12)
 
 
