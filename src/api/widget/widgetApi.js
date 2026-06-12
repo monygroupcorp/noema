@@ -696,21 +696,36 @@ function buildAppHtml(agentId, mode) {
 
   // ── Rendering ─────────────────────────────────────────────────────────────
   function render(ws) {
-    if (_mode === 'list')    return renderList(ws);
     if (_mode === 'gallery') return renderGallery(ws);
-    renderCanvas(ws);
+    if (_mode === 'canvas')  return renderCanvas(ws);
+    return renderList(ws);
+  }
+
+  function _buildGalleryStrip(ws) {
+    var outputs = ws.recentOutputs || [];
+    if (!outputs.length) return '';
+    return '<div class="gallery-grid" style="margin-bottom:12px">'
+      + outputs.map(function(o) {
+          return '<div class="gallery-item" data-url="' + esc(o.url) + '"><img src="' + esc(o.url) + '" loading="lazy"></div>';
+        }).join('')
+      + '</div>';
   }
 
   function renderList(ws) {
     var spells = ws.spells || [];
+    var galleryHtml = _buildGalleryStrip(ws);
     if (!spells.length) {
       var msg = _isOwner
         ? '<p class="loading">No spells in this workspace yet.<br><a href="' + BASE_URL + '" target="_blank" rel="noopener" style="color:#88a">Configure on Noema ↗</a></p>'
         : '<p class="loading">No spells configured yet.</p>';
-      setContent(msg);
+      setContent(galleryHtml + msg);
+      // Wire gallery clicks even on empty-spell view
+      $content.querySelectorAll('.gallery-item').forEach(function(el) {
+        el.addEventListener('click', function() { openAppLb(el.dataset.url); });
+      });
       return;
     }
-    var html = spells.map(function(s) {
+    var html = galleryHtml + spells.map(function(s) {
       var inputs = s.exposedInputs || [];
       var inputsHtml = inputs.map(function(inp) {
         if (inp.type === 'image') {
@@ -733,6 +748,9 @@ function buildAppHtml(agentId, mode) {
         + '</div>';
     }).join('');
     setContent(html);
+    $content.querySelectorAll('.gallery-item').forEach(function(el) {
+      el.addEventListener('click', function() { openAppLb(el.dataset.url); });
+    });
     $content.querySelectorAll('.spell-item').forEach(function(el) {
       var slug = el.dataset.slug;
       var castBtn = el.querySelector('.spell-cast');
@@ -1840,12 +1858,14 @@ function createWidgetApi(deps = {}) {
             }
 
             // Fetch recent cast outputs for the gallery
-            // initiatorAccountId is stored as a plain string, not ObjectId — match as string
+            // initiatorAccountId is stored as ObjectId — match both forms to be safe
             let recentOutputs = [];
+            const { ObjectId: OIDg } = require('mongodb');
+            const _oidMatch = OIDg.isValid(agentDoc._id) ? new OIDg(agentDoc._id) : agentDoc._id;
             if (deps.db?.casts) {
                 try {
                     recentOutputs = await deps.db.casts.aggregate([
-                        { $match: { initiatorAccountId: agentDoc._id.toString(), status: 'completed', 'output.url': { $exists: true } } },
+                        { $match: { initiatorAccountId: _oidMatch, status: 'completed', 'output.url': { $exists: true } } },
                         { $sort: { updatedAt: -1 } },
                         { $limit: 20 },
                         { $project: { _id: 0, castId: { $toString: '$_id' }, url: '$output.url' } },
