@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.13](https://github.com/monygroupcorp/noema/compare/v4.11.12...v4.11.13) (2026-06-12)
+
+
+### Bug Fixes
+
+* **payments:** update CreditVault function names to match new contract ([9b8caba](https://github.com/monygroupcorp/noema/commit/9b8caba06bf7727fecdbf08f47365d1f897482bd))
+
 ## [4.11.12](https://github.com/monygroupcorp/noema/compare/v4.11.11...v4.11.12) (2026-06-12)
 
 
