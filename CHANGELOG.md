@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.10](https://github.com/monygroupcorp/noema/compare/v4.11.9...v4.11.10) (2026-06-12)
+
+
+### Bug Fixes
+
+* **widget:** skip global 100kb json limit for /widget paths ([17f7984](https://github.com/monygroupcorp/noema/commit/17f798439f88aecea0cb4efa7aa770b7f33772a2))
+
 ## [4.11.9](https://github.com/monygroupcorp/noema/compare/v4.11.8...v4.11.9) (2026-06-12)
 
 
