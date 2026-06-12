@@ -37,6 +37,7 @@ import { toRun } from './runProjection.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
 import { Errors } from './errors.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
+import { computeRecipient } from '../../arcanum/prover.js'
 import type { Run } from './types.js'
 
 /** The ring slices CrystalApi composes. */
@@ -199,13 +200,16 @@ export class CrystalApi {
    * declares for this modus + aditus (side-effect-free; `run().impetus ≤ reserve()`).
    * Exact for fixed-cost flows, an upper bound for duration-based pod flows.
    */
-  async quote(auctor: AuctorKey, target: InvokeTarget, aditus: Record<string, unknown>): Promise<{ impetus: string }> {
+  async quote(auctor: AuctorKey, target: InvokeTarget, aditus: Record<string, unknown>): Promise<{ impetus: string; recipient: string }> {
     let modusId: string | undefined = target.modusId
     if (!modusId && target.verb) {
       modusId = (await this.deps.consuetudinum?.resolve(auctor, target.verb)) ?? CANON_VERBS[target.verb]
     }
     if (!modusId) throw Errors.notFoundFlow(target.verb ?? '?')
-    return { impetus: (await this._estimate(modusId, aditus)).toString() }
+    return {
+      impetus:   (await this._estimate(modusId, aditus)).toString(),
+      recipient: computeRecipient(modusId, aditus),
+    }
   }
 
   /** The cursor's read-only upper-bound reservation for a modus + aditus. */
