@@ -772,9 +772,16 @@ class SGLangExecutor(OpenAIServerExecutor):
         return cmd
 
     def _serve_env(self) -> dict:
-        # Disable SGLang's DeepGEMM FP8 path (a CUDA-13-built dep that crashes on the CUDA-12.4 base
-        # image — see _bootstrapRunner). BF16 MOSS doesn't need it. Belt to the post-install removal.
-        return {**os.environ, "SGLANG_ENABLE_JIT_DEEPGEMM": os.environ.get("SGLANG_ENABLE_JIT_DEEPGEMM", "0")}
+        # sglang[all] pulls a CUDA-13 torch whose bundled libs (libnvrtc.so.13, libcudart.so.13, …)
+        # ship under nvidia/cu13/lib but are NOT on the linker path → sgl_kernel/deep_gemm fail to
+        # dlopen them on the CUDA-12.4 base. Prepend that dir (the driver is CUDA-13 forward-compatible,
+        # so the cu13 userspace libs run fine). Verified-live-local 2026-06-12. SGLANG_ENABLE_JIT_DEEPGEMM
+        # left off (BF16 doesn't need FP8). `libnuma.so.1` (apt libnuma1) is installed by the bootstrap.
+        cu13 = os.environ.get("SGLANG_CU13_LIB", "/usr/local/lib/python3.11/dist-packages/nvidia/cu13/lib")
+        existing = os.environ.get("LD_LIBRARY_PATH", "")
+        env = {**os.environ, "SGLANG_ENABLE_JIT_DEEPGEMM": os.environ.get("SGLANG_ENABLE_JIT_DEEPGEMM", "0")}
+        env["LD_LIBRARY_PATH"] = f"{cu13}:{existing}" if existing else cu13
+        return env
 
 # ── Harness registry ──────────────────────────────────────────────────────────
 
