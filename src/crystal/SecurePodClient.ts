@@ -644,6 +644,11 @@ export class SecurePodClient implements RunPodClient, Procurator {
       return this._bootstrapRunner(ssh, podId, 'sglang', '"sglang[all]" huggingface_hub boto3',
         ['apt-get update -qq && apt-get install -y -qq libnuma1'])
     }
+    if (runtime === 'python-modelcard') {
+      // The modelcard repo brings its own deps (the runner `pip install -e .`s it at load); the pod
+      // just needs the download + R2 tooling. git is ensured inside _bootstrapRunner.
+      return this._bootstrapRunner(ssh, podId, 'python-modelcard', 'huggingface_hub boto3')
+    }
     return this._bootstrapComfyUI(ssh, podId)
   }
 

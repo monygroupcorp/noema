@@ -274,6 +274,55 @@ export const INTELLA_SHOTVL_7B: Intella = {
   natum: new Date('2026-06-11'),
 }
 
+// ── Generation track — HeartMuLa (text→music), python-modelcard runtime (ADR-0007) ──────────
+// HeartMuLa runs from a cloned `heartlib` repo; its 3 weight repos download into the repo's ./ckpt
+// tree (dest is repo-relative). Multi-file HF repos (like the understanding LMs) — the executor
+// pulls each via `hf download <repo> --local-dir <dest>`.
+export const INTELLA_HEARTMULA_GEN: Intella = {
+  id: 'intella.heartmula-gen',
+  nomen: 'HeartMuLa Gen (config + tokenizer)',
+  genus: 'model',
+  architectura: 'heartmula',
+  parametri: 0,
+  sources: [{ provenance: 'huggingface', uri: 'https://huggingface.co/HeartMuLa/HeartMuLaGen',
+              meta: { repo: 'HeartMuLa/HeartMuLaGen', branch: 'main' } }],
+  dest: 'ckpt',
+  sizeGb: 0.1,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-06-12'),
+}
+
+export const INTELLA_HEARTMULA_3B: Intella = {
+  id: 'intella.heartmula-3b',
+  nomen: 'HeartMuLa 3B',
+  genus: 'model',
+  architectura: 'heartmula',
+  parametri: 4_000_000_000,
+  sources: [{ provenance: 'huggingface', uri: 'https://huggingface.co/HeartMuLa/HeartMuLa-oss-3B-happy-new-year',
+              meta: { repo: 'HeartMuLa/HeartMuLa-oss-3B-happy-new-year', branch: 'main' } }],
+  dest: 'ckpt/HeartMuLa-oss-3B',
+  sizeGb: 8,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-06-12'),
+}
+
+export const INTELLA_HEARTCODEC: Intella = {
+  id: 'intella.heartcodec',
+  nomen: 'HeartCodec (audio decoder)',
+  genus: 'embedding',
+  architectura: 'codec',
+  parametri: 0,
+  sources: [{ provenance: 'huggingface', uri: 'https://huggingface.co/HeartMuLa/HeartCodec-oss-20260123',
+              meta: { repo: 'HeartMuLa/HeartCodec-oss-20260123', branch: 'main' } }],
+  dest: 'ckpt/HeartCodec-oss',
+  sizeGb: 2,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-06-12'),
+}
+
 export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_FLUX_SCHNELL,
   INTELLA_FLUX_VAE,
@@ -285,4 +334,7 @@ export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_QWEN3_VL_8B,
   INTELLA_MOSS_MUSIC_8B,
   INTELLA_SHOTVL_7B,
+  INTELLA_HEARTMULA_GEN,
+  INTELLA_HEARTMULA_3B,
+  INTELLA_HEARTCODEC,
 ]

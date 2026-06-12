@@ -203,10 +203,73 @@ export const ESSENTIA_SHOTVL: Essentia = {
   mutatum: new Date('2026-06-11'),
 }
 
+// =============================================================================
+// Generation track — HeartMuLa (text→music), runtime 'python-modelcard' (ADR-0007).
+//
+// Not a ComfyUI graph and not an OpenAI server: a cloned `heartlib` repo run as a one-shot CLI.
+// The `script` form encodes the real CLI — lyrics+tags are written to FILES (fileInputs), the
+// numeric knobs become flags (argMap), and the .mp3 is collected (output). categoria 'audio' (no
+// new type). Seeded catalog-first; runs once the PythonModelcardExecutor lands (pod-side).
+// =============================================================================
+export const ESSENTIA_HEARTMULA: Essentia = {
+  id: 'heartmula-3b',
+  nomen: 'HeartMuLa — text to music',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'audio',
+
+  fundamentumId: 'heartmula-pytorch',
+  fundamentumVersio: '1.0.0',
+  intellae: [
+    { id: 'intella.heartmula-gen', role: 'config' },
+    { id: 'intella.heartmula-3b',  role: 'generator' },
+    { id: 'intella.heartcodec',    role: 'codec' },
+  ],
+
+  aditus: {
+    lyrics:              { type: 'text',  required: true,  description: 'Lyrics, with [Intro]/[Verse]/[Chorus] section markers' },
+    tags:                { type: 'text',  required: true,  description: 'Comma-separated style tags (e.g. piano,happy,synthwave)' },
+    max_audio_length_ms: { type: 'int',   required: false, default: 240000, description: 'Max track length in ms' },
+    temperature:         { type: 'float', required: false, default: 1.0,    description: 'Sampling temperature' },
+    topk:                { type: 'int',   required: false, default: 50,     description: 'Top-k sampling' },
+    cfg_scale:           { type: 'float', required: false, default: 1.5,    description: 'Classifier-free guidance scale' },
+  },
+  exitus: {
+    audio: { type: 'audio', description: 'Generated music track (.mp3)' },
+  },
+
+  // Form half: the heartlib CLI. lyrics/tags → files; knobs → flags; collect the mp3.
+  script: {
+    repo: 'https://github.com/HeartMuLa/heartlib',
+    entry: 'python examples/run_music_generation.py',
+    // --lazy_load: heartlib's single-GPU memory saver (the 3B + codec just exceed 24GB at the codec
+    // decode step otherwise — verified-live-local 2026-06-12).
+    fixedArgs: ['--model_path=./ckpt', '--version=3B', '--save_path=assets/output.mp3', '--lazy_load', 'true'],
+    argMap: {
+      max_audio_length_ms: '--max_audio_length_ms',
+      temperature: '--temperature',
+      topk: '--topk',
+      cfg_scale: '--cfg_scale',
+    },
+    fileInputs: { lyrics: 'assets/lyrics.txt', tags: 'assets/tags.txt' },
+    output: 'assets/output.mp3',
+    outputKind: 'audio',
+  },
+
+  defaultCookFlags: { vramGb: 24 },
+
+  natum: new Date('2026-06-12'),
+  mutatum: new Date('2026-06-12'),
+}
+
 export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_RUNMAKE_FLUX_SCHNELL,
   ESSENTIA_RUNMAKE_SD15,
   ESSENTIA_QWEN3_VL,
   ESSENTIA_MOSS_MUSIC,
   ESSENTIA_SHOTVL,
+  ESSENTIA_HEARTMULA,
 ]

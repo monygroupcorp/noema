@@ -2,10 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Compiler, isInferenceSpec, type InferenceCompiledSpec } from '../../../src/crystal/Compiler.js'
+import { Compiler, isInferenceSpec, isScriptSpec, type InferenceCompiledSpec, type ScriptCompiledSpec } from '../../../src/crystal/Compiler.js'
 import { WorkflowTemplateRegistry } from '../../../src/crystal/WorkflowTemplateRegistry.js'
 import {
-  ESSENTIA_QWEN3_VL, ESSENTIA_MOSS_MUSIC, ESSENTIA_SHOTVL,
+  ESSENTIA_QWEN3_VL, ESSENTIA_MOSS_MUSIC, ESSENTIA_SHOTVL, ESSENTIA_HEARTMULA,
 } from '../../../src/crystal/seeds/essentiae.js'
 import { CANONICAL_FUNDAMENTA, FUNDAMENTUM_QWEN_VL_VLLM } from '../../../src/crystal/seeds/fundamenta.js'
 import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js'
@@ -143,6 +143,34 @@ test('weave: a prompt suffixum is woven into the inference prompt', async () => 
   }
   const { spec } = await makeCompiler().compile(essentia, { prompt: 'explain quantum tunneling' })
   assert.equal(asInference(spec).inference.prompt, 'explain quantum tunneling, be concise')
+})
+
+// ── python-modelcard: HeartMuLa compiles to a script spec ─────────────────────
+
+test('HeartMuLa compiles to a ScriptCompiledSpec (CLI args + file inputs)', async () => {
+  const { spec } = await makeCompiler().compile(ESSENTIA_HEARTMULA, {
+    lyrics: '[Verse]\na song about foxes', tags: 'piano,happy', temperature: 0.8,
+  })
+  assert.ok(isScriptSpec(spec as never), 'expected a ScriptCompiledSpec')
+  const s = (spec as ScriptCompiledSpec).script
+  assert.equal(s.repo, 'https://github.com/HeartMuLa/heartlib')
+  assert.equal(s.outputKind, 'audio')
+  // fixed args present
+  assert.ok(s.args.includes('--model_path=./ckpt'))
+  // user knob resolved as a flag+value
+  const ti = s.args.indexOf('--temperature')
+  assert.ok(ti >= 0 && s.args[ti + 1] === '0.8')
+  // omitted knob falls back to the aditus default (max_audio_length_ms default 240000)
+  const mi = s.args.indexOf('--max_audio_length_ms')
+  assert.ok(mi >= 0 && s.args[mi + 1] === '240000')
+  // lyrics/tags written to files (not args)
+  assert.equal(s.fileInputs?.['assets/lyrics.txt'], '[Verse]\na song about foxes')
+  assert.equal(s.fileInputs?.['assets/tags.txt'], 'piano,happy')
+  assert.equal(s.fileInputs?.['assets/lyrics.txt'] !== undefined, true)
+  assert.ok(!s.args.includes('--lyrics'), 'lyrics is a file input, not a flag')
+  // the 3 ckpt weights are in the manifest with their HF repos
+  assert.equal(s.repo && (spec as ScriptCompiledSpec).models.length, 3)
+  assert.ok((spec as ScriptCompiledSpec).models.every(m => (m as { repo?: string }).repo))
 })
 
 // ── enforcement: unknown runtime is a hard error ──────────────────────────────

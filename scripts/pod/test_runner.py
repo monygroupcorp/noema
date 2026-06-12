@@ -246,10 +246,11 @@ class RegistryTests(unittest.TestCase):
         registry, unique = runner._build_harnesses()
         self.assertIs(registry["vLLM"], registry["llm"])              # vLLM/llm = one harness
         self.assertIs(registry["sglang"], registry["transformers"])  # sglang/transformers = one harness
-        self.assertEqual(len(unique), 3)                              # comfy, vllm, sglang
+        self.assertEqual(len(unique), 4)                              # comfy, vllm, sglang, modelcard
         self.assertIsInstance(registry["ComfyUI"], runner.ComfyUIExecutor)
         self.assertIsInstance(registry["vLLM"], runner.VllmExecutor)
         self.assertIsInstance(registry["sglang"], runner.SGLangExecutor)
+        self.assertIsInstance(registry["python-modelcard"], runner.PythonModelcardExecutor)
         # both serving executors share the OpenAI-compatible base
         self.assertIsInstance(registry["vLLM"], runner.OpenAIServerExecutor)
         self.assertIsInstance(registry["sglang"], runner.OpenAIServerExecutor)

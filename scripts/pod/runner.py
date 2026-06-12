@@ -783,15 +783,109 @@ class SGLangExecutor(OpenAIServerExecutor):
         env["LD_LIBRARY_PATH"] = f"{cu13}:{existing}" if existing else cu13
         return env
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PythonModelcardExecutor — a cloned repo run as a one-shot CLI (HeartMuLa) — ADR-0007
+# ─────────────────────────────────────────────────────────────────────────────
+
+class PythonModelcardExecutor(Executor):
+    """Runs a modelcard repo's own inference as a one-shot CLI (no server). `load` clones the repo,
+    `pip install -e .`s it, and downloads the weights INTO the repo tree (dest is repo-relative).
+    `run` writes the spec's file inputs (e.g. lyrics.txt/tags.txt), runs `entry + args` from the
+    repo root, and collects the output artifact. Bespoke per model via the compiled `spec.script`."""
+
+    runtime = "python-modelcard"
+    default_ewma_ms = 240_000.0   # ~4 min (music gen)
+    server_label = "modelcard"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.vram_gb = float(os.environ.get("MODELCARD_VRAM_GB", "24"))
+        self.root    = os.environ.get("MODEL_ROOT", "/root/models")
+        self._workdir: "str | None" = None   # the cloned repo dir
+        self._repo = ""
+
+    # weights download relative to the cloned repo (dest like 'ckpt/...'); model_root is the repo dir
+    def model_root(self) -> str:
+        return self._workdir or self.root
+
+    def is_present(self, model: dict) -> bool:
+        p = self.model_path(model["dest"])
+        return os.path.isdir(p) and any(os.scandir(p))
+
+    def fetch_one(self, model: dict, job_id: str) -> None:
+        dest_path = self.model_path(model["dest"])
+        os.makedirs(dest_path, exist_ok=True)
+        repo = model.get("repo")
+        if not repo:
+            raise RuntimeError(f"model '{model['dest']}' has no 'repo' (HF repo id)")
+        subprocess.run(["hf", "download", repo, "--local-dir", dest_path],
+                       check=True, timeout=int(model.get("downloadTimeout", 3600)))
+
+    def _tail_log(self, n: int = 40) -> str:
+        try:
+            with open("/tmp/modelcard.log", "r", errors="replace") as f:
+                return "".join(f.readlines()[-n:]).strip()
+        except Exception:
+            return "(modelcard.log unavailable)"
+
+    def fail_detail(self, err_str: str) -> str:
+        return err_str if "modelcard.log tail:" in err_str else f"{err_str}\nmodelcard.log tail:\n{self._tail_log()}"
+
+    def load(self, job_spec: dict, job_id: str) -> None:
+        script = job_spec.get("script") or {}
+        repo = script.get("repo")
+        if not repo:
+            raise RuntimeError("python-modelcard job has no script.repo")
+        name = repo.rstrip("/").split("/")[-1].removesuffix(".git")
+        self._workdir = os.path.join(self.root, name)
+        if self._repo != repo or not os.path.isdir(os.path.join(self._workdir, ".git")):
+            _append_event(job_id, {"type": "cloning-repo", "repo": repo})
+            subprocess.run(["rm", "-rf", self._workdir], check=False, timeout=60)
+            subprocess.run(["git", "clone", "--depth", "1", repo, self._workdir], check=True, timeout=300)
+            subprocess.run(["pip", "install", "-e", ".", "-q"], cwd=self._workdir, check=True, timeout=900)
+            self._repo = repo
+        # weights download INTO the repo (model_root == workdir now)
+        _ensure_models(self, job_spec.get("models", []), job_id)
+
+    def run(self, job_spec: dict, job_id: str) -> list[dict]:
+        script = job_spec["script"]
+        wd = self._workdir
+        # write file inputs (lyrics.txt, tags.txt, …)
+        for rel, content in (script.get("fileInputs") or {}).items():
+            full = os.path.join(wd, rel)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w") as f:
+                f.write(content)
+        cmd = script["entry"].split() + list(script.get("args", []))
+        log.info(f"modelcard run: {' '.join(cmd)} (cwd={wd})")
+        _append_event(job_id, {"type": "generating"})
+        # expandable_segments cuts CUDA fragmentation — the difference between fitting and OOMing at
+        # a late allocation spike (e.g. HeartMuLa's codec decode). Env-overridable.
+        env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")}
+        with open("/tmp/modelcard.log", "a") as logf:
+            r = subprocess.run(cmd, cwd=wd, stdout=logf, stderr=subprocess.STDOUT, timeout=JOB_TIMEOUT, env=env)
+        if r.returncode != 0:
+            raise RuntimeError(f"modelcard CLI exited {r.returncode}\nmodelcard.log tail:\n{self._tail_log()}")
+        out_path = os.path.join(wd, script["output"])
+        if not os.path.isfile(out_path):
+            raise RuntimeError(f"modelcard produced no output at {script['output']}\nmodelcard.log tail:\n{self._tail_log()}")
+        return [{"kind": script.get("outputKind", "audio"), "path": out_path}]
+
+    def unload(self) -> None:
+        # one-shot CLI — no persistent server/VRAM to free (weights+repo stay on disk for reuse).
+        pass
+
 # ── Harness registry ──────────────────────────────────────────────────────────
 
 def _build_harnesses() -> "tuple[dict, list]":
     comfy = ComfyUIExecutor()
     vllm = VllmExecutor()
     sglang = SGLangExecutor()
+    modelcard = PythonModelcardExecutor()
     registry = {"ComfyUI": comfy, "vLLM": vllm, "llm": vllm,   # vLLM/llm share one harness
-                "sglang": sglang, "transformers": sglang}       # custom-arch models (MOSS)
-    unique = [comfy, vllm, sglang]
+                "sglang": sglang, "transformers": sglang,       # custom-arch models (MOSS)
+                "python-modelcard": modelcard}                   # one-shot CLI models (HeartMuLa)
+    unique = [comfy, vllm, sglang, modelcard]
     return registry, unique
 
 
@@ -1068,7 +1162,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         # ComfyUI jobs carry a graph (`workflow`); every serving runtime (vLLM, SGLang) carries an
         # `inference` body. Keying on "is it ComfyUI" (not "is it vLLM") is what makes sglang work.
-        form_field = "workflow" if ex.runtime == "ComfyUI" else "inference"
+        # Each runtime carries its own form: ComfyUI a graph, python-modelcard a CLI script, the
+        # serving runtimes (vLLM/SGLang) an inference body.
+        form_field = {"ComfyUI": "workflow", "python-modelcard": "script"}.get(ex.runtime, "inference")
         if form_field not in body:
             self._send_json(400, {"error": f"missing field: {form_field}"})
             return
