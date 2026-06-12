@@ -1818,14 +1818,18 @@ function createWidgetApi(deps = {}) {
                 if (!templateSpellSlug || !win.isSpell || !deps.db?.spells) continue;
 
                 const execSlug = clonedSlugByTemplateId[win.id] || templateSpellSlug;
+                const isCloned = execSlug !== templateSpellSlug;
                 try {
                     const spell = await deps.db.spells.findBySlug(templateSpellSlug);
+                    // Read exposedInputs from the exec (cloned) spell — the factory may have
+                    // baked some inputs as static and removed them from exposedInputs there.
+                    const execSpell = isCloned ? await deps.db.spells.findBySlug(execSlug).catch(() => null) : null;
                     if (spell) {
                         spells.push({
                             slug:          execSlug,
                             name:          spell.name,
                             description:   spell.description || null,
-                            exposedInputs: spell.exposedInputs || [],
+                            exposedInputs: (execSpell || spell).exposedInputs || [],
                             windowId:      win.id,
                             x402Url:       `${req.protocol}://${req.get('host')}/widget/${encodeURIComponent(req.params.agentId)}/spells/${encodeURIComponent(execSlug)}/x402`,
                         });
