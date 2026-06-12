@@ -319,7 +319,7 @@ async function startApp() {
           db: services.db || {},
           storageService: services.storageService || null,
         };
-        platforms.web.app.use('/widget', require('express').json(), createWidgetApi(widgetDeps));
+        platforms.web.app.use('/widget', require('express').json({ limit: '12mb' }), createWidgetApi(widgetDeps));
         logger.debug('Widget API mounted at /widget');
       } catch (widgetErr) {
         logger.warn('Widget API failed to mount:', widgetErr.message);
