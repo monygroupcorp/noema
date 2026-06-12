@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.1](https://github.com/monygroupcorp/noema/compare/v4.11.0...v4.11.1) (2026-06-12)
+
+
+### Bug Fixes
+
+* **billing:** charge async adapter tools on completion ([79374e8](https://github.com/monygroupcorp/noema/commit/79374e8d4870947dcdcb5ece556b6e5177c6d540))
+
 ## [4.11.0](https://github.com/monygroupcorp/noema/compare/v4.10.8...v4.11.0) (2026-06-11)
 
 
