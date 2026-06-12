@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
+import {VmSafe} from "forge-std/Vm.sol";
 import {CreditVault} from "src/CreditVault.sol";
 import {TestToken} from "test/mocks/TestToken.sol";
 import {MockERC721} from "test/mocks/MockERC721.sol";
@@ -125,51 +126,47 @@ contract CreditVaultTest is Test {
     }
 
     // =========================================================================
-    // pay (ERC20, no referral)
+    // payCoin (ERC20, no referral)
     // =========================================================================
 
-    function test_pay_noReferral_accumulatesProtocol() public {
+    function test_payCoin_noReferral_accumulatesProtocol() public {
         vm.startPrank(alice);
         token.approve(address(vault), 100e18);
-        vault.pay(address(token), 100e18, bytes32(0));
+        vault.payCoin(address(token), 100e18, bytes32(0));
         vm.stopPrank();
 
         assertEq(token.balanceOf(address(vault)), 100e18);
     }
 
-    function test_pay_noReferral_emitsPayment() public {
+    function test_payCoin_noReferral_emitsPayment() public {
         vm.startPrank(alice);
         token.approve(address(vault), 100e18);
 
         vm.expectEmit(true, true, false, true);
         emit CreditVault.Payment(alice, bytes32(0), address(token), 100e18, 100e18, 0);
-        vault.pay(address(token), 100e18, bytes32(0));
+        vault.payCoin(address(token), 100e18, bytes32(0));
         vm.stopPrank();
     }
 
     // =========================================================================
-    // pay (ERC20, with referral)
+    // payCoin (ERC20, with referral)
     // =========================================================================
 
-    function test_pay_withReferral_splitsPushesToReferrer() public {
-        // bob registers a referral name
+    function test_payCoin_withReferral_splitsPushesToReferrer() public {
         vm.prank(bob);
         vault.register("bob");
         bytes32 key = keccak256("bob");
 
-        // alice pays with bob's referral key
         vm.startPrank(alice);
         token.approve(address(vault), 100e18);
-        vault.pay(address(token), 100e18, key);
+        vault.payCoin(address(token), 100e18, key);
         vm.stopPrank();
 
-        // bob gets 5% = 5e18 pushed immediately
         assertEq(token.balanceOf(bob), 1000e18 + 5e18);
-        // vault holds 95e18 for protocol
         assertEq(token.balanceOf(address(vault)), 95e18);
     }
 
-    function test_pay_withReferral_emitsCorrectAmounts() public {
+    function test_payCoin_withReferral_emitsCorrectAmounts() public {
         vm.prank(bob);
         vault.register("bob");
         bytes32 key = keccak256("bob");
@@ -178,59 +175,56 @@ contract CreditVaultTest is Test {
         token.approve(address(vault), 100e18);
         vm.expectEmit(true, true, false, true);
         emit CreditVault.Payment(alice, key, address(token), 100e18, 95e18, 5e18);
-        vault.pay(address(token), 100e18, key);
+        vault.payCoin(address(token), 100e18, key);
         vm.stopPrank();
     }
 
-    function test_pay_withCustomBps_usesCustomRate() public {
+    function test_payCoin_withCustomBps_usesCustomRate() public {
         vm.prank(bob);
         vault.register("bob");
         bytes32 key = keccak256("bob");
 
-        // admin sets bob's rate to 10%
         vm.prank(owner);
         vault.setReferralBps(key, 1000);
 
         vm.startPrank(alice);
         token.approve(address(vault), 100e18);
-        vault.pay(address(token), 100e18, key);
+        vault.payCoin(address(token), 100e18, key);
         vm.stopPrank();
 
         assertEq(token.balanceOf(bob), 1000e18 + 10e18);
         assertEq(token.balanceOf(address(vault)), 90e18);
     }
 
-    function test_pay_zeroAmount_reverts() public {
+    function test_payCoin_zeroAmount_reverts() public {
         vm.startPrank(alice);
         token.approve(address(vault), 0);
         vm.expectRevert(CreditVault.ZeroAmount.selector);
-        vault.pay(address(token), 0, bytes32(0));
+        vault.payCoin(address(token), 0, bytes32(0));
         vm.stopPrank();
     }
 
     // =========================================================================
-    // payETH
+    // pay (ETH)
     // =========================================================================
 
-    function test_payETH_noReferral_accumulatesProtocol() public {
+    function test_pay_noReferral_accumulatesProtocol() public {
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        vault.payETH{value: 1 ether}(bytes32(0));
+        vault.pay{value: 1 ether}(bytes32(0));
         assertEq(address(vault).balance, 1 ether);
     }
 
-    function test_payETH_withReferral_pushesToReferrer() public {
+    function test_pay_withReferral_pushesToReferrer() public {
         vm.prank(bob);
         vault.register("bob");
         bytes32 key = keccak256("bob");
 
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        vault.payETH{value: 1 ether}(key);
+        vault.pay{value: 1 ether}(key);
 
-        // bob gets 5% = 0.05 ether
         assertEq(bob.balance, 0.05 ether);
-        // vault holds 0.95 ether
         assertEq(address(vault).balance, 0.95 ether);
     }
 
@@ -240,6 +234,80 @@ contract CreditVaultTest is Test {
         (bool ok,) = address(vault).call{value: 1 ether}("");
         assertTrue(ok);
         assertEq(address(vault).balance, 1 ether);
+    }
+
+    // =========================================================================
+    // payAnonymous (ETH)
+    // =========================================================================
+
+    function test_payAnonymous_emitsAnonymousDeposit() public {
+        bytes32 commitment = keccak256("nullifier:secret");
+        vm.deal(alice, 1 ether);
+        vm.prank(alice);
+        vm.expectEmit(true, false, false, true);
+        emit CreditVault.AnonymousDeposit(commitment, address(0), 1 ether);
+        vault.payAnonymous{value: 1 ether}(commitment);
+    }
+
+    function test_payAnonymous_accumulatesBalance() public {
+        bytes32 commitment = keccak256("nullifier:secret");
+        vm.deal(alice, 1 ether);
+        vm.prank(alice);
+        vault.payAnonymous{value: 1 ether}(commitment);
+        assertEq(address(vault).balance, 1 ether);
+    }
+
+    function test_payAnonymous_zeroValue_reverts() public {
+        bytes32 commitment = keccak256("nullifier:secret");
+        vm.prank(alice);
+        vm.expectRevert(CreditVault.ZeroAmount.selector);
+        vault.payAnonymous{value: 0}(commitment);
+    }
+
+    function test_payAnonymous_noPayer_inEvent() public {
+        // Verify no payer field is emitted — event has only commitment, token, amount.
+        // The AnonymousDeposit event has no address field for the sender by design.
+        bytes32 commitment = keccak256("nullifier:secret");
+        vm.deal(bob, 1 ether);
+        vm.prank(bob);
+        vm.recordLogs();
+        vault.payAnonymous{value: 1 ether}(commitment);
+        VmSafe.Log[] memory logs = vm.getRecordedLogs();
+        // AnonymousDeposit(bytes32 indexed commitment, address token, uint256 amount)
+        // topics[0] = event sig, topics[1] = commitment — no sender topic
+        assertEq(logs[0].topics.length, 2);
+    }
+
+    // =========================================================================
+    // payCoinAnonymous (ERC20)
+    // =========================================================================
+
+    function test_payCoinAnonymous_emitsAnonymousDeposit() public {
+        bytes32 commitment = keccak256("nullifier:secret");
+        vm.startPrank(alice);
+        token.approve(address(vault), 100e18);
+        vm.expectEmit(true, false, false, true);
+        emit CreditVault.AnonymousDeposit(commitment, address(token), 100e18);
+        vault.payCoinAnonymous(address(token), 100e18, commitment);
+        vm.stopPrank();
+    }
+
+    function test_payCoinAnonymous_accumulatesBalance() public {
+        bytes32 commitment = keccak256("nullifier:secret");
+        vm.startPrank(alice);
+        token.approve(address(vault), 100e18);
+        vault.payCoinAnonymous(address(token), 100e18, commitment);
+        vm.stopPrank();
+        assertEq(token.balanceOf(address(vault)), 100e18);
+    }
+
+    function test_payCoinAnonymous_zeroAmount_reverts() public {
+        bytes32 commitment = keccak256("nullifier:secret");
+        vm.startPrank(alice);
+        token.approve(address(vault), 0);
+        vm.expectRevert(CreditVault.ZeroAmount.selector);
+        vault.payCoinAnonymous(address(token), 0, commitment);
+        vm.stopPrank();
     }
 
     // =========================================================================
@@ -285,7 +353,7 @@ contract CreditVaultTest is Test {
     function test_withdrawProtocol_ETH() public {
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        vault.payETH{value: 1 ether}(bytes32(0));
+        vault.pay{value: 1 ether}(bytes32(0));
 
         address treasury = address(0xCAFE);
         vm.prank(owner);
@@ -297,7 +365,7 @@ contract CreditVaultTest is Test {
     function test_withdrawProtocol_ERC20() public {
         vm.startPrank(alice);
         token.approve(address(vault), 100e18);
-        vault.pay(address(token), 100e18, bytes32(0));
+        vault.payCoin(address(token), 100e18, bytes32(0));
         vm.stopPrank();
 
         address treasury = address(0xCAFE);
@@ -359,7 +427,6 @@ contract CreditVaultTest is Test {
     function test_onERC1155Received_acceptsToken() public {
         vm.prank(alice);
         erc1155.safeTransferFrom(alice, address(vault), 1, 5, "");
-        // vault holds 5 of token id 1
     }
 
     function test_onERC1155Received_emitsEvent() public {
@@ -375,7 +442,6 @@ contract CreditVaultTest is Test {
 
         vm.prank(owner);
         vault.withdrawERC1155(address(erc1155), 1, 5, bob);
-        // bob now has 5 of token id 1 — verify via balanceOf
         assertEq(erc1155.balanceOf(bob, 1), 5);
     }
 
@@ -412,8 +478,7 @@ contract CreditVaultTest is Test {
     // Reentrancy
     // =========================================================================
 
-    function test_payETH_revertingReferrer_skipscut() public {
-        // Deploy a contract with no receive() — it will revert on ETH push
+    function test_pay_revertingReferrer_skipsCut() public {
         address nonPayable = address(new NonPayableContract());
 
         vm.prank(nonPayable);
@@ -422,17 +487,13 @@ contract CreditVaultTest is Test {
 
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        // Payment should succeed — referral cut skipped, protocol keeps full amount
-        vault.payETH{value: 1 ether}(key);
+        vault.pay{value: 1 ether}(key);
 
         assertEq(address(vault).balance, 1 ether);
         assertEq(nonPayable.balance, 0);
     }
 
-    function test_payETH_reentrancy_cutSkipped() public {
-        // Reentrant referral recipient: its receive() tries to re-enter payETH.
-        // The reentrancy guard fires inside the push, the push fails silently,
-        // the cut is skipped, and the payment succeeds — attacker gets nothing.
+    function test_pay_reentrancy_cutSkipped() public {
         bytes32 key = keccak256("attacker");
         address attacker = address(new ReentrancyAttackerV2(address(vault), key));
 
@@ -443,9 +504,8 @@ contract CreditVaultTest is Test {
 
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        vault.payETH{value: 1 ether}(key);
+        vault.pay{value: 1 ether}(key);
 
-        // Payment succeeds, attacker gets no cut, vault holds full amount
         assertEq(address(vault).balance, 1 ether);
         assertEq(attacker.balance, 0);
     }
@@ -455,24 +515,21 @@ contract CreditVaultTest is Test {
     // =========================================================================
 
     function test_multicall_onlyOwner() public {
-        // Fund vault with ETH and ERC20
         vm.deal(alice, 2 ether);
         vm.prank(alice);
-        vault.payETH{value: 2 ether}(bytes32(0));
+        vault.pay{value: 2 ether}(bytes32(0));
 
         vm.startPrank(alice);
         token.approve(address(vault), 100e18);
-        vault.pay(address(token), 100e18, bytes32(0));
+        vault.payCoin(address(token), 100e18, bytes32(0));
         vm.stopPrank();
 
-        // Non-owner cannot multicall
         bytes[] memory calls = new bytes[](1);
         calls[0] = abi.encodeCall(vault.withdrawProtocol, (address(token), alice, 100e18));
         vm.prank(alice);
         vm.expectRevert();
         vault.multicall(calls);
 
-        // Owner can batch withdrawals
         calls = new bytes[](2);
         calls[0] = abi.encodeCall(vault.withdrawProtocol, (address(0), owner, 2 ether));
         calls[1] = abi.encodeCall(vault.withdrawProtocol, (address(token), owner, 100e18));

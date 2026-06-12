@@ -60,6 +60,13 @@ contract CreditVault is OwnableRoles, UUPSUpgradeable, Initializable, Reentrancy
         uint256 referralAmount
     );
 
+    /// @dev Anonymous deposit — no payer recorded. commitment is a Poseidon field element.
+    event AnonymousDeposit(
+        bytes32 indexed commitment,
+        address         token,
+        uint256         amount
+    );
+
     event NFTReceived(address indexed from, address indexed token, uint256 tokenId);
     event ERC1155TokenReceived(address indexed from, address indexed token, uint256 id, uint256 amount);
 
@@ -101,15 +108,34 @@ contract CreditVault is OwnableRoles, UUPSUpgradeable, Initializable, Reentrancy
         _processPayment(msg.sender, ETH, msg.value, bytes32(0));
     }
 
-    function payETH(bytes32 referralKey) external payable nonReentrant {
+    /// @notice Identified ETH deposit. referralKey = bytes32(0) for no referral.
+    function pay(bytes32 referralKey) external payable nonReentrant {
         _processPayment(msg.sender, ETH, msg.value, referralKey);
     }
 
-    function pay(address token, uint256 amount, bytes32 referralKey)
+    /// @notice Identified ERC20 deposit. referralKey = bytes32(0) for no referral.
+    function payCoin(address token, uint256 amount, bytes32 referralKey)
         external nonReentrant
     {
         SafeTransferLib.safeTransferFrom(token, msg.sender, address(this), amount);
         _processPayment(msg.sender, token, amount, referralKey);
+    }
+
+    /// @notice Anonymous ETH deposit. commitment is poseidon(nullifier, secret).
+    ///         No payer is recorded — the platform sees only commitment + amount.
+    function payAnonymous(bytes32 commitment) external payable nonReentrant {
+        if (msg.value == 0) revert ZeroAmount();
+        emit AnonymousDeposit(commitment, ETH, msg.value);
+    }
+
+    /// @notice Anonymous ERC20 deposit. commitment is poseidon(nullifier, secret).
+    ///         No payer is recorded — the platform sees only commitment + amount.
+    function payCoinAnonymous(address token, uint256 amount, bytes32 commitment)
+        external nonReentrant
+    {
+        if (amount == 0) revert ZeroAmount();
+        SafeTransferLib.safeTransferFrom(token, msg.sender, address(this), amount);
+        emit AnonymousDeposit(commitment, token, amount);
     }
 
     // -------------------------------------------------------------------------
