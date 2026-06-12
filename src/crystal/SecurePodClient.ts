@@ -636,12 +636,13 @@ export class SecurePodClient implements RunPodClient, Procurator {
       return this._bootstrapRunner(ssh, podId, 'vLLM', 'vllm huggingface_hub boto3')
     }
     if (runtime === 'sglang' || runtime === 'transformers') {
-      // SGLang serves custom-arch models (MOSS) vLLM can't. sglang[all] pulls its serving deps —
-      // including a CUDA-13-built `deep_gemm` whose .so needs libnvrtc.so.13 (the runpod/pytorch:2.4
-      // base is CUDA 12.4 → import crash at sglang startup). MOSS is BF16 and doesn't need DeepGEMM,
-      // so remove it post-install (the import then no-ops gracefully). Verified-live 2026-06-12.
+      // SGLang serves custom-arch models (MOSS) vLLM can't. sglang[all] pulls a CUDA-13 torch whose
+      // bundled libs (nvidia/cu13/lib) aren't on the linker path, and sgl_kernel needs libnuma.so.1
+      // — without both, sglang crashes at startup on the CUDA-12.4 base. Fix: apt install libnuma1
+      // here; the runner prepends nvidia/cu13/lib to LD_LIBRARY_PATH at launch (SGLangExecutor.
+      // _serve_env). Verified-live-local 2026-06-12.
       return this._bootstrapRunner(ssh, podId, 'sglang', '"sglang[all]" huggingface_hub boto3',
-        ['pip uninstall -y deep_gemm -q || true'])
+        ['apt-get update -qq && apt-get install -y -qq libnuma1'])
     }
     return this._bootstrapComfyUI(ssh, podId)
   }
