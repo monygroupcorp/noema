@@ -1976,9 +1976,9 @@ function createWidgetApi(deps = {}) {
 
             const { Readable } = require('stream');
             const stream = Readable.from(buf);
-            const url = await deps.storageService.uploadFromStream(stream, key, contentType);
+            const { permanentUrl } = await deps.storageService.uploadFromStream(stream, key, contentType);
 
-            res.json({ url });
+            res.json({ url: permanentUrl });
         } catch (err) { handleErr(res, err, 'POST widget upload'); }
     });
 
