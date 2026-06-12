@@ -460,33 +460,7 @@ function buildAppHtml(agentId, mode) {
         if (!preview) return;
         var html = '';
 
-        // Disabled spell list
-        var spells = ws.spells || [];
-        if (spells.length) {
-          html += '<div class="ent-preview-section">'
-            + '<div class="entrance-section-label">Spells</div>';
-          spells.forEach(function(s) {
-            var inputs = s.exposedInputs || [];
-            html += '<div class="spell-item ent-spell-locked">'
-              + '<div class="spell-name">' + esc(s.name) + '</div>'
-              + (s.description ? '<div class="spell-desc">' + esc(s.description) + '</div>' : '');
-            html += '<div class="spell-inputs" style="pointer-events:none;opacity:.35">';
-            inputs.forEach(function(inp) {
-              if (inp.type === 'image') {
-                html += '<div class="spell-img-pick" style="height:40px"><span class="pick-label">📷 ' + esc(inp.label || inp.paramKey) + '</span></div>';
-              } else {
-                html += '<input class="spell-input" placeholder="' + esc(inp.label || inp.paramKey) + '" disabled>';
-              }
-            });
-            html += '<button class="spell-cast" disabled>Cast</button>';
-            html += '</div>';
-            html += '<div class="ent-lock-hint">Enter code or pay to cast</div>';
-            html += '</div>';
-          });
-          html += '</div>';
-        }
-
-        // Gallery preview
+        // Gallery preview only — no spell preview on entrance
         var outputs = ws.recentOutputs || [];
         if (outputs.length) {
           html += '<div class="ent-preview-section">'
@@ -891,7 +865,7 @@ function buildAppHtml(agentId, mode) {
   function goBack() {
     _mode = 'list';
     if (_galleryToggleBtn) _galleryToggleBtn.textContent = 'Gallery';
-    if (_ws) render(_ws); else loadWorkspace();
+    loadWorkspace(); // reload so completed casts appear in gallery strip
   }
 
   function showCastResult(data) {
@@ -1982,7 +1956,7 @@ function createWidgetApi(deps = {}) {
     // Accepts { data: base64, contentType, fileName? } JSON, uploads to R2, returns { url }.
     // Uses its own body-parser with a 12 MB limit (base64 inflates ~33% over raw).
 
-    router.post('/:agentId/upload', express.json({ limit: '12mb' }), async (req, res) => {
+    router.post('/:agentId/upload', async (req, res) => {
         cors(res);
         try {
             const agentDoc = await findAgent(req.params.agentId);
