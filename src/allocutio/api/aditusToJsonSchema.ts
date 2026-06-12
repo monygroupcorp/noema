@@ -47,6 +47,7 @@ function portaTypeToSchema(type: string): JsonSchemaProperty {
     case 'image':
     case 'video':
     case 'audio':
+    case '3d':
       return { type: 'string', format: 'uri' }
     default:
       return { type: 'string' }
