@@ -11,13 +11,13 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
 import { ArcanumIssuer } from '../../../src/ledger/ArcanumIssuer.js'
 import { ArcanumVerifier } from '../../../src/arcanum/ArcanumVerifier.js'
 import { MemoryArcanumTree } from '../../../src/arcanum/ArcanumTree.js'
 import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
 import { ActumInceptor } from '../../../src/execution/ActumInceptor.js'
 import { computeCommitment, computeNullifierHash } from '../../../src/arcanum/poseidon.js'
+import { computeRecipient } from '../../../src/arcanum/prover.js'
 import type { Modus } from '../../../src/types/modus.js'
 import type { Actum } from '../../../src/types/actum.js'
 import type { ArcanumSpendProof } from '../../../src/arcanum/types.js'
@@ -61,16 +61,6 @@ function makeActa(): Actorum & { records: Actum[] } {
     findByNullifier: async (n) => records.find(x => x.nullifier === n) ?? null,
     findExpired: async () => [],
   }
-}
-
-/** Replicates ActumInceptor._computeRecipient — must stay in sync. */
-function computeRecipient(modusId: string, aditus: Record<string, unknown>): string {
-  const sorted = Object.fromEntries(
-    Object.entries(aditus).sort(([a], [b]) => a.localeCompare(b))
-  )
-  const payload = `${modusId}:${JSON.stringify(sorted)}`
-  const hash = createHash('sha256').update(payload).digest()
-  return BigInt('0x' + hash.slice(0, 31).toString('hex')).toString()
 }
 
 /** Mock verifier — accepts any proof. Validates signals shape only. */

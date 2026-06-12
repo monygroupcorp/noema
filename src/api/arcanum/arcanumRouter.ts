@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { Router, type Request } from 'express'
 import { createReadStream, existsSync } from 'node:fs'
 import path from 'node:path'
 import type { ArcanumIssuer } from '../../ledger/ArcanumIssuer.js'
@@ -7,17 +7,24 @@ import { makeLogger } from '../../lib/logger.js'
 
 const log = makeLogger('arcanum:router')
 
-// CommonJS __dirname polyfill (this module is bundled as CJS)
 declare const __dirname: string
 
 const ARTIFACTS_DIR = path.join(__dirname, '..', '..', 'arcanum', 'circuit', 'artifacts')
 const WASM_PATH     = path.join(ARTIFACTS_DIR, 'arcanum.wasm')
+const WASM_READY    = existsSync(WASM_PATH)
 
 export interface ArcanumRouterConfig {
   /** Public URL where the proving key (.zkey) can be fetched by clients. */
   zkeyUrl?: string
   /** Public URL of this server — used to build the wasm URL in /config. */
   serverUrl?: string
+  /**
+   * Resolve the caller's animaId from an authenticated request.
+   * When provided, POST /issue requires a valid credential and uses the
+   * resolved animaId instead of accepting it from the request body.
+   * When absent, /issue is disabled (returns 501).
+   */
+  resolve?: (req: Request) => Promise<{ animaId: string }>
 }
 
 export function createArcanumRouter(
@@ -48,11 +55,20 @@ export function createArcanumRouter(
   // call GET /tree/proof/:leafIndex.
 
   router.post('/issue', async (req, res) => {
-    const { animaId, valor: valorStr, commitment, nullifier } = req.body
-
-    if (!animaId || typeof animaId !== 'string') {
-      return res.status(400).json({ error: 'animaId is required' })
+    if (!config.resolve) {
+      return res.status(501).json({ error: 'issue endpoint not configured' })
     }
+
+    let animaId: string
+    try {
+      const auctor = await config.resolve(req)
+      animaId = auctor.animaId
+    } catch {
+      return res.status(401).json({ error: 'authentication required' })
+    }
+
+    const { valor: valorStr, commitment, nullifier } = req.body
+
     if (!valorStr || typeof valorStr !== 'string') {
       return res.status(400).json({ error: 'valor is required (decimal bigint string)' })
     }
@@ -159,7 +175,7 @@ export function createArcanumRouter(
       wasmUrl,
       zkeyUrl,
       depth: 32,
-      ready: existsSync(WASM_PATH) && zkeyUrl !== null,
+      ready: WASM_READY && zkeyUrl !== null,
     })
   })
 
@@ -169,12 +185,18 @@ export function createArcanumRouter(
   // 2MB — safe to serve from the API. The proving key (.zkey) is large and lives on R2.
 
   router.get('/circuit/wasm', (req, res) => {
-    if (!existsSync(WASM_PATH)) {
+    if (!WASM_READY) {
       return res.status(404).json({ error: 'wasm not found — run arcanum-trusted-setup.sh' })
     }
     res.setHeader('Content-Type', 'application/wasm')
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
-    createReadStream(WASM_PATH).pipe(res)
+    const stream = createReadStream(WASM_PATH)
+    stream.on('error', (err) => {
+      log.error('wasm stream error', { error: String(err) })
+      if (!res.headersSent) res.status(500).json({ error: 'internal error' })
+      else res.destroy()
+    })
+    stream.pipe(res)
   })
 
   return router

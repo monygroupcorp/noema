@@ -1,4 +1,5 @@
-import { randomUUID, createHash } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
+import { computeRecipient } from '../arcanum/prover.js'
 import type { Actum } from '../types/actum.js'
 import type { Signorum } from '../types/significandi.js'
 import type { Modorum } from '../types/modus.js'
@@ -144,7 +145,7 @@ export class ActumInceptor {
     }
 
     // Verify recipient = hash(modusId, aditus) — proof is bound to this execution
-    const expectedRecipient = this._computeRecipient(modus.id, aditus)
+    const expectedRecipient = computeRecipient(modus.id, aditus)
     if (arcanumProof.publicSignals.recipient !== expectedRecipient) {
       throw new Error('Arcanum proof recipient mismatch — proof was generated for a different execution')
     }
@@ -191,18 +192,4 @@ export class ActumInceptor {
     return actum
   }
 
-  /**
-   * Binds a proof to a specific execution context.
-   * recipient = sha256(modusId + ':' + JSON.stringify(sortedAditus)) as decimal
-   * Prevents a valid proof from being front-run or replayed on a different modus.
-   */
-  private _computeRecipient(modusId: string, aditus: Record<string, unknown>): string {
-    const sorted = Object.fromEntries(
-      Object.entries(aditus).sort(([a], [b]) => a.localeCompare(b))
-    )
-    const payload = `${modusId}:${JSON.stringify(sorted)}`
-    const hash = createHash('sha256').update(payload).digest()
-    // Convert first 31 bytes to BigInt (field-safe for BN128)
-    return BigInt('0x' + hash.slice(0, 31).toString('hex')).toString()
-  }
 }

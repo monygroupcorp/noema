@@ -18,7 +18,7 @@ import { createWebhookRouter } from './api/webhooks/webhookRouter.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
-import { IdentityResolver as ApiIdentityResolver } from './allocutio/api/IdentityResolver.js'
+import { IdentityResolver as ApiIdentityResolver, credentialsFromHeaders } from './allocutio/api/IdentityResolver.js'
 import { createApiRouter } from './allocutio/api/apiRouter.js'
 import { makeCredentialAcceptors } from './allocutio/api/apiAcceptors.js'
 import { RunEventHub } from './allocutio/api/RunEventHub.js'
@@ -103,9 +103,15 @@ const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL
 // ---------------------------------------------------------------------------
 
 const _vKeyPath = path.join(__dirname, 'arcanum', 'circuit', 'artifacts', 'verification_key.json')
-const _arcanumVerifyFn = existsSync(_vKeyPath)
-  ? makeSnarkjsVerifier(JSON.parse(readFileSync(_vKeyPath, 'utf8')))
-  : undefined
+let _arcanumVerifyFn: ReturnType<typeof makeSnarkjsVerifier> | undefined
+if (existsSync(_vKeyPath)) {
+  try {
+    _arcanumVerifyFn = makeSnarkjsVerifier(JSON.parse(readFileSync(_vKeyPath, 'utf8')))
+  } catch (err) {
+    // Malformed vkey — proceed without ZK verification rather than crashing at startup
+    console.error('[arcanum] verification_key.json is invalid, ZK proofs disabled:', err)
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Fractal Tool Compiler — compiles Essentia + aditus → RunPod job input
@@ -524,10 +530,6 @@ async function main(): Promise<void> {
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, v: process.env.BUILD_VERSION ?? 'dev' }))
   app.use('/api/vestigia', createVestigiaRouter(ring.vestigiorum))
-  app.use('/arcanum', createArcanumRouter(ring.arcanumIssuer, ring.arcanumTree, {
-    zkeyUrl: process.env.ARCANUM_ZKEY_URL,
-    serverUrl: process.env.WEBHOOK_URL,
-  }))
 
   // Crystal Agent API (/v1) — ApiAllocutio (docs/agent-tasks/EPIC-api-allocutio.md).
   // The agent-shaped facade over the ring + the credential→AuctorKey resolver.
@@ -590,6 +592,16 @@ async function main(): Promise<void> {
       })
     },
   })
+  app.use('/arcanum', createArcanumRouter(ring.arcanumIssuer, ring.arcanumTree, {
+    zkeyUrl: process.env.ARCANUM_ZKEY_URL,
+    serverUrl: process.env.WEBHOOK_URL,
+    resolve: (req) => apiResolver.resolve(
+      credentialsFromHeaders(req.headers as Record<string, string | undefined>, req.body)
+    ).then((auctor) => {
+      if (!('animaId' in auctor)) throw new Error('identified account required')
+      return auctor as { animaId: string }
+    }),
+  }))
   app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub }))
   // MCP adapter (/v1/mcp) — the same facade as REST, exposed as MCP tools + crystal://
   // resources for agent tool-use (Phase 3). Stateless per-request streamable-HTTP transport.
