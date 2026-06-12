@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.4](https://github.com/monygroupcorp/noema/compare/v4.11.3...v4.11.4) (2026-06-12)
+
+
+### Bug Fixes
+
+* **widget:** image upload picker, cast output display, gallery query ([a5f497e](https://github.com/monygroupcorp/noema/commit/a5f497eeab4ac0d092db2420a9649344d6061160))
+
 ## [4.11.3](https://github.com/monygroupcorp/noema/compare/v4.11.2...v4.11.3) (2026-06-12)
 
 
