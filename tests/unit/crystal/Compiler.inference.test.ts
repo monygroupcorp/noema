@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { Compiler, isInferenceSpec, isScriptSpec, type InferenceCompiledSpec, type ScriptCompiledSpec } from '../../../src/crystal/Compiler.js'
 import { WorkflowTemplateRegistry } from '../../../src/crystal/WorkflowTemplateRegistry.js'
 import {
-  ESSENTIA_QWEN3_VL, ESSENTIA_MOSS_MUSIC, ESSENTIA_SHOTVL, ESSENTIA_HEARTMULA,
+  ESSENTIA_QWEN3_VL, ESSENTIA_MOSS_MUSIC, ESSENTIA_SHOTVL, ESSENTIA_HEARTMULA, ESSENTIA_HUNYUAN3D,
 } from '../../../src/crystal/seeds/essentiae.js'
 import { CANONICAL_FUNDAMENTA, FUNDAMENTUM_QWEN_VL_VLLM } from '../../../src/crystal/seeds/fundamenta.js'
 import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js'
@@ -171,6 +171,19 @@ test('HeartMuLa compiles to a ScriptCompiledSpec (CLI args + file inputs)', asyn
   // the 3 ckpt weights are in the manifest with their HF repos
   assert.equal(s.repo && (spec as ScriptCompiledSpec).models.length, 3)
   assert.ok((spec as ScriptCompiledSpec).models.every(m => (m as { repo?: string }).repo))
+})
+
+test('Hunyuan3D compiles: 3d categoria, install cmd, wrapper fixedFile, image→flag', async () => {
+  const { spec } = await makeCompiler().compile(ESSENTIA_HUNYUAN3D, { image: 'https://x/cat.png' })
+  assert.ok(isScriptSpec(spec as never))
+  const s = (spec as ScriptCompiledSpec).script
+  assert.ok(s.install?.includes('hy3dshape/requirements.txt'), 'shape-only install, not the default -e .')
+  assert.equal(s.outputKind, '3d')
+  // image (a uri) becomes a CLI flag
+  const ii = s.args.indexOf('--image')
+  assert.ok(ii >= 0 && s.args[ii + 1] === 'https://x/cat.png')
+  // the wrapper script is dropped into the repo (no-CLI repo)
+  assert.ok(s.fileInputs?.['run_shape.py']?.includes('Hunyuan3DDiTFlowMatchingPipeline'))
 })
 
 // ── enforcement: unknown runtime is a hard error ──────────────────────────────

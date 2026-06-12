@@ -120,6 +120,9 @@ export interface Essentia extends Modus {
   script?: {
     /** Git repo to clone — the modelcard's inference code (e.g. github.com/HeartMuLa/heartlib). */
     repo: string
+    /** Post-clone install command run in the repo (default "pip install -e . -q"). HeartMuLa is a
+     *  package (-e .); Hunyuan3D is a plain repo ("pip install -r requirements.txt -q"). */
+    install?: string
     /** Command to run from the repo root (e.g. "python examples/run_music_generation.py"). */
     entry: string
     /** Always-passed flags (e.g. ["--model_path=./ckpt", "--version=3B"]). */
@@ -129,6 +132,9 @@ export interface Essentia extends Modus {
     /** aditus key → file path to WRITE its (affix-woven) value into before the run
      *  (e.g. { lyrics: "assets/lyrics.txt", tags: "assets/tags.txt" }). */
     fileInputs?: Record<string, string>
+    /** FIXED files written into the repo before the run — path → literal content. For repos with no
+     *  CLI: drop a thin wrapper script (e.g. Hunyuan3D's shape-gen) that `entry` then runs. */
+    fixedFiles?: Record<string, string>
     /** Output artifact path (relative to repo root) the executor collects (e.g. "assets/output.mp3"). */
     output: string
     /** The `exitus` kind of the output, for delivery (e.g. "audio", "3d"). */

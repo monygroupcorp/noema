@@ -134,6 +134,28 @@ export const FUNDAMENTUM_HEARTMULA_PYTORCH: Fundamentum = {
   mutatum: new Date('2026-06-12'),
 }
 
+/**
+ * Hunyuan3D · PyTorch — python-modelcard substrate for image→3D (shape-only). Same runtime as
+ * HeartMuLa; the Essentia's `script` form drops a thin wrapper (Hunyuan3D has no CLI) that runs the
+ * shape pipeline + exports a .glb. SHAPE-ONLY (~10GB, fits a 24GB pod); texture needs ~29GB + a
+ * custom CUDA build (deferred). The pipeline self-downloads `tencent/Hunyuan3D-2.1` (cached via
+ * HF_HOME on the model volume), so no `intellae` here.
+ */
+export const FUNDAMENTUM_HUNYUAN3D_PYTORCH: Fundamentum = {
+  id: 'hunyuan3d-pytorch',
+  nomen: 'Hunyuan3D · PyTorch',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'python-modelcard',
+  intellae: [],   // self-downloads via from_pretrained
+  vramGb: 12,
+  canonica: true,
+  natum: new Date('2026-06-12'),
+  mutatum: new Date('2026-06-12'),
+}
+
 /** All canonical fundamenta — seeded on boot (parity with CANONICAL_ESSENTIAE). */
 export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_FLUX_COMFYUI,
@@ -141,4 +163,5 @@ export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_QWEN_VL_VLLM,
   FUNDAMENTUM_MOSS_SGLANG,
   FUNDAMENTUM_HEARTMULA_PYTORCH,
+  FUNDAMENTUM_HUNYUAN3D_PYTORCH,
 ]

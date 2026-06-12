@@ -100,10 +100,11 @@ export interface InferenceCompiledSpec extends CompiledSpecBase {
 export interface ScriptCompiledSpec extends CompiledSpecBase {
   script: {
     repo: string
+    install?: string
     entry: string
     /** Resolved CLI args (fixedArgs ∪ argMap-resolved from aditus). */
     args: string[]
-    /** File path → content to write before the run (resolved from aditus). */
+    /** File path → content to write before the run (aditus-resolved ∪ fixed wrapper files). */
     fileInputs?: Record<string, string>
     output: string
     outputKind: string
@@ -519,13 +520,17 @@ export class Compiler {
       if (v !== undefined && v !== null && v !== '') args.push(flag, String(v))
     }
 
-    // File inputs: write each aditus value (affix-woven) to its declared path before the run.
+    // File inputs: write each aditus value (affix-woven) to its declared path before the run,
+    // plus any FIXED files (literal content — e.g. a wrapper script for repos with no CLI).
     const fileInputs: Record<string, string> = {}
     for (const [key, path] of Object.entries(form.fileInputs ?? {})) {
       const porta = essentia.aditus[key]
       const raw = aditus[key]
       const woven = porta ? weaveAffixes(raw, porta) : raw
       fileInputs[path] = typeof woven === 'string' ? woven : String(woven ?? '')
+    }
+    for (const [path, content] of Object.entries(form.fixedFiles ?? {})) {
+      fileInputs[path] = content
     }
 
     const spec: ScriptCompiledSpec = {
@@ -536,6 +541,7 @@ export class Compiler {
       runtime,
       script: {
         repo: form.repo,
+        ...(form.install ? { install: form.install } : {}),
         entry: form.entry,
         args,
         ...(Object.keys(fileInputs).length > 0 ? { fileInputs } : {}),

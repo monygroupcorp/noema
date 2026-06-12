@@ -842,7 +842,8 @@ class PythonModelcardExecutor(Executor):
             _append_event(job_id, {"type": "cloning-repo", "repo": repo})
             subprocess.run(["rm", "-rf", self._workdir], check=False, timeout=60)
             subprocess.run(["git", "clone", "--depth", "1", repo, self._workdir], check=True, timeout=300)
-            subprocess.run(["pip", "install", "-e", ".", "-q"], cwd=self._workdir, check=True, timeout=900)
+            install = (job_spec.get("script") or {}).get("install") or "pip install -e . -q"
+            subprocess.run(install, shell=True, cwd=self._workdir, check=True, timeout=1800)
             self._repo = repo
         # weights download INTO the repo (model_root == workdir now)
         _ensure_models(self, job_spec.get("models", []), job_id)
@@ -860,8 +861,11 @@ class PythonModelcardExecutor(Executor):
         log.info(f"modelcard run: {' '.join(cmd)} (cwd={wd})")
         _append_event(job_id, {"type": "generating"})
         # expandable_segments cuts CUDA fragmentation — the difference between fitting and OOMing at
-        # a late allocation spike (e.g. HeartMuLa's codec decode). Env-overridable.
-        env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")}
+        # a late allocation spike (e.g. HeartMuLa's codec decode). HF_HOME points `from_pretrained`
+        # (Hunyuan3D) at the persistent model volume so weights cache across runs. Env-overridable.
+        env = {**os.environ,
+               "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True"),
+               "HF_HOME": os.environ.get("HF_HOME", os.path.join(self.root, "hf_cache"))}
         with open("/tmp/modelcard.log", "a") as logf:
             r = subprocess.run(cmd, cwd=wd, stdout=logf, stderr=subprocess.STDOUT, timeout=JOB_TIMEOUT, env=env)
         if r.returncode != 0:

@@ -265,6 +265,71 @@ export const ESSENTIA_HEARTMULA: Essentia = {
   mutatum: new Date('2026-06-12'),
 }
 
+// =============================================================================
+// Generation track — Hunyuan3D (image→3D, SHAPE-ONLY), runtime 'python-modelcard' (ADR-0007).
+//
+// Hunyuan3D has no CLI — the `script` form drops a thin wrapper (fixedFiles) that loads the shape
+// pipeline, runs it on the input image, and exports a .glb. categoria '3d' (Part B). Shape-only
+// (~10GB) fits a 24GB pod; texture (~29GB + custom CUDA build) is deferred. The pipeline
+// self-downloads tencent/Hunyuan3D-2.1 (HF_HOME on the model volume). Seeded catalog-first.
+// =============================================================================
+const HUNYUAN3D_SHAPE_WRAPPER = `import sys, argparse, urllib.request
+sys.path.insert(0, './hy3dshape')
+from hy3dshape.pipelines import Hunyuan3DDiTFlowMatchingPipeline
+ap = argparse.ArgumentParser()
+ap.add_argument('--image'); ap.add_argument('--output')
+a = ap.parse_args()
+img = a.image
+if img.startswith('http'):
+    urllib.request.urlretrieve(img, '/tmp/in.png'); img = '/tmp/in.png'
+pipe = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained('tencent/Hunyuan3D-2.1')
+mesh = pipe(image=img)[0]
+mesh.export(a.output)
+print('exported', a.output)
+`
+
+export const ESSENTIA_HUNYUAN3D: Essentia = {
+  id: 'hunyuan3d-21',
+  nomen: 'Hunyuan3D — image to 3D (shape)',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: '3d',
+
+  fundamentumId: 'hunyuan3d-pytorch',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    image: { type: 'image', required: true, description: 'Reference image — a clean, front-facing subject works best' },
+  },
+  exitus: {
+    mesh: { type: '3d', description: 'Generated 3D mesh (.glb), untextured (shape-only)' },
+  },
+
+  // Form half: the Hunyuan3D shape pipeline, wrapped (the repo has no CLI).
+  script: {
+    repo: 'https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1',
+    // SHAPE-ONLY deps (hy3dshape/requirements.txt) — the root requirements.txt pulls texture-only,
+    // build-fragile packages (basicsr/realesrgan/tb_nightly) that fail; the shape set is light and
+    // keeps the base torch. Plus `timm` (image encoder, undeclared) and libGL/glib (pymeshlab needs
+    // libOpenGL.so.0). Verified-live-local 2026-06-12 → valid .glb.
+    install: 'apt-get update -qq && apt-get install -y -qq libgl1 libglib2.0-0 && pip install -r hy3dshape/requirements.txt timm -q',
+    entry: 'python run_shape.py',
+    argMap: { image: '--image' },
+    fixedArgs: ['--output', 'output.glb'],
+    fixedFiles: { 'run_shape.py': HUNYUAN3D_SHAPE_WRAPPER },
+    output: 'output.glb',
+    outputKind: '3d',
+  },
+
+  defaultCookFlags: { vramGb: 12 },
+
+  natum: new Date('2026-06-12'),
+  mutatum: new Date('2026-06-12'),
+}
+
 export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_RUNMAKE_FLUX_SCHNELL,
   ESSENTIA_RUNMAKE_SD15,
@@ -272,4 +337,5 @@ export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_MOSS_MUSIC,
   ESSENTIA_SHOTVL,
   ESSENTIA_HEARTMULA,
+  ESSENTIA_HUNYUAN3D,
 ]
