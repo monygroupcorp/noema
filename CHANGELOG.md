@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.12](https://github.com/monygroupcorp/noema/compare/v4.11.11...v4.11.12) (2026-06-12)
+
+
+### Bug Fixes
+
+* **widget:** resolve recentOutputs from generationOutputs when output.url absent ([9cabcdf](https://github.com/monygroupcorp/noema/commit/9cabcdff326465519d5ee48ba35a9e61f4527c51))
+
 ## [4.11.11](https://github.com/monygroupcorp/noema/compare/v4.11.10...v4.11.11) (2026-06-12)
 
 
