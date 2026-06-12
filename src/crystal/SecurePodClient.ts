@@ -623,7 +623,11 @@ export class SecurePodClient implements RunPodClient, Procurator {
    *  path byte-for-byte; vLLM/llm pods get the multi-runtime runner.py. */
   private async _bootstrap(ssh: SshTransportLike, podId: string, runtime?: string): Promise<void> {
     if (runtime === 'vLLM' || runtime === 'llm') {
-      return this._bootstrapVllm(ssh, podId)
+      return this._bootstrapRunner(ssh, podId, 'vLLM', 'vllm huggingface_hub boto3')
+    }
+    if (runtime === 'sglang' || runtime === 'transformers') {
+      // SGLang serves custom-arch models (MOSS) vLLM can't. sglang[all] pulls its serving deps.
+      return this._bootstrapRunner(ssh, podId, 'sglang', '"sglang[all]" huggingface_hub boto3')
     }
     return this._bootstrapComfyUI(ssh, podId)
   }
@@ -648,22 +652,21 @@ export class SecurePodClient implements RunPodClient, Procurator {
   }
 
   /**
-   * vLLM bootstrap (ADR-0007): install the serving stack + upload runner.py — the multi-harness
-   * manager. The runner holds an `Executor` per runtime and lazily loads each (download repo →
-   * `vllm serve` → wait) on first job, bounded by a VRAM budget. Here we install only the vLLM
-   * stack, so in practice this pod runs the vLLM harness (a ComfyUI job would fail to load — no
-   * ComfyUI present). True co-residency (both harnesses on one pod) is a provisioning mode that
-   * installs both stacks — a later, GPU-gated step.
+   * Serving-runtime bootstrap (ADR-0007): pip-install the given serving stack + upload runner.py —
+   * the multi-harness manager. The runner holds an `Executor` per runtime and lazily loads each
+   * (download repo → launch server → wait) on first job, bounded by a VRAM budget. We install only
+   * the one stack this pod needs (`pipPkgs`), so in practice the pod runs that one harness; a job
+   * for another runtime would fail to load (its lib absent). True co-residency (multiple stacks on
+   * one pod) is a later provisioning mode.
    *
-   * NOTE: wired but not yet live-verified — the exact `vllm serve` flags + VRAM budget are tuned
-   * on a real pod (the understanding essentiae are catalog-only until then). `RUNNER_VRAM_GB`
-   * should eventually come from the provisioned GPU's real VRAM.
+   * NOTE: serving flags/versions are tuned live on a real pod (vLLM is verified; SGLang/MOSS is
+   * wired but the exact sglang version + audio request format need a live pass).
    */
-  private async _bootstrapVllm(ssh: SshTransportLike, podId: string): Promise<void> {
-    log.info('bootstrapping pod', { podId, runtime: 'vLLM' })
+  private async _bootstrapRunner(ssh: SshTransportLike, podId: string, runtime: string, pipPkgs: string): Promise<void> {
+    log.info('bootstrapping pod', { podId, runtime })
 
     await ssh.exec('which git || (apt-get update -qq && apt-get install -y -qq git)', { timeout: 120_000 })
-    await ssh.exec('pip install vllm huggingface_hub boto3 -q', { timeout: 900_000 })
+    await ssh.exec(`pip install ${pipPkgs} -q`, { timeout: 1_200_000 })
 
     const script = fs.readFileSync(RUNNER_SCRIPT_PATH, 'utf8')
     const b64 = Buffer.from(script).toString('base64').replace(/\n/g, '')
@@ -672,7 +675,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
       `RUNPOD_POD_ID=${podId} MODEL_ROOT=/root/models nohup python3 /root/runner.py >> /tmp/runner.log 2>&1 &`,
       { timeout: 5_000 },
     )
-    log.info('runner started', { podId })
+    log.info('runner started', { podId, runtime })
   }
 }
 

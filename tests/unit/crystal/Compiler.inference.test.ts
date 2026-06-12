@@ -102,6 +102,15 @@ test('inferentia.systemPrompt is carried onto the inference spec', async () => {
   assert.equal(asInference(spec).inference.systemPrompt, 'You are a cinematography expert.')
 })
 
+test('MOSS-Music compiles via the sglang substrate (custom-arch runtime)', async () => {
+  // MOSS points at the moss-sglang fundamentum (runtime 'sglang') — vLLM can't serve its custom
+  // arch, SGLang can (trust_remote_code). The 'sglang' runtime must route to the inference path.
+  const { spec } = await makeCompiler().compile(ESSENTIA_MOSS_MUSIC, { audio: 'r2://song.mp3', prompt: 'transcribe' })
+  const inf = asInference(spec)
+  assert.equal(inf.runtime, 'sglang')
+  assert.deepEqual(inf.inference.media, [{ type: 'audio', ref: 'r2://song.mp3' }])
+})
+
 test('no systemPrompt → field omitted', async () => {
   const { spec } = await makeCompiler().compile(ESSENTIA_QWEN3_VL, { prompt: 'hi' })
   assert.equal('systemPrompt' in asInference(spec).inference, false)

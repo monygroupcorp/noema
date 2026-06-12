@@ -155,7 +155,8 @@ export const ESSENTIA_MOSS_MUSIC: Essentia = {
   canonica: true,
   categoria: 'text',
 
-  fundamentumId: 'qwen-vl-vllm',
+  // MOSS is a custom arch (audio encoder) vLLM can't serve → its own SGLang substrate (ADR-0007).
+  fundamentumId: 'moss-sglang',
   fundamentumVersio: '1.0.0',
   intellae: [{ id: 'intella.moss-music-8b', role: 'lm' }],
 

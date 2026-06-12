@@ -178,7 +178,9 @@ export class Compiler {
     // runtimes branch to `_compileInference`. An unknown runtime is a hard error — no
     // silent ComfyUI fallback (ADR-0007 enforcement).
     const runtime = fundamentum.runtime ?? 'ComfyUI'
-    if (runtime === 'vLLM' || runtime === 'llm') {
+    // OpenAI-compatible serving runtimes (vLLM for native archs, SGLang/transformers for custom
+    // archs via trust_remote_code) all compile to the same `spec.inference` shape.
+    if (runtime === 'vLLM' || runtime === 'llm' || runtime === 'sglang' || runtime === 'transformers') {
       return this._compileInference(essentia, aditus, opts, fundamentum, image, runtime)
     }
     if (runtime !== 'ComfyUI') {
