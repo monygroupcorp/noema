@@ -66,7 +66,10 @@ function initializeWebPlatform(services, options = {}) {
     origin: process.env.CORS_ORIGIN || [..._corsBase, ..._corsExtra],
     credentials: true
   }));
-  app.use(express.json({ verify: rawBodySaver }));
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/widget')) return next();
+    express.json({ verify: rawBodySaver })(req, res, next);
+  });
   app.use(express.urlencoded({ extended: true }));
   app.use(cookieParser());
 
