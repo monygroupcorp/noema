@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.3](https://github.com/monygroupcorp/noema/compare/v4.11.2...v4.11.3) (2026-06-12)
+
+
+### Bug Fixes
+
+* **cors:** add camelcabal.fun + CORS_EXTRA_ORIGINS for partner test origins ([ed163b6](https://github.com/monygroupcorp/noema/commit/ed163b6f7abfbe0960b8251ff216a3aa7126f796))
+
 ## [4.11.2](https://github.com/monygroupcorp/noema/compare/v4.11.1...v4.11.2) (2026-06-12)
 
 
