@@ -636,8 +636,12 @@ export class SecurePodClient implements RunPodClient, Procurator {
       return this._bootstrapRunner(ssh, podId, 'vLLM', 'vllm huggingface_hub boto3')
     }
     if (runtime === 'sglang' || runtime === 'transformers') {
-      // SGLang serves custom-arch models (MOSS) vLLM can't. sglang[all] pulls its serving deps.
-      return this._bootstrapRunner(ssh, podId, 'sglang', '"sglang[all]" huggingface_hub boto3')
+      // SGLang serves custom-arch models (MOSS) vLLM can't. sglang[all] pulls its serving deps —
+      // including a CUDA-13-built `deep_gemm` whose .so needs libnvrtc.so.13 (the runpod/pytorch:2.4
+      // base is CUDA 12.4 → import crash at sglang startup). MOSS is BF16 and doesn't need DeepGEMM,
+      // so remove it post-install (the import then no-ops gracefully). Verified-live 2026-06-12.
+      return this._bootstrapRunner(ssh, podId, 'sglang', '"sglang[all]" huggingface_hub boto3',
+        ['pip uninstall -y deep_gemm -q || true'])
     }
     return this._bootstrapComfyUI(ssh, podId)
   }
@@ -672,11 +676,14 @@ export class SecurePodClient implements RunPodClient, Procurator {
    * NOTE: serving flags/versions are tuned live on a real pod (vLLM is verified; SGLang/MOSS is
    * wired but the exact sglang version + audio request format need a live pass).
    */
-  private async _bootstrapRunner(ssh: SshTransportLike, podId: string, runtime: string, pipPkgs: string): Promise<void> {
+  private async _bootstrapRunner(ssh: SshTransportLike, podId: string, runtime: string, pipPkgs: string, postInstall: string[] = []): Promise<void> {
     log.info('bootstrapping pod', { podId, runtime })
 
     await ssh.exec('which git || (apt-get update -qq && apt-get install -y -qq git)', { timeout: 120_000 })
     await ssh.exec(`pip install ${pipPkgs} -q`, { timeout: 1_200_000 })
+    for (const cmd of postInstall) {
+      await ssh.exec(cmd, { timeout: 120_000 })
+    }
 
     const script = fs.readFileSync(RUNNER_SCRIPT_PATH, 'utf8')
     const b64 = Buffer.from(script).toString('base64').replace(/\n/g, '')
