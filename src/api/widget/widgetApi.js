@@ -770,19 +770,30 @@ function buildAppHtml(agentId, mode) {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ data: b64, contentType: file.type, fileName: file.name }),
             })
-            .then(function(r) { return r.json(); })
-            .then(function(d) {
+            .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
+            .then(function(resp) {
               picker.classList.remove('spell-img-uploading');
-              if (d.url) {
-                picker.dataset.url = d.url;
+              if (resp.ok && resp.data.url) {
+                picker.dataset.url = resp.data.url;
                 var label = picker.querySelector('.pick-label');
                 if (label) label.textContent = '';
                 var prev = picker.querySelector('img');
                 if (!prev) { prev = document.createElement('img'); picker.appendChild(prev); }
-                prev.src = d.url;
+                prev.src = resp.data.url;
+              } else {
+                var errMsg = resp.status === 413
+                  ? 'Image too large (max ~8 MB)'
+                  : (resp.data?.error?.message || 'Upload failed');
+                var label = picker.querySelector('.pick-label');
+                if (label) { label.textContent = '⚠ ' + errMsg; label.style.color = '#f87'; }
+                picker.dataset.url = '';
               }
             })
-            .catch(function() { picker.classList.remove('spell-img-uploading'); });
+            .catch(function(err) {
+              picker.classList.remove('spell-img-uploading');
+              var label = picker.querySelector('.pick-label');
+              if (label) { label.textContent = '⚠ Upload failed'; label.style.color = '#f87'; }
+            });
           };
           reader.readAsDataURL(file);
         });
@@ -1969,9 +1980,9 @@ function createWidgetApi(deps = {}) {
 
     // ── Image upload ──────────────────────────────────────────────────────────
     // Accepts { data: base64, contentType, fileName? } JSON, uploads to R2, returns { url }.
-    // Used by image-type exposed inputs in the spell cast UI.
+    // Uses its own body-parser with a 12 MB limit (base64 inflates ~33% over raw).
 
-    router.post('/:agentId/upload', async (req, res) => {
+    router.post('/:agentId/upload', express.json({ limit: '12mb' }), async (req, res) => {
         cors(res);
         try {
             const agentDoc = await findAgent(req.params.agentId);
