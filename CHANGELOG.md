@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.2](https://github.com/monygroupcorp/noema/compare/v4.11.1...v4.11.2) (2026-06-12)
+
+
+### Bug Fixes
+
+* **agents:** AGENT_CARD_URL_OVERRIDE for card fetch + session callback ([4ef41d0](https://github.com/monygroupcorp/noema/commit/4ef41d07d773bc4c6c78a2b4e3673f586dee17c1))
+
 ## [4.11.1](https://github.com/monygroupcorp/noema/compare/v4.11.0...v4.11.1) (2026-06-12)
 
 
