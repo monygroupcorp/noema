@@ -46,8 +46,24 @@ async function fetchAgentCard(issuerDomain, tokenId, opts = {}) {
   return promise;
 }
 
+function _resolveCardBase(issuerDomain, logger) {
+  const overrideEnv = process.env.AGENT_CARD_URL_OVERRIDE;
+  if (overrideEnv) {
+    try {
+      const overrides = JSON.parse(overrideEnv);
+      if (overrides[issuerDomain]) {
+        const base = overrides[issuerDomain].replace(/\/$/, '');
+        logger.warn(`agentCardFetcher: Using card URL override for ${issuerDomain}: ${base}`);
+        return base;
+      }
+    } catch { /* malformed — fall through */ }
+  }
+  return `https://${issuerDomain}`;
+}
+
 async function _doFetch(issuerDomain, tokenId, key, _fetchFn, logger) {
-  const url = `https://${issuerDomain}/agents/${tokenId}/card`;
+  const base = _resolveCardBase(issuerDomain, logger);
+  const url = `${base}/agents/${tokenId}/card`;
 
   let response;
   try {
