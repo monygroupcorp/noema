@@ -47,18 +47,23 @@ function initializeWebPlatform(services, options = {}) {
   // Set up middleware
   logger.debug('[WebPlatform] Initializing middleware...');
   app.use(httpLogger); // Use the centralized, correctly configured HTTP logger
+  const _corsBase = [
+    'http://localhost:3000',
+    'http://localhost:4000',
+    'http://localhost:5173',
+    'http://app.localhost:4000',
+    'http://app.localhost:5173',
+    'https://noema.art',
+    'https://www.noema.art',
+    'https://app.noema.art',
+    'https://staging.noema.art',
+    'https://camelcabal.fun',
+  ];
+  const _corsExtra = process.env.CORS_EXTRA_ORIGINS
+    ? process.env.CORS_EXTRA_ORIGINS.split(',').map(s => s.trim()).filter(Boolean)
+    : [];
   app.use(cors({
-    origin: process.env.CORS_ORIGIN || [
-      'http://localhost:3000',
-      'http://localhost:4000',
-      'http://localhost:5173',
-      'http://app.localhost:4000',
-      'http://app.localhost:5173',
-      'https://noema.art',
-      'https://www.noema.art',
-      'https://app.noema.art',
-      'https://staging.noema.art'
-    ],
+    origin: process.env.CORS_ORIGIN || [..._corsBase, ..._corsExtra],
     credentials: true
   }));
   app.use(express.json({ verify: rawBodySaver }));
