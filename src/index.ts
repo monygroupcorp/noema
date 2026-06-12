@@ -64,6 +64,8 @@ import { CANONICAL_INTELLAE } from './crystal/seeds/intellae.js'
 import { ensureIndexes } from './crystal/ensureIndexes.js'
 import type { Essentia } from './types/essendi.js'
 import path from 'node:path'
+import { readFileSync, existsSync } from 'node:fs'
+import { makeSnarkjsVerifier } from './arcanum/ArcanumVerifier.js'
 
 // ---------------------------------------------------------------------------
 // Env
@@ -94,6 +96,15 @@ const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY
 const R2_OUTPUTS_BUCKET = process.env.R2_OUTPUTS_BUCKET ?? process.env.R2_BUCKET_NAME
 const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL
 const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL
+
+// ---------------------------------------------------------------------------
+// Arcanum verifier — load snarkjs VerifyFn when the ceremony key is present
+// ---------------------------------------------------------------------------
+
+const _vKeyPath = path.join(__dirname, 'arcanum', 'circuit', 'artifacts', 'verification_key.json')
+const _arcanumVerifyFn = existsSync(_vKeyPath)
+  ? makeSnarkjsVerifier(JSON.parse(readFileSync(_vKeyPath, 'utf8')))
+  : undefined
 
 // ---------------------------------------------------------------------------
 // Fractal Tool Compiler — compiles Essentia + aditus → RunPod job input
@@ -162,6 +173,12 @@ async function main(): Promise<void> {
 
   // 0. Record startup time (used to filter stale Telegram updates)
   const botStartupTime = Date.now()
+
+  if (_arcanumVerifyFn) {
+    log.info('arcanum: verification_key.json loaded — ZK spend proofs active')
+  } else {
+    log.warn('arcanum: verification_key.json absent — ZK spend proofs disabled (run arcanum-trusted-setup.sh)')
+  }
 
   // 1. Connect MongoDB
   const mongo = new MongoClient(MONGODB_URI as string)
@@ -302,6 +319,7 @@ async function main(): Promise<void> {
     ...(openaiClient ? { openaiClient } : {}),
     ...(embed ? { embed } : {}),
     ...(embedImage ? { embedImage } : {}),
+    ...(_arcanumVerifyFn ? { arcanumVerifyFn: _arcanumVerifyFn } : {}),
   })
 
   // 3b. Rehydrate in-flight collections from DB (recovery after restart)

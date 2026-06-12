@@ -21,7 +21,7 @@ set -euo pipefail
 CIRCUIT_DIR="src/arcanum/circuit"
 ARTIFACTS_DIR="$CIRCUIT_DIR/artifacts"
 PTAU_FILE="$ARTIFACTS_DIR/pot20_final.ptau"
-PTAU_URL="https://hermez.s3-eu-west-1.amazonaws.com/powersOfTau28_hez_final_20.ptau"
+PTAU_URL="https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_20.ptau"
 
 MODE="${1:-solo}"
 FINAL_KEY="${2:-}"
@@ -43,25 +43,29 @@ download_ptau() {
 compile_circuit() {
   echo ""
   echo "=== Compile circuit ==="
-  CIRCOMLIB="node_modules/circomlib/circuits"
-  if [ ! -d "$CIRCOMLIB" ]; then
-    echo "ERROR: circomlib not found. Run: npm install"
+  if [ ! -d "node_modules/circomlib" ]; then
+    echo "ERROR: circomlib not found. Run: npm install --legacy-peer-deps"
     exit 1
   fi
   circom "$CIRCUIT_DIR/arcanum.circom" \
-    --r1cs "$ARTIFACTS_DIR/arcanum.r1cs" \
-    --wasm "$ARTIFACTS_DIR/" \
-    --sym  "$ARTIFACTS_DIR/arcanum.sym" \
-    -l "$CIRCOMLIB" \
+    --r1cs \
+    --wasm \
+    --sym \
+    -o "$ARTIFACTS_DIR/" \
+    -l node_modules \
     --O2
+  # circom writes wasm into arcanum_js/ subdirectory — copy up for convenience
+  if [ -f "$ARTIFACTS_DIR/arcanum_js/arcanum.wasm" ]; then
+    cp "$ARTIFACTS_DIR/arcanum_js/arcanum.wasm" "$ARTIFACTS_DIR/arcanum.wasm"
+  fi
   echo "Constraints:"
-  snarkjs r1cs info "$ARTIFACTS_DIR/arcanum.r1cs"
+  node_modules/.bin/snarkjs r1cs info "$ARTIFACTS_DIR/arcanum.r1cs"
 }
 
 export_vkey() {
   echo ""
   echo "=== Export verification key ==="
-  snarkjs zkey export verificationkey \
+  node_modules/.bin/snarkjs zkey export verificationkey \
     "$ARTIFACTS_DIR/arcanum_final.zkey" \
     "$ARTIFACTS_DIR/verification_key.json"
   echo "verification_key.json written."
@@ -70,7 +74,7 @@ export_vkey() {
 verify_final() {
   echo ""
   echo "=== Verify final setup ==="
-  snarkjs zkey verify \
+  node_modules/.bin/snarkjs zkey verify \
     "$ARTIFACTS_DIR/arcanum.r1cs" \
     "$PTAU_FILE" \
     "$ARTIFACTS_DIR/arcanum_final.zkey"
@@ -89,7 +93,7 @@ if [ "$MODE" = "--init" ]; then
 
   echo ""
   echo "=== Phase 2 setup ==="
-  snarkjs groth16 setup \
+  node_modules/.bin/snarkjs groth16 setup \
     "$ARTIFACTS_DIR/arcanum.r1cs" \
     "$PTAU_FILE" \
     "$ARTIFACTS_DIR/arcanum_0000.zkey"
@@ -125,7 +129,7 @@ if [ "$MODE" = "--finalize" ]; then
 
   # Verify the last contribution is valid
   echo "=== Verify last contribution ==="
-  snarkjs zkey verify \
+  node_modules/.bin/snarkjs zkey verify \
     "$ARTIFACTS_DIR/arcanum.r1cs" \
     "$PTAU_FILE" \
     "$FINAL_KEY"
@@ -140,7 +144,7 @@ if [ "$MODE" = "--finalize" ]; then
   fi
   echo "Random beacon: $BEACON_HASH"
 
-  snarkjs zkey beacon \
+  node_modules/.bin/snarkjs zkey beacon \
     "$FINAL_KEY" \
     "$ARTIFACTS_DIR/arcanum_final.zkey" \
     "$BEACON_HASH" \
@@ -172,14 +176,14 @@ compile_circuit
 
 echo ""
 echo "=== Phase 2 setup ==="
-snarkjs groth16 setup \
+node_modules/.bin/snarkjs groth16 setup \
   "$ARTIFACTS_DIR/arcanum.r1cs" \
   "$PTAU_FILE" \
   "$ARTIFACTS_DIR/arcanum_0000.zkey"
 
 echo ""
 echo "=== Solo contribution (dev entropy) ==="
-echo "dev-entropy-$(date +%s)" | snarkjs zkey contribute \
+echo "dev-entropy-$(date +%s)" | node_modules/.bin/snarkjs zkey contribute \
   "$ARTIFACTS_DIR/arcanum_0000.zkey" \
   "$ARTIFACTS_DIR/arcanum_final.zkey" \
   --name="dev-setup" \
