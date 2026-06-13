@@ -26,17 +26,13 @@ contract Upgrade is Script {
     address constant PROXY = 0x00000001152D633eb2AC3Cf91eac9994aEEFc021;
 
     function run() external {
-        uint256 deployerKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerKey);
-
-        console.log("Upgrading CreditVault proxy:", PROXY);
-        console.log("Deployer (must be proxy owner):", deployer);
-
-        // Pre-flight: verify ownership before spending gas on implementation deployment.
+        // Pre-flight: log owner so operator can confirm key matches before broadcast.
         address currentOwner = CreditVault(payable(PROXY)).owner();
-        require(currentOwner == deployer, "deployer is not proxy owner");
+        console.log("Upgrading CreditVault proxy:", PROXY);
+        console.log("Vault owner (your key must match):", currentOwner);
 
-        vm.startBroadcast(deployerKey);
+        // Uses --account keystore from the forge CLI. upgradeToAndCall reverts if not owner.
+        vm.startBroadcast();
 
         // 1. Deploy new implementation (constructor calls _disableInitializers).
         CreditVault newImpl = new CreditVault();
