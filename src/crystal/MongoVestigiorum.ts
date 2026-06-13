@@ -9,6 +9,9 @@ import type {
   ImpressioKind,
 } from '../types/vestigium.js'
 
+// Vestigia are only written for identified (animaId) and arcanum commitment runs.
+// bursaToken runs are excluded at the write site (executionWebhook.ts) — this
+// two-way type is intentionally narrower than the full AuctorKey union.
 type AuctorKey = { animaId: string } | { commitment: string }
 
 function raterToken(key: AuctorKey): string {

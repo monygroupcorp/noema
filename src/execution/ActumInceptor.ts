@@ -42,12 +42,12 @@ export class ActumInceptor {
 
     // ── ZK anonymous path ───────────────────────────────────────────────────
     if ('arcanumProof' in by) {
-      return this._initiateWithProof(params, modus, runner, reservation)
+      return this._initiateWithProof(params, modus, reservation)
     }
 
     // ── Bursa (anonymous credit purse) path ─────────────────────────────────
     if ('bursaToken' in by) {
-      return this._initiateWithBursa(params, modus, runner, reservation)
+      return this._initiateWithBursa(params, modus, reservation)
     }
 
     // ── Identified + legacy arcanum hash path ───────────────────────────────
@@ -138,7 +138,6 @@ export class ActumInceptor {
   private async _initiateWithProof(
     params: Inceptio,
     modus: Awaited<ReturnType<NonNullable<Deps['modorum']['find']>>>,
-    runner: ReturnType<Deps['cursorum']['resolve']>,
     reservation: bigint,
   ): Promise<Actum> {
     if (!modus) throw new Error('modus is null')
@@ -177,35 +176,27 @@ export class ActumInceptor {
     // burned rather than double-spent — an acceptable trade under the ZK threat model.
     await this.deps.arcanumVerifier.markSpent(nullifierHash)
 
-    let actum: Actum
-    try {
-      actum = await acta.create({
-        id: actumId,
-        modusId: modus.id,
-        modusVersiono: modus.versio,
-        modoId,
-        impetus: reservation,
-        signaConsumed: [],  // no Signorum signa — the note is the payment
-        aditus,
-        status: 'nascens',
-        expirat: new Date(Date.now() + DEFAULT_EXPIRAT_MS),
-        nullifier: nullifierHash,
-        ...(computeStrategy ? { computeStrategy } : {}),
-        ...(gpuClass ? { gpuClass } : {}),
-        ...(shareTokenHint ? { shareTokenHint } : {}),
-        ...(pinnedModels?.length ? { pinnedModels } : {}),
-      })
-    } catch (err) {
-      throw err
-    }
-
-    return actum
+    return acta.create({
+      id: actumId,
+      modusId: modus.id,
+      modusVersiono: modus.versio,
+      modoId,
+      impetus: reservation,
+      signaConsumed: [],  // no Signorum signa — the note is the payment
+      aditus,
+      status: 'nascens',
+      expirat: new Date(Date.now() + DEFAULT_EXPIRAT_MS),
+      nullifier: nullifierHash,
+      ...(computeStrategy ? { computeStrategy } : {}),
+      ...(gpuClass ? { gpuClass } : {}),
+      ...(shareTokenHint ? { shareTokenHint } : {}),
+      ...(pinnedModels?.length ? { pinnedModels } : {}),
+    })
   }
 
   private async _initiateWithBursa(
     params: Inceptio,
     modus: Awaited<ReturnType<NonNullable<Deps['modorum']['find']>>>,
-    runner: ReturnType<Deps['cursorum']['resolve']>,
     reservation: bigint,
   ): Promise<Actum> {
     if (!modus) throw new Error('modus is null')

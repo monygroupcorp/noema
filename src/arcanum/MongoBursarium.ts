@@ -11,8 +11,9 @@ export class MongoBursarium implements Bursarum {
 
   async create(credits: bigint): Promise<Bursa> {
     const token = randomUUID()
-    await this.col.insertOne({ token, credits: credits.toString(), createdAt: new Date() })
-    return { id: token, credits, createdAt: new Date() }
+    const createdAt = new Date()
+    await this.col.insertOne({ token, credits: credits.toString(), createdAt })
+    return { id: token, credits, createdAt }
   }
 
   async findByToken(token: string): Promise<Bursa | null> {
@@ -23,24 +24,26 @@ export class MongoBursarium implements Bursarum {
 
   // OCC debit: read → check → CAS update. Retries on concurrent debit (rare).
   async debit(token: string, amount: bigint): Promise<Bursa> {
-    const doc = await this.col.findOne({ token })
-    if (!doc) throw new Error('Bursa not found')
+    const MAX_RETRIES = 10
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const doc = await this.col.findOne({ token })
+      if (!doc) throw new Error('Bursa not found')
 
-    const current = BigInt(doc.credits as string)
-    if (current < amount) throw new Error(`Insufficient bursa balance: ${current} credits, need ${amount}`)
+      const current = BigInt(doc.credits as string)
+      if (current < amount) throw new Error(`Insufficient bursa balance: ${current} credits, need ${amount}`)
 
-    const next = (current - amount).toString()
+      const updated = await this.col.findOneAndUpdate(
+        { token, credits: current.toString() },
+        { $set: { credits: (current - amount).toString() } },
+        { returnDocument: 'after' },
+      )
 
-    const updated = await this.col.findOneAndUpdate(
-      { token, credits: current.toString() },
-      { $set: { credits: next } },
-      { returnDocument: 'after' },
-    )
-
-    // If null, a concurrent debit updated credits between our read and write — retry
-    if (!updated) return this.debit(token, amount)
-
-    return { id: updated.token as string, credits: BigInt(updated.credits as string), createdAt: updated.createdAt as Date }
+      if (updated) {
+        return { id: updated.token as string, credits: BigInt(updated.credits as string), createdAt: updated.createdAt as Date }
+      }
+      // CAS miss — concurrent debit won the race; retry
+    }
+    throw new Error('Bursa debit failed after max retries (concurrent contention)')
   }
 
   async credit(token: string, amount: bigint): Promise<void> {
