@@ -38,11 +38,10 @@ export interface ArcanumRouterConfig {
    */
   bursarium?: Bursarum
   /**
-   * ETH→credits conversion: how many impetus credits equal 1 ETH (1e18 wei).
-   * Used when minting a Bursa from an on-chain deposit (valor is in wei).
-   * 0n = bypass conversion — store valor as credits directly (dev mode).
+   * Convert wei to impetus credits at the current ETH price.
+   * Called at purse-mint time. Absent or returning 0n = dev mode (1 wei = 1 credit).
    */
-  creditsPerEth?: bigint
+  weiToCredits?: (wei: bigint) => Promise<bigint>
 }
 
 export function createArcanumRouter(
@@ -161,11 +160,11 @@ export function createArcanumRouter(
     try {
       const { nullifierHash, valor } = await config.verifier.verify(arcanumProof)
 
-      // Convert valor (wei) to impetus credits
-      const creditsPerEth = config.creditsPerEth ?? 0n
-      const credits = creditsPerEth > 0n
-        ? (valor * creditsPerEth) / (10n ** 18n)
-        : valor  // dev mode: 1 wei = 1 credit
+      // Convert valor (wei) to impetus credits at current ETH price.
+      // Falls back to 1 wei = 1 credit when converter not configured (dev mode).
+      const credits = config.weiToCredits
+        ? await config.weiToCredits(valor)
+        : valor
 
       // Burn nullifier before minting — note is gone even if create fails
       await config.verifier.markSpent(nullifierHash)
