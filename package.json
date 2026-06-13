@@ -34,6 +34,7 @@
     "archiver": "^7.0.1",
     "aws-sdk": "^2.1692.0",
     "axios": "^1.10.0",
+    "circomlib": "^2.0.5",
     "circomlibjs": "^0.1.7",
     "comfydeploy": "^0.0.16",
     "cookie": "^1.0.2",
