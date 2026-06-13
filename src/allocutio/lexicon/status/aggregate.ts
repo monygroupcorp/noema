@@ -57,7 +57,7 @@ export async function aggregateStatus(
 ): Promise<StatusSnapshot> {
   const now = (input.now ?? (() => new Date()))()
 
-  if (!input.auctorKey) {
+  if (!input.auctorKey || 'bursaToken' in input.auctorKey) {
     return emptySnapshot(now)
   }
 
@@ -138,7 +138,7 @@ async function buildGens(deps: StatusAggregateDeps, actumIds: string[]): Promise
 async function buildStudios(
   deps: StatusAggregateDeps,
   allHospitia: Awaited<ReturnType<HospitiumStore['findActive']>>,
-  who: AuctorKey,
+  who: HostKey,
   now: Date,
 ): Promise<StudioEntry[]> {
   const mine = allHospitia.filter(h => hostKeyMatches(h.hostKey, who))

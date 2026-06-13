@@ -236,6 +236,7 @@ export class ActumInceptor {
       aditus,
       status: 'nascens',
       expirat: new Date(Date.now() + DEFAULT_EXPIRAT_MS),
+      bursaToken,
       ...(computeStrategy ? { computeStrategy } : {}),
       ...(gpuClass ? { gpuClass } : {}),
       ...(shareTokenHint ? { shareTokenHint } : {}),

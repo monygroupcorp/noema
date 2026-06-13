@@ -448,7 +448,7 @@ async function main(): Promise<void> {
         opts: { models: Array<{ intellaId: string }>; runtime?: string; warmMs?: number },
         onStage?: StudioStageCb,
       ) => {
-        const budget = await ring.signorum.balance(auctor).catch(() => 0n)
+        const budget = 'bursaToken' in auctor ? 0n : await ring.signorum.balance(auctor).catch(() => 0n)
         const handle = await ring.conductor!.conducere(
           auctor,
           {

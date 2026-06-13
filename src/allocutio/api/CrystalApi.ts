@@ -168,10 +168,13 @@ export class CrystalApi {
     return toRun(a)
   }
 
-  /** A run is owned by an auctor iff a signum it consumed belongs to that auctor.
-   *  A targeted membership check (not a full-history scan); spent signa still match,
-   *  so it holds post-completion. */
+  /** A run is owned by an auctor iff:
+   *  - bursaToken: the actum.bursaToken matches (no signa involved)
+   *  - otherwise: a signum it consumed belongs to that auctor */
   private _owns(auctor: AuctorKey, a: Actum): Promise<boolean> {
+    if ('bursaToken' in auctor) {
+      return Promise.resolve(a.bursaToken === auctor.bursaToken)
+    }
     return this.deps.signorum.ownsAny(auctor, a.signaConsumed ?? [])
   }
 
@@ -349,6 +352,7 @@ export class CrystalApi {
    * balance is the budget. A zero budget is refused (`economy.insufficient_signa`).
    */
   async provisionStudio(auctor: AuctorKey, opts: ProvisionStudioOpts = {}): Promise<StudioView> {
+    if ('bursaToken' in auctor) throw Errors.authForbidden('Bursa tokens cannot provision studios')
     if (!this.deps.conductor) throw Errors.studioUnavailable()
 
     // A fundamentum (when given) supplies the runtime + must resolve (no opaque ids).

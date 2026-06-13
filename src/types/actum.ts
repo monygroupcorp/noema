@@ -114,6 +114,13 @@ export interface Actum {
    */
   nullifier?: string
 
+  /**
+   * Bursa bearer token — present when the run was paid for by an anonymous
+   * credit purse. Used for ownership checks: the presenter of this token owns
+   * the run. Mutually exclusive with nullifier.
+   */
+  bursaToken?: string
+
   // ── Execution ───────────────────────────────────────────────────────────
   /** "aditus" = entrance in Latin — the inputs provided at cast time */
   aditus: Record<string, unknown>

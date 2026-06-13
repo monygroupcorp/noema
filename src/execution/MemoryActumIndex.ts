@@ -39,7 +39,9 @@ export class MemoryActumIndex implements ActumIndexStore {
   async findFor(key: AuctorKey): Promise<ActumIndex[]> {
     const ids = 'animaId' in key
       ? this.byAnima.get(key.animaId)
-      : this.byCommitment.get(key.commitment)
+      : 'commitment' in key
+        ? this.byCommitment.get(key.commitment)
+        : undefined
     if (!ids) return []
     const out: ActumIndex[] = []
     for (const id of ids) {

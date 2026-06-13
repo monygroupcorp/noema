@@ -80,26 +80,28 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
       }
     }
 
-  /** Resolve the caller's identity from the request, or throw an ApiError. */
-  const auth = (req: Request): Promise<AuctorKey> =>
-    identity.resolve(
+  /** Resolve the caller's identity from the request, or throw an ApiError.
+   *  bursaToken in body or x-bursa-token header short-circuits to anonymous bursa identity. */
+  const auth = (req: Request): Promise<AuctorKey> => {
+    const bursaToken = req.body?.bursaToken ?? (req.headers['x-bursa-token'] as string | undefined)
+    if (bursaToken) return Promise.resolve({ bursaToken })
+    return identity.resolve(
       credentialsFromHeaders(req.headers as Record<string, string | undefined>, req.body),
     )
+  }
 
   // POST /v1/runs — invoke a flow.
   router.post(
     '/runs',
     wrap(async (req, res) => {
-      const { modusId, verb, aditus, pinnedModels, computeStrategy, gpuClass, maxImpetus, studioId, bursaToken } = req.body ?? {}
-      // bursaToken is a bearer credential — it IS the auth, no further identity needed.
-      const auctor = bursaToken ? null : await auth(req)
+      const { modusId, verb, aditus, pinnedModels, computeStrategy, gpuClass, maxImpetus, studioId } = req.body ?? {}
+      const auctor = await auth(req)
+      const by = 'bursaToken' in auctor ? auctor : undefined
       const run = await api.invokeFlow(
-        // auctor is only used for verb resolution (consuetudinum) — null safe for bursaToken
-        // since bursaToken runs must use an explicit modusId, not a verb.
-        (auctor ?? { animaId: '' }) as AuctorKey,
+        auctor,
         { modusId, verb },
         aditus ?? {},
-        { pinnedModels, computeStrategy, gpuClass, ...(maxImpetus !== undefined ? { maxImpetus } : {}), ...(studioId ? { studioId } : {}), ...(bursaToken ? { by: { bursaToken } } : {}) },
+        { pinnedModels, computeStrategy, gpuClass, ...(maxImpetus !== undefined ? { maxImpetus } : {}), ...(studioId ? { studioId } : {}), ...(by ? { by } : {}) },
       )
       const webhookUrl = req.body?.options?.webhookUrl
       if (deps.hub && typeof webhookUrl === 'string' && webhookUrl.length > 0) {

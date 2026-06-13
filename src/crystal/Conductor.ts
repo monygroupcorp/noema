@@ -106,7 +106,8 @@ export class Conductor {
     opts: ConduceOpts,
     onStage?: StudioStageCb,
   ): Promise<StudioHandle | null> {
-    const { modo, tessera } = await this._open(auctor, opts)
+    if ('bursaToken' in auctor) throw new Error('Bursa tokens cannot provision studios')
+    const { modo, tessera } = await this._open(auctor as HostKey, opts)
     const res = await this._provisionBind(modo, opts, onStage)
     if (!res) { await this._fail(modo.id); return null }
     return { studioId: modo.id, modo: res.modo, materia: res.materia, tessera, provision: res.provision }
@@ -124,7 +125,8 @@ export class Conductor {
     opts: ConduceOpts,
     onSettled?: (handle: StudioHandle | null) => void,
   ): Promise<StudioHandle> {
-    const { modo, tessera } = await this._open(auctor, opts)
+    if ('bursaToken' in auctor) throw new Error('Bursa tokens cannot provision studios')
+    const { modo, tessera } = await this._open(auctor as HostKey, opts)
     // Fire-and-forget the boot; status lives on the Modo. (Single-instance: a server
     // restart mid-provision orphans a `warming` Modo — recovery sweep is a follow-up.)
     // `onSettled` fires on the terminal state (bound or failed) — the webhook seam.
@@ -139,7 +141,7 @@ export class Conductor {
 
   /** Open the session (Modo `claiming` + budget tessera) and its host record
    *  (`Hospitium` keyed by `modoId` + `auctor`, pod attached later). */
-  private async _open(auctor: AuctorKey, opts: ConduceOpts): Promise<{ modo: Modo; tessera: Signum }> {
+  private async _open(auctor: HostKey, opts: ConduceOpts): Promise<{ modo: Modo; tessera: Signum }> {
     const idleWarmthSec = opts.warmMs ? Math.max(1, Math.floor(opts.warmMs / 1000)) : undefined
     const { modo, tessera } = await this.deps.opener.openModo(opts.budget, auctor, idleWarmthSec)
     await this.deps.hospitia.create({ modoId: modo.id, hostKey: auctor, inceptum: new Date() })
