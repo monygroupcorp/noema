@@ -243,7 +243,7 @@ export function createArcanumRouter(
     try {
       const leaf = await arcanumTree.findLeaf(req.params.commitment)
       if (!leaf) return res.status(404).json({ error: 'commitment not yet in tree' })
-      return res.json({ leaf })
+      return res.json({ leaf: { ...leaf, valor: leaf.valor.toString() } })
     } catch (err) {
       log.error('findLeaf error', { error: String(err) })
       return res.status(500).json({ error: 'internal error' })
