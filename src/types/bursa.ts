@@ -16,4 +16,6 @@ export interface Bursarum {
   findByToken(token: string): Promise<Bursa | null>
   /** Atomically debit `amount` credits. Throws if balance insufficient. */
   debit(token: string, amount: bigint): Promise<Bursa>
+  /** Restore `amount` credits — used to compensate a debit when actum creation fails. */
+  credit(token: string, amount: bigint): Promise<void>
 }
