@@ -90,13 +90,16 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   router.post(
     '/runs',
     wrap(async (req, res) => {
-      const auctor = await auth(req)
-      const { modusId, verb, aditus, pinnedModels, computeStrategy, gpuClass, maxImpetus, studioId } = req.body ?? {}
+      const { modusId, verb, aditus, pinnedModels, computeStrategy, gpuClass, maxImpetus, studioId, bursaToken } = req.body ?? {}
+      // bursaToken is a bearer credential — it IS the auth, no further identity needed.
+      const auctor = bursaToken ? null : await auth(req)
       const run = await api.invokeFlow(
-        auctor,
+        // auctor is only used for verb resolution (consuetudinum) — null safe for bursaToken
+        // since bursaToken runs must use an explicit modusId, not a verb.
+        (auctor ?? { animaId: '' }) as AuctorKey,
         { modusId, verb },
         aditus ?? {},
-        { pinnedModels, computeStrategy, gpuClass, ...(maxImpetus !== undefined ? { maxImpetus } : {}), ...(studioId ? { studioId } : {}) },
+        { pinnedModels, computeStrategy, gpuClass, ...(maxImpetus !== undefined ? { maxImpetus } : {}), ...(studioId ? { studioId } : {}), ...(bursaToken ? { by: { bursaToken } } : {}) },
       )
       const webhookUrl = req.body?.options?.webhookUrl
       if (deps.hub && typeof webhookUrl === 'string' && webhookUrl.length > 0) {
