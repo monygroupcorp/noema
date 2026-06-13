@@ -5,6 +5,7 @@ import type { Signorum } from '../types/significandi.js'
 import type { Modorum } from '../types/modus.js'
 import type { Cursorum, Actorum, Inceptio } from '../types/cursus.js'
 import type { ArcanumVerifier } from '../arcanum/ArcanumVerifier.js'
+import type { Bursarum } from '../types/bursa.js'
 import { makeLogger } from '../lib/logger.js'
 import { getTrace } from '../lib/trace.js'
 import { bus } from '../lib/bus.js'
@@ -20,6 +21,8 @@ interface Deps {
   acta: Actorum
   /** Required for the arcanumProof path — absent: ZK spend proofs will be rejected */
   arcanumVerifier?: ArcanumVerifier
+  /** Required for the bursaToken path — absent: bursa runs will be rejected */
+  bursarium?: Bursarum
 }
 
 export class ActumInceptor {
@@ -40,6 +43,11 @@ export class ActumInceptor {
     // ── ZK anonymous path ───────────────────────────────────────────────────
     if ('arcanumProof' in by) {
       return this._initiateWithProof(params, modus, runner, reservation)
+    }
+
+    // ── Bursa (anonymous credit purse) path ─────────────────────────────────
+    if ('bursaToken' in by) {
+      return this._initiateWithBursa(params, modus, runner, reservation)
     }
 
     // ── Identified + legacy arcanum hash path ───────────────────────────────
@@ -192,6 +200,47 @@ export class ActumInceptor {
     }
 
     return actum
+  }
+
+  private async _initiateWithBursa(
+    params: Inceptio,
+    modus: Awaited<ReturnType<NonNullable<Deps['modorum']['find']>>>,
+    runner: ReturnType<Deps['cursorum']['resolve']>,
+    reservation: bigint,
+  ): Promise<Actum> {
+    if (!modus) throw new Error('modus is null')
+    const { acta } = this.deps
+    const { aditus, by, modoId, computeStrategy: strategyOverride, gpuClass: gpuOverride, shareTokenHint, pinnedModels } = params
+
+    if (!('bursaToken' in by)) throw new Error('expected bursaToken path')
+    const { bursaToken } = by
+
+    if (!this.deps.bursarium) {
+      throw new Error('bursarium not configured — cannot accept bursa token runs')
+    }
+
+    // Atomic debit — throws if token not found or balance insufficient
+    await this.deps.bursarium.debit(bursaToken, reservation)
+
+    const actumId = randomUUID()
+    const computeStrategy = strategyOverride ?? modus.computeStrategy
+    const gpuClass = gpuOverride ?? modus.gpuClass
+
+    return acta.create({
+      id: actumId,
+      modusId: modus.id,
+      modusVersiono: modus.versio,
+      modoId,
+      impetus: reservation,
+      signaConsumed: [],
+      aditus,
+      status: 'nascens',
+      expirat: new Date(Date.now() + DEFAULT_EXPIRAT_MS),
+      ...(computeStrategy ? { computeStrategy } : {}),
+      ...(gpuClass ? { gpuClass } : {}),
+      ...(shareTokenHint ? { shareTokenHint } : {}),
+      ...(pinnedModels?.length ? { pinnedModels } : {}),
+    })
   }
 
 }
