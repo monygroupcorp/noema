@@ -37,11 +37,11 @@ export class MemoryActumIndex implements ActumIndexStore {
   }
 
   async findFor(key: AuctorKey): Promise<ActumIndex[]> {
+    // bursaToken runs are not indexed (dispatchInceptio skips record() for them).
+    if ('bursaToken' in key) return []
     const ids = 'animaId' in key
       ? this.byAnima.get(key.animaId)
-      : 'commitment' in key
-        ? this.byCommitment.get(key.commitment)
-        : undefined
+      : this.byCommitment.get(key.commitment)
     if (!ids) return []
     const out: ActumIndex[] = []
     for (const id of ids) {

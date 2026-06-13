@@ -16,9 +16,12 @@ export class MongoActumIndex implements ActumIndexStore {
   }
 
   async findFor(key: AuctorKey): Promise<ActumIndex[]> {
-    const filter = 'animaId' in key    ? { animaId: key.animaId }
-      : 'commitment' in key ? { commitment: key.commitment }
-      : { bursaToken: key.bursaToken }
+    // bursaToken runs are not indexed — dispatchInceptio skips the record() call for them.
+    // The index exists for identified (animaId) and arcanum commitment runs only.
+    if ('bursaToken' in key) return []
+    const filter = 'animaId' in key
+      ? { animaId: key.animaId }
+      : { commitment: key.commitment }
     const docs = await this.col.find(filter).toArray()
     return docs.map(d => {
       const { _id: _omit, ...rest } = d as ActumIndex & { _id: unknown }
