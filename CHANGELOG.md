@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.14](https://github.com/monygroupcorp/noema/compare/v4.11.13...v4.11.14) (2026-06-13)
+
+
+### Bug Fixes
+
+* **api:** use ResponsePayloadNormalizer in generation status endpoint ([e4f9e88](https://github.com/monygroupcorp/noema/commit/e4f9e88000d7b0fb42c3965b791ff1667311f2f5))
+
 ## [4.11.13](https://github.com/monygroupcorp/noema/compare/v4.11.12...v4.11.13) (2026-06-12)
 
 
