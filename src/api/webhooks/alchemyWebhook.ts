@@ -60,7 +60,7 @@ export interface AlchemyWebhookResult {
 // ---------------------------------------------------------------------------
 
 interface AlchemyLog {
-  address: string
+  account: { address: string }  // GraphQL: logs { account { address } }
   topics: string[]
   data: string
   transaction: { hash: string }
@@ -128,7 +128,7 @@ export async function handleAlchemyWebhook(
 
     // 3. Process each log
     for (const log of logs as AlchemyLog[]) {
-      const logAddress = log.address?.toLowerCase()
+      const logAddress = log.account?.address?.toLowerCase()
 
       // Skip logs not targeting our vault
       if (logAddress !== vaultAddress) {
