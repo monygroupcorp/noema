@@ -666,6 +666,7 @@ async function main(): Promise<void> {
       signature: req.headers['x-alchemy-signature'] as string | undefined,
       chainId:   req.params.chainId,
     }, alchemyDeps)
+    log.info('alchemy webhook', { chainId: req.params.chainId, status: result.status, body: result.body })
     res.status(result.status).json(result.body)
   })
 
