@@ -12,7 +12,7 @@ import type { ActumIndexStore } from '../../types/actumIndex.js'
 import { createVestigiumFromActum } from '../../execution/hooks/vestigiumHook.js'
 import { modoHostFor } from '../../ledger/rates.js'
 
-type AuctorKey = { animaId: string } | { commitment: string }
+type AuctorKey = { animaId: string } | { commitment: string } | { bursaToken: string }
 
 export interface ExecutionWebhookDeps {
   actorum: Actorum
@@ -219,7 +219,7 @@ export async function handleExecutionWebhook(
         if (collectioId) await deps.collectioRouter.onActumCompleta(collectioId, actum.id, true)
       }
 
-      if (identity && deps.vestigiorum) {
+      if (identity && deps.vestigiorum && !('bursaToken' in identity)) {
         createVestigiumFromActum(completed, identity, deps.vestigiorum).catch(() => {})
       }
 

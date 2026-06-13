@@ -103,6 +103,7 @@ export type Resolution =
 export type AuctorKey =
   | { animaId: string }
   | { commitment: string }
+  | { bursaToken: string }
 
 // ---------------------------------------------------------------------------
 // Platform

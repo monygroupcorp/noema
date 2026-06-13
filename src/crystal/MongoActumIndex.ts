@@ -16,9 +16,9 @@ export class MongoActumIndex implements ActumIndexStore {
   }
 
   async findFor(key: AuctorKey): Promise<ActumIndex[]> {
-    const filter = 'animaId' in key
-      ? { animaId: key.animaId }
-      : { commitment: key.commitment }
+    const filter = 'animaId' in key    ? { animaId: key.animaId }
+      : 'commitment' in key ? { commitment: key.commitment }
+      : { bursaToken: key.bursaToken }
     const docs = await this.col.find(filter).toArray()
     return docs.map(d => {
       const { _id: _omit, ...rest } = d as ActumIndex & { _id: unknown }

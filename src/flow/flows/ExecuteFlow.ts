@@ -375,6 +375,9 @@ export class ExecuteFlow implements Flow {
     modus: Awaited<ReturnType<ExecuteFlow['_resolveModus']>>,
   ): Promise<Step | Resolution> {
 
+    // Bursa runs pre-debit at inceptio — no signorum balance needed here.
+    if ('bursaToken' in ctx.identity) return this._submit(ctx, state)
+
     // Balance check — skipped in dev when DEV_FREE_EXECUTION is set
     const balance = await this.deps.signorum.balance(ctx.identity)
     const cursor = this.deps.cursorum.resolve(modus)

@@ -3,7 +3,7 @@ import type { Consuetudinum } from '../types/consuetudo.js'
 
 /** Owner discriminant → stable key (mirrors MongoConsuetudinum's flatten). */
 function ownerToken(owner: AuctorKey): string {
-  return 'animaId' in owner ? `a:${owner.animaId}` : `h:${owner.commitment}`
+  return 'animaId' in owner ? `a:${owner.animaId}` : 'commitment' in owner ? `h:${owner.commitment}` : `b:${owner.bursaToken}`
 }
 
 /**

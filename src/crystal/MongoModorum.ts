@@ -50,7 +50,8 @@ export class MongoModorum implements Modorum {
     // owner regardless of which side of the union is set.
     if (filter?.auctor !== undefined) {
       if ('animaId' in filter.auctor) query['auctor.animaId'] = filter.auctor.animaId
-      else query['auctor.commitment'] = filter.auctor.commitment
+      else if ('commitment' in filter.auctor) query['auctor.commitment'] = filter.auctor.commitment
+      else query['auctor.bursaToken'] = filter.auctor.bursaToken
     }
 
     const docs = await this.col.find(query).toArray()

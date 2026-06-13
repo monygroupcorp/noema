@@ -37,7 +37,8 @@ export class MongoFundamentorum implements Fundamentorum {
     if (filter?.canonica !== undefined) query.canonica = filter.canonica
     if (filter?.auctor !== undefined) {
       if ('animaId' in filter.auctor) query['auctor.animaId'] = filter.auctor.animaId
-      else query['auctor.commitment'] = filter.auctor.commitment
+      else if ('commitment' in filter.auctor) query['auctor.commitment'] = filter.auctor.commitment
+      else query['auctor.bursaToken'] = filter.auctor.bursaToken
     }
     const docs = await this.col.find(query).toArray()
     return docs.map(fromDoc)

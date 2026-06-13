@@ -3,14 +3,17 @@ import type { AuctorKey } from '../flow/types.js'
 import type { Consuetudinum } from '../types/consuetudo.js'
 
 /** Flatten the AuctorKey discriminant for storage (mirrors MongoVestigiorum). */
-function auctorKeyDoc(owner: AuctorKey): { animaId?: string; commitment?: string } {
-  return 'animaId' in owner ? { animaId: owner.animaId } : { commitment: owner.commitment }
+function auctorKeyDoc(owner: AuctorKey): { animaId?: string; commitment?: string; bursaToken?: string } {
+  if ('animaId' in owner)    return { animaId: owner.animaId }
+  if ('commitment' in owner) return { commitment: owner.commitment }
+  return { bursaToken: owner.bursaToken }
 }
 
 /** Query by the present discriminant only (mirrors MongoVestigiorum.auctorKeyQuery). */
 function auctorKeyQuery(owner: AuctorKey): Record<string, unknown> {
-  if ('animaId' in owner) return { 'auctorKey.animaId': owner.animaId }
-  return { 'auctorKey.commitment': owner.commitment }
+  if ('animaId' in owner)    return { 'auctorKey.animaId': owner.animaId }
+  if ('commitment' in owner) return { 'auctorKey.commitment': owner.commitment }
+  return { 'auctorKey.bursaToken': owner.bursaToken }
 }
 
 /**

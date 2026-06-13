@@ -28,8 +28,9 @@ export class MemoryFundamentorum implements Fundamentorum {
     if (filter?.auctor !== undefined) {
       const a = filter.auctor
       out = out.filter(f => f.auctor && (
-        'animaId' in a ? (f.auctor as { animaId?: string }).animaId === a.animaId
-                       : (f.auctor as { commitment?: string }).commitment === a.commitment
+        'animaId' in a    ? (f.auctor as { animaId?: string }).animaId === a.animaId
+        : 'commitment' in a ? (f.auctor as { commitment?: string }).commitment === a.commitment
+                            : (f.auctor as { bursaToken?: string }).bursaToken === a.bursaToken
       ))
     }
     return out
