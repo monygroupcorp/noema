@@ -1,5 +1,8 @@
 import { AbiCoder } from 'ethers'
 import crypto from 'node:crypto'
+import { makeLogger } from '../../lib/logger.js'
+
+const log = makeLogger('alchemy-webhook')
 import type { Depositorum, Petitionum, Testimoniorum } from '../../types/catena.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { AnimaStore } from '../../types/anima.js'
@@ -126,9 +129,13 @@ export async function handleAlchemyWebhook(
     let processed = 0
     let skipped = 0
 
+    log.info('alchemy webhook received', { chainId: req.chainId, logCount: logs.length, vaultAddress })
+
     // 3. Process each log
-    for (const log of logs as AlchemyLog[]) {
-      const logAddress = log.account?.address?.toLowerCase()
+    for (const entry of logs as AlchemyLog[]) {
+      const logAddress = entry.account?.address?.toLowerCase()
+
+      log.info('alchemy log', { logAddress, vaultAddress, topic0: entry.topics?.[0] })
 
       // Skip logs not targeting our vault
       if (logAddress !== vaultAddress) {
@@ -136,24 +143,24 @@ export async function handleAlchemyWebhook(
         continue
       }
 
-      const topic0 = log.topics?.[0]
+      const topic0 = entry.topics?.[0]
 
       if (topic0 === TOPIC_PAYMENT) {
-        const didProcess = await handlePaymentLog(log, req.chainId, vaultAddress, deps)
+        const didProcess = await handlePaymentLog(entry, req.chainId, vaultAddress, deps)
         if (didProcess) {
           processed++
         } else {
           skipped++
         }
       } else if (topic0 === TOPIC_NFT_RECEIVED) {
-        const didProcess = await handleNftLog(log, req.chainId, deps)
+        const didProcess = await handleNftLog(entry, req.chainId, deps)
         if (didProcess) {
           processed++
         } else {
           skipped++
         }
       } else if (topic0 === TOPIC_ANON_DEPOSIT) {
-        const didProcess = await handleAnonymousDepositLog(log, deps)
+        const didProcess = await handleAnonymousDepositLog(entry, deps)
         if (didProcess) {
           processed++
         } else {
@@ -257,12 +264,12 @@ async function handlePaymentLog(
 // ---------------------------------------------------------------------------
 
 async function handleAnonymousDepositLog(
-  log: AlchemyLog,
+  entry: AlchemyLog,
   deps: AlchemyWebhookDeps,
 ): Promise<boolean> {
   // topics[1] = commitment (indexed bytes32) — the Poseidon field element
-  if (!log.topics[1]) return false  // malformed log — no indexed commitment
-  const commitment = log.topics[1]  // already 0x-prefixed 32-byte hex
+  if (!entry.topics[1]) return false  // malformed log — no indexed commitment
+  const commitment = entry.topics[1]  // already 0x-prefixed 32-byte hex
 
   // Decode non-indexed params: (address token, uint256 amount).
   // NOTE: valor is stored in raw on-chain units (wei for ETH, token-decimals for ERC20).
@@ -271,7 +278,7 @@ async function handleAnonymousDepositLog(
   // an ETH→credits conversion is wired into this handler (see deps.ethPriceUsd).
   let valor: bigint
   try {
-    const [, amount] = AbiCoder.defaultAbiCoder().decode(['address', 'uint256'], log.data) as unknown as [string, bigint]
+    const [, amount] = AbiCoder.defaultAbiCoder().decode(['address', 'uint256'], entry.data) as unknown as [string, bigint]
     valor = BigInt(amount)
   } catch {
     return false  // malformed log data — skip rather than 500ing the whole webhook
@@ -279,10 +286,14 @@ async function handleAnonymousDepositLog(
 
   // Idempotency: commitment is unique per note — skip if already in tree
   const existing = await deps.arcanumTree.findLeaf(commitment)
-  if (existing) return false
+  if (existing) {
+    log.info('arcanum deposit already in tree', { commitment })
+    return false
+  }
 
   // Insert into Merkle tree — no animaId, no signum, no ledger entry
   await deps.arcanumTree.insert(commitment, valor)
+  log.info('arcanum deposit inserted', { commitment, valor: valor.toString() })
 
   return true
 }
