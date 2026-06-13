@@ -87,6 +87,11 @@ export interface InvokeOpts {
   maxImpetus?: bigint | string
   /** Target an existing warm studio (a Modo session) instead of cold-provisioning a pod. */
   studioId?: string
+  /**
+   * Override the `by` field on the Inceptio — used for anonymous paths (bursaToken,
+   * arcanumProof) that bypass AuctorKey identity entirely.
+   */
+  by?: Inceptio['by']
 }
 
 /** A compact catalog summary of one runnable flow. */
@@ -135,7 +140,7 @@ export class CrystalApi {
     const inceptio: Inceptio = {
       modusId,
       aditus,
-      by: auctor,
+      by: opts.by ?? auctor,
       ...(opts.studioId ? { modoId: opts.studioId } : {}),
       ...(opts.pinnedModels?.length ? { pinnedModels: opts.pinnedModels } : {}),
       ...(opts.computeStrategy ? { computeStrategy: opts.computeStrategy } : {}),
