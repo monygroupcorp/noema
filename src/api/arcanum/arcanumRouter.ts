@@ -182,6 +182,23 @@ export function createArcanumRouter(
     }
   })
 
+  // ── GET /purse/:token ─────────────────────────────────────────────────────────
+  //
+  // Returns the current credit balance for a Bursa token.
+  // 404 if the token doesn't exist or was never minted.
+
+  router.get('/purse/:token', async (req, res) => {
+    if (!config.bursarium) return res.status(501).json({ error: 'purse endpoint not configured' })
+    try {
+      const bursa = await config.bursarium.findByToken(req.params.token)
+      if (!bursa) return res.status(404).json({ error: 'purse not found' })
+      return res.json({ token: bursa.id, credits: bursa.credits.toString(), createdAt: bursa.createdAt })
+    } catch (err) {
+      log.error('purse lookup error', { error: String(err) })
+      return res.status(500).json({ error: 'internal error' })
+    }
+  })
+
   // ── GET /tree/root ────────────────────────────────────────────────────────────
   //
   // Returns the current Merkle root and tree size.
