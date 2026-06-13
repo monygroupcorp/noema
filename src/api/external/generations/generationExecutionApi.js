@@ -1,6 +1,7 @@
 const express = require('express');
 const { createLogger } = require('../../../utils/logger');
 const { ToolRegistry } = require('../../../core/tools/ToolRegistry');
+const ResponsePayloadNormalizer = require('../../../core/services/notifications/ResponsePayloadNormalizer');
 
 /**
  * Resolve a tool name to its toolId using the registry.
@@ -129,19 +130,15 @@ function createGenerationExecutionApi(dependencies) {
                 const allImages = [];
                 const allVideos = [];
 
-                // Extract all image/video URLs from responsePayload
-                if (Array.isArray(gen.responsePayload)) {
-                    for (const output of gen.responsePayload) {
-                        // Collect all images from this output
-                        if (output.data?.images && Array.isArray(output.data.images)) {
-                            for (const img of output.data.images) {
-                                if (img?.url) allImages.push(img.url);
-                            }
-                        }
-                        // Collect video if present
-                        if (output.data?.video?.url) {
-                            allVideos.push(output.data.video.url);
-                        }
+                // Normalize through ResponsePayloadNormalizer so all storage formats
+                // (array, raw ComfyDeploy node-keyed object, HuggingFace videoUrl, etc.) are handled uniformly.
+                const normalized = ResponsePayloadNormalizer.normalize(gen.responsePayload);
+                const media = ResponsePayloadNormalizer.extractMedia(normalized);
+                for (const item of media) {
+                    if (item.type === 'video') {
+                        allVideos.push(item.url);
+                    } else if (item.type === 'photo' || item.type === 'image') {
+                        allImages.push(item.url);
                     }
                 }
 
