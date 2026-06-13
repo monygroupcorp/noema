@@ -231,8 +231,11 @@ export interface Inceptio {
    *                      Deprecated — use arcanumProof for the real unlinkable spend.
    *   { arcanumProof } — ZK Groth16 proof of Merkle note membership.
    *                      The real anonymous path: platform cannot link spend to identity.
+   *   { bursaToken }  — bearer token for an anonymous credit purse (Bursa).
+   *                      Purse was minted by redeeming an arcanumProof once; subsequent
+   *                      runs present the token without re-proving.
    */
-  by: { animaId: string } | { commitment: string } | { arcanumProof: ArcanumSpendProof }
+  by: { animaId: string } | { commitment: string } | { arcanumProof: ArcanumSpendProof } | { bursaToken: string }
   /** FK → Modo. The session this actum runs within — optional */
   modoId?: string
   /**

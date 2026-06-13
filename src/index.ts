@@ -602,6 +602,9 @@ async function main(): Promise<void> {
       if (!('animaId' in auctor)) throw new Error('identified account required')
       return auctor as { animaId: string }
     }),
+    verifier:   ring.arcanumVerifier,
+    bursarium:  ring.bursarium,
+    // creditsPerEth: set this once ETH→credits price oracle is wired (0n = dev mode: 1 wei = 1 credit)
   }))
   app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub }))
   // MCP adapter (/v1/mcp) — the same facade as REST, exposed as MCP tools + crystal://

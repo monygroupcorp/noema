@@ -62,6 +62,7 @@ import { CollectioCursor } from './crystal/CollectioCursor.js'
 import { ArcanumIssuer } from './ledger/ArcanumIssuer.js'
 import { MongoArcanumTree } from './arcanum/ArcanumTree.js'
 import { ArcanumVerifier, MongoNullifierStore, type VerifyFn } from './arcanum/ArcanumVerifier.js'
+import { MongoBursarium } from './arcanum/MongoBursarium.js'
 
 export interface Ring {
   actorum: Actorum
@@ -91,6 +92,7 @@ export interface Ring {
   arcanumIssuer: ArcanumIssuer
   arcanumTree: MongoArcanumTree
   arcanumVerifier: ArcanumVerifier
+  bursarium: MongoBursarium
   materiae: MateriaStore
   /** Identity-bearing hosting metadata (host + admins) — see types/hospitium.ts. */
   hospitia: HospitiumStore
@@ -179,6 +181,8 @@ export interface ContainerConfig {
   arcanumLeavesCollection?: string
   /** Collection name for spent nullifiers — default 'arcanum_nullifiers' */
   arcanumNullifiersCollection?: string
+  /** Collection name for anonymous credit purses — default 'bursarium' */
+  bursariumCollection?: string
   /**
    * Groth16 verify function — inject makeSnarkjsVerifier(verificationKey) after running
    * arcanum-trusted-setup.sh. Absent: all ZK spend proofs will throw at verify().
@@ -362,7 +366,9 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     verify: config.arcanumVerifyFn
       ?? (async () => { throw new Error('arcanumVerifyFn not configured — run arcanum-trusted-setup.sh') }),
   })
-  const inceptor = new ActumInceptor({ modorum, cursorum, signorum, acta: actorum, arcanumVerifier })
+  const bursariumCol = db.collection(config.bursariumCollection ?? 'bursarium')
+  const bursarium = new MongoBursarium(bursariumCol)
+  const inceptor = new ActumInceptor({ modorum, cursorum, signorum, acta: actorum, arcanumVerifier, bursarium })
   const arcanumIssuer = new ArcanumIssuer({ signorum, tree: arcanumTree })
   const collectioCursor = new CollectioCursor(inceptor, collectiones, actorum, {})
 
@@ -372,7 +378,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
     cursorum, completor, inceptor, arcanumIssuer,
-    arcanumTree, arcanumVerifier,
+    arcanumTree, arcanumVerifier, bursarium,
     materiae, hospitia, actumIndex, deployments,
     fundamentorum,
     collectioCursor,
