@@ -226,22 +226,30 @@ export class ActumInceptor {
     const computeStrategy = strategyOverride ?? modus.computeStrategy
     const gpuClass = gpuOverride ?? modus.gpuClass
 
-    return acta.create({
-      id: actumId,
-      modusId: modus.id,
-      modusVersiono: modus.versio,
-      modoId,
-      impetus: reservation,
-      signaConsumed: [],
-      aditus,
-      status: 'nascens',
-      expirat: new Date(Date.now() + DEFAULT_EXPIRAT_MS),
-      bursaToken,
-      ...(computeStrategy ? { computeStrategy } : {}),
-      ...(gpuClass ? { gpuClass } : {}),
-      ...(shareTokenHint ? { shareTokenHint } : {}),
-      ...(pinnedModels?.length ? { pinnedModels } : {}),
-    })
+    try {
+      return await acta.create({
+        id: actumId,
+        modusId: modus.id,
+        modusVersiono: modus.versio,
+        modoId,
+        impetus: reservation,
+        signaConsumed: [],
+        aditus,
+        status: 'nascens',
+        expirat: new Date(Date.now() + DEFAULT_EXPIRAT_MS),
+        bursaToken,
+        ...(computeStrategy ? { computeStrategy } : {}),
+        ...(gpuClass ? { gpuClass } : {}),
+        ...(shareTokenHint ? { shareTokenHint } : {}),
+        ...(pinnedModels?.length ? { pinnedModels } : {}),
+      })
+    } catch (err) {
+      // Debit already committed — restore credits so the purse isn't silently drained.
+      await this.deps.bursarium.credit(bursaToken, reservation).catch(() => {
+        log.error('bursa credit-back failed after actum create error', { bursaToken, reservation: reservation.toString() })
+      })
+      throw err
+    }
   }
 
 }

@@ -42,4 +42,11 @@ export class MongoBursarium implements Bursarum {
 
     return { id: updated.token as string, credits: BigInt(updated.credits as string), createdAt: updated.createdAt as Date }
   }
+
+  async credit(token: string, amount: bigint): Promise<void> {
+    const doc = await this.col.findOne({ token })
+    if (!doc) return  // purse vanished — nothing to restore to
+    const restored = (BigInt(doc.credits as string) + amount).toString()
+    await this.col.updateOne({ token }, { $set: { credits: restored } })
+  }
 }

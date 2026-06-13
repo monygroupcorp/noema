@@ -280,6 +280,7 @@ export class CrystalApi {
    * chosen name yields a global-unique slug (collision → `conflict.slug_taken`).
    */
   async saveFlow(auctor: AuctorKey, opts: SaveFlowOpts): Promise<{ id: string }> {
+    if ('bursaToken' in auctor) throw Errors.authForbidden('Bursa tokens cannot own saved flows')
     let baseModusId = opts.modusId
     let aditus = opts.aditus ?? {}
     let pinned = opts.pinnedModels
@@ -311,6 +312,7 @@ export class CrystalApi {
 
   /** Rebind one of the caller's canon verbs to a flow (owner-keyed Consuetudinum). */
   async bind(auctor: AuctorKey, verb: string, modusId: string): Promise<{ verb: string; modusId: string }> {
+    if ('bursaToken' in auctor) throw Errors.authForbidden('Bursa tokens cannot rebind verbs')
     if (!this.deps.consuetudinum) throw Errors.internal('verb binding not configured')
     if (!(verb in CANON_VERBS)) throw Errors.inputMalformed(`'${verb}' is not a rebindable verb`)
     if (!(await this.deps.modorum.find(modusId))) throw Errors.notFoundFlow(modusId)
