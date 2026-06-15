@@ -632,7 +632,7 @@ async function main(): Promise<void> {
   app.post('/runner/ended',     express.json(), async (req, res) => { await crystalApi.handleRunnerEnded(req.body);                             res.json({ ok: true }) })
 
   // TEE browser client — served at /tee so it shares the same origin as the API (no CORS needed).
-  app.use('/tee', express.static(path.join(__dirname, '..', '..', 'tee', 'browser'), {
+  app.use('/tee', express.static(path.join(__dirname, '..', 'tee', 'browser'), {
     setHeaders: (res, filePath) => {
       if (filePath.endsWith('.wasm')) res.setHeader('Content-Type', 'application/wasm')
     },
