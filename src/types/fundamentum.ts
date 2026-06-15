@@ -64,6 +64,35 @@ export interface Fundamentum {
   /** Minimum VRAM in GB the substrate needs — drives GPU/pod selection (capacity hint). */
   vramGb?: number
 
+  /**
+   * Bootstrap commands run once before launch on bare-metal or non-image paths.
+   * In production (Docker) this is empty — the image already has everything.
+   * In local dev, this is what you would type into a blank terminal to prepare
+   * the environment: pip installs, git clones, etc.
+   * e.g. ["pip install vllm==0.9.0", "pip install flash-attn --no-build-isolation"]
+   */
+  install?: string[]
+
+  /**
+   * The command that starts the inference server. Variables filled from the
+   * Essentia at runtime — the runner does string interpolation, nothing else.
+   * Available vars: {model} (intellae[0].id resolved), {port}, {vramGb}
+   * e.g. "python -m vllm.entrypoints.openai.api_server --model {model} --port {port}"
+   * e.g. "llama-server --model {model} -ngl -1 --port {port}"
+   * e.g. "python /opt/ComfyUI/main.py --listen 0.0.0.0 --port {port}"
+   * Required for pod-hosted fundamenta. Absent for API-hosted (OpenAI, Replicate).
+   */
+  launchTemplate?: string
+
+  /**
+   * How the runner knows the server is ready to accept requests.
+   * Polled after launch until it returns 200 (HTTP) or exits 0 (shell command).
+   * e.g. "GET http://localhost:{port}/health"
+   * e.g. "GET http://localhost:{port}/v1/models"
+   * Absent: runner waits a fixed delay (fallback, not recommended).
+   */
+  readyProbe?: string
+
   /** True = platform-canonical fundament. False = a user-authored one (the /arm custom path). */
   canonica: boolean
   /** "auctor" = author/creator — owner of a user-authored fundament. Canonical ones leave it undefined. */

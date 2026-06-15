@@ -265,6 +265,9 @@ In staging, platform handlers begin calling the crystal ring directly.
 → identity resolution → flow dispatch → `ActumInceptor` → RunPod → webhook
 → reply. `index.ts` boots the full stack.
 
+**REST/MCP — DONE:** `src/allocutio/api/` — at parity with TelegramAllocutio.
+This is also the interface the TEE client will speak through the WireGuard tunnel.
+
 **Discord — NOT DONE:** No `DiscordAllocutio` exists. Discord users still
 route through the legacy JS platform. Mirror of `TelegramAllocutio` — ~1 day.
 

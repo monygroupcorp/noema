@@ -14,6 +14,7 @@
 // the public projection types, never the internal Latin primitives.
 // =============================================================================
 
+import { randomUUID } from 'crypto'
 import type { Modorum, Modus } from '../../types/modus.js'
 import type { Cursorum, ActumCompletor, Actorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
@@ -38,7 +39,18 @@ import { describeFlow, type FlowDescription, type DescribableModus } from './adi
 import { Errors } from './errors.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { computeRecipient } from '../../arcanum/prover.js'
+import { impetusForPodMs } from '../../ledger/rates.js'
 import type { Run } from './types.js'
+
+const PLATFORM_ANIMA_ID = process.env.PLATFORM_ANIMA_ID ?? 'platform'
+
+// Approximate RunPod SECURE hourly rates per GPU class — replaced by real Materia.costPerHr in Phase 3.
+const TEE_GPU_COST_PER_HR: Record<string, number> = {
+  '24gb': 1.2132,
+  '48gb': 2.28,
+  '80gb': 3.24,
+}
+const TEE_DEFAULT_COST_PER_HR = 1.2132
 
 /** The ring slices CrystalApi composes. */
 export interface CrystalApiDeps {
@@ -403,6 +415,93 @@ export class CrystalApi {
     return Promise.all(handles.map(async (h) =>
       toStudioView(h, await this.deps.signorum.sessionBudget(h.studioId).catch(() => 0n))))
   }
+
+  // ── TEE private compute sessions ─────────────────────────────────────────────
+
+  private readonly teeSessions = new Map<string, TeeSession>()
+
+  async provisionTeeSession(auctor: AuctorKey, opts: ProvisionTeeSessionOpts): Promise<TeeSessionView> {
+    if ('bursaToken' in auctor) throw Errors.authForbidden('Bursa tokens cannot provision TEE sessions')
+    const balance = await this.deps.signorum.balance(auctor)
+    const budget = opts.maxImpetus !== undefined ? BigInt(opts.maxImpetus) : balance
+    if (budget <= 0n) throw Errors.insufficientSigna({ available: balance.toString() })
+
+    const sessionId = randomUUID()
+    this.teeSessions.set(sessionId, {
+      sessionId,
+      auctor,
+      status: 'provisioning',
+      gpuClass: opts.gpuClass,
+      budgetImpetus: budget,
+      wgClientPublicKey: opts.wgClientPublicKey,
+      lastBilledGpuHours: 0,
+      spentImpetus: 0n,
+      createdAt: new Date(),
+    })
+
+    // TODO Phase 3: provision RunPod TEE pod here via a TeeProvisioner.
+    // Inject env: SESSION_ID=sessionId, PLATFORM_CALLBACK, WG_ENDPOINT, WG_CLIENT_PUBKEY.
+    // For local dev: start the runner manually with SESSION_ID matching the returned sessionId.
+
+    return toTeeSessionView(this.teeSessions.get(sessionId)!)
+  }
+
+  async getTeeSession(auctor: AuctorKey, sessionId: string): Promise<TeeSessionView> {
+    const session = this.teeSessions.get(sessionId)
+    if (!session || !_auctorMatch(session.auctor, auctor)) throw Errors.notFoundStudio(sessionId)
+    return toTeeSessionView(session)
+  }
+
+  async handleRunnerReady(signal: RunnerReadySignal): Promise<void> {
+    const session = this.teeSessions.get(signal.sessionId)
+    if (!session) return
+    session.status = 'ready'
+    session.serverPublicKey = signal.wgPublicKey
+    session.endpoint = signal.endpoint
+    session.tunnelIp = '10.13.0.2'
+    const host = signal.endpoint.split(':')[0]
+    session.proxyUrl = `socks5+ws://${host}:8080?bind=true&gost=true`
+  }
+
+  async handleRunnerHeartbeat(signal: RunnerHeartbeatSignal): Promise<{ continue: boolean }> {
+    const session = this.teeSessions.get(signal.sessionId)
+    if (!session) return { continue: false }
+    session.gpuHours = signal.gpuHours
+    const { continue: ok } = await this._billTeeHours(session, signal.gpuHours)
+    if (!ok) session.status = 'ended'
+    return { continue: ok }
+  }
+
+  async handleRunnerEnded(signal: RunnerEndedSignal): Promise<void> {
+    const session = this.teeSessions.get(signal.sessionId)
+    if (!session) return
+    session.gpuHours = signal.gpuHours
+    await this._billTeeHours(session, signal.gpuHours)
+    session.status = 'ended'
+  }
+
+  private async _billTeeHours(session: TeeSession, currentGpuHours: number): Promise<{ continue: boolean }> {
+    const deltaHours = currentGpuHours - session.lastBilledGpuHours
+    if (deltaHours <= 0) return { continue: true }
+
+    const costPerHr = TEE_GPU_COST_PER_HR[session.gpuClass ?? ''] ?? TEE_DEFAULT_COST_PER_HR
+    const requested = impetusForPodMs(deltaHours * 3_600_000, costPerHr)
+    const remaining = session.budgetImpetus - session.spentImpetus
+    const charged = requested > remaining ? remaining : requested
+
+    if (charged > 0n) {
+      const auctor = session.auctor
+      const debit = 'animaId' in auctor
+        ? { animaId: auctor.animaId, forma: 'integer' as const, valor: -charged, auctor: 'tee:spend', testis: session.sessionId }
+        : { forma: 'arcanum' as const, valor: -charged, auctor: 'tee:spend', testis: (auctor as { commitment: string }).commitment }
+      const credit = { animaId: PLATFORM_ANIMA_ID, forma: 'reward' as const, valor: charged, auctor: 'tee:spend', testis: session.sessionId }
+      await this.deps.signorum.createMany([debit, credit])
+      session.lastBilledGpuHours = currentGpuHours
+      session.spentImpetus += charged
+    }
+
+    return { continue: charged >= requested }
+  }
 }
 
 /** Inputs for `saveFlow`. Source the base from an owned run OR an explicit flow id. */
@@ -521,4 +620,76 @@ function toModelCard(i: Intelligens): ModelCard {
     ...(trigger ? { trigger } : {}),
     ...(i.descriptio ? { description: i.descriptio } : {}),
   }
+}
+
+// ── TEE types ─────────────────────────────────────────────────────────────────
+
+export interface ProvisionTeeSessionOpts {
+  gpuClass?: string
+  maxImpetus?: bigint | string
+  wgClientPublicKey: string
+}
+
+export interface TeeSessionView {
+  sessionId: string
+  status: 'provisioning' | 'ready' | 'ended'
+  serverPublicKey?: string
+  endpoint?: string      // WireGuard UDP endpoint (ip:port)
+  proxyUrl?: string      // gost SOCKS5+WS URL for the browser WASM tunnel
+  tunnelIp?: string
+  gpuHours?: number
+}
+
+export interface RunnerReadySignal {
+  sessionId: string
+  endpoint: string
+  wgPublicKey: string
+  attestation?: string
+}
+
+export interface RunnerHeartbeatSignal {
+  sessionId: string
+  gpuHours: number
+  status: string
+}
+
+export interface RunnerEndedSignal {
+  sessionId: string
+  gpuHours: number
+  status: string
+}
+
+interface TeeSession {
+  sessionId: string
+  auctor: AuctorKey
+  status: 'provisioning' | 'ready' | 'ended'
+  gpuClass?: string
+  budgetImpetus: bigint
+  wgClientPublicKey: string
+  serverPublicKey?: string
+  endpoint?: string
+  proxyUrl?: string
+  tunnelIp?: string
+  gpuHours?: number
+  lastBilledGpuHours: number
+  spentImpetus: bigint
+  createdAt: Date
+}
+
+function toTeeSessionView(s: TeeSession): TeeSessionView {
+  return {
+    sessionId: s.sessionId,
+    status: s.status,
+    ...(s.serverPublicKey ? { serverPublicKey: s.serverPublicKey } : {}),
+    ...(s.endpoint ? { endpoint: s.endpoint } : {}),
+    ...(s.proxyUrl ? { proxyUrl: s.proxyUrl } : {}),
+    ...(s.tunnelIp ? { tunnelIp: s.tunnelIp } : {}),
+    ...(s.gpuHours !== undefined ? { gpuHours: s.gpuHours } : {}),
+  }
+}
+
+function _auctorMatch(a: AuctorKey, b: AuctorKey): boolean {
+  if ('animaId' in a && 'animaId' in b) return a.animaId === b.animaId
+  if ('commitment' in a && 'commitment' in b) return a.commitment === b.commitment
+  return false
 }

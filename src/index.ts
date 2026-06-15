@@ -609,6 +609,13 @@ async function main(): Promise<void> {
       : undefined,
   }))
   app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub }))
+
+  // TEE runner lifecycle callbacks — internal pod-to-platform signals, not user-facing API.
+  // Mounted at /runner/* (not /v1) so PLATFORM_CALLBACK env var on the pod points here directly.
+  app.post('/runner/ready',     express.json(), async (req, res) => { await crystalApi.handleRunnerReady(req.body);                             res.json({ ok: true }) })
+  app.post('/runner/heartbeat', express.json(), async (req, res) => { res.json(await crystalApi.handleRunnerHeartbeat(req.body)) })
+  app.post('/runner/ended',     express.json(), async (req, res) => { await crystalApi.handleRunnerEnded(req.body);                             res.json({ ok: true }) })
+
   // MCP adapter (/v1/mcp) — the same facade as REST, exposed as MCP tools + crystal://
   // resources for agent tool-use (Phase 3). Stateless per-request streamable-HTTP transport.
   app.use('/v1/mcp', createMcpRouter({ api: crystalApi, identity: apiResolver }))
