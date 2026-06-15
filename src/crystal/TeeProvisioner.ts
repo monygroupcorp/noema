@@ -83,15 +83,11 @@ export class TeeProvisioner {
       // Only gost (TCP 8080) needs to be public — WireGuard tunnels through it.
       ports: ['8080/http'],
       supportPublicIp: true,
-      env: [
-        { key: 'SESSION_ID',        value: sessionId },
-        { key: 'PLATFORM_CALLBACK', value: this.config.platformCallback },
-        { key: 'WG_CLIENT_PUBKEY',  value: wgClientPublicKey },
-        // WG_ENDPOINT is set by the provisioner after we learn the pod's public IP,
-        // but we can't know it yet. The runner defaults to 127.0.0.1:51820 and the
-        // /runner/ready callback uses the env var if set, or falls back. We patch it
-        // on the session via handleRunnerReady using the actual endpoint the runner reports.
-      ],
+      env: {
+        SESSION_ID:        sessionId,
+        PLATFORM_CALLBACK: this.config.platformCallback,
+        WG_CLIENT_PUBKEY:  wgClientPublicKey,
+      },
     }
     if (this.config.gpuTypeIds) body.gpuTypeIds = this.config.gpuTypeIds
 
