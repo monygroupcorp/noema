@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.15](https://github.com/monygroupcorp/noema/compare/v4.11.14...v4.11.15) (2026-06-15)
+
+
+### Bug Fixes
+
+* **api:** surface statusReason in failed generation status response ([d27e091](https://github.com/monygroupcorp/noema/commit/d27e091b912df9a34948b68d23be75ad4d52c86b))
+
 ## [4.11.14](https://github.com/monygroupcorp/noema/compare/v4.11.13...v4.11.14) (2026-06-13)
 
 
