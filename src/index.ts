@@ -99,6 +99,11 @@ const R2_OUTPUTS_BUCKET = process.env.R2_OUTPUTS_BUCKET ?? process.env.R2_BUCKET
 const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL
 const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL
 
+// TEE private compute — optional. Set TEE_IMAGE_ID to enable real pod provisioning.
+const TEE_IMAGE_ID        = process.env.TEE_IMAGE_ID         // e.g. "monyrth/tee-runner:latest"
+const TEE_PLATFORM_CALLBACK = process.env.TEE_PLATFORM_CALLBACK  // e.g. "https://api.noema.ai"
+const TEE_GPU_TYPE_IDS    = process.env.TEE_GPU_TYPE_IDS?.split(',').map(s => s.trim()).filter(Boolean)
+
 // ---------------------------------------------------------------------------
 // Arcanum verifier — load snarkjs VerifyFn when the ceremony key is present
 // ---------------------------------------------------------------------------
@@ -328,6 +333,15 @@ async function main(): Promise<void> {
     ...(embed ? { embed } : {}),
     ...(embedImage ? { embedImage } : {}),
     ...(_arcanumVerifyFn ? { arcanumVerifyFn: _arcanumVerifyFn } : {}),
+    ...(TEE_IMAGE_ID && RUNPOD_API_KEY && TEE_PLATFORM_CALLBACK ? {
+      teeProvisioner: {
+        apiKey:           RUNPOD_API_KEY,
+        imageId:          TEE_IMAGE_ID,
+        platformCallback: TEE_PLATFORM_CALLBACK,
+        cloudType:        RUNPOD_CLOUD_TYPE,
+        ...(TEE_GPU_TYPE_IDS?.length ? { gpuTypeIds: TEE_GPU_TYPE_IDS } : {}),
+      },
+    } : {}),
   })
 
   // 3b. Rehydrate in-flight collections from DB (recovery after restart)
@@ -549,6 +563,7 @@ async function main(): Promise<void> {
     modos: ring.modos,
     consuetudinum,
     ...(ring.conductor ? { conductor: ring.conductor } : {}),
+    ...(ring.teeProvisioner ? { teeProvisioner: ring.teeProvisioner } : {}),
     // Fire-and-forget studio-ready/failed webhook (optional sugar over polling).
     notify: (url, body) => {
       void fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })

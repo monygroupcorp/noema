@@ -29,6 +29,8 @@ import { Praefectus } from './crystal/Praefectus.js'
 import { WarmPodClient } from './crystal/WarmPodClient.js'
 import { Conductor } from './crystal/Conductor.js'
 import type { Procurator } from './crystal/Procurator.js'
+import { TeeProvisioner } from './crystal/TeeProvisioner.js'
+import type { TeeProvisionerConfig } from './crystal/TeeProvisioner.js'
 
 import { MongoActorum } from './crystal/MongoActorum.js'
 import { MongoModorum } from './crystal/MongoModorum.js'
@@ -105,6 +107,8 @@ export interface Ring {
    *  (provisionStudio-capable pod client) is wired. Composes Materia + Hospitium
    *  + Modo + budget tessera into one verb both adapters call. */
   conductor?: Conductor
+  /** TEE pod provisioner — present when TEE_IMAGE_ID + RUNPOD_API_KEY are configured. */
+  teeProvisioner?: TeeProvisioner
 }
 
 export interface ContainerConfig {
@@ -221,6 +225,8 @@ export interface ContainerConfig {
   huggingfaceClient?: {
     predict(spaceUrl: string, params: Record<string, unknown>): Promise<Record<string, unknown>>
   }
+  /** TEE runner pod provisioner config — if present, POST /v1/sessions/tee boots real pods. */
+  teeProvisioner?: TeeProvisionerConfig
 }
 
 export function createContainer(mongo: MongoClient, config: ContainerConfig): Ring {
@@ -383,5 +389,6 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     fundamentorum,
     collectioCursor,
     ...(conductor ? { conductor } : {}),
+    ...(config.teeProvisioner ? { teeProvisioner: new TeeProvisioner(config.teeProvisioner) } : {}),
   }
 }

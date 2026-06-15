@@ -26,6 +26,7 @@ import type { Intelligens, IntelligentiumStore, IntelligensGenus } from '../../t
 import type { HospitiumStore } from '../../types/hospitium.js'
 import type { MateriaStore } from '../../types/materia.js'
 import type { Conductor, StudioHandle, ConduceOpts } from '../../crystal/Conductor.js'
+import type { TeeProvisioner } from '../../crystal/TeeProvisioner.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { Actum, ComputeStrategy, GpuClass, ModelRef } from '../../types/actum.js'
 import type { Inceptio } from '../../types/cursus.js'
@@ -74,6 +75,8 @@ export interface CrystalApiDeps {
   modos?: ModoStore
   /** Optional owner-keyed verb→flow rebinds; falls through to CANON_VERBS when absent. */
   consuetudinum?: Consuetudinum
+  /** RunPod pod provisioner for TEE private compute sessions. Absent → local dev (manual runner). */
+  teeProvisioner?: TeeProvisioner
 }
 
 /** Where to send a run: an explicit modusId OR a canon verb to resolve. */
@@ -432,9 +435,20 @@ export class CrystalApi {
       createdAt: new Date(),
     })
 
-    // TODO Phase 3: provision RunPod TEE pod here via a TeeProvisioner.
-    // Inject env: SESSION_ID=sessionId, PLATFORM_CALLBACK, WG_ENDPOINT, WG_CLIENT_PUBKEY.
-    // For local dev: start the runner manually with SESSION_ID matching the returned sessionId.
+    if (this.deps.teeProvisioner) {
+      // Fire-and-forget: pod boot is async; session transitions to 'ready' via /runner/ready callback.
+      this.deps.teeProvisioner.provision(sessionId, opts.wgClientPublicKey).then(result => {
+        const s = this.teeSessions.get(sessionId)
+        if (!s) return
+        s.podId = result.podId
+        if (result.costPerHrUsd !== undefined) s.costPerHrUsd = result.costPerHrUsd
+      }).catch(err => {
+        const s = this.teeSessions.get(sessionId)
+        if (s) s.status = 'ended'
+        console.error('[tee] pod provision failed', { sessionId, err: String(err) })
+      })
+    }
+    // Without teeProvisioner (local dev): start runner.py manually with SESSION_ID matching sessionId.
 
     return toTeeSessionView(this.teeSessions.get(sessionId)!)
   }
@@ -661,6 +675,7 @@ interface TeeSession {
   gpuClass?: string
   budgetImpetus: bigint
   wgClientPublicKey: string
+  podId?: string
   serverPublicKey?: string
   endpoint?: string
   proxyUrl?: string
