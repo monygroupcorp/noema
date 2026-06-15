@@ -44,14 +44,6 @@ import type { Run } from './types.js'
 
 const PLATFORM_ANIMA_ID = process.env.PLATFORM_ANIMA_ID ?? 'platform'
 
-// Approximate RunPod SECURE hourly rates per GPU class — replaced by real Materia.costPerHr in Phase 3.
-const TEE_GPU_COST_PER_HR: Record<string, number> = {
-  '24gb': 1.2132,
-  '48gb': 2.28,
-  '80gb': 3.24,
-}
-const TEE_DEFAULT_COST_PER_HR = 1.2132
-
 /** The ring slices CrystalApi composes. */
 export interface CrystalApiDeps {
   inceptor: { initiate: ActumInceptor['initiate'] }
@@ -434,6 +426,7 @@ export class CrystalApi {
       gpuClass: opts.gpuClass,
       budgetImpetus: budget,
       wgClientPublicKey: opts.wgClientPublicKey,
+      ...(opts.costPerHrUsd !== undefined ? { costPerHrUsd: opts.costPerHrUsd } : {}),
       lastBilledGpuHours: 0,
       spentImpetus: 0n,
       createdAt: new Date(),
@@ -483,9 +476,9 @@ export class CrystalApi {
   private async _billTeeHours(session: TeeSession, currentGpuHours: number): Promise<{ continue: boolean }> {
     const deltaHours = currentGpuHours - session.lastBilledGpuHours
     if (deltaHours <= 0) return { continue: true }
+    if (!session.costPerHrUsd) return { continue: true }   // no rate yet — provisioner hasn't set it
 
-    const costPerHr = TEE_GPU_COST_PER_HR[session.gpuClass ?? ''] ?? TEE_DEFAULT_COST_PER_HR
-    const requested = impetusForPodMs(deltaHours * 3_600_000, costPerHr)
+    const requested = impetusForPodMs(deltaHours * 3_600_000, session.costPerHrUsd)
     const remaining = session.budgetImpetus - session.spentImpetus
     const charged = requested > remaining ? remaining : requested
 
@@ -628,6 +621,8 @@ export interface ProvisionTeeSessionOpts {
   gpuClass?: string
   maxImpetus?: bigint | string
   wgClientPublicKey: string
+  /** Actual pod cost in USD/hr from the provider API — required for billing. Set by TeeProvisioner in Phase 3. */
+  costPerHrUsd?: number
 }
 
 export interface TeeSessionView {
@@ -671,6 +666,8 @@ interface TeeSession {
   proxyUrl?: string
   tunnelIp?: string
   gpuHours?: number
+  /** USD/hr from the provider — populated by TeeProvisioner at pod boot. Absent during local dev; billing skips. */
+  costPerHrUsd?: number
   lastBilledGpuHours: number
   spentImpetus: bigint
   createdAt: Date
