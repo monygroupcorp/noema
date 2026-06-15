@@ -74,6 +74,8 @@ export class TeeProvisioner {
       // Only gost (TCP 8080) needs to be public — WireGuard tunnels through it via RunPod's HTTP proxy.
       ports: ['8080/http'],
       supportPublicIp: true,
+      // NET_ADMIN is required for WireGuard interface creation (ip link add wg-tee-server).
+      dockerArgs: '--cap-add NET_ADMIN',
       env: {
         SESSION_ID:        sessionId,
         PLATFORM_CALLBACK: this.config.platformCallback,
