@@ -7,8 +7,8 @@
 // generates a WireGuard keypair, starts gost, and launches runner.py. The
 // runner then calls PLATFORM_CALLBACK/runner/ready with its WG public key.
 //
-// This class only needs to: start the pod → wait for a public IP → done.
-// The session transitions to 'ready' via the /runner/ready callback, not here.
+// This class only needs to: start the pod → return the podId + cost rate → done.
+// The session transitions to 'ready' via the /runner/ready callback from the pod.
 // =============================================================================
 
 import { makeLogger } from '../lib/logger.js'
@@ -16,6 +16,8 @@ import { makeLogger } from '../lib/logger.js'
 const log = makeLogger('tee:provisioner')
 
 const RUNPOD_API = 'https://rest.runpod.io/v1'
+const MACHINE_POLL_MS = 8_000
+const MACHINE_TIMEOUT_MS = 5 * 60 * 1_000
 
 export interface TeeProvisionerConfig {
   apiKey: string
@@ -44,8 +46,10 @@ export class TeeProvisioner {
   ): Promise<TeeProvisionResult> {
     const { podId, costPerHrUsd } = await this._startPod(sessionId, wgClientPublicKey)
     log.info('pod created', { podId, sessionId, costPerHrUsd })
-    // SECURE pods never get a publicIp field — they're exposed via {podId}-8080.proxy.runpod.net.
-    // The session transitions to 'ready' via /runner/ready callback from the pod; we return now.
+    // Poll until the pod is actually allocated to a machine. SECURE pods never get publicIp;
+    // proxy URL {podId}-8080.proxy.runpod.net becomes live once the machine field is populated.
+    await this._waitForMachine(podId)
+    log.info('pod allocated', { podId })
     return { podId, costPerHrUsd }
   }
 
@@ -95,4 +99,27 @@ export class TeeProvisioner {
     const data = await res.json() as { id: string; costPerHr?: number }
     return { podId: data.id, costPerHrUsd: data.costPerHr }
   }
+
+  private async _waitForMachine(podId: string): Promise<void> {
+    const deadline = Date.now() + MACHINE_TIMEOUT_MS
+    while (Date.now() < deadline) {
+      await sleep(MACHINE_POLL_MS)
+      try {
+        const res = await fetch(`${RUNPOD_API}/pods/${podId}`, {
+          headers: { 'Authorization': `Bearer ${this.config.apiKey}` },
+        })
+        if (res.ok) {
+          const data = await res.json() as { machine?: Record<string, unknown> }
+          if (data.machine && Object.keys(data.machine).length > 0) return
+        }
+      } catch { /* network blip — retry */ }
+    }
+    // No GPU became available — terminate to avoid ongoing charges and fail fast.
+    await this.terminate(podId)
+    throw new Error('No SECURE GPU available — pod queued for >5 min, terminated')
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(r => setTimeout(r, ms))
 }
