@@ -153,9 +153,9 @@ function createGenerationExecutionApi(dependencies) {
                 }
             }
 
-            // Add error if failed
-            if (gen.status === 'failed' && gen.metadata?.error) {
-                result.error = gen.metadata.error.message || 'Generation failed';
+            // Add error if failed — statusReason is set by webhookProcessor; metadata.error by adapter path
+            if (gen.status === 'failed') {
+                result.error = gen.statusReason || gen.metadata?.error?.message || 'Generation failed';
             }
 
             // Add cost info if available
