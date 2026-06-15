@@ -27,7 +27,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11 \
     python3.11-venv \
     python3-pip \
-    huggingface-hub \
     && rm -rf /var/lib/apt/lists/*
 
 # gost — SOCKS5+WS bridge (replaces wstunnel; speaks the socksgo protocol)
