@@ -306,7 +306,7 @@
         const session = (await res.json()).session;
         log('poll: status=' + session.status);
         if (session.status === 'ready') return session;
-        if (session.status === 'ended') throw new Error('session ended unexpectedly');
+        if (session.status === 'ended') throw new Error(session.error ?? 'session ended unexpectedly');
       }
       throw new Error('timed out waiting for pod');
     }
