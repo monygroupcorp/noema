@@ -76,16 +76,17 @@ It is not a code change.
 An allocutio is an adapter. It translates a platform's native interaction model
 into the ring's language — primitives and events — and back.
 
-| Allocutio | Client | Trust model |
-|-----------|--------|-------------|
-| TelegramAllocutio | Our bot acts as client | User trusts platform |
-| WebAllocutio | Browser on our servers | User trusts platform |
-| REST/MCPAllocutio | Any HTTP/MCP client | Configurable |
-| **TunnelAllocutio** | User's device through WireGuard | Platform cannot see |
+| Allocutio | Client | Trust model | Status |
+|-----------|--------|-------------|--------|
+| TelegramAllocutio | Our bot acts as client | User trusts platform | ✅ Live |
+| WebAllocutio | Browser on our servers | User trusts platform | not started |
+| REST/MCPAllocutio (`src/allocutio/api/`) | Any HTTP/MCP client | Configurable | ✅ Live — at parity with Telegram |
+| **TunnelAllocutio** | User's device through WireGuard | Platform cannot see | not started |
 
-The REST and MCP allocutio (Phase 7d) is not an "API layer." It is the interface
-that the TEE client speaks through the WireGuard tunnel. It is what makes the full
-case possible. It is not optional polish.
+The REST/MCP allocutio (`src/allocutio/api/`) is live and at parity with
+TelegramAllocutio. It is also the interface the TEE client will speak through
+the WireGuard tunnel — no new allocutio is needed for the full case. The tunnel
+changes the network path, not the protocol.
 
 ---
 

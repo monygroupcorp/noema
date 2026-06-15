@@ -16,7 +16,7 @@ import express, { type Request, type Response, type Router } from 'express'
 
 import type { Run } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
-import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView } from './CrystalApi.js'
+import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView } from './CrystalApi.js'
 import { ApiError, Errors } from './errors.js'
 import { makeLogger } from '../../lib/logger.js'
 import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
@@ -50,6 +50,8 @@ export interface ApiFacade {
   provisionStudio(auctor: AuctorKey, opts: ProvisionStudioOpts): Promise<StudioView>
   getStudio(auctor: AuctorKey, studioId: string): Promise<StudioView>
   listStudios(auctor: AuctorKey): Promise<StudioView[]>
+  provisionTeeSession(auctor: AuctorKey, opts: ProvisionTeeSessionOpts): Promise<TeeSessionView>
+  getTeeSession(auctor: AuctorKey, sessionId: string): Promise<TeeSessionView>
 }
 
 /** The slice of IdentityResolver this router needs. */
@@ -294,6 +296,37 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     wrap(async (req, res) => {
       const auctor = await auth(req)
       res.json({ studio: await api.getStudio(auctor, String(req.params.id)) })
+    }),
+  )
+
+  // POST /v1/sessions/tee — provision a private compute session. Returns immediately with
+  // status='provisioning'; poll GET /v1/sessions/tee/:id until status='ready', then use
+  // serverPublicKey + endpoint to configure WASM WireGuard in the browser.
+  router.post(
+    '/sessions/tee',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      const { gpuClass, maxImpetus, wgClientPublicKey } = req.body ?? {}
+      if (!wgClientPublicKey) {
+        res.status(400).json({ error: { code: 'bad_request', message: 'wgClientPublicKey is required' } })
+        return
+      }
+      const session = await api.provisionTeeSession(auctor, {
+        ...(gpuClass ? { gpuClass } : {}),
+        ...(maxImpetus !== undefined ? { maxImpetus } : {}),
+        wgClientPublicKey,
+      })
+      res.status(201).json({ session })
+    }),
+  )
+
+  // GET /v1/sessions/tee/:id — poll session status. When status='ready', response includes
+  // serverPublicKey, endpoint, and tunnelIp for WireGuard client configuration.
+  router.get(
+    '/sessions/tee/:id',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      res.json({ session: await api.getTeeSession(auctor, String(req.params.id)) })
     }),
   )
 
