@@ -464,10 +464,18 @@ export class CrystalApi {
     if (!session) return
     session.status = 'ready'
     session.serverPublicKey = signal.wgPublicKey
-    session.endpoint = signal.endpoint
     session.tunnelIp = '10.13.0.2'
-    const host = signal.endpoint.split(':')[0]
-    session.proxyUrl = `socks5+ws://${host}:8080?bind=true&gost=true`
+    if (session.podId) {
+      // SECURE RunPod pod: no raw public IP. RunPod proxies WSS → gost on port 8080.
+      // WireGuard peer endpoint is the pod's loopback, reachable through the gost proxy.
+      session.proxyUrl = `socks5+wss://${session.podId}-8080.proxy.runpod.net`
+      session.endpoint = '127.0.0.1:51820'
+    } else {
+      // Community cloud or local dev: runner self-reports its public endpoint.
+      const host = signal.endpoint.split(':')[0]
+      session.proxyUrl = `socks5+ws://${host}:8080?bind=true&gost=true`
+      session.endpoint = signal.endpoint
+    }
   }
 
   async handleRunnerHeartbeat(signal: RunnerHeartbeatSignal): Promise<{ continue: boolean }> {
