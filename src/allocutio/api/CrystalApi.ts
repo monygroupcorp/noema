@@ -444,7 +444,7 @@ export class CrystalApi {
         if (result.costPerHrUsd !== undefined) s.costPerHrUsd = result.costPerHrUsd
       }).catch(err => {
         const s = this.teeSessions.get(sessionId)
-        if (s) s.status = 'ended'
+        if (s) { s.status = 'ended'; s.error = String(err) }
         console.error('[tee] pod provision failed', { sessionId, err: String(err) })
       })
     }
@@ -642,6 +642,7 @@ export interface ProvisionTeeSessionOpts {
 export interface TeeSessionView {
   sessionId: string
   status: 'provisioning' | 'ready' | 'ended'
+  error?: string
   serverPublicKey?: string
   endpoint?: string      // WireGuard UDP endpoint (ip:port)
   proxyUrl?: string      // gost SOCKS5+WS URL for the browser WASM tunnel
@@ -672,6 +673,7 @@ interface TeeSession {
   sessionId: string
   auctor: AuctorKey
   status: 'provisioning' | 'ready' | 'ended'
+  error?: string
   gpuClass?: string
   budgetImpetus: bigint
   wgClientPublicKey: string
@@ -692,6 +694,7 @@ function toTeeSessionView(s: TeeSession): TeeSessionView {
   return {
     sessionId: s.sessionId,
     status: s.status,
+    ...(s.error ? { error: s.error } : {}),
     ...(s.serverPublicKey ? { serverPublicKey: s.serverPublicKey } : {}),
     ...(s.endpoint ? { endpoint: s.endpoint } : {}),
     ...(s.proxyUrl ? { proxyUrl: s.proxyUrl } : {}),
