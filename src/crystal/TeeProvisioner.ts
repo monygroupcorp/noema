@@ -15,8 +15,9 @@ import { makeLogger } from '../lib/logger.js'
 
 const log = makeLogger('tee:provisioner')
 
-const RUNPOD_API = 'https://rest.runpod.io/v1'
-const MACHINE_POLL_MS = 8_000
+const RUNPOD_REST_API = 'https://rest.runpod.io/v1'
+const RUNPOD_GQL_API  = 'https://api.runpod.io/graphql'
+const MACHINE_POLL_MS    = 8_000
 const MACHINE_TIMEOUT_MS = 5 * 60 * 1_000
 
 export interface TeeProvisionerConfig {
@@ -54,7 +55,7 @@ export class TeeProvisioner {
   }
 
   async terminate(podId: string): Promise<void> {
-    const res = await fetch(`${RUNPOD_API}/pods/${podId}`, {
+    const res = await fetch(`${RUNPOD_REST_API}/pods/${podId}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${this.config.apiKey}` },
     })
@@ -65,32 +66,43 @@ export class TeeProvisioner {
   }
 
   private async _startPod(sessionId: string, wgClientPublicKey: string): Promise<{ podId: string; costPerHrUsd?: number }> {
-    const body: Record<string, unknown> = {
-      name: `noema-tee-${sessionId.slice(0, 8)}`,
-      imageName: this.config.imageId,
-      gpuCount: 1,
-      cloudType: this.config.cloudType ?? 'SECURE',
-      containerDiskInGb: this.config.containerDiskGb ?? 40,
-      // Only gost (TCP 8080) needs to be public — WireGuard tunnels through it via RunPod's HTTP proxy.
-      ports: ['8080/http'],
-      supportPublicIp: true,
-      // NET_ADMIN is required for WireGuard interface creation (ip link add wg-tee-server).
-      dockerArgs: '--cap-add NET_ADMIN',
-      env: {
-        SESSION_ID:        sessionId,
-        PLATFORM_CALLBACK: this.config.platformCallback,
-        WG_CLIENT_PUBKEY:  wgClientPublicKey,
-      },
-    }
-    if (this.config.gpuTypeIds) body.gpuTypeIds = this.config.gpuTypeIds
+    const cloudType = this.config.cloudType ?? 'SECURE'
+    const envVars   = [
+      { key: 'SESSION_ID',        value: sessionId },
+      { key: 'PLATFORM_CALLBACK', value: this.config.platformCallback },
+      { key: 'WG_CLIENT_PUBKEY',  value: wgClientPublicKey },
+    ]
+    const gpuTypePart = this.config.gpuTypeIds?.length
+      ? `gpuTypeIdList: ${JSON.stringify(this.config.gpuTypeIds)},`
+      : ''
 
-    const res = await fetch(`${RUNPOD_API}/pods`, {
+    // GraphQL API supports dockerArgs (REST v1 does not).
+    // NET_ADMIN is required for WireGuard interface creation in entrypoint.sh.
+    const envGql = envVars.map(e => `{ key: "${e.key}", value: ${JSON.stringify(e.value)} }`).join(', ')
+    const query = `
+      mutation {
+        podFindAndDeployOnDemand(input: {
+          name: "noema-tee-${sessionId.slice(0, 8)}"
+          imageName: "${this.config.imageId}"
+          gpuCount: 1
+          cloudType: ${cloudType}
+          containerDiskInGb: ${this.config.containerDiskGb ?? 40}
+          ports: "8080/http"
+          supportPublicIp: true
+          dockerArgs: "--cap-add NET_ADMIN"
+          ${gpuTypePart}
+          env: [${envGql}]
+        }) {
+          id
+          costPerHr
+        }
+      }
+    `
+
+    const res = await fetch(`${RUNPOD_GQL_API}?api_key=${this.config.apiKey}`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.config.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
     })
 
     if (!res.ok) {
@@ -98,8 +110,14 @@ export class TeeProvisioner {
       throw new Error(`RunPod pod creation failed: ${res.status} ${text}`)
     }
 
-    const data = await res.json() as { id: string; costPerHr?: number }
-    return { podId: data.id, costPerHrUsd: data.costPerHr }
+    const json = await res.json() as {
+      data?: { podFindAndDeployOnDemand?: { id: string; costPerHr?: number } }
+      errors?: Array<{ message: string }>
+    }
+    if (json.errors?.length) throw new Error(`RunPod error: ${json.errors.map(e => e.message).join(', ')}`)
+    const pod = json.data?.podFindAndDeployOnDemand
+    if (!pod?.id) throw new Error(`RunPod returned no pod id: ${JSON.stringify(json)}`)
+    return { podId: pod.id, costPerHrUsd: pod.costPerHr }
   }
 
   private async _waitForMachine(podId: string): Promise<void> {
@@ -107,7 +125,7 @@ export class TeeProvisioner {
     while (Date.now() < deadline) {
       await sleep(MACHINE_POLL_MS)
       try {
-        const res = await fetch(`${RUNPOD_API}/pods/${podId}`, {
+        const res = await fetch(`${RUNPOD_REST_API}/pods/${podId}`, {
           headers: { 'Authorization': `Bearer ${this.config.apiKey}` },
         })
         if (res.ok) {
