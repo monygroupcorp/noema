@@ -16,36 +16,23 @@ import { makeLogger } from '../lib/logger.js'
 const log = makeLogger('tee:provisioner')
 
 const RUNPOD_API = 'https://rest.runpod.io/v1'
-const POLL_INTERVAL_MS = 8_000
-const PROVISION_TIMEOUT_MS = 10 * 60 * 1_000
 
 export interface TeeProvisionerConfig {
   apiKey: string
-  /** Docker image for the TEE runner (e.g. "monyrth/tee-runner:latest"). */
+  /** Docker image for the TEE runner (e.g. "monygroup/tee-runner:latest"). */
   imageId: string
-  /** Public URL the pod calls back to (e.g. "https://api.noema.ai"). No trailing slash. */
+  /** Public URL the pod calls back to (e.g. "https://staging.noema.art"). No trailing slash. */
   platformCallback: string
   /** RunPod GPU type IDs to request. If omitted, RunPod picks any available. */
   gpuTypeIds?: string[]
   cloudType?: string
   containerDiskGb?: number
-  provisionTimeoutMs?: number
-  pollIntervalMs?: number
 }
 
 export interface TeeProvisionResult {
   podId: string
-  publicIp: string
   /** USD/hr from the RunPod API — set as costPerHrUsd on the TeeSession for billing. */
   costPerHrUsd?: number
-}
-
-interface RunPodStatus {
-  desiredStatus?: string
-  publicIp?: string
-  costPerHr?: number
-  machine?: { gpuDisplayName?: string; dataCenterId?: string }
-  portMappings?: Record<string, number>
 }
 
 export class TeeProvisioner {
@@ -55,11 +42,11 @@ export class TeeProvisioner {
     sessionId: string,
     wgClientPublicKey: string,
   ): Promise<TeeProvisionResult> {
-    const podId = await this._startPod(sessionId, wgClientPublicKey)
-    log.info('pod created', { podId, sessionId })
-    const { publicIp, costPerHrUsd } = await this._waitForIp(podId)
-    log.info('pod running', { podId, publicIp, costPerHrUsd })
-    return { podId, publicIp, costPerHrUsd }
+    const { podId, costPerHrUsd } = await this._startPod(sessionId, wgClientPublicKey)
+    log.info('pod created', { podId, sessionId, costPerHrUsd })
+    // SECURE pods never get a publicIp field — they're exposed via {podId}-8080.proxy.runpod.net.
+    // The session transitions to 'ready' via /runner/ready callback from the pod; we return now.
+    return { podId, costPerHrUsd }
   }
 
   async terminate(podId: string): Promise<void> {
@@ -73,14 +60,14 @@ export class TeeProvisioner {
     }
   }
 
-  private async _startPod(sessionId: string, wgClientPublicKey: string): Promise<string> {
+  private async _startPod(sessionId: string, wgClientPublicKey: string): Promise<{ podId: string; costPerHrUsd?: number }> {
     const body: Record<string, unknown> = {
       name: `noema-tee-${sessionId.slice(0, 8)}`,
       imageName: this.config.imageId,
       gpuCount: 1,
       cloudType: this.config.cloudType ?? 'SECURE',
       containerDiskInGb: this.config.containerDiskGb ?? 40,
-      // Only gost (TCP 8080) needs to be public — WireGuard tunnels through it.
+      // Only gost (TCP 8080) needs to be public — WireGuard tunnels through it via RunPod's HTTP proxy.
       ports: ['8080/http'],
       supportPublicIp: true,
       env: {
@@ -105,44 +92,7 @@ export class TeeProvisioner {
       throw new Error(`RunPod pod creation failed: ${res.status} ${text}`)
     }
 
-    const data = await res.json() as { id: string }
-    return data.id
+    const data = await res.json() as { id: string; costPerHr?: number }
+    return { podId: data.id, costPerHrUsd: data.costPerHr }
   }
-
-  private async _waitForIp(podId: string): Promise<{ publicIp: string; costPerHrUsd?: number }> {
-    const timeout = this.config.provisionTimeoutMs ?? PROVISION_TIMEOUT_MS
-    const pollMs  = this.config.pollIntervalMs    ?? POLL_INTERVAL_MS
-    const deadline = Date.now() + timeout
-
-    while (Date.now() < deadline) {
-      const info = await this._pollStatus(podId)
-      if (info) return info
-      await sleep(pollMs)
-    }
-    throw new Error(`TEE pod ${podId} did not get a public IP within ${timeout}ms`)
-  }
-
-  private async _pollStatus(podId: string): Promise<{ publicIp: string; costPerHrUsd?: number } | null> {
-    let res: Response
-    try {
-      res = await fetch(`${RUNPOD_API}/pods/${podId}`, {
-        headers: { 'Authorization': `Bearer ${this.config.apiKey}` },
-      })
-    } catch {
-      return null
-    }
-    if (!res.ok) return null
-
-    const data = await res.json() as RunPodStatus
-    if (data.desiredStatus !== 'RUNNING' || !data.publicIp) return null
-
-    return {
-      publicIp:     data.publicIp,
-      costPerHrUsd: data.costPerHr,
-    }
-  }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms))
 }
