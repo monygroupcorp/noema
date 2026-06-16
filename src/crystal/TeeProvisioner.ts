@@ -78,7 +78,7 @@ export class TeeProvisioner {
       containerDiskInGb: this.config.containerDiskGb ?? 40,
       ports: ['8080/http'],
       supportPublicIp: true,
-      gpuTypeId: this.config.gpuTypeIds?.[0] ?? DEFAULT_GPU_TYPE,
+      gpuTypeIds: this.config.gpuTypeIds ?? [DEFAULT_GPU_TYPE],
       env: {
         SESSION_ID:        sessionId,
         PLATFORM_CALLBACK: this.config.platformCallback,
