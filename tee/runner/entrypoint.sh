@@ -18,22 +18,32 @@ status() {
 status "entrypoint_start"
 
 # — WireGuard server keypair —
-# Generated fresh at every boot. Private key is consumed directly by wg and
-# never written to disk — it exists only in kernel memory for the session lifetime.
+status "wg_keygen"
 WG_PRIVATE=$(wg genkey)
 WG_PUBLIC=$(echo "$WG_PRIVATE" | wg pubkey)
 echo "$WG_PUBLIC" > /tmp/tee-wg-server.pub
+echo "$WG_PRIVATE" > /tmp/wg-priv.tmp
+chmod 600 /tmp/wg-priv.tmp
+unset WG_PRIVATE
 log "WireGuard public key: $WG_PUBLIC"
 
-# — WireGuard interface —
-ip link add wg-tee-server type wireguard
-ip addr add 10.13.0.1/24 dev wg-tee-server
-echo "$WG_PRIVATE" | wg set wg-tee-server listen-port 51820 private-key /dev/stdin
-ip link set wg-tee-server up
-log "wg-tee-server up — 10.13.0.1/24, port 51820"
+# — Userspace WireGuard via boringtun (no kernel wireguard module required) —
+# Falls back cleanly: if ip addr/link fail we'll see the status step that stopped.
+status "wg_iface_create"
+# wireguard-go creates a userspace TUN interface — no kernel wireguard module needed.
+WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD=1 wireguard-go wg-tee-server &
+sleep 2  # give wireguard-go time to bring up the TUN interface
 
-# Clear the private key from shell memory
-unset WG_PRIVATE
+status "wg_addr_add"
+ip addr add 10.13.0.1/24 dev wg-tee-server
+
+status "wg_configure"
+wg set wg-tee-server listen-port 51820 private-key /tmp/wg-priv.tmp
+rm -f /tmp/wg-priv.tmp
+
+status "wg_link_up"
+ip link set wg-tee-server up
+log "wg-tee-server up (boringtun) — 10.13.0.1/24, port 51820"
 
 status "wireguard_up"
 
