@@ -5,6 +5,18 @@ set -euo pipefail
 
 log() { echo "[entrypoint] $*"; }
 
+status() {
+  local step="$1"
+  log "status: $step"
+  if [ -n "${PLATFORM_CALLBACK:-}" ] && [ -n "${SESSION_ID:-}" ]; then
+    curl -sf -X POST "${PLATFORM_CALLBACK}/runner/status" \
+      -H "Content-Type: application/json" \
+      -d "{\"sessionId\":\"${SESSION_ID}\",\"step\":\"${step}\"}" || true
+  fi
+}
+
+status "entrypoint_start"
+
 # — WireGuard server keypair —
 # Generated fresh at every boot. Private key is consumed directly by wg and
 # never written to disk — it exists only in kernel memory for the session lifetime.
@@ -23,6 +35,8 @@ log "wg-tee-server up — 10.13.0.1/24, port 51820"
 # Clear the private key from shell memory
 unset WG_PRIVATE
 
+status "wireguard_up"
+
 # Pre-register the browser's WireGuard peer if supplied by the provisioner
 if [ -n "${WG_CLIENT_PUBKEY:-}" ]; then
     wg set wg-tee-server peer "$WG_CLIENT_PUBKEY" allowed-ips 10.13.0.2/32
@@ -35,6 +49,9 @@ gost -L "socks5+ws://:${GOST_PORT}?udp=true&udpBufferSize=4096&bind=true" &
 GOST_PID=$!
 log "gost SOCKS5+WS bridge on :${GOST_PORT} (pid $GOST_PID)"
 
+status "gost_up"
+
 # — Runner —
 log "starting runner — session ${SESSION_ID:-local-dev}"
+status "runner_start"
 exec python3 /opt/runner/runner.py

@@ -627,9 +627,14 @@ async function main(): Promise<void> {
 
   // TEE runner lifecycle callbacks — internal pod-to-platform signals, not user-facing API.
   // Mounted at /runner/* (not /v1) so PLATFORM_CALLBACK env var on the pod points here directly.
-  app.post('/runner/ready',     express.json(), async (req, res) => { await crystalApi.handleRunnerReady(req.body);                             res.json({ ok: true }) })
+  app.post('/runner/ready',     express.json(), async (req, res) => { await crystalApi.handleRunnerReady(req.body);     res.json({ ok: true }) })
   app.post('/runner/heartbeat', express.json(), async (req, res) => { res.json(await crystalApi.handleRunnerHeartbeat(req.body)) })
-  app.post('/runner/ended',     express.json(), async (req, res) => { await crystalApi.handleRunnerEnded(req.body);                             res.json({ ok: true }) })
+  app.post('/runner/ended',     express.json(), async (req, res) => { await crystalApi.handleRunnerEnded(req.body);     res.json({ ok: true }) })
+  app.post('/runner/status',    express.json(), async (req, res) => {
+    const { sessionId, step } = req.body as { sessionId?: string; step?: string }
+    log.info('[tee] runner status', { sessionId, step })
+    res.json({ ok: true })
+  })
 
   // TEE browser client — served at /tee so it shares the same origin as the API (no CORS needed).
   app.use('/tee', express.static(path.join(__dirname, '..', 'tee', 'browser'), {
