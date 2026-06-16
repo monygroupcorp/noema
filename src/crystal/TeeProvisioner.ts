@@ -15,10 +15,11 @@ import { makeLogger } from '../lib/logger.js'
 
 const log = makeLogger('tee:provisioner')
 
-const RUNPOD_REST_API = 'https://rest.runpod.io/v1'
-const RUNPOD_GQL_API  = 'https://api.runpod.io/graphql'
+const RUNPOD_REST_API    = 'https://rest.runpod.io/v1'
+const RUNPOD_GQL_API     = 'https://api.runpod.io/graphql'
 const MACHINE_POLL_MS    = 8_000
 const MACHINE_TIMEOUT_MS = 5 * 60 * 1_000
+const DEFAULT_GPU_TYPE   = 'NVIDIA GeForce RTX 4090'
 
 export interface TeeProvisionerConfig {
   apiKey: string
@@ -66,15 +67,13 @@ export class TeeProvisioner {
   }
 
   private async _startPod(sessionId: string, wgClientPublicKey: string): Promise<{ podId: string; costPerHrUsd?: number }> {
-    const cloudType = this.config.cloudType ?? 'SECURE'
-    const envVars   = [
+    const cloudType  = this.config.cloudType ?? 'SECURE'
+    const gpuTypeId  = this.config.gpuTypeIds?.[0] ?? DEFAULT_GPU_TYPE
+    const envVars    = [
       { key: 'SESSION_ID',        value: sessionId },
       { key: 'PLATFORM_CALLBACK', value: this.config.platformCallback },
       { key: 'WG_CLIENT_PUBKEY',  value: wgClientPublicKey },
     ]
-    const gpuTypePart = this.config.gpuTypeIds?.length
-      ? `gpuTypeIdList: ${JSON.stringify(this.config.gpuTypeIds)},`
-      : ''
 
     // GraphQL API supports dockerArgs (REST v1 does not).
     // NET_ADMIN is required for WireGuard interface creation in entrypoint.sh.
@@ -90,7 +89,7 @@ export class TeeProvisioner {
           ports: "8080/http"
           supportPublicIp: true
           dockerArgs: "--cap-add NET_ADMIN"
-          ${gpuTypePart}
+          gpuTypeId: "${gpuTypeId}"
           env: [${envGql}]
         }) {
           id
