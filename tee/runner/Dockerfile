@@ -16,9 +16,11 @@ FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# System packages — WireGuard + network tools + Python 3.11
+# System packages — WireGuard + userspace fallback + network tools + Python 3.11
+# wireguard-go provides userspace WireGuard (no kernel module / NET_ADMIN needed for iface creation).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wireguard-tools \
+    wireguard-go \
     iproute2 \
     iptables \
     curl \
@@ -29,8 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# gost — SOCKS5+WS bridge (replaces wstunnel; speaks the socksgo protocol)
-# Single static binary (~20MB) — the only non-infra addition to the base image.
+# gost — SOCKS5+WS bridge
 ARG GOST_VERSION=3.2.6
 RUN curl -fsSL \
     "https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_amd64.tar.gz" \
