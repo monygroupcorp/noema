@@ -19,7 +19,6 @@ const RUNPOD_REST_API    = 'https://rest.runpod.io/v1'
 const RUNPOD_GQL_API     = 'https://api.runpod.io/graphql'
 const MACHINE_POLL_MS    = 8_000
 const MACHINE_TIMEOUT_MS = 5 * 60 * 1_000
-const DEFAULT_GPU_TYPE   = 'NVIDIA GeForce RTX 4090'
 
 export interface TeeProvisionerConfig {
   apiKey: string
@@ -78,7 +77,7 @@ export class TeeProvisioner {
       containerDiskInGb: this.config.containerDiskGb ?? 40,
       ports: ['8080/http'],
       supportPublicIp: true,
-      gpuTypeIds: this.config.gpuTypeIds ?? [DEFAULT_GPU_TYPE],
+      ...(this.config.gpuTypeIds ? { gpuTypeIds: this.config.gpuTypeIds } : {}),
       env: {
         SESSION_ID:        sessionId,
         PLATFORM_CALLBACK: this.config.platformCallback,
