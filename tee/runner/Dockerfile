@@ -1,28 +1,29 @@
-# TEE Runner base image
+# TEE Runner — two-stage build.
+# Build context: tee/ directory (docker build -f runner/Dockerfile tee/)
 #
-# One image for all private compute sessions. Runtimes are pre-installed so
-# Fundamentum.install is empty in production — the image IS the install step.
-#
-# Required capabilities at runtime: --cap-add NET_ADMIN (WireGuard interface)
-# Required env at runtime:
-#   SESSION_ID           assigned by platform
-#   PLATFORM_CALLBACK    platform lifecycle endpoint
-#   WG_ENDPOINT          public IP:port of this pod (set by provisioner after boot)
-#   GOST_PORT            WebSocket bridge port (default: 8080)
-#   ATTESTATION_STUB     "true" for local dev (skips hardware attestation)
+# Stage 1: compile tee-wg-server (userspace WireGuard, no kernel TUN / NET_ADMIN).
+# Stage 2: runtime image with CUDA, gost, Python runner, and the wg-server binary.
 
+# ── Stage 1: Go builder ──────────────────────────────────────────────────────
+FROM golang:1.25-bookworm AS wg-builder
+
+WORKDIR /build
+COPY wg-server/go.mod wg-server/go.sum ./
+RUN go mod download
+
+COPY wg-server/ ./
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tee-wg-server .
+
+# ── Stage 2: runtime ─────────────────────────────────────────────────────────
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# System packages — WireGuard + userspace fallback + network tools + Python 3.11
-# wireguard-go provides userspace WireGuard (no kernel module / NET_ADMIN needed for iface creation).
+# wireguard-tools: only for wg genkey / wg pubkey (no kernel module needed).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wireguard-tools \
-    wireguard-go \
     iproute2 \
-    iptables \
     curl \
     wget \
     git \
@@ -31,28 +32,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# gost — SOCKS5+WS bridge
+# gost — SOCKS5+WS bridge (browser → pod UDP transport for WireGuard packets)
 ARG GOST_VERSION=3.2.6
 RUN curl -fsSL \
     "https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_amd64.tar.gz" \
     | tar -xz -C /usr/local/bin gost \
     && chmod +x /usr/local/bin/gost
 
-# Runtimes (vLLM, llama-server, ComfyUI) are NOT pre-installed.
-# They are declared in Fundamentum.install and run at setup time.
-# This keeps the image lean and provider-agnostic.
+# tee-wg-server — userspace WireGuard (gVisor netstack, no TUN / NET_ADMIN)
+COPY --from=wg-builder /tee-wg-server /usr/local/bin/tee-wg-server
 
 # Runner
 WORKDIR /opt/runner
-COPY requirements.txt ./
+COPY runner/requirements.txt ./
 RUN pip3 install --no-cache-dir -r requirements.txt
-COPY runner.py ./
+COPY runner/runner.py ./
 
 # Entrypoint
-COPY entrypoint.sh /entrypoint.sh
+COPY runner/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# gost WebSocket bridge port (WireGuard stays on 51820 internally)
 EXPOSE 8080
 
 ENTRYPOINT ["/entrypoint.sh"]

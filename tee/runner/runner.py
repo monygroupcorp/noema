@@ -76,11 +76,16 @@ def _alloc_port() -> int:
 # — Platform signals —
 
 async def signal_ready():
+    try:
+        wg_log = open("/tmp/wg-server.log").read()[-4000:]
+    except Exception:
+        wg_log = "(wg-server.log not found)"
     payload = {
         "sessionId": SESSION_ID,
         "endpoint": WG_ENDPOINT,
         "wgPublicKey": _read_wg_pubkey(),
         "attestation": "stub" if ATTESTATION_STUB else await _get_attestation(),
+        "wgServerLog": wg_log,
     }
     async with aiohttp.ClientSession() as s:
         async with s.post(f"{PLATFORM_CALLBACK}/runner/ready", json=payload) as r:
@@ -250,6 +255,21 @@ async def status():
 @app.get("/health")
 async def health():
     return {"ok": True}
+
+
+@app.get("/debug/wglog")
+async def debug_wglog():
+    try:
+        return {"log": open("/tmp/wg-server.log").read()}
+    except Exception as e:
+        return {"log": f"(error reading log: {e})"}
+
+
+@app.get("/debug/netstat")
+async def debug_netstat():
+    import subprocess
+    out = subprocess.run(["ss", "-ulnp"], capture_output=True, text=True).stdout
+    return {"ss_udp": out}
 
 
 # — Helpers —
