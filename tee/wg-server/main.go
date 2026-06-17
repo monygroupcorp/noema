@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -45,6 +46,14 @@ import (
 )
 
 func main() {
+	// Write logs directly to /tmp/wg-server.log in addition to stderr.
+	// The entrypoint's >/tmp/wg-server.log 2>&1 redirect is unreliable in
+	// some container environments; opening the file here guarantees log output.
+	if lf, err := os.OpenFile("/tmp/wg-server.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+		log.SetOutput(io.MultiWriter(os.Stderr, lf))
+		defer lf.Close()
+	}
+
 	privKeyB64 := mustEnv("WG_PRIVATE_KEY")
 	clientPubKeyB64 := mustEnv("WG_CLIENT_PUBKEY")
 	runnerUpstream := envOr("RUNNER_UPSTREAM", "http://127.0.0.1:7998")
