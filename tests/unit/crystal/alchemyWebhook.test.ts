@@ -193,7 +193,7 @@ function makePaymentLog(overrides: {
   const payer = (overrides.payer ?? PAYER).toLowerCase()
   const amount = overrides.amount ?? AMOUNT
   return {
-    address: addr,
+    account: { address: addr },
     topics: [
       TOPIC_PAYMENT,
       encodeTopic(payer),
@@ -215,7 +215,7 @@ function makeNftLog(overrides: {
   const token = overrides.token ?? '0x2222222222222222222222222222222222222222'
   const tokenId = overrides.tokenId ?? 42n
   return {
-    address: VAULT,
+    account: { address: VAULT },
     topics: [
       TOPIC_NFT_RECEIVED,
       encodeTopic(operator),
@@ -228,7 +228,7 @@ function makeNftLog(overrides: {
 
 function makeErc1155Log() {
   return {
-    address: VAULT,
+    account: { address: VAULT },
     topics: [TOPIC_ERC1155],
     data: '0x',
     transaction: { hash: TX_HASH },
