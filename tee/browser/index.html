@@ -536,21 +536,18 @@
       syncButtons();
     }
 
-    // — Fetch /debug/wglog from the pod directly via the RunPod HTTP proxy.
-    //   Requires no tunnel — the endpoint is on the same port 8080 as the SOCKS5 server.
+    // — Fetch /debug/wglog via the platform proxy (avoids CORS on the RunPod URL).
     async function fetchServerLog() {
-      const proxyUrl = currentProxyUrl || document.getElementById('localProxyUrl').value.trim();
-      if (!proxyUrl) { log('[WGLOG] no proxyUrl — start a session first'); return; }
-      const httpBase = proxyUrl
-        .replace(/^socks5\+wss:\/\//, 'https://')
-        .replace(/^socks5\+ws:\/\//, 'http://')
-        .replace(/\?.*$/, '')
-        .replace(/\/$/, '');
-      const logUrl = httpBase + '/debug/wglog';
-      log('[WGLOG] fetching ' + logUrl);
+      if (!sessionId) { log('[WGLOG] no active session — start a session first'); return; }
+      const platformUrl = document.getElementById('platformUrl').value.trim();
+      const authToken   = document.getElementById('authToken').value.trim();
+      log('[WGLOG] fetching server log…');
       try {
-        const res = await fetch(logUrl);
+        const res = await fetch(platformUrl + '/v1/sessions/tee/' + sessionId + '/wglog', {
+          headers: authToken ? { 'Authorization': 'Bearer ' + authToken } : {},
+        });
         const text = await res.text();
+        if (!res.ok) { log('[WGLOG] error ' + res.status + ': ' + text); return; }
         log('[WGLOG] ===== SERVER LOG =====\n' + text + '\n[WGLOG] ===== END =====');
       } catch (e) {
         log('[WGLOG] fetch failed: ' + e);
