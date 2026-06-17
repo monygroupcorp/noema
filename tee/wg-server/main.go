@@ -173,10 +173,26 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write(data)
 	})
+	// ws-test: manual WebSocket reachability probe. Test from browser DevTools:
+	//   new WebSocket('wss://PODID-8080.proxy.runpod.net/ws-test')
+	// Logs whether RunPod's proxy forwards the Upgrade header.
+	mux.HandleFunc("/ws-test", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("ws-test: from=%s upgrade=%q", r.RemoteAddr, r.Header.Get("Upgrade"))
+		wsConn, err := cws.Accept(w, r, &cws.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			log.Printf("ws-test: accept error: %v", err)
+			return
+		}
+		log.Printf("ws-test: connected OK")
+		_ = wsConn.CloseNow()
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Plain HTTP requests (e.g. RunPod health probes on /) return 200 instead of failing
-		// the WS upgrade, which would cause RunPod to mark the pod unhealthy and restart it.
-		if r.Header.Get("Upgrade") != "websocket" {
+		// Log every request so we can see whether WebSocket upgrades are reaching the server
+		// and whether RunPod's proxy forwards the Upgrade header.
+		upgrade := r.Header.Get("Upgrade")
+		log.Printf("http: %s %s Upgrade=%q from=%s", r.Method, r.URL.Path, upgrade, r.RemoteAddr)
+
+		if upgrade != "websocket" {
 			w.Header().Set("Content-Type", "text/plain")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("ok"))
