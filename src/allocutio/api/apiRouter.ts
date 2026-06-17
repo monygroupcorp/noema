@@ -341,5 +341,28 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     }),
   )
 
+  // GET /v1/sessions/tee/:id/wglog — proxy /debug/wglog from the pod over the platform.
+  // Avoids CORS: browser calls this instead of fetching the RunPod URL directly.
+  router.get(
+    '/sessions/tee/:id/wglog',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      const session = await api.getTeeSession(auctor, String(req.params.id))
+      if (!session.proxyUrl) {
+        res.status(404).json({ error: { code: 'not_found', message: 'session has no proxy URL yet' } })
+        return
+      }
+      const httpBase = session.proxyUrl
+        .replace(/^socks5\+wss:\/\//, 'https://')
+        .replace(/^socks5\+ws:\/\//, 'http://')
+        .replace(/\?.*$/, '')
+        .replace(/\/$/, '')
+      const podRes = await fetch(httpBase + '/debug/wglog')
+      const text = await podRes.text()
+      res.setHeader('Content-Type', 'text/plain')
+      res.send(text)
+    }),
+  )
+
   return router
 }
