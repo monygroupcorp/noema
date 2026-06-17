@@ -76,6 +76,34 @@ export interface Gradus {
   condicio?: string
   /** If true, this step can run in parallel with adjacent steps at the same ordine */
   parallel?: boolean
+  /**
+   * "ligamina" = bonds/ties (plural of ligamen) — per-port input wiring.
+   * Maps THIS step's aditus port → a prior step's exitus. Only cross-step wires
+   * need an entry; ports not listed bind by name from the compositus modus's own
+   * `aditus`, then fall back to the child modus's `Porta.default`.
+   *
+   * Resolution precedence for a step's input port (most specific first):
+   *   explicit ligamen (prior step exitus) > compositus aditus by name > child default.
+   *
+   * Example (sd1-5 → upscale): the upscale step declares
+   *   `{ image: { gradus: 0, exitus: 'image' } }`
+   * — its `image` input is fed by step 0's `image` output.
+   *
+   * This is the distilled form of a `TabulaVinculum`: the Tabula→Modus publish
+   * compiler emits `ligamina` from the canvas edges. (ADR-0008.)
+   */
+  ligamina?: Record<string, GradusFons>
+}
+
+/**
+ * GradusFons — "fons" = source/spring in Latin. Where one input port of a gradus
+ * draws its value: the exitus of a prior step (by ordine + output port key).
+ */
+export interface GradusFons {
+  /** The ordine of the prior step whose exitus feeds this port */
+  gradus: number
+  /** The output port key on that prior step's exitus */
+  exitus: string
 }
 
 /**

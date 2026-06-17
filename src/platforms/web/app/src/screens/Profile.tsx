@@ -1,6 +1,8 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
+import { usePromptAssist, useAssistField } from '../state/promptAssist';
+import { fieldExample } from '../lib/promptExamples';
 
 const SWATCHES = ['#5b8cff', '#8b76d6', '#57c8a6', '#d68f6f', '#d66f9a', '#d6c46f'];
 const LOOKS = ['Clean', 'N64 / low-poly', 'Vapor', 'Editorial'];
@@ -8,6 +10,12 @@ const LOOKS = ['Clean', 'N64 / low-poly', 'Vapor', 'Editorial'];
 export function Profile() {
   const [accent, setAccent] = useState('#5b8cff');
   const [look, setLook] = useState('Clean');
+  const [vibe, setVibe] = useState('');
+
+  // The kit generator's "vibe" field gets Concierge augmentation too.
+  const { clear } = usePromptAssist();
+  const assist = useAssistField();
+  useEffect(() => () => clear(), [clear]);
 
   // live-preview the accent across this page's subtree (reverts on leaving the screen)
   const pageStyle = { ['--accent' as keyof CSSProperties]: accent } as CSSProperties;
@@ -47,7 +55,21 @@ export function Profile() {
         <div className="sectionhead">Generate a kit</div>
         <div className="sidecard">
           <div style={{ display: 'flex', gap: 'var(--s3)' }}>
-            <input className="inp" placeholder="Describe the vibe…" />
+            <input
+              className="inp"
+              placeholder="Describe the vibe…"
+              value={vibe}
+              onChange={(e) => setVibe(e.target.value)}
+              {...assist({
+                flowId: 'profile-kit',
+                flowName: 'Profile kit',
+                fieldKey: 'vibe',
+                fieldLabel: 'vibe',
+                example: fieldExample('profile-kit', 'vibe'),
+                hint: 'The aesthetic for your skin kit — colors, era, materials, mood.',
+                apply: setVibe,
+              })}
+            />
             <button className="btn"><Ic name="sparkles" /> Generate kit</button>
           </div>
           <div className="mono" style={{ color: 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 'var(--s3)' }}>

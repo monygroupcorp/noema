@@ -31,6 +31,7 @@ const FIELD_EXAMPLES: Record<string, string> = {
   lyrics: '[Verse]\n___\n[Chorus]\n___',
   tags: 'cinematic, warm, analog',
   negative_prompt: 'blurry, low quality, extra limbs, watermark',
+  'profile-kit:vibe': 'vaporwave chrome, neon magenta + cyan, retro-future, soft glow…',
 };
 
 /** The best example for a specific field: curated per-field → flow medium → description. */

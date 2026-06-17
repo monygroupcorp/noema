@@ -32,6 +32,15 @@ export interface DispatchDeps {
    * Arcanum-proof runs carry neither side, so nothing is recorded for them.
    */
   actumIndex?: ActumIndexStore
+  /**
+   * Compositus engine (ADR-0008). When present, a `compositus` modus is handed to
+   * `compositusCursor.start` (which creates the cost-free parent actum and dispatches
+   * step 0) instead of resolving a cursor — a compositus has no `ministerium`, so
+   * `cursorum.resolve` would throw. Atomic modi take the normal path below.
+   */
+  compositusCursor?: {
+    start(inceptio: Inceptio, modus: import('../types/modus.js').Modus): Promise<Actum>
+  }
 }
 
 /**
@@ -52,6 +61,19 @@ export async function dispatchInceptio(
   inceptio: Inceptio,
 ): Promise<{ actum: Actum; exitus?: Record<string, unknown> }> {
   const { inceptor, modorum, cursorum, completor } = deps
+
+  // 0. Compositus branch (ADR-0008) — a modus made of modi has no ministerium and
+  // can't resolve a cursor. Hand it to the CompositusCursor, which creates the
+  // cost-free parent actum and dispatches step 0 (each step re-enters this function
+  // as an ordinary atomic run). Returns the parent actum as the run handle.
+  const target = await modorum.find(inceptio.modusId, inceptio.versio)
+  if (target?.genus === 'compositus') {
+    if (!deps.compositusCursor) {
+      throw new Error(`Compositus modus '${inceptio.modusId}' dispatched but no compositusCursor configured`)
+    }
+    const parent = await deps.compositusCursor.start(inceptio, target)
+    return { actum: parent }
+  }
 
   // 1. Initiate — balance check + lock signa + create Actum.
   const actum = await inceptor.initiate(inceptio)
@@ -75,8 +97,11 @@ export async function dispatchInceptio(
     }
   }
 
-  // 2. Resolve modus and cursor.
-  const modus = await modorum.find(actum.modusId, actum.modusVersiono)
+  // 2. Resolve modus and cursor. Reuse the modus already fetched in step 0 when it
+  // matches the locked version (the common path); only re-fetch if it somehow differs.
+  const modus = (target && target.versio === actum.modusVersiono)
+    ? target
+    : await modorum.find(actum.modusId, actum.modusVersiono)
   if (!modus) throw new Error(`Modus '${actum.modusId}' not found after initiation`)
 
   const cursor = cursorum.resolve(modus)

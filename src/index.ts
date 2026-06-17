@@ -352,7 +352,14 @@ async function main(): Promise<void> {
   const expired = await ring.actorum.findExpired()
   if (expired.length) {
     log.info(`Recovering ${expired.length} expired acta`)
-    await Promise.all(expired.map(a => ring.completor.fail(a, 'Actum expired — pod never reported back')))
+    await Promise.all(expired.map(async a => {
+      await ring.completor.fail(a, 'Actum expired — pod never reported back')
+      // A recovered compositus step must fail its parent run too — the sweep bypasses
+      // the webhook, so notify the engine directly (fails the parent + frees state).
+      if (a.compositum) {
+        await ring.compositusCursor.onStepComplete(a.compositum.parentId, a, false).catch(() => {})
+      }
+    }))
   }
 
   // 3d. Reconcile against live RunPod pods — terminate any pod not tracked by the DB.
@@ -443,6 +450,7 @@ async function main(): Promise<void> {
     cursorum: ring.cursorum,
     inceptor: ring.inceptor,
     actumIndex: ring.actumIndex,
+    compositusCursor: ring.compositusCursor,
   })
   router.register(executeFlow)
 
@@ -562,6 +570,7 @@ async function main(): Promise<void> {
     actumIndex: ring.actumIndex,
     modos: ring.modos,
     consuetudinum,
+    compositusCursor: ring.compositusCursor,
     ...(ring.conductor ? { conductor: ring.conductor } : {}),
     ...(ring.teeProvisioner ? { teeProvisioner: ring.teeProvisioner } : {}),
     // Fire-and-forget studio-ready/failed webhook (optional sugar over polling).
@@ -723,6 +732,7 @@ async function main(): Promise<void> {
     actumIndex: ring.actumIndex,
     vestigiorum: ring.vestigiorum,
     collectioRouter: ring.collectioCursor,
+    compositusRouter: ring.compositusCursor,
   }))
 
   // --- Web app (new React frontend) — gated by STAGING_FRONTEND, registered AFTER all API routes ---

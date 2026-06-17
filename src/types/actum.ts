@@ -83,6 +83,17 @@ export interface Actum {
   /** FK → Materia. The physical pod that executed this actum. */
   materiamId?: string
 
+  /**
+   * Compositus linkage — set ONLY on the child step acta of a compositus run.
+   * Marks this actum as step `ordine` of the parent compositus actum `parentId`.
+   * Non-identity by construction: both are actum ids. Lets the execution webhook
+   * route a completed step back to the CompositusCursor (which threads sibling
+   * exitus into the next step's aditus) and lets restart-rehydrate reconstruct
+   * in-flight chains via `Actorum.findInFlight()` grouped by `parentId`. The
+   * parent actum itself carries no `compositum`. (ADR-0008.)
+   */
+  compositum?: { parentId: string; ordine: number }
+
   // ── Compute spec ────────────────────────────────────────────────────────
   /**
    * How the user dispatched this generation.
