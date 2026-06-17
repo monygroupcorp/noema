@@ -260,4 +260,11 @@ export interface Inceptio {
    * and unioned into `spec.models` by the Compiler. Absent for ordinary `/make`.
    */
   pinnedModels?: ModelRef[]
+  /**
+   * Compositus linkage — set ONLY when this initiation is a child step of a
+   * compositus run (ADR-0008). Stamped onto the created Actum as `Actum.compositum`
+   * so the execution webhook can route the completed step back to the
+   * CompositusCursor. Absent for ordinary single-modus runs.
+   */
+  compositum?: { parentId: string; ordine: number }
 }

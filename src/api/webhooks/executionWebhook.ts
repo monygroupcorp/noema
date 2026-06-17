@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import type { Actorum, ActumCompletor } from '../../types/cursus.js'
+import type { Actum } from '../../types/actum.js'
 import type { Exitus } from '../../types/cursus.js'
 import type { Nexus } from '../../types/nexus.js'
 import type { Signorum } from '../../types/significandi.js'
@@ -48,6 +49,12 @@ export interface ExecutionWebhookDeps {
   collectioRouter?: {
     findCollectioIdForActum(actumId: string): string | null
     onActumCompleta(collectioId: string, actumId: string, success: boolean): Promise<void>
+  }
+  /** Optional: routes compositus step completions back to CompositusCursor (ADR-0008).
+   *  Unlike collections, the child step carries its own `compositum.parentId`, so no
+   *  lookup table is needed — the webhook reads the link off the completed actum. */
+  compositusRouter?: {
+    onStepComplete(parentId: string, childActum: Actum, success: boolean): Promise<void>
   }
 }
 
@@ -219,6 +226,12 @@ export async function handleExecutionWebhook(
         if (collectioId) await deps.collectioRouter.onActumCompleta(collectioId, actum.id, true)
       }
 
+      // Route compositus step acta to CompositusCursor — the completed step carries
+      // its own parent link, so it advances the chain (next step) or completes the parent.
+      if (deps.compositusRouter && completed.compositum) {
+        await deps.compositusRouter.onStepComplete(completed.compositum.parentId, completed, true)
+      }
+
       if (identity && deps.vestigiorum && !('bursaToken' in identity)) {
         createVestigiumFromActum(completed, identity, deps.vestigiorum).catch(() => {})
       }
@@ -252,6 +265,12 @@ export async function handleExecutionWebhook(
       if (deps.collectioRouter) {
         const collectioId = deps.collectioRouter.findCollectioIdForActum(actum.id)
         if (collectioId) await deps.collectioRouter.onActumCompleta(collectioId, actum.id, false)
+      }
+
+      // A failed compositus step fails the parent run (release-only — no charge for
+      // the unrun remainder).
+      if (deps.compositusRouter && actum.compositum) {
+        await deps.compositusRouter.onStepComplete(actum.compositum.parentId, actum, false)
       }
 
       // Drop the actumIndex entry — terminal status, no longer "in flight".

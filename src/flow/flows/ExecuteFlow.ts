@@ -72,6 +72,9 @@ export interface ExecuteFlowDeps {
    * stays intact — see `src/types/actumIndex.ts`). Commitment runs skip.
    */
   actumIndex?: import('../../types/actumIndex.js').ActumIndexStore
+  /** Compositus engine (ADR-0008) — passed straight through to dispatchInceptio so
+   *  /run can cast a compositus (spell) modus. Absent → compositus modi throw. */
+  compositusCursor?: import('../../execution/dispatchInceptio.js').DispatchDeps['compositusCursor']
 }
 
 // ---------------------------------------------------------------------------

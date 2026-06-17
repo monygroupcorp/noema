@@ -47,6 +47,7 @@ import { HuggingFaceCursor } from './crystal/HuggingFaceCursor.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
 import { ActumCompletor } from './execution/ActumCompletor.js'
 import { ActumInceptor } from './execution/ActumInceptor.js'
+import { dispatchInceptio } from './execution/dispatchInceptio.js'
 import { MongoMandatum } from './crystal/MongoMandatum.js'
 import { MongoCorpus } from './crystal/MongoCorpus.js'
 import { MongoCollectio } from './crystal/MongoCollectio.js'
@@ -61,6 +62,7 @@ import { MongoDictum } from './crystal/MongoDictum.js'
 import { MongoMemoria } from './crystal/MongoMemoria.js'
 import { MongoIntelligendi } from './crystal/MongoIntelligendi.js'
 import { CollectioCursor } from './crystal/CollectioCursor.js'
+import { CompositusCursor } from './crystal/CompositusCursor.js'
 import { ArcanumIssuer } from './ledger/ArcanumIssuer.js'
 import { MongoArcanumTree } from './arcanum/ArcanumTree.js'
 import { ArcanumVerifier, MongoNullifierStore, type VerifyFn } from './arcanum/ArcanumVerifier.js'
@@ -103,6 +105,9 @@ export interface Ring {
   actumIndex: import('./types/actumIndex.js').ActumIndexStore
   deployments: DeploymentumStore
   collectioCursor: CollectioCursor
+  /** Compositus chain orchestrator (ADR-0008) — runs a modus-made-of-modi, threading
+   *  each step's exitus into the next step's aditus. Sibling of collectioCursor. */
+  compositusCursor: CompositusCursor
   /** Studio-lifecycle anchor (ADR-0006) — present only when a Procurator
    *  (provisionStudio-capable pod client) is wired. Composes Materia + Hospitium
    *  + Modo + budget tessera into one verb both adapters call. */
@@ -378,6 +383,17 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const arcanumIssuer = new ArcanumIssuer({ signorum, tree: arcanumTree })
   const collectioCursor = new CollectioCursor(inceptor, collectiones, actorum, {})
 
+  // Compositus engine (ADR-0008): its child steps dispatch through the SAME
+  // dispatchInceptio used everywhere else, so they get the full rail (actumIndex,
+  // hooks). Self-reference resolved via a holder — `compositusCursor` is assigned
+  // before any dispatch call can fire.
+  let compositusCursor: CompositusCursor
+  compositusCursor = new CompositusCursor(
+    (inc) => dispatchInceptio({ inceptor, modorum, cursorum, completor, actumIndex, compositusCursor }, inc),
+    modorum,
+    actorum,
+  )
+
   return {
     actorum, modorum, signorum, animae, personae, vestigiorum, modos,
     mandatores, corpora, collectiones, tabulae, testimonia,
@@ -388,6 +404,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     materiae, hospitia, actumIndex, deployments,
     fundamentorum,
     collectioCursor,
+    compositusCursor,
     ...(conductor ? { conductor } : {}),
     ...(config.teeProvisioner ? { teeProvisioner: new TeeProvisioner(config.teeProvisioner) } : {}),
   }

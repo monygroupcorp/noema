@@ -46,3 +46,14 @@ export function usePromptAssist(): Pick<AssistCtx, 'setTarget' | 'clear'> {
   const ctx = useContext(Ctx);
   return { setTarget: ctx?.setTarget ?? (() => {}), clear: ctx?.clear ?? (() => {}) };
 }
+
+/**
+ * One-line field wiring. Spread the result onto any text input/textarea to make the
+ * Concierge slide open with augmentation when it's focused:
+ *   <input {...assist({ flowId, flowName, fieldKey, fieldLabel, example, apply })} />
+ * Pair with a `useEffect(() => () => clear(), [clear])` so the target releases on unmount.
+ */
+export function useAssistField(): (spec: AssistTarget) => { onFocus: () => void } {
+  const { setTarget } = usePromptAssist();
+  return useCallback((spec: AssistTarget) => ({ onFocus: () => setTarget(spec) }), [setTarget]);
+}

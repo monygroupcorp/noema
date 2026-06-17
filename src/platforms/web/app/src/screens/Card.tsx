@@ -5,7 +5,7 @@ import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
 import { api, type FlowDescription, type Run } from '../lib/api';
 import { isPinned, togglePin } from '../lib/pins';
-import { usePromptAssist } from '../state/promptAssist';
+import { usePromptAssist, useAssistField } from '../state/promptAssist';
 import { fieldExample } from '../lib/promptExamples';
 
 const IMPETUS_USD = 0.000337; // 1 impetus ≈ this many dollars (upper-bound reservation units)
@@ -33,7 +33,8 @@ export function Card() {
 
   // Prompt augmentation: register prompt fields with the Concierge on focus,
   // and release the assist target when this card unmounts.
-  const { setTarget, clear } = usePromptAssist();
+  const { clear } = usePromptAssist();
+  const assist = useAssistField();
   useEffect(() => () => clear(), [clear]);
 
   // fetch the real flow schema + seed the form from defaults
@@ -151,8 +152,8 @@ export function Card() {
             const isText = p.type === 'string' && !isUri;
             const isLong = isText && /prompt|lyric|story|description|caption|text|message|content/i.test(k);
             // Wired onto every free-text field so the Concierge slides open on focus.
-            const assist = isText
-              ? { onFocus: () => setTarget({
+            const assistProps = isText
+              ? assist({
                   flowId: id,
                   flowName: name,
                   fieldKey: k,
@@ -160,7 +161,7 @@ export function Card() {
                   example: fieldExample(id, k, p.description),
                   hint: p.description,
                   apply: (t: string) => set(k, t),
-                }) }
+                })
               : {};
             return (
               <div className="field" key={k}>
@@ -173,9 +174,9 @@ export function Card() {
                 ) : isNum ? (
                   <input className="inp mono" type="number" value={aditus[k] === '' || aditus[k] === undefined ? '' : Number(aditus[k])} placeholder={p.description} onChange={(e) => set(k, e.target.value === '' ? '' : Number(e.target.value))} />
                 ) : isLong ? (
-                  <textarea className="ta2" value={String(aditus[k] ?? '')} placeholder={p.description} onChange={(e) => set(k, e.target.value)} {...assist} />
+                  <textarea className="ta2" value={String(aditus[k] ?? '')} placeholder={p.description} onChange={(e) => set(k, e.target.value)} {...assistProps} />
                 ) : (
-                  <input className="inp" value={String(aditus[k] ?? '')} placeholder={p.description} onChange={(e) => set(k, e.target.value)} {...assist} />
+                  <input className="inp" value={String(aditus[k] ?? '')} placeholder={p.description} onChange={(e) => set(k, e.target.value)} {...assistProps} />
                 )}
               </div>
             );
