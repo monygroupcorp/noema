@@ -190,7 +190,20 @@ func main() {
 		// Log every request so we can see whether WebSocket upgrades are reaching the server
 		// and whether RunPod's proxy forwards the Upgrade header.
 		upgrade := r.Header.Get("Upgrade")
-		log.Printf("http: %s %s Upgrade=%q from=%s", r.Method, r.URL.Path, upgrade, r.RemoteAddr)
+		wsKey := r.Header.Get("Sec-WebSocket-Key")
+		log.Printf("http: %s %s Upgrade=%q WsKey=%t from=%s", r.Method, r.URL.Path, upgrade, wsKey != "", r.RemoteAddr)
+
+		// RunPod's Nginx proxy strips the Upgrade and Connection headers (standard proxy
+		// behaviour without explicit proxy_set_header Upgrade). The Sec-WebSocket-Key header
+		// survives because it's not in the forbidden/hop-by-hop list. If the key is present
+		// the client is definitely attempting a WebSocket handshake — restore the missing
+		// hop-by-hop headers so cws.Accept can complete the upgrade correctly.
+		if upgrade == "" && wsKey != "" {
+			r.Header.Set("Upgrade", "websocket")
+			r.Header.Set("Connection", "Upgrade")
+			upgrade = "websocket"
+			log.Printf("http: restored Upgrade header (proxy stripping detected)")
+		}
 
 		if upgrade != "websocket" {
 			w.Header().Set("Content-Type", "text/plain")
