@@ -164,7 +164,9 @@ func main() {
 			log.Printf("ws accept: %v", err)
 			return
 		}
-		go socks.AcceptWS(r.Context(), wsConn, false)
+		// Block — r.Context() must stay alive for the lifetime of the SOCKS5 session.
+		// http.Server runs each handler in its own goroutine, so blocking is correct.
+		socks.AcceptWS(r.Context(), wsConn, false)
 	})
 
 	log.Printf("ready — serving SOCKS5+WS on %s", socksAddr)
