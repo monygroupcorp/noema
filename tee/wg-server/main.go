@@ -1,19 +1,23 @@
-// tee-wg-server — userspace WireGuard server for TEE runner.
+// tee-wg-server — userspace WireGuard server + SOCKS5+WS proxy for TEE runner.
 //
-// Uses gVisor netstack (same as the browser WASM) so no /dev/net/tun or
-// NET_ADMIN capability is required. Listens for WireGuard packets on real
-// OS UDP port 51820, decrypts them via wgo/device + vtun, and reverse-proxies
-// the resulting HTTP traffic to the runner at http://127.0.0.1:7998.
+// No /dev/net/tun or NET_ADMIN capability required.
+//
+//   - SOCKS5+WS on port 8080:  browser WASM sends WireGuard UDP packets through
+//     this proxy using the Gost UDP TUN extension (asciimoth/socksgo protocol).
+//   - WireGuard on UDP 51820:  real OS socket; receives WG packets relayed by the
+//     SOCKS5 proxy and decrypts them via the gVisor vtun.
+//   - HTTP reverse proxy on vtun 10.13.0.1:7998: exposes the runner at
+//     127.0.0.1:7998 through the encrypted WireGuard tunnel.
 //
 // Required env:
-//   WG_PRIVATE_KEY   base64 WireGuard private key (from wg genkey)
-//   WG_CLIENT_PUBKEY base64 of the browser's WireGuard public key
-//   RUNNER_UPSTREAM  runner HTTP address (default: http://127.0.0.1:7998)
-//   WG_LISTEN_PORT   UDP listen port (default: 51820)
-//   WG_TUNNEL_IP     server tunnel IP (default: 10.13.0.1)
-//   WG_PEER_IP       peer (browser) tunnel IP (default: 10.13.0.2)
-//   WG_LISTEN_ADDR   HTTP listen address on vtun (default: WG_TUNNEL_IP:7998)
-
+//
+//	WG_PRIVATE_KEY   base64 WireGuard private key (from wg genkey)
+//	WG_CLIENT_PUBKEY base64 of the browser's WireGuard public key
+//	RUNNER_UPSTREAM  runner HTTP address (default: http://127.0.0.1:7998)
+//	WG_LISTEN_PORT   UDP listen port (default: 51820)
+//	WG_TUNNEL_IP     server tunnel IP (default: 10.13.0.1)
+//	WG_PEER_IP       peer (browser) tunnel IP (default: 10.13.0.2)
+//	SOCKS_ADDR       SOCKS5+WS listen address (default: 0.0.0.0:8080)
 package main
 
 import (
@@ -21,6 +25,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/netip"
@@ -32,7 +37,10 @@ import (
 	conn "github.com/asciimoth/batchudp"
 	"github.com/asciimoth/gonnect"
 	"github.com/asciimoth/gonnect-netstack/vtun"
+	"github.com/asciimoth/socksgo"
+	"github.com/asciimoth/socksgo/protocol"
 	"github.com/asciimoth/wgo/device"
+	cws "github.com/coder/websocket"
 )
 
 func main() {
@@ -43,6 +51,7 @@ func main() {
 	tunnelIPStr := envOr("WG_TUNNEL_IP", "10.13.0.1")
 	peerIPStr := envOr("WG_PEER_IP", "10.13.0.2")
 	httpListenAddr := envOr("WG_LISTEN_ADDR", tunnelIPStr+":7998")
+	socksAddr := envOr("SOCKS_ADDR", "0.0.0.0:8080")
 
 	privKey, err := parseKey(privKeyB64)
 	if err != nil {
@@ -62,8 +71,8 @@ func main() {
 		log.Fatalf("parse WG_PEER_IP: %v", err)
 	}
 
-	log.Printf("starting tee-wg-server tunnel=%s peer=%s upstream=%s udp=%d",
-		tunnelIP, peerIP, runnerUpstream, listenPort)
+	log.Printf("starting tee-wg-server tunnel=%s peer=%s upstream=%s udp=%d socks=%s",
+		tunnelIP, peerIP, runnerUpstream, listenPort, socksAddr)
 
 	// Build virtual TUN backed by gVisor netstack — no /dev/net/tun needed.
 	vt, err := (&vtun.Opts{
@@ -83,7 +92,7 @@ func main() {
 		log.Fatal("vtun ready timeout")
 	}
 
-	// WireGuard device using real OS UDP (NativeNetwork) — no SOCKS5 needed.
+	// WireGuard device using real OS UDP — no SOCKS5 needed on the server side.
 	osNet := gonnect.DefaultNetwork(nil)
 	dev := device.NewDevice(vt, conn.NewDefaultBind(osNet), device.NewLogger(device.LogLevelDebug, "[tee-wg] "))
 	defer dev.Close()
@@ -108,21 +117,59 @@ func main() {
 	}
 	log.Printf("WireGuard up — UDP :%d, vtun %s, peer %s/32", listenPort, tunnelIP, peerIP)
 
-	// Reverse proxy: vtun TCP listener → runner
+	// Reverse proxy on vtun: HTTP from inside the WG tunnel → runner.
 	upstream, err := url.Parse(runnerUpstream)
 	if err != nil {
 		log.Fatalf("parse runner upstream: %v", err)
 	}
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
-
 	ln, err := vt.Listen(context.Background(), "tcp", httpListenAddr)
 	if err != nil {
 		log.Fatalf("listen on vtun %s: %v", httpListenAddr, err)
 	}
 	log.Printf("HTTP proxy on vtun %s → %s", httpListenAddr, runnerUpstream)
+	go func() {
+		if err := http.Serve(ln, proxy); err != nil {
+			log.Printf("vtun http proxy: %v", err)
+		}
+	}()
 
-	if err := http.Serve(ln, proxy); err != nil {
-		log.Fatalf("serve: %v", err)
+	// SOCKS5+WS server — replaces gost.
+	// Browser WASM (asciimoth/socksgo client) connects here and sends WireGuard
+	// UDP packets using the Gost UDP TUN extension (CmdGostUDPTun = 0xF3).
+	// We use the same socksgo library on both sides: guaranteed compatibility.
+	socks := &socksgo.Server{
+		Auth: (&protocol.AuthHandlers{}).Add(&protocol.NoAuthHandler{}),
+		// DefaultCommandHandlers includes CmdGostUDPTun (0xF3).
+		Handlers: socksgo.DefaultCommandHandlers,
+		// osNet provides real OS UDP sockets for forwarding WG packets.
+		PacketDialer:   osNet.PacketDial,
+		PacketListener: osNet.ListenPacket,
+		Dialer:         osNet.Dial,
+	}
+
+	socksLn, err := net.Listen("tcp", socksAddr)
+	if err != nil {
+		log.Fatalf("listen SOCKS5+WS %s: %v", socksAddr, err)
+	}
+	log.Printf("SOCKS5+WS server on %s (replaces gost)", socksAddr)
+
+	// Serve WebSocket-based SOCKS5 connections.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		wsConn, err := cws.Accept(w, r, &cws.AcceptOptions{
+			InsecureSkipVerify: true, // TLS terminated by RunPod proxy
+		})
+		if err != nil {
+			log.Printf("ws accept: %v", err)
+			return
+		}
+		go socks.AcceptWS(r.Context(), wsConn, false)
+	})
+
+	log.Printf("ready — serving SOCKS5+WS on %s", socksAddr)
+	if err := http.Serve(socksLn, mux); err != nil {
+		log.Fatalf("socks5+ws serve: %v", err)
 	}
 }
 
@@ -161,4 +208,3 @@ func mustUint16(s string) uint16 {
 	}
 	return uint16(n)
 }
-

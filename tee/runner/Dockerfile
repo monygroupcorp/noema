@@ -1,8 +1,10 @@
 # TEE Runner — two-stage build.
 # Build context: tee/ directory (docker build -f runner/Dockerfile tee/)
 #
-# Stage 1: compile tee-wg-server (userspace WireGuard, no kernel TUN / NET_ADMIN).
-# Stage 2: runtime image with CUDA, gost, Python runner, and the wg-server binary.
+# Stage 1: compile tee-wg-server:
+#   - userspace WireGuard (gVisor netstack, no kernel TUN / NET_ADMIN)
+#   - SOCKS5+WS server (asciimoth/socksgo, replaces gost)
+# Stage 2: runtime image with CUDA, Python runner, and the wg-server binary.
 
 # ── Stage 1: Go builder ──────────────────────────────────────────────────────
 FROM golang:1.25-bookworm AS wg-builder
@@ -32,14 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# gost — SOCKS5+WS bridge (browser → pod UDP transport for WireGuard packets)
-ARG GOST_VERSION=3.2.6
-RUN curl -fsSL \
-    "https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_amd64.tar.gz" \
-    | tar -xz -C /usr/local/bin gost \
-    && chmod +x /usr/local/bin/gost
-
-# tee-wg-server — userspace WireGuard (gVisor netstack, no TUN / NET_ADMIN)
+# tee-wg-server — WireGuard + SOCKS5+WS server (gVisor netstack, no TUN / NET_ADMIN)
 COPY --from=wg-builder /tee-wg-server /usr/local/bin/tee-wg-server
 
 # Runner
