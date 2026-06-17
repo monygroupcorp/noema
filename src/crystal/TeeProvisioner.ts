@@ -44,8 +44,12 @@ export class TeeProvisioner {
   async provision(
     sessionId: string,
     wgClientPublicKey: string,
+    onPodCreated?: (podId: string) => void,
   ): Promise<TeeProvisionResult> {
     const { podId, costPerHrUsd } = await this._startPod(sessionId, wgClientPublicKey)
+    // Notify caller immediately so session.podId is set before the pod's runner/ready callback
+    // can arrive (which happens while _waitForRuntime is still polling).
+    onPodCreated?.(podId)
     log.info('pod created', { podId, sessionId, costPerHrUsd })
     // Poll via GraphQL runtime field until the container is actually running.
     // SECURE pods never get publicIp; proxy URL {podId}-8080.proxy.runpod.net
