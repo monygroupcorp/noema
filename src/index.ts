@@ -725,6 +725,23 @@ async function main(): Promise<void> {
     collectioRouter: ring.collectioCursor,
   }))
 
+  // --- Web app (new React frontend) — gated by STAGING_FRONTEND, registered AFTER all API routes ---
+  if (process.env.STAGING_FRONTEND === '1') {
+    const appDist = path.join(__dirname, '..', 'src', 'platforms', 'web', 'app', 'dist')
+    const appIndex = path.join(appDist, 'index.html')
+    if (existsSync(appIndex)) {
+      app.use(express.static(appDist))
+      // SPA fallback: serve index.html for browser navigations, but never shadow API routers.
+      app.get('*', (req, res, next) => {
+        if (!req.accepts('html') || /^\/(v1|api|webhooks|telegram|widget)\b/.test(req.path)) return next()
+        res.sendFile(appIndex)
+      })
+      log.info(`[web] serving React app from ${appDist}`)
+    } else {
+      log.warn(`[web] STAGING_FRONTEND=1 but app build missing at ${appIndex}`)
+    }
+  }
+
   app.listen(PORT, () => log.info(`Listening on :${PORT}`))
 
   // 9. Register bot commands with Telegram
