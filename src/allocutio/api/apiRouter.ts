@@ -330,5 +330,15 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     }),
   )
 
+  // DELETE /v1/sessions/tee/:id — end session and terminate the RunPod pod.
+  router.delete(
+    '/sessions/tee/:id',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      await api.endTeeSession(auctor, String(req.params.id))
+      res.status(204).end()
+    }),
+  )
+
   return router
 }

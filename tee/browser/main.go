@@ -172,10 +172,6 @@ func (a *app) connect(args []js.Value) (any, error) {
 		dev.Close(); _ = vt.Close()
 		return nil, fmt.Errorf("add peer: %w", err)
 	}
-	if err := dev.SetPeerProtocolVersion(peerPublic.toDevice(), 1); err != nil {
-		dev.Close(); _ = vt.Close()
-		return nil, fmt.Errorf("set peer protocol version: %w", err)
-	}
 	if len(allowedIPs) > 0 {
 		if err := dev.ReplacePeerAllowedIPs(peerPublic.toDevice(), allowedIPs); err != nil {
 			dev.Close(); _ = vt.Close()
