@@ -118,11 +118,18 @@ function initializeWebPlatform(services, options = {}) {
     app,
     initializeRoutes: async () => {
       // --- Hostname routing ---
-      const frontendDist = path.join(__dirname, 'frontend', 'dist');
+      // STAGING_FRONTEND=1 serves the new React app (src/platforms/web/app); otherwise the
+      // legacy microact frontend. Falls back to legacy if the new build is absent.
+      const useNewApp = process.env.STAGING_FRONTEND === '1'
+        && fs.existsSync(path.join(__dirname, 'app', 'dist', 'index.html'));
+      const frontendDist = useNewApp
+        ? path.join(__dirname, 'app', 'dist')
+        : path.join(__dirname, 'frontend', 'dist');
       const frontendIndexHtml = path.join(frontendDist, 'index.html');
+      logger.info(`[WebPlatform] Serving frontend from ${useNewApp ? 'app (new React)' : 'frontend (legacy)'}: ${frontendDist}`);
 
       if (!fs.existsSync(frontendIndexHtml)) {
-        throw new Error(`Frontend not built: ${frontendIndexHtml} not found. Run 'npm run build' in src/platforms/web/frontend/ first.`);
+        throw new Error(`Frontend not built: ${frontendIndexHtml} not found. Build the web app first.`);
       }
 
       const isAppSubdomain = (req) => {
