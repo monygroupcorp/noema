@@ -34,7 +34,7 @@ import type { Inceptio } from '../../types/cursus.js'
 import { aggregateStatus, materiaStudioStatus } from '../lexicon/status/aggregate.js'
 import type { ModoStore } from '../../types/modo.js'
 import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModus.js'
-import { dispatchInceptio } from '../../execution/dispatchInceptio.js'
+import { dispatchInceptio, type DispatchDeps } from '../../execution/dispatchInceptio.js'
 import { toRun } from './runProjection.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
 import { Errors } from './errors.js'
@@ -75,6 +75,9 @@ export interface CrystalApiDeps {
   modos?: ModoStore
   /** Optional owner-keyed verb→flow rebinds; falls through to CANON_VERBS when absent. */
   consuetudinum?: Consuetudinum
+  /** Compositus engine (ADR-0008) — lets `invokeFlow` dispatch a compositus (spell)
+   *  modus, not just atomics. Absent → compositus modi throw at dispatch. */
+  compositusCursor?: DispatchDeps['compositusCursor']
   /** RunPod pod provisioner for TEE private compute sessions. Absent → local dev (manual runner). */
   teeProvisioner?: TeeProvisioner
 }
@@ -125,7 +128,7 @@ export class CrystalApi {
     aditus: Record<string, unknown>,
     opts: InvokeOpts = {},
   ): Promise<Run> {
-    const { inceptor, modorum, cursorum, completor, actumIndex, consuetudinum } = this.deps
+    const { inceptor, modorum, cursorum, completor, actumIndex, consuetudinum, compositusCursor } = this.deps
 
     let modusId: string | undefined
     if (target.modusId) {
@@ -155,7 +158,7 @@ export class CrystalApi {
     }
 
     const { actum } = await dispatchInceptio(
-      { inceptor, modorum, cursorum, completor, actumIndex },
+      { inceptor, modorum, cursorum, completor, actumIndex, compositusCursor },
       inceptio,
     )
     return toRun(actum)
@@ -227,10 +230,34 @@ export class CrystalApi {
     }
   }
 
-  /** The cursor's read-only upper-bound reservation for a modus + aditus. */
+  /**
+   * The cursor's read-only upper-bound reservation for a modus + aditus.
+   *
+   * A compositus (spell) has no cursor of its own — its estimate is the SUM of its
+   * steps' reservations (ADR-0008). Per-step aditus is bound by name from the cast
+   * inputs only; values that a step would receive via `ligamina` (a prior step's
+   * exitus) aren't known until run time, so this is an estimate, not a guarantee —
+   * which is the right contract for a storefront price (cold-start / GPU-fit make
+   * every upfront number an approximation).
+   */
   private async _estimate(modusId: string, aditus: Record<string, unknown>): Promise<bigint> {
     const modus = await this.deps.modorum.find(modusId)
     if (!modus) throw Errors.notFoundFlow(modusId)
+
+    if (modus.genus === 'compositus') {
+      let total = 0n
+      for (const g of modus.gradus ?? []) {
+        const child = await this.deps.modorum.find(g.modusId)
+        if (!child) continue  // validated for real at dispatch; a missing child just doesn't add cost here
+        const childAditus: Record<string, unknown> = {}
+        for (const key of Object.keys(child.aditus)) {
+          if (key in aditus) childAditus[key] = aditus[key]
+        }
+        total += await this.deps.cursorum.resolve(child).reserve(child, childAditus)
+      }
+      return total
+    }
+
     return this.deps.cursorum.resolve(modus).reserve(modus, aditus)
   }
 
@@ -437,7 +464,13 @@ export class CrystalApi {
 
     if (this.deps.teeProvisioner) {
       // Fire-and-forget: pod boot is async; session transitions to 'ready' via /runner/ready callback.
-      this.deps.teeProvisioner.provision(sessionId, opts.wgClientPublicKey).then(result => {
+      // onPodCreated sets podId immediately after _startPod() so that when the runner/ready callback
+      // arrives (while _waitForRuntime is still polling), session.podId is already set and
+      // handleRunnerReady picks the correct RunPod proxy URL instead of the localhost fallback.
+      this.deps.teeProvisioner.provision(sessionId, opts.wgClientPublicKey, (podId) => {
+        const s = this.teeSessions.get(sessionId)
+        if (s) s.podId = podId
+      }).then(result => {
         const s = this.teeSessions.get(sessionId)
         if (!s) return
         s.podId = result.podId
