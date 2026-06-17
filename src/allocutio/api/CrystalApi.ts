@@ -460,8 +460,12 @@ export class CrystalApi {
   }
 
   async handleRunnerReady(signal: RunnerReadySignal): Promise<void> {
+    console.info('[tee] runner ready', { sessionId: signal.sessionId, wgKey: signal.wgPublicKey?.slice(0, 12) })
     const session = this.teeSessions.get(signal.sessionId)
-    if (!session) return
+    if (!session) {
+      console.warn('[tee] runner ready: no session found', { sessionId: signal.sessionId })
+      return
+    }
     session.status = 'ready'
     session.serverPublicKey = signal.wgPublicKey
     session.tunnelIp = '10.13.0.2'
