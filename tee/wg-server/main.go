@@ -32,6 +32,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	conn "github.com/asciimoth/batchudp"
@@ -164,11 +165,21 @@ func main() {
 	})
 	// Debug log endpoint — readable from outside the WG tunnel (port 8080 is publicly proxied).
 	// Exposes /tmp/wg-server.log: everything tee-wg-server has printed to stdout/stderr.
+	// ?tail=N returns only the last N lines (default: all).
 	mux.HandleFunc("/debug/wglog", func(w http.ResponseWriter, r *http.Request) {
 		data, err := os.ReadFile("/tmp/wg-server.log")
 		if err != nil {
 			http.Error(w, "log not found: "+err.Error(), http.StatusNotFound)
 			return
+		}
+		if tailStr := r.URL.Query().Get("tail"); tailStr != "" {
+			if n, err2 := strconv.Atoi(tailStr); err2 == nil && n > 0 {
+				lines := strings.Split(string(data), "\n")
+				if len(lines) > n {
+					lines = lines[len(lines)-n:]
+				}
+				data = []byte(strings.Join(lines, "\n"))
+			}
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write(data)
@@ -177,7 +188,13 @@ func main() {
 	//   new WebSocket('wss://PODID-8080.proxy.runpod.net/ws-test')
 	// Logs whether RunPod's proxy forwards the Upgrade header.
 	mux.HandleFunc("/ws-test", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("ws-test: from=%s upgrade=%q", r.RemoteAddr, r.Header.Get("Upgrade"))
+		upgrade := r.Header.Get("Upgrade")
+		wsKey := r.Header.Get("Sec-WebSocket-Key")
+		if upgrade == "" && wsKey != "" {
+			r.Header.Set("Upgrade", "websocket")
+			r.Header.Set("Connection", "Upgrade")
+		}
+		log.Printf("ws-test: from=%s upgrade=%q wskey=%t", r.RemoteAddr, r.Header.Get("Upgrade"), wsKey != "")
 		wsConn, err := cws.Accept(w, r, &cws.AcceptOptions{InsecureSkipVerify: true})
 		if err != nil {
 			log.Printf("ws-test: accept error: %v", err)
