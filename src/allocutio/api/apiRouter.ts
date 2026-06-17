@@ -357,7 +357,8 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
         .replace(/^socks5\+ws:\/\//, 'http://')
         .replace(/\?.*$/, '')
         .replace(/\/$/, '')
-      const podRes = await fetch(httpBase + '/debug/wglog')
+      const tail = req.query.tail ? `?tail=${encodeURIComponent(String(req.query.tail))}` : ''
+      const podRes = await fetch(httpBase + '/debug/wglog' + tail)
       const text = await podRes.text()
       res.setHeader('Content-Type', 'text/plain')
       res.send(text)

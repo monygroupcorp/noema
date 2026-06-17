@@ -543,7 +543,7 @@
       const authToken   = document.getElementById('authToken').value.trim();
       log('[WGLOG] fetching server log…');
       try {
-        const res = await fetch(platformUrl + '/v1/sessions/tee/' + sessionId + '/wglog', {
+        const res = await fetch(platformUrl + '/v1/sessions/tee/' + sessionId + '/wglog?tail=200', {
           headers: authToken ? { 'Authorization': 'Bearer ' + authToken } : {},
         });
         const text = await res.text();
