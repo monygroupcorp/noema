@@ -461,6 +461,7 @@ export class CrystalApi {
 
   async handleRunnerReady(signal: RunnerReadySignal): Promise<void> {
     console.info('[tee] runner ready', { sessionId: signal.sessionId, wgKey: signal.wgPublicKey?.slice(0, 12) })
+    if (signal.wgServerLog) console.info('[tee] wg-server.log at ready:\n' + signal.wgServerLog)
     const session = this.teeSessions.get(signal.sessionId)
     if (!session) {
       console.warn('[tee] runner ready: no session found', { sessionId: signal.sessionId })
@@ -667,6 +668,7 @@ export interface RunnerReadySignal {
   endpoint: string
   wgPublicKey: string
   attestation?: string
+  wgServerLog?: string
 }
 
 export interface RunnerHeartbeatSignal {
