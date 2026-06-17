@@ -1,11 +1,19 @@
 # syntax=docker/dockerfile:1.2
 
-# Stage 1: Build frontend (JS web app)
+# Stage 1: Build frontend (legacy microact web app)
 FROM node:20-slim AS frontend-builder
 WORKDIR /frontend
 COPY src/platforms/web/frontend/package*.json ./
 RUN npm ci
 COPY src/platforms/web/frontend/ ./
+RUN npm run build
+
+# Stage 1b: Build the new React app (served when STAGING_FRONTEND=1)
+FROM node:20-slim AS app-builder
+WORKDIR /webapp
+COPY src/platforms/web/app/package*.json ./
+RUN npm ci
+COPY src/platforms/web/app/ ./
 RUN npm run build
 
 # Stage 2: Compile TypeScript
@@ -50,6 +58,9 @@ COPY --from=ts-builder /build/dist ./dist
 
 # Copy built frontend from stage 1
 COPY --from=frontend-builder /frontend/dist ./src/platforms/web/frontend/dist
+
+# Copy the new React app build (served when STAGING_FRONTEND=1)
+COPY --from=app-builder /webapp/dist ./src/platforms/web/app/dist
 
 # Copy ESM builds needed by the widget iframe (served via /widget/lib/*)
 COPY --from=frontend-builder /frontend/node_modules/@monygroupcorp/microact/dist/microact.esm.js ./src/platforms/web/frontend/node_modules/@monygroupcorp/microact/dist/microact.esm.js
