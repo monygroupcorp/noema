@@ -156,7 +156,21 @@ func main() {
 
 	// Serve WebSocket-based SOCKS5 connections.
 	mux := http.NewServeMux()
+	// Health check — RunPod probes port 8080 with plain HTTP; return 200 to prevent restart loop.
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Plain HTTP requests (e.g. RunPod health probes on /) return 200 instead of failing
+		// the WS upgrade, which would cause RunPod to mark the pod unhealthy and restart it.
+		if r.Header.Get("Upgrade") != "websocket" {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+			return
+		}
 		log.Printf("ws: connection from %s path=%s", r.RemoteAddr, r.URL.Path)
 		wsConn, err := cws.Accept(w, r, &cws.AcceptOptions{
 			InsecureSkipVerify: true, // TLS terminated by RunPod proxy

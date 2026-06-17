@@ -189,7 +189,7 @@ Also rebuilt `tee/browser/app.wasm`.
 
 ---
 
-## Current state (2026-06-17)
+## Current state (2026-06-17) — session 1 end
 
 All three root causes patched. `monygroup/tee-runner:latest` pushed with rc3 fix.
 `tee/browser/app.wasm` rebuilt.
@@ -198,6 +198,163 @@ All three root causes patched. `monygroup/tee-runner:latest` pushed with rc3 fix
 1. wg-server.log shows `ws: connection from ...` (SOCKS5 session arrives at server)
 2. wg-server.log shows `[tee-wg] peer ... handshake initiated/completed`
 3. `wgRequest` through tunnel returns a response from runner.py
+
+---
+
+## Session 2 (2026-06-17) — Root cause 4 investigation
+
+**Cost**: ~$10 in RunPod GPU time. Up to 3 pods ran simultaneously due to missing pod-kill discipline (stale sessions accumulating). **Process failure.**
+
+### What was confirmed working
+- Platform billing/metering: `economy.insufficient_signa` correctly raised when balance at zero.
+- RunPod health check restart loop: fixed. Adding `/health` route and non-WS 200 fallback on `/` stopped the pod-restart-every-6-min cycle.
+- `monygroup/tee-runner:latest` image is stable: pod starts once, stays up, wg-server serves correctly on :8080.
+- Python SOCKS5+WS debug script (`/tmp/wg_debug.py`) reaches the pod's `/debug/wglog` endpoint reliably.
+
+### Symptom after session 1 fixes
+Browser reports "tunnel up" but no `ws: connection from ...` ever appears in wg-server.log.
+WireGuard loops: "Sending handshake initiation (try N)" indefinitely.
+
+### New finding: browser WASM not opening any WebSocket
+
+Added `window.WebSocket` interceptor to `index.html` (installs before WASM runs, logs `[WS]` lines to UI panel). Result: **zero `[WS]` lines** during a full `wgConnect` → handshake-retry cycle.
+
+The browser WASM never calls `window.WebSocket`, yet `dev.Up()` returns nil ("tunnel up").
+
+### Narrowed culprit
+
+`batchudp.Open()` calls `listenNet("udp4")` → `socksClient.ListenUDPConfig` → `ListenPacket` → `setupUDPTun5`. If `setupUDPTun5` opens a WebSocket, it must call `coder/websocket.Dial` → `wsjs.New` → `window.WebSocket.New(url, protos)`, which my interceptor would catch.
+
+Either:
+- `setupUDPTun5` is not being called (GostUDPTun not taking effect)
+- OR `setupUDPTun5` is called but its WebSocket path is bypassed
+- OR `Open()` is completing via a different code path in WASM that doesn't touch `window.WebSocket`
+
+**Unresolved.** Investigation cut due to $10 cost overrun and simultaneous pod accumulation.
+
+---
+
+## Root cause 4 — systematic resolution strategy
+
+### Diagnosis gap
+
+All previous debugging was blind: no log until AFTER a real $3.29/hr RunPod pod boots. We need to close the observability gap locally before spending more pod cycles.
+
+### Step 1 — Reproduce locally (zero cost)
+
+Run `tee-wg-server` locally (not in RunPod, no GPU). It just needs Go — no CUDA.
+
+```bash
+cd tee/wg-server
+WG_PRIVATE_KEY=$(wg genkey) WG_CLIENT_PUBKEY=$(wg genkey | wg pubkey) go run . &
+```
+
+Now the server is on `ws://localhost:8080`. Change `proxyUrl` to `socks5+ws://localhost:8080` in the browser (or serve `index.html` locally with a dummy session that hardcodes that URL). No RunPod, no cost, instant restart.
+
+### Step 2 — Add WS probe to index.html BEFORE wgConnect
+
+The `window.WebSocket` interceptor proved zero WS calls happen. The next question is: does `batchudp.Open()` even try? Add this after `wgGenerateKeys` resolves and before `wgConnect` is called:
+
+```javascript
+// Probe: does a manual WebSocket to the proxy URL open?
+const probe = new WebSocket(proxyUrl.replace('socks5+wss://', 'wss://').replace('socks5+ws://', 'ws://') + '/');
+probe.onopen  = () => { log('[PROBE] WS open — proxy reachable'); probe.close(); };
+probe.onerror = () => log('[PROBE] WS error — proxy unreachable or CORS');
+```
+
+This isolates "is the proxy URL reachable from the browser" from "does the WASM code path work".
+
+### Step 3 — Verify GostUDPTun is actually set in the running WASM
+
+The WASM is a binary blob. Grep it for the string `GostUDPTun` (Go compiler embeds field names in type info):
+
+```bash
+strings tee/browser/app.wasm | grep -i "gost\|insecureudp\|plaintext UDP"
+```
+
+If `"plaintext UDP is disallowed"` appears, the error string is compiled in. If `GostUDPTun` appears in metadata, the field is present. This proves the binary matches the source.
+
+### Step 4 — Add explicit bind verification to wgConnect
+
+After `dev.Up()`, before returning "tunnel up", send one WireGuard handshake initiation explicitly and confirm the WS connection appears at the server-side within 1 second. If it doesn't, fail loudly:
+
+In `tee/browser/main.go`, add after `dev.Up()`:
+```go
+// Verify the bind actually opened a socket — dev.Up() doesn't surface bind errors.
+// We can't call Open() directly but we can check that packets leave.
+// For now: log immediately if no send path exists.
+logLine("app", fmt.Sprintf("device up; bind type: %T", conn.NewDefaultBind(network)))
+```
+
+Better: expose a `wgBindStatus` function that returns whether `s.ipv4` is set on the bind, to directly confirm the UDP tunnel is wired.
+
+### Step 5 — If WASM path is confirmed broken, switch to wss:// URL query parameters
+
+socksgo's `ClientFromURL` supports `?gost&insecureudp` in the URL itself:
+```
+socks5+wss://host:port/?gost&insecureudp
+```
+
+The platform sets `proxyUrl` in `CrystalApi.ts`. Change:
+```typescript
+session.proxyUrl = `socks5+wss://${session.podId}-8080.proxy.runpod.net`
+```
+to:
+```typescript
+session.proxyUrl = `socks5+wss://${session.podId}-8080.proxy.runpod.net/?gost&insecureudp`
+```
+
+Then `ClientFromURL` sets `GostUDPTun=true` and `InsecureUDP=true` from the URL query. This bypasses the manual field-set in `main.go` and removes the dependency on compile-time state.
+
+### Step 6 — Only then test on RunPod
+
+Only spin a pod once steps 1–5 confirm the tunnel handshakes locally. Expected: one pod, one session, WS connection appears in wg-server.log within 5 seconds of wgConnect.
+
+### Pod discipline (non-negotiable from here)
+- Kill the current pod BEFORE provisioning a new one, without exception.
+- The platform must not issue a new `TeeProvisioner.provision()` call if an active session exists for the same animaId. Check `TeeProvisioner.ts`.
+- Add a TTL to sessions: if runner heartbeat stops, terminate the pod via the RunPod REST API automatically.
+
+---
+
+## Session 3 (2026-06-17) — Local end-to-end verification (PASS)
+
+**Cost**: $0. No pods. All work on localhost.
+
+### What was done
+
+1. **Native Go test** (`tee/native-test/`): full end-to-end in pure Go. No browser, no WASM. Server subprocess + socksgo GostUDPTun client + WireGuard device. Confirmed handshake completes. PASS.
+
+2. **Playwright headless Chromium test**: served `index.html` on `:19000`, ran actual WASM in headless Chromium against local tee-wg-server on `:18088`/`:15182`. All five checks passed:
+   - WS probe reachable ✓
+   - WASM WS open attempt ✓ (the `window.WebSocket` interceptor fired from WASM)
+   - WASM WS connected ✓
+   - Tunnel up ✓
+   - WG handshake — `peer(kaoi…2a2c) - Received handshake response` ✓
+
+### Root causes that turned out NOT to be real
+
+After the previous session concluded "WASM never opens a WebSocket (root cause 4)", investigation revealed:
+
+1. **`teeLog` doesn't call `console.log`** — all `[WS]`, `[PROBE]`, and `[UI]` log lines went to the DOM log panel only. Playwright's `page.on('console')` listens to `console.log`, not DOM mutations. So "no `[WS] open attempt` in Playwright output" didn't mean the WebSocket never opened — it meant the observer was blind. Fixed: `window.teeLog` now also calls `console.log`.
+
+2. **WS probe URL double-slash** — `proxyUrl.replace(/\?.*$/, '') + '/'` on `socks5+ws://host:port/?query` gives `ws://host:port//` (double-slash). Server responded 307. Fixed: strip trailing slash before appending: `base.replace(/\/$/, '') + '/'`.
+
+3. **Wrong WG peer endpoint** — `localConnect()` hardcoded `127.0.0.1:51820` but the browser test server listened on port 15182. WG packets were being tunneled to port 51820 (nothing listening). Handshake initiation sent but no response possible. Fixed: added `#localPeerEndpoint` field to Section 0 with configurable endpoint; Playwright fills it with the correct port.
+
+### What this proves
+
+GostUDPTun is working correctly in the WASM build. The code path from `batchudp.Open()` → `socksgo.ListenUDPConfig` → `setupUDPTun5` → `coder/websocket.Dial` → `window.WebSocket.New` is intact and functional.
+
+The "root cause 4" from the previous session was a **test instrumentation gap**, not a code bug.
+
+### Files added/changed in session 3
+
+| File | What changed |
+|------|-------------|
+| `tee/native-test/main.go` | new — full native Go end-to-end test |
+| `tee/native-test/go.mod` | new — module for native test |
+| `tee/browser/index.html` | `teeLog` → also `console.log`; probe URL double-slash fix; `#localPeerEndpoint` field; `peerEndpoint` reads from field |
 
 ---
 
@@ -214,8 +371,12 @@ All three root causes patched. `monygroup/tee-runner:latest` pushed with rc3 fix
 
 **Tag images with commit SHA, not `:latest`**. RunPod caches `:latest` on the host. New pod, same host = old image. Tag `monygroup/tee-runner:$(git rev-parse --short HEAD)` and pass the tag to the RunPod API.
 
+**Kill the old pod before testing a new one.** No exceptions. Check `runpod.io/console` before any new provision.
+
 **Separate diagnostic path from the broken path**. When the SOCKS5 tunnel is broken, querying `/debug/wglog` through the SOCKS5 tunnel doesn't work. Need a healthcheck endpoint on a different port (or stdout-only diagnostics at boot that show in RunPod pod logs).
 
 **Read library source before wiring**. `IsUDPAllowed()`, `GostUDPTun`, and the `?gost` URL parameter are all in `client.go`. 30 minutes of reading would have found root cause 3 before ever deploying to RunPod.
 
 **Don't trust "tunnel up"**. WireGuard's `device.Up()` does not surface `Open()` failures to the caller. "Tunnel up" just means the vtun was configured, not that any socket exists. Add an explicit bind check at startup.
+
+**Test locally first**. `tee-wg-server` runs locally with no RunPod dependency. There is no reason the WASM↔server path requires a cloud GPU pod to diagnose. Future sessions start with `go run ./tee/wg-server` on localhost.

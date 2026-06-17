@@ -471,9 +471,11 @@ export class CrystalApi {
     session.serverPublicKey = signal.wgPublicKey
     session.tunnelIp = '10.13.0.2'
     if (session.podId) {
-      // SECURE RunPod pod: no raw public IP. RunPod proxies WSS → gost on port 8080.
-      // WireGuard peer endpoint is the pod's loopback, reachable through the gost proxy.
-      session.proxyUrl = `socks5+wss://${session.podId}-8080.proxy.runpod.net`
+      // SECURE RunPod pod: no raw public IP. RunPod proxies WSS → socksgo on port 8080.
+      // ?gost&insecureudp: force GostUDPTun (CmdGostUDPTun 0xF3) and allow UDP through
+      // the WSS tunnel. wss:// sets IsTLS()=true which disables UDP by default; InsecureUDP
+      // overrides that. UDP is tunneled inside the WSS stream — no plaintext exposure.
+      session.proxyUrl = `socks5+wss://${session.podId}-8080.proxy.runpod.net/?gost&insecureudp`
       session.endpoint = '127.0.0.1:51820'
     } else {
       // Community cloud or local dev: runner self-reports its public endpoint.

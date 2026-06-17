@@ -110,3 +110,5 @@ src/arcanum/circuit/artifacts/*.zkey
 src/arcanum/circuit/artifacts/arcanum.r1cs
 src/arcanum/circuit/artifacts/arcanum.sym
 src/arcanum/circuit/artifacts/arcanum_js/
+docs/competitive/
+tee/native-test/native-test

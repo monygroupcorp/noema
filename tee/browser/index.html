@@ -112,6 +112,36 @@
   <h1>TEE Private Compute</h1>
   <p class="subtitle">private GPU session · WireGuard WASM · platform-managed tunnel</p>
 
+  <!-- 0. Local dev mode — test against a local tee-wg-server without provisioning a real pod -->
+  <section>
+    <h2>0. LOCAL DEV (bypass platform)</h2>
+    <p class="note">Point at a local <code>go run ./tee/wg-server</code> instance. No RunPod needed.</p>
+    <div class="pair">
+      <div>
+        <label>Server WG public key (from wg pubkey)</label>
+        <input id="localServerKey" placeholder="base64 public key">
+      </div>
+      <div>
+        <label>WS proxy URL</label>
+        <input id="localProxyUrl" value="socks5+ws://localhost:8080/?gost&insecureudp">
+      </div>
+    </div>
+    <div class="pair">
+      <div>
+        <label>WG peer endpoint (server UDP host:port)</label>
+        <input id="localPeerEndpoint" value="127.0.0.1:51820">
+      </div>
+      <div>
+        <label>Client private key (optional — leave blank to generate)</label>
+        <input id="localClientKey" placeholder="base64 private key — for reproducible tests only">
+      </div>
+    </div>
+    <div class="row">
+      <button id="btnLocalConnect" disabled onclick="localConnect()">Connect (local)</button>
+    </div>
+    <div class="status idle" id="localStatus">WASM loading…</div>
+  </section>
+
   <!-- 1. Session -->
   <section id="sectionSession">
     <h2>1. START SESSION</h2>
@@ -183,6 +213,26 @@
 
   <script src="wasm_exec.js"></script>
   <script>
+    // WebSocket interceptor — log all WS activity from WASM to the UI log panel.
+    // Must be installed before the WASM runs.
+    (function() {
+      const _WS = window.WebSocket;
+      window.WebSocket = function(url, protos) {
+        const ws = protos ? new _WS(url, protos) : new _WS(url);
+        const short = url.replace(/^wss?:\/\//, '').substring(0, 60);
+        window.teeLog && window.teeLog('[WS] open attempt → ' + short);
+        ws.addEventListener('open',  () => window.teeLog && window.teeLog('[WS] opened  → ' + short));
+        ws.addEventListener('error', () => window.teeLog && window.teeLog('[WS] ERROR   → ' + short));
+        ws.addEventListener('close', e => window.teeLog && window.teeLog('[WS] closed  → ' + short + ' code=' + e.code));
+        return ws;
+      };
+      window.WebSocket.prototype = _WS.prototype;
+      window.WebSocket.CONNECTING = _WS.CONNECTING;
+      window.WebSocket.OPEN       = _WS.OPEN;
+      window.WebSocket.CLOSING    = _WS.CLOSING;
+      window.WebSocket.CLOSED     = _WS.CLOSED;
+    })();
+
     let wasmReady = false;
     let connected = false;
     let sessionId = null;
@@ -190,11 +240,12 @@
     let tunnelIp = '10.13.0.2';
     let pollTimer = null;
 
-    // — WASM log receiver
+    // — WASM log receiver (also console.log so headless test runners can capture output)
     window.teeLog = function(line) {
       const el = document.getElementById('logs');
       el.textContent += line + '\n';
       el.scrollTop = el.scrollHeight;
+      console.log(line);
     };
 
     function log(msg) {
@@ -212,8 +263,74 @@
     }
 
     function syncButtons() {
-      document.getElementById('btnStart').disabled      = !wasmReady || connected;
-      document.getElementById('btnDisconnect').disabled = !connected;
+      document.getElementById('btnStart').disabled        = !wasmReady || connected;
+      document.getElementById('btnDisconnect').disabled   = !connected;
+      document.getElementById('btnLocalConnect').disabled = !wasmReady || connected;
+      const localStatus = document.getElementById('localStatus');
+      if (wasmReady && localStatus.textContent === 'WASM loading…') {
+        localStatus.className = 'status idle';
+        localStatus.textContent = 'ready — enter server key and click Connect (local)';
+      }
+    }
+
+    async function localConnect() {
+      const proxyUrl   = document.getElementById('localProxyUrl').value.trim();
+      const serverKey  = document.getElementById('localServerKey').value.trim();
+      if (!serverKey) { setStatus('localStatus', 'err', 'enter the server WG public key'); return; }
+
+      const presetKey = document.getElementById('localClientKey').value.trim();
+      setStatus('localStatus', 'loading', presetKey ? 'using preset keypair…' : 'generating keypair…');
+      let kp;
+      try {
+        if (presetKey) {
+          // derive pubkey via wgGenerateKeys path isn't available; rely on server accepting any peer.
+          // For test mode: if server started with WG_CLIENT_PUBKEY matching this key's pubkey, it works.
+          kp = JSON.parse(await wgGenerateKeys());
+          // override private key — publicKey field will be wrong here but server uses its own config
+          kp.privateKey = presetKey;
+          log('local: using preset private key');
+        } else {
+          kp = JSON.parse(await wgGenerateKeys());
+          log('local: keypair generated — pubkey: ' + kp.publicKey.slice(0, 16) + '…');
+        }
+      } catch (e) { setStatus('localStatus', 'err', 'keygen: ' + e); return; }
+
+      // Probe WS before handing to WASM
+      await new Promise(resolve => {
+        const base = proxyUrl.replace(/^socks5\+ws:\/\//, 'ws://').replace(/\?.*$/, '').replace(/\/$/, '');
+        const wsUrl = base + '/';
+        log('[PROBE] testing WS to ' + wsUrl);
+        const probe = new WebSocket(wsUrl);
+        const done = () => { try { probe.close(); } catch (_) {} resolve(); };
+        probe.onopen  = () => { log('[PROBE] WS reachable ✓'); done(); };
+        probe.onerror = () => { log('[PROBE] WS unreachable — is tee-wg-server running?'); done(); };
+        setTimeout(done, 3000);
+      });
+
+      setStatus('localStatus', 'loading', 'connecting tunnel…');
+      const peerEndpoint = document.getElementById('localPeerEndpoint').value.trim() || '127.0.0.1:51820';
+      const cfg = {
+        proxyUrl,
+        localTunnelAddr: '10.13.0.2',
+        localPrivateKey: kp.privateKey,
+        listenPort: 0,
+        peerPublicKey:  serverKey,
+        peerEndpoint,
+        peerAllowedIPs: '10.13.0.1/32',
+        peerKeepalive:  5,
+      };
+      try {
+        const raw = await wgConnect(JSON.stringify(cfg));
+        const res = JSON.parse(raw);
+        connected = true;
+        tunnelIp = '10.13.0.2';
+        setStatus('localStatus', 'ok', 'tunnel connected — ' + res.message);
+        log('local: tunnel up');
+        enable('sectionSetup');
+      } catch (e) {
+        setStatus('localStatus', 'err', 'connect failed: ' + e);
+      }
+      syncButtons();
     }
 
     // — Step 1: generate keys, provision session, poll until ready, connect tunnel
@@ -269,7 +386,23 @@
         return;
       }
 
-      // 1d. Connect tunnel
+      // 1d. Probe WS connectivity to the proxy before handing off to WASM.
+      //     This isolates "proxy unreachable" from "WASM code path broken" — both
+      //     produce zero [WS] lines from the interceptor if the probe doesn't fire either.
+      await new Promise(resolve => {
+        const wsUrl = session.proxyUrl
+          .replace(/^socks5\+wss:\/\//, 'wss://')
+          .replace(/^socks5\+ws:\/\//, 'ws://')
+          .replace(/\?.*$/, '') + '/';
+        log('[PROBE] testing WS to ' + wsUrl.substring(0, 60));
+        const probe = new WebSocket(wsUrl);
+        const done = () => { try { probe.close(); } catch (_) {} resolve(); };
+        probe.onopen  = () => { log('[PROBE] WS reachable ✓'); done(); };
+        probe.onerror = () => { log('[PROBE] WS unreachable — check proxy URL or network'); done(); };
+        setTimeout(done, 4000); // don't block connect on probe timeout
+      });
+
+      // 1e. Connect tunnel
       setStatus('sessionStatus', 'loading', 'connecting tunnel…');
       const cfg = {
         proxyUrl:        session.proxyUrl,
