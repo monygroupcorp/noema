@@ -411,6 +411,8 @@
 
       // 1e. Connect tunnel
       currentProxyUrl = session.proxyUrl;
+      // Log the proxy URL so it's visible in the UI and DevTools — needed to fetch /debug/wglog manually.
+      log('proxyUrl: ' + session.proxyUrl);
       setStatus('sessionStatus', 'loading', 'connecting tunnel…');
       const cfg = {
         proxyUrl:        session.proxyUrl,
