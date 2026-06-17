@@ -208,6 +208,10 @@
   <!-- Logs -->
   <section>
     <h2>LOGS</h2>
+    <div class="row" style="margin-bottom:10px">
+      <button class="secondary" onclick="fetchServerLog()">Fetch Server Log</button>
+      <button class="secondary" onclick="document.getElementById('logs').textContent=''">Clear</button>
+    </div>
     <div id="logs"></div>
   </section>
 
@@ -237,6 +241,7 @@
     let connected = false;
     let sessionId = null;
     let inferPort = null;
+    let currentProxyUrl = null; // set when session becomes ready; used by fetchServerLog()
     let tunnelIp = '10.13.0.2';
     let pollTimer = null;
 
@@ -405,6 +410,7 @@
       });
 
       // 1e. Connect tunnel
+      currentProxyUrl = session.proxyUrl;
       setStatus('sessionStatus', 'loading', 'connecting tunnel…');
       const cfg = {
         proxyUrl:        session.proxyUrl,
@@ -526,6 +532,27 @@
       document.getElementById('sectionSetup').classList.add('disabled');
       document.getElementById('sectionInfer').classList.add('disabled');
       syncButtons();
+    }
+
+    // — Fetch /debug/wglog from the pod directly via the RunPod HTTP proxy.
+    //   Requires no tunnel — the endpoint is on the same port 8080 as the SOCKS5 server.
+    async function fetchServerLog() {
+      const proxyUrl = currentProxyUrl || document.getElementById('localProxyUrl').value.trim();
+      if (!proxyUrl) { log('[WGLOG] no proxyUrl — start a session first'); return; }
+      const httpBase = proxyUrl
+        .replace(/^socks5\+wss:\/\//, 'https://')
+        .replace(/^socks5\+ws:\/\//, 'http://')
+        .replace(/\?.*$/, '')
+        .replace(/\/$/, '');
+      const logUrl = httpBase + '/debug/wglog';
+      log('[WGLOG] fetching ' + logUrl);
+      try {
+        const res = await fetch(logUrl);
+        const text = await res.text();
+        log('[WGLOG] ===== SERVER LOG =====\n' + text + '\n[WGLOG] ===== END =====');
+      } catch (e) {
+        log('[WGLOG] fetch failed: ' + e);
+      }
     }
 
     // — Helpers
