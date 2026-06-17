@@ -9,6 +9,10 @@ set -euo pipefail
 #
 # Pulls the :staging image from GHCR and restarts the staging
 # container. No workers, no keystore, no maintenance mode.
+#
+# The DEPLOYED copy runs from /opt/noema/ ON THE DROPLET (ssh host `noema`) — that is the
+# source of truth (it holds .env.staging with STAGING_FRONTEND=1). Runbook + full context:
+# docs/ops/staging-deploy.md.
 # ------------------------------------------------------------------
 
 DEPLOY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,18 +22,18 @@ ENV_FILE="${DEPLOY_ROOT}/.env.staging"
 REGISTRY="ghcr.io/monygroupcorp/noema"
 IMAGE="${REGISTRY}:staging"
 
-# Container
-STAGING_CONTAINER="crystal-staging"
-NETWORK_NAME="crystal_network"
-CONTAINER_ALIAS="crystal-staging"
+# Container — MUST match the live ops (Caddy routes staging.noema.art → hyperbot-staging)
+STAGING_CONTAINER="hyperbot-staging"
+NETWORK_NAME="hyperbot_network"
+CONTAINER_ALIAS="hyperbot-staging"
 
 # Health check tuning
 HEALTH_CHECK_RETRIES="${HEALTH_CHECK_RETRIES:-30}"
 HEALTH_CHECK_DELAY="${HEALTH_CHECK_DELAY:-3}"
 
 # Logging
-LOG_DIR="/var/log/crystal"
-LOG_FILE="${LOG_DIR}/crystal-staging.log"
+LOG_DIR="/var/log/hyperbot"
+LOG_FILE="${LOG_DIR}/hyperbot-staging.log"
 mkdir -p "${LOG_DIR}"
 
 log() { echo "[staging-deploy] $1" | tee -a "${LOG_FILE}"; }
