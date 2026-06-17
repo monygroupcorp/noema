@@ -48,17 +48,14 @@ else
   status "wg_server_failed"
 fi
 
-# — Verify tee-wg-server is actually listening on UDP 51820 —
+# tee-wg-server now serves the SOCKS5+WS proxy itself on :8080 (no gost needed).
+# Give it a moment to bind, then confirm.
+sleep 1
 if ss -ulnp 2>/dev/null | grep -q ":51820 "; then
   log "UDP 51820 confirmed open"
 else
-  log "WARNING: UDP 51820 not yet visible in ss (may still be fine)"
+  log "WARNING: UDP 51820 not yet visible in ss"
 fi
-
-# — gost SOCKS5+WS bridge (browser → pod, proxies WG UDP to 127.0.0.1:51820) —
-GOST_PORT="${GOST_PORT:-8080}"
-gost -L "socks5+ws://:${GOST_PORT}?bind=true&udp=true" &
-log "gost SOCKS5+WS bridge on :${GOST_PORT}"
 status "gost_up"
 
 # — Runner —
