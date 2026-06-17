@@ -52,6 +52,7 @@ export interface ApiFacade {
   listStudios(auctor: AuctorKey): Promise<StudioView[]>
   provisionTeeSession(auctor: AuctorKey, opts: ProvisionTeeSessionOpts): Promise<TeeSessionView>
   getTeeSession(auctor: AuctorKey, sessionId: string): Promise<TeeSessionView>
+  endTeeSession(auctor: AuctorKey, sessionId: string): Promise<void>
 }
 
 /** The slice of IdentityResolver this router needs. */
