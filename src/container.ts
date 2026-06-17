@@ -1,6 +1,6 @@
 import type { Collection, MongoClient } from 'mongodb'
 import type { Modus } from './types/modus.js'
-import type { Actorum, Cursorum, ActumCompletor as IActumCompletor } from './types/cursus.js'
+import type { Actorum, Cursorum, ActumCompletor as IActumCompletor, Inceptio } from './types/cursus.js'
 import type { RunPodClient } from './crystal/RunPodCursor.js'
 import type { ActumInceptor as IActumInceptor } from './execution/ActumInceptor.js'
 import type { Signorum } from './types/significandi.js'
@@ -389,7 +389,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   // before any dispatch call can fire.
   let compositusCursor: CompositusCursor
   compositusCursor = new CompositusCursor(
-    (inc) => dispatchInceptio({ inceptor, modorum, cursorum, completor, actumIndex, compositusCursor }, inc),
+    (inc: Inceptio) => dispatchInceptio({ inceptor, modorum, cursorum, completor, actumIndex, compositusCursor }, inc),
     modorum,
     actorum,
   )
