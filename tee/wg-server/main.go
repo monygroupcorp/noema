@@ -157,16 +157,19 @@ func main() {
 	// Serve WebSocket-based SOCKS5 connections.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("ws: connection from %s path=%s", r.RemoteAddr, r.URL.Path)
 		wsConn, err := cws.Accept(w, r, &cws.AcceptOptions{
 			InsecureSkipVerify: true, // TLS terminated by RunPod proxy
 		})
 		if err != nil {
-			log.Printf("ws accept: %v", err)
+			log.Printf("ws: accept error: %v", err)
 			return
 		}
+		log.Printf("ws: socks5 session started")
 		// Block — r.Context() must stay alive for the lifetime of the SOCKS5 session.
 		// http.Server runs each handler in its own goroutine, so blocking is correct.
-		socks.AcceptWS(r.Context(), wsConn, false)
+		err = socks.AcceptWS(r.Context(), wsConn, false)
+		log.Printf("ws: socks5 session ended: %v", err)
 	})
 
 	log.Printf("ready — serving SOCKS5+WS on %s", socksAddr)

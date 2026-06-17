@@ -133,6 +133,11 @@ func (a *app) connect(args []js.Value) (any, error) {
 		return nil, fmt.Errorf("build socks client: %w", err)
 	}
 	socksClient.Filter = nil
+	// wss:// sets IsTLS()=true which blocks UDP by default. The UDP is tunneled
+	// through the encrypted WSS stream (GostUDPTun = UDP-over-TCP), so there is
+	// no plaintext exposure — InsecureUDP is safe to enable here.
+	socksClient.GostUDPTun = true
+	socksClient.InsecureUDP = true
 
 	network := &singleStackUDPNetwork{Network: socksClient}
 
