@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
+import { SiteFooter } from './SiteFooter';
 import './landing.css';
 
 const FRONT_HALF_NODES = [
@@ -85,8 +86,9 @@ export function Landing() {
       <nav className="topnav">
         <div className="brand"><span className="dot" />noema</div>
         <div className="right">
-          <Link className="btn-ghost" to="/catalog">Catalog</Link>
-          <a className="btn-ghost" href="#">Docs</a>
+          <Link className="btn-ghost" to="/features">Features</Link>
+          <Link className="btn-ghost" to="/pricing">Pricing</Link>
+          <Link className="btn-ghost" to="/about">About</Link>
           <Link className="btn" to="/">Open app</Link>
         </div>
       </nav>
@@ -201,7 +203,8 @@ export function Landing() {
         </div>
 
         <div className="docs">
-          <a className="btn-ghost" href="#"><Ic name="file-text" /> Read the architecture</a>
+          <Link className="btn-ghost" to="/about"><Ic name="file-text" /> Read the architecture</Link>
+          <Link className="btn-ghost" to="/legal/privacy"><Ic name="eye-off" /> Privacy policy</Link>
           <a className="btn-ghost" href="#"><Ic name="file-text" /> Source — VPL licensed</a>
         </div>
       </section>
@@ -221,7 +224,7 @@ export function Landing() {
         <Link className="btn lg" to="/onboard">Start free <Ic name="arrow-right" /></Link>
       </div>
 
-      <div className="lfoot">noema · generative media, on your terms</div>
+      <SiteFooter />
     </div>
   );
 }

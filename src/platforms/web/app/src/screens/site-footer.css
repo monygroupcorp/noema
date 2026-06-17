@@ -1,0 +1,13 @@
+.site-footer { border-top: 1px solid var(--hair); background: var(--panel); }
+.site-footer .inner {
+  max-width: 980px; margin: 0 auto; padding: var(--s8) var(--s7);
+  display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: var(--s7);
+}
+@media (max-width: 680px) { .site-footer .inner { grid-template-columns: 1fr 1fr; } }
+.site-footer .brand { display: flex; align-items: center; gap: var(--s2); font-weight: 600; }
+.site-footer .brand .dot { width: 13px; height: 13px; border-radius: 5px; background: conic-gradient(from 200deg, var(--accent), #2b2e6b 60%, var(--accent)); }
+.site-footer .tag { color: var(--faint); font-size: var(--fs-sm); margin-top: var(--s3); max-width: 240px; line-height: 1.5; }
+.site-footer .col h4 { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .1em; color: var(--faint); margin: 0 0 var(--s3); }
+.site-footer .col a { display: block; color: var(--muted); text-decoration: none; font-size: 13px; padding: 4px 0; transition: color .14s var(--ease); }
+.site-footer .col a:hover { color: var(--text); }
+.site-footer .legal { border-top: 1px solid var(--hair-soft); padding: var(--s4) var(--s7); text-align: center; color: var(--faint); font-size: 11.5px; font-family: var(--font-mono); }

@@ -85,7 +85,7 @@ export function Catalog() {
         {flows && shown.length > 0 && (
           <div className="grid">
             {shown.map((f) => (
-              <Link key={f.id} className="gcard" to="/card">
+              <Link key={f.id} className="gcard" to={`/card?id=${encodeURIComponent(f.id)}`}>
                 <div className="gtop">
                   <span className="fav" style={{ background: f.fav }} />
                   <div><h3>{f.name}</h3> <span className="badge accent">{f.media}</span></div>

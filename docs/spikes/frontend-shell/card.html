@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en" class="tier-identified" data-font="geist">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Noema — flow card</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="app.css" />
+</head>
+<body>
+<div class="app">
+
+  <aside class="rail" id="rail"></aside>
+
+  <section class="main">
+    <div class="topbar">
+      <div class="me" id="me"></div>
+      <div class="crumb"><span class="sep">/</span> cards <span class="sep">/</span> flux-schnell</div>
+    </div>
+
+    <div class="cardscroll">
+      <div class="card">
+
+        <div class="flow-head">
+          <span class="fav"></span>
+          <div>
+            <h1>FLUX Schnell <span class="verbtag">make</span></h1>
+            <div class="desc">Fast text-to-image. Four-step latent diffusion — the default for <span class="mono">make</span>.</div>
+            <div class="ports"><span class="p">text</span> → <span class="p">image</span></div>
+          </div>
+          <span class="ver mono">v1 · official</span>
+        </div>
+
+        <!-- auto-generated from the flow's input JSON-Schema -->
+        <div class="field">
+          <label>prompt <span class="req">required</span><span class="ty">text</span></label>
+          <textarea class="ta2" id="f_prompt" placeholder="Describe the image…">a low-poly n64-style dragon perched on a neon temple, dusk</textarea>
+        </div>
+
+        <div class="row2">
+          <div class="field">
+            <label>width <span class="ty">int</span></label>
+            <div class="range"><input type="range" id="f_w" min="512" max="1536" step="64" value="1024"><span class="num" id="f_wv">1024</span></div>
+          </div>
+          <div class="field">
+            <label>height <span class="ty">int</span></label>
+            <div class="range"><input type="range" id="f_h" min="512" max="1536" step="64" value="1024"><span class="num" id="f_hv">1024</span></div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>steps <span class="ty">int</span></label>
+          <div class="range"><input type="range" id="f_steps" min="1" max="8" step="1" value="4"><span class="num" id="f_stepsv">4</span></div>
+        </div>
+
+        <div class="advtoggle" id="advt"><span class="car"><i data-lucide="chevron-right"></i></span> <span id="advlbl">4 more inputs</span></div>
+        <div class="advanced" id="adv">
+          <div class="field">
+            <label>negative prompt <span class="opt">optional</span><span class="ty">text</span></label>
+            <input class="inp" id="f_neg" placeholder="What to avoid…" />
+          </div>
+          <div class="field">
+            <label>guidance <span class="opt">optional</span><span class="ty">float</span></label>
+            <div class="range"><input type="range" id="f_g" min="0" max="10" step="0.1" value="3.5"><span class="num" id="f_gv">3.5</span></div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label>seed <span class="opt">optional</span><span class="ty">int</span></label>
+              <input class="inp mono" id="f_seed" placeholder="random" />
+            </div>
+            <div class="field">
+              <label>reference image <span class="opt">optional</span><span class="ty">image · uri</span></label>
+              <div class="drop"><span class="ic"><i data-lucide="image-plus"></i></span><span>Drop an image, or paste a URL</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- result -->
+        <div class="result" id="result">
+          <h2><span class="ttdot"></span> output</h2>
+          <div class="out">
+            <div class="rimg" id="rimg"><div class="ph"></div><div class="stage" id="rstage"><span class="dots"><span></span><span></span><span></span></span> compiling…</div></div>
+            <div class="exitus">
+              <div class="er"><span>image</span><span class="v" id="x_img">—</span></div>
+              <div class="er"><span>seed</span><span class="v" id="x_seed">—</span></div>
+              <div class="er"><span>dimensions</span><span class="v" id="x_dim">—</span></div>
+              <div class="er"><span>model</span><span class="v">flux-schnell</span></div>
+              <div class="er"><span>time</span><span class="v" id="x_time">—</span></div>
+              <div class="acts">
+                <button class="btn-ghost"><i data-lucide="sparkles"></i> Save to Space</button>
+                <button class="btn-ghost"><i data-lucide="workflow"></i> Send to Canvas</button>
+                <button class="btn-ghost"><i data-lucide="rotate-cw"></i> Rerun</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- sticky run bar -->
+        <div class="runbar">
+          <div class="inner">
+            <div class="quote">
+              <span class="q mono" id="quote">≈ $0.043</span>
+              <span class="ql">upper-bound · pod-metered</span>
+            </div>
+            <button class="btn-run" id="run">Run <span class="kbd">⌘⏎</span></button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <aside class="context">
+    <div class="csec">
+      <div class="ctitle">Flow</div>
+      <div class="meta-line"><span>verb</span><span class="v mono">make</span></div>
+      <div class="meta-line"><span>runtime</span><span class="v mono">comfy</span></div>
+      <div class="meta-line"><span>base model</span><span class="v mono">flux-schnell·v1</span></div>
+      <div class="meta-line"><span>signature</span><span class="v mono">text → image</span></div>
+    </div>
+    <div class="csec">
+      <div class="ctitle">Account</div>
+      <div class="meta-line"><span>balance</span><span class="v mono" id="bal">214 credits</span></div>
+      <div class="eph" id="eph" style="display:none"><span class="pulse"></span> leaves no trace — nothing is persisted</div>
+    </div>
+  </aside>
+</div>
+
+<script src="app.js"></script>
+<script>
+  // ($ comes from app.js — do not redeclare)
+  // live slider readouts + quote
+  const bind = (id,out,fmt=v=>v)=>{ const i=$(id),o=$(out); i.addEventListener('input',()=>{o.textContent=fmt(i.value); quote();}); };
+  bind('#f_w','#f_wv'); bind('#f_h','#f_hv'); bind('#f_steps','#f_stepsv');
+  bind('#f_g','#f_gv', v=>(+v).toFixed(1));
+  $('#f_prompt').addEventListener('input', quote);
+
+  function quote(){
+    const w=+$('#f_w').value, h=+$('#f_h').value, s=+$('#f_steps').value;
+    const est = 0.043 * (w*h)/(1024*1024) * (s/4);
+    $('#quote').textContent = '≈ $'+est.toFixed(3);
+  }
+  quote();
+
+  // advanced toggle
+  $('#advt').onclick = ()=>{ $('#advt').classList.toggle('open'); $('#adv').classList.toggle('open');
+    $('#advlbl').textContent = $('#adv').classList.contains('open') ? 'fewer inputs' : '4 more inputs'; };
+
+  // run → staged progress → result
+  let running=false;
+  function run(){
+    if(running) return; running=true;
+    const btn=$('#run'); btn.disabled=true; btn.textContent='Running…';
+    $('#result').classList.add('show');
+    const img=$('#rimg'), stage=$('#rstage');
+    img.classList.remove('done');
+    img.innerHTML = '<div class="ph"></div><div class="stage" id="rstage"><span class="dots"><span></span><span></span><span></span></span> compiling…</div>';
+    const stages=[[700,'provisioning pod…'],[1400,'generating · 1/4'],[2100,'generating · 3/4'],[2700,'uploading…']];
+    stages.forEach(([t,label])=> setTimeout(()=>{ const s=$('#rstage'); if(s) s.innerHTML='<span class="dots"><span></span><span></span><span></span></span> '+label; }, t));
+    setTimeout(()=>{
+      img.classList.add('done'); img.innerHTML='';
+      const seed = Math.floor(Math.random()*1e9);
+      $('#x_img').textContent='flux-schnell.png';
+      $('#x_seed').textContent=seed;
+      $('#x_dim').textContent=$('#f_w').value+'×'+$('#f_h').value;
+      $('#x_time').textContent='3.2s';
+      btn.disabled=false; btn.innerHTML='Run <span class="kbd">⌘⏎</span>'; running=false;
+    }, 3300);
+  }
+  $('#run').onclick = run;
+  document.addEventListener('keydown', e=>{ if((e.metaKey||e.ctrlKey) && e.key==='Enter') run(); });
+</script>
+</body>
+</html>

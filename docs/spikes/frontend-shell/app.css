@@ -148,7 +148,6 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .hint .dest .ttdot{width:6px;height:6px}
 .hint .keys{margin-left:auto;display:flex;gap:14px}
 .hint .mono{color:var(--faint)}
-.hint .dest b{color:var(--text);font-weight:500}
 
 /* ---------- flow card ---------- */
 .cardscroll{flex:1; overflow:auto; padding:38px 0 46px}
@@ -161,11 +160,6 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .flow-head .ports{margin-top:8px;display:flex;align-items:center;gap:8px;color:var(--faint);font-size:11.5px;font-family:var(--font-mono)}
 .flow-head .ports .p{color:var(--muted);border:1px solid var(--hair);border-radius:5px;padding:1px 6px}
 .flow-head .ver{margin-left:auto;color:var(--faint);font-size:11px;font-family:var(--font-mono)}
-.flow-head .pin{flex:0 0 auto;display:grid;place-items:center;width:30px;height:30px;border-radius:8px;border:1px solid var(--hair);background:transparent;color:var(--faint);cursor:pointer;transition:.14s var(--ease)}
-.flow-head .pin:hover{color:var(--muted);border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
-.flow-head .pin.on{color:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 45%,var(--hair));background:var(--accent-bg)}
-.flow-head .pin svg{width:15px;height:15px}
-.flow-head .pin.on svg{fill:currentColor}
 
 .field{margin-bottom:24px}
 .field > label{display:flex;align-items:baseline;gap:8px;margin-bottom:7px;font-size:13px;font-weight:500}
@@ -441,22 +435,6 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .cpanel .cinput input{flex:1;background:var(--raised);border:1px solid var(--hair);border-radius:9px;color:var(--text);font:inherit;font-size:12.5px;padding:8px 11px;outline:0}
 .cpanel .cinput input:focus{border-color:color-mix(in srgb,var(--accent) 55%,var(--hair));box-shadow:0 0 0 3px var(--accent-bg)}
 .cpanel .cinput button{border:0;border-radius:8px;background:var(--accent);color:#0a0a14;width:32px;cursor:pointer;font-size:14px}
-
-/* ---------- concierge prompt augmentation (focused-field assist) ---------- */
-.chead .ctxtag{margin-left:8px;font-size:10.5px;font-family:var(--font-mono);color:var(--accent-soft);background:var(--accent-bg);border:1px solid color-mix(in srgb,var(--accent) 28%,var(--hair));padding:2px 7px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
-.chead .ctxtag + .x{margin-left:6px}
-.cassist{padding:12px 14px;display:flex;flex-direction:column;gap:10px}
-.cassist .chint{font-size:11.5px;line-height:1.45;color:var(--muted);padding:0 1px}
-.cassist .extext{white-space:pre-wrap}
-.cassist .ex{background:var(--raised);border:1px solid var(--hair);border-radius:11px;padding:10px 11px}
-.cassist .ex.draft{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair));background:var(--accent-bg)}
-.cassist .exlbl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);margin-bottom:5px}
-.cassist .extext{font-size:12.5px;line-height:1.5;color:var(--text)}
-.cassist .exact{display:flex;gap:7px;margin-top:9px}
-.cassist .exact button{border:0;border-radius:7px;background:var(--accent);color:#0a0a14;font:inherit;font-size:11.5px;font-weight:500;padding:5px 11px;cursor:pointer;transition:.14s var(--ease)}
-.cassist .exact button.ghost{background:transparent;color:var(--muted);border:1px solid var(--hair)}
-.cassist .exact button.ghost:hover{color:var(--text);border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
-.cassist .cinput{padding:0;border-top:0}
 
 /* ---------- font toggle (dev affordance) ---------- */
 .fonttoggle{position:fixed;right:16px;top:11px;z-index:50;display:flex;align-items:center;gap:2px;background:var(--panel);border:1px solid var(--hair);border-radius:999px;padding:3px;box-shadow:0 8px 30px rgba(0,0,0,.4);opacity:.7;transition:opacity .15s}

@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
 import { TIER_LABEL } from '../lib/idents';
+import { usePins } from '../lib/pins';
 import { Chip } from './Chip';
 
 interface NavLeaf { to: string; ico: string; label: string; key?: string }
@@ -10,11 +11,12 @@ interface NavMenu { ico: string; label: string; menu: NavLeaf[] }
 interface NavSection { sec: string; items: (NavLeaf | NavMenu)[] }
 
 const NAV: NavSection[] = [
+  // Catalog is the entry point for tools; a single "card" is the detail you reach from it.
+  // "Cards" only earns a nav slot when there's something to show (active card / pinned) — see Rail().
   { sec: 'Create', items: [
     { to: '/', ico: 'message-square', label: 'Chat', key: '⌘1' },
-    { to: '/card', ico: 'sliders-horizontal', label: 'Cards', key: '⌘2' },
-    { to: '/catalog', ico: 'layout-grid', label: 'Catalog', key: '⌘3' },
-    { to: '/canvas', ico: 'workflow', label: 'Canvas', key: '⌘4' },
+    { to: '/catalog', ico: 'layout-grid', label: 'Catalog', key: '⌘2' },
+    { to: '/canvas', ico: 'workflow', label: 'Canvas', key: '⌘3' },
   ] },
   { sec: 'Remember', items: [
     { to: '/space', ico: 'sparkles', label: 'Space', key: '⌘5' },
@@ -93,6 +95,22 @@ function Keyring() {
 }
 
 export function Rail() {
+  const loc = useLocation();
+  const here = loc.pathname;
+  const pinned: NavLeaf[] = usePins().map((p) => ({ to: `/card?id=${encodeURIComponent(p.id)}`, ico: 'star', label: p.name }));
+  // The card you're on — surfaced as its own nav entry unless it's already pinned.
+  const activeId = new URLSearchParams(loc.search).get('id');
+  const activeTo = here === '/card' ? `/card?id=${encodeURIComponent(activeId ?? 'flux-schnell')}` : null;
+  const activeUnpinned = activeTo && !pinned.some((p) => p.to === activeTo);
+  // Inject under Create: the active (unpinned) card first, then the pinned cards.
+  const cards: NavLeaf[] = [
+    ...(activeUnpinned ? [{ to: activeTo, ico: 'sliders-horizontal', label: 'Active card' }] : []),
+    ...pinned,
+  ];
+  const sections = NAV.map((s) =>
+    s.sec === 'Create' && cards.length > 0 ? { ...s, items: [...s.items, ...cards] } : s
+  );
+
   return (
     <aside className="rail">
       <div className="brand">
@@ -100,12 +118,18 @@ export function Rail() {
         <Link to="/map" className="maplink" title="all screens"><Ic name="map" /></Link>
       </div>
       <nav className="nav">
-        {NAV.map((s) => (
+        {sections.map((s) => (
           <Fragment key={s.sec}>
             <div className="lbl">{s.sec}</div>
             {s.items.map((it) =>
               'menu' in it ? (
                 <AccountMenu key="account" item={it} />
+              ) : it.to.includes('?') ? (
+                // Card links share the /card path — match on the full url so only the
+                // card you're actually viewing highlights, not every pinned one.
+                <Link key={it.to} to={it.to} className={`navitem${it.to === here + loc.search ? ' active' : ''}`}>
+                  <span className="ico"><Ic name={it.ico} /></span> {it.label}
+                </Link>
               ) : (
                 <NavLink key={it.to} to={it.to} end className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
                   <span className="ico"><Ic name={it.ico} /></span> {it.label}

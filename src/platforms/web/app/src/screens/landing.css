@@ -1,11 +1,14 @@
 /* standalone marketing surface — no app shell; built for weight, not softness */
-.landing-page{display:flex;flex-direction:column;min-height:100vh}
+.landing-page{display:flex;flex-direction:column;min-height:100vh;
+  --px-section:clamp(24px,5.5vw,88px);   /* scales with viewport; generous on wide screens */
+  --py-section:clamp(72px,9vw,120px);    /* vertical breathing room between sections */
+}
 .topnav{display:flex;align-items:center;justify-content:space-between;padding:15px 26px;border-bottom:1px solid var(--hair);position:sticky;top:0;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(8px);z-index:10}
 .topnav .brand{display:flex;align-items:center;gap:9px;font-weight:600;letter-spacing:-.01em;font-size:15px}
 .topnav .brand .dot{width:15px;height:15px;border-radius:5px;background:conic-gradient(from 200deg,var(--accent),#2b2e6b 60%,var(--accent))}
 .topnav .right{display:flex;align-items:center;gap:10px}
 
-.hero{position:relative;max-width:840px;margin:0 auto;padding:clamp(64px,11vh,132px) 26px 30px;text-align:center}
+.hero{position:relative;max-width:840px;margin:0 auto;padding:clamp(80px,12vh,144px) var(--px-section) 44px;text-align:center}
 .hero::before{content:"";position:absolute;inset:-40% 0 auto 0;height:520px;pointer-events:none;
   background:radial-gradient(58% 50% at 50% 0%,var(--accent-bg),transparent 72%)}
 .hero > *{position:relative}
@@ -18,13 +21,13 @@
 
 /* the stance band — the thing that makes it feel important */
 .stance{border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);margin-top:34px;background:linear-gradient(180deg,transparent,var(--accent-bg))}
-.stance .in{max-width:860px;margin:0 auto;padding:58px 28px;text-align:center}
+.stance .in{max-width:860px;margin:0 auto;padding:var(--py-section) var(--px-section);text-align:center}
 .stance h2{font-size:clamp(25px,3.6vw,40px);line-height:1.14;letter-spacing:-.032em;font-weight:600;margin:0}
 .stance h2 .dim{color:var(--muted)}
 .stance .sub{margin-top:16px;color:var(--muted);font-size:14px;max-width:560px;margin-left:auto;margin-right:auto}
 
 /* architecture / whitepaper section — the mechanism IS the pitch (Arweave-style) */
-.arch{max-width:940px;margin:0 auto;padding:58px 28px;border-bottom:1px solid var(--hair)}
+.arch{max-width:940px;margin:0 auto;padding:var(--py-section) var(--px-section);border-bottom:1px solid var(--hair)}
 .arch .lab{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-soft);text-align:center;margin-bottom:12px}
 .arch h2{text-align:center;font-size:clamp(22px,3vw,32px);letter-spacing:-.03em;font-weight:600;margin:0 0 8px}
 .arch .ah-sub{text-align:center;color:var(--muted);font-size:14px;max-width:560px;margin:0 auto 38px;line-height:1.55}
@@ -49,7 +52,7 @@
 .docs{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
 @media (max-width:680px){ .diagram,.diagram.three{grid-template-columns:1fr;gap:10px} .darrow{padding:10px 0;flex-direction:row} }
 
-.lfeat{max-width:1000px;margin:48px auto;padding:0 28px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.lfeat{max-width:1000px;margin:var(--py-section) auto;padding:0 var(--px-section);display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
 .lfeat .lf{border:1px solid var(--hair);border-radius:var(--radius);background:var(--panel);padding:22px}
 .lfeat .lf .li{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:var(--accent-bg);color:var(--accent-soft);margin-bottom:14px}
 .lfeat .lf .li svg.lucide{width:18px;height:18px}
@@ -57,6 +60,6 @@
 .lfeat .lf p{color:var(--muted);font-size:13px;line-height:1.55;margin:0}
 @media(max-width:780px){.lfeat{grid-template-columns:1fr}}
 
-.endcta{text-align:center;padding:26px 28px 6px}
+.endcta{text-align:center;padding:var(--py-section) var(--px-section) calc(var(--py-section) * 0.75)}
 .endcta h2{font-size:clamp(23px,3vw,34px);letter-spacing:-.03em;font-weight:600;margin:0 0 20px}
 .lfoot{text-align:center;color:var(--faint);font-family:var(--font-mono);font-size:11px;padding:40px 0 30px;margin-top:auto}

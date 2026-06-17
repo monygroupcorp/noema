@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en" class="tier-identified" data-font="geist">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Noema — catalog</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="app.css" />
+</head>
+<body>
+<div class="app two">
+  <aside class="rail" id="rail"></aside>
+  <section class="main">
+    <div class="topbar">
+      <div class="me" id="me"></div>
+      <div class="crumb"><span class="sep">/</span> catalog</div>
+      <div class="vis" id="vis"></div>
+    </div>
+    <div class="page"><div class="pw wide">
+      <div class="pagehead"><div><h1>Catalog</h1><div class="sub">Every flow you can run. Pick one to open its card.</div></div></div>
+
+      <div class="toolbar">
+        <div class="search"><span><i data-lucide="search"></i></span><input placeholder="Search flows — make, animate, describe…" /></div>
+        <div class="filters">
+          <button class="fchip on">All</button>
+          <button class="fchip">image</button>
+          <button class="fchip">video</button>
+          <button class="fchip">audio</button>
+          <button class="fchip">3d</button>
+        </div>
+      </div>
+
+      <div class="sectionhead">Canon verbs</div>
+      <div class="grid">
+        <a class="gcard" href="card.html"><div class="gtop"><span class="fav"></span><div><h3>FLUX Schnell</h3><span class="badge accent">make</span></div></div><div class="gd">Fast text-to-image. The default for make.</div><div class="gports"><span class="port">text</span> → <span class="port">image</span></div></a>
+        <a class="gcard" href="card.html"><div class="gtop"><span class="fav" style="background:linear-gradient(160deg,#5fd0a8,#1c4a3c)"></span><div><h3>ChatGPT</h3><span class="badge accent">chat</span></div></div><div class="gd">Multi-turn conversation over text.</div><div class="gports"><span class="port">text</span> → <span class="port">text</span></div></a>
+        <a class="gcard" href="card.html"><div class="gtop"><span class="fav" style="background:linear-gradient(160deg,#d68f6f,#4a261c)"></span><div><h3>LTX Video</h3><span class="badge">animate</span></div></div><div class="gd">Image + prompt → short video clip.</div><div class="gports"><span class="port">text</span> <span class="port">image</span> → <span class="port">video</span></div></a>
+        <a class="gcard" href="card.html"><div class="gtop"><span class="fav" style="background:linear-gradient(160deg,#9a8fd6,#2b2456)"></span><div><h3>JoyCaption</h3><span class="badge">describe</span></div></div><div class="gd">Image → rich text description.</div><div class="gports"><span class="port">image</span> → <span class="port">text</span></div></a>
+      </div>
+
+      <div class="sectionhead">Self-hosted models</div>
+      <div class="grid">
+        <a class="gcard" href="card.html"><div class="gtop"><span class="fav" style="background:linear-gradient(160deg,#6f8fd6,#23264f)"></span><div><h3>Hunyuan3D</h3><span class="badge">make · 3d</span></div></div><div class="gd">Image → printable 3D mesh.</div><div class="gports"><span class="port">image</span> → <span class="port">3d</span></div></a>
+        <a class="gcard" href="card.html"><div class="gtop"><span class="fav" style="background:linear-gradient(160deg,#d66f9a,#4a1c33)"></span><div><h3>HeartMuLa</h3><span class="badge">compose</span></div></div><div class="gd">Text → music.</div><div class="gports"><span class="port">text</span> → <span class="port">audio</span></div></a>
+        <a class="gcard" href="card.html"><div class="gtop"><span class="fav" style="background:linear-gradient(160deg,#8fd66f,#2c4a1c)"></span><div><h3>Qwen3-VL</h3><span class="badge">describe</span></div></div><div class="gd">Vision-language understanding.</div><div class="gports"><span class="port">image</span> <span class="port">text</span> → <span class="port">text</span></div></a>
+        <a class="gcard" href="card.html"><div class="gtop"><span class="fav" style="background:linear-gradient(160deg,#d6c46f,#4a401c)"></span><div><h3>ShotVL</h3><span class="badge">describe</span></div></div><div class="gd">Cinematic shot understanding.</div><div class="gports"><span class="port">video</span> → <span class="port">text</span></div></a>
+      </div>
+    </div></div>
+  </section>
+</div>
+<script src="app.js"></script>
+<script>
+  document.querySelectorAll('.fchip').forEach(c=> c.onclick=()=>{
+    document.querySelectorAll('.fchip').forEach(x=>x.classList.remove('on')); c.classList.add('on');
+  });
+</script>
+</body>
+</html>
