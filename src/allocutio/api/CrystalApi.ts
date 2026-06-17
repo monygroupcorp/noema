@@ -459,6 +459,17 @@ export class CrystalApi {
     return toTeeSessionView(session)
   }
 
+  async endTeeSession(auctor: AuctorKey, sessionId: string): Promise<void> {
+    const session = this.teeSessions.get(sessionId)
+    if (!session || !_auctorMatch(session.auctor, auctor)) throw Errors.notFoundStudio(sessionId)
+    session.status = 'ended'
+    if (session.podId && this.deps.teeProvisioner) {
+      await this.deps.teeProvisioner.terminate(session.podId).catch(err =>
+        console.warn('[tee] pod terminate failed', { sessionId, podId: session.podId, err: String(err) })
+      )
+    }
+  }
+
   async handleRunnerReady(signal: RunnerReadySignal): Promise<void> {
     console.info('[tee] runner ready', { sessionId: signal.sessionId, wgKey: signal.wgPublicKey?.slice(0, 12) })
     if (signal.wgServerLog) console.info('[tee] wg-server.log at ready:\n' + signal.wgServerLog)

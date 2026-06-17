@@ -162,6 +162,17 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	// Debug log endpoint — readable from outside the WG tunnel (port 8080 is publicly proxied).
+	// Exposes /tmp/wg-server.log: everything tee-wg-server has printed to stdout/stderr.
+	mux.HandleFunc("/debug/wglog", func(w http.ResponseWriter, r *http.Request) {
+		data, err := os.ReadFile("/tmp/wg-server.log")
+		if err != nil {
+			http.Error(w, "log not found: "+err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write(data)
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Plain HTTP requests (e.g. RunPod health probes on /) return 200 instead of failing
 		// the WS upgrade, which would cause RunPod to mark the pod unhealthy and restart it.

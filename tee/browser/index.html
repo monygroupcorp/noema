@@ -390,10 +390,12 @@
       //     This isolates "proxy unreachable" from "WASM code path broken" — both
       //     produce zero [WS] lines from the interceptor if the probe doesn't fire either.
       await new Promise(resolve => {
-        const wsUrl = session.proxyUrl
+        const wsBase = session.proxyUrl
           .replace(/^socks5\+wss:\/\//, 'wss://')
           .replace(/^socks5\+ws:\/\//, 'ws://')
-          .replace(/\?.*$/, '') + '/';
+          .replace(/\?.*$/, '')
+          .replace(/\/$/, '');
+        const wsUrl = wsBase + '/';
         log('[PROBE] testing WS to ' + wsUrl.substring(0, 60));
         const probe = new WebSocket(wsUrl);
         const done = () => { try { probe.close(); } catch (_) {} resolve(); };
@@ -506,6 +508,16 @@
 
     // — Disconnect / end session
     async function disconnect() {
+      // 1. Tell the platform to terminate the pod — fire and forget.
+      if (sessionId) {
+        const platformUrl = document.getElementById('platformUrl').value.trim();
+        const authToken   = document.getElementById('authToken').value.trim();
+        fetch(platformUrl + '/v1/sessions/tee/' + sessionId, {
+          method: 'DELETE',
+          headers: authToken ? { 'Authorization': 'Bearer ' + authToken } : {},
+        }).then(r => log('session terminated: ' + r.status)).catch(e => log('terminate error: ' + e));
+      }
+      // 2. Close WASM tunnel.
       await wgDisconnect().catch(() => {});
       connected = false;
       sessionId = null;
