@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en" class="tier-identified" data-font="geist">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Noema — space</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="app.css" />
+<style>
+  .spacehint{position:absolute;left:18px;top:18px;z-index:5;font-family:var(--font-mono);font-size:11px;color:var(--faint)}
+  .peek .pmeta .ln{font-family:var(--font-mono);font-size:11px;color:var(--faint);margin-top:5px}
+  .peek .pmeta .open{display:inline-flex;margin-top:9px;color:var(--accent-soft);font-size:11.5px;text-decoration:none}
+  .peek .pmeta .open:hover{color:var(--accent)}
+  .legend .lg .ct{margin-left:auto;color:var(--faint);font-family:var(--font-mono);font-size:10.5px}
+  .legend .lg{min-width:150px}
+</style>
+</head>
+<body>
+<div class="app two">
+  <aside class="rail" id="rail"></aside>
+  <section class="main">
+    <div class="topbar">
+      <div class="me" id="me"></div>
+      <div class="crumb"><span class="sep">/</span> space</div>
+      <div class="vis" id="vis"></div>
+    </div>
+    <div class="space">
+      <div class="spacehint mono">1,284 traces · drag to fly · scroll to zoom</div>
+      <div class="spacebar">
+        <div class="search"><span><i data-lucide="search"></i></span><input placeholder="Search your space — by prompt, look, or model…" /></div>
+      </div>
+      <div class="void" id="void"></div>
+      <div class="legend" id="legend"></div>
+      <div class="peek" id="peek">
+        <div class="pimg"></div>
+        <div class="pmeta">
+          <b id="peek_prompt">—</b>
+          <div class="ln" id="peek_meta">—</div>
+          <a class="open" href="trace.html" id="peek_open">open →</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+<script src="app.js"></script>
+<script>
+(function(){
+  const CLUSTERS = [
+    { key:'dragons',    label:'dragons',    c:'#7d7bff', cx:30, cy:34, count:18, prompts:['a low-poly n64-style dragon perched on a neon temple, dusk','an ancient frost dragon coiled around a tower','jade dragon over a misty valley','wyrm in molten obsidian, ember light'] },
+    { key:'portraits',  label:'portraits',  c:'#d68f6f', cx:72, cy:30, count:11, prompts:['portrait of a stoic ranger, rim light','a court alchemist in candlelit study','weathered sailor, salt and rope','girl with bioluminescent freckles'] },
+    { key:'landscapes', label:'landscapes', c:'#5fd0a8', cx:66, cy:70, count:10, prompts:['terraced rice fields at golden hour','a glass city under aurora','desert monolith, long shadows','floating archipelago above clouds'] },
+    { key:'abstract',   label:'abstract',   c:'#d66f9a', cx:26, cy:72, count:7,  prompts:['liquid chrome folding into itself','generative ink bloom, magenta','fractured stained glass, slow spin','soft noise field, warm grain'] },
+  ];
+  const MODELS = ['flux-schnell','flux-schnell','sd1-5','ltx-video'];
+  const void_ = document.getElementById('void');
+  const peek = document.getElementById('peek');
+  const rand = (a,b)=> a + Math.random()*(b-a);
+
+  CLUSTERS.forEach(cl=>{
+    for(let i=0;i<cl.count;i++){
+      const n = document.createElement('div');
+      n.className = 'pnode';
+      const sz = Math.round(rand(6,16));
+      const left = Math.max(3, Math.min(94, cl.cx + rand(-15,15)));
+      const top  = Math.max(10, Math.min(90, cl.cy + rand(-16,16)));
+      const prompt = cl.prompts[Math.floor(Math.random()*cl.prompts.length)];
+      const model = MODELS[Math.floor(Math.random()*MODELS.length)];
+      const seed = Math.floor(Math.random()*1e9);
+      n.style.cssText = `left:${left}%;top:${top}%;--sz:${sz}px;--c:${cl.c}`;
+      n.dataset.cluster = cl.key;
+      n.dataset.prompt = prompt;
+      n.dataset.meta = `${model} · seed ${seed}`;
+      const show = ()=>{
+        document.getElementById('peek_prompt').textContent = n.dataset.prompt;
+        document.getElementById('peek_meta').textContent = n.dataset.meta;
+        peek.classList.add('show');
+      };
+      n.addEventListener('mouseenter', show);
+      n.addEventListener('click', show);
+      void_.appendChild(n);
+    }
+  });
+
+  document.getElementById('legend').innerHTML = CLUSTERS.map(cl=>
+    `<div class="lg"><span class="d" style="background:${cl.c}"></span>${cl.label}<span class="ct">${cl.count}</span></div>`
+  ).join('');
+})();
+</script>
+</body>
+</html>

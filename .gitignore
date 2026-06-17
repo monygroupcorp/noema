@@ -112,3 +112,4 @@ src/arcanum/circuit/artifacts/arcanum.sym
 src/arcanum/circuit/artifacts/arcanum_js/
 docs/competitive/
 tee/native-test/native-test
+tee/wg-server/wg-server

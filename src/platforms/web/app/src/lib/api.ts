@@ -36,16 +36,39 @@ async function j<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Anonymous self-asserting spend identity (arcanum commitment). Stable per browser session.
+// For quotes it just identifies the caller; real spend is validated downstream against a funded note.
+export function commitment(): string {
+  let c = localStorage.getItem('noema-commitment');
+  if (!c) {
+    const b = new Uint8Array(24);
+    crypto.getRandomValues(b);
+    c = '0x' + Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join('');
+    localStorage.setItem('noema-commitment', c);
+  }
+  return c;
+}
+
+const anonHeaders = () => ({ 'content-type': 'application/json', 'x-commitment': commitment() });
+
 export const api = {
   listFlows: () => fetch('/v1/flows').then(j<{ flows: FlowSummary[] }>),
   getFlow: (id: string) => fetch(`/v1/flows/${id}`).then(j<FlowDescription>),
   quote: (body: Pick<RunRequest, 'modusId' | 'verb' | 'aditus'>) =>
-    fetch('/v1/runs/quote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    fetch('/v1/runs/quote', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
       .then(j<{ impetus: string; recipient?: string }>),
   createRun: (body: RunRequest) =>
-    fetch('/v1/runs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    fetch('/v1/runs', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
       .then(j<{ run: Run }>),
   getRun: (id: string) => fetch(`/v1/runs/${id}`).then(j<{ run: Run }>),
   // SSE — returns an EventSource the caller subscribes to.
   streamRun: (id: string) => new EventSource(`/v1/runs/${id}/stream`),
+  meStatus: () => fetch('/v1/me/status', { headers: { 'x-commitment': commitment() } }).then(j<MeStatus>),
 };
+
+export interface MeStatus {
+  balanceImpetus: string;
+  balanceUsd: number;
+  gens: unknown[];
+  studios: unknown[];
+}

@@ -1,0 +1,29 @@
+.doc-page { min-height: 100vh; display: flex; flex-direction: column; }
+
+/* markdown prose — reserved, readable, dark */
+.prose {
+  max-width: 760px; margin: 0 auto; padding: 48px 28px 72px; width: 100%; flex: 1;
+  color: var(--muted); font-size: 15px; line-height: 1.7;
+}
+.prose > :first-child { margin-top: 0; }
+.prose h1 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -.03em; color: var(--text); margin: 0 0 10px; font-weight: 600; line-height: 1.1; }
+.prose h2 { font-size: 22px; letter-spacing: -.02em; color: var(--text); margin: 40px 0 12px; font-weight: 600; }
+.prose h3 { font-size: 17px; color: var(--text); margin: 28px 0 8px; font-weight: 600; }
+.prose h4 { font-size: 14px; color: var(--text); margin: 22px 0 6px; font-weight: 600; }
+.prose p { margin: 0 0 16px; }
+.prose a { color: var(--accent-soft); text-decoration: none; }
+.prose a:hover { text-decoration: underline; }
+.prose ul, .prose ol { margin: 0 0 16px; padding-left: 22px; }
+.prose li { margin: 5px 0; }
+.prose strong { color: var(--text); font-weight: 600; }
+.prose em { color: var(--faint); }
+.prose code { font-family: var(--font-mono); font-size: .86em; background: var(--raised); border: 1px solid var(--hair); border-radius: 5px; padding: 1px 5px; color: var(--text); }
+.prose pre { background: var(--panel); border: 1px solid var(--hair); border-radius: 10px; padding: 14px; overflow: auto; margin: 0 0 18px; }
+.prose pre code { background: none; border: 0; padding: 0; font-size: 12.5px; }
+.prose blockquote { border-left: 2px solid color-mix(in srgb, var(--accent) 50%, var(--hair)); margin: 0 0 16px; padding: 2px 0 2px 16px; color: var(--faint); }
+.prose hr { border: 0; border-top: 1px solid var(--hair); margin: 32px 0; }
+.prose table { width: 100%; border-collapse: collapse; margin: 4px 0 22px; font-size: 13.5px; display: block; overflow-x: auto; }
+.prose th, .prose td { border: 1px solid var(--hair); padding: 9px 12px; text-align: left; vertical-align: top; }
+.prose th { background: var(--panel); color: var(--text); font-weight: 600; white-space: nowrap; }
+.prose td { color: var(--muted); }
+.prose td strong { color: var(--text); }

@@ -1,0 +1,33 @@
+.canvas-wrap { flex: 1; min-height: 0; position: relative; }
+.canvas-wrap .react-flow { background: var(--bg); }
+
+/* edges */
+.react-flow__edge-path { stroke: var(--hair); stroke-width: 1.5; }
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path { stroke: var(--accent); }
+.react-flow__connectionline .react-flow__connection-path { stroke: var(--accent-soft); stroke-width: 1.5; }
+
+/* controls */
+.react-flow__controls { box-shadow: 0 8px 24px rgba(0,0,0,.4); border-radius: var(--radius); overflow: hidden; }
+.react-flow__controls-button { background: var(--panel); border-bottom: 1px solid var(--hair-soft); }
+.react-flow__controls-button:hover { background: var(--raised); }
+.react-flow__controls-button svg { fill: var(--muted); }
+
+/* custom tool node */
+.cnode { background: var(--panel); border: 1px solid var(--hair); border-radius: var(--r-lg); width: 190px; box-shadow: 0 8px 24px rgba(0,0,0,.3); }
+.react-flow__node.selected .cnode { border-color: color-mix(in srgb, var(--accent) 55%, var(--hair)); box-shadow: 0 0 0 3px var(--accent-bg); }
+.cnode-head { display: flex; align-items: center; gap: var(--s2); padding: 10px 12px; border-bottom: 1px solid var(--hair-soft); }
+.cnode-head .cn-fav { width: 20px; height: 20px; border-radius: 6px; flex: 0 0 auto; }
+.cnode-head b { font-size: 13px; font-weight: 600; flex: 1; letter-spacing: -.01em; }
+.cnode-body { display: flex; justify-content: space-between; padding: 8px 0 10px; min-height: 28px; }
+.cn-col { display: flex; flex-direction: column; }
+.cn-row { height: 26px; display: flex; align-items: center; padding: 0 13px; }
+.cn-row.out { justify-content: flex-end; }
+.cn-row .port { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.react-flow__handle.cn-handle { width: 9px; height: 9px; border: 2px solid var(--bg); }
+
+/* the compile bar */
+.canvas-bar { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 5;
+  display: flex; align-items: center; gap: var(--s4); background: var(--panel); border: 1px solid var(--hair);
+  border-radius: var(--r-pill); padding: 8px 8px 8px 16px; box-shadow: 0 8px 30px rgba(0,0,0,.4); }
+.canvas-bar .hint { color: var(--faint); font-size: var(--fs-xs); font-family: var(--font-mono); white-space: nowrap; }

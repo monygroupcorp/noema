@@ -3,15 +3,17 @@ import { Link, useLocation } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 
 // The altitude "webring" — explicit level-stepping, beside the identity control.
+// Catalog is the tools altitude; a single card is a sub-state of it (so /card highlights catalog).
 const ALT = [
   { to: '/', label: 'chat' },
-  { to: '/card', label: 'card' },
+  { to: '/catalog', label: 'catalog' },
   { to: '/canvas', label: 'canvas' },
   { to: '/space', label: 'space' },
 ];
 
 export function Webring() {
-  const here = useLocation().pathname;
+  const raw = useLocation().pathname;
+  const here = raw === '/card' ? '/catalog' : raw; // a card sits under the catalog altitude
   const idx = Math.max(0, ALT.findIndex((a) => a.to === here));
   const prev = ALT[(idx - 1 + ALT.length) % ALT.length].to;
   const next = ALT[(idx + 1) % ALT.length].to;

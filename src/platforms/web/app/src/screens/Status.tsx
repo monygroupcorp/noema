@@ -1,64 +1,68 @@
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { useIdentity } from '../state/identity';
+import { Ic } from '../lib/icons';
+import { api, type MeStatus } from '../lib/api';
 
-interface Entry { when: string; entry: string; detail: string; delta: number; balance: number }
-
-const LEDGER: Entry[] = [
-  { when: 'today 14:02', entry: 'spend', detail: 'make · flux-schnell', delta: -43, balance: 214 },
-  { when: 'today 11:20', entry: 'spend', detail: 'animate · ltx-video', delta: -120, balance: 257 },
-  { when: 'yesterday', entry: 'deposit', detail: 'eth → credits', delta: 300, balance: 377 },
-  { when: '2d ago', entry: 'reward', detail: 'referral', delta: 25, balance: 77 },
-  { when: '3d ago', entry: 'spend', detail: 'make · flux-schnell', delta: -88, balance: 52 },
-  { when: '4d ago', entry: 'spend', detail: 'describe · joycaption', delta: -60, balance: 140 },
-  { when: '5d ago', entry: 'deposit', detail: 'eth → credits', delta: 200, balance: 200 },
-];
-
-const QUOTES = [
-  { flow: 'make · flux-schnell', when: 'just now', cost: '≈ $0.043' },
-  { flow: 'animate · ltx-video', when: '2h ago', cost: '≈ $0.12' },
-  { flow: 'make · hunyuan3d', when: 'yesterday', cost: '≈ $0.08' },
-];
+const IMPETUS_USD = 0.000337;
 
 export function Status() {
   const { ident } = useIdentity();
+  const [me, setMe] = useState<MeStatus | null>(null);
+  const [err, setErr] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    api.meStatus().then((s) => { if (live) setMe(s); }).catch(() => { if (live) setErr(true); });
+    return () => { live = false; };
+  }, []);
+
+  const credits = me ? Number(me.balanceImpetus) : 0;
+  const usd = me ? (me.balanceUsd || credits * IMPETUS_USD) : 0;
+  const runs = me?.gens.length ?? 0;
+  const studios = me?.studios.length ?? 0;
 
   return (
     <AppShell crumb="account">
       <div className="page"><div className="pw">
-        <div className="pagehead"><div><h1>Account</h1><div className="sub">{ident.name} · {ident.role}</div></div></div>
-
-        <div className="stats">
-          <div className="stat"><div className="l">Balance</div><div className="n">214</div><div className="d">credits · ≈ $0.92</div></div>
-          <div className="stat"><div className="l">Spent this month</div><div className="n">$14.20</div><div className="d">47 runs</div></div>
-          <div className="stat"><div className="l">Runs</div><div className="n">312</div><div className="d">all time</div></div>
+        <div className="pagehead">
+          <div><h1>Account</h1><div className="sub">{ident.name} · {ident.role}</div></div>
+          <div className="right"><Link className="btn" to="/funding"><Ic name="plus" /> Add credits</Link></div>
         </div>
 
-        <div className="sectionhead">Ledger</div>
-        <table className="tbl">
-          <thead>
-            <tr><th>When</th><th>Entry</th><th>Detail</th><th>Δ</th><th>Balance</th></tr>
-          </thead>
-          <tbody>
-            {LEDGER.map((e, i) => (
-              <tr key={i}>
-                <td>{e.when}</td>
-                <td>{e.entry}</td>
-                <td>{e.detail}</td>
-                <td className={`v ${e.delta >= 0 ? 'pos' : 'neg'}`}>{e.delta >= 0 ? '+' : ''}{e.delta}</td>
-                <td className="v">{e.balance}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {err && <div className="warn">Couldn’t reach your account on staging.</div>}
 
-        <div className="sectionhead">Recent quotes</div>
-        <div className="list">
-          {QUOTES.map((q, i) => (
-            <div className="lrow" key={i}>
-              <div className="li-main"><div className="t">{q.flow}</div><div className="s">{q.when}</div></div>
-              <div className="li-right">{q.cost}</div>
-            </div>
-          ))}
+        <div className="stats">
+          <div className="stat"><div className="l">Balance</div><div className="n">{me ? credits.toLocaleString() : '…'}</div><div className="d">credits · ≈ ${usd.toFixed(2)}</div></div>
+          <div className="stat"><div className="l">Runs</div><div className="n">{me ? runs : '…'}</div><div className="d">all time</div></div>
+          <div className="stat"><div className="l">Studios</div><div className="n">{me ? studios : '…'}</div><div className="d">warm sessions</div></div>
+        </div>
+
+        <div className="sectionhead">Recent runs</div>
+        {!me ? (
+          <div className="empty"><div className="t">Loading your account…</div></div>
+        ) : runs === 0 ? (
+          <div className="empty">
+            <div className="ico"><Ic name="sparkles" /></div>
+            <div className="t">No runs yet — your generations will appear here, and in your <Link to="/space" style={{ color: 'var(--accent-soft)' }}>space</Link>.</div>
+          </div>
+        ) : (
+          <div className="list">
+            {me.gens.slice(0, 8).map((gobj, i) => {
+              const gn = gobj as { modusId?: string; status?: string; createdAt?: string };
+              return (
+                <div className="lrow" key={i}>
+                  <div className="li-main"><div className="t">{gn.modusId ?? 'run'}</div><div className="s">{gn.status ?? ''}</div></div>
+                  <div className="li-right">{gn.createdAt?.slice(0, 10) ?? ''}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="sub" style={{ marginTop: 'var(--s5)', color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
+          Live from staging · {ident.tier === 'identified' ? 'signed-in account' : 'anonymous session'}.
         </div>
       </div></div>
     </AppShell>
