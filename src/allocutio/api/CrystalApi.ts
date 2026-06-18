@@ -457,6 +457,7 @@ export class CrystalApi {
       budgetImpetus: budget,
       wgClientPublicKey: opts.wgClientPublicKey,
       ...(opts.costPerHrUsd !== undefined ? { costPerHrUsd: opts.costPerHrUsd } : {}),
+      wsProbeAttempts: 0,
       lastBilledGpuHours: 0,
       spentImpetus: 0n,
       createdAt: new Date(),
@@ -523,7 +524,15 @@ export class CrystalApi {
       const wsOk = await this.deps.teeProvisioner.probeWSUpgrade(session.podId)
       if (!wsOk) {
         const badPodId = session.podId
-        console.warn('[tee] WS probe failed — bad proxy routing; re-provisioning', { podId: badPodId, sessionId: signal.sessionId })
+        session.wsProbeAttempts += 1
+        if (session.wsProbeAttempts >= 3) {
+          console.error('[tee] WS probe failed 3 times — giving up', { sessionId: signal.sessionId })
+          session.status = 'ended'
+          session.error = 'no GPU with working proxy found after 3 attempts — please try again later'
+          await this.deps.teeProvisioner.terminate(badPodId).catch(() => {})
+          return
+        }
+        console.warn('[tee] WS probe failed — re-provisioning', { podId: badPodId, attempt: session.wsProbeAttempts, sessionId: signal.sessionId })
         session.podId = undefined
         await this.deps.teeProvisioner.terminate(badPodId).catch(() => {})
         // Keep session in 'provisioning' — spin a new pod transparently.
@@ -764,6 +773,7 @@ interface TeeSession {
   budgetImpetus: bigint
   wgClientPublicKey: string
   podId?: string
+  wsProbeAttempts: number
   serverPublicKey?: string
   endpoint?: string
   proxyUrl?: string
