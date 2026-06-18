@@ -11,6 +11,8 @@
 // The session transitions to 'ready' via the /runner/ready callback from the pod.
 // =============================================================================
 
+import tls from 'tls'
+import crypto from 'crypto'
 import { makeLogger } from '../lib/logger.js'
 
 const log = makeLogger('tee:provisioner')
@@ -19,6 +21,10 @@ const RUNPOD_REST_API    = 'https://rest.runpod.io/v1'
 const RUNPOD_GQL_API     = 'https://api.runpod.io/graphql'
 const MACHINE_POLL_MS    = 8_000
 const MACHINE_TIMEOUT_MS = 5 * 60 * 1_000
+const HEALTH_POLL_MS     = 3_000
+const HEALTH_TIMEOUT_MS  = 60 * 1_000
+const WS_PROBE_TIMEOUT_MS = 5_000
+const MAX_PROVISION_ATTEMPTS = 3
 
 export interface TeeProvisionerConfig {
   apiKey: string
@@ -46,17 +52,26 @@ export class TeeProvisioner {
     wgClientPublicKey: string,
     onPodCreated?: (podId: string) => void,
   ): Promise<TeeProvisionResult> {
-    const { podId, costPerHrUsd } = await this._startPod(sessionId, wgClientPublicKey)
-    // Notify caller immediately so session.podId is set before the pod's runner/ready callback
-    // can arrive (which happens while _waitForRuntime is still polling).
-    onPodCreated?.(podId)
-    log.info('pod created', { podId, sessionId, costPerHrUsd })
-    // Poll via GraphQL runtime field until the container is actually running.
-    // SECURE pods never get publicIp; proxy URL {podId}-8080.proxy.runpod.net
-    // becomes live once runtime is non-null.
-    await this._waitForRuntime(podId)
-    log.info('pod running', { podId })
-    return { podId, costPerHrUsd }
+    for (let attempt = 1; attempt <= MAX_PROVISION_ATTEMPTS; attempt++) {
+      const { podId, costPerHrUsd } = await this._startPod(sessionId, wgClientPublicKey)
+      onPodCreated?.(podId)
+      log.info('pod created', { podId, sessionId, costPerHrUsd, attempt })
+
+      await this._waitForRuntime(podId)
+      await this._waitForHealth(podId)
+
+      const wsOk = await this._probeWSUpgrade(podId)
+      if (wsOk) {
+        log.info('pod WS probe passed', { podId, attempt })
+        return { podId, costPerHrUsd }
+      }
+
+      // This host routes WS through nginx that drops the Upgrade header.
+      // Terminate and try again — we'll land on a different host.
+      log.warn('pod WS probe failed — bad proxy routing; terminating', { podId, attempt })
+      await this.terminate(podId)
+    }
+    throw new Error('Could not find a pod with working WS proxy after 3 attempts')
   }
 
   async terminate(podId: string): Promise<void> {
@@ -105,6 +120,37 @@ export class TeeProvisioner {
 
     const data = await res.json() as { id: string; costPerHr?: number }
     return { podId: data.id, costPerHrUsd: data.costPerHr }
+  }
+
+  private async _waitForHealth(podId: string): Promise<void> {
+    const url = `https://${podId}-8080.proxy.runpod.net/health`
+    const deadline = Date.now() + HEALTH_TIMEOUT_MS
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(url)
+        if (res.ok) return
+      } catch { /* not up yet */ }
+      await sleep(HEALTH_POLL_MS)
+    }
+    throw new Error(`Pod ${podId} /health never returned 200 within ${HEALTH_TIMEOUT_MS / 1000}s`)
+  }
+
+  private _probeWSUpgrade(podId: string): Promise<boolean> {
+    const host = `${podId}-8080.proxy.runpod.net`
+    const key  = crypto.randomBytes(16).toString('base64')
+    return new Promise(resolve => {
+      let settled = false
+      const done = (ok: boolean) => { if (!settled) { settled = true; socket.destroy(); resolve(ok) } }
+      const socket = tls.connect({ host, port: 443, servername: host }, () => {
+        socket.write(
+          `GET / HTTP/1.1\r\nHost: ${host}\r\nUpgrade: websocket\r\n` +
+          `Connection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`
+        )
+      })
+      socket.once('data', chunk => done(chunk.toString().startsWith('HTTP/1.1 101')))
+      socket.once('error', () => done(false))
+      setTimeout(() => done(false), WS_PROBE_TIMEOUT_MS)
+    })
   }
 
   private async _waitForRuntime(podId: string): Promise<void> {
