@@ -522,10 +522,21 @@ export class CrystalApi {
       // sees sessions with confirmed WS connectivity.
       const wsOk = await this.deps.teeProvisioner.probeWSUpgrade(session.podId)
       if (!wsOk) {
-        console.warn('[tee] WS probe failed — bad proxy routing; terminating pod', { podId: session.podId })
-        session.status = 'ended'
-        session.error = 'bad proxy routing — start a new session'
-        await this.deps.teeProvisioner.terminate(session.podId).catch(() => {})
+        const badPodId = session.podId
+        console.warn('[tee] WS probe failed — bad proxy routing; re-provisioning', { podId: badPodId, sessionId: signal.sessionId })
+        session.podId = undefined
+        await this.deps.teeProvisioner.terminate(badPodId).catch(() => {})
+        // Keep session in 'provisioning' — spin a new pod transparently.
+        this.deps.teeProvisioner.provision(signal.sessionId, session.wgClientPublicKey, (podId) => {
+          const s = this.teeSessions.get(signal.sessionId)
+          if (s) s.podId = podId
+        }).then(result => {
+          const s = this.teeSessions.get(signal.sessionId)
+          if (s) { s.podId = result.podId; if (result.costPerHrUsd !== undefined) s.costPerHrUsd = result.costPerHrUsd }
+        }).catch(err => {
+          const s = this.teeSessions.get(signal.sessionId)
+          if (s) { s.status = 'ended'; s.error = String(err) }
+        })
         return
       }
       // SECURE RunPod pod: no raw public IP. RunPod proxies WSS → socksgo on port 8080.
