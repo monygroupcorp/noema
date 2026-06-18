@@ -511,10 +511,23 @@ export class CrystalApi {
       console.warn('[tee] runner ready: no session found', { sessionId: signal.sessionId })
       return
     }
-    session.status = 'ready'
+
     session.serverPublicKey = signal.wgPublicKey
     session.tunnelIp = '10.13.0.2'
-    if (session.podId) {
+
+    if (session.podId && this.deps.teeProvisioner) {
+      // SECURE RunPod pod: probe the WS upgrade path before marking the session ready.
+      // Some RunPod hosts route through nginx that strips the Upgrade header — the browser
+      // would get a 1006 immediately. Gate 'ready' on the probe so the browser only ever
+      // sees sessions with confirmed WS connectivity.
+      const wsOk = await this.deps.teeProvisioner.probeWSUpgrade(session.podId)
+      if (!wsOk) {
+        console.warn('[tee] WS probe failed — bad proxy routing; terminating pod', { podId: session.podId })
+        session.status = 'ended'
+        session.error = 'bad proxy routing — start a new session'
+        await this.deps.teeProvisioner.terminate(session.podId).catch(() => {})
+        return
+      }
       // SECURE RunPod pod: no raw public IP. RunPod proxies WSS → socksgo on port 8080.
       // ?gost&insecureudp: force GostUDPTun (CmdGostUDPTun 0xF3) and allow UDP through
       // the WSS tunnel. wss:// sets IsTLS()=true which disables UDP by default; InsecureUDP
@@ -527,6 +540,8 @@ export class CrystalApi {
       session.proxyUrl = `socks5+ws://${host}:8080?bind=true&gost=true`
       session.endpoint = signal.endpoint
     }
+
+    session.status = 'ready'
   }
 
   async handleRunnerHeartbeat(signal: RunnerHeartbeatSignal): Promise<{ continue: boolean }> {
