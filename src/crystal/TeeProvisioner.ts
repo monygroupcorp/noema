@@ -52,26 +52,26 @@ export class TeeProvisioner {
     wgClientPublicKey: string,
     onPodCreated?: (podId: string) => void,
   ): Promise<TeeProvisionResult> {
-    for (let attempt = 1; attempt <= MAX_PROVISION_ATTEMPTS; attempt++) {
-      const { podId, costPerHrUsd } = await this._startPod(sessionId, wgClientPublicKey)
-      onPodCreated?.(podId)
-      log.info('pod created', { podId, sessionId, costPerHrUsd, attempt })
+    const { podId, costPerHrUsd } = await this._startPod(sessionId, wgClientPublicKey)
+    // Notify caller immediately so session.podId is set before the pod's runner/ready callback
+    // can arrive (which happens while _waitForRuntime is still polling).
+    onPodCreated?.(podId)
+    log.info('pod created', { podId, sessionId, costPerHrUsd })
+    await this._waitForRuntime(podId)
+    log.info('pod running', { podId })
+    return { podId, costPerHrUsd }
+  }
 
-      await this._waitForRuntime(podId)
-      await this._waitForHealth(podId)
-
-      const wsOk = await this._probeWSUpgrade(podId)
-      if (wsOk) {
-        log.info('pod WS probe passed', { podId, attempt })
-        return { podId, costPerHrUsd }
-      }
-
-      // This host routes WS through nginx that drops the Upgrade header.
-      // Terminate and try again — we'll land on a different host.
-      log.warn('pod WS probe failed — bad proxy routing; terminating', { podId, attempt })
-      await this.terminate(podId)
-    }
-    throw new Error('Could not find a pod with working WS proxy after 3 attempts')
+  /**
+   * Probe the WS upgrade path from the server side, called from handleRunnerReady BEFORE
+   * the session is marked ready. Gates the 'ready' state on actual WS connectivity so the
+   * browser never receives a session that will immediately 1006.
+   *
+   * Returns true if the pod's proxy correctly forwards WS upgrades (Cloudflare path),
+   * false if it strips the Upgrade header (RunPod nginx path — kill and let the user retry).
+   */
+  async probeWSUpgrade(podId: string): Promise<boolean> {
+    return this._probeWSUpgrade(podId)
   }
 
   async terminate(podId: string): Promise<void> {
