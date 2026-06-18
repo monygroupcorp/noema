@@ -529,6 +529,69 @@ If it says "tunnel up" but requests fail, the WG handshake didn't complete.
 
 ---
 
+## Session 6 (2026-06-18) — End-to-end browser tunnel CONFIRMED
+
+### Result
+
+Full browser→pod tunnel working in Chrome against a live RunPod SECURE pod (`2g46llpd55ahra`).
+
+```
+[WS] opened  → 2g46llpd55ahra-8080.proxy.runpod.net/    ← WebSocket up
+[WG/DEBUG] UDP bind has been updated                      ← SOCKS5 GostUDPTun wired
+[WG/DEBUG] peer(btOl…GjRc) - Sending handshake initiation
+[WG/DEBUG] Interface state was Down, requested Up, now Up
+[APP] tunnel up local=10.13.0.2 peer=btOlOVLIg3LO7y3lhILzTuDg2zPyml1AihMIcWoGjRc=
+[WG/DEBUG] peer(btOl…GjRc) - Received handshake response  ← WG handshake complete
+```
+
+Then "Setup Model" was clicked with the default essentia (which has local machine paths).
+Runner.py received the request and returned a 500 — confirmed by the JSON parse error:
+`SyntaxError: Unexpected token 'I', "Internal S"... is not valid JSON`
+
+This proves **HTTP through the WireGuard tunnel works**. The 500 is from the essentia
+pointing to paths that don't exist on the pod (`/home/rth/projects/ai/llama.cpp/...`).
+
+### Complete stack proven
+
+| Layer | Status |
+|-------|--------|
+| Browser WASM load | ✓ |
+| WG key generation | ✓ |
+| Platform session provision (`/v1/sessions/tee`) | ✓ |
+| RunPod pod boot + runner/ready callback | ✓ |
+| WebSocket to pod (via Cloudflare, h2→h1 fallback) | ✓ |
+| SOCKS5 GostUDPTun session | ✓ |
+| WireGuard handshake | ✓ |
+| HTTP request through tunnel → runner.py | ✓ |
+
+### Staging server state
+
+- Image: `ghcr.io/monygroupcorp/noema:staging` (built 2026-06-18T10:04 UTC)
+- TEE image: `monygroup/tee-runner:0617b` (set in `/opt/noema/.env.staging`)
+- Duplicate `TEE_IMAGE_ID` entries in `.env.staging` — last value wins in Node.js (0617b wins)
+- All TEE routes live: `/v1/sessions/tee`, `/runner/ready`, `/runner/heartbeat`, etc.
+
+### Next phase: runner.py model execution
+
+The tunnel is done. What remains:
+
+1. **Fix runner.py 500 → JSON**: Setup errors should return `{"error": "..."}` not a plain 500.
+   FastAPI exception handler needed.
+
+2. **Test with a real model on the pod**: The essentia needs paths that exist on RunPod.
+   Options:
+   - Download a model at setup time (slow but flexible)
+   - Bake a small model into the Docker image
+   - Mount a network volume
+
+3. **Runner probe timeout**: `readyProbe` polls until the model server binds. Timeout is 120s.
+   Need the model server to be reachable at `readyProbe` URL before that.
+
+4. **Inference through tunnel**: Once setup returns `{"status":"ready","port":N}`, wgRequest
+   to `http://10.13.0.1:N/v1/chat/completions` should stream tokens back.
+
+---
+
 ## Process lessons
 
 **Tag images with commit SHA, not `:latest`**. RunPod caches `:latest` on the host. New pod, same host = old image. Tag `monygroup/tee-runner:$(git rev-parse --short HEAD)` and pass the tag to the RunPod API.
