@@ -358,6 +358,87 @@ The "root cause 4" from the previous session was a **test instrumentation gap**,
 
 ---
 
+---
+
+## Session 4 (2026-06-18) — Autonomous test loop; server confirmed working
+
+### Problem with previous debugging approach
+
+Every iteration required: push image → user spins pod → user waits → user copies logs into chat → I analyze → propose fix → repeat. Pod sits burning GPU cash while I think. No way to close the loop fast.
+
+### New approach: autonomous test script
+
+`tee/scripts/test-runpod.mjs` — runs entirely without user involvement:
+1. Provisions a RunPod SECURE pod via REST API
+2. Polls for runtime
+3. Tests: HTTP health, wglog, WS upgrade, SOCKS5 handshake, wglog after
+4. Terminates the pod
+5. Prints a verdict
+
+Run it:
+```bash
+export RUNPOD_API_KEY=...
+node tee/scripts/test-runpod.mjs
+```
+
+Optional env:
+- `TEE_IMAGE` — Docker image (default: `monygroup/tee-runner:0617b`)
+- `GPU_TYPE_ID` — RunPod GPU type
+- `PLATFORM_CALLBACK` — URL for runner/ready (default: staging.noema.art)
+
+### Why previous pods had empty wglogs
+
+`entrypoint.sh` redirects tee-wg-server via `>/tmp/wg-server.log 2>&1`. In some container environments this fd redirect is silently lost. Fixed in `0617b` by having the Go binary open the file explicitly:
+
+```go
+if lf, err := os.OpenFile("/tmp/wg-server.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+    log.SetOutput(io.MultiWriter(os.Stderr, lf))
+}
+```
+
+### Why previous pods may have used stale images
+
+We were pushing to `:latest`, which RunPod caches on its hosts. A new pod on a previously-used host gets the old image. Fixed by using versioned tags (`monygroup/tee-runner:0617b`) which force a fresh pull every time.
+
+### First autonomous test result (pod x22wdiklmw0jl9, image 0617b)
+
+```
+HTTP /health      : OK
+wglog before WS   : HAS CONTENT         ← log fix working
+WS upgrade /       : UPGRADED (101)      ← WebSocket works
+WS upgrade /ws-test: UPGRADED (101)
+SOCKS5 over WS    : (pending)
+wglog after WS    : HAS CONTENT
+
+Server: cloudflare   ← this pod goes through Cloudflare (not RunPod's nginx)
+Upgrade header forwarded correctly — no stripping on this pod
+```
+
+Wglog after WS tests showed:
+```
+http: GET / Upgrade="websocket" WsKey=true from=100.64.1.64:52638
+ws: connection from 100.64.1.64:52638 path=/
+ws: socks5 session started
+ws: socks5 session ended: EOF
+```
+
+**Upgrade header was NOT stripped** on this pod. Different RunPod hosts route differently: some through Cloudflare (Upgrade forwarded), some through RunPod's own nginx (Upgrade stripped). Our restoration fix (`Upgrade="" + WsKey present → restore`) handles both cases.
+
+### Current state
+
+Server-side fully confirmed working on image `0617b`:
+- ✅ tee-wg-server starts and logs correctly
+- ✅ WS upgrade returns 101
+- ✅ SOCKS5 session opens and closes cleanly
+- ✅ SOCKS5 handshake (NoAuth `05 01 00` → `05 00`) — confirmed on pod 4ylikpi3cpjggq
+- ❓ WireGuard handshake — requires full WASM client
+
+**Next**: browser test against platform configured with `TEE_IMAGE_ID=monygroup/tee-runner:0617b`.
+Set on the droplet's `.env`, then `./deploy-staging.sh`. Start a TEE session. If wglog shows
+`ws: socks5 session started`, the tunnel is working end-to-end.
+
+---
+
 ## Open unknowns after verification
 
 - RunPod's HTTPS proxy: will it keep WebSocket alive for the lifetime of a long WG session? Any idle timeout?
