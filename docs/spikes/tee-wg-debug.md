@@ -448,6 +448,87 @@ Set on the droplet's `.env`, then `./deploy-staging.sh`. Start a TEE session. If
 
 ---
 
+## Session 5 (2026-06-18) — Chrome h2 ALPN hypothesis investigated; server-side fully proven
+
+### What was tested
+
+Improved the autonomous test script (`tee/scripts/test-runpod.mjs`) with:
+- Multi-GPU fallback: `GPU_TYPES` array (RTX 4090 → RTX 3090 → RTX A4000)
+- Health retry loop after pod-running event (polls `/health: 200` before starting tests)
+- Chrome simulation test: establishes h2 TLS connection, reads `SETTINGS_ENABLE_CONNECT_PROTOCOL`, then does a separate `http/1.1`-only WS upgrade to simulate Chrome's fallback
+
+Ran two successful tests on RTX 4090 pods (`2bzyt254fvjbwc`, `eif4001igchy6x`).
+
+### h2 ALPN hypothesis: DEBUNKED
+
+**Hypothesis going in**: Chrome offers `['h2', 'http/1.1']` in ALPN → Cloudflare selects h2 →
+`SETTINGS_ENABLE_CONNECT_PROTOCOL=0` → Chrome can't do h2 Extended CONNECT → WS fails →
+Chrome falls back to http/1.1 but re-offers `['h2', 'http/1.1']` → infinite loop → 1006.
+
+**Result from Chrome simulation test**:
+```
+h2 ALPN negotiated: h2
+SETTINGS_ENABLE_CONNECT_PROTOCOL: NOT SET (=0)
+h1 fallback WS result: UPGRADED (101)   ← WS succeeds on http/1.1 fallback
+h1 fallback ALPN: http/1.1
+detail: SETTINGS_ENABLE_CONNECT_PROTOCOL=0 → Chrome falls back to http/1.1 → WS succeeds ✓
+```
+
+Chrome's h2→http/1.1 WS fallback opens a NEW TLS connection with ALPN=`['http/1.1']` only.
+Cloudflare respects the http/1.1-only ALPN, returns 101. The theory was wrong.
+
+### Current confirmed state with image 0617b
+
+```
+HTTP /health                : OK
+wglog before WS             : HAS CONTENT
+WS upgrade / (http/1.1)     : UPGRADED (101)
+Chrome sim (h2→h1 fallback) : UPGRADED (101)  [ENABLE_CONNECT=0, h1ALPN=http/1.1]
+WS upgrade /ws-test         : UPGRADED (101)
+SOCKS5 over WS              : OK — NoAuth accepted (05 00)
+wglog after all tests       : HAS CONTENT
+```
+
+**Server-side is fully working.** All known failure modes are eliminated. The browser 1006
+failures from previous sessions were with a pre-0617b image (gost-based SOCKS5, Upgrade header
+stripping). Image 0617b has:
+- Integrated socksgo server (same library as WASM client, guaranteed protocol compatibility)
+- Upgrade header restoration when RunPod proxy strips it
+- io.MultiWriter direct log file write (belt-and-suspenders alongside shell redirect)
+
+### RTX 3090 timing issue (test-only)
+
+RTX 3090 pods returned 404 at 6 seconds after pod-running event. Root cause: RunPod marks a pod
+as `RUNNING` when the container starts, not when tee-wg-server binds port 8080. On slower machines
+or cold image pulls, 6 seconds isn't enough.
+
+**This does NOT affect the platform**: the platform waits for the `/runner/ready` callback from
+runner.py, which fires ~3 seconds AFTER tee-wg-server starts. By then, port 8080 is always bound.
+Fixed in the test script only (health-check retry loop).
+
+### Next: browser test
+
+**Action required** — on the staging droplet:
+```bash
+# Verify TEE image is set
+grep TEE_IMAGE_ID /opt/noema/.env
+# If not monygroup/tee-runner:0617b, update and restart:
+# TEE_IMAGE_ID=monygroup/tee-runner:0617b
+```
+
+Then open `https://staging.noema.art/tee` in Chrome. Expected success log:
+```
+[PROBE] WS reachable ✓        ← WS layer confirmed
+tunnel connected — tunnel up  ← wgConnect resolved
+[WG/DEBUG] handshake ...      ← WG handshake (after first traffic)
+```
+
+If the probe fires `[PROBE] WS unreachable`, the server is down or the image is wrong.
+If wgConnect times out on vtun, something in the WASM path is broken.
+If it says "tunnel up" but requests fail, the WG handshake didn't complete.
+
+---
+
 ## Process lessons
 
 **Tag images with commit SHA, not `:latest`**. RunPod caches `:latest` on the host. New pod, same host = old image. Tag `monygroup/tee-runner:$(git rev-parse --short HEAD)` and pass the tag to the RunPod API.

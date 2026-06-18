@@ -23,7 +23,8 @@ import crypto from 'crypto'
 const API_KEY  = process.env.RUNPOD_API_KEY
 const IMAGE    = process.env.TEE_IMAGE    || 'monygroup/tee-runner:0617b'
 const CALLBACK = process.env.PLATFORM_CALLBACK || 'https://staging.noema.art'
-const GPU_TYPE = process.env.GPU_TYPE_ID  || 'NVIDIA GeForce RTX 4090'
+// Accept comma-separated GPU types; if unset try several common ones in order.
+const GPU_TYPES = (process.env.GPU_TYPE_ID || 'NVIDIA GeForce RTX 4090,NVIDIA GeForce RTX 3090,NVIDIA RTX A4000').split(',')
 
 if (!API_KEY) { die('RUNPOD_API_KEY is required') }
 
@@ -32,7 +33,8 @@ const CLIENT_PUBKEY = crypto.randomBytes(32).toString('base64')
 
 const RUNTIME_POLL_MS    = 8_000
 const RUNTIME_TIMEOUT_MS = 5 * 60_000
-const BOOT_SETTLE_MS     = 6_000   // wait after runtime before probing
+const BOOT_SETTLE_MS     = 4_000   // initial wait after runtime; then we poll /health
+const HEALTH_TIMEOUT_MS  = 3 * 60_000  // max time waiting for /health: 200
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -50,14 +52,26 @@ async function main() {
     await waitForRuntime(podId)
     const base = `https://${podId}-8080.proxy.runpod.net`
     log(`pod running  : ${base}`)
-    log(`settling for ${BOOT_SETTLE_MS / 1000}s…`)
+    log(`settling for ${BOOT_SETTLE_MS / 1000}s then polling /health…`)
     await sleep(BOOT_SETTLE_MS)
+
+    // Wait for tee-wg-server to bind port 8080. RunPod returns 404 when the
+    // container port isn't bound yet (not 502/503), so poll until we see 200.
+    const healthDeadline = Date.now() + HEALTH_TIMEOUT_MS
+    let health = await httpGet(base + '/health')
+    while (health.status !== 200 && Date.now() < healthDeadline) {
+      process.stdout.write(health.status === 404 ? '⏳' : `[${health.status}]`)
+      await sleep(4_000)
+      health = await httpGet(base + '/health')
+    }
+    process.stdout.write('\n')
+    if (health.status !== 200) die(`/health never returned 200 (last: ${health.status})`)
 
     const results = {}
 
     // ── Test 1: plain HTTP health check ──────────────────────────────────────
     log('\n=== TEST 1: HTTP /health ===')
-    results.health = await httpGet(base + '/health')
+    results.health = health
     log(`status: ${results.health.status}  body: ${results.health.body.slice(0, 120)}`)
 
     // ── Test 2: wglog (before WS) ────────────────────────────────────────────
@@ -66,27 +80,39 @@ async function main() {
     log(`status: ${results.wglogBefore.status}`)
     log(results.wglogBefore.body || '(empty)')
 
-    // ── Test 3: WebSocket upgrade ─────────────────────────────────────────────
-    log('\n=== TEST 3: WebSocket upgrade to / ===')
-    results.wsRoot = await wsUpgradeTest(`${podId}-8080.proxy.runpod.net`, '/')
+    // ── Test 3: WebSocket upgrade (HTTP/1.1 only — no h2 ALPN) ──────────────
+    log('\n=== TEST 3: WebSocket upgrade / (HTTP/1.1 ALPN) ===')
+    results.wsRoot = await wsUpgradeTest(`${podId}-8080.proxy.runpod.net`, '/', ['http/1.1'])
     log(`result: ${results.wsRoot.verdict}`)
-    log(`status line: ${results.wsRoot.statusLine}`)
+    log(`ALPN: ${results.wsRoot.alpn}  status: ${results.wsRoot.statusLine}`)
     if (results.wsRoot.headers) log(`headers:\n${results.wsRoot.headers}`)
 
-    // ── Test 4: WebSocket upgrade to /ws-test ────────────────────────────────
-    log('\n=== TEST 4: WebSocket upgrade to /ws-test ===')
-    results.wsTest = await wsUpgradeTest(`${podId}-8080.proxy.runpod.net`, '/ws-test')
+    // ── Test 4: Chrome browser simulation (h2 first, then WS fallback) ───────────
+    // Chrome opens a connection offering h2+http/1.1. If Cloudflare selects h2 but
+    // SETTINGS_ENABLE_CONNECT_PROTOCOL is not set, Chrome opens a SECOND connection
+    // with http/1.1 only for WebSocket. This test simulates that two-step fallback.
+    log('\n=== TEST 4: Chrome simulation (h2 handshake → http/1.1 WS fallback) ===')
+    results.wsBrowserSim = await chromeBrowserSimTest(`${podId}-8080.proxy.runpod.net`)
+    log(`h2 ALPN negotiated: ${results.wsBrowserSim.h2Alpn}`)
+    log(`SETTINGS_ENABLE_CONNECT_PROTOCOL: ${results.wsBrowserSim.enableConnect ?? 'NOT SET (=0)'}`)
+    log(`h1 fallback WS result: ${results.wsBrowserSim.verdict}`)
+    log(`h1 fallback ALPN: ${results.wsBrowserSim.h1Alpn}`)
+    if (results.wsBrowserSim.detail) log(`detail: ${results.wsBrowserSim.detail}`)
+
+    // ── Test 5: WebSocket upgrade to /ws-test ────────────────────────────────
+    log('\n=== TEST 5: WebSocket upgrade to /ws-test ===')
+    results.wsTest = await wsUpgradeTest(`${podId}-8080.proxy.runpod.net`, '/ws-test', ['http/1.1'])
     log(`result: ${results.wsTest.verdict}`)
     log(`status line: ${results.wsTest.statusLine}`)
 
-    // ── Test 5: SOCKS5 handshake over WebSocket ───────────────────────────────
-    log('\n=== TEST 5: SOCKS5 NoAuth handshake over WS ===')
+    // ── Test 6: SOCKS5 handshake over WebSocket ───────────────────────────────
+    log('\n=== TEST 6: SOCKS5 NoAuth handshake over WS ===')
     results.socks5 = await socks5HandshakeTest(`${podId}-8080.proxy.runpod.net`)
     log(`result: ${results.socks5.verdict}`)
     if (results.socks5.detail) log(`detail: ${results.socks5.detail}`)
 
-    // ── Test 6: wglog after all tests ────────────────────────────────────────
-    log('\n=== TEST 6: /debug/wglog (after all tests) ===')
+    // ── Test 7: wglog after all tests ────────────────────────────────────────
+    log('\n=== TEST 7: /debug/wglog (after all tests) ===')
     await sleep(500)
     results.wglogAfter = await httpGet(base + '/debug/wglog?tail=30')
     log(`status: ${results.wglogAfter.status}`)
@@ -94,12 +120,13 @@ async function main() {
 
     // ── Summary ───────────────────────────────────────────────────────────────
     log('\n======== SUMMARY ========')
-    log(`HTTP /health         : ${results.health.status === 200 ? 'OK' : 'FAIL (' + results.health.status + ')'}`)
-    log(`wglog before WS      : ${results.wglogBefore.body ? 'HAS CONTENT' : 'EMPTY — server not logging'}`)
-    log(`WS upgrade /          : ${results.wsRoot.verdict}`)
-    log(`WS upgrade /ws-test   : ${results.wsTest.verdict}`)
-    log(`SOCKS5 over WS        : ${results.socks5.verdict}`)
-    log(`wglog after all tests : ${results.wglogAfter.body ? 'HAS CONTENT' : 'EMPTY'}`)
+    log(`HTTP /health                : ${results.health.status === 200 ? 'OK' : 'FAIL (' + results.health.status + ')'}`)
+    log(`wglog before WS             : ${results.wglogBefore.body ? 'HAS CONTENT' : 'EMPTY — server not logging'}`)
+    log(`WS upgrade / (http/1.1 ALPN): ${results.wsRoot.verdict}  [ALPN=${results.wsRoot.alpn}]`)
+    log(`Chrome sim (h2→h1 fallback)  : ${results.wsBrowserSim.verdict}  [h1ALPN=${results.wsBrowserSim.h1Alpn}]  ENABLE_CONNECT=${results.wsBrowserSim.enableConnect ?? 0}`)
+    log(`WS upgrade /ws-test         : ${results.wsTest.verdict}`)
+    log(`SOCKS5 over WS              : ${results.socks5.verdict}`)
+    log(`wglog after all tests       : ${results.wglogAfter.body ? 'HAS CONTENT' : 'EMPTY'}`)
 
     if (!results.wglogBefore.body && !results.wglogAfter.body) {
       log('\nDIAGNOSIS: tee-wg-server is NOT writing to /tmp/wg-server.log.')
@@ -110,12 +137,35 @@ async function main() {
       log('  If /health returned "ok" (plain text) → tee-wg-server IS on 8080 but log file is broken')
     }
 
-    const wsOk    = results.wsRoot.verdict === 'UPGRADED (101)'
-    const socksOk = results.socks5.verdict.startsWith('OK')
+    const wsOk            = results.wsRoot.verdict === 'UPGRADED (101)'
+    const socksOk         = results.socks5.verdict.startsWith('OK')
+    const chromeFallbackOk = results.wsBrowserSim.verdict === 'UPGRADED (101)'
+    const enableConnect   = results.wsBrowserSim.enableConnect
 
     if (wsOk && socksOk) {
-      log('\nDIAGNOSIS: Server-side fully working (WS upgrade + SOCKS5 handshake). Ready for browser test.')
-      log('  Next: deploy platform with TEE_IMAGE_ID=monygroup/tee-runner:0617b and test from browser.')
+      log('\nDIAGNOSIS: Server-side fully working (WS upgrade + SOCKS5 handshake).')
+      if (!chromeFallbackOk) {
+        log('\n*** Chrome fallback WS FAILED — this is likely the browser root cause. ***')
+        log(`  Cloudflare h2 SETTINGS_ENABLE_CONNECT_PROTOCOL = ${enableConnect ?? 0}`)
+        if ((enableConnect ?? 0) === 0) {
+          log('  Chrome should fall back to HTTP/1.1 for WebSocket, but the fallback failed.')
+          log('  Possible causes:')
+          log('  (a) Chrome\'s HTTP/1.1 fallback connection also negotiated h2 (cycle)')
+          log('  (b) Cloudflare rejected the second connection')
+          log('  (c) The browser WASM uses ?gost&insecureudp query params that cause rejection')
+          log(`  h1 fallback ALPN was: ${results.wsBrowserSim.h1Alpn} (should be http/1.1)`)
+        }
+        log('  → FIX: intercept window.WebSocket in the browser and force an http/1.1-only ALPN.')
+        log('    This is NOT possible from JavaScript. Must use a platform relay.')
+        log('  → RELAY FIX: add a WS relay endpoint to the platform (staging.noema.art/v1/sessions/tee/:id/ws)')
+        log('    Platform connects to pod using Node.js (http/1.1) and relays. Browser never hits pod directly.')
+      } else if (enableConnect === 1) {
+        log('  SETTINGS_ENABLE_CONNECT_PROTOCOL=1 — Chrome uses h2 Extended CONNECT, Cloudflare relays.')
+        if (chromeFallbackOk) log('  Chrome h2→h2 WS path works.')
+      } else {
+        log('  Chrome h2→http/1.1 fallback WS works — browser failure must be something else.')
+        log('  Check Chrome DevTools for the actual error on a failed browser test.')
+      }
     } else if (wsOk && !socksOk) {
       log('\nDIAGNOSIS: WS upgrade works but SOCKS5 handshake failed.')
       log('  Check socksgo server config and AcceptWS error in wglog.')
@@ -135,24 +185,27 @@ async function main() {
 // ── RunPod API ────────────────────────────────────────────────────────────────
 
 async function startPod() {
-  const body = {
-    name:                `noema-autotest-${SESSION_ID.slice(0, 8)}`,
-    imageName:           IMAGE,
-    gpuCount:            1,
-    cloudType:           'SECURE',
-    containerDiskInGb:   40,
-    ports:               ['8080/http'],
-    supportPublicIp:     true,
-    gpuTypeIds:          [GPU_TYPE],
-    env: {
-      SESSION_ID:        SESSION_ID,
-      PLATFORM_CALLBACK: CALLBACK,
-      WG_CLIENT_PUBKEY:  CLIENT_PUBKEY,
-    },
+  for (const gpuType of GPU_TYPES) {
+    const body = {
+      name:                `noema-autotest-${SESSION_ID.slice(0, 8)}`,
+      imageName:           IMAGE,
+      gpuCount:            1,
+      cloudType:           'SECURE',
+      containerDiskInGb:   40,
+      ports:               ['8080/http'],
+      supportPublicIp:     true,
+      gpuTypeIds:          [gpuType.trim()],
+      env: {
+        SESSION_ID:        SESSION_ID,
+        PLATFORM_CALLBACK: CALLBACK,
+        WG_CLIENT_PUBKEY:  CLIENT_PUBKEY,
+      },
+    }
+    const res = await jsonPost('https://rest.runpod.io/v1/pods', body)
+    if (res.id) { log(`gpu: ${gpuType.trim()}`); return res.id }
+    log(`gpu ${gpuType.trim()} unavailable — trying next`)
   }
-  const res = await jsonPost('https://rest.runpod.io/v1/pods', body)
-  if (!res.id) die(`pod creation failed: ${JSON.stringify(res)}`)
-  return res.id
+  die(`pod creation failed — no GPU types available: ${GPU_TYPES.join(', ')}`)
 }
 
 async function waitForRuntime(podId) {
@@ -231,6 +284,77 @@ function jsonPost(url, body, opts = {}) {
   })
 }
 
+// ── Chrome browser simulation: h2 first, then http/1.1 WebSocket fallback ─────
+// Step 1: Establish an h2 connection (send proper h2 preface), read SETTINGS.
+// Step 2: If SETTINGS_ENABLE_CONNECT_PROTOCOL=0, open a SECOND connection with
+//         ALPN=['http/1.1'] and send a WebSocket upgrade (the Chrome fallback path).
+// This accurately tests whether Chrome's two-step fallback succeeds.
+
+function chromeBrowserSimTest(hostname) {
+  return new Promise((resolve) => {
+    const result = { h2Alpn: '?', enableConnect: null, h1Alpn: '?', verdict: '?', detail: undefined }
+
+    // ── Step 1: h2 connection, read SETTINGS ─────────────────────────────────
+    const h2Sock = tls.connect({ host: hostname, port: 443, servername: hostname, ALPNProtocols: ['h2', 'http/1.1'] }, () => {
+      result.h2Alpn = h2Sock.alpnProtocol || '(none)'
+      if (result.h2Alpn !== 'h2') {
+        h2Sock.destroy()
+        // If CF didn't negotiate h2, fall straight to step 2 with regular test
+        wsUpgradeTest(hostname, '/', ['http/1.1']).then(r => {
+          result.h1Alpn = r.alpn; result.verdict = r.verdict; result.detail = 'CF did not negotiate h2 — tested http/1.1 directly'
+          resolve(result)
+        })
+        return
+      }
+      // Send h2 client preface + empty SETTINGS frame
+      const magic = Buffer.from('PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n')
+      const sf = Buffer.from([0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00])
+      h2Sock.write(Buffer.concat([magic, sf]))
+    })
+
+    let h2Buf = Buffer.alloc(0)
+    const h2Timer = setTimeout(() => { h2Sock.destroy(); resolve({ ...result, verdict: 'TIMEOUT reading h2 SETTINGS' }) }, 8_000)
+
+    h2Sock.on('data', (chunk) => {
+      h2Buf = Buffer.concat([h2Buf, chunk])
+      let offset = 0
+      while (offset + 9 <= h2Buf.length) {
+        const len = (h2Buf[offset]<<16)|(h2Buf[offset+1]<<8)|h2Buf[offset+2]
+        const type = h2Buf[offset+3], flags = h2Buf[offset+4]
+        if (offset + 9 + len > h2Buf.length) break
+        const payload = h2Buf.slice(offset+9, offset+9+len)
+        if (type === 0x04 && !(flags & 0x01)) { // SETTINGS (not ACK)
+          for (let i = 0; i+6 <= payload.length; i += 6) {
+            const id = (payload[i]<<8)|payload[i+1]
+            const val = (payload[i+2]<<24)|(payload[i+3]<<16)|(payload[i+4]<<8)|payload[i+5]
+            if (id === 8) result.enableConnect = val
+          }
+          clearTimeout(h2Timer)
+          h2Sock.destroy() // done with h2; KEEP IT OPEN is not needed — test the fallback now
+
+          // ── Step 2: http/1.1-only WebSocket (the Chrome fallback path) ────────
+          wsUpgradeTest(hostname, '/', ['http/1.1']).then(r => {
+            result.h1Alpn = r.alpn
+            result.verdict = r.verdict
+            if (result.enableConnect === 1) {
+              result.detail = 'Cloudflare sends SETTINGS_ENABLE_CONNECT_PROTOCOL=1 → Chrome uses h2 Extended CONNECT (not this path)'
+            } else if (r.verdict === 'UPGRADED (101)') {
+              result.detail = 'SETTINGS_ENABLE_CONNECT_PROTOCOL=0 → Chrome falls back to http/1.1 → WS succeeds ✓'
+            } else {
+              result.detail = `SETTINGS_ENABLE_CONNECT_PROTOCOL=0, Chrome fallback http/1.1 WS failed: ${r.verdict}`
+            }
+            resolve(result)
+          })
+          return
+        }
+        offset += 9 + len
+      }
+    })
+
+    h2Sock.on('error', (e) => { clearTimeout(h2Timer); resolve({ ...result, verdict: `h2 ERROR: ${e.message}` }) })
+  })
+}
+
 // ── WebSocket upgrade test (raw TLS, no npm deps) ────────────────────────────
 // Makes a raw TLS connection and sends HTTP upgrade headers manually.
 // Reads the first response line to determine if the server returned:
@@ -238,7 +362,7 @@ function jsonPost(url, body, opts = {}) {
 //   200 OK                  → server ignored the upgrade (returned plain HTTP)
 //   4xx / other             → proxy/server rejected
 
-function wsUpgradeTest(hostname, path) {
+function wsUpgradeTest(hostname, path, alpnProtocols = ['http/1.1']) {
   return new Promise((resolve) => {
     const wsKey = crypto.randomBytes(16).toString('base64')
     const request = [
@@ -253,14 +377,25 @@ function wsUpgradeTest(hostname, path) {
       '',
     ].join('\r\n')
 
-    const sock = tls.connect({ host: hostname, port: 443, servername: hostname }, () => {
+    const sock = tls.connect({ host: hostname, port: 443, servername: hostname, ALPNProtocols: alpnProtocols }, () => {
+      const alpn = sock.alpnProtocol || '(none)'
+      // If h2 was negotiated, the proxy will expect HTTP/2 frames, not HTTP/1.1.
+      // Sending HTTP/1.1 bytes over an h2 connection will get an immediate reset.
+      // Record the negotiated protocol and write the HTTP/1.1 upgrade request anyway
+      // so we can see how the server responds.
+      sock._negotiatedAlpn = alpn
       sock.write(request)
     })
 
     let buf = ''
     const timer = setTimeout(() => {
+      const alpn = sock._negotiatedAlpn || '(timeout-before-connect)'
       sock.destroy()
-      resolve({ verdict: 'TIMEOUT', statusLine: '(no response within 10s)', headers: '' })
+      // If ALPN is h2 and we timed out: Cloudflare received HTTP/1.1 bytes over h2 and
+      // responded with h2 binary frames. Our parser looks for \r\n\r\n which doesn't appear
+      // in h2 binary → timeout. This confirms h2 was negotiated.
+      const detail = alpn === 'h2' ? 'h2 negotiated — Cloudflare returned h2 binary (SETTINGS/GOAWAY), not HTTP/1.1 text' : undefined
+      resolve({ verdict: 'TIMEOUT', statusLine: '(no response within 10s)', headers: '', alpn, detail })
     }, 10_000)
 
     sock.on('data', (chunk) => {
@@ -274,16 +409,19 @@ function wsUpgradeTest(hostname, path) {
       const statusLine = lines[0]
       const headers = lines.slice(1).join('\n')
       const is101 = statusLine.startsWith('HTTP/1.1 101')
+      const alpn = sock._negotiatedAlpn || '(unknown)'
       resolve({
         verdict: is101 ? 'UPGRADED (101)' : `NOT UPGRADED — ${statusLine}`,
         statusLine,
         headers,
+        alpn,
+        detail: alpn === 'h2' ? 'WARNING: Cloudflare negotiated h2 — browser sends HTTP/2 CONNECT, Go backend only speaks HTTP/1.1 → WS upgrade rejected' : undefined,
       })
     })
 
     sock.on('error', (e) => {
       clearTimeout(timer)
-      resolve({ verdict: `ERROR: ${e.message}`, statusLine: '', headers: '' })
+      resolve({ verdict: `ERROR: ${e.message}`, statusLine: '', headers: '', alpn: sock._negotiatedAlpn || '(error before handshake)' })
     })
   })
 }
