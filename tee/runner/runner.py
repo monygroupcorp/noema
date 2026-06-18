@@ -27,7 +27,8 @@ from dataclasses import dataclass
 
 import aiohttp
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [runner] %(message)s")
@@ -163,6 +164,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.exception_handler(Exception)
+async def _json_error(request: Request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
+    log.exception(f"unhandled: {exc}")
+    return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
 # — Endpoints —
