@@ -430,10 +430,12 @@ Server-side fully confirmed working on image `0617b`:
 - ✅ tee-wg-server starts and logs correctly
 - ✅ WS upgrade returns 101
 - ✅ SOCKS5 session opens and closes cleanly
-- ❓ SOCKS5 handshake (NoAuth + CmdGostUDPTun) — tested in second autonomous run
+- ✅ SOCKS5 handshake (NoAuth `05 01 00` → `05 00`) — confirmed on pod 4ylikpi3cpjggq
 - ❓ WireGuard handshake — requires full WASM client
 
 **Next**: browser test against platform configured with `TEE_IMAGE_ID=monygroup/tee-runner:0617b`.
+Set on the droplet's `.env`, then `./deploy-staging.sh`. Start a TEE session. If wglog shows
+`ws: socks5 session started`, the tunnel is working end-to-end.
 
 ---
 
