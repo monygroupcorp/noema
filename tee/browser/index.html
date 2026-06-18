@@ -177,16 +177,19 @@
     <h2>2. SETUP MODEL</h2>
     <p class="note">Essentia definition is pushed through the tunnel — the platform never sees it.</p>
     <label>Essentia (JSON)</label>
-    <textarea id="essentiaJson" style="min-height:160px">{
+    <textarea id="essentiaJson" style="min-height:200px">{
   "fundamentum": {
     "runtime": "llama.cpp",
-    "launchTemplate": "/home/rth/projects/ai/llama.cpp/build/bin/llama-server --model {model} -ngl -1 --port {port} --host 0.0.0.0",
-    "readyProbe": "GET http://localhost:{port}/health",
-    "intellae": [{ "id": "/mnt/data/models/gguf/Huihui-Qwen3.6-27B-abliterated-ggml-model-Q4_K.gguf", "role": "lm" }]
+    "install": [
+      "pip install llama-cpp-python[server] --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124 -q"
+    ],
+    "launchTemplate": "python -m llama_cpp.server --model {model} --n_gpu_layers -1 --port {port} --host 0.0.0.0",
+    "readyProbe": "GET http://localhost:{port}/v1/models",
+    "intellae": [{ "id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf", "role": "lm" }]
   }
 }</textarea>
     <label>Essentia ID</label>
-    <input id="essentiaId" value="huihui-qwen3-27b">
+    <input id="essentiaId" value="qwen2.5-0.5b">
     <div class="row">
       <button id="btnSetup" onclick="setupModel()">Setup Model</button>
     </div>
@@ -269,7 +272,7 @@
 
     function syncButtons() {
       document.getElementById('btnStart').disabled        = !wasmReady || connected;
-      document.getElementById('btnDisconnect').disabled   = !connected;
+      document.getElementById('btnDisconnect').disabled   = !sessionId;
       document.getElementById('btnLocalConnect').disabled = !wasmReady || connected;
       const localStatus = document.getElementById('localStatus');
       if (wasmReady && localStatus.textContent === 'WASM loading…') {

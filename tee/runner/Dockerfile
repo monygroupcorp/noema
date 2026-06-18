@@ -1,10 +1,12 @@
 # TEE Runner — two-stage build.
 # Build context: tee/ directory (docker build -f runner/Dockerfile tee/)
 #
-# Stage 1: compile tee-wg-server:
-#   - userspace WireGuard (gVisor netstack, no kernel TUN / NET_ADMIN)
-#   - SOCKS5+WS server (asciimoth/socksgo, replaces gost)
-# Stage 2: runtime image with CUDA, Python runner, and the wg-server binary.
+# Stage 1: compile tee-wg-server (userspace WG + SOCKS5+WS)
+# Stage 2: runtime image with CUDA and Python runner
+#
+# Intentionally lean — no runtime-specific binaries (llama-server, vLLM, etc.).
+# Those are installed at /setup time via the fundamentum's install[] steps,
+# keeping the image a blank compute substrate the user fully controls.
 
 # ── Stage 1: Go builder ──────────────────────────────────────────────────────
 FROM golang:1.25-bookworm AS wg-builder
