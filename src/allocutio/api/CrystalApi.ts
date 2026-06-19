@@ -85,7 +85,7 @@ export interface CrystalApiDeps {
   /** Collection store + fan-out cursor — back `collect`/`getCollection`/review.
    *  Absent → collection ops unavailable. */
   collectiones?: Collectionum
-  collectioCursor?: Pick<CollectioCursor, 'start' | 'approveActum' | 'rejectAndRevive' | 'pause' | 'resume'>
+  collectioCursor?: Pick<CollectioCursor, 'start' | 'extend' | 'approveActum' | 'rejectAndRevive' | 'pause' | 'resume'>
   /** RunPod pod provisioner for TEE private compute sessions. Absent → local dev (manual runner). */
   teeProvisioner?: TeeProvisioner
 }
@@ -299,6 +299,17 @@ export class CrystalApi {
   async listCollections(auctor: AuctorKey): Promise<Collection[]> {
     const all = (await this.deps.collectiones?.list()) ?? []
     return all.filter((c) => this._ownsCollection(auctor, c)).map(toCollection)
+  }
+
+  /**
+   * Extend a Collection's target by `addCount` and dispatch the new pieces —
+   * the incremental-batch primitive (fire a batch, review, fire more toward a
+   * larger goal over time). Re-opens a completed Collection. Owner-scoped.
+   */
+  async extendCollection(auctor: AuctorKey, id: string, addCount: number): Promise<Collection> {
+    await this._ownedCollection(auctor, id)
+    await this.deps.collectioCursor?.extend(id, addCount)
+    return toCollection((await this.deps.collectiones!.find(id))!)
   }
 
   /** Pause dispatching new pieces (in-flight finish). Owner-scoped. */

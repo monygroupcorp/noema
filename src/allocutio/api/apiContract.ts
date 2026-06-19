@@ -712,6 +712,19 @@ export const API_CONTRACT: ApiContract = {
     },
     {
       method: 'POST',
+      path: '/collectiones/:id/extend',
+      summary: 'Extend a Collection — raise the target by `count` and dispatch the new pieces (incremental batches: fire a batch, review, fire more). Re-opens a completed Collection. Owner-scoped.',
+      auth: true,
+      request: {
+        type: 'object',
+        description: 'How many more pieces to add to the target and fire.',
+        properties: { count: { type: 'number', description: 'Pieces to add (must be > 0).' } },
+        required: ['count'],
+      },
+      response: CollectionEnvelopeSchema,
+    },
+    {
+      method: 'POST',
       path: '/collectiones/:id/pause',
       summary: 'Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Owner-scoped.',
       auth: true,

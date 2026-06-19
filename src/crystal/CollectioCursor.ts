@@ -60,44 +60,49 @@ export class CollectioCursor {
     for (const collectio of agensList) {
       // Already tracked (e.g. rehydrate called twice) — skip
       if (this.states.has(collectio.id)) continue
+      this.states.set(collectio.id, await this._reconstructState(collectio))
+    }
+  }
 
-      // Reconstruct running set: acta whose status is nascens or agens
-      const running = new Set<string>()
-      const pendingReview = new Set<string>()
-      const usedDna = new Set<string>()
-      let reviveCount = 0
+  /**
+   * Rebuild in-memory state for one Collectio from its persisted acta — the
+   * running/pending/revive sets and the DNA ledger. Shared by rehydrate (on
+   * restart) and extend (re-opening a settled collection for another batch).
+   */
+  private async _reconstructState(collectio: Collectio): Promise<CollectioState> {
+    const running = new Set<string>()
+    const pendingReview = new Set<string>()
+    const usedDna = new Set<string>()
+    let reviveCount = 0
 
-      for (const actumId of collectio.acta) {
-        const actum = await this.actorum.findById(actumId)
-        if (!actum) continue
+    for (const actumId of collectio.acta) {
+      const actum = await this.actorum.findById(actumId)
+      if (!actum) continue
 
-        if (actum.status === 'nascens' || actum.status === 'agens') {
-          running.add(actumId)
-        }
-
-        if (actum.exitus?.reviewOutcome === 'pending') {
-          pendingReview.add(actumId)
-        }
-
-        if (actum.exitus?.reviewOutcome === 'rejected') {
-          reviveCount++
-        }
-
-        // Rebuild the DNA ledger from the fingerprint stamped at dispatch time.
-        const dna = actum.aditus?._dna
-        if (typeof dna === 'string' && dna) usedDna.add(dna)
+      if (actum.status === 'nascens' || actum.status === 'agens') {
+        running.add(actumId)
       }
 
-      const state: CollectioState = {
-        nextIndex: collectio.acta.length,
-        running,
-        paused: false,
-        pendingReview,
-        reviveCount,
-        usedDna,
+      if (actum.exitus?.reviewOutcome === 'pending') {
+        pendingReview.add(actumId)
       }
 
-      this.states.set(collectio.id, state)
+      if (actum.exitus?.reviewOutcome === 'rejected') {
+        reviveCount++
+      }
+
+      // Rebuild the DNA ledger from the fingerprint stamped at dispatch time.
+      const dna = actum.aditus?._dna
+      if (typeof dna === 'string' && dna) usedDna.add(dna)
+    }
+
+    return {
+      nextIndex: collectio.acta.length,
+      running,
+      paused: false,
+      pendingReview,
+      reviveCount,
+      usedDna,
     }
   }
 
@@ -116,6 +121,32 @@ export class CollectioCursor {
     await this.collectiones.update(collectio.id, { status: 'agens' })
 
     await this._dispatch(collectio.id)
+  }
+
+  /**
+   * Extend a Collectio's target by `addCount` and dispatch the new pieces —
+   * the incremental-batch primitive ("fire 50 → review → fire 50 more"). Works
+   * whether the collection is still agens or already completa: state is
+   * reconstructed if it was cleared on completion, the target (numerus) grows,
+   * the collection re-opens to agens, and the fan-out resumes from where it
+   * left off (new pieces get fresh, non-colliding pieceIndexes).
+   */
+  async extend(collectioId: string, addCount: number): Promise<void> {
+    if (addCount <= 0) return
+    const collectio = await this.collectiones.find(collectioId)
+    if (!collectio) return
+
+    // Reconstruct state if the collection had settled (completa clears it).
+    if (!this.states.has(collectioId)) {
+      this.states.set(collectioId, await this._reconstructState(collectio))
+    }
+
+    await this.collectiones.update(collectioId, {
+      numerus: collectio.numerus + addCount,
+      status: 'agens',
+    })
+
+    await this._dispatch(collectioId)
   }
 
   /**
