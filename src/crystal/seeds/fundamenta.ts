@@ -53,6 +53,140 @@ export const FUNDAMENTUM_SD15_COMFYUI: Fundamentum = {
   mutatum: new Date('2025-01-01'),
 }
 
+/** SDXL · ComfyUI — the self-contained SDXL base checkpoint (model + CLIP + VAE in one file). */
+export const FUNDAMENTUM_SDXL_COMFYUI: Fundamentum = {
+  id: 'sdxl-comfyui',
+  nomen: 'SDXL · ComfyUI',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'ComfyUI',
+  intellae: [
+    { id: 'intella.sdxl-base-1-0', role: 'checkpoint' },
+  ],
+  vramGb: 12,
+  canonica: true,
+  natum: new Date('2025-01-01'),
+  mutatum: new Date('2025-01-01'),
+}
+
+/**
+ * Chroma · ComfyUI — the Chroma DiT stack. FLUX-adjacent: the new Chroma unet sits on the SHARED
+ * FLUX support weights (T5-XXL text encoder + FLUX VAE), so it reuses intella.t5xxl-fp16 +
+ * intella.flux-vae rather than minting its own. Family ('chroma') derives from the unet's `familia`.
+ */
+export const FUNDAMENTUM_CHROMA_COMFYUI: Fundamentum = {
+  id: 'chroma-comfyui',
+  nomen: 'Chroma · ComfyUI',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'ComfyUI',
+  intellae: [
+    { id: 'intella.chroma-unlocked-v35', role: 'unet' },
+    { id: 'intella.t5xxl-fp16',          role: 'clip' },
+    { id: 'intella.flux-vae',            role: 'vae' },
+  ],
+  vramGb: 24,
+  canonica: true,
+  natum: new Date('2025-01-01'),
+  mutatum: new Date('2025-01-01'),
+}
+
+/**
+ * FLUX Kontext · ComfyUI — the FLUX.1 Kontext [dev] edit stack. FLUX-adjacent: the Kontext unet sits on
+ * the SHARED FLUX support weights (T5-XXL + CLIP-L + FLUX VAE), so it reuses those intellae; only the
+ * unet differs from `flux-comfyui`. Family ('flux') derives from the unet's `familia` (so old flux LoRAs
+ * apply — the user's note that Kontext works with our existing LoRAs).
+ */
+export const FUNDAMENTUM_FLUX_KONTEXT_COMFYUI: Fundamentum = {
+  id: 'flux-kontext-comfyui',
+  nomen: 'FLUX Kontext · ComfyUI',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'ComfyUI',
+  intellae: [
+    { id: 'intella.flux-kontext-dev', role: 'unet' },
+    { id: 'intella.t5xxl-fp16',       role: 'clip' },
+    { id: 'intella.clip-l',           role: 'clip' },
+    { id: 'intella.flux-vae',         role: 'vae' },
+  ],
+  vramGb: 24,
+  canonica: true,
+  natum: new Date('2025-01-01'),
+  mutatum: new Date('2025-01-01'),
+}
+
+/**
+ * ComfyUI base — a weightless ComfyUI substrate for pack-only flows whose custom node self-downloads
+ * its own model (e.g. InspyrenetRembg pulls the transparent-background ckpt on first use). No pinned
+ * intellae; the flow's template names its customNodes. Light pod.
+ */
+export const FUNDAMENTUM_COMFYUI_BASE: Fundamentum = {
+  id: 'comfyui-base',
+  nomen: 'ComfyUI base (weightless)',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'ComfyUI',
+  intellae: [],
+  vramGb: 8,
+  canonica: true,
+  natum: new Date('2025-01-01'),
+  mutatum: new Date('2025-01-01'),
+}
+
+/**
+ * FLUX.2 Klein · ComfyUI — the FLUX.2 Klein 9B stack (a NEW family, not FLUX.1). Distinct architecture:
+ * a Qwen3-8B text encoder (CLIPLoader type 'flux2') + the FLUX.2 full-encoder VAE + the Klein 9B DiT.
+ * Carries all three (none shared with the flux.1 fundamenta). family 'flux2' — flux.1 LoRAs don't apply.
+ */
+export const FUNDAMENTUM_FLUX2_KLEIN_COMFYUI: Fundamentum = {
+  id: 'flux2-klein-comfyui',
+  nomen: 'FLUX.2 Klein · ComfyUI',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'ComfyUI',
+  intellae: [
+    { id: 'intella.flux2-klein-9b',          role: 'unet' },
+    { id: 'intella.qwen3-8b-flux2',          role: 'clip' },
+    { id: 'intella.flux2-vae-full-encoder',  role: 'vae' },
+  ],
+  vramGb: 24,
+  canonica: true,
+  natum: new Date('2025-01-01'),
+  mutatum: new Date('2025-01-01'),
+}
+
+/**
+ * Upscale · ComfyUI — the lightest image substrate: an ESRGAN upscaler only, no checkpoint. The
+ * model-only upscale flow (UpscaleModelLoader + ImageUpscaleWithModel) needs no diffusion model, so
+ * this fundament carries just the 4x-UltraSharp weight and runs on a small pod.
+ */
+export const FUNDAMENTUM_UPSCALE_COMFYUI: Fundamentum = {
+  id: 'upscale-comfyui',
+  nomen: 'Upscale · ComfyUI',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'ComfyUI',
+  intellae: [
+    { id: 'intella.upscale-4x-ultrasharp', role: 'upscale_model' },
+  ],
+  vramGb: 6,
+  canonica: true,
+  natum: new Date('2025-01-01'),
+  mutatum: new Date('2025-01-01'),
+}
+
 /**
  * Qwen-VL · vLLM — the SHARED understanding substrate (ADR-0007).
  *
@@ -160,6 +294,12 @@ export const FUNDAMENTUM_HUNYUAN3D_PYTORCH: Fundamentum = {
 export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_FLUX_COMFYUI,
   FUNDAMENTUM_SD15_COMFYUI,
+  FUNDAMENTUM_SDXL_COMFYUI,
+  FUNDAMENTUM_CHROMA_COMFYUI,
+  FUNDAMENTUM_FLUX_KONTEXT_COMFYUI,
+  FUNDAMENTUM_FLUX2_KLEIN_COMFYUI,
+  FUNDAMENTUM_COMFYUI_BASE,
+  FUNDAMENTUM_UPSCALE_COMFYUI,
   FUNDAMENTUM_QWEN_VL_VLLM,
   FUNDAMENTUM_MOSS_SGLANG,
   FUNDAMENTUM_HEARTMULA_PYTORCH,

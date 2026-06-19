@@ -35,7 +35,8 @@ export class OpenAICursor implements Cursor {
       return {
         kind: 'sync',
         exitus: {
-          exitus: { imageUrl: imageResult.url },
+          // Schema-keyed: the DALL·E modus declares `exitus: { image }` (typed 'image').
+          exitus: { image: imageResult.url },
           impetus: 0n,
         },
       }

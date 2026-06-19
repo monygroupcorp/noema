@@ -18,10 +18,16 @@ const EXT_TYPE: Record<string, string> = {
   checkpoint: 'checkpoint', lora: 'lora', boolean: 'boolean',
 }
 
-// ── class_type → custom-node pack (from INVENTORY.md; extend as packs are mapped) ────
+// ── class_type → custom-node pack (authoritative: comfydeploy machine manifest, 2026-06-19; see INVENTORY.md) ────
 const PACKS: Array<[RegExp, { url: string; name?: string }]> = [
   [/MultiLoraLoader|LoraTextExtractor/, { url: 'https://github.com/skfoo/ComfyUI-Coziness', name: 'ComfyUI-Coziness' }],
-  // TBD (pull from the comfydeploy machine manifest): WD14Tagger, InspyrenetRembg, UltimateSDUpscale, IPAdapter*, rgthree, CR *, OpenPose
+  [/IPAdapter/,                          { url: 'https://github.com/cubiq/ComfyUI_IPAdapter_plus', name: 'ComfyUI_IPAdapter_plus' }],
+  [/rgthree|Any Switch/,                 { url: 'https://github.com/rgthree/rgthree-comfy', name: 'rgthree-comfy' }],
+  [/OpenPose - Get poses/,               { url: 'https://github.com/alessandrozonta/ComfyUI-OpenPose', name: 'ComfyUI-OpenPose' }],
+  [/WD14Tagger|pysssss/,                 { url: 'https://github.com/pythongosssss/ComfyUI-WD14-Tagger', name: 'ComfyUI-WD14-Tagger' }],
+  [/InspyrenetRembg/,                    { url: 'https://github.com/john-mnz/ComfyUI-Inspyrenet-Rembg', name: 'ComfyUI-Inspyrenet-Rembg' }],
+  [/ResizeAndPadImage|ImageConcanate/,   { url: 'https://github.com/kijai/ComfyUI-KJNodes', name: 'ComfyUI-KJNodes' }],
+  [/UltimateSDUpscale/,                  { url: 'https://github.com/ssitu/ComfyUI_UltimateSDUpscale', name: 'ComfyUI_UltimateSDUpscale' }],
 ]
 
 type Node = { class_type?: string; type?: string; inputs?: Record<string, unknown>; _meta?: unknown }

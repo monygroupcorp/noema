@@ -117,12 +117,12 @@ test('run with quality in aditus dispatches to client.image', async () => {
   assert.ok(imageCalled, 'expected client.image to be called')
 })
 
-test('run image result contains imageUrl in exitus.exitus', async () => {
+test('run image result contains the image URL under the schema key in exitus.exitus', async () => {
   const cursor = new OpenAICursor(makeImageClient('https://cdn.openai.com/mypic.png'))
   const result = await cursor.run(makeActum({ aditus: { prompt: 'a cat', size: '512x512' } }))
   assert.equal(result.kind, 'sync')
   const { exitus } = result as Extract<typeof result, { kind: 'sync' }>
-  assert.equal((exitus.exitus as { imageUrl: string }).imageUrl, 'https://cdn.openai.com/mypic.png')
+  assert.equal((exitus.exitus as { image: string }).image, 'https://cdn.openai.com/mypic.png')
 })
 
 test('run image result is sync kind', async () => {

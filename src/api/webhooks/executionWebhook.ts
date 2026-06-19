@@ -11,6 +11,7 @@ import type { HospitiumStore } from '../../types/hospitium.js'
 import type { MateriaStore } from '../../types/materia.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
 import { createVestigiumFromActum } from '../../execution/hooks/vestigiumHook.js'
+import { projectExitus } from '../../execution/projectExitus.js'
 import { modoHostFor } from '../../ledger/rates.js'
 
 type AuctorKey = { animaId: string } | { commitment: string } | { bursaToken: string }
@@ -129,27 +130,15 @@ export async function handleExecutionWebhook(
 
     if (status === 'COMPLETED') {
       const executionTime = payload.executionTime ?? 0
-
-      // Build typed exitus from output items
       const outputItems = payload.output ?? []
-      let exitusData: Record<string, unknown> = { outputs: outputItems }
-      const urlItems = outputItems
-        .map(o => (typeof o === 'object' && o !== null && 'url' in o ? (o as RunPodOutputItem).url : undefined))
-        .filter((u): u is string => !!u)
-      if (urlItems.length > 0) {
-        const ext = urlItems[0].split('?')[0].split('.').pop()?.toLowerCase() ?? ''
-        const isVideo = /mp4|webm|mov/.test(ext)
-        const isAudio = /mp3|wav|ogg|flac/.test(ext)
-        exitusData = isVideo
-          ? { videoUrl: urlItems[0] }
-          : isAudio
-          ? { audioUrl: urlItems[0] }
-          : { imageUrl: urlItems[0] }
-        urlItems.slice(1).forEach((u, i) => { exitusData[`imageUrl${i + 2}`] = u })
-      }
+
+      // Resolve the flow's exitus schema once — used to key the outputs under the
+      // DECLARED exitus Porta names (projectExitus), and reused below for royalty
+      // routing. Optional dep → null, and projectExitus falls back to bare type names.
+      const modus = deps.modorum ? await deps.modorum.find(actum.modusId) : null
 
       const exitus: Exitus = {
-        exitus: exitusData,
+        exitus: projectExitus(modus, outputItems),
         impetus: BigInt(Math.ceil(executionTime / 1000)),
         duratio: executionTime,
       }
@@ -166,16 +155,13 @@ export async function handleExecutionWebhook(
         }
       }
 
-      // Look up spell author for royalty routing — available via modorum dep
-      let modusAuctorAnimaId: string | undefined
-      if (deps.modorum) {
-        const modus = await deps.modorum.find(actum.modusId)
-        // `Modus.auctor` is now the `{ animaId } | { commitment }` owner union.
-        // Royalty routing addresses identified authors only; anon-owned (commitment)
-        // saved flows have no animaId to route to here.
-        modusAuctorAnimaId = modus?.auctor && typeof modus.auctor === 'object' && 'animaId' in modus.auctor
+      // Spell-author royalty routing — reuse the `modus` resolved above.
+      // `Modus.auctor` is the `{ animaId } | { commitment }` owner union. Royalty
+      // routing addresses identified authors only; anon-owned (commitment) saved
+      // flows have no animaId to route to here.
+      const modusAuctorAnimaId: string | undefined =
+        modus?.auctor && typeof modus.auctor === 'object' && 'animaId' in modus.auctor
           ? modus.auctor.animaId : undefined   // typeof guard: legacy stringy data can't crash the webhook
-      }
 
       // Hosting payout (Phase C): resolve the host's full HostKey from Hospitium
       // at emit time — host identity is NEVER on the actum or materia. The

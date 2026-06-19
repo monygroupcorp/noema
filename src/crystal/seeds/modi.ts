@@ -57,7 +57,7 @@ export const MODUS_DALLE_III: Modus = make({
   },
 
   exitus: {
-    imageUrl: { type: 'image', description: 'URL of the generated image' },
+    image: { type: 'image', description: 'The generated image (URL)' },
   },
 
   natum:   new Date('2025-01-01'),
