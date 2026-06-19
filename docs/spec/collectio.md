@@ -1,7 +1,15 @@
 # Collectio — spec
 
-**Status:** scoping (2026-06-19). The canonical spec for the collection / batch-generation feature.
-Build against this. Naming rule: **`Collectio` is the only backend term** (Latin, internal — never
+**Status:** build-order #1 SHIPPED (2026-06-19, commits `5382ee1d` + `f71e3e92`); #2–7 remain.
+The canonical spec for the collection / batch-generation feature. Build against this.
+
+**#1 done — `CrystalApi.collect()` + `/v1/collectiones` routes** (create/list/get/pause/resume/cancel +
+per-piece review), owner-scoped, public `Collection` projection; hermetic-tested (2-axis grid → N
+woven+run pieces). **Discovery:** `CollectioCursor` only `initiate`d pieces and never RAN them (it
+predated `dispatchInceptio`) — fixed to dispatch (run), sharing the compositus-aware dispatch, so a
+Collectio piece may itself be a compositus (**cook-over-spell works for free**). All green
+(typecheck, test:hermetic 593, test:crystal 895). Small follow-ups: an MCP `collect` tool; `API_CONTRACT`
+entries so `/v1/openapi.json` advertises `/v1/collectiones`; a staging rebuild+deploy to exercise on GPUs. Naming rule: **`Collectio` is the only backend term** (Latin, internal — never
 surfaced to users); the colloquial "cook" is **purged from code** (→ `GenFlags`); user-facing labels
 ("Collections"/"Drops"/"Editions") are a frontend concern; **`mint` is reserved for the on-chain step
 (Catena)**, never for generation.
@@ -199,8 +207,8 @@ lives in a layer we control (and charge for), sidestepping the messy on-chain/tr
 
 ## 6. Net-new work + proposed build order
 
-1. **Launch surface over the existing engine** (`§5`) — gives live *general* collection generation
-   immediately (variation testing works day one) + surfaces the built-in review. Smallest, highest leverage.
+1. ✅ **DONE — Launch surface over the existing engine** (`§5`): `CrystalApi.collect()` + routes +
+   the dispatch fix (pieces now actually run). General collection generation is live + hermetic-tested.
 2. **Integrity/observability layer** (`§4d`) — provenance hash + realized-rarity table + DNA dedup.
    Pure data on top of what we stamp. (Powers the live "shared target" view across the four lenses.)
 3. **Collaborative-flow model** (`§4c`/`§4f`) — incremental batches + **teams** + per-artifact split.
