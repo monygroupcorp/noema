@@ -141,7 +141,7 @@ export class TeeProvisioner {
     return new Promise(resolve => {
       let settled = false
       const done = (ok: boolean) => { if (!settled) { settled = true; socket.destroy(); resolve(ok) } }
-      const socket = tls.connect({ host, port: 443, servername: host }, () => {
+      const socket = tls.connect({ host, port: 443, servername: host, ALPNProtocols: ['http/1.1'] }, () => {
         socket.write(
           `GET / HTTP/1.1\r\nHost: ${host}\r\nUpgrade: websocket\r\n` +
           `Connection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`
