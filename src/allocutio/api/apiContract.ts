@@ -400,6 +400,98 @@ const StudiosListSchema: JsonSchema = {
   required: ['studios'],
 }
 
+/** A single trait option within an axis (mirrors `collectio.ts#TraitValor`). */
+const TraitValorSchema: JsonSchema = {
+  type: 'object',
+  description: 'One option within a trait axis.',
+  properties: {
+    value: { description: 'The aditus value injected when this option is selected.' },
+    label: { type: 'string', description: 'Human-facing display name (falls back to String(value)).' },
+    rarity: { type: 'number', description: 'Probability weight for weighted-random selection (default 0.5; higher = more common).' },
+    promptFragment: { type: 'string', description: 'Text woven into the assembled prompt when this option wins.' },
+    excludes: { type: 'array', items: { type: 'string' }, description: 'Labels in OTHER axes this option blocks.' },
+    tags: { type: 'array', items: { type: 'string' }, description: 'Theme tags for group-level mutual exclusion.' },
+  },
+  required: ['value'],
+}
+
+/** One axis of variation in the parameter grid (mirrors `collectio.ts#Tractus`). */
+const TractusSchema: JsonSchema = {
+  type: 'object',
+  description: 'One axis of variation — the aditus port to vary and its options.',
+  properties: {
+    porta: { type: 'string', description: 'The aditus port key this axis varies (e.g. background, outfit).' },
+    label: { type: 'string', description: 'Human-facing category label (falls back to porta).' },
+    valores: { type: 'array', items: TraitValorSchema, description: 'The options for this axis.' },
+  },
+  required: ['porta', 'valores'],
+}
+
+/** The request body for `POST /v1/collectiones`. */
+const CollectRequestSchema: JsonSchema = {
+  type: 'object',
+  description:
+    'Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces. ' +
+    'The base modus may be atomic or a compositus pipeline.',
+  properties: {
+    modusId: { type: 'string', description: 'The flow expanded across the grid.' },
+    total: { type: 'number', description: 'Target number of pieces to generate.' },
+    tractus: { type: 'array', items: TractusSchema, description: 'The axes of variation (the parameter grid).' },
+    aditusBase: {
+      type: 'object',
+      additionalProperties: true,
+      description: 'Base aditus applied to every piece (e.g. `_basePrompt` with `{{porta}}` tokens).',
+    },
+    concurrentia: { type: 'number', description: 'Max concurrent pieces in flight (default 3).' },
+    nomen: { type: 'string', description: 'Optional human name for the collection.' },
+  },
+  required: ['modusId', 'total', 'tractus'],
+}
+
+/** The public `Collection` projection (mirrors `types.ts#Collection`). */
+const CollectionSchema: JsonSchema = {
+  type: 'object',
+  description: 'The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.',
+  properties: {
+    id: { type: 'string' },
+    nomen: { type: 'string', description: 'The collection display name.' },
+    status: {
+      type: 'string',
+      enum: ['pending', 'running', 'complete', 'cancelled'],
+      description: 'The collection lifecycle status.',
+    },
+    modusId: { type: 'string', description: 'The flow (modus) expanded across the grid.' },
+    total: { type: 'number', description: 'Target piece count (the size of the run).' },
+    completed: { type: 'number', description: 'Pieces completed so far.' },
+    failed: { type: 'number', description: 'Pieces failed so far.' },
+    cost: { type: 'string', description: 'Total impetus across completed pieces, serialised as a string.' },
+    createdAt: { type: 'string', format: 'date-time', description: 'When the collection started.' },
+    completedAt: { type: 'string', format: 'date-time', description: 'When it finished (or was cancelled).' },
+  },
+  required: ['id', 'status', 'modusId', 'total', 'completed', 'failed'],
+}
+
+/** The `{ collection }` envelope returned by the collection operations. */
+const CollectionEnvelopeSchema: JsonSchema = {
+  type: 'object',
+  properties: { collection: CollectionSchema },
+  required: ['collection'],
+}
+
+/** The `{ collections }` envelope returned by `GET /v1/collectiones`. */
+const CollectionsListSchema: JsonSchema = {
+  type: 'object',
+  properties: { collections: { type: 'array', items: CollectionSchema } },
+  required: ['collections'],
+}
+
+/** A bare acknowledgement returned by the review operations. */
+const OkSchema: JsonSchema = {
+  type: 'object',
+  properties: { ok: { type: 'boolean' } },
+  required: ['ok'],
+}
+
 /** The error envelope every failed request carries (mirrors `errors.ts#ApiErrorBody`). */
 const ErrorEnvelopeSchema: JsonSchema = {
   type: 'object',
@@ -461,7 +553,7 @@ export const API_CONTRACT: ApiContract = {
       path: '/mcp',
       summary:
         'MCP (Model Context Protocol) JSON-RPC endpoint — agent tool-use over the same facade. ' +
-        'Tools: run_flow / get_run / list_flows / describe_flow. Resources: crystal://flows and ' +
+        'Tools: run_flow / get_run / list_flows / describe_flow / collect / get_collection. Resources: crystal://flows and ' +
         'crystal://flows/{id}. Stateless streamable-HTTP transport; not a typed REST op.',
       auth: true,
     },
@@ -546,6 +638,63 @@ export const API_CONTRACT: ApiContract = {
       auth: true,
       response: StudioEnvelopeSchema,
     },
+    {
+      method: 'POST',
+      path: '/collectiones',
+      summary: 'Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). Returns a Collection handle (poll GET /v1/collectiones/:id).',
+      auth: true,
+      request: CollectRequestSchema,
+      response: CollectionEnvelopeSchema,
+    },
+    {
+      method: 'GET',
+      path: '/collectiones',
+      summary: "List the authenticated caller's Collections (owner-scoped).",
+      auth: true,
+      response: CollectionsListSchema,
+    },
+    {
+      method: 'GET',
+      path: '/collectiones/:id',
+      summary: 'Fetch one Collection by id — progress (completed/failed/total), status, cost. Owner-scoped (404 if not yours).',
+      auth: true,
+      response: CollectionEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/collectiones/:id/pause',
+      summary: 'Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Owner-scoped.',
+      auth: true,
+      response: CollectionEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/collectiones/:id/resume',
+      summary: 'Resume a paused Collection — continue dispatching toward the target. Owner-scoped.',
+      auth: true,
+      response: CollectionEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/collectiones/:id/cancel',
+      summary: 'Cancel a Collection — stop dispatching and mark it cancelled. Owner-scoped.',
+      auth: true,
+      response: CollectionEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/collectiones/:id/pieces/:actumId/approve',
+      summary: 'Approve a pending-review piece — it counts toward the collection. Owner-scoped.',
+      auth: true,
+      response: OkSchema,
+    },
+    {
+      method: 'POST',
+      path: '/collectiones/:id/pieces/:actumId/reject',
+      summary: 'Reject a piece and reroll — re-fire it with a fresh trait selection. Owner-scoped.',
+      auth: true,
+      response: OkSchema,
+    },
   ],
   // Mirrors the request-error taxonomy in `errors.ts`. Append-only.
   errorCodes: [
@@ -557,6 +706,7 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.flow', httpStatus: 404 },
     { code: 'not_found.fundamentum', httpStatus: 404 },
     { code: 'not_found.studio', httpStatus: 404 },
+    { code: 'not_found.collection', httpStatus: 404 },
     { code: 'not_found.run', httpStatus: 404 },
     { code: 'economy.insufficient_signa', httpStatus: 402 },
     { code: 'economy.cap_too_low', httpStatus: 422 },
