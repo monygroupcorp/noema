@@ -233,7 +233,10 @@ export class SecurePodClient implements RunPodClient, Procurator {
       // deliberately bailed every pod, so no webhook is coming and the client must
       // be told (and refunded) "no good pods available".
       if (params.webhook && (!runnerAcceptedJob || (err as { isThrottleError?: boolean }).isThrottleError)) {
-        await this._postWebhook(params.webhook, { id: podId, status: 'FAILED', error: (err as Error).message })
+        // Key the failure webhook by `activePodId` — retries advance the actum's
+        // externusJobId (via onPodActive) to the LAST pod, so posting the FIRST pod's
+        // id 404s and the run never reaches `fractus` (incident 2026-06-19).
+        await this._postWebhook(params.webhook, { id: activePodId, status: 'FAILED', error: (err as Error).message })
           .catch(() => {})
       }
     })

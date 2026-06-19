@@ -67,7 +67,7 @@ import { CANONICAL_INTELLAE } from './crystal/seeds/intellae.js'
 import { ensureIndexes } from './crystal/ensureIndexes.js'
 import type { Essentia } from './types/essendi.js'
 import path from 'node:path'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { makeSnarkjsVerifier } from './arcanum/ArcanumVerifier.js'
 
 // ---------------------------------------------------------------------------
@@ -140,8 +140,37 @@ const RUNPOD_R2: R2Config | undefined =
     ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_OUTPUTS_BUCKET!, publicUrl: R2_PUBLIC_URL }
     : undefined
 
+/**
+ * Durably materialise the RunPod SSH key (incident 2026-06-19). The key MUST survive a
+ * container *recreate* — so we write it from the `RUNPOD_SSH_KEY` (base64) secret on boot
+ * when the file is absent, instead of relying on a hand-placed file inside a live container
+ * that a recreate silently wipes. Idempotent: a present key is left untouched. If we'll need
+ * a key and still have none, fail LOUD (so a missing key shows at boot, not 10 min into a
+ * stuck pod run).
+ */
+let _sshKeyEnsured = false
+function ensureRunpodSshKey(): void {
+  if (_sshKeyEnsured) return
+  _sshKeyEnsured = true
+  const sshLog = makeLogger('startup')
+  const b64 = process.env.RUNPOD_SSH_KEY
+  if (b64 && !existsSync(RUNPOD_SSH_KEY_PATH)) {
+    try {
+      mkdirSync(path.dirname(RUNPOD_SSH_KEY_PATH), { recursive: true, mode: 0o700 })
+      writeFileSync(RUNPOD_SSH_KEY_PATH, Buffer.from(b64, 'base64'), { mode: 0o600 })
+      sshLog.info('RunPod SSH key materialised from RUNPOD_SSH_KEY env', { path: RUNPOD_SSH_KEY_PATH })
+    } catch (err) {
+      sshLog.error('failed to write RunPod SSH key from RUNPOD_SSH_KEY', { path: RUNPOD_SSH_KEY_PATH, error: String(err) })
+    }
+  }
+  if (!existsSync(RUNPOD_SSH_KEY_PATH)) {
+    sshLog.warn('⚠ RunPod SSH key MISSING — SECURE pod runs WILL FAIL. Set RUNPOD_SSH_KEY (base64) in the container env, or place the key file at this path.', { path: RUNPOD_SSH_KEY_PATH })
+  }
+}
+
 function makeSecureRunPodClient(materiae?: MateriaStore, hospitia?: HospitiumStore): SecurePodClient {
   const r2 = RUNPOD_R2
+  ensureRunpodSshKey()
 
   return new SecurePodClient(
     {

@@ -213,8 +213,12 @@ test('SSH bootstrap: terminates pod + fires FAILED webhook when SSH throws', asy
   await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
   await new Promise(r => setTimeout(r, 300))
   assert.ok(terminateSpy.calls.length > 0, 'expected terminatePod call')
-  const failed = (webhookPayloads as Array<{ status?: string }>).find(p => p.status === 'FAILED')
+  const failed = (webhookPayloads as Array<{ status?: string; id?: string }>).find(p => p.status === 'FAILED')
   assert.ok(failed, 'expected a FAILED webhook')
+  // The FAILED webhook must be keyed by the ACTIVE pod id — that's what the actum's
+  // externusJobId tracks (onPodActive). Posting a different pod id 404s the webhook and
+  // the run never reaches `fractus` (incident 2026-06-19, retry path).
+  assert.equal(failed!.id, 'pod-fail', 'FAILED webhook keyed by the active pod id')
 })
 
 test('SSH bootstrap: does NOT fire FAILED after comfyrunner accepted (comfyrunner owns webhook)', async () => {
