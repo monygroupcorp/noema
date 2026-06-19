@@ -46,6 +46,8 @@ export interface Collection {
   modusId: string
   /** Target piece count (the size of the run). */
   total: number
+  /** Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash. */
+  provenanceHash: string
   /** Pieces completed so far. */
   completed: number
   /** Pieces failed so far. */

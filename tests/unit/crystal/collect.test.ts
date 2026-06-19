@@ -79,7 +79,7 @@ function makeApi() {
   const collectiones = new MemCollectionum()
   const collectioCursor = new CollectioCursor((inc: Inceptio) => dispatchInceptio(deps, inc), collectiones, actorum, {})
 
-  const api = new CrystalApi({ collectiones, collectioCursor } as unknown as CrystalApiDeps)
+  const api = new CrystalApi({ collectiones, collectioCursor, modorum, actorum } as unknown as CrystalApiDeps)
   return { api, modorum, actorum, signorum, cursor, collectiones }
 }
 
@@ -129,4 +129,61 @@ test('collect(): owner-scoped — non-owner cannot fetch the collection', async 
     () => api.getCollection({ animaId: 'someone-else' }, col.id),
     /not found/i,
   )
+})
+
+test('collect(): stamps a provenance hash on the collection', async () => {
+  const { api, modorum, signorum } = makeApi()
+  await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const col = await api.collect({ animaId: 'anima-1' }, {
+    modusId: 'sd1-5', total: 2,
+    aditusBase: { _basePrompt: 'a {{color}} thing' },
+    tractus: [{ porta: 'color', valores: [{ value: 'red', promptFragment: 'red' }, { value: 'blue', promptFragment: 'blue' }] }],
+  })
+  assert.match(col.provenanceHash, /^sha256:[0-9a-f]{64}$/)
+})
+
+test('getCollectionRarity(): reports target vs realized from produced pieces', async () => {
+  const { api, modorum, signorum } = makeApi()
+  await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const col = await api.collect({ animaId: 'anima-1' }, {
+    modusId: 'sd1-5', total: 4,
+    aditusBase: { _basePrompt: 'a {{color}} cat' },
+    tractus: [{ porta: 'color', label: 'Color', valores: [
+      { value: 'red', label: 'Red', promptFragment: 'red', rarity: 0.5 },
+      { value: 'blue', label: 'Blue', promptFragment: 'blue', rarity: 0.5 },
+    ] }],
+  })
+
+  const report = await api.getCollectionRarity({ animaId: 'anima-1' }, col.id)
+  assert.equal(report.totalPieces, 4, 'all four produced pieces counted')
+  const axis = report.axes[0]
+  assert.equal(axis.trait_type, 'Color')
+  // Each value's realized count is reported; the two sum to the total.
+  const total = axis.valores.reduce((s, v) => s + v.realizedCount, 0)
+  assert.equal(total, 4)
+  for (const v of axis.valores) assert.ok(Math.abs(v.targetRarity - 0.5) < 1e-9)
+})
+
+test('collect({ dna: true }): every produced piece has a unique trait combination', async () => {
+  const { api, modorum, signorum, cursor } = makeApi()
+  await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  // 2×2 = 4 combos, request all 4 with DNA on → expect 4 distinct DNAs.
+  await api.collect({ animaId: 'anima-1' }, {
+    modusId: 'sd1-5', total: 4, dna: true,
+    aditusBase: { _basePrompt: 'a {{color}} {{shape}}' },
+    tractus: [
+      { porta: 'color', valores: [{ value: 'red', promptFragment: 'red' }, { value: 'blue', promptFragment: 'blue' }] },
+      { porta: 'shape', valores: [{ value: 'square', promptFragment: 'square' }, { value: 'circle', promptFragment: 'circle' }] },
+    ],
+  })
+
+  assert.equal(cursor.runs.length, 4)
+  const dnas = new Set(cursor.runs.map((a) => String(a._dna)))
+  assert.equal(dnas.size, 4, 'all four pieces have unique DNA')
 })

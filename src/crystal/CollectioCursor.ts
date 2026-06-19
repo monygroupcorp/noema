@@ -30,6 +30,8 @@ interface CollectioState {
   pendingReview: Set<string>
   /** How many revives have happened (used to extend numerus effectively) */
   reviveCount: number
+  /** DNA fingerprints already produced — the uniqueness ledger (only used when `Collectio.dna`). */
+  usedDna: Set<string>
 }
 
 export class CollectioCursor {
@@ -62,6 +64,7 @@ export class CollectioCursor {
       // Reconstruct running set: acta whose status is nascens or agens
       const running = new Set<string>()
       const pendingReview = new Set<string>()
+      const usedDna = new Set<string>()
       let reviveCount = 0
 
       for (const actumId of collectio.acta) {
@@ -79,6 +82,10 @@ export class CollectioCursor {
         if (actum.exitus?.reviewOutcome === 'rejected') {
           reviveCount++
         }
+
+        // Rebuild the DNA ledger from the fingerprint stamped at dispatch time.
+        const dna = actum.aditus?._dna
+        if (typeof dna === 'string' && dna) usedDna.add(dna)
       }
 
       const state: CollectioState = {
@@ -87,6 +94,7 @@ export class CollectioCursor {
         paused: false,
         pendingReview,
         reviveCount,
+        usedDna,
       }
 
       this.states.set(collectio.id, state)
@@ -101,6 +109,7 @@ export class CollectioCursor {
       paused: false,
       pendingReview: new Set(),
       reviveCount: 0,
+      usedDna: new Set(),
     }
     this.states.set(collectio.id, state)
 
@@ -262,7 +271,12 @@ export class CollectioCursor {
         basePrompt: collectio.aditusBase._basePrompt as string | undefined,
         collectionName: collectio.nomen,
         totalPieces: collectio.numerus,
+        // Opt-in DNA uniqueness: feed the ledger so the mixer rerolls collisions.
+        ...(collectio.dna ? { usedDna: state.usedDna } : {}),
       })
+
+      // Record this piece's DNA so subsequent pieces avoid it (when deduping).
+      if (collectio.dna) state.usedDna.add(selection.dna)
 
       const aditus: Record<string, unknown> = {
         ...collectio.aditusBase,
@@ -270,6 +284,7 @@ export class CollectioCursor {
         prompt: selection.prompt,
         _pieceIndex: pieceIndex,
         _attributes: selection.attributes,
+        _dna: selection.dna,
       }
 
       const inceptio: Inceptio = {

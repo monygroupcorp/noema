@@ -67,6 +67,12 @@ export interface Tractus {
    * Falls back to porta if absent.
    */
   label?: string
+  /**
+   * When true, this axis is IGNORED in the DNA uniqueness check (see `Collectio.dna`).
+   * Two pieces differing only on bypassed axes count as duplicate DNA. Typical for
+   * incidental axes like `background` where a repeat is acceptable.
+   */
+  bypassDNA?: boolean
   valores: TraitValor[]
 }
 
@@ -90,6 +96,14 @@ export interface Collectio {
   /** Total number of combinations = product of all tractus.valores.length */
   numerus: number
 
+  /**
+   * Content-address of the generative configuration — `sha256:<hex>` over
+   * `{ modusId, modusVersio, tractus, aditusBase }`. Any change to the flow,
+   * a trait, a weight, or the base aditus yields a new hash (a provably
+   * different/versioned input). The NFT "provenance hash". See provenance.ts.
+   */
+  provenanceHash: string
+
   /** FK → Anima or commitment — who initiated this collection */
   by: { animaId: string } | { commitment: string }
 
@@ -102,6 +116,14 @@ export interface Collectio {
 
   /** Max concurrent acta — rate control for the fan-out */
   concurrentia: number
+
+  /**
+   * Opt-in DNA uniqueness: when true, no two pieces share the same trait
+   * combination (across non-`bypassDNA` axes). The TraitMixer rerolls a
+   * colliding piece deterministically until its DNA is unique (or the grid is
+   * exhausted). Off (default) → duplicates allowed (variation-test behaviour).
+   */
+  dna?: boolean
 
   status: CollectioStatus
 
