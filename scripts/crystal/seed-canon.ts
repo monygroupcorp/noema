@@ -15,6 +15,7 @@ import { MongoClient } from 'mongodb'
 import { MongoModorum } from '../../src/crystal/MongoModorum.js'
 import { hashModus } from '../../src/crystal/hashModus.js'
 import { CANONICAL_ESSENTIAE } from '../../src/crystal/seeds/essentiae.js'
+import { CANONICAL_COMPOSITI } from '../../src/crystal/seeds/compositi.js'
 import { CANONICAL_INTELLAE } from '../../src/crystal/seeds/intellae.js'
 
 const URI = process.env.MONGO_PASS ?? process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
@@ -59,6 +60,14 @@ async function run() {
     await modorum.register(withHash)
     modiSeeded++
     console.log(`  essentia: ${essentia.id}@${essentia.versio}  hash=${withHash.contentHash.slice(0, 12)}…`)
+  }
+
+  // Compositus modi (spells) — registered after the atomic essentiae they reference.
+  for (const compositus of CANONICAL_COMPOSITI) {
+    const withHash = { ...compositus, contentHash: hashModus(compositus) }
+    await modorum.register(withHash)
+    modiSeeded++
+    console.log(`  compositus: ${compositus.id}@${compositus.versio}  hash=${withHash.contentHash.slice(0, 12)}…`)
   }
 
   console.log(`[seed-canon] Done. intellae=${intellaSeeded} modi=${modiSeeded}`)

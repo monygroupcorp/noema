@@ -207,6 +207,180 @@ export const INTELLA_LORA_ARMORED_DRESS: Intella = {
   natum: new Date('2025-01-01'),
 }
 
+// SDXL base 1.0 — the canonical SDXL checkpoint (self-contained: model + dual CLIP + VAE in one
+// ~6.9GB file, like SD1.5). The canonical `make (sdxl)` flow bakes this; the old bot ran the
+// ZavyChromaXL community finetune, but base SDXL is the license-clean, auth-free canonical default.
+export const INTELLA_SDXL_BASE: Intella = {
+  id: 'intella.sdxl-base-1-0',
+  nomen: 'Stable Diffusion XL Base 1.0',
+  genus: 'model',
+  architectura: 'sdxl',
+  // family — the LoRA-compat key (SDXL LoRAs carry the same 'sdxl' string).
+  familia: 'sdxl',
+  parametri: 3_500_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'stabilityai/stable-diffusion-xl-base-1.0', branch: 'main', filename: 'sd_xl_base_1.0.safetensors' },
+    },
+  ],
+  dest: 'checkpoints/sd_xl_base_1.0.safetensors',
+  sizeGb: 6.94,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2025-01-01'),
+}
+
+// Chroma (unlocked v35) — an 8.9B Apache-2.0 model architecturally FLUX-adjacent (a DiT unet loaded
+// via UNETLoader). It reuses the FLUX support stack: the T5-XXL text encoder (intella.t5xxl-fp16,
+// via a CLIPLoader with type 'chroma') and the FLUX VAE (intella.flux-vae). Only the unet is new.
+export const INTELLA_CHROMA: Intella = {
+  id: 'intella.chroma-unlocked-v35',
+  nomen: 'Chroma (unlocked v35)',
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'chroma',
+  parametri: 8_900_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/lodestones/Chroma/resolve/main/chroma-unlocked-v35.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'lodestones/Chroma', branch: 'main', filename: 'chroma-unlocked-v35.safetensors' },
+    },
+  ],
+  dest: 'unet/chroma-unlocked-v35.safetensors',
+  sizeGb: 17.8,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2025-01-01'),
+}
+
+// FLUX.1 Kontext [dev] — the instruction-edit DiT (fp8 scaled). Sits on the same FLUX support stack as
+// the other flux flows (reuses intella.t5xxl-fp16 + intella.clip-l + intella.flux-vae); only the unet is
+// new. URL VERIFIED 200 (Comfy-Org fp8 mirror, ungated — no token needed) on 2026-06-19.
+export const INTELLA_FLUX_KONTEXT_DEV: Intella = {
+  id: 'intella.flux-kontext-dev',
+  nomen: 'FLUX.1 Kontext [dev] (fp8 scaled)',
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'flux',
+  parametri: 12_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/flux1-kontext-dev_ComfyUI/resolve/main/split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/flux1-kontext-dev_ComfyUI', branch: 'main', filename: 'split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors' },
+    },
+  ],
+  dest: 'unet/flux1-kontext-dev.safetensors',
+  sizeGb: 11.9,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2025-01-01'),
+}
+
+// ── FLUX.2 Klein 9B stack (ADR: a NEW family — not FLUX.1) ───────────────────
+// FLUX.2 is a distinct architecture: a Qwen3 text encoder (CLIPLoader type 'flux2', NOT dual-CLIP) +
+// its own VAE. FLUX.1 LoRAs do NOT apply → familia 'flux2' (separate compat key). Dest dirs are the
+// FLUX.2 ComfyUI layout: diffusion_models/, text_encoders/, vae/. URLs are from the official Comfy-Org
+// workflow_templates Klein-9B edit template.
+// URL STATUS (2026-06-19): qwen3-8b + flux2-vae VERIFIED 200 (ungated). The klein-9b diffusion weight is
+// `gated: auto` on BFL → 403 until the HF account accepts the gate once (then auto-granted). BUT the pod
+// downloader (comfyrunner.py) uses plain unauthenticated wget, so gated HF URLs won't fetch on a pod
+// regardless. ACTION before a real run: mirror flux-2-klein-9b-fp8 to our R2 (models.miladystation2.net)
+// and make that source[0] — the established auth-free pattern (see INTELLA_FLUX_SCHNELL et al.).
+export const INTELLA_FLUX2_KLEIN_9B: Intella = {
+  id: 'intella.flux2-klein-9b',
+  nomen: 'FLUX.2 Klein 9B (fp8)',
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'flux2',
+  parametri: 9_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8/resolve/main/flux-2-klein-9b-fp8.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'black-forest-labs/FLUX.2-klein-9b-fp8', branch: 'main', filename: 'flux-2-klein-9b-fp8.safetensors' },
+    },
+  ],
+  dest: 'diffusion_models/flux-2-klein-9b-fp8.safetensors',
+  sizeGb: 9.5,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2025-01-01'),
+}
+
+export const INTELLA_QWEN3_8B_FLUX2: Intella = {
+  id: 'intella.qwen3-8b-flux2',
+  nomen: 'Qwen3 8B (FLUX.2 text encoder, fp8 mixed)',
+  genus: 'embedding',
+  architectura: 'transformer',
+  parametri: 8_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/flux2-klein-9B', branch: 'main', filename: 'split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors' },
+    },
+  ],
+  dest: 'text_encoders/qwen_3_8b_fp8mixed.safetensors',
+  sizeGb: 9.0,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2025-01-01'),
+}
+
+export const INTELLA_FLUX2_VAE_FULL: Intella = {
+  id: 'intella.flux2-vae-full-encoder',
+  nomen: 'FLUX.2 VAE (full encoder, small decoder)',
+  genus: 'embedding',
+  architectura: 'vae',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'black-forest-labs/FLUX.2-small-decoder', branch: 'main', filename: 'full_encoder_small_decoder.safetensors' },
+    },
+  ],
+  dest: 'vae/full_encoder_small_decoder.safetensors',
+  sizeGb: 0.4,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2025-01-01'),
+}
+
+// 4x-UltraSharp — an ESRGAN super-resolution model (~67MB) for the pack-free, model-only upscale flow
+// (core UpscaleModelLoader + ImageUpscaleWithModel; no UltimateSDUpscale, no checkpoint). Not a
+// generative base → no `familia` (carries no LoRA-compat). (Verify the HF mirror URL before a real run.)
+export const INTELLA_UPSCALE_ULTRASHARP: Intella = {
+  id: 'intella.upscale-4x-ultrasharp',
+  nomen: '4x-UltraSharp (ESRGAN upscaler)',
+  genus: 'model',
+  architectura: 'esrgan',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/lokCX/4x-Ultrasharp/resolve/main/4x-UltraSharp.pth',
+      format: 'pt',
+      meta: { repo: 'lokCX/4x-Ultrasharp', branch: 'main', filename: '4x-UltraSharp.pth' },
+    },
+  ],
+  dest: 'upscale_models/4x-UltraSharp.pth',
+  sizeGb: 0.067,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2025-01-01'),
+}
+
 // ── Understanding-track LMs (vLLM/transformers runtime) — ADR-0007 ───────────
 // The 3 "read a new medium → text" models. Each is a WHOLE HuggingFace repo (multi-file:
 // sharded safetensors + config + tokenizer), not a single file — the TransformersVllmExecutor
@@ -329,6 +503,13 @@ export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_T5XXL,
   INTELLA_CLIP_L,
   INTELLA_SD15,
+  INTELLA_SDXL_BASE,
+  INTELLA_CHROMA,
+  INTELLA_FLUX_KONTEXT_DEV,
+  INTELLA_FLUX2_KLEIN_9B,
+  INTELLA_QWEN3_8B_FLUX2,
+  INTELLA_FLUX2_VAE_FULL,
+  INTELLA_UPSCALE_ULTRASHARP,
   INTELLA_SMOLLM2_135M,
   INTELLA_LORA_ARMORED_DRESS,
   INTELLA_QWEN3_VL_8B,

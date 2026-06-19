@@ -22,6 +22,22 @@ function weaveAffixes(value: unknown, porta: Porta): unknown {
     .join(', ')
 }
 
+/** Porta types whose slot-mapped value is a downloadable FILE, not a graph value. */
+const MEDIA_PORTA_TYPES = new Set(['image', 'video', 'audio'])
+
+/**
+ * Deterministic input-dir filename for a media input. Derived from the input key +
+ * a hash of the URL *path* (query stripped, so presigned/expiring params don't churn
+ * the content-address) + the URL's extension. Stable across re-compiles of the same
+ * input → spec stays hash-stable; distinct inputs never collide on a warm pod.
+ */
+function mediaInputDestFilename(key: string, url: string): string {
+  const clean = url.split('?')[0]
+  const ext = (clean.split('.').pop() ?? '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png'
+  const hash = createHash('sha1').update(clean).digest('hex').slice(0, 16)
+  return `noema_${key}_${hash}.${ext}`
+}
+
 /** Stable model ordering — by role, then id. Keeps `spec.models` deterministic for hashing. */
 function byRoleThenId(a: { role: string; id: string }, b: { role: string; id: string }): number {
   const r = a.role.localeCompare(b.role)
@@ -80,6 +96,11 @@ export interface ComfyUICompiledSpec extends CompiledSpecBase {
    *  `comfyrunnerClient.submitToRunner` ships these to the runner's `_ensure_custom_nodes`.
    *  Omitted when the template declares none. */
   customNodes?: Array<{ url: string; name?: string }>
+  /** Image/video/audio inputs the runner fetches into ComfyUI's `input/` dir before
+   *  queueing (the i2i image-input primitive). A media-typed, slot-mapped aditus is a
+   *  FILE, not a graph value: the graph's `LoadImage`-style node carries `destFilename`
+   *  and the runner downloads `url` to that filename. Omitted for text-only flows. */
+  mediaInputs?: Array<{ destFilename: string; url: string }>
 }
 
 /** LLM/serving inference spec — runtime 'vLLM' | 'llm'. No graph, no seed. */
@@ -300,7 +321,25 @@ export class Compiler {
 
     const seedKey = essentia.seedInputKey ?? 'input_seed'
     const slotInputs = { ...promptForSlots, [seedKey]: seed }
-    const inputTemplate = this._applySlotMap(template, slotInputs)
+
+    // ── Media inputs (i2i) ─────────────────────────────────────────────────
+    // An image/video/audio-typed, slot-mapped aditus is a FILE, not a graph value:
+    // ComfyUI's LoadImage wants a filename in its input/ dir. So we inject a
+    // per-input-unique destFilename into the slot and hand the runner the URL to
+    // fetch into that filename. Pack-free — the Porta.type is the whole signal.
+    const slottedKeys = new Set(Object.values(template.slotMap ?? {}))
+    const mediaInputs: Array<{ destFilename: string; url: string }> = []
+    const resolvedSlotInputs: Record<string, unknown> = { ...slotInputs }
+    for (const [key, porta] of Object.entries(essentia.aditus)) {
+      if (!MEDIA_PORTA_TYPES.has(porta.type) || !slottedKeys.has(key)) continue
+      const url = slotInputs[key]
+      if (typeof url !== 'string' || !url) continue
+      const destFilename = mediaInputDestFilename(key, url)
+      resolvedSlotInputs[key] = destFilename
+      mediaInputs.push({ destFilename, url })
+    }
+
+    const inputTemplate = this._applySlotMap(template, resolvedSlotInputs)
 
     // models = the resolved base weights + LoRAs from prompt resolution + any
     // models the host pinned onto the session via `Mod • → Add`. LoRA + pinned
@@ -326,6 +365,7 @@ export class Compiler {
       ...(template.customNodes && template.customNodes.length > 0
         ? { customNodes: template.customNodes }
         : {}),
+      ...(mediaInputs.length > 0 ? { mediaInputs } : {}),
     }
 
     const hash = `sha256:${this._hashSpec(spec)}`

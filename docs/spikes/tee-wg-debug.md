@@ -665,6 +665,75 @@ confirmed architecture before touching code.
 
 ---
 
+## Session 8 (2026-06-19) — END-TO-END INFERENCE CONFIRMED ✓
+
+**MILESTONE: full private compute stack proven end-to-end.**
+
+### What happened
+
+After session 7 fixes deployed, a fresh session was started. It ended immediately
+("session ended unexpectedly") with the pod not auto-terminating.
+
+**Root cause: budget exhaustion on first heartbeat.**
+- RTX 4090 at $3.29/hr → 60s = ~163 impetus
+- User's staging balance < 163 impetus → `_billTeeHours` returned `continue: false`
+- `handleRunnerHeartbeat` set `session.status = 'ended'` with no error message, no pod terminate
+- Same bug in `handleRunnerEnded`
+
+**Fixes applied:**
+1. Both `handleRunnerHeartbeat` and `handleRunnerEnded` now call `terminate(podId)` when ending
+2. Both paths now set `session.error` with a meaningful message
+3. Added `TEE_BILLING_DISABLED=true` to `.env.staging` — heartbeats always return `continue: true`
+   in dev. Production will run with real billing enabled.
+
+### Confirmed working
+
+After billing was bypassed and fixes deployed, the full flow completed:
+
+```
+Start Session → pod boots → WS probe passes → status=ready
+Setup Model → pip install llama-cpp-python (prebuilt CUDA 12.4 wheel) ✓
+           → huggingface-cli download Qwen2.5-0.5B-Instruct-Q4_K_M.gguf ✓
+           → python3 -m llama_cpp.server --model ... launched ✓
+           → readyProbe GET http://localhost:8000/v1/models → 200 ✓
+           → {"status":"ready","port":8000}
+Run → wgStream → http://10.13.0.1:7998/infer/qwen2.5-0.5b/v1/chat/completions
+    → runner.py /infer proxy → http://127.0.0.1:8000/v1/chat/completions
+    → SSE tokens streamed back through WireGuard tunnel to browser ✓
+```
+
+Prompt: "tell me about breakdancing"
+Response: streamed tokens from Qwen2.5-0.5B-Instruct running on RTX 4090 inside the tunnel.
+
+### Complete proven stack
+
+| Layer | Status |
+|-------|--------|
+| Browser WASM WireGuard client | ✓ |
+| SOCKS5+WS GostUDPTun tunnel | ✓ |
+| RunPod SECURE pod (no CAP_NET_ADMIN) | ✓ |
+| WireGuard handshake (userspace gVisor vtun) | ✓ |
+| runner.py model setup through tunnel | ✓ |
+| llama-cpp-python CUDA 12.4 wheel install | ✓ |
+| HuggingFace GGUF model download | ✓ |
+| Inference server launch + readyProbe | ✓ |
+| runner.py /infer proxy (vtun→kernel stack bridge) | ✓ |
+| SSE token streaming back through tunnel | ✓ |
+| Platform has zero visibility into model or prompts | ✓ |
+
+### Image: `monygroup/tee-runner:0619a`
+
+### Next phase
+
+The TEE private compute MVP is complete. Next work:
+- Async setup with progress feedback (install+download takes 2-3 min, blocking wgRequest)
+- Runner.py log access through platform (for user debugging)
+- Hardware attestation (Phase 3 — requires real TEE hardware, deferred)
+- Production billing (remove `TEE_BILLING_DISABLED`, ensure users have sufficient balance before provisioning)
+- Session cleanup on platform restart (teeSessions is in-memory Map — restarting platform orphans live pods)
+
+---
+
 ## Process lessons
 
 **Tag images with commit SHA, not `:latest`**. RunPod caches `:latest` on the host. New pod, same host = old image. Tag `monygroup/tee-runner:$(git rev-parse --short HEAD)` and pass the tag to the RunPod API.

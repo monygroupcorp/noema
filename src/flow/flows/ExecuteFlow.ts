@@ -564,22 +564,25 @@ export class ExecuteFlow implements Flow {
       priorMessages?: Array<{ role: 'user' | 'assistant'; content: string }>
     }
   ): Step {
-    // Detect media URLs by key convention: keys ending in 'Url', 'url', or 'imageUrl'
-    const mediaEntries = Object.entries(result).filter(([k]) =>
-      k.toLowerCase().endsWith('url')
-    )
+    // Deliver by VALUE, not key name: any string value that is an http(s) URL is a
+    // media output (type inferred from its extension); everything else is text. This
+    // is key-agnostic, so it works whatever the flow's exitus schema names its output
+    // (`image`, `imageUrl`, `mesh`, …) — the schema/runtime key never has to match a
+    // delivery convention again.
+    const isUrl = (v: unknown): v is string => typeof v === 'string' && /^https?:\/\//.test(v)
+    const mediaType = (url: string): 'video' | 'audio' | 'image' => {
+      const ext = url.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
+      if (/^(mp4|webm|mov|m4v|mkv)$/.test(ext)) return 'video'
+      if (/^(mp3|wav|ogg|flac|m4a|aac)$/.test(ext)) return 'audio'
+      return 'image'
+    }
 
-    const media = mediaEntries.map(([k, v]) => ({
-      url: String(v),
-      type: k.toLowerCase().includes('video') ? 'video' as const
-          : k.toLowerCase().includes('audio') ? 'audio' as const
-          : 'image' as const,
-    }))
+    const media = Object.entries(result)
+      .filter(([, v]) => isUrl(v))
+      .map(([, v]) => ({ url: v as string, type: mediaType(v as string) }))
 
-    // Text content: anything that is not a URL
-    const textEntries = Object.entries(result).filter(([k]) =>
-      !k.toLowerCase().endsWith('url')
-    )
+    // Text content: non-URL values, skipping internal underscore-prefixed keys (cook bookkeeping).
+    const textEntries = Object.entries(result).filter(([k, v]) => !isUrl(v) && !k.startsWith('_'))
     const textContent = textEntries.length > 0
       ? textEntries.map(([k, v]) => `${k}: ${String(v)}`).join('\n')
       : undefined
@@ -628,11 +631,15 @@ export class ExecuteFlow implements Flow {
   ): { modusId?: string; priorMessages?: Array<{ role: 'user' | 'assistant'; content: string }> } | undefined {
     if (!state.modusId) return undefined
 
-    // Extract raw text from result (for text-only cursor responses)
-    const textEntries = Object.entries(result).filter(([k]) => !k.toLowerCase().endsWith('url'))
+    // Extract the assistant's text reply (for chat continuation). Value-driven:
+    // genuine text = string values that are NOT URLs, so a media output (e.g. an
+    // `image` URL) never pollutes the conversation thread. Image-only flows yield
+    // no text → no priorMessages.
+    const isUrl = (v: unknown): v is string => typeof v === 'string' && /^https?:\/\//.test(v)
+    const textEntries = Object.entries(result).filter(([, v]) => typeof v === 'string' && !isUrl(v))
     if (textEntries.length === 0) return { modusId: state.modusId }
 
-    const rawText = String(result.response ?? Object.values(result)[0] ?? '')
+    const rawText = String(result.response ?? result.text ?? textEntries[0]?.[1] ?? '')
 
     // Build priorMessages: continuation (messages already in aditus) or first turn
     let priorMessages: Array<{ role: 'user' | 'assistant'; content: string }>

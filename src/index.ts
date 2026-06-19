@@ -34,6 +34,7 @@ import { startAnalyticsListener } from './analytics/analyticsListener.js'
 import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
 import { CANONICAL_MODI } from './crystal/seeds/modi.js'
 import { CANONICAL_ESSENTIAE } from './crystal/seeds/essentiae.js'
+import { CANONICAL_COMPOSITI } from './crystal/seeds/compositi.js'
 import { CANONICAL_FUNDAMENTA } from './crystal/seeds/fundamenta.js'
 import { makeLogger } from './lib/logger.js'
 import { withTrace, makeTraceContext } from './lib/trace.js'
@@ -410,6 +411,12 @@ async function main(): Promise<void> {
     await ring.modorum.register(essentia)
   }
   log.info(`Seeded ${CANONICAL_ESSENTIAE.length} canonical essentiae`)
+
+  // Compositus modi (spells) — registered after the atomic essentiae they reference.
+  for (const compositus of CANONICAL_COMPOSITI) {
+    await ring.modorum.register(compositus)
+  }
+  log.info(`Seeded ${CANONICAL_COMPOSITI.length} canonical compositi`)
 
   for (const intella of CANONICAL_INTELLAE) {
     await intellae.upsert(intella)
