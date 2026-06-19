@@ -547,12 +547,43 @@ def _output_paths(outputs: dict) -> list[str]:
 
 # ── Job processor ──────────────────────────────────────────────────────────────
 
+def _ensure_media_inputs(media_inputs: list, job_id: str) -> None:
+    """Fetch each i2i input file into ComfyUI's input/ dir before the workflow runs.
+    The graph's LoadImage-style node references destFilename; we download url → that file.
+    Mirrors the model-download idiom (aria2c/wget). Idempotent: a present file is reused
+    (destFilename is a content-address of the source, so reuse is safe across jobs)."""
+    if not media_inputs:
+        return
+    input_dir = os.path.join(COMFYUI_DIR, "input")
+    os.makedirs(input_dir, exist_ok=True)
+    for m in media_inputs:
+        dest = os.path.join(input_dir, m["destFilename"])
+        if os.path.isfile(dest) and os.path.getsize(dest) > 0:
+            _append_event(job_id, {"type": "media-input-reused", "dest": m["destFilename"]})
+            continue
+        t0 = time.time()
+        _append_event(job_id, {"type": "fetching-media-input", "dest": m["destFilename"]})
+        try:
+            if shutil.which("aria2c"):
+                subprocess.run(
+                    ["aria2c", "-x16", "-s16", "--allow-overwrite=true", "-q", m["url"], "-o", dest],
+                    check=True, timeout=600,
+                )
+            else:
+                subprocess.run(["wget", "-q", m["url"], "-O", dest], check=True, timeout=600)
+            _append_event(job_id, {"type": "media-input-ready", "dest": m["destFilename"],
+                                   "elapsedMs": int((time.time() - t0) * 1000)})
+        except Exception as e:
+            raise RuntimeError(f"media input fetch failed ({m['destFilename']}): {e}")
+
+
 def _process_job(job_spec: dict) -> None:
     global _current_job
     job_id      = job_spec["jobId"]
     workflow    = job_spec["workflow"]
     models      = job_spec.get("models", [])
     custom_nodes = job_spec.get("customNodes", [])
+    media_inputs = job_spec.get("mediaInputs", [])
     webhook     = job_spec.get("webhook")
     r2          = job_spec.get("r2")
     start       = time.time()
@@ -572,6 +603,10 @@ def _process_job(job_spec: dict) -> None:
 
         # 2. Model preflight
         _ensure_models(models, job_id)
+
+        # 2b. Media-input preflight — fetch i2i input files into ComfyUI's input/ dir
+        # so the graph's LoadImage node finds them by filename.
+        _ensure_media_inputs(media_inputs, job_id)
 
         # 3. Submit workflow to ComfyUI
         result = _http_post(f"{COMFYUI_URL}/prompt", {"prompt": workflow, "client_id": CLIENT_ID})
