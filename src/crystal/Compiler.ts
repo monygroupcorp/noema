@@ -78,7 +78,7 @@ export interface CompiledSpecBase {
   /** Resolved weight manifest. `repo` (HF repo id) is set only for repo-download runtimes
    *  (vLLM/transformers, via `huggingface-cli`); ComfyUI single-file downloads omit it. */
   models: Array<{ role: string; id: string; url: string; dest: string; repo?: string }>
-  cookFlags: Record<string, unknown>
+  genFlags: Record<string, unknown>
   sourceTool: { id: string; versio: string }
   /** On-pod runtime this spec targets — the dispatch key (ADR-0005 single-source, ADR-0007 dispatch). */
   runtime: string
@@ -195,7 +195,7 @@ export class Compiler {
     // ── Resolve the substrate (Fundamentum) the flow runs on (ADR-0005) ────
     // The flow references its fundament by id+versio; the registry resolves it.
     // The image + runtime + base weights come from HERE; the flow's own form
-    // (template, seed key, cook flags) stays on the Essentia.
+    // (template, seed key, generation flags) stays on the Essentia.
     if (!essentia.fundamentumId) {
       throw new CompilerError('MISSING_FUNDAMENTUM', `Essentia '${essentia.id}' has no fundamentumId`)
     }
@@ -247,12 +247,12 @@ export class Compiler {
       throw err
     }
 
-    const cookFlags: Record<string, unknown> = {
-      ...(essentia.defaultCookFlags ?? {}),
-      ...((aditus._cookFlags as Record<string, unknown>) ?? {}),
+    const genFlags: Record<string, unknown> = {
+      ...(essentia.defaultGenFlags ?? {}),
+      ...((aditus._genFlags as Record<string, unknown>) ?? {}),
     }
 
-    const seed = this._resolveSeed(essentia, aditus, cookFlags)
+    const seed = this._resolveSeed(essentia, aditus, genFlags)
 
     // ── Weight manifest = the FUNDAMENT's base weights ∪ the flow's own extras ─
     // Base/support weights live on the `Fundamentum` (shared substrate); a flow may
@@ -358,7 +358,7 @@ export class Compiler {
         templateVersion: template.version,
         inputTemplate,
       },
-      cookFlags,
+      genFlags,
       seed,
       sourceTool: { id: essentia.id, versio: essentia.versio },
       runtime: fundamentum.runtime ?? 'ComfyUI',
@@ -462,9 +462,9 @@ export class Compiler {
     image: { imageId: string; imageVersion: string; ociRef: string },
     runtime: string,
   ): Promise<CompileResult> {
-    const cookFlags: Record<string, unknown> = {
-      ...(essentia.defaultCookFlags ?? {}),
-      ...((aditus._cookFlags as Record<string, unknown>) ?? {}),
+    const genFlags: Record<string, unknown> = {
+      ...(essentia.defaultGenFlags ?? {}),
+      ...((aditus._genFlags as Record<string, unknown>) ?? {}),
     }
 
     // ── Weight manifest = fundament base ∪ flow weights (no template fallback) ─
@@ -507,7 +507,7 @@ export class Compiler {
     const spec: InferenceCompiledSpec = {
       image,
       models,
-      cookFlags,
+      genFlags,
       sourceTool: { id: essentia.id, versio: essentia.versio },
       runtime,
       inference: {
@@ -539,9 +539,9 @@ export class Compiler {
     if (!form) {
       throw new CompilerError('MISSING_SCRIPT', `Essentia '${essentia.id}' (runtime ${runtime}) has no script form`)
     }
-    const cookFlags: Record<string, unknown> = {
-      ...(essentia.defaultCookFlags ?? {}),
-      ...((aditus._cookFlags as Record<string, unknown>) ?? {}),
+    const genFlags: Record<string, unknown> = {
+      ...(essentia.defaultGenFlags ?? {}),
+      ...((aditus._genFlags as Record<string, unknown>) ?? {}),
     }
 
     // Weight manifest (fundament ∪ flow), resolved from the registry — same as the other paths.
@@ -576,7 +576,7 @@ export class Compiler {
     const spec: ScriptCompiledSpec = {
       image,
       models,
-      cookFlags,
+      genFlags,
       sourceTool: { id: essentia.id, versio: essentia.versio },
       runtime,
       script: {
@@ -596,7 +596,7 @@ export class Compiler {
   /**
    * Resolve generation parameters for an inference flow. Precedence (low→high):
    * flow `inferentia.genParams` (baked baseline) < each int/float `aditus` knob's
-   * default < the user's explicit `aditus` value. Text/media ports and the cook-flags
+   * default < the user's explicit `aditus` value. Text/media ports and the gen-flags
    * envelope are excluded — only the numeric knobs (max_tokens, temperature, …) flow in.
    */
   private _resolveGenParams(
@@ -617,7 +617,7 @@ export class Compiler {
   private _resolveSeed(
     essentia: Essentia,
     aditus: Record<string, unknown>,
-    cookFlags: Record<string, unknown>,
+    genFlags: Record<string, unknown>,
   ): number {
     const seedKey = essentia.seedInputKey ?? 'input_seed'
     const explicit = aditus[seedKey]
@@ -625,17 +625,17 @@ export class Compiler {
       return Number(explicit)
     }
 
-    const strategy = (cookFlags.seedStrategy as string | undefined) ?? 'shuffle'
+    const strategy = (genFlags.seedStrategy as string | undefined) ?? 'shuffle'
     switch (strategy) {
       case 'shuffle':
         return this.randomSeed()
       case 'fixed': {
-        const placeholder = cookFlags.seedPlaceholder ?? essentia.defaultCookFlags?.seedPlaceholder ?? 88888888
+        const placeholder = genFlags.seedPlaceholder ?? essentia.defaultGenFlags?.seedPlaceholder ?? 88888888
         return Number(placeholder)
       }
       case 'increment': {
-        const base = Number(cookFlags.baseSeed ?? 0)
-        const idx = Number(cookFlags.pieceIndex ?? 0)
+        const base = Number(genFlags.baseSeed ?? 0)
+        const idx = Number(genFlags.pieceIndex ?? 0)
         return base + idx
       }
       default:

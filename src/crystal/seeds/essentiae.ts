@@ -6,7 +6,7 @@ import type { Essentia } from '../../types/essendi.js'
 // Each Essentia is the crystal representation of a platform tool. It REFERENCES
 // its compute substrate (`Fundamentum`, see seeds/fundamenta.ts) by id+versio —
 // the substrate carries the image, runtime, and base/support weights. The
-// Essentia keeps its own FORM: workflowTemplate + seedInputKey + cookFlags.
+// Essentia keeps its own FORM: workflowTemplate + seedInputKey + genFlags.
 // (Decomposed from the former provider-named `runpodSpec` — ADR-0005.)
 //
 // contentHash is omitted here — computed and set on first registration
@@ -40,11 +40,11 @@ export const ESSENTIA_RUNMAKE_FLUX_SCHNELL: Essentia = {
     image: { type: 'image', description: 'Generated image' },
   },
 
-  // Form: which workflow graph runs on the fundament, + seed/cook defaults.
+  // Form: which workflow graph runs on the fundament, + seed/generation defaults.
   workflowTemplate: 'flux-schnell',
   workflowTemplateVersion: '1',
   seedInputKey: 'input_seed',
-  defaultCookFlags: {
+  defaultGenFlags: {
     batchSize: 1,
     seedStrategy: 'shuffle',
     seedPlaceholder: 88888888,
@@ -84,11 +84,11 @@ export const ESSENTIA_RUNMAKE_SD15: Essentia = {
     image: { type: 'image', description: 'Generated image' },
   },
 
-  // Form: which workflow graph runs on the fundament, + seed/cook defaults.
+  // Form: which workflow graph runs on the fundament, + seed/generation defaults.
   workflowTemplate: 'sd15',
   workflowTemplateVersion: '1',
   seedInputKey: 'input_seed',
-  defaultCookFlags: {
+  defaultGenFlags: {
     batchSize: 1,
     seedStrategy: 'shuffle',
     seedPlaceholder: 88888888,
@@ -131,7 +131,7 @@ export const ESSENTIA_RUNMAKE_SDXL: Essentia = {
   workflowTemplate: 'sdxl',
   workflowTemplateVersion: '1',
   seedInputKey: 'input_seed',
-  defaultCookFlags: {
+  defaultGenFlags: {
     batchSize: 1,
     seedStrategy: 'shuffle',
     seedPlaceholder: 88888888,
@@ -174,7 +174,7 @@ export const ESSENTIA_RUNMAKE_CHROMA: Essentia = {
   workflowTemplate: 'chroma',
   workflowTemplateVersion: '1',
   seedInputKey: 'input_seed',
-  defaultCookFlags: {
+  defaultGenFlags: {
     batchSize: 1,
     seedStrategy: 'shuffle',
     seedPlaceholder: 666,
@@ -216,7 +216,7 @@ export const ESSENTIA_FLUXI2I: Essentia = {
   workflowTemplate: 'fluxi2i',
   workflowTemplateVersion: '1',
   seedInputKey: 'input_seed',
-  defaultCookFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
+  defaultGenFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
 
   natum: new Date('2025-01-01'),
   mutatum: new Date('2025-01-01'),
@@ -251,7 +251,7 @@ export const ESSENTIA_KONTEXTEDIT: Essentia = {
   workflowTemplate: 'kontextedit',
   workflowTemplateVersion: '1',
   seedInputKey: 'input_seed',
-  defaultCookFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
+  defaultGenFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
 
   natum: new Date('2025-01-01'),
   mutatum: new Date('2025-01-01'),
@@ -286,7 +286,7 @@ export const ESSENTIA_KLEINEDIT: Essentia = {
   workflowTemplate: 'kleinedit',
   workflowTemplateVersion: '1',
   seedInputKey: 'input_seed',
-  defaultCookFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
+  defaultGenFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
 
   natum: new Date('2025-01-01'),
   mutatum: new Date('2025-01-01'),
@@ -315,7 +315,7 @@ export const ESSENTIA_RMBG: Essentia = {
 
   workflowTemplate: 'rmbg',
   workflowTemplateVersion: '1',
-  defaultCookFlags: { batchSize: 1, privateMode: false, vramGb: 8 },
+  defaultGenFlags: { batchSize: 1, privateMode: false, vramGb: 8 },
 
   natum: new Date('2025-01-01'),
   mutatum: new Date('2025-01-01'),
@@ -350,7 +350,7 @@ export const ESSENTIA_UPSCALE: Essentia = {
 
   workflowTemplate: 'upscale',
   workflowTemplateVersion: '1',
-  defaultCookFlags: {
+  defaultGenFlags: {
     batchSize: 1,
     privateMode: false,
     vramGb: 6,
@@ -519,7 +519,7 @@ export const ESSENTIA_HEARTMULA: Essentia = {
     outputKind: 'audio',
   },
 
-  defaultCookFlags: { vramGb: 24 },
+  defaultGenFlags: { vramGb: 24 },
 
   natum: new Date('2026-06-12'),
   mutatum: new Date('2026-06-12'),
@@ -584,7 +584,7 @@ export const ESSENTIA_HUNYUAN3D: Essentia = {
     outputKind: '3d',
   },
 
-  defaultCookFlags: { vramGb: 12 },
+  defaultGenFlags: { vramGb: 12 },
 
   natum: new Date('2026-06-12'),
   mutatum: new Date('2026-06-12'),

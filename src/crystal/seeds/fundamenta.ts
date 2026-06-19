@@ -7,7 +7,7 @@ import type { Fundamentum } from '../../types/fundamentum.js'
 // image + runtime + the shared base/support weights + a capacity hint. Essentiae
 // reference one by id+versio (see seeds/essentiae.ts). The decomposition of the
 // former `Essentia.runpodSpec`: the environment half lives here; each flow keeps
-// its own form (workflowTemplate, seedInputKey, cookFlags).
+// its own form (workflowTemplate, seedInputKey, genFlags).
 //
 // contentHash is omitted — computed/set on first registration (parity with modi).
 // =============================================================================

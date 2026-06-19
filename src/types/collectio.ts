@@ -1,5 +1,5 @@
 // =============================================================================
-// COLLECTIO — the batch/cook container
+// COLLECTIO — the collection / batch-generation container
 // =============================================================================
 //
 // "Collectio" = a gathering together, a collection (Latin, from colligere:
@@ -9,7 +9,10 @@
 // A Collectio is the container for N Acta generated from one parameterised
 // modus expansion. It is neither a single Actum nor a Modus — it is the
 // result of applying a parameter grid to a Modus and executing every
-// combination. The old system called this "cook."
+// combination. This is the canonical name for the feature once colloquially
+// called "cook" — `Collectio` is the only term used in code (user-facing
+// labels like "Collections"/"Drops" are a frontend concern). Minting is the
+// SEPARATE later on-chain step (Catena), never conflated with generation.
 //
 // The TraitEngine (pure function) expands:
 //   Modus × parametri → Inceptio[]   (one Inceptio per combination)
@@ -68,7 +71,7 @@ export interface Tractus {
 }
 
 /**
- * Collectio — a batch/cook container.
+ * Collectio — a batch-generation container.
  *
  * Holds the parameterisation that generated it, the IDs of all resulting
  * Acta, and aggregate stats for progress tracking and cost accounting.
