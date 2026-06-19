@@ -10,7 +10,7 @@
 // A modus is FRACTAL: it can be an atomic leaf (atomicus) that runs one
 // operation, or a composed tree (compositus) whose children are other modi.
 // This single primitive replaces what were previously called "tools" (atomic),
-// "spells" (sequential compositions), and "cook" (batch/expression grids).
+// "spells" (sequential compositions), and batch/expression grids (a Collectio).
 //
 // TRIAD: modus defines → modo executes → actum records
 //
@@ -115,7 +115,7 @@ export interface GradusFons {
  *
  * Composed modus (genus: 'compositus'):
  *   A tree of other modi wired by gradus steps and condicio expressions.
- *   This is how "spells" (sequential) and "cook" (batch/expression) are expressed.
+ *   This is how "spells" (sequential) and batch/expression (a Collectio) are expressed.
  *   Can contain other compositus modi — fractal depth is unlimited.
  */
 export interface Modus {

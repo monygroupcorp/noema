@@ -34,10 +34,10 @@ export type EssentiaCategoria =
   | 'chain'   // on-chain operation (transaction, contract call)
 
 /**
- * CookFlags — per-flow defaults for GPU selection + inference behaviour, merged with
- * per-request `_cookFlags` overrides at compile time. The flow's own FORM, not substrate.
+ * GenFlags — per-flow defaults for GPU selection + inference behaviour, merged with
+ * per-request `_genFlags` overrides at compile time. The flow's own FORM, not substrate.
  */
-export interface CookFlags {
+export interface GenFlags {
   batchSize?: number
   /** 'shuffle' = random each run, 'fixed' = always seedPlaceholder, 'increment' = base + pieceIndex */
   seedStrategy?: 'shuffle' | 'fixed' | 'increment'
@@ -56,12 +56,12 @@ export interface CookFlags {
  *   - genus is always 'atomicus' (essentiae are leaves, never trees)
  *   - categoria declares what it produces
  *   - a version-pinned reference to the `Fundamentum` it runs on (the substrate), plus its own
- *     execution FORM (workflow template, seed key, cook flags)
+ *     execution FORM (workflow template, seed key, generation flags)
  *
  * Per ADR-0005, the SUBSTRATE (image + runtime + base/support weights) was lifted out of the old
  * provider-named `runpodSpec` into `Fundamentum`; the Essentia now REFERENCES it (id + versio, the
  * same discipline as the template ref) so a family of essentiae share one fundament. The form half
- * — `workflowTemplate`, `seedInputKey`, `defaultCookFlags` — stays here. The provider name (runpod)
+ * — `workflowTemplate`, `seedInputKey`, `defaultGenFlags` — stays here. The provider name (runpod)
  * lives only on the `Cursor` / `Materia.genus`. Base weights live on the `Fundamentum`; any
  * flow-specific extra weights may still ride `Modus.intellae`.
  *
@@ -93,8 +93,8 @@ export interface Essentia extends Modus {
   workflowTemplateVersion?: string
   /** Which aditus field holds the seed value. Default: 'input_seed'. Passed to the slot map resolver. */
   seedInputKey?: string
-  /** Default cook flags — merged with per-request `_cookFlags` overrides. */
-  defaultCookFlags?: CookFlags
+  /** Default generation flags — merged with per-request `_genFlags` overrides. */
+  defaultGenFlags?: GenFlags
 
   /**
    * "inferentia" = inference (Latin). The FORM HALF for LLM/serving runtimes ('vLLM' | 'llm') —
