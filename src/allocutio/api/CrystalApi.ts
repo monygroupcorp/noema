@@ -35,13 +35,15 @@ import { aggregateStatus, materiaStudioStatus } from '../lexicon/status/aggregat
 import type { ModoStore } from '../../types/modo.js'
 import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModus.js'
 import { dispatchInceptio, type DispatchDeps } from '../../execution/dispatchInceptio.js'
-import { toRun } from './runProjection.js'
+import { toRun, toCollection } from './runProjection.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
 import { Errors } from './errors.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { computeRecipient } from '../../arcanum/prover.js'
 import { impetusForPodMs } from '../../ledger/rates.js'
-import type { Run } from './types.js'
+import type { Run, Collection } from './types.js'
+import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
+import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 
 const PLATFORM_ANIMA_ID = process.env.PLATFORM_ANIMA_ID ?? 'platform'
 
@@ -78,8 +80,28 @@ export interface CrystalApiDeps {
   /** Compositus engine (ADR-0008) — lets `invokeFlow` dispatch a compositus (spell)
    *  modus, not just atomics. Absent → compositus modi throw at dispatch. */
   compositusCursor?: DispatchDeps['compositusCursor']
+  /** Collection store + fan-out cursor — back `collect`/`getCollection`/review.
+   *  Absent → collection ops unavailable. */
+  collectiones?: Collectionum
+  collectioCursor?: Pick<CollectioCursor, 'start' | 'approveActum' | 'rejectAndRevive' | 'pause' | 'resume'>
   /** RunPod pod provisioner for TEE private compute sessions. Absent → local dev (manual runner). */
   teeProvisioner?: TeeProvisioner
+}
+
+/** Inputs to start a Collection (a Collectio): a base modus expanded over a Tractus[] grid. */
+export interface CollectOpts {
+  /** The flow expanded across the grid (atomic or a compositus pipeline). */
+  modusId: string
+  /** Target number of pieces to generate. */
+  total: number
+  /** The axes of variation. Each Tractus is one trait/parameter dimension. */
+  tractus: Tractus[]
+  /** Base aditus applied to every piece (e.g. `_basePrompt` with `{{axis}}` tokens). */
+  aditusBase?: Record<string, unknown>
+  /** Max concurrent pieces in flight. Default 3. */
+  concurrentia?: number
+  /** Optional human name. */
+  nomen?: string
 }
 
 /** Where to send a run: an explicit modusId OR a canon verb to resolve. */
@@ -203,6 +225,96 @@ export class CrystalApi {
       if (childSigna.length > 0 && await this.deps.signorum.ownsAny(auctor, childSigna)) return true
     }
     return false
+  }
+
+  // ── Collections (Collectio) ─────────────────────────────────────────────────
+
+  /**
+   * Start a Collection — create a `Collectio` (a base modus expanded over a
+   * `Tractus[]` grid) and fan it out via the CollectioCursor. General-purpose:
+   * NFT rarity/attributes/export ride on the same grid but are opt-in. Returns
+   * the public Collection. The base modus may be atomic OR a compositus pipeline.
+   */
+  async collect(auctor: AuctorKey, opts: CollectOpts): Promise<Collection> {
+    const { collectiones, collectioCursor } = this.deps
+    if (!collectiones || !collectioCursor) throw Errors.notFoundCollection('collections')
+    const by = this._collectionBy(auctor)
+
+    const collectio = await collectiones.create({
+      ...(opts.nomen !== undefined ? { nomen: opts.nomen } : {}),
+      modusId: opts.modusId,
+      aditusBase: opts.aditusBase ?? {},
+      tractus: opts.tractus,
+      numerus: opts.total,
+      by,
+      concurrentia: opts.concurrentia ?? 3,
+      status: 'nascens',
+    })
+    await collectioCursor.start(collectio)
+    return toCollection((await collectiones.find(collectio.id)) ?? collectio)
+  }
+
+  /** Fetch a Collection, owner-scoped. */
+  async getCollection(auctor: AuctorKey, id: string): Promise<Collection> {
+    return toCollection(await this._ownedCollection(auctor, id))
+  }
+
+  /** List the caller's Collections. */
+  async listCollections(auctor: AuctorKey): Promise<Collection[]> {
+    const all = (await this.deps.collectiones?.list()) ?? []
+    return all.filter((c) => this._ownsCollection(auctor, c)).map(toCollection)
+  }
+
+  /** Pause dispatching new pieces (in-flight finish). Owner-scoped. */
+  async pauseCollection(auctor: AuctorKey, id: string): Promise<Collection> {
+    const c = await this._ownedCollection(auctor, id)
+    await this.deps.collectioCursor?.pause(id)
+    return toCollection(c)
+  }
+
+  /** Resume dispatching after a pause. Owner-scoped. */
+  async resumeCollection(auctor: AuctorKey, id: string): Promise<Collection> {
+    const c = await this._ownedCollection(auctor, id)
+    await this.deps.collectioCursor?.resume(id)
+    return toCollection(c)
+  }
+
+  /** Cancel a Collection — stop dispatching + mark cancellata. Owner-scoped. */
+  async cancelCollection(auctor: AuctorKey, id: string): Promise<Collection> {
+    await this._ownedCollection(auctor, id)
+    await this.deps.collectioCursor?.pause(id)
+    return toCollection(await this.deps.collectiones!.update(id, { status: 'cancellata' }))
+  }
+
+  /** Review: approve a pending piece (it counts toward the collection). Owner-scoped. */
+  async approveCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void> {
+    await this._ownedCollection(auctor, id)
+    await this.deps.collectioCursor?.approveActum(id, actumId)
+  }
+
+  /** Review: reject a pending piece and reroll it with a fresh seed. Owner-scoped. */
+  async rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void> {
+    await this._ownedCollection(auctor, id)
+    await this.deps.collectioCursor?.rejectAndRevive(id, actumId)
+  }
+
+  /** A Collectio owns by `{animaId}|{commitment}` only — bursaToken/proof have no persistent owner record. */
+  private _collectionBy(auctor: AuctorKey): Collectio['by'] {
+    if ('animaId' in auctor) return { animaId: auctor.animaId }
+    if ('commitment' in auctor) return { commitment: auctor.commitment }
+    throw Errors.authForbidden('Collections require an identified or commitment account')
+  }
+
+  private _ownsCollection(auctor: AuctorKey, c: Collectio): boolean {
+    if ('animaId' in auctor && 'animaId' in c.by) return c.by.animaId === auctor.animaId
+    if ('commitment' in auctor && 'commitment' in c.by) return c.by.commitment === auctor.commitment
+    return false
+  }
+
+  private async _ownedCollection(auctor: AuctorKey, id: string): Promise<Collectio> {
+    const c = await this.deps.collectiones?.find(id)
+    if (!c || !this._ownsCollection(auctor, c)) throw Errors.notFoundCollection(id)
+    return c
   }
 
   /** List the canonical flows (atomic + compositus spells) as compact summaries. */
