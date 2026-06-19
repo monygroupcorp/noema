@@ -28,7 +28,7 @@ from dataclasses import dataclass
 import aiohttp
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [runner] %(message)s")
@@ -237,6 +237,43 @@ async def setup(req: SetupRequest):
     return {"status": "ready", "essentiaId": req.essentiaId, "port": port}
 
 
+@app.api_route("/infer/{essentia_id}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def infer_proxy(essentia_id: str, path: str, request: Request):
+    """Proxy inference requests to the managed process for essentiaId.
+
+    The vtun HTTP proxy in tee-wg-server only bridges port 7998 to the real kernel
+    network stack. Dynamically allocated process ports (8000, 8001, …) are only
+    reachable on localhost inside the pod, not through the WireGuard vtun.
+    This endpoint bridges that gap: browser calls /infer/{id}/... and we forward.
+    """
+    proc = managed.get(essentia_id)
+    if not proc:
+        raise HTTPException(404, f"{essentia_id} not running")
+    target = f"http://127.0.0.1:{proc.port}/{path}"
+    body = await request.body()
+    fwd_headers = {k: v for k, v in request.headers.items()
+                   if k.lower() not in ('host', 'content-length', 'transfer-encoding')}
+    timeout = aiohttp.ClientTimeout(total=None, connect=10)
+    session = aiohttp.ClientSession(timeout=timeout)
+    resp = await session.request(request.method, target, data=body, headers=fwd_headers)
+
+    async def _stream():
+        try:
+            async for chunk in resp.content.iter_any():
+                yield chunk
+        finally:
+            resp.release()
+            await session.close()
+
+    return StreamingResponse(
+        _stream(),
+        status_code=resp.status,
+        media_type=resp.content_type,
+        headers={k: v for k, v in resp.headers.items()
+                 if k.lower() not in ('content-encoding', 'transfer-encoding', 'content-length')},
+    )
+
+
 @app.post("/stop")
 async def stop(req: StopRequest):
     proc = managed.pop(req.essentiaId, None)
@@ -338,10 +375,14 @@ async def _run_script(script: dict, options: dict):
 
 
 async def _run(cmd: list[str], cwd: str = None):
-    proc = await asyncio.create_subprocess_exec(*cmd, cwd=cwd)
-    rc = await proc.wait()
-    if rc != 0:
-        raise RuntimeError(f"command failed (rc={rc}): {' '.join(cmd)}")
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, cwd=cwd,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        err = stderr.decode(errors='replace').strip()[-2000:] if stderr else ''
+        raise RuntimeError(f"command failed (rc={proc.returncode}): {' '.join(cmd)}\n{err}")
 
 
 async def _download_gguf(model: str) -> str:

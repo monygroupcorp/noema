@@ -183,7 +183,7 @@
     "install": [
       "pip install llama-cpp-python[server] --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124 -q"
     ],
-    "launchTemplate": "python -m llama_cpp.server --model {model} --n_gpu_layers -1 --port {port} --host 0.0.0.0",
+    "launchTemplate": "python3 -m llama_cpp.server --model {model} --n_gpu_layers -1 --port {port} --host 0.0.0.0",
     "readyProbe": "GET http://localhost:{port}/v1/models",
     "intellae": [{ "id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf", "role": "lm" }]
   }
@@ -244,6 +244,7 @@
     let connected = false;
     let sessionId = null;
     let inferPort = null;
+    let inferEssentiaId = null;
     let currentProxyUrl = null; // set when session becomes ready; used by fetchServerLog()
     let tunnelIp = '10.13.0.2';
     let pollTimer = null;
@@ -473,6 +474,7 @@
         const body = JSON.parse(res);
         if (body.status !== 'ready') throw new Error(JSON.stringify(body));
         inferPort = body.port;
+        inferEssentiaId = essentiaId;
         setStatus('setupStatus', 'ok', 'model ready on port ' + inferPort);
         log('setup done — port ' + inferPort);
         enable('sectionInfer');
@@ -483,8 +485,11 @@
 
     // — Step 3: inference through tunnel
     function run() {
-      if (!inferPort) { setStatus('runStatus', 'err', 'no model port — run setup first'); return; }
-      const url    = 'http://10.13.0.1:' + inferPort + '/v1/chat/completions';
+      if (!inferEssentiaId) { setStatus('runStatus', 'err', 'no model — run setup first'); return; }
+      // Route through runner.py's /infer proxy — dynamically allocated process ports
+      // (e.g. 8000) are only on the real kernel stack inside the pod and are not
+      // reachable via the vtun (which only bridges port 7998 → runner.py).
+      const url    = 'http://10.13.0.1:7998/infer/' + inferEssentiaId + '/v1/chat/completions';
       const prompt = document.getElementById('prompt').value.trim();
       const output = document.getElementById('output');
 
@@ -533,6 +538,7 @@
       connected = false;
       sessionId = null;
       inferPort = null;
+      inferEssentiaId = null;
       setStatus('sessionStatus', 'idle', 'disconnected');
       document.getElementById('sectionSetup').classList.add('disabled');
       document.getElementById('sectionInfer').classList.add('disabled');
