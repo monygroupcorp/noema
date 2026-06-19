@@ -34,7 +34,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11 \
     python3.11-venv \
     python3-pip \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3 /usr/local/bin/python \
+    && ln -sf /usr/bin/pip3 /usr/local/bin/pip
 
 # tee-wg-server — WireGuard + SOCKS5+WS server (gVisor netstack, no TUN / NET_ADMIN)
 COPY --from=wg-builder /tee-wg-server /usr/local/bin/tee-wg-server
