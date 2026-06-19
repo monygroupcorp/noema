@@ -110,6 +110,9 @@ export interface FlowSummary {
   nomen: string
   versio: string
   categoria?: unknown
+  /** Number of steps — present only for a compositus (spell). Absent = an atomic flow.
+   *  Lets an agent tell a one-shot tool from a multi-step spell at the catalog level. */
+  steps?: number
 }
 
 export class CrystalApi {
@@ -181,16 +184,30 @@ export class CrystalApi {
   /** A run is owned by an auctor iff:
    *  - bursaToken: the actum.bursaToken matches (no signa involved)
    *  - otherwise: a signum it consumed belongs to that auctor */
-  private _owns(auctor: AuctorKey, a: Actum): Promise<boolean> {
+  private async _owns(auctor: AuctorKey, a: Actum): Promise<boolean> {
     if ('bursaToken' in auctor) {
-      return Promise.resolve(a.bursaToken === auctor.bursaToken)
+      if (a.bursaToken === auctor.bursaToken) return true
+      // A compositus parent (cost-free umbrella) carries no bursaToken of its own —
+      // it's owned by whoever owns its child steps. Check them.
+      if ((a.signaConsumed?.length ?? 0) === 0) {
+        const kids = await this.deps.actorum.findByCompositum(a.id)
+        if (kids.some(k => k.bursaToken === auctor.bursaToken)) return true
+      }
+      return false
     }
-    return this.deps.signorum.ownsAny(auctor, a.signaConsumed ?? [])
+    if (await this.deps.signorum.ownsAny(auctor, a.signaConsumed ?? [])) return true
+    // Compositus parent: no signa of its own (ADR-0008) → owned via its child steps' signa.
+    if ((a.signaConsumed?.length ?? 0) === 0) {
+      const kids = await this.deps.actorum.findByCompositum(a.id)
+      const childSigna = kids.flatMap(k => k.signaConsumed ?? [])
+      if (childSigna.length > 0 && await this.deps.signorum.ownsAny(auctor, childSigna)) return true
+    }
+    return false
   }
 
-  /** List the canonical atomic flows as compact summaries. */
+  /** List the canonical flows (atomic + compositus spells) as compact summaries. */
   async listFlows(): Promise<FlowSummary[]> {
-    const modi = await this.deps.modorum.list({ genus: 'atomicus', canonica: true })
+    const modi = await this.deps.modorum.list({ canonica: true })
     return modi.map((m) => {
       // `categoria` is an optional catalog tag not on the core Modus type — read it
       // off whatever the registry carries without widening the primitive.
@@ -200,6 +217,7 @@ export class CrystalApi {
         nomen: m.nomen,
         versio: m.versio,
         ...(categoria !== undefined ? { categoria } : {}),
+        ...(m.genus === 'compositus' ? { steps: m.gradus?.length ?? 0 } : {}),
       }
     })
   }

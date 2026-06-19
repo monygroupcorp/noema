@@ -172,6 +172,7 @@ function makeDeps(over: Partial<CrystalApiDeps> = {}): {
       findByNullifier: async () => null,
       findExpired: async () => [],
       findInFlight: async () => [],
+      findByCompositum: async () => [],
     },
     // The owner (`auctor`) owns signum 'sig-1'; any other identity owns nothing.
     signorum: ({
@@ -300,17 +301,51 @@ test('getRun is owner-scoped: a non-owner gets not_found.run (no IDOR), even for
   assert.equal(anonRun.status, 'complete')
 })
 
-test('listFlows returns only atomicus + canonica flows', async () => {
+test('listFlows returns canonical atomic flows AND compositus spells, excluding non-canonica', async () => {
   const { deps } = makeDeps()
   const api = new CrystalApi(deps)
 
   const flows = await api.listFlows()
   const ids = flows.map((f) => f.id).sort()
 
-  assert.deepEqual(ids, ['flux-schnell', 'sd1-5', 'verb-bound'])
+  // spell-x (compositus, canonica) IS now listed; community-y (canonica:false) is not.
+  assert.deepEqual(ids, ['flux-schnell', 'sd1-5', 'spell-x', 'verb-bound'])
   const flux = flows.find((f) => f.id === 'flux-schnell')!
   assert.equal(flux.nomen, 'FLUX Schnell')
   assert.equal(flux.versio, '1.0.0')
+  assert.equal(flux.steps, undefined, 'an atomic flow surfaces no step count')
+  const spell = flows.find((f) => f.id === 'spell-x')!
+  assert.equal(typeof spell.steps, 'number', 'a compositus surfaces its step count')
+})
+
+test('getRun: a cost-free compositus parent is owned via its child steps (ADR-0008)', async () => {
+  // The parent (spell run) holds NO signa — the child step consumed the owner's 'sig-1'.
+  const parent = nascens({ modusId: 'spell-x', aditus: {}, by: auctor })
+  parent.signaConsumed = []  // cost-free umbrella — holds no signa of its own
+  const child = { ...parent, id: `${parent.id}-step0`, signaConsumed: ['sig-1'], compositum: { parentId: parent.id, ordine: 0 } }
+  const { deps } = makeDeps({
+    actorum: ({
+      findById: async (id: string) => (id === parent.id ? parent : null),
+      findByCompositum: async (pid: string) => (pid === parent.id ? [child] : []),
+      create: async () => { throw new Error('unused') },
+      update: async () => { throw new Error('unused') },
+      findByExternusJobId: async () => null,
+      findByNullifier: async () => null,
+      findExpired: async () => [],
+      findInFlight: async () => [],
+    } as unknown) as CrystalApiDeps['actorum'],
+  })
+  const api = new CrystalApi(deps)
+
+  // Owner (owns sig-1, consumed by the child) can fetch the parent run.
+  const run = await api.getRun(auctor, parent.id)
+  assert.equal(run.id, parent.id)
+
+  // A non-owner still cannot (no IDOR via the children).
+  await assert.rejects(
+    () => api.getRun({ animaId: 'someone-else' }, parent.id),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.run',
+  )
 })
 
 test('describeFlow returns a schema with an input', async () => {
