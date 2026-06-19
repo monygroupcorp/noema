@@ -51,4 +51,8 @@ export class MemoryActorum implements Actorum {
       a => (a.status === 'nascens' || a.status === 'agens') && a.externusJobId != null
     )
   }
+
+  async findByCompositum(parentId: string): Promise<Actum[]> {
+    return Array.from(this.store.values()).filter(a => a.compositum?.parentId === parentId)
+  }
 }

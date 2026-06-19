@@ -105,4 +105,9 @@ export class MongoActorum implements Actorum {
       .toArray()
     return docs.map(fromDoc)
   }
+
+  async findByCompositum(parentId: string): Promise<Actum[]> {
+    const docs = await this.col.find({ 'compositum.parentId': parentId }).toArray()
+    return docs.map(fromDoc)
+  }
 }
