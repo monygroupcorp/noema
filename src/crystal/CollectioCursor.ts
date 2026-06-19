@@ -1,6 +1,6 @@
 import type { Collectio, Collectionum } from '../types/collectio.js'
-import type { Actorum } from '../types/cursus.js'
-import type { ActumInceptor } from '../execution/ActumInceptor.js'
+import type { Actorum, Inceptio } from '../types/cursus.js'
+import type { Actum } from '../types/actum.js'
 import { selectForPiece } from './TraitMixer.js'
 
 // =============================================================================
@@ -36,7 +36,9 @@ export class CollectioCursor {
   private readonly states = new Map<string, CollectioState>()
 
   constructor(
-    private readonly inceptor: ActumInceptor,
+    /** Dispatch one piece — `(inceptio) => dispatchInceptio(deps, inceptio)`. Initiates AND
+     *  RUNS the piece (sync → completes inline; async pod → parks for the webhook). */
+    private readonly dispatch: (inceptio: Inceptio) => Promise<{ actum: Actum; exitus?: Record<string, unknown> }>,
     private readonly collectiones: Collectionum,
     private readonly actorum: Actorum,
     private readonly config: CollectioCursorConfig,
@@ -246,6 +248,7 @@ export class CollectioCursor {
     if (!collectio) return
 
     const totalPieces = collectio.numerus + state.reviveCount
+    const syncDone: string[] = []
 
     while (
       state.running.size < collectio.concurrentia &&
@@ -269,13 +272,14 @@ export class CollectioCursor {
         _attributes: selection.attributes,
       }
 
-      const inceptio = {
+      const inceptio: Inceptio = {
         modusId: collectio.modusId,
         aditus,
         by: collectio.by,
       }
 
-      const actum = await this.inceptor.initiate(inceptio)
+      const result = await this.dispatch(inceptio)
+      const actum = result.actum
       state.running.add(actum.id)
 
       // Persist actumId in Collectio.acta
@@ -285,6 +289,15 @@ export class CollectioCursor {
           acta: [...fresh.acta, actum.id],
         })
       }
+
+      // Sync cursors complete the piece inline — no webhook will fire, so advance
+      // the collection ourselves. (Real async pods → the webhook's collectioRouter
+      // calls onActumCompleta.) Deferred past the loop to avoid re-entrant dispatch.
+      if (result.exitus !== undefined) syncDone.push(actum.id)
+    }
+
+    for (const actumId of syncDone) {
+      await this.onActumCompleta(collectioId, actumId, true)
     }
   }
 

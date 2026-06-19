@@ -4,7 +4,6 @@ import type { Collectio } from '../../../src/types/collectio.js'
 import type { Actum, ActumStatus } from '../../../src/types/actum.js'
 import type { Actorum, Inceptio } from '../../../src/types/cursus.js'
 import type { Collectionum } from '../../../src/types/collectio.js'
-import { ActumInceptor } from '../../../src/execution/ActumInceptor.js'
 import { CollectioCursor } from '../../../src/crystal/CollectioCursor.js'
 import { selectForPiece } from '../../../src/crystal/TraitMixer.js'
 import type { Tractus } from '../../../src/types/collectio.js'
@@ -108,21 +107,25 @@ function makeActorum(): ActorumStub {
   }
 }
 
-interface InceptorStub {
-  initiate(inceptio: Inceptio): Promise<Actum>
+interface DispatchStub {
+  dispatch(inceptio: Inceptio): Promise<{ actum: Actum }>
   calls: Inceptio[]
   actorum: ActorumStub
+  _counter: number
 }
 
-function makeInceptor(actumIdPrefix = 'actum'): InceptorStub & { _counter: number } {
+// The cursor now takes a `dispatch` fn (initiate + RUN). This stub mimics an ASYNC pod:
+// it creates the actum (nascens) and returns it with NO exitus, so the piece stays in
+// `running` until the test drives onActumCompleta (the webhook path these tests exercise).
+function makeInceptor(actumIdPrefix = 'actum'): DispatchStub {
   let counter = 0
   const actorum = makeActorum()
 
-  const stub = {
+  const stub: DispatchStub = {
     calls: [] as Inceptio[],
     actorum,
     _counter: 0,
-    async initiate(inceptio: Inceptio): Promise<Actum> {
+    async dispatch(inceptio: Inceptio): Promise<{ actum: Actum }> {
       stub.calls.push(inceptio)
       const id = `${actumIdPrefix}-${counter++}`
       stub._counter = counter
@@ -138,7 +141,7 @@ function makeInceptor(actumIdPrefix = 'actum'): InceptorStub & { _counter: numbe
         expirat: new Date(Date.now() + 60_000),
       }
       actorum.store.set(id, actum)
-      return actum
+      return { actum }
     },
   }
 
@@ -152,7 +155,7 @@ test('start() marks Collectio agens', async () => {
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     {},
@@ -172,7 +175,7 @@ test('start() dispatches up to concurrentia pieces', async () => {
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     {},
@@ -190,7 +193,7 @@ test('start() with numerus: 1 dispatches exactly 1 piece', async () => {
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     {},
@@ -208,7 +211,7 @@ test('onActumCompleta() dispatches next piece when slot opens', async () => {
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     {},
@@ -230,7 +233,7 @@ test('onActumCompleta() does NOT dispatch when paused', async () => {
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     {},
@@ -252,7 +255,7 @@ test('resume() dispatches pending pieces after pause', async () => {
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     {},
@@ -274,7 +277,7 @@ test('onActumCompleta(success: false) increments fractae', async () => {
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     {},
@@ -295,7 +298,7 @@ test('onActumCompleta(success: true) without review increments completae', async
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     {},
@@ -316,7 +319,7 @@ test('Collectio marked completa when all 3 pieces done', async () => {
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     {},
@@ -342,7 +345,7 @@ test('reviewEnabled: completion sets reviewOutcome pending on actum exitus', asy
   const inceptor = makeInceptor()
   const actorum = inceptor.actorum
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     actorum,
     { reviewEnabled: true },
@@ -363,7 +366,7 @@ test('reviewEnabled: completion does NOT increment completae until approveActum(
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     { reviewEnabled: true },
@@ -384,7 +387,7 @@ test('reviewEnabled: approveActum() increments completae and dispatches next pie
   const inceptor = makeInceptor()
   const actorum = inceptor.actorum
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     actorum,
     { reviewEnabled: true },
@@ -415,7 +418,7 @@ test('reviewEnabled: Collectio NOT marked completa while pendingReview non-empty
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     { reviewEnabled: true },
@@ -441,7 +444,7 @@ test('rejectAndRevive() sets reviewOutcome: rejected on original actum', async (
   const inceptor = makeInceptor()
   const actorum = inceptor.actorum
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     actorum,
     { reviewEnabled: true },
@@ -464,7 +467,7 @@ test('rejectAndRevive() dispatches a new piece', async () => {
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     { reviewEnabled: true },
@@ -485,7 +488,7 @@ test('rejectAndRevive() new piece _pieceIndex is >= collectio.numerus', async ()
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     { reviewEnabled: true },
@@ -529,7 +532,7 @@ test('TraitMixer integration: dispatched aditus.prompt matches selectForPiece ou
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     {},
@@ -560,7 +563,7 @@ test('aditus merges aditusBase fields into each dispatched inceptio', async () =
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     {},
@@ -591,7 +594,7 @@ test('_pieceIndex and _attributes are injected into dispatched aditus', async ()
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     {},
@@ -615,7 +618,7 @@ test('reviewEnabled: pendingReview does not block concurrentia — dispatches 2 
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     { reviewEnabled: true },
@@ -680,7 +683,7 @@ test('rehydrate() restores state for agens collections', async () => {
 
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     actorum,
     {},
@@ -728,7 +731,7 @@ test('rehydrate() correctly identifies running vs pending-review acta', async ()
 
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     actorum,
     { reviewEnabled: true },
@@ -752,7 +755,7 @@ test('rehydrate() is a no-op when no agens collections exist', async () => {
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     {},
@@ -792,7 +795,7 @@ test('after rehydrate, onActumCompleta() dispatches the next piece correctly', a
 
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     actorum,
     {},
@@ -814,7 +817,7 @@ test('onActumCompleta called twice for same actumId is no-op on second call', as
   const collectiones = makeCollectionum(collectio)
   const inceptor = makeInceptor()
   const cursor = new CollectioCursor(
-    inceptor as unknown as ActumInceptor,
+    inceptor.dispatch,
     collectiones,
     inceptor.actorum,
     {},

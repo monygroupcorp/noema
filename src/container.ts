@@ -381,18 +381,17 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const bursarium = new MongoBursarium(bursariumCol)
   const inceptor = new ActumInceptor({ modorum, cursorum, signorum, acta: actorum, arcanumVerifier, bursarium })
   const arcanumIssuer = new ArcanumIssuer({ signorum, tree: arcanumTree })
-  const collectioCursor = new CollectioCursor(inceptor, collectiones, actorum, {})
 
-  // Compositus engine (ADR-0008): its child steps dispatch through the SAME
-  // dispatchInceptio used everywhere else, so they get the full rail (actumIndex,
-  // hooks). Self-reference resolved via a holder — `compositusCursor` is assigned
-  // before any dispatch call can fire.
+  // Both fan-out cursors (collectio + compositus) dispatch their pieces/steps through
+  // the SAME dispatchInceptio used everywhere else — so they get the full rail
+  // (actumIndex, hooks) AND a Collectio piece can itself be a compositus (cook-over-spell).
+  // Self-reference resolved via a holder — `compositusCursor` is assigned before any
+  // dispatch call can fire.
   let compositusCursor: CompositusCursor
-  compositusCursor = new CompositusCursor(
-    (inc: Inceptio) => dispatchInceptio({ inceptor, modorum, cursorum, completor, actumIndex, compositusCursor }, inc),
-    modorum,
-    actorum,
-  )
+  const sharedDispatch = (inc: Inceptio) =>
+    dispatchInceptio({ inceptor, modorum, cursorum, completor, actumIndex, compositusCursor }, inc)
+  compositusCursor = new CompositusCursor(sharedDispatch, modorum, actorum)
+  const collectioCursor = new CollectioCursor(sharedDispatch, collectiones, actorum, {})
 
   return {
     actorum, modorum, signorum, animae, personae, vestigiorum, modos,

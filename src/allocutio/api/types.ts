@@ -30,3 +30,30 @@ export interface Run {
   /** When the run started, as an ISO-8601 string. */
   createdAt?: string
 }
+
+/** Public collection status — the externalised projection of CollectioStatus. */
+export type CollectionStatus = 'pending' | 'running' | 'complete' | 'cancelled'
+
+/**
+ * Collection — the public projection of a Collectio (a generated collection /
+ * batch) for the HTTP API. The internal Collectio is keyed by `numerus` /
+ * `completae` / `fractae` and a Latin status; this is the JSON-safe English face.
+ */
+export interface Collection {
+  id: string
+  nomen?: string
+  status: CollectionStatus
+  modusId: string
+  /** Target piece count (the size of the run). */
+  total: number
+  /** Pieces completed so far. */
+  completed: number
+  /** Pieces failed so far. */
+  failed: number
+  /** Total impetus across completed pieces, serialised as a string. */
+  cost?: string
+  /** When the collection started, ISO-8601. */
+  createdAt?: string
+  /** When it finished (or was cancelled), ISO-8601. */
+  completedAt?: string
+}
