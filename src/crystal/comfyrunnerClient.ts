@@ -47,6 +47,8 @@ export interface CompiledSpecLike {
   workflow?: { inputTemplate: Record<string, unknown> }
   inference?: Record<string, unknown>
   customNodes?: Array<{ url: string; name?: string }>
+  /** Image/video/audio inputs the runner fetches into ComfyUI's input/ dir before queueing. */
+  mediaInputs?: Array<{ destFilename: string; url: string }>
 }
 
 /** A compiled ComfyUI graph spec — has a `workflow` template. */
@@ -95,6 +97,7 @@ export async function submitToRunner(
     body.workflow    = input.workflow.inputTemplate
     body.models      = input.models
     body.customNodes = input.customNodes ?? []
+    if (input.mediaInputs?.length) body.mediaInputs = input.mediaInputs
     if (input.runtime) body.runtime = input.runtime
   } else if (isInferenceSpec(input)) {
     body.inference = input.inference
