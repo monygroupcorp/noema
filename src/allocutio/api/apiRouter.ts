@@ -14,9 +14,9 @@
 
 import express, { type Request, type Response, type Router } from 'express'
 
-import type { Run } from './types.js'
+import type { Run, Collection } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
-import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView } from './CrystalApi.js'
+import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts } from './CrystalApi.js'
 import { ApiError, Errors } from './errors.js'
 import { makeLogger } from '../../lib/logger.js'
 import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
@@ -53,6 +53,14 @@ export interface ApiFacade {
   provisionTeeSession(auctor: AuctorKey, opts: ProvisionTeeSessionOpts): Promise<TeeSessionView>
   getTeeSession(auctor: AuctorKey, sessionId: string): Promise<TeeSessionView>
   endTeeSession(auctor: AuctorKey, sessionId: string): Promise<void>
+  collect(auctor: AuctorKey, opts: CollectOpts): Promise<Collection>
+  getCollection(auctor: AuctorKey, id: string): Promise<Collection>
+  listCollections(auctor: AuctorKey): Promise<Collection[]>
+  pauseCollection(auctor: AuctorKey, id: string): Promise<Collection>
+  resumeCollection(auctor: AuctorKey, id: string): Promise<Collection>
+  cancelCollection(auctor: AuctorKey, id: string): Promise<Collection>
+  approveCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
+  rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
 }
 
 /** The slice of IdentityResolver this router needs. */
@@ -192,6 +200,45 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
       res.json(await api.quote(auctor, { modusId, verb }, aditus ?? {}))
     }),
   )
+
+  // ── Collections (Collectio) — a base modus expanded over a Tractus[] grid ──────
+  // POST /v1/collectiones — create + start a Collection.
+  router.post('/collectiones', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const { modusId, total, tractus, aditusBase, concurrentia, nomen } = req.body ?? {}
+    res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen }) })
+  }))
+
+  // GET /v1/collectiones — list the caller's collections (owner-scoped).
+  router.get('/collectiones', wrap(async (req, res) => {
+    res.json({ collections: await api.listCollections(await auth(req)) })
+  }))
+
+  // GET /v1/collectiones/:id — fetch one (owner-scoped: 404 if not yours).
+  router.get('/collectiones/:id', wrap(async (req, res) => {
+    res.json({ collection: await api.getCollection(await auth(req), String(req.params.id)) })
+  }))
+
+  // POST /v1/collectiones/:id/{pause,resume,cancel}.
+  router.post('/collectiones/:id/pause', wrap(async (req, res) => {
+    res.json({ collection: await api.pauseCollection(await auth(req), String(req.params.id)) })
+  }))
+  router.post('/collectiones/:id/resume', wrap(async (req, res) => {
+    res.json({ collection: await api.resumeCollection(await auth(req), String(req.params.id)) })
+  }))
+  router.post('/collectiones/:id/cancel', wrap(async (req, res) => {
+    res.json({ collection: await api.cancelCollection(await auth(req), String(req.params.id)) })
+  }))
+
+  // POST /v1/collectiones/:id/pieces/:actumId/{approve,reject} — review (approve / reject-and-reroll).
+  router.post('/collectiones/:id/pieces/:actumId/approve', wrap(async (req, res) => {
+    await api.approveCollectionPiece(await auth(req), String(req.params.id), String(req.params.actumId))
+    res.status(200).json({ ok: true })
+  }))
+  router.post('/collectiones/:id/pieces/:actumId/reject', wrap(async (req, res) => {
+    await api.rejectCollectionPiece(await auth(req), String(req.params.id), String(req.params.actumId))
+    res.status(200).json({ ok: true })
+  }))
 
   // GET /v1/fundamenta — list compute substrates (public).
   router.get(
