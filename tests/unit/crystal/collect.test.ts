@@ -168,6 +168,46 @@ test('getCollectionRarity(): reports target vs realized from produced pieces', a
   for (const v of axis.valores) assert.ok(Math.abs(v.targetRarity - 0.5) < 1e-9)
 })
 
+test('extendCollection(): re-opens a completed collection and fires another batch', async () => {
+  const { api, modorum, signorum, cursor } = makeApi()
+  await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const col = await api.collect({ animaId: 'anima-1' }, {
+    modusId: 'sd1-5', total: 2,
+    aditusBase: { _basePrompt: 'a {{color}} cat' },
+    tractus: [{ porta: 'color', valores: [{ value: 'red', promptFragment: 'red' }, { value: 'blue', promptFragment: 'blue' }] }],
+  })
+  // Sync cursor → first batch completes inline.
+  assert.equal(col.completed, 2)
+  assert.equal(col.status, 'complete')
+  assert.equal(cursor.runs.length, 2)
+
+  // Fire a second batch of 3 toward a larger target.
+  const extended = await api.extendCollection({ animaId: 'anima-1' }, col.id, 3)
+  assert.equal(extended.total, 5, 'target grew by the batch size')
+  assert.equal(extended.completed, 5, 'all five pieces now produced')
+  assert.equal(extended.status, 'complete', 're-completed after the extra batch')
+  assert.equal(cursor.runs.length, 5, 'three more pieces actually ran')
+
+  // The new pieces got fresh, continuing pieceIndexes (no collision with the first batch).
+  const indexes = cursor.runs.map((a) => a._pieceIndex)
+  assert.deepEqual([...indexes].sort((a, b) => Number(a) - Number(b)), [0, 1, 2, 3, 4])
+})
+
+test('extendCollection(): owner-scoped — non-owner cannot extend', async () => {
+  const { api, modorum, signorum } = makeApi()
+  await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const col = await api.collect({ animaId: 'anima-1' }, {
+    modusId: 'sd1-5', total: 1,
+    aditusBase: { _basePrompt: 'a {{color}} cat' },
+    tractus: [{ porta: 'color', valores: [{ value: 'red', promptFragment: 'red' }] }],
+  })
+  await assert.rejects(() => api.extendCollection({ animaId: 'intruder' }, col.id, 2), /not found/i)
+})
+
 test('collect({ dna: true }): every produced piece has a unique trait combination', async () => {
   const { api, modorum, signorum, cursor } = makeApi()
   await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))

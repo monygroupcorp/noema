@@ -148,5 +148,5 @@ export interface Collectionum {
   list(filter?: Partial<Pick<Collectio, 'status'>>): Promise<Collectiones>
   listByStatus(status: CollectioStatus): Promise<Collectiones>
   create(collectio: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'impetusTotal'>): Promise<Collectio>
-  update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'impetusTotal' | 'completum'>>): Promise<Collectio>
+  update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'impetusTotal' | 'completum' | 'numerus'>>): Promise<Collectio>
 }

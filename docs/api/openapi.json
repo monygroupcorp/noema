@@ -1897,6 +1897,142 @@
         ]
       }
     },
+    "/collectiones/{id}/extend": {
+      "post": {
+        "summary": "Extend a Collection — raise the target by `count` and dispatch the new pieces (incremental batches: fire a batch, review, fire more). Re-opens a completed Collection. Owner-scoped.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "collection": {
+                      "type": "object",
+                      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "nomen": {
+                          "type": "string",
+                          "description": "The collection display name."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "running",
+                            "complete",
+                            "cancelled"
+                          ],
+                          "description": "The collection lifecycle status."
+                        },
+                        "modusId": {
+                          "type": "string",
+                          "description": "The flow (modus) expanded across the grid."
+                        },
+                        "total": {
+                          "type": "number",
+                          "description": "Target piece count (the size of the run)."
+                        },
+                        "provenanceHash": {
+                          "type": "string",
+                          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
+                        "completed": {
+                          "type": "number",
+                          "description": "Pieces completed so far."
+                        },
+                        "failed": {
+                          "type": "number",
+                          "description": "Pieces failed so far."
+                        },
+                        "cost": {
+                          "type": "string",
+                          "description": "Total impetus across completed pieces, serialised as a string."
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When the collection started."
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When it finished (or was cancelled)."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "status",
+                        "modusId",
+                        "total",
+                        "provenanceHash",
+                        "completed",
+                        "failed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "collection"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "How many more pieces to add to the target and fire.",
+                "properties": {
+                  "count": {
+                    "type": "number",
+                    "description": "Pieces to add (must be > 0)."
+                  }
+                },
+                "required": [
+                  "count"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/collectiones/{id}/pause": {
       "post": {
         "summary": "Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Owner-scoped.",

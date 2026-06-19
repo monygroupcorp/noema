@@ -57,6 +57,7 @@ export interface ApiFacade {
   collect(auctor: AuctorKey, opts: CollectOpts): Promise<Collection>
   getCollection(auctor: AuctorKey, id: string): Promise<Collection>
   getCollectionRarity(auctor: AuctorKey, id: string): Promise<RarityReport>
+  extendCollection(auctor: AuctorKey, id: string, addCount: number): Promise<Collection>
   listCollections(auctor: AuctorKey): Promise<Collection[]>
   pauseCollection(auctor: AuctorKey, id: string): Promise<Collection>
   resumeCollection(auctor: AuctorKey, id: string): Promise<Collection>
@@ -224,6 +225,13 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   // GET /v1/collectiones/:id/rarity — imagined-vs-realized rarity table (owner-scoped).
   router.get('/collectiones/:id/rarity', wrap(async (req, res) => {
     res.json({ rarity: await api.getCollectionRarity(await auth(req), String(req.params.id)) })
+  }))
+
+  // POST /v1/collectiones/:id/extend — raise the target + fire another batch (incremental batches).
+  router.post('/collectiones/:id/extend', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const addCount = Number((req.body ?? {}).count)
+    res.json({ collection: await api.extendCollection(auctor, String(req.params.id), addCount) })
   }))
 
   // POST /v1/collectiones/:id/{pause,resume,cancel}.
