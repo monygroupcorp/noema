@@ -569,19 +569,36 @@ export class CrystalApi {
     if (!session) return { continue: false }
     session.gpuHours = signal.gpuHours
     const { continue: ok } = await this._billTeeHours(session, signal.gpuHours)
-    if (!ok) session.status = 'ended'
+    if (!ok) {
+      session.status = 'ended'
+      session.error = 'session budget exhausted'
+      console.warn('[tee] budget exhausted — ending session and terminating pod', { sessionId: signal.sessionId, podId: session.podId })
+      if (session.podId && this.deps.teeProvisioner) {
+        await this.deps.teeProvisioner.terminate(session.podId).catch(err =>
+          console.warn('[tee] pod terminate failed on budget exhaustion', { podId: session.podId, err: String(err) })
+        )
+      }
+    }
     return { continue: ok }
   }
 
   async handleRunnerEnded(signal: RunnerEndedSignal): Promise<void> {
     const session = this.teeSessions.get(signal.sessionId)
     if (!session) return
+    console.info('[tee] runner ended', { sessionId: signal.sessionId, status: signal.status, podId: session.podId })
     session.gpuHours = signal.gpuHours
     await this._billTeeHours(session, signal.gpuHours)
     session.status = 'ended'
+    if (!session.error) session.error = signal.status === 'terminated' ? 'session budget exhausted' : 'runner exited unexpectedly'
+    if (session.podId && this.deps.teeProvisioner) {
+      await this.deps.teeProvisioner.terminate(session.podId).catch(err =>
+        console.warn('[tee] pod terminate failed on runner ended', { podId: session.podId, err: String(err) })
+      )
+    }
   }
 
   private async _billTeeHours(session: TeeSession, currentGpuHours: number): Promise<{ continue: boolean }> {
+    if (process.env.TEE_BILLING_DISABLED === 'true') return { continue: true }
     const deltaHours = currentGpuHours - session.lastBilledGpuHours
     if (deltaHours <= 0) return { continue: true }
     if (!session.costPerHrUsd) return { continue: true }   // no rate yet — provisioner hasn't set it
