@@ -58,6 +58,14 @@ const fakeApi: CrystalApi = {
     joinable: [],
     takenAt: new Date().toISOString(),
   }),
+  collect: async (_a: unknown, opts: { modusId: string; total: number }) => ({
+    id: 'coll-7',
+    status: 'pending',
+    modusId: opts.modusId,
+    total: opts.total,
+    completed: 0,
+    failed: 0,
+  }),
 } as unknown as CrystalApi
 
 const auctor: AuctorKey = { animaId: 'a1' }
@@ -80,11 +88,11 @@ async function makeClient(auctorArg?: AuctorKey | null) {
 // Tests
 // ---------------------------------------------------------------------------
 
-test('listTools returns all 13 tool names', async () => {
+test('listTools returns all 16 tool names', async () => {
   const { client } = await makeClient()
   const { tools } = await client.listTools()
   const names = tools.map((t) => t.name).sort()
-  assert.deepEqual(names, ['bind', 'describe_flow', 'get_run', 'get_studio', 'list_flows', 'list_fundamenta', 'list_models', 'list_studios', 'provision_studio', 'quote', 'run_flow', 'save_flow', 'status'])
+  assert.deepEqual(names, ['bind', 'collect', 'describe_flow', 'get_collection', 'get_run', 'get_studio', 'list_collections', 'list_flows', 'list_fundamenta', 'list_models', 'list_studios', 'provision_studio', 'quote', 'run_flow', 'save_flow', 'status'])
 })
 
 test('list_flows tool returns the flow catalog', async () => {
@@ -118,6 +126,31 @@ test('run_flow tool returns run handle when authenticated', async () => {
 test('run_flow tool returns auth.missing when no auctor', async () => {
   const { client } = await makeClient(null)
   const result = await client.callTool({ name: 'run_flow', arguments: { modusId: 'flux-schnell' } })
+  assert.equal(result.isError, true)
+  const text = (result.content[0] as { type: string; text: string }).text
+  assert.ok(text.includes('auth.missing'))
+})
+
+test('collect tool starts a collection when authenticated', async () => {
+  const { client } = await makeClient(auctor)
+  const result = await client.callTool({
+    name: 'collect',
+    arguments: {
+      modusId: 'flux-schnell',
+      total: 4,
+      tractus: [{ porta: 'color', valores: [{ value: 'red' }, { value: 'blue' }] }],
+      aditusBase: { _basePrompt: 'a {{color}} cat' },
+    },
+  })
+  const text = (result.content[0] as { type: string; text: string }).text
+  const parsed = JSON.parse(text)
+  assert.equal(parsed.collection.id, 'coll-7')
+  assert.equal(parsed.collection.total, 4)
+})
+
+test('collect tool returns auth.missing when no auctor', async () => {
+  const { client } = await makeClient(null)
+  const result = await client.callTool({ name: 'collect', arguments: { modusId: 'flux-schnell', total: 1, tractus: [] } })
   assert.equal(result.isError, true)
   const text = (result.content[0] as { type: string; text: string }).text
   assert.ok(text.includes('auth.missing'))

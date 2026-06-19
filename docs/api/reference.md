@@ -262,7 +262,7 @@ The live OpenAPI 3.1 description of this surface (self-describing).
 
 ### POST /v1/mcp
 
-MCP (Model Context Protocol) JSON-RPC endpoint — agent tool-use over the same facade. Tools: run_flow / get_run / list_flows / describe_flow. Resources: crystal://flows and crystal://flows/{id}. Stateless streamable-HTTP transport; not a typed REST op.
+MCP (Model Context Protocol) JSON-RPC endpoint — agent tool-use over the same facade. Tools: run_flow / get_run / list_flows / describe_flow / collect / get_collection. Resources: crystal://flows and crystal://flows/{id}. Stateless streamable-HTTP transport; not a typed REST op.
 
 - **Auth:** required
 
@@ -985,6 +985,634 @@ Fetch one of the caller's studios by id (owner-scoped) — poll its status (prov
 }
 ```
 
+### POST /v1/collectiones
+
+Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). Returns a Collection handle (poll GET /v1/collectiones/:id).
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces. The base modus may be atomic or a compositus pipeline.",
+  "properties": {
+    "modusId": {
+      "type": "string",
+      "description": "The flow expanded across the grid."
+    },
+    "total": {
+      "type": "number",
+      "description": "Target number of pieces to generate."
+    },
+    "tractus": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "One axis of variation — the aditus port to vary and its options.",
+        "properties": {
+          "porta": {
+            "type": "string",
+            "description": "The aditus port key this axis varies (e.g. background, outfit)."
+          },
+          "label": {
+            "type": "string",
+            "description": "Human-facing category label (falls back to porta)."
+          },
+          "valores": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One option within a trait axis.",
+              "properties": {
+                "value": {
+                  "description": "The aditus value injected when this option is selected."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Human-facing display name (falls back to String(value))."
+                },
+                "rarity": {
+                  "type": "number",
+                  "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                },
+                "promptFragment": {
+                  "type": "string",
+                  "description": "Text woven into the assembled prompt when this option wins."
+                },
+                "excludes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Labels in OTHER axes this option blocks."
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Theme tags for group-level mutual exclusion."
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            "description": "The options for this axis."
+          }
+        },
+        "required": [
+          "porta",
+          "valores"
+        ]
+      },
+      "description": "The axes of variation (the parameter grid)."
+    },
+    "aditusBase": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Base aditus applied to every piece (e.g. `_basePrompt` with `{{porta}}` tokens)."
+    },
+    "concurrentia": {
+      "type": "number",
+      "description": "Max concurrent pieces in flight (default 3)."
+    },
+    "nomen": {
+      "type": "string",
+      "description": "Optional human name for the collection."
+    }
+  },
+  "required": [
+    "modusId",
+    "total",
+    "tractus"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "object",
+      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The collection display name."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "complete",
+            "cancelled"
+          ],
+          "description": "The collection lifecycle status."
+        },
+        "modusId": {
+          "type": "string",
+          "description": "The flow (modus) expanded across the grid."
+        },
+        "total": {
+          "type": "number",
+          "description": "Target piece count (the size of the run)."
+        },
+        "completed": {
+          "type": "number",
+          "description": "Pieces completed so far."
+        },
+        "failed": {
+          "type": "number",
+          "description": "Pieces failed so far."
+        },
+        "cost": {
+          "type": "string",
+          "description": "Total impetus across completed pieces, serialised as a string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the collection started."
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it finished (or was cancelled)."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "modusId",
+        "total",
+        "completed",
+        "failed"
+      ]
+    }
+  },
+  "required": [
+    "collection"
+  ]
+}
+```
+
+### GET /v1/collectiones
+
+List the authenticated caller's Collections (owner-scoped).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "nomen": {
+            "type": "string",
+            "description": "The collection display name."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "complete",
+              "cancelled"
+            ],
+            "description": "The collection lifecycle status."
+          },
+          "modusId": {
+            "type": "string",
+            "description": "The flow (modus) expanded across the grid."
+          },
+          "total": {
+            "type": "number",
+            "description": "Target piece count (the size of the run)."
+          },
+          "completed": {
+            "type": "number",
+            "description": "Pieces completed so far."
+          },
+          "failed": {
+            "type": "number",
+            "description": "Pieces failed so far."
+          },
+          "cost": {
+            "type": "string",
+            "description": "Total impetus across completed pieces, serialised as a string."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the collection started."
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it finished (or was cancelled)."
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "modusId",
+          "total",
+          "completed",
+          "failed"
+        ]
+      }
+    }
+  },
+  "required": [
+    "collections"
+  ]
+}
+```
+
+### GET /v1/collectiones/:id
+
+Fetch one Collection by id — progress (completed/failed/total), status, cost. Owner-scoped (404 if not yours).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "object",
+      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The collection display name."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "complete",
+            "cancelled"
+          ],
+          "description": "The collection lifecycle status."
+        },
+        "modusId": {
+          "type": "string",
+          "description": "The flow (modus) expanded across the grid."
+        },
+        "total": {
+          "type": "number",
+          "description": "Target piece count (the size of the run)."
+        },
+        "completed": {
+          "type": "number",
+          "description": "Pieces completed so far."
+        },
+        "failed": {
+          "type": "number",
+          "description": "Pieces failed so far."
+        },
+        "cost": {
+          "type": "string",
+          "description": "Total impetus across completed pieces, serialised as a string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the collection started."
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it finished (or was cancelled)."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "modusId",
+        "total",
+        "completed",
+        "failed"
+      ]
+    }
+  },
+  "required": [
+    "collection"
+  ]
+}
+```
+
+### POST /v1/collectiones/:id/pause
+
+Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Owner-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "object",
+      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The collection display name."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "complete",
+            "cancelled"
+          ],
+          "description": "The collection lifecycle status."
+        },
+        "modusId": {
+          "type": "string",
+          "description": "The flow (modus) expanded across the grid."
+        },
+        "total": {
+          "type": "number",
+          "description": "Target piece count (the size of the run)."
+        },
+        "completed": {
+          "type": "number",
+          "description": "Pieces completed so far."
+        },
+        "failed": {
+          "type": "number",
+          "description": "Pieces failed so far."
+        },
+        "cost": {
+          "type": "string",
+          "description": "Total impetus across completed pieces, serialised as a string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the collection started."
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it finished (or was cancelled)."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "modusId",
+        "total",
+        "completed",
+        "failed"
+      ]
+    }
+  },
+  "required": [
+    "collection"
+  ]
+}
+```
+
+### POST /v1/collectiones/:id/resume
+
+Resume a paused Collection — continue dispatching toward the target. Owner-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "object",
+      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The collection display name."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "complete",
+            "cancelled"
+          ],
+          "description": "The collection lifecycle status."
+        },
+        "modusId": {
+          "type": "string",
+          "description": "The flow (modus) expanded across the grid."
+        },
+        "total": {
+          "type": "number",
+          "description": "Target piece count (the size of the run)."
+        },
+        "completed": {
+          "type": "number",
+          "description": "Pieces completed so far."
+        },
+        "failed": {
+          "type": "number",
+          "description": "Pieces failed so far."
+        },
+        "cost": {
+          "type": "string",
+          "description": "Total impetus across completed pieces, serialised as a string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the collection started."
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it finished (or was cancelled)."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "modusId",
+        "total",
+        "completed",
+        "failed"
+      ]
+    }
+  },
+  "required": [
+    "collection"
+  ]
+}
+```
+
+### POST /v1/collectiones/:id/cancel
+
+Cancel a Collection — stop dispatching and mark it cancelled. Owner-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "object",
+      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The collection display name."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "complete",
+            "cancelled"
+          ],
+          "description": "The collection lifecycle status."
+        },
+        "modusId": {
+          "type": "string",
+          "description": "The flow (modus) expanded across the grid."
+        },
+        "total": {
+          "type": "number",
+          "description": "Target piece count (the size of the run)."
+        },
+        "completed": {
+          "type": "number",
+          "description": "Pieces completed so far."
+        },
+        "failed": {
+          "type": "number",
+          "description": "Pieces failed so far."
+        },
+        "cost": {
+          "type": "string",
+          "description": "Total impetus across completed pieces, serialised as a string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the collection started."
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it finished (or was cancelled)."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "modusId",
+        "total",
+        "completed",
+        "failed"
+      ]
+    }
+  },
+  "required": [
+    "collection"
+  ]
+}
+```
+
+### POST /v1/collectiones/:id/pieces/:actumId/approve
+
+Approve a pending-review piece — it counts toward the collection. Owner-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "ok"
+  ]
+}
+```
+
+### POST /v1/collectiones/:id/pieces/:actumId/reject
+
+Reject a piece and reroll — re-fire it with a fresh trait selection. Owner-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "ok"
+  ]
+}
+```
+
 ## Error codes
 
 Every failed request returns the uniform envelope `{ error: { code, message, retryable?, retryAfter?, details? } }`. Branch on the stable `code`.
@@ -999,6 +1627,7 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `not_found.flow` | 404 | no |
 | `not_found.fundamentum` | 404 | no |
 | `not_found.studio` | 404 | no |
+| `not_found.collection` | 404 | no |
 | `not_found.run` | 404 | no |
 | `economy.insufficient_signa` | 402 | no |
 | `economy.cap_too_low` | 422 | no |

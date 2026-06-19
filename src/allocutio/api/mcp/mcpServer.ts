@@ -21,6 +21,9 @@ import {
   provisionStudioTool,
   getStudioTool,
   listStudiosTool,
+  collectTool,
+  getCollectionTool,
+  listCollectionsTool,
 } from './tools.js'
 
 export function buildMcpServer(api: CrystalApi, auctor: AuctorKey | undefined): McpServer {
@@ -184,6 +187,61 @@ export function buildMcpServer(api: CrystalApi, auctor: AuctorKey | undefined): 
       inputSchema: {},
     },
     (_args) => listStudiosTool(api, auctor),
+  )
+
+  // ── Collections (Collectio) ─────────────────────────────────────────────────
+
+  const traitValorSchema = z.object({
+    value: z.unknown(),
+    label: z.string().optional(),
+    rarity: z.number().optional(),
+    promptFragment: z.string().optional(),
+    excludes: z.array(z.string()).optional(),
+    tags: z.array(z.string()).optional(),
+  })
+
+  server.registerTool(
+    'collect',
+    {
+      description:
+        'Start a Collection — expand one flow (modusId, atomic or a compositus pipeline) over a ' +
+        "Tractus[] parameter grid into `total` pieces. Each Tractus is one axis of variation (porta + " +
+        'valores); aditusBase is applied to every piece (use `_basePrompt` with `{{porta}}` tokens). ' +
+        'Returns a Collection handle (poll get_collection).',
+      inputSchema: {
+        modusId: z.string(),
+        total: z.number(),
+        tractus: z.array(
+          z.object({
+            porta: z.string(),
+            label: z.string().optional(),
+            valores: z.array(traitValorSchema),
+          }),
+        ),
+        aditusBase: z.record(z.string(), z.unknown()).optional(),
+        concurrentia: z.number().optional(),
+        nomen: z.string().optional(),
+      },
+    },
+    (args) => collectTool(api, auctor, args),
+  )
+
+  server.registerTool(
+    'get_collection',
+    {
+      description: 'Fetch a Collection by id — progress (completed/failed/total), status, cost. Owner-scoped.',
+      inputSchema: { id: z.string() },
+    },
+    (args) => getCollectionTool(api, auctor, args),
+  )
+
+  server.registerTool(
+    'list_collections',
+    {
+      description: "List the authenticated caller's Collections.",
+      inputSchema: {},
+    },
+    (_args) => listCollectionsTool(api, auctor),
   )
 
   // ── Resources ─────────────────────────────────────────────────────────────
