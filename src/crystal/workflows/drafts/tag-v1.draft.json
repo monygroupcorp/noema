@@ -1,0 +1,78 @@
+{
+  "templateId": "tag",
+  "version": "1",
+  "status": "DRAFT — not registered, not runnable",
+  "blocked": "BLOCKED: needs ComfyUI text-output harvesting in the runner — comfyrunner.py _output_paths() only collects images/gifs/videos, not text. i2i-input + WD14-Tagger pack are resolved; only text-exitus remains (a small, well-scoped runner addition, like the i2i primitive was).",
+  "categoriaHint": "text (i2t → describe)",
+  "loraCapable": false,
+  "customNodes": [
+    {
+      "url": "https://github.com/pythongosssss/ComfyUI-WD14-Tagger",
+      "name": "ComfyUI-WD14-Tagger"
+    }
+  ],
+  "aditus": {
+    "input_image": {
+      "type": "image",
+      "required": true
+    },
+    "input_threshold": {
+      "type": "text",
+      "default": 0.35
+    },
+    "input_character_threshold": {
+      "type": "text",
+      "default": 0.85
+    },
+    "input_exclude_tags": {
+      "type": "text",
+      "required": true
+    },
+    "input_tagger": {
+      "type": "text",
+      "default": "wd-v1-4-moat-tagger-v2"
+    }
+  },
+  "slotMap": {
+    "/23/inputs/image": "input_image",
+    "/23/inputs/threshold": "input_threshold",
+    "/23/inputs/character_threshold": "input_character_threshold",
+    "/23/inputs/exclude_tags": "input_exclude_tags",
+    "/23/inputs/model": "input_tagger"
+  },
+  "outputs": [
+    "24:ComfyDeployOutputText"
+  ],
+  "inputTemplate": {
+    "23": {
+      "_meta": {
+        "title": "WD14 Tagger 🐍"
+      },
+      "inputs": {
+        "image": null,
+        "model": "wd-v1-4-moat-tagger-v2",
+        "threshold": 0.35,
+        "exclude_tags": "",
+        "trailing_comma": false,
+        "replace_underscore": false,
+        "character_threshold": 0.85
+      },
+      "class_type": "WD14Tagger|pysssss"
+    },
+    "24": {
+      "_meta": {
+        "title": "Text Output (ComfyDeploy)"
+      },
+      "inputs": {
+        "text": [
+          "23",
+          0
+        ],
+        "file_type": "txt",
+        "output_id": "output_text",
+        "filename_prefix": "stbtag"
+      },
+      "class_type": "ComfyDeployOutputText"
+    }
+  }
+}

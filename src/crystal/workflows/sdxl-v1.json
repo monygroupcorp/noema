@@ -1,0 +1,33 @@
+{
+  "templateId": "sdxl",
+  "version": "1",
+  "displayName": "SDXL text-to-image (1024x1024, 30 steps)",
+  "seedInputKey": "input_seed",
+  "loraCapable": true,
+  "customNodes": [
+    { "url": "https://github.com/skfoo/ComfyUI-Coziness", "name": "ComfyUI-Coziness" }
+  ],
+  "inputTemplate": {
+    "3":  { "class_type": "KSampler",              "inputs": { "seed": 88888888, "steps": 30, "cfg": 7, "sampler_name": "dpmpp_2m", "scheduler": "karras", "denoise": 1, "model": ["46", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["97", 0] } },
+    "4":  { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "sd_xl_base_1.0.safetensors" } },
+    "6":  { "class_type": "CLIPTextEncode",         "inputs": { "clip": ["46", 1], "text": ["47", 0] } },
+    "7":  { "class_type": "CLIPTextEncode",         "inputs": { "clip": ["46", 1], "text": "" } },
+    "8":  { "class_type": "VAEDecode",              "inputs": { "vae": ["4", 2], "samples": ["3", 0] } },
+    "9":  { "class_type": "SaveImage",              "inputs": { "images": ["8", 0], "filename_prefix": "runmake" } },
+    "46": { "class_type": "MultiLoraLoader-70bf3d77",   "inputs": { "clip": ["4", 1], "text": ["47", 1], "model": ["4", 0] } },
+    "47": { "class_type": "LoraTextExtractor-b1f83aa2", "inputs": { "text": "PLACEHOLDER" } },
+    "97": { "class_type": "EmptyLatentImage",       "inputs": { "width": 1024, "height": 1024, "batch_size": 1 } }
+  },
+  "slotMap": {
+    "/3/inputs/seed":   "input_seed",
+    "/3/inputs/steps":  "steps",
+    "/3/inputs/cfg":    "guidance",
+    "/97/inputs/width":  "width",
+    "/97/inputs/height": "height",
+    "/47/inputs/text":  "prompt"
+  },
+  "requiredModels": [
+    { "role": "checkpoint", "id": "intella.sdxl-base-1-0", "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors", "dest": "checkpoints/sd_xl_base_1.0.safetensors" }
+  ],
+  "platformHints": { "vramGb": 12 }
+}

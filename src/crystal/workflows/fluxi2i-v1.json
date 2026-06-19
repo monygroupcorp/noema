@@ -1,0 +1,46 @@
+{
+  "templateId": "fluxi2i",
+  "version": "1",
+  "displayName": "FLUX img2img / restyle (denoise strength)",
+  "seedInputKey": "input_seed",
+  "loraCapable": true,
+  "customNodes": [
+    { "url": "https://github.com/skfoo/ComfyUI-Coziness", "name": "ComfyUI-Coziness" }
+  ],
+  "inputTemplate": {
+    "95": { "class_type": "LoadImage",            "inputs": { "image": "PLACEHOLDER" } },
+    "96": { "class_type": "VAEEncode",            "inputs": { "vae": ["10", 0], "pixels": ["95", 0] } },
+    "10": { "class_type": "VAELoader",            "inputs": { "vae_name": "ae.safetensors" } },
+    "11": { "class_type": "DualCLIPLoader",       "inputs": { "type": "flux", "clip_name1": "t5xxl_fp16.safetensors", "clip_name2": "clip_l.safetensors" } },
+    "12": { "class_type": "UNETLoader",           "inputs": { "unet_name": "flux1-schnell-fp8-scaled.safetensors", "weight_dtype": "default" } },
+    "86": { "class_type": "LoraTextExtractor-b1f83aa2", "inputs": { "text": "PLACEHOLDER" } },
+    "88": { "class_type": "MultiLoraLoader-70bf3d77",   "inputs": { "clip": ["11", 0], "text": ["86", 1], "model": ["12", 0] } },
+    "6":  { "class_type": "CLIPTextEncode",       "inputs": { "clip": ["88", 1], "text": ["86", 0] } },
+    "84": { "class_type": "CLIPTextEncodeFlux",   "inputs": { "clip": ["11", 0], "t5xxl": ["86", 0], "clip_l": ["86", 0], "guidance": 3.5 } },
+    "92": { "class_type": "ConditioningCombine",  "inputs": { "conditioning_1": ["6", 0], "conditioning_2": ["84", 0] } },
+    "60": { "class_type": "FluxGuidance",         "inputs": { "guidance": 3.5, "conditioning": ["92", 0] } },
+    "61": { "class_type": "ModelSamplingFlux",    "inputs": { "model": ["88", 0], "width": 1024, "height": 1024, "max_shift": 1.15, "base_shift": 0.5 } },
+    "22": { "class_type": "BasicGuider",          "inputs": { "model": ["61", 0], "conditioning": ["60", 0] } },
+    "17": { "class_type": "BasicScheduler",       "inputs": { "model": ["61", 0], "steps": 6, "denoise": 0.6, "scheduler": "beta" } },
+    "16": { "class_type": "KSamplerSelect",       "inputs": { "sampler_name": "euler" } },
+    "25": { "class_type": "RandomNoise",          "inputs": { "noise_seed": 88888888 } },
+    "13": { "class_type": "SamplerCustomAdvanced", "inputs": { "noise": ["25", 0], "guider": ["22", 0], "sigmas": ["17", 0], "sampler": ["16", 0], "latent_image": ["96", 0] } },
+    "8":  { "class_type": "VAEDecode",            "inputs": { "vae": ["10", 0], "samples": ["13", 0] } },
+    "9":  { "class_type": "SaveImage",            "inputs": { "images": ["8", 0], "filename_prefix": "runmake" } }
+  },
+  "slotMap": {
+    "/25/inputs/noise_seed": "input_seed",
+    "/86/inputs/text":       "prompt",
+    "/17/inputs/steps":      "steps",
+    "/17/inputs/denoise":    "strength",
+    "/60/inputs/guidance":   "guidance",
+    "/95/inputs/image":      "image"
+  },
+  "requiredModels": [
+    { "role": "unet", "id": "intella.flux-schnell-fp8-scaled", "url": "https://models.miladystation2.net/unet/flux1-schnell-fp8-scaled.safetensors", "dest": "unet/flux1-schnell-fp8-scaled.safetensors" },
+    { "role": "vae",  "id": "intella.flux-vae",   "url": "https://models.miladystation2.net/vae/ae.safetensors",           "dest": "vae/ae.safetensors" },
+    { "role": "clip", "id": "intella.t5xxl-fp16", "url": "https://models.miladystation2.net/clip/t5xxl_fp16.safetensors", "dest": "clip/t5xxl_fp16.safetensors" },
+    { "role": "clip", "id": "intella.clip-l",     "url": "https://models.miladystation2.net/clip/clip_l.safetensors",     "dest": "clip/clip_l.safetensors" }
+  ],
+  "platformHints": { "vramGb": 24 }
+}

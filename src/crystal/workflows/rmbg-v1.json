@@ -1,0 +1,18 @@
+{
+  "templateId": "rmbg",
+  "version": "1",
+  "displayName": "Background removal (InspyrenetRembg)",
+  "loraCapable": false,
+  "customNodes": [
+    { "url": "https://github.com/john-mnz/ComfyUI-Inspyrenet-Rembg", "name": "ComfyUI-Inspyrenet-Rembg" }
+  ],
+  "inputTemplate": {
+    "95": { "class_type": "LoadImage",        "inputs": { "image": "PLACEHOLDER" } },
+    "74": { "class_type": "InspyrenetRembg",  "inputs": { "image": ["95", 0], "torchscript_jit": "default" } },
+    "72": { "class_type": "SaveImage",        "inputs": { "images": ["74", 0], "filename_prefix": "runmake" } }
+  },
+  "slotMap": {
+    "/95/inputs/image": "image"
+  },
+  "platformHints": { "vramGb": 8 }
+}

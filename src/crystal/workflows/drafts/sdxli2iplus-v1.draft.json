@@ -1,0 +1,234 @@
+{
+  "templateId": "sdxli2iplus",
+  "version": "1",
+  "status": "DRAFT — not registered, not runnable",
+  "blocked": "BLOCKED: needs i2i image-input primitive + packs rgthree-comfy",
+  "categoriaHint": "image (SDXL img2img+ → effect)",
+  "seedInputKey": "input_seed",
+  "loraCapable": true,
+  "customNodes": [
+    {
+      "url": "https://github.com/skfoo/ComfyUI-Coziness",
+      "name": "ComfyUI-Coziness"
+    },
+    {
+      "url": "https://github.com/rgthree/rgthree-comfy",
+      "name": "rgthree-comfy"
+    }
+  ],
+  "aditus": {
+    "input_seed": {
+      "type": "int",
+      "default": 88888888
+    },
+    "input_steps": {
+      "type": "int",
+      "default": 30
+    },
+    "input_cfg": {
+      "type": "float",
+      "default": 7
+    },
+    "input_prompt": {
+      "type": "text",
+      "default": "playstation 1 still, low poly, <lora:LOW_POLY_PLAYSTATION_1_STILL.safetensors:1.0>"
+    },
+    "input_checkpoint": {
+      "type": "checkpoint",
+      "default": "zavychromaxl_v60.safetensors"
+    },
+    "input_image": {
+      "type": "image",
+      "required": true
+    },
+    "input_strength": {
+      "type": "float",
+      "default": 0.66
+    },
+    "input_batch": {
+      "type": "int",
+      "default": 1
+    },
+    "input_negative": {
+      "type": "text",
+      "default": "embedding:easynegative, "
+    },
+    "input_text": {
+      "type": "text",
+      "default": "stationthisbot"
+    },
+    "input_height": {
+      "type": "int",
+      "default": 1024
+    },
+    "input_width": {
+      "type": "int",
+      "default": 1024
+    }
+  },
+  "slotMap": {
+    "/3/inputs/seed": "input_seed",
+    "/3/inputs/steps": "input_steps",
+    "/3/inputs/cfg": "input_cfg",
+    "/47/inputs/text": "input_prompt",
+    "/4/inputs/ckpt_name": "input_checkpoint",
+    "/77/inputs/images": "input_image",
+    "/3/inputs/denoise": "input_strength",
+    "/77/inputs/multiply_by": "input_batch",
+    "/7/inputs/text": "input_negative",
+    "/9/inputs/filename_prefix": "input_text"
+  },
+  "outputs": [
+    "9:SaveImage"
+  ],
+  "inputTemplate": {
+    "3": {
+      "inputs": {
+        "cfg": 7,
+        "seed": 88888888,
+        "model": [
+          "46",
+          0
+        ],
+        "steps": 30,
+        "denoise": 0.66,
+        "negative": [
+          "84",
+          0
+        ],
+        "positive": [
+          "83",
+          0
+        ],
+        "scheduler": "karras",
+        "latent_image": [
+          "54",
+          0
+        ],
+        "sampler_name": "dpmpp_2m"
+      },
+      "class_type": "KSampler"
+    },
+    "4": {
+      "inputs": {
+        "ckpt_name": "zavychromaxl_v60.safetensors"
+      },
+      "class_type": "CheckpointLoaderSimple"
+    },
+    "6": {
+      "inputs": {
+        "clip": [
+          "46",
+          1
+        ],
+        "text": [
+          "143",
+          0
+        ]
+      },
+      "class_type": "CLIPTextEncode"
+    },
+    "7": {
+      "inputs": {
+        "clip": [
+          "46",
+          1
+        ],
+        "text": "embedding:easynegative, "
+      },
+      "class_type": "CLIPTextEncode"
+    },
+    "8": {
+      "inputs": {
+        "vae": [
+          "4",
+          2
+        ],
+        "samples": [
+          "3",
+          0
+        ]
+      },
+      "class_type": "VAEDecode"
+    },
+    "9": {
+      "inputs": {
+        "images": [
+          "8",
+          0
+        ],
+        "filename_prefix": "stationthisbot"
+      },
+      "class_type": "SaveImage"
+    },
+    "46": {
+      "inputs": {
+        "clip": [
+          "4",
+          1
+        ],
+        "text": [
+          "47",
+          1
+        ],
+        "model": [
+          "4",
+          0
+        ]
+      },
+      "class_type": "MultiLoraLoader-70bf3d77"
+    },
+    "47": {
+      "inputs": {
+        "text": "playstation 1 still, low poly, <lora:LOW_POLY_PLAYSTATION_1_STILL.safetensors:1.0>"
+      },
+      "class_type": "LoraTextExtractor-b1f83aa2"
+    },
+    "54": {
+      "inputs": {
+        "vae": [
+          "4",
+          2
+        ],
+        "pixels": [
+          "77",
+          0
+        ]
+      },
+      "class_type": "VAEEncode"
+    },
+    "77": {
+      "inputs": {
+        "images": null,
+        "multiply_by": 1
+      },
+      "class_type": "VHS_DuplicateImages"
+    },
+    "83": {
+      "inputs": {
+        "conditioning_to": [
+          "6",
+          0
+        ],
+        "conditioning_from": [
+          "6",
+          0
+        ]
+      },
+      "class_type": "ConditioningConcat"
+    },
+    "84": {
+      "inputs": {},
+      "class_type": "ConditioningConcat"
+    },
+    "143": {
+      "inputs": {
+        "any_02": [
+          "47",
+          0
+        ]
+      },
+      "class_type": "Any Switch (rgthree)"
+    }
+  }
+}

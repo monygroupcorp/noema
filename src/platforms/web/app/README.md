@@ -53,7 +53,13 @@ Single stylesheet `src/styles/app.css` — fully **tokenized**: spacing `--s1..-
 - `src/state/identity.tsx` — the active identity (context); switching sets the `tier-*` class on
   `<html>` so the accent shifts app-wide.
 - `src/shell/` — `AppShell` (the frame), `Rail` (nav + Account menu + keyring), `IdentityControl`
-  (+ trust popover), `Webring` (altitude bar), `Concierge` (collapsed chat bubble), `ErrorBoundary`.
+  (+ trust popover), `Webring` (altitude bar), `Concierge` (collapsed chat bubble + prompt
+  augmentation), `ErrorBoundary`.
+- **Prompt augmentation** — focus any free-text field and the Concierge slides open with a
+  tailored example (Use / Copy) + a "write it for me" draft. Wire a field in one line with
+  `useAssistField()` (`state/promptAssist.tsx`); examples + local drafter in `lib/promptExamples.ts`.
+  The field's schema `description` is surfaced as the hint — **enrich essentiae input descriptions
+  to give it sharper teeth** (no frontend change needed). Live on Card + Profile kit.
 - `src/lib/` — `api.ts` (typed `/v1` client + anon `x-commitment`), `icons.tsx` (Lucide registry),
   `idents.ts` (identities + tiers).
 - `src/screens/` — one file per screen. `src/content/` — markdown for the site/legal pages.

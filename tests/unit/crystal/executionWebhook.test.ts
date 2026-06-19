@@ -105,10 +105,10 @@ test('COMPLETED payload calls completor.complete and returns 200', async () => {
   assert.equal(result.body.success, true)
   assert.equal(completor.completed.length, 1)
   assert.equal(completor.completed[0].actumId, 'actum-test-1')
-  // The webhook normalizes RunPod output items into a typed exitus shape: any
-  // single .png URL becomes `{imageUrl}`; videos/audio land under their own keys.
-  // (Multi-image runs add imageUrl2, imageUrl3, …)
-  assert.deepEqual(completor.completed[0].exitus.exitus, { imageUrl: 'https://example.com/out.png' })
+  // The webhook projects RunPod outputs into the flow's DECLARED exitus schema
+  // (projectExitus). No modorum here → falls back to the bare media-type name, so a
+  // .png lands under `image`. (Schema-keyed cases are covered in projectExitus.test.)
+  assert.deepEqual(completor.completed[0].exitus.exitus, { image: 'https://example.com/out.png' })
 })
 
 // 2. Valid FAILED payload → calls completor.fail(), returns 200
@@ -344,7 +344,7 @@ test('flowRouter.handleActumComplete is called with complete result when COMPLET
   assert.equal(flowRouter.calls[0].actumId, 'actum-test-1')
   assert.deepEqual(flowRouter.calls[0].result, {
     kind: 'complete',
-    exitus: { imageUrl: 'https://example.com/out.png' },
+    exitus: { image: 'https://example.com/out.png' },
   })
 })
 

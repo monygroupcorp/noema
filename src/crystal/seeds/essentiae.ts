@@ -100,6 +100,266 @@ export const ESSENTIA_RUNMAKE_SD15: Essentia = {
   mutatum: new Date('2025-01-01'),
 }
 
+export const ESSENTIA_RUNMAKE_SDXL: Essentia = {
+  id: 'sdxl',
+  nomen: 'Stable Diffusion XL — text to image',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',        // set on registration via hashModus()
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  // Substrate: the SDXL·ComfyUI fundament (self-contained checkpoint).
+  // Family ('sdxl') derives from the fundament's weight's `Intella.familia`.
+  fundamentumId: 'sdxl-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation' },
+    width:      { type: 'int',   required: false, default: 1024, description: 'Output width in pixels' },
+    height:     { type: 'int',   required: false, default: 1024, description: 'Output height in pixels' },
+    steps:      { type: 'int',   required: false, default: 30,   description: 'Inference steps' },
+    guidance:   { type: 'float', required: false, default: 7,    description: 'CFG guidance scale' },
+    input_seed: { type: 'int',   required: false,               description: 'Random seed — omit to shuffle' },
+  },
+
+  exitus: {
+    image: { type: 'image', description: 'Generated image' },
+  },
+
+  workflowTemplate: 'sdxl',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultCookFlags: {
+    batchSize: 1,
+    seedStrategy: 'shuffle',
+    seedPlaceholder: 88888888,
+    privateMode: false,
+    vramGb: 12,
+  },
+
+  natum: new Date('2025-01-01'),
+  mutatum: new Date('2025-01-01'),
+}
+
+export const ESSENTIA_RUNMAKE_CHROMA: Essentia = {
+  id: 'chroma',
+  nomen: 'Chroma — text to image',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',        // set on registration via hashModus()
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  // Substrate: the Chroma·ComfyUI fundament (Chroma unet + shared FLUX T5/VAE).
+  // Family ('chroma') derives from the unet weight's `Intella.familia`.
+  fundamentumId: 'chroma-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation' },
+    width:      { type: 'int',   required: false, default: 1024, description: 'Output width in pixels' },
+    height:     { type: 'int',   required: false, default: 1024, description: 'Output height in pixels' },
+    steps:      { type: 'int',   required: false, default: 26,   description: 'Sampling steps' },
+    guidance:   { type: 'float', required: false, default: 4,    description: 'CFG guidance scale' },
+    input_seed: { type: 'int',   required: false,               description: 'Random seed — omit to shuffle' },
+  },
+
+  exitus: {
+    image: { type: 'image', description: 'Generated image' },
+  },
+
+  workflowTemplate: 'chroma',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultCookFlags: {
+    batchSize: 1,
+    seedStrategy: 'shuffle',
+    seedPlaceholder: 666,
+    privateMode: false,
+    vramGb: 24,
+  },
+
+  natum: new Date('2025-01-01'),
+  mutatum: new Date('2025-01-01'),
+}
+
+// FLUX img2img / restyle — i2i (effect). The input image is VAE-encoded to a latent and partially
+// denoised (`strength`), so the output keeps the source composition and restyles per the prompt. Reuses
+// the shared flux-comfyui substrate (schnell unet + flux VAE + T5/CLIP — all seeded). The `image` aditus
+// rides the i2i primitive into a LoadImage node feeding VAEEncode. categoria 'image'.
+export const ESSENTIA_FLUXI2I: Essentia = {
+  id: 'flux-i2i',
+  nomen: 'FLUX — image to image (restyle)',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  fundamentumId: 'flux-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:     { type: 'text',  required: true,  description: 'How to restyle the image' },
+    image:      { type: 'image', required: true,  description: 'Source image to restyle' },
+    strength:   { type: 'float', required: false, default: 0.6, description: 'Denoise strength — higher = more change, lower = closer to source' },
+    steps:      { type: 'int',   required: false, default: 6,   description: 'Sampling steps' },
+    guidance:   { type: 'float', required: false, default: 3.5, description: 'FLUX guidance' },
+    input_seed: { type: 'int',   required: false,              description: 'Random seed — omit to shuffle' },
+  },
+  exitus: { image: { type: 'image', description: 'Restyled image' } },
+
+  workflowTemplate: 'fluxi2i',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultCookFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
+
+  natum: new Date('2025-01-01'),
+  mutatum: new Date('2025-01-01'),
+}
+
+// FLUX.1 Kontext — instruction edit (effect). The input image becomes a ReferenceLatent conditioning;
+// the prompt is an edit instruction ("add a hat", "make it night"). Works with our existing flux LoRAs
+// (familia 'flux'). New flux-kontext-comfyui substrate (Kontext unet + shared flux T5/CLIP/VAE).
+// categoria 'image'.
+export const ESSENTIA_KONTEXTEDIT: Essentia = {
+  id: 'kontext-edit',
+  nomen: 'FLUX.1 Kontext — instruction edit',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  fundamentumId: 'flux-kontext-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:     { type: 'text',  required: true,  description: 'Edit instruction (e.g. "add a red hat", "make it winter")' },
+    image:      { type: 'image', required: true,  description: 'Image to edit' },
+    steps:      { type: 'int',   required: false, default: 20,  description: 'Sampling steps' },
+    guidance:   { type: 'float', required: false, default: 2.5, description: 'FLUX guidance' },
+    input_seed: { type: 'int',   required: false,              description: 'Random seed — omit to shuffle' },
+  },
+  exitus: { image: { type: 'image', description: 'Edited image' } },
+
+  workflowTemplate: 'kontextedit',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultCookFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
+
+  natum: new Date('2025-01-01'),
+  mutatum: new Date('2025-01-01'),
+}
+
+// FLUX.2 Klein — instruction edit (effect). A more capable edit model than Kontext: FLUX.2 architecture
+// (Qwen3 text encoder, flux2 VAE). The input image is scaled, VAE-encoded, and injected as a
+// ReferenceLatent into both the prompt conditioning and a zeroed negative; the prompt is the edit
+// instruction. NOT LoRA-compatible with our flux.1 LoRAs (familia 'flux2', no Coziness stack). Graph
+// ported 1:1 from the official Comfy-Org flux2-klein-9b image-edit template. categoria 'image'.
+export const ESSENTIA_KLEINEDIT: Essentia = {
+  id: 'klein-edit',
+  nomen: 'FLUX.2 Klein — instruction edit',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  fundamentumId: 'flux2-klein-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:     { type: 'text',  required: true,  description: 'Edit instruction (e.g. "replace the background with a coastal cliff at sunset")' },
+    image:      { type: 'image', required: true,  description: 'Image to edit' },
+    steps:      { type: 'int',   required: false, default: 4,  description: 'Sampling steps (Klein is distilled — few steps)' },
+    input_seed: { type: 'int',   required: false,             description: 'Random seed — omit to shuffle' },
+  },
+  exitus: { image: { type: 'image', description: 'Edited image' } },
+
+  workflowTemplate: 'kleinedit',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultCookFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
+
+  natum: new Date('2025-01-01'),
+  mutatum: new Date('2025-01-01'),
+}
+
+// Background removal — i2i (enhance). InspyrenetRembg pack (self-downloads its ckpt) on the weightless
+// comfyui-base substrate. The `image` aditus rides the i2i primitive into a LoadImage feeding the rembg
+// node; output is the cut-out (transparent PNG). categoria 'image'.
+export const ESSENTIA_RMBG: Essentia = {
+  id: 'rmbg',
+  nomen: 'Remove background',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  fundamentumId: 'comfyui-base',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    image: { type: 'image', required: true, description: 'Image to remove the background from' },
+  },
+  exitus: { image: { type: 'image', description: 'Subject cut out on transparency (RGBA PNG)' } },
+
+  workflowTemplate: 'rmbg',
+  workflowTemplateVersion: '1',
+  defaultCookFlags: { batchSize: 1, privateMode: false, vramGb: 8 },
+
+  natum: new Date('2025-01-01'),
+  mutatum: new Date('2025-01-01'),
+}
+
+// Image upscale — the first i2i flow, pack-free + model-only (core UpscaleModelLoader +
+// ImageUpscaleWithModel; replaces the old UltimateSDUpscale graphs). The image-typed, slot-mapped
+// `image` aditus rides the i2i image-input primitive (Compiler.ts "Media inputs" — runner fetches the
+// URL into ComfyUI's input/ dir as a destFilename, keyed purely on Porta.type). Verified to compile to
+// a correct mediaInputs spec. Runnable pending a real-pod staging run (graph correctness + the HF
+// weight URL). categoria 'image'; verb binding (enhance) is a separate decision.
+export const ESSENTIA_UPSCALE: Essentia = {
+  id: 'upscale',
+  nomen: 'Image upscale — 4x-UltraSharp',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',        // set on registration via hashModus()
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  fundamentumId: 'upscale-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    image: { type: 'image', required: true, description: 'Image to upscale 4x' },
+  },
+
+  exitus: {
+    image: { type: 'image', description: 'Upscaled image (4x)' },
+  },
+
+  workflowTemplate: 'upscale',
+  workflowTemplateVersion: '1',
+  defaultCookFlags: {
+    batchSize: 1,
+    privateMode: false,
+    vramGb: 6,
+  },
+
+  natum: new Date('2025-01-01'),
+  mutatum: new Date('2025-01-01'),
+}
+
 // =============================================================================
 // Understanding-track Essentiae — "read a new medium → text" (ADR-0007).
 //
@@ -333,6 +593,13 @@ export const ESSENTIA_HUNYUAN3D: Essentia = {
 export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_RUNMAKE_FLUX_SCHNELL,
   ESSENTIA_RUNMAKE_SD15,
+  ESSENTIA_RUNMAKE_SDXL,
+  ESSENTIA_RUNMAKE_CHROMA,
+  ESSENTIA_FLUXI2I,
+  ESSENTIA_KONTEXTEDIT,
+  ESSENTIA_KLEINEDIT,
+  ESSENTIA_RMBG,
+  ESSENTIA_UPSCALE,
   ESSENTIA_QWEN3_VL,
   ESSENTIA_MOSS_MUSIC,
   ESSENTIA_SHOTVL,

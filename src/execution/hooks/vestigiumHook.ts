@@ -36,7 +36,7 @@ export async function createVestigiumFromActum(
     visibilitas = 'privata',
     promptKey = 'prompt',
     negativumKey = 'negative_prompt',
-    imagoKey = 'imageUrl',
+    imagoKey,
     summaryKey,
     intellaIds,
     intellaDescription,
@@ -53,9 +53,14 @@ export async function createVestigiumFromActum(
     ? (aditus[negativumKey] as string)
     : undefined
 
-  const imagoUrl = typeof exitus[imagoKey] === 'string'
-    ? (exitus[imagoKey] as string)
-    : undefined
+  // Key-agnostic by default: the imago is the first http(s)-URL exitus value (so it
+  // tracks the flow's declared exitus key — `image`, `imageUrl`, … — without coupling).
+  // An explicit `imagoKey` overrides (e.g. to pick a specific output among several).
+  const imagoUrl = imagoKey !== undefined
+    ? (typeof exitus[imagoKey] === 'string' ? (exitus[imagoKey] as string) : undefined)
+    : (Object.values(exitus).find(
+        (v): v is string => typeof v === 'string' && /^https?:\/\//.test(v),
+      ))
 
   const summarium = resolveSummarium(exitus, summaryKey)
 
