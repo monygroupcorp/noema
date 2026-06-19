@@ -592,6 +592,79 @@ The tunnel is done. What remains:
 
 ---
 
+## Session 7 (2026-06-19) — Inference path analysis + systematic fixes
+
+### What was confirmed in session 7
+
+Session 7 continued directly from session 6's confirmed browser→tunnel→runner.py HTTP path.
+Setup Model was clicked. The model downloaded successfully via `huggingface-cli`. Setup then
+failed with:
+
+```
+setup failed: Error: {"error":"[Errno 2] No such file or directory: 'python'"}
+```
+
+This confirmed: HuggingFace GGUF download works. The `install[]` step (pip install) must have
+also succeeded (or was fast enough). The failure was in the `launchTemplate` execution.
+
+### Systematic gap analysis
+
+Rather than chasing each error one at a time, a full gap audit was done against the
+confirmed architecture before touching code.
+
+**Gap 1: `python` not in PATH**
+- Dockerfile installs `python3.11` + `python3-pip`. Binary is `/usr/bin/python3`, not `python`.
+- `launchTemplate` calls `python -m llama_cpp.server ...`
+- Fix: `ln -sf /usr/bin/python3 /usr/local/bin/python` in Dockerfile
+
+**Gap 2: `pip` not in PATH**
+- `python3-pip` installs `pip3` only. The install step calls `pip install ...`
+- Fix: `ln -sf /usr/bin/pip3 /usr/local/bin/pip` in Dockerfile
+
+**Gap 3: Inference port unreachable through tunnel** *(architectural)*
+- `main.go` creates one reverse proxy: `vtun:7998 → localhost:7998`
+- This is the ONLY bridge from the gVisor netstack to the real kernel network stack
+- llama-server launched on `--host 0.0.0.0 --port 8000` binds to the real kernel stack
+- Packets destined for `10.13.0.1:8000` through the tunnel arrive at the gVisor vtun but
+  nothing is listening there — they are dropped
+- The browser's `run()` was calling `http://10.13.0.1:{port}/v1/chat/completions` directly
+- Fix: add `/infer/{essentiaId}/{path:path}` streaming proxy endpoint to runner.py;
+  browser calls `http://10.13.0.1:7998/infer/{essentiaId}/v1/chat/completions`
+
+**Gap 4: Install errors silent**
+- `_run()` used `create_subprocess_exec` without capturing stderr
+- On failure, only `rc=1` surfaced — no hint what went wrong
+- Fix: capture stderr, include last 2000 chars in RuntimeError
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `tee/runner/Dockerfile` | Added `python` + `pip` symlinks in RUN step |
+| `tee/runner/runner.py` | `_run()` captures stderr; added `/infer/{id}/{path}` streaming proxy |
+| `tee/browser/index.html` | `launchTemplate` default → `python3`; `run()` uses proxy URL; `inferEssentiaId` tracked |
+
+### Image
+
+`monygroup/tee-runner:0619a` — pushed 2026-06-19
+
+### Expected next test flow
+
+1. Start Session → pod boots → runner/ready → WS probe → status=ready
+2. Setup Model → pip install (llama-cpp-python wheel, ~30s) → download GGUF (~60s) → launch llama-server → readyProbe 200 → `{"status":"ready","port":8000}`
+3. Run → `wgStream` → `http://10.13.0.1:7998/infer/qwen2.5-0.5b/v1/chat/completions` → runner.py proxy → `http://127.0.0.1:8000/v1/chat/completions` → SSE tokens stream back
+
+### Remaining unknowns after this session
+
+- Does `wgStream` (browser WASM) correctly handle SSE chunked responses through the tunnel?
+  It's called with a streaming callback but has never been exercised end-to-end.
+- Does the `/setup` HTTP call (blocking for 2-5 min during install+download+probe) timeout
+  anywhere? `wgRequest` in the WASM may have a hardcoded timeout.
+- RunPod WS proxy idle timeout: will Cloudflare keep the SOCKS5 WebSocket alive for a
+  5-minute blocking setup call with no data flowing?
+
+---
+
 ## Process lessons
 
 **Tag images with commit SHA, not `:latest`**. RunPod caches `:latest` on the host. New pod, same host = old image. Tag `monygroup/tee-runner:$(git rev-parse --short HEAD)` and pass the tag to the RunPod API.
