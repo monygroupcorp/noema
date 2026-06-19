@@ -44,6 +44,8 @@ import { impetusForPodMs } from '../../ledger/rates.js'
 import type { Run, Collection } from './types.js'
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
+import { provenanceHash } from '../../crystal/provenance.js'
+import { rarityReport, type RarityReport } from '../../crystal/rarityReport.js'
 
 const PLATFORM_ANIMA_ID = process.env.PLATFORM_ANIMA_ID ?? 'platform'
 
@@ -102,6 +104,8 @@ export interface CollectOpts {
   concurrentia?: number
   /** Optional human name. */
   nomen?: string
+  /** Opt-in DNA uniqueness — no two pieces share a trait combination (see Collectio.dna). */
+  dna?: boolean
 }
 
 /** Where to send a run: an explicit modusId OR a canon verb to resolve. */
@@ -240,14 +244,26 @@ export class CrystalApi {
     if (!collectiones || !collectioCursor) throw Errors.notFoundCollection('collections')
     const by = this._collectionBy(auctor)
 
+    const aditusBase = opts.aditusBase ?? {}
+    // Pin the provenance hash to the flow version when the modus is known.
+    const modus = await this.deps.modorum.find(opts.modusId)
+    const provenance = provenanceHash({
+      modusId: opts.modusId,
+      ...(modus?.versio !== undefined ? { modusVersio: modus.versio } : {}),
+      tractus: opts.tractus,
+      aditusBase,
+    })
+
     const collectio = await collectiones.create({
       ...(opts.nomen !== undefined ? { nomen: opts.nomen } : {}),
       modusId: opts.modusId,
-      aditusBase: opts.aditusBase ?? {},
+      aditusBase,
       tractus: opts.tractus,
       numerus: opts.total,
+      provenanceHash: provenance,
       by,
       concurrentia: opts.concurrentia ?? 3,
+      ...(opts.dna !== undefined ? { dna: opts.dna } : {}),
       status: 'nascens',
     })
     await collectioCursor.start(collectio)
@@ -257,6 +273,26 @@ export class CrystalApi {
   /** Fetch a Collection, owner-scoped. */
   async getCollection(auctor: AuctorKey, id: string): Promise<Collection> {
     return toCollection(await this._ownedCollection(auctor, id))
+  }
+
+  /**
+   * The target-vs-realized rarity table for a Collection — what the creator
+   * dialled in (normalized `TraitValor.rarity`) vs what was actually produced
+   * (counted from the `_attributes` stamped on each completed piece). Drift is
+   * expected at low N. Owner-scoped. Counts only successfully-produced,
+   * non-rejected pieces.
+   */
+  async getCollectionRarity(auctor: AuctorKey, id: string): Promise<RarityReport> {
+    const c = await this._ownedCollection(auctor, id)
+    const pieces: Array<Array<{ trait_type: string; value: string }>> = []
+    for (const actumId of c.acta) {
+      const actum = await this.deps.actorum.findById(actumId)
+      if (!actum || actum.status !== 'completus') continue
+      if (actum.exitus?.reviewOutcome === 'rejected') continue
+      const attrs = actum.aditus?._attributes
+      if (Array.isArray(attrs)) pieces.push(attrs as Array<{ trait_type: string; value: string }>)
+    }
+    return rarityReport({ tractus: c.tractus, pieces })
   }
 
   /** List the caller's Collections. */

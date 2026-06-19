@@ -17,6 +17,7 @@ import express, { type Request, type Response, type Router } from 'express'
 import type { Run, Collection } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts } from './CrystalApi.js'
+import type { RarityReport } from '../../crystal/rarityReport.js'
 import { ApiError, Errors } from './errors.js'
 import { makeLogger } from '../../lib/logger.js'
 import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
@@ -55,6 +56,7 @@ export interface ApiFacade {
   endTeeSession(auctor: AuctorKey, sessionId: string): Promise<void>
   collect(auctor: AuctorKey, opts: CollectOpts): Promise<Collection>
   getCollection(auctor: AuctorKey, id: string): Promise<Collection>
+  getCollectionRarity(auctor: AuctorKey, id: string): Promise<RarityReport>
   listCollections(auctor: AuctorKey): Promise<Collection[]>
   pauseCollection(auctor: AuctorKey, id: string): Promise<Collection>
   resumeCollection(auctor: AuctorKey, id: string): Promise<Collection>
@@ -205,8 +207,8 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   // POST /v1/collectiones — create + start a Collection.
   router.post('/collectiones', wrap(async (req, res) => {
     const auctor = await auth(req)
-    const { modusId, total, tractus, aditusBase, concurrentia, nomen } = req.body ?? {}
-    res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen }) })
+    const { modusId, total, tractus, aditusBase, concurrentia, nomen, dna } = req.body ?? {}
+    res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen, dna }) })
   }))
 
   // GET /v1/collectiones — list the caller's collections (owner-scoped).
@@ -217,6 +219,11 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   // GET /v1/collectiones/:id — fetch one (owner-scoped: 404 if not yours).
   router.get('/collectiones/:id', wrap(async (req, res) => {
     res.json({ collection: await api.getCollection(await auth(req), String(req.params.id)) })
+  }))
+
+  // GET /v1/collectiones/:id/rarity — imagined-vs-realized rarity table (owner-scoped).
+  router.get('/collectiones/:id/rarity', wrap(async (req, res) => {
+    res.json({ rarity: await api.getCollectionRarity(await auth(req), String(req.params.id)) })
   }))
 
   // POST /v1/collectiones/:id/{pause,resume,cancel}.

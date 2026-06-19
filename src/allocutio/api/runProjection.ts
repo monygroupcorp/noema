@@ -64,6 +64,7 @@ export function toCollection(c: Collectio): Collection {
     status: COLLECTION_STATUS_MAP[c.status],
     modusId: c.modusId,
     total: c.numerus,
+    provenanceHash: c.provenanceHash,
     completed: c.completae,
     failed: c.fractae,
   }

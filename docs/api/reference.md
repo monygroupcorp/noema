@@ -1082,6 +1082,10 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
     "nomen": {
       "type": "string",
       "description": "Optional human name for the collection."
+    },
+    "dna": {
+      "type": "boolean",
+      "description": "Opt-in DNA uniqueness — no two pieces share a trait combination (across non-bypassDNA axes). Default false."
     }
   },
   "required": [
@@ -1127,6 +1131,10 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
           "type": "number",
           "description": "Target piece count (the size of the run)."
         },
+        "provenanceHash": {
+          "type": "string",
+          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
         "completed": {
           "type": "number",
           "description": "Pieces completed so far."
@@ -1155,6 +1163,7 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
         "status",
         "modusId",
         "total",
+        "provenanceHash",
         "completed",
         "failed"
       ]
@@ -1209,6 +1218,10 @@ List the authenticated caller's Collections (owner-scoped).
             "type": "number",
             "description": "Target piece count (the size of the run)."
           },
+          "provenanceHash": {
+            "type": "string",
+            "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+          },
           "completed": {
             "type": "number",
             "description": "Pieces completed so far."
@@ -1237,6 +1250,7 @@ List the authenticated caller's Collections (owner-scoped).
           "status",
           "modusId",
           "total",
+          "provenanceHash",
           "completed",
           "failed"
         ]
@@ -1290,6 +1304,10 @@ Fetch one Collection by id — progress (completed/failed/total), status, cost. 
           "type": "number",
           "description": "Target piece count (the size of the run)."
         },
+        "provenanceHash": {
+          "type": "string",
+          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
         "completed": {
           "type": "number",
           "description": "Pieces completed so far."
@@ -1318,6 +1336,7 @@ Fetch one Collection by id — progress (completed/failed/total), status, cost. 
         "status",
         "modusId",
         "total",
+        "provenanceHash",
         "completed",
         "failed"
       ]
@@ -1325,6 +1344,86 @@ Fetch one Collection by id — progress (completed/failed/total), status, cost. 
   },
   "required": [
     "collection"
+  ]
+}
+```
+
+### GET /v1/collectiones/:id/rarity
+
+Imagined-vs-realized rarity table for a Collection — target shares (from trait weights) vs actual shares (from produced pieces). Owner-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "rarity": {
+      "type": "object",
+      "description": "Imagined (target) vs realized rarity per trait axis — drift is expected at low N.",
+      "properties": {
+        "totalPieces": {
+          "type": "number",
+          "description": "Produced pieces the realized figures are computed over."
+        },
+        "axes": {
+          "type": "array",
+          "description": "One entry per trait axis.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "trait_type": {
+                "type": "string",
+                "description": "The axis label (matches the NFT trait_type)."
+              },
+              "valores": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "string",
+                      "description": "The attribute value as stamped on pieces."
+                    },
+                    "targetRarity": {
+                      "type": "number",
+                      "description": "Target share: the weight normalised within its axis [0,1]."
+                    },
+                    "realizedCount": {
+                      "type": "number",
+                      "description": "Produced pieces that got this value."
+                    },
+                    "realizedRarity": {
+                      "type": "number",
+                      "description": "realizedCount / totalPieces [0,1]."
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "targetRarity",
+                    "realizedCount",
+                    "realizedRarity"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "trait_type",
+              "valores"
+            ]
+          }
+        }
+      },
+      "required": [
+        "totalPieces",
+        "axes"
+      ]
+    }
+  },
+  "required": [
+    "rarity"
   ]
 }
 ```
@@ -1370,6 +1469,10 @@ Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Own
           "type": "number",
           "description": "Target piece count (the size of the run)."
         },
+        "provenanceHash": {
+          "type": "string",
+          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
         "completed": {
           "type": "number",
           "description": "Pieces completed so far."
@@ -1398,6 +1501,7 @@ Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Own
         "status",
         "modusId",
         "total",
+        "provenanceHash",
         "completed",
         "failed"
       ]
@@ -1450,6 +1554,10 @@ Resume a paused Collection — continue dispatching toward the target. Owner-sco
           "type": "number",
           "description": "Target piece count (the size of the run)."
         },
+        "provenanceHash": {
+          "type": "string",
+          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
         "completed": {
           "type": "number",
           "description": "Pieces completed so far."
@@ -1478,6 +1586,7 @@ Resume a paused Collection — continue dispatching toward the target. Owner-sco
         "status",
         "modusId",
         "total",
+        "provenanceHash",
         "completed",
         "failed"
       ]
@@ -1530,6 +1639,10 @@ Cancel a Collection — stop dispatching and mark it cancelled. Owner-scoped.
           "type": "number",
           "description": "Target piece count (the size of the run)."
         },
+        "provenanceHash": {
+          "type": "string",
+          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
         "completed": {
           "type": "number",
           "description": "Pieces completed so far."
@@ -1558,6 +1671,7 @@ Cancel a Collection — stop dispatching and mark it cancelled. Owner-scoped.
         "status",
         "modusId",
         "total",
+        "provenanceHash",
         "completed",
         "failed"
       ]

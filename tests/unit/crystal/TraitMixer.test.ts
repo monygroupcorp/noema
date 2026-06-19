@@ -409,3 +409,59 @@ test('tagRules absent: tags on valors have no effect', () => {
   const result = selectForPiece({ tractus, pieceIndex: 0 })
   assert.equal(result.aditus['outfit'], 'spacesuit')
 })
+
+// ── DNA uniqueness (opt-in dedup) ──────────────────────────────────────────────
+
+test('selection carries a canonical DNA over non-bypassed axes', () => {
+  const tractus: Tractus[] = [
+    makeTractus('color', [{ value: 'red', label: 'Red', rarity: 1 }]),
+    makeTractus('shape', [{ value: 'square', label: 'Square', rarity: 1 }]),
+  ]
+  const r = selectForPiece({ tractus, pieceIndex: 0 })
+  assert.equal(r.dna, 'color=Red|shape=Square')
+})
+
+test('bypassDNA axes are excluded from the DNA key', () => {
+  const tractus: Tractus[] = [
+    makeTractus('color', [{ value: 'red', label: 'Red', rarity: 1 }]),
+    { ...makeTractus('background', [{ value: 'sky', label: 'Sky', rarity: 1 }]), bypassDNA: true },
+  ]
+  const r = selectForPiece({ tractus, pieceIndex: 0 })
+  assert.equal(r.dna, 'color=Red', 'background is bypassed → not in DNA')
+})
+
+test('usedDna ledger forces a reroll to a unique combination', () => {
+  // Two axes, 2×2 = 4 possible combos — plenty of room to find a unique one.
+  const tractus: Tractus[] = [
+    makeTractus('color', [
+      { value: 'red', label: 'Red', rarity: 1 },
+      { value: 'blue', label: 'Blue', rarity: 1 },
+    ]),
+    makeTractus('shape', [
+      { value: 'square', label: 'Square', rarity: 1 },
+      { value: 'circle', label: 'Circle', rarity: 1 },
+    ]),
+  ]
+  const usedDna = new Set<string>()
+  const seen = new Set<string>()
+  for (let i = 0; i < 4; i++) {
+    const r = selectForPiece({ tractus, pieceIndex: i, usedDna })
+    assert.ok(!seen.has(r.dna), `piece ${i} DNA ${r.dna} must be unique`)
+    seen.add(r.dna)
+    usedDna.add(r.dna)
+  }
+  assert.equal(seen.size, 4, 'all four unique combinations produced')
+})
+
+test('without a usedDna ledger, duplicates are allowed (variation-test behaviour)', () => {
+  const tractus: Tractus[] = [
+    makeTractus('color', [
+      { value: 'red', label: 'Red', rarity: 1 },
+      { value: 'blue', label: 'Blue', rarity: 1 },
+    ]),
+  ]
+  // Same pieceIndex → identical selection whether or not dedup is involved.
+  const a = selectForPiece({ tractus, pieceIndex: 5 })
+  const b = selectForPiece({ tractus, pieceIndex: 5 })
+  assert.equal(a.dna, b.dna)
+})

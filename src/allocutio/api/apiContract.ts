@@ -444,8 +444,50 @@ const CollectRequestSchema: JsonSchema = {
     },
     concurrentia: { type: 'number', description: 'Max concurrent pieces in flight (default 3).' },
     nomen: { type: 'string', description: 'Optional human name for the collection.' },
+    dna: { type: 'boolean', description: 'Opt-in DNA uniqueness — no two pieces share a trait combination (across non-bypassDNA axes). Default false.' },
   },
   required: ['modusId', 'total', 'tractus'],
+}
+
+/** The rarity-report response for `GET /v1/collectiones/:id/rarity`. */
+const RarityReportSchema: JsonSchema = {
+  type: 'object',
+  description: 'Imagined (target) vs realized rarity per trait axis — drift is expected at low N.',
+  properties: {
+    totalPieces: { type: 'number', description: 'Produced pieces the realized figures are computed over.' },
+    axes: {
+      type: 'array',
+      description: 'One entry per trait axis.',
+      items: {
+        type: 'object',
+        properties: {
+          trait_type: { type: 'string', description: 'The axis label (matches the NFT trait_type).' },
+          valores: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                value: { type: 'string', description: 'The attribute value as stamped on pieces.' },
+                targetRarity: { type: 'number', description: 'Target share: the weight normalised within its axis [0,1].' },
+                realizedCount: { type: 'number', description: 'Produced pieces that got this value.' },
+                realizedRarity: { type: 'number', description: 'realizedCount / totalPieces [0,1].' },
+              },
+              required: ['value', 'targetRarity', 'realizedCount', 'realizedRarity'],
+            },
+          },
+        },
+        required: ['trait_type', 'valores'],
+      },
+    },
+  },
+  required: ['totalPieces', 'axes'],
+}
+
+/** The `{ rarity }` envelope returned by `GET /v1/collectiones/:id/rarity`. */
+const RarityEnvelopeSchema: JsonSchema = {
+  type: 'object',
+  properties: { rarity: RarityReportSchema },
+  required: ['rarity'],
 }
 
 /** The public `Collection` projection (mirrors `types.ts#Collection`). */
@@ -462,13 +504,14 @@ const CollectionSchema: JsonSchema = {
     },
     modusId: { type: 'string', description: 'The flow (modus) expanded across the grid.' },
     total: { type: 'number', description: 'Target piece count (the size of the run).' },
+    provenanceHash: { type: 'string', description: 'Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash.' },
     completed: { type: 'number', description: 'Pieces completed so far.' },
     failed: { type: 'number', description: 'Pieces failed so far.' },
     cost: { type: 'string', description: 'Total impetus across completed pieces, serialised as a string.' },
     createdAt: { type: 'string', format: 'date-time', description: 'When the collection started.' },
     completedAt: { type: 'string', format: 'date-time', description: 'When it finished (or was cancelled).' },
   },
-  required: ['id', 'status', 'modusId', 'total', 'completed', 'failed'],
+  required: ['id', 'status', 'modusId', 'total', 'provenanceHash', 'completed', 'failed'],
 }
 
 /** The `{ collection }` envelope returned by the collection operations. */
@@ -659,6 +702,13 @@ export const API_CONTRACT: ApiContract = {
       summary: 'Fetch one Collection by id — progress (completed/failed/total), status, cost. Owner-scoped (404 if not yours).',
       auth: true,
       response: CollectionEnvelopeSchema,
+    },
+    {
+      method: 'GET',
+      path: '/collectiones/:id/rarity',
+      summary: 'Imagined-vs-realized rarity table for a Collection — target shares (from trait weights) vs actual shares (from produced pieces). Owner-scoped.',
+      auth: true,
+      response: RarityEnvelopeSchema,
     },
     {
       method: 'POST',

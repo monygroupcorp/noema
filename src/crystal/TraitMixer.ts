@@ -23,9 +23,11 @@ function lcg(seed: number): number {
 
 /**
  * Compute the deterministic seed for a given tractus index and piece index.
+ * `attempt` salts the seed for DNA-dedup rerolls — attempt 0 reproduces the
+ * historical (un-salted) seed exactly, so non-dedup behaviour is unchanged.
  */
-function seedFor(tractusIndex: number, pieceIndex: number): number {
-  return ((tractusIndex * 2654435761) ^ (pieceIndex * 2246822519)) >>> 0
+function seedFor(tractusIndex: number, pieceIndex: number, attempt = 0): number {
+  return ((tractusIndex * 2654435761) ^ (pieceIndex * 2246822519) ^ (attempt * 40503)) >>> 0
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────────
@@ -37,6 +39,21 @@ export interface TraitSelection {
   prompt: string
   /** NFT-standard attributes array */
   attributes: Array<{ trait_type: string; value: string }>
+  /**
+   * Canonical DNA fingerprint of this selection over the non-`bypassDNA` axes.
+   * Two pieces with the same `dna` are duplicate combinations. The caller
+   * (CollectioCursor) tracks these to enforce uniqueness when opted in.
+   */
+  dna: string
+}
+
+/** The canonical DNA key for a set of winners, ignoring `bypassDNA` axes. */
+function dnaKey(winners: Array<{ tractus: Tractus; valor: TraitValor }>): string {
+  return winners
+    .filter(({ tractus }) => !tractus.bypassDNA)
+    .map(({ tractus, valor }) => `${tractus.porta}=${valor.label ?? String(valor.value)}`)
+    .sort()
+    .join('|')
 }
 
 /**
@@ -65,84 +82,110 @@ export function selectForPiece(params: {
    * → 'fantasy' and 'sci-fi' themed options never appear on the same piece.
    */
   tagRules?: string[][]
+  /**
+   * DNA-dedup ledger: the canonical DNA keys already produced by this collection.
+   * When provided, the mixer rerolls (salting the seed) until it finds a unique
+   * combination, up to `maxDnaAttempts`. Absent → no dedup (duplicates allowed).
+   */
+  usedDna?: Set<string>
+  /** Max reroll attempts before accepting a colliding combination. Default 64. */
+  maxDnaAttempts?: number
 }): TraitSelection {
-  const { tractus, pieceIndex, basePrompt, tagRules } = params
+  const { tractus, pieceIndex, basePrompt, tagRules, usedDna } = params
 
   if (tractus.length === 0) {
-    return { aditus: {}, prompt: basePrompt ?? '', attributes: [] }
+    return { aditus: {}, prompt: basePrompt ?? '', attributes: [], dna: '' }
   }
 
-  // Track selected labels for label-level exclusion (label ?? String(value))
-  const selectedLabels = new Set<string>()
-  // Track which tags are blocked by tag-group rules
-  const blockedTags = new Set<string>()
-  const winners: Array<{ tractus: Tractus; valor: TraitValor }> = []
+  // One deterministic selection pass over the grid for a given reroll `attempt`.
+  const selectWinners = (attempt: number): Array<{ tractus: Tractus; valor: TraitValor }> => {
+    // Track selected labels for label-level exclusion (label ?? String(value))
+    const selectedLabels = new Set<string>()
+    // Track which tags are blocked by tag-group rules
+    const blockedTags = new Set<string>()
+    const winners: Array<{ tractus: Tractus; valor: TraitValor }> = []
 
-  for (let ti = 0; ti < tractus.length; ti++) {
-    const tract = tractus[ti]
-    const seed = seedFor(ti, pieceIndex)
+    for (let ti = 0; ti < tractus.length; ti++) {
+      const tract = tractus[ti]
+      const seed = seedFor(ti, pieceIndex, attempt)
 
-    // Step 1: filter out excluded options (label-level + tag-group level)
-    let candidates = tract.valores.filter(v => {
-      // Label-level exclusion: valor.excludes lists specific labels to block
-      if (v.excludes?.some(ex => selectedLabels.has(ex))) return false
-      // Tag-group exclusion: valor's tags overlap with blocked tags
-      if (v.tags?.some(t => blockedTags.has(t))) return false
-      return true
-    })
+      // Step 1: filter out excluded options (label-level + tag-group level)
+      let candidates = tract.valores.filter(v => {
+        // Label-level exclusion: valor.excludes lists specific labels to block
+        if (v.excludes?.some(ex => selectedLabels.has(ex))) return false
+        // Tag-group exclusion: valor's tags overlap with blocked tags
+        if (v.tags?.some(t => blockedTags.has(t))) return false
+        return true
+      })
 
-    // Fallback: if all candidates are excluded (shouldn't happen in practice),
-    // use all valores
-    if (candidates.length === 0) {
-      candidates = tract.valores
-    }
+      // Fallback: if all candidates are excluded (shouldn't happen in practice),
+      // use all valores
+      if (candidates.length === 0) {
+        candidates = tract.valores
+      }
 
-    let winner: TraitValor
+      let winner: TraitValor
 
-    if (candidates.length === 1) {
-      // Single candidate — always wins regardless of rarity
-      winner = candidates[0]
-    } else {
-      // Step 2: compute total weight
-      const totalWeight = candidates.reduce((sum, v) => sum + (v.rarity ?? 0.5), 0)
-
-      if (totalWeight <= 0) {
-        // All weights are zero — pick uniformly using LCG
-        const idx = Math.floor(lcg(seed) * candidates.length)
-        winner = candidates[idx]
+      if (candidates.length === 1) {
+        // Single candidate — always wins regardless of rarity
+        winner = candidates[0]
       } else {
-        // Step 3: weighted selection via LCG
-        const pick = lcg(seed) * totalWeight
-        let remaining = pick
-        winner = candidates[candidates.length - 1] // default to last
-        for (const v of candidates) {
-          remaining -= (v.rarity ?? 0.5)
-          if (remaining <= 0) {
-            winner = v
-            break
+        // Step 2: compute total weight
+        const totalWeight = candidates.reduce((sum, v) => sum + (v.rarity ?? 0.5), 0)
+
+        if (totalWeight <= 0) {
+          // All weights are zero — pick uniformly using LCG
+          const idx = Math.floor(lcg(seed) * candidates.length)
+          winner = candidates[idx]
+        } else {
+          // Step 3: weighted selection via LCG
+          const pick = lcg(seed) * totalWeight
+          let remaining = pick
+          winner = candidates[candidates.length - 1] // default to last
+          for (const v of candidates) {
+            remaining -= (v.rarity ?? 0.5)
+            if (remaining <= 0) {
+              winner = v
+              break
+            }
           }
         }
       }
-    }
 
-    // Record selected label for label-level exclusion in subsequent tractus
-    const winnerLabel = winner.label ?? String(winner.value)
-    selectedLabels.add(winnerLabel)
+      // Record selected label for label-level exclusion in subsequent tractus
+      const winnerLabel = winner.label ?? String(winner.value)
+      selectedLabels.add(winnerLabel)
 
-    // Update blocked tags: for each tag-group rule, if the winner carries a tag
-    // from that group, block all OTHER tags in that group for subsequent tractus.
-    if (tagRules && winner.tags && winner.tags.length > 0) {
-      for (const group of tagRules) {
-        const matchedTag = winner.tags.find(t => group.includes(t))
-        if (matchedTag !== undefined) {
-          for (const t of group) {
-            if (t !== matchedTag) blockedTags.add(t)
+      // Update blocked tags: for each tag-group rule, if the winner carries a tag
+      // from that group, block all OTHER tags in that group for subsequent tractus.
+      if (tagRules && winner.tags && winner.tags.length > 0) {
+        for (const group of tagRules) {
+          const matchedTag = winner.tags.find(t => group.includes(t))
+          if (matchedTag !== undefined) {
+            for (const t of group) {
+              if (t !== matchedTag) blockedTags.add(t)
+            }
           }
         }
       }
+
+      winners.push({ tractus: tract, valor: winner })
     }
 
-    winners.push({ tractus: tract, valor: winner })
+    return winners
+  }
+
+  // Reroll until the DNA is unique (when a dedup ledger is supplied), else
+  // accept the un-salted attempt. Falls back to the last attempt if the grid is
+  // exhausted (uniqueness unsatisfiable) — duplicates are then unavoidable.
+  const maxAttempts = usedDna ? Math.max(1, params.maxDnaAttempts ?? 64) : 1
+  let winners = selectWinners(0)
+  let dna = dnaKey(winners)
+  if (usedDna) {
+    for (let attempt = 1; attempt < maxAttempts && usedDna.has(dna); attempt++) {
+      winners = selectWinners(attempt)
+      dna = dnaKey(winners)
+    }
   }
 
   // ── Prompt assembly ──────────────────────────────────────────────────────────
@@ -182,7 +225,7 @@ export function selectForPiece(params: {
     })
   }
 
-  return { aditus, prompt, attributes }
+  return { aditus, prompt, attributes, dna }
 }
 
 /**

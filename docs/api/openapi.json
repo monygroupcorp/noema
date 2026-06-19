@@ -1398,6 +1398,10 @@
                           "type": "number",
                           "description": "Target piece count (the size of the run)."
                         },
+                        "provenanceHash": {
+                          "type": "string",
+                          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
                         "completed": {
                           "type": "number",
                           "description": "Pieces completed so far."
@@ -1426,6 +1430,7 @@
                         "status",
                         "modusId",
                         "total",
+                        "provenanceHash",
                         "completed",
                         "failed"
                       ]
@@ -1541,6 +1546,10 @@
                   "nomen": {
                     "type": "string",
                     "description": "Optional human name for the collection."
+                  },
+                  "dna": {
+                    "type": "boolean",
+                    "description": "Opt-in DNA uniqueness — no two pieces share a trait combination (across non-bypassDNA axes). Default false."
                   }
                 },
                 "required": [
@@ -1602,6 +1611,10 @@
                             "type": "number",
                             "description": "Target piece count (the size of the run)."
                           },
+                          "provenanceHash": {
+                            "type": "string",
+                            "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                          },
                           "completed": {
                             "type": "number",
                             "description": "Pieces completed so far."
@@ -1630,6 +1643,7 @@
                           "status",
                           "modusId",
                           "total",
+                          "provenanceHash",
                           "completed",
                           "failed"
                         ]
@@ -1704,6 +1718,10 @@
                           "type": "number",
                           "description": "Target piece count (the size of the run)."
                         },
+                        "provenanceHash": {
+                          "type": "string",
+                          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
                         "completed": {
                           "type": "number",
                           "description": "Pieces completed so far."
@@ -1732,6 +1750,7 @@
                         "status",
                         "modusId",
                         "total",
+                        "provenanceHash",
                         "completed",
                         "failed"
                       ]
@@ -1739,6 +1758,117 @@
                   },
                   "required": [
                     "collection"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/collectiones/{id}/rarity": {
+      "get": {
+        "summary": "Imagined-vs-realized rarity table for a Collection — target shares (from trait weights) vs actual shares (from produced pieces). Owner-scoped.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rarity": {
+                      "type": "object",
+                      "description": "Imagined (target) vs realized rarity per trait axis — drift is expected at low N.",
+                      "properties": {
+                        "totalPieces": {
+                          "type": "number",
+                          "description": "Produced pieces the realized figures are computed over."
+                        },
+                        "axes": {
+                          "type": "array",
+                          "description": "One entry per trait axis.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "trait_type": {
+                                "type": "string",
+                                "description": "The axis label (matches the NFT trait_type)."
+                              },
+                              "valores": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "value": {
+                                      "type": "string",
+                                      "description": "The attribute value as stamped on pieces."
+                                    },
+                                    "targetRarity": {
+                                      "type": "number",
+                                      "description": "Target share: the weight normalised within its axis [0,1]."
+                                    },
+                                    "realizedCount": {
+                                      "type": "number",
+                                      "description": "Produced pieces that got this value."
+                                    },
+                                    "realizedRarity": {
+                                      "type": "number",
+                                      "description": "realizedCount / totalPieces [0,1]."
+                                    }
+                                  },
+                                  "required": [
+                                    "value",
+                                    "targetRarity",
+                                    "realizedCount",
+                                    "realizedRarity"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "trait_type",
+                              "valores"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "totalPieces",
+                        "axes"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "rarity"
                   ]
                 }
               }
@@ -1815,6 +1945,10 @@
                           "type": "number",
                           "description": "Target piece count (the size of the run)."
                         },
+                        "provenanceHash": {
+                          "type": "string",
+                          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
                         "completed": {
                           "type": "number",
                           "description": "Pieces completed so far."
@@ -1843,6 +1977,7 @@
                         "status",
                         "modusId",
                         "total",
+                        "provenanceHash",
                         "completed",
                         "failed"
                       ]
@@ -1926,6 +2061,10 @@
                           "type": "number",
                           "description": "Target piece count (the size of the run)."
                         },
+                        "provenanceHash": {
+                          "type": "string",
+                          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
                         "completed": {
                           "type": "number",
                           "description": "Pieces completed so far."
@@ -1954,6 +2093,7 @@
                         "status",
                         "modusId",
                         "total",
+                        "provenanceHash",
                         "completed",
                         "failed"
                       ]
@@ -2037,6 +2177,10 @@
                           "type": "number",
                           "description": "Target piece count (the size of the run)."
                         },
+                        "provenanceHash": {
+                          "type": "string",
+                          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
                         "completed": {
                           "type": "number",
                           "description": "Pieces completed so far."
@@ -2065,6 +2209,7 @@
                         "status",
                         "modusId",
                         "total",
+                        "provenanceHash",
                         "completed",
                         "failed"
                       ]
