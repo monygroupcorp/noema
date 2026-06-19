@@ -1,6 +1,6 @@
 # Collectio — spec
 
-**Status:** build-order #1 SHIPPED (2026-06-19, commits `5382ee1d` + `f71e3e92`); #2–7 remain.
+**Status:** build-order #1 + #2 SHIPPED (2026-06-19); #3–7 remain.
 The canonical spec for the collection / batch-generation feature. Build against this.
 
 **#1 done — `CrystalApi.collect()` + `/v1/collectiones` routes** (create/list/get/pause/resume/cancel +
@@ -209,8 +209,11 @@ lives in a layer we control (and charge for), sidestepping the messy on-chain/tr
 
 1. ✅ **DONE — Launch surface over the existing engine** (`§5`): `CrystalApi.collect()` + routes +
    the dispatch fix (pieces now actually run). General collection generation is live + hermetic-tested.
-2. **Integrity/observability layer** (`§4d`) — provenance hash + realized-rarity table + DNA dedup.
-   Pure data on top of what we stamp. (Powers the live "shared target" view across the four lenses.)
+2. ✅ **DONE — Integrity/observability layer** (`§4d`): `provenanceHash` content-addresses
+   `{modusId+versio, tractus, aditusBase}` on every Collectio (surfaced on the public Collection);
+   `rarityReport()` gives target-vs-realized per-axis rarity (`GET /v1/collectiones/:id/rarity`);
+   opt-in `Collectio.dna` enforces trait-combination uniqueness (TraitMixer salted reroll +
+   per-axis `bypassDNA`; cursor tracks the ledger + stamps `_dna` for rehydrate). All hermetic-tested.
 3. **Collaborative-flow model** (`§4c`/`§4f`) — incremental batches + **teams** + per-artifact split.
 4. **Deterministic runtimes** (`§4a`) — layer-composite + ffmpeg. Net-new, but reusable far beyond NFT
    (content pipelines at large).
