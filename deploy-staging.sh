@@ -100,9 +100,21 @@ stop_container_if_exists "${STAGING_CONTAINER}"
 ensure_network
 
 # 5. Start staging container
+#
+# RunPod SSH key: the key lives on the host (uid-1000/600 at /root/.ssh/runpod) and MUST be
+# mounted into the container at the path the app reads (RUNPOD_SSH_KEY_PATH, default
+# /home/node/.ssh/runpod). Without this mount the container can't SSH into SECURE pods and
+# every pod run fails "SSH private key not found" (incident 2026-06-19). Override the host
+# source with RUNPOD_SSH_KEY_SRC if the key moves; it must be readable by uid 1000 (node).
+RUNPOD_SSH_KEY_SRC="${RUNPOD_SSH_KEY_SRC:-/root/.ssh/runpod}"
+if [[ ! -f "${RUNPOD_SSH_KEY_SRC}" ]]; then
+  log "WARNING: RunPod SSH key not found at ${RUNPOD_SSH_KEY_SRC} — SECURE pod runs will fail until it's mounted."
+fi
+
 log "Starting staging container..."
 docker run -d \
   --env-file "${ENV_FILE}" \
+  -v "${RUNPOD_SSH_KEY_SRC}:/home/node/.ssh/runpod:ro" \
   --network "${NETWORK_NAME}" \
   --network-alias "${CONTAINER_ALIAS}" \
   --name "${STAGING_CONTAINER}" \
