@@ -62,6 +62,7 @@ export const Errors = {
   conflictSlug: (slug: string) => new ApiError('conflict.slug_taken', `The slug '${slug}' is already taken`, 409),
   notFoundRun: (id: string) => new ApiError('not_found.run', `Run '${id}' not found`, 404),
   notFoundCollection: (id: string) => new ApiError('not_found.collection', `Collection '${id}' not found`, 404),
+  notFoundTeam: (id: string) => new ApiError('not_found.team', `Team '${id}' not found`, 404),
   insufficientSigna: (details?: Record<string, unknown>) =>
     new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
   capTooLow: (details?: Record<string, unknown>) =>

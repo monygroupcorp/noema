@@ -104,8 +104,28 @@ export interface Collectio {
    */
   provenanceHash: string
 
-  /** FK → Anima or commitment — who initiated this collection */
+  /**
+   * FK → Anima or commitment — the concrete identity that initiated AND funds
+   * this collection's pieces (every dispatched Actum is charged to this `by`).
+   * For a team-owned collection this is the founding/initiating member; team
+   * ownership is the `sodalitasId` overlay below.
+   */
   by: { animaId: string } | { commitment: string }
+
+  /**
+   * FK → Sodalitas. Team ownership overlay: when present, every member of the
+   * team owns this collection (not just `by`). The funding identity stays on
+   * `by` — teams have no pooled ledger yet. Absent → single-owner.
+   */
+  sodalitasId?: string
+
+  /**
+   * Per-artifact ownership split, snapshotted from the owning team's membership
+   * at creation (equal weights by default; weights sum to 1). The provenance of
+   * who shares in the artifact — re-snapshotted at freeze (later). Absent for
+   * single-owner (non-team) collections.
+   */
+  owners?: Array<{ animaId: string; weight: number }>
 
   /** FK[] → Actum. The executions this collection spawned */
   acta: string[]

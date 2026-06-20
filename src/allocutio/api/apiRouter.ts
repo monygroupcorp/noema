@@ -14,7 +14,7 @@
 
 import express, { type Request, type Response, type Router } from 'express'
 
-import type { Run, Collection } from './types.js'
+import type { Run, Collection, Team } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts } from './CrystalApi.js'
 import type { RarityReport } from '../../crystal/rarityReport.js'
@@ -64,6 +64,11 @@ export interface ApiFacade {
   cancelCollection(auctor: AuctorKey, id: string): Promise<Collection>
   approveCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
   rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
+  createTeam(auctor: AuctorKey, opts: { nomen: string; members?: string[] }): Promise<Team>
+  getTeam(auctor: AuctorKey, id: string): Promise<Team>
+  listTeams(auctor: AuctorKey): Promise<Team[]>
+  addTeamMember(auctor: AuctorKey, id: string, animaId: string): Promise<Team>
+  removeTeamMember(auctor: AuctorKey, id: string, animaId: string): Promise<Team>
 }
 
 /** The slice of IdentityResolver this router needs. */
@@ -208,8 +213,8 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   // POST /v1/collectiones — create + start a Collection.
   router.post('/collectiones', wrap(async (req, res) => {
     const auctor = await auth(req)
-    const { modusId, total, tractus, aditusBase, concurrentia, nomen, dna } = req.body ?? {}
-    res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen, dna }) })
+    const { modusId, total, tractus, aditusBase, concurrentia, nomen, dna, teamId } = req.body ?? {}
+    res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen, dna, teamId }) })
   }))
 
   // GET /v1/collectiones — list the caller's collections (owner-scoped).
@@ -253,6 +258,34 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   router.post('/collectiones/:id/pieces/:actumId/reject', wrap(async (req, res) => {
     await api.rejectCollectionPiece(await auth(req), String(req.params.id), String(req.params.actumId))
     res.status(200).json({ ok: true })
+  }))
+
+  // ── Teams (Sodalitas) — a fellowship of Animae that co-owns work ────────────────
+  // POST /v1/teams — create a team (the caller is the founder + first member).
+  router.post('/teams', wrap(async (req, res) => {
+    const { nomen, members } = req.body ?? {}
+    res.status(200).json({ team: await api.createTeam(await auth(req), { nomen, members }) })
+  }))
+
+  // GET /v1/teams — list the caller's teams (member-scoped).
+  router.get('/teams', wrap(async (req, res) => {
+    res.json({ teams: await api.listTeams(await auth(req)) })
+  }))
+
+  // GET /v1/teams/:id — fetch one (member-scoped: 404 if not a member).
+  router.get('/teams/:id', wrap(async (req, res) => {
+    res.json({ team: await api.getTeam(await auth(req), String(req.params.id)) })
+  }))
+
+  // POST /v1/teams/:id/members — add a member { animaId }. Member-scoped.
+  router.post('/teams/:id/members', wrap(async (req, res) => {
+    const animaId = String((req.body ?? {}).animaId)
+    res.json({ team: await api.addTeamMember(await auth(req), String(req.params.id), animaId) })
+  }))
+
+  // DELETE /v1/teams/:id/members/:animaId — remove a member (not the founder). Member-scoped.
+  router.delete('/teams/:id/members/:animaId', wrap(async (req, res) => {
+    res.json({ team: await api.removeTeamMember(await auth(req), String(req.params.id), String(req.params.animaId)) })
   }))
 
   // GET /v1/fundamenta — list compute substrates (public).
