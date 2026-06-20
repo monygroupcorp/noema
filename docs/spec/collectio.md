@@ -1,6 +1,6 @@
 # Collectio — spec
 
-**Status:** build-order #1 + #2 + #3 SHIPPED (2026-06-19); #4–7 remain.
+**Status:** build-order #1 + #2 + #3 + #4 SHIPPED (2026-06-19); #5–7 remain.
 The canonical spec for the collection / batch-generation feature. Build against this.
 
 **#1 done — `CrystalApi.collect()` + `/v1/collectiones` routes** (create/list/get/pause/resume/cancel +
@@ -220,8 +220,12 @@ lives in a layer we control (and charge for), sidestepping the messy on-chain/tr
    **per-artifact split** = `owners[]` snapshotted equal-weight from team membership at create, with a
    `sodalitasId` ownership overlay on the Collectio (funding stays on `by`). Roles/permissions + a pooled
    team ledger + split-payout wiring deferred (the latter lands with freeze/mint). All hermetic-tested.
-4. **Deterministic runtimes** (`§4a`) — layer-composite + ffmpeg. Net-new, but reusable far beyond NFT
-   (content pipelines at large).
+4. ✅ **DONE — Deterministic runtimes** (`§4a`): host-side cursors (dispatch by `ministerium`, sync, no
+   GPU pod — siblings of the OpenAI/HF cursors), on a shared foundation (`MediaFetcher` URL→bytes +
+   `R2Uploader` host-side R2 PutObject, both injected). **layer-composite** (jimp z-order PNG flatten;
+   `modus.layer-composite`) and **ffmpeg** (bounded ops — no raw args; `frames-to-video` mp4/webm via a
+   spawned ffmpeg with a fixed arg vector; `modus.frames-to-video`). A Collectio expands a composite/
+   animate step over its grid. Registered when R2 is configured. Net-new, reusable far beyond NFT.
 5. **Export + freeze** (`§4b`/`§4e`) — agnostic metadata + adapters (incl. native launchpad), the freeze
    boundary, forced combos, 1/1 inserts.
 6. **Mint** — Catena, later, separate track.
