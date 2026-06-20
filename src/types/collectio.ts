@@ -132,10 +132,15 @@ export interface Collectio {
 
   /** FK[] → Actum. The executions this collection spawned */
   acta: string[]
-  /** How many acta have reached completus */
+  /** How many acta have reached completus AND count toward the target (approved
+   *  when review is on; all successes when it is off) */
   completae: number
-  /** How many acta have reached fractus */
+  /** How many acta have reached fractus (a genuine generation FAILURE) */
   fractae: number
+  /** How many pieces a reviewer REJECTED (a successful gen the reviewer declined —
+   *  distinct from `fractae`). Each rejection extends the dispatch budget by one
+   *  (a replacement piece is generated) and is the single source of that budget. */
+  reiectae: number
 
   /** Max concurrent acta — rate control for the fan-out */
   concurrentia: number
@@ -170,6 +175,6 @@ export interface Collectionum {
   find(id: string): Promise<Collectio | null>
   list(filter?: Partial<Pick<Collectio, 'status'>>): Promise<Collectiones>
   listByStatus(status: CollectioStatus): Promise<Collectiones>
-  create(collectio: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'impetusTotal'>): Promise<Collectio>
-  update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'impetusTotal' | 'completum' | 'numerus'>>): Promise<Collectio>
+  create(collectio: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal'>): Promise<Collectio>
+  update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'numerus'>>): Promise<Collectio>
 }

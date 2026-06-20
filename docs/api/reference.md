@@ -1160,11 +1160,15 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
         },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far."
+          "description": "Pieces completed so far (approved, when review is on)."
         },
         "failed": {
           "type": "number",
-          "description": "Pieces failed so far."
+          "description": "Pieces that failed to generate so far."
+        },
+        "rejected": {
+          "type": "number",
+          "description": "Pieces a reviewer rejected so far (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -1188,7 +1192,8 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
         "total",
         "provenanceHash",
         "completed",
-        "failed"
+        "failed",
+        "rejected"
       ]
     }
   },
@@ -1266,11 +1271,15 @@ List the authenticated caller's Collections (owner-scoped).
           },
           "completed": {
             "type": "number",
-            "description": "Pieces completed so far."
+            "description": "Pieces completed so far (approved, when review is on)."
           },
           "failed": {
             "type": "number",
-            "description": "Pieces failed so far."
+            "description": "Pieces that failed to generate so far."
+          },
+          "rejected": {
+            "type": "number",
+            "description": "Pieces a reviewer rejected so far (distinct from failed)."
           },
           "cost": {
             "type": "string",
@@ -1294,7 +1303,8 @@ List the authenticated caller's Collections (owner-scoped).
           "total",
           "provenanceHash",
           "completed",
-          "failed"
+          "failed",
+          "rejected"
         ]
       }
     }
@@ -1371,11 +1381,15 @@ Fetch one Collection by id — progress (completed/failed/total), status, cost. 
         },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far."
+          "description": "Pieces completed so far (approved, when review is on)."
         },
         "failed": {
           "type": "number",
-          "description": "Pieces failed so far."
+          "description": "Pieces that failed to generate so far."
+        },
+        "rejected": {
+          "type": "number",
+          "description": "Pieces a reviewer rejected so far (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -1399,7 +1413,8 @@ Fetch one Collection by id — progress (completed/failed/total), status, cost. 
         "total",
         "provenanceHash",
         "completed",
-        "failed"
+        "failed",
+        "rejected"
       ]
     }
   },
@@ -1573,11 +1588,15 @@ Extend a Collection — raise the target by `count` and dispatch the new pieces 
         },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far."
+          "description": "Pieces completed so far (approved, when review is on)."
         },
         "failed": {
           "type": "number",
-          "description": "Pieces failed so far."
+          "description": "Pieces that failed to generate so far."
+        },
+        "rejected": {
+          "type": "number",
+          "description": "Pieces a reviewer rejected so far (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -1601,7 +1620,8 @@ Extend a Collection — raise the target by `count` and dispatch the new pieces 
         "total",
         "provenanceHash",
         "completed",
-        "failed"
+        "failed",
+        "rejected"
       ]
     }
   },
@@ -1677,11 +1697,15 @@ Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Own
         },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far."
+          "description": "Pieces completed so far (approved, when review is on)."
         },
         "failed": {
           "type": "number",
-          "description": "Pieces failed so far."
+          "description": "Pieces that failed to generate so far."
+        },
+        "rejected": {
+          "type": "number",
+          "description": "Pieces a reviewer rejected so far (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -1705,7 +1729,8 @@ Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Own
         "total",
         "provenanceHash",
         "completed",
-        "failed"
+        "failed",
+        "rejected"
       ]
     }
   },
@@ -1781,11 +1806,15 @@ Resume a paused Collection — continue dispatching toward the target. Owner-sco
         },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far."
+          "description": "Pieces completed so far (approved, when review is on)."
         },
         "failed": {
           "type": "number",
-          "description": "Pieces failed so far."
+          "description": "Pieces that failed to generate so far."
+        },
+        "rejected": {
+          "type": "number",
+          "description": "Pieces a reviewer rejected so far (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -1809,7 +1838,8 @@ Resume a paused Collection — continue dispatching toward the target. Owner-sco
         "total",
         "provenanceHash",
         "completed",
-        "failed"
+        "failed",
+        "rejected"
       ]
     }
   },
@@ -1885,11 +1915,15 @@ Cancel a Collection — stop dispatching and mark it cancelled. Owner-scoped.
         },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far."
+          "description": "Pieces completed so far (approved, when review is on)."
         },
         "failed": {
           "type": "number",
-          "description": "Pieces failed so far."
+          "description": "Pieces that failed to generate so far."
+        },
+        "rejected": {
+          "type": "number",
+          "description": "Pieces a reviewer rejected so far (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -1913,7 +1947,8 @@ Cancel a Collection — stop dispatching and mark it cancelled. Owner-scoped.
         "total",
         "provenanceHash",
         "completed",
-        "failed"
+        "failed",
+        "rejected"
       ]
     }
   },

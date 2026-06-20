@@ -14,15 +14,16 @@ function toDoc(c: Partial<Collectio>): Record<string, unknown> {
 }
 
 function fromDoc(doc: Document): Collectio {
-  const { _id, impetusTotal, ...rest } = doc as CollectioDoc & { _id: unknown }
-  return { ...rest, impetusTotal: BigInt(impetusTotal ?? '0') } as Collectio
+  const { _id, impetusTotal, reiectae, ...rest } = doc as CollectioDoc & { _id: unknown }
+  // `reiectae` post-dates the first collections — default legacy docs to 0.
+  return { ...rest, reiectae: reiectae ?? 0, impetusTotal: BigInt(impetusTotal ?? '0') } as Collectio
 }
 
 export class MongoCollectionum implements Collectionum {
   constructor(private readonly col: Collection) {}
 
   async create(
-    input: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'impetusTotal'>
+    input: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal'>
   ): Promise<Collectio> {
     const collectio: Collectio = {
       ...input,
@@ -31,6 +32,7 @@ export class MongoCollectionum implements Collectionum {
       acta: [],
       completae: 0,
       fractae: 0,
+      reiectae: 0,
       impetusTotal: 0n,
     }
     await this.col.insertOne(toDoc(collectio))
@@ -53,7 +55,7 @@ export class MongoCollectionum implements Collectionum {
 
   async update(
     id: string,
-    patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'impetusTotal' | 'completum' | 'numerus'>>
+    patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'numerus'>>
   ): Promise<Collectio> {
     const result = await this.col.findOneAndUpdate(
       { id },
