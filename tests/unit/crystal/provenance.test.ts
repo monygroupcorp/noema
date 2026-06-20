@@ -31,6 +31,16 @@ test('any substantive change → different hash', () => {
   assert.notEqual(base, provenanceHash({ modusId: 'sd1-5', tractus: tractus2, aditusBase: { _basePrompt: 'a {{color}} cat' } }))
 })
 
+test('bigint trait values do not crash the hash (token-amount traits)', () => {
+  const big: Tractus[] = [{ porta: 'amount', valores: [{ value: 1_000_000_000_000_000_000n }] }]
+  const h = provenanceHash({ modusId: 'm', tractus: big, aditusBase: { cap: 5n } })
+  assert.match(h, /^sha256:[0-9a-f]{64}$/)
+  // 1n and "1" must not collide.
+  const asBigint = provenanceHash({ modusId: 'm', tractus: [{ porta: 'x', valores: [{ value: 1n }] }], aditusBase: {} })
+  const asString = provenanceHash({ modusId: 'm', tractus: [{ porta: 'x', valores: [{ value: '1' }] }], aditusBase: {} })
+  assert.notEqual(asBigint, asString)
+})
+
 test('tractus order is significant (it drives prompt assembly)', () => {
   const t1: Tractus[] = [{ porta: 'a', valores: [{ value: 1 }] }, { porta: 'b', valores: [{ value: 2 }] }]
   const t2: Tractus[] = [{ porta: 'b', valores: [{ value: 2 }] }, { porta: 'a', valores: [{ value: 1 }] }]
