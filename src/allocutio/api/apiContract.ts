@@ -34,7 +34,7 @@ export interface JsonSchema {
 
 /** One HTTP operation on the `/v1` surface. */
 export interface RouteSpec {
-  method: 'GET' | 'POST' | 'PUT'
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE'
   /** The path, RELATIVE to the `/v1` mount (e.g. `/runs`, `/runs/:id`). */
   path: string
   summary: string
@@ -445,6 +445,7 @@ const CollectRequestSchema: JsonSchema = {
     concurrentia: { type: 'number', description: 'Max concurrent pieces in flight (default 3).' },
     nomen: { type: 'string', description: 'Optional human name for the collection.' },
     dna: { type: 'boolean', description: 'Opt-in DNA uniqueness — no two pieces share a trait combination (across non-bypassDNA axes). Default false.' },
+    teamId: { type: 'string', description: 'Own this collection by a team (Sodalitas) the caller is a member of — snapshots an equal-weight owners split.' },
   },
   required: ['modusId', 'total', 'tractus'],
 }
@@ -505,6 +506,15 @@ const CollectionSchema: JsonSchema = {
     modusId: { type: 'string', description: 'The flow (modus) expanded across the grid.' },
     total: { type: 'number', description: 'Target piece count (the size of the run).' },
     provenanceHash: { type: 'string', description: 'Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash.' },
+    owners: {
+      type: 'array',
+      description: 'Per-artifact ownership split (team-owned collections only) — weights sum to 1.',
+      items: {
+        type: 'object',
+        properties: { animaId: { type: 'string' }, weight: { type: 'number' } },
+        required: ['animaId', 'weight'],
+      },
+    },
     completed: { type: 'number', description: 'Pieces completed so far.' },
     failed: { type: 'number', description: 'Pieces failed so far.' },
     cost: { type: 'string', description: 'Total impetus across completed pieces, serialised as a string.' },
@@ -526,6 +536,53 @@ const CollectionsListSchema: JsonSchema = {
   type: 'object',
   properties: { collections: { type: 'array', items: CollectionSchema } },
   required: ['collections'],
+}
+
+/** The public `Team` projection (mirrors `types.ts#Team`). */
+const TeamSchema: JsonSchema = {
+  type: 'object',
+  description: 'A team (Sodalitas) — a fellowship of Animae that co-owns work.',
+  properties: {
+    id: { type: 'string' },
+    nomen: { type: 'string', description: 'The team display name.' },
+    members: { type: 'array', items: { type: 'string' }, description: 'Member Anima ids (includes the founder).' },
+    founder: { type: 'string', description: "The founder's Anima id." },
+    createdAt: { type: 'string', format: 'date-time' },
+  },
+  required: ['id', 'nomen', 'members', 'founder', 'createdAt'],
+}
+
+/** The `{ team }` envelope returned by the single-team operations. */
+const TeamEnvelopeSchema: JsonSchema = {
+  type: 'object',
+  properties: { team: TeamSchema },
+  required: ['team'],
+}
+
+/** The `{ teams }` envelope returned by `GET /v1/teams`. */
+const TeamsListSchema: JsonSchema = {
+  type: 'object',
+  properties: { teams: { type: 'array', items: TeamSchema } },
+  required: ['teams'],
+}
+
+/** The request body for `POST /v1/teams`. */
+const CreateTeamRequestSchema: JsonSchema = {
+  type: 'object',
+  description: 'Create a team. The caller becomes the founder and first member.',
+  properties: {
+    nomen: { type: 'string', description: 'The team display name.' },
+    members: { type: 'array', items: { type: 'string' }, description: 'Additional member Anima ids to seed.' },
+  },
+  required: ['nomen'],
+}
+
+/** The request body for `POST /v1/teams/:id/members`. */
+const AddMemberRequestSchema: JsonSchema = {
+  type: 'object',
+  description: 'Add a member to a team.',
+  properties: { animaId: { type: 'string', description: 'The Anima id to add.' } },
+  required: ['animaId'],
 }
 
 /** A bare acknowledgement returned by the review operations. */
@@ -758,6 +815,43 @@ export const API_CONTRACT: ApiContract = {
       auth: true,
       response: OkSchema,
     },
+    {
+      method: 'POST',
+      path: '/teams',
+      summary: 'Create a team (Sodalitas) — a fellowship of Animae that co-owns work. The caller becomes the founder and first member.',
+      auth: true,
+      request: CreateTeamRequestSchema,
+      response: TeamEnvelopeSchema,
+    },
+    {
+      method: 'GET',
+      path: '/teams',
+      summary: "List the caller's teams (every team they are a member of).",
+      auth: true,
+      response: TeamsListSchema,
+    },
+    {
+      method: 'GET',
+      path: '/teams/:id',
+      summary: 'Fetch one team by id. Member-scoped (404 if not a member).',
+      auth: true,
+      response: TeamEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/teams/:id/members',
+      summary: 'Add a member to a team. Member-scoped; idempotent.',
+      auth: true,
+      request: AddMemberRequestSchema,
+      response: TeamEnvelopeSchema,
+    },
+    {
+      method: 'DELETE',
+      path: '/teams/:id/members/:animaId',
+      summary: 'Remove a member from a team (the founder cannot be removed). Member-scoped.',
+      auth: true,
+      response: TeamEnvelopeSchema,
+    },
   ],
   // Mirrors the request-error taxonomy in `errors.ts`. Append-only.
   errorCodes: [
@@ -770,6 +864,7 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.fundamentum', httpStatus: 404 },
     { code: 'not_found.studio', httpStatus: 404 },
     { code: 'not_found.collection', httpStatus: 404 },
+    { code: 'not_found.team', httpStatus: 404 },
     { code: 'not_found.run', httpStatus: 404 },
     { code: 'economy.insufficient_signa', httpStatus: 402 },
     { code: 'economy.cap_too_low', httpStatus: 422 },

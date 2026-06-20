@@ -13,6 +13,7 @@ import type { Cursor, CursorResult, ActumCompletor, Inceptio, Exitus } from '../
 import type { Modus, Forma } from '../../../src/types/modus.js'
 import type { Actum } from '../../../src/types/actum.js'
 import type { Collectio, Collectionum, Collectiones, CollectioStatus } from '../../../src/types/collectio.js'
+import type { Sodalitas, Sodalitates, Sodalitatum } from '../../../src/types/sodalitas.js'
 
 // =============================================================================
 // Collectio launch surface — CrystalApi.collect() fans a base modus out over a
@@ -59,6 +60,25 @@ class MemCollectionum implements Collectionum {
   }
 }
 
+/** In-memory Sodalitatum (team store) for the test. */
+class MemSodalitatum implements Sodalitatum {
+  store = new Map<string, Sodalitas>()
+  async find(id: string) { return this.store.get(id) ?? null }
+  async create(s: Omit<Sodalitas, 'id' | 'natum'>) {
+    const full: Sodalitas = { ...s, id: randomUUID(), natum: new Date() }
+    this.store.set(full.id, full)
+    return full
+  }
+  async update(id: string, patch: Partial<Pick<Sodalitas, 'membra' | 'nomen'>>) {
+    const s = { ...this.store.get(id)!, ...patch }
+    this.store.set(id, s)
+    return s
+  }
+  async listByMember(animaId: string): Promise<Sodalitates> {
+    return [...this.store.values()].filter((s) => s.membra.includes(animaId))
+  }
+}
+
 function makeApi() {
   const modorum = new MemoryModorum()
   const actorum = new MemoryActorum()
@@ -79,8 +99,9 @@ function makeApi() {
   const collectiones = new MemCollectionum()
   const collectioCursor = new CollectioCursor((inc: Inceptio) => dispatchInceptio(deps, inc), collectiones, actorum, {})
 
-  const api = new CrystalApi({ collectiones, collectioCursor, modorum, actorum } as unknown as CrystalApiDeps)
-  return { api, modorum, actorum, signorum, cursor, collectiones }
+  const sodalitates = new MemSodalitatum()
+  const api = new CrystalApi({ collectiones, collectioCursor, modorum, actorum, sodalitatum: sodalitates } as unknown as CrystalApiDeps)
+  return { api, modorum, actorum, signorum, cursor, collectiones, sodalitates }
 }
 
 test('collect(): fans a base modus over a 2-axis grid into N runs, each woven + run', async () => {
@@ -226,4 +247,76 @@ test('collect({ dna: true }): every produced piece has a unique trait combinatio
   assert.equal(cursor.runs.length, 4)
   const dnas = new Set(cursor.runs.map((a) => String(a._dna)))
   assert.equal(dnas.size, 4, 'all four pieces have unique DNA')
+})
+
+// =============================================================================
+// Teams (Sodalitas) + team-owned collections + per-artifact split
+// =============================================================================
+
+test('createTeam(): founder is the first member; getTeam is member-scoped', async () => {
+  const { api } = makeApi()
+  const team = await api.createTeam({ animaId: 'anima-1' }, { nomen: 'Studio', members: ['anima-2'] })
+  assert.equal(team.founder, 'anima-1')
+  assert.deepEqual(team.members.sort(), ['anima-1', 'anima-2'])
+
+  // A member can read it; a non-member gets a 404.
+  assert.equal((await api.getTeam({ animaId: 'anima-2' }, team.id)).id, team.id)
+  await assert.rejects(() => api.getTeam({ animaId: 'outsider' }, team.id), /not found/i)
+})
+
+test('addTeamMember / removeTeamMember; founder cannot be removed', async () => {
+  const { api } = makeApi()
+  const team = await api.createTeam({ animaId: 'anima-1' }, { nomen: 'Studio' })
+  const withBob = await api.addTeamMember({ animaId: 'anima-1' }, team.id, 'bob')
+  assert.ok(withBob.members.includes('bob'))
+  // idempotent
+  const again = await api.addTeamMember({ animaId: 'anima-1' }, team.id, 'bob')
+  assert.equal(again.members.filter((m) => m === 'bob').length, 1)
+
+  const withoutBob = await api.removeTeamMember({ animaId: 'bob' }, team.id, 'bob')
+  assert.ok(!withoutBob.members.includes('bob'))
+  await assert.rejects(() => api.removeTeamMember({ animaId: 'anima-1' }, team.id, 'anima-1'), /founder/i)
+})
+
+test('teams require an identified account (no anonymous commitments)', async () => {
+  const { api } = makeApi()
+  await assert.rejects(() => api.createTeam({ commitment: 'c1' }, { nomen: 'x' }), /identified/i)
+})
+
+test('collect({ teamId }): team members all own it + equal-weight owners snapshot', async () => {
+  const { api, modorum, signorum } = makeApi()
+  await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const team = await api.createTeam({ animaId: 'anima-1' }, { nomen: 'Studio', members: ['anima-2', 'anima-3'] })
+
+  const col = await api.collect({ animaId: 'anima-1' }, {
+    modusId: 'sd1-5', total: 2, teamId: team.id,
+    aditusBase: { _basePrompt: 'a {{color}} cat' },
+    tractus: [{ porta: 'color', valores: [{ value: 'red', promptFragment: 'red' }, { value: 'blue', promptFragment: 'blue' }] }],
+  })
+
+  // Equal-weight split over the three members.
+  assert.equal(col.owners?.length, 3)
+  for (const o of col.owners!) assert.ok(Math.abs(o.weight - 1 / 3) < 1e-9)
+
+  // Any team member can fetch it; a non-member cannot.
+  assert.equal((await api.getCollection({ animaId: 'anima-3' }, col.id)).id, col.id)
+  await assert.rejects(() => api.getCollection({ animaId: 'stranger' }, col.id), /not found/i)
+})
+
+test('collect({ teamId }): non-member cannot own-by-team', async () => {
+  const { api, modorum, signorum } = makeApi()
+  await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
+  await signorum.issue({ animaId: 'intruder', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const team = await api.createTeam({ animaId: 'anima-1' }, { nomen: 'Studio' })
+  await assert.rejects(
+    () => api.collect({ animaId: 'intruder' }, {
+      modusId: 'sd1-5', total: 1, teamId: team.id,
+      aditusBase: { _basePrompt: 'a cat' },
+      tractus: [{ porta: 'color', valores: [{ value: 'red', promptFragment: 'red' }] }],
+    }),
+    /not found/i,
+  )
 })

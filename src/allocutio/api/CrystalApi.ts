@@ -35,14 +35,15 @@ import { aggregateStatus, materiaStudioStatus } from '../lexicon/status/aggregat
 import type { ModoStore } from '../../types/modo.js'
 import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModus.js'
 import { dispatchInceptio, type DispatchDeps } from '../../execution/dispatchInceptio.js'
-import { toRun, toCollection } from './runProjection.js'
+import { toRun, toCollection, toTeam } from './runProjection.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
 import { Errors } from './errors.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { computeRecipient } from '../../arcanum/prover.js'
 import { impetusForPodMs } from '../../ledger/rates.js'
-import type { Run, Collection } from './types.js'
+import type { Run, Collection, Team } from './types.js'
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
+import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 import { provenanceHash } from '../../crystal/provenance.js'
 import { rarityReport, type RarityReport } from '../../crystal/rarityReport.js'
@@ -86,6 +87,8 @@ export interface CrystalApiDeps {
    *  Absent → collection ops unavailable. */
   collectiones?: Collectionum
   collectioCursor?: Pick<CollectioCursor, 'start' | 'extend' | 'approveActum' | 'rejectAndRevive' | 'pause' | 'resume'>
+  /** Team store — backs the team CRUD + team-owned collections. Absent → team ops unavailable. */
+  sodalitatum?: Sodalitatum
   /** RunPod pod provisioner for TEE private compute sessions. Absent → local dev (manual runner). */
   teeProvisioner?: TeeProvisioner
 }
@@ -106,6 +109,12 @@ export interface CollectOpts {
   nomen?: string
   /** Opt-in DNA uniqueness — no two pieces share a trait combination (see Collectio.dna). */
   dna?: boolean
+  /**
+   * Own this collection by a team (Sodalitas) instead of the individual caller.
+   * The caller must be a member. Snapshots an equal-weight `owners` split from
+   * the team's membership at creation.
+   */
+  teamId?: string
 }
 
 /** Where to send a run: an explicit modusId OR a canon verb to resolve. */
@@ -242,7 +251,18 @@ export class CrystalApi {
   async collect(auctor: AuctorKey, opts: CollectOpts): Promise<Collection> {
     const { collectiones, collectioCursor } = this.deps
     if (!collectiones || !collectioCursor) throw Errors.notFoundCollection('collections')
+
+    // The caller is always the concrete funding identity. A team overlay
+    // (sodalitasId + a snapshotted owners split) layers shared ownership on top.
     const by = this._collectionBy(auctor)
+    let sodalitasId: string | undefined
+    let owners: Collectio['owners']
+    if (opts.teamId !== undefined) {
+      const team = await this._memberTeam(auctor, opts.teamId)
+      sodalitasId = team.id
+      // Snapshot an equal-weight split across the team's membership.
+      owners = team.membra.map((animaId) => ({ animaId, weight: 1 / team.membra.length }))
+    }
 
     const aditusBase = opts.aditusBase ?? {}
     // Pin the provenance hash to the flow version when the modus is known.
@@ -262,6 +282,8 @@ export class CrystalApi {
       numerus: opts.total,
       provenanceHash: provenance,
       by,
+      ...(sodalitasId !== undefined ? { sodalitasId } : {}),
+      ...(owners !== undefined ? { owners } : {}),
       concurrentia: opts.concurrentia ?? 3,
       ...(opts.dna !== undefined ? { dna: opts.dna } : {}),
       status: 'nascens',
@@ -298,7 +320,8 @@ export class CrystalApi {
   /** List the caller's Collections. */
   async listCollections(auctor: AuctorKey): Promise<Collection[]> {
     const all = (await this.deps.collectiones?.list()) ?? []
-    return all.filter((c) => this._ownsCollection(auctor, c)).map(toCollection)
+    const owned = await Promise.all(all.map(async (c) => ((await this._ownsCollection(auctor, c)) ? c : null)))
+    return owned.filter((c): c is Collectio => c !== null).map(toCollection)
   }
 
   /**
@@ -345,6 +368,65 @@ export class CrystalApi {
     await this.deps.collectioCursor?.rejectAndRevive(id, actumId)
   }
 
+  // ── Teams (Sodalitas) ───────────────────────────────────────────────────────
+
+  /**
+   * Create a team — a Sodalitas the caller founds and is the first member of.
+   * `members` are additional Anima ids to seed (the caller is always included).
+   * Teams require an identified (animaId) caller.
+   */
+  async createTeam(auctor: AuctorKey, opts: { nomen: string; members?: string[] }): Promise<Team> {
+    const animaId = this._teamAnimaId(auctor)
+    const store = this._teamStore()
+    const membra = [...new Set([animaId, ...(opts.members ?? [])])]
+    return toTeam(await store.create({ nomen: opts.nomen, auctor: animaId, membra }))
+  }
+
+  /** Fetch a team — members-only. */
+  async getTeam(auctor: AuctorKey, id: string): Promise<Team> {
+    return toTeam(await this._memberTeam(auctor, id))
+  }
+
+  /** List the caller's teams (every Sodalitas they are a member of). */
+  async listTeams(auctor: AuctorKey): Promise<Team[]> {
+    const animaId = this._teamAnimaId(auctor)
+    return (await this._teamStore().listByMember(animaId)).map(toTeam)
+  }
+
+  /** Add a member to a team — members-only. Idempotent. */
+  async addTeamMember(auctor: AuctorKey, id: string, animaId: string): Promise<Team> {
+    const team = await this._memberTeam(auctor, id)
+    if (team.membra.includes(animaId)) return toTeam(team)
+    return toTeam(await this._teamStore().update(id, { membra: [...team.membra, animaId] }))
+  }
+
+  /** Remove a member from a team — members-only. The `auctor` (founder) cannot be removed. */
+  async removeTeamMember(auctor: AuctorKey, id: string, animaId: string): Promise<Team> {
+    const team = await this._memberTeam(auctor, id)
+    if (animaId === team.auctor) throw Errors.authForbidden('the team founder cannot be removed')
+    return toTeam(await this._teamStore().update(id, { membra: team.membra.filter((m) => m !== animaId) }))
+  }
+
+  private _teamStore(): Sodalitatum {
+    const store = this.deps.sodalitatum
+    if (!store) throw Errors.notFoundTeam('teams')
+    return store
+  }
+
+  /** Teams are animaId-keyed — anonymous (commitment/bursa) callers cannot own or join them. */
+  private _teamAnimaId(auctor: AuctorKey): string {
+    if ('animaId' in auctor) return auctor.animaId
+    throw Errors.authForbidden('teams require an identified account')
+  }
+
+  /** Resolve a team the caller is a member of, or 404. */
+  private async _memberTeam(auctor: AuctorKey, id: string): Promise<Sodalitas> {
+    const animaId = this._teamAnimaId(auctor)
+    const team = await this._teamStore().find(id)
+    if (!team || !team.membra.includes(animaId)) throw Errors.notFoundTeam(id)
+    return team
+  }
+
   /** A Collectio owns by `{animaId}|{commitment}` only — bursaToken/proof have no persistent owner record. */
   private _collectionBy(auctor: AuctorKey): Collectio['by'] {
     if ('animaId' in auctor) return { animaId: auctor.animaId }
@@ -352,15 +434,21 @@ export class CrystalApi {
     throw Errors.authForbidden('Collections require an identified or commitment account')
   }
 
-  private _ownsCollection(auctor: AuctorKey, c: Collectio): boolean {
-    if ('animaId' in auctor && 'animaId' in c.by) return c.by.animaId === auctor.animaId
-    if ('commitment' in auctor && 'commitment' in c.by) return c.by.commitment === auctor.commitment
+  private async _ownsCollection(auctor: AuctorKey, c: Collectio): Promise<boolean> {
+    // Direct owner (the funding identity).
+    if ('animaId' in auctor && 'animaId' in c.by && c.by.animaId === auctor.animaId) return true
+    if ('commitment' in auctor && 'commitment' in c.by && c.by.commitment === auctor.commitment) return true
+    // Team overlay: every member of the Sodalitas owns it.
+    if ('animaId' in auctor && c.sodalitasId !== undefined) {
+      const team = await this.deps.sodalitatum?.find(c.sodalitasId)
+      return team?.membra.includes(auctor.animaId) ?? false
+    }
     return false
   }
 
   private async _ownedCollection(auctor: AuctorKey, id: string): Promise<Collectio> {
     const c = await this.deps.collectiones?.find(id)
-    if (!c || !this._ownsCollection(auctor, c)) throw Errors.notFoundCollection(id)
+    if (!c || !(await this._ownsCollection(auctor, c))) throw Errors.notFoundCollection(id)
     return c
   }
 

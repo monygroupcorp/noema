@@ -35,6 +35,20 @@ export interface Run {
 export type CollectionStatus = 'pending' | 'running' | 'complete' | 'cancelled'
 
 /**
+ * Team — the public projection of a Sodalitas (a fellowship of Animae that
+ * co-owns work). JSON-safe; `createdAt` is ISO-8601.
+ */
+export interface Team {
+  id: string
+  nomen: string
+  /** Member Anima ids (includes the founder). */
+  members: string[]
+  /** The founder's Anima id. */
+  founder: string
+  createdAt: string
+}
+
+/**
  * Collection — the public projection of a Collectio (a generated collection /
  * batch) for the HTTP API. The internal Collectio is keyed by `numerus` /
  * `completae` / `fractae` and a Latin status; this is the JSON-safe English face.
@@ -48,6 +62,8 @@ export interface Collection {
   total: number
   /** Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash. */
   provenanceHash: string
+  /** Per-artifact ownership split (team-owned collections only) — animaId → weight (sum 1). */
+  owners?: Array<{ animaId: string; weight: number }>
   /** Pieces completed so far. */
   completed: number
   /** Pieces failed so far. */

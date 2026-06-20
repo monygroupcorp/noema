@@ -9,7 +9,8 @@
 
 import type { Actum, ActumStatus } from '../../types/actum.js'
 import type { Collectio, CollectioStatus } from '../../types/collectio.js'
-import type { Run, RunStatus, Collection, CollectionStatus } from './types.js'
+import type { Sodalitas } from '../../types/sodalitas.js'
+import type { Run, RunStatus, Collection, CollectionStatus, Team } from './types.js'
 
 /** Map the Latin ActumStatus onto the public English RunStatus. */
 const STATUS_MAP: Record<ActumStatus, RunStatus> = {
@@ -69,8 +70,20 @@ export function toCollection(c: Collectio): Collection {
     failed: c.fractae,
   }
   if (c.nomen !== undefined) out.nomen = c.nomen
+  if (c.owners !== undefined) out.owners = c.owners
   if (c.impetusTotal !== undefined) out.cost = c.impetusTotal.toString()
   if (c.natum !== undefined) out.createdAt = c.natum.toISOString()
   if (c.completum !== undefined) out.completedAt = c.completum.toISOString()
   return out
+}
+
+/** Project a Sodalitas onto its public, JSON-safe Team shape. Pure. */
+export function toTeam(s: Sodalitas): Team {
+  return {
+    id: s.id,
+    nomen: s.nomen,
+    members: s.membra,
+    founder: s.auctor,
+    createdAt: s.natum.toISOString(),
+  }
 }

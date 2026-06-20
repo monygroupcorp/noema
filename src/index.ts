@@ -609,6 +609,7 @@ async function main(): Promise<void> {
     compositusCursor: ring.compositusCursor,
     collectiones: ring.collectiones,
     collectioCursor: ring.collectioCursor,
+    sodalitatum: ring.sodalitates,
     ...(ring.conductor ? { conductor: ring.conductor } : {}),
     ...(ring.teeProvisioner ? { teeProvisioner: ring.teeProvisioner } : {}),
     // Fire-and-forget studio-ready/failed webhook (optional sugar over polling).

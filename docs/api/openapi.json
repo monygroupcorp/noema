@@ -1402,6 +1402,25 @@
                           "type": "string",
                           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
                         },
+                        "owners": {
+                          "type": "array",
+                          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "animaId": {
+                                "type": "string"
+                              },
+                              "weight": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "animaId",
+                              "weight"
+                            ]
+                          }
+                        },
                         "completed": {
                           "type": "number",
                           "description": "Pieces completed so far."
@@ -1550,6 +1569,10 @@
                   "dna": {
                     "type": "boolean",
                     "description": "Opt-in DNA uniqueness — no two pieces share a trait combination (across non-bypassDNA axes). Default false."
+                  },
+                  "teamId": {
+                    "type": "string",
+                    "description": "Own this collection by a team (Sodalitas) the caller is a member of — snapshots an equal-weight owners split."
                   }
                 },
                 "required": [
@@ -1614,6 +1637,25 @@
                           "provenanceHash": {
                             "type": "string",
                             "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                          },
+                          "owners": {
+                            "type": "array",
+                            "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "animaId": {
+                                  "type": "string"
+                                },
+                                "weight": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "animaId",
+                                "weight"
+                              ]
+                            }
                           },
                           "completed": {
                             "type": "number",
@@ -1721,6 +1763,25 @@
                         "provenanceHash": {
                           "type": "string",
                           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
+                        "owners": {
+                          "type": "array",
+                          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "animaId": {
+                                "type": "string"
+                              },
+                              "weight": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "animaId",
+                              "weight"
+                            ]
+                          }
                         },
                         "completed": {
                           "type": "number",
@@ -1949,6 +2010,25 @@
                           "type": "string",
                           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
                         },
+                        "owners": {
+                          "type": "array",
+                          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "animaId": {
+                                "type": "string"
+                              },
+                              "weight": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "animaId",
+                              "weight"
+                            ]
+                          }
+                        },
                         "completed": {
                           "type": "number",
                           "description": "Pieces completed so far."
@@ -2085,6 +2165,25 @@
                           "type": "string",
                           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
                         },
+                        "owners": {
+                          "type": "array",
+                          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "animaId": {
+                                "type": "string"
+                              },
+                              "weight": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "animaId",
+                              "weight"
+                            ]
+                          }
+                        },
                         "completed": {
                           "type": "number",
                           "description": "Pieces completed so far."
@@ -2201,6 +2300,25 @@
                           "type": "string",
                           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
                         },
+                        "owners": {
+                          "type": "array",
+                          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "animaId": {
+                                "type": "string"
+                              },
+                              "weight": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "animaId",
+                              "weight"
+                            ]
+                          }
+                        },
                         "completed": {
                           "type": "number",
                           "description": "Pieces completed so far."
@@ -2316,6 +2434,25 @@
                         "provenanceHash": {
                           "type": "string",
                           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
+                        "owners": {
+                          "type": "array",
+                          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "animaId": {
+                                "type": "string"
+                              },
+                              "weight": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "animaId",
+                              "weight"
+                            ]
+                          }
                         },
                         "completed": {
                           "type": "number",
@@ -2502,6 +2639,467 @@
           }
         ]
       }
+    },
+    "/teams": {
+      "post": {
+        "summary": "Create a team (Sodalitas) — a fellowship of Animae that co-owns work. The caller becomes the founder and first member.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "team": {
+                      "type": "object",
+                      "description": "A team (Sodalitas) — a fellowship of Animae that co-owns work.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "nomen": {
+                          "type": "string",
+                          "description": "The team display name."
+                        },
+                        "members": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Member Anima ids (includes the founder)."
+                        },
+                        "founder": {
+                          "type": "string",
+                          "description": "The founder's Anima id."
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "nomen",
+                        "members",
+                        "founder",
+                        "createdAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "team"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Create a team. The caller becomes the founder and first member.",
+                "properties": {
+                  "nomen": {
+                    "type": "string",
+                    "description": "The team display name."
+                  },
+                  "members": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Additional member Anima ids to seed."
+                  }
+                },
+                "required": [
+                  "nomen"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List the caller's teams (every team they are a member of).",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "teams": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "A team (Sodalitas) — a fellowship of Animae that co-owns work.",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "nomen": {
+                            "type": "string",
+                            "description": "The team display name."
+                          },
+                          "members": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Member Anima ids (includes the founder)."
+                          },
+                          "founder": {
+                            "type": "string",
+                            "description": "The founder's Anima id."
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "nomen",
+                          "members",
+                          "founder",
+                          "createdAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "teams"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/teams/{id}": {
+      "get": {
+        "summary": "Fetch one team by id. Member-scoped (404 if not a member).",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "team": {
+                      "type": "object",
+                      "description": "A team (Sodalitas) — a fellowship of Animae that co-owns work.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "nomen": {
+                          "type": "string",
+                          "description": "The team display name."
+                        },
+                        "members": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Member Anima ids (includes the founder)."
+                        },
+                        "founder": {
+                          "type": "string",
+                          "description": "The founder's Anima id."
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "nomen",
+                        "members",
+                        "founder",
+                        "createdAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "team"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/teams/{id}/members": {
+      "post": {
+        "summary": "Add a member to a team. Member-scoped; idempotent.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "team": {
+                      "type": "object",
+                      "description": "A team (Sodalitas) — a fellowship of Animae that co-owns work.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "nomen": {
+                          "type": "string",
+                          "description": "The team display name."
+                        },
+                        "members": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Member Anima ids (includes the founder)."
+                        },
+                        "founder": {
+                          "type": "string",
+                          "description": "The founder's Anima id."
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "nomen",
+                        "members",
+                        "founder",
+                        "createdAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "team"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Add a member to a team.",
+                "properties": {
+                  "animaId": {
+                    "type": "string",
+                    "description": "The Anima id to add."
+                  }
+                },
+                "required": [
+                  "animaId"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/teams/{id}/members/{animaId}": {
+      "delete": {
+        "summary": "Remove a member from a team (the founder cannot be removed). Member-scoped.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "team": {
+                      "type": "object",
+                      "description": "A team (Sodalitas) — a fellowship of Animae that co-owns work.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "nomen": {
+                          "type": "string",
+                          "description": "The team display name."
+                        },
+                        "members": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Member Anima ids (includes the founder)."
+                        },
+                        "founder": {
+                          "type": "string",
+                          "description": "The founder's Anima id."
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "nomen",
+                        "members",
+                        "founder",
+                        "createdAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "team"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "animaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -2651,6 +3249,10 @@
     },
     {
       "code": "not_found.collection",
+      "httpStatus": 404
+    },
+    {
+      "code": "not_found.team",
       "httpStatus": 404
     },
     {
