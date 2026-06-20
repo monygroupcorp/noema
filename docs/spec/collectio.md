@@ -1,6 +1,6 @@
 # Collectio — spec
 
-**Status:** build-order #1 + #2 SHIPPED (2026-06-19); #3–7 remain.
+**Status:** build-order #1 + #2 + #3 SHIPPED (2026-06-19); #4–7 remain.
 The canonical spec for the collection / batch-generation feature. Build against this.
 
 **#1 done — `CrystalApi.collect()` + `/v1/collectiones` routes** (create/list/get/pause/resume/cancel +
@@ -214,7 +214,12 @@ lives in a layer we control (and charge for), sidestepping the messy on-chain/tr
    `rarityReport()` gives target-vs-realized per-axis rarity (`GET /v1/collectiones/:id/rarity`);
    opt-in `Collectio.dna` enforces trait-combination uniqueness (TraitMixer salted reroll +
    per-axis `bypassDNA`; cursor tracks the ledger + stamps `_dna` for rehydrate). All hermetic-tested.
-3. **Collaborative-flow model** (`§4c`/`§4f`) — incremental batches + **teams** + per-artifact split.
+3. ✅ **DONE — Collaborative-flow model** (`§4c`/`§4f`): **incremental batches** (`extendCollection` /
+   `POST …/:id/extend` re-opens a collection toward a larger target); **teams** = a new lean `Sodalitas`
+   primitive (flat membership; team CRUD + `/v1/teams`; distinct from the economic `Animarum`);
+   **per-artifact split** = `owners[]` snapshotted equal-weight from team membership at create, with a
+   `sodalitasId` ownership overlay on the Collectio (funding stays on `by`). Roles/permissions + a pooled
+   team ledger + split-payout wiring deferred (the latter lands with freeze/mint). All hermetic-tested.
 4. **Deterministic runtimes** (`§4a`) — layer-composite + ffmpeg. Net-new, but reusable far beyond NFT
    (content pipelines at large).
 5. **Export + freeze** (`§4b`/`§4e`) — agnostic metadata + adapters (incl. native launchpad), the freeze
