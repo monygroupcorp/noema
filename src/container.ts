@@ -47,6 +47,8 @@ import { OpenAICursor } from './crystal/OpenAICursor.js'
 import { HuggingFaceCursor } from './crystal/HuggingFaceCursor.js'
 import { LayerCompositeCursor } from './crystal/LayerCompositeCursor.js'
 import { JimpLayerCompositeEngine } from './crystal/LayerCompositeEngine.js'
+import { FfmpegCursor } from './crystal/FfmpegCursor.js'
+import { SpawnFfmpegEngine } from './crystal/FfmpegEngine.js'
 import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
@@ -376,12 +378,17 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   // Host-side deterministic processing runtimes (spec §4a). They produce bytes
   // ON the host, so they need R2 to host the result — gate registration on it.
   if (config.runpodR2) {
-    const compositeCursor = new LayerCompositeCursor({
+    const uploader = new R2Uploader(config.runpodR2)
+    cursorum.register('composite', new LayerCompositeCursor({
       engine: new JimpLayerCompositeEngine(),
       fetcher: httpMediaFetcher,
-      uploader: new R2Uploader(config.runpodR2),
-    })
-    cursorum.register('composite', compositeCursor)
+      uploader,
+    }))
+    cursorum.register('ffmpeg', new FfmpegCursor({
+      engine: new SpawnFfmpegEngine(),
+      fetcher: httpMediaFetcher,
+      uploader,
+    }))
   }
 
   const completor = new ActumCompletor({ acta: actorum, signorum, terminatePod: config.terminatePod })

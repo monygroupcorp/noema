@@ -6,10 +6,18 @@ import {
   MODUS_DALLE_III,
   MODUS_JOYCAPTION,
   MODUS_LAYER_COMPOSITE,
+  MODUS_FRAMES_TO_VIDEO,
 } from '../../../../src/crystal/seeds/modi.js'
 
-test('CANONICAL_MODI contains four entries', () => {
-  assert.equal(CANONICAL_MODI.length, 4)
+test('CANONICAL_MODI contains five entries', () => {
+  assert.equal(CANONICAL_MODI.length, 5)
+})
+
+test('frames-to-video modus is host-side (ministerium ffmpeg, sync, video out)', () => {
+  assert.equal(MODUS_FRAMES_TO_VIDEO.ministerium, 'ffmpeg')
+  assert.equal(MODUS_FRAMES_TO_VIDEO.deliveryMode, 'sync')
+  assert.equal(MODUS_FRAMES_TO_VIDEO.aditus.frames?.type, 'text')
+  assert.equal(MODUS_FRAMES_TO_VIDEO.exitus.video?.type, 'video')
 })
 
 test('layer-composite modus is host-side (ministerium composite, sync, no fixed cost)', () => {

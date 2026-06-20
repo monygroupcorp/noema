@@ -114,9 +114,35 @@ export const MODUS_LAYER_COMPOSITE: Modus = make({
   mutatum: new Date('2026-06-19'),
 })
 
+export const MODUS_FRAMES_TO_VIDEO: Modus = make({
+  id: 'modus.frames-to-video',
+  nomen: 'Frames → Video — assemble frames into an animation',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  ministerium: 'ffmpeg',
+  deliveryMode: 'sync',
+  canonica: true,
+  // Host-side deterministic processing — no GPU, no per-second pod cost.
+
+  aditus: {
+    // `text` so an array of frame URLs passes validateAditus intact. Playback order.
+    frames: { type: 'text', required: true,  description: 'Ordered frame image URLs (array or single URL)' },
+    fps:    { type: 'int',  required: false, default: 12,    description: 'Frames per second (1–60)' },
+    format: { type: 'text', required: false, default: 'mp4', description: 'Output container: mp4 or webm' },
+  },
+
+  exitus: {
+    video: { type: 'video', description: 'The assembled animation' },
+  },
+
+  natum:   new Date('2026-06-19'),
+  mutatum: new Date('2026-06-19'),
+})
+
 export const CANONICAL_MODI: Modus[] = [
   MODUS_CHATGPT,
   MODUS_DALLE_III,
   MODUS_JOYCAPTION,
   MODUS_LAYER_COMPOSITE,
+  MODUS_FRAMES_TO_VIDEO,
 ]
