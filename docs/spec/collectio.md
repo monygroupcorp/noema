@@ -100,16 +100,29 @@ rarity ticks up, review propagates, and co-authors see each other. The lenses ar
 
 ## 3. Current state (what's already built)
 
+Foundations (pre-#1):
 - **Types** `Collectio` / `Tractus` / `TraitValor` (`src/types/collectio.ts`): trait grid, weighted
   `rarity`, `promptFragment`, `excludes`, `tags`.
 - **`TraitMixer.selectForPiece`** — weighted-random selection, exclusions, tag-rules, `{{porta}}`
   prompt assembly, NFT-standard `attributes[]` per piece.
-- **`CollectioCursor`** — fan-out with concurrency, **review/approve + reject-and-reroll**
-  (`reviewEnabled`, `approveActum`, `rejectAndRevive`, `pendingReview`), pause/resume,
+- **`CollectioCursor`** — fan-out with concurrency, **review/approve + reject-and-reroll**, pause/resume,
   restart-rehydrate.
-- **Stores** `MongoCollectio` / `MongoCollectionum` in the ring; the webhook loop-back is wired
-  (`collectioRouter: ring.collectioCursor` → `onActumCompleta`).
-- **The one gap:** nothing calls `collectioCursor.start` — there is no launch surface.
+- **Stores** `MongoCollectio` / `MongoCollectionum` in the ring; webhook loop-back wired.
+
+Shipped this build-out (#1–#4, 2026-06-19):
+- **#1 launch surface** — `CrystalApi.collect()` + `/v1/collectiones` (create/list/get/extend/pause/
+  resume/cancel + per-piece review) + MCP `collect`/`get_collection`/`list_collections`; the dispatch
+  fix that made `CollectioCursor` actually RUN pieces (cook-over-spell falls out for free).
+- **#2 integrity/observability** — `provenanceHash` (content-address of the gen config), `rarityReport()`
+  (target-vs-realized, `GET …/:id/rarity`), opt-in DNA dedup (`Collectio.dna` + per-axis `bypassDNA`,
+  `TraitMixer` salted reroll).
+- **#3 collaborative-flow** — incremental batches (`extendCollection` / `POST …/:id/extend`); **teams** =
+  the lean `Sodalitas` primitive (flat membership, `/v1/teams`); per-artifact `owners[]` split snapshot
+  (equal, provisional — finalized at freeze) via a `sodalitasId` overlay (funding stays on `by`).
+  Review accounting corrected: rejected pieces count `reiectae`, not `fractae`.
+- **#4 deterministic runtimes** — host-side cursors (by `ministerium`, sync, no GPU): **layer-composite**
+  (jimp z-order; `modus.layer-composite`) and **ffmpeg** (bounded ops; `frames-to-video`;
+  `modus.frames-to-video`), on a shared `MediaFetcher` + host-side `R2Uploader` foundation.
 
 ## 4. Feature spec
 
@@ -117,33 +130,40 @@ rarity ticks up, review propagates, and co-authors see each other. The lenses ar
 
 ### 4a. Generation pipeline (per-piece)
 - ✅ AI prompt-driven (traits → prompt → generative modus).
-- 🟠 **Layer compositing** — a deterministic `runtime` + a composite step modus (z-order PNG layers;
-  the "trait" is an image layer). Reuses the trait grid; the selected layer files composite per piece.
-- 🟠 **ffmpeg post-processing** — a deterministic `runtime` for content pipelines (video/audio/image).
+- ✅ **Layer compositing** (#4) — host-side `LayerCompositeCursor` (ministerium `composite`) + jimp
+  z-order PNG flatten; `modus.layer-composite` takes ordered layer URLs (`layers`) → image.
+- ✅ **ffmpeg post-processing** (#4) — host-side `FfmpegCursor` (ministerium `ffmpeg`), **bounded ops
+  only** (no raw args); `frames-to-video` (mp4/webm) shipped; `modus.frames-to-video`. transcode/trim/etc
+  are localized engine additions later.
 - The pipeline is a **compositus**; a Collectio expands it. Pure-AI / pure-layer / hybrid all fall out.
+- 🟡 *Open seam:* binding a trait grid's per-axis image selections into the `layers`/`frames` ordered list
+  is the Canvas layer-authoring concern (§2d), not yet wired — the runtimes consume the list directly.
 
 ### 4b. Trait grid + selection
 - ✅ weighted `rarity`, `excludes` (invalid combinations), `tags` (group mutual-exclusion), prompt
   fragments.
-- 🟡 **DNA uniqueness dedup** — no duplicate trait combinations; per-axis `bypassDNA` (ignore an axis
-  in the uniqueness check, e.g. background). Verify/extend `selectForPiece`.
-- 🟡 **Forced / guaranteed combinations** and **1/1 inserts** (hand-made uniques placed into the run).
+- ✅ **DNA uniqueness dedup** (#2) — opt-in `Collectio.dna`; `TraitMixer` rerolls a colliding piece with a
+  salted seed until unique; per-axis `bypassDNA`. Cursor tracks the ledger + stamps `_dna` for rehydrate.
+- 🟡 **Forced / guaranteed combinations** and **1/1 inserts** (hand-made uniques placed into the run) —
+  not yet built (lands with #5 export/freeze).
 
 ### 4c. Collaborative process
-- ✅ review/approve + reject-and-reroll (surface it).
-- 🟠 **Multi-author access** — `Collectio.by` (single) → a collaborator/access model (multiple authors
-  generate, review, manage one Collectio).
-- 🟡 **Incremental batches** — dispatch X at a time toward a larger target, on demand, over time
-  (batch-dispatch mode over the current all-at-once `numerus`).
+- ✅ review/approve + reject-and-reroll, surfaced via `POST …/:id/pieces/:actumId/{approve,reject}`.
+  Rejected pieces count `reiectae` (≠ `fractae`) and extend the dispatch budget by one (a replacement
+  is generated) — surfaced as `Collection.rejected`.
+- ✅ **Multi-author access** (#3) — team ownership via the `sodalitasId` overlay; every `Sodalitas` member
+  owns + can review/observe the Collectio (extend is funder-only until a pooled team ledger exists).
+- ✅ **Incremental batches** (#3) — `extendCollection(id, addCount)` raises the target and dispatches the
+  delta, re-opening a completed Collectio. (Funder-only; team-pooled funding deferred.)
 
 ### 4d. Integrity + observability
-- 🟡 **Provenance hash** — content-address the generative config `{ modusId+modusVersiono, tractus,
-  aditusBase }` → a `provenanceHash` on the Collectio. Any trait/weight/flow change → new hash → a
-  provably different input/version. (This is the NFT "provenance hash" + our content-addressing ethos.)
-- 🟡 **Imagined vs realized rarity** — target (`TraitValor.rarity`, normalized) vs actual
-  (count of each value across produced pieces / total, from the stamped `attributes[]`). Surface both
-  so a creator sees "target 1% vs current 0.4% (3/750)" and can reroll/adjust. Drift is expected at low N.
-- ✅/🟡 progress (`completae`/`fractae`/`numerus`), cost (`impetusTotal`) — have; surface via observe.
+- ✅ **Provenance hash** (#2) — `provenanceHash()` content-addresses `{ modusId+versio, tractus,
+  aditusBase }` → `sha256:…` on every Collectio (bigint-safe). Surfaced on the public `Collection`.
+- ✅ **Imagined vs realized rarity** (#2) — `rarityReport()`: per-axis target (`TraitValor.rarity`,
+  normalized) vs realized (counted from the stamped `attributes[]` of completed, non-rejected pieces).
+  `GET /v1/collectiones/:id/rarity`. Drift is expected at low N.
+- ✅ progress (`completae`/`fractae`/`reiectae`/`numerus`), cost (`impetusTotal`) — surfaced via the
+  public `Collection` (`completed`/`failed`/`rejected`/`total`/`cost`) + observe.
 
 ### 4e. Export + mint (agnostic metadata, projected on export)
 - 🟠 **Agnostic metadata + export adapters** — same discipline as `projectExitus`: store ONE canonical,
@@ -158,6 +178,10 @@ rarity ticks up, review propagates, and co-authors see each other. The lenses ar
   → *then* mint. Never conflated with generation.
 
 ### 4f. Ownership & teams (DECIDED: teams)
+- ✅ **Built (#3):** the `Sodalitas` team primitive (flat membership; team CRUD + `/v1/teams`) + the
+  per-artifact `owners[]` split snapshot (equal weights at create, via the `sodalitasId` overlay). Still
+  **pending:** the on-chain **split payout** wiring into the royalty hooks + the **freeze** re-snapshot
+  (both land with #5/#6) — and a pooled team ledger (so any member, not just the funder, can spend).
 - **Teams own the project.** A team is the shared collaborative-identity construct (mutable membership);
   it owns the *workspace* and the work that accrues in it.
 - **The Collectio owns the on-chain — via the freeze.** At export the Collectio snapshots the team's
