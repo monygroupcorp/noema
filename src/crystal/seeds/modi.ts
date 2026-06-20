@@ -88,8 +88,35 @@ export const MODUS_JOYCAPTION: Modus = make({
   mutatum: new Date('2025-01-01'),
 })
 
+export const MODUS_LAYER_COMPOSITE: Modus = make({
+  id: 'modus.layer-composite',
+  nomen: 'Layer Composite — z-order image compositing',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  ministerium: 'composite',
+  deliveryMode: 'sync',
+  canonica: true,
+  // Host-side deterministic processing — no GPU, no per-second pod cost.
+
+  aditus: {
+    // Declared `text` so an array of URLs passes validateAditus intact (arrays
+    // pass through for text ports). Bottom→top z-order.
+    layers: { type: 'text', required: true,  description: 'Ordered image layer URLs, bottom→top (array or single URL)' },
+    width:  { type: 'int',  required: false, description: 'Canvas width in px (default: widest layer)' },
+    height: { type: 'int',  required: false, description: 'Canvas height in px (default: tallest layer)' },
+  },
+
+  exitus: {
+    image: { type: 'image', description: 'The flattened composite PNG' },
+  },
+
+  natum:   new Date('2026-06-19'),
+  mutatum: new Date('2026-06-19'),
+})
+
 export const CANONICAL_MODI: Modus[] = [
   MODUS_CHATGPT,
   MODUS_DALLE_III,
   MODUS_JOYCAPTION,
+  MODUS_LAYER_COMPOSITE,
 ]

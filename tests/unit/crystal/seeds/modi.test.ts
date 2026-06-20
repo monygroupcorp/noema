@@ -5,10 +5,19 @@ import {
   MODUS_CHATGPT,
   MODUS_DALLE_III,
   MODUS_JOYCAPTION,
+  MODUS_LAYER_COMPOSITE,
 } from '../../../../src/crystal/seeds/modi.js'
 
-test('CANONICAL_MODI contains three entries', () => {
-  assert.equal(CANONICAL_MODI.length, 3)
+test('CANONICAL_MODI contains four entries', () => {
+  assert.equal(CANONICAL_MODI.length, 4)
+})
+
+test('layer-composite modus is host-side (ministerium composite, sync, no fixed cost)', () => {
+  assert.equal(MODUS_LAYER_COMPOSITE.ministerium, 'composite')
+  assert.equal(MODUS_LAYER_COMPOSITE.deliveryMode, 'sync')
+  assert.equal(MODUS_LAYER_COMPOSITE.impetusFixum, undefined)
+  assert.equal(MODUS_LAYER_COMPOSITE.aditus.layers?.type, 'text')
+  assert.equal(MODUS_LAYER_COMPOSITE.exitus.image?.type, 'image')
 })
 
 test('chatgpt modus has ministerium openai and deliveryMode sync', () => {
