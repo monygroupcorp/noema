@@ -17,10 +17,12 @@ function makeCollectio(overrides: Partial<Collectio> = {}): Collectio {
     aditusBase: {},
     tractus: [],
     numerus: 3,
+    provenanceHash: 'sha256:test',
     by: { animaId: 'anima-1' },
     acta: [],
     completae: 0,
     fractae: 0,
+    reiectae: 0,
     concurrentia: 2,
     impetusTotal: 0n,
     status: 'nascens',
@@ -55,7 +57,7 @@ function makeCollectionum(initial?: Collectio): CollectionumStub {
       return [...store.values()].filter(c => c.status === status)
     },
     async create(input) {
-      const c = { ...input, id: 'col-auto', natum: new Date(), acta: [], completae: 0, fractae: 0, impetusTotal: 0n } as Collectio
+      const c = { ...input, id: 'col-auto', natum: new Date(), acta: [], completae: 0, fractae: 0, reiectae: 0, impetusTotal: 0n } as Collectio
       store.set(c.id, c)
       return c
     },
@@ -512,6 +514,49 @@ test('rejectAndRevive() new piece _pieceIndex is >= collectio.numerus', async ()
   const lastCall = inceptor.calls[inceptor.calls.length - 1]
   const revivePieceIndex = lastCall.aditus._pieceIndex as number
   assert.ok(revivePieceIndex >= 3, `_pieceIndex ${revivePieceIndex} should be >= numerus (3)`)
+})
+
+// ── Test 16b: rejectAndRevive() bumps reiectae, NOT fractae ───────────────────
+
+test('rejectAndRevive() counts the piece as reiectae (rejected), never fractae (failed)', async () => {
+  const collectio = makeCollectio({ numerus: 3, concurrentia: 2 })
+  const collectiones = makeCollectionum(collectio)
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(inceptor.dispatch, collectiones, inceptor.actorum, { reviewEnabled: true })
+
+  await cursor.start(collectio)
+  await cursor.onActumCompleta('col-1', 'actum-0', true) // → pending review
+  await cursor.rejectAndRevive('col-1', 'actum-0')
+
+  const reiectaeUpdate = collectiones.updates.find(u => u.patch.reiectae !== undefined)
+  assert.ok(reiectaeUpdate, 'reject should bump reiectae')
+  assert.equal(reiectaeUpdate.patch.reiectae, 1)
+  assert.ok(
+    !collectiones.updates.some(u => u.patch.fractae !== undefined),
+    'reject must NOT touch fractae (that is for genuine generation failures)',
+  )
+})
+
+// ── Test 16c: early reject does NOT skip undispatched original pieces ──────────
+
+test('rejectAndRevive() before all originals dispatch does not skip any (no index gap)', async () => {
+  // concurrentia: 1 forces pieces to dispatch one-at-a-time, so a reject can land
+  // while originals (index 2) are still undispatched — the case the old nextIndex
+  // bump silently skipped.
+  const collectio = makeCollectio({ numerus: 3, concurrentia: 1 })
+  const collectiones = makeCollectionum(collectio)
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(inceptor.dispatch, collectiones, inceptor.actorum, { reviewEnabled: true })
+
+  await cursor.start(collectio)                            // dispatch piece 0
+  await cursor.onActumCompleta('col-1', 'actum-0', true)   // pending; dispatch piece 1
+  await cursor.rejectAndRevive('col-1', 'actum-0')         // reject early (piece 2 not yet dispatched)
+  await cursor.onActumCompleta('col-1', 'actum-1', true)   // pending; dispatch piece 2 (NOT skipped)
+  await cursor.onActumCompleta('col-1', 'actum-2', true)   // pending; dispatch piece 3 (the replacement)
+  await cursor.onActumCompleta('col-1', 'actum-3', true)   // pending; budget exhausted
+
+  const indexes = inceptor.calls.map(c => c.aditus._pieceIndex as number).sort((a, b) => a - b)
+  assert.deepEqual(indexes, [0, 1, 2, 3], 'every original (0,1,2) plus one replacement (3) — nothing skipped')
 })
 
 // ── Test 17: TraitMixer integration ──────────────────────────────────────────

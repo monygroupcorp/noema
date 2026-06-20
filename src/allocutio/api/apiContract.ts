@@ -515,13 +515,14 @@ const CollectionSchema: JsonSchema = {
         required: ['animaId', 'weight'],
       },
     },
-    completed: { type: 'number', description: 'Pieces completed so far.' },
-    failed: { type: 'number', description: 'Pieces failed so far.' },
+    completed: { type: 'number', description: 'Pieces completed so far (approved, when review is on).' },
+    failed: { type: 'number', description: 'Pieces that failed to generate so far.' },
+    rejected: { type: 'number', description: 'Pieces a reviewer rejected so far (distinct from failed).' },
     cost: { type: 'string', description: 'Total impetus across completed pieces, serialised as a string.' },
     createdAt: { type: 'string', format: 'date-time', description: 'When the collection started.' },
     completedAt: { type: 'string', format: 'date-time', description: 'When it finished (or was cancelled).' },
   },
-  required: ['id', 'status', 'modusId', 'total', 'provenanceHash', 'completed', 'failed'],
+  required: ['id', 'status', 'modusId', 'total', 'provenanceHash', 'completed', 'failed', 'rejected'],
 }
 
 /** The `{ collection }` envelope returned by the collection operations. */

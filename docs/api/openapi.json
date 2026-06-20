@@ -1423,11 +1423,15 @@
                         },
                         "completed": {
                           "type": "number",
-                          "description": "Pieces completed so far."
+                          "description": "Pieces completed so far (approved, when review is on)."
                         },
                         "failed": {
                           "type": "number",
-                          "description": "Pieces failed so far."
+                          "description": "Pieces that failed to generate so far."
+                        },
+                        "rejected": {
+                          "type": "number",
+                          "description": "Pieces a reviewer rejected so far (distinct from failed)."
                         },
                         "cost": {
                           "type": "string",
@@ -1451,7 +1455,8 @@
                         "total",
                         "provenanceHash",
                         "completed",
-                        "failed"
+                        "failed",
+                        "rejected"
                       ]
                     }
                   },
@@ -1659,11 +1664,15 @@
                           },
                           "completed": {
                             "type": "number",
-                            "description": "Pieces completed so far."
+                            "description": "Pieces completed so far (approved, when review is on)."
                           },
                           "failed": {
                             "type": "number",
-                            "description": "Pieces failed so far."
+                            "description": "Pieces that failed to generate so far."
+                          },
+                          "rejected": {
+                            "type": "number",
+                            "description": "Pieces a reviewer rejected so far (distinct from failed)."
                           },
                           "cost": {
                             "type": "string",
@@ -1687,7 +1696,8 @@
                           "total",
                           "provenanceHash",
                           "completed",
-                          "failed"
+                          "failed",
+                          "rejected"
                         ]
                       }
                     }
@@ -1785,11 +1795,15 @@
                         },
                         "completed": {
                           "type": "number",
-                          "description": "Pieces completed so far."
+                          "description": "Pieces completed so far (approved, when review is on)."
                         },
                         "failed": {
                           "type": "number",
-                          "description": "Pieces failed so far."
+                          "description": "Pieces that failed to generate so far."
+                        },
+                        "rejected": {
+                          "type": "number",
+                          "description": "Pieces a reviewer rejected so far (distinct from failed)."
                         },
                         "cost": {
                           "type": "string",
@@ -1813,7 +1827,8 @@
                         "total",
                         "provenanceHash",
                         "completed",
-                        "failed"
+                        "failed",
+                        "rejected"
                       ]
                     }
                   },
@@ -2031,11 +2046,15 @@
                         },
                         "completed": {
                           "type": "number",
-                          "description": "Pieces completed so far."
+                          "description": "Pieces completed so far (approved, when review is on)."
                         },
                         "failed": {
                           "type": "number",
-                          "description": "Pieces failed so far."
+                          "description": "Pieces that failed to generate so far."
+                        },
+                        "rejected": {
+                          "type": "number",
+                          "description": "Pieces a reviewer rejected so far (distinct from failed)."
                         },
                         "cost": {
                           "type": "string",
@@ -2059,7 +2078,8 @@
                         "total",
                         "provenanceHash",
                         "completed",
-                        "failed"
+                        "failed",
+                        "rejected"
                       ]
                     }
                   },
@@ -2186,11 +2206,15 @@
                         },
                         "completed": {
                           "type": "number",
-                          "description": "Pieces completed so far."
+                          "description": "Pieces completed so far (approved, when review is on)."
                         },
                         "failed": {
                           "type": "number",
-                          "description": "Pieces failed so far."
+                          "description": "Pieces that failed to generate so far."
+                        },
+                        "rejected": {
+                          "type": "number",
+                          "description": "Pieces a reviewer rejected so far (distinct from failed)."
                         },
                         "cost": {
                           "type": "string",
@@ -2214,7 +2238,8 @@
                         "total",
                         "provenanceHash",
                         "completed",
-                        "failed"
+                        "failed",
+                        "rejected"
                       ]
                     }
                   },
@@ -2321,11 +2346,15 @@
                         },
                         "completed": {
                           "type": "number",
-                          "description": "Pieces completed so far."
+                          "description": "Pieces completed so far (approved, when review is on)."
                         },
                         "failed": {
                           "type": "number",
-                          "description": "Pieces failed so far."
+                          "description": "Pieces that failed to generate so far."
+                        },
+                        "rejected": {
+                          "type": "number",
+                          "description": "Pieces a reviewer rejected so far (distinct from failed)."
                         },
                         "cost": {
                           "type": "string",
@@ -2349,7 +2378,8 @@
                         "total",
                         "provenanceHash",
                         "completed",
-                        "failed"
+                        "failed",
+                        "rejected"
                       ]
                     }
                   },
@@ -2456,11 +2486,15 @@
                         },
                         "completed": {
                           "type": "number",
-                          "description": "Pieces completed so far."
+                          "description": "Pieces completed so far (approved, when review is on)."
                         },
                         "failed": {
                           "type": "number",
-                          "description": "Pieces failed so far."
+                          "description": "Pieces that failed to generate so far."
+                        },
+                        "rejected": {
+                          "type": "number",
+                          "description": "Pieces a reviewer rejected so far (distinct from failed)."
                         },
                         "cost": {
                           "type": "string",
@@ -2484,7 +2518,8 @@
                         "total",
                         "provenanceHash",
                         "completed",
-                        "failed"
+                        "failed",
+                        "rejected"
                       ]
                     }
                   },

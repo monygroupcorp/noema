@@ -68,6 +68,7 @@ export function toCollection(c: Collectio): Collection {
     provenanceHash: c.provenanceHash,
     completed: c.completae,
     failed: c.fractae,
+    rejected: c.reiectae ?? 0,
   }
   if (c.nomen !== undefined) out.nomen = c.nomen
   if (c.owners !== undefined) out.owners = c.owners

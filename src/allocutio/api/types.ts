@@ -64,10 +64,12 @@ export interface Collection {
   provenanceHash: string
   /** Per-artifact ownership split (team-owned collections only) — animaId → weight (sum 1). */
   owners?: Array<{ animaId: string; weight: number }>
-  /** Pieces completed so far. */
+  /** Pieces completed so far (approved, when review is on). */
   completed: number
-  /** Pieces failed so far. */
+  /** Pieces that failed to generate so far. */
   failed: number
+  /** Pieces a reviewer rejected so far (distinct from failed). */
+  rejected: number
   /** Total impetus across completed pieces, serialised as a string. */
   cost?: string
   /** When the collection started, ISO-8601. */
