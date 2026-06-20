@@ -264,12 +264,16 @@ export class CrystalApi {
       owners = team.membra.map((animaId) => ({ animaId, weight: 1 / team.membra.length }))
     }
 
-    const aditusBase = opts.aditusBase ?? {}
-    // Pin the provenance hash to the flow version when the modus is known.
+    // Validate the flow up front — a bogus modusId would otherwise create a
+    // collection whose every piece fails at dispatch. (Mirrors invokeFlow/quote.)
     const modus = await this.deps.modorum.find(opts.modusId)
+    if (!modus) throw Errors.notFoundFlow(opts.modusId)
+
+    const aditusBase = opts.aditusBase ?? {}
+    // Pin the provenance hash to the resolved flow version.
     const provenance = provenanceHash({
       modusId: opts.modusId,
-      ...(modus?.versio !== undefined ? { modusVersio: modus.versio } : {}),
+      modusVersio: modus.versio,
       tractus: opts.tractus,
       aditusBase,
     })
@@ -320,8 +324,18 @@ export class CrystalApi {
   /** List the caller's Collections. */
   async listCollections(auctor: AuctorKey): Promise<Collection[]> {
     const all = (await this.deps.collectiones?.list()) ?? []
-    const owned = await Promise.all(all.map(async (c) => ((await this._ownsCollection(auctor, c)) ? c : null)))
-    return owned.filter((c): c is Collectio => c !== null).map(toCollection)
+    // Resolve the caller's team ids ONCE (not one lookup per collection).
+    const teamIds =
+      'animaId' in auctor && this.deps.sodalitatum
+        ? new Set((await this.deps.sodalitatum.listByMember(auctor.animaId)).map((t) => t.id))
+        : new Set<string>()
+    return all.filter((c) => this._ownsCollectionWith(auctor, c, teamIds)).map(toCollection)
+  }
+
+  /** Synchronous ownership check given a precomputed set of the caller's team ids. */
+  private _ownsCollectionWith(auctor: AuctorKey, c: Collectio, teamIds: Set<string>): boolean {
+    if (this._isFunder(auctor, c)) return true
+    return c.sodalitasId !== undefined && teamIds.has(c.sodalitasId)
   }
 
   /**
@@ -330,9 +344,23 @@ export class CrystalApi {
    * larger goal over time). Re-opens a completed Collection. Owner-scoped.
    */
   async extendCollection(auctor: AuctorKey, id: string, addCount: number): Promise<Collection> {
-    await this._ownedCollection(auctor, id)
+    const c = await this._ownedCollection(auctor, id)
+    // Extending dispatches new pieces funded by the collection's `by` (the
+    // creator). Only that funder may extend — otherwise a team member could
+    // spend the creator's balance. Pooled-funding extend arrives with the team
+    // ledger (deferred).
+    if (!this._isFunder(auctor, c)) {
+      throw Errors.authForbidden('only the collection funder can extend it (team-pooled funding is not yet available)')
+    }
     await this.deps.collectioCursor?.extend(id, addCount)
     return toCollection((await this.deps.collectiones!.find(id))!)
+  }
+
+  /** Whether the caller is the concrete funding identity of a collection (its `by`). */
+  private _isFunder(auctor: AuctorKey, c: Collectio): boolean {
+    if ('animaId' in auctor && 'animaId' in c.by) return c.by.animaId === auctor.animaId
+    if ('commitment' in auctor && 'commitment' in c.by) return c.by.commitment === auctor.commitment
+    return false
   }
 
   /** Pause dispatching new pieces (in-flight finish). Owner-scoped. */
@@ -436,8 +464,7 @@ export class CrystalApi {
 
   private async _ownsCollection(auctor: AuctorKey, c: Collectio): Promise<boolean> {
     // Direct owner (the funding identity).
-    if ('animaId' in auctor && 'animaId' in c.by && c.by.animaId === auctor.animaId) return true
-    if ('commitment' in auctor && 'commitment' in c.by && c.by.commitment === auctor.commitment) return true
+    if (this._isFunder(auctor, c)) return true
     // Team overlay: every member of the Sodalitas owns it.
     if ('animaId' in auctor && c.sodalitasId !== undefined) {
       const team = await this.deps.sodalitatum?.find(c.sodalitasId)

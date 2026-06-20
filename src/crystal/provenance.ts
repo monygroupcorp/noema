@@ -30,6 +30,9 @@ export interface ProvenanceInput {
  * meaningful — e.g. tractus order drives prompt assembly).
  */
 function canonicalise(value: unknown): unknown {
+  // bigint is not JSON-serialisable — tag it stably (a trait value may be a
+  // token amount). Distinct from the numeric string so 1n ≠ "1".
+  if (typeof value === 'bigint') return `bigint:${value.toString()}`
   if (value === null || typeof value !== 'object') return value
   if (Array.isArray(value)) return value.map(canonicalise)
   const obj = value as Record<string, unknown>

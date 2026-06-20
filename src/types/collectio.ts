@@ -93,7 +93,9 @@ export interface Collectio {
   aditusBase: Record<string, unknown>
   /** The parameter grid axes — each tractus is one dimension of variation */
   tractus: Tractus[]
-  /** Total number of combinations = product of all tractus.valores.length */
+  /** Target piece count for the run (the requested total; grows when extended).
+   *  NOT the size of the combination grid — with weighted/duplicate selection a
+   *  collection may target more or fewer pieces than there are combinations. */
   numerus: number
 
   /**
@@ -121,9 +123,10 @@ export interface Collectio {
 
   /**
    * Per-artifact ownership split, snapshotted from the owning team's membership
-   * at creation (equal weights by default; weights sum to 1). The provenance of
-   * who shares in the artifact — re-snapshotted at freeze (later). Absent for
-   * single-owner (non-team) collections.
+   * at creation (equal weights, each `1/n`; floating-point so they sum to ~1).
+   * A PROVISIONAL record of who shares in the artifact — the exact, canonical
+   * on-chain split (integer basis points) is re-snapshotted at freeze (later).
+   * Absent for single-owner (non-team) collections.
    */
   owners?: Array<{ animaId: string; weight: number }>
 

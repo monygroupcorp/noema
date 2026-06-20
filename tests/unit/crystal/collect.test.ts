@@ -216,6 +216,19 @@ test('extendCollection(): re-opens a completed collection and fires another batc
   assert.deepEqual([...indexes].sort((a, b) => Number(a) - Number(b)), [0, 1, 2, 3, 4])
 })
 
+test('collect(): unknown modusId is rejected up front', async () => {
+  const { api, signorum } = makeApi()
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+  await assert.rejects(
+    () => api.collect({ animaId: 'anima-1' }, {
+      modusId: 'does-not-exist', total: 1,
+      aditusBase: { _basePrompt: 'x' },
+      tractus: [{ porta: 'color', valores: [{ value: 'red', promptFragment: 'red' }] }],
+    }),
+    /not found/i,
+  )
+})
+
 test('extendCollection(): owner-scoped — non-owner cannot extend', async () => {
   const { api, modorum, signorum } = makeApi()
   await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
@@ -303,6 +316,26 @@ test('collect({ teamId }): team members all own it + equal-weight owners snapsho
   // Any team member can fetch it; a non-member cannot.
   assert.equal((await api.getCollection({ animaId: 'anima-3' }, col.id)).id, col.id)
   await assert.rejects(() => api.getCollection({ animaId: 'stranger' }, col.id), /not found/i)
+})
+
+test('extendCollection(): a team member who is not the funder cannot extend (no cross-spend)', async () => {
+  const { api, modorum, signorum } = makeApi()
+  await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const team = await api.createTeam({ animaId: 'anima-1' }, { nomen: 'Studio', members: ['anima-2'] })
+  const col = await api.collect({ animaId: 'anima-1' }, {
+    modusId: 'sd1-5', total: 1, teamId: team.id,
+    aditusBase: { _basePrompt: 'a {{color}} cat' },
+    tractus: [{ porta: 'color', valores: [{ value: 'red', promptFragment: 'red' }] }],
+  })
+
+  // anima-2 co-owns it (can read) but did not fund it → cannot extend.
+  assert.equal((await api.getCollection({ animaId: 'anima-2' }, col.id)).id, col.id)
+  await assert.rejects(() => api.extendCollection({ animaId: 'anima-2' }, col.id, 2), /funder/i)
+  // The funder can.
+  const extended = await api.extendCollection({ animaId: 'anima-1' }, col.id, 2)
+  assert.equal(extended.total, 3)
 })
 
 test('collect({ teamId }): non-member cannot own-by-team', async () => {
