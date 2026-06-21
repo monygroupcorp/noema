@@ -1,6 +1,8 @@
 # Publishing (Editio) — spec
 
-**Status:** FINALIZED (2026-06-21) — build-order #1 (feed) ready; nothing built yet. The canonical spec for
+**Status:** build-order #1 (feed) SHIPPED (2026-06-21) — `Editio`/`Editionum` spine + `FeedAdapter` +
+async moderation gate + `POST /v1/editiones` / `GET /v1/feed`, hermetic-green, never live-verified on GPUs.
+#2–6 not started. The canonical spec for
 **publishing as a first-class arm of the application**: routing any artifact the platform produces
 (a gen, a trained model, a collection drop) to any destination (our feed, our buckets, HuggingFace,
 user custody, on-chain mint, external marketplaces) under a chosen visibility/custody/rights
@@ -166,11 +168,14 @@ gen uses that model (the ChainEngine royalty surface). So:
 
 ✅ have · 🟡 lean add · 🟠 new build
 
-1. 🟠 **Spine + feed bite** — `Editio` + `Editionum` + the adapter interface + a `FeedAdapter` + the
-   `visibility` flag + one account default. **Publish an `Actum` to our feed.** Cheapest slice that stands
-   up the whole spine; immediate advertisement value; the on-ramp to Vestigium. **Hard gate:**
-   `visibility:'feed'|'marketplace'` MUST route through the trust-boundary moderation (CSAM scan/NCMEC,
-   per the compliance posture) before going public — designed in from line one, not bolted on.
+1. ✅ **Spine + feed bite** — SHIPPED 2026-06-21. `Editio` (`src/types/editio.ts`) + `Editionum`
+   (`MongoEditionum`) + `PublicationAdapter` + `ModerationGate` interfaces + a `FeedAdapter` + `visibility`/
+   `custody` + `PublishingPrefs` on `Anima` (`publicatio`). `CrystalApi.publish/feed/retractEdition`;
+   `POST /v1/editiones`, `POST /v1/editiones/:id/retract`, `GET /v1/feed`. **Hard gate honoured:** public
+   surfaces (`feed`/`marketplace`) go `pending` → async moderation `scan` → `published` | `rejected`, never a
+   synchronous publish — the gate is injected as an interface; the **real CSAM/NCMEC scanner is still unbuilt**,
+   so the container wires `permissiveModerationGate` (a structural no-op that preserves the async-gate path).
+   §5d reconciler is a documented write-through seam (`_reconcile`) — a no-op until intella publishing (#3).
 2. 🟠 **Bucket / hosting custody** — `BucketAdapter` (R2, public-hosted or private) + `unlisted` (link)
    visibility. Establishes custody=`nostra`. This is the substrate living NFTs later reuse (we serve the
    `tokenURI`).

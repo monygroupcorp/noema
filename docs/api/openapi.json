@@ -2675,6 +2675,465 @@
         ]
       }
     },
+    "/editiones": {
+      "post": {
+        "summary": "Publish an artifact (an Actum for #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate — never a synchronous publish to public. Unspecified fields default from the caller`s publishing prefs.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "edition": {
+                      "type": "object",
+                      "description": "The public projection of an Editio — a publication record referencing a canonical artifact.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "artifact": {
+                          "type": "object",
+                          "description": "The canonical artifact being published (referenced, never copied).",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "actum",
+                                "intella",
+                                "collectio"
+                              ],
+                              "description": "Which artifact kind."
+                            },
+                            "id": {
+                              "type": "string",
+                              "description": "The artifact's id."
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "id"
+                          ]
+                        },
+                        "destination": {
+                          "type": "string",
+                          "description": "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …"
+                        },
+                        "visibility": {
+                          "type": "string",
+                          "enum": [
+                            "private",
+                            "unlisted",
+                            "feed",
+                            "marketplace"
+                          ]
+                        },
+                        "custody": {
+                          "type": "string",
+                          "enum": [
+                            "ours",
+                            "theirs",
+                            "both"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "published",
+                            "rejected",
+                            "failed",
+                            "retracted"
+                          ],
+                          "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+                        },
+                        "externalRef": {
+                          "type": "string",
+                          "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
+                        },
+                        "owners": {
+                          "type": "array",
+                          "description": "Rights split snapshot (team-owned only) — weights sum to ~1.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "animaId": {
+                                "type": "string"
+                              },
+                              "weight": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "animaId",
+                              "weight"
+                            ]
+                          }
+                        },
+                        "license": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "artifact",
+                        "destination",
+                        "visibility",
+                        "custody",
+                        "status",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "edition"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Publish an artifact (an Actum for build-order #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate. Unspecified fields default from the caller`s Anima publishing prefs.",
+                "properties": {
+                  "artifact": {
+                    "type": "object",
+                    "description": "The canonical artifact being published (referenced, never copied).",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "actum",
+                          "intella",
+                          "collectio"
+                        ],
+                        "description": "Which artifact kind."
+                      },
+                      "id": {
+                        "type": "string",
+                        "description": "The artifact's id."
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "id"
+                    ]
+                  },
+                  "destination": {
+                    "type": "string",
+                    "description": "Adapter key (e.g. 'feed'). Defaults from prefs, then 'feed'."
+                  },
+                  "visibility": {
+                    "type": "string",
+                    "enum": [
+                      "private",
+                      "unlisted",
+                      "feed",
+                      "marketplace"
+                    ],
+                    "description": "Public-exposure surface."
+                  },
+                  "custody": {
+                    "type": "string",
+                    "enum": [
+                      "ours",
+                      "theirs",
+                      "both"
+                    ],
+                    "description": "Who holds the bytes/metadata."
+                  },
+                  "license": {
+                    "type": "string",
+                    "description": "License tag — 'catalog' (our liability) | a BYO license id."
+                  },
+                  "teamId": {
+                    "type": "string",
+                    "description": "Snapshot a rights split from a team (Sodalitas) the caller is a member of."
+                  }
+                },
+                "required": [
+                  "artifact"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/editiones/{id}/retract": {
+      "post": {
+        "summary": "Retract a publication where the destination allows it (feed/bucket = revocable; mint = permanent → 403). Author-scoped.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "edition": {
+                      "type": "object",
+                      "description": "The public projection of an Editio — a publication record referencing a canonical artifact.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "artifact": {
+                          "type": "object",
+                          "description": "The canonical artifact being published (referenced, never copied).",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "actum",
+                                "intella",
+                                "collectio"
+                              ],
+                              "description": "Which artifact kind."
+                            },
+                            "id": {
+                              "type": "string",
+                              "description": "The artifact's id."
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "id"
+                          ]
+                        },
+                        "destination": {
+                          "type": "string",
+                          "description": "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …"
+                        },
+                        "visibility": {
+                          "type": "string",
+                          "enum": [
+                            "private",
+                            "unlisted",
+                            "feed",
+                            "marketplace"
+                          ]
+                        },
+                        "custody": {
+                          "type": "string",
+                          "enum": [
+                            "ours",
+                            "theirs",
+                            "both"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "published",
+                            "rejected",
+                            "failed",
+                            "retracted"
+                          ],
+                          "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+                        },
+                        "externalRef": {
+                          "type": "string",
+                          "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
+                        },
+                        "owners": {
+                          "type": "array",
+                          "description": "Rights split snapshot (team-owned only) — weights sum to ~1.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "animaId": {
+                                "type": "string"
+                              },
+                              "weight": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "animaId",
+                              "weight"
+                            ]
+                          }
+                        },
+                        "license": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "artifact",
+                        "destination",
+                        "visibility",
+                        "custody",
+                        "status",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "edition"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/feed": {
+      "get": {
+        "summary": "The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact`s produced output. Query: visibility, destination, limit.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "feed": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "A published feed entry — the Editio plus the referenced artifact`s produced output.",
+                        "properties": {
+                          "editionId": {
+                            "type": "string",
+                            "description": "The Editio id (the feed entry id)."
+                          },
+                          "artifact": {
+                            "type": "object",
+                            "description": "The canonical artifact being published (referenced, never copied).",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "actum",
+                                  "intella",
+                                  "collectio"
+                                ],
+                                "description": "Which artifact kind."
+                              },
+                              "id": {
+                                "type": "string",
+                                "description": "The artifact's id."
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id"
+                            ]
+                          },
+                          "output": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "The artifact's produced output (an Actum's exitus media), when resolvable."
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "editionId",
+                          "artifact",
+                          "createdAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "feed"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/teams": {
       "post": {
         "summary": "Create a team (Sodalitas) — a fellowship of Animae that co-owns work. The caller becomes the founder and first member.",
@@ -3291,8 +3750,20 @@
       "httpStatus": 404
     },
     {
+      "code": "not_found.edition",
+      "httpStatus": 404
+    },
+    {
+      "code": "not_found.adapter",
+      "httpStatus": 404
+    },
+    {
       "code": "not_found.run",
       "httpStatus": 404
+    },
+    {
+      "code": "input.unsupported_artifact",
+      "httpStatus": 422
     },
     {
       "code": "economy.insufficient_signa",

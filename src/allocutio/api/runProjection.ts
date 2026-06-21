@@ -9,8 +9,9 @@
 
 import type { Actum, ActumStatus } from '../../types/actum.js'
 import type { Collectio, CollectioStatus } from '../../types/collectio.js'
+import type { Editio } from '../../types/editio.js'
 import type { Sodalitas } from '../../types/sodalitas.js'
-import type { Run, RunStatus, Collection, CollectionStatus, Team } from './types.js'
+import type { Run, RunStatus, Collection, CollectionStatus, Team, Edition } from './types.js'
 
 /** Map the Latin ActumStatus onto the public English RunStatus. */
 const STATUS_MAP: Record<ActumStatus, RunStatus> = {
@@ -75,6 +76,24 @@ export function toCollection(c: Collectio): Collection {
   if (c.impetusTotal !== undefined) out.cost = c.impetusTotal.toString()
   if (c.natum !== undefined) out.createdAt = c.natum.toISOString()
   if (c.completum !== undefined) out.completedAt = c.completum.toISOString()
+  return out
+}
+
+/** Project an Editio onto its public, JSON-safe Edition shape. Pure. */
+export function toEdition(e: Editio): Edition {
+  const out: Edition = {
+    id: e.id,
+    artifact: { kind: e.artifactRef.kind, id: e.artifactRef.id },
+    destination: e.destination,
+    visibility: e.visibility,
+    custody: e.custody,
+    status: e.status,
+    createdAt: e.natum.toISOString(),
+    updatedAt: e.mutatum.toISOString(),
+  }
+  if (e.externalRef !== undefined) out.externalRef = e.externalRef
+  if (e.owners !== undefined) out.owners = e.owners
+  if (e.license !== undefined) out.license = e.license
   return out
 }
 
