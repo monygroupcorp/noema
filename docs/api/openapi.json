@@ -3785,10 +3785,6 @@
       "httpStatus": 404
     },
     {
-      "code": "input.unsupported_artifact",
-      "httpStatus": 422
-    },
-    {
       "code": "economy.insufficient_signa",
       "httpStatus": 402
     },
