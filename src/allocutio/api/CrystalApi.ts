@@ -531,7 +531,7 @@ export class CrystalApi {
     const e = await editiones.find(editioId)
     if (!e || e.status !== 'pending') return
 
-    const artifact = { ref: e.artifactRef, output: await this._artifactOutput(e.artifactRef) }
+    const artifact = { ref: e.artifactRef, output: await this._artifactOutput(e.artifactRef), editioId: e.id }
     if (e.visibility === 'feed' || e.visibility === 'marketplace') {
       const verdict = await this._moderationGate().scan(artifact)
       if (!verdict.ok) {

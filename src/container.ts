@@ -52,6 +52,9 @@ import { FfmpegCursor } from './crystal/FfmpegCursor.js'
 import { SpawnFfmpegEngine } from './crystal/FfmpegEngine.js'
 import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
+import { FeedAdapter } from './crystal/FeedAdapter.js'
+import { BucketAdapter } from './crystal/BucketAdapter.js'
+import type { PublicationAdapter } from './crystal/PublicationAdapter.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
 import { ActumCompletor } from './execution/ActumCompletor.js'
 import { ActumInceptor } from './execution/ActumInceptor.js'
@@ -91,6 +94,8 @@ export interface Ring {
   collectiones: Collectionum
   /** Publication records (Editio) — backs the publishing spine + feed. */
   editiones: Editionum
+  /** Registered publication adapters (FeedAdapter always; BucketAdapter when R2 is configured). */
+  publicationAdapters: PublicationAdapter[]
   sodalitates: Sodalitatum
   tabulae: Tabularum
   testimonia: Testimoniorum
@@ -381,6 +386,10 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     cursorum.register('huggingface', hfCursor)
   }
 
+  // Publication adapters (spec §5b): the feed needs nothing; the bucket adapter
+  // needs R2 (custody=ours hosting) so it is gated on config below.
+  const publicationAdapters: PublicationAdapter[] = [new FeedAdapter()]
+
   // Host-side deterministic processing runtimes (spec §4a). They produce bytes
   // ON the host, so they need R2 to host the result — gate registration on it.
   if (config.runpodR2) {
@@ -395,6 +404,8 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
       fetcher: httpMediaFetcher,
       uploader,
     }))
+    // Bucket custody (publishing #2): re-hosts an artifact's media to R2.
+    publicationAdapters.push(new BucketAdapter({ fetcher: httpMediaFetcher, store: uploader }))
   }
 
   const completor = new ActumCompletor({ acta: actorum, signorum, terminatePod: config.terminatePod })
@@ -428,7 +439,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   return {
     actorum, modorum, signorum, animae, personae, vestigiorum, modos,
-    mandatores, corpora, collectiones, editiones, sodalitates, tabulae, testimonia,
+    mandatores, corpora, collectiones, editiones, publicationAdapters, sodalitates, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
     cursorum, completor, inceptor, arcanumIssuer,

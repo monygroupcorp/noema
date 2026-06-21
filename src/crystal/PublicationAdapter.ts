@@ -31,6 +31,12 @@ export interface PublishArtifact {
   ref: ArtifactRef
   /** The artifact's produced output — e.g. an Actum's `exitus` (media urls). */
   output?: Record<string, unknown>
+  /**
+   * The publication record's id (the `Editio.id`). Lets an adapter mint a STABLE
+   * per-publication handle/key (so `retract` can target the same bytes) rather than
+   * a random one. Used by the bucket/mint adapters; the feed adapter ignores it.
+   */
+  editioId?: string
 }
 
 /**

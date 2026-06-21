@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
 import type { R2Config } from './comfyrunnerClient.js'
 
 // =============================================================================
@@ -15,8 +15,19 @@ export interface Uploader {
   put(key: string, bytes: Buffer, contentType: string): Promise<string>
 }
 
+/**
+ * ObjectStore — an Uploader that can also DELETE. The publishing `BucketAdapter`
+ * needs deletion to honour `retract` (feed/bucket = revocable: unpublish removes
+ * the hosted bytes — spec §8/§9). Kept distinct from `Uploader` so the put-only
+ * cursors (LayerComposite/Ffmpeg) are unaffected.
+ */
+export interface ObjectStore extends Uploader {
+  /** Delete the object at `key`. Idempotent (deleting a missing key is fine). */
+  del(key: string): Promise<void>
+}
+
 /** The real uploader — Cloudflare R2 via the S3 API (same R2Config the pods use). */
-export class R2Uploader implements Uploader {
+export class R2Uploader implements ObjectStore {
   private readonly s3: S3Client
 
   constructor(private readonly cfg: R2Config) {
@@ -33,5 +44,9 @@ export class R2Uploader implements Uploader {
     )
     const base = (this.cfg.publicUrl ?? `${this.cfg.endpoint}/${this.cfg.bucket}`).replace(/\/$/, '')
     return `${base}/${key}`
+  }
+
+  async del(key: string): Promise<void> {
+    await this.s3.send(new DeleteObjectCommand({ Bucket: this.cfg.bucket, Key: key }))
   }
 }
