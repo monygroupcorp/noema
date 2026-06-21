@@ -2,39 +2,31 @@ import type { SignumHook } from '../../types/nexus.js'
 
 const MODEL_ROYALTY_RATE = 5n   // 5% of impetus, split equally
 
+const WEIGHT_SCALE = 1_000_000   // weights are floats (0..1); scale to integers for exact bigint math
+
 export const modelRoyaltyHook: SignumHook<'execution_spend'> = async (event) => {
-  const { impetus, intellaAuctorAnimaIds, intellaRoyaltyPayees } = event.payload
-  if (impetus === 0n) return []
+  const { impetus, intellaRoyaltyPayees } = event.payload
+  if (impetus === 0n || !intellaRoyaltyPayees?.length) return []
 
   const pool = (impetus * MODEL_ROYALTY_RATE) / 100n
   if (pool === 0n) return []
 
-  // A weighted split (a published Editio's owners[]) takes precedence — the
-  // publishing layer owns who-earns (publishing.md §5e). Each payee gets
-  // pool * (weight / Σweight); rounding dust stays unspent (as with the floor below).
-  if (intellaRoyaltyPayees?.length) {
-    const total = intellaRoyaltyPayees.reduce((s, p) => s + (p.weight > 0 ? p.weight : 0), 0)
-    if (total <= 0) return []
-    return intellaRoyaltyPayees
-      .filter(p => p.weight > 0)
-      .map(p => ({
-        animaId: p.animaId,
-        forma: 'reward' as const,
-        valor: (pool * BigInt(Math.round((p.weight / total) * 1_000_000))) / 1_000_000n,
-        auctor: 'nexus:modelRoyalty' as const,
-      }))
-      .filter(s => s.valor > 0n)
-  }
+  // Split the pool across the payees by weight: valor = pool × wᵢ / Σw, in pure
+  // bigint after scaling the float weights to integers. Equal weights reduce to an
+  // exact pool/n floor; unequal weights honour a published Editio.owners[] split
+  // (publishing.md §5e). Floor-division dust stays unspent.
+  const scaled = intellaRoyaltyPayees
+    .map(p => ({ animaId: p.animaId, w: BigInt(Math.round((p.weight > 0 ? p.weight : 0) * WEIGHT_SCALE)) }))
+    .filter(p => p.w > 0n)
+  const total = scaled.reduce((s, p) => s + p.w, 0n)
+  if (total === 0n) return []
 
-  // Fallback: equal split across the model authors.
-  if (!intellaAuctorAnimaIds?.length) return []
-  const share = pool / BigInt(intellaAuctorAnimaIds.length)
-  if (share === 0n) return []
-
-  return intellaAuctorAnimaIds.map(animaId => ({
-    animaId,
-    forma: 'reward' as const,
-    valor: share,
-    auctor: 'nexus:modelRoyalty',
-  }))
+  return scaled
+    .map(p => ({
+      animaId: p.animaId,
+      forma: 'reward' as const,
+      valor: (pool * p.w) / total,
+      auctor: 'nexus:modelRoyalty' as const,
+    }))
+    .filter(s => s.valor > 0n)
 }

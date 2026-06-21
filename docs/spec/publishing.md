@@ -204,13 +204,14 @@ gen uses that model (the ChainEngine royalty surface). So:
    record: an **explicit weighted `owners[]` split** (validated Σ=1, mutually exclusive with `teamId`'s
    equal-weight team snapshot) + a **`license` tag** defaulting via the compliance catalog/BYO line
    (`opts.license` → `prefs.defaultLicense` → `'catalog'` for a platform-canonical artifact, else unset).
-   **Ledger tie:** `modelRoyaltyHook` now honours a **weighted split** — a new
-   `execution_spend.intellaRoyaltyPayees` (`Array<{animaId,weight}>`) takes precedence over the equal
-   `intellaAuctorAnimaIds` split; each payee gets `pool × weight/Σweight`. The publishing layer owns
-   who-earns; this is the ledger capability that consumes it. **Remaining integration (§9):** populating
-   `intellaRoyaltyPayees` at execution (resolve the models an actum used → their published `Editio.owners[]`)
-   is an execution/Compiler concern — the hook is ready, the field is dormant until then (as
-   `intellaAuctorAnimaIds` already was).
+   **Ledger tie:** `modelRoyaltyHook` splits the 5% pool across a single weighted payee field —
+   `execution_spend.intellaRoyaltyPayees` (`Array<{animaId,weight}>`) — each payee getting `pool × weight/Σweight`
+   in pure bigint (weights scaled to integers, so equal weights reduce to an *exact* `pool/n` floor). Equal
+   credit across a model's authors is just equal weights; a published `Editio.owners[]` split is unequal
+   weights — **one field, one path** (the prior flat `intellaAuctorAnimaIds` equal-split field was collapsed
+   into this). **Remaining integration (§9):** populating `intellaRoyaltyPayees` at execution (resolve the
+   models an actum used → their published `Editio.owners[]`) is an execution/Compiler concern — the hook is
+   ready, the field is dormant until then.
 5. 🟠 **Collection / mint** — `MintAdapter` + `MarketplaceAdapter`. The Collectio **freeze → export → mint**
    path (§4e/§5/§6) IS this: a Collectio published with `visibility='marketplace'`, `custody` per arrangement,
    freezing the `owners[]` split + `provenanceHash` + trait DNA into the immutable canon at publish time.
@@ -266,10 +267,10 @@ accrete as adapters on the identical interface. Do NOT model a second artifact t
 - TRUE private custody for the bucket (owner-only bytes via signed URLs / private bucket) — deferred to #6;
   `private` bucket publishes are unlisted-grade today (public bytes under an unguessable key).
 - Wallet-linking → `custody:'theirs'` wiring + living-NFT mutable-metadata hosting (lands with #5/#6).
-- **Execution-time royalty-payee population** (#4 left this open): the `modelRoyaltyHook` honours a weighted
-  `execution_spend.intellaRoyaltyPayees`, but nothing populates it yet. At execution, resolve the models an
-  actum used → their published `Editio.owners[]` split → the payload. An execution/Compiler concern, dormant
-  until wired (exactly as `intellaAuctorAnimaIds` is).
+- **Execution-time royalty-payee population** (#4 left this open): the `modelRoyaltyHook` splits by
+  `execution_spend.intellaRoyaltyPayees` (the single weighted payee field), but nothing populates it yet. At
+  execution, resolve the models an actum used → equal-weight their authors, or their published `Editio.owners[]`
+  split → the payload. An execution/Compiler concern, dormant until wired.
 - Reconciler mechanics (event-hook vs write-through) for keeping `Intella.access` in sync with `Editio` —
   decided at #1, **LIVE at #3**: write-through in `CrystalApi._reconcile` (`Intellarum.setAccess`), single
   settle point = single update point.
