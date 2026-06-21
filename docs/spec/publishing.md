@@ -237,4 +237,18 @@ accrete as adapters on the identical interface. Do NOT model a second artifact t
 - Exact `retract` semantics + hosted-byte deletion per adapter (lands with #2 bucket / #5 mint).
 - Wallet-linking → `custody:'theirs'` wiring + living-NFT mutable-metadata hosting (lands with #5/#6).
 - Reconciler mechanics (event-hook vs write-through) for keeping `Intella.access` in sync with `Editio` —
-  decide at #1/#3 against the then-current Nexus hook rail.
+  decided at #1: **write-through** in `CrystalApi._reconcile` (single settle point = single update point).
+
+## 10. Placeholders & stubs shipped in #1 (must be replaced before public traffic)
+
+Inert stand-ins shipped to stand up the spine. Each is wired and exercised by the architecture but does
+**no real work**; none is a safety/behaviour guarantee. Greppable in code via `PLACEHOLDER(publishing#N)`.
+
+| Where | What it does today | What replaces it | When |
+|---|---|---|---|
+| `permissiveModerationGate` (`src/crystal/ModerationGate.ts`) | Approves **everything** (`ok:true`). Preserves the async `pending → scan → published\|rejected` path so the gate is never bypassed structurally, but performs **no CSAM detection and no NCMEC reporting**. Container wires it because no real scanner exists. | A real `ModerationGate` impl: hash-match (PhotoDNA/known-CSAM lists) + classifier for novel material **and** NCMEC CyberTipline reporting on a confirmed match (18 U.S.C. §2258A). | **Before** the feed is exposed to real public traffic. Hard blocker for go-live. |
+| `CrystalApi._reconcile` (§5d seam) | No-op for `actum`/`collectio`; never reached for `intella` (intella publishing throws `input.unsupported_artifact`). | Write-through of `Intella.access` (`public`/`private`) + royalty payee (§5e) when an `Intella` is published/retracted. | Build-order **#3** (model publishing). |
+| `FeedAdapter.externalRef` (`src/crystal/FeedAdapter.ts`) | Mints a cosmetic `feed:<uuid>` handle; the feed is actually served from `Editionum.listFeed`. No dedicated feed backend (no fan-out / cache / ranking). | A real feed service if/when scale needs one — the adapter is the seam. | Not blocking; only if the store-backed read stops sufficing. |
+
+**Discovery:** `grep -rn "PLACEHOLDER(publishing" src/` lists every inert site. Keep this table in sync when
+adding or removing one.

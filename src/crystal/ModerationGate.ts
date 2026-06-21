@@ -32,6 +32,9 @@ export interface ModerationGate {
  * → scan → published path always runs) while the scanner that decides verdicts
  * lands later. Wired by the container until then. Do NOT treat its `ok:true` as
  * a real safety guarantee — it is a structural no-op, flagged here on purpose.
+ *
+ * PLACEHOLDER(publishing#1): inert stand-in for the real CSAM/NCMEC scanner+reporter.
+ * MUST be replaced before the feed sees real public traffic. Ledger: docs/spec/publishing.md §10.
  */
 export const permissiveModerationGate: ModerationGate = {
   async scan(): Promise<ModerationVerdict> {

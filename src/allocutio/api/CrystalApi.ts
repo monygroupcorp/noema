@@ -564,8 +564,10 @@ export class CrystalApi {
    */
   private async _reconcile(editio: Editio): Promise<void> {
     if (editio.artifactRef.kind !== 'intella') return
-    // (build-order #3) write-through Intella.access ('public' on published / 'private'
-    // on retracted) + the royalty payee (§5e). No Intella publish path exists yet.
+    // PLACEHOLDER(publishing#3): inert reconciler seam. When intella publishing lands,
+    // write-through Intella.access ('public' on published / 'private' on retracted) +
+    // the royalty payee (§5e) here. No Intella publish path reaches this yet.
+    // Ledger: docs/spec/publishing.md §10.
   }
 
   /** Resolve a registered publication adapter by key, or 404. */
