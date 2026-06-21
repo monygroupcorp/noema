@@ -44,16 +44,25 @@ function canonicalise(value: unknown): unknown {
 }
 
 /**
+ * Content-address any JSON-safe value → `sha256:<hex>`. Stable across machines
+ * and key ordering (objects canonicalised; arrays keep order); bigint-safe. The
+ * shared content-addressing primitive — `provenanceHash` and the publishing
+ * freeze digest (the immutable mint canon, spec §4e/§6 #5) both build on it.
+ */
+export function contentHash(value: unknown): string {
+  const digest = createHash('sha256').update(JSON.stringify(canonicalise(value))).digest('hex')
+  return `sha256:${digest}`
+}
+
+/**
  * Content-address a Collectio's generative configuration → `sha256:<hex>`.
  * Stable across machines and key ordering; sensitive to any substantive change.
  */
 export function provenanceHash(input: ProvenanceInput): string {
-  const canonical = canonicalise({
+  return contentHash({
     modusId: input.modusId,
     modusVersio: input.modusVersio ?? null,
     tractus: input.tractus,
     aditusBase: input.aditusBase,
   })
-  const digest = createHash('sha256').update(JSON.stringify(canonical)).digest('hex')
-  return `sha256:${digest}`
 }

@@ -456,7 +456,13 @@ export class CrystalApi {
     const destination = opts.destination ?? prefs?.defaultDestination ?? 'feed'
     // Validate the destination up front (mirrors collect validating the modus).
     this._resolveAdapter(destination)
-    const visibility = opts.visibility ?? prefs?.defaultVisibility ?? (destination === 'feed' ? 'feed' : 'private')
+    // Default visibility by destination: the feed/on-chain/market destinations are
+    // inherently PUBLIC surfaces (so a mint/list runs through the moderation gate),
+    // everything else is private. Explicit opts/prefs still win.
+    const visibility = opts.visibility ?? prefs?.defaultVisibility ??
+      (destination === 'feed' ? 'feed'
+        : destination === 'mint' || destination === 'marketplace' ? 'marketplace'
+        : 'private')
     const custody = opts.custody ?? prefs?.defaultCustody ?? 'ours'
 
     // A model (Intella) has a binary resolvability (public/private), not a media
@@ -466,13 +472,22 @@ export class CrystalApi {
       throw Errors.inputMalformed("a model publishes to 'private' or 'unlisted', not the media feed/marketplace")
     }
 
-    // The caller must own the artifact they are putting forth. For a model this
-    // also resolves it (reused below for the license default — one read, not two).
+    // The caller must own the artifact they are putting forth. Resolves the artifact
+    // (model / collection) so the freeze + license below reuse it — one read, not two.
     const ref: ArtifactRef = { kind: opts.artifact.kind, id: opts.artifact.id }
-    const ownedModel = await this._assertOwnsArtifact(auctor, ref)
+    const owned = await this._assertOwnsArtifact(auctor, ref)
+
+    // Freeze boundary (#5, spec §4e): a Collectio put on-chain or to a marketplace
+    // must be COMPLETE — you cannot freeze the canon of a drop that is still minting
+    // pieces. (Mutable team/collection above the freeze, immutable drop below it.)
+    if (owned.collectio && (destination === 'mint' || destination === 'marketplace') && owned.collectio.status !== 'completa') {
+      throw Errors.inputMalformed('a collection must be complete before it can be minted or listed')
+    }
 
     // Rights split (snapshotted on the Editio — the canonical "who earns" record):
-    // an explicit weighted split OR an equal-weight snapshot of a team's membership.
+    // an explicit weighted split, an equal-weight snapshot of a team's membership,
+    // or — for a Collectio with no explicit split — the collection's own owners[]
+    // re-snapshotted at freeze (the §4e "frozen drop below" rule).
     if (opts.owners !== undefined && opts.teamId !== undefined) {
       throw Errors.inputMalformed('provide either owners or teamId, not both')
     }
@@ -482,11 +497,13 @@ export class CrystalApi {
     } else if (opts.teamId !== undefined) {
       const team = await this._memberTeam(auctor, opts.teamId)
       owners = team.membra.map((animaId) => ({ animaId, weight: 1 / team.membra.length }))
+    } else if (owned.collectio?.owners?.length) {
+      owners = this._validateOwners(owned.collectio.owners)
     }
 
     // License tag (the compliance catalog/BYO line): explicit, then prefs, then
     // 'catalog' for a platform-canonical artifact (our license/liability), else unset.
-    const license = opts.license ?? prefs?.defaultLicense ?? (ownedModel?.canonica ? 'catalog' : undefined)
+    const license = opts.license ?? prefs?.defaultLicense ?? (owned.intella?.canonica ? 'catalog' : undefined)
 
     const editio = await editiones.create({
       artifactRef: ref,
@@ -644,22 +661,23 @@ export class CrystalApi {
   }
 
   /** Verify the caller owns the artifact being published, or throw not-found. Returns
-   *  the resolved Intella for a model publish (so the caller reuses it), else undefined. */
-  private async _assertOwnsArtifact(auctor: AuctorKey, ref: ArtifactRef): Promise<Intella | undefined> {
+   *  the resolved artifact for the kinds the caller reuses (an Intella for the license
+   *  default, a Collectio for the freeze boundary); `{}` for an Actum. */
+  private async _assertOwnsArtifact(auctor: AuctorKey, ref: ArtifactRef): Promise<{ intella?: Intella; collectio?: Collectio }> {
     if (ref.kind === 'actum') {
       const a = await this.deps.actorum.findById(ref.id)
       if (!a || !(await this._owns(auctor, a))) throw Errors.notFoundRun(ref.id)
-      return undefined
+      return {}
     }
     if (ref.kind === 'collectio') {
-      await this._ownedCollection(auctor, ref.id) // throws not_found.collection if not owned
-      return undefined
+      // throws not_found.collection if absent / not owned
+      return { collectio: await this._ownedCollection(auctor, ref.id) }
     }
     // Intella (model): owned by its `ownerAnimaId` (private LoRAs) or `auctor`.
     // Platform-canonical models have neither set to a user → not user-publishable.
     const intella = await this._ownedIntella(auctor, ref.id)
     if (!intella) throw Errors.notFoundModel(ref.id)
-    return intella
+    return { intella }
   }
 
   /** Validate an explicit rights split: non-empty, positive weights summing to ~1. */
@@ -697,6 +715,17 @@ export class CrystalApi {
         ...(m.trigger !== undefined ? { trigger: m.trigger } : {}),
         ...(m.familia !== undefined ? { familia: m.familia } : {}),
         ...(m.auctor !== undefined ? { auctor: m.auctor } : {}),
+      }
+    }
+    if (ref.kind === 'collectio') {
+      // The freeze manifest the mint/marketplace adapters content-address (§4e):
+      // the generative provenance + the drop size. Ownership is on the policy.
+      const c = await this.deps.collectiones?.find(ref.id)
+      if (!c) return undefined
+      return {
+        provenanceHash: c.provenanceHash,
+        numerus: c.numerus,
+        ...(c.nomen !== undefined ? { nomen: c.nomen } : {}),
       }
     }
     return undefined
