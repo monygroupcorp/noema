@@ -255,9 +255,12 @@ lives in a layer we control (and charge for), sidestepping the messy on-chain/tr
    `modus.layer-composite`) and **ffmpeg** (bounded ops — no raw args; `frames-to-video` mp4/webm via a
    spawned ffmpeg with a fixed arg vector; `modus.frames-to-video`). A Collectio expands a composite/
    animate step over its grid. Registered when R2 is configured. Net-new, reusable far beyond NFT.
-5. **Export + freeze** (`§4b`/`§4e`) — agnostic metadata + adapters (incl. native launchpad), the freeze
-   boundary, forced combos, 1/1 inserts.
-6. **Mint** — Catena, later, separate track.
+5. **Export + freeze** (`§4b`/`§4e`) — ✅ the freeze boundary + adapters SHIPPED via **publishing #5**
+   (`MintAdapter`/`MarketplaceAdapter`, docs/spec/publishing.md §6): a Collectio published to
+   `destination:'mint'`/`'marketplace'` content-addresses `provenanceHash + owners[] + size` into the immutable
+   canon (must be `completa`; owners[] re-snapshotted at freeze). Still here: agnostic per-token metadata,
+   forced combos, 1/1 inserts. The real on-chain mint tx is the publishing-#5 placeholder.
+6. **Mint** — Catena, later, separate track (the on-chain tx behind the publishing-#5 freeze).
 7. **Living NFTs / Publish** (`§4g`) — the north star: hosted-metadata service + customization pipeline +
    owner-gated re-execution + fiat subscription. Builds on 1–6; largest, highest-differentiation.
 

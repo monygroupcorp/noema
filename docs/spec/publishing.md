@@ -1,12 +1,13 @@
 # Publishing (Editio) — spec
 
 **Status:** build-orders #1 (feed) + #2 (bucket custody) + #3 (model publishing) + #4 (rights/license/splits)
-SHIPPED (2026-06-21) — `Editio`/`Editionum` spine + `FeedAdapter` + `BucketAdapter` (R2 re-host +
-retract-delete) + `ModelPublishAdapter` (HuggingFace/Civitai, custody prefs, live `Intella.access`
-reconciler) + validated `owners[]`/`license` rights record + weighted `modelRoyaltyHook` + async moderation
++ #5 (collection/mint) SHIPPED (2026-06-21) — `Editio`/`Editionum` spine + `FeedAdapter` + `BucketAdapter`
+(R2 re-host + retract-delete) + `ModelPublishAdapter` (HuggingFace/Civitai, custody prefs, live `Intella.access`
+reconciler) + validated `owners[]`/`license` rights record + weighted `modelRoyaltyHook` + `MintAdapter`
+(permanent, content-addressed freeze) + `MarketplaceAdapter` (revocable) + async moderation
 gate + `unlisted` + `POST /v1/editiones` / `GET /v1/feed`, hermetic-green, never live-verified on GPUs (model
-UPLOAD is a documented placeholder; execution-time royalty-payee population is the open seam). #5–6 not
-started. The canonical spec for
+UPLOAD + on-chain mint tx + marketplace API are documented placeholders; execution-time royalty-payee
+population is the open seam). #6 (living NFTs) not started. The canonical spec for
 **publishing as a first-class arm of the application**: routing any artifact the platform produces
 (a gen, a trained model, a collection drop) to any destination (our feed, our buckets, HuggingFace,
 user custody, on-chain mint, external marketplaces) under a chosen visibility/custody/rights
@@ -212,10 +213,21 @@ gen uses that model (the ChainEngine royalty surface). So:
    into this). **Remaining integration (§9):** populating `intellaRoyaltyPayees` at execution (resolve the
    models an actum used → their published `Editio.owners[]`) is an execution/Compiler concern — the hook is
    ready, the field is dormant until then.
-5. 🟠 **Collection / mint** — `MintAdapter` + `MarketplaceAdapter`. The Collectio **freeze → export → mint**
-   path (§4e/§5/§6) IS this: a Collectio published with `visibility='marketplace'`, `custody` per arrangement,
-   freezing the `owners[]` split + `provenanceHash` + trait DNA into the immutable canon at publish time.
-   Publishing **subsumes** Collectio's export adapters rather than duplicating them.
+5. ✅ **Collection / mint** — SHIPPED 2026-06-21. `MintAdapter` + `MarketplaceAdapter`
+   (`src/crystal/MintAdapter.ts`). The Collectio **freeze → export → mint** path (§4e/§5/§6) IS this: publishing
+   a Collectio to `destination:'mint'`/`'marketplace'` (both default to `visibility:'marketplace'` → the
+   moderation gate runs) **freezes** the immutable canon — the generative `provenanceHash` + the snapshotted
+   `owners[]` rights split + the drop size are **content-addressed** into one deterministic handle
+   (`mint:<chain>:<sha256>`) via the shared `contentHash` (generalized out of `provenanceHash`). The freeze is
+   enforced at the spine: a Collectio must be `completa` to mint/list (you cannot freeze an in-flight drop), and
+   a Collectio's own `owners[]` are **re-snapshotted** onto the Editio at publish when no explicit split is
+   given (the "frozen drop below" rule). **Mint is permanent** — the adapter omits `retract`, so the spine 403s
+   it; a **marketplace listing is revocable** (keeps `retract`, keyed by the publication id). Publishing
+   **subsumes** Collectio's export adapters — no second artifact type (the Editio only references the Collectio).
+   **PLACEHOLDER(publishing#5):** no real on-chain transaction (no Catena/CreditVault mint, no `tokenURI`
+   assembly — the hosted/mutable layer is #6) and no real marketplace API call; both adapters do the
+   deterministic freeze→handle projection only (§10). `MarketplaceAdapter` is venue-parameterized (base URL),
+   so "other marketplaces" are config, not new classes.
 6. 🟠 **Living NFTs (§4g)** — the north star, now expressible as a publishing *arrangement*: `custody='nostra'`
    + `visibility='marketplace'` + a **mutable hosted projection** (the owner re-runs a bounded pipeline →
    we overwrite the hosted image) + owner-gated re-execution + fiat subscription. Builds on 1–5.
@@ -266,7 +278,8 @@ accrete as adapters on the identical interface. Do NOT model a second artifact t
   mint has no `retract` (#5, permanent).
 - TRUE private custody for the bucket (owner-only bytes via signed URLs / private bucket) — deferred to #6;
   `private` bucket publishes are unlisted-grade today (public bytes under an unguessable key).
-- Wallet-linking → `custody:'theirs'` wiring + living-NFT mutable-metadata hosting (lands with #5/#6).
+- Wallet-linking → `custody:'theirs'` wiring + living-NFT mutable-metadata hosting + the real on-chain mint
+  tx / marketplace API behind the #5 freeze (the freeze + handle are real; the chain/venue calls land with #6).
 - **Execution-time royalty-payee population** (#4 left this open): the `modelRoyaltyHook` splits by
   `execution_spend.intellaRoyaltyPayees` (the single weighted payee field), but nothing populates it yet. At
   execution, resolve the models an actum used → equal-weight their authors, or their published `Editio.owners[]`
@@ -285,6 +298,7 @@ Inert stand-ins shipped to stand up the spine. Each is wired and exercised by th
 | `permissiveModerationGate` (`src/crystal/ModerationGate.ts`) | Approves **everything** (`ok:true`). Preserves the async `pending → scan → published\|rejected` path so the gate is never bypassed structurally, but performs **no CSAM detection and no NCMEC reporting**. Container wires it because no real scanner exists. | A real `ModerationGate` impl: hash-match (PhotoDNA/known-CSAM lists) + classifier for novel material **and** NCMEC CyberTipline reporting on a confirmed match (18 U.S.C. §2258A). | **Before** the feed is exposed to real public traffic. Hard blocker for go-live. |
 | `ModelPublishAdapter` upload (`src/crystal/ModelPublishAdapter.ts`) | Projects `account + slug → registry URL` and returns the handle for HuggingFace/Civitai; the §5d access reconciler around it is **real** (the model becomes resolvable). But it does **NOT upload the weight bytes** — `Intella.sources` are never pushed to the registry API; the returned URL points at a repo that does not yet exist. | A real per-registry uploader: HF (`createRepo` + `uploadFile`, `HF_TOKEN`) — port the legacy `HuggingFaceHubService.js`; Civitai (its model-upload API + token). Plus real `retract` = repo deletion. | Before model publishing is offered to users (the URL is a dangling handle until then). |
 | `FeedAdapter.externalRef` (`src/crystal/FeedAdapter.ts`) | Mints a cosmetic `feed:<uuid>` handle; the feed is actually served from `Editionum.listFeed`. No dedicated feed backend (no fan-out / cache / ranking). | A real feed service if/when scale needs one — the adapter is the seam. | Not blocking; only if the store-backed read stops sufficing. |
+| `MintAdapter` / `MarketplaceAdapter` (`src/crystal/MintAdapter.ts`) | **Freeze is real**: content-addresses `provenanceHash + owners[] + size` into a deterministic `mint:<chain>:<sha256>` / marketplace listing handle (the immutable drop identifier). But it submits **no on-chain transaction** (no Catena/CreditVault mint, no contract, no chain-issued tokenId, no per-token `tokenURI`) and makes **no real marketplace API call** — the returned handle is a projection, not an on-chain/venue artifact. | A real on-chain minter (Catena/CreditVault rails: deploy/mint, capture the tx + tokenId; assemble `tokenURI`s — the mutable hosted layer is the living-NFT work #6) and a real marketplace client (list/delist via the venue API). | Before minting/listing is offered to users (the handle is a deterministic-but-off-chain reference until then). |
 
 **Discovery:** `grep -rn "PLACEHOLDER(publishing" src/` lists every inert site. Keep this table in sync when
 adding or removing one.

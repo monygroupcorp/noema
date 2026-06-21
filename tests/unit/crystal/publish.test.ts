@@ -5,7 +5,9 @@ import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/Crys
 import { FeedAdapter } from '../../../src/crystal/FeedAdapter.js'
 import { BucketAdapter } from '../../../src/crystal/BucketAdapter.js'
 import { ModelPublishAdapter, huggingFaceRegistry, civitaiRegistry } from '../../../src/crystal/ModelPublishAdapter.js'
+import { MintAdapter, MarketplaceAdapter } from '../../../src/crystal/MintAdapter.js'
 import type { ObjectStore } from '../../../src/crystal/R2Uploader.js'
+import type { Collectio } from '../../../src/types/collectio.js'
 import type { MediaFetcher } from '../../../src/crystal/MediaFetcher.js'
 import type { ModerationGate } from '../../../src/crystal/ModerationGate.js'
 import type { Intella } from '../../../src/types/intelligendi.js'
@@ -81,6 +83,13 @@ function makeApi(opts?: { gate?: ModerationGate; prefs?: Record<string, unknown>
     ['lora-1', { id: 'lora-1', nomen: 'My LoRA', genus: 'lora', slug: 'my-lora', trigger: 'mld', familia: 'flux', ownerAnimaId: 'anima-1', access: 'private', canonica: false, sources: [{ provenance: 'miladystation', uri: 'https://x/lora.safetensors' }] } as unknown as Intella],
     ['canon-1', { id: 'canon-1', nomen: 'Canon Model', genus: 'lora', slug: 'canon', familia: 'flux', auctor: 'anima-1', canonica: true, sources: [{ provenance: 'miladystation', uri: 'https://x/c.safetensors' }] } as unknown as Intella],
   ])
+  // A fake Collectio store: one COMPLETE owned drop (with a team owners[] split) and
+  // one still AGENS (in-flight) — both funded by anima-1.
+  const collections = new Map<string, Collectio>([
+    ['col-done', { id: 'col-done', nomen: 'Done Drop', status: 'completa', provenanceHash: 'sha256:done', numerus: 100, by: { animaId: 'anima-1' }, owners: [{ animaId: 'anima-1', weight: 0.5 }, { animaId: 'anima-2', weight: 0.5 }] } as unknown as Collectio],
+    ['col-busy', { id: 'col-busy', nomen: 'Busy Drop', status: 'agens', provenanceHash: 'sha256:busy', numerus: 100, by: { animaId: 'anima-1' } } as unknown as Collectio],
+  ])
+  const collectiones = { find: async (id: string) => collections.get(id) ?? null }
   const accessCalls: Array<{ id: string; access: 'public' | 'private' }> = []
   const intellarum = {
     find: async (id: string) => models.get(id) ?? null,
@@ -96,16 +105,19 @@ function makeApi(opts?: { gate?: ModerationGate; prefs?: Record<string, unknown>
     signorum: fakeSignorum,
     animae,
     intellarum,
+    collectiones,
     publicationAdapters: [
       new FeedAdapter(),
       new BucketAdapter({ fetcher, store }),
       new ModelPublishAdapter(huggingFaceRegistry('ms2stationthis')),
       new ModelPublishAdapter(civitaiRegistry()),
+      new MintAdapter(),
+      new MarketplaceAdapter({ base: 'https://noema.art/market' }),
     ],
     ...(opts?.gate ? { moderationGate: opts.gate } : {}),
     publishScheduler: (fn: () => Promise<void>) => { tasks.push(fn()) },
   } as unknown as CrystalApiDeps)
-  return { api, editiones, puts, dels, models, accessCalls, flush: () => Promise.all(tasks) }
+  return { api, editiones, puts, dels, models, collections, accessCalls, flush: () => Promise.all(tasks) }
 }
 
 const anima1 = { animaId: 'anima-1' }
@@ -297,4 +309,56 @@ test('retractEdition(): only the publishing author may retract', async () => {
     () => api.retractEdition({ animaId: 'someone-else' }, ed.id),
     /not found/i,
   )
+})
+
+// ── Collection / mint (#5) ───────────────────────────────────────────────────
+
+test('publish(): minting a complete collection freezes its canon + owners onto the mint', async () => {
+  const { api, editiones, flush } = makeApi()
+  const ed = await api.publish(anima1, { artifact: { kind: 'collectio', id: 'col-done' }, destination: 'mint' })
+
+  // 'mint' is a public surface → defaults to marketplace visibility → gated (pending).
+  assert.equal(ed.visibility, 'marketplace')
+  assert.equal(ed.status, 'pending')
+  // The collection's own owners[] are re-snapshotted onto the Editio at freeze.
+  assert.deepEqual(ed.owners, [{ animaId: 'anima-1', weight: 0.5 }, { animaId: 'anima-2', weight: 0.5 }])
+
+  await flush()
+  const stored = await editiones.find(ed.id)
+  assert.equal(stored?.status, 'published')
+  assert.match(stored?.externalRef ?? '', /^mint:evm:[0-9a-f]{64}$/)
+})
+
+test('publish(): an in-flight collection cannot be minted (freeze boundary)', async () => {
+  const { api } = makeApi()
+  await assert.rejects(
+    () => api.publish(anima1, { artifact: { kind: 'collectio', id: 'col-busy' }, destination: 'mint' }),
+    /must be complete/,
+  )
+})
+
+test('retractEdition(): a mint is permanent — it cannot be retracted', async () => {
+  const { api, editiones, flush } = makeApi()
+  const ed = await api.publish(anima1, { artifact: { kind: 'collectio', id: 'col-done' }, destination: 'mint' })
+  await flush()
+  assert.equal((await editiones.find(ed.id))?.status, 'published')
+  await assert.rejects(() => api.retractEdition(anima1, ed.id), /permanent/)
+})
+
+test('publish(): a marketplace listing is revocable and keyed by the publication id', async () => {
+  const { api, editiones, flush } = makeApi()
+  const ed = await api.publish(anima1, { artifact: { kind: 'collectio', id: 'col-done' }, destination: 'marketplace' })
+  await flush()
+  const stored = await editiones.find(ed.id)
+  assert.equal(stored?.externalRef, `https://noema.art/market/listing/${ed.id}`)
+
+  const retracted = await api.retractEdition(anima1, ed.id)
+  assert.equal(retracted.status, 'retracted')
+})
+
+test('publish(): an explicit owners split overrides the collection freeze default', async () => {
+  const { api } = makeApi()
+  const owners = [{ animaId: 'anima-1', weight: 1 }]
+  const ed = await api.publish(anima1, { artifact: { kind: 'collectio', id: 'col-done' }, destination: 'mint', owners })
+  assert.deepEqual(ed.owners, owners)
 })

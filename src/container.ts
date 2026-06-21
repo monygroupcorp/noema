@@ -55,6 +55,7 @@ import { R2Uploader } from './crystal/R2Uploader.js'
 import { FeedAdapter } from './crystal/FeedAdapter.js'
 import { BucketAdapter } from './crystal/BucketAdapter.js'
 import { ModelPublishAdapter, huggingFaceRegistry, civitaiRegistry } from './crystal/ModelPublishAdapter.js'
+import { MintAdapter, MarketplaceAdapter } from './crystal/MintAdapter.js'
 import type { PublicationAdapter } from './crystal/PublicationAdapter.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
 import { ActumCompletor } from './execution/ActumCompletor.js'
@@ -189,6 +190,8 @@ export interface ContainerConfig {
   editionesCollection?: string
   /** Our HuggingFace org for `custody:'ours'` model publishes (default 'ms2stationthis'). */
   huggingFaceOrg?: string
+  /** Base URL the MarketplaceAdapter projects listing handles under (default 'https://noema.art/market'). */
+  marketplaceBaseUrl?: string
   sodalitatesCollection?: string
   tabulaeCollection?: string
   testimoniaCollection?: string
@@ -393,10 +396,15 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   // bucket adapter needs R2 (custody=ours hosting) so it is gated on config below.
   // Model registries (HuggingFace/Civitai, publishing #3): our HF org hosts a
   // custody:'ours' publish; Civitai has no org → requires custody:'theirs' (BYO).
+  // Collection/mint (publishing #5): the mint + marketplace adapters freeze a drop's
+  // canon into a deterministic content-addressed handle. Pure projectors (no chain tx
+  // / venue API yet — placeholder §10), so they need no deps and are always available.
   const publicationAdapters: PublicationAdapter[] = [
     new FeedAdapter(),
     new ModelPublishAdapter(huggingFaceRegistry(config.huggingFaceOrg ?? 'ms2stationthis')),
     new ModelPublishAdapter(civitaiRegistry()),
+    new MintAdapter(),
+    new MarketplaceAdapter({ base: config.marketplaceBaseUrl ?? 'https://noema.art/market' }),
   ]
 
   // Host-side deterministic processing runtimes (spec §4a). They produce bytes
