@@ -78,7 +78,8 @@ function makeApi(opts?: { gate?: ModerationGate; prefs?: Record<string, unknown>
   const fetcher: MediaFetcher = { async fetch(url) { return Buffer.from(`bytes:${url}`) } }
   // A fake Intella store: one model the caller (anima-1) owns + a setAccess spy.
   const models = new Map<string, Intella>([
-    ['lora-1', { id: 'lora-1', nomen: 'My LoRA', genus: 'lora', slug: 'my-lora', trigger: 'mld', familia: 'flux', ownerAnimaId: 'anima-1', access: 'private', sources: [{ provenance: 'miladystation', uri: 'https://x/lora.safetensors' }] } as unknown as Intella],
+    ['lora-1', { id: 'lora-1', nomen: 'My LoRA', genus: 'lora', slug: 'my-lora', trigger: 'mld', familia: 'flux', ownerAnimaId: 'anima-1', access: 'private', canonica: false, sources: [{ provenance: 'miladystation', uri: 'https://x/lora.safetensors' }] } as unknown as Intella],
+    ['canon-1', { id: 'canon-1', nomen: 'Canon Model', genus: 'lora', slug: 'canon', familia: 'flux', auctor: 'anima-1', canonica: true, sources: [{ provenance: 'miladystation', uri: 'https://x/c.safetensors' }] } as unknown as Intella],
   ])
   const accessCalls: Array<{ id: string; access: 'public' | 'private' }> = []
   const intellarum = {
@@ -226,6 +227,47 @@ test('retractEdition(): retracting a model publish revokes resolvability (access
   await api.retractEdition(anima1, ed.id)
   assert.deepEqual(accessCalls, [{ id: 'lora-1', access: 'private' }])
   assert.equal((models.get('lora-1') as { access?: string }).access, 'private')
+})
+
+// ── Rights / license / splits (#4) ──────────────────────────────────────────
+
+test('publish(): snapshots an explicit weighted owners split onto the Editio', async () => {
+  const { api } = makeApi()
+  const owners = [{ animaId: 'anima-1', weight: 0.6 }, { animaId: 'anima-2', weight: 0.4 }]
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed', owners })
+  assert.deepEqual(ed.owners, owners)
+})
+
+test('publish(): rejects owners that do not sum to 1', async () => {
+  const { api } = makeApi()
+  await assert.rejects(
+    () => api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed', owners: [{ animaId: 'a', weight: 0.3 }, { animaId: 'b', weight: 0.3 }] }),
+    /sum to 1/,
+  )
+})
+
+test('publish(): rejects both owners and teamId together', async () => {
+  const { api } = makeApi()
+  await assert.rejects(
+    () => api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed', owners: [{ animaId: 'a', weight: 1 }], teamId: 't1' }),
+    /either owners or teamId/,
+  )
+})
+
+test('publish(): a platform-canonical model defaults to the catalog license', async () => {
+  const { api } = makeApi()
+  const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'canon-1' }, destination: 'huggingface', visibility: 'unlisted' })
+  assert.equal(ed.license, 'catalog')
+})
+
+test('publish(): license falls back to the caller prefs, and an explicit license wins', async () => {
+  const withPref = makeApi({ prefs: { defaultLicense: 'cc-by-4.0' } })
+  const a = await withPref.api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  assert.equal(a.license, 'cc-by-4.0')
+
+  const explicit = makeApi({ prefs: { defaultLicense: 'cc-by-4.0' } })
+  const b = await explicit.api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed', license: 'mit' })
+  assert.equal(b.license, 'mit')
 })
 
 test('publish(): rejects an artifact the caller does not own', async () => {

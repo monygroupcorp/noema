@@ -2063,11 +2063,30 @@ Publish an artifact (an Actum for #1) to a destination under a visibility/custod
     },
     "license": {
       "type": "string",
-      "description": "License tag — 'catalog' (our liability) | a BYO license id."
+      "description": "License tag — 'catalog' (our liability) | a BYO license id. Defaults from prefs, then 'catalog' for platform-canonical artifacts."
     },
     "teamId": {
       "type": "string",
-      "description": "Snapshot a rights split from a team (Sodalitas) the caller is a member of."
+      "description": "Snapshot an equal-weight rights split from a team (Sodalitas) the caller is a member of. Mutually exclusive with owners."
+    },
+    "owners": {
+      "type": "array",
+      "description": "Explicit rights split — animaId → weight, weights must sum to 1. Mutually exclusive with teamId. Snapshotted on the Editio as the canonical who-earns record (drives the model-royalty split).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "animaId": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "animaId",
+          "weight"
+        ]
+      }
     }
   },
   "required": [

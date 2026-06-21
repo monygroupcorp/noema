@@ -67,6 +67,15 @@ export interface SignumEventPayload {
     modusAuctorAnimaId?: string
     /** animaIds of intella authors — for model royalty, equal-split across all */
     intellaAuctorAnimaIds?: string[]
+    /**
+     * Weighted model-royalty payees — the rights split snapshotted on a model's
+     * published `Editio` (`owners[]`, from a Sodalitas or an explicit split). When
+     * present it takes precedence over the equal `intellaAuctorAnimaIds` split:
+     * the publishing layer OWNS who-earns (publishing.md §5e), and this is how that
+     * decision reaches the ledger. Populated at execution by resolving the models an
+     * actum used → their published rights split (the remaining integration, §9).
+     */
+    intellaRoyaltyPayees?: Array<{ animaId: string; weight: number }>
   }
 
   session_spend: {

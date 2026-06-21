@@ -618,8 +618,13 @@ const PublishRequestSchema: JsonSchema = {
     destination: { type: 'string', description: "Adapter key (e.g. 'feed'). Defaults from prefs, then 'feed'." },
     visibility: { type: 'string', enum: ['private', 'unlisted', 'feed', 'marketplace'], description: 'Public-exposure surface.' },
     custody: { type: 'string', enum: ['ours', 'theirs', 'both'], description: 'Who holds the bytes/metadata.' },
-    license: { type: 'string', description: "License tag — 'catalog' (our liability) | a BYO license id." },
-    teamId: { type: 'string', description: 'Snapshot a rights split from a team (Sodalitas) the caller is a member of.' },
+    license: { type: 'string', description: "License tag — 'catalog' (our liability) | a BYO license id. Defaults from prefs, then 'catalog' for platform-canonical artifacts." },
+    teamId: { type: 'string', description: 'Snapshot an equal-weight rights split from a team (Sodalitas) the caller is a member of. Mutually exclusive with owners.' },
+    owners: {
+      type: 'array',
+      description: 'Explicit rights split — animaId → weight, weights must sum to 1. Mutually exclusive with teamId. Snapshotted on the Editio as the canonical who-earns record (drives the model-royalty split).',
+      items: { type: 'object', properties: { animaId: { type: 'string' }, weight: { type: 'number' } }, required: ['animaId', 'weight'] },
+    },
   },
   required: ['artifact'],
 }

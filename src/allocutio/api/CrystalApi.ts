@@ -146,10 +146,13 @@ export interface PublishOpts {
   visibility?: EditioVisibility
   /** Who holds the bytes/metadata. Defaults from prefs, then 'ours'. */
   custody?: EditioCustody
-  /** License tag — 'catalog' (our liability) | a BYO license id. */
+  /** License tag — 'catalog' (our liability) | a BYO license id. Defaults: prefs, then
+   *  'catalog' for platform-canonical artifacts, else unset. */
   license?: string
   /** Snapshot a rights split from a team (Sodalitas) the caller is a member of. */
   teamId?: string
+  /** Explicit rights split (animaId → weight, Σ≈1). Mutually exclusive with `teamId`. */
+  owners?: Array<{ animaId: string; weight: number }>
 }
 
 /** Where to send a run: an explicit modusId OR a canon verb to resolve. */
@@ -467,12 +470,22 @@ export class CrystalApi {
     const ref: ArtifactRef = { kind: opts.artifact.kind, id: opts.artifact.id }
     await this._assertOwnsArtifact(auctor, ref)
 
-    // Team overlay: snapshot an equal-weight owners split from the membership.
+    // Rights split (snapshotted on the Editio — the canonical "who earns" record):
+    // an explicit weighted split OR an equal-weight snapshot of a team's membership.
+    if (opts.owners !== undefined && opts.teamId !== undefined) {
+      throw Errors.inputMalformed('provide either owners or teamId, not both')
+    }
     let owners: Editio['owners']
-    if (opts.teamId !== undefined) {
+    if (opts.owners !== undefined) {
+      owners = this._validateOwners(opts.owners)
+    } else if (opts.teamId !== undefined) {
       const team = await this._memberTeam(auctor, opts.teamId)
       owners = team.membra.map((animaId) => ({ animaId, weight: 1 / team.membra.length }))
     }
+
+    // License tag (the compliance catalog/BYO line): explicit, then prefs, then
+    // 'catalog' for a platform-canonical artifact (our license/liability), else unset.
+    const license = opts.license ?? prefs?.defaultLicense ?? (await this._defaultLicense(ref))
 
     const editio = await editiones.create({
       artifactRef: ref,
@@ -481,7 +494,7 @@ export class CrystalApi {
       custody,
       by,
       ...(owners !== undefined ? { owners } : {}),
-      ...(opts.license !== undefined ? { license: opts.license } : {}),
+      ...(license !== undefined ? { license } : {}),
     })
 
     if (visibility === 'feed' || visibility === 'marketplace') {
@@ -644,6 +657,29 @@ export class CrystalApi {
     // Platform-canonical models have neither set to a user → not user-publishable.
     const intella = await this._ownedIntella(auctor, ref.id)
     if (!intella) throw Errors.notFoundModel(ref.id)
+  }
+
+  /** Validate an explicit rights split: non-empty, positive weights summing to ~1. */
+  private _validateOwners(owners: Array<{ animaId: string; weight: number }>): Editio['owners'] {
+    if (owners.length === 0) throw Errors.inputMalformed('owners must be non-empty')
+    let sum = 0
+    for (const o of owners) {
+      if (!o.animaId) throw Errors.inputMalformed('each owner needs an animaId')
+      if (!(o.weight > 0)) throw Errors.inputMalformed('each owner weight must be > 0')
+      sum += o.weight
+    }
+    if (Math.abs(sum - 1) > 1e-6) throw Errors.inputMalformed(`owner weights must sum to 1 (got ${sum})`)
+    return owners
+  }
+
+  /** The default license for an artifact (compliance catalog/BYO line): 'catalog' for a
+   *  platform-canonical model (our license/liability), else unset (user content). */
+  private async _defaultLicense(ref: ArtifactRef): Promise<string | undefined> {
+    if (ref.kind === 'intella') {
+      const m = await this.deps.intellarum?.find(ref.id)
+      if (m?.canonica) return 'catalog'
+    }
+    return undefined
   }
 
   /** Resolve an Intella the caller owns, or null. Models lacking the store are unavailable. */
