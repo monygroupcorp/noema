@@ -1,6 +1,6 @@
 # Publishing (Editio) — spec
 
-**Status:** DRAFT for finalization (2026-06-21) — nothing built. The canonical spec for
+**Status:** FINALIZED (2026-06-21) — build-order #1 (feed) ready; nothing built yet. The canonical spec for
 **publishing as a first-class arm of the application**: routing any artifact the platform produces
 (a gen, a trained model, a collection drop) to any destination (our feed, our buckets, HuggingFace,
 user custody, on-chain mint, external marketplaces) under a chosen visibility/custody/rights
@@ -96,8 +96,8 @@ artifact may have **many** `Editio`s (private bucket + public feed + minted), ea
 ### 4c. Under what arrangement (the policy matrix — "the perfect arrangement")
 - **Visibility:** `private` (owner only) · `unlisted` (anyone with the link) · `feed` (public in our feed) ·
   `marketplace` (public + listed externally / on-chain).
-- **Custody:** `nostra` (ours — we host bytes/metadata) · `sua` (theirs — their account/wallet/bucket) ·
-  `utraque` (both — we host + mirror to theirs).
+- **Custody:** `ours` (we host bytes/metadata) · `theirs` (their account/wallet/bucket) ·
+  `both` (we host + mirror to theirs).
 - **Fan-out:** one artifact → several destinations at once (each its own `Editio`).
 - **Rights:** owner / `owners[]` split (the `Sodalitas` snapshot) + license tag (catalog=our license vs
   BYO=user license/liability) + royalty split, snapshotted at publish/freeze.
@@ -113,7 +113,7 @@ Editio {
   artifactRef: { kind: 'actum' | 'intella' | 'collectio', id }
   destination: string               // adapter key, e.g. 'feed' | 'r2' | 'huggingface' | 'mint'
   visibility:  'private' | 'unlisted' | 'feed' | 'marketplace'
-  custody:     'nostra' | 'sua' | 'utraque'
+  custody:     'ours' | 'theirs' | 'both'
   by:          { animaId } | { commitment }   // who published
   owners?:     Array<{ animaId, weight }>      // rights split, snapshotted (from Sodalitas)
   license?:    string                          // 'catalog' (our liability) | a BYO license id
@@ -138,18 +138,29 @@ touching the spine.
 
 ### 5c. Account publishing preferences (kills the hardcode)
 ```
-PublishingPrefs {   // on Anima, or a small prefs store
-  defaultDestination; defaultVisibility; defaultCustody
+PublishingPrefs {   // FINALIZED: lives on Anima (per-identity, low-churn, no new store).
+  defaultDestination; defaultVisibility; defaultCustody    //   Per-Sodalitas defaults added later, only if a team needs one.
   huggingFaceAccount?; wallet?; bucket?        // BYO custody targets
 }
 ```
-"Everything → HuggingFace" becomes `defaultDestination='huggingface', custody='nostra'` — a default, not a
-hardcode. A user with their own account flips `custody='sua'` + their token.
+"Everything → HuggingFace" becomes `defaultDestination='huggingface', custody='ours'` — a default, not a
+hardcode. A user with their own account flips `custody='theirs'` + their token.
 
-### 5d. The relationship to the artifact's own `access` field (decide in §8)
-`Intella.access`/`ownerAnimaId` already encode a visibility/owner. The `Editio` must be the **single source
-of truth** for "is this public, and where" — the artifact's `access` is *derived from / kept in sync with*
-its `Editio`s, not maintained independently. (Avoid two competing visibility flags.)
+### 5d. Single source of truth (FINALIZED)
+`Editio` **owns** visibility/custody/rights. `Intella.access`/`ownerAnimaId` and the Collectio public
+projection are **derived** — a small reconciler keeps them in sync when an `Editio` is published/retracted;
+they are never set independently. Two competing visibility flags is the bug we are explicitly avoiding.
+
+### 5e. Intella publishing == the royalty / ChainEngine surface (FINALIZED)
+For an **`Intella`** (a model), publishing and royalties are **one surface, one source of truth**. Making a
+model public/usable and deciding *who earns when it is used* is a single decision: the `Editio`'s
+rights/owner layer (`owners[]` / `auctor`) IS the identity the ledger's `modelRoyalty` hook pays whenever a
+gen uses that model (the ChainEngine royalty surface). So:
+- publishing a model = (a) making it resolvable (`loraResolver` finds it by trigger) **and** (b) wiring its
+  royalty-earning identity — never two separate records to drift apart;
+- this is why **rights/license/splits (build-order #4) is tightly coupled to model publishing specifically**,
+  and why the `Editio.owners[]`/`license` for an `Intella` must reconcile with its catalog `auctor` and the
+  royalty-hook payee. (Catalog models = our license/our cut; BYO/user-trained = the user's `auctor` earns.)
 
 ## 6. Net-new work + proposed build order
 
@@ -190,20 +201,35 @@ accrete as adapters on the identical interface. Do NOT model a second artifact t
 - **`Sodalitas` + ledger royalty hooks** → the rights/split layer (#4) snapshots at publish/freeze.
 - **Compliance posture** → the moderation gate (#1) + the license/custody policy (catalog vs BYO).
 
-## 8. Open questions (to finalize before building)
+## 8. Decisions (finalized 2026-06-21)
 
-- **Naming** — `Editio`/`Editionum` for the primitive/store? destinations as "publication adapters"? The
-  visibility/custody enums in Latin (`nostra`/`sua`/`utraque`) or English?
-- **Prefs home** — `PublishingPrefs` on `Anima`, or a small dedicated store? Per-Sodalitas defaults too?
-- **Single source of truth for visibility** — does `Editio` own it and `Intella.access`/Collectio public
-  projection *derive*, or do they coexist (and how do we prevent drift)? (§5d.)
-- **Retract semantics** — feed/bucket can unpublish; **on-chain cannot**. How does `status:'retracted'`
-  behave per adapter, and what's the UX promise ("public" ≠ "forever" for feed, but is for mint)?
-- **Custody for on-chain** — non-custodial means the user's wallet holds the token; we host only the mutable
-  metadata (living NFTs). How does wallet-linking (arcanum / magic-amount) feed `custody='sua'`?
-- **Moderation pipeline** — reuse the speced trust-boundary CSAM/NCMEC scan as the `visibility→public` gate;
-  where does it run (on publish-request, async before going live), and what's the pending/rejected UX?
-- **Does `Editio` supersede or wrap Collectio's §4e adapters** — confirm publishing owns the adapter set and
-  Collectio just *requests* a publish, rather than maintaining its own export code.
-- **Feed surface** — is the feed a crystal `/v1` read API + a frontend lens, both? Anonymous (`commitment`)
-  publishing to the feed — allowed, and how attributed?
+- **Naming** — ✅ `Editio` / `Editionum` (primitive / store); destinations are "publication adapters."
+  Value **enums are English** (`private/unlisted/feed/marketplace`, `ours/theirs/both`) — they are
+  user-facing policy, not internal primitives; we Latinize primitives, not value enums.
+- **Prefs home** — ✅ `PublishingPrefs` lives on **`Anima`** (per-identity, low-churn, no new store).
+  Per-`Sodalitas` defaults added later, only when a team actually needs a shared destination.
+- **Single source of truth** — ✅ `Editio` **owns** visibility/custody/rights; `Intella.access` and the
+  Collectio public projection **derive** via a reconciler (§5d). For an `Intella`, this same source of
+  truth IS the royalty/ChainEngine payee surface (§5e) — publish + royalty are one decision.
+- **Retract** — ✅ per-adapter capability: feed/bucket support real unpublish (`status:'retracted'` + delete
+  hosted bytes); **`MintAdapter` has no `retract()`**. The honest UX promise: *feed/hosted = revocable;
+  minted = permanent.* `retract?` is optional on the adapter interface for exactly this reason.
+- **On-chain custody** — ✅ **deferred to build-order #5**: non-custodial (token in the user's linked
+  wallet, `custody:'theirs'`; we host only mutable metadata, `custody:'ours'`, for living NFTs). Fed by the
+  existing wallet-linking (arcanum / magic-amount). Not designed in detail until #5.
+- **Moderation** — ✅ reuse the trust-boundary **CSAM/NCMEC scan as the `→public` gate**, run **async on
+  publish-request**: an `Editio` to a public surface goes `pending` → scan → `published` | `rejected`.
+  **Never** a synchronous publish to a public surface. Non-negotiable for the #1 feed bite.
+- **Editio vs Collectio §4e** — ✅ **publishing owns the adapter registry**; a Collectio *requests* a
+  publish (`publish(collectio, { marketplace, ... })`) rather than carrying export code. Collectio spec §4e
+  to be updated to point here (single adapter registry, no duplication).
+- **Feed surface** — ✅ a crystal **`/v1` read API (`GET /v1/feed`) + a frontend lens**, both. **Anonymous
+  (`commitment`) publishing allowed**, attributed to the commitment or a chosen handle (anon gens are a
+  large share of the advertising value), gated by the same moderation.
+
+## 9. Open (deferred to their build-order step, not undecided)
+
+- Exact `retract` semantics + hosted-byte deletion per adapter (lands with #2 bucket / #5 mint).
+- Wallet-linking → `custody:'theirs'` wiring + living-NFT mutable-metadata hosting (lands with #5/#6).
+- Reconciler mechanics (event-hook vs write-through) for keeping `Intella.access` in sync with `Editio` —
+  decide at #1/#3 against the then-current Nexus hook rail.
