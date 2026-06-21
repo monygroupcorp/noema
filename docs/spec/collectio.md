@@ -166,6 +166,11 @@ Shipped this build-out (#1–#4, 2026-06-19):
   public `Collection` (`completed`/`failed`/`rejected`/`total`/`cost`) + observe.
 
 ### 4e. Export + mint (agnostic metadata, projected on export)
+- **→ Now owned by the Publishing module** (`docs/spec/publishing.md`, finalized 2026-06-21): publishing owns
+  the adapter registry; a Collectio *requests* a publish — `publish(collectio, { destination:'mint' |
+  'marketplace', visibility, custody })` — rather than carrying its own export code. The freeze boundary
+  below stays a Collectio concern (it snapshots at publish time); the *adapters* it projects through live in
+  publishing. Build-orders #5/#6 here = the Mint/Marketplace adapters there.
 - 🟠 **Agnostic metadata + export adapters** — same discipline as `projectExitus`: store ONE canonical,
   format-agnostic piece record (attributes + media + provenance hash); **export adapters project it**
   into the format a target wants (ERC-721 / ERC-1155, OpenSea attributes, Metaplex/Solana, **and our
