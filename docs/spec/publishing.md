@@ -1,8 +1,8 @@
 # Publishing (Editio) — spec
 
-**Status:** build-order #1 (feed) SHIPPED (2026-06-21) — `Editio`/`Editionum` spine + `FeedAdapter` +
-async moderation gate + `POST /v1/editiones` / `GET /v1/feed`, hermetic-green, never live-verified on GPUs.
-#2–6 not started. The canonical spec for
+**Status:** build-orders #1 (feed) + #2 (bucket custody) SHIPPED (2026-06-21) — `Editio`/`Editionum` spine +
+`FeedAdapter` + `BucketAdapter` (R2 re-host + retract-delete) + async moderation gate + `unlisted` +
+`POST /v1/editiones` / `GET /v1/feed`, hermetic-green, never live-verified on GPUs. #3–6 not started. The canonical spec for
 **publishing as a first-class arm of the application**: routing any artifact the platform produces
 (a gen, a trained model, a collection drop) to any destination (our feed, our buckets, HuggingFace,
 user custody, on-chain mint, external marketplaces) under a chosen visibility/custody/rights
@@ -176,9 +176,14 @@ gen uses that model (the ChainEngine royalty surface). So:
    synchronous publish — the gate is injected as an interface; the **real CSAM/NCMEC scanner is still unbuilt**,
    so the container wires `permissiveModerationGate` (a structural no-op that preserves the async-gate path).
    §5d reconciler is a documented write-through seam (`_reconcile`) — a no-op until intella publishing (#3).
-2. 🟠 **Bucket / hosting custody** — `BucketAdapter` (R2, public-hosted or private) + `unlisted` (link)
-   visibility. Establishes custody=`nostra`. This is the substrate living NFTs later reuse (we serve the
-   `tokenURI`).
+2. ✅ **Bucket / hosting custody** — SHIPPED 2026-06-21. `BucketAdapter` (`src/crystal/BucketAdapter.ts`,
+   keyed `r2`) re-hosts an artifact's media into R2 under a stable per-publication key (`editiones/<editioId>.<ext>`),
+   custody `ours`; `retract` DELETES the hosted bytes (new `ObjectStore.del` on `R2Uploader`). Adapters now
+   built in the container (`Ring.publicationAdapters`), bucket gated on R2 config like the deterministic
+   cursors. `unlisted` visibility flows through the existing sync (un-gated) publish path. **Deferred:** TRUE
+   private custody (owner-only bytes via signed URLs / a private bucket) — a `private` bucket publish today
+   hosts publicly-readable bytes under an unguessable key (unlisted-grade); signed-URL custody lands with the
+   living-NFT work (#6). This is the substrate living NFTs reuse (we serve the `tokenURI`).
 3. 🟠 **Model publishing + custody preferences** — generalize the LoRA→HF hardcode into `HuggingFaceAdapter`
    + the `CustodyAdapter` (BYO HF account), governed by `PublishingPrefs`. **Resolves the original
    training-output question:** "the HF adapter is one of several, chosen by the user's custody preference."
@@ -234,7 +239,10 @@ accrete as adapters on the identical interface. Do NOT model a second artifact t
 
 ## 9. Open (deferred to their build-order step, not undecided)
 
-- Exact `retract` semantics + hosted-byte deletion per adapter (lands with #2 bucket / #5 mint).
+- Exact `retract` semantics + hosted-byte deletion per adapter — ✅ done for bucket (#2: `ObjectStore.del`);
+  mint has no `retract` (#5, permanent).
+- TRUE private custody for the bucket (owner-only bytes via signed URLs / private bucket) — deferred to #6;
+  `private` bucket publishes are unlisted-grade today (public bytes under an unguessable key).
 - Wallet-linking → `custody:'theirs'` wiring + living-NFT mutable-metadata hosting (lands with #5/#6).
 - Reconciler mechanics (event-hook vs write-through) for keeping `Intella.access` in sync with `Editio` —
   decided at #1: **write-through** in `CrystalApi._reconcile` (single settle point = single update point).
