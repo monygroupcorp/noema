@@ -4,9 +4,11 @@ import { randomUUID } from 'node:crypto'
 import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/CrystalApi.js'
 import { FeedAdapter } from '../../../src/crystal/FeedAdapter.js'
 import { BucketAdapter } from '../../../src/crystal/BucketAdapter.js'
+import { ModelPublishAdapter, huggingFaceRegistry, civitaiRegistry } from '../../../src/crystal/ModelPublishAdapter.js'
 import type { ObjectStore } from '../../../src/crystal/R2Uploader.js'
 import type { MediaFetcher } from '../../../src/crystal/MediaFetcher.js'
 import type { ModerationGate } from '../../../src/crystal/ModerationGate.js'
+import type { Intella } from '../../../src/types/intelligendi.js'
 import type { Editio, Editiones, Editionum, ArtifactRef, FeedFilter } from '../../../src/types/editio.js'
 
 // =============================================================================
@@ -74,16 +76,35 @@ function makeApi(opts?: { gate?: ModerationGate; prefs?: Record<string, unknown>
     async del(key) { dels.push(key) },
   }
   const fetcher: MediaFetcher = { async fetch(url) { return Buffer.from(`bytes:${url}`) } }
+  // A fake Intella store: one model the caller (anima-1) owns + a setAccess spy.
+  const models = new Map<string, Intella>([
+    ['lora-1', { id: 'lora-1', nomen: 'My LoRA', genus: 'lora', slug: 'my-lora', trigger: 'mld', familia: 'flux', ownerAnimaId: 'anima-1', access: 'private', sources: [{ provenance: 'miladystation', uri: 'https://x/lora.safetensors' }] } as unknown as Intella],
+  ])
+  const accessCalls: Array<{ id: string; access: 'public' | 'private' }> = []
+  const intellarum = {
+    find: async (id: string) => models.get(id) ?? null,
+    setAccess: async (id: string, access: 'public' | 'private') => {
+      accessCalls.push({ id, access })
+      const m = models.get(id); if (m) (m as { access?: string }).access = access
+      return m ?? null
+    },
+  }
   const api = new CrystalApi({
     editiones,
     actorum: fakeActorum(),
     signorum: fakeSignorum,
     animae,
-    publicationAdapters: [new FeedAdapter(), new BucketAdapter({ fetcher, store })],
+    intellarum,
+    publicationAdapters: [
+      new FeedAdapter(),
+      new BucketAdapter({ fetcher, store }),
+      new ModelPublishAdapter(huggingFaceRegistry('ms2stationthis')),
+      new ModelPublishAdapter(civitaiRegistry()),
+    ],
     ...(opts?.gate ? { moderationGate: opts.gate } : {}),
     publishScheduler: (fn: () => Promise<void>) => { tasks.push(fn()) },
   } as unknown as CrystalApiDeps)
-  return { api, editiones, puts, dels, flush: () => Promise.all(tasks) }
+  return { api, editiones, puts, dels, models, accessCalls, flush: () => Promise.all(tasks) }
 }
 
 const anima1 = { animaId: 'anima-1' }
@@ -163,19 +184,55 @@ test('retractEdition(): retracting a bucket publish deletes the hosted bytes', a
   assert.deepEqual(dels, [`editiones/${ed.id}.png`], 'the hosted object was deleted')
 })
 
+test('publish(): a model publishes to HuggingFace (custody ours) and becomes resolvable (access public)', async () => {
+  const { api, models, accessCalls } = makeApi()
+  const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'huggingface', visibility: 'unlisted' })
+
+  assert.equal(ed.status, 'published')
+  assert.equal(ed.externalRef, 'https://huggingface.co/ms2stationthis/my-lora')
+  // §5d reconciler: an unlisted (non-private) model publish flips access → public.
+  assert.deepEqual(accessCalls, [{ id: 'lora-1', access: 'public' }])
+  assert.equal((models.get('lora-1') as { access?: string }).access, 'public')
+})
+
+test('publish(): a model to Civitai under the caller BYO account (custody theirs, from prefs)', async () => {
+  const { api } = makeApi({ prefs: { defaultDestination: 'civitai', defaultCustody: 'theirs', defaultVisibility: 'unlisted', civitaiAccount: 'mony' } })
+  const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' } })
+  assert.equal(ed.destination, 'civitai')
+  assert.equal(ed.custody, 'theirs')
+  assert.equal(ed.externalRef, 'https://civitai.com/user/mony?model=my-lora')
+})
+
+test('publish(): a model cannot go to the media feed/marketplace', async () => {
+  const { api } = makeApi()
+  await assert.rejects(
+    () => api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'huggingface', visibility: 'feed' }),
+    /not the media feed/,
+  )
+})
+
+test('publish(): rejects a model the caller does not own', async () => {
+  const { api } = makeApi()
+  await assert.rejects(
+    () => api.publish({ animaId: 'not-the-owner' }, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'huggingface', visibility: 'unlisted' }),
+    /not found/i,
+  )
+})
+
+test('retractEdition(): retracting a model publish revokes resolvability (access private)', async () => {
+  const { api, models, accessCalls } = makeApi()
+  const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'huggingface', visibility: 'unlisted' })
+  accessCalls.length = 0
+  await api.retractEdition(anima1, ed.id)
+  assert.deepEqual(accessCalls, [{ id: 'lora-1', access: 'private' }])
+  assert.equal((models.get('lora-1') as { access?: string }).access, 'private')
+})
+
 test('publish(): rejects an artifact the caller does not own', async () => {
   const { api } = makeApi()
   await assert.rejects(
     () => api.publish(anima1, { artifact: { kind: 'actum', id: 'not-mine' } }),
     /not found/i,
-  )
-})
-
-test('publish(): intella publishing is not yet supported (build-order #3)', async () => {
-  const { api } = makeApi()
-  await assert.rejects(
-    () => api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'feed' }),
-    /not yet supported/i,
   )
 })
 

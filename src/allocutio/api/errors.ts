@@ -64,6 +64,7 @@ export const Errors = {
   notFoundCollection: (id: string) => new ApiError('not_found.collection', `Collection '${id}' not found`, 404),
   notFoundTeam: (id: string) => new ApiError('not_found.team', `Team '${id}' not found`, 404),
   notFoundEdition: (id: string) => new ApiError('not_found.edition', `Edition '${id}' not found`, 404),
+  notFoundModel: (id: string) => new ApiError('not_found.model', `Model '${id}' not found`, 404),
   notFoundAdapter: (key: string) => new ApiError('not_found.adapter', `Publication destination '${key}' is not available`, 404),
   publishUnsupportedArtifact: (kind: string) =>
     new ApiError('input.unsupported_artifact', `Publishing a '${kind}' is not yet supported`, 422),

@@ -22,7 +22,7 @@ import type { ActumIndexStore } from '../../types/actumIndex.js'
 import type { Consuetudinum } from '../../types/consuetudo.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Fundamentorum } from '../../types/fundamentum.js'
-import type { Intelligens, IntelligentiumStore, IntelligensGenus } from '../../types/intelligendi.js'
+import type { Intelligens, IntelligentiumStore, IntelligensGenus, Intellarum, Intella } from '../../types/intelligendi.js'
 import type { HospitiumStore } from '../../types/hospitium.js'
 import type { MateriaStore } from '../../types/materia.js'
 import type { Conductor, StudioHandle, ConduceOpts } from '../../crystal/Conductor.js'
@@ -102,6 +102,9 @@ export interface CrystalApiDeps {
   moderationGate?: ModerationGate
   /** Identity store — reads `Anima.publicatio` to default a publish from the caller's prefs. */
   animae?: AnimaStore
+  /** Model (Intella) registry — resolves + owner-scopes an `Intella` publish and is the
+   *  reconciler's write seam (`setAccess`) for §5d. Absent → model publishing unavailable. */
+  intellarum?: Intellarum
   /** Scheduler for the async →public settle (moderation + adapter publish). Absent →
    *  fire-and-forget. Tests inject a collecting scheduler to await the pipeline. */
   publishScheduler?: (task: () => Promise<void>) => void
@@ -453,6 +456,13 @@ export class CrystalApi {
     const visibility = opts.visibility ?? prefs?.defaultVisibility ?? (destination === 'feed' ? 'feed' : 'private')
     const custody = opts.custody ?? prefs?.defaultCustody ?? 'ours'
 
+    // A model (Intella) has a binary resolvability (public/private), not a media
+    // surface — it never belongs in the image feed/marketplace (those render an
+    // Actum's media). Keep models on private/unlisted; reconcile maps that to access.
+    if (opts.artifact.kind === 'intella' && (visibility === 'feed' || visibility === 'marketplace')) {
+      throw Errors.inputMalformed("a model publishes to 'private' or 'unlisted', not the media feed/marketplace")
+    }
+
     // The caller must own the artifact they are putting forth.
     const ref: ArtifactRef = { kind: opts.artifact.kind, id: opts.artifact.id }
     await this._assertOwnsArtifact(auctor, ref)
@@ -541,11 +551,13 @@ export class CrystalApi {
     }
     try {
       const adapter = this._resolveAdapter(e.destination)
+      const custodyTarget = await this._custodyTarget(e)
       const { externalRef } = await adapter.publish(artifact, {
         visibility: e.visibility,
         custody: e.custody,
         ...(e.owners !== undefined ? { owners: e.owners } : {}),
         ...(e.license !== undefined ? { license: e.license } : {}),
+        ...(custodyTarget !== undefined ? { custodyTarget } : {}),
       })
       const published = await editiones.update(editioId, { status: 'published', externalRef })
       await this._reconcile(published)
@@ -564,10 +576,21 @@ export class CrystalApi {
    */
   private async _reconcile(editio: Editio): Promise<void> {
     if (editio.artifactRef.kind !== 'intella') return
-    // PLACEHOLDER(publishing#3): inert reconciler seam. When intella publishing lands,
-    // write-through Intella.access ('public' on published / 'private' on retracted) +
-    // the royalty payee (§5e) here. No Intella publish path reaches this yet.
-    // Ledger: docs/spec/publishing.md §10.
+    // A model's resolvability DERIVES from its Editio: published-public → 'public'
+    // (anyone can resolve it by trigger), retracted/private → 'private'. The royalty
+    // payee (§5e) is the model's own `auctor`, which a public publish does not change
+    // — making it resolvable IS the same decision as who earns when it is used.
+    const isPublic = editio.status === 'published' && editio.visibility !== 'private'
+    await this.deps.intellarum?.setAccess?.(editio.artifactRef.id, isPublic ? 'public' : 'private')
+  }
+
+  /** The BYO custody target (account) for a `custody:'theirs'` model publish, from the
+   *  author's prefs — HuggingFace/Civitai account by destination. Undefined otherwise. */
+  private async _custodyTarget(e: Editio): Promise<{ account?: string } | undefined> {
+    if (e.custody !== 'theirs') return undefined
+    const prefs = await this._publishingPrefs(e.by)
+    const account = e.destination === 'civitai' ? prefs?.civitaiAccount : prefs?.huggingFaceAccount
+    return account ? { account } : undefined
   }
 
   /** Resolve a registered publication adapter by key, or 404. */
@@ -617,13 +640,36 @@ export class CrystalApi {
       await this._ownedCollection(auctor, ref.id) // throws not_found.collection if not owned
       return
     }
-    // Intella (model) publishing is build-order #3 — needs the custody/royalty surface.
-    throw Errors.publishUnsupportedArtifact(ref.kind)
+    // Intella (model): owned by its `ownerAnimaId` (private LoRAs) or `auctor`.
+    // Platform-canonical models have neither set to a user → not user-publishable.
+    const intella = await this._ownedIntella(auctor, ref.id)
+    if (!intella) throw Errors.notFoundModel(ref.id)
   }
 
-  /** The produced output of an artifact (an Actum's exitus media), when resolvable. */
+  /** Resolve an Intella the caller owns, or null. Models lacking the store are unavailable. */
+  private async _ownedIntella(auctor: AuctorKey, id: string): Promise<Intella | null> {
+    if (!('animaId' in auctor) || !this.deps.intellarum) return null
+    const intella = await this.deps.intellarum.find(id)
+    if (!intella) return null
+    const owns = intella.ownerAnimaId === auctor.animaId || intella.auctor === auctor.animaId
+    return owns ? intella : null
+  }
+
+  /** The payload an adapter is handed for an artifact: an Actum's exitus media, or a
+   *  model's publishable view (sources + naming) for the registry adapters. */
   private async _artifactOutput(ref: ArtifactRef): Promise<Record<string, unknown> | undefined> {
     if (ref.kind === 'actum') return (await this.deps.actorum.findById(ref.id))?.exitus
+    if (ref.kind === 'intella') {
+      const m = await this.deps.intellarum?.find(ref.id)
+      if (!m) return undefined
+      return {
+        nomen: m.nomen, genus: m.genus, sources: m.sources,
+        ...(m.slug !== undefined ? { slug: m.slug } : {}),
+        ...(m.trigger !== undefined ? { trigger: m.trigger } : {}),
+        ...(m.familia !== undefined ? { familia: m.familia } : {}),
+        ...(m.auctor !== undefined ? { auctor: m.auctor } : {}),
+      }
+    }
     return undefined
   }
 

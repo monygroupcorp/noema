@@ -3754,6 +3754,10 @@
       "httpStatus": 404
     },
     {
+      "code": "not_found.model",
+      "httpStatus": 404
+    },
+    {
       "code": "not_found.adapter",
       "httpStatus": 404
     },
