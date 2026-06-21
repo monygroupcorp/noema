@@ -30,7 +30,8 @@ function makeSpendEvent(impetus: bigint, overrides = {}): SignumEvent<'execution
     payload: {
       actum: { id: 'act-1', modusId: 'mod-1', modusVersiono: '1.0.0', impetus, signaConsumed: [], aditus: {}, status: 'completus' as const, inceptum: new Date() },
       impetus,
-      modoHostAnimaId: 'anima-host',
+      baseImpetus: impetus,
+      modoHostKey: { animaId: 'anima-host' },
       modusAuctorAnimaId: 'anima-author',
       intellaRoyaltyPayees: [{ animaId: 'anima-model-a', weight: 1 }],
       ...overrides,

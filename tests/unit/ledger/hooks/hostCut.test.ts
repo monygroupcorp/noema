@@ -23,10 +23,10 @@ function makeEvent(overrides: Partial<SignumEvent<'execution_spend'>['payload']>
   }
 }
 
-// Host cut = 20% of impetus, paid to modoHostAnimaId as 'reward' signum
+// Host cut = 20% of baseImpetus, paid to modoHostKey.animaId as 'reward' signum
 
-test('returns reward signum to host when modoHostAnimaId is present', async () => {
-  const event = makeEvent({ modoHostAnimaId: 'anima-host-123' })
+test('returns reward signum to host when modoHostKey is present', async () => {
+  const event = makeEvent({ baseImpetus: 1000n, modoHostKey: { animaId: 'anima-host-123' } })
 
   const signa = await hostCutHook(event)
 
@@ -36,32 +36,32 @@ test('returns reward signum to host when modoHostAnimaId is present', async () =
   assert.equal(signa[0].auctor, 'nexus:hostCut')
 })
 
-test('host cut is 20% of impetus', async () => {
-  const event = makeEvent({ impetus: 1000n, modoHostAnimaId: 'anima-host-123' })
+test('host cut is 20% of baseImpetus', async () => {
+  const event = makeEvent({ baseImpetus: 1000n, modoHostKey: { animaId: 'anima-host-123' } })
 
   const signa = await hostCutHook(event)
 
   assert.equal(signa[0].valor, 200n)
 })
 
-test('host cut rounds down on non-divisible impetus', async () => {
-  const event = makeEvent({ impetus: 999n, modoHostAnimaId: 'anima-host-123' })
+test('host cut rounds down on non-divisible baseImpetus', async () => {
+  const event = makeEvent({ baseImpetus: 999n, modoHostKey: { animaId: 'anima-host-123' } })
 
   const signa = await hostCutHook(event)
 
   assert.equal(signa[0].valor, 199n)  // floor(999 * 0.2) = 199
 })
 
-test('returns empty array when no modoHostAnimaId', async () => {
-  const event = makeEvent({ modoHostAnimaId: undefined })
+test('returns empty array when no modoHostKey', async () => {
+  const event = makeEvent({ baseImpetus: 1000n, modoHostKey: undefined })
 
   const signa = await hostCutHook(event)
 
   assert.deepEqual(signa, [])
 })
 
-test('returns empty array when impetus is zero', async () => {
-  const event = makeEvent({ impetus: 0n, modoHostAnimaId: 'anima-host-123' })
+test('returns empty array when baseImpetus is zero', async () => {
+  const event = makeEvent({ baseImpetus: 0n, modoHostKey: { animaId: 'anima-host-123' } })
 
   const signa = await hostCutHook(event)
 
