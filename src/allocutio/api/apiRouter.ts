@@ -269,8 +269,8 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   // (feed/marketplace) return a `pending` Edition (async moderation → published).
   router.post('/editiones', wrap(async (req, res) => {
     const auctor = await auth(req)
-    const { artifact, destination, visibility, custody, license, teamId } = req.body ?? {}
-    res.status(200).json({ edition: await api.publish(auctor, { artifact, destination, visibility, custody, license, teamId }) })
+    const { artifact, destination, visibility, custody, license, teamId, owners } = req.body ?? {}
+    res.status(200).json({ edition: await api.publish(auctor, { artifact, destination, visibility, custody, license, teamId, owners }) })
   }))
 
   // POST /v1/editiones/:id/retract — unpublish where the destination allows it (author-scoped).

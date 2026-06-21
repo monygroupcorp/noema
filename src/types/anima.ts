@@ -42,6 +42,8 @@ export interface PublishingPrefs {
   defaultVisibility?: import('./editio.js').EditioVisibility
   /** Default custody — 'ours' | 'theirs' | 'both'. */
   defaultCustody?: import('./editio.js').EditioCustody
+  /** Default license tag for the caller's own publications — 'catalog' or a BYO license id. */
+  defaultLicense?: string
   /** BYO custody target: the user's own HuggingFace account/namespace. */
   huggingFaceAccount?: string
   /** BYO custody target: the user's own Civitai account/username. */

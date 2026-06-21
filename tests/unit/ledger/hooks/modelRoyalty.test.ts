@@ -103,6 +103,38 @@ test('returns empty array when impetus is zero', async () => {
   assert.deepEqual(signa, [])
 })
 
+// Weighted split (a published Editio's owners[]) — takes precedence over the equal split.
+
+test('weighted payees split the 5% pool by weight', async () => {
+  const event = makeEvent({ impetus: 1000n, intellaRoyaltyPayees: [{ animaId: 'a', weight: 0.7 }, { animaId: 'b', weight: 0.3 }] })
+  const signa = await modelRoyaltyHook(event)
+  assert.equal(signa.length, 2)
+  assert.equal(signa[0].valor, 35n)  // 50 * 0.7
+  assert.equal(signa[1].valor, 15n)  // 50 * 0.3
+})
+
+test('weighted payees take precedence over equal intellaAuctorAnimaIds', async () => {
+  const event = makeEvent({ impetus: 1000n, intellaAuctorAnimaIds: ['x', 'y', 'z'], intellaRoyaltyPayees: [{ animaId: 'a', weight: 1 }] })
+  const signa = await modelRoyaltyHook(event)
+  assert.equal(signa.length, 1)
+  assert.equal(signa[0].animaId, 'a')
+  assert.equal(signa[0].valor, 50n)
+})
+
+test('weighted payees: non-normalized weights are normalized by their sum', async () => {
+  const event = makeEvent({ impetus: 1000n, intellaRoyaltyPayees: [{ animaId: 'a', weight: 3 }, { animaId: 'b', weight: 1 }] })
+  const signa = await modelRoyaltyHook(event)
+  assert.equal(signa[0].valor, 37n)  // pool 50 * 0.75 = 37.5 → bigint floor 37
+  assert.equal(signa[1].valor, 12n)  // pool 50 * 0.25 = 12.5 → bigint floor 12
+})
+
+test('weighted payees: zero/negative weights are dropped', async () => {
+  const event = makeEvent({ impetus: 1000n, intellaRoyaltyPayees: [{ animaId: 'a', weight: 1 }, { animaId: 'b', weight: 0 }] })
+  const signa = await modelRoyaltyHook(event)
+  assert.equal(signa.length, 1)
+  assert.equal(signa[0].animaId, 'a')
+})
+
 test('authors with zero share after floor are excluded', async () => {
   // 1 * 5% = 0 (integer division), 3 authors → each would get 0 → all excluded
   const event = makeEvent({ impetus: 1n, intellaAuctorAnimaIds: ['a', 'b', 'c'] })
