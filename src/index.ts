@@ -19,6 +19,7 @@ import { handleAlchemyWebhook } from './api/webhooks/alchemyWebhook.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
+import { FeedAdapter } from './crystal/FeedAdapter.js'
 import { IdentityResolver as ApiIdentityResolver, credentialsFromHeaders } from './allocutio/api/IdentityResolver.js'
 import { createApiRouter } from './allocutio/api/apiRouter.js'
 import { makeCredentialAcceptors } from './allocutio/api/apiAcceptors.js'
@@ -610,6 +611,12 @@ async function main(): Promise<void> {
     collectiones: ring.collectiones,
     collectioCursor: ring.collectioCursor,
     sodalitatum: ring.sodalitates,
+    // Publishing spine (Editio): the feed adapter + the store + prefs source.
+    // No moderationGate wired → the permissive placeholder gate (real CSAM/NCMEC
+    // scanner is unbuilt; the async →public gate path still always runs).
+    editiones: ring.editiones,
+    publicationAdapters: [new FeedAdapter()],
+    animae: ring.animae,
     ...(ring.conductor ? { conductor: ring.conductor } : {}),
     ...(ring.teeProvisioner ? { teeProvisioner: ring.teeProvisioner } : {}),
     // Fire-and-forget studio-ready/failed webhook (optional sugar over polling).

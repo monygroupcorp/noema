@@ -35,15 +35,20 @@ import { aggregateStatus, materiaStudioStatus } from '../lexicon/status/aggregat
 import type { ModoStore } from '../../types/modo.js'
 import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModus.js'
 import { dispatchInceptio, type DispatchDeps } from '../../execution/dispatchInceptio.js'
-import { toRun, toCollection, toTeam } from './runProjection.js'
+import { toRun, toCollection, toTeam, toEdition } from './runProjection.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
 import { Errors } from './errors.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { computeRecipient } from '../../arcanum/prover.js'
 import { impetusForPodMs } from '../../ledger/rates.js'
-import type { Run, Collection, Team } from './types.js'
+import type { Run, Collection, Team, Edition, FeedItem } from './types.js'
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
+import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
 import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
+import type { AnimaStore, PublishingPrefs } from '../../types/anima.js'
+import type { PublicationAdapter } from '../../crystal/PublicationAdapter.js'
+import type { ModerationGate } from '../../crystal/ModerationGate.js'
+import { permissiveModerationGate } from '../../crystal/ModerationGate.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 import { provenanceHash } from '../../crystal/provenance.js'
 import { rarityReport, type RarityReport } from '../../crystal/rarityReport.js'
@@ -89,6 +94,17 @@ export interface CrystalApiDeps {
   collectioCursor?: Pick<CollectioCursor, 'start' | 'extend' | 'approveActum' | 'rejectAndRevive' | 'pause' | 'resume'>
   /** Team store — backs the team CRUD + team-owned collections. Absent → team ops unavailable. */
   sodalitatum?: Sodalitatum
+  /** Publication store (Editio) — backs `publish`/`feed`/`retract`. Absent → publishing unavailable. */
+  editiones?: Editionum
+  /** Registered publication adapters, resolved by `destination` key (FeedAdapter, …). */
+  publicationAdapters?: PublicationAdapter[]
+  /** Trust-boundary →public moderation gate (CSAM/NCMEC). Absent → permissive placeholder. */
+  moderationGate?: ModerationGate
+  /** Identity store — reads `Anima.publicatio` to default a publish from the caller's prefs. */
+  animae?: AnimaStore
+  /** Scheduler for the async →public settle (moderation + adapter publish). Absent →
+   *  fire-and-forget. Tests inject a collecting scheduler to await the pipeline. */
+  publishScheduler?: (task: () => Promise<void>) => void
   /** RunPod pod provisioner for TEE private compute sessions. Absent → local dev (manual runner). */
   teeProvisioner?: TeeProvisioner
 }
@@ -114,6 +130,22 @@ export interface CollectOpts {
    * The caller must be a member. Snapshots an equal-weight `owners` split from
    * the team's membership at creation.
    */
+  teamId?: string
+}
+
+/** Inputs to publish an artifact (an Actum for #1) to a destination under a policy. */
+export interface PublishOpts {
+  /** The canonical artifact to put forth (referenced, never copied). */
+  artifact: { kind: ArtifactKind; id: string }
+  /** Adapter key. Defaults from the caller's prefs, then 'feed'. */
+  destination?: string
+  /** Public-exposure surface. Defaults from prefs, then 'feed' for the feed adapter else 'private'. */
+  visibility?: EditioVisibility
+  /** Who holds the bytes/metadata. Defaults from prefs, then 'ours'. */
+  custody?: EditioCustody
+  /** License tag — 'catalog' (our liability) | a BYO license id. */
+  license?: string
+  /** Snapshot a rights split from a team (Sodalitas) the caller is a member of. */
   teamId?: string
 }
 
@@ -394,6 +426,199 @@ export class CrystalApi {
   async rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void> {
     await this._ownedCollection(auctor, id)
     await this.deps.collectioCursor?.rejectAndRevive(id, actumId)
+  }
+
+  // ── Publishing (Editio) ─────────────────────────────────────────────────────
+
+  /**
+   * Publish an artifact — put a canonical `Actum`/`Intella`/`Collectio` forth to a
+   * destination (an adapter, keyed by `destination`) under a visibility/custody/
+   * rights policy. Creates an `Editio` (a publication record; the artifact is only
+   * referenced, never copied) and settles it:
+   *   - PUBLIC surfaces (`feed`/`marketplace`) go `pending` → async moderation
+   *     scan → `published` | `rejected`. NEVER a synchronous publish to public.
+   *   - private/unlisted publish synchronously (no moderation gate).
+   * Unspecified fields default from the caller's `Anima.publicatio` prefs. Returns
+   * the public Edition (pending for a public surface; settled otherwise).
+   */
+  async publish(auctor: AuctorKey, opts: PublishOpts): Promise<Edition> {
+    const editiones = this.deps.editiones
+    if (!editiones) throw Errors.notFoundEdition('publishing')
+
+    const by = this._editionBy(auctor)
+    const prefs = await this._publishingPrefs(auctor)
+    const destination = opts.destination ?? prefs?.defaultDestination ?? 'feed'
+    // Validate the destination up front (mirrors collect validating the modus).
+    this._resolveAdapter(destination)
+    const visibility = opts.visibility ?? prefs?.defaultVisibility ?? (destination === 'feed' ? 'feed' : 'private')
+    const custody = opts.custody ?? prefs?.defaultCustody ?? 'ours'
+
+    // The caller must own the artifact they are putting forth.
+    const ref: ArtifactRef = { kind: opts.artifact.kind, id: opts.artifact.id }
+    await this._assertOwnsArtifact(auctor, ref)
+
+    // Team overlay: snapshot an equal-weight owners split from the membership.
+    let owners: Editio['owners']
+    if (opts.teamId !== undefined) {
+      const team = await this._memberTeam(auctor, opts.teamId)
+      owners = team.membra.map((animaId) => ({ animaId, weight: 1 / team.membra.length }))
+    }
+
+    const editio = await editiones.create({
+      artifactRef: ref,
+      destination,
+      visibility,
+      custody,
+      by,
+      ...(owners !== undefined ? { owners } : {}),
+      ...(opts.license !== undefined ? { license: opts.license } : {}),
+    })
+
+    if (visibility === 'feed' || visibility === 'marketplace') {
+      // Public surface — never block the ack on the scan; settle asynchronously.
+      this._publishScheduler()(() => this._settlePublication(editio.id))
+      return toEdition(editio)
+    }
+    // Private/unlisted — no moderation gate; settle inline.
+    await this._settlePublication(editio.id)
+    return toEdition((await editiones.find(editio.id)) ?? editio)
+  }
+
+  /** The public feed — published, public-surface Editiones, newest first. NOT
+   *  owner-scoped (the feed is public). Each item carries the referenced artifact's
+   *  produced output so a client can render it without a second fetch. */
+  async feed(filter?: FeedFilter): Promise<FeedItem[]> {
+    const editiones = this.deps.editiones
+    if (!editiones) return []
+    const items = await editiones.listFeed(filter)
+    const out: FeedItem[] = []
+    for (const e of items) {
+      const output = await this._artifactOutput(e.artifactRef)
+      out.push({
+        editionId: e.id,
+        artifact: { kind: e.artifactRef.kind, id: e.artifactRef.id },
+        ...(output !== undefined ? { output } : {}),
+        createdAt: e.natum.toISOString(),
+      })
+    }
+    return out
+  }
+
+  /** Retract a publication where the destination allows it (feed/bucket = revocable;
+   *  mint = permanent → 403). Author-scoped: only the publishing identity may retract. */
+  async retractEdition(auctor: AuctorKey, id: string): Promise<Edition> {
+    const editiones = this.deps.editiones
+    if (!editiones) throw Errors.notFoundEdition(id)
+    const e = await editiones.find(id)
+    if (!e || !this._isEditionAuthor(auctor, e)) throw Errors.notFoundEdition(id)
+    const adapter = this._resolveAdapter(e.destination)
+    if (!adapter.retract) throw Errors.authForbidden(`'${e.destination}' publications cannot be retracted (permanent)`)
+    await adapter.retract(e)
+    const updated = await editiones.update(id, { status: 'retracted' })
+    await this._reconcile(updated)
+    return toEdition(updated)
+  }
+
+  /** Run the moderation gate (public surfaces only) then the adapter publish,
+   *  recording the outcome on the Editio. Pending → published | rejected | failed. */
+  private async _settlePublication(editioId: string): Promise<void> {
+    const editiones = this.deps.editiones
+    if (!editiones) return
+    const e = await editiones.find(editioId)
+    if (!e || e.status !== 'pending') return
+
+    const artifact = { ref: e.artifactRef, output: await this._artifactOutput(e.artifactRef) }
+    if (e.visibility === 'feed' || e.visibility === 'marketplace') {
+      const verdict = await this._moderationGate().scan(artifact)
+      if (!verdict.ok) {
+        await editiones.update(editioId, { status: 'rejected' })
+        return
+      }
+    }
+    try {
+      const adapter = this._resolveAdapter(e.destination)
+      const { externalRef } = await adapter.publish(artifact, {
+        visibility: e.visibility,
+        custody: e.custody,
+        ...(e.owners !== undefined ? { owners: e.owners } : {}),
+        ...(e.license !== undefined ? { license: e.license } : {}),
+      })
+      const published = await editiones.update(editioId, { status: 'published', externalRef })
+      await this._reconcile(published)
+    } catch {
+      await editiones.update(editioId, { status: 'failed' })
+    }
+  }
+
+  /**
+   * §5d reconciler seam — `Editio` OWNS visibility/custody/rights; `Intella.access`
+   * (and the Collectio public projection) DERIVE from it. DECISION: write-through
+   * here (not an event hook) — the single place a publish/retract settles is the
+   * single place the derived flag updates, so the two cannot drift. Only `intella`
+   * artifacts have a derived flag; `actum`/`collectio` are a safe no-op. Intella
+   * publishing is build-order #3 — this is its documented attachment point.
+   */
+  private async _reconcile(editio: Editio): Promise<void> {
+    if (editio.artifactRef.kind !== 'intella') return
+    // (build-order #3) write-through Intella.access ('public' on published / 'private'
+    // on retracted) + the royalty payee (§5e). No Intella publish path exists yet.
+  }
+
+  /** Resolve a registered publication adapter by key, or 404. */
+  private _resolveAdapter(key: string): PublicationAdapter {
+    const adapter = this.deps.publicationAdapters?.find((a) => a.key === key)
+    if (!adapter) throw Errors.notFoundAdapter(key)
+    return adapter
+  }
+
+  /** The →public moderation gate, or the permissive placeholder if none is wired. */
+  private _moderationGate(): ModerationGate {
+    return this.deps.moderationGate ?? permissiveModerationGate
+  }
+
+  /** The async-settle scheduler, or fire-and-forget if none is wired. */
+  private _publishScheduler(): (task: () => Promise<void>) => void {
+    return this.deps.publishScheduler ?? ((task) => { void task().catch(() => {}) })
+  }
+
+  /** An Editio owns by `{animaId}|{commitment}` only — bursaToken has no persistent owner. */
+  private _editionBy(auctor: AuctorKey): Editio['by'] {
+    if ('animaId' in auctor) return { animaId: auctor.animaId }
+    if ('commitment' in auctor) return { commitment: auctor.commitment }
+    throw Errors.authForbidden('Publishing requires an identified or commitment account')
+  }
+
+  private _isEditionAuthor(auctor: AuctorKey, e: Editio): boolean {
+    if ('animaId' in auctor && 'animaId' in e.by) return e.by.animaId === auctor.animaId
+    if ('commitment' in auctor && 'commitment' in e.by) return e.by.commitment === auctor.commitment
+    return false
+  }
+
+  /** The caller's per-identity publishing prefs (identified callers only). */
+  private async _publishingPrefs(auctor: AuctorKey): Promise<PublishingPrefs | undefined> {
+    if (!('animaId' in auctor) || !this.deps.animae) return undefined
+    return (await this.deps.animae.find(auctor.animaId))?.publicatio
+  }
+
+  /** Verify the caller owns the artifact being published, or throw not-found. */
+  private async _assertOwnsArtifact(auctor: AuctorKey, ref: ArtifactRef): Promise<void> {
+    if (ref.kind === 'actum') {
+      const a = await this.deps.actorum.findById(ref.id)
+      if (!a || !(await this._owns(auctor, a))) throw Errors.notFoundRun(ref.id)
+      return
+    }
+    if (ref.kind === 'collectio') {
+      await this._ownedCollection(auctor, ref.id) // throws not_found.collection if not owned
+      return
+    }
+    // Intella (model) publishing is build-order #3 — needs the custody/royalty surface.
+    throw Errors.publishUnsupportedArtifact(ref.kind)
+  }
+
+  /** The produced output of an artifact (an Actum's exitus media), when resolvable. */
+  private async _artifactOutput(ref: ArtifactRef): Promise<Record<string, unknown> | undefined> {
+    if (ref.kind === 'actum') return (await this.deps.actorum.findById(ref.id))?.exitus
+    return undefined
   }
 
   // ── Teams (Sodalitas) ───────────────────────────────────────────────────────

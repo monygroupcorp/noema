@@ -14,9 +14,10 @@
 
 import express, { type Request, type Response, type Router } from 'express'
 
-import type { Run, Collection, Team } from './types.js'
+import type { Run, Collection, Team, Edition, FeedItem } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
-import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts } from './CrystalApi.js'
+import type { FeedFilter } from '../../types/editio.js'
+import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts } from './CrystalApi.js'
 import type { RarityReport } from '../../crystal/rarityReport.js'
 import { ApiError, Errors } from './errors.js'
 import { makeLogger } from '../../lib/logger.js'
@@ -64,6 +65,9 @@ export interface ApiFacade {
   cancelCollection(auctor: AuctorKey, id: string): Promise<Collection>
   approveCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
   rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
+  publish(auctor: AuctorKey, opts: PublishOpts): Promise<Edition>
+  feed(filter?: FeedFilter): Promise<FeedItem[]>
+  retractEdition(auctor: AuctorKey, id: string): Promise<Edition>
   createTeam(auctor: AuctorKey, opts: { nomen: string; members?: string[] }): Promise<Team>
   getTeam(auctor: AuctorKey, id: string): Promise<Team>
   listTeams(auctor: AuctorKey): Promise<Team[]>
@@ -258,6 +262,31 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   router.post('/collectiones/:id/pieces/:actumId/reject', wrap(async (req, res) => {
     await api.rejectCollectionPiece(await auth(req), String(req.params.id), String(req.params.actumId))
     res.status(200).json({ ok: true })
+  }))
+
+  // ── Publishing (Editio) — put a canonical artifact forth to a destination ──────
+  // POST /v1/editiones — publish an artifact (an Actum for #1). Public surfaces
+  // (feed/marketplace) return a `pending` Edition (async moderation → published).
+  router.post('/editiones', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const { artifact, destination, visibility, custody, license, teamId } = req.body ?? {}
+    res.status(200).json({ edition: await api.publish(auctor, { artifact, destination, visibility, custody, license, teamId }) })
+  }))
+
+  // POST /v1/editiones/:id/retract — unpublish where the destination allows it (author-scoped).
+  router.post('/editiones/:id/retract', wrap(async (req, res) => {
+    res.json({ edition: await api.retractEdition(await auth(req), String(req.params.id)) })
+  }))
+
+  // GET /v1/feed — the public feed (NO auth): published, public-surface editions, newest first.
+  router.get('/feed', wrap(async (req, res) => {
+    const { visibility, destination, limit } = req.query
+    const filter: FeedFilter = {
+      ...(typeof visibility === 'string' ? { visibility: visibility as FeedFilter['visibility'] } : {}),
+      ...(typeof destination === 'string' ? { destination } : {}),
+      ...(typeof limit === 'string' && Number.isFinite(Number(limit)) ? { limit: Number(limit) } : {}),
+    }
+    res.json({ feed: await api.feed(filter) })
   }))
 
   // ── Teams (Sodalitas) — a fellowship of Animae that co-owns work ────────────────

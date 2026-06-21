@@ -63,6 +63,10 @@ export const Errors = {
   notFoundRun: (id: string) => new ApiError('not_found.run', `Run '${id}' not found`, 404),
   notFoundCollection: (id: string) => new ApiError('not_found.collection', `Collection '${id}' not found`, 404),
   notFoundTeam: (id: string) => new ApiError('not_found.team', `Team '${id}' not found`, 404),
+  notFoundEdition: (id: string) => new ApiError('not_found.edition', `Edition '${id}' not found`, 404),
+  notFoundAdapter: (key: string) => new ApiError('not_found.adapter', `Publication destination '${key}' is not available`, 404),
+  publishUnsupportedArtifact: (kind: string) =>
+    new ApiError('input.unsupported_artifact', `Publishing a '${kind}' is not yet supported`, 422),
   insufficientSigna: (details?: Record<string, unknown>) =>
     new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
   capTooLow: (details?: Record<string, unknown>) =>

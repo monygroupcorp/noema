@@ -593,6 +593,88 @@ const OkSchema: JsonSchema = {
   required: ['ok'],
 }
 
+// ── Publishing (Editio) ───────────────────────────────────────────────────────
+
+/** A reference to the canonical artifact an Editio puts forth. */
+const ArtifactRefSchema: JsonSchema = {
+  type: 'object',
+  description: 'The canonical artifact being published (referenced, never copied).',
+  properties: {
+    kind: { type: 'string', enum: ['actum', 'intella', 'collectio'], description: 'Which artifact kind.' },
+    id: { type: 'string', description: "The artifact's id." },
+  },
+  required: ['kind', 'id'],
+}
+
+/** The request body for `POST /v1/editiones`. */
+const PublishRequestSchema: JsonSchema = {
+  type: 'object',
+  description:
+    'Publish an artifact (an Actum for build-order #1) to a destination under a visibility/custody policy. ' +
+    'Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the ' +
+    'moderation gate. Unspecified fields default from the caller`s Anima publishing prefs.',
+  properties: {
+    artifact: ArtifactRefSchema,
+    destination: { type: 'string', description: "Adapter key (e.g. 'feed'). Defaults from prefs, then 'feed'." },
+    visibility: { type: 'string', enum: ['private', 'unlisted', 'feed', 'marketplace'], description: 'Public-exposure surface.' },
+    custody: { type: 'string', enum: ['ours', 'theirs', 'both'], description: 'Who holds the bytes/metadata.' },
+    license: { type: 'string', description: "License tag — 'catalog' (our liability) | a BYO license id." },
+    teamId: { type: 'string', description: 'Snapshot a rights split from a team (Sodalitas) the caller is a member of.' },
+  },
+  required: ['artifact'],
+}
+
+/** The public `Edition` projection (mirrors `types.ts#Edition`). */
+const EditionSchema: JsonSchema = {
+  type: 'object',
+  description: 'The public projection of an Editio — a publication record referencing a canonical artifact.',
+  properties: {
+    id: { type: 'string' },
+    artifact: ArtifactRefSchema,
+    destination: { type: 'string', description: "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …" },
+    visibility: { type: 'string', enum: ['private', 'unlisted', 'feed', 'marketplace'] },
+    custody: { type: 'string', enum: ['ours', 'theirs', 'both'] },
+    status: { type: 'string', enum: ['pending', 'published', 'rejected', 'failed', 'retracted'], description: 'Lifecycle: pending → published | rejected | failed; retracted on unpublish.' },
+    externalRef: { type: 'string', description: "The destination's handle — feed post id / HF repo / token id / R2 url." },
+    owners: {
+      type: 'array',
+      description: 'Rights split snapshot (team-owned only) — weights sum to ~1.',
+      items: { type: 'object', properties: { animaId: { type: 'string' }, weight: { type: 'number' } }, required: ['animaId', 'weight'] },
+    },
+    license: { type: 'string' },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+  required: ['id', 'artifact', 'destination', 'visibility', 'custody', 'status', 'createdAt', 'updatedAt'],
+}
+
+/** The `{ edition }` envelope returned by the publish operations. */
+const EditionEnvelopeSchema: JsonSchema = {
+  type: 'object',
+  properties: { edition: EditionSchema },
+  required: ['edition'],
+}
+
+/** One entry in the public feed (`GET /v1/feed`). */
+const FeedItemSchema: JsonSchema = {
+  type: 'object',
+  description: 'A published feed entry — the Editio plus the referenced artifact`s produced output.',
+  properties: {
+    editionId: { type: 'string', description: 'The Editio id (the feed entry id).' },
+    artifact: ArtifactRefSchema,
+    output: { type: 'object', additionalProperties: true, description: "The artifact's produced output (an Actum's exitus media), when resolvable." },
+    createdAt: { type: 'string', format: 'date-time' },
+  },
+  required: ['editionId', 'artifact', 'createdAt'],
+}
+
+/** The `{ feed }` envelope returned by `GET /v1/feed`. */
+const FeedListSchema: JsonSchema = {
+  type: 'object',
+  properties: { feed: { type: 'array', items: FeedItemSchema } },
+  required: ['feed'],
+}
+
 /** The error envelope every failed request carries (mirrors `errors.ts#ApiErrorBody`). */
 const ErrorEnvelopeSchema: JsonSchema = {
   type: 'object',
@@ -818,6 +900,28 @@ export const API_CONTRACT: ApiContract = {
     },
     {
       method: 'POST',
+      path: '/editiones',
+      summary: 'Publish an artifact (an Actum for #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate — never a synchronous publish to public. Unspecified fields default from the caller`s publishing prefs.',
+      auth: true,
+      request: PublishRequestSchema,
+      response: EditionEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/editiones/:id/retract',
+      summary: 'Retract a publication where the destination allows it (feed/bucket = revocable; mint = permanent → 403). Author-scoped.',
+      auth: true,
+      response: EditionEnvelopeSchema,
+    },
+    {
+      method: 'GET',
+      path: '/feed',
+      summary: 'The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact`s produced output. Query: visibility, destination, limit.',
+      auth: false,
+      response: FeedListSchema,
+    },
+    {
+      method: 'POST',
       path: '/teams',
       summary: 'Create a team (Sodalitas) — a fellowship of Animae that co-owns work. The caller becomes the founder and first member.',
       auth: true,
@@ -866,7 +970,10 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.studio', httpStatus: 404 },
     { code: 'not_found.collection', httpStatus: 404 },
     { code: 'not_found.team', httpStatus: 404 },
+    { code: 'not_found.edition', httpStatus: 404 },
+    { code: 'not_found.adapter', httpStatus: 404 },
     { code: 'not_found.run', httpStatus: 404 },
+    { code: 'input.unsupported_artifact', httpStatus: 422 },
     { code: 'economy.insufficient_signa', httpStatus: 402 },
     { code: 'economy.cap_too_low', httpStatus: 422 },
     { code: 'conflict.slug_taken', httpStatus: 409 },

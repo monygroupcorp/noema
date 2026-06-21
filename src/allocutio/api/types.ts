@@ -77,3 +77,42 @@ export interface Collection {
   /** When it finished (or was cancelled), ISO-8601. */
   completedAt?: string
 }
+
+/**
+ * Edition — the public projection of an Editio (a publication record). JSON-safe;
+ * `createdAt`/`updatedAt` are ISO-8601. An Edition references a canonical
+ * artifact and records where + under what policy it was put forth.
+ */
+export interface Edition {
+  id: string
+  /** The canonical artifact put forth. */
+  artifact: { kind: 'actum' | 'intella' | 'collectio'; id: string }
+  /** Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | … */
+  destination: string
+  visibility: 'private' | 'unlisted' | 'feed' | 'marketplace'
+  custody: 'ours' | 'theirs' | 'both'
+  /** Lifecycle: pending → published | rejected | failed; retracted on unpublish. */
+  status: 'pending' | 'published' | 'rejected' | 'failed' | 'retracted'
+  /** The destination's handle — feed post id / HF repo / token id / R2 url. */
+  externalRef?: string
+  /** Rights split snapshot (animaId → weight), when team-owned. */
+  owners?: Array<{ animaId: string; weight: number }>
+  /** License tag — 'catalog' (our liability) | a BYO license id. */
+  license?: string
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * FeedItem — one entry in the public feed read (`GET /v1/feed`). The published
+ * Editio plus the referenced artifact's produced output (an Actum's exitus
+ * media), so a client can render it without a second fetch.
+ */
+export interface FeedItem {
+  /** The Editio id (the feed entry id). */
+  editionId: string
+  artifact: { kind: 'actum' | 'intella' | 'collectio'; id: string }
+  /** The artifact's produced output (an Actum's exitus), when resolvable. */
+  output?: Record<string, unknown>
+  createdAt: string
+}

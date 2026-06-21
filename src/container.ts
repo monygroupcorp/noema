@@ -12,6 +12,7 @@ import type { ModoStore } from './types/modo.js'
 import type { Mandatorum } from './types/mandatum.js'
 import type { Corporum } from './types/corpus.js'
 import type { Collectionum } from './types/collectio.js'
+import type { Editionum } from './types/editio.js'
 import type { Sodalitatum } from './types/sodalitas.js'
 import type { Tabularum } from './types/tabula.js'
 import type { Testimoniorum, Depositorum, Solutionum, Petitionum } from './types/catena.js'
@@ -58,6 +59,7 @@ import { dispatchInceptio } from './execution/dispatchInceptio.js'
 import { MongoMandatum } from './crystal/MongoMandatum.js'
 import { MongoCorpus } from './crystal/MongoCorpus.js'
 import { MongoCollectio } from './crystal/MongoCollectio.js'
+import { MongoEditionum } from './crystal/MongoEditionum.js'
 import { MongoSodalitatum } from './crystal/MongoSodalitatum.js'
 import { MongoTabula } from './crystal/MongoTabula.js'
 import { MongoTestimoniorum } from './crystal/MongoTestimoniorum.js'
@@ -87,6 +89,8 @@ export interface Ring {
   mandatores: Mandatorum
   corpora: Corporum
   collectiones: Collectionum
+  /** Publication records (Editio) — backs the publishing spine + feed. */
+  editiones: Editionum
   sodalitates: Sodalitatum
   tabulae: Tabularum
   testimonia: Testimoniorum
@@ -176,6 +180,7 @@ export interface ContainerConfig {
   mandatoresCollection?: string
   corporaCollection?: string
   collectionesCollection?: string
+  editionesCollection?: string
   sodalitatesCollection?: string
   tabulaeCollection?: string
   testimoniaCollection?: string
@@ -276,6 +281,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const mandatores = new MongoMandatum(db.collection(config.mandatoresCollection ?? 'mandatores'))
   const corpora = new MongoCorpus(db.collection(config.corporaCollection ?? 'corpora'))
   const collectiones = new MongoCollectio(db.collection(config.collectionesCollection ?? 'collectiones'))
+  const editiones = new MongoEditionum(db.collection(config.editionesCollection ?? 'editiones'))
   const sodalitates = new MongoSodalitatum(db.collection(config.sodalitatesCollection ?? 'sodalitates'))
   const tabulae = new MongoTabula(db.collection(config.tabulaeCollection ?? 'tabulae'))
   const testimonia = new MongoTestimoniorum(db.collection(config.testimoniaCollection ?? 'testimonia'))
@@ -422,7 +428,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   return {
     actorum, modorum, signorum, animae, personae, vestigiorum, modos,
-    mandatores, corpora, collectiones, sodalitates, tabulae, testimonia,
+    mandatores, corpora, collectiones, editiones, sodalitates, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
     cursorum, completor, inceptor, arcanumIssuer,
