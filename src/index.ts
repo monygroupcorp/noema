@@ -616,6 +616,7 @@ async function main(): Promise<void> {
     editiones: ring.editiones,
     publicationAdapters: ring.publicationAdapters,
     animae: ring.animae,
+    intellarum: intellae,
     ...(ring.conductor ? { conductor: ring.conductor } : {}),
     ...(ring.teeProvisioner ? { teeProvisioner: ring.teeProvisioner } : {}),
     // Fire-and-forget studio-ready/failed webhook (optional sugar over polling).

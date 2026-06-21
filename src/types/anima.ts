@@ -44,6 +44,8 @@ export interface PublishingPrefs {
   defaultCustody?: import('./editio.js').EditioCustody
   /** BYO custody target: the user's own HuggingFace account/namespace. */
   huggingFaceAccount?: string
+  /** BYO custody target: the user's own Civitai account/username. */
+  civitaiAccount?: string
   /** BYO custody target: the user's wallet address (on-chain custody). */
   wallet?: string
   /** BYO custody target: the user's own bucket. */

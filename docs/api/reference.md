@@ -2726,6 +2726,7 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `not_found.collection` | 404 | no |
 | `not_found.team` | 404 | no |
 | `not_found.edition` | 404 | no |
+| `not_found.model` | 404 | no |
 | `not_found.adapter` | 404 | no |
 | `not_found.run` | 404 | no |
 | `input.unsupported_artifact` | 422 | no |

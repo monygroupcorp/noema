@@ -54,6 +54,7 @@ import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
 import { FeedAdapter } from './crystal/FeedAdapter.js'
 import { BucketAdapter } from './crystal/BucketAdapter.js'
+import { ModelPublishAdapter, huggingFaceRegistry, civitaiRegistry } from './crystal/ModelPublishAdapter.js'
 import type { PublicationAdapter } from './crystal/PublicationAdapter.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
 import { ActumCompletor } from './execution/ActumCompletor.js'
@@ -186,6 +187,8 @@ export interface ContainerConfig {
   corporaCollection?: string
   collectionesCollection?: string
   editionesCollection?: string
+  /** Our HuggingFace org for `custody:'ours'` model publishes (default 'ms2stationthis'). */
+  huggingFaceOrg?: string
   sodalitatesCollection?: string
   tabulaeCollection?: string
   testimoniaCollection?: string
@@ -386,9 +389,15 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     cursorum.register('huggingface', hfCursor)
   }
 
-  // Publication adapters (spec §5b): the feed needs nothing; the bucket adapter
-  // needs R2 (custody=ours hosting) so it is gated on config below.
-  const publicationAdapters: PublicationAdapter[] = [new FeedAdapter()]
+  // Publication adapters (spec §5b): feed + model registries need nothing; the
+  // bucket adapter needs R2 (custody=ours hosting) so it is gated on config below.
+  // Model registries (HuggingFace/Civitai, publishing #3): our HF org hosts a
+  // custody:'ours' publish; Civitai has no org → requires custody:'theirs' (BYO).
+  const publicationAdapters: PublicationAdapter[] = [
+    new FeedAdapter(),
+    new ModelPublishAdapter(huggingFaceRegistry(config.huggingFaceOrg ?? 'ms2stationthis')),
+    new ModelPublishAdapter(civitaiRegistry()),
+  ]
 
   // Host-side deterministic processing runtimes (spec §4a). They produce bytes
   // ON the host, so they need R2 to host the result — gate registration on it.

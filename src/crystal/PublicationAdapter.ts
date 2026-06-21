@@ -24,6 +24,12 @@ export interface PublishPolicy {
   owners?: Array<{ animaId: string; weight: number }>
   /** License tag — 'catalog' (our liability) | a BYO license id. */
   license?: string
+  /**
+   * BYO custody target — the user's own account/token at the destination, resolved
+   * from `Anima.publicatio` when `custody:'theirs'`. Used by the model-registry
+   * adapters (HuggingFace/Civitai) to publish under the user's account.
+   */
+  custodyTarget?: { account?: string; token?: string }
 }
 
 /** What an adapter is handed: the artifact reference + its produced output. */

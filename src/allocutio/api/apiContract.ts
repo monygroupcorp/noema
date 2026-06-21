@@ -971,6 +971,7 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.collection', httpStatus: 404 },
     { code: 'not_found.team', httpStatus: 404 },
     { code: 'not_found.edition', httpStatus: 404 },
+    { code: 'not_found.model', httpStatus: 404 },
     { code: 'not_found.adapter', httpStatus: 404 },
     { code: 'not_found.run', httpStatus: 404 },
     { code: 'input.unsupported_artifact', httpStatus: 422 },

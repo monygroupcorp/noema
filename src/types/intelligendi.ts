@@ -247,6 +247,13 @@ export interface Intellarum {
    * signature is family-keyed now so it plugs in with no rework.)
    */
   triggerMap(familia: string, animaId?: string): Promise<Map<string, Intellae>>
+  /**
+   * Set a model's resolvability (`access`). The publishing reconciler (§5d) calls
+   * this so `Intella.access` DERIVES from its `Editio` — a model becomes resolvable
+   * ('public') only when published public, and 'private' again on retract. Optional:
+   * read-only stores / test fakes may omit it (the reconciler no-ops when absent).
+   */
+  setAccess?(id: string, access: 'public' | 'private'): Promise<Intella | null>
 }
 
 // =============================================================================

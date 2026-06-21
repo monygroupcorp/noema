@@ -1,8 +1,10 @@
 # Publishing (Editio) — spec
 
-**Status:** build-orders #1 (feed) + #2 (bucket custody) SHIPPED (2026-06-21) — `Editio`/`Editionum` spine +
-`FeedAdapter` + `BucketAdapter` (R2 re-host + retract-delete) + async moderation gate + `unlisted` +
-`POST /v1/editiones` / `GET /v1/feed`, hermetic-green, never live-verified on GPUs. #3–6 not started. The canonical spec for
+**Status:** build-orders #1 (feed) + #2 (bucket custody) + #3 (model publishing) SHIPPED (2026-06-21) —
+`Editio`/`Editionum` spine + `FeedAdapter` + `BucketAdapter` (R2 re-host + retract-delete) +
+`ModelPublishAdapter` (HuggingFace/Civitai, custody prefs, live `Intella.access` reconciler) + async
+moderation gate + `unlisted` + `POST /v1/editiones` / `GET /v1/feed`, hermetic-green, never live-verified on
+GPUs (model UPLOAD is a documented placeholder). #4–6 not started. The canonical spec for
 **publishing as a first-class arm of the application**: routing any artifact the platform produces
 (a gen, a trained model, a collection drop) to any destination (our feed, our buckets, HuggingFace,
 user custody, on-chain mint, external marketplaces) under a chosen visibility/custody/rights
@@ -142,7 +144,7 @@ touching the spine.
 ```
 PublishingPrefs {   // FINALIZED: lives on Anima (per-identity, low-churn, no new store).
   defaultDestination; defaultVisibility; defaultCustody    //   Per-Sodalitas defaults added later, only if a team needs one.
-  huggingFaceAccount?; wallet?; bucket?        // BYO custody targets
+  huggingFaceAccount?; civitaiAccount?; wallet?; bucket?   // BYO custody targets (#3 added civitaiAccount)
 }
 ```
 "Everything → HuggingFace" becomes `defaultDestination='huggingface', custody='ours'` — a default, not a
@@ -184,9 +186,17 @@ gen uses that model (the ChainEngine royalty surface). So:
    private custody (owner-only bytes via signed URLs / a private bucket) — a `private` bucket publish today
    hosts publicly-readable bytes under an unguessable key (unlisted-grade); signed-URL custody lands with the
    living-NFT work (#6). This is the substrate living NFTs reuse (we serve the `tokenURI`).
-3. 🟠 **Model publishing + custody preferences** — generalize the LoRA→HF hardcode into `HuggingFaceAdapter`
-   + the `CustodyAdapter` (BYO HF account), governed by `PublishingPrefs`. **Resolves the original
-   training-output question:** "the HF adapter is one of several, chosen by the user's custody preference."
+3. ✅ **Model publishing + custody preferences** — SHIPPED 2026-06-21. One registry-parameterized
+   `ModelPublishAdapter` (`src/crystal/ModelPublishAdapter.ts`) covers **HuggingFace + Civitai** (and
+   "others" = a `ModelRegistry` descriptor, not a new class). custody `ours` → our org; custody `theirs`
+   → the caller's BYO account from `PublishingPrefs` (`huggingFaceAccount`/`civitaiAccount`), threaded to
+   the adapter via `PublishPolicy.custodyTarget`. **Resolves the training-output question:** the HF adapter
+   is one of several, chosen by custody preference. The **§5d reconciler is now LIVE** — `CrystalApi._reconcile`
+   write-throughs `Intella.access` (`setAccess` on `Intellarum`): a non-private model publish → `public`
+   (resolvable by trigger), retract → `private`. Models publish to `private`/`unlisted` only (not the media
+   feed). **PLACEHOLDER:** the real weight UPLOAD (push `Intella.sources` to the registry API + token) is
+   deferred — the adapter does the account+slug → URL projection and returns the handle; it does not yet
+   move bytes (§10). The royalty payee (§5e) is the model's own `auctor`, unchanged by publish.
 4. 🟡 **Rights / license / splits** — `owners[]` snapshot at publish, `license` tag, royalty-split wiring
    (ties `Sodalitas` + the ledger royalty hooks + the compliance catalog/BYO line).
 5. 🟠 **Collection / mint** — `MintAdapter` + `MarketplaceAdapter`. The Collectio **freeze → export → mint**
@@ -245,9 +255,10 @@ accrete as adapters on the identical interface. Do NOT model a second artifact t
   `private` bucket publishes are unlisted-grade today (public bytes under an unguessable key).
 - Wallet-linking → `custody:'theirs'` wiring + living-NFT mutable-metadata hosting (lands with #5/#6).
 - Reconciler mechanics (event-hook vs write-through) for keeping `Intella.access` in sync with `Editio` —
-  decided at #1: **write-through** in `CrystalApi._reconcile` (single settle point = single update point).
+  decided at #1, **LIVE at #3**: write-through in `CrystalApi._reconcile` (`Intellarum.setAccess`), single
+  settle point = single update point.
 
-## 10. Placeholders & stubs shipped in #1 (must be replaced before public traffic)
+## 10. Placeholders & stubs shipped (must be replaced before relying on them)
 
 Inert stand-ins shipped to stand up the spine. Each is wired and exercised by the architecture but does
 **no real work**; none is a safety/behaviour guarantee. Greppable in code via `PLACEHOLDER(publishing#N)`.
@@ -255,7 +266,7 @@ Inert stand-ins shipped to stand up the spine. Each is wired and exercised by th
 | Where | What it does today | What replaces it | When |
 |---|---|---|---|
 | `permissiveModerationGate` (`src/crystal/ModerationGate.ts`) | Approves **everything** (`ok:true`). Preserves the async `pending → scan → published\|rejected` path so the gate is never bypassed structurally, but performs **no CSAM detection and no NCMEC reporting**. Container wires it because no real scanner exists. | A real `ModerationGate` impl: hash-match (PhotoDNA/known-CSAM lists) + classifier for novel material **and** NCMEC CyberTipline reporting on a confirmed match (18 U.S.C. §2258A). | **Before** the feed is exposed to real public traffic. Hard blocker for go-live. |
-| `CrystalApi._reconcile` (§5d seam) | No-op for `actum`/`collectio`; never reached for `intella` (intella publishing throws `input.unsupported_artifact`). | Write-through of `Intella.access` (`public`/`private`) + royalty payee (§5e) when an `Intella` is published/retracted. | Build-order **#3** (model publishing). |
+| `ModelPublishAdapter` upload (`src/crystal/ModelPublishAdapter.ts`) | Projects `account + slug → registry URL` and returns the handle for HuggingFace/Civitai; the §5d access reconciler around it is **real** (the model becomes resolvable). But it does **NOT upload the weight bytes** — `Intella.sources` are never pushed to the registry API; the returned URL points at a repo that does not yet exist. | A real per-registry uploader: HF (`createRepo` + `uploadFile`, `HF_TOKEN`) — port the legacy `HuggingFaceHubService.js`; Civitai (its model-upload API + token). Plus real `retract` = repo deletion. | Before model publishing is offered to users (the URL is a dangling handle until then). |
 | `FeedAdapter.externalRef` (`src/crystal/FeedAdapter.ts`) | Mints a cosmetic `feed:<uuid>` handle; the feed is actually served from `Editionum.listFeed`. No dedicated feed backend (no fan-out / cache / ranking). | A real feed service if/when scale needs one — the adapter is the seam. | Not blocking; only if the store-backed read stops sufficing. |
 
 **Discovery:** `grep -rn "PLACEHOLDER(publishing" src/` lists every inert site. Keep this table in sync when

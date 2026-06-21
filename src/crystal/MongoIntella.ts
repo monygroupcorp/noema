@@ -183,4 +183,16 @@ export class MongoIntella implements Intellarum {
     })()
     await this.col.replaceOne({ id: record.id }, record, { upsert: true })
   }
+
+  /** Flip a model's resolvability — the publishing reconciler's write seam (§5d).
+   *  Sets the v1 binary `access` string; the top-level `ownerAnimaId` gating is
+   *  untouched, so a later flip back to 'private' restores owner-scoped resolution. */
+  async setAccess(id: string, access: 'public' | 'private'): Promise<Intella | null> {
+    const doc = await this.col.findOneAndUpdate(
+      { id },
+      { $set: { access, mutatum: new Date() } },
+      { returnDocument: 'after' },
+    )
+    return doc ? projectV2ToV1(doc) : null
+  }
 }
