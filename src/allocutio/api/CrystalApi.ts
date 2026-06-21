@@ -490,7 +490,11 @@ export class CrystalApi {
   async feed(filter?: FeedFilter): Promise<FeedItem[]> {
     const editiones = this.deps.editiones
     if (!editiones) return []
-    const items = await editiones.listFeed(filter)
+    // The feed is a PUBLIC surface — clamp to public visibilities so a caller can
+    // never enumerate private/unlisted editions via `?visibility=…` (only 'feed'
+    // and 'marketplace' are public; everything else collapses to 'feed').
+    const visibility = filter?.visibility === 'marketplace' ? 'marketplace' : 'feed'
+    const items = await editiones.listFeed({ ...filter, visibility })
     const out: FeedItem[] = []
     for (const e of items) {
       const output = await this._artifactOutput(e.artifactRef)

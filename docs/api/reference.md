@@ -2004,7 +2004,7 @@ Reject a piece and reroll — re-fire it with a fresh trait selection. Owner-sco
 
 ### POST /v1/editiones
 
-Publish an artifact (an Actum for #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate — never a synchronous publish to public. Unspecified fields default from the caller`s publishing prefs.
+Publish an artifact (an Actum for #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate — never a synchronous publish to public. Unspecified fields default from the caller's publishing prefs.
 
 - **Auth:** required
 
@@ -2013,7 +2013,7 @@ Publish an artifact (an Actum for #1) to a destination under a visibility/custod
 ```json
 {
   "type": "object",
-  "description": "Publish an artifact (an Actum for build-order #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate. Unspecified fields default from the caller`s Anima publishing prefs.",
+  "description": "Publish an artifact (an Actum for build-order #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate. Unspecified fields default from the caller's Anima publishing prefs.",
   "properties": {
     "artifact": {
       "type": "object",
@@ -2326,7 +2326,7 @@ Retract a publication where the destination allows it (feed/bucket = revocable; 
 
 ### GET /v1/feed
 
-The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact`s produced output. Query: visibility, destination, limit.
+The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact's produced output. Query: visibility, destination, limit.
 
 - **Auth:** public
 
@@ -2340,7 +2340,7 @@ The public feed — published, public-surface editions newest first (NOT auth-sc
       "type": "array",
       "items": {
         "type": "object",
-        "description": "A published feed entry — the Editio plus the referenced artifact`s produced output.",
+        "description": "A published feed entry — the Editio plus the referenced artifact's produced output.",
         "properties": {
           "editionId": {
             "type": "string",

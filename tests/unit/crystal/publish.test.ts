@@ -123,6 +123,15 @@ test('publish(): a private publish settles synchronously with no moderation gate
   assert.equal((await api.feed()).length, 0, 'private editions never appear in the feed')
 })
 
+test('feed(): clamps to public surfaces — a private edition is never enumerable via ?visibility=private', async () => {
+  const { api } = makeApi()
+  // A published-but-private edition exists in the store.
+  await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed', visibility: 'private' })
+  // Asking the public feed for private editions must NOT leak it.
+  assert.equal((await api.feed({ visibility: 'private' })).length, 0)
+  assert.equal((await api.feed({ visibility: 'unlisted' })).length, 0)
+})
+
 test('publish(): rejects an artifact the caller does not own', async () => {
   const { api } = makeApi()
   await assert.rejects(

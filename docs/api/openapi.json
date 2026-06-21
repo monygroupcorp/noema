@@ -2677,7 +2677,7 @@
     },
     "/editiones": {
       "post": {
-        "summary": "Publish an artifact (an Actum for #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate — never a synchronous publish to public. Unspecified fields default from the caller`s publishing prefs.",
+        "summary": "Publish an artifact (an Actum for #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate — never a synchronous publish to public. Unspecified fields default from the caller's publishing prefs.",
         "security": [
           {
             "ApiKeyAuth": []
@@ -2827,7 +2827,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "Publish an artifact (an Actum for build-order #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate. Unspecified fields default from the caller`s Anima publishing prefs.",
+                "description": "Publish an artifact (an Actum for build-order #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate. Unspecified fields default from the caller's Anima publishing prefs.",
                 "properties": {
                   "artifact": {
                     "type": "object",
@@ -3053,7 +3053,7 @@
     },
     "/feed": {
       "get": {
-        "summary": "The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact`s produced output. Query: visibility, destination, limit.",
+        "summary": "The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact's produced output. Query: visibility, destination, limit.",
         "security": [],
         "responses": {
           "200": {
@@ -3067,7 +3067,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "description": "A published feed entry — the Editio plus the referenced artifact`s produced output.",
+                        "description": "A published feed entry — the Editio plus the referenced artifact's produced output.",
                         "properties": {
                           "editionId": {
                             "type": "string",
