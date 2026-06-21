@@ -66,8 +66,6 @@ export const Errors = {
   notFoundEdition: (id: string) => new ApiError('not_found.edition', `Edition '${id}' not found`, 404),
   notFoundModel: (id: string) => new ApiError('not_found.model', `Model '${id}' not found`, 404),
   notFoundAdapter: (key: string) => new ApiError('not_found.adapter', `Publication destination '${key}' is not available`, 404),
-  publishUnsupportedArtifact: (kind: string) =>
-    new ApiError('input.unsupported_artifact', `Publishing a '${kind}' is not yet supported`, 422),
   insufficientSigna: (details?: Record<string, unknown>) =>
     new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
   capTooLow: (details?: Record<string, unknown>) =>

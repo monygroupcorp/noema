@@ -466,9 +466,10 @@ export class CrystalApi {
       throw Errors.inputMalformed("a model publishes to 'private' or 'unlisted', not the media feed/marketplace")
     }
 
-    // The caller must own the artifact they are putting forth.
+    // The caller must own the artifact they are putting forth. For a model this
+    // also resolves it (reused below for the license default — one read, not two).
     const ref: ArtifactRef = { kind: opts.artifact.kind, id: opts.artifact.id }
-    await this._assertOwnsArtifact(auctor, ref)
+    const ownedModel = await this._assertOwnsArtifact(auctor, ref)
 
     // Rights split (snapshotted on the Editio — the canonical "who earns" record):
     // an explicit weighted split OR an equal-weight snapshot of a team's membership.
@@ -485,7 +486,7 @@ export class CrystalApi {
 
     // License tag (the compliance catalog/BYO line): explicit, then prefs, then
     // 'catalog' for a platform-canonical artifact (our license/liability), else unset.
-    const license = opts.license ?? prefs?.defaultLicense ?? (await this._defaultLicense(ref))
+    const license = opts.license ?? prefs?.defaultLicense ?? (ownedModel?.canonica ? 'catalog' : undefined)
 
     const editio = await editiones.create({
       artifactRef: ref,
@@ -642,21 +643,23 @@ export class CrystalApi {
     return (await this.deps.animae.find(auctor.animaId))?.publicatio
   }
 
-  /** Verify the caller owns the artifact being published, or throw not-found. */
-  private async _assertOwnsArtifact(auctor: AuctorKey, ref: ArtifactRef): Promise<void> {
+  /** Verify the caller owns the artifact being published, or throw not-found. Returns
+   *  the resolved Intella for a model publish (so the caller reuses it), else undefined. */
+  private async _assertOwnsArtifact(auctor: AuctorKey, ref: ArtifactRef): Promise<Intella | undefined> {
     if (ref.kind === 'actum') {
       const a = await this.deps.actorum.findById(ref.id)
       if (!a || !(await this._owns(auctor, a))) throw Errors.notFoundRun(ref.id)
-      return
+      return undefined
     }
     if (ref.kind === 'collectio') {
       await this._ownedCollection(auctor, ref.id) // throws not_found.collection if not owned
-      return
+      return undefined
     }
     // Intella (model): owned by its `ownerAnimaId` (private LoRAs) or `auctor`.
     // Platform-canonical models have neither set to a user → not user-publishable.
     const intella = await this._ownedIntella(auctor, ref.id)
     if (!intella) throw Errors.notFoundModel(ref.id)
+    return intella
   }
 
   /** Validate an explicit rights split: non-empty, positive weights summing to ~1. */
@@ -670,16 +673,6 @@ export class CrystalApi {
     }
     if (Math.abs(sum - 1) > 1e-6) throw Errors.inputMalformed(`owner weights must sum to 1 (got ${sum})`)
     return owners
-  }
-
-  /** The default license for an artifact (compliance catalog/BYO line): 'catalog' for a
-   *  platform-canonical model (our license/liability), else unset (user content). */
-  private async _defaultLicense(ref: ArtifactRef): Promise<string | undefined> {
-    if (ref.kind === 'intella') {
-      const m = await this.deps.intellarum?.find(ref.id)
-      if (m?.canonica) return 'catalog'
-    }
-    return undefined
   }
 
   /** Resolve an Intella the caller owns, or null. Models lacking the store are unavailable. */
