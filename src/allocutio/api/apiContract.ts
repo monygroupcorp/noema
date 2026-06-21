@@ -612,7 +612,7 @@ const PublishRequestSchema: JsonSchema = {
   description:
     'Publish an artifact (an Actum for build-order #1) to a destination under a visibility/custody policy. ' +
     'Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the ' +
-    'moderation gate. Unspecified fields default from the caller`s Anima publishing prefs.',
+    "moderation gate. Unspecified fields default from the caller's Anima publishing prefs.",
   properties: {
     artifact: ArtifactRefSchema,
     destination: { type: 'string', description: "Adapter key (e.g. 'feed'). Defaults from prefs, then 'feed'." },
@@ -658,7 +658,7 @@ const EditionEnvelopeSchema: JsonSchema = {
 /** One entry in the public feed (`GET /v1/feed`). */
 const FeedItemSchema: JsonSchema = {
   type: 'object',
-  description: 'A published feed entry — the Editio plus the referenced artifact`s produced output.',
+  description: "A published feed entry — the Editio plus the referenced artifact's produced output.",
   properties: {
     editionId: { type: 'string', description: 'The Editio id (the feed entry id).' },
     artifact: ArtifactRefSchema,
@@ -901,7 +901,7 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'POST',
       path: '/editiones',
-      summary: 'Publish an artifact (an Actum for #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate — never a synchronous publish to public. Unspecified fields default from the caller`s publishing prefs.',
+      summary: "Publish an artifact (an Actum for #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate — never a synchronous publish to public. Unspecified fields default from the caller's publishing prefs.",
       auth: true,
       request: PublishRequestSchema,
       response: EditionEnvelopeSchema,
@@ -916,7 +916,7 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'GET',
       path: '/feed',
-      summary: 'The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact`s produced output. Query: visibility, destination, limit.',
+      summary: "The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact's produced output. Query: visibility, destination, limit.",
       auth: false,
       response: FeedListSchema,
     },
