@@ -32,6 +32,7 @@ import { WideEventStore }         from './analytics/WideEventStore.js'
 import { ensureWideIndexes }      from './analytics/ensureWideIndexes.js'
 import { startAnalyticsListener } from './analytics/analyticsListener.js'
 import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
+import { PublicationWorker } from './crystal/PublicationWorker.js'
 import { CANONICAL_MODI } from './crystal/seeds/modi.js'
 import { CANONICAL_ESSENTIAE } from './crystal/seeds/essentiae.js'
 import { CANONICAL_COMPOSITI } from './crystal/seeds/compositi.js'
@@ -625,6 +626,18 @@ async function main(): Promise<void> {
         .catch(err => log.warn('studio webhook failed', { url, error: String(err) }))
     },
   })
+
+  // Publication worker (publishing): drains `pending` Editiones off the store — the
+  // durable queue — so settles (moderation + adapter publish + reconcile, incl. heavy
+  // model uploads) run OFF the request path and survive restarts. In-process for now,
+  // behind the store's atomic claim/lease so it can be split into its own container
+  // later with just a thin entrypoint (see PublicationWorker). Best-effort: a crash
+  // mid-settle is reclaimed once the lease lapses.
+  const publicationWorker = new PublicationWorker({
+    editiones: ring.editiones,
+    settle: (editioId) => crystalApi.settlePublication(editioId),
+  }).start(5_000)
+  log.info('publication worker started')
   // Identified-user acceptors → animaId via a `'web'`/`'api'` persona (create-on-sight).
   // JWT (env secret) + API-key (read-only users lookup) + anon {commitment} are live; web3
   // needs a nonce-challenge endpoint (deferred). All verification is defensive — any failure
