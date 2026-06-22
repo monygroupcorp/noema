@@ -9,9 +9,12 @@ finalized.
 > `Gradus` (that already names a compositus spell's ordered steps, `Modus.gradus`).
 
 **Decisions locked (2026-06-22):** name = `Nuntius`; **one channel** (status subsumes heartbeat, §4); **the
-full timeline is persisted on the Actum** — every phase transition + key event, so states are queryable and
-each step's duration is measurable (§7); the phase taxonomy is **as specific as the distinct measurable costs
-demand** — pulling the fundamentum, downloading models, and loading into VRAM are SEPARATE phases (§3b).
+full timeline is persisted on the Actum** — every transition + log message + error, so states are queryable
+and each step's duration is measurable (§7); the phase taxonomy is **as specific as the distinct measurable
+costs demand** — pulling the fundamentum, downloading models, and loading into VRAM are SEPARATE phases (§3b);
+**status is always per-Actum** — `/arm` (warm-session procurement) is its own Actum, every gen within is its
+own Actum, the `Modo` has no separate timeline (§7); durations roll up **per `(phase, target)`** (§7);
+schema-versioned + lenient so base images degrade gracefully (§4).
 
 ## 1. What it is — and why we own it
 
@@ -114,9 +117,14 @@ Consumers can render the rollup (parent phase + aggregate %) or drill into the s
 `POST /runner/status` is the **single** runner→platform channel. It carries the Nuntius **and** doubles as the
 heartbeat — no separate status vs heartbeat split. Body + response:
 ```
-→  { actumId? | sessionId? ,  nuntius: Nuntius }
+→  { v: 1 ,  actumId? | sessionId? ,  nuntius: Nuntius }
 ←  { continue: boolean }          // the keep-alive / cancel signal (today's heartbeat return)
 ```
+**Lenient by contract (base images deploy off-cadence from the platform):** the `v` schema version + tolerant
+parsing let an OLD base image and a NEW platform (or vice-versa) interoperate — an **unknown `phase` degrades
+to the nearest known** (default `executing`, or `failed` if it smells terminal), an unknown `target` is just a
+free string, and **missing fields are always fine** (everything but `phase`/`at` is optional). A runner is
+never rejected for speaking a slightly older/newer Nuntius; we never hard-fail a status report.
 Every base image speaks exactly this one call: the persistent runner.py job server, comfyrunner, the TEE
 enclave runner, the trainer. The platform handler (`CrystalApi.reportNuntius`):
 1. **appends** the Nuntius to the Actum's persisted timeline + updates the latest (§7);
@@ -190,23 +198,35 @@ Nuntius, so existing consumers keep working while they migrate.
 We want **all the logs saved on the final Actum** so states are queryable later and each step's speed is
 measurable. So we persist the whole stream, not just the latest:
 - `Actum.nuntii: Nuntius[]` — the **ordered timeline** of every phase transition + key event, each timestamped
-  (`at`). Step durations are derived by diffing consecutive `at`s (or rolled up into a `phaseDurations` summary
-  on completion: `{ provisioning: ms, pulling: ms, downloading: ms, loading: ms, executing: ms, … }` —
-  cross-run comparable). `Actum.nuntius` (singular) is the latest, a convenience pointer to `nuntii[last]`.
-- `Modo.nuntii` / TEE-session — same, for long-lived sessions.
+  (`at`). `Actum.nuntius` (singular) is the latest, a convenience pointer to `nuntii[last]`.
+- `Actum.phaseDurations` — derived on completion, **per `(phase, target)`** so the granular costs are directly
+  comparable: `{ "provisioning": ms, "pulling/fundamentum": ms, "downloading/model": ms,
+  "downloading/dataset": ms, "loading/vram": ms, "executing": ms, "uploading/output": ms, … }`. This is the
+  "how fast is each step" substrate, cross-run queryable.
 - `ActumExecutio` telemetry **unifies into this** — its fields (provisionMs, downloadMs, …) become the derived
   `phaseDurations`, no longer separately reported.
 
-**Volume guard (the one thing to get right):** raw high-frequency ticks (sampler step 7→8→9, byte samples)
-must NOT each become a persisted row, or a long run bloats the doc. Policy: persist **every phase/target
-transition** + **error/warn events** + a **coalesced progress checkpoint** (e.g. ≤1/sec or on ≥5% change);
-the fine-grained ticks stay live-only (bus/SSE) and collapse into the owning phase entry's final
-`progress`/`etaMs`. (comfyrunner already throttles download samples — reuse that policy.) Deep per-tick traces,
-if ever wanted, go to the analytics/`wideStore`, not the Actum doc.
+**Status is ALWAYS per-Actum — the warm session has no separate timeline.** Procuring a warm studio via
+`/arm` (agent twin: `provisionStudio`) is **its own Actum**, which owns the expensive cold-start phases
+(`provisioning` → `pulling` the fundamentum → `attesting` → `loading` VRAM) — measured ONCE, on the arm
+Actum. Every gen run inside the warm session is **its own Actum** with its own `nuntii` (near-zero
+provisioning/pulling, since warm — so cold-vs-warm cost falls straight out of the data). The `Modo` (session)
+keeps only its `acta: string[]`; "session status" is the **rollup** of its Acta's timelines, not a fourth
+copy of the data. (So: no `Modo.nuntii`.)
+
+**Volume guard — what's persisted vs live (resolves the coalescing question):**
+- **Persisted verbatim** (this IS "all the logs"): every **phase/target transition**, every **log message**
+  (`message`), every **error/warn**. Bounded — a run has ~dozens, not thousands.
+- **NOT persisted per-tick:** pure numeric progress (sampler 7→8→9, byte samples). These stay **live-only**
+  (bus/SSE for the moving bar) and collapse into the owning phase entry's terminal `progress`/`etaMs`. A
+  phase's *duration* (the thing we measure) comes from its transition timestamps, not from the ticks.
+- Optional intra-phase progress checkpoints, if ever wanted for a graph, are coalesced to **≤1/sec**
+  (comfyrunner already throttles download samples — reuse that). Deep per-tick traces go to `wideStore`, never
+  the Actum doc.
 
 ## 8. Build order
 
-1. 🟠 **Core:** `src/types/nuntius.ts` — `Nuntius` + `Phasis` + `target` + `resources`. Add `Actum.nuntii[]` (timeline) + `nuntius` (latest) + derived `phaseDurations`.
+1. 🟠 **Core:** `src/types/nuntius.ts` — `Nuntius` + `Phasis` + `target` + `resources`. Add `Actum.nuntii[]` (timeline) + `nuntius` (latest) + derived `phaseDurations` (per phase/target). (Status is per-Actum — no `Modo` timeline; the arm Actum owns cold-start phases.)
 2. 🟠 **Sink + bus + projection:** `POST /runner/status` (one channel; returns `{continue}`) → `CrystalApi.reportNuntius` → append to `nuntii[]` (coalesced, §7) + `actum.nuntius` bus event → `NuntiusProjector` (with legacy `actum.stage` shim).
 3. 🟠 **ComfyUI:** retarget `comfyrunnerClient` to emit `Nuntius` (6a) instead of strings.
 4. 🟠 **TEE:** the enclave runner POSTs real `Nuntius` (6b) — closes the TEE status gap.
@@ -226,11 +246,17 @@ Per the build decision, the canonical model is defined once and ComfyUI + TEE + 
 - **Phase granularity** — split the three faces of "loading" into `pulling` (fundamentum) / `downloading`
   (artifacts) / `loading` (VRAM), + `warming`, `cancelling`; `target` absorbs finer specificity (§3b).
 
-**Still open (resolve during the build, not blockers):**
-- **Coalescing policy specifics** — the exact throttle (≤1/sec? ≥5% delta?) for the persisted progress
-  checkpoints vs the live stream (§7). Tune against a real run.
-- **`phaseDurations` rollup shape** — flat `{phase: ms}` vs per-`(phase,target)` (e.g. download-model vs
-  download-dataset separately). Lean per-(phase,target) since that's the measurement we asked for.
-- **Base-image schema versioning** — a `v` on the Nuntius so older base images degrade gracefully (unknown
-  phase → nearest known; missing fields → fine). Define before the first base image ships it.
-- **Does `Modo` (warm session) need its own timeline**, or is per-Actum enough + a session rollup?
+**Resolved 2026-06-22 (was open):**
+- **Coalescing** — don't persist per-tick numeric progress at all; persist transitions + log messages + errors
+  verbatim ("all logs"), measure durations from transition timestamps. Per-tick is live-only; optional
+  checkpoints coalesce ≤1/sec (§7).
+- **`phaseDurations` rollup** — per-`(phase, target)` (download-model vs download-dataset measured apart) — §7.
+- **Base-image versioning** — `v` on the POST envelope + lenient parsing; unknown phase → nearest known,
+  missing fields fine; a status report never hard-fails (§4).
+- **Warm session timeline** — none. Status is per-Actum; `/arm` is its own Actum (owns cold-start phases),
+  each gen its own Actum; the `Modo`'s status is the rollup of its `acta` (§7).
+
+**Genuinely still open (small, tune in build):**
+- The exact "nearest known phase" fallback table for unknown phases.
+- Whether the arm Actum needs a distinct `genus`/marker so cold-start measurements are trivially filterable
+  from gen runs (likely yes — but it's an Actum-shape question, decide when wiring `provisionStudio`).
