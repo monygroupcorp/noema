@@ -22,6 +22,7 @@
 // =============================================================================
 
 import type { GpuClass } from './materia.js'
+import type { Progressus, PhaseDurations } from './progressus.js'
 export type { GpuClass }
 
 /**
@@ -182,6 +183,26 @@ export interface Actum {
 
   /** Pod execution telemetry — see ActumExecutio. Absent for non-pod cursors. */
   executio?: ActumExecutio
+
+  // ── Status timeline (Progressus) ────────────────────────────────────────
+  /**
+   * The ordered, persisted timeline of status reports for this run — every phase
+   * transition + log message + error, each timestamped. This IS "all the logs":
+   * states are queryable later and each step's duration is measurable. The runner
+   * emits a stream via `POST /runner/status`; the sink appends here. The LATEST
+   * report is `progressus.at(-1)` — derived, not a separate field. Per-tick numeric
+   * progress (sampler 7→8→9, byte samples) is NEVER persisted here — that's
+   * live-only (bus/SSE); durations come from transition timestamps. See
+   * src/types/progressus.ts + docs/spec/runner-status.md §7.
+   */
+  progressus?: Progressus[]
+  /**
+   * Derived on completion from `progressus` — dwell-time per `(phase, target)`, the
+   * "how fast is each step" substrate, cross-run queryable. `ActumExecutio`'s
+   * telemetry (provisionMs, downloadMs, …) unifies into this. See `rollupPhaseDurations`.
+   */
+  phaseDurations?: PhaseDurations
+
   /**
    * Hard deadline for this execution.
    * A nascens actum past this timestamp is stuck — the cursor never reported back.
