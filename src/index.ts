@@ -774,6 +774,8 @@ async function main(): Promise<void> {
     modorum: ring.modorum,
     modos: ring.modos,
     hospitia: ring.hospitia,
+    deployments: ring.deployments,
+    editiones: ring.editiones,
     materiae,
     actumIndex: ring.actumIndex,
     vestigiorum: ring.vestigiorum,

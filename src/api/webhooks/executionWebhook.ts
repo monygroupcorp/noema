@@ -13,6 +13,7 @@ import type { ActumIndexStore } from '../../types/actumIndex.js'
 import { createVestigiumFromActum } from '../../execution/hooks/vestigiumHook.js'
 import { projectExitus } from '../../execution/projectExitus.js'
 import { modoHostFor } from '../../ledger/rates.js'
+import { resolveModelRoyaltyPayees } from '../../ledger/resolveModelPayees.js'
 
 type AuctorKey = { animaId: string } | { commitment: string } | { bursaToken: string }
 
@@ -40,6 +41,12 @@ export interface ExecutionWebhookDeps {
   modos?: ModoStore
   /** Optional: identity-bearing hosting side-table — resolves modoHostAnimaId at emit. */
   hospitia?: HospitiumStore
+  /** Optional: compiled-bundle store — reads the resolved `spec.models` (the models the
+   *  gen actually used) to route model royalties. Absent → no model-royalty payees. */
+  deployments?: import('../../types/deploymentum.js').DeploymentumStore
+  /** Optional: publication store — a model's published `Editio.owners[]` is its royalty
+   *  surface (spec §5e). Absent → no model-royalty payees. */
+  editiones?: import('../../types/editio.js').Editionum
   /** Optional: studio store — merges `executio.modelsInstalled` reports into
    *  `Materia.installedModels` so the bulletin Mod • → View loadout reflects reality. */
   materiae?: MateriaStore
@@ -177,6 +184,14 @@ export async function handleExecutionWebhook(
       // never went through cursor stamping fall back to the spend amount itself.
       const baseImpetus = completed.executio?.baseImpetus ?? completed.impetus
 
+      // Model royalty routing (roadmap Tier 1 #1): the models this gen actually used
+      // → their published Editio rights split → weighted payees. The `modelRoyaltyHook`
+      // splits the 5% pool across them; empty list → it no-ops (no published models).
+      const intellaRoyaltyPayees = await resolveModelRoyaltyPayees(completed, {
+        deployments: deps.deployments,
+        editiones: deps.editiones,
+      })
+
       if (deps.nexus && deps.signorum) {
         const royaltySigna = await deps.nexus.emit({
           type: 'execution_spend',
@@ -186,6 +201,7 @@ export async function handleExecutionWebhook(
             baseImpetus,
             modusAuctorAnimaId,
             modoHostKey,
+            ...(intellaRoyaltyPayees.length ? { intellaRoyaltyPayees } : {}),
           },
         })
         let allSigna = royaltySigna
