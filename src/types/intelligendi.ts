@@ -254,6 +254,16 @@ export interface Intellarum {
    * read-only stores / test fakes may omit it (the reconciler no-ops when absent).
    */
   setAccess?(id: string, access: 'public' | 'private'): Promise<Intella | null>
+  /**
+   * Prepend a download source as the new highest priority (`sources[0]`),
+   * de-duplicating by `uri`. The publishing reconciler calls this when a model's
+   * weights are hosted in OUR bucket so the pod resolves the model FROM there
+   * (the `miladystation` mirror convention). Optional — fakes/read-only stores omit it.
+   */
+  addSource?(id: string, source: IntellaSource): Promise<Intella | null>
+  /** Remove a download source by `uri` — the inverse of `addSource`, called when an
+   *  our-bucket model publish is retracted (the hosted copy is gone). Optional. */
+  removeSource?(id: string, uri: string): Promise<Intella | null>
 }
 
 // =============================================================================

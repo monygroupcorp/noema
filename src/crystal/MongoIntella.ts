@@ -1,5 +1,5 @@
 import type { Collection, Document } from 'mongodb'
-import type { Intella, Intellae, IntellaGenus, Intellarum } from '../types/intelligendi.js'
+import type { Intella, Intellae, IntellaGenus, IntellaSource, Intellarum } from '../types/intelligendi.js'
 import { inferFamilia } from './inferFamilia.js'
 
 // =============================================================================
@@ -191,6 +191,36 @@ export class MongoIntella implements Intellarum {
     const doc = await this.col.findOneAndUpdate(
       { id },
       { $set: { access, mutatum: new Date() } },
+      { returnDocument: 'after' },
+    )
+    return doc ? projectV2ToV1(doc) : null
+  }
+
+  /** Prepend a download source (new sources[0]), de-duplicating by uri — the
+   *  our-bucket self-host seam. `$pull` then `$push $position:0` in one round-trip
+   *  would race; do it read-modify-write under the doc's current source list. */
+  async addSource(id: string, source: IntellaSource): Promise<Intella | null> {
+    const current = await this.col.findOne({ id })
+    if (!current) return null
+    const existing = (Array.isArray(current.sources) ? current.sources : []) as IntellaSource[]
+    const sources = [source, ...existing.filter((s) => s?.uri !== source.uri)]
+    const doc = await this.col.findOneAndUpdate(
+      { id },
+      { $set: { sources, mutatum: new Date() } },
+      { returnDocument: 'after' },
+    )
+    return doc ? projectV2ToV1(doc) : null
+  }
+
+  /** Remove a download source by uri — the inverse of `addSource` (retract). */
+  async removeSource(id: string, uri: string): Promise<Intella | null> {
+    const current = await this.col.findOne({ id })
+    if (!current) return null
+    const existing = (Array.isArray(current.sources) ? current.sources : []) as IntellaSource[]
+    const sources = existing.filter((s) => s?.uri !== uri)
+    const doc = await this.col.findOneAndUpdate(
+      { id },
+      { $set: { sources, mutatum: new Date() } },
       { returnDocument: 'after' },
     )
     return doc ? projectV2ToV1(doc) : null

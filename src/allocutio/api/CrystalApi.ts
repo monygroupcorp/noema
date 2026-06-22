@@ -613,6 +613,20 @@ export class CrystalApi {
     // — making it resolvable IS the same decision as who earns when it is used.
     const isPublic = editio.status === 'published' && editio.visibility !== 'private'
     await this.deps.intellarum?.setAccess?.(editio.artifactRef.id, isPublic ? 'public' : 'private')
+
+    // Our-bucket custody (training finality): when a model's WEIGHTS are hosted in
+    // OUR R2 (destination 'r2', custody ours), make it resolvable FROM there —
+    // prepend the hosted URL as the highest-priority `miladystation` source so the
+    // pod downloads from us, not a flaky external host. Retract removes it. (Other
+    // destinations return a registry URL that points at no real upload yet, §10 —
+    // never registered as a source.)
+    if (editio.destination === 'r2' && editio.externalRef) {
+      if (editio.status === 'published') {
+        await this.deps.intellarum?.addSource?.(editio.artifactRef.id, { provenance: 'miladystation', uri: editio.externalRef })
+      } else if (editio.status === 'retracted') {
+        await this.deps.intellarum?.removeSource?.(editio.artifactRef.id, editio.externalRef)
+      }
+    }
   }
 
   /** The BYO custody target (account) for a `custody:'theirs'` model publish, from the
