@@ -214,7 +214,10 @@ gen uses that model (the ChainEngine royalty surface). So:
      keeps it owner-only; `unlisted` makes it broadly resolvable. `retract` deletes the weights AND drops the
      source (`removeSource`). This is the "publish a trained model to finality: somewhere external **and**
      available to us in our buckets, private or otherwise" path — the external leg stays the registry-upload
-     placeholder above; the our-bucket leg is done.
+     placeholder above; the our-bucket leg is done. **Weights STREAM end-to-end** (2026-06-22): `_hostModel`
+     uses `MediaFetcher.fetchStream` → `ObjectStore.putStream` (lib-storage multipart) when both are present,
+     so a multi-GB checkpoint never buffers whole in memory; it falls back to the buffered path for
+     LoRA-sized files / test fakes.
 4. ✅ **Rights / license / splits** — SHIPPED 2026-06-21. The `Editio` is now the complete canonical rights
    record: an **explicit weighted `owners[]` split** (validated Σ=1, mutually exclusive with `teamId`'s
    equal-weight team snapshot) + a **`license` tag** defaulting via the compliance catalog/BYO line

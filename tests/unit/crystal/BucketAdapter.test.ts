@@ -111,3 +111,52 @@ test('retract: deletes a hosted model weight key (model prefix)', async () => {
   await adapter.retract({ externalRef: 'https://cdn.example/models/ed-7/my-lora.safetensors' } as Editio)
   assert.deepEqual(dels, ['models/ed-7/my-lora.safetensors'])
 })
+
+test('publish: STREAMS model weights when fetcher + store support it (never buffers)', async () => {
+  const { Readable } = await import('node:stream')
+  const streamed: Array<{ key: string; contentType: string; contentLength?: number }> = []
+  let bufferedFetch = false
+  let bufferedPut = false
+  const fetcher: MediaFetcher = {
+    async fetch() { bufferedFetch = true; return Buffer.from('nope') },
+    async fetchStream(url) {
+      assert.equal(url, 'https://hf/repo/resolve/main/big.safetensors')
+      return { body: Readable.from([Buffer.from('weight-bytes')]), contentType: 'application/octet-stream', contentLength: 12 }
+    },
+  }
+  const store: ObjectStore = {
+    async put() { bufferedPut = true; return 'nope' },
+    async del() {},
+    async putStream(key, _body, contentType, contentLength) {
+      streamed.push({ key, contentType, contentLength })
+      return `https://cdn.example/${key}`
+    },
+  }
+  const adapter = new BucketAdapter({ fetcher, store })
+  const { externalRef } = await adapter.publish(
+    {
+      ref: { kind: 'intella', id: 'lora-9' }, editioId: 'ed-9',
+      output: { slug: 'big', sources: [{ provenance: 'huggingface', uri: 'https://hf/repo/resolve/main/big.safetensors' }] },
+    },
+    { visibility: 'private', custody: 'ours' },
+  )
+  assert.equal(externalRef, 'https://cdn.example/models/ed-9/big.safetensors')
+  assert.deepEqual(streamed, [{ key: 'models/ed-9/big.safetensors', contentType: 'application/octet-stream', contentLength: 12 }])
+  assert.equal(bufferedFetch, false, 'must not buffer-fetch when streaming is available')
+  assert.equal(bufferedPut, false, 'must not buffer-put when streaming is available')
+})
+
+test('publish: falls back to the buffered path when streaming is unavailable', async () => {
+  // The default fakes() have no fetchStream/putStream → buffered path.
+  const { fetcher, store, fetched, puts } = fakes()
+  const adapter = new BucketAdapter({ fetcher, store })
+  await adapter.publish(
+    {
+      ref: { kind: 'intella', id: 'lora-3' }, editioId: 'ed-3',
+      output: { slug: 'small', sources: [{ provenance: 'huggingface', uri: 'https://hf/small.safetensors' }] },
+    },
+    { visibility: 'private', custody: 'ours' },
+  )
+  assert.deepEqual(fetched, ['https://hf/small.safetensors'])
+  assert.equal(puts[0].key, 'models/ed-3/small.safetensors')
+})
