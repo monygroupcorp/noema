@@ -155,9 +155,45 @@ test('reportProgressus: emits the typed actum.progressus bus event', async () =>
   assert.equal(seen[0].phase, 'uploading')
 })
 
-test('reportProgressus: no actumId → returns continue, persists nothing', async () => {
+test('reportProgressus: no actumId and no known session → returns continue, persists nothing', async () => {
   const { api } = await makeApi()
   assert.deepEqual(await api.reportProgressus({ sessionId: 's1', step: 'warming up' }), { continue: true })
+})
+
+// ── reportProgressus: TEE warm session (build #4, §6b) ───────────────────────
+// A sessionId-bound report (no Actum yet, §9) reflects the latest phase onto the live
+// TEE session, surfaced on TeeSessionView.phase — the browser's cold-start progress.
+
+async function makeTeeApi() {
+  const actorum = new MemoryActorum()
+  const signorum = { balance: async () => 1_000_000n }   // funded — provision passes the budget gate
+  const api = new CrystalApi({ actorum, signorum } as unknown as CrystalApiDeps)
+  return { api }
+}
+
+test('reportProgressus: a sessionId-bound report reflects the latest phase on the TEE session', async () => {
+  const { api } = await makeTeeApi()
+  const auctor = { animaId: 'anima-1' }
+  const provisioned = await api.provisionTeeSession(auctor, { wgClientPublicKey: 'wg-pub' })
+  assert.equal(provisioned.status, 'provisioning')
+  assert.equal(provisioned.phase, 'provisioning')   // platform-side initial phase
+
+  // The enclave runner posts loading → the browser's next poll sees it.
+  const cont = await api.reportProgressus({ sessionId: provisioned.sessionId, progressus: { phase: 'loading', target: 'vram' } })
+  assert.deepEqual(cont, { continue: true })
+  const view = await api.getTeeSession(auctor, provisioned.sessionId)
+  assert.equal(view.phase, 'loading')
+})
+
+test('reportProgressus: an ended TEE session tells the runner to bail (continue:false)', async () => {
+  const { api } = await makeTeeApi()
+  const auctor = { animaId: 'anima-2' }
+  const provisioned = await api.provisionTeeSession(auctor, { wgClientPublicKey: 'wg-pub' })
+  await api.endTeeSession(auctor, provisioned.sessionId)   // status → 'ended' (no pod in local dev)
+  assert.deepEqual(
+    await api.reportProgressus({ sessionId: provisioned.sessionId, progressus: { phase: 'executing' } }),
+    { continue: false },
+  )
 })
 
 test('reportProgressus: an unknown actumId returns continue but fans out nothing', async () => {

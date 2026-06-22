@@ -114,6 +114,25 @@ async def signal_ended(reason: str):
     log.info(f"ended: {reason}")
 
 
+async def signal_status(phase: str, target: str = None, message: str = None):
+    """Report a real Progressus phase to the universal status sink (spec §6b).
+
+    The platform reflects it onto the live TEE session (TeeSessionView.phase) so the
+    browser sees in-enclave cold-start progress — model download/load/warmup — that the
+    platform can't observe from outside the tunnel. Fire-and-forget: the heartbeat owns the
+    stop signal, so a status post never blocks setup, and a sink hiccup is non-fatal."""
+    prog = {"phase": phase}
+    if target:  prog["target"] = target
+    if message: prog["message"] = message
+    payload = {"v": 1, "sessionId": SESSION_ID, "progressus": prog}
+    try:
+        async with aiohttp.ClientSession() as s:
+            await s.post(f"{PLATFORM_CALLBACK}/runner/status", json=payload,
+                         timeout=aiohttp.ClientTimeout(total=10))
+    except Exception as e:
+        log.warning(f"status post failed ({phase}): {e} — continuing")
+
+
 async def _get_attestation() -> str:
     raise NotImplementedError("Hardware attestation requires a real TEE pod.")
 
@@ -209,20 +228,22 @@ async def setup(req: SetupRequest):
         log.info(f"[install] {cmd}")
         await _run(shlex.split(cmd))
 
-    # 2. Resolve model from intellae
+    # 2. Resolve model from intellae (may download — _resolve_model reports `downloading`)
     model = await _resolve_model(fund, req.options)
 
-    # 3. Launch — fill launchTemplate vars, spawn process
+    # 3. Launch — fill launchTemplate vars, spawn process (model load into the enclave)
     template = fund.get("launchTemplate", "")
     if not template:
         raise HTTPException(400, "fundamentum.launchTemplate is required")
     cmd_str = template.format(model=model, port=port, vramGb=fund.get("vramGb", 24))
     log.info(f"[launch] {cmd_str}")
+    await signal_status("loading", target="vram", message=req.essentiaId)
     process = subprocess.Popen(shlex.split(cmd_str))
 
-    # 4. Probe — poll readyProbe until HTTP 200
+    # 4. Probe — poll readyProbe until HTTP 200 (server warming up to first-token-ready)
     probe = fund.get("readyProbe", "")
     if probe:
+        await signal_status("warming", message=req.essentiaId)
         await _probe_ready(probe.format(port=port))
 
     # 5. Form half — configure the running server from Essentia
@@ -393,6 +414,7 @@ async def _download_gguf(model: str) -> str:
     if os.path.exists(dest):
         log.info(f"model cached at {dest}")
         return dest
+    await signal_status("downloading", target="model", message=filename)
     try:
         await _run(["huggingface-cli", "download", "/".join(parts[:-1]), filename, "--local-dir", "/tmp/models"])
     except Exception:

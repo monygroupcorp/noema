@@ -17,7 +17,7 @@
 import { randomUUID } from 'crypto'
 import { bus } from '../../lib/bus.js'
 import { normalizeProgressus, shouldPersist, rollupPhaseDurations, progressusToStage } from '../../execution/progressus.js'
-import type { Progressus } from '../../types/progressus.js'
+import type { Progressus, Phasis } from '../../types/progressus.js'
 import type { Modorum, Modus } from '../../types/modus.js'
 import type { Cursorum, ActumCompletor, Actorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
@@ -1126,6 +1126,7 @@ export class CrystalApi {
       sessionId,
       auctor,
       status: 'provisioning',
+      phase: 'provisioning',
       gpuClass: opts.gpuClass,
       budgetImpetus: budget,
       wgClientPublicKey: opts.wgClientPublicKey,
@@ -1151,7 +1152,7 @@ export class CrystalApi {
         if (result.costPerHrUsd !== undefined) s.costPerHrUsd = result.costPerHrUsd
       }).catch(err => {
         const s = this.teeSessions.get(sessionId)
-        if (s) { s.status = 'ended'; s.error = String(err) }
+        if (s) { s.status = 'ended'; s.phase = 'failed'; s.error = String(err) }
         console.error('[tee] pod provision failed', { sessionId, err: String(err) })
       })
     }
@@ -1188,6 +1189,10 @@ export class CrystalApi {
 
     session.serverPublicKey = signal.wgPublicKey
     session.tunnelIp = '10.13.0.2'
+    // The secure-tunnel handshake is the TEE-only `attesting` phase (spec §6b): WG key
+    // exchange just landed; the WS-upgrade probe below completes it. The runner advances
+    // the phase from here (loading/warming) once the browser pushes work over the tunnel.
+    session.phase = 'attesting'
 
     if (session.podId && this.deps.teeProvisioner) {
       // SECURE RunPod pod: probe the WS upgrade path before marking the session ready.
@@ -1201,6 +1206,7 @@ export class CrystalApi {
         if (session.wsProbeAttempts >= 3) {
           console.error('[tee] WS probe failed 3 times — giving up', { sessionId: signal.sessionId })
           session.status = 'ended'
+          session.phase = 'failed'
           session.error = 'no GPU with working proxy found after 3 attempts — please try again later'
           await this.deps.teeProvisioner.terminate(badPodId).catch(() => {})
           return
@@ -1217,7 +1223,7 @@ export class CrystalApi {
           if (s) { s.podId = result.podId; if (result.costPerHrUsd !== undefined) s.costPerHrUsd = result.costPerHrUsd }
         }).catch(err => {
           const s = this.teeSessions.get(signal.sessionId)
-          if (s) { s.status = 'ended'; s.error = String(err) }
+          if (s) { s.status = 'ended'; s.phase = 'failed'; s.error = String(err) }
         })
         return
       }
@@ -1244,6 +1250,7 @@ export class CrystalApi {
     const { continue: ok } = await this._billTeeHours(session, signal.gpuHours)
     if (!ok) {
       session.status = 'ended'
+      session.phase = 'failed'
       session.error = 'session budget exhausted'
       console.warn('[tee] budget exhausted — ending session and terminating pod', { sessionId: signal.sessionId, podId: session.podId })
       if (session.podId && this.deps.teeProvisioner) {
@@ -1262,6 +1269,8 @@ export class CrystalApi {
     session.gpuHours = signal.gpuHours
     await this._billTeeHours(session, signal.gpuHours)
     session.status = 'ended'
+    // Clean lifespan exit → `done`; budget-kill or crash → `failed` (spec §6b terminal).
+    session.phase = signal.status === 'ended' ? 'done' : 'failed'
     if (!session.error) session.error = signal.status === 'terminated' ? 'session budget exhausted' : 'runner exited unexpectedly'
     if (session.podId && this.deps.teeProvisioner) {
       await this.deps.teeProvisioner.terminate(session.podId).catch(err =>
@@ -1280,18 +1289,29 @@ export class CrystalApi {
    * (coalesced — transitions + messages + terminals only, never per-tick progress),
    * and on a terminal report roll the timeline up into `phaseDurations`. Always emit
    * the typed `actum.progressus` bus event + a legacy `actum.stage` shim so existing
-   * consumers keep working until build #6. A `sessionId`-only report (no actumId — the
-   * arm Actum that owns warm-session cold-start isn't minted yet, spec §9) still emits
-   * + returns continue; persistence lands when the arm Actum exists (build #4).
+   * consumers keep working until build #6. A `sessionId`-bound report (no actumId — the
+   * arm Actum that owns warm-session cold-start isn't minted yet, spec §9) reflects the
+   * latest phase onto the live TEE session (surfaced on `TeeSessionView.phase`) and returns
+   * `continue:false` once that session has ended; full timeline persistence lands when the
+   * arm Actum exists.
    */
   async reportProgressus(signal: ProgressusSignal): Promise<{ continue: boolean }> {
     const progressus = normalizeProgressus(signal.progressus ?? signal)
-    const { actumId } = signal
-    // sessionId-only (the arm Actum that owns warm-session cold-start isn't minted yet,
-    // §9) or a report for an unknown run: nothing to persist or fan out — just keep going.
-    if (!actumId) return { continue: true }
-    const actum = await this.deps.actorum.findById(actumId)
-    if (!actum) return { continue: true }
+    const { actumId, sessionId } = signal
+
+    const actum = actumId ? await this.deps.actorum.findById(actumId) : undefined
+    if (!actum) {
+      // No Actum to bind to. A `sessionId`-bound report is the TEE warm session (spec §6b):
+      // the arm Actum that would own its cold-start isn't minted yet (§9), so we reflect the
+      // latest phase as live session status — the browser polls it during the cold-start wait.
+      // A `fractus`/ended session tells the runner to bail (replacing the heartbeat's role).
+      const session = sessionId ? this.teeSessions.get(sessionId) : undefined
+      if (session) {
+        session.phase = progressus.phase
+        return { continue: session.status !== 'ended' }
+      }
+      return { continue: true }
+    }
 
     await this._persistAndEmit(actum, progressus)
 
@@ -1300,7 +1320,7 @@ export class CrystalApi {
     // it still emits the legacy vocabulary itself via `emitStage` (the consumers parse those
     // exact strings), so `recordProgressus` does NOT re-emit a phase-vocabulary shim.
     bus.emit('actum.stage', {
-      actumId,
+      actumId: actum.id,
       stage: progressusToStage(progressus),
       elapsedMs: Math.max(0, progressus.at.getTime() - actum.inceptum.getTime()),
     })
@@ -1501,6 +1521,14 @@ export interface ProvisionTeeSessionOpts {
 export interface TeeSessionView {
   sessionId: string
   status: 'provisioning' | 'ready' | 'ended'
+  /**
+   * The latest fine-grained `Phasis` (spec §6b) — `provisioning` → `attesting` (tunnel
+   * handshake) → the runner's own `pulling`/`downloading`/`loading`/`warming` → `done`/
+   * `failed`. The coarse `status` gates the tunnel UI; `phase` is the live cold-start
+   * progress the browser shows while polling. This is the latest report, NOT a persisted
+   * timeline — the warm session has no Actum yet (spec §9), so there's nothing to roll up.
+   */
+  phase?: Phasis
   error?: string
   serverPublicKey?: string
   endpoint?: string      // WireGuard UDP endpoint (ip:port)
@@ -1549,6 +1577,8 @@ interface TeeSession {
   sessionId: string
   auctor: AuctorKey
   status: 'provisioning' | 'ready' | 'ended'
+  /** Latest fine-grained phase (spec §6b) — live cold-start progress, not a persisted timeline. */
+  phase?: Phasis
   error?: string
   gpuClass?: string
   budgetImpetus: bigint
@@ -1571,6 +1601,7 @@ function toTeeSessionView(s: TeeSession): TeeSessionView {
   return {
     sessionId: s.sessionId,
     status: s.status,
+    ...(s.phase ? { phase: s.phase } : {}),
     ...(s.error ? { error: s.error } : {}),
     ...(s.serverPublicKey ? { serverPublicKey: s.serverPublicKey } : {}),
     ...(s.endpoint ? { endpoint: s.endpoint } : {}),
