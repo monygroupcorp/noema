@@ -132,8 +132,10 @@ export function huggingFaceRegistry(defaultAccount?: string, uploader?: Registry
   }
 }
 
-/** Civitai registry (`https://civitai.com/user/<account>?model=<slug>`). Pass an
- *  `uploader` to move real bytes; omit it for projection-only (placeholder). */
+/** Civitai registry (`https://civitai.com/user/<account>?model=<slug>`). PROJECTION-ONLY
+ *  by necessity: Civitai exposes no public write/POST API (uploads are GUI-locked), so a
+ *  real `uploader` is NOT buildable — this can only LINK a user's existing Civitai model,
+ *  never push one. The `uploader` param exists for interface symmetry; leave it unset. */
 export function civitaiRegistry(defaultAccount?: string, uploader?: RegistryUploader): ModelRegistry {
   return {
     key: 'civitai',
