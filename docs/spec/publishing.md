@@ -198,9 +198,19 @@ gen uses that model (the ChainEngine royalty surface). So:
    is one of several, chosen by custody preference. The **§5d reconciler is now LIVE** — `CrystalApi._reconcile`
    write-throughs `Intella.access` (`setAccess` on `Intellarum`): a non-private model publish → `public`
    (resolvable by trigger), retract → `private`. Models publish to `private`/`unlisted` only (not the media
-   feed). **PLACEHOLDER:** the real weight UPLOAD (push `Intella.sources` to the registry API + token) is
-   deferred — the adapter does the account+slug → URL projection and returns the handle; it does not yet
-   move bytes (§10). The royalty payee (§5e) is the model's own `auctor`, unchanged by publish.
+   feed). **PLACEHOLDER:** the real weight UPLOAD to an EXTERNAL REGISTRY (push `Intella.sources` to the
+   HuggingFace/Civitai API + token) is deferred — the registry adapter does the account+slug → URL projection
+   and returns the handle; it does not yet move bytes (§10). The royalty payee (§5e) is the model's own
+   `auctor`, unchanged by publish.
+   - ✅ **3b — Training finality, our-bucket custody (SHIPPED 2026-06-21).** The **our-custody** half is now
+     REAL (not a placeholder): publishing a model to `destination:'r2'` hosts its primary weight file into OUR
+     R2 bucket (`BucketAdapter._hostModel` — real byte movement, keyed `models/<editioId>/<file>`) and the
+     reconciler **prepends the hosted URL as the highest-priority `miladystation` source** (`Intellarum.addSource`)
+     so the pod resolves the model FROM us, not a flaky external host (the `sources[0]` convention). `private`
+     keeps it owner-only; `unlisted` makes it broadly resolvable. `retract` deletes the weights AND drops the
+     source (`removeSource`). This is the "publish a trained model to finality: somewhere external **and**
+     available to us in our buckets, private or otherwise" path — the external leg stays the registry-upload
+     placeholder above; the our-bucket leg is done.
 4. ✅ **Rights / license / splits** — SHIPPED 2026-06-21. The `Editio` is now the complete canonical rights
    record: an **explicit weighted `owners[]` split** (validated Σ=1, mutually exclusive with `teamId`'s
    equal-weight team snapshot) + a **`license` tag** defaulting via the compliance catalog/BYO line
@@ -296,7 +306,7 @@ Inert stand-ins shipped to stand up the spine. Each is wired and exercised by th
 | Where | What it does today | What replaces it | When |
 |---|---|---|---|
 | `permissiveModerationGate` (`src/crystal/ModerationGate.ts`) | Approves **everything** (`ok:true`). Preserves the async `pending → scan → published\|rejected` path so the gate is never bypassed structurally, but performs **no CSAM detection and no NCMEC reporting**. Container wires it because no real scanner exists. | A real `ModerationGate` impl: hash-match (PhotoDNA/known-CSAM lists) + classifier for novel material **and** NCMEC CyberTipline reporting on a confirmed match (18 U.S.C. §2258A). | **Before** the feed is exposed to real public traffic. Hard blocker for go-live. |
-| `ModelPublishAdapter` upload (`src/crystal/ModelPublishAdapter.ts`) | Projects `account + slug → registry URL` and returns the handle for HuggingFace/Civitai; the §5d access reconciler around it is **real** (the model becomes resolvable). But it does **NOT upload the weight bytes** — `Intella.sources` are never pushed to the registry API; the returned URL points at a repo that does not yet exist. | A real per-registry uploader: HF (`createRepo` + `uploadFile`, `HF_TOKEN`) — port the legacy `HuggingFaceHubService.js`; Civitai (its model-upload API + token). Plus real `retract` = repo deletion. | Before model publishing is offered to users (the URL is a dangling handle until then). |
+| `ModelPublishAdapter` upload — EXTERNAL registries only (`src/crystal/ModelPublishAdapter.ts`) | Projects `account + slug → registry URL` and returns the handle for HuggingFace/Civitai; the §5d access reconciler around it is **real** (the model becomes resolvable). But it does **NOT upload the weight bytes** to the registry — `Intella.sources` are never pushed to the HF/Civitai API; the returned URL points at a repo that does not yet exist. (**Note:** the OUR-bucket path, `destination:'r2'`, IS real — `BucketAdapter._hostModel` moves bytes into R2 and registers a `miladystation` source. Only the external-registry upload is stubbed.) | A real per-registry uploader: HF (`createRepo` + `uploadFile`, `HF_TOKEN`) — port the legacy `HuggingFaceHubService.js`; Civitai (its model-upload API + token). Plus real `retract` = repo deletion. | Before EXTERNAL model publishing is offered to users (the URL is a dangling handle until then). |
 | `FeedAdapter.externalRef` (`src/crystal/FeedAdapter.ts`) | Mints a cosmetic `feed:<uuid>` handle; the feed is actually served from `Editionum.listFeed`. No dedicated feed backend (no fan-out / cache / ranking). | A real feed service if/when scale needs one — the adapter is the seam. | Not blocking; only if the store-backed read stops sufficing. |
 | `MintAdapter` / `MarketplaceAdapter` (`src/crystal/MintAdapter.ts`) | **Freeze is real**: content-addresses `provenanceHash + owners[] + size` into a deterministic `mint:<chain>:<sha256>` / marketplace listing handle (the immutable drop identifier). But it submits **no on-chain transaction** (no Catena/CreditVault mint, no contract, no chain-issued tokenId, no per-token `tokenURI`) and makes **no real marketplace API call** — the returned handle is a projection, not an on-chain/venue artifact. | A real on-chain minter (Catena/CreditVault rails: deploy/mint, capture the tx + tokenId; assemble `tokenURI`s — the mutable hosted layer is the living-NFT work #6) and a real marketplace client (list/delist via the venue API). | Before minting/listing is offered to users (the handle is a deterministic-but-off-chain reference until then). |
 

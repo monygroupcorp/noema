@@ -19,6 +19,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import type { PublicationAdapter, PublishArtifact, PublishPolicy } from './PublicationAdapter.js'
 import type { Editio } from '../types/editio.js'
+import type { IntellaSource } from '../types/intelligendi.js'
 import type { MediaFetcher } from './MediaFetcher.js'
 import type { ObjectStore } from './R2Uploader.js'
 
@@ -61,15 +62,27 @@ export function mediaTypeFor(url: string): { contentType: string; ext: string } 
   return { contentType: CONTENT_TYPES[ext] ?? 'application/octet-stream', ext: ext || 'bin' }
 }
 
+/** The basename of a URL (query/fragment stripped), or a fallback. */
+function urlBasename(url: string, fallback: string): string {
+  const seg = url.split('?')[0].split('#')[0].split('/').pop() ?? ''
+  return seg || fallback
+}
+
 export class BucketAdapter implements PublicationAdapter {
   readonly key = 'r2'
   private readonly prefix: string
+  private readonly modelPrefix: string
 
-  constructor(private readonly deps: { fetcher: MediaFetcher; store: ObjectStore; prefix?: string }) {
+  constructor(private readonly deps: { fetcher: MediaFetcher; store: ObjectStore; prefix?: string; modelPrefix?: string }) {
     this.prefix = deps.prefix ?? 'editiones'
+    this.modelPrefix = deps.modelPrefix ?? 'models'
   }
 
-  async publish(artifact: PublishArtifact, _policy: PublishPolicy): Promise<{ externalRef: string }> {
+  async publish(artifact: PublishArtifact, policy: PublishPolicy): Promise<{ externalRef: string }> {
+    // A model (Intella) hosts its WEIGHTS (the durable, our-custody copy — the
+    // training-finality path); everything else hosts its produced MEDIA.
+    if (artifact.ref.kind === 'intella') return this._hostModel(artifact, policy)
+
     const url = primaryMediaUrl(artifact.output)
     if (!url) throw new Error('bucket-adapter: artifact has no resolvable media to host')
     const bytes = await this.deps.fetcher.fetch(url)
@@ -80,12 +93,32 @@ export class BucketAdapter implements PublicationAdapter {
     return { externalRef: hosted }
   }
 
+  /** Host a trained model's primary weight file into OUR bucket → a durable,
+   *  our-custody download URL (the `miladystation` mirror the resolver prefers).
+   *  This is real byte movement — the our-custody half of model publishing. */
+  private async _hostModel(artifact: PublishArtifact, _policy: PublishPolicy): Promise<{ externalRef: string }> {
+    const sources = (artifact.output?.sources as IntellaSource[] | undefined) ?? []
+    const primary = sources.find((s) => typeof s?.uri === 'string' && s.uri.length > 0)
+    if (!primary) throw new Error('bucket-adapter: model has no weight source to host')
+    const bytes = await this.deps.fetcher.fetch(primary.uri)
+    const slug = typeof artifact.output?.slug === 'string' ? artifact.output.slug : 'model'
+    const filename = urlBasename(primary.uri, `${slug}.safetensors`)
+    const id = artifact.editioId ?? uuidv4()
+    // Keyed under a per-publication folder so `retract` can recompute + delete it.
+    const hosted = await this.deps.store.put(`${this.modelPrefix}/${id}/${filename}`, bytes, 'application/octet-stream')
+    return { externalRef: hosted }
+  }
+
   async retract(editio: Editio): Promise<void> {
     if (!editio.externalRef) return
-    // Recover the object key from the hosted URL (`<base>/<prefix>/<id>.<ext>`).
-    const marker = `/${this.prefix}/`
-    const at = editio.externalRef.indexOf(marker)
-    if (at < 0) return
-    await this.deps.store.del(`${this.prefix}/${editio.externalRef.slice(at + marker.length)}`)
+    // Recover the object key from the hosted URL — media live under `<prefix>/…`,
+    // model weights under `<modelPrefix>/…`; delete whichever this publication used.
+    for (const prefix of [this.prefix, this.modelPrefix]) {
+      const marker = `/${prefix}/`
+      const at = editio.externalRef.indexOf(marker)
+      if (at < 0) continue
+      await this.deps.store.del(`${prefix}/${editio.externalRef.slice(at + marker.length)}`)
+      return
+    }
   }
 }

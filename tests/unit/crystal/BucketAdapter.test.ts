@@ -77,3 +77,37 @@ test('retract: a no-externalRef editio is a safe no-op', async () => {
   await adapter.retract({} as Editio)
   assert.equal(dels.length, 0)
 })
+
+// ── Model weights (training finality — our-custody copy) ─────────────────────
+
+test('publish: an intella hosts its primary weight file under the model prefix', async () => {
+  const { fetcher, store, fetched, puts } = fakes()
+  const adapter = new BucketAdapter({ fetcher, store })
+  const { externalRef } = await adapter.publish(
+    {
+      ref: { kind: 'intella', id: 'lora-7' }, editioId: 'ed-7',
+      output: { slug: 'my-lora', sources: [{ provenance: 'huggingface', uri: 'https://hf/repo/resolve/main/my-lora.safetensors' }] },
+    },
+    { visibility: 'private', custody: 'ours' },
+  )
+  assert.deepEqual(fetched, ['https://hf/repo/resolve/main/my-lora.safetensors'], 'fetched the weight bytes')
+  assert.equal(puts[0].key, 'models/ed-7/my-lora.safetensors', 'keyed under models/<editioId>/<filename>')
+  assert.equal(puts[0].contentType, 'application/octet-stream')
+  assert.equal(externalRef, 'https://cdn.example/models/ed-7/my-lora.safetensors')
+})
+
+test('publish: an intella with no weight source throws', async () => {
+  const { fetcher, store } = fakes()
+  const adapter = new BucketAdapter({ fetcher, store })
+  await assert.rejects(
+    () => adapter.publish({ ref: { kind: 'intella', id: 'x' }, output: { slug: 's', sources: [] }, editioId: 'e' }, { visibility: 'private', custody: 'ours' }),
+    /no weight source/,
+  )
+})
+
+test('retract: deletes a hosted model weight key (model prefix)', async () => {
+  const { fetcher, store, dels } = fakes()
+  const adapter = new BucketAdapter({ fetcher, store })
+  await adapter.retract({ externalRef: 'https://cdn.example/models/ed-7/my-lora.safetensors' } as Editio)
+  assert.deepEqual(dels, ['models/ed-7/my-lora.safetensors'])
+})

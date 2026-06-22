@@ -98,6 +98,16 @@ function makeApi(opts?: { gate?: ModerationGate; prefs?: Record<string, unknown>
       const m = models.get(id); if (m) (m as { access?: string }).access = access
       return m ?? null
     },
+    addSource: async (id: string, source: { provenance: string; uri: string }) => {
+      const m = models.get(id); if (!m) return null
+      m.sources = [source as never, ...m.sources.filter((s) => s.uri !== source.uri)]
+      return m
+    },
+    removeSource: async (id: string, uri: string) => {
+      const m = models.get(id); if (!m) return null
+      m.sources = m.sources.filter((s) => s.uri !== uri)
+      return m
+    },
   }
   const api = new CrystalApi({
     editiones,
@@ -309,6 +319,41 @@ test('retractEdition(): only the publishing author may retract', async () => {
     () => api.retractEdition({ animaId: 'someone-else' }, ed.id),
     /not found/i,
   )
+})
+
+// ── Training finality: a model hosted in OUR bucket (custody ours) ───────────
+
+test('publish(): a model to r2 hosts its weights in our bucket + makes it resolvable from there', async () => {
+  const { api, editiones, puts, models } = makeApi()
+  const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'r2', visibility: 'private' })
+
+  // The weight file was really moved into our bucket, keyed per-publication.
+  assert.equal(ed.status, 'published', 'private settles inline — no moderation gate')
+  assert.equal(puts.length, 1)
+  assert.equal(puts[0].key, `models/${ed.id}/lora.safetensors`, 'hosted under the model prefix + filename')
+  assert.equal((await editiones.find(ed.id))?.externalRef, `https://cdn/models/${ed.id}/lora.safetensors`)
+
+  // The model now resolves FROM our bucket: a miladystation source at index 0.
+  const m = models.get('lora-1')!
+  assert.equal(m.sources[0].provenance, 'miladystation')
+  assert.equal(m.sources[0].uri, `https://cdn/models/${ed.id}/lora.safetensors`)
+})
+
+test('publish(): a private our-bucket model stays private (resolvable only by its owner)', async () => {
+  const { api, accessCalls } = makeApi()
+  await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'r2', visibility: 'private' })
+  assert.deepEqual(accessCalls, [{ id: 'lora-1', access: 'private' }])
+})
+
+test('retractEdition(): retracting an our-bucket model deletes the weights + drops the source', async () => {
+  const { api, dels, models } = makeApi()
+  const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'r2', visibility: 'unlisted' })
+  const hosted = `https://cdn/models/${ed.id}/lora.safetensors`
+  assert.ok(models.get('lora-1')!.sources.some((s) => s.uri === hosted))
+
+  await api.retractEdition(anima1, ed.id)
+  assert.deepEqual(dels, [`models/${ed.id}/lora.safetensors`], 'the hosted weights were deleted')
+  assert.ok(!models.get('lora-1')!.sources.some((s) => s.uri === hosted), 'the our-bucket source was removed')
 })
 
 // ── Collection / mint (#5) ───────────────────────────────────────────────────
