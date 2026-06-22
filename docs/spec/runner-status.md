@@ -5,9 +5,13 @@ base-image runner (ComfyUI, TEE, training, hosting, downloading) reports progres
 all consumers (SSE, Telegram, bulletin, frontend, analytics) read. Not built. Build against this once
 finalized.
 
-> **Naming is provisional.** This spec proposes **`Nuntius`** (Latin *nuntius* — a dispatch, a report, a
-> messenger) for the status-report primitive. NOT `Gradus` — that already names a compositus spell's ordered
-> steps (`Modus.gradus`). Open for finalization (§9).
+> **Name: `Nuntius`** (FINALIZED 2026-06-22 — Latin *nuntius*: a dispatch, a report, a messenger). NOT
+> `Gradus` (that already names a compositus spell's ordered steps, `Modus.gradus`).
+
+**Decisions locked (2026-06-22):** name = `Nuntius`; **one channel** (status subsumes heartbeat, §4); **the
+full timeline is persisted on the Actum** — every phase transition + key event, so states are queryable and
+each step's duration is measurable (§7); the phase taxonomy is **as specific as the distinct measurable costs
+demand** — pulling the fundamentum, downloading models, and loading into VRAM are SEPARATE phases (§3b).
 
 ## 1. What it is — and why we own it
 
@@ -49,36 +53,47 @@ from the Nuntius stream — one model, not two.
 ```
 Nuntius {
   phase:      Phasis                    // the canonical, OWNED phase (3b)
+  target?:    string                    // WHAT this phase acts on, for within-phase specificity:
+                                        //   'fundamentum' | 'model' | 'lora' | 'dataset' | 'input' | 'vram' | 'output' | …
   progress?:  { done, total, unit }     // unit: 'items' | 'bytes' | 'steps' | 'pct'
   etaMs?:     number                    // estimated time remaining in this phase
-  message?:   string                    // human detail ("loading flux1-schnell")
+  message?:   string                    // human detail ("loading flux1-schnell into VRAM")
   resources?: { vramUsedMb?, vramTotalMb?, gpuUtilPct?, diskUsedMb? }   // VRAM & friends; extensible
   parallel?:  Nuntius[]                 // sub-reports for concurrent work (3d)
   at:         Date
 }
 ```
-A runner emits a *stream* of `Nuntius`. The **latest** is persisted (`Actum.nuntius?` / `Modo.nuntius?` for
-long sessions) so "current status" is queryable; the *stream* flows via the bus to live consumers.
+`phase` is the coarse step (for the timeline + measurement); `target` is the within-phase specificity (so a
+`downloading` of a `model` is queryable apart from a `downloading` of a `dataset`, without exploding the phase
+set). A runner emits a *stream* of `Nuntius`; the **whole stream is persisted** on the Actum (§7) — not just
+the latest — so we can replay states and measure each step. The live stream also flows via the bus to consumers.
 
 ### 3b. `Phasis` — the canonical phase taxonomy (the OWNED vocabulary)
-Runner-agnostic. Every runner maps its native events into exactly these. Ordered roughly by lifecycle:
+Runner-agnostic. Every runner maps its native events into exactly these. **Specific where the cost differs** —
+the three faces of "loading" are split, because pulling a multi-GB image, downloading weights, and copying
+weights into VRAM are independently slow and we want to measure each. Ordered roughly by lifecycle:
 ```
 Phasis =
   | 'queued'        // accepted, awaiting a slot (warm-pool queue, scheduler)
-  | 'provisioning'  // acquiring compute (pod/instance create, cold start)
+  | 'provisioning'  // acquiring compute — pod/instance create (cold start)
+  | 'pulling'       // fetching the RUNTIME / base image (the fundamentum) onto the host  ← "downloading fundamentum"
   | 'attesting'     // TEE attestation + secure-tunnel handshake (TEE only)
-  | 'downloading'   // fetching inputs onto the runner (models, datasets, media)
+  | 'downloading'   // fetching ARTIFACTS — models / loras / datasets / media inputs (target says which)  ← "downloading models"
   | 'installing'    // installing custom nodes / deps
-  | 'loading'       // loading weights into VRAM / warming
+  | 'loading'       // copying weights into VRAM (target:'vram') — the GPU load, NOT a download  ← "loading into VRAM"
+  | 'warming'       // post-load readiness (CUDA graphs, first-token warmup, sampler warmup)
   | 'executing'     // the actual work (inference steps, training steps, token stream)
   | 'uploading'     // pushing outputs out (R2, HF)
   | 'finalizing'    // settle / cleanup
+  | 'cancelling'    // an in-flight cancel was requested
   | 'done'
   | 'failed'
 ```
-These are **owned**: adding a richer ComfyUI event never adds a `Phasis` — it maps to an existing one (with
-`message`/`progress` carrying the native detail). A new runner that needs a genuinely new phase is a spec
-change, deliberately (keeps the vocabulary small and shared).
+These are **owned**: a richer native event never adds a `Phasis` — it maps to an existing phase, with
+`target` for what it acts on and `message`/`progress` for the native detail. A new runner that needs a
+genuinely new phase is a deliberate spec change (keeps the vocabulary small, shared, and measurable). The
+`target` axis (§3a) absorbs the long tail of specificity (model vs lora vs dataset within `downloading`)
+without multiplying phases.
 
 ### 3c. Progress is one shape across very different work
 - ComfyUI model download → `{ done: 2, total: 5, unit: 'items' }` (+ a nested bytes sub-report, 3d)
@@ -94,20 +109,25 @@ Concurrent work nests instead of flattening to a string. Examples:
 - parallel training shards / multi-GPU.
 Consumers can render the rollup (parent phase + aggregate %) or drill into the sub-reports.
 
-## 4. The protocol — one universal sink
+## 4. The protocol — ONE channel (decided)
 
-`POST /runner/status` becomes the **canonical status sink** (generalizing today's TEE stub). Body:
+`POST /runner/status` is the **single** runner→platform channel. It carries the Nuntius **and** doubles as the
+heartbeat — no separate status vs heartbeat split. Body + response:
 ```
-{ actumId?  |  sessionId? ,  nuntius: Nuntius }
+→  { actumId? | sessionId? ,  nuntius: Nuntius }
+←  { continue: boolean }          // the keep-alive / cancel signal (today's heartbeat return)
 ```
-Every base image speaks it: the persistent runner.py job server, comfyrunner, the TEE enclave runner, the
-trainer. The platform handler (`CrystalApi.reportNuntius`):
-1. **persists** the latest Nuntius on the `Actum` (or `Modo`/TEE session);
+Every base image speaks exactly this one call: the persistent runner.py job server, comfyrunner, the TEE
+enclave runner, the trainer. The platform handler (`CrystalApi.reportNuntius`):
+1. **appends** the Nuntius to the Actum's persisted timeline + updates the latest (§7);
 2. **emits** it to the bus (a typed `actum.nuntius` event — supersedes the stringly `actum.stage`);
-3. lets the **projection** (§5) fan it out.
+3. lets the **projection** (§5) fan it out;
+4. returns `{ continue }` — so the same call that reports progress also tells a runner to keep going or bail
+   (subsumes `/runner/heartbeat`).
 
-The existing `/runner/ready|heartbeat|ended` stay as the *lifecycle* control channel (they gate
-provisioning + billing); `/runner/status` is the *progress* channel. (A heartbeat MAY carry a Nuntius too.)
+The discrete lifecycle markers fold into phases: today's `/runner/ready` ≈ a `loading`/`warming`→`executing`
+Nuntius, `/runner/ended` ≈ a `done`/`failed` Nuntius. The base-image contract collapses to **"emit Nuntius,
+read `continue`."** (The legacy `/runner/ready|heartbeat|ended` endpoints stay during migration, then retire.)
 
 ## 5. Projection — one mapper to every consumer
 
@@ -130,7 +150,8 @@ Nuntius, so existing consumers keep working while they migrate.
 | `downloading` / `download-progress` | `downloading` | `{done,total,unit:'items'}` + `parallel[]` bytes per file; `etaMs` |
 | `downloaded` / `models-ready` | `downloading` → (done) | phase boundary |
 | `installing-node` / `restarting-comfy` | `installing` | message = node name |
-| `workflow-submitted` / `waiting` | `queued` / `loading` | "awaiting ComfyUI" |
+| `workflow-submitted` | `loading` | `target:'vram'` — ComfyUI loading weights for the graph |
+| `waiting` ("awaiting ComfyUI") | `loading` / `warming` | `target:'vram'`; first-node warmup |
 | `node` | `executing` | message = node title |
 | `progress` | `executing` | `{done:value,total:max,unit:'steps'}` |
 | `uploading` | `uploading` | — |
@@ -141,8 +162,9 @@ Nuntius, so existing consumers keep working while they migrate.
 | TEE step | → `Phasis` | notes |
 |---|---|---|
 | pod create (RunPod SECURE) | `provisioning` | from `TeeProvisioner` |
+| pull the `tee-runner` image | `pulling` | `target:'fundamentum'`; cold-start image fetch |
 | WireGuard key exchange (`/runner/ready` `wgPublicKey`) + WS-upgrade probe | `attesting` | the secure-tunnel handshake (TEE-only phase) |
-| model load into enclave | `loading` | `resources.vramUsedMb` |
+| model load into enclave | `loading` | `target:'vram'`; `resources.vramUsedMb` |
 | inference / token stream | `executing` | `{done:tokens, unit:'items'}` |
 | heartbeat (`gpuHours`) | (current phase, refreshed) | lifecycle channel carries a Nuntius |
 | ended | `done` / `failed` | |
@@ -151,8 +173,9 @@ Nuntius, so existing consumers keep working while they migrate.
 | Training step | → `Phasis` | progress |
 |---|---|---|
 | provision VastAI instance | `provisioning` | — |
-| upload dataset / fetch base model | `downloading` | `{unit:'bytes'}` |
-| init model | `loading` | `resources.vramUsedMb` |
+| pull the trainer image (aitoolkit) | `pulling` | `target:'fundamentum'` |
+| upload dataset / fetch base model | `downloading` | `target:'dataset'`/`'model'`, `{unit:'bytes'}` |
+| init model | `loading` | `target:'vram'`; `resources.vramUsedMb` |
 | train | `executing` | `{done:step, total:totalSteps, unit:'steps'}`; `etaMs` |
 | upload output → HF/R2 (publishing #3/#3b) | `uploading` | `{unit:'bytes'}` |
 | done / stall-timeout | `done` / `failed` | |
@@ -162,18 +185,29 @@ Nuntius, so existing consumers keep working while they migrate.
 - **Standalone download** (model install onto a volume) — a `downloading` Nuntius with bytes progress + `parallel[]` per file.
 - **VRAM and friends** ride `resources` on any phase — first-class, not bolted on.
 
-## 7. Persistence
+## 7. Persistence — the full timeline on the Actum (decided)
 
-- `Actum.nuntius?: Nuntius` — the latest report (queryable "current status"). The stream is NOT fully
-  persisted (bus/SSE only); optionally a small ring of the last N for a timeline.
-- `Modo.nuntius?` / TEE-session — same, for long-lived sessions.
-- `ActumExecutio` telemetry is **derived** from phase dwell-times (the projector accumulates them), so we
-  stop reporting it separately.
+We want **all the logs saved on the final Actum** so states are queryable later and each step's speed is
+measurable. So we persist the whole stream, not just the latest:
+- `Actum.nuntii: Nuntius[]` — the **ordered timeline** of every phase transition + key event, each timestamped
+  (`at`). Step durations are derived by diffing consecutive `at`s (or rolled up into a `phaseDurations` summary
+  on completion: `{ provisioning: ms, pulling: ms, downloading: ms, loading: ms, executing: ms, … }` —
+  cross-run comparable). `Actum.nuntius` (singular) is the latest, a convenience pointer to `nuntii[last]`.
+- `Modo.nuntii` / TEE-session — same, for long-lived sessions.
+- `ActumExecutio` telemetry **unifies into this** — its fields (provisionMs, downloadMs, …) become the derived
+  `phaseDurations`, no longer separately reported.
+
+**Volume guard (the one thing to get right):** raw high-frequency ticks (sampler step 7→8→9, byte samples)
+must NOT each become a persisted row, or a long run bloats the doc. Policy: persist **every phase/target
+transition** + **error/warn events** + a **coalesced progress checkpoint** (e.g. ≤1/sec or on ≥5% change);
+the fine-grained ticks stay live-only (bus/SSE) and collapse into the owning phase entry's final
+`progress`/`etaMs`. (comfyrunner already throttles download samples — reuse that policy.) Deep per-tick traces,
+if ever wanted, go to the analytics/`wideStore`, not the Actum doc.
 
 ## 8. Build order
 
-1. 🟠 **Core:** `src/types/nuntius.ts` — `Nuntius` + `Phasis` + `resources`. Persist `Actum.nuntius?`.
-2. 🟠 **Sink + bus + projection:** `POST /runner/status` → `CrystalApi.reportNuntius` → persist + `actum.nuntius` bus event → `NuntiusProjector` (with legacy `actum.stage` shim).
+1. 🟠 **Core:** `src/types/nuntius.ts` — `Nuntius` + `Phasis` + `target` + `resources`. Add `Actum.nuntii[]` (timeline) + `nuntius` (latest) + derived `phaseDurations`.
+2. 🟠 **Sink + bus + projection:** `POST /runner/status` (one channel; returns `{continue}`) → `CrystalApi.reportNuntius` → append to `nuntii[]` (coalesced, §7) + `actum.nuntius` bus event → `NuntiusProjector` (with legacy `actum.stage` shim).
 3. 🟠 **ComfyUI:** retarget `comfyrunnerClient` to emit `Nuntius` (6a) instead of strings.
 4. 🟠 **TEE:** the enclave runner POSTs real `Nuntius` (6b) — closes the TEE status gap.
 5. 🟠 **Training:** the trainer POSTs `Nuntius` (6c).
@@ -182,15 +216,21 @@ Nuntius, so existing consumers keep working while they migrate.
 Per the build decision, the canonical model is defined once and ComfyUI + TEE + training are wired together
 (#3–5) to prove runner-agnosticism before the consumer migration (#6).
 
-## 9. Open / to finalize
+## 9. Decisions + still-open
 
-- **Name** — `Nuntius` vs `Progressus` vs `Status` (Latin `status, -us` is the genuine term but a generic TS
-  name). `Gradus` is taken (compositus steps). Decide before the type lands.
-- **Phase set** — is the §3b list complete? Candidates: a separate `warming` vs `loading`; `cancelling`.
-- **Stream persistence** — latest-only (proposed) vs a bounded timeline ring on the Actum.
-- **Heartbeat vs status** — keep `/runner/status` separate from `/runner/heartbeat`, or let heartbeat carry
-  the Nuntius (one channel)?
-- **Backpressure** — runners can emit many `progress` updates/sec; the sink should throttle/coalesce
-  (comfyrunner already throttles download samples — fold that policy in).
-- **Base-image contract** — version the Nuntius schema so older base images degrade gracefully (unknown phase
-  → nearest known; missing fields → fine).
+**Decided (2026-06-22):**
+- **Name** = `Nuntius`.
+- **One channel** — `/runner/status` carries the Nuntius and returns `{continue}`, subsuming heartbeat (§4).
+- **Full timeline persisted** on `Actum.nuntii[]` (+ `nuntius` latest pointer); step durations derived /
+  rolled into `phaseDurations`; `ActumExecutio` unifies in (§7).
+- **Phase granularity** — split the three faces of "loading" into `pulling` (fundamentum) / `downloading`
+  (artifacts) / `loading` (VRAM), + `warming`, `cancelling`; `target` absorbs finer specificity (§3b).
+
+**Still open (resolve during the build, not blockers):**
+- **Coalescing policy specifics** — the exact throttle (≤1/sec? ≥5% delta?) for the persisted progress
+  checkpoints vs the live stream (§7). Tune against a real run.
+- **`phaseDurations` rollup shape** — flat `{phase: ms}` vs per-`(phase,target)` (e.g. download-model vs
+  download-dataset separately). Lean per-(phase,target) since that's the measurement we asked for.
+- **Base-image schema versioning** — a `v` on the Nuntius so older base images degrade gracefully (unknown
+  phase → nearest known; missing fields → fine). Define before the first base image ships it.
+- **Does `Modo` (warm session) need its own timeline**, or is per-Actum enough + a session rollup?
