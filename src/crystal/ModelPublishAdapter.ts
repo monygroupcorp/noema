@@ -11,13 +11,19 @@
 // custody: 'ours'  → our org/account hosts it (registry.defaultAccount).
 // custody: 'theirs'→ the user's BYO account (policy.custodyTarget, from prefs).
 //
-// PLACEHOLDER(publishing#3): the REAL weight upload (push the Intella's `sources`
-// files to the registry via its API + token) is NOT built — the legacy HF
-// uploader is JS outside the crystal layer and needs HF_TOKEN; Civitai upload
-// does not exist anywhere yet. This adapter does the registry-specific PROJECTION
-// (account + slug → the canonical model URL) and returns that handle; it does not
-// yet move bytes. Ledger: docs/spec/publishing.md §10. The spine, custody routing,
-// ownership, and the access reconciler around it ARE real.
+// The actual byte-push is a per-platform STRATEGY (`RegistryUploader`), injected
+// per registry — so HuggingFace, Civitai, and any future host are PEER strategies,
+// NONE privileged in the adapter or the spine. Adding a platform = a new descriptor
+// + a new uploader, never a change here. When a registry has no uploader the adapter
+// PROJECTS the handle only (account + slug → canonical URL) and moves no bytes.
+//
+// PLACEHOLDER(publishing#3): no concrete `RegistryUploader` ships yet — the seam is
+// ready, the per-platform transport is the remaining work. HF needs **LFS** (the
+// legacy `HuggingFaceHubService.js` base64-inlines a whole file into one commit —
+// fine for a model card, unusable for multi-GB weights); Civitai has **no public
+// upload API** today. Until an uploader is wired, the registries are projection-only
+// and return a not-yet-real repo URL. Ledger: docs/spec/publishing.md §10. The spine,
+// custody routing, ownership, the access reconciler, and this seam ARE real.
 // =============================================================================
 
 import type { PublicationAdapter, PublishArtifact, PublishPolicy } from './PublicationAdapter.js'
@@ -35,7 +41,32 @@ export interface ModelView {
   sources: IntellaSource[]
 }
 
-/** A registry descriptor — how one model host names a published model. */
+/** A request to push a model's weights to a registry — platform-agnostic. */
+export interface RegistryUploadRequest {
+  /** The account/org to publish under (our org, or the caller's BYO account). */
+  account: string
+  /** The registry-safe model slug (the repo/model name). */
+  slug: string
+  /** Whether the published repo/model should be private (visibility 'private'). */
+  private: boolean
+  /** The model projection — `nomen`, `genus`, weight `sources`, trigger, … */
+  model: ModelView
+  /** BYO access token (custody:'theirs'); a self-contained uploader may also hold its own. */
+  token?: string
+}
+
+/**
+ * RegistryUploader — moves a model's weight bytes to ONE model-hosting platform.
+ * The platform-specific upload STRATEGY, injected per `ModelRegistry`, so the adapter
+ * and spine stay platform-agnostic: HuggingFace, Civitai, and any future host are
+ * PEER implementations of this one interface. Returns the canonical handle the
+ * platform assigns. Absent on a registry → the adapter projects the handle only.
+ */
+export interface RegistryUploader {
+  upload(req: RegistryUploadRequest): Promise<{ externalRef: string }>
+}
+
+/** A registry descriptor — how one model host names (and, with an uploader, hosts) a model. */
 export interface ModelRegistry {
   /** Adapter key + Editio.destination — 'huggingface' | 'civitai' | … */
   key: string
@@ -43,6 +74,8 @@ export interface ModelRegistry {
   defaultAccount?: string
   /** Build the canonical model URL (the externalRef handle) for an account + slug. */
   handleFor(account: string, slug: string, model: ModelView): string
+  /** Real byte-upload strategy. Present → the adapter uploads; absent → projection only. */
+  uploader?: RegistryUploader
 }
 
 /** Lowercase, hyphenate — a registry-safe repo/model slug. */
@@ -67,7 +100,18 @@ export class ModelPublishAdapter implements PublicationAdapter {
       throw new Error(`${this.key}-adapter: no target account — set custody:'theirs' + a ${this.key} account in prefs, or configure an org`)
     }
     const slug = slugify(model.slug ?? model.nomen)
-    // PLACEHOLDER(publishing#3): real weight upload deferred — projection only.
+
+    // Real byte movement, when this registry has an upload strategy — the adapter
+    // stays platform-agnostic and just hands off (HF/Civitai/… are peer strategies).
+    if (this.registry.uploader) {
+      const token = policy.custodyTarget?.token
+      return this.registry.uploader.upload({
+        account, slug, model,
+        private: policy.visibility === 'private',
+        ...(token ? { token } : {}),
+      })
+    }
+    // PLACEHOLDER(publishing#3): no uploader wired → project the handle, move no bytes.
     return { externalRef: this.registry.handleFor(account, slug, model) }
   }
 
@@ -77,20 +121,24 @@ export class ModelPublishAdapter implements PublicationAdapter {
   }
 }
 
-/** HuggingFace registry (`https://huggingface.co/<account>/<slug>`). */
-export function huggingFaceRegistry(defaultAccount?: string): ModelRegistry {
+/** HuggingFace registry (`https://huggingface.co/<account>/<slug>`). Pass an
+ *  `uploader` to move real bytes; omit it for projection-only (placeholder). */
+export function huggingFaceRegistry(defaultAccount?: string, uploader?: RegistryUploader): ModelRegistry {
   return {
     key: 'huggingface',
     ...(defaultAccount !== undefined ? { defaultAccount } : {}),
+    ...(uploader ? { uploader } : {}),
     handleFor: (account, slug) => `https://huggingface.co/${account}/${slug}`,
   }
 }
 
-/** Civitai registry (`https://civitai.com/user/<account>/models?slug=<slug>`). */
-export function civitaiRegistry(defaultAccount?: string): ModelRegistry {
+/** Civitai registry (`https://civitai.com/user/<account>?model=<slug>`). Pass an
+ *  `uploader` to move real bytes; omit it for projection-only (placeholder). */
+export function civitaiRegistry(defaultAccount?: string, uploader?: RegistryUploader): ModelRegistry {
   return {
     key: 'civitai',
     ...(defaultAccount !== undefined ? { defaultAccount } : {}),
+    ...(uploader ? { uploader } : {}),
     handleFor: (account, slug) => `https://civitai.com/user/${account}?model=${slug}`,
   }
 }
