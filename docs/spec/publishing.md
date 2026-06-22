@@ -223,6 +223,16 @@ gen uses that model (the ChainEngine royalty surface). So:
      uses `MediaFetcher.fetchStream` → `ObjectStore.putStream` (lib-storage multipart) when both are present,
      so a multi-GB checkpoint never buffers whole in memory; it falls back to the buffered path for
      LoRA-sized files / test fakes.
+   - ✅ **3c — one-call finality (`custody:'both'`) + auto-trigger (SHIPPED 2026-06-22).** A single `publish`
+     of a model with `custody:'both'` creates TWO durable publications: the EXTERNAL registry copy (custody
+     `theirs` when the caller has a BYO account for that registry, else our org) AND an R2 bucket MIRROR
+     (`destination:'r2'`, custody `ours`) — so a trained model lands on HF *and* stays available to us, in one
+     call. The spine stays one-Editio-per-destination (two records, each worker-settled); gated on the bucket
+     adapter being present. **The training auto-trigger needs no new mechanism:** the trainer calls
+     `publish(ownerAnimaId, {artifact:{kind:'intella', id}})` and the owner's `publicatio` prefs
+     (`defaultDestination` / `defaultCustody:'both'` / `defaultVisibility`) drive the finality. **Remaining
+     (rides with the training test):** the one-line call from the legacy `TrainingFinalizationService` on
+     training completion — gated on a real trained model existing, same as the HF live e2e.
 4. ✅ **Rights / license / splits** — SHIPPED 2026-06-21. The `Editio` is now the complete canonical rights
    record: an **explicit weighted `owners[]` split** (validated Σ=1, mutually exclusive with `teamId`'s
    equal-weight team snapshot) + a **`license` tag** defaulting via the compliance catalog/BYO line

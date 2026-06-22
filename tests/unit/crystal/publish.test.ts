@@ -380,6 +380,35 @@ test('retractEdition(): retracting an our-bucket model deletes the weights + dro
   assert.ok(!models.get('lora-1')!.sources.some((s) => s.uri === hosted), 'the our-bucket source was removed')
 })
 
+// ── custody:'both' one-call finality (#4): registry + our-bucket mirror ──────
+
+test("publish(): custody 'both' publishes to the registry AND mirrors weights to our bucket", async () => {
+  const { api, editiones, puts, models, flush } = makeApi()
+  const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'huggingface', visibility: 'unlisted', custody: 'both' })
+  assert.equal(ed.destination, 'huggingface')
+  assert.equal(ed.custody, 'ours', 'no BYO account → the external copy goes to our org')
+
+  // One call → two durable publications for the one model: the registry + an r2 mirror.
+  const all = await editiones.listByArtifact({ kind: 'intella', id: 'lora-1' })
+  assert.equal(all.length, 2)
+  assert.deepEqual(all.map((e) => e.destination).sort(), ['huggingface', 'r2'])
+  const r2Id = all.find((e) => e.destination === 'r2')!.id
+  const hfId = all.find((e) => e.destination === 'huggingface')!.id
+
+  await flush()
+  // Registry handle projected + the bucket mirror really hosted the weights + made it resolvable from us.
+  assert.equal((await editiones.find(hfId))?.externalRef, 'https://huggingface.co/ms2stationthis/my-lora')
+  assert.match((await editiones.find(r2Id))?.externalRef ?? '', /^https:\/\/cdn\/models\//)
+  assert.equal(puts.length, 1, 'the weights were hosted in our bucket once')
+  assert.equal(models.get('lora-1')!.sources[0].provenance, 'miladystation')
+})
+
+test("publish(): custody 'both' with a BYO account sends the registry copy to theirs", async () => {
+  const { api } = makeApi({ prefs: { huggingFaceAccount: 'alice' } })
+  const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'huggingface', visibility: 'unlisted', custody: 'both' })
+  assert.equal(ed.custody, 'theirs', 'a BYO HF account → the external copy goes to their account')
+})
+
 // ── Collection / mint (#5) ───────────────────────────────────────────────────
 
 test('publish(): minting a complete collection freezes its canon + owners onto the mint', async () => {

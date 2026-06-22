@@ -502,15 +502,38 @@ export class CrystalApi {
     // 'catalog' for a platform-canonical artifact (our license/liability), else unset.
     const license = opts.license ?? prefs?.defaultLicense ?? (owned.intella?.canonica ? 'catalog' : undefined)
 
+    // `custody:'both'` finality (#4): one call publishes a model to an EXTERNAL
+    // registry AND mirrors its weights into OUR R2 bucket — so we retain/serve it
+    // ourselves regardless of the external host. The external Editio takes a concrete
+    // custody ('theirs' when the caller has a BYO account for that registry, else our
+    // org); the bucket mirror is a SECOND publication ('r2', custody 'ours'). Each is
+    // its own durable, worker-settled record (the spine stays one-Editio-one-destination).
+    const externalCustody: EditioCustody =
+      custody === 'both' ? (this._hasBYOAccount(destination, prefs) ? 'theirs' : 'ours') : custody
+    const mirrorToBucket =
+      custody === 'both' && ref.kind === 'intella' && destination !== 'r2' && this._hasAdapter('r2')
+
     const editio = await editiones.create({
       artifactRef: ref,
       destination,
       visibility,
-      custody,
+      custody: externalCustody,
       by,
       ...(owners !== undefined ? { owners } : {}),
       ...(license !== undefined ? { license } : {}),
     })
+
+    if (mirrorToBucket) {
+      await editiones.create({
+        artifactRef: ref,
+        destination: 'r2',
+        visibility,
+        custody: 'ours',
+        by,
+        ...(owners !== undefined ? { owners } : {}),
+        ...(license !== undefined ? { license } : {}),
+      })
+    }
 
     // Durable settle: every publication is drained by the PublicationWorker, which
     // claims `pending` rows off the store (the store IS the queue). We return the
@@ -644,6 +667,16 @@ export class CrystalApi {
     const adapter = this.deps.publicationAdapters?.find((a) => a.key === key)
     if (!adapter) throw Errors.notFoundAdapter(key)
     return adapter
+  }
+
+  /** Whether an adapter is registered (without throwing) — gates the `both` mirror. */
+  private _hasAdapter(key: string): boolean {
+    return this.deps.publicationAdapters?.some((a) => a.key === key) ?? false
+  }
+
+  /** Whether the caller has a BYO account configured for a model registry destination. */
+  private _hasBYOAccount(destination: string, prefs?: PublishingPrefs): boolean {
+    return destination === 'civitai' ? !!prefs?.civitaiAccount : !!prefs?.huggingFaceAccount
   }
 
   /** The →public moderation gate, or the permissive placeholder if none is wired. */
