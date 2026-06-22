@@ -15,6 +15,8 @@
 // =============================================================================
 
 import { randomUUID } from 'crypto'
+import { bus } from '../../lib/bus.js'
+import { normalizeProgressus, shouldPersist, rollupPhaseDurations, progressusToStage } from '../../execution/progressus.js'
 import type { Modorum, Modus } from '../../types/modus.js'
 import type { Cursorum, ActumCompletor, Actorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
@@ -1267,6 +1269,55 @@ export class CrystalApi {
     }
   }
 
+  /**
+   * The universal status sink (spec §4) — `POST /runner/status`. ONE channel every
+   * runner speaks: it carries a Progressus AND returns `{continue}` (subsuming the
+   * heartbeat). Lenient by contract — `normalizeProgressus` never throws, so an
+   * off-cadence base image is never rejected.
+   *
+   * For a report bound to an `actumId`: append it to the Actum's persisted timeline
+   * (coalesced — transitions + messages + terminals only, never per-tick progress),
+   * and on a terminal report roll the timeline up into `phaseDurations`. Always emit
+   * the typed `actum.progressus` bus event + a legacy `actum.stage` shim so existing
+   * consumers keep working until build #6. A `sessionId`-only report (no actumId — the
+   * arm Actum that owns warm-session cold-start isn't minted yet, spec §9) still emits
+   * + returns continue; persistence lands when the arm Actum exists (build #4).
+   */
+  async reportProgressus(signal: ProgressusSignal): Promise<{ continue: boolean }> {
+    const progressus = normalizeProgressus(signal.progressus ?? signal)
+    const { actumId } = signal
+    // sessionId-only (the arm Actum that owns warm-session cold-start isn't minted yet,
+    // §9) or a report for an unknown run: nothing to persist or fan out — just keep going.
+    if (!actumId) return { continue: true }
+    const actum = await this.deps.actorum.findById(actumId)
+    if (!actum) return { continue: true }
+
+    // Read-modify-write of the timeline array — safe because a runner posts SEQUENTIALLY
+    // (the base-image contract is "emit, await {continue}"), so reports for one Actum never
+    // race. If a runner ever fans out concurrent posts, switch the append to an atomic $push.
+    const last = actum.progressus?.at(-1)
+    if (shouldPersist(last, progressus)) {
+      const timeline = [...(actum.progressus ?? []), progressus]
+      const patch: Partial<Pick<Actum, 'progressus' | 'phaseDurations'>> = { progressus: timeline }
+      if (progressus.phase === 'done' || progressus.phase === 'failed') {
+        patch.phaseDurations = rollupPhaseDurations(timeline)
+      }
+      await this.deps.actorum.update(actumId, patch)
+    }
+
+    // Fan out: the typed report + a legacy actum.stage shim (real elapsed from inceptum)
+    // so existing SSE/Telegram consumers keep working until build #6.
+    bus.emit('actum.progressus', { actumId, progressus })
+    bus.emit('actum.stage', {
+      actumId,
+      stage: progressusToStage(progressus),
+      elapsedMs: Math.max(0, progressus.at.getTime() - actum.inceptum.getTime()),
+    })
+
+    // A cancelled/failed Actum tells the runner to bail; otherwise keep going.
+    return { continue: actum.status !== 'fractus' }
+  }
+
   private async _billTeeHours(session: TeeSession, currentGpuHours: number): Promise<{ continue: boolean }> {
     if (process.env.TEE_BILLING_DISABLED === 'true') return { continue: true }
     const deltaHours = currentGpuHours - session.lastBilledGpuHours
@@ -1449,6 +1500,22 @@ export interface RunnerEndedSignal {
   sessionId: string
   gpuHours: number
   status: string
+}
+
+/**
+ * The `POST /runner/status` envelope (spec §4). `v` is the schema version (lenient —
+ * tolerated, not enforced). `actumId` binds the report to a run's timeline;
+ * `sessionId` is the warm-session form (persistence deferred to the arm Actum, §9).
+ * `progressus` is the raw report — `reportProgressus` normalizes it (and tolerates a
+ * legacy flat `{ step }` body where the whole signal IS the report).
+ */
+export interface ProgressusSignal {
+  v?: number
+  actumId?: string
+  sessionId?: string
+  progressus?: unknown
+  /** Legacy TEE stub field — `{ sessionId, step }` — folded in by normalizeProgressus. */
+  step?: string
 }
 
 interface TeeSession {
