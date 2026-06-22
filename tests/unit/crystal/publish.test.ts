@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/CrystalApi.js'
+import { PublicationWorker } from '../../../src/crystal/PublicationWorker.js'
 import { FeedAdapter } from '../../../src/crystal/FeedAdapter.js'
 import { BucketAdapter } from '../../../src/crystal/BucketAdapter.js'
 import { ModelPublishAdapter, huggingFaceRegistry, civitaiRegistry } from '../../../src/crystal/ModelPublishAdapter.js'
@@ -49,6 +50,15 @@ class MemEditionum implements Editionum {
     this.store.set(id, e)
     return e
   }
+  async claimPending(now: Date, leaseMs: number): Promise<Editio | null> {
+    const claimable = [...this.store.values()]
+      .filter((e) => e.status === 'pending' && (!e.leasedUntil || e.leasedUntil.getTime() <= now.getTime()))
+      .sort((a, b) => a.natum.getTime() - b.natum.getTime())[0]
+    if (!claimable) return null
+    const updated: Editio = { ...claimable, leasedUntil: new Date(now.getTime() + leaseMs), attempts: (claimable.attempts ?? 0) + 1, mutatum: new Date() }
+    this.store.set(updated.id, updated)
+    return updated
+  }
 }
 
 const OWNED_ACTUM = 'act-owned'
@@ -66,7 +76,6 @@ const fakeSignorum = { ownsAny: async () => true }
 
 function makeApi(opts?: { gate?: ModerationGate; prefs?: Record<string, unknown> }) {
   const editiones = new MemEditionum()
-  const tasks: Array<Promise<void>> = []
   const animae = {
     find: async (id: string) => (id === 'anima-1' && opts?.prefs ? ({ id, publicatio: opts.prefs }) : null),
   }
@@ -125,9 +134,11 @@ function makeApi(opts?: { gate?: ModerationGate; prefs?: Record<string, unknown>
       new MarketplaceAdapter({ base: 'https://noema.art/market' }),
     ],
     ...(opts?.gate ? { moderationGate: opts.gate } : {}),
-    publishScheduler: (fn: () => Promise<void>) => { tasks.push(fn()) },
   } as unknown as CrystalApiDeps)
-  return { api, editiones, puts, dels, models, collections, accessCalls, flush: () => Promise.all(tasks) }
+  // The durable worker drives every settle (publish() only enqueues a pending Editio).
+  // `flush` drains it deterministically — the test analogue of the in-process loop.
+  const worker = new PublicationWorker({ editiones, settle: (id) => api.settlePublication(id), leaseMs: 60_000 })
+  return { api, editiones, puts, dels, models, collections, accessCalls, flush: () => worker.drainOnce() }
 }
 
 const anima1 = { animaId: 'anima-1' }
@@ -170,11 +181,14 @@ test('publish(): defaults destination + visibility from the caller Anima prefs',
   assert.equal((await api.feed()).length, 1)
 })
 
-test('publish(): a private publish settles synchronously with no moderation gate', async () => {
-  const { api } = makeApi()
+test('publish(): a private publish settles via the worker with no moderation gate', async () => {
+  const { api, editiones, flush } = makeApi()
   const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed', visibility: 'private' })
-  assert.equal(ed.status, 'published', 'private surface publishes inline')
-  assert.match(ed.externalRef ?? '', /^feed:/)
+  assert.equal(ed.status, 'pending', 'publish() only enqueues — the worker settles')
+  await flush()
+  const stored = await editiones.find(ed.id)
+  assert.equal(stored?.status, 'published')
+  assert.match(stored?.externalRef ?? '', /^feed:/)
   assert.equal((await api.feed()).length, 0, 'private editions never appear in the feed')
 })
 
@@ -187,43 +201,49 @@ test('feed(): clamps to public surfaces — a private edition is never enumerabl
   assert.equal((await api.feed({ visibility: 'unlisted' })).length, 0)
 })
 
-test('publish(): an unlisted bucket publish hosts the bytes synchronously (no moderation gate)', async () => {
-  const { api, editiones, puts } = makeApi()
+test('publish(): an unlisted bucket publish hosts the bytes via the worker (no moderation gate)', async () => {
+  const { api, editiones, puts, flush } = makeApi()
   const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'r2', visibility: 'unlisted' })
+  assert.equal(ed.status, 'pending')
+  await flush()
 
-  assert.equal(ed.status, 'published', 'unlisted settles inline — never gated')
   assert.equal(ed.custody, 'ours')
   assert.equal(puts.length, 1)
   assert.equal(puts[0].key, `editiones/${ed.id}.png`, 'hosted under the publication id')
+  assert.equal((await editiones.find(ed.id))?.status, 'published')
   assert.equal((await editiones.find(ed.id))?.externalRef, `https://cdn/editiones/${ed.id}.png`)
   assert.equal((await api.feed()).length, 0, 'unlisted never appears in the public feed')
 })
 
 test('retractEdition(): retracting a bucket publish deletes the hosted bytes', async () => {
-  const { api, dels } = makeApi()
+  const { api, dels, flush } = makeApi()
   const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'r2', visibility: 'unlisted' })
+  await flush()
   const retracted = await api.retractEdition(anima1, ed.id)
   assert.equal(retracted.status, 'retracted')
   assert.deepEqual(dels, [`editiones/${ed.id}.png`], 'the hosted object was deleted')
 })
 
 test('publish(): a model publishes to HuggingFace (custody ours) and becomes resolvable (access public)', async () => {
-  const { api, models, accessCalls } = makeApi()
+  const { api, models, accessCalls, editiones, flush } = makeApi()
   const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'huggingface', visibility: 'unlisted' })
+  await flush()
 
-  assert.equal(ed.status, 'published')
-  assert.equal(ed.externalRef, 'https://huggingface.co/ms2stationthis/my-lora')
+  const stored = await editiones.find(ed.id)
+  assert.equal(stored?.status, 'published')
+  assert.equal(stored?.externalRef, 'https://huggingface.co/ms2stationthis/my-lora')
   // §5d reconciler: an unlisted (non-private) model publish flips access → public.
   assert.deepEqual(accessCalls, [{ id: 'lora-1', access: 'public' }])
   assert.equal((models.get('lora-1') as { access?: string }).access, 'public')
 })
 
 test('publish(): a model to Civitai under the caller BYO account (custody theirs, from prefs)', async () => {
-  const { api } = makeApi({ prefs: { defaultDestination: 'civitai', defaultCustody: 'theirs', defaultVisibility: 'unlisted', civitaiAccount: 'mony' } })
+  const { api, editiones, flush } = makeApi({ prefs: { defaultDestination: 'civitai', defaultCustody: 'theirs', defaultVisibility: 'unlisted', civitaiAccount: 'mony' } })
   const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' } })
   assert.equal(ed.destination, 'civitai')
   assert.equal(ed.custody, 'theirs')
-  assert.equal(ed.externalRef, 'https://civitai.com/user/mony?model=my-lora')
+  await flush()
+  assert.equal((await editiones.find(ed.id))?.externalRef, 'https://civitai.com/user/mony?model=my-lora')
 })
 
 test('publish(): a model cannot go to the media feed/marketplace', async () => {
@@ -243,8 +263,9 @@ test('publish(): rejects a model the caller does not own', async () => {
 })
 
 test('retractEdition(): retracting a model publish revokes resolvability (access private)', async () => {
-  const { api, models, accessCalls } = makeApi()
+  const { api, models, accessCalls, flush } = makeApi()
   const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'huggingface', visibility: 'unlisted' })
+  await flush()
   accessCalls.length = 0
   await api.retractEdition(anima1, ed.id)
   assert.deepEqual(accessCalls, [{ id: 'lora-1', access: 'private' }])
@@ -324,11 +345,12 @@ test('retractEdition(): only the publishing author may retract', async () => {
 // ── Training finality: a model hosted in OUR bucket (custody ours) ───────────
 
 test('publish(): a model to r2 hosts its weights in our bucket + makes it resolvable from there', async () => {
-  const { api, editiones, puts, models } = makeApi()
+  const { api, editiones, puts, models, flush } = makeApi()
   const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'r2', visibility: 'private' })
+  await flush()
 
   // The weight file was really moved into our bucket, keyed per-publication.
-  assert.equal(ed.status, 'published', 'private settles inline — no moderation gate')
+  assert.equal((await editiones.find(ed.id))?.status, 'published')
   assert.equal(puts.length, 1)
   assert.equal(puts[0].key, `models/${ed.id}/lora.safetensors`, 'hosted under the model prefix + filename')
   assert.equal((await editiones.find(ed.id))?.externalRef, `https://cdn/models/${ed.id}/lora.safetensors`)
@@ -340,14 +362,16 @@ test('publish(): a model to r2 hosts its weights in our bucket + makes it resolv
 })
 
 test('publish(): a private our-bucket model stays private (resolvable only by its owner)', async () => {
-  const { api, accessCalls } = makeApi()
+  const { api, accessCalls, flush } = makeApi()
   await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'r2', visibility: 'private' })
+  await flush()
   assert.deepEqual(accessCalls, [{ id: 'lora-1', access: 'private' }])
 })
 
 test('retractEdition(): retracting an our-bucket model deletes the weights + drops the source', async () => {
-  const { api, dels, models } = makeApi()
+  const { api, dels, models, flush } = makeApi()
   const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'r2', visibility: 'unlisted' })
+  await flush()
   const hosted = `https://cdn/models/${ed.id}/lora.safetensors`
   assert.ok(models.get('lora-1')!.sources.some((s) => s.uri === hosted))
 

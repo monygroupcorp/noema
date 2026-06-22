@@ -62,4 +62,16 @@ export class MongoEditionum implements Editionum {
     if (!result) throw new Error(`Editio '${id}' not found`)
     return fromDoc(result as Record<string, unknown>)
   }
+
+  async claimPending(now: Date, leaseMs: number): Promise<Editio | null> {
+    // Atomic claim: the oldest pending row whose lease is absent or lapsed. Stamping
+    // `leasedUntil` + bumping `attempts` in the same findOneAndUpdate is the lock —
+    // a competing worker's identical query won't match a freshly-leased row.
+    const result = await this.col.findOneAndUpdate(
+      { status: 'pending', $or: [{ leasedUntil: { $exists: false } }, { leasedUntil: { $lte: now } }] },
+      { $set: { leasedUntil: new Date(now.getTime() + leaseMs), mutatum: now }, $inc: { attempts: 1 } },
+      { returnDocument: 'after', sort: { natum: 1 } },
+    )
+    return result ? fromDoc(result as Record<string, unknown>) : null
+  }
 }

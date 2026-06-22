@@ -82,6 +82,16 @@ export interface Editio {
   /** The adapter's returned handle: feed post id / HF repo / token id / R2 url. */
   externalRef?: string
   status: EditioStatus
+  /**
+   * Worker lease — when the current settle attempt's claim EXPIRES. A pending Editio
+   * is the durable work record (the store IS the queue); a `PublicationWorker` claims
+   * it by stamping a lease, so two workers never settle it at once and a crashed
+   * worker's claim becomes reclaimable once the lease lapses (restart-safe). Absent =
+   * unclaimed.
+   */
+  leasedUntil?: Date
+  /** How many times a worker has claimed this for settling — capped (→ 'failed'). */
+  attempts?: number
   /** "natum" = born — when the publish was requested. */
   natum: Date
   /** "mutatum" = changed — when the status/handle last changed. */
@@ -117,4 +127,13 @@ export interface Editionum {
   listFeed(filter?: FeedFilter): Promise<Editiones>
   create(input: Omit<Editio, 'id' | 'natum' | 'mutatum' | 'status'>): Promise<Editio>
   update(id: string, patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody'>>): Promise<Editio>
+  /**
+   * Atomically claim one settle-able publication for a worker: the oldest `pending`
+   * Editio with no live lease, stamping a fresh lease (`now + leaseMs`) and bumping
+   * `attempts`. Returns it, or null when none is claimable. The atomic claim is what
+   * makes the store a safe durable queue — concurrent workers never grab the same row,
+   * and a lapsed lease (crashed worker) is reclaimed on a later call. See
+   * `PublicationWorker`.
+   */
+  claimPending(now: Date, leaseMs: number): Promise<Editio | null>
 }

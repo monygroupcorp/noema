@@ -105,9 +105,6 @@ export interface CrystalApiDeps {
   /** Model (Intella) registry — resolves + owner-scopes an `Intella` publish and is the
    *  reconciler's write seam (`setAccess`) for §5d. Absent → model publishing unavailable. */
   intellarum?: Intellarum
-  /** Scheduler for the async →public settle (moderation + adapter publish). Absent →
-   *  fire-and-forget. Tests inject a collecting scheduler to await the pipeline. */
-  publishScheduler?: (task: () => Promise<void>) => void
   /** RunPod pod provisioner for TEE private compute sessions. Absent → local dev (manual runner). */
   teeProvisioner?: TeeProvisioner
 }
@@ -515,14 +512,18 @@ export class CrystalApi {
       ...(license !== undefined ? { license } : {}),
     })
 
-    if (visibility === 'feed' || visibility === 'marketplace') {
-      // Public surface — never block the ack on the scan; settle asynchronously.
-      this._publishScheduler()(() => this._settlePublication(editio.id))
-      return toEdition(editio)
-    }
-    // Private/unlisted — no moderation gate; settle inline.
-    await this._settlePublication(editio.id)
-    return toEdition((await editiones.find(editio.id)) ?? editio)
+    // Durable settle: every publication is drained by the PublicationWorker, which
+    // claims `pending` rows off the store (the store IS the queue). We return the
+    // pending Editio immediately and never settle inline — so a restart can't orphan
+    // it and heavy work (a model weight upload) never blocks this call. The worker
+    // runs the moderation gate (public surfaces) → the adapter → the reconciler.
+    return toEdition(editio)
+  }
+
+  /** Settle one pending publication — claimed and invoked by the `PublicationWorker`.
+   *  Idempotent: a no-op unless the Editio is still `pending` (see `_settlePublication`). */
+  async settlePublication(editioId: string): Promise<void> {
+    await this._settlePublication(editioId)
   }
 
   /** The public feed — published, public-surface Editiones, newest first. NOT
@@ -648,11 +649,6 @@ export class CrystalApi {
   /** The →public moderation gate, or the permissive placeholder if none is wired. */
   private _moderationGate(): ModerationGate {
     return this.deps.moderationGate ?? permissiveModerationGate
-  }
-
-  /** The async-settle scheduler, or fire-and-forget if none is wired. */
-  private _publishScheduler(): (task: () => Promise<void>) => void {
-    return this.deps.publishScheduler ?? ((task) => { void task().catch(() => {}) })
   }
 
   /** An Editio owns by `{animaId}|{commitment}` only — bursaToken has no persistent owner. */

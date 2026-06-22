@@ -312,6 +312,17 @@ accrete as adapters on the identical interface. Do NOT model a second artifact t
 - Reconciler mechanics (event-hook vs write-through) for keeping `Intella.access` in sync with `Editio` —
   decided at #1, **LIVE at #3**: write-through in `CrystalApi._reconcile` (`Intellarum.setAccess`), single
   settle point = single update point.
+- ✅ **Durable settle worker** — SHIPPED 2026-06-22. `publish()` no longer settles inline / fire-and-forget;
+  it only ENQUEUES (`create` at `status:'pending'`) and returns. A `PublicationWorker` (`src/crystal/
+  PublicationWorker.ts`) drains pending Editiones off the store — **the store IS the queue**, so a settle
+  (moderation gate + adapter publish + reconcile, incl. heavy model uploads) runs OFF the request path and
+  **survives restarts** (nothing held in memory). Atomic claim via `Editionum.claimPending` (oldest pending
+  with no live lease → stamp `leasedUntil` + bump `attempts`), so concurrent workers never double-run a row
+  and a crashed worker's lease is reclaimed; exceeds `maxAttempts` → `failed`. **At-least-once** delivery — the
+  adapters are idempotent (deterministic mint handle; HF `createRepo` repo-exists-guarded; bucket `put`
+  overwrites a stable key). **Topology:** in-process loop today (started in `index.ts`, like Census), behind
+  the store's claim/lease so it lifts into a separate worker CONTAINER later with just a thin entrypoint — no
+  rewrite. This is the runner the real HF-LFS uploader (#3) executes inside.
 
 ## 10. Placeholders & stubs shipped (must be replaced before relying on them)
 
