@@ -699,10 +699,11 @@ async function main(): Promise<void> {
   app.post('/runner/ready',     express.json(), async (req, res) => { await crystalApi.handleRunnerReady(req.body);     res.json({ ok: true }) })
   app.post('/runner/heartbeat', express.json(), async (req, res) => { res.json(await crystalApi.handleRunnerHeartbeat(req.body)) })
   app.post('/runner/ended',     express.json(), async (req, res) => { await crystalApi.handleRunnerEnded(req.body);     res.json({ ok: true }) })
+  // The universal status sink (spec §4): one channel every runner speaks — carries a
+  // Progressus and returns { continue } (subsumes the heartbeat). Lenient: a legacy
+  // { sessionId, step } body still works (folded into an `executing` report).
   app.post('/runner/status',    express.json(), async (req, res) => {
-    const { sessionId, step } = req.body as { sessionId?: string; step?: string }
-    log.info('[tee] runner status', { sessionId, step })
-    res.json({ ok: true })
+    res.json(await crystalApi.reportProgressus(req.body))
   })
 
   // TEE browser client — served at /tee so it shares the same origin as the API (no CORS needed).
