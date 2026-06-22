@@ -17,6 +17,7 @@
 import { randomUUID } from 'crypto'
 import { bus } from '../../lib/bus.js'
 import { normalizeProgressus, shouldPersist, rollupPhaseDurations, progressusToStage } from '../../execution/progressus.js'
+import type { Progressus } from '../../types/progressus.js'
 import type { Modorum, Modus } from '../../types/modus.js'
 import type { Cursorum, ActumCompletor, Actorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
@@ -1292,22 +1293,12 @@ export class CrystalApi {
     const actum = await this.deps.actorum.findById(actumId)
     if (!actum) return { continue: true }
 
-    // Read-modify-write of the timeline array — safe because a runner posts SEQUENTIALLY
-    // (the base-image contract is "emit, await {continue}"), so reports for one Actum never
-    // race. If a runner ever fans out concurrent posts, switch the append to an atomic $push.
-    const last = actum.progressus?.at(-1)
-    if (shouldPersist(last, progressus)) {
-      const timeline = [...(actum.progressus ?? []), progressus]
-      const patch: Partial<Pick<Actum, 'progressus' | 'phaseDurations'>> = { progressus: timeline }
-      if (progressus.phase === 'done' || progressus.phase === 'failed') {
-        patch.phaseDurations = rollupPhaseDurations(timeline)
-      }
-      await this.deps.actorum.update(actumId, patch)
-    }
+    await this._persistAndEmit(actum, progressus)
 
-    // Fan out: the typed report + a legacy actum.stage shim (real elapsed from inceptum)
-    // so existing SSE/Telegram consumers keep working until build #6.
-    bus.emit('actum.progressus', { actumId, progressus })
+    // Legacy actum.stage shim (real elapsed from inceptum) so existing SSE/Telegram
+    // consumers keep working until build #6. The in-process comfyrunner path skips this —
+    // it still emits the legacy vocabulary itself via `emitStage` (the consumers parse those
+    // exact strings), so `recordProgressus` does NOT re-emit a phase-vocabulary shim.
     bus.emit('actum.stage', {
       actumId,
       stage: progressusToStage(progressus),
@@ -1316,6 +1307,42 @@ export class CrystalApi {
 
     // A cancelled/failed Actum tells the runner to bail; otherwise keep going.
     return { continue: actum.status !== 'fractus' }
+  }
+
+  /**
+   * In-process status recorder (spec §6a) — the seam `comfyrunnerClient` routes its typed
+   * `Progressus` through, since it lives in the crystal rail (constructed before this API)
+   * and already owns the legacy `actum.stage` emission. Persists the timeline (coalesced) +
+   * emits the typed `actum.progressus` event, but NO legacy shim (the caller owns that).
+   * Wired at startup via `registerProgressusRecorder` (index.ts).
+   */
+  async recordProgressus(actumId: string, progressus: Progressus): Promise<void> {
+    const actum = await this.deps.actorum.findById(actumId)
+    if (!actum) return
+    await this._persistAndEmit(actum, progressus)
+  }
+
+  /**
+   * Append a Progressus to the Actum's timeline (coalesced — transitions + messages +
+   * terminals only, never per-tick progress; §7), roll up `phaseDurations` on a terminal,
+   * and emit the typed `actum.progressus` bus event. Shared by the HTTP sink
+   * (`reportProgressus`) and the in-process recorder (`recordProgressus`).
+   */
+  private async _persistAndEmit(actum: Actum, progressus: Progressus): Promise<void> {
+    // Read-modify-write of the timeline array — safe because a runner posts SEQUENTIALLY
+    // (the base-image contract is "emit, await {continue}"; comfyrunner awaits each record),
+    // so reports for one Actum never race. If a runner ever fans out concurrent posts,
+    // switch the append to an atomic $push.
+    const last = actum.progressus?.at(-1)
+    if (shouldPersist(last, progressus)) {
+      const timeline = [...(actum.progressus ?? []), progressus]
+      const patch: Partial<Pick<Actum, 'progressus' | 'phaseDurations'>> = { progressus: timeline }
+      if (progressus.phase === 'done' || progressus.phase === 'failed') {
+        patch.phaseDurations = rollupPhaseDurations(timeline)
+      }
+      await this.deps.actorum.update(actum.id, patch)
+    }
+    bus.emit('actum.progressus', { actumId: actum.id, progressus })
   }
 
   private async _billTeeHours(session: TeeSession, currentGpuHours: number): Promise<{ continue: boolean }> {
