@@ -478,6 +478,43 @@ test('no signa issued when modus has no auctor', async () => {
   assert.equal(platformSigna.length, 0)
 })
 
+// 19a. Model royalty: a gen that used a PUBLISHED model pays its owner (roadmap #1)
+test('COMPLETED — model royalty routed to the used model\'s published owner', async () => {
+  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  await modorum.register({ ...TEST_MODUS, auctor: undefined })   // isolate the model-royalty signum
+  await seedActum(actorum, makeActum({ deploymentHash: 'sha256:dep-1' }))
+
+  // The deployment bundle records that this gen used 'lora-1'; that model has a
+  // published Editio with no explicit split → its publisher earns the 5% pool.
+  const deployments = {
+    async find(h: string) {
+      return h === 'sha256:dep-1' ? { hash: h, spec: { models: [{ id: 'lora-1', role: 'lora' }] }, natum: new Date() } : null
+    },
+  }
+  const editiones = {
+    async listByArtifact(ref: { kind: string; id: string }) {
+      if (ref.kind === 'intella' && ref.id === 'lora-1') {
+        const now = new Date()
+        return [{ id: 'e-1', artifactRef: { kind: 'intella', id: 'lora-1' }, destination: 'huggingface', visibility: 'unlisted', custody: 'ours', by: { animaId: 'lora-author' }, status: 'published', natum: now, mutatum: now }]
+      }
+      return []
+    },
+  }
+
+  const deps = {
+    actorum, completor: makeCompletor(), nexus, signorum, modorum,
+    deployments, editiones,
+  } as unknown as ExecutionWebhookDeps
+  // 200s → 200n impetus; model royalty = 5% = 10n to the sole payee.
+  await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }), deps)
+
+  const signa = await signorum.history({ animaId: 'lora-author' })
+  assert.equal(signa.length, 1)
+  assert.equal(signa[0].forma, 'reward')
+  assert.equal(signa[0].valor, 10n)
+  assert.equal(signa[0].auctor, 'nexus:modelRoyalty')
+})
+
 // 19b. Inventory merge: comfyrunner's modelsInstalled report set-unions into Materia.installedModels
 test('COMPLETED with modelsInstalled report — Materia.installedModels gets set-union merged', async () => {
   const { actorum } = makeLedgerDeps()

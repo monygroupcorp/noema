@@ -224,9 +224,9 @@ gen uses that model (the ChainEngine royalty surface). So:
    in pure bigint (weights scaled to integers, so equal weights reduce to an *exact* `pool/n` floor). Equal
    credit across a model's authors is just equal weights; a published `Editio.owners[]` split is unequal
    weights — **one field, one path** (the prior flat `intellaAuctorAnimaIds` equal-split field was collapsed
-   into this). **Remaining integration (§9):** populating `intellaRoyaltyPayees` at execution (resolve the
-   models an actum used → their published `Editio.owners[]`) is an execution/Compiler concern — the hook is
-   ready, the field is dormant until then.
+   into this). **Integration LANDED (2026-06-22, §9):** the execution webhook now populates
+   `intellaRoyaltyPayees` (`resolveModelRoyaltyPayees`) — the models a gen used → their published `Editio`
+   rights split → the payload. The rights layer now actually pays.
 5. ✅ **Collection / mint** — SHIPPED 2026-06-21. `MintAdapter` + `MarketplaceAdapter`
    (`src/crystal/MintAdapter.ts`). The Collectio **freeze → export → mint** path (§4e/§5/§6) IS this: publishing
    a Collectio to `destination:'mint'`/`'marketplace'` (both default to `visibility:'marketplace'` → the
@@ -294,10 +294,16 @@ accrete as adapters on the identical interface. Do NOT model a second artifact t
   `private` bucket publishes are unlisted-grade today (public bytes under an unguessable key).
 - Wallet-linking → `custody:'theirs'` wiring + living-NFT mutable-metadata hosting + the real on-chain mint
   tx / marketplace API behind the #5 freeze (the freeze + handle are real; the chain/venue calls land with #6).
-- **Execution-time royalty-payee population** (#4 left this open): the `modelRoyaltyHook` splits by
-  `execution_spend.intellaRoyaltyPayees` (the single weighted payee field), but nothing populates it yet. At
-  execution, resolve the models an actum used → equal-weight their authors, or their published `Editio.owners[]`
-  split → the payload. An execution/Compiler concern, dormant until wired.
+- ✅ **Execution-time royalty-payee population** — SHIPPED 2026-06-22 (roadmap Tier 1 #1). The execution
+  webhook now populates `execution_spend.intellaRoyaltyPayees` via `resolveModelRoyaltyPayees`
+  (`src/ledger/resolveModelPayees.ts`): the models a gen ACTUALLY used (resolved `spec.models` from the
+  content-addressed deployment bundle, incl. prompt LoRAs, + host-pinned) → each model's **published
+  `Editio`** rights split (`owners[]`, else the publishing `by` identity) → weighted payees the
+  `modelRoyaltyHook` splits the 5% pool across. **Publishing is the royalty surface (§5e):** an unpublished
+  or platform-canonical model yields no payee; we deliberately do NOT fall back to `Intella.auctor` (may be a
+  provider name, not an animaId → would mint bogus signa). Wired on the production webhook path only; the
+  inline `ActumCompletor` emit (sync cursors, no GPU LoRAs) is unchanged. Scraped-model attribution via
+  `corpusId` remains a separate, later path.
 - Reconciler mechanics (event-hook vs write-through) for keeping `Intella.access` in sync with `Editio` —
   decided at #1, **LIVE at #3**: write-through in `CrystalApi._reconcile` (`Intellarum.setAccess`), single
   settle point = single update point.
