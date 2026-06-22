@@ -33,6 +33,7 @@ import { ensureWideIndexes }      from './analytics/ensureWideIndexes.js'
 import { startAnalyticsListener } from './analytics/analyticsListener.js'
 import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
 import { PublicationWorker } from './crystal/PublicationWorker.js'
+import { registerProgressusRecorder } from './execution/progressusSink.js'
 import { CANONICAL_MODI } from './crystal/seeds/modi.js'
 import { CANONICAL_ESSENTIAE } from './crystal/seeds/essentiae.js'
 import { CANONICAL_COMPOSITI } from './crystal/seeds/compositi.js'
@@ -639,6 +640,10 @@ async function main(): Promise<void> {
     settle: (editioId) => crystalApi.settlePublication(editioId),
   }).start(5_000)
   log.info('publication worker started')
+
+  // Status (Progressus, spec §6a): let the in-process comfyrunner SSE parse persist its
+  // typed timeline through the same sink the HTTP /runner/status uses, without an HTTP loopback.
+  registerProgressusRecorder((actumId, progressus) => crystalApi.recordProgressus(actumId, progressus))
   // Identified-user acceptors → animaId via a `'web'`/`'api'` persona (create-on-sight).
   // JWT (env secret) + API-key (read-only users lookup) + anon {commitment} are live; web3
   // needs a nonce-challenge endpoint (deferred). All verification is defensive — any failure

@@ -1,6 +1,8 @@
 import { makeLogger } from '../lib/logger.js'
 import { getTrace } from '../lib/trace.js'
 import { bus } from '../lib/bus.js'
+import { recordProgressus } from '../execution/progressusSink.js'
+import type { Progressus } from '../types/progressus.js'
 import type { ModelRef } from '../types/actum.js'
 
 export interface R2Config {
@@ -185,6 +187,7 @@ export async function awaitViaStream(
 ): Promise<void> {
   let lastSeq = -1
   let inferringEmitted = false
+  let installingRecorded = false
   let modelTotal = 0
   let modelDone = 0
   let downloadStartMs = 0
@@ -196,6 +199,18 @@ export async function awaitViaStream(
   let lastProgMs = 0
   let slowSinceMs = 0
   const deadline = Date.now() + timeoutMs
+
+  // Status (Progressus, spec §6a): in PARALLEL with the legacy `emitStage` strings (which
+  // existing consumers still parse, untouched until build #6), persist a typed timeline onto
+  // the Actum via the in-process recorder. We record only PHASE TRANSITIONS, log messages, and
+  // terminals (§7) — never per-tick progress (sampler/byte ticks stay live-only on the bus),
+  // so there's no findById-per-tick. Awaited inline so reports for one Actum apply in order and
+  // the terminal lands before we resolve. No-op until a recorder is registered (index.ts), so
+  // unit tests that drive the SSE parse directly need no sink.
+  const record = async (p: Omit<Progressus, 'at'>): Promise<void> => {
+    const ctx = getTrace()
+    if (ctx?.actumId) await recordProgressus(ctx.actumId, { ...p, at: new Date() })
+  }
 
   for (let attempt = 0; attempt <= 3; attempt++) {
     if (attempt > 0) {
@@ -251,7 +266,10 @@ export async function awaitViaStream(
                 modelDone = present
                 if (total > present && downloadStartMs === 0) downloadStartMs = Date.now()
                 log.info('model preflight', { jobId, missing: total - present, present, total })
-                if (total > present) emitStage?.(`downloading:${present}/${total}`)
+                if (total > present) {
+                  emitStage?.(`downloading:${present}/${total}`)
+                  await record({ phase: 'downloading', target: 'model', progress: { done: present, total, unit: 'items' } })
+                }
                 break
               }
               case 'downloading': {
@@ -309,6 +327,8 @@ export async function awaitViaStream(
               }
               case 'workflow-submitted':
                 log.info('workflow submitted to ComfyUI', { jobId, promptId: event.promptId })
+                // ComfyUI now loads the graph's weights into VRAM (§6a).
+                await record({ phase: 'loading', target: 'vram' })
                 break
               case 'waiting':
                 // Heartbeat while ComfyUI runs. nodesExecuted=0 across many of these = stuck loading.
@@ -316,14 +336,22 @@ export async function awaitViaStream(
                 break
               case 'installing-node':
                 emitStage?.('installing-nodes')
+                // One installing entry per run (mirrors inferringEmitted) — fires per node,
+                // so guard rather than lean on the recorder to coalesce N findById round-trips.
+                if (!installingRecorded) {
+                  installingRecorded = true
+                  await record({ phase: 'installing' })
+                }
                 break
               case 'restarting-comfy':
                 emitStage?.('restarting')
+                await record({ phase: 'installing', message: 'restarting ComfyUI' })
                 break
               case 'node':
                 if (!inferringEmitted) {
                   inferringEmitted = true
                   emitStage?.('inferring')
+                  await record({ phase: 'executing' })   // first node → work begins (§6a)
                 }
                 break
               case 'progress': {
@@ -339,16 +367,19 @@ export async function awaitViaStream(
               }
               case 'uploading':
                 emitStage?.('uploading')
+                await record({ phase: 'uploading', target: 'output' })
                 break
               case 'complete': {
                 const { executionTimeMs } = event as { executionTimeMs?: number }
                 log.info('job complete', { jobId, executionTimeMs })
                 if (typeof executionTimeMs === 'number') onMetrics?.({ executionMs: executionTimeMs })
+                await record({ phase: 'done' })   // terminal → rolls up phaseDurations
                 return
               }
               case 'error': {
                 const errMsg = (event.error as string) || 'comfyrunner job failed'
                 log.warn('job error from comfyrunner', { jobId, error: errMsg })
+                await record({ phase: 'failed', message: errMsg })   // terminal
                 throw new JobError(errMsg)
               }
             }
