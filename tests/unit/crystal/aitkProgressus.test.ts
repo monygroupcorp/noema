@@ -103,3 +103,43 @@ test('etaMsFromSpeed: iter/sec and sec/iter both parse; complete/garbage → und
 test('at is carried through from the supplied clock', () => {
   assert.equal(aitkJobToProgressus(job({ info: 'Training', step: 1 }), 10, NOW).at.getTime(), NOW.getTime())
 })
+
+// ── GROUND TRUTH: real Job rows from a local FLUX.2 Klein-4B smoke (2026-06-22) ─────
+// Captured from an actual ai-toolkit run on the 4090 (dataset: impresstation, 60 steps).
+// These are the exact status/info strings UITrainer wrote — including klein-specific load
+// substates ("Loading Qwen3" / "Quantizing Qwen3" — the Qwen3 text encoder) and the
+// pre-train "Generating baseline" sample, none of which were hardcoded in the projector.
+// This is the spec §6c "validate against ground truth" gate: the real timeline projects to
+// a clean loading → executing → done shape.
+test('ground truth: the real klein-4b smoke timeline projects to loading → executing → done', () => {
+  const TOTAL = 60
+  // (status, info, step) tuples in the order ai-toolkit emitted them.
+  const realTimeline: Array<[string, string, number]> = [
+    ['queued',    'seeded by launcher', 0],   // our launcher's seed row
+    ['running',   'Starting',           0],
+    ['running',   'Loading Qwen3',      0],    // klein loads a Qwen3 text encoder
+    ['running',   'Quantizing Qwen3',   0],    // qfloat8 quantization (low-VRAM path)
+    ['running',   'Loading model',      0],
+    ['running',   'Loading dataset',    0],
+    ['running',   'Generating baseline',0],    // pre-train sample
+    ['running',   'Training',           1],
+    ['running',   'Training',          30],
+    ['running',   'Training',          60],
+    ['completed', 'Training completed',60],
+  ]
+  const phases = realTimeline.map(([status, info, step]) =>
+    aitkJobToProgressus({ status, info, step }, TOTAL, NOW).phase)
+
+  assert.deepEqual(phases, [
+    'queued',
+    'loading', 'loading', 'loading', 'loading',  // Starting/Qwen3/Quantizing/Loading model
+    'downloading',                                // "Loading dataset" → downloading/dataset
+    'loading',                                    // "Generating baseline" (pre-loop) → loading floor
+    'executing', 'executing', 'executing',        // the training loop
+    'done',
+  ])
+  // the dataset step is specifically targeted, and training steps carry real progress.
+  assert.equal(aitkJobToProgressus({ status: 'running', info: 'Loading dataset', step: 0 }, TOTAL, NOW).target, 'dataset')
+  assert.deepEqual(aitkJobToProgressus({ status: 'running', info: 'Training', step: 30 }, TOTAL, NOW).progress,
+    { done: 30, total: 60, unit: 'steps' })
+})
