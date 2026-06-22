@@ -56,6 +56,7 @@ import { FeedAdapter } from './crystal/FeedAdapter.js'
 import { BucketAdapter } from './crystal/BucketAdapter.js'
 import { ModelPublishAdapter, huggingFaceRegistry, civitaiRegistry } from './crystal/ModelPublishAdapter.js'
 import { MintAdapter, MarketplaceAdapter } from './crystal/MintAdapter.js'
+import { HuggingFaceUploader, HfHttpTransport } from './crystal/HfUploader.js'
 import type { PublicationAdapter } from './crystal/PublicationAdapter.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
 import { ActumCompletor } from './execution/ActumCompletor.js'
@@ -190,6 +191,8 @@ export interface ContainerConfig {
   editionesCollection?: string
   /** Our HuggingFace org for `custody:'ours'` model publishes (default 'ms2stationthis'). */
   huggingFaceOrg?: string
+  /** HF_TOKEN — present → the HF registry gets a real LFS uploader; absent → projection-only. */
+  huggingFaceToken?: string
   /** Base URL the MarketplaceAdapter projects listing handles under (default 'https://noema.art/market'). */
   marketplaceBaseUrl?: string
   sodalitatesCollection?: string
@@ -399,9 +402,14 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   // Collection/mint (publishing #5): the mint + marketplace adapters freeze a drop's
   // canon into a deterministic content-addressed handle. Pure projectors (no chain tx
   // / venue API yet — placeholder §10), so they need no deps and are always available.
+  // Real HF weight upload (LFS) when a token is configured; else projection-only.
+  // Runs inside the PublicationWorker's settle, so a multi-GB upload is durable.
+  const hfUploader = config.huggingFaceToken
+    ? new HuggingFaceUploader({ transport: new HfHttpTransport({ token: config.huggingFaceToken }), fetcher: httpMediaFetcher })
+    : undefined
   const publicationAdapters: PublicationAdapter[] = [
     new FeedAdapter(),
-    new ModelPublishAdapter(huggingFaceRegistry(config.huggingFaceOrg ?? 'ms2stationthis')),
+    new ModelPublishAdapter(huggingFaceRegistry(config.huggingFaceOrg ?? 'ms2stationthis', hfUploader)),
     new ModelPublishAdapter(civitaiRegistry()),
     new MintAdapter(),
     new MarketplaceAdapter({ base: config.marketplaceBaseUrl ?? 'https://noema.art/market' }),

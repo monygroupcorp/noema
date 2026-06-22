@@ -360,6 +360,7 @@ async function main(): Promise<void> {
         installLive: (m: Materia, ids: string[]) => installCoordinator.installLive(m, ids),
       } : {}),
     } : {}),
+    ...(process.env.HF_TOKEN ? { huggingFaceToken: process.env.HF_TOKEN } : {}),
     ...(openaiClient ? { openaiClient } : {}),
     ...(embed ? { embed } : {}),
     ...(embedImage ? { embedImage } : {}),
