@@ -180,16 +180,32 @@ Progressus, so existing consumers keep working while they migrate.
 | heartbeat (`gpuHours`) | (current phase, refreshed) | lifecycle channel carries a Progressus |
 | ended | `done` / `failed` | |
 
-### 6c. Training runner (VastAI) — fold legacy phases in
-| Training step | → `Phasis` | progress |
+### 6c. Training runner (ostris/ai-toolkit) — read its STRUCTURED job state, not stdout
+
+The crystal-native training runner drives **ostris/ai-toolkit** directly (FLUX.2 Klein and
+friends — klein trains on a 24GB 4090 where FLUX.1's 12B OOMs; upstream even ships a
+"Klein load-time VRAM spike" low-mem fix). We map from ai-toolkit's **typed SQLite `Job`
+row** (`ui/prisma/schema.prisma`, written by `UITrainer`) — NOT from training stdout. The
+legacy `TrainingOutputParser` (538 lines of `/step\s*(\d+)\/(\d+)/` regexes across
+ai-toolkit/Kohya/generic formats) is **retired, not ported**. The Job signal is two-axis:
+a typed `status` (`Literal["running","stopped","error","completed"]` + `"queued"`) × an
+`info` sub-phase label, plus `step` / `speed_string` / `job_config.process[0].train.steps`.
+
+| ai-toolkit `Job` (`status` + `info`) | → `Phasis` | progress |
 |---|---|---|
-| provision VastAI instance | `provisioning` | — |
-| pull the trainer image (aitoolkit) | `pulling` | `target:'fundamentum'` |
-| upload dataset / fetch base model | `downloading` | `target:'dataset'`/`'model'`, `{unit:'bytes'}` |
-| init model | `loading` | `target:'vram'`; `resources.vramUsedMb` |
-| train | `executing` | `{done:step, total:totalSteps, unit:'steps'}`; `etaMs` |
-| upload output → HF/R2 (publishing #3/#3b) | `uploading` | `{unit:'bytes'}` |
-| done / stall-timeout | `done` / `failed` | |
+| `queued` | `queued` | `queue_position` → message |
+| `running` + "Loading dataset" | `downloading` | `target:'dataset'` |
+| `running` + "Loading model" / "Starting" (step 0) | `loading` | `target:'vram'`; `resources.vramUsedMb` |
+| `running` + "Training" (step>0) | `executing` | `{done:step, total:cfgSteps, unit:'steps'}`; `etaMs` from `speed_string` |
+| `completed` | `done` | — |
+| `error` | `failed` | message = `info` |
+| `stopped` | `cancelling` | terminal |
+
+`message` is set for phase-meaningful sub-phases / errors but NEVER for the steady
+"Training" pings — so incrementing-step reports coalesce to live-only (§7). A **local**
+ai-toolkit run has no `provisioning`/`pulling` (no pod create / image pull) — its timeline
+opens at `loading`; a remote training variant prepends those, mapped from the provider.
+Output `uploading` → HF/R2 is the publishing arm (#3/#3b), not ai-toolkit's job state.
 
 ### 6d. Hosting / downloading / VRAM
 - **Hosting** (warm studio) — idle warmth + the active gen's Progressus; `resources` surfaces VRAM headroom for the bulletin.
@@ -235,7 +251,7 @@ copy of the data. (So: no `Modo.progressus`.)
 2. ✅ **Sink + bus + projection (LANDED 2026-06-22):** `POST /runner/status` (one channel; returns `{continue}`; lenient — legacy `{sessionId,step}` folds into an `executing` report) → `CrystalApi.reportProgressus` → append to `progressus[]` **coalesced** (transitions + messages + terminals persisted; per-tick progress live-only, §7) + roll up `phaseDurations` on terminal + `actum.progressus` bus event + legacy `actum.stage` shim (`progressusToStage`) so existing SSE/Telegram consumers keep working. Pure transforms (`normalizeProgressus`/`coercePhase`/`shouldPersist`/`progressusToStage`) in `src/execution/progressus.ts`. Tests: `tests/unit/crystal/progressusSink.test.ts` (15). Note: the `/runner/status` response shape went `{ok}`→`{continue}` — safe, the TEE runner posts fire-and-forget (`curl … || true`, ignores the body).
 3. ✅ **ComfyUI (LANDED 2026-06-22):** `comfyrunnerClient`'s SSE parse now builds a typed `Progressus` per §6a and persists the timeline through an **in-process recorder seam** (`src/execution/progressusSink.ts` — an ambient registration mirroring `bus`, wired at startup to `CrystalApi.recordProgressus`; the crystal rail is constructed before `CrystalApi`, so no HTTP loopback). `recordProgressus` is the in-process twin of the HTTP sink: it shares `_persistAndEmit` (coalesced append + `phaseDurations` rollup on terminal + typed `actum.progressus` event) but emits **no** legacy `actum.stage` shim — comfyrunner still emits the legacy stage vocabulary itself via the **untouched** `emitStage` (consumers like `PodSession.onStage` parse those exact strings: `inferring`/`installing-nodes`/`downloading:n/m` — changing them is build #6, not now). Only phase transitions / messages / terminals record (§7); per-tick sampler/byte progress stays live-only on the bus (no `findById`-per-tick). Records awaited inline so reports apply in order and the terminal lands before the stream resolves. **Scope boundary:** cold-start phases (`provisioning`/`pulling`/`bootstrapping`/`comfy-ready`) live in `SecurePodClient.emitStage` and carry pod-control `StageInfo` (podId/gpuType) — they are NOT yet recorded to the timeline, so a cold ComfyUI run's `progressus[]` opens at `downloading`; `provisionMs` etc. still live in `ActumExecutio`. Folding cold-start into the timeline is part of #6's unification. Tests: `tests/unit/crystal/comfyrunnerProgressus.test.ts` (3, the event→Progressus mapping).
 4. ✅ **TEE (LANDED 2026-06-22):** the enclave runner POSTs real `Progressus` (6b) over the universal `/runner/status` channel, closing the TEE status gap. Two halves: **(a) runner-side** — `runner.py` gained `signal_status(phase, target?, message?)` (fire-and-forget; the heartbeat still owns the stop signal) emitting the in-enclave phases the platform can't see from outside the tunnel: `downloading`/`model` (gguf pull), `loading`/`vram` (process launch = model load), `warming` (readyProbe). **(b) platform-side** — the TEE lifecycle the platform DOES observe maps to `Phasis` directly on the session: `provisioning` (provision) → `attesting` (WG handshake + WS-upgrade probe) → `done`/`failed` (clean exit vs budget-kill / crash / probe-give-up). `reportProgressus` now routes a `sessionId`-bound report (no actumId) onto the live session — reflected as `TeeSessionView.phase`, the browser's cold-start progress on its existing poll — and returns `continue:false` once the session ended (replacing the heartbeat's bail role for status posts). **Scope boundary (§9):** this is the *latest* phase as live session status, NOT a persisted timeline — the warm session has no Actum yet, so there's nothing to roll into `phaseDurations`; full timeline persistence lands when the arm Actum (`provisionStudio`) is minted. The in-enclave `executing`/token-stream phase isn't emitted (inference is transparently proxied through `/infer/*` — no clean per-token hook runner-side; folds into the arm-Actum work). Tests: `tests/unit/crystal/progressusSink.test.ts` (+2 — session-phase reflection + ended-bail).
-5. 🟠 **Training:** the trainer POSTs `Progressus` (6c).
+5. 🟡 **Training (projector LANDED 2026-06-22; runner + smoke pending):** crystal-native — drive **ostris/ai-toolkit** directly and read its typed SQLite `Job` row, retiring the legacy `TrainingOutputParser` regex slop entirely (decided: no legacy VastAI wrap). The pure §6c projector `aitkJobToProgressus(job, cfgSteps)` (`src/execution/aitkProgressus.ts`) maps ai-toolkit's two-axis `status`×`info` job state → `Progressus`, including `executing {done:step,total,steps}` + `etaMs` parsed from `speed_string` (both `iter/sec` and `sec/iter`), and is coalescing-aware (steady "Training" pings carry no `message`, so ticks stay live-only §7). Tests: `tests/unit/crystal/aitkProgressus.test.ts` (13). **Still pending:** (a) a local **FLUX.2 Klein** smoke on the 4090 (ai-toolkit is 308 commits behind — needs update) to capture real `Job` rows as fixtures and validate the projector against ground truth; (b) the crystal-native training **runner** (a Cursor that writes the Job row + spawns ai-toolkit, polls `aitk_db.db`, emits Progressus to its training **Actum** — so unlike TEE, the full timeline + `phaseDurations` persist).
 6. 🟠 **Consumers:** `StatusView`/bulletin/frontend read `Progressus`; derive `ActumExecutio` from phase durations.
 
 Per the build decision, the canonical model is defined once and ComfyUI + TEE + training are wired together
