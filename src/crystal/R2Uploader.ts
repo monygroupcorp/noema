@@ -1,4 +1,6 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
+import { Upload } from '@aws-sdk/lib-storage'
+import type { Readable } from 'node:stream'
 import type { R2Config } from './comfyrunnerClient.js'
 
 // =============================================================================
@@ -24,6 +26,12 @@ export interface Uploader {
 export interface ObjectStore extends Uploader {
   /** Delete the object at `key`. Idempotent (deleting a missing key is fine). */
   del(key: string): Promise<void>
+  /**
+   * Stream bytes to `key` without buffering the whole payload in memory, returning
+   * the public URL. Optional — used for large objects like model weights; callers
+   * fall back to `put` when absent. `contentLength` is a hint (may be unknown).
+   */
+  putStream?(key: string, body: Readable, contentType: string, contentLength?: number): Promise<string>
 }
 
 /** The real uploader — Cloudflare R2 via the S3 API (same R2Config the pods use). */
@@ -48,5 +56,18 @@ export class R2Uploader implements ObjectStore {
 
   async del(key: string): Promise<void> {
     await this.s3.send(new DeleteObjectCommand({ Bucket: this.cfg.bucket, Key: key }))
+  }
+
+  /** Multipart streaming upload (lib-storage) — never holds the whole object in
+   *  memory. The SDK chunks the stream into parts, so a multi-GB weight file uploads
+   *  with a bounded footprint. `contentLength` is unused (multipart needs no length). */
+  async putStream(key: string, body: Readable, contentType: string): Promise<string> {
+    const upload = new Upload({
+      client: this.s3,
+      params: { Bucket: this.cfg.bucket, Key: key, Body: body, ContentType: contentType },
+    })
+    await upload.done()
+    const base = (this.cfg.publicUrl ?? `${this.cfg.endpoint}/${this.cfg.bucket}`).replace(/\/$/, '')
+    return `${base}/${key}`
   }
 }

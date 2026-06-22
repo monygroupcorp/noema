@@ -95,17 +95,29 @@ export class BucketAdapter implements PublicationAdapter {
 
   /** Host a trained model's primary weight file into OUR bucket → a durable,
    *  our-custody download URL (the `miladystation` mirror the resolver prefers).
-   *  This is real byte movement — the our-custody half of model publishing. */
+   *  This is real byte movement — the our-custody half of model publishing.
+   *
+   *  STREAMS the weights when the fetcher + store both support it (model weights are
+   *  large — a multi-GB checkpoint must never be buffered whole in memory); falls
+   *  back to the buffered path otherwise (fine for LoRA-sized files + test fakes). */
   private async _hostModel(artifact: PublishArtifact, _policy: PublishPolicy): Promise<{ externalRef: string }> {
     const sources = (artifact.output?.sources as IntellaSource[] | undefined) ?? []
     const primary = sources.find((s) => typeof s?.uri === 'string' && s.uri.length > 0)
     if (!primary) throw new Error('bucket-adapter: model has no weight source to host')
-    const bytes = await this.deps.fetcher.fetch(primary.uri)
     const slug = typeof artifact.output?.slug === 'string' ? artifact.output.slug : 'model'
     const filename = urlBasename(primary.uri, `${slug}.safetensors`)
     const id = artifact.editioId ?? uuidv4()
     // Keyed under a per-publication folder so `retract` can recompute + delete it.
-    const hosted = await this.deps.store.put(`${this.modelPrefix}/${id}/${filename}`, bytes, 'application/octet-stream')
+    const key = `${this.modelPrefix}/${id}/${filename}`
+    const { fetcher, store } = this.deps
+
+    if (fetcher.fetchStream && store.putStream) {
+      const { body, contentLength } = await fetcher.fetchStream(primary.uri)
+      const hosted = await store.putStream(key, body, 'application/octet-stream', contentLength)
+      return { externalRef: hosted }
+    }
+    const bytes = await fetcher.fetch(primary.uri)
+    const hosted = await store.put(key, bytes, 'application/octet-stream')
     return { externalRef: hosted }
   }
 
