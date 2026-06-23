@@ -57,7 +57,8 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
       // Warm reuse → a near-zero `provisioning` entry on the timeline (#6a): cold-vs-warm
       // cost falls straight out of phaseDurations (warm provisioning ≈ 0).
       const prog = coldStartProgressus('warm-pod-found', { podId: externusId })
-      if (prog) void recordProgressus(ctx.actumId, { ...prog, at: new Date() })
+      // Fire-and-forget but .catch — a recorder DB error must never break the run (§4).
+      if (prog) recordProgressus(ctx.actumId, { ...prog, at: new Date() }).catch(err => log.warn('progressus record failed', { error: (err as Error).message }))
     }
 
     this._runBackground(params.input, params.webhook, jobId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics)

@@ -294,8 +294,9 @@ export class SecurePodClient implements RunPodClient, Procurator {
         bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - (ctx.startTs ?? startMs), info })
         // Also record the cold-start phase onto the Progressus timeline (#6a). Maps only the
         // pod-lifecycle stages; comfyrunner's own stages return undefined (it records those).
+        // Fire-and-forget but .catch — a recorder DB error must never break the run (§4).
         const prog = coldStartProgressus(stage, info)
-        if (prog) void recordProgressus(ctx.actumId, { ...prog, at: new Date() })
+        if (prog) recordProgressus(ctx.actumId, { ...prog, at: new Date() }).catch(err => log.warn('progressus record failed', { error: (err as Error).message }))
       }
       onStage?.(stage, info)   // direct callback for the /arm bulletin (no actumId/trace in that path)
     }
@@ -479,7 +480,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
       if (ctx?.actumId) {
         bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - (ctx.startTs ?? startMs), info })
         const prog = coldStartProgressus(stage, info)   // cold-start phases onto the timeline (#6a)
-        if (prog) void recordProgressus(ctx.actumId, { ...prog, at: new Date() })
+        if (prog) recordProgressus(ctx.actumId, { ...prog, at: new Date() }).catch(err => log.warn('progressus record failed', { error: (err as Error).message }))
       }
     }
     // Pod telemetry accumulated as the job runs and persisted onto the actum
