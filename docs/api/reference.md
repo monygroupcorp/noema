@@ -250,7 +250,7 @@ Fetch a run by id (poll for completion).
 
 ### GET /v1/runs/:id/stream
 
-Server-Sent Events stream of run events (an initial snapshot, then stage/complete/failed frames). Content-Type: text/event-stream; the stream ends on the terminal event.
+Server-Sent Events stream of run events (an initial snapshot, then progress/stage/complete/failed frames). Content-Type: text/event-stream; the stream ends on the terminal event.
 
 - **Auth:** required
 

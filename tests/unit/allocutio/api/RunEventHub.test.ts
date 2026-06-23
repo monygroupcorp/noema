@@ -23,6 +23,18 @@ test('subscriber receives a stage event emitted on the bus', () => {
   assert.equal(received[0].stage, 'provisioning')
 })
 
+test('subscriber receives a typed progress event from actum.progressus (#6c)', () => {
+  const { bus, hub } = makeHub()
+  const received: RunEvent[] = []
+  hub.subscribe('rp', ev => received.push(ev))
+  const progressus = { phase: 'executing' as const, progress: { done: 5, total: 20, unit: 'steps' as const }, at: new Date(0) }
+  bus.emit('actum.progressus', { actumId: 'rp', progressus })
+  assert.equal(received.length, 1)
+  assert.equal(received[0].kind, 'progress')
+  assert.equal(received[0].terminal, false)
+  assert.equal(received[0].progressus, progressus)
+})
+
 test('recentFor returns buffered events', () => {
   const { bus, hub } = makeHub()
   bus.emit('actum.stage', { actumId: 'r2', stage: 'prep', elapsedMs: 10 })

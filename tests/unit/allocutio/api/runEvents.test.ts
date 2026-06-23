@@ -15,6 +15,27 @@ test('actum.stage maps to stage RunEvent', () => {
   assert.equal(ev.status, undefined)
 })
 
+test('actum.progressus maps to a non-terminal progress RunEvent carrying the typed report (#6c)', () => {
+  const progressus = {
+    phase: 'downloading' as const,
+    target: 'model' as const,
+    progress: { done: 1, total: 3, unit: 'items' as const },
+    at: new Date(0),
+  }
+  const ev = busToRunEvent('actum.progressus', { actumId: 'r6', progressus })
+  assert.ok(ev)
+  assert.equal(ev.runId, 'r6')
+  assert.equal(ev.kind, 'progress')
+  assert.equal(ev.terminal, false)        // cost/completion ride actum.complete/fail
+  assert.equal(ev.progressus, progressus) // passed through by reference
+  assert.equal(ev.stage, undefined)
+})
+
+test('actum.progressus without a progressus payload is dropped', () => {
+  assert.equal(busToRunEvent('actum.progressus', { actumId: 'r7' }), null)
+  assert.equal(busToRunEvent('actum.progressus', { actumId: 'r7', progressus: 'nope' }), null)
+})
+
 test('actum.complete maps to complete RunEvent', () => {
   const ev = busToRunEvent('actum.complete', {
     actumId: 'r2',
