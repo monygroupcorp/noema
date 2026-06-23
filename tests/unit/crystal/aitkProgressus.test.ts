@@ -38,6 +38,13 @@ test('running + "Loading dataset" → downloading/dataset', () => {
   assert.equal(p.message, 'Loading dataset')
 })
 
+test('running + "Generating baseline" (step 0) → warming, not loading (it is sample inference)', () => {
+  const p = aitkJobToProgressus(job({ info: 'Generating baseline' }), 1000, NOW)
+  assert.equal(p.phase, 'warming')
+  assert.equal(p.target, undefined)   // no VRAM-load target — this is readiness inference
+  assert.equal(p.message, 'Generating baseline')
+})
+
 test('running + "Training" (step>0) → executing with step/total progress + etaMs', () => {
   const p = aitkJobToProgressus(job({ info: 'Training', step: 250, speed_string: '2.00 iter/sec' }), 1000, NOW)
   assert.equal(p.phase, 'executing')
@@ -134,7 +141,7 @@ test('ground truth: the real klein-4b smoke timeline projects to loading → exe
     'queued',
     'loading', 'loading', 'loading', 'loading',  // Starting/Qwen3/Quantizing/Loading model
     'downloading',                                // "Loading dataset" → downloading/dataset
-    'loading',                                    // "Generating baseline" (pre-loop) → loading floor
+    'warming',                                    // "Generating baseline" (pre-train sample) → warming
     'executing', 'executing', 'executing',        // the training loop
     'done',
   ])
