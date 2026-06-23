@@ -51,6 +51,9 @@ import { JimpLayerCompositeEngine } from './crystal/LayerCompositeEngine.js'
 import { FfmpegCursor } from './crystal/FfmpegCursor.js'
 import { SpawnFfmpegEngine } from './crystal/FfmpegEngine.js'
 import { AitoolkitTrainingCursor, type AitoolkitTrainingCursorDeps } from './crystal/AitoolkitTrainingCursor.js'
+import { RemoteAitoolkitTrainingCursor } from './crystal/RemoteAitoolkitTrainingCursor.js'
+import { RemoteAitkLauncher, securePodTrainingProvisioner } from './crystal/RemoteAitkLauncher.js'
+import { makeDatasetResolver } from './crystal/datasetManifest.js'
 import { SqliteAitkJobStore } from './crystal/AitkJobStore.js'
 import { DockerAitkSpawner } from './crystal/AitkSpawner.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
@@ -196,6 +199,22 @@ export interface ContainerConfig {
      * (users never author a config). Absent → only a pre-built `configPath` aditus runs.
      */
     configDir?: string
+  }
+  /**
+   * Remote ai-toolkit training (Slice E, ministerium 'aitoolkit') — the PROD path: training runs
+   * on a provisioned, billed SECURE pod instead of a local GPU. Present (+ `runpodClient` with
+   * `launchTrainingPod`, `runpodR2`, `runpodWebhookUrl`) → registers `RemoteAitoolkitTrainingCursor`.
+   * Mutually exclusive with the local `aitoolkit` block (a box runs one or the other; the modus is
+   * identical). The completion-side finality (urlLoraReader → re-host + Intella) is the webhook's
+   * `resolveExitus` seam, wired in index.ts.
+   */
+  aitoolkitRemote?: {
+    /** The ai-toolkit training image (ai-toolkit + run.py baked, base weights cached). */
+    image: string
+    /** Our `/runner/status` sink URL — the pod POSTs its Progressus here. */
+    statusUrl: string
+    /** Reservation cap in pod-seconds (settled to actual at completion) — default 7200 (2h). */
+    maxTrainingSeconds?: number
   }
   /** Warm-window TTL (ms) passed to warm-pod jobs — default 60_000. */
   runpodWarmTtlMs?: number
@@ -490,6 +509,27 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
       })
     }
     cursorum.register('aitoolkit', new AitoolkitTrainingCursor(aitkDeps))
+  } else if (
+    config.aitoolkitRemote && config.runpodClient && config.runpodR2 && config.runpodWebhookUrl &&
+    'launchTrainingPod' in config.runpodClient
+  ) {
+    // Remote ai-toolkit training (Slice E) — the prod path. Reuses the SAME finalizer at the
+    // completion webhook (resolveExitus, index.ts); here we just dispatch onto a billed pod.
+    const launcher = new RemoteAitkLauncher({
+      provisioner: securePodTrainingProvisioner(
+        config.runpodClient as unknown as { launchTrainingPod(opts: { image: string; env: Record<string, string> }): Promise<{ podId: string }> },
+      ),
+      resolver: makeDatasetResolver({ corpora }),
+      image: config.aitoolkitRemote.image,
+      r2: config.runpodR2,
+      statusUrl: config.aitoolkitRemote.statusUrl,
+      webhookUrl: config.runpodWebhookUrl,
+    })
+    cursorum.register('aitoolkit', new RemoteAitoolkitTrainingCursor({
+      launcher,
+      actorum,
+      ...(config.aitoolkitRemote.maxTrainingSeconds !== undefined ? { maxTrainingSeconds: config.aitoolkitRemote.maxTrainingSeconds } : {}),
+    }))
   }
 
   const completor = new ActumCompletor({ acta: actorum, signorum, terminatePod: config.terminatePod })
