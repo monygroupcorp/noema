@@ -36,6 +36,7 @@ export type LiveState =
   | { kind: 'plugins' }
   | { kind: 'reloading' }
   | { kind: 'generating' }
+  | { kind: 'training'; step?: number; total?: number; etaMs?: number } // a step-counted run (e.g. LoRA training)
   | { kind: 'saving' }
 
 /**

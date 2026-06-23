@@ -33,6 +33,19 @@ test('downloading live line shows n/m and the slow annotation', () => {
   assert.match(text, /Connected, downloading models \(3\/4\)… — taking longer than usual/)
 })
 
+test('training live line renders step/total, percent, and the formatted ETA', () => {
+  const { text } = BulletinView.render({ ...base, live: { kind: 'training', step: 420, total: 600, etaMs: 360_000 } })
+  assert.match(text, /Training · step 420\/600 \(70%\) · ~6\.0m left/)
+})
+
+test('training live line without total/eta degrades to a bare step (then to "Training…")', () => {
+  const stepOnly = BulletinView.render({ ...base, live: { kind: 'training', step: 50 } })
+  assert.match(stepOnly.text, /Training · step 50/)
+  assert.ok(!/\(/.test(stepOnly.text), 'no percent without a total')
+  const bare = BulletinView.render({ ...base, live: { kind: 'training' } })
+  assert.match(bare.text, /Training…/)
+})
+
 test('prepared line renders the % vs the typical baseline', () => {
   // 4.5m of a 7m typical → ~36% under avg.
   const { text } = BulletinView.render({ ...base, journal: [{ kind: 'prepared', ms: 4.5 * 60_000 }], live: { kind: 'generating' } })

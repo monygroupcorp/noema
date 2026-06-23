@@ -59,6 +59,18 @@ test('onProgressus: pulling bootstrap → initializing; installing → plugins/r
   assert.deepEqual(s.snapshot().live, { kind: 'saving' })
 })
 
+test('onProgressus: a step-counted execution (training) renders a training live line; plain executing stays generating', () => {
+  const s = new PodSession('host-1')
+  s.onProgressus(prog({ phase: 'provisioning', pod: { podId: 'p', gpuType: 'RTX 4090', costPerHr: 0.69 } }), 0)
+  // executing WITH steps (a training loop) → the step/ETA-bearing training kind.
+  s.onProgressus(prog({ phase: 'executing', progress: { done: 420, total: 600, unit: 'steps' }, etaMs: 360_000 }), 100)
+  assert.deepEqual(s.snapshot().live, { kind: 'training', step: 420, total: 600, etaMs: 360_000 })
+  assert.equal(s.phase, 'ready')
+  // executing WITHOUT steps (plain inference) → generating, unchanged.
+  s.onProgressus(prog({ phase: 'executing' }), 200)
+  assert.deepEqual(s.snapshot().live, { kind: 'generating' })
+})
+
 test('onProgressus: warm reuse (warm-pod-found) is 🔥-only — never journaled', () => {
   const s = new PodSession('host-1')
   // A warm reuse: provisioning WITH a pod + the warm message. No hunt preceded it.
