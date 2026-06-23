@@ -9,6 +9,8 @@ import type { ModelInstallClient, InstallProgress } from './ModelInstaller.js'
 import { makeLogger } from '../lib/logger.js'
 import { bus } from '../lib/bus.js'
 import { getTrace } from '../lib/trace.js'
+import { recordProgressus } from '../execution/progressusSink.js'
+import { coldStartProgressus } from '../execution/progressus.js'
 
 const log = makeLogger('cursor:runpod:warm')
 
@@ -50,7 +52,13 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
     // Signal "warm" so the Telegram layer reacts 🔥 (vs 👌 for a cold start), and
     // carry the pod id so the destroy button can terminate this warm pod.
     const ctx = getTrace()
-    if (ctx?.actumId) bus.emit('actum.stage', { actumId: ctx.actumId, stage: 'warm-pod-found', elapsedMs: 0, info: { podId: externusId } })
+    if (ctx?.actumId) {
+      bus.emit('actum.stage', { actumId: ctx.actumId, stage: 'warm-pod-found', elapsedMs: 0, info: { podId: externusId } })
+      // Warm reuse → a near-zero `provisioning` entry on the timeline (#6a): cold-vs-warm
+      // cost falls straight out of phaseDurations (warm provisioning ≈ 0).
+      const prog = coldStartProgressus('warm-pod-found', { podId: externusId })
+      if (prog) void recordProgressus(ctx.actumId, { ...prog, at: new Date() })
+    }
 
     this._runBackground(params.input, params.webhook, jobId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics)
       .catch(async (err) => {

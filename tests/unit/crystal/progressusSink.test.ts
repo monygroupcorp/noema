@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  coercePhase, normalizeProgressus, shouldPersist, progressusToStage,
+  coercePhase, normalizeProgressus, shouldPersist, progressusToStage, coldStartProgressus,
 } from '../../../src/execution/progressus.js'
 import { MemoryActorum } from '../../../src/execution/MemoryActorum.js'
 import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/CrystalApi.js'
@@ -69,6 +69,42 @@ test('normalize: recurses into parallel[] and drops junk fields', () => {
 test('normalize: malformed resources are dropped; valid numeric ones kept', () => {
   assert.equal(normalizeProgressus({ phase: 'loading', resources: { vramUsedMb: 'lots' } }, at(0)).resources, undefined)
   assert.deepEqual(normalizeProgressus({ phase: 'loading', resources: { vramUsedMb: 8000 } }, at(0)).resources, { vramUsedMb: 8000 })
+})
+
+test('normalize: a pod field is parsed (podId/gpuType/region strings + costPerHr number)', () => {
+  const p = normalizeProgressus({ phase: 'provisioning', pod: { podId: 'pod-1', gpuType: 'RTX 4090', region: 'US', costPerHr: 0.44, junk: 'x' } }, at(0))
+  assert.deepEqual(p.pod, { podId: 'pod-1', gpuType: 'RTX 4090', region: 'US', costPerHr: 0.44 })
+})
+
+test('normalize: an empty/garbage pod is dropped', () => {
+  assert.equal(normalizeProgressus({ phase: 'provisioning', pod: { costPerHr: 'lots' } }, at(0)).pod, undefined)
+  assert.equal(normalizeProgressus({ phase: 'provisioning', pod: {} }, at(0)).pod, undefined)
+})
+
+// ── coldStartProgressus (build #6a — pod-lifecycle stages → timeline) ────────
+
+test('coldStartProgressus: maps the pod-lifecycle vocabulary; ignores comfyrunner stages', () => {
+  assert.deepEqual(coldStartProgressus('provisioning'), { phase: 'provisioning', message: 'acquiring GPU' })
+  assert.deepEqual(coldStartProgressus('bootstrapping'), { phase: 'pulling', target: 'fundamentum', message: 'bootstrapping runtime' })
+  assert.deepEqual(coldStartProgressus('comfy-ready'), { phase: 'pulling', target: 'fundamentum', message: 'runtime ready' })
+  // comfyrunner records these itself → undefined here (no double-record).
+  assert.equal(coldStartProgressus('inferring'), undefined)
+  assert.equal(coldStartProgressus('uploading'), undefined)
+  assert.equal(coldStartProgressus('downloading:2/5'), undefined)
+})
+
+test('coldStartProgressus: pod-locked carries pod identity/cost + a persisting message', () => {
+  const p = coldStartProgressus('pod-locked', { podId: 'pod-9', gpuType: 'RTX 4090', region: 'EU', costPerHr: 0.44 })
+  assert.equal(p?.phase, 'provisioning')
+  assert.equal(p?.message, 'pod pod-9 (RTX 4090)')   // message ⇒ shouldPersist keeps it
+  assert.deepEqual(p?.pod, { podId: 'pod-9', gpuType: 'RTX 4090', region: 'EU', costPerHr: 0.44 })
+})
+
+test('coldStartProgressus: warm-pod-found is a near-zero provisioning entry carrying the pod', () => {
+  const p = coldStartProgressus('warm-pod-found', { podId: 'warm-3' })
+  assert.equal(p?.phase, 'provisioning')
+  assert.equal(p?.message, 'warm pod reused')
+  assert.deepEqual(p?.pod, { podId: 'warm-3' })
 })
 
 // ── shouldPersist (coalescing) ──────────────────────────────────────────────

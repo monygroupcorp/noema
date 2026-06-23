@@ -8,6 +8,8 @@ import type { ActumExecutio } from '../types/actum.js'
 import { makeLogger } from '../lib/logger.js'
 import { getTrace } from '../lib/trace.js'
 import { bus } from '../lib/bus.js'
+import { recordProgressus } from '../execution/progressusSink.js'
+import { coldStartProgressus } from '../execution/progressus.js'
 import { terminatePod as _terminatePodUtil } from './terminatePod.js'
 import { submitToRunner, awaitViaStream, isCompiledSpec, type R2Config } from './comfyrunnerClient.js'
 import { computeBootCostImpetus, impetusPerSecondFromHourly } from '../ledger/rates.js'
@@ -288,7 +290,13 @@ export class SecurePodClient implements RunPodClient, Procurator {
     const startMs = Date.now()
     const emitStage = (stage: string, info?: import('../lib/bus.js').StageInfo) => {
       const ctx = getTrace()
-      if (ctx?.actumId) bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - (ctx.startTs ?? startMs), info })
+      if (ctx?.actumId) {
+        bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - (ctx.startTs ?? startMs), info })
+        // Also record the cold-start phase onto the Progressus timeline (#6a). Maps only the
+        // pod-lifecycle stages; comfyrunner's own stages return undefined (it records those).
+        const prog = coldStartProgressus(stage, info)
+        if (prog) void recordProgressus(ctx.actumId, { ...prog, at: new Date() })
+      }
       onStage?.(stage, info)   // direct callback for the /arm bulletin (no actumId/trace in that path)
     }
 
@@ -468,7 +476,11 @@ export class SecurePodClient implements RunPodClient, Procurator {
     let sshInfo: SshInfo | null = null
     const emitStage = (stage: string, info?: import('../lib/bus.js').StageInfo) => {
       const ctx = getTrace()
-      if (ctx?.actumId) bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - (ctx.startTs ?? startMs), info })
+      if (ctx?.actumId) {
+        bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - (ctx.startTs ?? startMs), info })
+        const prog = coldStartProgressus(stage, info)   // cold-start phases onto the timeline (#6a)
+        if (prog) void recordProgressus(ctx.actumId, { ...prog, at: new Date() })
+      }
     }
     // Pod telemetry accumulated as the job runs and persisted onto the actum
     // (via onMetrics) before completion — the completion webhook can't see this

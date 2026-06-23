@@ -1,6 +1,7 @@
 import type {
-  Progressus, PhaseDurations, Phasis, ProgressusMensura, ProgressusResources, ProgressusUnit,
+  Progressus, PhaseDurations, Phasis, ProgressusMensura, ProgressusResources, ProgressusPod, ProgressusUnit,
 } from '../types/progressus.js'
+import type { StageInfo } from '../lib/bus.js'
 
 // =============================================================================
 // progressus (execution rail) — derive phase durations from a Progressus timeline
@@ -100,6 +101,17 @@ function coerceMensura(raw: unknown): ProgressusMensura | undefined {
   return m
 }
 
+function coercePod(raw: unknown): ProgressusPod | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  const out: ProgressusPod = {}
+  for (const k of ['podId', 'gpuType', 'region'] as const) {
+    if (typeof r[k] === 'string') out[k] = r[k] as string
+  }
+  if (typeof r.costPerHr === 'number') out.costPerHr = r.costPerHr
+  return Object.keys(out).length ? out : undefined
+}
+
 function coerceResources(raw: unknown): ProgressusResources | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const r = raw as Record<string, unknown>
@@ -125,8 +137,37 @@ export function normalizeProgressus(raw: unknown, now: Date = new Date()): Progr
   if (typeof r.message === 'string') p.message = r.message
   else if (r.phase === undefined && typeof r.step === 'string') p.message = r.step  // legacy TEE {step}
   const resources = coerceResources(r.resources); if (resources) p.resources = resources
+  const pod = coercePod(r.pod); if (pod) p.pod = pod
   if (Array.isArray(r.parallel)) p.parallel = r.parallel.map(x => normalizeProgressus(x, now))
   return p
+}
+
+// ── Cold-start projection (build #6a) ───────────────────────────────────────
+/**
+ * Project a pod-lifecycle `actum.stage` string (the cold-start vocabulary only emitted by
+ * SecurePodClient/WarmPodClient — `provisioning`/`pod-locked`/`bootstrapping`/`comfy-ready`/
+ * `warm-pod-found`) to a `Progressus`, so a cold run's timeline opens at `provisioning`
+ * instead of `downloading` (the #3 scope boundary). Returns `undefined` for any other stage —
+ * notably comfyrunner's own `inferring`/`uploading`/`downloading:n/m`, which comfyrunner
+ * already records itself (no double-record). `pod-locked`/`warm-pod-found` carry the pod
+ * identity/cost on `pod`; each maps to a `message` so the entry persists (§7).
+ */
+export function coldStartProgressus(stage: string, info?: StageInfo): Omit<Progressus, 'at'> | undefined {
+  const pod = coercePod(info)
+  switch (stage) {
+    case 'provisioning':  return { phase: 'provisioning', message: 'acquiring GPU' }
+    case 'pod-locked':    return { phase: 'provisioning', message: podLabel(info), ...(pod ? { pod } : {}) }
+    case 'warm-pod-found': return { phase: 'provisioning', message: 'warm pod reused', ...(pod ? { pod } : {}) }
+    case 'bootstrapping': return { phase: 'pulling', target: 'fundamentum', message: 'bootstrapping runtime' }
+    case 'comfy-ready':   return { phase: 'pulling', target: 'fundamentum', message: 'runtime ready' }
+    default:              return undefined   // comfyrunner stages record themselves; ignore here
+  }
+}
+
+function podLabel(info?: StageInfo): string {
+  if (!info) return 'pod acquired'
+  const gpu = info.gpuType ? ` (${info.gpuType})` : ''
+  return info.podId ? `pod ${info.podId}${gpu}` : `pod acquired${gpu}`
 }
 
 // ── Coalescing (volume guard, spec §7) ──────────────────────────────────────
