@@ -42,6 +42,13 @@ export interface AitkOutcome {
   status: 'completed' | 'error' | 'stopped'
   lastStep: number
   message?: string
+  /**
+   * The trained LoRA's location for finality (Slice E). On the REMOTE path the pod
+   * uploads its safetensors to R2 and reports the URL here, so `urlLoraReader` can
+   * fetch it at completion. Absent on the LOCAL path (the file is on host disk —
+   * `fsLoraReader` finds it from the output dir instead).
+   */
+  outputUrl?: string
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
