@@ -147,7 +147,9 @@ export const MODUS_AITOOLKIT_TRAINING: Modus = make({
   ministerium: 'aitoolkit',
   deliveryMode: 'sync',   // the local cursor blocks for the run; the remote variant (Slice E) is async
   canonica: true,
-  impetusFixum: 0n,       // self-hosted on our GPU — no cost to self (Slice E revisits to real pod billing)
+  // No impetusFixum: cost is runtime-duration based (the Modus convention for pod tools). The
+  // LOCAL cursor still charges `impetusFixum ?? 0n` = 0n (self-hosted); the REMOTE cursor (Slice E)
+  // reserves a pod-seconds cap, settled to the actual run length at the completion webhook.
 
   // The contract the AitoolkitTrainingCursor (run) + trainingFinalizer (resolveOutput) consume.
   // `configPath` is the container-relative training yaml (it references the dataset); a
