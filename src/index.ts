@@ -98,6 +98,13 @@ const RUNPOD_WARM_TTL_MS = Number(process.env.RUNPOD_WARM_TTL_MS ?? 60_000)  // 
 const RUNPOD_WEBHOOK_URL = process.env.WEBHOOK_URL
   ? `https://${process.env.WEBHOOK_URL.replace(/^https?:\/\//, '').replace(/\/$/, '')}/webhooks/runpod`
   : `http://localhost:${process.env.PORT ?? 3000}/webhooks/runpod`
+// Where a remote training pod POSTs its `/runner/status` Progressus — same host as the webhook.
+const RUNNER_STATUS_URL = process.env.WEBHOOK_URL
+  ? `https://${process.env.WEBHOOK_URL.replace(/^https?:\/\//, '').replace(/\/$/, '')}/runner/status`
+  : `http://localhost:${process.env.PORT ?? 3000}/runner/status`
+// Remote ai-toolkit training (Slice E) — present → the training modus runs on billed SECURE pods.
+const AITK_REMOTE_IMAGE = process.env.AITK_REMOTE_IMAGE
+const AITK_REMOTE_MAX_SECONDS = process.env.AITK_REMOTE_MAX_SECONDS ? Number(process.env.AITK_REMOTE_MAX_SECONDS) : undefined
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY
@@ -363,6 +370,13 @@ async function main(): Promise<void> {
         admitWarm: (m: Materia, models: Array<{ id?: string }>) => installCoordinator.ensureForGen(m, models),
         installLive: (m: Materia, ids: string[]) => installCoordinator.installLive(m, ids),
       } : {}),
+    } : {}),
+    ...(AITK_REMOTE_IMAGE ? {
+      aitoolkitRemote: {
+        image: AITK_REMOTE_IMAGE,
+        statusUrl: RUNNER_STATUS_URL,
+        ...(AITK_REMOTE_MAX_SECONDS !== undefined ? { maxTrainingSeconds: AITK_REMOTE_MAX_SECONDS } : {}),
+      },
     } : {}),
     ...(process.env.HF_TOKEN ? { huggingFaceToken: process.env.HF_TOKEN } : {}),
     ...(openaiClient ? { openaiClient } : {}),
