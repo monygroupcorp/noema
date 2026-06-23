@@ -42,6 +42,42 @@ export function rollupPhaseDurations(timeline: readonly Progressus[]): PhaseDura
   return out
 }
 
+/**
+ * Derive the DURATION subset of `ActumExecutio` telemetry from a rolled-up
+ * `phaseDurations` (build #6d, spec §7 unification): `provisionMs`/`downloadMs`/
+ * `executionMs` ARE the phase dwell-times — no longer a separately-reported channel.
+ *
+ * Only duration-shaped fields are derivable here; identity/cost telemetry (podId,
+ * gpuType, costPerHr, coldStart, modelsDownloaded, billedMs, …) is NOT a duration and
+ * stays sourced from the cursor. Consumers PREFER an explicitly-reported field and fall
+ * back to this, so a runner that reports only a Progressus timeline (TEE / training)
+ * still lands these in its wide event, while comfyrunner's precise self-reported
+ * inference time (`executio.executionMs`) stays authoritative when present.
+ *
+ * Targets fold in: every `downloading/*` key (model, lora, dataset, …) sums into one
+ * `downloadMs`; likewise provisioning/executing sum across any target.
+ */
+export function executioFromPhaseDurations(
+  pd: PhaseDurations | undefined,
+): { provisionMs?: number; downloadMs?: number; executionMs?: number } {
+  if (!pd) return {}
+  const out: { provisionMs?: number; downloadMs?: number; executionMs?: number } = {}
+  const provisionMs = sumPhase(pd, 'provisioning'); if (provisionMs !== undefined) out.provisionMs = provisionMs
+  const downloadMs = sumPhase(pd, 'downloading');   if (downloadMs !== undefined) out.downloadMs = downloadMs
+  const executionMs = sumPhase(pd, 'executing');    if (executionMs !== undefined) out.executionMs = executionMs
+  return out
+}
+
+/** Sum every `phaseDurations` entry whose phase part (before any `/target`) equals `phase`. */
+function sumPhase(pd: PhaseDurations, phase: Phasis): number | undefined {
+  let total: number | undefined
+  for (const [k, ms] of Object.entries(pd)) {
+    const p = k.includes('/') ? k.slice(0, k.indexOf('/')) : k
+    if (p === phase) total = (total ?? 0) + ms
+  }
+  return total
+}
+
 // ── Lenient inbound parse ───────────────────────────────────────────────────
 // A status report NEVER hard-fails (base images deploy off-cadence — an old runner
 // and a new platform, or vice-versa, must interoperate). Unknown phase degrades to

@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Progressus } from '../../../src/types/progressus.js'
-import { phaseKey, rollupPhaseDurations } from '../../../src/execution/progressus.js'
+import { phaseKey, rollupPhaseDurations, executioFromPhaseDurations } from '../../../src/execution/progressus.js'
 
 const at = (ms: number): Date => new Date(1_700_000_000_000 + ms)
 
@@ -79,4 +79,36 @@ test('rollup: out-of-order timestamps are skipped, not counted negative', () => 
   const durations = rollupPhaseDurations(timeline)
   assert.ok(!('executing' in durations)) // negative segment skipped
   assert.equal(durations.uploading, 6000)
+})
+
+// ── executioFromPhaseDurations (#6d) ───────────────────────────────────────────
+
+test('executio derive: maps provisioning/downloading/executing dwell onto telemetry fields', () => {
+  assert.deepEqual(executioFromPhaseDurations({
+    provisioning: 3000,
+    'pulling/fundamentum': 1000,   // no executio field — ignored
+    'downloading/model': 4000,
+    'loading/vram': 500,           // no executio field — ignored
+    executing: 9000,
+    'uploading/output': 200,       // no executio field — ignored
+  }), { provisionMs: 3000, downloadMs: 4000, executionMs: 9000 })
+})
+
+test('executio derive: every downloading/* target sums into one downloadMs', () => {
+  assert.deepEqual(executioFromPhaseDurations({
+    'downloading/model': 4000,
+    'downloading/lora': 1000,
+    'downloading/dataset': 500,
+  }), { downloadMs: 5500 })
+})
+
+test('executio derive: bare-phase keys (no target) fold in too', () => {
+  assert.deepEqual(executioFromPhaseDurations({ downloading: 2000, executing: 3000 }),
+    { downloadMs: 2000, executionMs: 3000 })
+})
+
+test('executio derive: undefined / empty / unmapped-only yields no fields', () => {
+  assert.deepEqual(executioFromPhaseDurations(undefined), {})
+  assert.deepEqual(executioFromPhaseDurations({}), {})
+  assert.deepEqual(executioFromPhaseDurations({ 'loading/vram': 500, queued: 100 }), {})
 })

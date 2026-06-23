@@ -2,6 +2,7 @@ import type { Actum } from '../../../types/actum.js'
 import type { UiKeyboard } from '../ui/Keyboard.js'
 import { GLYPH, RATING } from '../symbols.js'
 import { COPY } from '../copy.js'
+import { executioFromPhaseDurations } from '../../../execution/progressus.js'
 
 /** Rating glyphs — the fixed set the delivery row offers (brand vocabulary). */
 export const RATE_EMOJI = RATING
@@ -47,7 +48,7 @@ export function formatStats(actum: Actum | null): string {
   if (!actum) return COPY.stats.unavailable
   const e = actum.executio ?? {}
   const lines: string[] = [COPY.stats.modus(actum.modusId)]
-  const ms = e.executionMs ?? actum.duratio
+  const ms = e.executionMs ?? executioFromPhaseDurations(actum.phaseDurations).executionMs ?? actum.duratio
   if (typeof ms === 'number') lines.push(COPY.stats.generation((ms / 1000).toFixed(1)))
   lines.push(COPY.stats.pod(!!e.coldStart))
   if (e.gpuType) lines.push(COPY.stats.gpu(e.gpuType))
