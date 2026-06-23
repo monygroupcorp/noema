@@ -14,12 +14,13 @@ test('CANONICAL_MODI contains six entries', () => {
   assert.equal(CANONICAL_MODI.length, 6)
 })
 
-test('aitoolkit-training modus is a canon training flow (ministerium aitoolkit, sync, 0 fixed cost)', () => {
+test('aitoolkit-training modus is a canon training flow (ministerium aitoolkit, sync, duration-billed)', () => {
   assert.equal(MODUS_AITOOLKIT_TRAINING.ministerium, 'aitoolkit')
   assert.equal(MODUS_AITOOLKIT_TRAINING.genus, 'atomicus')
   assert.equal(MODUS_AITOOLKIT_TRAINING.deliveryMode, 'sync')
   assert.equal(MODUS_AITOOLKIT_TRAINING.canonica, true)
-  assert.equal(MODUS_AITOOLKIT_TRAINING.impetusFixum, 0n)
+  // No fixed cost: local self-hosted charges 0n via `?? 0n`; remote bills pod-seconds (Slice E).
+  assert.equal(MODUS_AITOOLKIT_TRAINING.impetusFixum, undefined)
   // The cursor's required inputs are declared required.
   for (const k of ['configPath', 'steps', 'triggerWord', 'baseModel']) {
     assert.equal(MODUS_AITOOLKIT_TRAINING.aditus[k]?.required, true, `${k} should be required`)
