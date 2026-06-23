@@ -34,9 +34,32 @@ export interface AitkRunSpec {
   env?: Record<string, string>
 }
 
+/** Where a run's outputs live, for the post-completion readability pass. */
+export interface AitkOutputSpec {
+  image: string
+  mounts?: AitkMount[]
+  /** Container workdir — outputs are under `<workdir>/output` (matches buildAitkConfig). */
+  workdir?: string
+}
+
 export interface AitkSpawner {
   /** Launch the training container; resolves once it has started (rejects if launch fails). */
   start(spec: AitkRunSpec): Promise<void>
+  /**
+   * Make a completed run's outputs host-readable. ai-toolkit (in the root container) writes
+   * the safetensors via a tempfile → `root:root 0600`, which the unprivileged finalizer can't
+   * read. The cursor calls this AFTER completion + BEFORE the finalizer, so the read always
+   * succeeds (deterministic — no chmod-vs-poll race). Optional (a host-user runner won't need it).
+   */
+  makeOutputsReadable?(spec: AitkOutputSpec): Promise<void>
+}
+
+/** `docker run --rm` arg vector to chmod a run's outputs readable (root container, fast — no GPU/entrypoint). */
+export function buildAitkChmodArgs(spec: AitkOutputSpec): string[] {
+  const args = ['run', '--rm', '--entrypoint', 'chmod']
+  for (const m of spec.mounts ?? []) args.push('-v', `${m.host}:${m.container}`)
+  args.push(spec.image, '-R', 'a+rX', `${spec.workdir ?? '/aitk'}/output`)
+  return args
 }
 
 /**
@@ -64,6 +87,10 @@ export class DockerAitkSpawner implements AitkSpawner {
 
   start(spec: AitkRunSpec): Promise<void> {
     return this._run(buildAitkDockerArgs(spec))
+  }
+
+  makeOutputsReadable(spec: AitkOutputSpec): Promise<void> {
+    return this._run(buildAitkChmodArgs(spec))
   }
 
   private _run(args: string[]): Promise<void> {

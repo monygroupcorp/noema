@@ -109,6 +109,14 @@ export class AitoolkitTrainingCursor implements Cursor {
       throw new Error(`aitoolkit training ${outcome.status} at step ${outcome.lastStep}: ${outcome.message ?? 'no detail'}`)
     }
 
+    // The container wrote the LoRA as root (0600); make it host-readable BEFORE the
+    // (unprivileged) finalizer reads it — deterministic, no chmod-vs-poll race.
+    await this.deps.spawner.makeOutputsReadable?.({
+      image: this.deps.image,
+      ...(this.deps.mounts ? { mounts: this.deps.mounts } : {}),
+      ...(this.deps.workdir ? { workdir: this.deps.workdir } : {}),
+    })
+
     const exitus = await (this.deps.resolveOutput?.(actum, outcome) ?? Promise.resolve({ trained: true, steps: outcome.lastStep }))
     return { kind: 'sync', exitus: { exitus, impetus: 0n, duratio: Date.now() - startedAt } }
   }

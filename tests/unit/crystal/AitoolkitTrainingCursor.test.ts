@@ -32,7 +32,10 @@ class FakeStore implements AitkJobStore {
 
 class FakeSpawner implements AitkSpawner {
   started: AitkRunSpec[] = []
+  readableCalls = 0
+  order: string[] = []
   async start(spec: AitkRunSpec): Promise<void> { this.started.push(spec) }
+  async makeOutputsReadable(): Promise<void> { this.readableCalls++; this.order.push('readable') }
 }
 
 const actum = (aditus: Record<string, unknown>): Actum =>
@@ -109,15 +112,31 @@ test('run: resolveOutput maps the completed outcome to exitus (training finality
 
 test('run: resolveOutput is NOT called when the run fails (no finality on a non-completed run)', async () => {
   const calls: AitkOutcome[] = []
+  const spawner = new FakeSpawner()
   const cursor = new AitoolkitTrainingCursor({
     store: new FakeStore([{ status: 'error', step: 5, info: 'CUDA out of memory' }]),
-    spawner: new FakeSpawner(), image: 'img:1', pollIntervalMs: 1,
+    spawner, image: 'img:1', pollIntervalMs: 1,
     resolveOutput: async (_a, o) => { calls.push(o); return {} },
   })
   await withRecorder('act-train', async () => {
     await assert.rejects(() => cursor.run(actum({ steps: 100, configPath: 'c.yaml' })))
   })
   assert.equal(calls.length, 0)
+  assert.equal(spawner.readableCalls, 0, 'no readability pass on a failed run')
+})
+
+test('run: a completed run makes outputs host-readable BEFORE the finalizer reads them', async () => {
+  const spawner = new FakeSpawner()
+  const order = spawner.order
+  const cursor = new AitoolkitTrainingCursor({
+    store: new FakeStore(COMPLETED), spawner, image: 'img:1', pollIntervalMs: 1,
+    resolveOutput: async () => { order.push('finalize'); return { trained: true, steps: 60 } },
+  })
+  await withRecorder('act-train', async () => {
+    await cursor.run(actum({ steps: 60, configPath: 'c.yaml' }))
+  })
+  assert.equal(spawner.readableCalls, 1)
+  assert.deepEqual(order, ['readable', 'finalize'], 'chmod the outputs, THEN read them')
 })
 
 test('run: an error outcome throws so the Actum goes fractus (and still records failed)', async () => {
