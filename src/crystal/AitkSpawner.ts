@@ -25,6 +25,12 @@ export interface AitkRunSpec {
   mounts?: AitkMount[]
   /** Container workdir (where `run.py` lives) — default `/aitk`. */
   workdir?: string
+  /**
+   * `--shm-size` for the container (e.g. '8g'). PyTorch's DataLoader workers share tensors
+   * through /dev/shm; Docker's 64MB default is too small and kills them with a Bus error.
+   * Default '8g' — set lower only on a memory-tight host.
+   */
+  shmSize?: string
   env?: Record<string, string>
 }
 
@@ -33,23 +39,31 @@ export interface AitkSpawner {
   start(spec: AitkRunSpec): Promise<void>
 }
 
+/**
+ * Build the `docker run -d` arg vector for a training launch (mirrors train_stationthis.sh).
+ * Pure — so the launch command is verifiable in CI even though the spawn itself isn't.
+ */
+export function buildAitkDockerArgs(spec: AitkRunSpec): string[] {
+  const args = [
+    'run', '-d', '--rm',
+    '--name', `aitk-${spec.jobId}`,
+    '--gpus', `device=${spec.gpuId ?? '0'}`,
+    '--shm-size', spec.shmSize ?? '8g',   // PyTorch DataLoader needs >64MB /dev/shm
+    '-e', `AITK_JOB_ID=${spec.jobId}`,
+    '-e', 'AITK_DB=/aitk/aitk_db.db',
+  ]
+  for (const [k, v] of Object.entries(spec.env ?? {})) args.push('-e', `${k}=${v}`)
+  for (const m of spec.mounts ?? []) args.push('-v', `${m.host}:${m.container}`)
+  args.push('-w', spec.workdir ?? '/aitk', spec.image, 'bash', '-lc', `python -u run.py '${spec.configPath}'`)
+  return args
+}
+
 /** Real Docker spawner — `docker run -d` the ai-toolkit image (mirrors train_stationthis.sh). */
 export class DockerAitkSpawner implements AitkSpawner {
   constructor(private readonly bin: string = 'docker') {}
 
   start(spec: AitkRunSpec): Promise<void> {
-    const workdir = spec.workdir ?? '/aitk'
-    const args = [
-      'run', '-d', '--rm',
-      '--name', `aitk-${spec.jobId}`,
-      '--gpus', `device=${spec.gpuId ?? '0'}`,
-      '-e', `AITK_JOB_ID=${spec.jobId}`,
-      '-e', 'AITK_DB=/aitk/aitk_db.db',
-    ]
-    for (const [k, v] of Object.entries(spec.env ?? {})) args.push('-e', `${k}=${v}`)
-    for (const m of spec.mounts ?? []) args.push('-v', `${m.host}:${m.container}`)
-    args.push('-w', workdir, spec.image, 'bash', '-lc', `python -u run.py '${spec.configPath}'`)
-    return this._run(args)
+    return this._run(buildAitkDockerArgs(spec))
   }
 
   private _run(args: string[]): Promise<void> {
