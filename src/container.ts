@@ -55,6 +55,7 @@ import { SqliteAitkJobStore } from './crystal/AitkJobStore.js'
 import { DockerAitkSpawner } from './crystal/AitkSpawner.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { makeTrainingFinalizer, fsLoraReader } from './crystal/trainingFinalizer.js'
+import { fsConfigWriter } from './crystal/aitkConfig.js'
 import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
 import { FeedAdapter } from './crystal/FeedAdapter.js'
@@ -189,6 +190,12 @@ export interface ContainerConfig {
      * the run still trains but the exitus stays `{ trained, steps }` (headless).
      */
     outputDir?: string
+    /**
+     * Host path of the ai-toolkit `config/` dir (under the mounted clone). Present → the
+     * modus SYNTHESISES each run's training yaml here from {dataset, baseModel, steps, …}
+     * (users never author a config). Absent → only a pre-built `configPath` aditus runs.
+     */
+    configDir?: string
   }
   /** Warm-window TTL (ms) passed to warm-pod jobs — default 60_000. */
   runpodWarmTtlMs?: number
@@ -471,6 +478,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
       ...(config.aitoolkit.mounts ? { mounts: config.aitoolkit.mounts } : {}),
       ...(config.aitoolkit.shmSize ? { shmSize: config.aitoolkit.shmSize } : {}),
       ...(config.aitoolkit.timeoutMs !== undefined ? { timeoutMs: config.aitoolkit.timeoutMs } : {}),
+      ...(config.aitoolkit.configDir ? { writeConfig: fsConfigWriter(config.aitoolkit.configDir) } : {}),
     }
     // Training finality (build #5b): a completed run hosts its LoRA in R2 + registers it
     // as a private Intella — only where both an output dir (to read it) and R2 (to host it) exist.

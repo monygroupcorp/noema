@@ -151,16 +151,19 @@ export const MODUS_AITOOLKIT_TRAINING: Modus = make({
   // LOCAL cursor still charges `impetusFixum ?? 0n` = 0n (self-hosted); the REMOTE cursor (Slice E)
   // reserves a pod-seconds cap, settled to the actual run length at the completion webhook.
 
-  // The contract the AitoolkitTrainingCursor (run) + trainingFinalizer (resolveOutput) consume.
-  // `configPath` is the container-relative training yaml (it references the dataset); a
-  // higher-level dataset→yaml builder is a future layer, so the yaml path is the input today.
+  // The user-facing contract: a DATASET + a few knobs. The modus SYNTHESISES the
+  // ai-toolkit training yaml from these (buildAitkConfig, per base-model preset) — users
+  // never author a config. Captions are optional (.txt beside the images); when absent the
+  // caption arm (Slice D) fills them in upstream.
   aditus: {
-    configPath:    { type: 'text', required: true,  description: 'Container-relative ai-toolkit training yaml' },
-    steps:         { type: 'int',  required: true,  description: 'Total training steps (drives step/ETA progress)' },
+    dataset:       { type: 'text', required: true,  description: 'Image folder to train on (with optional .txt captions)' },
     triggerWord:   { type: 'text', required: true,  description: 'The LoRA trigger word — becomes its trigger + slug' },
-    baseModel:     { type: 'text', required: true,  description: 'Base model family (the familia compat key /make resolves on)' },
+    baseModel:     { type: 'text', required: true,  description: 'Base model preset (e.g. klein-4b) — also the familia /make resolves on' },
+    steps:         { type: 'int',  required: true,  description: 'Total training steps (drives the config + step/ETA progress)' },
+    saveEvery:     { type: 'int',  required: false, description: 'Checkpoint cadence (default min(steps, 250))' },
+    rank:          { type: 'int',  required: false, description: 'LoRA rank (default per base model)' },
     gpuId:         { type: 'text', required: false, description: 'GPU device id (default 0)' },
-    jobId:         { type: 'text', required: false, description: 'ai-toolkit Job id — defaults to the actum id' },
+    jobId:         { type: 'text', required: false, description: 'Run id — defaults to the actum id; becomes the config name' },
     jobConfig:     { type: 'text', required: false, description: 'Optional JSON stored on the Job row' },
     baseIntellaId: { type: 'text', required: false, description: 'The exact base Intella trained against (provenance)' },
     ownerAnimaId:  { type: 'text', required: false, description: 'Owner of the resulting private LoRA (scopes /make resolution)' },
