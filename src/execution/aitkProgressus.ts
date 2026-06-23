@@ -55,6 +55,7 @@ export function etaMsFromSpeed(speed: string | undefined, remaining: number): nu
  * coarse `status` × the `info` sub-phase:
  *  - queued                         → queued       (queue position in message)
  *  - running + "…dataset…"          → downloading/dataset
+ *  - running + "Generating baseline" → warming      (pre-train sample = readiness inference)
  *  - running + pre-loop (step 0)    → loading/vram  ("Loading model" / "Starting")
  *  - running + training (step > 0)  → executing {done:step, total:cfgSteps, steps} + etaMs
  *  - completed                      → done
@@ -93,6 +94,10 @@ export function aitkJobToProgressus(job: AitkJob, cfgSteps?: number, now: Date =
   const lower = info?.toLowerCase() ?? ''
   if (lower.includes('dataset')) {
     return { phase: 'downloading', target: 'dataset', at, ...(info ? { message: info } : {}) }
+  }
+  if (job.step <= 0 && /baseline|sample|generat/.test(lower)) {
+    // Pre-loop "Generating baseline" sample — post-load readiness inference, not a VRAM load.
+    return { phase: 'warming', at, ...(info ? { message: info } : {}) }
   }
   if (job.step <= 0 && !lower.includes('training')) {
     // Pre-loop: "Loading model" / "Starting" — weights into VRAM (the GPU load, not a download).
