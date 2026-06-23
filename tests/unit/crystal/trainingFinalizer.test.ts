@@ -3,9 +3,10 @@
 // filesystem, no R2, no Mongo.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { makeTrainingFinalizer } from '../../../src/crystal/trainingFinalizer.js'
+import { makeTrainingFinalizer, urlLoraReader } from '../../../src/crystal/trainingFinalizer.js'
 import type { LoraReader, IntellaWriter } from '../../../src/crystal/trainingFinalizer.js'
 import type { Uploader } from '../../../src/crystal/R2Uploader.js'
+import type { MediaFetcher } from '../../../src/crystal/MediaFetcher.js'
 import type { Intella } from '../../../src/types/intelligendi.js'
 import type { Actum } from '../../../src/types/actum.js'
 import type { AitkOutcome } from '../../../src/crystal/aitoolkitRunnerClient.js'
@@ -72,4 +73,29 @@ test('an owner-less run still hosts + records an (archival) Intella, slugging th
   assert.equal(i.familia, undefined)         // omitted — no aditus familia/baseModel
   assert.equal(i.ownerAnimaId, undefined)
   assert.equal(i.access, 'private')
+})
+
+test('urlLoraReader (remote path): fetches the pod-uploaded LoRA, re-hosts it, registers the Intella', async () => {
+  const fetched: string[] = []
+  const fetcher: MediaFetcher = { async fetch(url) { fetched.push(url); return Buffer.from(`bytes:${url}`) } }
+  const h = harness()
+  const finalize = makeTrainingFinalizer({ ...h, reader: urlLoraReader(fetcher), newId: () => 'lora-r' })
+
+  const podUrl = 'https://pod-bucket/outputs/run-9/milady.safetensors?sig=abc'
+  const exitus = await finalize(
+    actum({ triggerWord: 'milady', familia: 'flux', ownerAnimaId: 'anima-2' }),
+    { status: 'completed', lastStep: 800, outputUrl: podUrl },
+  )
+
+  assert.deepEqual(fetched, [podUrl])                                   // pulled from the pod's R2 URL
+  assert.equal(h.puts[0].key, 'models/lora-r/milady.safetensors')      // re-hosted to OUR durable key
+  assert.deepEqual(h.puts[0].bytes, Buffer.from(`bytes:${podUrl}`))
+  assert.deepEqual(exitus, { trained: true, steps: 800, loraId: 'lora-r', loraUrl: 'https://cdn/models/lora-r/milady.safetensors' })
+  assert.equal(h.upserts[0].familia, 'flux')
+  assert.equal(h.upserts[0].ownerAnimaId, 'anima-2')
+})
+
+test('urlLoraReader throws when the remote outcome carries no outputUrl', async () => {
+  const fetcher: MediaFetcher = { async fetch() { return Buffer.from('x') } }
+  await assert.rejects(() => urlLoraReader(fetcher)('job', { status: 'completed', lastStep: 1 }), /no outputUrl/)
 })

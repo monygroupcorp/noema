@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid'
 import type { Actum } from '../types/actum.js'
 import type { Intella, IntellaSource } from '../types/intelligendi.js'
 import type { Uploader } from './R2Uploader.js'
+import type { MediaFetcher } from './MediaFetcher.js'
 import type { AitkOutcome } from './aitoolkitRunnerClient.js'
 
 // =============================================================================
@@ -146,5 +147,21 @@ export function fsLoraReader(outputDir: string): LoraReader {
       if (m > newest) { newest = m; filename = n }
     }
     return read(filename)
+  }
+}
+
+/**
+ * Remote `LoraReader` (Slice E): the pod uploaded its safetensors to R2 and reported the
+ * URL on `outcome.outputUrl`; fetch those bytes for the same finality path. The finalizer
+ * then re-hosts them under our durable `models/<id>/` key — one finality, two readers.
+ * Hermetic (a fake `MediaFetcher` drives it in tests).
+ */
+export function urlLoraReader(fetcher: MediaFetcher): LoraReader {
+  return async (_jobId, outcome) => {
+    const url = outcome.outputUrl
+    if (!url) throw new Error('training finality: remote run reported no outputUrl')
+    const base = url.split('?')[0].split('#')[0].split('/').pop() || 'lora'
+    const filename = base.endsWith('.safetensors') ? base : `${base}.safetensors`
+    return { bytes: await fetcher.fetch(url), filename }
   }
 }
