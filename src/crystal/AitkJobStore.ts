@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
 import type { AitkJob } from '../execution/aitkProgressus.js'
 
 // =============================================================================
@@ -11,8 +11,11 @@ import type { AitkJob } from '../execution/aitkProgressus.js'
 // orchestration harness's `seed_job.py` exactly (same minimal schema + upsert), so a fresh
 // OR resumed run starts clean. `read` is the `AitkJobReader` the poll loop drives.
 //
-// `node:sqlite` (built into Node) — no new dependency, in-process, so the store is exercised
-// hermetically against a real temp DB (no external service).
+// `node:sqlite` is built into Node **22.5+** — no new dependency, in-process, so the store is
+// exercised hermetically against a real temp DB (no external service). It is required LAZILY
+// (inside the constructor, not at module load) so this file imports cleanly on older Node (the
+// staging/prod container runs Node 20 and never constructs this — registration is gated on
+// `config.aitoolkit`, present only where a local trainer + Node 22 exist).
 // =============================================================================
 
 export interface AitkJobStore {
@@ -37,6 +40,8 @@ export class SqliteAitkJobStore implements AitkJobStore {
   private readonly db: DatabaseSync
 
   constructor(dbPath: string) {
+    // Lazy require — see header. Throws only here (on a Node without node:sqlite), never at import.
+    const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite')
     this.db = new DatabaseSync(dbPath)
     // ai-toolkit writes with autocommit while we read — wait out a momentary write lock
     // rather than failing the poll.
