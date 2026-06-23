@@ -23,16 +23,25 @@ import type { Modus } from '../types/modus.js'
 // modus omits `impetusFixum`, so this cap — not 0n — is what's used.
 // =============================================================================
 
-/** What the pod needs to run one training job. The launcher provisions + bootstraps from this. */
+/**
+ * The high-level training inputs the launcher needs. The modus owns the config — the user
+ * brings a dataset (+ knobs), NEVER a yaml — so the LAUNCHER resolves the dataset → a manifest
+ * and synthesises the training config (`buildAitkConfig`) with the pod-side dataset path, then
+ * provisions + bootstraps. This mirrors the local cursor, which generates its own config too.
+ */
 export interface RemoteAitkLaunchSpec {
   /** The training Actum's id — the pod posts `/runner/status` + the completion webhook against it. */
   actumId: string
   /** ai-toolkit Job id (= the config `name`). */
   jobId: string
-  /** Container-relative training yaml. */
-  configPath: string
-  /** Total steps (for the pod-side progress projection). */
-  steps?: number
+  /** Dataset reference — a corpusId or an inline manifest; the launcher resolves it. */
+  dataset: string
+  /** Base-model preset key (e.g. 'klein-4b'). */
+  baseModel: string
+  /** The LoRA trigger word. */
+  triggerWord: string
+  /** Total steps. */
+  steps: number
   gpuId?: string
   /** Optional JSON stored on the Job row. */
   jobConfig?: string
@@ -62,15 +71,19 @@ export class RemoteAitoolkitTrainingCursor implements Cursor {
   async run(actum: Actum): Promise<CursorResult> {
     const aditus = actum.aditus
     const jobId = String(aditus.jobId ?? actum.id)
-    const configPath = String(aditus.configPath ?? '')
-    if (!configPath) throw new Error('aitoolkit remote training: `configPath` is required (the container-relative training yaml)')
+    const dataset = String(aditus.dataset ?? '')
+    if (!dataset) throw new Error('aitoolkit remote training: `dataset` is required (a corpusId or manifest)')
+    const baseModel = String(aditus.baseModel ?? '')
+    if (!baseModel) throw new Error('aitoolkit remote training: `baseModel` is required')
+    const triggerWord = String(aditus.triggerWord ?? '')
+    if (!triggerWord) throw new Error('aitoolkit remote training: `triggerWord` is required')
     const steps = asPositiveInt(aditus.steps)
+    if (steps === undefined) throw new Error('aitoolkit remote training: `steps` is required (a positive integer)')
     const gpuId = aditus.gpuId !== undefined ? String(aditus.gpuId) : undefined
     const jobConfig = typeof aditus.jobConfig === 'string' ? aditus.jobConfig : undefined
 
     const { externusJobId } = await this.deps.launcher.launch({
-      actumId: actum.id, jobId, configPath,
-      ...(steps !== undefined ? { steps } : {}),
+      actumId: actum.id, jobId, dataset, baseModel, triggerWord, steps,
       ...(gpuId ? { gpuId } : {}),
       ...(jobConfig ? { jobConfig } : {}),
     })

@@ -18,6 +18,9 @@ const COMFYRUNNER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/comfy
 // The multi-runtime runner (ADR-0007) — shipped for non-ComfyUI runtimes (vLLM). ComfyUI stays on
 // comfyrunner.py until its cutover is live-verified, so the proven gen path is untouched.
 const RUNNER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/runner.py')
+// The one-shot LoRA trainer (Slice E) — launched detached for a long single job (not the
+// VRAM-scheduled runner.py, not comfyrunner's held SSE pipeline).
+const AITKTRAINER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/aitktrainer.py')
 
 const log = makeLogger('cursor:runpod:secure')
 
@@ -107,6 +110,11 @@ interface RunPodPodStatus {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
+}
+
+/** Single-quote a value for a POSIX shell command line (escapes embedded single quotes). */
+function shellQuote(v: string): string {
+  return `'${v.replace(/'/g, `'\\''`)}'`
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +280,70 @@ export class SecurePodClient implements RunPodClient, Procurator {
       ...(typeof prov.sshInfo.costPerHr === 'number' ? { costPerHr: prov.sshInfo.costPerHr } : {}),
       provisionMs: prov.provisionMs,
     }
+  }
+
+  /**
+   * Provision a SECURE pod and launch a DETACHED pod script (Slice E training) — NOT submit()'s
+   * held SSE pipeline (built for short gens) and NOT runner.py's VRAM scheduler. For one long
+   * single-shot job: provision (SECURE for attempts 1-2, COMMUNITY/any-GPU on the last), wait SSH,
+   * ensure boto3, upload `aitktrainer.py`, nohup-launch it with `env` (+ injected RUNPOD_POD_ID =
+   * the pod id), close SSH, return the pod id. Fire-and-forget — the pod posts its own
+   * `/runner/status` + completion webhook. `image` is the ai-toolkit image (≠ the comfyrunner
+   * default). GPU-gated: live-verified, not CI-covered (the launcher's logic is tested hermetically).
+   */
+  async launchTrainingPod(opts: { image: string; env: Record<string, string> }): Promise<{ podId: string }> {
+    const maxAttempts = this.config.podRetries ?? 3
+    let podId: string | undefined
+    let lastErr: Error | undefined
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const isFallback = attempt >= maxAttempts
+      try {
+        podId = await this._provisionPod(opts.image, isFallback ? 'COMMUNITY' : undefined, isFallback ? null : undefined)
+        break
+      } catch (err) {
+        lastErr = err as Error
+        log.warn(`training pod provision attempt ${attempt}/${maxAttempts} failed`, { error: lastErr.message })
+      }
+    }
+    if (!podId) throw lastErr ?? new Error('training pod provision failed')
+
+    let ssh: SshTransportLike | null = null
+    try {
+      const sshInfo = await this._waitForSsh(podId)
+      log.info('training pod locked', { podId, gpuType: sshInfo.gpuType, costPerHr: sshInfo.costPerHr })
+      ssh = await this._waitForSshd(sshInfo)
+      await this._bootstrapDetached(ssh, podId, AITKTRAINER_SCRIPT_PATH, 'aitktrainer.py',
+        { ...opts.env, RUNPOD_POD_ID: podId }, 'boto3')
+      await ssh.close()
+      ssh = null
+      return { podId }
+    } catch (err) {
+      await ssh?.close().catch(() => {})
+      await this._terminatePod(podId).catch(() => {})   // don't leak a pod whose job never started
+      throw err
+    }
+  }
+
+  /**
+   * Upload a pod script and launch it DETACHED with `env` (nohup) — the pod owns its own status +
+   * completion webhook from here. `pipPackages` are installed first if absent (lean: the heavy
+   * runtime is baked into the training image). Env values are shell-quoted (base64 blobs + URLs).
+   */
+  private async _bootstrapDetached(
+    ssh: SshTransportLike, podId: string, scriptPath: string, scriptName: string,
+    env: Record<string, string>, pipPackages?: string,
+  ): Promise<void> {
+    log.info('bootstrapping training pod', { podId, script: scriptName })
+    if (pipPackages) {
+      const probe = pipPackages.split(' ')[0]
+      await ssh.exec(`python3 -c 'import ${probe}' 2>/dev/null || pip install ${pipPackages} -q`, { timeout: 600_000 })
+    }
+    const script = fs.readFileSync(scriptPath, 'utf8')
+    const b64 = Buffer.from(script).toString('base64').replace(/\n/g, '')
+    await ssh.exec(`echo '${b64}' | base64 -d > /root/${scriptName}`, { timeout: 10_000 })
+    const envStr = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(' ')
+    await ssh.exec(`${envStr} nohup python3 /root/${scriptName} >> /tmp/${scriptName}.log 2>&1 &`, { timeout: 10_000 })
+    log.info('training pod launched', { podId })
   }
 
   // ── private ──────────────────────────────────────────────────────────────
