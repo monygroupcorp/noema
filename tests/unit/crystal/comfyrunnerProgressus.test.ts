@@ -67,6 +67,29 @@ test('comfyrunner records the §6a phase timeline; per-tick progress is NOT reco
   })
 })
 
+test('downloaded events tick the downloading n/m counter onto the timeline (#6b)', async () => {
+  // #6b makes actum.progressus the bulletin's sole driver, so the n/m counter must advance on
+  // each per-model `downloaded` (not just at preflight) — the bus event drives the live line even
+  // though same-phase progress coalesces out of the persisted timeline.
+  const fetchFn = (async () => makeSseStream([
+    { type: 'preflight-models', total: 2, present: 0 },
+    { type: 'downloaded', dest: 'a.safetensors' },
+    { type: 'downloaded', dest: 'b.safetensors' },
+    { type: 'node' },
+    { type: 'complete' },
+  ])) as unknown as typeof fetch
+
+  await withRecorder('act-dl', async (seen) => {
+    await awaitViaStream(fetchFn, 'https://pod-8080.proxy.runpod.net', 'job-1', 5000)
+    const downloads = seen.filter(s => s.p.phase === 'downloading').map(s => s.p.progress)
+    assert.deepEqual(downloads, [
+      { done: 0, total: 2, unit: 'items' },   // preflight
+      { done: 1, total: 2, unit: 'items' },   // first model lands
+      { done: 2, total: 2, unit: 'items' },   // second model lands
+    ], 'the counter ticks 0/2 → 1/2 → 2/2')
+  })
+})
+
 test('comfyrunner records a failed terminal carrying the error message', async () => {
   const fetchFn = (async () => makeSseStream([{ type: 'error', error: 'OOM on GPU' }])) as unknown as typeof fetch
   await withRecorder('act-err', async (seen) => {
