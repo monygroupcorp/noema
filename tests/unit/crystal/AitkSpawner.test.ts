@@ -4,7 +4,7 @@
 // env, mounts, workdir, and the run.py command.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildAitkDockerArgs } from '../../../src/crystal/AitkSpawner.js'
+import { buildAitkDockerArgs, buildAitkChmodArgs } from '../../../src/crystal/AitkSpawner.js'
 
 function flagValue(args: string[], flag: string): string | undefined {
   const i = args.indexOf(flag)
@@ -37,4 +37,16 @@ test('buildAitkDockerArgs: honours overrides — gpuId, shmSize, mounts, env', (
   assert.equal(flagValue(args, '-e'), 'AITK_JOB_ID=j')
   assert.ok(args.includes('AITK_DB=/aitk/aitk_db.db'))
   assert.ok(args.includes('HF_HUB_ENABLE_HF_TRANSFER=0'))
+})
+
+test('buildAitkChmodArgs: a fast root chmod of <workdir>/output (no entrypoint, mounts passed)', () => {
+  const args = buildAitkChmodArgs({
+    image: 'img:1', workdir: '/aitk',
+    mounts: [{ host: '/h/aitk', container: '/aitk' }],
+  })
+  // skips the image's nvidia entrypoint → just chmod
+  assert.deepEqual(args.slice(0, 4), ['run', '--rm', '--entrypoint', 'chmod'])
+  assert.ok(args.includes('-v') && args.includes('/h/aitk:/aitk'))
+  // recursive, group/other read + dir-traverse, on the output dir
+  assert.deepEqual(args.slice(-4), ['img:1', '-R', 'a+rX', '/aitk/output'])
 })
