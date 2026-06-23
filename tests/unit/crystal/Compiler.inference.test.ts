@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { Compiler, isInferenceSpec, isScriptSpec, type InferenceCompiledSpec, type ScriptCompiledSpec } from '../../../src/crystal/Compiler.js'
 import { WorkflowTemplateRegistry } from '../../../src/crystal/WorkflowTemplateRegistry.js'
 import {
-  ESSENTIA_QWEN3_VL, ESSENTIA_MOSS_MUSIC, ESSENTIA_SHOTVL, ESSENTIA_HEARTMULA, ESSENTIA_HUNYUAN3D,
+  ESSENTIA_QWEN3_VL, ESSENTIA_QWEN3_VL_CAPTION, ESSENTIA_MOSS_MUSIC, ESSENTIA_SHOTVL, ESSENTIA_HEARTMULA, ESSENTIA_HUNYUAN3D,
 } from '../../../src/crystal/seeds/essentiae.js'
 import { CANONICAL_FUNDAMENTA, FUNDAMENTUM_QWEN_VL_VLLM } from '../../../src/crystal/seeds/fundamenta.js'
 import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js'
@@ -112,7 +112,9 @@ test('MOSS-Music compiles via the sglang substrate (custom-arch runtime)', async
 })
 
 test('no systemPrompt → field omitted', async () => {
-  const { spec } = await makeCompiler().compile(ESSENTIA_QWEN3_VL, { prompt: 'hi' })
+  // An essentia whose inferentia carries no systemPrompt (Qwen3-VL now bakes one).
+  const essentia: Essentia = { ...ESSENTIA_QWEN3_VL, inferentia: { genParams: {} } }
+  const { spec } = await makeCompiler().compile(essentia, { prompt: 'hi' })
   assert.equal('systemPrompt' in asInference(spec).inference, false)
 })
 
@@ -184,6 +186,36 @@ test('Hunyuan3D compiles: 3d categoria, install cmd, wrapper fixedFile, image→
   assert.ok(ii >= 0 && s.args[ii + 1] === 'https://x/cat.png')
   // the wrapper script is dropped into the repo (no-CLI repo)
   assert.ok(s.fileInputs?.['run_shape.py']?.includes('Hunyuan3DDiTFlowMatchingPipeline'))
+})
+
+// ── Slice D: the caption modus compiles to a complete, runnable inference spec ──
+
+test('caption modus (image-only) compiles to a full vLLM spec: persona + baked instruction + image', async () => {
+  const { spec } = await makeCompiler().compile(ESSENTIA_QWEN3_VL_CAPTION, { image: 'r2://pic.png' })
+  const inf = asInference(spec)
+
+  assert.equal(inf.runtime, 'vLLM')
+  // the captioner persona (system turn) + the baked instruction (user turn, via the
+  // prompt-Porta praefixum — woven even with no typed prompt) — so it runs image-only.
+  assert.match(inf.inference.systemPrompt ?? '', /expert image captioner/)
+  assert.equal(inf.inference.prompt, 'Describe this image in one dense caption — subject, attributes, style, and composition.')
+  assert.deepEqual(inf.inference.media, [{ type: 'image', ref: 'r2://pic.png' }])
+  // baseline genParams under the aditus defaults; the LM weight + HF repo for download.
+  assert.equal(inf.inference.genParams.top_p, 0.9)
+  assert.equal(inf.inference.genParams.repeat_penalty, 1.05)
+  assert.equal(inf.inference.genParams.max_tokens, 256)
+  assert.equal(inf.inference.genParams.temperature, 0.3)
+  const lm = inf.models.find(m => m.role === 'lm')
+  assert.equal(lm!.id, 'intella.qwen3-vl-8b')
+  assert.equal((lm as { repo?: string }).repo, 'org/intella.qwen3-vl-8b')
+})
+
+test('caption modus: a typed prompt is woven AFTER the baked instruction', async () => {
+  const { spec } = await makeCompiler().compile(ESSENTIA_QWEN3_VL_CAPTION, { image: 'r2://pic.png', prompt: 'focus on the clothing' })
+  assert.equal(
+    asInference(spec).inference.prompt,
+    'Describe this image in one dense caption — subject, attributes, style, and composition., focus on the clothing',
+  )
 })
 
 // ── enforcement: unknown runtime is a hard error ──────────────────────────────

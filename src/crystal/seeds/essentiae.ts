@@ -401,8 +401,15 @@ export const ESSENTIA_QWEN3_VL: Essentia = {
     text: { type: 'text', description: 'The model\'s textual answer' },
   },
 
+  // The LLM form half (ADR-0007 Part B): a baked assistant persona + baseline gen params
+  // (the aditus knobs override these). The vLLM executor builds its chat call from this.
+  inferentia: {
+    systemPrompt: 'You are Qwen-VL, a precise multimodal assistant. Answer the user\'s question about the provided image directly and concisely.',
+    genParams: { top_p: 0.9 },
+  },
+
   natum: new Date('2026-06-11'),
-  mutatum: new Date('2026-06-11'),
+  mutatum: new Date('2026-06-23'),
 }
 
 export const ESSENTIA_MOSS_MUSIC: Essentia = {
@@ -461,6 +468,51 @@ export const ESSENTIA_SHOTVL: Essentia = {
 
   natum: new Date('2026-06-11'),
   mutatum: new Date('2026-06-11'),
+}
+
+// =============================================================================
+// ESSENTIA_QWEN3_VL_CAPTION — a caption-focused understanding flow (Slice D).
+//
+// Same substrate + weights as ESSENTIA_QWEN3_VL (the Qwen3-VL VLM), but the form
+// half is specialised for ONE job: producing dense, comma-separated training
+// captions. The captioner instruction lives in two baked places so the flow is
+// usable image-only: a `systemPrompt` persona/format-rule (the system turn) and a
+// `prompt` Porta `praefixum` (the user turn — woven even when no prompt is typed,
+// since the inference compile reads the raw prompt and weaves affixes). Feeds the
+// canon-training dataset-prep loop. Execution is GPU-gated on the vLLM executor
+// (ADR-0007 A2.2c) — the seed compiles to a runnable spec today, hermetically.
+// =============================================================================
+export const ESSENTIA_QWEN3_VL_CAPTION: Essentia = {
+  id: 'qwen3-vl-caption',
+  nomen: 'Qwen3-VL — image captioner (training datasets)',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'text',
+
+  fundamentumId: 'qwen-vl-vllm',
+  fundamentumVersio: '1.0.0',
+  intellae: [{ id: 'intella.qwen3-vl-8b', role: 'lm' }],
+
+  aditus: {
+    image:       { type: 'image', required: true,  description: 'Image to caption' },
+    prompt:      { type: 'text',  required: false, praefixum: 'Describe this image in one dense caption — subject, attributes, style, and composition.', description: 'Optional extra guidance, woven after the caption instruction' },
+    max_tokens:  { type: 'int',   required: false, default: 256, description: 'Max caption tokens' },
+    temperature: { type: 'float', required: false, default: 0.3, description: 'Sampling temperature (low = stable captions)' },
+  },
+  exitus: {
+    caption: { type: 'text', description: 'A dense, comma-separated training caption' },
+  },
+
+  inferentia: {
+    systemPrompt: 'You are an expert image captioner producing training-dataset captions. Reply with ONE line: comma-separated descriptive phrases covering subject, attributes, style, and composition. No preamble, no markdown, no quotes.',
+    genParams: { top_p: 0.9, repeat_penalty: 1.05 },
+  },
+
+  natum:   new Date('2026-06-23'),
+  mutatum: new Date('2026-06-23'),
 }
 
 // =============================================================================
@@ -601,6 +653,7 @@ export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_RMBG,
   ESSENTIA_UPSCALE,
   ESSENTIA_QWEN3_VL,
+  ESSENTIA_QWEN3_VL_CAPTION,
   ESSENTIA_MOSS_MUSIC,
   ESSENTIA_SHOTVL,
   ESSENTIA_HEARTMULA,

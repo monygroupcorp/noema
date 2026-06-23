@@ -50,6 +50,41 @@ export const COMPOSITUS_MAKE_UPSCALE: Modus = {
   mutatum: new Date('2026-06-19'),
 }
 
+/**
+ * Image → Caption — caption an image with the Qwen3-VL captioner (Slice D). A single
+ * step today; the public face that feeds the canon-training dataset-prep loop (and the
+ * graft point for a later caption→dataset-write chain).
+ *
+ *   image ─→ [qwen3-vl-caption] ──→ caption
+ *
+ * The `image` input binds BY NAME from the spell aditus to the child's `image` port —
+ * no cross-step wire needed. The captioning instruction is baked into the essentia
+ * (systemPrompt + the prompt-Porta praefixum), so the spell takes just an image.
+ */
+export const COMPOSITUS_IMAGE_CAPTION: Modus = {
+  id: 'image-caption',
+  nomen: 'Image → Caption',
+  genus: 'compositus',
+  versio: '1.0.0',
+  contentHash: '',
+  canonica: true,
+
+  aditus: {
+    image: { type: 'image', required: true, description: 'Image to caption' },
+  },
+  exitus: {
+    caption: { type: 'text', description: 'A dense, comma-separated training caption' },
+  },
+
+  gradus: [
+    { ordine: 0, modusId: 'qwen3-vl-caption' },
+  ],
+
+  natum: new Date('2026-06-23'),
+  mutatum: new Date('2026-06-23'),
+}
+
 export const CANONICAL_COMPOSITI: Modus[] = [
   COMPOSITUS_MAKE_UPSCALE,
+  COMPOSITUS_IMAGE_CAPTION,
 ]
