@@ -56,8 +56,8 @@ export interface FakeOpts {
  * Telegram UX — reactions, the session bulletin, warm reuse, the idle reaper —
  * can be exercised without provisioning (or paying for) a real GPU pod.
  *
- * Emits the same actum.stage events the real cursor does with *real* elapsed
- * times, fires a COMPLETED webhook with a sample image, then — mirroring
+ * Records the same Progressus timeline the real cursor does (via the in-process recorder
+ * seam), fires a COMPLETED webhook with a sample image, then — mirroring
  * SecurePodClient — registers an idle Materia in the store so the NEXT /make is
  * routed to a warm pod (FakeWarmPodClient) and the idle reaper can sweep it.
  * No SSH, no comfyrunner, no $.
@@ -97,8 +97,7 @@ export class FakeRunPodClient implements RunPodClient, Procurator {
     const actumId = getTrace()?.actumId
     const start = Date.now()
     const emit = (stage: string, info?: Record<string, unknown>) => {
-      if (actumId) bus.emit('actum.stage', { actumId, stage, elapsedMs: Date.now() - start, info })
-      recordFakeStage(actumId, stage, info)   // #6b: drive the bulletin off the owned timeline
+      recordFakeStage(actumId, stage, info)   // owned timeline drives the bulletin/SSE (#6b/#6e)
       onStage?.(stage, info)
     }
     const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -155,10 +154,8 @@ export class FakeRunPodClient implements RunPodClient, Procurator {
     const imageUrl = this.opts.imageUrl ?? process.env.DEV_FAKE_IMAGE ?? 'https://picsum.photos/seed/noema/512'
 
     const actumId = getTrace()?.actumId
-    const start = Date.now()
     const emit = (stage: string, info?: Record<string, unknown>) => {
-      if (actumId) bus.emit('actum.stage', { actumId, stage, elapsedMs: Date.now() - start, info })
-      recordFakeStage(actumId, stage, info)   // #6b: drive the bulletin off the owned timeline
+      recordFakeStage(actumId, stage, info)   // owned timeline drives the bulletin/SSE (#6b/#6e)
     }
     const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 

@@ -288,11 +288,10 @@ export class SecurePodClient implements RunPodClient, Procurator {
     runtime?: string,
   ): Promise<{ podId: string; sshInfo: SshInfo; provisionMs: number }> {
     const startMs = Date.now()
-    const emitStage = (stage: string, info?: import('../lib/bus.js').StageInfo) => {
+    const signal = (stage: string, info?: import('../lib/bus.js').StageInfo) => {
       const ctx = getTrace()
       if (ctx?.actumId) {
-        bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - (ctx.startTs ?? startMs), info })
-        // Also record the cold-start phase onto the Progressus timeline (#6a). Maps only the
+        // Record the cold-start phase onto the owned Progressus timeline (#6a). Maps only the
         // pod-lifecycle stages; comfyrunner's own stages return undefined (it records those).
         // Fire-and-forget but .catch — a recorder DB error must never break the run (§4).
         const prog = coldStartProgressus(stage, info)
@@ -319,16 +318,16 @@ export class SecurePodClient implements RunPodClient, Procurator {
 
     let ssh: SshTransportLike | null = null
     try {
-      emitStage('provisioning')
+      signal('provisioning')
       const sshInfo = await this._waitForSsh(podId)
-      emitStage('pod-locked', { gpuType: sshInfo.gpuType, region: sshInfo.region, costPerHr: sshInfo.costPerHr, podId })
+      signal('pod-locked', { gpuType: sshInfo.gpuType, region: sshInfo.region, costPerHr: sshInfo.costPerHr, podId })
       ssh = await this._waitForSshd(sshInfo)
-      emitStage('bootstrapping')
+      signal('bootstrapping')
       await this._bootstrap(ssh, podId, runtime)
       await ssh.close()
       ssh = null
       await this._waitForRunner(SecurePodClient.runnerBase(podId))
-      emitStage('comfy-ready')
+      signal('comfy-ready')
       return { podId, sshInfo, provisionMs: Date.now() - startMs }
     } catch (err) {
       await ssh?.close().catch(() => {})
@@ -475,11 +474,10 @@ export class SecurePodClient implements RunPodClient, Procurator {
     const startMs = Date.now()
     let ssh: SshTransportLike | null = null
     let sshInfo: SshInfo | null = null
-    const emitStage = (stage: string, info?: import('../lib/bus.js').StageInfo) => {
+    const signal = (stage: string, info?: import('../lib/bus.js').StageInfo) => {
       const ctx = getTrace()
       if (ctx?.actumId) {
-        bus.emit('actum.stage', { actumId: ctx.actumId, stage, elapsedMs: Date.now() - (ctx.startTs ?? startMs), info })
-        const prog = coldStartProgressus(stage, info)   // cold-start phases onto the timeline (#6a)
+        const prog = coldStartProgressus(stage, info)   // cold-start phases onto the owned timeline (#6a)
         if (prog) recordProgressus(ctx.actumId, { ...prog, at: new Date() }).catch(err => log.warn('progressus record failed', { error: (err as Error).message }))
       }
     }
@@ -491,18 +489,18 @@ export class SecurePodClient implements RunPodClient, Procurator {
     let jobSucceeded = false
 
     try {
-      emitStage('provisioning')
+      signal('provisioning')
       sshInfo = await this._waitForSsh(podId)
       executio.provisionMs = Date.now() - startMs
       executio.costPerHr = sshInfo.costPerHr
       executio.gpuType = sshInfo.gpuType
       // Pod acquired — surface GPU/region/price to the user the moment we lock on.
       log.info('pod locked', { podId, gpuType: sshInfo.gpuType, region: sshInfo.region, costPerHr: sshInfo.costPerHr })
-      emitStage('pod-locked', { gpuType: sshInfo.gpuType, region: sshInfo.region, costPerHr: sshInfo.costPerHr, podId })
+      signal('pod-locked', { gpuType: sshInfo.gpuType, region: sshInfo.region, costPerHr: sshInfo.costPerHr, podId })
       ssh = await this._waitForSshd(sshInfo)
       executio.sshReadyMs = Date.now() - startMs
       reportMetrics()  // persist provision/ssh/podId/costPerHr — survives even if download fails
-      emitStage('bootstrapping')
+      signal('bootstrapping')
       await this._bootstrap(ssh, podId, isCompiledSpec(input) ? input.runtime : undefined)
 
       // SSH only needed for bootstrap — close before HTTP phase
@@ -511,7 +509,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
 
       const runnerBase = SecurePodClient.runnerBase(podId)
       await this._waitForRunner(runnerBase)
-      emitStage('comfy-ready')
+      signal('comfy-ready')
 
       const jobId = externusJobId ?? podId
       await submitToRunner(this.fetchFn, runnerBase, jobId, input, webhook, this.config.r2)
@@ -521,9 +519,10 @@ export class SecurePodClient implements RunPodClient, Procurator {
       if (submitCtx) submitCtx.jobSubmitMs = Date.now() - submitCtx.startTs
 
       // comfyrunner fires the webhook; we subscribe to SSE only to know when done
-      // (so we can terminate/warm the pod and emit stage events to the bus)
+      // (so we can terminate/warm the pod). comfyrunner records its own Progressus timeline
+      // through the in-process recorder seam — no stage callback needed (#6e).
       await awaitViaStream(
-        this.fetchFn, runnerBase, jobId, this.config.jobTimeoutMs ?? 45 * 60 * 1000, emitStage,
+        this.fetchFn, runnerBase, jobId, this.config.jobTimeoutMs ?? 45 * 60 * 1000,
         (m) => { Object.assign(executio, m); reportMetrics() },
       )
       jobSucceeded = true

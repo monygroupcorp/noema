@@ -7,7 +7,6 @@ import { submitToRunner, awaitViaStream, installViaRunner, type InstallResult } 
 import type { ModelRef } from '../types/actum.js'
 import type { ModelInstallClient, InstallProgress } from './ModelInstaller.js'
 import { makeLogger } from '../lib/logger.js'
-import { bus } from '../lib/bus.js'
 import { getTrace } from '../lib/trace.js'
 import { recordProgressus } from '../execution/progressusSink.js'
 import { coldStartProgressus } from '../execution/progressus.js'
@@ -53,11 +52,11 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
     // carry the pod id so the destroy button can terminate this warm pod.
     const ctx = getTrace()
     if (ctx?.actumId) {
-      bus.emit('actum.stage', { actumId: ctx.actumId, stage: 'warm-pod-found', elapsedMs: 0, info: { podId: externusId } })
-      // Warm reuse → a near-zero `provisioning` entry on the timeline (#6a): cold-vs-warm
-      // cost falls straight out of phaseDurations (warm provisioning ≈ 0).
-      const prog = coldStartProgressus('warm-pod-found', { podId: externusId })
+      // Warm reuse → a near-zero `provisioning`/'warm pod reused' Progressus (#6a): the Telegram
+      // layer reacts 🔥 off this, and cold-vs-warm cost falls straight out of phaseDurations
+      // (warm provisioning ≈ 0). Single owned channel since #6e retired the `actum.stage` shim.
       // Fire-and-forget but .catch — a recorder DB error must never break the run (§4).
+      const prog = coldStartProgressus('warm-pod-found', { podId: externusId })
       if (prog) recordProgressus(ctx.actumId, { ...prog, at: new Date() }).catch(err => log.warn('progressus record failed', { error: (err as Error).message }))
     }
 
@@ -131,7 +130,6 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
         runnerBase,
         jobId,
         this.config.jobTimeoutMs ?? 45 * 60 * 1000,
-        undefined,
         (m) => { Object.assign(executio, m); void onMetrics?.({ ...executio }) },
       )
     } catch (err) {

@@ -13,15 +13,8 @@ function makeHub(opts?: { bufferSize?: number }) {
   return { bus, hub, calls }
 }
 
-test('subscriber receives a stage event emitted on the bus', () => {
-  const { bus, hub } = makeHub()
-  const received: RunEvent[] = []
-  hub.subscribe('r1', ev => received.push(ev))
-  bus.emit('actum.stage', { actumId: 'r1', stage: 'provisioning', elapsedMs: 50 })
-  assert.equal(received.length, 1)
-  assert.equal(received[0].kind, 'stage')
-  assert.equal(received[0].stage, 'provisioning')
-})
+/** Minimal owned status report — the single live-status channel since #6e. */
+const prog = (message: string) => ({ phase: 'executing' as const, message, at: new Date(0) })
 
 test('subscriber receives a typed progress event from actum.progressus (#6c)', () => {
   const { bus, hub } = makeHub()
@@ -37,17 +30,17 @@ test('subscriber receives a typed progress event from actum.progressus (#6c)', (
 
 test('recentFor returns buffered events', () => {
   const { bus, hub } = makeHub()
-  bus.emit('actum.stage', { actumId: 'r2', stage: 'prep', elapsedMs: 10 })
-  bus.emit('actum.stage', { actumId: 'r2', stage: 'running', elapsedMs: 20 })
+  bus.emit('actum.progressus', { actumId: 'r2', progressus: prog('prep') })
+  bus.emit('actum.progressus', { actumId: 'r2', progressus: prog('running') })
   const recent = hub.recentFor('r2')
   assert.equal(recent.length, 2)
-  assert.equal(recent[0].stage, 'prep')
-  assert.equal(recent[1].stage, 'running')
+  assert.equal(recent[0].progressus?.message, 'prep')
+  assert.equal(recent[1].progressus?.message, 'running')
 })
 
 test('recentFor returns a copy (not the internal array)', () => {
   const { bus, hub } = makeHub()
-  bus.emit('actum.stage', { actumId: 'r3', stage: 'prep', elapsedMs: 5 })
+  bus.emit('actum.progressus', { actumId: 'r3', progressus: prog('prep') })
   const a = hub.recentFor('r3')
   const b = hub.recentFor('r3')
   assert.notEqual(a, b)
@@ -84,21 +77,21 @@ test('postWebhook does NOT fire when setWebhook was not called', async () => {
 test('bufferSize cap drops oldest events', () => {
   const { bus, hub } = makeHub({ bufferSize: 3 })
   for (let i = 0; i < 5; i++) {
-    bus.emit('actum.stage', { actumId: 'r6', stage: `s${i}`, elapsedMs: i * 10 })
+    bus.emit('actum.progressus', { actumId: 'r6', progressus: prog(`s${i}`) })
   }
   const recent = hub.recentFor('r6')
   assert.equal(recent.length, 3)
-  assert.equal(recent[0].stage, 's2')
-  assert.equal(recent[2].stage, 's4')
+  assert.equal(recent[0].progressus?.message, 's2')
+  assert.equal(recent[2].progressus?.message, 's4')
 })
 
 test('unsubscribe stops delivery', () => {
   const { bus, hub } = makeHub()
   const received: RunEvent[] = []
   const off = hub.subscribe('r7', ev => received.push(ev))
-  bus.emit('actum.stage', { actumId: 'r7', stage: 'prep', elapsedMs: 5 })
+  bus.emit('actum.progressus', { actumId: 'r7', progressus: prog('prep') })
   off()
-  bus.emit('actum.stage', { actumId: 'r7', stage: 'running', elapsedMs: 15 })
+  bus.emit('actum.progressus', { actumId: 'r7', progressus: prog('running') })
   assert.equal(received.length, 1)
 })
 
@@ -106,6 +99,6 @@ test('events for other runIds are not delivered to an unrelated subscriber', () 
   const { bus, hub } = makeHub()
   const received: RunEvent[] = []
   hub.subscribe('r8', ev => received.push(ev))
-  bus.emit('actum.stage', { actumId: 'other', stage: 'prep', elapsedMs: 5 })
+  bus.emit('actum.progressus', { actumId: 'other', progressus: prog('prep') })
   assert.equal(received.length, 0)
 })

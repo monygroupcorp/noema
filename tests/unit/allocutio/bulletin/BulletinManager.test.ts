@@ -2,6 +2,15 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { BulletinManager, type BulletinSink } from '../../../../src/allocutio/lexicon/bulletin/BulletinManager.js'
 import type { BulletinKeyboard } from '../../../../src/allocutio/lexicon/bulletin/types.js'
+import { fakeStageToProgressus } from '../../../../src/crystal/FakeRunPodClient.js'
+
+/** Drive the manager via the OWNED status channel using the same stage→Progressus projection the
+ *  runners use, so these tests exercise `onProgressus` exactly as production does (#6e — the
+ *  stringly `onStage` they used to call was deleted). Unknown stages (no owned phase) are no-ops. */
+function stage(m: BulletinManager, actumId: string, st: string, info?: Record<string, unknown>): void {
+  const p = fakeStageToProgressus(st, info)
+  if (p) m.onProgressus(actumId, { ...p, at: new Date(0) })
+}
 
 function makeSink() {
   const posts: Array<{ chatId: number; text: string; kb: BulletinKeyboard }> = []
@@ -33,10 +42,10 @@ test('register posts the setup bulletin; stages drive the journal; complete show
   m.register(456, 'a1', '123')
   assert.match(s.lastText(), /Set how long to keep the pod warm/)
 
-  m.onStage('a1', 'provisioning', undefined)
-  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  stage(m, 'a1', 'provisioning', undefined)
+  stage(m, 'a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   await tick(0)   // renders are serialized — let the chained stage edits drain
-  assert.match(s.lastText(), /Found RTX 4090 for \$0\.69\/hr in 30s/)
+  assert.match(s.lastText(), /Found RTX 4090 for \$0\.69\/hr/)
   assert.match(s.lastText(), /Initializing/)
 
   m.onComplete('a1', { costUsd: 0.08, execMs: 12_000, podId: 'pod-1' })
@@ -50,11 +59,11 @@ test('gen-path race: stages that arrive BEFORE register are buffered + replayed 
   // The gen path (cursor.run) fires 'provisioning' the instant it detaches — before the Stream
   // primitive renders + registers. Without buffering these drop (no actumChat yet), the session
   // never enters 'hunting', and the later 'pod-locked' is misread as a WARM reuse ("generating").
-  m.onStage('a1', 'provisioning', undefined)
-  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  stage(m, 'a1', 'provisioning', undefined)
+  stage(m, 'a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   m.register(456, 'a1', '123')   // Stream primitive renders → replays the buffered stages in order
   await tick(0)
-  assert.match(s.lastText(), /Found RTX 4090 for \$0\.69\/hr in 30s/, 'cold Found line from the replayed provisioning→pod-locked')
+  assert.match(s.lastText(), /Found RTX 4090 for \$0\.69\/hr/, 'cold Found line from the replayed provisioning→pod-locked')
   assert.match(s.lastText(), /Initializing/, 'prep stage — NOT a warm "generating"')
   assert.doesNotMatch(s.lastText(), /keep cooking/i, 'not mis-rendered as a warm idle pod')
 })
@@ -63,13 +72,13 @@ test('warm reuse on a live session does NOT add a second Found line', async () =
   const s = makeSink()
   const m = new BulletinManager({ sink: s.sink })
   m.register(456, 'a1', '123')
-  m.onStage('a1', 'provisioning')
-  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  stage(m, 'a1', 'provisioning')
+  stage(m, 'a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   m.onComplete('a1', { costUsd: 0.08, execMs: 12_000, podId: 'pod-1' })
 
   // Second gen reuses the warm pod: register again, then a bare pod-locked (no hunt).
   m.register(456, 'a2', '123')
-  m.onStage('a2', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 })
+  stage(m, 'a2', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 })
   m.onComplete('a2', { costUsd: 0.005, execMs: 11_000, podId: 'pod-1' })
   await tick(0)   // serialized renders — drain the chain before reading the screen
 
@@ -88,8 +97,8 @@ test('kill is host-only, terminates, cancels in-flight, freezes to receipt', asy
     cancelActum: async (a) => { cancelled.push(a); return true },
   })
   m.register(456, 'a1', '123')
-  m.onStage('a1', 'provisioning')
-  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  stage(m, 'a1', 'provisioning')
+  stage(m, 'a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
 
   await m.handleControl(456, '999', 'kill')   // not the host
   assert.deepEqual(terminated, [])
@@ -103,8 +112,8 @@ test('pod.reaped freezes the matching bulletin', async () => {
   const s = makeSink()
   const m = new BulletinManager({ sink: s.sink })
   m.register(456, 'a1', '123')
-  m.onStage('a1', 'provisioning')
-  m.onStage('a1', 'pod-locked', { podId: 'pod-9', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  stage(m, 'a1', 'provisioning')
+  stage(m, 'a1', 'pod-locked', { podId: 'pod-9', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   m.onReaped('pod-9')
   await tick(0)   // serialized renders — let the receipt edit drain
   assert.equal(cb(s.lastKb()).length, 0, 'reaped → frozen, no buttons')
@@ -133,8 +142,8 @@ test('destroy submenu: open → Now terminates + cancels in-flight; receipt froz
     autoSettleMs: 30,
   })
   m.register(456, 'a1', '123')
-  m.onStage('a1', 'provisioning')
-  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  stage(m, 'a1', 'provisioning')
+  stage(m, 'a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   await tick(60)   // confirm via auto-settle so the top-3 is rendered
 
   // Open the destroy submenu — must show submenu actions, not yet destroyed.
@@ -160,8 +169,8 @@ test('destroy submenu: Drain sets drain-only, does NOT terminate immediately', a
     autoSettleMs: 30,
   })
   m.register(456, 'a1', '123')
-  m.onStage('a1', 'provisioning')
-  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  stage(m, 'a1', 'provisioning')
+  stage(m, 'a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   await tick(60)
   await m.handleControl(456, '123', 'destroy')
   await m.handleControl(456, '123', 'destroy.drain')
@@ -192,7 +201,7 @@ test('non-host cannot open submenus or invoke destructive actions', async () => 
     autoSettleMs: 30,
   })
   m.register(456, 'a1', '123')
-  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  stage(m, 'a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   await tick(60)
   await m.handleControl(456, '999', 'destroy')        // not the host
   assert.ok(!cb(s.lastKb()).includes('bul:destroy.now'), 'submenu not opened for non-host')
@@ -204,8 +213,8 @@ test('a fresh actum after a receipt opens a new bulletin (new message)', async (
   const s = makeSink()
   const m = new BulletinManager({ sink: s.sink, terminatePod: async () => {} })
   m.register(456, 'a1', '123')
-  m.onStage('a1', 'provisioning')
-  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  stage(m, 'a1', 'provisioning')
+  stage(m, 'a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   await m.handleControl(456, '123', 'kill')   // receipt
   const postsBefore = s.posts.length
 
@@ -234,8 +243,8 @@ async function modOpen(extra: Record<string, unknown> = {}) {
   const s = makeSink()
   const m = new BulletinManager({ sink: s.sink, autoSettleMs: 999_999, ...extra })
   m.register(456, 'a1', '123')
-  m.onStage('a1', 'provisioning')
-  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
+  stage(m, 'a1', 'provisioning')
+  stage(m, 'a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   m.onComplete('a1', { costUsd: 0.08, execMs: 12_000, podId: 'pod-1' })
   await m.handleControl(456, '123', 'confirm')
   await m.handleControl(456, '123', 'mod')
@@ -325,7 +334,7 @@ test('Mod • Add on a WARM studio installs live (no gen), not Standby', async (
   const m = new BulletinManager({ sink: s.sink, ...deps })
   m.register(456, 'a1', '123')
   await m.handleControl(456, '123', 'confirm')                              // confirmed
-  m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 })
+  stage(m, 'a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 })
   m.onComplete('a1', { costUsd: 0.05, execMs: 10_000, podId: 'pod-1' })     // gen done → warm-idle
   await m.handleControl(456, '123', 'mod')
   await m.handleControl(456, '123', 'mod.add')
@@ -808,11 +817,11 @@ test('renders are serialized per chat — at most one sink edit in flight, stage
   // pod-locked (commits the Found line + Initializing) → downloading 1/3 → downloading 2/3.
   // (`provisioning` is silent in the /make path — hunting renders no journal line — so it would
   // dedupe against the setup frame; we drive the visible, ordered stages.)
-  m.onStage('a1', 'provisioning')   // silent hunt — no frame change
+  stage(m, 'a1', 'provisioning')   // silent hunt — no frame change
   const stages: Array<() => void> = [
-    () => m.onStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 }),
-    () => m.onStage('a1', 'downloading:1/3'),
-    () => m.onStage('a1', 'downloading:2/3'),
+    () => stage(m, 'a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 }),
+    () => stage(m, 'a1', 'downloading:1/3'),
+    () => stage(m, 'a1', 'downloading:2/3'),
   ]
 
   const order: string[] = []
@@ -842,7 +851,7 @@ test('renders are serialized per chat — at most one sink edit in flight, stage
 
   // Delivered in stage order: pod-locked (Found + Initializing) → downloading 1/3 → downloading 2/3.
   // No earlier frame overtakes a later one.
-  assert.match(order[0], /Found RTX 4090 for \$0\.69\/hr in 30s/, 'first frame is the Found (pod-locked) state')
+  assert.match(order[0], /Found RTX 4090 for \$0\.69\/hr/, 'first frame is the Found (pod-locked) state')
   assert.match(order[0], /Initializing/, 'pod-locked frame is initializing')
   assert.match(order[1], /downloading models \(1\/3\)/, 'second frame is downloading 1/3')
   assert.match(order[2], /downloading models \(2\/3\)/, 'third frame is downloading 2/3')

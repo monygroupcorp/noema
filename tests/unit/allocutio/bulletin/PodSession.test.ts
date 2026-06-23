@@ -6,48 +6,15 @@ import type { Progressus } from '../../../../src/types/progressus.js'
 /** Build a Progressus with the required `at` filled (value irrelevant — onProgressus reads `now`). */
 const prog = (p: Omit<Progressus, 'at'>): Progressus => ({ ...p, at: new Date(0) })
 
-test('cold lifecycle: silent hunt → Found → prep → ready, journal commits persist', () => {
-  const s = new PodSession('host-1')
-  s.onStage('provisioning', undefined, 0)
-  assert.equal(s.phase, 'hunting')
-  assert.equal(s.snapshot().live, null, 'fast hunt is silent')
-  // The silent hunt must still surface "Provisioning…" (not fall through to the warm "keep
-  // cooking" line) — the `/make` cold path relies on the stage, not the /arm Start button.
-  assert.equal(s.snapshot().starting, true, 'provisioning stage drives the starting/provisioning display')
+/** Owned-vocabulary equivalents of the retired cold-start stage strings (#6e). */
+const huntP = prog({ phase: 'provisioning', message: 'acquiring GPU' })
+const lockP = (pod: { podId?: string; gpuType?: string; costPerHr?: number }): Progressus =>
+  prog({ phase: 'provisioning', message: 'pod locked', pod })
 
-  s.onStage('pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 }, 1000)
-  let snap = s.snapshot()
-  assert.equal(snap.starting, false, 'starting clears at pod-locked so it cannot leak into warm-idle')
-  assert.deepEqual(snap.journal[0], { kind: 'found', gpu: 'RTX 4090', rate: 0.69, ms: 30_000 })
-  assert.deepEqual(snap.live, { kind: 'initializing' })
-  assert.equal(s.phase, 'prep')
+// ── onProgressus drives the journal/live from the owned status vocabulary ──────
+// (The stringly `onStage` path these mirror was deleted in #6e.)
 
-  s.onStage('downloading:3/4', undefined, 2000)
-  assert.deepEqual(s.snapshot().live, { kind: 'downloading', n: 3, m: 4, slow: false })
-
-  s.onStage('comfy-ready', { phaseMs: 4.5 * 60_000 }, 3000)
-  snap = s.snapshot()
-  assert.deepEqual(snap.journal[1], { kind: 'prepared', ms: 4.5 * 60_000 })
-  assert.deepEqual(snap.live, { kind: 'generating' })
-  assert.equal(s.phase, 'ready')
-})
-
-test('bail erases the Found entry and records a Quit entry (by kind, not prose)', () => {
-  const s = new PodSession('host-1')
-  s.onStage('provisioning', undefined, 0)
-  s.onStage('pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 }, 1000)
-  s.onStage('downloading:2/4', undefined, 2000)
-  s.onStage('pod-bailed', { bailReason: 'download throttle' }, 3000)
-
-  const j = s.snapshot().journal
-  assert.ok(!j.some(e => e.kind === 'found'), 'the bailed pod\'s Found entry is gone')
-  assert.deepEqual(j.at(-1), { kind: 'quit', podNum: 1, reason: 'download throttle' })
-  assert.equal(s.phase, 'hunting', 're-hunting after the bail')
-})
-
-// ── #6b: onProgressus drives the SAME transitions as onStage, from the owned vocabulary ──────
-
-test('onProgressus cold lifecycle mirrors the onStage cold lifecycle exactly', () => {
+test('onProgressus cold lifecycle: silent hunt → Found → prep → ready', () => {
   const s = new PodSession('host-1')
   s.onProgressus(prog({ phase: 'provisioning', message: 'acquiring GPU' }), 0)
   assert.equal(s.phase, 'hunting')
@@ -116,18 +83,18 @@ test('onProgressus: terminals + non-bulletin phases keep the current live (WideE
 
 test('markHuntSlow only escalates while hunting', () => {
   const s = new PodSession('host-1')
-  s.onStage('provisioning', undefined, 0)
+  s.onProgressus(huntP, 0)
   s.markHuntSlow()
   assert.deepEqual(s.snapshot().live, { kind: 'hunting-slow' })
   // Once locked, a stray markHuntSlow must not overwrite the live line.
-  s.onStage('pod-locked', { podId: 'p', gpuType: 'RTX 4090', costPerHr: 0.69 }, 100)
+  s.onProgressus(lockP({ podId: 'p', gpuType: 'RTX 4090', costPerHr: 0.69 }), 100)
   s.markHuntSlow()
   assert.deepEqual(s.snapshot().live, { kind: 'initializing' })
 })
 
 test('recordGen tallies the ledger and rests; warm stepping + confirm', () => {
   const s = new PodSession('host-1')
-  s.onStage('pod-locked', { podId: 'p', gpuType: 'RTX 4090', costPerHr: 0.69 }, 0)
+  s.onProgressus(lockP({ podId: 'p', gpuType: 'RTX 4090', costPerHr: 0.69 }), 0)
   s.recordGen({ costUsd: 0.08, execMs: 12_000 })
   const snap = s.snapshot()
   assert.equal(snap.ledger.genCount, 1)
@@ -143,7 +110,7 @@ test('recordGen tallies the ledger and rests; warm stepping + confirm', () => {
 
 test('end() freezes and clears the live line', () => {
   const s = new PodSession('host-1')
-  s.onStage('pod-locked', { podId: 'p', gpuType: 'RTX 4090', costPerHr: 0.69 }, 0)
+  s.onProgressus(lockP({ podId: 'p', gpuType: 'RTX 4090', costPerHr: 0.69 }), 0)
   s.end()
   assert.equal(s.ended, true)
   assert.equal(s.snapshot().live, null)

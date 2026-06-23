@@ -223,18 +223,3 @@ export function shouldPersist(last: Progressus | undefined, next: Progressus): b
   if (next.phase === 'done' || next.phase === 'failed') return true
   return false
 }
-
-// ── Legacy projection shim (retired in build #6) ────────────────────────────
-/**
- * Project a `Progressus` to the legacy stringly `actum.stage` value, so existing
- * consumers (Telegram StatusView, SSE) keep working unchanged while a runner emits
- * the new typed reports. `phase:done/total` when there's countable progress, else the
- * bare phase word. Mirrors the vocabulary comfyrunner emits today (`downloading:2/5`,
- * `executing` etc.).
- */
-export function progressusToStage(p: Progressus): string {
-  if (p.progress && typeof p.progress.total === 'number') {
-    return `${p.phase}:${p.progress.done}/${p.progress.total}`
-  }
-  return p.phase
-}

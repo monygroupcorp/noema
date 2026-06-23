@@ -1,11 +1,11 @@
-// Build #2 — the status sink + lenient parse + coalescing + legacy shim.
-//  - pure transforms: coercePhase / normalizeProgressus / shouldPersist / progressusToStage
+// Build #2 — the status sink + lenient parse + coalescing.
+//  - pure transforms: coercePhase / normalizeProgressus / shouldPersist
 //  - CrystalApi.reportProgressus end-to-end over a real MemoryActorum: append, coalesce
 //    (per-tick NOT persisted), roll up phaseDurations on terminal, return {continue}.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  coercePhase, normalizeProgressus, shouldPersist, progressusToStage, coldStartProgressus,
+  coercePhase, normalizeProgressus, shouldPersist, coldStartProgressus,
 } from '../../../src/execution/progressus.js'
 import { MemoryActorum } from '../../../src/execution/MemoryActorum.js'
 import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/CrystalApi.js'
@@ -124,13 +124,6 @@ test('shouldPersist: a same-(phase,target) pure progress tick is NOT persisted (
   assert.equal(shouldPersist(a, b), false)
 })
 
-// ── progressusToStage (legacy shim) ─────────────────────────────────────────
-
-test('progressusToStage: phase:done/total when countable, else bare phase', () => {
-  assert.equal(progressusToStage({ phase: 'executing', at: at(0), progress: { done: 7, total: 20, unit: 'steps' } }), 'executing:7/20')
-  assert.equal(progressusToStage({ phase: 'uploading', at: at(0) }), 'uploading')
-})
-
 // ── reportProgressus end-to-end ─────────────────────────────────────────────
 
 function makeActum(over: Partial<Actum> = {}): Omit<Actum, 'inceptum'> {
@@ -243,21 +236,4 @@ test('reportProgressus: an unknown actumId returns continue but fans out nothing
     bus.off('actum.progressus', listener)
   }
   assert.equal(emitted, 0)
-})
-
-test('reportProgressus: the legacy actum.stage shim carries real elapsed from inceptum', async () => {
-  const { actorum, api } = await makeApi()
-  const created = await actorum.create(makeActum())   // inceptum stamped = now
-  const stages: Array<{ stage: string; elapsedMs: number }> = []
-  const listener = (d: { actumId: string; stage: string; elapsedMs: number }) => { if (d.actumId === 'act-1') stages.push(d) }
-  bus.on('actum.stage', listener)
-  try {
-    // at is 2s after inceptum → elapsed ~2000ms (allow a little slack for wall-clock create()).
-    await api.reportProgressus({ actumId: 'act-1', progressus: { phase: 'executing', at: new Date(created.inceptum.getTime() + 2000), progress: { done: 5, total: 20, unit: 'steps' } } })
-  } finally {
-    bus.off('actum.stage', listener)
-  }
-  assert.equal(stages.length, 1)
-  assert.equal(stages[0].stage, 'executing:5/20')
-  assert.equal(stages[0].elapsedMs, 2000)
 })

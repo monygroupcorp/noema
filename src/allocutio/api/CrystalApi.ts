@@ -16,7 +16,7 @@
 
 import { randomUUID } from 'crypto'
 import { bus } from '../../lib/bus.js'
-import { normalizeProgressus, shouldPersist, rollupPhaseDurations, progressusToStage } from '../../execution/progressus.js'
+import { normalizeProgressus, shouldPersist, rollupPhaseDurations } from '../../execution/progressus.js'
 import type { Progressus, Phasis } from '../../types/progressus.js'
 import type { Modorum, Modus } from '../../types/modus.js'
 import type { Cursorum, ActumCompletor, Actorum } from '../../types/cursus.js'
@@ -1288,8 +1288,8 @@ export class CrystalApi {
    * For a report bound to an `actumId`: append it to the Actum's persisted timeline
    * (coalesced — transitions + messages + terminals only, never per-tick progress),
    * and on a terminal report roll the timeline up into `phaseDurations`. Always emit
-   * the typed `actum.progressus` bus event + a legacy `actum.stage` shim so existing
-   * consumers keep working until build #6. A `sessionId`-bound report (no actumId — the
+   * the typed `actum.progressus` bus event (the single status channel since #6e retired
+   * the `actum.stage` shim). A `sessionId`-bound report (no actumId — the
    * arm Actum that owns warm-session cold-start isn't minted yet, spec §9) reflects the
    * latest phase onto the live TEE session (surfaced on `TeeSessionView.phase`) and returns
    * `continue:false` once that session has ended; full timeline persistence lands when the
@@ -1315,26 +1315,15 @@ export class CrystalApi {
 
     await this._persistAndEmit(actum, progressus)
 
-    // Legacy actum.stage shim (real elapsed from inceptum) so existing SSE/Telegram
-    // consumers keep working until build #6. The in-process comfyrunner path skips this —
-    // it still emits the legacy vocabulary itself via `emitStage` (the consumers parse those
-    // exact strings), so `recordProgressus` does NOT re-emit a phase-vocabulary shim.
-    bus.emit('actum.stage', {
-      actumId: actum.id,
-      stage: progressusToStage(progressus),
-      elapsedMs: Math.max(0, progressus.at.getTime() - actum.inceptum.getTime()),
-    })
-
     // A cancelled/failed Actum tells the runner to bail; otherwise keep going.
     return { continue: actum.status !== 'fractus' }
   }
 
   /**
-   * In-process status recorder (spec §6a) — the seam `comfyrunnerClient` routes its typed
-   * `Progressus` through, since it lives in the crystal rail (constructed before this API)
-   * and already owns the legacy `actum.stage` emission. Persists the timeline (coalesced) +
-   * emits the typed `actum.progressus` event, but NO legacy shim (the caller owns that).
-   * Wired at startup via `registerProgressusRecorder` (index.ts).
+   * In-process status recorder (spec §6a) — the seam `comfyrunnerClient` + the cold-start
+   * pod clients route their typed `Progressus` through, since they live in the crystal rail
+   * (constructed before this API). Persists the timeline (coalesced) + emits the typed
+   * `actum.progressus` event. Wired at startup via `registerProgressusRecorder` (index.ts).
    */
   async recordProgressus(actumId: string, progressus: Progressus): Promise<void> {
     const actum = await this.deps.actorum.findById(actumId)
