@@ -50,9 +50,11 @@ import { LayerCompositeCursor } from './crystal/LayerCompositeCursor.js'
 import { JimpLayerCompositeEngine } from './crystal/LayerCompositeEngine.js'
 import { FfmpegCursor } from './crystal/FfmpegCursor.js'
 import { SpawnFfmpegEngine } from './crystal/FfmpegEngine.js'
-import { AitoolkitTrainingCursor } from './crystal/AitoolkitTrainingCursor.js'
+import { AitoolkitTrainingCursor, type AitoolkitTrainingCursorDeps } from './crystal/AitoolkitTrainingCursor.js'
 import { SqliteAitkJobStore } from './crystal/AitkJobStore.js'
 import { DockerAitkSpawner } from './crystal/AitkSpawner.js'
+import { MongoIntella } from './crystal/MongoIntella.js'
+import { makeTrainingFinalizer, fsLoraReader } from './crystal/trainingFinalizer.js'
 import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
 import { FeedAdapter } from './crystal/FeedAdapter.js'
@@ -180,6 +182,13 @@ export interface ContainerConfig {
     shmSize?: string
     /** Overall poll cap (ms) — a hung run trips this and fails. */
     timeoutMs?: number
+    /**
+     * Host path of ai-toolkit's output dir (a trained run leaves `<outputDir>/<jobId>/
+     * <jobId>.safetensors`). Present (with `runpodR2`) → a completed run hosts the LoRA
+     * in R2 + registers it as a private Intella (training finality, build #5b). Absent →
+     * the run still trains but the exitus stays `{ trained, steps }` (headless).
+     */
+    outputDir?: string
   }
   /** Warm-window TTL (ms) passed to warm-pod jobs — default 60_000. */
   runpodWarmTtlMs?: number
@@ -455,14 +464,24 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   // Local ai-toolkit training (build #5) — only where a GPU + image + host-mounted DB exist.
   if (config.aitoolkit) {
-    cursorum.register('aitoolkit', new AitoolkitTrainingCursor({
+    const aitkDeps: AitoolkitTrainingCursorDeps = {
       store: new SqliteAitkJobStore(config.aitoolkit.dbPath),
       spawner: new DockerAitkSpawner(),
       image: config.aitoolkit.image,
       ...(config.aitoolkit.mounts ? { mounts: config.aitoolkit.mounts } : {}),
       ...(config.aitoolkit.shmSize ? { shmSize: config.aitoolkit.shmSize } : {}),
       ...(config.aitoolkit.timeoutMs !== undefined ? { timeoutMs: config.aitoolkit.timeoutMs } : {}),
-    }))
+    }
+    // Training finality (build #5b): a completed run hosts its LoRA in R2 + registers it
+    // as a private Intella — only where both an output dir (to read it) and R2 (to host it) exist.
+    if (config.aitoolkit.outputDir && config.runpodR2) {
+      aitkDeps.resolveOutput = makeTrainingFinalizer({
+        reader: fsLoraReader(config.aitoolkit.outputDir),
+        store: new R2Uploader(config.runpodR2),
+        intellae: new MongoIntella(db.collection('intellae')),
+      })
+    }
+    cursorum.register('aitoolkit', new AitoolkitTrainingCursor(aitkDeps))
   }
 
   const completor = new ActumCompletor({ acta: actorum, signorum, terminatePod: config.terminatePod })

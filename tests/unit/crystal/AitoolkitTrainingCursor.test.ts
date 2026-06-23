@@ -7,6 +7,7 @@ import { AitoolkitTrainingCursor } from '../../../src/crystal/AitoolkitTrainingC
 import type { AitkJobStore } from '../../../src/crystal/AitkJobStore.js'
 import type { AitkSpawner, AitkRunSpec } from '../../../src/crystal/AitkSpawner.js'
 import type { AitkJob } from '../../../src/execution/aitkProgressus.js'
+import type { AitkOutcome } from '../../../src/crystal/aitoolkitRunnerClient.js'
 import { registerProgressusRecorder } from '../../../src/execution/progressusSink.js'
 import { withTrace, makeTraceContext } from '../../../src/lib/trace.js'
 import type { Actum } from '../../../src/types/actum.js'
@@ -88,6 +89,35 @@ test('run: jobId defaults to the Actum id when not in aditus', async () => {
     await cursor.run(actum({ steps: 60, configPath: 'c.yaml' }))
     assert.equal(store.seeded[0].jobId, 'act-train')
   })
+})
+
+test('run: resolveOutput maps the completed outcome to exitus (training finality seam)', async () => {
+  const store = new FakeStore(COMPLETED)
+  const calls: AitkOutcome[] = []
+  const cursor = new AitoolkitTrainingCursor({
+    store, spawner: new FakeSpawner(), image: 'img:1', pollIntervalMs: 1,
+    resolveOutput: async (_actum, outcome) => { calls.push(outcome); return { trained: true, steps: outcome.lastStep, loraId: 'lora-1', loraUrl: 'https://cdn/x' } },
+  })
+  await withRecorder('act-train', async () => {
+    const result = await cursor.run(actum({ steps: 60, configPath: 'c.yaml' }))
+    assert.equal(result.kind, 'sync')
+    if (result.kind !== 'sync') return
+    assert.deepEqual(result.exitus.exitus, { trained: true, steps: 60, loraId: 'lora-1', loraUrl: 'https://cdn/x' })
+  })
+  assert.deepEqual(calls.map(c => c.status), ['completed'])
+})
+
+test('run: resolveOutput is NOT called when the run fails (no finality on a non-completed run)', async () => {
+  const calls: AitkOutcome[] = []
+  const cursor = new AitoolkitTrainingCursor({
+    store: new FakeStore([{ status: 'error', step: 5, info: 'CUDA out of memory' }]),
+    spawner: new FakeSpawner(), image: 'img:1', pollIntervalMs: 1,
+    resolveOutput: async (_a, o) => { calls.push(o); return {} },
+  })
+  await withRecorder('act-train', async () => {
+    await assert.rejects(() => cursor.run(actum({ steps: 100, configPath: 'c.yaml' })))
+  })
+  assert.equal(calls.length, 0)
 })
 
 test('run: an error outcome throws so the Actum goes fractus (and still records failed)', async () => {
