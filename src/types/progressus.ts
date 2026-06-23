@@ -83,6 +83,20 @@ export interface ProgressusResources {
 }
 
 /**
+ * The pod/instance identity + cost backing the run's compute. Rides on the cold-start
+ * phase reports (provisioning/pulling) so a consumer can show "found a 4090 @ $X/hr" and
+ * offer pod control (warm-window / destroy) — the StageInfo the legacy `actum.stage`
+ * carried, now first-class on the timeline. Identity, not telemetry, so it's its own field
+ * (VRAM lives on `resources`).
+ */
+export interface ProgressusPod {
+  podId?: string
+  gpuType?: string
+  region?: string
+  costPerHr?: number
+}
+
+/**
  * Progressus — one structured status report at a moment.
  *
  * `phase` is the coarse step (for the timeline + measurement); `target` is the
@@ -105,6 +119,8 @@ export interface Progressus {
   /** Human detail ("loading flux1-schnell into VRAM"). */
   message?: string
   resources?: ProgressusResources
+  /** Pod/instance identity + cost backing this run (carried on cold-start phases). */
+  pod?: ProgressusPod
   /** Sub-reports for concurrent work (multi-file download, fan-out, multi-GPU). */
   parallel?: Progressus[]
   /** When this report was emitted. */
