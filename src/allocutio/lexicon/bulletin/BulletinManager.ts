@@ -1,4 +1,5 @@
 import type { StageInfo } from '../../../lib/bus.js'
+import type { Progressus } from '../../../types/progressus.js'
 import { PodSession } from './PodSession.js'
 import { BulletinView } from './BulletinView.js'
 import { TimerRegistry } from './TimerRegistry.js'
@@ -111,6 +112,9 @@ export class BulletinManager {
   // replayed on register — without this the first stage drops and the session misreads the
   // cold start as a warm reuse. Capped per actum; cleared on register.
   private readonly _pendingStages = new Map<string, Array<{ stage: string; info?: StageInfo }>>()
+  // Same race for the owned-status path (#6b): a Progressus can land before register(). Buffered
+  // and replayed in order, so the session enters 'hunting' on the buffered `provisioning`.
+  private readonly _pendingProgressus = new Map<string, Progressus[]>()
   /** Full candidate list (+ resolved base families/filter for a LoRA mount) backing the open
    *  picker list, per chat — so page turns don't refetch. */
   private readonly pickerCache = new Map<number, { all: PendingModel[]; base?: { families: Array<{ id: string; label: string }>; filter: string } }>()
@@ -142,6 +146,14 @@ export class BulletinManager {
     if (pending) {
       this._pendingStages.delete(actumId)
       for (const { stage, info } of pending) cb.session.onStage(stage, info, this.now())
+      if (cb.session.phase === 'hunting') {
+        cb.timers.arm('slowHunt', HUNT_SLOW_MS, () => { cb.session.markHuntSlow(); void this._render(chatId) })
+      }
+    }
+    const pendingP = this._pendingProgressus.get(actumId)
+    if (pendingP) {
+      this._pendingProgressus.delete(actumId)
+      for (const p of pendingP) cb.session.onProgressus(p, this.now())
       if (cb.session.phase === 'hunting') {
         cb.timers.arm('slowHunt', HUNT_SLOW_MS, () => { cb.session.markHuntSlow(); void this._render(chatId) })
       }
@@ -212,6 +224,25 @@ export class BulletinManager {
     if (!cb) return
     cb.session.onStage(stage, info, this.now())
     // Slow-hunt timer follows the phase: armed while hunting, cleared otherwise.
+    if (cb.session.phase === 'hunting') {
+      cb.timers.arm('slowHunt', HUNT_SLOW_MS, () => { cb.session.markHuntSlow(); void this._render(chatId) })
+    } else {
+      cb.timers.cancel('slowHunt')
+    }
+    void this._render(chatId)
+  }
+
+  /** The owned-status twin of `onStage` (#6b) — the bulletin's single driver from build #6b on. */
+  onProgressus(actumId: string, progressus: Progressus): void {
+    const chatId = this.actumChat.get(actumId)
+    if (chatId === undefined) {
+      const buf = this._pendingProgressus.get(actumId) ?? []
+      if (buf.length < 50) { buf.push(progressus); this._pendingProgressus.set(actumId, buf) }
+      return
+    }
+    const cb = this.chats.get(chatId)
+    if (!cb) return
+    cb.session.onProgressus(progressus, this.now())
     if (cb.session.phase === 'hunting') {
       cb.timers.arm('slowHunt', HUNT_SLOW_MS, () => { cb.session.markHuntSlow(); void this._render(chatId) })
     } else {

@@ -7,6 +7,8 @@ import type { FakeOpts } from './FakeRunPodClient.js'
 import { bus } from '../lib/bus.js'
 import { getTrace } from '../lib/trace.js'
 import { makeLogger } from '../lib/logger.js'
+import { recordProgressus } from '../execution/progressusSink.js'
+import { fakeStageToProgressus } from './FakeRunPodClient.js'
 
 const log = makeLogger('cursor:fake:warm')
 
@@ -33,7 +35,11 @@ export class FakeWarmPodClient implements RunPodClient, ModelInstallClient {
 
     // Signal "warm" so the Telegram layer reacts 🔥 (vs 👌 for a cold start).
     const actumId = getTrace()?.actumId
-    if (actumId) bus.emit('actum.stage', { actumId, stage: 'warm-pod-found', elapsedMs: 0, info: { podId: externusId } })
+    if (actumId) {
+      bus.emit('actum.stage', { actumId, stage: 'warm-pod-found', elapsedMs: 0, info: { podId: externusId } })
+      const prog = fakeStageToProgressus('warm-pod-found', { podId: externusId })   // #6b: 🔥-only, skipped by the journal
+      if (prog) recordProgressus(actumId, { ...prog, at: new Date() }).catch(err => log.warn('progressus record failed', { error: (err as Error).message }))
+    }
 
     void this._run(jobId, actumId, params).catch(err => log.error('fake warm run failed', { error: String(err) }))
     return { id: jobId }
@@ -66,6 +72,10 @@ export class FakeWarmPodClient implements RunPodClient, ModelInstallClient {
     const start = Date.now()
     const emit = (stage: string, info?: Record<string, unknown>) => {
       if (actumId) bus.emit('actum.stage', { actumId, stage, elapsedMs: Date.now() - start, info })
+      if (actumId) {
+        const prog = fakeStageToProgressus(stage, info)   // #6b: drive the bulletin off the owned timeline
+        if (prog) recordProgressus(actumId, { ...prog, at: new Date() }).catch(err => log.warn('progressus record failed', { error: (err as Error).message }))
+      }
     }
     const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
