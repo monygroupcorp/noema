@@ -123,7 +123,11 @@ export class PodSession {
         this.live = p.message === 'restarting ComfyUI' ? { kind: 'reloading' } : { kind: 'plugins' }
         return
       case 'executing':   // legacy 'inferring'
-        this.live = { kind: 'generating' }
+        // A step-counted execution (training loops report `unit:'steps'`) renders a
+        // progress line (step/ETA); a plain inference execution stays "Generating…".
+        this.live = p.progress?.unit === 'steps'
+          ? { kind: 'training', step: p.progress.done, total: p.progress.total, etaMs: p.etaMs }
+          : { kind: 'generating' }
         this._phase = 'ready'
         return
       case 'uploading':

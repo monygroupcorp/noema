@@ -88,6 +88,7 @@ function liveLine(live: LiveState): string {
     case 'plugins':      return c.plugins
     case 'reloading':    return c.reloading
     case 'generating':   return c.generating
+    case 'training':     return c.training(live.step, live.total, live.etaMs !== undefined ? fmtDur(live.etaMs) : undefined)
     case 'saving':       return c.saving
   }
 }
