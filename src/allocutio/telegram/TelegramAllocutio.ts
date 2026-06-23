@@ -11,6 +11,7 @@ import type { Allocutio, Nuntius, Responsum } from '../../types/allocutio.js'
 import type { Inceptio } from '../../types/cursus.js'
 import { makeLogger } from '../../lib/logger.js'
 import { bus, type StageInfo } from '../../lib/bus.js'
+import type { Progressus } from '../../types/progressus.js'
 import { withTrace, getTrace, makeTraceContext } from '../../lib/trace.js'
 import type { WideEvent } from '../../lib/wide.js'
 import type { MateriaStore } from '../../types/materia.js'
@@ -286,6 +287,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     this.router.onResolution((ctx, resolution) => { void this._handleResolution(ctx, resolution) })
 
     // Pod lifecycle → bulletin manager (+ the local reaction bookkeeping).
+    // The bulletin is driven by the owned `actum.progressus` (#6b); the legacy `actum.stage`
+    // shim still fires in parallel (other consumers, 6c/6e) but only feeds the 🔥/👌 reaction here.
+    bus.on('actum.progressus', (data) => { void this._handleActumProgressus(data) })
     bus.on('actum.stage', (data) => { void this._handleActumStage(data) })
     bus.on('actum.complete', (wide) => { void this._handleActumComplete(wide) })
     bus.on('actum.fail', (wide) => { void this._handleActumFail(wide) })
@@ -942,13 +946,14 @@ Generate AI art, chat with models, explore creative tools.`
   // -------------------------------------------------------------------------
 
   private async _handleActumStage(data: { actumId: string; stage: string; elapsedMs: number; info?: StageInfo }): Promise<void> {
+    // Reaction bookkeeping ONLY (the bulletin journal/live is driven by `actum.progressus`, #6b).
     // Warm signal (may arrive before OR after the Stream registers) → 🔥, never 👌.
-    if (data.stage === 'warm-pod-found') { this.reactions.noteWarm(data.actumId); return }
+    if (data.stage === 'warm-pod-found') { this.reactions.noteWarm(data.actumId) }
+  }
 
-    // KSampler progress (progress:N/M) is suppressed — it never keeps up with fast
-    // jobs and burns edit quota. Every other stage drives the bulletin journal.
-    if (data.stage.startsWith('progress:')) return
-    this.bulletins.onStage(data.actumId, data.stage, data.info)
+  /** Owned-status path (#6b): the typed `Progressus` drives the bulletin (single source). */
+  private async _handleActumProgressus(data: { actumId: string; progressus: Progressus }): Promise<void> {
+    this.bulletins.onProgressus(data.actumId, data.progressus)
   }
 
   private async _handleActumComplete(wide: WideEvent): Promise<void> {

@@ -1,6 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { PodSession } from '../../../../src/allocutio/lexicon/bulletin/PodSession.js'
+import type { Progressus } from '../../../../src/types/progressus.js'
+
+/** Build a Progressus with the required `at` filled (value irrelevant — onProgressus reads `now`). */
+const prog = (p: Omit<Progressus, 'at'>): Progressus => ({ ...p, at: new Date(0) })
 
 test('cold lifecycle: silent hunt → Found → prep → ready, journal commits persist', () => {
   const s = new PodSession('host-1')
@@ -39,6 +43,75 @@ test('bail erases the Found entry and records a Quit entry (by kind, not prose)'
   assert.ok(!j.some(e => e.kind === 'found'), 'the bailed pod\'s Found entry is gone')
   assert.deepEqual(j.at(-1), { kind: 'quit', podNum: 1, reason: 'download throttle' })
   assert.equal(s.phase, 'hunting', 're-hunting after the bail')
+})
+
+// ── #6b: onProgressus drives the SAME transitions as onStage, from the owned vocabulary ──────
+
+test('onProgressus cold lifecycle mirrors the onStage cold lifecycle exactly', () => {
+  const s = new PodSession('host-1')
+  s.onProgressus(prog({ phase: 'provisioning', message: 'acquiring GPU' }), 0)
+  assert.equal(s.phase, 'hunting')
+  assert.equal(s.snapshot().live, null, 'fast hunt is silent')
+  assert.equal(s.snapshot().starting, true, 'provisioning (no pod) drives the starting display')
+
+  // pod-locked = provisioning WITH a pod (the StageInfo now rides on `pod`).
+  s.onProgressus(prog({ phase: 'provisioning', message: 'pod p (RTX 4090)', pod: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } }), 1000)
+  let snap = s.snapshot()
+  assert.equal(snap.starting, false, 'starting clears at pod-locked')
+  assert.deepEqual(snap.journal[0], { kind: 'found', gpu: 'RTX 4090', rate: 0.69, ms: 1000 })
+  assert.deepEqual(snap.live, { kind: 'initializing' })
+  assert.equal(s.phase, 'prep')
+
+  // downloading + progress replaces downloading:n/m.
+  s.onProgressus(prog({ phase: 'downloading', target: 'model', progress: { done: 3, total: 4, unit: 'items' } }), 2000)
+  assert.deepEqual(s.snapshot().live, { kind: 'downloading', n: 3, m: 4, slow: false })
+
+  // pulling + 'runtime ready' = comfy-ready: commit Prepared, go ready.
+  s.onProgressus(prog({ phase: 'pulling', target: 'fundamentum', message: 'runtime ready' }), 3000)
+  snap = s.snapshot()
+  assert.deepEqual(snap.journal[1], { kind: 'prepared', ms: 2000 })
+  assert.deepEqual(snap.live, { kind: 'generating' })
+  assert.equal(s.phase, 'ready')
+})
+
+test('onProgressus: pulling bootstrap → initializing; installing → plugins/reloading; executing/uploading', () => {
+  const s = new PodSession('host-1')
+  s.onProgressus(prog({ phase: 'provisioning', message: 'acquiring GPU' }), 0)
+  s.onProgressus(prog({ phase: 'provisioning', pod: { podId: 'p', gpuType: 'RTX 4090', costPerHr: 0.69 } }), 100)
+  // pulling without 'runtime ready' = bootstrapping.
+  s.onProgressus(prog({ phase: 'pulling', target: 'fundamentum', message: 'bootstrapping runtime' }), 200)
+  assert.deepEqual(s.snapshot().live, { kind: 'initializing' })
+  s.onProgressus(prog({ phase: 'installing' }), 300)
+  assert.deepEqual(s.snapshot().live, { kind: 'plugins' })
+  s.onProgressus(prog({ phase: 'installing', message: 'restarting ComfyUI' }), 400)
+  assert.deepEqual(s.snapshot().live, { kind: 'reloading' })
+  s.onProgressus(prog({ phase: 'executing' }), 500)
+  assert.deepEqual(s.snapshot().live, { kind: 'generating' })
+  assert.equal(s.phase, 'ready')
+  s.onProgressus(prog({ phase: 'uploading', target: 'output' }), 600)
+  assert.deepEqual(s.snapshot().live, { kind: 'saving' })
+})
+
+test('onProgressus: warm reuse (warm-pod-found) is 🔥-only — never journaled', () => {
+  const s = new PodSession('host-1')
+  // A warm reuse: provisioning WITH a pod + the warm message. No hunt preceded it.
+  s.onProgressus(prog({ phase: 'provisioning', message: 'warm pod reused', pod: { podId: 'warm-1' } }), 0)
+  assert.equal(s.snapshot().journal.length, 0, 'no Found/Prepared line for a warm reuse')
+  assert.equal(s.podId, 'warm-1', 'pod identity still captured (destroy button)')
+  // The actual work then drives the live line.
+  s.onProgressus(prog({ phase: 'executing' }), 100)
+  assert.deepEqual(s.snapshot().live, { kind: 'generating' })
+})
+
+test('onProgressus: terminals + non-bulletin phases keep the current live (WideEvent owns completion)', () => {
+  const s = new PodSession('host-1')
+  s.onProgressus(prog({ phase: 'provisioning', pod: { podId: 'p', gpuType: 'RTX 4090', costPerHr: 0.69 } }), 0)
+  s.onProgressus(prog({ phase: 'executing' }), 100)
+  const before = s.snapshot().live
+  for (const phase of ['queued', 'loading', 'warming', 'finalizing', 'done', 'failed'] as const) {
+    s.onProgressus(prog({ phase }), 200)
+    assert.deepEqual(s.snapshot().live, before, `${phase} leaves the live line untouched`)
+  }
 })
 
 test('markHuntSlow only escalates while hunting', () => {

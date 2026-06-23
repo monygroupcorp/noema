@@ -863,3 +863,30 @@ test('an awaited register path still lands a final render through the serialized
   assert.equal(s.posts.length, 1, 'register posted the bulletin')
   assert.match(s.lastText(), /Set how long to keep the pod warm/)
 })
+
+// ── #6b: the bulletin is driven by the owned actum.progressus (single source) ────────────────
+
+const prog = (p: Omit<import('../../../../src/types/progressus.js').Progressus, 'at'>) => ({ ...p, at: new Date(0) })
+
+test('onProgressus drives the journal exactly as onStage does (owned vocabulary)', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink })
+  m.register(456, 'a1', '123')
+  m.onProgressus('a1', prog({ phase: 'provisioning', message: 'acquiring GPU' }))
+  m.onProgressus('a1', prog({ phase: 'provisioning', message: 'pod p', pod: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } }))
+  await tick(0)
+  assert.match(s.lastText(), /Found RTX 4090 for \$0\.69\/hr/, 'cold Found line from the provisioning→pod-locked progressus')
+  assert.match(s.lastText(), /Initializing/)
+})
+
+test('gen-path race: progressus that arrives BEFORE register is buffered + replayed in order', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink })
+  m.onProgressus('a1', prog({ phase: 'provisioning', message: 'acquiring GPU' }))
+  m.onProgressus('a1', prog({ phase: 'provisioning', message: 'pod p', pod: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } }))
+  m.register(456, 'a1', '123')   // replays the buffered progressus in order
+  await tick(0)
+  assert.match(s.lastText(), /Found RTX 4090 for \$0\.69\/hr/, 'cold Found line from the replayed progressus')
+  assert.match(s.lastText(), /Initializing/, 'prep — NOT a warm "generating"')
+  assert.doesNotMatch(s.lastText(), /keep cooking/i)
+})

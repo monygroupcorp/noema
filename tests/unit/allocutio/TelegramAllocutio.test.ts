@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { TelegramAllocutio } from '../../../src/allocutio/telegram/TelegramAllocutio.js'
 import { bus } from '../../../src/lib/bus.js'
+import { fakeStageToProgressus } from '../../../src/crystal/FakeRunPodClient.js'
 import type {
   FlowContext, Step, Resolution, PrimitiveEvent, Intent, Platform, AuctorKey
 } from '../../../src/flow/types.js'
@@ -287,6 +288,18 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
 // =============================================================================
 
 // 1. /make command → calls FlowRouter.enter('execute', ...) with correct platform/userId
+/**
+ * #6b: drive the bulletin the way production does — via the owned `actum.progressus` — while
+ * still firing the legacy `actum.stage` for the 🔥 reaction path. Mirrors the Fake/real clients,
+ * which record a Progressus alongside the shim. `info` not in the owned vocabulary (e.g.
+ * `pod-bailed`, `progress:n/m`) yields no Progressus — only the reaction shim fires.
+ */
+function emitStage(actumId: string, stage: string, info?: Record<string, unknown>): void {
+  bus.emit('actum.stage', { actumId, stage, elapsedMs: 0, ...(info ? { info } : {}) } as unknown as Parameters<typeof bus.emit>[1])
+  const prog = fakeStageToProgressus(stage, info)
+  if (prog) bus.emit('actum.progressus', { actumId, progressus: { ...prog, at: new Date() } })
+}
+
 test('/make command calls router.enter with execute intent', async () => {
   const { allocutio, router } = makeAllocutio()
 
@@ -963,7 +976,7 @@ test('actum.complete applies the warm window but sends NO concierge message', as
   const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
   router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-c', status: 'running' }] })
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'actum-c', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1' } })
+  emitStage('actum-c', 'pod-locked', { podId: 'pod-1' })
   await new Promise(r => setImmediate(r))
 
   sender.sent.length = 0
@@ -980,7 +993,7 @@ test('warm-pod-found stage reacts 🔥 on the command message', async () => {
   const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
   router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-w', status: 'running' }] })
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'actum-w', stage: 'warm-pod-found', elapsedMs: 0 })
+  emitStage('actum-w', 'warm-pod-found')
   // warm-pod-found cancels the deferred 👌 and reacts 🔥 (~500ms). Wait past both the
   // 🔥 delay and the 👌 deadline (800ms) to prove 👌 never fired.
   await new Promise(r => setTimeout(r, 900))
@@ -995,7 +1008,7 @@ test('progress:N/M stage does not create a standalone generating message', async
   router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-p', status: 'running' }] })
   await new Promise(r => setImmediate(r))
   sender.sent.length = 0
-  bus.emit('actum.stage', { actumId: 'actum-p', stage: 'progress:1/4', elapsedMs: 4000 })
+  emitStage('actum-p', 'progress:1/4')
   await new Promise(r => setImmediate(r))
   assert.equal(sender.sent.length, 0, 'the KSampler progress bar should not spawn a message')
 })
@@ -1085,7 +1098,7 @@ test('warm signal arriving before registration still reacts 🔥 (not 👌)', as
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
 
   // Warm signal fires FIRST (WarmPodClient emits it inside submit, pre-Stream)
-  bus.emit('actum.stage', { actumId: 'actum-warm', stage: 'warm-pod-found', elapsedMs: 0, info: { podId: 'pod-9' } })
+  emitStage('actum-warm', 'warm-pod-found', { podId: 'pod-9' })
   await new Promise(r => setImmediate(r))
 
   // Then the flow yields the Stream primitive → registration. Because the warm
@@ -1117,8 +1130,8 @@ test('pod-locked creates the session bulletin with the warm stepper + confirm', 
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'provisioning', elapsedMs: 0 })
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 } })
+  emitStage('a1', 'provisioning')
+  emitStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   await new Promise(r => setImmediate(r))
   // Bulletin posts at registration then edits in pod info — check both surfaces.
   const bul = [...sender.sent, ...sender.edited].find(s => /RTX 4090/.test(s.text))
@@ -1133,7 +1146,7 @@ test('bul:kill is host-only, terminates the pod, and cancels in-flight gens (fre
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  emitStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 })
   await new Promise(r => setImmediate(r))
 
   await allocutio.receive(bulCb(999, 'bul:kill'))   // not the host
@@ -1154,8 +1167,8 @@ test('a new pod after a receipt starts a FRESH bulletin (does not reanimate the 
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'provisioning', elapsedMs: 0 })
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 } })
+  emitStage('a1', 'provisioning')
+  emitStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   await new Promise(r => setImmediate(r))
 
   // Close the session → receipt frozen.
@@ -1171,8 +1184,8 @@ test('a new pod after a receipt starts a FRESH bulletin (does not reanimate the 
     { primitives: [{ kind: 'Stream', label: 'g', actumId: 'a2', status: 'running' }] },
   )
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a2', stage: 'provisioning', elapsedMs: 0 })
-  bus.emit('actum.stage', { actumId: 'a2', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-2', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 } })
+  emitStage('a2', 'provisioning')
+  emitStage('a2', 'pod-locked', { podId: 'pod-2', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   await new Promise(r => setImmediate(r))
 
   assert.ok(sender.sent.length > sentBefore, 'a fresh bulletin is posted as a new message')
@@ -1185,7 +1198,7 @@ test('pod.reaped freezes the matching session bulletin to a receipt', async () =
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  emitStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 })
   await new Promise(r => setImmediate(r))
   sender.edited.length = 0
 
@@ -1202,7 +1215,7 @@ test('actum.complete tallies the gen into the bulletin totals', async () => {
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  emitStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 })
   await new Promise(r => setImmediate(r))
   sender.edited.length = 0
   bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, coldStart: true, costUsd: 0.09, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
@@ -1222,7 +1235,7 @@ test('cold-start journal: silent hunt, committed Found/Prepared lines, live line
 
   const textAfter = async (stage: string, info?: object) => {
     sender.sent.length = 0; sender.edited.length = 0
-    bus.emit('actum.stage', { actumId: 'a1', stage, elapsedMs: 0, ...(info ? { info } : {}) } as unknown as Parameters<typeof bus.emit>[1])
+    emitStage('a1', stage, info)
     await new Promise(r => setImmediate(r))
     return [...sender.sent, ...sender.edited].map(m => m.text).at(-1) ?? ''
   }
@@ -1230,35 +1243,42 @@ test('cold-start journal: silent hunt, committed Found/Prepared lines, live line
   // Hunt is silent unless it drags — provisioning shows no "Hunting" line yet.
   const prov = await textAfter('provisioning')
   assert.ok(!/Hunting/.test(prov), 'fast hunt stays quiet')
-  // pod-locked commits the Found line (with the synthetic 30s hunt) + live Initializing.
+  // pod-locked commits the Found line + live Initializing. (The owned timeline derives the hunt
+  // duration from real elapsed `at`, not a synthetic `phaseMs`, so we don't pin "in 30s" here —
+  // the duration math is unit-tested in PodSession.test.ts.)
   const locked = await textAfter('pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
-  assert.match(locked, /Found RTX 4090 for \$0\.69\/hr in 30s/)
+  assert.match(locked, /Found RTX 4090 for \$0\.69\/hr/)
   assert.match(locked, /Initializing/)
   // download → connected live line; the Found line persists above it.
   const dl = await textAfter('downloading:3/4')
-  assert.match(dl, /Found RTX 4090 for \$0\.69\/hr in 30s/)
+  assert.match(dl, /Found RTX 4090 for \$0\.69\/hr/)
   assert.match(dl, /Connected, downloading models \(3\/4\)/)
-  // comfy-ready commits the Prepared line (4.5m) + live Generating.
+  // comfy-ready commits the Prepared line + live Generating.
   const ready = await textAfter('comfy-ready', { phaseMs: 4.5 * 60_000 })
-  assert.match(ready, /Prepared Make Setup in 4\.5m/)
+  assert.match(ready, /Prepared Make Setup/)
   assert.match(ready, /Generating/)
 })
 
-test('bail erases the Found line, records a permanent Quit-pod meta line', async () => {
+test('a throttle re-hunt surfaces as a fresh Found line (the Quit line retired with the shim, #6b)', async () => {
+  // The legacy `pod-bailed` → "Quit pod N" meta line was Fake/dev-only; the real throttle path
+  // never emitted it — it re-provisions, which the owned timeline shows as a new hunt → Found.
+  // So `pod-bailed` yields no Progressus (no bulletin change); the re-provision drives the rest.
   const { allocutio, router, sender } = makeAllocutio({ withPodControls: true })
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'provisioning', elapsedMs: 0 })
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 } })
+  emitStage('a1', 'provisioning')
+  emitStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 })
   await new Promise(r => setImmediate(r))
-  sender.edited.length = 0
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-bailed', elapsedMs: 0 })
+
+  emitStage('a1', 'pod-bailed')   // no owned phase → no bulletin change
+  emitStage('a1', 'provisioning') // throttle → re-hunt
+  emitStage('a1', 'pod-locked', { podId: 'pod-2', gpuType: 'RTX 4090', costPerHr: 0.69 })
   await new Promise(r => setImmediate(r))
 
   const txt = sender.edited.at(-1)!.text
-  assert.ok(!/Found RTX 4090/.test(txt), 'the bailed pod\'s Found line is erased')
-  assert.match(txt, /Quit pod 1 for download throttle/, 'a permanent meta line records the bail')
+  assert.match(txt, /Found RTX 4090 for \$0\.69\/hr/, 'the replacement pod commits a Found line')
+  assert.ok(!/Quit pod/.test(txt), 'no Quit meta line — retired with the actum.stage shim')
 })
 
 test('per-gen average falls across gens and the idle nudge shows marginal cost', async () => {
@@ -1266,7 +1286,7 @@ test('per-gen average falls across gens and the idle nudge shows marginal cost',
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 } })
+  emitStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   await new Promise(r => setImmediate(r))
   await allocutio.receive(bulCb(123, 'bul:confirm'))  // confirm → idle nudge, not setup prompt
   await new Promise(r => setImmediate(r))
@@ -1283,8 +1303,8 @@ test('GPU + rate live in the Found journal line; no vendor noise or location', a
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'provisioning', elapsedMs: 0 })
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'NVIDIA GeForce RTX 4090', region: 'EU-RO-1', costPerHr: 0.69, phaseMs: 30_000 } })
+  emitStage('a1', 'provisioning')
+  emitStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'NVIDIA GeForce RTX 4090', region: 'EU-RO-1', costPerHr: 0.69, phaseMs: 30_000 })
   await new Promise(r => setImmediate(r))
   bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, executionMs: 12000, coldStart: true, costUsd: 0.08, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
   await new Promise(r => setImmediate(r))
@@ -1301,7 +1321,7 @@ test('warm window auto-settles (confirms) if the host does not interact', async 
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(allocutio, router, 'a1')
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 } })
+  emitStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 })
   await new Promise(r => setImmediate(r))
 
   // Before the window lapses, the stepper (bul:confirm) is still offered.
@@ -1364,8 +1384,8 @@ async function bootMod() {
   await h.allocutio.receive(msgUpdate(123, 456, '/make', 50))
   lockPod(h.allocutio, h.router, 'a1')
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'provisioning', elapsedMs: 0 })
-  bus.emit('actum.stage', { actumId: 'a1', stage: 'pod-locked', elapsedMs: 0, info: { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 } })
+  emitStage('a1', 'provisioning')
+  emitStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69, phaseMs: 30_000 })
   await new Promise(r => setImmediate(r))
   await h.allocutio.receive(bulCb(123, 'bul:confirm'))
   await new Promise(r => setImmediate(r))
