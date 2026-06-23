@@ -297,6 +297,11 @@ export async function awaitViaStream(
                     etaMs = Math.round((downloadBytes - completedBytes) / bytesPerMs)
                   }
                   emitStage?.(`downloading:${modelDone}/${modelTotal}`, etaMs !== undefined ? { etaMs } : undefined)
+                  // Tick the owned timeline too (#6b makes actum.progressus the bulletin's sole
+                  // driver, so the n/m counter must advance here, not just at preflight). Per-MODEL
+                  // (low-frequency, like preflight) — NOT the byte-level download-progress; and
+                  // same-phase progress coalesces out of the persisted timeline (§7), bus-only.
+                  await record({ phase: 'downloading', target: 'model', progress: { done: modelDone, total: modelTotal, unit: 'items' }, ...(etaMs !== undefined ? { etaMs } : {}) })
                 }
                 break
               }
