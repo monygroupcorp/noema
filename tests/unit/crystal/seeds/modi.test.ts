@@ -21,10 +21,11 @@ test('aitoolkit-training modus is a canon training flow (ministerium aitoolkit, 
   assert.equal(MODUS_AITOOLKIT_TRAINING.canonica, true)
   // No fixed cost: local self-hosted charges 0n via `?? 0n`; remote bills pod-seconds (Slice E).
   assert.equal(MODUS_AITOOLKIT_TRAINING.impetusFixum, undefined)
-  // The cursor's required inputs are declared required.
-  for (const k of ['configPath', 'steps', 'triggerWord', 'baseModel']) {
+  // The user-facing required inputs (a dataset + knobs; the modus synthesises the config).
+  for (const k of ['dataset', 'steps', 'triggerWord', 'baseModel']) {
     assert.equal(MODUS_AITOOLKIT_TRAINING.aditus[k]?.required, true, `${k} should be required`)
   }
+  assert.equal('configPath' in MODUS_AITOOLKIT_TRAINING.aditus, false, 'configPath is internal, not a user port')
   // Exitus matches the finalizer's return (Slice B): { trained, steps, loraId, loraUrl }.
   assert.deepEqual(Object.keys(MODUS_AITOOLKIT_TRAINING.exitus).sort(), ['loraId', 'loraUrl', 'steps', 'trained'])
   assert.ok(MODUS_AITOOLKIT_TRAINING.contentHash.length > 0)

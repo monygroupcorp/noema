@@ -4,6 +4,7 @@ import type { Modus } from '../types/modus.js'
 import type { AitkJobStore } from './AitkJobStore.js'
 import type { AitkSpawner, AitkMount } from './AitkSpawner.js'
 import { awaitViaPoll, type AitkOutcome } from './aitoolkitRunnerClient.js'
+import { buildAitkConfig, type AitkConfigWriter } from './aitkConfig.js'
 
 // =============================================================================
 // AitoolkitTrainingCursor — the crystal-native training runtime (build #5)
@@ -24,9 +25,15 @@ import { awaitViaPoll, type AitkOutcome } from './aitoolkitRunnerClient.js'
 // training duration while the poll loop streams status. A remote/queued training variant
 // would return `{ kind: 'async', externusJobId }` and complete via webhook — not this path.
 //
-// Inputs (aditus): `jobId` (default = actum.id, MUST match the config `name`), `steps`
-// (total, for executing progress + etaMs), `configPath` (container-relative training yaml),
-// `jobConfig` (optional JSON string stored on the Job row), `gpuId`.
+// The modus OWNS the config. The user-facing inputs are a DATASET + a few knobs; the
+// cursor SYNTHESISES the ai-toolkit yaml from them (`buildAitkConfig`, per base-model
+// preset) and writes it via the injected `writeConfig` shell — users never hand a yaml.
+//
+// Inputs (aditus): `dataset` (container-visible image folder), `triggerWord`, `baseModel`
+// (preset key), `steps` (total — drives the config + the executing progress/etaMs);
+// optional `saveEvery`, `rank`, `jobId` (default = actum.id, becomes the run `name`),
+// `gpuId`, `jobConfig`. `configPath` is an internal escape hatch (a pre-built yaml) —
+// if present it's used as-is and no config is generated.
 // =============================================================================
 
 export interface AitoolkitTrainingCursorDeps {
@@ -44,6 +51,12 @@ export interface AitoolkitTrainingCursorDeps {
   timeoutMs?: number
   /** Poll cadence (ms) — default 2000. */
   pollIntervalMs?: number
+  /**
+   * Materialise a generated training config: write it, return the container-relative path
+   * the spawner runs. Required for the high-level `dataset`/`baseModel` path; unused when
+   * the aditus carries a ready `configPath`. (`fsConfigWriter` is the production shell.)
+   */
+  writeConfig?: AitkConfigWriter
   /**
    * Map a completed run to its exitus outputs (e.g. locate + host the LoRA safetensors).
    * Default: `{ trained: true, steps }`. The LoRA upload/registration is the publishing
@@ -63,10 +76,12 @@ export class AitoolkitTrainingCursor implements Cursor {
     const aditus = actum.aditus
     const jobId = String(aditus.jobId ?? actum.id)
     const cfgSteps = asPositiveInt(aditus.steps)
-    const configPath = String(aditus.configPath ?? '')
-    if (!configPath) throw new Error('aitoolkit training: `configPath` is required (the container-relative training yaml)')
     const jobConfig = typeof aditus.jobConfig === 'string' ? aditus.jobConfig : undefined
     const gpuId = aditus.gpuId !== undefined ? String(aditus.gpuId) : undefined
+
+    // The modus owns the config: synthesise the training yaml from the dataset + knobs,
+    // unless a ready `configPath` is handed in (internal escape hatch).
+    const configPath = String(aditus.configPath ?? '') || await this._generateConfig(jobId, aditus, cfgSteps)
 
     const startedAt = Date.now()
 
@@ -96,6 +111,28 @@ export class AitoolkitTrainingCursor implements Cursor {
 
     const exitus = await (this.deps.resolveOutput?.(actum, outcome) ?? Promise.resolve({ trained: true, steps: outcome.lastStep }))
     return { kind: 'sync', exitus: { exitus, impetus: 0n, duratio: Date.now() - startedAt } }
+  }
+
+  /** Synthesise + write the ai-toolkit yaml from the high-level aditus; returns its path. */
+  private async _generateConfig(jobId: string, aditus: Record<string, unknown>, steps: number | undefined): Promise<string> {
+    const dataset = String(aditus.dataset ?? '')
+    if (!dataset) throw new Error('aitoolkit training: `dataset` is required (the image folder), or pass a ready `configPath`')
+    const baseModel = String(aditus.baseModel ?? '')
+    if (!baseModel) throw new Error('aitoolkit training: `baseModel` is required to pick the config preset')
+    if (!this.deps.writeConfig) throw new Error('aitoolkit training: no `writeConfig` configured to materialise the generated config')
+
+    const saveEvery = asPositiveInt(aditus.saveEvery)
+    const rank = asPositiveInt(aditus.rank)
+    const yaml = buildAitkConfig({
+      name: jobId,
+      datasetPath: dataset,
+      triggerWord: String(aditus.triggerWord ?? jobId),
+      baseModel,
+      steps: steps ?? 500,
+      ...(saveEvery !== undefined ? { saveEvery } : {}),
+      ...(rank !== undefined ? { rank } : {}),
+    })
+    return this.deps.writeConfig(jobId, yaml)
   }
 }
 
