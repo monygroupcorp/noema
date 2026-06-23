@@ -2,12 +2,14 @@
 // runEvents — bus event → RunEvent projection (pure)
 // =============================================================================
 
+import type { Progressus } from '../../types/progressus.js'
+
 export interface RunEvent {
   runId: string
-  kind: 'stage' | 'complete' | 'failed'
+  kind: 'progress' | 'complete' | 'failed'
   terminal: boolean
-  stage?: string
-  elapsedMs?: number
+  /** The owned typed status report (#6c). Carried on `kind: 'progress'`. */
+  progressus?: Progressus
   status?: 'complete' | 'failed'
   costUsd?: number
   executionMs?: number
@@ -21,15 +23,18 @@ export function busToRunEvent(event: string, payload: any): RunEvent | null {
   // Defensive: a malformed event with no actumId can't be keyed per-run — drop it.
   if (!payload || typeof payload.actumId !== 'string') return null
 
-  if (event === 'actum.stage') {
-    const ev: RunEvent = {
+  // #6c — the owned typed status report (the single live-status channel since #6e
+  // retired the stringly `actum.stage` frames). A frontend reads `progressus.phase` +
+  // `progressus.progress` directly. Never terminal — cost + completion ride the
+  // actum.complete/fail events below.
+  if (event === 'actum.progressus') {
+    if (!payload.progressus || typeof payload.progressus !== 'object') return null
+    return {
       runId: payload.actumId,
-      kind: 'stage',
+      kind: 'progress',
       terminal: false,
-      stage: payload.stage,
-      elapsedMs: payload.elapsedMs,
+      progressus: payload.progressus as Progressus,
     }
-    return ev
   }
 
   if (event === 'actum.complete') {

@@ -3,8 +3,9 @@ import assert from 'node:assert/strict'
 import { FakeRunPodClient } from '../../../src/crystal/FakeRunPodClient.js'
 import { FakeWarmPodClient } from '../../../src/crystal/FakeWarmPodClient.js'
 import type { Materia, MateriaStore } from '../../../src/types/materia.js'
-import { bus } from '../../../src/lib/bus.js'
+import { registerProgressusRecorder } from '../../../src/execution/progressusSink.js'
 import { withTrace, makeTraceContext } from '../../../src/lib/trace.js'
+import type { Progressus } from '../../../src/types/progressus.js'
 
 /** Minimal in-memory MateriaStore — enough for the fake cold→warm→reap path. */
 function memoryMateriae(): MateriaStore & { all(): Materia[] } {
@@ -66,20 +67,23 @@ test('warm reuse emits warm-pod-found, delivers, and re-arms the idle window', a
   const webhooks: Array<{ id: string; status: string }> = []
   const warm = new FakeWarmPodClient(m, materiae, okFetch(webhooks), { stepMs: 1, warmTtlMs: 50 })
 
-  const stages: string[] = []
-  const listener = (d: { stage: string }): void => { stages.push(d.stage) }
-  bus.on('actum.stage', listener)
+  const seen: Progressus[] = []
+  registerProgressusRecorder(async (_id, p) => { seen.push(p) })
   let jobId = ''
-  await withTrace(makeTraceContext({ actumId: 'a2' }), async () => {
-    const r = await warm.submit({ input, webhook: 'http://localhost/wh' })
-    jobId = r.id
-    await new Promise(r => setTimeout(r, 100))
-  })
-  bus.off('actum.stage', listener)
+  try {
+    await withTrace(makeTraceContext({ actumId: 'a2' }), async () => {
+      const r = await warm.submit({ input, webhook: 'http://localhost/wh' })
+      jobId = r.id
+      await new Promise(r => setTimeout(r, 100))
+    })
+  } finally {
+    registerProgressusRecorder(async () => {})
+  }
 
   assert.ok(jobId.startsWith('pod-x-'), `jobId keyed by job, not pod id: ${jobId}`)
-  assert.ok(stages.includes('warm-pod-found'), `stages missing warm-pod-found: ${stages.join(',')}`)
-  assert.ok(stages.includes('inferring'), `stages missing inferring: ${stages.join(',')}`)
+  // warm-pod-found → a `provisioning` report tagged 'warm pod reused' (drives 🔥); inferring → executing.
+  assert.ok(seen.some(p => p.phase === 'provisioning' && p.message === 'warm pod reused'), 'missing warm-pod-found')
+  assert.ok(seen.some(p => p.phase === 'executing'), 'missing executing')
   assert.equal(webhooks.length, 1)
   assert.equal(webhooks[0].id, jobId)
   assert.equal(webhooks[0].status, 'COMPLETED')

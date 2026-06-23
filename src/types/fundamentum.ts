@@ -13,7 +13,7 @@
 // (a flow definition must NOT name "runpod" — that belongs on the Cursor / Materia.genus)
 // and scope-conflated (it mixed the shareable environment with flow-specific form).
 // `Fundamentum` is the environment half, extracted and de-provider-ized; the form half
-// (workflowTemplate, seedInputKey, cookFlags) stays on the Essentia.
+// (workflowTemplate, seedInputKey, genFlags) stays on the Essentia.
 //
 // An Essentia REFERENCES a Fundamentum, version-pinned (`fundamentumId` +
 // `fundamentumVersio`) — the same id+version discipline it uses for workflowTemplate.

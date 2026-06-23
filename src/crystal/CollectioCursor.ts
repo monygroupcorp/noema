@@ -1,6 +1,6 @@
 import type { Collectio, Collectionum } from '../types/collectio.js'
-import type { Actorum } from '../types/cursus.js'
-import type { ActumInceptor } from '../execution/ActumInceptor.js'
+import type { Actorum, Inceptio } from '../types/cursus.js'
+import type { Actum } from '../types/actum.js'
 import { selectForPiece } from './TraitMixer.js'
 
 // =============================================================================
@@ -28,15 +28,17 @@ interface CollectioState {
   paused: boolean
   /** actumIds awaiting review (only when reviewEnabled) */
   pendingReview: Set<string>
-  /** How many revives have happened (used to extend numerus effectively) */
-  reviveCount: number
+  /** DNA fingerprints already produced — the uniqueness ledger (only used when `Collectio.dna`). */
+  usedDna: Set<string>
 }
 
 export class CollectioCursor {
   private readonly states = new Map<string, CollectioState>()
 
   constructor(
-    private readonly inceptor: ActumInceptor,
+    /** Dispatch one piece — `(inceptio) => dispatchInceptio(deps, inceptio)`. Initiates AND
+     *  RUNS the piece (sync → completes inline; async pod → parks for the webhook). */
+    private readonly dispatch: (inceptio: Inceptio) => Promise<{ actum: Actum; exitus?: Record<string, unknown> }>,
     private readonly collectiones: Collectionum,
     private readonly actorum: Actorum,
     private readonly config: CollectioCursorConfig,
@@ -56,38 +58,44 @@ export class CollectioCursor {
     for (const collectio of agensList) {
       // Already tracked (e.g. rehydrate called twice) — skip
       if (this.states.has(collectio.id)) continue
+      this.states.set(collectio.id, await this._reconstructState(collectio))
+    }
+  }
 
-      // Reconstruct running set: acta whose status is nascens or agens
-      const running = new Set<string>()
-      const pendingReview = new Set<string>()
-      let reviveCount = 0
+  /**
+   * Rebuild in-memory state for one Collectio from its persisted acta — the
+   * running/pending sets and the DNA ledger. Shared by rehydrate (on restart)
+   * and extend (re-opening a settled collection for another batch). The reject
+   * budget is the persisted `reiectae`, so it needs no reconstruction here.
+   */
+  private async _reconstructState(collectio: Collectio): Promise<CollectioState> {
+    const running = new Set<string>()
+    const pendingReview = new Set<string>()
+    const usedDna = new Set<string>()
 
-      for (const actumId of collectio.acta) {
-        const actum = await this.actorum.findById(actumId)
-        if (!actum) continue
+    for (const actumId of collectio.acta) {
+      const actum = await this.actorum.findById(actumId)
+      if (!actum) continue
 
-        if (actum.status === 'nascens' || actum.status === 'agens') {
-          running.add(actumId)
-        }
-
-        if (actum.exitus?.reviewOutcome === 'pending') {
-          pendingReview.add(actumId)
-        }
-
-        if (actum.exitus?.reviewOutcome === 'rejected') {
-          reviveCount++
-        }
+      if (actum.status === 'nascens' || actum.status === 'agens') {
+        running.add(actumId)
       }
 
-      const state: CollectioState = {
-        nextIndex: collectio.acta.length,
-        running,
-        paused: false,
-        pendingReview,
-        reviveCount,
+      if (actum.exitus?.reviewOutcome === 'pending') {
+        pendingReview.add(actumId)
       }
 
-      this.states.set(collectio.id, state)
+      // Rebuild the DNA ledger from the fingerprint stamped at dispatch time.
+      const dna = actum.aditus?._dna
+      if (typeof dna === 'string' && dna) usedDna.add(dna)
+    }
+
+    return {
+      nextIndex: collectio.acta.length,
+      running,
+      paused: false,
+      pendingReview,
+      usedDna,
     }
   }
 
@@ -98,13 +106,39 @@ export class CollectioCursor {
       running: new Set(),
       paused: false,
       pendingReview: new Set(),
-      reviveCount: 0,
+      usedDna: new Set(),
     }
     this.states.set(collectio.id, state)
 
     await this.collectiones.update(collectio.id, { status: 'agens' })
 
     await this._dispatch(collectio.id)
+  }
+
+  /**
+   * Extend a Collectio's target by `addCount` and dispatch the new pieces —
+   * the incremental-batch primitive ("fire 50 → review → fire 50 more"). Works
+   * whether the collection is still agens or already completa: state is
+   * reconstructed if it was cleared on completion, the target (numerus) grows,
+   * the collection re-opens to agens, and the fan-out resumes from where it
+   * left off (new pieces get fresh, non-colliding pieceIndexes).
+   */
+  async extend(collectioId: string, addCount: number): Promise<void> {
+    if (addCount <= 0) return
+    const collectio = await this.collectiones.find(collectioId)
+    if (!collectio) return
+
+    // Reconstruct state if the collection had settled (completa clears it).
+    if (!this.states.has(collectioId)) {
+      this.states.set(collectioId, await this._reconstructState(collectio))
+    }
+
+    await this.collectiones.update(collectioId, {
+      numerus: collectio.numerus + addCount,
+      status: 'agens',
+    })
+
+    await this._dispatch(collectioId)
   }
 
   /**
@@ -172,9 +206,13 @@ export class CollectioCursor {
   }
 
   /**
-   * Reject a pending-review actum and re-run it with a new seed.
-   * Sets exitus.reviewOutcome = 'rejected' on the original actum.
-   * Dispatches a new piece using pieceIndex beyond numerus (deterministic revive).
+   * Reject a pending-review actum and re-run it with a fresh piece.
+   * Sets exitus.reviewOutcome = 'rejected' on the original actum and bumps
+   * `reiectae` — which extends the dispatch budget (numerus + reiectae) by one,
+   * so the sequential fan-out generates one replacement piece. The replacement
+   * gets the next free pieceIndex (always ≥ every original index), so it never
+   * reproduces the rejected piece's selection — no nextIndex juggling needed.
+   * A rejection is NOT a failure: it does not touch `fractae`.
    */
   async rejectAndRevive(collectioId: string, actumId: string): Promise<void> {
     const state = this.states.get(collectioId)
@@ -190,22 +228,13 @@ export class CollectioCursor {
     })
 
     state.pendingReview.delete(actumId)
-    state.reviveCount++
-
-    // Ensure revive pieces start at index >= numerus — deterministic, never
-    // collides with original run. LCG seeded by pieceIndex, so numerus+n gives
-    // a different but deterministic result per revive.
-    if (state.nextIndex < (await this._collectioNumerus(collectioId))) {
-      state.nextIndex = await this._collectioNumerus(collectioId)
-    }
 
     const collectio = await this.collectiones.find(collectioId)
     if (!collectio) return
 
-    // The rejected piece counts as fractus for accounting
-    await this.collectiones.update(collectioId, { fractae: collectio.fractae + 1 })
+    // Rejection extends the dispatch budget by one → a replacement is generated.
+    await this.collectiones.update(collectioId, { reiectae: collectio.reiectae + 1 })
 
-    // Dispatch a new piece — nextIndex now equals or exceeds numerus
     await this._dispatch(collectioId)
   }
 
@@ -245,7 +274,8 @@ export class CollectioCursor {
     const collectio = await this.collectiones.find(collectioId)
     if (!collectio) return
 
-    const totalPieces = collectio.numerus + state.reviveCount
+    const totalPieces = collectio.numerus + collectio.reiectae
+    const syncDone: string[] = []
 
     while (
       state.running.size < collectio.concurrentia &&
@@ -259,7 +289,12 @@ export class CollectioCursor {
         basePrompt: collectio.aditusBase._basePrompt as string | undefined,
         collectionName: collectio.nomen,
         totalPieces: collectio.numerus,
+        // Opt-in DNA uniqueness: feed the ledger so the mixer rerolls collisions.
+        ...(collectio.dna ? { usedDna: state.usedDna } : {}),
       })
+
+      // Record this piece's DNA so subsequent pieces avoid it (when deduping).
+      if (collectio.dna) state.usedDna.add(selection.dna)
 
       const aditus: Record<string, unknown> = {
         ...collectio.aditusBase,
@@ -267,15 +302,17 @@ export class CollectioCursor {
         prompt: selection.prompt,
         _pieceIndex: pieceIndex,
         _attributes: selection.attributes,
+        _dna: selection.dna,
       }
 
-      const inceptio = {
+      const inceptio: Inceptio = {
         modusId: collectio.modusId,
         aditus,
         by: collectio.by,
       }
 
-      const actum = await this.inceptor.initiate(inceptio)
+      const result = await this.dispatch(inceptio)
+      const actum = result.actum
       state.running.add(actum.id)
 
       // Persist actumId in Collectio.acta
@@ -285,6 +322,15 @@ export class CollectioCursor {
           acta: [...fresh.acta, actum.id],
         })
       }
+
+      // Sync cursors complete the piece inline — no webhook will fire, so advance
+      // the collection ourselves. (Real async pods → the webhook's collectioRouter
+      // calls onActumCompleta.) Deferred past the loop to avoid re-entrant dispatch.
+      if (result.exitus !== undefined) syncDone.push(actum.id)
+    }
+
+    for (const actumId of syncDone) {
+      await this.onActumCompleta(collectioId, actumId, true)
     }
   }
 
@@ -307,14 +353,10 @@ export class CollectioCursor {
     }
   }
 
+  /** The number of pieces to dispatch: the target plus one replacement per rejection. */
   private async _totalPieces(collectioId: string, state: CollectioState): Promise<number> {
     const collectio = await this.collectiones.find(collectioId)
     if (!collectio) return state.nextIndex
-    return collectio.numerus + state.reviveCount
-  }
-
-  private async _collectioNumerus(collectioId: string): Promise<number> {
-    const collectio = await this.collectiones.find(collectioId)
-    return collectio?.numerus ?? 0
+    return collectio.numerus + collectio.reiectae
   }
 }

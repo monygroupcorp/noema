@@ -12,6 +12,8 @@ import type { ModoStore } from './types/modo.js'
 import type { Mandatorum } from './types/mandatum.js'
 import type { Corporum } from './types/corpus.js'
 import type { Collectionum } from './types/collectio.js'
+import type { Editionum } from './types/editio.js'
+import type { Sodalitatum } from './types/sodalitas.js'
 import type { Tabularum } from './types/tabula.js'
 import type { Testimoniorum, Depositorum, Solutionum, Petitionum } from './types/catena.js'
 import type { Scholiorum } from './types/scholium.js'
@@ -44,6 +46,21 @@ import { RunPodCursor } from './crystal/RunPodCursor.js'
 import { TesseraCursor } from './crystal/TesseraCursor.js'
 import { OpenAICursor } from './crystal/OpenAICursor.js'
 import { HuggingFaceCursor } from './crystal/HuggingFaceCursor.js'
+import { LayerCompositeCursor } from './crystal/LayerCompositeCursor.js'
+import { JimpLayerCompositeEngine } from './crystal/LayerCompositeEngine.js'
+import { FfmpegCursor } from './crystal/FfmpegCursor.js'
+import { SpawnFfmpegEngine } from './crystal/FfmpegEngine.js'
+import { AitoolkitTrainingCursor } from './crystal/AitoolkitTrainingCursor.js'
+import { SqliteAitkJobStore } from './crystal/AitkJobStore.js'
+import { DockerAitkSpawner } from './crystal/AitkSpawner.js'
+import { httpMediaFetcher } from './crystal/MediaFetcher.js'
+import { R2Uploader } from './crystal/R2Uploader.js'
+import { FeedAdapter } from './crystal/FeedAdapter.js'
+import { BucketAdapter } from './crystal/BucketAdapter.js'
+import { ModelPublishAdapter, huggingFaceRegistry, civitaiRegistry } from './crystal/ModelPublishAdapter.js'
+import { MintAdapter, MarketplaceAdapter } from './crystal/MintAdapter.js'
+import { HuggingFaceUploader, HfHttpTransport } from './crystal/HfUploader.js'
+import type { PublicationAdapter } from './crystal/PublicationAdapter.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
 import { ActumCompletor } from './execution/ActumCompletor.js'
 import { ActumInceptor } from './execution/ActumInceptor.js'
@@ -51,6 +68,8 @@ import { dispatchInceptio } from './execution/dispatchInceptio.js'
 import { MongoMandatum } from './crystal/MongoMandatum.js'
 import { MongoCorpus } from './crystal/MongoCorpus.js'
 import { MongoCollectio } from './crystal/MongoCollectio.js'
+import { MongoEditionum } from './crystal/MongoEditionum.js'
+import { MongoSodalitatum } from './crystal/MongoSodalitatum.js'
 import { MongoTabula } from './crystal/MongoTabula.js'
 import { MongoTestimoniorum } from './crystal/MongoTestimoniorum.js'
 import { MongoDepositum } from './crystal/MongoDepositum.js'
@@ -79,6 +98,11 @@ export interface Ring {
   mandatores: Mandatorum
   corpora: Corporum
   collectiones: Collectionum
+  /** Publication records (Editio) — backs the publishing spine + feed. */
+  editiones: Editionum
+  /** Registered publication adapters (FeedAdapter always; BucketAdapter when R2 is configured). */
+  publicationAdapters: PublicationAdapter[]
+  sodalitates: Sodalitatum
   tabulae: Tabularum
   testimonia: Testimoniorum
   deposita: Depositorum
@@ -140,6 +164,23 @@ export interface ContainerConfig {
   runpodWebhookUrl?: string
   /** R2 config for warm-pod jobs so they upload to durable storage (not pod-proxy URLs). */
   runpodR2?: import('./crystal/SecurePodClient.js').R2Config
+  /**
+   * Local ai-toolkit training (build #5, ministerium 'aitoolkit'). Present only on a box
+   * with a GPU + the `stationthis-klein` image + a host-mounted `aitk_db.db`. Registers the
+   * `AitoolkitTrainingCursor`; absent in prod (no local trainer) → no registration.
+   */
+  aitoolkit?: {
+    /** Path to the host-mounted ai-toolkit SQLite DB (`aitk_db.db`). */
+    dbPath: string
+    /** The ai-toolkit Docker image (e.g. 'stationthis-klein:1'). */
+    image: string
+    /** Bind mounts for the container (ai-toolkit clone, dataset, HF cache). */
+    mounts?: import('./crystal/AitkSpawner.js').AitkMount[]
+    /** `--shm-size` for the container (PyTorch DataLoader) — default '8g'. */
+    shmSize?: string
+    /** Overall poll cap (ms) — a hung run trips this and fails. */
+    timeoutMs?: number
+  }
   /** Warm-window TTL (ms) passed to warm-pod jobs — default 60_000. */
   runpodWarmTtlMs?: number
   /** Override the warm-pod client factory (dev fake mode swaps in FakeWarmPodClient). */
@@ -167,6 +208,14 @@ export interface ContainerConfig {
   mandatoresCollection?: string
   corporaCollection?: string
   collectionesCollection?: string
+  editionesCollection?: string
+  /** Our HuggingFace org for `custody:'ours'` model publishes (default 'ms2stationthis'). */
+  huggingFaceOrg?: string
+  /** HF_TOKEN — present → the HF registry gets a real LFS uploader; absent → projection-only. */
+  huggingFaceToken?: string
+  /** Base URL the MarketplaceAdapter projects listing handles under (default 'https://noema.art/market'). */
+  marketplaceBaseUrl?: string
+  sodalitatesCollection?: string
   tabulaeCollection?: string
   testimoniaCollection?: string
   depositaCollection?: string
@@ -266,6 +315,8 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const mandatores = new MongoMandatum(db.collection(config.mandatoresCollection ?? 'mandatores'))
   const corpora = new MongoCorpus(db.collection(config.corporaCollection ?? 'corpora'))
   const collectiones = new MongoCollectio(db.collection(config.collectionesCollection ?? 'collectiones'))
+  const editiones = new MongoEditionum(db.collection(config.editionesCollection ?? 'editiones'))
+  const sodalitates = new MongoSodalitatum(db.collection(config.sodalitatesCollection ?? 'sodalitates'))
   const tabulae = new MongoTabula(db.collection(config.tabulaeCollection ?? 'tabulae'))
   const testimonia = new MongoTestimoniorum(db.collection(config.testimoniaCollection ?? 'testimonia'))
   const deposita = new MongoDepositum(db.collection(config.depositaCollection ?? 'deposita'))
@@ -364,6 +415,56 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     cursorum.register('huggingface', hfCursor)
   }
 
+  // Publication adapters (spec §5b): feed + model registries need nothing; the
+  // bucket adapter needs R2 (custody=ours hosting) so it is gated on config below.
+  // Model registries (HuggingFace/Civitai, publishing #3): our HF org hosts a
+  // custody:'ours' publish; Civitai has no org → requires custody:'theirs' (BYO).
+  // Collection/mint (publishing #5): the mint + marketplace adapters freeze a drop's
+  // canon into a deterministic content-addressed handle. Pure projectors (no chain tx
+  // / venue API yet — placeholder §10), so they need no deps and are always available.
+  // Real HF weight upload (LFS) when a token is configured; else projection-only.
+  // Runs inside the PublicationWorker's settle, so a multi-GB upload is durable.
+  const hfUploader = config.huggingFaceToken
+    ? new HuggingFaceUploader({ transport: new HfHttpTransport({ token: config.huggingFaceToken }), fetcher: httpMediaFetcher })
+    : undefined
+  const publicationAdapters: PublicationAdapter[] = [
+    new FeedAdapter(),
+    new ModelPublishAdapter(huggingFaceRegistry(config.huggingFaceOrg ?? 'ms2stationthis', hfUploader)),
+    new ModelPublishAdapter(civitaiRegistry()),
+    new MintAdapter(),
+    new MarketplaceAdapter({ base: config.marketplaceBaseUrl ?? 'https://noema.art/market' }),
+  ]
+
+  // Host-side deterministic processing runtimes (spec §4a). They produce bytes
+  // ON the host, so they need R2 to host the result — gate registration on it.
+  if (config.runpodR2) {
+    const uploader = new R2Uploader(config.runpodR2)
+    cursorum.register('composite', new LayerCompositeCursor({
+      engine: new JimpLayerCompositeEngine(),
+      fetcher: httpMediaFetcher,
+      uploader,
+    }))
+    cursorum.register('ffmpeg', new FfmpegCursor({
+      engine: new SpawnFfmpegEngine(),
+      fetcher: httpMediaFetcher,
+      uploader,
+    }))
+    // Bucket custody (publishing #2): re-hosts an artifact's media to R2.
+    publicationAdapters.push(new BucketAdapter({ fetcher: httpMediaFetcher, store: uploader }))
+  }
+
+  // Local ai-toolkit training (build #5) — only where a GPU + image + host-mounted DB exist.
+  if (config.aitoolkit) {
+    cursorum.register('aitoolkit', new AitoolkitTrainingCursor({
+      store: new SqliteAitkJobStore(config.aitoolkit.dbPath),
+      spawner: new DockerAitkSpawner(),
+      image: config.aitoolkit.image,
+      ...(config.aitoolkit.mounts ? { mounts: config.aitoolkit.mounts } : {}),
+      ...(config.aitoolkit.shmSize ? { shmSize: config.aitoolkit.shmSize } : {}),
+      ...(config.aitoolkit.timeoutMs !== undefined ? { timeoutMs: config.aitoolkit.timeoutMs } : {}),
+    }))
+  }
+
   const completor = new ActumCompletor({ acta: actorum, signorum, terminatePod: config.terminatePod })
   const arcanumLeafCol = db.collection(config.arcanumLeavesCollection ?? 'arcanum_leaves')
   const arcanumNullifiersCol = db.collection(config.arcanumNullifiersCollection ?? 'arcanum_nullifiers')
@@ -381,22 +482,21 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const bursarium = new MongoBursarium(bursariumCol)
   const inceptor = new ActumInceptor({ modorum, cursorum, signorum, acta: actorum, arcanumVerifier, bursarium })
   const arcanumIssuer = new ArcanumIssuer({ signorum, tree: arcanumTree })
-  const collectioCursor = new CollectioCursor(inceptor, collectiones, actorum, {})
 
-  // Compositus engine (ADR-0008): its child steps dispatch through the SAME
-  // dispatchInceptio used everywhere else, so they get the full rail (actumIndex,
-  // hooks). Self-reference resolved via a holder — `compositusCursor` is assigned
-  // before any dispatch call can fire.
+  // Both fan-out cursors (collectio + compositus) dispatch their pieces/steps through
+  // the SAME dispatchInceptio used everywhere else — so they get the full rail
+  // (actumIndex, hooks) AND a Collectio piece can itself be a compositus (cook-over-spell).
+  // Self-reference resolved via a holder — `compositusCursor` is assigned before any
+  // dispatch call can fire.
   let compositusCursor: CompositusCursor
-  compositusCursor = new CompositusCursor(
-    (inc: Inceptio) => dispatchInceptio({ inceptor, modorum, cursorum, completor, actumIndex, compositusCursor }, inc),
-    modorum,
-    actorum,
-  )
+  const sharedDispatch = (inc: Inceptio) =>
+    dispatchInceptio({ inceptor, modorum, cursorum, completor, actumIndex, compositusCursor }, inc)
+  compositusCursor = new CompositusCursor(sharedDispatch, modorum, actorum)
+  const collectioCursor = new CollectioCursor(sharedDispatch, collectiones, actorum, {})
 
   return {
     actorum, modorum, signorum, animae, personae, vestigiorum, modos,
-    mandatores, corpora, collectiones, tabulae, testimonia,
+    mandatores, corpora, collectiones, editiones, publicationAdapters, sodalitates, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
     cursorum, completor, inceptor, arcanumIssuer,

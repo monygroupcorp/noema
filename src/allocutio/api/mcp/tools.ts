@@ -11,7 +11,7 @@
 // unauthenticated.
 // =============================================================================
 
-import type { CrystalApi, SaveFlowOpts } from '../CrystalApi.js'
+import type { CrystalApi, SaveFlowOpts, CollectOpts } from '../CrystalApi.js'
 import type { AuctorKey } from '../../../flow/types.js'
 import type { IntelligensGenus } from '../../../types/intelligendi.js'
 import { ApiError } from '../errors.js'
@@ -208,6 +208,51 @@ export async function provisionStudioTool(
   if (!auctor) return errResult('auth.missing', 'authentication required')
   try {
     return ok({ studio: await api.provisionStudio(auctor, args) })
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Collections (Collectio) — a base modus expanded over a Tractus[] grid
+// ---------------------------------------------------------------------------
+
+export async function collectTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+  args: CollectOpts,
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    return ok({ collection: await api.collect(auctor, args) })
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}
+
+export async function getCollectionTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+  args: { id: string },
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    return ok({ collection: await api.getCollection(auctor, args.id) })
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}
+
+export async function listCollectionsTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    return ok({ collections: await api.listCollections(auctor) })
   } catch (e) {
     if (e instanceof ApiError) return errResult(e.code, e.message)
     return errResult('internal.error', String(e))

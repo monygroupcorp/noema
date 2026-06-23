@@ -10,7 +10,13 @@ One container, one process.
   DigitalOcean droplet. `staging.noema.art` resolves here.
 - **Source of truth for ops lives on the droplet at `/opt/noema/`** — NOT in the repo,
   NOT in `/root`. The repo copies and `/root/hyperbot/*` are stale.
-  - `/opt/noema/deploy-staging.sh` — the real deploy script.
+  - **`~/deploy-staging.sh` (i.e. `/root/deploy-staging.sh`) is the command you actually run.**
+    It's a thin wrapper: `cd /opt/noema && git pull` (pulls the latest ops config) then calls
+    `/opt/noema/deploy-staging.sh`. **Always invoke the `/root` wrapper — do NOT run the inner
+    `/opt/noema/deploy-staging.sh` directly** (it skips the `git pull`). (Incident 2026-06-19:
+    running the inner script directly recreated the container against stale state.)
+  - `/opt/noema/deploy-staging.sh` — the inner script the wrapper calls (pulls the `:staging`
+    image + recreates the container).
   - `/opt/noema/Caddyfile` — the live reverse-proxy config (mounted into `caddy_proxy`).
   - `/opt/noema/.env.staging` — the container env (**contains `STAGING_FRONTEND=1`**).
 - **Container:** `hyperbot-staging` on docker network `hyperbot_network`, image
@@ -28,9 +34,9 @@ One container, one process.
    pushes `ghcr.io/monygroupcorp/noema:staging`. (Staging tracks `chainengine-migration`;
    a push is a clean fast-forward — `git push origin HEAD:staging`.)
 2. **Wait** for the build to go green: `gh run list --branch staging --limit 1`.
-3. **Deploy (manual, on the droplet):**
+3. **Deploy (manual, on the droplet) — run the `/root` wrapper, NOT the inner script:**
    ```bash
-   ssh noema 'cd /opt/noema && ./deploy-staging.sh'
+   ssh noema './deploy-staging.sh'
    ```
    It pulls `:staging`, recreates `hyperbot-staging` with `.env.staging`, health-checks
    `/api/health`, and prints logs (look for `[web] serving React app from …`).

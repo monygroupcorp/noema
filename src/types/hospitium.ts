@@ -60,7 +60,7 @@ export interface Hospitium {
 
   /**
    * The economic owner — receives hostCut + accrues Materia.bootRecovered as guests
-   * cook. Identified (animaId) or anonymous (commitment). The hostCut payout path
+   * generate. Identified (animaId) or anonymous (commitment). The hostCut payout path
    * branches on this at signum-emission time.
    */
   hostKey: HostKey

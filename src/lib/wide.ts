@@ -2,6 +2,7 @@ import { bus } from './bus.js'
 import type { TraceContext } from './trace.js'
 import type { Actum } from '../types/actum.js'
 import type { Exitus } from '../types/cursus.js'
+import { executioFromPhaseDurations } from '../execution/progressus.js'
 
 export interface WideEvent {
   event:         'actum.complete' | 'actum.fail'
@@ -60,11 +61,15 @@ export function buildWideEvent(
   // Pod telemetry is read off the actum, not the trace context: the completion
   // webhook runs in a fresh context, so ctx has none of the in-flight pod state.
   const e = actum.executio ?? {}
+  // #6d — the duration telemetry unifies into phaseDurations: prefer the cursor's
+  // explicit report, fall back to the rolled-up timeline (so a runner that reports
+  // only a Progressus stream still lands provision/download/execution timings).
+  const d = executioFromPhaseDurations(actum.phaseDurations)
   // Total wall-clock from execution start to completion. Durable on the actum —
   // ctx.startTs on the webhook path is just the webhook handler's own start.
   const endTs = actum.completum ? actum.completum.getTime() : Date.now()
   const durationMs = endTs - actum.inceptum.getTime()
-  const executionMs = e.executionMs ?? exitus?.duratio
+  const executionMs = e.executionMs ?? d.executionMs ?? exitus?.duratio
   // Cost is billed against pod wall-time. Prefer an explicit billedMs when the
   // cursor reports one (the dev fake), else the actum's inceptum→completum delta.
   const billedMs = e.billedMs ?? durationMs
@@ -85,14 +90,14 @@ export function buildWideEvent(
     impetus:       impetus.toString(),
     refund:        refund.toString(),
     durationMs,
-    provisionMs:   e.provisionMs,
+    provisionMs:   e.provisionMs ?? d.provisionMs,
     sshReadyMs:    e.sshReadyMs,
     jobSubmitMs:   ctx.jobSubmitMs,
     webhookMs:     ctx.webhookMs,
     coldStart:     e.coldStart ?? false,
     gpuType:       e.gpuType,
     podId:         e.podId,
-    downloadMs:        e.downloadMs,
+    downloadMs:        e.downloadMs ?? d.downloadMs,
     modelsDownloaded:  e.modelsDownloaded,
     modelsReused:      e.modelsReused,
     downloadBytes:     e.downloadBytes,

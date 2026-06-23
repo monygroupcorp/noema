@@ -59,7 +59,7 @@ export class MongoActorum implements Actorum {
 
   async update(
     id: string,
-    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'deploymentHash' | 'executio'>>
+    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'deploymentHash' | 'executio' | 'progressus' | 'phaseDurations'>>
   ): Promise<Actum> {
     const { impetus, executio, ...rest } = patch
     const $set: Record<string, unknown> = { ...rest }
@@ -103,6 +103,11 @@ export class MongoActorum implements Actorum {
     const docs = await this.col
       .find({ status: { $in: ['nascens', 'agens'] }, externusJobId: { $exists: true, $ne: null } })
       .toArray()
+    return docs.map(fromDoc)
+  }
+
+  async findByCompositum(parentId: string): Promise<Actum[]> {
+    const docs = await this.col.find({ 'compositum.parentId': parentId }).toArray()
     return docs.map(fromDoc)
   }
 }

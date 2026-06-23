@@ -32,9 +32,10 @@ test('execution_spend: all three hooks fire and signa are collected', async () =
         status: 'completed', inceptum: new Date(),
       },
       impetus: 1000n,
-      modoHostAnimaId: 'anima-host',
+      baseImpetus: 1000n,
+      modoHostKey: { animaId: 'anima-host' },
       modusAuctorAnimaId: 'anima-spell-author',
-      intellaAuctorAnimaIds: ['anima-model-a', 'anima-model-b'],
+      intellaRoyaltyPayees: [{ animaId: 'anima-model-a', weight: 1 }, { animaId: 'anima-model-b', weight: 1 }],
     },
   }
 

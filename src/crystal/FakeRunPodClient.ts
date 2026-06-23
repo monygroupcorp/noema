@@ -7,8 +7,37 @@ import { bus } from '../lib/bus.js'
 import { getTrace } from '../lib/trace.js'
 import { makeLogger } from '../lib/logger.js'
 import { computeBootCostImpetus } from '../ledger/rates.js'
+import { recordProgressus } from '../execution/progressusSink.js'
+import { coldStartProgressus } from '../execution/progressus.js'
+import type { Progressus } from '../types/progressus.js'
 
 const log = makeLogger('cursor:fake')
+
+/**
+ * Project a fake stage string → Progressus (#6b). The real path is partitioned — SecurePodClient
+ * records only the cold-start phases (`coldStartProgressus`) and comfyrunner records its own — but
+ * the fake replaces BOTH (no comfyrunner runs), so it must cover the full vocabulary itself.
+ * `ssh-ready` maps to bootstrapping; `pod-bailed` returns undefined (no terminal/quit phase in the
+ * owned taxonomy — the fake re-emits `provisioning` right after, which re-drives the hunt).
+ */
+export function fakeStageToProgressus(stage: string, info?: Record<string, unknown>): Omit<Progressus, 'at'> | undefined {
+  const cold = coldStartProgressus(stage, info)
+  if (cold) return cold
+  if (stage === 'ssh-ready') return { phase: 'pulling', target: 'fundamentum', message: 'bootstrapping runtime' }
+  if (stage === 'inferring') return { phase: 'executing' }
+  if (stage.startsWith('downloading')) {
+    const [done, total] = stage.startsWith('downloading:') ? stage.slice(12).split('/').map(Number) : [undefined, undefined]
+    return { phase: 'downloading', target: 'model', ...(done !== undefined && total !== undefined ? { progress: { done, total, unit: 'items' as const } } : {}) }
+  }
+  return undefined
+}
+
+/** Emit a fake stage onto the owned `actum.progressus` timeline (no-op if the stage has no phase). */
+function recordFakeStage(actumId: string | undefined, stage: string, info?: Record<string, unknown>): void {
+  if (!actumId) return
+  const prog = fakeStageToProgressus(stage, info)
+  if (prog) recordProgressus(actumId, { ...prog, at: new Date() }).catch(err => log.warn('progressus record failed', { error: (err as Error).message }))
+}
 
 export interface FakeOpts {
   /** Base delay between simulated stages (ms). Default 800. */
@@ -27,8 +56,8 @@ export interface FakeOpts {
  * Telegram UX — reactions, the session bulletin, warm reuse, the idle reaper —
  * can be exercised without provisioning (or paying for) a real GPU pod.
  *
- * Emits the same actum.stage events the real cursor does with *real* elapsed
- * times, fires a COMPLETED webhook with a sample image, then — mirroring
+ * Records the same Progressus timeline the real cursor does (via the in-process recorder
+ * seam), fires a COMPLETED webhook with a sample image, then — mirroring
  * SecurePodClient — registers an idle Materia in the store so the NEXT /make is
  * routed to a warm pod (FakeWarmPodClient) and the idle reaper can sweep it.
  * No SSH, no comfyrunner, no $.
@@ -68,7 +97,7 @@ export class FakeRunPodClient implements RunPodClient, Procurator {
     const actumId = getTrace()?.actumId
     const start = Date.now()
     const emit = (stage: string, info?: Record<string, unknown>) => {
-      if (actumId) bus.emit('actum.stage', { actumId, stage, elapsedMs: Date.now() - start, info })
+      recordFakeStage(actumId, stage, info)   // owned timeline drives the bulletin/SSE (#6b/#6e)
       onStage?.(stage, info)
     }
     const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -125,9 +154,8 @@ export class FakeRunPodClient implements RunPodClient, Procurator {
     const imageUrl = this.opts.imageUrl ?? process.env.DEV_FAKE_IMAGE ?? 'https://picsum.photos/seed/noema/512'
 
     const actumId = getTrace()?.actumId
-    const start = Date.now()
     const emit = (stage: string, info?: Record<string, unknown>) => {
-      if (actumId) bus.emit('actum.stage', { actumId, stage, elapsedMs: Date.now() - start, info })
+      recordFakeStage(actumId, stage, info)   // owned timeline drives the bulletin/SSE (#6b/#6e)
     }
     const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 

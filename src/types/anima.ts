@@ -26,10 +26,44 @@
  * Survives: platform changes, pod terminations, session ends.
  * Does NOT survive: user explicitly deleting their account.
  */
+/**
+ * PublishingPrefs — per-identity publishing defaults (docs/spec/publishing.md §5c).
+ *
+ * Kills the "everything → HuggingFace" hardcode: that becomes
+ * `defaultDestination='huggingface', defaultCustody='ours'` — a default, not a
+ * hardcode. A user with their own account flips `defaultCustody='theirs'` + a BYO
+ * target below. Lives on Anima (low-churn, no new store); per-Sodalitas defaults
+ * are added later only if a team needs one.
+ */
+export interface PublishingPrefs {
+  /** Default adapter key — e.g. 'feed' | 'huggingface' | 'r2'. */
+  defaultDestination?: string
+  /** Default visibility surface — 'private' | 'unlisted' | 'feed' | 'marketplace'. */
+  defaultVisibility?: import('./editio.js').EditioVisibility
+  /** Default custody — 'ours' | 'theirs' | 'both'. */
+  defaultCustody?: import('./editio.js').EditioCustody
+  /** Default license tag for the caller's own publications — 'catalog' or a BYO license id. */
+  defaultLicense?: string
+  /** BYO custody target: the user's own HuggingFace account/namespace. */
+  huggingFaceAccount?: string
+  /** BYO custody target: the user's own Civitai account/username. */
+  civitaiAccount?: string
+  /** BYO custody target: the user's wallet address (on-chain custody). */
+  wallet?: string
+  /** BYO custody target: the user's own bucket. */
+  bucket?: string
+}
+
 export interface Anima {
   id: string
   /** "nomen" = name in Latin — the user's chosen display name */
   nomen: string
+
+  /**
+   * Publishing defaults (visibility/custody/destination + BYO targets).
+   * The single source for resolving a publish when the request omits a field.
+   */
+  publicatio?: PublishingPrefs
 
   /**
    * Pointer to this soul's memory volume on Materia.
@@ -59,7 +93,7 @@ export interface AnimaStore {
   create(input: Omit<Anima, 'id' | 'natum' | 'mutatum'>): Promise<Anima>
   find(id: string): Promise<Anima | null>
   findByCustos(custos: string): Promise<Anima | null>
-  update(id: string, patch: Partial<Pick<Anima, 'nomen' | 'memoriaRef' | 'custos'>>): Promise<Anima>
+  update(id: string, patch: Partial<Pick<Anima, 'nomen' | 'memoriaRef' | 'custos' | 'publicatio'>>): Promise<Anima>
 }
 
 /**

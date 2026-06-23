@@ -5,7 +5,7 @@
 // "deploymentum" is the neuter singular gerundive of "deploro" adapted for
 // deployment — "that which is to be deployed." A Deploymentum is the exact,
 // versioned bundle that was or will be shipped to a GPU pod: image + models
-// + workflow + cook flags, hashed to a SHA-256 content address.
+// + workflow + generation flags, hashed to a SHA-256 content address.
 //
 // The hash is the canonical identity:
 //   - Same hash → same pod requirements → warm-pool affinity
@@ -28,7 +28,7 @@ export interface Deploymentum {
   hash: string
   /**
    * The full compiled spec as a JSON-serializable record.
-   * Stores image, models, workflow, cookFlags, seed, sourceTool.
+   * Stores image, models, workflow, genFlags, seed, sourceTool.
    */
   spec: Record<string, unknown>
   /** When this deployment was first stored. */

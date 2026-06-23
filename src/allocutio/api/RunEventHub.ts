@@ -28,7 +28,7 @@ export class RunEventHub {
     this.postWebhook = deps.postWebhook
     this.bufferSize = deps.bufferSize ?? 50
 
-    for (const name of ['actum.stage', 'actum.complete', 'actum.fail'] as const) {
+    for (const name of ['actum.progressus', 'actum.complete', 'actum.fail'] as const) {
       deps.bus.on(name, (payload: unknown) => this._ingest(name, payload))
     }
   }

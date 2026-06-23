@@ -2,8 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { WarmPodClient } from '../../../src/crystal/WarmPodClient.js'
 import type { Materia, MateriaStore } from '../../../src/types/materia.js'
-import { bus } from '../../../src/lib/bus.js'
+import { registerProgressusRecorder } from '../../../src/execution/progressusSink.js'
 import { withTrace, makeTraceContext } from '../../../src/lib/trace.js'
+import type { Progressus } from '../../../src/types/progressus.js'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -99,18 +100,21 @@ test('submit returns the per-submission jobId immediately (must match the webhoo
   assert.match(result.id, /^pod-xyz-\d+$/)
 })
 
-test('submit emits a warm-pod-found stage so the UI can react 🔥', async () => {
+test('submit records a warm-pod-found Progressus so the UI can react 🔥', async () => {
   const materia = makeMateria()
   const { fetch } = makeComfyrunnerFetch('pod-xyz')
   const client = new WarmPodClient(materia, makeMateriaStore(materia), fetch)
-  const stages: string[] = []
-  const listener = (d: { stage: string }): void => { stages.push(d.stage) }
-  bus.on('actum.stage', listener)
-  await withTrace(makeTraceContext({ actumId: 'actum-warm' }), async () => {
-    await client.submit({ input: {} })
-  })
-  bus.off('actum.stage', listener)
-  assert.ok(stages.includes('warm-pod-found'), `stages missing warm-pod-found: ${stages.join(',')}`)
+  const seen: Progressus[] = []
+  registerProgressusRecorder(async (_id, p) => { seen.push(p) })
+  try {
+    await withTrace(makeTraceContext({ actumId: 'actum-warm' }), async () => {
+      await client.submit({ input: {} })
+    })
+  } finally {
+    registerProgressusRecorder(async () => {})
+  }
+  // warm reuse → a near-zero `provisioning` report tagged 'warm pod reused' (the 🔥 signal, #6e).
+  assert.ok(seen.some(p => p.phase === 'provisioning' && p.message === 'warm pod reused'), 'missing warm-pod-found Progressus')
 })
 
 test('submit polls /health then POSTs to /job', async () => {

@@ -30,9 +30,10 @@ function makeSpendEvent(impetus: bigint, overrides = {}): SignumEvent<'execution
     payload: {
       actum: { id: 'act-1', modusId: 'mod-1', modusVersiono: '1.0.0', impetus, signaConsumed: [], aditus: {}, status: 'completus' as const, inceptum: new Date() },
       impetus,
-      modoHostAnimaId: 'anima-host',
+      baseImpetus: impetus,
+      modoHostKey: { animaId: 'anima-host' },
       modusAuctorAnimaId: 'anima-author',
-      intellaAuctorAnimaIds: ['anima-model-a'],
+      intellaRoyaltyPayees: [{ animaId: 'anima-model-a', weight: 1 }],
       ...overrides,
     },
   }
@@ -154,7 +155,7 @@ test('INVARIANT: model royalty split is always exactly 5% total divided equally 
 
   const impetus = 1000n
   const event = makeSpendEvent(impetus, {
-    intellaAuctorAnimaIds: ['model-a', 'model-b', 'model-c'],
+    intellaRoyaltyPayees: [{ animaId: 'model-a', weight: 1 }, { animaId: 'model-b', weight: 1 }, { animaId: 'model-c', weight: 1 }],
   })
   const signa = await nexus.emit(event)
 

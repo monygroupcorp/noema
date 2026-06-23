@@ -143,6 +143,45 @@ test('buildWideEvent executionMs prefers executio, falls back to exitus.duratio'
 })
 
 // ---------------------------------------------------------------------------
+// #6d — duration telemetry unifies into phaseDurations. The wide event prefers
+// the cursor's explicit executio field, falling back to the rolled-up timeline,
+// so a runner that reports ONLY a Progressus stream still lands these timings.
+// ---------------------------------------------------------------------------
+
+test('buildWideEvent derives provision/download/execution timings from phaseDurations when executio is absent (#6d)', () => {
+  const actum = makeActum({ phaseDurations: {
+    provisioning: 3000, 'downloading/model': 4000, 'downloading/lora': 1000, executing: 9000,
+  } })
+  const wide = buildWideEvent(actum, makeTraceContext(), 'completed', makeExitus())
+  assert.equal(wide.provisionMs, 3000)
+  assert.equal(wide.downloadMs,  5000)   // both downloading/* targets summed
+  assert.equal(wide.executionMs, 9000)
+})
+
+test('buildWideEvent prefers an explicit executio field over the phaseDurations fallback (#6d)', () => {
+  const actum = makeActum({
+    executio: { executionMs: 1234, downloadMs: 42_000 },  // cursor's authoritative report
+    phaseDurations: { executing: 9000, 'downloading/model': 4000, provisioning: 3000 },
+  })
+  const wide = buildWideEvent(actum, makeTraceContext(), 'completed', makeExitus())
+  assert.equal(wide.executionMs, 1234)    // explicit wins
+  assert.equal(wide.downloadMs,  42_000)  // explicit wins
+  assert.equal(wide.provisionMs, 3000)    // not reported explicitly → derived
+})
+
+test('buildWideEvent cost derivation is unchanged by the #6d phaseDurations fallback', () => {
+  const inceptum = new Date(Date.now() - 60 * 60 * 1000)
+  const completum = new Date(inceptum.getTime() + 30 * 60 * 1000)  // 0.5 hr billed
+  const actum = makeActum({
+    inceptum, completum,
+    executio: { costPerHr: 0.7, coldStart: true },
+    phaseDurations: { executing: 9000 },   // present, but must not touch billed wall-time
+  })
+  const wide = buildWideEvent(actum, makeTraceContext(), 'completed', makeExitus())
+  assert.equal(wide.costUsd, 0.35)   // still 0.7 * 0.5 hr — cost rides billedMs, not executionMs
+})
+
+// ---------------------------------------------------------------------------
 // Event-name regression: emitWideEvent must emit the name listeners subscribe
 // to ('actum.complete' / 'actum.fail'). The original bug emitted
 // 'actum.completed' / 'actum.failed' → nothing was ever persisted.

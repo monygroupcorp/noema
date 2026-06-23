@@ -140,7 +140,7 @@ test('GET /v1/runs/r1/stream returns 200 text/event-stream with snapshot frame',
   }
 })
 
-test('stage bus event arrives as a data frame in the SSE stream', async () => {
+test('progressus bus event arrives as a typed progress frame in the SSE stream (#6c/#6e)', async () => {
   const { server, url, bus } = await makeServer(true)
   try {
     // Start listening, then emit after a short delay
@@ -156,14 +156,14 @@ test('stage bus event arrives as a data frame in the SSE stream', async () => {
     await new Promise(r => setTimeout(r, 50))
     if (!emitted) {
       emitted = true
-      bus.emit('actum.stage', { actumId: 'r1', stage: 'provisioning', elapsedMs: 10 })
+      bus.emit('actum.progressus', { actumId: 'r1', progressus: { phase: 'provisioning', message: 'acquiring GPU', at: new Date(0) } })
     }
 
     const { frames } = await framePromise
-    const stageFrame = frames.find((f: any) => f.kind === 'stage') as any
-    assert.ok(stageFrame, 'expected a stage frame')
-    assert.equal(stageFrame.stage, 'provisioning')
-    assert.equal(stageFrame.elapsedMs, 10)
+    const frame = frames.find((f: any) => f.kind === 'progress') as any
+    assert.ok(frame, 'expected a progress frame')
+    assert.equal(frame.progressus.phase, 'provisioning')
+    assert.equal(frame.progressus.message, 'acquiring GPU')
   } finally {
     await closeServer(server)
   }

@@ -10,7 +10,7 @@ export class MemoryActorum implements Actorum {
     return record
   }
 
-  async update(id: string, patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'deploymentHash' | 'executio'>>): Promise<Actum> {
+  async update(id: string, patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'deploymentHash' | 'executio' | 'progressus' | 'phaseDurations'>>): Promise<Actum> {
     const existing = this.store.get(id)
     if (!existing) throw new Error(`Actum '${id}' not found`)
     const updated = { ...existing, ...patch }
@@ -50,5 +50,9 @@ export class MemoryActorum implements Actorum {
     return Array.from(this.store.values()).filter(
       a => (a.status === 'nascens' || a.status === 'agens') && a.externusJobId != null
     )
+  }
+
+  async findByCompositum(parentId: string): Promise<Actum[]> {
+    return Array.from(this.store.values()).filter(a => a.compositum?.parentId === parentId)
   }
 }

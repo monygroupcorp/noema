@@ -144,34 +144,9 @@ test('awaitViaStream: throws when an error event arrives', async () => {
   )
 })
 
-test('awaitViaStream: emits the canonical stage names for each event kind', async () => {
-  const stages: string[] = []
-  const fetchFn = (async () => makeSseStream([
-    { type: 'downloading' },
-    { type: 'installing-node' },
-    { type: 'restarting-comfy' },
-    { type: 'node' },
-    { type: 'uploading' },
-    { type: 'complete' },
-  ])) as unknown as typeof fetch
-
-  await awaitViaStream(fetchFn, 'https://pod-8080.proxy.runpod.net', 'job-1', 5000, (s) => stages.push(s))
-
-  assert.ok(stages.includes('downloading'))
-  assert.ok(stages.includes('installing-nodes'))
-  assert.ok(stages.includes('restarting'))
-  assert.ok(stages.includes('inferring'))
-  assert.ok(stages.includes('uploading'))
-})
-
-test('awaitViaStream: emits inferring only once even with multiple node events', async () => {
-  const stages: string[] = []
-  const fetchFn = (async () => makeSseStream([
-    { type: 'node' }, { type: 'node' }, { type: 'node' }, { type: 'complete' },
-  ])) as unknown as typeof fetch
-  await awaitViaStream(fetchFn, 'https://pod-8080.proxy.runpod.net', 'job-1', 5000, (s) => stages.push(s))
-  assert.equal(stages.filter(s => s === 'inferring').length, 1)
-})
+// The owned-Progressus timeline these stages map to (downloading/installing/loading/executing/
+// uploading/done, and executing-once across multiple node events) is covered in
+// comfyrunnerProgressus.test.ts — the stringly `emitStage` callback they exercised was deleted (#6e).
 
 test('awaitViaStream: throws on timeout when stream never terminates', { timeout: 3000 }, async () => {
   const fetchFn = (async () => makeSseStream([])) as unknown as typeof fetch  // empty stream → retry

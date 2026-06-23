@@ -250,7 +250,7 @@ Fetch a run by id (poll for completion).
 
 ### GET /v1/runs/:id/stream
 
-Server-Sent Events stream of run events (an initial snapshot, then stage/complete/failed frames). Content-Type: text/event-stream; the stream ends on the terminal event.
+Server-Sent Events stream of run events (an initial snapshot, then progress/stage/complete/failed frames). Content-Type: text/event-stream; the stream ends on the terminal event.
 
 - **Auth:** required
 
@@ -262,7 +262,7 @@ The live OpenAPI 3.1 description of this surface (self-describing).
 
 ### POST /v1/mcp
 
-MCP (Model Context Protocol) JSON-RPC endpoint — agent tool-use over the same facade. Tools: run_flow / get_run / list_flows / describe_flow. Resources: crystal://flows and crystal://flows/{id}. Stateless streamable-HTTP transport; not a typed REST op.
+MCP (Model Context Protocol) JSON-RPC endpoint — agent tool-use over the same facade. Tools: run_flow / get_run / list_flows / describe_flow / collect / get_collection. Resources: crystal://flows and crystal://flows/{id}. Stateless streamable-HTTP transport; not a typed REST op.
 
 - **Auth:** required
 
@@ -985,6 +985,1749 @@ Fetch one of the caller's studios by id (owner-scoped) — poll its status (prov
 }
 ```
 
+### POST /v1/collectiones
+
+Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). Returns a Collection handle (poll GET /v1/collectiones/:id).
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces. The base modus may be atomic or a compositus pipeline.",
+  "properties": {
+    "modusId": {
+      "type": "string",
+      "description": "The flow expanded across the grid."
+    },
+    "total": {
+      "type": "number",
+      "description": "Target number of pieces to generate."
+    },
+    "tractus": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "One axis of variation — the aditus port to vary and its options.",
+        "properties": {
+          "porta": {
+            "type": "string",
+            "description": "The aditus port key this axis varies (e.g. background, outfit)."
+          },
+          "label": {
+            "type": "string",
+            "description": "Human-facing category label (falls back to porta)."
+          },
+          "valores": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One option within a trait axis.",
+              "properties": {
+                "value": {
+                  "description": "The aditus value injected when this option is selected."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Human-facing display name (falls back to String(value))."
+                },
+                "rarity": {
+                  "type": "number",
+                  "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                },
+                "promptFragment": {
+                  "type": "string",
+                  "description": "Text woven into the assembled prompt when this option wins."
+                },
+                "excludes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Labels in OTHER axes this option blocks."
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Theme tags for group-level mutual exclusion."
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            "description": "The options for this axis."
+          }
+        },
+        "required": [
+          "porta",
+          "valores"
+        ]
+      },
+      "description": "The axes of variation (the parameter grid)."
+    },
+    "aditusBase": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Base aditus applied to every piece (e.g. `_basePrompt` with `{{porta}}` tokens)."
+    },
+    "concurrentia": {
+      "type": "number",
+      "description": "Max concurrent pieces in flight (default 3)."
+    },
+    "nomen": {
+      "type": "string",
+      "description": "Optional human name for the collection."
+    },
+    "dna": {
+      "type": "boolean",
+      "description": "Opt-in DNA uniqueness — no two pieces share a trait combination (across non-bypassDNA axes). Default false."
+    },
+    "teamId": {
+      "type": "string",
+      "description": "Own this collection by a team (Sodalitas) the caller is a member of — snapshots an equal-weight owners split."
+    }
+  },
+  "required": [
+    "modusId",
+    "total",
+    "tractus"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "object",
+      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The collection display name."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "complete",
+            "cancelled"
+          ],
+          "description": "The collection lifecycle status."
+        },
+        "modusId": {
+          "type": "string",
+          "description": "The flow (modus) expanded across the grid."
+        },
+        "total": {
+          "type": "number",
+          "description": "Target piece count (the size of the run)."
+        },
+        "provenanceHash": {
+          "type": "string",
+          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "completed": {
+          "type": "number",
+          "description": "Pieces completed so far (approved, when review is on)."
+        },
+        "failed": {
+          "type": "number",
+          "description": "Pieces that failed to generate so far."
+        },
+        "rejected": {
+          "type": "number",
+          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+        },
+        "cost": {
+          "type": "string",
+          "description": "Total impetus across completed pieces, serialised as a string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the collection started."
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it finished (or was cancelled)."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "modusId",
+        "total",
+        "provenanceHash",
+        "completed",
+        "failed",
+        "rejected"
+      ]
+    }
+  },
+  "required": [
+    "collection"
+  ]
+}
+```
+
+### GET /v1/collectiones
+
+List the authenticated caller's Collections (owner-scoped).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "nomen": {
+            "type": "string",
+            "description": "The collection display name."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "complete",
+              "cancelled"
+            ],
+            "description": "The collection lifecycle status."
+          },
+          "modusId": {
+            "type": "string",
+            "description": "The flow (modus) expanded across the grid."
+          },
+          "total": {
+            "type": "number",
+            "description": "Target piece count (the size of the run)."
+          },
+          "provenanceHash": {
+            "type": "string",
+            "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+          },
+          "owners": {
+            "type": "array",
+            "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "animaId": {
+                  "type": "string"
+                },
+                "weight": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "animaId",
+                "weight"
+              ]
+            }
+          },
+          "completed": {
+            "type": "number",
+            "description": "Pieces completed so far (approved, when review is on)."
+          },
+          "failed": {
+            "type": "number",
+            "description": "Pieces that failed to generate so far."
+          },
+          "rejected": {
+            "type": "number",
+            "description": "Pieces a reviewer rejected so far (distinct from failed)."
+          },
+          "cost": {
+            "type": "string",
+            "description": "Total impetus across completed pieces, serialised as a string."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the collection started."
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it finished (or was cancelled)."
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "modusId",
+          "total",
+          "provenanceHash",
+          "completed",
+          "failed",
+          "rejected"
+        ]
+      }
+    }
+  },
+  "required": [
+    "collections"
+  ]
+}
+```
+
+### GET /v1/collectiones/:id
+
+Fetch one Collection by id — progress (completed/failed/total), status, cost. Owner-scoped (404 if not yours).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "object",
+      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The collection display name."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "complete",
+            "cancelled"
+          ],
+          "description": "The collection lifecycle status."
+        },
+        "modusId": {
+          "type": "string",
+          "description": "The flow (modus) expanded across the grid."
+        },
+        "total": {
+          "type": "number",
+          "description": "Target piece count (the size of the run)."
+        },
+        "provenanceHash": {
+          "type": "string",
+          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "completed": {
+          "type": "number",
+          "description": "Pieces completed so far (approved, when review is on)."
+        },
+        "failed": {
+          "type": "number",
+          "description": "Pieces that failed to generate so far."
+        },
+        "rejected": {
+          "type": "number",
+          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+        },
+        "cost": {
+          "type": "string",
+          "description": "Total impetus across completed pieces, serialised as a string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the collection started."
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it finished (or was cancelled)."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "modusId",
+        "total",
+        "provenanceHash",
+        "completed",
+        "failed",
+        "rejected"
+      ]
+    }
+  },
+  "required": [
+    "collection"
+  ]
+}
+```
+
+### GET /v1/collectiones/:id/rarity
+
+Imagined-vs-realized rarity table for a Collection — target shares (from trait weights) vs actual shares (from produced pieces). Owner-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "rarity": {
+      "type": "object",
+      "description": "Imagined (target) vs realized rarity per trait axis — drift is expected at low N.",
+      "properties": {
+        "totalPieces": {
+          "type": "number",
+          "description": "Produced pieces the realized figures are computed over."
+        },
+        "axes": {
+          "type": "array",
+          "description": "One entry per trait axis.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "trait_type": {
+                "type": "string",
+                "description": "The axis label (matches the NFT trait_type)."
+              },
+              "valores": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "string",
+                      "description": "The attribute value as stamped on pieces."
+                    },
+                    "targetRarity": {
+                      "type": "number",
+                      "description": "Target share: the weight normalised within its axis [0,1]."
+                    },
+                    "realizedCount": {
+                      "type": "number",
+                      "description": "Produced pieces that got this value."
+                    },
+                    "realizedRarity": {
+                      "type": "number",
+                      "description": "realizedCount / totalPieces [0,1]."
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "targetRarity",
+                    "realizedCount",
+                    "realizedRarity"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "trait_type",
+              "valores"
+            ]
+          }
+        }
+      },
+      "required": [
+        "totalPieces",
+        "axes"
+      ]
+    }
+  },
+  "required": [
+    "rarity"
+  ]
+}
+```
+
+### POST /v1/collectiones/:id/extend
+
+Extend a Collection — raise the target by `count` and dispatch the new pieces (incremental batches: fire a batch, review, fire more). Re-opens a completed Collection. Owner-scoped.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "How many more pieces to add to the target and fire.",
+  "properties": {
+    "count": {
+      "type": "number",
+      "description": "Pieces to add (must be > 0)."
+    }
+  },
+  "required": [
+    "count"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "object",
+      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The collection display name."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "complete",
+            "cancelled"
+          ],
+          "description": "The collection lifecycle status."
+        },
+        "modusId": {
+          "type": "string",
+          "description": "The flow (modus) expanded across the grid."
+        },
+        "total": {
+          "type": "number",
+          "description": "Target piece count (the size of the run)."
+        },
+        "provenanceHash": {
+          "type": "string",
+          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "completed": {
+          "type": "number",
+          "description": "Pieces completed so far (approved, when review is on)."
+        },
+        "failed": {
+          "type": "number",
+          "description": "Pieces that failed to generate so far."
+        },
+        "rejected": {
+          "type": "number",
+          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+        },
+        "cost": {
+          "type": "string",
+          "description": "Total impetus across completed pieces, serialised as a string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the collection started."
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it finished (or was cancelled)."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "modusId",
+        "total",
+        "provenanceHash",
+        "completed",
+        "failed",
+        "rejected"
+      ]
+    }
+  },
+  "required": [
+    "collection"
+  ]
+}
+```
+
+### POST /v1/collectiones/:id/pause
+
+Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Owner-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "object",
+      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The collection display name."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "complete",
+            "cancelled"
+          ],
+          "description": "The collection lifecycle status."
+        },
+        "modusId": {
+          "type": "string",
+          "description": "The flow (modus) expanded across the grid."
+        },
+        "total": {
+          "type": "number",
+          "description": "Target piece count (the size of the run)."
+        },
+        "provenanceHash": {
+          "type": "string",
+          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "completed": {
+          "type": "number",
+          "description": "Pieces completed so far (approved, when review is on)."
+        },
+        "failed": {
+          "type": "number",
+          "description": "Pieces that failed to generate so far."
+        },
+        "rejected": {
+          "type": "number",
+          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+        },
+        "cost": {
+          "type": "string",
+          "description": "Total impetus across completed pieces, serialised as a string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the collection started."
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it finished (or was cancelled)."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "modusId",
+        "total",
+        "provenanceHash",
+        "completed",
+        "failed",
+        "rejected"
+      ]
+    }
+  },
+  "required": [
+    "collection"
+  ]
+}
+```
+
+### POST /v1/collectiones/:id/resume
+
+Resume a paused Collection — continue dispatching toward the target. Owner-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "object",
+      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The collection display name."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "complete",
+            "cancelled"
+          ],
+          "description": "The collection lifecycle status."
+        },
+        "modusId": {
+          "type": "string",
+          "description": "The flow (modus) expanded across the grid."
+        },
+        "total": {
+          "type": "number",
+          "description": "Target piece count (the size of the run)."
+        },
+        "provenanceHash": {
+          "type": "string",
+          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "completed": {
+          "type": "number",
+          "description": "Pieces completed so far (approved, when review is on)."
+        },
+        "failed": {
+          "type": "number",
+          "description": "Pieces that failed to generate so far."
+        },
+        "rejected": {
+          "type": "number",
+          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+        },
+        "cost": {
+          "type": "string",
+          "description": "Total impetus across completed pieces, serialised as a string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the collection started."
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it finished (or was cancelled)."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "modusId",
+        "total",
+        "provenanceHash",
+        "completed",
+        "failed",
+        "rejected"
+      ]
+    }
+  },
+  "required": [
+    "collection"
+  ]
+}
+```
+
+### POST /v1/collectiones/:id/cancel
+
+Cancel a Collection — stop dispatching and mark it cancelled. Owner-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "object",
+      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The collection display name."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "complete",
+            "cancelled"
+          ],
+          "description": "The collection lifecycle status."
+        },
+        "modusId": {
+          "type": "string",
+          "description": "The flow (modus) expanded across the grid."
+        },
+        "total": {
+          "type": "number",
+          "description": "Target piece count (the size of the run)."
+        },
+        "provenanceHash": {
+          "type": "string",
+          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "completed": {
+          "type": "number",
+          "description": "Pieces completed so far (approved, when review is on)."
+        },
+        "failed": {
+          "type": "number",
+          "description": "Pieces that failed to generate so far."
+        },
+        "rejected": {
+          "type": "number",
+          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+        },
+        "cost": {
+          "type": "string",
+          "description": "Total impetus across completed pieces, serialised as a string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the collection started."
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it finished (or was cancelled)."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "modusId",
+        "total",
+        "provenanceHash",
+        "completed",
+        "failed",
+        "rejected"
+      ]
+    }
+  },
+  "required": [
+    "collection"
+  ]
+}
+```
+
+### POST /v1/collectiones/:id/pieces/:actumId/approve
+
+Approve a pending-review piece — it counts toward the collection. Owner-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "ok"
+  ]
+}
+```
+
+### POST /v1/collectiones/:id/pieces/:actumId/reject
+
+Reject a piece and reroll — re-fire it with a fresh trait selection. Owner-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "ok"
+  ]
+}
+```
+
+### POST /v1/editiones
+
+Publish an artifact (an Actum for #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate — never a synchronous publish to public. Unspecified fields default from the caller's publishing prefs.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Publish an artifact (an Actum for build-order #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate. Unspecified fields default from the caller's Anima publishing prefs.",
+  "properties": {
+    "artifact": {
+      "type": "object",
+      "description": "The canonical artifact being published (referenced, never copied).",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "actum",
+            "intella",
+            "collectio"
+          ],
+          "description": "Which artifact kind."
+        },
+        "id": {
+          "type": "string",
+          "description": "The artifact's id."
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ]
+    },
+    "destination": {
+      "type": "string",
+      "description": "Adapter key (e.g. 'feed'). Defaults from prefs, then 'feed'."
+    },
+    "visibility": {
+      "type": "string",
+      "enum": [
+        "private",
+        "unlisted",
+        "feed",
+        "marketplace"
+      ],
+      "description": "Public-exposure surface."
+    },
+    "custody": {
+      "type": "string",
+      "enum": [
+        "ours",
+        "theirs",
+        "both"
+      ],
+      "description": "Who holds the bytes/metadata."
+    },
+    "license": {
+      "type": "string",
+      "description": "License tag — 'catalog' (our liability) | a BYO license id. Defaults from prefs, then 'catalog' for platform-canonical artifacts."
+    },
+    "teamId": {
+      "type": "string",
+      "description": "Snapshot an equal-weight rights split from a team (Sodalitas) the caller is a member of. Mutually exclusive with owners."
+    },
+    "owners": {
+      "type": "array",
+      "description": "Explicit rights split — animaId → weight, weights must sum to 1. Mutually exclusive with teamId. Snapshotted on the Editio as the canonical who-earns record (drives the model-royalty split).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "animaId": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "animaId",
+          "weight"
+        ]
+      }
+    }
+  },
+  "required": [
+    "artifact"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "edition": {
+      "type": "object",
+      "description": "The public projection of an Editio — a publication record referencing a canonical artifact.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "artifact": {
+          "type": "object",
+          "description": "The canonical artifact being published (referenced, never copied).",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "actum",
+                "intella",
+                "collectio"
+              ],
+              "description": "Which artifact kind."
+            },
+            "id": {
+              "type": "string",
+              "description": "The artifact's id."
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        "destination": {
+          "type": "string",
+          "description": "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …"
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "private",
+            "unlisted",
+            "feed",
+            "marketplace"
+          ]
+        },
+        "custody": {
+          "type": "string",
+          "enum": [
+            "ours",
+            "theirs",
+            "both"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "published",
+            "rejected",
+            "failed",
+            "retracted"
+          ],
+          "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+        },
+        "externalRef": {
+          "type": "string",
+          "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Rights split snapshot (team-owned only) — weights sum to ~1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "license": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "artifact",
+        "destination",
+        "visibility",
+        "custody",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "required": [
+    "edition"
+  ]
+}
+```
+
+### POST /v1/editiones/:id/retract
+
+Retract a publication where the destination allows it (feed/bucket = revocable; mint = permanent → 403). Author-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "edition": {
+      "type": "object",
+      "description": "The public projection of an Editio — a publication record referencing a canonical artifact.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "artifact": {
+          "type": "object",
+          "description": "The canonical artifact being published (referenced, never copied).",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "actum",
+                "intella",
+                "collectio"
+              ],
+              "description": "Which artifact kind."
+            },
+            "id": {
+              "type": "string",
+              "description": "The artifact's id."
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        "destination": {
+          "type": "string",
+          "description": "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …"
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "private",
+            "unlisted",
+            "feed",
+            "marketplace"
+          ]
+        },
+        "custody": {
+          "type": "string",
+          "enum": [
+            "ours",
+            "theirs",
+            "both"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "published",
+            "rejected",
+            "failed",
+            "retracted"
+          ],
+          "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+        },
+        "externalRef": {
+          "type": "string",
+          "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Rights split snapshot (team-owned only) — weights sum to ~1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "license": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "artifact",
+        "destination",
+        "visibility",
+        "custody",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "required": [
+    "edition"
+  ]
+}
+```
+
+### GET /v1/feed
+
+The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact's produced output. Query: visibility, destination, limit.
+
+- **Auth:** public
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "feed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "A published feed entry — the Editio plus the referenced artifact's produced output.",
+        "properties": {
+          "editionId": {
+            "type": "string",
+            "description": "The Editio id (the feed entry id)."
+          },
+          "artifact": {
+            "type": "object",
+            "description": "The canonical artifact being published (referenced, never copied).",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "actum",
+                  "intella",
+                  "collectio"
+                ],
+                "description": "Which artifact kind."
+              },
+              "id": {
+                "type": "string",
+                "description": "The artifact's id."
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ]
+          },
+          "output": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The artifact's produced output (an Actum's exitus media), when resolvable."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "editionId",
+          "artifact",
+          "createdAt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "feed"
+  ]
+}
+```
+
+### POST /v1/teams
+
+Create a team (Sodalitas) — a fellowship of Animae that co-owns work. The caller becomes the founder and first member.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Create a team. The caller becomes the founder and first member.",
+  "properties": {
+    "nomen": {
+      "type": "string",
+      "description": "The team display name."
+    },
+    "members": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Additional member Anima ids to seed."
+    }
+  },
+  "required": [
+    "nomen"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "team": {
+      "type": "object",
+      "description": "A team (Sodalitas) — a fellowship of Animae that co-owns work.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The team display name."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Member Anima ids (includes the founder)."
+        },
+        "founder": {
+          "type": "string",
+          "description": "The founder's Anima id."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "nomen",
+        "members",
+        "founder",
+        "createdAt"
+      ]
+    }
+  },
+  "required": [
+    "team"
+  ]
+}
+```
+
+### GET /v1/teams
+
+List the caller's teams (every team they are a member of).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "teams": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "A team (Sodalitas) — a fellowship of Animae that co-owns work.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "nomen": {
+            "type": "string",
+            "description": "The team display name."
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Member Anima ids (includes the founder)."
+          },
+          "founder": {
+            "type": "string",
+            "description": "The founder's Anima id."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "nomen",
+          "members",
+          "founder",
+          "createdAt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "teams"
+  ]
+}
+```
+
+### GET /v1/teams/:id
+
+Fetch one team by id. Member-scoped (404 if not a member).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "team": {
+      "type": "object",
+      "description": "A team (Sodalitas) — a fellowship of Animae that co-owns work.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The team display name."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Member Anima ids (includes the founder)."
+        },
+        "founder": {
+          "type": "string",
+          "description": "The founder's Anima id."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "nomen",
+        "members",
+        "founder",
+        "createdAt"
+      ]
+    }
+  },
+  "required": [
+    "team"
+  ]
+}
+```
+
+### POST /v1/teams/:id/members
+
+Add a member to a team. Member-scoped; idempotent.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Add a member to a team.",
+  "properties": {
+    "animaId": {
+      "type": "string",
+      "description": "The Anima id to add."
+    }
+  },
+  "required": [
+    "animaId"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "team": {
+      "type": "object",
+      "description": "A team (Sodalitas) — a fellowship of Animae that co-owns work.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The team display name."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Member Anima ids (includes the founder)."
+        },
+        "founder": {
+          "type": "string",
+          "description": "The founder's Anima id."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "nomen",
+        "members",
+        "founder",
+        "createdAt"
+      ]
+    }
+  },
+  "required": [
+    "team"
+  ]
+}
+```
+
+### DELETE /v1/teams/:id/members/:animaId
+
+Remove a member from a team (the founder cannot be removed). Member-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "team": {
+      "type": "object",
+      "description": "A team (Sodalitas) — a fellowship of Animae that co-owns work.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The team display name."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Member Anima ids (includes the founder)."
+        },
+        "founder": {
+          "type": "string",
+          "description": "The founder's Anima id."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "nomen",
+        "members",
+        "founder",
+        "createdAt"
+      ]
+    }
+  },
+  "required": [
+    "team"
+  ]
+}
+```
+
 ## Error codes
 
 Every failed request returns the uniform envelope `{ error: { code, message, retryable?, retryAfter?, details? } }`. Branch on the stable `code`.
@@ -999,6 +2742,11 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `not_found.flow` | 404 | no |
 | `not_found.fundamentum` | 404 | no |
 | `not_found.studio` | 404 | no |
+| `not_found.collection` | 404 | no |
+| `not_found.team` | 404 | no |
+| `not_found.edition` | 404 | no |
+| `not_found.model` | 404 | no |
+| `not_found.adapter` | 404 | no |
 | `not_found.run` | 404 | no |
 | `economy.insufficient_signa` | 402 | no |
 | `economy.cap_too_low` | 422 | no |

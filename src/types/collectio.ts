@@ -1,5 +1,5 @@
 // =============================================================================
-// COLLECTIO — the batch/cook container
+// COLLECTIO — the collection / batch-generation container
 // =============================================================================
 //
 // "Collectio" = a gathering together, a collection (Latin, from colligere:
@@ -9,7 +9,10 @@
 // A Collectio is the container for N Acta generated from one parameterised
 // modus expansion. It is neither a single Actum nor a Modus — it is the
 // result of applying a parameter grid to a Modus and executing every
-// combination. The old system called this "cook."
+// combination. This is the canonical name for the feature once colloquially
+// called "cook" — `Collectio` is the only term used in code (user-facing
+// labels like "Collections"/"Drops" are a frontend concern). Minting is the
+// SEPARATE later on-chain step (Catena), never conflated with generation.
 //
 // The TraitEngine (pure function) expands:
 //   Modus × parametri → Inceptio[]   (one Inceptio per combination)
@@ -64,11 +67,17 @@ export interface Tractus {
    * Falls back to porta if absent.
    */
   label?: string
+  /**
+   * When true, this axis is IGNORED in the DNA uniqueness check (see `Collectio.dna`).
+   * Two pieces differing only on bypassed axes count as duplicate DNA. Typical for
+   * incidental axes like `background` where a repeat is acceptable.
+   */
+  bypassDNA?: boolean
   valores: TraitValor[]
 }
 
 /**
- * Collectio — a batch/cook container.
+ * Collectio — a batch-generation container.
  *
  * Holds the parameterisation that generated it, the IDs of all resulting
  * Acta, and aggregate stats for progress tracking and cost accounting.
@@ -84,21 +93,65 @@ export interface Collectio {
   aditusBase: Record<string, unknown>
   /** The parameter grid axes — each tractus is one dimension of variation */
   tractus: Tractus[]
-  /** Total number of combinations = product of all tractus.valores.length */
+  /** Target piece count for the run (the requested total; grows when extended).
+   *  NOT the size of the combination grid — with weighted/duplicate selection a
+   *  collection may target more or fewer pieces than there are combinations. */
   numerus: number
 
-  /** FK → Anima or commitment — who initiated this collection */
+  /**
+   * Content-address of the generative configuration — `sha256:<hex>` over
+   * `{ modusId, modusVersio, tractus, aditusBase }`. Any change to the flow,
+   * a trait, a weight, or the base aditus yields a new hash (a provably
+   * different/versioned input). The NFT "provenance hash". See provenance.ts.
+   */
+  provenanceHash: string
+
+  /**
+   * FK → Anima or commitment — the concrete identity that initiated AND funds
+   * this collection's pieces (every dispatched Actum is charged to this `by`).
+   * For a team-owned collection this is the founding/initiating member; team
+   * ownership is the `sodalitasId` overlay below.
+   */
   by: { animaId: string } | { commitment: string }
+
+  /**
+   * FK → Sodalitas. Team ownership overlay: when present, every member of the
+   * team owns this collection (not just `by`). The funding identity stays on
+   * `by` — teams have no pooled ledger yet. Absent → single-owner.
+   */
+  sodalitasId?: string
+
+  /**
+   * Per-artifact ownership split, snapshotted from the owning team's membership
+   * at creation (equal weights, each `1/n`; floating-point so they sum to ~1).
+   * A PROVISIONAL record of who shares in the artifact — the exact, canonical
+   * on-chain split (integer basis points) is re-snapshotted at freeze (later).
+   * Absent for single-owner (non-team) collections.
+   */
+  owners?: Array<{ animaId: string; weight: number }>
 
   /** FK[] → Actum. The executions this collection spawned */
   acta: string[]
-  /** How many acta have reached completus */
+  /** How many acta have reached completus AND count toward the target (approved
+   *  when review is on; all successes when it is off) */
   completae: number
-  /** How many acta have reached fractus */
+  /** How many acta have reached fractus (a genuine generation FAILURE) */
   fractae: number
+  /** How many pieces a reviewer REJECTED (a successful gen the reviewer declined —
+   *  distinct from `fractae`). Each rejection extends the dispatch budget by one
+   *  (a replacement piece is generated) and is the single source of that budget. */
+  reiectae: number
 
   /** Max concurrent acta — rate control for the fan-out */
   concurrentia: number
+
+  /**
+   * Opt-in DNA uniqueness: when true, no two pieces share the same trait
+   * combination (across non-`bypassDNA` axes). The TraitMixer rerolls a
+   * colliding piece deterministically until its DNA is unique (or the grid is
+   * exhausted). Off (default) → duplicates allowed (variation-test behaviour).
+   */
+  dna?: boolean
 
   status: CollectioStatus
 
@@ -122,6 +175,6 @@ export interface Collectionum {
   find(id: string): Promise<Collectio | null>
   list(filter?: Partial<Pick<Collectio, 'status'>>): Promise<Collectiones>
   listByStatus(status: CollectioStatus): Promise<Collectiones>
-  create(collectio: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'impetusTotal'>): Promise<Collectio>
-  update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'impetusTotal' | 'completum'>>): Promise<Collectio>
+  create(collectio: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal'>): Promise<Collectio>
+  update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'numerus'>>): Promise<Collectio>
 }

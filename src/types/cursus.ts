@@ -167,7 +167,7 @@ export interface Actorum {
    */
   update(
     id: string,
-    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'deploymentHash' | 'executio'>>
+    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'deploymentHash' | 'executio' | 'progressus' | 'phaseDurations'>>
   ): Promise<Actum>
   findById(id: string): Promise<Actum | null>
   /** Find an actum by the external job ID assigned at submission time. */
@@ -186,6 +186,12 @@ export interface Actorum {
   findExpired(): Promise<Actum[]>
   /** Return all nascens/agens actums that have an externusJobId — in-flight pods. */
   findInFlight(): Promise<Actum[]>
+  /**
+   * Return the child step acta of a compositus run — those whose `compositum.parentId`
+   * matches. Used to derive ownership of the cost-free parent (which holds no signa of
+   * its own) from its children's `signaConsumed` / bearer tokens. (ADR-0008.)
+   */
+  findByCompositum(parentId: string): Promise<Actum[]>
 }
 
 // ---------------------------------------------------------------------------

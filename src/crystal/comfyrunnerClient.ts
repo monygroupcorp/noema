@@ -1,6 +1,7 @@
 import { makeLogger } from '../lib/logger.js'
 import { getTrace } from '../lib/trace.js'
-import { bus } from '../lib/bus.js'
+import { recordProgressus } from '../execution/progressusSink.js'
+import type { Progressus } from '../types/progressus.js'
 import type { ModelRef } from '../types/actum.js'
 
 export interface R2Config {
@@ -180,11 +181,11 @@ export async function awaitViaStream(
   runnerBase: string,
   jobId: string,
   timeoutMs: number,
-  emitStage?: (stage: string, info?: { etaMs?: number }) => void,
   onMetrics?: (m: RunMetrics) => void,
 ): Promise<void> {
   let lastSeq = -1
   let inferringEmitted = false
+  let installingRecorded = false
   let modelTotal = 0
   let modelDone = 0
   let downloadStartMs = 0
@@ -196,6 +197,17 @@ export async function awaitViaStream(
   let lastProgMs = 0
   let slowSinceMs = 0
   const deadline = Date.now() + timeoutMs
+
+  // Status (Progressus, spec §6a): the OWNED, single status channel (#6e retired the parallel
+  // `emitStage`/`actum.stage` strings). Persist a typed timeline onto the Actum via the in-process
+  // recorder. We record only PHASE TRANSITIONS, log messages, and terminals (§7) — never per-tick
+  // sampler progress (stays live-only) — so there's no findById-per-tick. Awaited inline so reports
+  // for one Actum apply in order and the terminal lands before we resolve. No-op until a recorder
+  // is registered (index.ts), so unit tests that drive the SSE parse directly need no sink.
+  const record = async (p: Omit<Progressus, 'at'>): Promise<void> => {
+    const ctx = getTrace()
+    if (ctx?.actumId) await recordProgressus(ctx.actumId, { ...p, at: new Date() })
+  }
 
   for (let attempt = 0; attempt <= 3; attempt++) {
     if (attempt > 0) {
@@ -251,7 +263,9 @@ export async function awaitViaStream(
                 modelDone = present
                 if (total > present && downloadStartMs === 0) downloadStartMs = Date.now()
                 log.info('model preflight', { jobId, missing: total - present, present, total })
-                if (total > present) emitStage?.(`downloading:${present}/${total}`)
+                if (total > present) {
+                  await record({ phase: 'downloading', target: 'model', progress: { done: present, total, unit: 'items' } })
+                }
                 break
               }
               case 'downloading': {
@@ -261,7 +275,9 @@ export async function awaitViaStream(
                   downloadBytes += bytes
                   if (dest) dlSizes.set(dest, bytes)
                 }
-                if (modelTotal === 0) emitStage?.('downloading')
+                // No preflight count (single-file fetch) → still surface a `downloading` phase
+                // on the owned timeline so the bulletin/SSE show it (#6e; was emitStage('downloading')).
+                if (modelTotal === 0) await record({ phase: 'downloading', target: 'model' })
                 log.info('model download started', { jobId, dest, bytes })
                 break
               }
@@ -278,7 +294,11 @@ export async function awaitViaStream(
                     const bytesPerMs = completedBytes / elapsed
                     etaMs = Math.round((downloadBytes - completedBytes) / bytesPerMs)
                   }
-                  emitStage?.(`downloading:${modelDone}/${modelTotal}`, etaMs !== undefined ? { etaMs } : undefined)
+                  // Tick the owned timeline: actum.progressus is the bulletin/SSE's sole driver, so
+                  // the n/m counter must advance here, not just at preflight. Per-MODEL (low-frequency,
+                  // like preflight) — NOT the byte-level download-progress; and same-phase progress
+                  // coalesces out of the persisted timeline (§7), bus-only.
+                  await record({ phase: 'downloading', target: 'model', progress: { done: modelDone, total: modelTotal, unit: 'items' }, ...(etaMs !== undefined ? { etaMs } : {}) })
                 }
                 break
               }
@@ -309,46 +329,50 @@ export async function awaitViaStream(
               }
               case 'workflow-submitted':
                 log.info('workflow submitted to ComfyUI', { jobId, promptId: event.promptId })
+                // ComfyUI now loads the graph's weights into VRAM (§6a).
+                await record({ phase: 'loading', target: 'vram' })
                 break
               case 'waiting':
                 // Heartbeat while ComfyUI runs. nodesExecuted=0 across many of these = stuck loading.
                 log.info('awaiting ComfyUI', { jobId, elapsedS: event.elapsedS, nodesExecuted: event.nodesExecuted })
                 break
               case 'installing-node':
-                emitStage?.('installing-nodes')
+                // One installing entry per run (mirrors inferringEmitted) — fires per node,
+                // so guard rather than lean on the recorder to coalesce N findById round-trips.
+                if (!installingRecorded) {
+                  installingRecorded = true
+                  await record({ phase: 'installing' })
+                }
                 break
               case 'restarting-comfy':
-                emitStage?.('restarting')
+                await record({ phase: 'installing', message: 'restarting ComfyUI' })
                 break
               case 'node':
                 if (!inferringEmitted) {
                   inferringEmitted = true
-                  emitStage?.('inferring')
+                  await record({ phase: 'executing' })   // first node → work begins (§6a)
                 }
                 break
-              case 'progress': {
-                const ctx = getTrace()
-                if (ctx?.actumId) {
-                  bus.emit('actum.stage', {
-                    actumId:  ctx.actumId,
-                    stage:    `progress:${event.value}/${event.max}`,
-                    elapsedMs: Date.now() - (ctx.startTs ?? deadline - timeoutMs),
-                  })
-                }
+              case 'progress':
+                // Per-tick sampler progress (n/max) is live-only and high-frequency. It was a
+                // bus-only `actum.stage` frame for the SSE bar; the bulletin never read it. With
+                // the shim retired (#6e) we don't route it through the owned timeline (§7 keeps
+                // per-tick out, and an actum.progressus per step would flood the Telegram render).
                 break
-              }
               case 'uploading':
-                emitStage?.('uploading')
+                await record({ phase: 'uploading', target: 'output' })
                 break
               case 'complete': {
                 const { executionTimeMs } = event as { executionTimeMs?: number }
                 log.info('job complete', { jobId, executionTimeMs })
                 if (typeof executionTimeMs === 'number') onMetrics?.({ executionMs: executionTimeMs })
+                await record({ phase: 'done' })   // terminal → rolls up phaseDurations
                 return
               }
               case 'error': {
                 const errMsg = (event.error as string) || 'comfyrunner job failed'
                 log.warn('job error from comfyrunner', { jobId, error: errMsg })
+                await record({ phase: 'failed', message: errMsg })   // terminal
                 throw new JobError(errMsg)
               }
             }

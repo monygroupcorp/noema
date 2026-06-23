@@ -1,4 +1,4 @@
-import type { StageInfo } from '../../../lib/bus.js'
+import type { Progressus } from '../../../types/progressus.js'
 import { Ledger } from './Ledger.js'
 import type { BulletinSnapshot } from './BulletinView.js'
 import type { ActiveSubmenu } from './affordances.js'
@@ -55,58 +55,85 @@ export class PodSession {
   get armBase(): string | undefined { return this._armBase }
   get loadout(): Loadout | undefined { return this._loadout }
 
-  /** Advance the journal/live for a pod lifecycle stage. */
-  onStage(stage: string, info?: StageInfo, now: number = Date.now()): void {
-    if (info?.gpuType) this.pod.gpu = info.gpuType
-    if (typeof info?.costPerHr === 'number') this.pod.rate = info.costPerHr
-    if (info?.podId) this.pod.podId = info.podId
+  /**
+   * Advance the journal/live from a `Progressus` (the owned status vocabulary) — the bulletin's
+   * single source since #6b; the stringly `actum.stage` path it replaced was deleted in #6e.
+   * Pure: no I/O, no timers.
+   *
+   * Discriminators the flat phase vocabulary needs:
+   *  - `provisioning` WITHOUT a pod = the silent hunt opener (legacy `provisioning`); WITH a pod =
+   *    the pod is locked (legacy `pod-locked`). A warm reuse (`message: 'warm pod reused'`) is
+   *    owned by the 🔥 reaction, not the journal — skipped here, mirroring legacy where
+   *    `warm-pod-found` never reached the session.
+   *  - `pulling` + `runtime ready` = comfy is up (legacy `comfy-ready`: commit Prepared, go ready);
+   *    any other `pulling` = still bootstrapping (legacy `bootstrapping`/`ssh-ready`: initializing).
+   *  - `loading`/`warming` get no distinct line (legacy emitted no stage there — `comfy-ready`
+   *    already set 'generating'); we keep the current live.
+   *  - terminals (`done`/`failed`) are owned by the WideEvent path (`onComplete`/`onFail`) — ignored.
+   */
+  onProgressus(p: Progressus, now: number = Date.now()): void {
+    // Pod identity rides on the cold-start phases (on `Progressus.pod`) — capture it.
+    if (p.pod?.gpuType) this.pod.gpu = p.pod.gpuType
+    if (typeof p.pod?.costPerHr === 'number') this.pod.rate = p.pod.costPerHr
+    if (p.pod?.podId) this.pod.podId = p.pod.podId
 
-    if (stage === 'provisioning') {
-      this.podCount += 1
-      this.phaseStartMs = now
-      this.live = null            // hunt is silent unless it drags (manager arms the timer)
-      this._phase = 'hunting'
-      // A cold start is in flight — render "Provisioning…" during the otherwise-silent hunt
-      // (the `/make` path never calls beginStarting; only `/arm`'s ▸ Start did). Cleared at
-      // pod-locked so it can't leak into the warm-idle "keep cooking" state afterward.
-      this._starting = true
-      return
-    }
-    if (stage === 'pod-locked') {
-      this._starting = false      // hunt over — let `live` drive the display from here
-      if (this._phase === 'hunting') {
-        // Cold start (or bail replacement): commit the Found line + enter prep.
-        this.journal.push({ kind: 'found', gpu: this.pod.gpu, rate: this.pod.rate, ms: this._phaseMs(info, now) })
-        this.phaseStartMs = now
-        this.live = { kind: 'initializing' }
+    switch (p.phase) {
+      case 'provisioning': {
+        if (!p.pod?.podId) {
+          // Silent hunt opener (legacy 'provisioning') — render "Provisioning…" during the hunt.
+          this.podCount += 1
+          this.phaseStartMs = now
+          this.live = null
+          this._phase = 'hunting'
+          this._starting = true
+          return
+        }
+        if (p.message === 'warm pod reused') return   // 🔥 reaction owns this; never journaled
+        // Pod locked (legacy 'pod-locked').
+        this._starting = false
+        if (this._phase === 'hunting') {
+          this.journal.push({ kind: 'found', gpu: this.pod.gpu, rate: this.pod.rate, ms: this.phaseStartMs !== undefined ? now - this.phaseStartMs : 0 })
+          this.phaseStartMs = now
+          this.live = { kind: 'initializing' }
+          this._phase = 'prep'
+        } else {
+          // Warm reuse of an already-known pod: straight to work, no new Found line.
+          this.live = { kind: 'generating' }
+          this._phase = 'ready'
+        }
+        return
+      }
+      case 'pulling':
+        if (p.message === 'runtime ready') {   // legacy 'comfy-ready'
+          this.journal.push({ kind: 'prepared', ms: this.phaseStartMs !== undefined ? now - this.phaseStartMs : 0 })
+          this.live = { kind: 'generating' }
+          this._phase = 'ready'
+        } else {                                // legacy 'bootstrapping' / 'ssh-ready'
+          this.live = { kind: 'initializing' }
+          this._phase = 'prep'
+        }
+        return
+      case 'downloading': {
+        const slow = this.phaseStartMs !== undefined && now - this.phaseStartMs > DL_SLOW_MS
+        this.live = { kind: 'downloading', n: p.progress?.done, m: p.progress?.total, slow }
         this._phase = 'prep'
-      } else {
-        // Warm reuse of an already-known pod: no new Found line, straight to work.
+        return
+      }
+      case 'installing':
+        this.live = p.message === 'restarting ComfyUI' ? { kind: 'reloading' } : { kind: 'plugins' }
+        return
+      case 'executing':   // legacy 'inferring'
         this.live = { kind: 'generating' }
         this._phase = 'ready'
-      }
-      return
+        return
+      case 'uploading':
+        this.live = { kind: 'saving' }
+        return
+      // queued/attesting/loading/warming/finalizing/cancelling/done/failed: no pod-bulletin line —
+      // keep the current live (terminals are the WideEvent path's; the rest had no legacy stage).
+      default:
+        return
     }
-    if (stage === 'ssh-ready' || stage === 'bootstrapping') { this.live = { kind: 'initializing' }; this._phase = 'prep'; return }
-    if (stage.startsWith('downloading')) {
-      const slow = this.phaseStartMs !== undefined && now - this.phaseStartMs > DL_SLOW_MS
-      const [n, m] = stage.startsWith('downloading:') ? stage.slice(12).split('/').map(Number) : [undefined, undefined]
-      this.live = { kind: 'downloading', n, m, slow }
-      this._phase = 'prep'
-      return
-    }
-    if (stage === 'installing-nodes') { this.live = { kind: 'plugins' }; return }
-    if (stage === 'restarting')       { this.live = { kind: 'reloading' }; return }
-    if (stage === 'pod-bailed')       { this._bail(info); return }
-    if (stage === 'comfy-ready') {
-      this.journal.push({ kind: 'prepared', ms: this._phaseMs(info, now) })
-      this.live = { kind: 'generating' }
-      this._phase = 'ready'
-      return
-    }
-    if (stage === 'inferring') { this.live = { kind: 'generating' }; this._phase = 'ready'; return }
-    if (stage === 'uploading') { this.live = { kind: 'saving' }; return }
-    // unknown stage — keep the current live line
   }
 
   /** Manager calls this when the hunt drags past the threshold. */
@@ -363,18 +390,4 @@ export class PodSession {
     }
   }
 
-  private _phaseMs(info: StageInfo | undefined, now: number): number {
-    return info?.phaseMs ?? (this.phaseStartMs ? now - this.phaseStartMs : 0)
-  }
-
-  /** Cut a sluggish pod loose: erase its Found entry, record a permanent Quit entry. */
-  private _bail(info?: StageInfo): void {
-    for (let i = this.journal.length - 1; i >= 0; i--) {
-      if (this.journal[i].kind === 'found') { this.journal.splice(i, 1); break }
-    }
-    this.journal.push({ kind: 'quit', podNum: this.podCount, reason: info?.bailReason ?? 'download throttle' })
-    this.live = null
-    this.phaseStartMs = undefined
-    this._phase = 'hunting'
-  }
 }

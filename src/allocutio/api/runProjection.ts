@@ -8,7 +8,10 @@
 // =============================================================================
 
 import type { Actum, ActumStatus } from '../../types/actum.js'
-import type { Run, RunStatus } from './types.js'
+import type { Collectio, CollectioStatus } from '../../types/collectio.js'
+import type { Editio } from '../../types/editio.js'
+import type { Sodalitas } from '../../types/sodalitas.js'
+import type { Run, RunStatus, Collection, CollectionStatus, Team, Edition } from './types.js'
 
 /** Map the Latin ActumStatus onto the public English RunStatus. */
 const STATUS_MAP: Record<ActumStatus, RunStatus> = {
@@ -47,4 +50,60 @@ export function toRun(actum: Actum): Run {
   if (actum.inceptum !== undefined) run.createdAt = actum.inceptum.toISOString()
 
   return run
+}
+
+const COLLECTION_STATUS_MAP: Record<CollectioStatus, CollectionStatus> = {
+  nascens: 'pending',
+  agens: 'running',
+  completa: 'complete',
+  cancellata: 'cancelled',
+}
+
+/** Project a Collectio onto its public, JSON-safe Collection shape. Pure. */
+export function toCollection(c: Collectio): Collection {
+  const out: Collection = {
+    id: c.id,
+    status: COLLECTION_STATUS_MAP[c.status],
+    modusId: c.modusId,
+    total: c.numerus,
+    provenanceHash: c.provenanceHash,
+    completed: c.completae,
+    failed: c.fractae,
+    rejected: c.reiectae ?? 0,
+  }
+  if (c.nomen !== undefined) out.nomen = c.nomen
+  if (c.owners !== undefined) out.owners = c.owners
+  if (c.impetusTotal !== undefined) out.cost = c.impetusTotal.toString()
+  if (c.natum !== undefined) out.createdAt = c.natum.toISOString()
+  if (c.completum !== undefined) out.completedAt = c.completum.toISOString()
+  return out
+}
+
+/** Project an Editio onto its public, JSON-safe Edition shape. Pure. */
+export function toEdition(e: Editio): Edition {
+  const out: Edition = {
+    id: e.id,
+    artifact: { kind: e.artifactRef.kind, id: e.artifactRef.id },
+    destination: e.destination,
+    visibility: e.visibility,
+    custody: e.custody,
+    status: e.status,
+    createdAt: e.natum.toISOString(),
+    updatedAt: e.mutatum.toISOString(),
+  }
+  if (e.externalRef !== undefined) out.externalRef = e.externalRef
+  if (e.owners !== undefined) out.owners = e.owners
+  if (e.license !== undefined) out.license = e.license
+  return out
+}
+
+/** Project a Sodalitas onto its public, JSON-safe Team shape. Pure. */
+export function toTeam(s: Sodalitas): Team {
+  return {
+    id: s.id,
+    nomen: s.nomen,
+    members: s.membra,
+    founder: s.auctor,
+    createdAt: s.natum.toISOString(),
+  }
 }

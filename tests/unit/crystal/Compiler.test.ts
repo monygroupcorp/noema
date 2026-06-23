@@ -57,7 +57,7 @@ function makeEssentia(overrides: Partial<Essentia> = {}): Essentia {
     workflowTemplate: 'flux-schnell',
     workflowTemplateVersion: '1',
     seedInputKey: 'input_seed',
-    defaultCookFlags: {
+    defaultGenFlags: {
       batchSize: 1,
       seedStrategy: 'shuffle',
       seedPlaceholder: 88888888,
@@ -126,7 +126,7 @@ test('compile() generates random seed when input_seed absent (shuffle strategy)'
 
 test('compile() uses fixed seedPlaceholder when strategy is fixed', async () => {
   const essentia = makeEssentia({
-    defaultCookFlags: { seedStrategy: 'fixed', seedPlaceholder: 77777777 },
+    defaultGenFlags: { seedStrategy: 'fixed', seedPlaceholder: 77777777 },
   })
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(essentia, { prompt: 'test' })
@@ -196,12 +196,12 @@ test('compile() throws when the fundament reference is absent on essentia', asyn
 
 test('compile() uses increment strategy: baseSeed + pieceIndex', async () => {
   const essentia = makeEssentia({
-    defaultCookFlags: { seedStrategy: 'increment' },
+    defaultGenFlags: { seedStrategy: 'increment' },
   })
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(essentia, {
     prompt: 'test',
-    _cookFlags: { baseSeed: 1000, pieceIndex: 7 },
+    _genFlags: { baseSeed: 1000, pieceIndex: 7 },
   })
   assert.equal(spec.seed, 1007)
 })
@@ -367,7 +367,7 @@ function makeLoraEssentia(): Essentia {
     workflowTemplate: 'lora-test',
     workflowTemplateVersion: '1',
     seedInputKey: 'input_seed',
-    defaultCookFlags: { batchSize: 1, seedStrategy: 'fixed', seedPlaceholder: 42, privateMode: false, vramGb: 24 },
+    defaultGenFlags: { batchSize: 1, seedStrategy: 'fixed', seedPlaceholder: 42, privateMode: false, vramGb: 24 },
   })
 }
 

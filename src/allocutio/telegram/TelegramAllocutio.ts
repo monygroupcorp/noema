@@ -11,6 +11,7 @@ import type { Allocutio, Nuntius, Responsum } from '../../types/allocutio.js'
 import type { Inceptio } from '../../types/cursus.js'
 import { makeLogger } from '../../lib/logger.js'
 import { bus, type StageInfo } from '../../lib/bus.js'
+import type { Progressus } from '../../types/progressus.js'
 import { withTrace, getTrace, makeTraceContext } from '../../lib/trace.js'
 import type { WideEvent } from '../../lib/wide.js'
 import type { MateriaStore } from '../../types/materia.js'
@@ -285,8 +286,10 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     this.router.onStep((ctx, step) => { void this._handleStep(ctx, step) })
     this.router.onResolution((ctx, resolution) => { void this._handleResolution(ctx, resolution) })
 
-    // Pod lifecycle → bulletin manager (+ the local reaction bookkeeping).
-    bus.on('actum.stage', (data) => { void this._handleActumStage(data) })
+    // Pod lifecycle → bulletin manager (+ the local reaction bookkeeping). The owned
+    // `actum.progressus` is the single status channel (#6e retired the `actum.stage` shim):
+    // it drives the bulletin journal/live AND the 🔥 warm reaction.
+    bus.on('actum.progressus', (data) => { void this._handleActumProgressus(data) })
     bus.on('actum.complete', (wide) => { void this._handleActumComplete(wide) })
     bus.on('actum.fail', (wide) => { void this._handleActumFail(wide) })
     bus.on('pod.reaped', ({ externusId }) => { this.bulletins.onReaped(externusId) })
@@ -941,14 +944,13 @@ Generate AI art, chat with models, explore creative tools.`
   // Pod lifecycle → reaction choreography + bulletin journal
   // -------------------------------------------------------------------------
 
-  private async _handleActumStage(data: { actumId: string; stage: string; elapsedMs: number; info?: StageInfo }): Promise<void> {
-    // Warm signal (may arrive before OR after the Stream registers) → 🔥, never 👌.
-    if (data.stage === 'warm-pod-found') { this.reactions.noteWarm(data.actumId); return }
-
-    // KSampler progress (progress:N/M) is suppressed — it never keeps up with fast
-    // jobs and burns edit quota. Every other stage drives the bulletin journal.
-    if (data.stage.startsWith('progress:')) return
-    this.bulletins.onStage(data.actumId, data.stage, data.info)
+  /** Owned-status path: the typed `Progressus` drives the bulletin AND the reaction (#6b/#6e). */
+  private async _handleActumProgressus(data: { actumId: string; progressus: Progressus }): Promise<void> {
+    // Warm reuse (`provisioning` + 'warm pod reused', may arrive before OR after the Stream
+    // registers) → 🔥, never 👌. (Was the `actum.stage` 'warm-pod-found' signal, #6e.)
+    const p = data.progressus
+    if (p.phase === 'provisioning' && p.message === 'warm pod reused') { this.reactions.noteWarm(data.actumId) }
+    this.bulletins.onProgressus(data.actumId, p)
   }
 
   private async _handleActumComplete(wide: WideEvent): Promise<void> {

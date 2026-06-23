@@ -581,7 +581,7 @@ export class ExecuteFlow implements Flow {
       .filter(([, v]) => isUrl(v))
       .map(([, v]) => ({ url: v as string, type: mediaType(v as string) }))
 
-    // Text content: non-URL values, skipping internal underscore-prefixed keys (cook bookkeeping).
+    // Text content: non-URL values, skipping internal underscore-prefixed keys (collection bookkeeping).
     const textEntries = Object.entries(result).filter(([k, v]) => !isUrl(v) && !k.startsWith('_'))
     const textContent = textEntries.length > 0
       ? textEntries.map(([k, v]) => `${k}: ${String(v)}`).join('\n')

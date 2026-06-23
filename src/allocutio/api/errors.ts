@@ -61,6 +61,11 @@ export const Errors = {
   notFoundStudio: (id: string) => new ApiError('not_found.studio', `Studio '${id}' not found`, 404),
   conflictSlug: (slug: string) => new ApiError('conflict.slug_taken', `The slug '${slug}' is already taken`, 409),
   notFoundRun: (id: string) => new ApiError('not_found.run', `Run '${id}' not found`, 404),
+  notFoundCollection: (id: string) => new ApiError('not_found.collection', `Collection '${id}' not found`, 404),
+  notFoundTeam: (id: string) => new ApiError('not_found.team', `Team '${id}' not found`, 404),
+  notFoundEdition: (id: string) => new ApiError('not_found.edition', `Edition '${id}' not found`, 404),
+  notFoundModel: (id: string) => new ApiError('not_found.model', `Model '${id}' not found`, 404),
+  notFoundAdapter: (key: string) => new ApiError('not_found.adapter', `Publication destination '${key}' is not available`, 404),
   insufficientSigna: (details?: Record<string, unknown>) =>
     new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
   capTooLow: (details?: Record<string, unknown>) =>

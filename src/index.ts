@@ -32,6 +32,8 @@ import { WideEventStore }         from './analytics/WideEventStore.js'
 import { ensureWideIndexes }      from './analytics/ensureWideIndexes.js'
 import { startAnalyticsListener } from './analytics/analyticsListener.js'
 import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
+import { PublicationWorker } from './crystal/PublicationWorker.js'
+import { registerProgressusRecorder } from './execution/progressusSink.js'
 import { CANONICAL_MODI } from './crystal/seeds/modi.js'
 import { CANONICAL_ESSENTIAE } from './crystal/seeds/essentiae.js'
 import { CANONICAL_COMPOSITI } from './crystal/seeds/compositi.js'
@@ -67,7 +69,7 @@ import { CANONICAL_INTELLAE } from './crystal/seeds/intellae.js'
 import { ensureIndexes } from './crystal/ensureIndexes.js'
 import type { Essentia } from './types/essendi.js'
 import path from 'node:path'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { makeSnarkjsVerifier } from './arcanum/ArcanumVerifier.js'
 
 // ---------------------------------------------------------------------------
@@ -140,8 +142,37 @@ const RUNPOD_R2: R2Config | undefined =
     ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_OUTPUTS_BUCKET!, publicUrl: R2_PUBLIC_URL }
     : undefined
 
+/**
+ * Durably materialise the RunPod SSH key (incident 2026-06-19). The key MUST survive a
+ * container *recreate* — so we write it from the `RUNPOD_SSH_KEY` (base64) secret on boot
+ * when the file is absent, instead of relying on a hand-placed file inside a live container
+ * that a recreate silently wipes. Idempotent: a present key is left untouched. If we'll need
+ * a key and still have none, fail LOUD (so a missing key shows at boot, not 10 min into a
+ * stuck pod run).
+ */
+let _sshKeyEnsured = false
+function ensureRunpodSshKey(): void {
+  if (_sshKeyEnsured) return
+  _sshKeyEnsured = true
+  const sshLog = makeLogger('startup')
+  const b64 = process.env.RUNPOD_SSH_KEY
+  if (b64 && !existsSync(RUNPOD_SSH_KEY_PATH)) {
+    try {
+      mkdirSync(path.dirname(RUNPOD_SSH_KEY_PATH), { recursive: true, mode: 0o700 })
+      writeFileSync(RUNPOD_SSH_KEY_PATH, Buffer.from(b64, 'base64'), { mode: 0o600 })
+      sshLog.info('RunPod SSH key materialised from RUNPOD_SSH_KEY env', { path: RUNPOD_SSH_KEY_PATH })
+    } catch (err) {
+      sshLog.error('failed to write RunPod SSH key from RUNPOD_SSH_KEY', { path: RUNPOD_SSH_KEY_PATH, error: String(err) })
+    }
+  }
+  if (!existsSync(RUNPOD_SSH_KEY_PATH)) {
+    sshLog.warn('⚠ RunPod SSH key MISSING — SECURE pod runs WILL FAIL. Set RUNPOD_SSH_KEY (base64) in the container env, or place the key file at this path.', { path: RUNPOD_SSH_KEY_PATH })
+  }
+}
+
 function makeSecureRunPodClient(materiae?: MateriaStore, hospitia?: HospitiumStore): SecurePodClient {
   const r2 = RUNPOD_R2
+  ensureRunpodSshKey()
 
   return new SecurePodClient(
     {
@@ -330,6 +361,7 @@ async function main(): Promise<void> {
         installLive: (m: Materia, ids: string[]) => installCoordinator.installLive(m, ids),
       } : {}),
     } : {}),
+    ...(process.env.HF_TOKEN ? { huggingFaceToken: process.env.HF_TOKEN } : {}),
     ...(openaiClient ? { openaiClient } : {}),
     ...(embed ? { embed } : {}),
     ...(embedImage ? { embedImage } : {}),
@@ -578,6 +610,16 @@ async function main(): Promise<void> {
     modos: ring.modos,
     consuetudinum,
     compositusCursor: ring.compositusCursor,
+    collectiones: ring.collectiones,
+    collectioCursor: ring.collectioCursor,
+    sodalitatum: ring.sodalitates,
+    // Publishing spine (Editio): the feed adapter + the store + prefs source.
+    // No moderationGate wired → the permissive placeholder gate (real CSAM/NCMEC
+    // scanner is unbuilt; the async →public gate path still always runs).
+    editiones: ring.editiones,
+    publicationAdapters: ring.publicationAdapters,
+    animae: ring.animae,
+    intellarum: intellae,
     ...(ring.conductor ? { conductor: ring.conductor } : {}),
     ...(ring.teeProvisioner ? { teeProvisioner: ring.teeProvisioner } : {}),
     // Fire-and-forget studio-ready/failed webhook (optional sugar over polling).
@@ -586,6 +628,22 @@ async function main(): Promise<void> {
         .catch(err => log.warn('studio webhook failed', { url, error: String(err) }))
     },
   })
+
+  // Publication worker (publishing): drains `pending` Editiones off the store — the
+  // durable queue — so settles (moderation + adapter publish + reconcile, incl. heavy
+  // model uploads) run OFF the request path and survive restarts. In-process for now,
+  // behind the store's atomic claim/lease so it can be split into its own container
+  // later with just a thin entrypoint (see PublicationWorker). Best-effort: a crash
+  // mid-settle is reclaimed once the lease lapses.
+  const publicationWorker = new PublicationWorker({
+    editiones: ring.editiones,
+    settle: (editioId) => crystalApi.settlePublication(editioId),
+  }).start(5_000)
+  log.info('publication worker started')
+
+  // Status (Progressus, spec §6a): let the in-process comfyrunner SSE parse persist its
+  // typed timeline through the same sink the HTTP /runner/status uses, without an HTTP loopback.
+  registerProgressusRecorder((actumId, progressus) => crystalApi.recordProgressus(actumId, progressus))
   // Identified-user acceptors → animaId via a `'web'`/`'api'` persona (create-on-sight).
   // JWT (env secret) + API-key (read-only users lookup) + anon {commitment} are live; web3
   // needs a nonce-challenge endpoint (deferred). All verification is defensive — any failure
@@ -610,7 +668,7 @@ async function main(): Promise<void> {
     ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
     verifyApiKeyToAccountId,
   }))
-  // Run-event hub — projects the bus (actum.stage/complete/fail) into per-run SSE
+  // Run-event hub — projects the bus (actum.progressus/complete/fail) into per-run SSE
   // streams + fire-and-forget completion webhooks (Phase 2). In-process (single
   // instance), per the epic's distribution note. Webhook POSTs are best-effort.
   const runHub = new RunEventHub({
@@ -646,10 +704,11 @@ async function main(): Promise<void> {
   app.post('/runner/ready',     express.json(), async (req, res) => { await crystalApi.handleRunnerReady(req.body);     res.json({ ok: true }) })
   app.post('/runner/heartbeat', express.json(), async (req, res) => { res.json(await crystalApi.handleRunnerHeartbeat(req.body)) })
   app.post('/runner/ended',     express.json(), async (req, res) => { await crystalApi.handleRunnerEnded(req.body);     res.json({ ok: true }) })
+  // The universal status sink (spec §4): one channel every runner speaks — carries a
+  // Progressus and returns { continue } (subsumes the heartbeat). Lenient: a legacy
+  // { sessionId, step } body still works (folded into an `executing` report).
   app.post('/runner/status',    express.json(), async (req, res) => {
-    const { sessionId, step } = req.body as { sessionId?: string; step?: string }
-    log.info('[tee] runner status', { sessionId, step })
-    res.json({ ok: true })
+    res.json(await crystalApi.reportProgressus(req.body))
   })
 
   // TEE browser client — served at /tee so it shares the same origin as the API (no CORS needed).
@@ -735,6 +794,8 @@ async function main(): Promise<void> {
     modorum: ring.modorum,
     modos: ring.modos,
     hospitia: ring.hospitia,
+    deployments: ring.deployments,
+    editiones: ring.editiones,
     materiae,
     actumIndex: ring.actumIndex,
     vestigiorum: ring.vestigiorum,
