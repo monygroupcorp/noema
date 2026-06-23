@@ -50,6 +50,9 @@ import { LayerCompositeCursor } from './crystal/LayerCompositeCursor.js'
 import { JimpLayerCompositeEngine } from './crystal/LayerCompositeEngine.js'
 import { FfmpegCursor } from './crystal/FfmpegCursor.js'
 import { SpawnFfmpegEngine } from './crystal/FfmpegEngine.js'
+import { AitoolkitTrainingCursor } from './crystal/AitoolkitTrainingCursor.js'
+import { SqliteAitkJobStore } from './crystal/AitkJobStore.js'
+import { DockerAitkSpawner } from './crystal/AitkSpawner.js'
 import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
 import { FeedAdapter } from './crystal/FeedAdapter.js'
@@ -161,6 +164,21 @@ export interface ContainerConfig {
   runpodWebhookUrl?: string
   /** R2 config for warm-pod jobs so they upload to durable storage (not pod-proxy URLs). */
   runpodR2?: import('./crystal/SecurePodClient.js').R2Config
+  /**
+   * Local ai-toolkit training (build #5, ministerium 'aitoolkit'). Present only on a box
+   * with a GPU + the `stationthis-klein` image + a host-mounted `aitk_db.db`. Registers the
+   * `AitoolkitTrainingCursor`; absent in prod (no local trainer) → no registration.
+   */
+  aitoolkit?: {
+    /** Path to the host-mounted ai-toolkit SQLite DB (`aitk_db.db`). */
+    dbPath: string
+    /** The ai-toolkit Docker image (e.g. 'stationthis-klein:1'). */
+    image: string
+    /** Bind mounts for the container (ai-toolkit clone, dataset, HF cache). */
+    mounts?: import('./crystal/AitkSpawner.js').AitkMount[]
+    /** Overall poll cap (ms) — a hung run trips this and fails. */
+    timeoutMs?: number
+  }
   /** Warm-window TTL (ms) passed to warm-pod jobs — default 60_000. */
   runpodWarmTtlMs?: number
   /** Override the warm-pod client factory (dev fake mode swaps in FakeWarmPodClient). */
@@ -431,6 +449,17 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     }))
     // Bucket custody (publishing #2): re-hosts an artifact's media to R2.
     publicationAdapters.push(new BucketAdapter({ fetcher: httpMediaFetcher, store: uploader }))
+  }
+
+  // Local ai-toolkit training (build #5) — only where a GPU + image + host-mounted DB exist.
+  if (config.aitoolkit) {
+    cursorum.register('aitoolkit', new AitoolkitTrainingCursor({
+      store: new SqliteAitkJobStore(config.aitoolkit.dbPath),
+      spawner: new DockerAitkSpawner(),
+      image: config.aitoolkit.image,
+      ...(config.aitoolkit.mounts ? { mounts: config.aitoolkit.mounts } : {}),
+      ...(config.aitoolkit.timeoutMs !== undefined ? { timeoutMs: config.aitoolkit.timeoutMs } : {}),
+    }))
   }
 
   const completor = new ActumCompletor({ acta: actorum, signorum, terminatePod: config.terminatePod })

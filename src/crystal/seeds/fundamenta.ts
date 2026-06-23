@@ -290,6 +290,31 @@ export const FUNDAMENTUM_HUNYUAN3D_PYTORCH: Fundamentum = {
   mutatum: new Date('2026-06-12'),
 }
 
+/**
+ * ai-toolkit Training — the crystal-native LoRA-training substrate (runtime 'aitoolkit',
+ * build #5). Drives ostris/ai-toolkit LOCALLY on our GPU (the `AitoolkitTrainingCursor`,
+ * ministerium 'aitoolkit'), reading its SQLite `Job` row for status. Canonical target is
+ * FLUX.2 Klein-4B (`black-forest-labs/FLUX.2-klein-base-4B`, arch `flux2_klein_4b`, TE
+ * Qwen/Qwen3-4B — all Apache, ungated), which trains on a 24GB 4090 where FLUX.1's 12B OOMs.
+ * ai-toolkit self-downloads the base/TE/VAE via `from_pretrained` (so no `intellae`). The
+ * image is the locally-built `stationthis-klein:1` (ai-toolkit deps baked); the cursor owns
+ * the `docker run` launch, so no generic `launchTemplate`.
+ */
+export const FUNDAMENTUM_AITOOLKIT_TRAINING: Fundamentum = {
+  id: 'aitoolkit-training',
+  nomen: 'ai-toolkit · Training',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'stationthis-klein',
+  imageVersion: '1',
+  runtime: 'aitoolkit',
+  intellae: [],   // ai-toolkit self-downloads klein-4b + Qwen3-4B + VAE via from_pretrained
+  vramGb: 24,
+  canonica: true,
+  natum: new Date('2026-06-23'),
+  mutatum: new Date('2026-06-23'),
+}
+
 /** All canonical fundamenta — seeded on boot (parity with CANONICAL_ESSENTIAE). */
 export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_FLUX_COMFYUI,
@@ -304,4 +329,5 @@ export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_MOSS_SGLANG,
   FUNDAMENTUM_HEARTMULA_PYTORCH,
   FUNDAMENTUM_HUNYUAN3D_PYTORCH,
+  FUNDAMENTUM_AITOOLKIT_TRAINING,
 ]
