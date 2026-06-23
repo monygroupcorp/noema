@@ -122,6 +122,47 @@ function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'lora'
 }
 
+/** The finalizer closure shape `makeTrainingFinalizer` returns. */
+export type TrainingFinalize = (actum: Actum, outcome: AitkOutcome) => Promise<Record<string, unknown>>
+
+/**
+ * Adapt the finalizer to the execution webhook's `resolveExitus` seam (Slice E). For a
+ * completed training run (matched by `ministerium`), it reads the pod-uploaded LoRA URL off
+ * the webhook's output items, treats the configured `aditus.steps` as the steps reached, and
+ * runs finality → `{ trained, steps, loraId, loraUrl }`. Returns null for any other modus, so
+ * the webhook falls back to the generic `projectExitus`.
+ */
+export function makeTrainingExitusResolver(
+  finalize: TrainingFinalize,
+  ministerium = 'aitoolkit',
+): (
+  actum: Actum,
+  modus: { ministerium?: string } | null,
+  outputItems: Array<{ url?: string; path?: string } | string>,
+) => Promise<Record<string, unknown> | null> {
+  return async (actum, modus, outputItems) => {
+    if (modus?.ministerium !== ministerium) return null
+    const loraUrl = firstUrl(outputItems)
+    if (!loraUrl) throw new Error('training finality: completion carried no LoRA output URL')
+    const steps = asPositiveInt(actum.aditus.steps) ?? 0
+    return finalize(actum, { status: 'completed', lastStep: steps, outputUrl: loraUrl })
+  }
+}
+
+/** The first resolvable media URL among the webhook's output items (string or `{ url }`). */
+function firstUrl(items: Array<{ url?: string; path?: string } | string>): string | undefined {
+  for (const it of items) {
+    if (typeof it === 'string' && it.length > 0) return it
+    if (it && typeof it === 'object' && typeof it.url === 'string' && it.url.length > 0) return it.url
+  }
+  return undefined
+}
+
+function asPositiveInt(v: unknown): number | undefined {
+  const n = Number(v)
+  return Number.isInteger(n) && n > 0 ? n : undefined
+}
+
 /**
  * Production `LoraReader`: read the trained safetensors off the host-mounted
  * ai-toolkit output dir. ai-toolkit writes `<outputDir>/<jobId>/<jobId>.safetensors`

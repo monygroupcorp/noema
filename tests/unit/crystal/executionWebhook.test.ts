@@ -15,6 +15,18 @@ import { hostCutHook } from '../../../src/ledger/hooks/hostCut.js'
 import { spellRoyaltyHook } from '../../../src/ledger/hooks/spellRoyalty.js'
 import { modelRoyaltyHook } from '../../../src/ledger/hooks/modelRoyalty.js'
 import { platformSkimHook } from '../../../src/ledger/hooks/platformSkim.js'
+import { makeTrainingFinalizer, urlLoraReader, makeTrainingExitusResolver } from '../../../src/crystal/trainingFinalizer.js'
+import type { Modorum } from '../../../src/types/modus.js'
+import type { Intella } from '../../../src/types/intelligendi.js'
+
+function makeModorum(modus: Modus): Modorum {
+  return {
+    async find() { return modus },
+    async register() {},
+    async list() { return [modus] },
+    async update() { return modus },
+  }
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -108,6 +120,53 @@ test('COMPLETED payload calls completor.complete and returns 200', async () => {
   // The webhook projects RunPod outputs into the flow's DECLARED exitus schema
   // (projectExitus). No modorum here → falls back to the bare media-type name, so a
   // .png lands under `image`. (Schema-keyed cases are covered in projectExitus.test.)
+  assert.deepEqual(completor.completed[0].exitus.exitus, { image: 'https://example.com/out.png' })
+})
+
+// 1b. A training completion runs finality (host LoRA + register Intella) instead of projectExitus.
+test('COMPLETED training payload runs finality and bills real pod-seconds', async () => {
+  const actum = makeActum({ modusId: 'modus.aitoolkit-training', aditus: { steps: 600, triggerWord: 'milady', familia: 'flux', ownerAnimaId: 'anima-3' } })
+  const completor = makeCompletor()
+  const upserts: Intella[] = []
+  const puts: string[] = []
+  const finalize = makeTrainingFinalizer({
+    reader: urlLoraReader({ async fetch(url) { return Buffer.from(`b:${url}`) } }),
+    store: { async put(key) { puts.push(key); return `https://cdn/${key}` } },
+    intellae: { async upsert(i) { upserts.push(i) } },
+    newId: () => 'lora-w',
+  })
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    modorum: makeModorum({ id: 'modus.aitoolkit-training', ministerium: 'aitoolkit' } as unknown as Modus),
+    resolveExitus: makeTrainingExitusResolver(finalize),
+  }
+  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [{ url: 'https://pod/outputs/run/milady.safetensors' }], executionTime: 900_000 }
+  const result = await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(puts.length, 1)                                           // re-hosted in our bucket
+  assert.equal(upserts.length, 1)
+  assert.equal(upserts[0].familia, 'flux')                              // registered + /make-resolvable
+  assert.deepEqual(completor.completed[0].exitus.exitus, { trained: true, steps: 600, loraId: 'lora-w', loraUrl: 'https://cdn/models/lora-w/milady.safetensors' })
+  assert.equal(completor.completed[0].exitus.impetus, 900n)            // pod-seconds = executionTime/1000
+})
+
+// 1c. A non-training completion still uses projectExitus (resolver returns null, no finality fires).
+test('COMPLETED non-training payload still uses projectExitus', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  let finalizeCalls = 0
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    modorum: makeModorum({ id: 'flux-schnell', ministerium: 'runpod' } as unknown as Modus),
+    resolveExitus: makeTrainingExitusResolver(async () => { finalizeCalls++; return {} }),
+  }
+  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [{ url: 'https://example.com/out.png' }], executionTime: 5000 }
+  await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(finalizeCalls, 0)
   assert.deepEqual(completor.completed[0].exitus.exitus, { image: 'https://example.com/out.png' })
 })
 
