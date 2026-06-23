@@ -309,7 +309,7 @@
     },
     "/runs/{id}/stream": {
       "get": {
-        "summary": "Server-Sent Events stream of run events (an initial snapshot, then stage/complete/failed frames). Content-Type: text/event-stream; the stream ends on the terminal event.",
+        "summary": "Server-Sent Events stream of run events (an initial snapshot, then progress/stage/complete/failed frames). Content-Type: text/event-stream; the stream ends on the terminal event.",
         "security": [
           {
             "ApiKeyAuth": []

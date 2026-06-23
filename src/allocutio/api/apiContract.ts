@@ -726,7 +726,7 @@ export const API_CONTRACT: ApiContract = {
       method: 'GET',
       path: '/runs/:id/stream',
       summary:
-        'Server-Sent Events stream of run events (an initial snapshot, then stage/complete/failed ' +
+        'Server-Sent Events stream of run events (an initial snapshot, then progress/stage/complete/failed ' +
         'frames). Content-Type: text/event-stream; the stream ends on the terminal event.',
       auth: true,
     },
