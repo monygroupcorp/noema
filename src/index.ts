@@ -668,7 +668,7 @@ async function main(): Promise<void> {
     ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
     verifyApiKeyToAccountId,
   }))
-  // Run-event hub — projects the bus (actum.stage/complete/fail) into per-run SSE
+  // Run-event hub — projects the bus (actum.progressus/complete/fail) into per-run SSE
   // streams + fire-and-forget completion webhooks (Phase 2). In-process (single
   // instance), per the epic's distribution note. Webhook POSTs are best-effort.
   const runHub = new RunEventHub({

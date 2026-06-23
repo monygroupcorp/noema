@@ -289,13 +289,12 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
 
 // 1. /make command → calls FlowRouter.enter('execute', ...) with correct platform/userId
 /**
- * #6b: drive the bulletin the way production does — via the owned `actum.progressus` — while
- * still firing the legacy `actum.stage` for the 🔥 reaction path. Mirrors the Fake/real clients,
- * which record a Progressus alongside the shim. `info` not in the owned vocabulary (e.g.
- * `pod-bailed`, `progress:n/m`) yields no Progressus — only the reaction shim fires.
+ * Drive the bulletin + reaction the way production does — via the owned `actum.progressus`, the
+ * single status channel since #6e retired the `actum.stage` shim. Mirrors the Fake/real clients,
+ * which project each stage through `fakeStageToProgressus`. A stage with no owned phase (e.g.
+ * `progress:n/m`) yields no Progressus, so nothing fires — exactly as production drops it.
  */
 function emitStage(actumId: string, stage: string, info?: Record<string, unknown>): void {
-  bus.emit('actum.stage', { actumId, stage, elapsedMs: 0, ...(info ? { info } : {}) } as unknown as Parameters<typeof bus.emit>[1])
   const prog = fakeStageToProgressus(stage, info)
   if (prog) bus.emit('actum.progressus', { actumId, progressus: { ...prog, at: new Date() } })
 }

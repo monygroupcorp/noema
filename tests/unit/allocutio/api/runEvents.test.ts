@@ -3,18 +3,6 @@ import assert from 'node:assert/strict'
 
 import { busToRunEvent } from '../../../../src/allocutio/api/runEvents.js'
 
-test('actum.stage maps to stage RunEvent', () => {
-  const ev = busToRunEvent('actum.stage', { actumId: 'r1', stage: 'provisioning', elapsedMs: 100 })
-  assert.ok(ev)
-  assert.equal(ev.runId, 'r1')
-  assert.equal(ev.kind, 'stage')
-  assert.equal(ev.terminal, false)
-  assert.equal(ev.stage, 'provisioning')
-  assert.equal(ev.elapsedMs, 100)
-  // no status on stage
-  assert.equal(ev.status, undefined)
-})
-
 test('actum.progressus maps to a non-terminal progress RunEvent carrying the typed report (#6c)', () => {
   const progressus = {
     phase: 'downloading' as const,

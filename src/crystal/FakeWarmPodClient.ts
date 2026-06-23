@@ -4,7 +4,6 @@ import type { ActumExecutio, ModelRef } from '../types/actum.js'
 import type { InstallResult } from './comfyrunnerClient.js'
 import type { ModelInstallClient, InstallProgress } from './ModelInstaller.js'
 import type { FakeOpts } from './FakeRunPodClient.js'
-import { bus } from '../lib/bus.js'
 import { getTrace } from '../lib/trace.js'
 import { makeLogger } from '../lib/logger.js'
 import { recordProgressus } from '../execution/progressusSink.js'
@@ -33,11 +32,11 @@ export class FakeWarmPodClient implements RunPodClient, ModelInstallClient {
     const { externusId } = this.materia
     const jobId = `${externusId}-${Date.now()}`
 
-    // Signal "warm" so the Telegram layer reacts 🔥 (vs 👌 for a cold start).
+    // Warm reuse → a near-zero `provisioning`/'warm pod reused' Progressus: the Telegram layer
+    // reacts 🔥 off this (the journal skips it). Owned timeline, single channel (#6e).
     const actumId = getTrace()?.actumId
     if (actumId) {
-      bus.emit('actum.stage', { actumId, stage: 'warm-pod-found', elapsedMs: 0, info: { podId: externusId } })
-      const prog = fakeStageToProgressus('warm-pod-found', { podId: externusId })   // #6b: 🔥-only, skipped by the journal
+      const prog = fakeStageToProgressus('warm-pod-found', { podId: externusId })
       if (prog) recordProgressus(actumId, { ...prog, at: new Date() }).catch(err => log.warn('progressus record failed', { error: (err as Error).message }))
     }
 
@@ -69,11 +68,9 @@ export class FakeWarmPodClient implements RunPodClient, ModelInstallClient {
     const imageUrl = this.opts.imageUrl ?? process.env.DEV_FAKE_IMAGE ?? 'https://picsum.photos/seed/noema-warm/512'
     const podId = this.materia.externusId
 
-    const start = Date.now()
     const emit = (stage: string, info?: Record<string, unknown>) => {
-      if (actumId) bus.emit('actum.stage', { actumId, stage, elapsedMs: Date.now() - start, info })
       if (actumId) {
-        const prog = fakeStageToProgressus(stage, info)   // #6b: drive the bulletin off the owned timeline
+        const prog = fakeStageToProgressus(stage, info)   // owned timeline drives the bulletin/SSE (#6b/#6e)
         if (prog) recordProgressus(actumId, { ...prog, at: new Date() }).catch(err => log.warn('progressus record failed', { error: (err as Error).message }))
       }
     }

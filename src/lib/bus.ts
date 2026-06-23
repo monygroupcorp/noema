@@ -3,7 +3,11 @@ import type { LogEntry } from './logger.js'
 import type { WideEvent } from './wide.js'
 import type { Progressus } from '../types/progressus.js'
 
-/** Optional pod/runtime detail attached to a stage event for richer user-facing UX. */
+/**
+ * Optional pod/runtime detail carried on the studio-provision callback (`StudioStageCb`)
+ * and projected onto `Progressus.pod` for richer user-facing UX. (Was also the payload of
+ * the retired `actum.stage` event, #6e.)
+ */
 export interface StageInfo {
   gpuType?:   string
   region?:    string
@@ -24,12 +28,11 @@ export interface StageInfo {
 export interface BusEvents {
   'log':             [entry: LogEntry]
   'actum.start':     [data: { actumId: string; modusId: string; animaId?: string }]
-  'actum.stage':     [data: { actumId: string; stage: string; elapsedMs: number; info?: StageInfo }]
   /**
-   * The typed, OWNED status report (Progressus) — supersedes the stringly `actum.stage`.
-   * Emitted by `CrystalApi.reportProgressus` for every report a runner POSTs to
-   * `/runner/status`. During migration the sink ALSO emits a legacy `actum.stage` shim
-   * (see `progressusToStage`) so existing consumers keep working until build #6.
+   * The typed, OWNED status report (Progressus) — the single status channel since the
+   * stringly `actum.stage` shim was retired (#6e). Emitted by `CrystalApi.reportProgressus`
+   * for every report a runner POSTs to `/runner/status`, by the in-process `recordProgressus`
+   * seam (comfyrunner / cold-start), and by the dev Fake clients.
    */
   'actum.progressus': [data: { actumId: string; progressus: Progressus }]
   'actum.complete':  [wide: WideEvent]

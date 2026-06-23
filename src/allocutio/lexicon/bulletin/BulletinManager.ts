@@ -1,5 +1,6 @@
 import type { StageInfo } from '../../../lib/bus.js'
 import type { Progressus } from '../../../types/progressus.js'
+import { coldStartProgressus } from '../../../execution/progressus.js'
 import { PodSession } from './PodSession.js'
 import { BulletinView } from './BulletinView.js'
 import { TimerRegistry } from './TimerRegistry.js'
@@ -107,13 +108,10 @@ interface ChatBulletin {
 export class BulletinManager {
   private readonly chats = new Map<number, ChatBulletin>()
   private readonly actumChat = new Map<string, number>()   // actumId → chatId
-  // Stages that arrived before register() (the gen path fires 'provisioning' the instant
+  // A Progressus can arrive before register() (the gen path records 'provisioning' the instant
   // cursor.run detaches, before the Stream primitive renders + registers). Buffered here and
-  // replayed on register — without this the first stage drops and the session misreads the
-  // cold start as a warm reuse. Capped per actum; cleared on register.
-  private readonly _pendingStages = new Map<string, Array<{ stage: string; info?: StageInfo }>>()
-  // Same race for the owned-status path (#6b): a Progressus can land before register(). Buffered
-  // and replayed in order, so the session enters 'hunting' on the buffered `provisioning`.
+  // replayed in order on register — without this the first report drops and the session misreads
+  // the cold start as a warm reuse. Capped per actum; cleared on register.
   private readonly _pendingProgressus = new Map<string, Progressus[]>()
   /** Full candidate list (+ resolved base families/filter for a LoRA mount) backing the open
    *  picker list, per chat — so page turns don't refetch. */
@@ -140,16 +138,8 @@ export class BulletinManager {
       this.chats.set(chatId, cb)
       this._armAutoSettle(chatId)
     }
-    // Replay any stages that fired before this register (see _pendingStages) — in order, so the
-    // session enters 'hunting' on the buffered 'provisioning' and reads the cold start correctly.
-    const pending = this._pendingStages.get(actumId)
-    if (pending) {
-      this._pendingStages.delete(actumId)
-      for (const { stage, info } of pending) cb.session.onStage(stage, info, this.now())
-      if (cb.session.phase === 'hunting') {
-        cb.timers.arm('slowHunt', HUNT_SLOW_MS, () => { cb.session.markHuntSlow(); void this._render(chatId) })
-      }
-    }
+    // Replay any reports that landed before this register (see _pendingProgressus) — in order, so
+    // the session enters 'hunting' on the buffered 'provisioning' and reads the cold start correctly.
     const pendingP = this._pendingProgressus.get(actumId)
     if (pendingP) {
       this._pendingProgressus.delete(actumId)
@@ -212,27 +202,7 @@ export class BulletinManager {
     session.beginArm(presets, images)
   }
 
-  onStage(actumId: string, stage: string, info?: StageInfo): void {
-    const chatId = this.actumChat.get(actumId)
-    if (chatId === undefined) {
-      // Stage before register → buffer for replay (capped so a never-registered actum can't grow it).
-      const buf = this._pendingStages.get(actumId) ?? []
-      if (buf.length < 50) { buf.push({ stage, info }); this._pendingStages.set(actumId, buf) }
-      return
-    }
-    const cb = this.chats.get(chatId)
-    if (!cb) return
-    cb.session.onStage(stage, info, this.now())
-    // Slow-hunt timer follows the phase: armed while hunting, cleared otherwise.
-    if (cb.session.phase === 'hunting') {
-      cb.timers.arm('slowHunt', HUNT_SLOW_MS, () => { cb.session.markHuntSlow(); void this._render(chatId) })
-    } else {
-      cb.timers.cancel('slowHunt')
-    }
-    void this._render(chatId)
-  }
-
-  /** The owned-status twin of `onStage` (#6b) — the bulletin's single driver from build #6b on. */
+  /** The bulletin's single status driver (#6b; the stringly `onStage` twin was deleted in #6e). */
   onProgressus(actumId: string, progressus: Progressus): void {
     const chatId = this.actumChat.get(actumId)
     if (chatId === undefined) {
@@ -666,14 +636,21 @@ export class BulletinManager {
     this._closePicker(chatId)
     s.setLoadout(undefined)
     s.openSubmenu(null)
+    // Project a cold-start stage string + info onto the OWNED `Progressus` and drive the session.
+    // The `/arm` path runs outside an actum trace (no `actum.progressus` on the bus), so the
+    // provisioner's string callback is projected here, the one place it lands (#6e).
+    const drive = (stage: string, info?: StageInfo) => {
+      const prog = coldStartProgressus(stage, info)
+      if (prog) s.onProgressus({ ...prog, at: new Date(this.now()) }, this.now())
+    }
     s.beginStarting()                                  // provisioning in flight → "provisioning…", Start hidden
-    s.onStage('provisioning', undefined, this.now())
+    drive('provisioning')
     await this._render(chatId)                         // immediate: provisioning starts, not the armed copy
     // Stream the provision's stages onto the bulletin LIVE (pod-locked → bootstrapping → comfy-ready),
     // at parity with the /make gen path. Ignored once the session has ended (cancelled mid-provision).
     const onStage = (stage: string, info?: StageInfo) => {
       if (s.ended) return
-      s.onStage(stage, info, this.now())
+      drive(stage, info)
       void this._render(chatId)
     }
     const res = this.deps.startStudio ? await this.deps.startStudio(s.hostUserId, { models, warmMs: s.warmTtlMs, ...(runtime ? { runtime } : {}) }, onStage).catch(() => null) : null
@@ -685,12 +662,11 @@ export class BulletinManager {
     }
     if (res?.podId) {
       // Ensure the pod is locked-in on the journal (in case the live callback didn't carry telemetry).
-      s.onStage('pod-locked', {
+      drive('pod-locked', {
         podId: res.podId,
         ...(res.gpuType ? { gpuType: res.gpuType } : {}),
         ...(typeof res.costPerHr === 'number' ? { costPerHr: res.costPerHr } : {}),
-        ...(typeof res.provisionMs === 'number' ? { phaseMs: res.provisionMs } : {}),
-      }, this.now())
+      })
       s.markReady()                          // up + resting warm, no gen (clears the starting flag)
       await this._render(chatId, { renew: true })   // FRESH message → push notification: ready to cook
     } else {
