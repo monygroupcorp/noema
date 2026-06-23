@@ -61,6 +61,9 @@ import { MongoHospitium } from './crystal/MongoHospitium.js'
 import { startIdleReaper } from './crystal/idleReaper.js'
 import { startCensus } from './crystal/Census.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
+import { R2Uploader } from './crystal/R2Uploader.js'
+import { httpMediaFetcher } from './crystal/MediaFetcher.js'
+import { makeTrainingFinalizer, urlLoraReader, makeTrainingExitusResolver } from './crystal/trainingFinalizer.js'
 import { MongoConsuetudinum } from './crystal/MongoConsuetudinum.js'
 import { MongoFundamentorum } from './crystal/MongoFundamentorum.js'
 import { Compiler } from './crystal/Compiler.js'
@@ -784,6 +787,17 @@ async function main(): Promise<void> {
     res.status(result.status).json(result.body)
   })
 
+  // Training finality at the completion webhook (Slice E): a remote (pod) training run
+  // completes here — host the pod-uploaded LoRA in R2 + register it as an Intella. Gated on
+  // R2 (needed to host); harmless for non-training completions (resolver returns null).
+  const trainingExitusResolver = RUNPOD_R2
+    ? makeTrainingExitusResolver(makeTrainingFinalizer({
+        reader: urlLoraReader(httpMediaFetcher),
+        store: new R2Uploader(RUNPOD_R2),
+        intellae,
+      }))
+    : undefined
+
   app.use('/webhooks', createWebhookRouter({
     actorum: ring.actorum,
     completor: ring.completor,
@@ -792,6 +806,7 @@ async function main(): Promise<void> {
     nexus,
     signorum: ring.signorum,
     modorum: ring.modorum,
+    ...(trainingExitusResolver ? { resolveExitus: trainingExitusResolver } : {}),
     modos: ring.modos,
     hospitia: ring.hospitia,
     deployments: ring.deployments,

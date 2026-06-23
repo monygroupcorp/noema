@@ -37,6 +37,17 @@ export interface ExecutionWebhookDeps {
   vestigiorum?: Vestigiorum
   /** Optional: modus registry — used to look up spell author for royalty routing. */
   modorum?: Modorum
+  /**
+   * Optional: a ministerium-specific exitus resolver. When it returns non-null for a
+   * completion, that record is the actum's exitus instead of the generic `projectExitus`
+   * of the pod outputs. The training path uses this to run finality (host the pod-uploaded
+   * LoRA + register the Intella) at completion. Returns null → fall back to projectExitus.
+   */
+  resolveExitus?(
+    actum: Actum,
+    modus: import('../../types/modus.js').Modus | null,
+    outputItems: Array<{ url?: string; path?: string } | string>,
+  ): Promise<Record<string, unknown> | null>
   /** Optional: session store — updates impetusAccrued when async jobs complete. */
   modos?: ModoStore
   /** Optional: identity-bearing hosting side-table — resolves modoHostAnimaId at emit. */
@@ -144,8 +155,12 @@ export async function handleExecutionWebhook(
       // routing. Optional dep → null, and projectExitus falls back to bare type names.
       const modus = deps.modorum ? await deps.modorum.find(actum.modusId) : null
 
+      // A ministerium-specific resolver (e.g. training finality) may own the exitus;
+      // otherwise project the pod outputs under the declared exitus Porta names.
+      const resolved = deps.resolveExitus ? await deps.resolveExitus(actum, modus, outputItems) : null
+
       const exitus: Exitus = {
-        exitus: projectExitus(modus, outputItems),
+        exitus: resolved ?? projectExitus(modus, outputItems),
         impetus: BigInt(Math.ceil(executionTime / 1000)),
         duratio: executionTime,
       }
