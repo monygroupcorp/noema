@@ -38,6 +38,8 @@ export interface AitoolkitTrainingCursorDeps {
   mounts?: AitkMount[]
   /** Container workdir (where run.py lives) — default '/aitk'. */
   workdir?: string
+  /** `--shm-size` for the container (PyTorch DataLoader) — default '8g' (see AitkSpawner). */
+  shmSize?: string
   /** Overall poll cap (ms) — a hung run trips this and fails. */
   timeoutMs?: number
   /** Poll cadence (ms) — default 2000. */
@@ -77,6 +79,7 @@ export class AitoolkitTrainingCursor implements Cursor {
       ...(gpuId ? { gpuId } : {}),
       ...(this.deps.mounts ? { mounts: this.deps.mounts } : {}),
       ...(this.deps.workdir ? { workdir: this.deps.workdir } : {}),
+      ...(this.deps.shmSize ? { shmSize: this.deps.shmSize } : {}),
     })
 
     // 3. Poll to terminal, recording the Progressus timeline onto this Actum.

@@ -176,6 +176,8 @@ export interface ContainerConfig {
     image: string
     /** Bind mounts for the container (ai-toolkit clone, dataset, HF cache). */
     mounts?: import('./crystal/AitkSpawner.js').AitkMount[]
+    /** `--shm-size` for the container (PyTorch DataLoader) — default '8g'. */
+    shmSize?: string
     /** Overall poll cap (ms) — a hung run trips this and fails. */
     timeoutMs?: number
   }
@@ -458,6 +460,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
       spawner: new DockerAitkSpawner(),
       image: config.aitoolkit.image,
       ...(config.aitoolkit.mounts ? { mounts: config.aitoolkit.mounts } : {}),
+      ...(config.aitoolkit.shmSize ? { shmSize: config.aitoolkit.shmSize } : {}),
       ...(config.aitoolkit.timeoutMs !== undefined ? { timeoutMs: config.aitoolkit.timeoutMs } : {}),
     }))
   }
