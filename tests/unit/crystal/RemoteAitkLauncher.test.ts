@@ -4,7 +4,7 @@
 // manifest — no pod, no SSH, no GPU. The provisioner's SSH/GPU work is the live seam (step 5).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { RemoteAitkLauncher, securePodTrainingProvisioner, POD_DATASET_DIR } from '../../../src/crystal/RemoteAitkLauncher.js'
+import { RemoteAitkLauncher, securePodTrainingProvisioner, POD_DATASET_DIR, POD_AITK_DIR, DEFAULT_AITK_IMAGE, DEFAULT_AITK_REF } from '../../../src/crystal/RemoteAitkLauncher.js'
 import type { TrainingPodProvisioner } from '../../../src/crystal/RemoteAitkLauncher.js'
 import { makeDatasetResolver } from '../../../src/crystal/datasetManifest.js'
 import type { Corporum, Corpus, Corpora } from '../../../src/types/corpus.js'
@@ -12,11 +12,11 @@ import type { Corporum, Corpus, Corpora } from '../../../src/types/corpus.js'
 const R2 = { endpoint: 'https://acc.r2.cloudflarestorage.com', accessKeyId: 'AK', secretAccessKey: 'SK', bucket: 'b', publicUrl: 'https://cdn.example' }
 
 function harness() {
-  const calls: Array<{ image: string; env: Record<string, string> }> = []
+  const calls: Array<{ image: string; env: Record<string, string>; setup: string[] }> = []
   const provisioner: TrainingPodProvisioner = { async provision(opts) { calls.push(opts); return { podId: 'pod-77' } } }
   const resolver = makeDatasetResolver({ corpora: {} as Corporum })   // inline-manifest path needs no store
   const launcher = new RemoteAitkLauncher({
-    provisioner, resolver, image: 'monygroup/aitk-klein:1', r2: R2,
+    provisioner, resolver, r2: R2,                                     // image omitted → DEFAULT_AITK_IMAGE
     statusUrl: 'https://noema.art/runner/status', webhookUrl: 'https://noema.art/webhooks/runpod',
   })
   return { calls, launcher }
@@ -34,8 +34,16 @@ test('launch: resolves the dataset, generates the config, assembles env, provisi
   // the pod id is the external run handle.
   assert.deepEqual(result, { externusJobId: 'pod-77' })
   assert.equal(h.calls.length, 1)
-  assert.equal(h.calls[0].image, 'monygroup/aitk-klein:1')
+  assert.equal(h.calls[0].image, DEFAULT_AITK_IMAGE)      // stock torch≥2.9 base (no custom image)
+
+  // bootstrap recipe: clone ai-toolkit (pinned) onto the stock base + install its deps.
+  const setup = h.calls[0].setup
+  assert.ok(setup.some(c => c.includes(`git clone https://github.com/ostris/ai-toolkit ${POD_AITK_DIR}`)))
+  assert.ok(setup.some(c => c.includes(`git checkout ${DEFAULT_AITK_REF}`)))
+  assert.ok(setup.some(c => c.includes('pip install') && c.includes('requirements.txt') && c.includes('boto3')))
+
   const env = h.calls[0].env
+  assert.equal(env.AITK_DIR, POD_AITK_DIR)
 
   // config: generated for this run, pointed at the POD-SIDE dataset dir, carrying the user's knobs.
   const yaml = decode(env.AITK_CONFIG_B64)
@@ -74,7 +82,7 @@ test('launch: gpuId defaults to 0 when omitted', async () => {
 })
 
 test('launch: resolves a corpusId via the store (dataset ref, not just inline)', async () => {
-  const calls: Array<{ image: string; env: Record<string, string> }> = []
+  const calls: Array<{ image: string; env: Record<string, string>; setup: string[] }> = []
   const provisioner: TrainingPodProvisioner = { async provision(opts) { calls.push(opts); return { podId: 'pod-9' } } }
   const corpus: Corpus = { id: 'c1', nomen: 'koh', genus: 'imagines', auctor: 'a1',
     exemplaria: [{ ref: 'https://r2/x.png', titulus: 'koh', genus: 'image/png' }], numerus: 1,
@@ -84,11 +92,22 @@ test('launch: resolves a corpusId via the store (dataset ref, not just inline)',
     async list() { return [] as Corpora }, async create() { throw new Error('x') }, async update() { throw new Error('x') },
   }
   const launcher = new RemoteAitkLauncher({
-    provisioner, resolver: makeDatasetResolver({ corpora }), image: 'img:1', r2: R2,
-    statusUrl: 's', webhookUrl: 'w',
+    provisioner, resolver: makeDatasetResolver({ corpora }), r2: R2, statusUrl: 's', webhookUrl: 'w',
   })
   await launcher.launch({ actumId: 'a', jobId: 'j', dataset: 'c1', baseModel: 'klein-4b', triggerWord: 'koh', steps: 10 })
   assert.deepEqual(JSON.parse(decode(calls[0].env.AITK_MANIFEST_B64)), [{ url: 'https://r2/x.png', caption: 'koh' }])
+})
+
+test('launch: image + aitkRef overrides flow into the provision call', async () => {
+  const h = harness()
+  const launcher = new RemoteAitkLauncher({
+    provisioner: { async provision(o) { h.calls.push(o); return { podId: 'p' } } },
+    resolver: makeDatasetResolver({ corpora: {} as Corporum }), r2: R2, statusUrl: 's', webhookUrl: 'w',
+    image: 'runpod/pytorch:custom', aitkRef: 'deadbeef',
+  })
+  await launcher.launch({ actumId: 'a', jobId: 'j', dataset: MANIFEST, baseModel: 'klein-4b', triggerWord: 'koh', steps: 10 })
+  assert.equal(h.calls[0].image, 'runpod/pytorch:custom')
+  assert.ok(h.calls[0].setup.some(c => c.includes('git checkout deadbeef')))
 })
 
 test('launch: a bad dataset ref fails before provisioning (no pod spun on an empty dataset)', async () => {
@@ -101,9 +120,9 @@ test('launch: a bad dataset ref fails before provisioning (no pod spun on an emp
 })
 
 test('securePodTrainingProvisioner: adapts a client.launchTrainingPod to the provision port', async () => {
-  const seen: Array<{ image: string; env: Record<string, string> }> = []
-  const client = { async launchTrainingPod(opts: { image: string; env: Record<string, string> }) { seen.push(opts); return { podId: 'p1' } } }
+  const seen: Array<{ image: string; env: Record<string, string>; setup: string[] }> = []
+  const client = { async launchTrainingPod(opts: { image: string; env: Record<string, string>; setup: string[] }) { seen.push(opts); return { podId: 'p1' } } }
   const prov = securePodTrainingProvisioner(client)
-  assert.deepEqual(await prov.provision({ image: 'i', env: { A: '1' } }), { podId: 'p1' })
-  assert.deepEqual(seen, [{ image: 'i', env: { A: '1' } }])
+  assert.deepEqual(await prov.provision({ image: 'i', env: { A: '1' }, setup: ['x'] }), { podId: 'p1' })
+  assert.deepEqual(seen, [{ image: 'i', env: { A: '1' }, setup: ['x'] }])
 })

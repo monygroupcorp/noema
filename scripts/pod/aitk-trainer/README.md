@@ -1,15 +1,27 @@
-# aitk-trainer — publishable ai-toolkit training image
+# aitk-trainer — OPTIONAL baked ai-toolkit training image (fallback)
 
-The pod-pullable image behind the **remote** training modus (Slice E). A RunPod SECURE pod
-pulls it, `SecurePodClient` SSHes in and launches `scripts/pod/aitktrainer.py`, which trains
-a LoRA on a dataset manifest and reports back through the same finality the local path proves.
+> **Not the default path.** Remote training (Slice E) runs on a **stock** RunPod base that already
+> ships torch 2.9.1 + CUDA 12.8.1 — `runpod/pytorch:1.0.7-cu1281-torch291-ubuntu2404`
+> (`DEFAULT_AITK_IMAGE`) — and bootstraps ai-toolkit over SSH, exactly like ComfyUI/vLLM. No custom
+> image needed. This baked image is kept as a **fallback** for if the per-pod dep install proves too
+> slow/fragile in prod (baking trades a maintained 30GB image for a faster, install-free cold start).
 
-## Why a custom image (vs the stock `runpod/pytorch`)
+A RunPod SECURE pod pulls it, `SecurePodClient` SSHes in and launches `scripts/pod/aitktrainer.py`,
+which trains a LoRA on a dataset manifest and reports through the same finality the local path proves.
+
+## Why this image exists (the constraint that forced it)
 - ai-toolkit's pins (transformers 5.5.3, diffusers-from-git, torchao 0.10.0) need **torch ≥2.9**;
-  the stock `runpod/pytorch:2.4` base fails to import diffusers. So we base on
+  the *old* `runpod/pytorch:2.4` base failed to import diffusers. So this image bases on
   `nvidia/cuda:12.8.1-devel-ubuntu24.04` + `torch 2.9.1/cu128` (the proven `stationthis-klein` recipe).
+  **The stock-base default solves the same constraint without a custom image** (RunPod now publishes a
+  cu128/torch291 tag), which is why this image is now the fallback rather than the primary path.
 - A pod has **no host mount**, so the ai-toolkit clone is **baked at `/aitk`** (pinned SHA).
 - A bare `nvidia/cuda` base has **no sshd**; `start.sh` adds RunPod's `$PUBLIC_KEY` SSH setup.
+
+## To use this fallback instead of the stock-base bootstrap
+Set `AITK_REMOTE_IMAGE=monygroup/aitk-klein:<tag>` (overrides `DEFAULT_AITK_IMAGE`). The bootstrap's
+clone+pip step is harmless on a baked image (re-clone into /aitk is fast; deps already satisfied) —
+or trim it later if the baked path becomes primary.
 
 ## What is / isn't baked
 - **Baked:** torch + ai-toolkit deps + the `/aitk` clone (pinned `AITK_REF`) + boto3 + sshd/start.sh.

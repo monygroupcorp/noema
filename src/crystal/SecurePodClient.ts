@@ -286,12 +286,13 @@ export class SecurePodClient implements RunPodClient, Procurator {
    * Provision a SECURE pod and launch a DETACHED pod script (Slice E training) — NOT submit()'s
    * held SSE pipeline (built for short gens) and NOT runner.py's VRAM scheduler. For one long
    * single-shot job: provision (SECURE for attempts 1-2, COMMUNITY/any-GPU on the last), wait SSH,
-   * ensure boto3, upload `aitktrainer.py`, nohup-launch it with `env` (+ injected RUNPOD_POD_ID =
-   * the pod id), close SSH, return the pod id. Fire-and-forget — the pod posts its own
-   * `/runner/status` + completion webhook. `image` is the ai-toolkit image (≠ the comfyrunner
-   * default). GPU-gated: live-verified, not CI-covered (the launcher's logic is tested hermetically).
+   * run `setup` (bootstrap ai-toolkit onto the stock torch≥2.9 base — clone + pip install its
+   * deps), upload `aitktrainer.py`, nohup-launch it with `env` (+ injected RUNPOD_POD_ID = the pod
+   * id), close SSH, return the pod id. Fire-and-forget — the pod posts its own `/runner/status` +
+   * completion webhook. `image` is a stock RunPod base (SSH-ready). GPU-gated: live-verified, not
+   * CI-covered (the launcher's logic + the setup recipe are tested hermetically).
    */
-  async launchTrainingPod(opts: { image: string; env: Record<string, string> }): Promise<{ podId: string }> {
+  async launchTrainingPod(opts: { image: string; env: Record<string, string>; setup: string[] }): Promise<{ podId: string }> {
     const maxAttempts = this.config.podRetries ?? 3
     let podId: string | undefined
     let lastErr: Error | undefined
@@ -313,7 +314,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
       log.info('training pod locked', { podId, gpuType: sshInfo.gpuType, costPerHr: sshInfo.costPerHr })
       ssh = await this._waitForSshd(sshInfo)
       await this._bootstrapDetached(ssh, podId, AITKTRAINER_SCRIPT_PATH, 'aitktrainer.py',
-        { ...opts.env, RUNPOD_POD_ID: podId }, 'boto3')
+        { ...opts.env, RUNPOD_POD_ID: podId }, opts.setup)
       await ssh.close()
       ssh = null
       return { podId }
@@ -325,18 +326,18 @@ export class SecurePodClient implements RunPodClient, Procurator {
   }
 
   /**
-   * Upload a pod script and launch it DETACHED with `env` (nohup) — the pod owns its own status +
-   * completion webhook from here. `pipPackages` are installed first if absent (lean: the heavy
-   * runtime is baked into the training image). Env values are shell-quoted (base64 blobs + URLs).
+   * Run the `setup` bootstrap commands over SSH (clone ai-toolkit + pip install its deps onto the
+   * stock base), then upload a pod script and launch it DETACHED with `env` (nohup) — the pod owns
+   * its own status + completion webhook from here. Setup gets a generous timeout (the pip install is
+   * the slow step). Env values are shell-quoted (base64 blobs + URLs).
    */
   private async _bootstrapDetached(
     ssh: SshTransportLike, podId: string, scriptPath: string, scriptName: string,
-    env: Record<string, string>, pipPackages?: string,
+    env: Record<string, string>, setup: string[] = [],
   ): Promise<void> {
-    log.info('bootstrapping training pod', { podId, script: scriptName })
-    if (pipPackages) {
-      const probe = pipPackages.split(' ')[0]
-      await ssh.exec(`python3 -c 'import ${probe}' 2>/dev/null || pip install ${pipPackages} -q`, { timeout: 600_000 })
+    log.info('bootstrapping training pod', { podId, script: scriptName, setupSteps: setup.length })
+    for (const cmd of setup) {
+      await ssh.exec(cmd, { timeout: 1_200_000 })   // pip install of the ai-toolkit dep tree is slow
     }
     const script = fs.readFileSync(scriptPath, 'utf8')
     const b64 = Buffer.from(script).toString('base64').replace(/\n/g, '')
