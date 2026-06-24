@@ -83,6 +83,15 @@ export function makeTrainingFinalizer(
     const familia = String(a.familia ?? a.baseModel ?? '').trim().toLowerCase()
     const nomen = (typeof a.name === 'string' && a.name.trim()) || trigger || jobId
 
+    // Model-card enrichment (optional aditus): the requested step count, a human description,
+    // and external retrain lineage (source repo + base) for the card's provenance backlink.
+    const steps = typeof a.steps === 'number' ? a.steps : outcome.lastStep
+    const description = typeof a.description === 'string' && a.description.trim() ? a.description.trim() : undefined
+    const provRepo = typeof a.provenanceRepo === 'string' ? a.provenanceRepo.trim() : ''
+    const provenance = provRepo
+      ? { repo: provRepo, ...(typeof a.provenanceBase === 'string' && a.provenanceBase.trim() ? { base: a.provenanceBase.trim() } : {}) }
+      : undefined
+
     // 1. Lift the trained safetensors off the host.
     const { bytes, filename } = await deps.reader(jobId, outcome)
 
@@ -109,6 +118,9 @@ export function makeTrainingFinalizer(
       ...(trigger ? { trigger } : {}),
       slug,
       ...(typeof a.ownerAnimaId === 'string' ? { ownerAnimaId: a.ownerAnimaId } : {}),
+      ...(description ? { description } : {}),
+      ...(typeof steps === 'number' ? { trainingSteps: steps } : {}),
+      ...(provenance ? { provenance } : {}),
       natum: now(),
     }
     await deps.intellae.upsert(intella)

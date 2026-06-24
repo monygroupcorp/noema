@@ -74,8 +74,10 @@ export interface AitkConfigParams {
   steps: number
   /** Checkpoint cadence — default min(steps, 250) so a run always saves at least once. */
   saveEvery?: number
-  /** Sample cadence — default > steps (sampling off: faster runs). */
+  /** Sample cadence — default = steps (one preview set at the final step, for the model card). */
   sampleEvery?: number
+  /** Sample prompts (`[trigger]` is substituted) — default a small varied set for the card gallery. */
+  samplePrompts?: string[]
   /** LoRA rank override (else the preset default). */
   rank?: number
   /** Multi-res bucketing override (else the preset default). */
@@ -88,12 +90,25 @@ export interface AitkConfigParams {
   trainingFolder?: string
 }
 
+/**
+ * Default sample prompts for the end-of-run preview gallery — `[trigger]` is substituted
+ * by ai-toolkit with the run's trigger word. A small varied set (portrait / full body /
+ * close-up / bare trigger) so the model card shows the LoRA across a few framings.
+ */
+export const DEFAULT_SAMPLE_PROMPTS: string[] = [
+  '[trigger], a character portrait',
+  '[trigger], full body, detailed',
+  '[trigger], close-up portrait, studio lighting',
+  '[trigger]',
+]
+
 /** Render the ai-toolkit `ui_trainer` training yaml for a run. Deterministic. */
 export function buildAitkConfig(p: AitkConfigParams): string {
   const preset = resolveBasePreset(p.baseModel)
   const steps = p.steps
   const saveEvery = p.saveEvery ?? Math.min(steps, 250)
-  const sampleEvery = p.sampleEvery ?? steps + 1     // > steps → no sampling
+  const sampleEvery = p.sampleEvery ?? steps         // = steps → one preview set at the end (model-card gallery)
+  const samplePrompts = p.samplePrompts ?? DEFAULT_SAMPLE_PROMPTS
   const rank = p.rank ?? preset.rank
   const resolution = p.resolution ?? preset.resolution
   const captionExt = p.captionExt ?? 'txt'
@@ -158,7 +173,7 @@ config:
         width: 1024
         height: 1024
         prompts:
-          - "[trigger], a character portrait"
+${samplePrompts.map(s => `          - "${s.replace(/"/g, '\\"')}"`).join('\n')}
         neg: ""
         seed: 42
         walk_seed: true

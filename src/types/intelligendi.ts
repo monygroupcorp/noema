@@ -204,6 +204,17 @@ export interface Intella {
    */
   corpusId?: string
 
+  /** For trained LoRAs: the number of training steps. Provenance; surfaced on the published model card. */
+  trainingSteps?: number
+
+  /**
+   * For derived/retrained LoRAs: where this was retrained from — the source registry repo
+   * (e.g. 'ms2stationthis/drifella') + the base it came off ('FLUX.1-dev'). Drives the
+   * provenance backlink on the published model card. Distinct from `baseIntellaId` (a crystal
+   * FK to the base weight); this is the external lineage a human reads.
+   */
+  provenance?: { repo: string; base?: string }
+
   /** Discovery/classification tags (e.g. base family 'flux'/'sd15', 'trained'). The catalog derives
    *  a model's base family from these (the import sets them; canonical seeds set them directly). */
   tags?: Array<{ tag: string; source?: string }>

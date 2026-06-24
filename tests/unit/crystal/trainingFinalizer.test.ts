@@ -57,6 +57,33 @@ test('completed run: hosts the LoRA bytes in R2, registers a private Intella, re
   assert.deepEqual(i.sources, [{ provenance: 'miladystation', uri: exitus.loraUrl, format: 'safetensors' }])
 })
 
+test('card enrichment: persists trainingSteps (aditus steps wins), description, and retrain provenance', async () => {
+  const h = harness()
+  const finalize = makeTrainingFinalizer({ ...h, newId: () => 'lora-k', now: () => new Date(0) })
+
+  await finalize(
+    actum({
+      triggerWord: 'drifella', baseModel: 'flux2-klein', steps: 1000,
+      description: 'anthropomorphic cat collages', provenanceRepo: 'ms2stationthis/drifella', provenanceBase: 'FLUX.1-dev',
+    }),
+    completed(1000),
+  )
+
+  const i = h.upserts[0]
+  assert.equal(i.trainingSteps, 1000)                                  // aditus steps, not just lastStep
+  assert.equal(i.description, 'anthropomorphic cat collages')
+  assert.deepEqual(i.provenance, { repo: 'ms2stationthis/drifella', base: 'FLUX.1-dev' })
+})
+
+test('card enrichment: omits provenance when no source repo is given', async () => {
+  const h = harness()
+  await makeTrainingFinalizer({ ...h, newId: () => 'lora-n', now: () => new Date(0) })(
+    actum({ triggerWord: 'koh', baseModel: 'klein-4b', steps: 250 }), completed(250),
+  )
+  assert.equal(h.upserts[0].provenance, undefined)
+  assert.equal(h.upserts[0].trainingSteps, 250)
+})
+
 test('an owner-less run still hosts + records an (archival) Intella, slugging the jobId', async () => {
   // No ownerAnimaId → the private record is owner-less, so /make can't yet resolve it
   // (access gating admits a private LoRA only for its owner). It's still hosted + recorded.

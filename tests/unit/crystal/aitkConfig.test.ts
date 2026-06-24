@@ -13,7 +13,8 @@ test('buildAitkConfig: user knobs + klein-4b preset → a complete ui_trainer co
   assert.match(yaml, /folder_path: "\/mnt\/data\/datasets\/koh"/)
   assert.match(yaml, /steps: 500/)
   assert.match(yaml, /save_every: 250/)                     // default min(steps, 250)
-  assert.match(yaml, /sample_every: 501/)                   // default > steps → sampling off
+  assert.match(yaml, /sample_every: 500/)                   // default = steps → one preview set at the end
+  assert.match(yaml, /- "\[trigger\], a character portrait"/) // default sample-prompt gallery (trigger-substituted)
   assert.match(yaml, /name_or_path: "black-forest-labs\/FLUX\.2-klein-base-4B"/)
   assert.match(yaml, /arch: "flux2_klein_4b"/)
   assert.match(yaml, /sqlite_db_path: "\/aitk\/aitk_db\.db"/)
