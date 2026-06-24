@@ -161,6 +161,14 @@ export interface Actum {
   externusJobId?: string
 
   /**
+   * True when `externusJobId` is a DEDICATED one-shot pod (e.g. a training pod) that
+   * must be terminated when the run ends — on success as well as failure. Warm/pooled
+   * pods (the `make` path) leave this unset: `complete()` keeps them alive for reuse and
+   * the idle reaper sweeps them. Set by the cursor that launched the dedicated pod.
+   */
+  oneshotPod?: boolean
+
+  /**
    * SHA-256 content address of the CompiledSpec that was submitted.
    * "sha256:<hex>" — links this execution to its exact deployment bundle.
    * Set by RunPodCursor after compilation; absent on non-RunPod cursors.

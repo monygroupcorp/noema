@@ -20,7 +20,7 @@ export class ActumCompletor {
   constructor(private readonly deps: Deps) {}
 
   async complete(actum: Actum, result: Exitus): Promise<Actum> {
-    const { acta, signorum, nexus } = this.deps
+    const { acta, signorum, nexus, terminatePod } = this.deps
     const { exitus, impetus: reportedImpetus, duratio, materiamId } = result
     const now = new Date()
 
@@ -59,6 +59,14 @@ export class ActumCompletor {
       completum: now,
       ...(materiamId ? { materiamId } : {}),
     })
+
+    // Reap a dedicated one-shot pod (e.g. training) on success — warm/pooled pods
+    // (oneshotPod unset) are left alive for reuse and swept by the idle reaper. Mirrors
+    // fail()'s terminate; best-effort so a reaper hiccup never blocks completion.
+    if (actum.oneshotPod && actum.externusJobId && terminatePod) {
+      await terminatePod(actum.externusJobId).catch((e) =>
+        log.warn('oneshot pod terminate failed', { actumId: actum.id, podId: actum.externusJobId, error: String(e) }))
+    }
 
     log.info('actum completed', {
       actumId:    actum.id,

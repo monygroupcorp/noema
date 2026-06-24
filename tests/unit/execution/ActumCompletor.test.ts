@@ -156,6 +156,47 @@ test('nexus emission includes the completed actum and actual impetus', async () 
   assert.equal(payload.impetus, 55n)
 })
 
+test('terminates a one-shot pod on successful completion', async () => {
+  const actum = makeActum({ externusJobId: 'pod-99', oneshotPod: true })
+  const acta = makeActa(actum)
+  const terminated: string[] = []
+  const completor = new ActumCompletor({
+    acta, signorum: makeSignorum(), nexus: makeNexus(),
+    terminatePod: async (id) => { terminated.push(id) },
+  })
+
+  await completor.complete(actum, makeRunResult())
+
+  assert.deepEqual(terminated, ['pod-99'])
+})
+
+test('leaves a warm/pooled pod alive on completion (oneshotPod unset)', async () => {
+  const actum = makeActum({ externusJobId: 'warm-pod', oneshotPod: undefined })
+  const acta = makeActa(actum)
+  const terminated: string[] = []
+  const completor = new ActumCompletor({
+    acta, signorum: makeSignorum(), nexus: makeNexus(),
+    terminatePod: async (id) => { terminated.push(id) },
+  })
+
+  await completor.complete(actum, makeRunResult())
+
+  assert.deepEqual(terminated, [])   // reuse: only the idle reaper sweeps warm pods
+})
+
+test('completion still succeeds when one-shot pod termination throws', async () => {
+  const actum = makeActum({ externusJobId: 'pod-x', oneshotPod: true })
+  const acta = makeActa(actum)
+  const completor = new ActumCompletor({
+    acta, signorum: makeSignorum(), nexus: makeNexus(),
+    terminatePod: async () => { throw new Error('runpod 500') },
+  })
+
+  const completed = await completor.complete(actum, makeRunResult())
+
+  assert.equal(completed.status, 'completus')   // best-effort: a reaper hiccup never blocks completion
+})
+
 test('marks actum fractus and releases all signa on failure', async () => {
   const actum = makeActum({ signaConsumed: ['sig-a', 'sig-b'] })
   const acta = makeActa(actum)
