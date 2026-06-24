@@ -71,8 +71,9 @@ async function main(): Promise<void> {
     reader: urlLoraReader(httpMediaFetcher), store: new R2Uploader(R2), intellae,
   })
 
-  // The aditus the finalizer reads (familia/owner/name) — mirrors what the modus would carry.
-  const finalAditus = { familia: FAMILIA, ownerAnimaId: OWNER, name: 'koh remote spike LoRA', steps: STEPS }
+  // The aditus the finalizer reads (triggerWord/familia/owner/name) — mirrors what the modus carries
+  // (the production resolver passes the real Actum, whose aditus has all of these).
+  const finalAditus = { triggerWord: TRIGGER, familia: FAMILIA, ownerAnimaId: OWNER, name: 'koh remote spike LoRA', steps: STEPS }
 
   // ── tiny receiver for the pod's callbacks ────────────────────────────────────
   let resolveDone!: (v: { ok: boolean; exitus?: Record<string, unknown>; error?: string }) => void

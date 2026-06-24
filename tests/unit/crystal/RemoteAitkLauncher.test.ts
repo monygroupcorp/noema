@@ -36,11 +36,14 @@ test('launch: resolves the dataset, generates the config, assembles env, provisi
   assert.equal(h.calls.length, 1)
   assert.equal(h.calls[0].image, DEFAULT_AITK_IMAGE)      // stock torch≥2.9 base (no custom image)
 
-  // bootstrap recipe: clone ai-toolkit (pinned) onto the stock base + install its deps.
+  // bootstrap recipe: apt system libs (libGL for opencv) + clone ai-toolkit (pinned) + install deps.
   const setup = h.calls[0].setup
+  assert.ok(setup.some(c => c.includes('apt-get install') && c.includes('libgl1')))
   assert.ok(setup.some(c => c.includes(`git clone https://github.com/ostris/ai-toolkit ${POD_AITK_DIR}`)))
   assert.ok(setup.some(c => c.includes(`git checkout ${DEFAULT_AITK_REF}`)))
   assert.ok(setup.some(c => c.includes('pip install') && c.includes('requirements.txt') && c.includes('boto3')))
+  // and the torch-stack restore (matched cu128 trio) as the final step — guards the torchaudio ABI crash.
+  assert.ok(setup.some(c => c.includes('--force-reinstall') && c.includes('torch==2.9.1') && c.includes('cu128')))
 
   const env = h.calls[0].env
   assert.equal(env.AITK_DIR, POD_AITK_DIR)

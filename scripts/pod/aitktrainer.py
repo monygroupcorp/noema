@@ -84,6 +84,17 @@ def _post_status(url: str, signal: dict) -> None:
         log.warning(f"status post failed (ignored): {e}")
 
 
+def _tail(path: str, lines: int = 40, limit: int = 4000) -> str:
+    """Last few lines of a log file (bounded) — for surfacing a run.py crash in the failure."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return "(no run log)"
+    text = data.decode("utf-8", errors="replace")
+    return "\n".join(text.splitlines()[-lines:])[-limit:]
+
+
 def _download(url: str, dest: str) -> None:
     req = urllib.request.Request(url, headers={"User-Agent": "noema-aitktrainer"})
     with urllib.request.urlopen(req, timeout=60) as r, open(dest, "wb") as f:
@@ -275,10 +286,14 @@ def main() -> int:
         n = stage_dataset(manifest, dataset_dir)
         log.info(f"staged {n} images → {dataset_dir}")
 
-        # 3. seed the Job row, then 4. run the trainer.
+        # 3. seed the Job row, then 4. run the trainer — capturing run.py's output so a startup
+        #    crash (the reason it exited) travels back in the failure instead of a bare exit code.
         seed_job_row(db_path, job_id, gpu_ids)
-        log.info(f"launching run.py {config_path} (job={job_id}, steps={steps})")
-        proc = subprocess.Popen(["python", "-u", "run.py", config_path], cwd=aitk_dir)
+        run_log = os.path.join(aitk_dir, f"{job_id}.runlog")
+        log.info(f"launching run.py {config_path} (job={job_id}, steps={steps}) → {run_log}")
+        run_fh = open(run_log, "wb")
+        proc = subprocess.Popen(["python", "-u", "run.py", config_path], cwd=aitk_dir,
+                                stdout=run_fh, stderr=subprocess.STDOUT)
 
         # 4b. poll the Job row → POST status until terminal (or the process dies).
         last_phase = None
@@ -294,9 +309,10 @@ def main() -> int:
                 if row.get("status") == "completed":
                     break
                 if row.get("status") in ("error", "stopped"):
-                    raise RuntimeError(f"training {row.get('status')} at step {row.get('step')}: {row.get('info')}")
+                    raise RuntimeError(f"training {row.get('status')} at step {row.get('step')}: "
+                                       f"{row.get('info')} | run.py tail:\n{_tail(run_log)}")
             if proc.poll() is not None and (not row or row.get("status") not in ("running", "completed")):
-                raise RuntimeError(f"run.py exited ({proc.returncode}) before completion")
+                raise RuntimeError(f"run.py exited ({proc.returncode}) before completion | run.py tail:\n{_tail(run_log)}")
 
         # 5. upload the LoRA → fire the completion webhook.
         path = lora_path(output_dir, job_id)
