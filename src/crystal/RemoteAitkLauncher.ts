@@ -102,9 +102,17 @@ export class RemoteAitkLauncher implements RemoteAitkLauncherPort {
     //    deps (torch is already present in the base) + boto3. Run over SSH before the runner starts.
     const aitkRef = this.deps.aitkRef ?? DEFAULT_AITK_REF
     const setup = [
+      // system libs ai-toolkit's opencv/ffmpeg need at runtime (libGL.so.1 etc.) — the stock base
+      // lacks them; without this run.py crashes on `import cv2` (the local image baked these as apt pkgs).
+      'apt-get update -qq && apt-get install -y -qq libgl1 libglib2.0-0 ffmpeg',
       `rm -rf ${POD_AITK_DIR} && git clone https://github.com/ostris/ai-toolkit ${POD_AITK_DIR}`,
       `cd ${POD_AITK_DIR} && git checkout ${aitkRef} && git submodule update --init --recursive`,
       `cd ${POD_AITK_DIR} && pip install --break-system-packages -q -r requirements.txt boto3`,
+      // ai-toolkit's deps disturb the base's matched torch stack → torchaudio loads against a
+      // mismatched libtorch (undefined-symbol crash at `import torchaudio`). Force the proven
+      // cu128 trio back as the FINAL state (the base already had it; requirements moved it).
+      'pip install --break-system-packages -q --force-reinstall --no-deps ' +
+        'torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128',
     ]
 
     // 5. provision + launch detached; the pod id IS the external run handle.
