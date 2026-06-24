@@ -94,6 +94,31 @@ test('repro artifacts: persists samples (paired with prompts), datasetItems, and
   assert.match(i.configYaml ?? '', /arch: "flux2_klein_4b"/)
 })
 
+test('cleanup: a remote completion sweeps the intermediate checkpoint + redundant pod-final (keeps samples)', async () => {
+  const h = harness()
+  const deleted: string[] = []
+  const store = { ...h.store, async del(key: string) { deleted.push(key) } }
+  const fetcher: MediaFetcher = { async fetch() { return Buffer.from('w') } }
+  const finalize = makeTrainingFinalizer({ ...h, store, reader: urlLoraReader(fetcher), newId: () => 'lid', now: () => new Date(0) })
+
+  await finalize(
+    actum({ jobId: 'koh', triggerWord: 'koh', baseModel: 'klein-4b', steps: 1000 }),
+    { status: 'completed', lastStep: 1000, outputUrl: 'https://cdn/training/koh/koh.safetensors' },
+  )
+
+  assert.deepEqual(deleted, ['training/koh/checkpoint.safetensors', 'training/koh/koh.safetensors'])
+})
+
+test('cleanup: the LOCAL path (no outputUrl) sweeps nothing', async () => {
+  const h = harness()
+  const deleted: string[] = []
+  const store = { ...h.store, async del(key: string) { deleted.push(key) } }
+  await makeTrainingFinalizer({ ...h, store, newId: () => 'lid2', now: () => new Date(0) })(
+    actum({ jobId: 'koh', triggerWord: 'koh', baseModel: 'klein-4b', steps: 250 }), completed(250),
+  )
+  assert.deepEqual(deleted, [])
+})
+
 test('repro artifacts: no samples/dataset on a bare run leaves the fields unset', async () => {
   const h = harness()
   await makeTrainingFinalizer({ ...h, newId: () => 'lora-b', now: () => new Date(0) })(
