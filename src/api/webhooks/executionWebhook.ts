@@ -46,7 +46,7 @@ export interface ExecutionWebhookDeps {
   resolveExitus?(
     actum: Actum,
     modus: import('../../types/modus.js').Modus | null,
-    outputItems: Array<{ url?: string; path?: string } | string>,
+    outputItems: Array<{ url?: string; path?: string; kind?: string } | string>,
   ): Promise<Record<string, unknown> | null>
   /** Optional: session store — updates impetusAccrued when async jobs complete. */
   modos?: ModoStore

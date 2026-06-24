@@ -48,6 +48,11 @@ export interface ModelView {
   provenance?: { repo: string; base?: string }
   /** Preview samples to embed in the card gallery — `url` is fetched + committed at `pathInRepo`. */
   samples?: Array<{ url: string; pathInRepo: string; prompt?: string }>
+  /** Training dataset (for reproduction) — each image is fetched + committed under `dataset/`,
+   *  with its caption as a sibling `.txt`. */
+  datasetItems?: Array<{ url: string; caption?: string }>
+  /** The ai-toolkit training config — committed as `config.yaml` for reproduction. */
+  configYaml?: string
 }
 
 /** A request to push a model's weights to a registry — platform-agnostic. */

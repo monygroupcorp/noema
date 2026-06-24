@@ -208,6 +208,23 @@ export interface Intella {
   trainingSteps?: number
 
   /**
+   * Preview samples generated at the end of training — durable R2 URLs + the prompt each was
+   * rendered from. First-class preview media: interfaces (the model-detail card, the /make
+   * picker, galleries) surface these to convey what the LoRA does. Persisted independently of
+   * publishing; the HF publisher is just one consumer that commits them into the repo.
+   */
+  samples?: Array<{ url: string; prompt?: string }>
+
+  /**
+   * The training dataset (for reproduction) — each image's durable URL + its caption. Surfaced
+   * on the model-detail card and committed under `dataset/` when published.
+   */
+  datasetItems?: Array<{ url: string; caption?: string }>
+
+  /** The ai-toolkit training config (yaml) this LoRA was trained with — committed as `config.yaml`. */
+  configYaml?: string
+
+  /**
    * For derived/retrained LoRAs: where this was retrained from — the source registry repo
    * (e.g. 'ms2stationthis/drifella') + the base it came off ('FLUX.1-dev'). Drives the
    * provenance backlink on the published model card. Distinct from `baseIntellaId` (a crystal
