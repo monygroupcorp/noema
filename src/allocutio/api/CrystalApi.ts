@@ -765,6 +765,13 @@ export class CrystalApi {
         ...(m.description !== undefined ? { description: m.description } : {}),
         ...(m.trainingSteps !== undefined ? { trainingSteps: m.trainingSteps } : {}),
         ...(m.provenance !== undefined ? { provenance: m.provenance } : {}),
+        // Repro artifacts: the Intella holds durable preview/dataset URLs; the publisher needs a
+        // repo path per sample image, derived here by index (samples/sample_NNN.jpg).
+        ...(m.samples?.length
+          ? { samples: m.samples.map((s, i) => ({ url: s.url, pathInRepo: `samples/sample_${String(i).padStart(3, '0')}.jpg`, ...(s.prompt ? { prompt: s.prompt } : {}) })) }
+          : {}),
+        ...(m.datasetItems?.length ? { datasetItems: m.datasetItems } : {}),
+        ...(m.configYaml !== undefined ? { configYaml: m.configYaml } : {}),
       }
     }
     if (ref.kind === 'collectio') {

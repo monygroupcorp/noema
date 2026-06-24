@@ -75,6 +75,34 @@ test('card enrichment: persists trainingSteps (aditus steps wins), description, 
   assert.deepEqual(i.provenance, { repo: 'ms2stationthis/drifella', base: 'FLUX.1-dev' })
 })
 
+test('repro artifacts: persists samples (paired with prompts), datasetItems, and a repo-relative configYaml', async () => {
+  const h = harness()
+  const finalize = makeTrainingFinalizer({ ...h, newId: () => 'lora-r', now: () => new Date(0) })
+  const manifest = JSON.stringify([{ url: 'https://cdn/img0.png', caption: 'a koh' }, { url: 'https://cdn/img1.png' }])
+
+  await finalize(
+    actum({ triggerWord: 'koh', baseModel: 'klein-4b', steps: 1000, dataset: manifest }),
+    { status: 'completed', lastStep: 1000, sampleUrls: ['https://cdn/s0.jpg', 'https://cdn/s1.jpg'] },
+  )
+
+  const i = h.upserts[0]
+  assert.equal(i.samples?.length, 2)
+  assert.equal(i.samples?.[0].url, 'https://cdn/s0.jpg')
+  assert.match(i.samples?.[0].prompt ?? '', /koh/)                 // DEFAULT_SAMPLE_PROMPTS, trigger-substituted, by index
+  assert.deepEqual(i.datasetItems, [{ url: 'https://cdn/img0.png', caption: 'a koh' }, { url: 'https://cdn/img1.png' }])
+  assert.match(i.configYaml ?? '', /folder_path: "dataset"/)       // repo-relative for reproduction
+  assert.match(i.configYaml ?? '', /arch: "flux2_klein_4b"/)
+})
+
+test('repro artifacts: no samples/dataset on a bare run leaves the fields unset', async () => {
+  const h = harness()
+  await makeTrainingFinalizer({ ...h, newId: () => 'lora-b', now: () => new Date(0) })(
+    actum({ triggerWord: 'koh', baseModel: 'klein-4b', steps: 250 }), completed(250),
+  )
+  assert.equal(h.upserts[0].samples, undefined)
+  assert.equal(h.upserts[0].datasetItems, undefined)
+})
+
 test('card enrichment: omits provenance when no source repo is given', async () => {
   const h = harness()
   await makeTrainingFinalizer({ ...h, newId: () => 'lora-n', now: () => new Date(0) })(

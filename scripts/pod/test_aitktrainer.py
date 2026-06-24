@@ -112,12 +112,36 @@ class WebhookPayloadTests(unittest.TestCase):
         self.assertEqual(p, {"id": "pod-9", "status": "COMPLETED",
                              "output": [{"url": "https://cdn/x.safetensors"}], "executionTime": 12345})
 
+    def test_samples_ride_output_tagged_kind_sample(self):
+        p = t.build_webhook_payload("pod-9", "COMPLETED", lora_url="https://cdn/x.safetensors",
+                                    execution_time=10, sample_urls=["https://cdn/s0.jpg", "https://cdn/s1.jpg"])
+        self.assertEqual(p["output"], [
+            {"url": "https://cdn/x.safetensors"},
+            {"url": "https://cdn/s0.jpg", "kind": "sample"},
+            {"url": "https://cdn/s1.jpg", "kind": "sample"},
+        ])
+
     def test_failed_carries_error(self):
         p = t.build_webhook_payload("pod-9", "FAILED", error="boom")
         self.assertEqual(p, {"id": "pod-9", "status": "FAILED", "error": "boom"})
 
     def test_lora_path_follows_aitoolkit_convention(self):
         self.assertEqual(t.lora_path("/aitk/output", "koh"), "/aitk/output/koh/koh.safetensors")
+
+
+class SamplePathsTests(unittest.TestCase):
+    def test_lists_sorted_sample_images_only(self):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as d:
+            sdir = os.path.join(d, "koh", "samples")
+            os.makedirs(sdir)
+            for n in ["1.jpg", "0.png", "notes.txt"]:
+                open(os.path.join(sdir, n), "w").close()
+            paths = t.sample_paths(d, "koh")
+            self.assertEqual([os.path.basename(p) for p in paths], ["0.png", "1.jpg"])
+
+    def test_missing_samples_dir_returns_empty(self):
+        self.assertEqual(t.sample_paths("/nonexistent", "koh"), [])
 
 
 class JobRowTests(unittest.TestCase):

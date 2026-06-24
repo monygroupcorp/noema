@@ -196,19 +196,32 @@ def build_status_signal(actum_id: str, row: dict, cfg_steps=None) -> dict:
     return {"actumId": actum_id, "progressus": prog}
 
 
-def build_webhook_payload(pod_id: str, status: str, lora_url=None, execution_time=0, error=None) -> dict:
+def build_webhook_payload(pod_id: str, status: str, lora_url=None, execution_time=0, error=None, sample_urls=None) -> dict:
     """The completion webhook body — matches RunPodPayload (executionWebhook.ts). COMPLETED
-    carries the LoRA URL in output[]; the host finalizer re-hosts it + registers the Intella."""
+    carries the LoRA URL in output[0]; preview samples ride the SAME output[] tagged
+    kind:'sample' (the host finalizer splits LoRA vs samples). The host re-hosts the LoRA,
+    registers the Intella, and persists the samples as first-class previews."""
     if status == "COMPLETED":
-        return {"id": pod_id, "status": "COMPLETED",
-                "output": [{"url": lora_url}] if lora_url else [],
-                "executionTime": execution_time}
+        output = [{"url": lora_url}] if lora_url else []
+        output += [{"url": u, "kind": "sample"} for u in (sample_urls or [])]
+        return {"id": pod_id, "status": "COMPLETED", "output": output, "executionTime": execution_time}
     return {"id": pod_id, "status": "FAILED", "error": error or "training failed"}
 
 
 def lora_path(output_dir: str, job_id: str) -> str:
     """ai-toolkit writes the LoRA to <training_folder>/<name>/<name>.safetensors."""
     return os.path.join(output_dir, job_id, f"{job_id}.safetensors")
+
+
+def sample_paths(output_dir: str, job_id: str) -> list:
+    """End-of-run preview images ai-toolkit writes to <training_folder>/<name>/samples/.
+    Returns the image paths sorted by name (so they pair with the config's prompt order)."""
+    sample_dir = os.path.join(output_dir, job_id, "samples")
+    try:
+        names = sorted(n for n in os.listdir(sample_dir) if os.path.splitext(n)[1].lower() in _IMG_EXTS)
+    except OSError:
+        return []
+    return [os.path.join(sample_dir, n) for n in names]
 
 
 def seed_job_row(db_path: str, job_id: str, gpu_ids: str = "0", job_config: str = "{}") -> None:
@@ -357,14 +370,26 @@ def main() -> int:
             if proc.poll() is not None and (not row or row.get("status") not in ("running", "completed")):
                 raise RuntimeError(f"run.py exited ({proc.returncode}) before completion | run.py tail:\n{_tail(run_log)}")
 
-        # 5. upload the LoRA → fire the completion webhook.
+        # 5. upload the LoRA, then the end-of-run preview samples → fire the completion webhook.
         path = lora_path(output_dir, job_id)
         if not os.path.exists(path):
             raise RuntimeError(f"completed but no safetensors at {path}")
         url = _upload_to_r2(r2, path, f"training/{job_id}/{job_id}.safetensors")
         log.info(f"uploaded LoRA → {url}")
+
+        # Preview samples — first-class previews on the Intella + the published card gallery.
+        # Best-effort: a sampling/upload hiccup must never fail an otherwise-complete training.
+        sample_urls = []
+        for i, sp in enumerate(sample_paths(output_dir, job_id)):
+            try:
+                ext = os.path.splitext(sp)[1].lower() or ".jpg"
+                sample_urls.append(_upload_to_r2(r2, sp, f"training/{job_id}/samples/{i:03d}{ext}"))
+            except Exception as e:  # noqa: BLE001
+                log.warning(f"sample upload failed ({sp}): {e}")
+        log.info(f"uploaded {len(sample_urls)} preview samples")
+
         _send_webhook(webhook_url, build_webhook_payload(
-            pod_id, "COMPLETED", lora_url=url, execution_time=int((time.time() - t0) * 1000)))
+            pod_id, "COMPLETED", lora_url=url, execution_time=int((time.time() - t0) * 1000), sample_urls=sample_urls))
         _post_status(status_url, {"actumId": actum_id, "progressus": {"phase": "done"}})
         log.info("done.")
         return 0
