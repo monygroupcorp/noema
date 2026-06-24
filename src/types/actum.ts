@@ -169,6 +169,14 @@ export interface Actum {
   oneshotPod?: boolean
 
   /**
+   * The latest checkpoint a long run (training) has rescued to durable storage, updated as the
+   * pod reports them on `/runner/status`. The RESUME ANCHOR: if the pod is hard-killed (no
+   * completion/failure webhook), the host still holds `{url, step}` here, so a resume run can
+   * continue from it (`aditus.resumeFrom = url`, remaining steps = total − step).
+   */
+  resumeCheckpoint?: { url: string; step: number }
+
+  /**
    * SHA-256 content address of the CompiledSpec that was submitted.
    * "sha256:<hex>" — links this execution to its exact deployment bundle.
    * Set by RunPodCursor after compilation; absent on non-RunPod cursors.

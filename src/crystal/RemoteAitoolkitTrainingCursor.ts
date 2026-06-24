@@ -40,8 +40,11 @@ export interface RemoteAitkLaunchSpec {
   baseModel: string
   /** The LoRA trigger word. */
   triggerWord: string
-  /** Total steps. */
+  /** Total steps (additional, when resuming). */
   steps: number
+  /** Weights-only resume/continue: a URL of prior LoRA weights the pod inits the network from
+   *  (a rescued checkpoint for crash-recovery, or a finished LoRA to extend). */
+  resumeFrom?: string
   /** Auto-caption images that arrive without a caption (default true) — the modus does everything. */
   autocaption?: boolean
   gpuId?: string
@@ -84,11 +87,13 @@ export class RemoteAitoolkitTrainingCursor implements Cursor {
     const gpuId = aditus.gpuId !== undefined ? String(aditus.gpuId) : undefined
     const jobConfig = typeof aditus.jobConfig === 'string' ? aditus.jobConfig : undefined
     const autocaption = aditus.autocaption !== false   // default on — caption missing captions
+    const resumeFrom = typeof aditus.resumeFrom === 'string' && aditus.resumeFrom.trim() ? aditus.resumeFrom.trim() : undefined
 
     const { externusJobId } = await this.deps.launcher.launch({
       actumId: actum.id, jobId, dataset, baseModel, triggerWord, steps, autocaption,
       ...(gpuId ? { gpuId } : {}),
       ...(jobConfig ? { jobConfig } : {}),
+      ...(resumeFrom ? { resumeFrom } : {}),
     })
 
     // The training pod is dedicated + one-shot — flag it so the completor terminates it

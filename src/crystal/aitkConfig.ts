@@ -80,6 +80,13 @@ export interface AitkConfigParams {
   samplePrompts?: string[]
   /** LoRA rank override (else the preset default). */
   rank?: number
+  /**
+   * Weights-only resume/continue: a container path to a prior LoRA's `.safetensors`. Emitted as
+   * `network.pretrained_lora_path` — ai-toolkit initialises the network from it (fresh optimizer,
+   * step counter starts at 0, so `steps` is purely additional). Covers both crash-recovery
+   * (point at the rescued checkpoint, steps = remaining) and extend (point at a finished LoRA).
+   */
+  resumeFrom?: string
   /** Multi-res bucketing override (else the preset default). */
   resolution?: number[]
   /** Caption file extension — default 'txt'. */
@@ -130,7 +137,7 @@ config:
       network:
         type: "lora"
         linear: ${rank}
-        linear_alpha: ${rank}
+        linear_alpha: ${rank}${p.resumeFrom ? `\n        pretrained_lora_path: "${p.resumeFrom}"` : ''}
       save:
         dtype: float16
         save_every: ${saveEvery}

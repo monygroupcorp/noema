@@ -97,6 +97,19 @@ export interface ProgressusPod {
 }
 
 /**
+ * A checkpoint a runner has rescued to durable storage mid-run — the resume anchor. Rides
+ * on `executing` reports from a training pod each time it persists a checkpoint off the
+ * ephemeral pod, so the host always holds the latest safe `{url, step}` even if the pod is
+ * hard-killed (no completion/failure webhook ever fires). Read on resume to continue from it.
+ */
+export interface ProgressusCheckpoint {
+  /** Durable (R2) URL of the rescued weights. */
+  url: string
+  /** The training step this checkpoint was saved at. */
+  step: number
+}
+
+/**
  * Progressus — one structured status report at a moment.
  *
  * `phase` is the coarse step (for the timeline + measurement); `target` is the
@@ -121,6 +134,8 @@ export interface Progressus {
   resources?: ProgressusResources
   /** Pod/instance identity + cost backing this run (carried on cold-start phases). */
   pod?: ProgressusPod
+  /** A checkpoint rescued to durable storage mid-run (training) — the resume anchor. */
+  checkpoint?: ProgressusCheckpoint
   /** Sub-reports for concurrent work (multi-file download, fan-out, multi-GPU). */
   parallel?: Progressus[]
   /** When this report was emitted. */

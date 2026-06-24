@@ -144,6 +144,22 @@ class SamplePathsTests(unittest.TestCase):
         self.assertEqual(t.sample_paths("/nonexistent", "koh"), [])
 
 
+class LatestCheckpointTests(unittest.TestCase):
+    def test_picks_highest_step_checkpoint(self):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as d:
+            jdir = os.path.join(d, "koh")
+            os.makedirs(jdir)
+            for n in ["koh_000000250.safetensors", "koh_000000500.safetensors", "koh.safetensors", "koh_notanum.safetensors"]:
+                open(os.path.join(jdir, n), "w").close()
+            path, step = t.latest_checkpoint(d, "koh")
+            self.assertEqual(step, 500)
+            self.assertTrue(path.endswith("koh_000000500.safetensors"))
+
+    def test_no_checkpoints_returns_none_zero(self):
+        self.assertEqual(t.latest_checkpoint("/nonexistent", "koh"), (None, 0))
+
+
 class JobRowTests(unittest.TestCase):
     def test_seed_then_read_round_trip(self):
         with tempfile.TemporaryDirectory() as d:
