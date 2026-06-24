@@ -123,7 +123,12 @@ async function main(): Promise<void> {
   const cursor = new RemoteAitoolkitTrainingCursor({ launcher, actorum, maxTrainingSeconds: 7200 })
 
   // The koh manifest is already staged to R2 (scripts/stage-koh-r2.ts). Pass it inline.
-  const manifest = readFileSync('scripts/.koh-manifest.json', 'utf8').trim()
+  // SPIKE_STRIP_CAPTIONS=1 drops the captions → exercises the on-pod Qwen3-VL auto-captioner.
+  let manifest = readFileSync('scripts/.koh-manifest.json', 'utf8').trim()
+  if (process.env.SPIKE_STRIP_CAPTIONS === '1') {
+    manifest = JSON.stringify((JSON.parse(manifest) as Array<{ url: string }>).map(({ url }) => ({ url })))
+    console.log('[spike] stripped captions → forcing on-pod auto-captioning (images-only)')
+  }
   const actum = {
     id: JOB, modusId: 'modus.aitoolkit-training',
     aditus: { jobId: JOB, dataset: manifest, baseModel: 'klein-4b', triggerWord: TRIGGER, steps: STEPS },

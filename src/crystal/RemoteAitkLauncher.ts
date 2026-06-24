@@ -21,7 +21,7 @@
 import type { R2Config } from './comfyrunnerClient.js'
 import type { DatasetResolver } from './datasetManifest.js'
 import type { RemoteAitkLauncher as RemoteAitkLauncherPort, RemoteAitkLaunchSpec } from './RemoteAitoolkitTrainingCursor.js'
-import { buildAitkConfig } from './aitkConfig.js'
+import { buildAitkConfig, buildAitkCaptionConfig } from './aitkConfig.js'
 
 /** Where the ai-toolkit clone lives on the pod (cloned at bootstrap; `aitktrainer.py`'s AITK_DIR). */
 export const POD_AITK_DIR = '/aitk'
@@ -96,6 +96,14 @@ export class RemoteAitkLauncher implements RemoteAitkLauncherPort {
       R2_SECRET_ACCESS_KEY: r2.secretAccessKey,
       R2_BUCKET_NAME: r2.bucket,
       R2_PUBLIC_URL: r2.publicUrl ?? '',
+    }
+
+    // Auto-caption (default on): hand the pod an ai-toolkit Qwen3-VL caption config; it fills
+    // captions for any staged image lacking a .txt sidecar BEFORE training (recaption:false →
+    // dataset-provided captions win). The modus accepts images-only.
+    if (spec.autocaption !== false) {
+      const captionYaml = buildAitkCaptionConfig({ datasetPath: POD_DATASET_DIR })
+      env.AITK_CAPTION_CONFIG_B64 = Buffer.from(captionYaml, 'utf8').toString('base64')
     }
 
     // 4. bootstrap recipe: clone ai-toolkit (pinned) onto the stock torch≥2.9 base + install its

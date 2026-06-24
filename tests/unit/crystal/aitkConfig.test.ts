@@ -2,7 +2,7 @@
 // steps} into the ai-toolkit ui_trainer yaml from a per-base-model preset. Deterministic.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildAitkConfig, resolveBasePreset } from '../../../src/crystal/aitkConfig.js'
+import { buildAitkConfig, resolveBasePreset, buildAitkCaptionConfig, DEFAULT_CAPTION_PROMPT } from '../../../src/crystal/aitkConfig.js'
 
 test('buildAitkConfig: user knobs + klein-4b preset → a complete ui_trainer config', () => {
   const yaml = buildAitkConfig({ name: 'koh', datasetPath: '/mnt/data/datasets/koh', triggerWord: 'koh', baseModel: 'flux2-klein-4b', steps: 500 })
@@ -32,6 +32,25 @@ test('buildAitkConfig: aliases resolve, and overrides win over preset defaults',
 
 test('buildAitkConfig: an unknown base model is a hard error (no silent default)', () => {
   assert.throws(() => buildAitkConfig({ name: 'r', datasetPath: '/d', triggerWord: 't', baseModel: 'sdxl-not-seeded', steps: 100 }), /unknown baseModel/)
+})
+
+test('buildAitkCaptionConfig: Qwen3VL captioner extension job, gap-fill only, pod dataset dir', () => {
+  const yaml = buildAitkCaptionConfig({ datasetPath: '/aitk/dataset' })
+  assert.match(yaml, /job: extension/)
+  assert.match(yaml, /type: Qwen3VLCaptioner/)
+  assert.match(yaml, /model_name_or_path: "Qwen\/Qwen3-VL-8B-Instruct"/)
+  assert.match(yaml, /path_to_caption: "\/aitk\/dataset"/)
+  assert.match(yaml, /recaption: false/)                    // images with a .txt are skipped
+  assert.match(yaml, /caption_extension: "txt"/)
+  assert.match(yaml, /max_new_tokens: 256/)
+  assert.ok(yaml.includes(DEFAULT_CAPTION_PROMPT))
+})
+
+test('buildAitkCaptionConfig: overrides win (model, prompt, tokens)', () => {
+  const yaml = buildAitkCaptionConfig({ datasetPath: '/d', model: 'Qwen/Qwen3-VL-4B', captionPrompt: 'tag it', maxNewTokens: 64 })
+  assert.match(yaml, /model_name_or_path: "Qwen\/Qwen3-VL-4B"/)
+  assert.match(yaml, /caption_prompt: "tag it"/)
+  assert.match(yaml, /max_new_tokens: 64/)
 })
 
 test('buildAitkConfig is deterministic — identical inputs, identical yaml', () => {

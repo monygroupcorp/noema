@@ -42,6 +42,8 @@ export interface RemoteAitkLaunchSpec {
   triggerWord: string
   /** Total steps. */
   steps: number
+  /** Auto-caption images that arrive without a caption (default true) — the modus does everything. */
+  autocaption?: boolean
   gpuId?: string
   /** Optional JSON stored on the Job row. */
   jobConfig?: string
@@ -81,9 +83,10 @@ export class RemoteAitoolkitTrainingCursor implements Cursor {
     if (steps === undefined) throw new Error('aitoolkit remote training: `steps` is required (a positive integer)')
     const gpuId = aditus.gpuId !== undefined ? String(aditus.gpuId) : undefined
     const jobConfig = typeof aditus.jobConfig === 'string' ? aditus.jobConfig : undefined
+    const autocaption = aditus.autocaption !== false   // default on — caption missing captions
 
     const { externusJobId } = await this.deps.launcher.launch({
-      actumId: actum.id, jobId, dataset, baseModel, triggerWord, steps,
+      actumId: actum.id, jobId, dataset, baseModel, triggerWord, steps, autocaption,
       ...(gpuId ? { gpuId } : {}),
       ...(jobConfig ? { jobConfig } : {}),
     })
