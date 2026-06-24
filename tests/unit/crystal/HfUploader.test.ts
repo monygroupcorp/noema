@@ -89,8 +89,39 @@ test('upload: a model with no weight source throws', async () => {
   await assert.rejects(() => uploader.upload(req({ model: { ...MODEL, sources: [] } })), /no weight source/)
 })
 
-test('renderModelCard: includes the name and trigger', () => {
+test('renderModelCard: frontmatter + body, name and trigger', () => {
   const card = renderModelCard(MODEL)
+  assert.match(card, /^---\n/)                                  // YAML frontmatter
   assert.match(card, /# My LoRA/)
-  assert.match(card, /mld/)
+  assert.match(card, /instance_prompt: mld/)
+  assert.match(card, /\*\*Trigger word:\*\* `mld`/)
+  assert.match(card, /## Usage \(Diffusers\)/)
+  assert.match(card, /## Training Details/)
+})
+
+test('renderModelCard: klein familia derives klein base facts + Flux2Pipeline + apache-2.0', () => {
+  const card = renderModelCard({ ...MODEL, familia: 'flux2-klein', trainingSteps: 4000 }, 'ms2stationthis/my-lora-klein')
+  assert.match(card, /license: apache-2.0/)
+  assert.match(card, /base_model: black-forest-labs\/FLUX\.2-klein-base-4B/)
+  assert.match(card, /training_steps: 4000/)
+  assert.match(card, /from diffusers import Flux2Pipeline/)
+  assert.match(card, /load_lora_weights\("ms2stationthis\/my-lora-klein"\)/)
+  assert.match(card, /\*\*Steps:\*\* 4000/)
+})
+
+test('renderModelCard: provenance backlink + sample gallery when present', () => {
+  const card = renderModelCard({
+    ...MODEL, familia: 'flux2-klein',
+    provenance: { repo: 'ms2stationthis/drifella', base: 'FLUX.1-dev' },
+    samples: [{ url: 'https://cdn/s0.jpg', pathInRepo: 'samples/sample_000.jpg', prompt: 'mld, a portrait' }],
+  })
+  assert.match(card, /Retrained onto FLUX\.2 \[klein\] 4B from \[ms2stationthis\/drifella\]/)
+  assert.match(card, /## Sample Outputs/)
+  assert.match(card, /!\[sample\]\(samples\/sample_000\.jpg\)/)
+})
+
+test('renderModelCard: unknown familia falls back to FLUX.1 [dev] facts', () => {
+  const card = renderModelCard({ ...MODEL, familia: undefined })
+  assert.match(card, /base_model: black-forest-labs\/FLUX\.1-dev/)
+  assert.match(card, /from diffusers import FluxPipeline/)
 })

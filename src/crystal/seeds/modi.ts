@@ -168,6 +168,9 @@ export const MODUS_AITOOLKIT_TRAINING: Modus = make({
     baseIntellaId: { type: 'text', required: false, description: 'The exact base Intella trained against (provenance)' },
     ownerAnimaId:  { type: 'text', required: false, description: 'Owner of the resulting private LoRA (scopes /make resolution)' },
     name:          { type: 'text', required: false, description: 'Display name for the trained LoRA (defaults to the trigger)' },
+    description:    { type: 'text', required: false, description: 'Human description for the published model card' },
+    provenanceRepo:{ type: 'text', required: false, description: 'Source registry repo this was retrained from (model-card backlink, e.g. ms2stationthis/drifella)' },
+    provenanceBase:{ type: 'text', required: false, description: 'Base the source model came off (e.g. FLUX.1-dev)' },
   },
 
   exitus: {

@@ -39,6 +39,15 @@ export interface ModelView {
   auctor?: string
   /** The weight download sources a real uploader would push to the registry. */
   sources: IntellaSource[]
+  // --- model-card enrichment (all optional; the card degrades gracefully without them) ---
+  /** Human description for the card body. */
+  description?: string
+  /** Training steps — surfaced in the card frontmatter + training details. */
+  trainingSteps?: number
+  /** Where this was retrained from, for a provenance backlink in the card. */
+  provenance?: { repo: string; base?: string }
+  /** Preview samples to embed in the card gallery — `url` is fetched + committed at `pathInRepo`. */
+  samples?: Array<{ url: string; pathInRepo: string; prompt?: string }>
 }
 
 /** A request to push a model's weights to a registry — platform-agnostic. */

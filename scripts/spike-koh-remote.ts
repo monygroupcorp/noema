@@ -29,6 +29,8 @@ import { RemoteAitkLauncher, securePodTrainingProvisioner, DEFAULT_AITK_IMAGE } 
 import { RemoteAitoolkitTrainingCursor } from '../src/crystal/RemoteAitoolkitTrainingCursor.js'
 import { makeDatasetResolver } from '../src/crystal/datasetManifest.js'
 import { makeTrainingFinalizer, urlLoraReader } from '../src/crystal/trainingFinalizer.js'
+import { HuggingFaceUploader, HfHttpTransport } from '../src/crystal/HfUploader.js'
+import type { ModelView } from '../src/crystal/ModelPublishAdapter.js'
 import { httpMediaFetcher } from '../src/crystal/MediaFetcher.js'
 import { R2Uploader } from '../src/crystal/R2Uploader.js'
 import { MongoIntella } from '../src/crystal/MongoIntella.js'
@@ -73,7 +75,10 @@ async function main(): Promise<void> {
 
   // The aditus the finalizer reads (triggerWord/familia/owner/name) — mirrors what the modus carries
   // (the production resolver passes the real Actum, whose aditus has all of these).
-  const finalAditus = { triggerWord: TRIGGER, familia: FAMILIA, ownerAnimaId: OWNER, name: 'koh remote spike LoRA', steps: STEPS }
+  const finalAditus = {
+    triggerWord: TRIGGER, familia: FAMILIA, ownerAnimaId: OWNER, name: 'koh remote spike LoRA', steps: STEPS,
+    description: 'A FLUX.2 [klein] 4B LoRA — koh, trained via the crystal remote training pod.',
+  }
 
   // ── tiny receiver for the pod's callbacks ────────────────────────────────────
   let resolveDone!: (v: { ok: boolean; exitus?: Record<string, unknown>; error?: string }) => void
@@ -160,6 +165,32 @@ async function main(): Promise<void> {
     console.log('[spike] Intella.find(loraId):', found ? `${found.id} familia=${found.familia} trigger=${found.trigger}` : 'NOT FOUND')
     const map = await intellae.triggerMap(FAMILIA, OWNER)
     console.log(`[spike] triggerMap(${FAMILIA}, ${OWNER}) resolves '${TRIGGER}':`, map.get(TRIGGER)?.some(i => i.id === loraId) ? 'YES ✓' : 'no')
+
+    // ── publish to HuggingFace (FIRST live exercise of HfHttpTransport) ────────────
+    // SPIKE_PUBLISH=1 + HF_TOKEN → push the registered LoRA to HF_ORG/HF_SLUG with the
+    // new model card. This is the only LIVE-UNVERIFIED seam in the publish rail.
+    const found2 = loraId ? await intellae.find(loraId) : null
+    if (process.env.SPIKE_PUBLISH === '1' && process.env.HF_TOKEN && found2) {
+      const org = process.env.HF_ORG ?? 'ms2stationthis'
+      const slug = process.env.HF_SLUG ?? `${TRIGGER}-klein`
+      const model: ModelView = {
+        nomen: found2.nomen, genus: found2.genus, sources: found2.sources,
+        ...(found2.slug !== undefined ? { slug: found2.slug } : {}),
+        ...(found2.trigger !== undefined ? { trigger: found2.trigger } : {}),
+        ...(found2.familia !== undefined ? { familia: found2.familia } : {}),
+        ...(found2.description !== undefined ? { description: found2.description } : {}),
+        ...(found2.trainingSteps !== undefined ? { trainingSteps: found2.trainingSteps } : {}),
+        ...(found2.provenance !== undefined ? { provenance: found2.provenance } : {}),
+      }
+      console.log(`[spike] publishing → https://huggingface.co/${org}/${slug} …`)
+      try {
+        const uploader = new HuggingFaceUploader({ transport: new HfHttpTransport({ token: process.env.HF_TOKEN }), fetcher: httpMediaFetcher })
+        const { externalRef } = await uploader.upload({ account: org, slug, private: false, model })
+        console.log(`[spike] PUBLISHED ✓ ${externalRef}`)
+      } catch (e) { console.error('[spike] publish FAILED:', (e as Error).message) }
+    } else if (process.env.SPIKE_PUBLISH === '1') {
+      console.log('[spike] publish skipped — need HF_TOKEN (and a registered LoRA).')
+    }
   }
 
   // Always terminate the pod — it does not self-terminate.
