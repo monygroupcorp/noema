@@ -53,6 +53,14 @@ function urlBasename(url: string, fallback: string): string {
   return seg || fallback
 }
 
+/** Image extension from a URL basename (lowercased), or `.png` when absent/unknown. */
+function urlImageExt(url: string): string {
+  const base = urlBasename(url, '')
+  const dot = base.lastIndexOf('.')
+  const ext = dot >= 0 ? base.slice(dot).toLowerCase() : ''
+  return ['.png', '.jpg', '.jpeg', '.webp'].includes(ext) ? ext : '.png'
+}
+
 // ---------------------------------------------------------------------------
 // Model card — frontmatter + body, matching the StationThis card format.
 // Training details are DERIVED from a per-base-model facts table (keyed by the
@@ -175,6 +183,14 @@ export function renderModelCard(model: ModelView, repoId?: string): string {
     `- **Steps:** ${model.trainingSteps ?? 'n/a'} · **Network:** LoRA rank ${facts.rank} / alpha ${facts.rank}`,
     `- **Optimizer:** adamw8bit, lr ${facts.lr} · **Scheduler:** flowmatch`,
     `- **Resolution:** ${facts.resolution} (multi-res bucketed) · **Precision:** bf16 train / fp16 save`, '',
+  )
+  if ((model.datasetItems && model.datasetItems.length > 0) || model.configYaml) {
+    const bits: string[] = []
+    if (model.datasetItems?.length) bits.push(`the full **\`dataset/\`** (${model.datasetItems.length} image-caption pairs)`)
+    if (model.configYaml) bits.push('the exact **\`config.yaml\`**')
+    body.push('## Reproduction', '', `This repo includes ${bits.join(' and ')} so the LoRA can be retrained as-is.`, '')
+  }
+  body.push(
     '## About', '',
     'Trained on [StationThis](https://miladystation2.net) — an AI creative platform powered by $MS2.',
     'Train your own LoRAs via [@stationthisbot](https://t.me/stationthisbot) on Telegram.', '',
@@ -190,23 +206,46 @@ export class HuggingFaceUploader implements RegistryUploader {
   async upload(req: RegistryUploadRequest): Promise<{ externalRef: string }> {
     const repoId = `${req.account}/${req.slug}`
     const { url } = await this.deps.transport.ensureRepo({ repoId, private: req.private })
+    const model = req.model
 
     // `sources` are priority-ordered MIRRORS of the same weights — upload the primary.
-    const source = req.model.sources.find((s) => typeof s?.uri === 'string' && s.uri.length > 0)
+    const source = model.sources.find((s) => typeof s?.uri === 'string' && s.uri.length > 0)
     if (!source) throw new Error('hf-uploader: model has no weight source to upload')
     const filename = urlBasename(source.uri, `${req.slug}.safetensors`)
 
-    // Authoritative oid+size by streaming the source once (bounded memory).
-    const { oid, size } = await this._digest(source.uri)
-    await this.deps.transport.uploadLfs({ repoId, oid, size, fetchBody: () => this._stream(source.uri) })
+    // All binary artifacts (weights + sample/dataset images) go via Git-LFS — robust at any
+    // size (a 46-image dataset would blow up a single inline commit). Text (captions, config,
+    // README) is committed inline.
+    const lfsFiles: LfsFile[] = [await this._lfs(repoId, source.uri, filename)]
+    const textFiles: TextFile[] = []
 
-    await this.deps.transport.commit({
-      repoId,
-      message: `Upload ${filename}`,
-      lfsFiles: [{ pathInRepo: filename, oid, size }],
-      textFiles: [{ pathInRepo: 'README.md', content: renderModelCard(req.model, repoId) }],
-    })
+    // Preview samples → samples/sample_NNN.<ext> (the card gallery references these paths).
+    for (const s of model.samples ?? []) {
+      lfsFiles.push(await this._lfs(repoId, s.url, s.pathInRepo))
+    }
+    // Training dataset → dataset/NNNN.<ext> + the caption sidecar, for reproduction.
+    const dataset = model.datasetItems ?? []
+    for (let i = 0; i < dataset.length; i++) {
+      const stem = `dataset/${String(i).padStart(4, '0')}`
+      lfsFiles.push(await this._lfs(repoId, dataset[i].url, `${stem}${urlImageExt(dataset[i].url)}`))
+      const caption = dataset[i].caption?.trim()
+      if (caption) textFiles.push({ pathInRepo: `${stem}.txt`, content: caption })
+    }
+    // The training config, for reproduction.
+    if (model.configYaml?.trim()) textFiles.push({ pathInRepo: 'config.yaml', content: model.configYaml })
+
+    // README last — the card references the sample paths committed above.
+    textFiles.push({ pathInRepo: 'README.md', content: renderModelCard(model, repoId) })
+
+    await this.deps.transport.commit({ repoId, message: `Publish ${req.slug}`, lfsFiles, textFiles })
     return { externalRef: url }
+  }
+
+  /** Upload one URL's bytes via Git-LFS and return its commit pointer. */
+  private async _lfs(repoId: string, url: string, pathInRepo: string): Promise<LfsFile> {
+    const { oid, size } = await this._digest(url)
+    await this.deps.transport.uploadLfs({ repoId, oid, size, fetchBody: () => this._stream(url) })
+    return { pathInRepo, oid, size }
   }
 
   private async _stream(url: string): Promise<{ body: Readable }> {

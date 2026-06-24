@@ -49,6 +49,11 @@ export interface AitkOutcome {
    * `fsLoraReader` finds it from the output dir instead).
    */
   outputUrl?: string
+  /**
+   * Durable URLs of the end-of-run preview samples the pod uploaded (REMOTE path). Persisted
+   * onto the Intella as first-class previews + committed to the published repo. Absent locally.
+   */
+  sampleUrls?: string[]
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))

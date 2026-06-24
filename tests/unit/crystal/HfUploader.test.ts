@@ -70,6 +70,28 @@ test('upload: commit references the LFS pointer + a generated README', async () 
   assert.match(commit.textFiles![0].content, /My LoRA/)
 })
 
+test('upload: commits sample + dataset images via LFS, with captions/config/README inline', async () => {
+  const { transport, calls } = fakeTransport()
+  const model: ModelView = {
+    ...MODEL,
+    samples: [{ url: 'https://cdn/s0.jpg', pathInRepo: 'samples/sample_000.jpg', prompt: 'mld, a portrait' }],
+    datasetItems: [{ url: 'https://cdn/d0.png', caption: 'a thing' }, { url: 'https://cdn/d1.webp' }],
+    configYaml: 'job: extension\n',
+  }
+  await new HuggingFaceUploader({ transport, fetcher: fakeFetcher() }).upload(req({ model }))
+
+  const commit = calls.commit[0]
+  // weights + every image go via LFS, in order
+  assert.deepEqual(commit.lfsFiles.map((f) => f.pathInRepo),
+    ['my-lora.safetensors', 'samples/sample_000.jpg', 'dataset/0000.png', 'dataset/0001.webp'])
+  // captions (only the one with a caption) + config + README go inline
+  assert.deepEqual((commit.textFiles ?? []).map((f) => f.pathInRepo),
+    ['dataset/0000.txt', 'config.yaml', 'README.md'])
+  const readme = commit.textFiles!.find((f) => f.pathInRepo === 'README.md')!.content
+  assert.match(readme, /## Sample Outputs/)
+  assert.match(readme, /## Reproduction/)
+})
+
 test('upload: streams the source twice (digest pass + PUT pass), never buffering', async () => {
   const fetcher = fakeFetcher()
   const { transport } = fakeTransport()

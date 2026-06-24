@@ -4,6 +4,8 @@ import type { Intella, IntellaSource } from '../types/intelligendi.js'
 import type { Uploader } from './R2Uploader.js'
 import type { MediaFetcher } from './MediaFetcher.js'
 import type { AitkOutcome } from './aitoolkitRunnerClient.js'
+import { buildAitkConfig, DEFAULT_SAMPLE_PROMPTS } from './aitkConfig.js'
+import { parseManifest } from './datasetManifest.js'
 
 // =============================================================================
 // trainingFinalizer — a completed local training run's `resolveOutput` (Slice B)
@@ -92,6 +94,28 @@ export function makeTrainingFinalizer(
       ? { repo: provRepo, ...(typeof a.provenanceBase === 'string' && a.provenanceBase.trim() ? { base: a.provenanceBase.trim() } : {}) }
       : undefined
 
+    // Repro artifacts (first-class on the Intella; the publisher commits them too):
+    //  • samples — the pod's preview URLs paired with the prompts they were rendered from
+    //    (DEFAULT_SAMPLE_PROMPTS, trigger-substituted, by index — the pod never reports prompts).
+    //  • datasetItems — the training images + captions (from the run's dataset manifest).
+    //  • configYaml — the ai-toolkit config, regenerated with a repo-relative dataset path so a
+    //    downloader can reproduce against the committed `dataset/` folder.
+    const samplePrompts = DEFAULT_SAMPLE_PROMPTS.map((p) => p.replace(/\[trigger\]/g, trigger || slug))
+    const samples = (outcome.sampleUrls ?? [])
+      .filter((u) => typeof u === 'string' && u.length > 0)
+      .map((url, i) => (samplePrompts[i] ? { url, prompt: samplePrompts[i] } : { url }))
+    const datasetItems = typeof a.dataset === 'string' ? (parseManifest(a.dataset) ?? undefined) : undefined
+    let configYaml: string | undefined
+    if (a.baseModel && typeof steps === 'number') {
+      try {
+        configYaml = buildAitkConfig({
+          name: slug, datasetPath: 'dataset', triggerWord: trigger || slug,
+          baseModel: String(a.baseModel), steps,
+          ...(asPositiveInt(a.rank) ? { rank: asPositiveInt(a.rank)! } : {}),
+        })
+      } catch { /* config regeneration is best-effort — never block finality on it */ }
+    }
+
     // 1. Lift the trained safetensors off the host.
     const { bytes, filename } = await deps.reader(jobId, outcome)
 
@@ -121,6 +145,9 @@ export function makeTrainingFinalizer(
       ...(description ? { description } : {}),
       ...(typeof steps === 'number' ? { trainingSteps: steps } : {}),
       ...(provenance ? { provenance } : {}),
+      ...(samples.length ? { samples } : {}),
+      ...(datasetItems && datasetItems.length ? { datasetItems } : {}),
+      ...(configYaml ? { configYaml } : {}),
       natum: now(),
     }
     await deps.intellae.upsert(intella)
@@ -150,19 +177,25 @@ export function makeTrainingExitusResolver(
 ): (
   actum: Actum,
   modus: { ministerium?: string } | null,
-  outputItems: Array<{ url?: string; path?: string } | string>,
+  outputItems: Array<{ url?: string; path?: string; kind?: string } | string>,
 ) => Promise<Record<string, unknown> | null> {
   return async (actum, modus, outputItems) => {
     if (modus?.ministerium !== ministerium) return null
-    const loraUrl = firstUrl(outputItems)
+    // Samples ride the same output[] channel, tagged `kind:'sample'`; the LoRA is the rest.
+    const isSample = (it: typeof outputItems[number]): boolean => typeof it === 'object' && it?.kind === 'sample'
+    const loraUrl = firstUrl(outputItems.filter((it) => !isSample(it)))
     if (!loraUrl) throw new Error('training finality: completion carried no LoRA output URL')
+    const sampleUrls = outputItems
+      .filter(isSample)
+      .map((it) => (typeof it === 'object' ? it.url : undefined))
+      .filter((u): u is string => typeof u === 'string' && u.length > 0)
     const steps = asPositiveInt(actum.aditus.steps) ?? 0
-    return finalize(actum, { status: 'completed', lastStep: steps, outputUrl: loraUrl })
+    return finalize(actum, { status: 'completed', lastStep: steps, outputUrl: loraUrl, ...(sampleUrls.length ? { sampleUrls } : {}) })
   }
 }
 
 /** The first resolvable media URL among the webhook's output items (string or `{ url }`). */
-function firstUrl(items: Array<{ url?: string; path?: string } | string>): string | undefined {
+function firstUrl(items: Array<{ url?: string; path?: string; kind?: string } | string>): string | undefined {
   for (const it of items) {
     if (typeof it === 'string' && it.length > 0) return it
     if (it && typeof it === 'object' && typeof it.url === 'string' && it.url.length > 0) return it.url
