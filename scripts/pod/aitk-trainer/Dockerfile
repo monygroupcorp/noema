@@ -12,7 +12,8 @@
 # Reuses the PROVEN stationthis-klein dep recipe: torch 2.9.1/cu128 on CUDA 12.8 (ai-toolkit's
 # pins need torch >=2.9 — the stock runpod/pytorch:2.4 base fails diffusers import). Base
 # weights (klein-4b + Qwen3-4B TE + flux2_vae, ~25GB, ungated) are PULLED AT BOOT by
-# ai-toolkit's from_pretrained — NOT baked (keeps the image ~10GB).
+# ai-toolkit's from_pretrained — NOT baked. Image is ~30GB (CUDA *devel* base + torch + the
+# ai-toolkit dep tree); a later slim could swap the runtime base if no dep needs nvcc.
 #
 # The pod runner (scripts/pod/aitktrainer.py) is NOT baked — SecurePodClient ships it over
 # SSH at bootstrap, so the image is stable across runner edits.
