@@ -91,7 +91,10 @@ export class RemoteAitoolkitTrainingCursor implements Cursor {
       ...(jobConfig ? { jobConfig } : {}),
     })
 
-    await this.deps.actorum.update(actum.id, { externusJobId, status: 'agens' })
+    // The training pod is dedicated + one-shot — flag it so the completor terminates it
+    // when the run ends (success or failure), not just on failure. Without this the pod
+    // leaks: complete() keeps warm pods alive, and the idle reaper only sweeps pooled pods.
+    await this.deps.actorum.update(actum.id, { externusJobId, oneshotPod: true, status: 'agens' })
     return { kind: 'async', externusJobId }
   }
 }
