@@ -30,7 +30,7 @@ test('run: launches the pod job with high-level inputs, stamps externusJobId + a
   assert.equal(h.launched.length, 1)
   // the cursor passes the high-level training inputs — NOT a configPath (the launcher owns the yaml).
   assert.deepEqual(h.launched[0], { actumId: 'act-remote', jobId: 'job-9', dataset: 'corpus-1', baseModel: 'klein-4b', triggerWord: 'koh', steps: 600, autocaption: true, gpuId: '0', jobConfig: '{"x":1}' })
-  assert.deepEqual(h.updates, [{ id: 'act-remote', patch: { externusJobId: 'pod-42', status: 'agens' } }])
+  assert.deepEqual(h.updates, [{ id: 'act-remote', patch: { externusJobId: 'pod-42', oneshotPod: true, status: 'agens' } }])
 })
 
 test('run: jobId defaults to the actum id; optional fields omitted from the spec', async () => {

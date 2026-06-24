@@ -167,7 +167,7 @@ export interface Actorum {
    */
   update(
     id: string,
-    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'deploymentHash' | 'executio' | 'progressus' | 'phaseDurations'>>
+    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'oneshotPod' | 'deploymentHash' | 'executio' | 'progressus' | 'phaseDurations'>>
   ): Promise<Actum>
   findById(id: string): Promise<Actum | null>
   /** Find an actum by the external job ID assigned at submission time. */
