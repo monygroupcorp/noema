@@ -224,6 +224,25 @@ def sample_paths(output_dir: str, job_id: str) -> list:
     return [os.path.join(sample_dir, n) for n in names]
 
 
+def latest_checkpoint(output_dir: str, job_id: str):
+    """The highest-step LoRA checkpoint ai-toolkit has written so far → (path, step), or
+    (None, 0). ai-toolkit names step checkpoints <name>_<zero-padded step>.safetensors; we
+    rescue the newest to durable storage mid-run so a hard-killed pod is still resumable."""
+    d = os.path.join(output_dir, job_id)
+    prefix, suffix = f"{job_id}_", ".safetensors"
+    best_path, best_step = None, -1
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return None, 0
+    for n in names:
+        if n.startswith(prefix) and n.endswith(suffix):
+            stem = n[len(prefix):-len(suffix)]
+            if stem.isdigit() and int(stem) > best_step:
+                best_step, best_path = int(stem), os.path.join(d, n)
+    return best_path, (best_step if best_step >= 0 else 0)
+
+
 def seed_job_row(db_path: str, job_id: str, gpu_ids: str = "0", job_config: str = "{}") -> None:
     """Seed the SQLite Job row ai-toolkit's ui_trainer updates by name — same schema + INSERT
     as the host SqliteAitkJobStore.seed (AitkJobStore.ts), so local and remote share one shape."""
@@ -320,6 +339,14 @@ def main() -> int:
         with open(config_path, "w", encoding="utf-8") as f:
             f.write(base64.b64decode(_env("AITK_CONFIG_B64", required=True)).decode("utf-8"))
 
+        # 1b. resume/continue (weights-only): download the prior LoRA the config's
+        #     network.pretrained_lora_path points at — ai-toolkit inits the network from it.
+        resume_url = _env("AITK_RESUME_URL", "")
+        if resume_url:
+            resume_path = _env("AITK_RESUME_PATH", f"{aitk_dir}/resume.safetensors")
+            log.info(f"resume: downloading prior weights → {resume_path}")
+            _download(resume_url, resume_path)
+
         # 2. pull the dataset manifest → images + caption sidecars.
         _post_status(status_url, {"actumId": actum_id,
                                   "progressus": {"phase": "downloading", "target": "dataset"}})
@@ -351,15 +378,32 @@ def main() -> int:
         proc = subprocess.Popen(["python", "-u", "run.py", config_path], cwd=aitk_dir,
                                 stdout=run_fh, stderr=subprocess.STDOUT)
 
-        # 4b. poll the Job row → POST status until terminal (or the process dies).
+        # 4b. poll the Job row → POST status until terminal (or the process dies). Each loop also
+        #     RESCUES any new checkpoint off the ephemeral pod to R2 (overwrite-latest) and reports
+        #     {url, step} on the status signal, so a hard kill is still resumable from durable storage.
         last_phase = None
+        last_ckpt_step = 0
         while True:
             time.sleep(poll_s)
             row = read_job_row(db_path, job_id)
+
+            checkpoint_sig = None
+            ckpt_path, ckpt_step = latest_checkpoint(output_dir, job_id)
+            if ckpt_path and ckpt_step > last_ckpt_step:
+                try:
+                    ckpt_url = _upload_to_r2(r2, ckpt_path, f"training/{job_id}/checkpoint.safetensors")
+                    last_ckpt_step = ckpt_step
+                    checkpoint_sig = {"url": ckpt_url, "step": ckpt_step}
+                    log.info(f"rescued checkpoint step {ckpt_step} → {ckpt_url}")
+                except Exception as e:  # noqa: BLE001
+                    log.warning(f"checkpoint rescue failed (step {ckpt_step}): {e}")
+
             if row:
                 signal = build_status_signal(actum_id, row, steps if steps > 0 else None)
+                if checkpoint_sig:
+                    signal["progressus"]["checkpoint"] = checkpoint_sig
                 phase = signal["progressus"]["phase"]
-                if phase != last_phase or phase == "executing":
+                if phase != last_phase or phase == "executing" or checkpoint_sig:
                     _post_status(status_url, signal)
                     last_phase = phase
                 if row.get("status") == "completed":
@@ -395,9 +439,20 @@ def main() -> int:
         return 0
     except Exception as e:  # noqa: BLE001
         log.error(f"FAILED: {e}")
+        # Best-effort final rescue: a graceful failure (run.py errored, pod still alive) gets one
+        # last shot at the newest checkpoint — reported on the failed status so the resume anchor is
+        # current. (A HARD kill never reaches here; the in-loop rescues above already cover it.)
+        fail_prog = {"phase": "failed", "message": str(e)}
+        try:
+            ckpt_path, ckpt_step = latest_checkpoint(output_dir, job_id)
+            if ckpt_path:
+                ckpt_url = _upload_to_r2(r2, ckpt_path, f"training/{job_id}/checkpoint.safetensors")
+                fail_prog["checkpoint"] = {"url": ckpt_url, "step": ckpt_step}
+                log.info(f"rescued final checkpoint step {ckpt_step} → {ckpt_url}")
+        except Exception as ce:  # noqa: BLE001
+            log.warning(f"final checkpoint rescue failed: {ce}")
         _send_webhook(webhook_url, build_webhook_payload(pod_id, "FAILED", error=str(e)))
-        _post_status(status_url, {"actumId": actum_id,
-                                  "progressus": {"phase": "failed", "message": str(e)}})
+        _post_status(status_url, {"actumId": actum_id, "progressus": fail_prog})
         return 1
 
 

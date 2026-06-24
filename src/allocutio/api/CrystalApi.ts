@@ -1354,14 +1354,18 @@ export class CrystalApi {
     // so reports for one Actum never race. If a runner ever fans out concurrent posts,
     // switch the append to an atomic $push.
     const last = actum.progressus?.at(-1)
+    const patch: Partial<Pick<Actum, 'progressus' | 'phaseDurations' | 'resumeCheckpoint'>> = {}
     if (shouldPersist(last, progressus)) {
       const timeline = [...(actum.progressus ?? []), progressus]
-      const patch: Partial<Pick<Actum, 'progressus' | 'phaseDurations'>> = { progressus: timeline }
+      patch.progressus = timeline
       if (progressus.phase === 'done' || progressus.phase === 'failed') {
         patch.phaseDurations = rollupPhaseDurations(timeline)
       }
-      await this.deps.actorum.update(actum.id, patch)
     }
+    // The rescued-checkpoint anchor is captured ALWAYS — even when the report itself is a
+    // per-tick `executing` the timeline coalesces away — so the resume anchor survives a hard kill.
+    if (progressus.checkpoint?.url) patch.resumeCheckpoint = progressus.checkpoint
+    if (Object.keys(patch).length > 0) await this.deps.actorum.update(actum.id, patch)
     bus.emit('actum.progressus', { actumId: actum.id, progressus })
   }
 

@@ -48,6 +48,7 @@ export function toRun(actum: Actum): Run {
 
   if (actum.impetus !== undefined) run.cost = actum.impetus.toString()
   if (actum.inceptum !== undefined) run.createdAt = actum.inceptum.toISOString()
+  if (actum.resumeCheckpoint?.url) run.resumeCheckpoint = actum.resumeCheckpoint
 
   return run
 }
