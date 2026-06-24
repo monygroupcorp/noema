@@ -7,10 +7,28 @@ import {
   MODUS_JOYCAPTION,
   MODUS_LAYER_COMPOSITE,
   MODUS_FRAMES_TO_VIDEO,
+  MODUS_AITOOLKIT_TRAINING,
 } from '../../../../src/crystal/seeds/modi.js'
 
-test('CANONICAL_MODI contains five entries', () => {
-  assert.equal(CANONICAL_MODI.length, 5)
+test('CANONICAL_MODI contains six entries', () => {
+  assert.equal(CANONICAL_MODI.length, 6)
+})
+
+test('aitoolkit-training modus is a canon training flow (ministerium aitoolkit, sync, duration-billed)', () => {
+  assert.equal(MODUS_AITOOLKIT_TRAINING.ministerium, 'aitoolkit')
+  assert.equal(MODUS_AITOOLKIT_TRAINING.genus, 'atomicus')
+  assert.equal(MODUS_AITOOLKIT_TRAINING.deliveryMode, 'sync')
+  assert.equal(MODUS_AITOOLKIT_TRAINING.canonica, true)
+  // No fixed cost: local self-hosted charges 0n via `?? 0n`; remote bills pod-seconds (Slice E).
+  assert.equal(MODUS_AITOOLKIT_TRAINING.impetusFixum, undefined)
+  // The user-facing required inputs (a dataset + knobs; the modus synthesises the config).
+  for (const k of ['dataset', 'steps', 'triggerWord', 'baseModel']) {
+    assert.equal(MODUS_AITOOLKIT_TRAINING.aditus[k]?.required, true, `${k} should be required`)
+  }
+  assert.equal('configPath' in MODUS_AITOOLKIT_TRAINING.aditus, false, 'configPath is internal, not a user port')
+  // Exitus matches the finalizer's return (Slice B): { trained, steps, loraId, loraUrl }.
+  assert.deepEqual(Object.keys(MODUS_AITOOLKIT_TRAINING.exitus).sort(), ['loraId', 'loraUrl', 'steps', 'trained'])
+  assert.ok(MODUS_AITOOLKIT_TRAINING.contentHash.length > 0)
 })
 
 test('frames-to-video modus is host-side (ministerium ffmpeg, sync, video out)', () => {

@@ -139,10 +139,56 @@ export const MODUS_FRAMES_TO_VIDEO: Modus = make({
   mutatum: new Date('2026-06-19'),
 })
 
+export const MODUS_AITOOLKIT_TRAINING: Modus = make({
+  id: 'modus.aitoolkit-training',
+  nomen: 'LoRA Training — ai-toolkit',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  ministerium: 'aitoolkit',
+  deliveryMode: 'sync',   // the local cursor blocks for the run; the remote variant (Slice E) is async
+  canonica: true,
+  // No impetusFixum: cost is runtime-duration based (the Modus convention for pod tools). The
+  // LOCAL cursor still charges `impetusFixum ?? 0n` = 0n (self-hosted); the REMOTE cursor (Slice E)
+  // reserves a pod-seconds cap, settled to the actual run length at the completion webhook.
+
+  // The user-facing contract: a DATASET + a few knobs. The modus SYNTHESISES the
+  // ai-toolkit training yaml from these (buildAitkConfig, per base-model preset) — users
+  // never author a config. Captions are optional (.txt beside the images); when absent the
+  // caption arm (Slice D) fills them in upstream.
+  aditus: {
+    dataset:       { type: 'text', required: true,  description: 'Image folder to train on (with optional .txt captions)' },
+    triggerWord:   { type: 'text', required: true,  description: 'The LoRA trigger word — becomes its trigger + slug' },
+    baseModel:     { type: 'text', required: true,  description: 'Base model preset (e.g. klein-4b) — also the familia /make resolves on' },
+    steps:         { type: 'int',  required: true,  description: 'Total training steps (drives the config + step/ETA progress)' },
+    saveEvery:     { type: 'int',  required: false, description: 'Checkpoint cadence (default min(steps, 250))' },
+    rank:          { type: 'int',  required: false, description: 'LoRA rank (default per base model)' },
+    gpuId:         { type: 'text', required: false, description: 'GPU device id (default 0)' },
+    jobId:         { type: 'text', required: false, description: 'Run id — defaults to the actum id; becomes the config name' },
+    jobConfig:     { type: 'text', required: false, description: 'Optional JSON stored on the Job row' },
+    baseIntellaId: { type: 'text', required: false, description: 'The exact base Intella trained against (provenance)' },
+    ownerAnimaId:  { type: 'text', required: false, description: 'Owner of the resulting private LoRA (scopes /make resolution)' },
+    name:          { type: 'text', required: false, description: 'Display name for the trained LoRA (defaults to the trigger)' },
+    description:    { type: 'text', required: false, description: 'Human description for the published model card' },
+    provenanceRepo:{ type: 'text', required: false, description: 'Source registry repo this was retrained from (model-card backlink, e.g. ms2stationthis/drifella)' },
+    provenanceBase:{ type: 'text', required: false, description: 'Base the source model came off (e.g. FLUX.1-dev)' },
+  },
+
+  exitus: {
+    trained: { type: 'text', description: 'Completion flag — true when the run finished and the LoRA was registered' },
+    steps:   { type: 'int',  description: 'The last training step reached' },
+    loraId:  { type: 'text', description: 'Id of the registered LoRA Intella' },
+    loraUrl: { type: 'text', description: 'Our-bucket (R2) download URL for the trained weights' },
+  },
+
+  natum:   new Date('2026-06-23'),
+  mutatum: new Date('2026-06-23'),
+})
+
 export const CANONICAL_MODI: Modus[] = [
   MODUS_CHATGPT,
   MODUS_DALLE_III,
   MODUS_JOYCAPTION,
   MODUS_LAYER_COMPOSITE,
   MODUS_FRAMES_TO_VIDEO,
+  MODUS_AITOOLKIT_TRAINING,
 ]

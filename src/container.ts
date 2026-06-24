@@ -50,9 +50,15 @@ import { LayerCompositeCursor } from './crystal/LayerCompositeCursor.js'
 import { JimpLayerCompositeEngine } from './crystal/LayerCompositeEngine.js'
 import { FfmpegCursor } from './crystal/FfmpegCursor.js'
 import { SpawnFfmpegEngine } from './crystal/FfmpegEngine.js'
-import { AitoolkitTrainingCursor } from './crystal/AitoolkitTrainingCursor.js'
+import { AitoolkitTrainingCursor, type AitoolkitTrainingCursorDeps } from './crystal/AitoolkitTrainingCursor.js'
+import { RemoteAitoolkitTrainingCursor } from './crystal/RemoteAitoolkitTrainingCursor.js'
+import { RemoteAitkLauncher, securePodTrainingProvisioner } from './crystal/RemoteAitkLauncher.js'
+import { makeDatasetResolver } from './crystal/datasetManifest.js'
 import { SqliteAitkJobStore } from './crystal/AitkJobStore.js'
 import { DockerAitkSpawner } from './crystal/AitkSpawner.js'
+import { MongoIntella } from './crystal/MongoIntella.js'
+import { makeTrainingFinalizer, fsLoraReader } from './crystal/trainingFinalizer.js'
+import { fsConfigWriter } from './crystal/aitkConfig.js'
 import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
 import { FeedAdapter } from './crystal/FeedAdapter.js'
@@ -180,6 +186,38 @@ export interface ContainerConfig {
     shmSize?: string
     /** Overall poll cap (ms) — a hung run trips this and fails. */
     timeoutMs?: number
+    /**
+     * Host path of ai-toolkit's output dir (a trained run leaves `<outputDir>/<jobId>/
+     * <jobId>.safetensors`). Present (with `runpodR2`) → a completed run hosts the LoRA
+     * in R2 + registers it as a private Intella (training finality, build #5b). Absent →
+     * the run still trains but the exitus stays `{ trained, steps }` (headless).
+     */
+    outputDir?: string
+    /**
+     * Host path of the ai-toolkit `config/` dir (under the mounted clone). Present → the
+     * modus SYNTHESISES each run's training yaml here from {dataset, baseModel, steps, …}
+     * (users never author a config). Absent → only a pre-built `configPath` aditus runs.
+     */
+    configDir?: string
+  }
+  /**
+   * Remote ai-toolkit training (Slice E, ministerium 'aitoolkit') — the PROD path: training runs
+   * on a provisioned, billed SECURE pod instead of a local GPU. Present (+ `runpodClient` with
+   * `launchTrainingPod`, `runpodR2`, `runpodWebhookUrl`) → registers `RemoteAitoolkitTrainingCursor`.
+   * Mutually exclusive with the local `aitoolkit` block (a box runs one or the other; the modus is
+   * identical). The completion-side finality (urlLoraReader → re-host + Intella) is the webhook's
+   * `resolveExitus` seam, wired in index.ts.
+   */
+  aitoolkitRemote?: {
+    /** Pod base image — a stock RunPod image with torch ≥2.9 (default `DEFAULT_AITK_IMAGE`);
+     *  ai-toolkit is bootstrapped onto it over SSH (no custom image to maintain). */
+    image?: string
+    /** ai-toolkit commit to clone on the pod (default the verified `DEFAULT_AITK_REF`). */
+    aitkRef?: string
+    /** Our `/runner/status` sink URL — the pod POSTs its Progressus here. */
+    statusUrl: string
+    /** Reservation cap in pod-seconds (settled to actual at completion) — default 7200 (2h). */
+    maxTrainingSeconds?: number
   }
   /** Warm-window TTL (ms) passed to warm-pod jobs — default 60_000. */
   runpodWarmTtlMs?: number
@@ -455,13 +493,46 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   // Local ai-toolkit training (build #5) — only where a GPU + image + host-mounted DB exist.
   if (config.aitoolkit) {
-    cursorum.register('aitoolkit', new AitoolkitTrainingCursor({
+    const aitkDeps: AitoolkitTrainingCursorDeps = {
       store: new SqliteAitkJobStore(config.aitoolkit.dbPath),
       spawner: new DockerAitkSpawner(),
       image: config.aitoolkit.image,
       ...(config.aitoolkit.mounts ? { mounts: config.aitoolkit.mounts } : {}),
       ...(config.aitoolkit.shmSize ? { shmSize: config.aitoolkit.shmSize } : {}),
       ...(config.aitoolkit.timeoutMs !== undefined ? { timeoutMs: config.aitoolkit.timeoutMs } : {}),
+      ...(config.aitoolkit.configDir ? { writeConfig: fsConfigWriter(config.aitoolkit.configDir) } : {}),
+    }
+    // Training finality (build #5b): a completed run hosts its LoRA in R2 + registers it
+    // as a private Intella — only where both an output dir (to read it) and R2 (to host it) exist.
+    if (config.aitoolkit.outputDir && config.runpodR2) {
+      aitkDeps.resolveOutput = makeTrainingFinalizer({
+        reader: fsLoraReader(config.aitoolkit.outputDir),
+        store: new R2Uploader(config.runpodR2),
+        intellae: new MongoIntella(db.collection('intellae')),
+      })
+    }
+    cursorum.register('aitoolkit', new AitoolkitTrainingCursor(aitkDeps))
+  } else if (
+    config.aitoolkitRemote && config.runpodClient && config.runpodR2 && config.runpodWebhookUrl &&
+    'launchTrainingPod' in config.runpodClient
+  ) {
+    // Remote ai-toolkit training (Slice E) — the prod path. Reuses the SAME finalizer at the
+    // completion webhook (resolveExitus, index.ts); here we just dispatch onto a billed pod.
+    const launcher = new RemoteAitkLauncher({
+      provisioner: securePodTrainingProvisioner(
+        config.runpodClient as unknown as { launchTrainingPod(opts: { image: string; env: Record<string, string> }): Promise<{ podId: string }> },
+      ),
+      resolver: makeDatasetResolver({ corpora }),
+      ...(config.aitoolkitRemote.image ? { image: config.aitoolkitRemote.image } : {}),
+      ...(config.aitoolkitRemote.aitkRef ? { aitkRef: config.aitoolkitRemote.aitkRef } : {}),
+      r2: config.runpodR2,
+      statusUrl: config.aitoolkitRemote.statusUrl,
+      webhookUrl: config.runpodWebhookUrl,
+    })
+    cursorum.register('aitoolkit', new RemoteAitoolkitTrainingCursor({
+      launcher,
+      actorum,
+      ...(config.aitoolkitRemote.maxTrainingSeconds !== undefined ? { maxTrainingSeconds: config.aitoolkitRemote.maxTrainingSeconds } : {}),
     }))
   }
 

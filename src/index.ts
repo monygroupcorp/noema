@@ -61,6 +61,9 @@ import { MongoHospitium } from './crystal/MongoHospitium.js'
 import { startIdleReaper } from './crystal/idleReaper.js'
 import { startCensus } from './crystal/Census.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
+import { R2Uploader } from './crystal/R2Uploader.js'
+import { httpMediaFetcher } from './crystal/MediaFetcher.js'
+import { makeTrainingFinalizer, urlLoraReader, makeTrainingExitusResolver } from './crystal/trainingFinalizer.js'
 import { MongoConsuetudinum } from './crystal/MongoConsuetudinum.js'
 import { MongoFundamentorum } from './crystal/MongoFundamentorum.js'
 import { Compiler } from './crystal/Compiler.js'
@@ -95,6 +98,17 @@ const RUNPOD_WARM_TTL_MS = Number(process.env.RUNPOD_WARM_TTL_MS ?? 60_000)  // 
 const RUNPOD_WEBHOOK_URL = process.env.WEBHOOK_URL
   ? `https://${process.env.WEBHOOK_URL.replace(/^https?:\/\//, '').replace(/\/$/, '')}/webhooks/runpod`
   : `http://localhost:${process.env.PORT ?? 3000}/webhooks/runpod`
+// Where a remote training pod POSTs its `/runner/status` Progressus — same host as the webhook.
+const RUNNER_STATUS_URL = process.env.WEBHOOK_URL
+  ? `https://${process.env.WEBHOOK_URL.replace(/^https?:\/\//, '').replace(/\/$/, '')}/runner/status`
+  : `http://localhost:${process.env.PORT ?? 3000}/runner/status`
+// Remote ai-toolkit training (Slice E) — enabled → the training modus runs on billed SECURE pods.
+// ai-toolkit is bootstrapped over SSH onto a stock torch≥2.9 base (no custom image); AITK_REMOTE_IMAGE
+// optionally overrides the base, AITK_REF the cloned ai-toolkit commit.
+const AITK_REMOTE_ENABLE = process.env.AITK_REMOTE_ENABLE === '1' || !!process.env.AITK_REMOTE_IMAGE
+const AITK_REMOTE_IMAGE = process.env.AITK_REMOTE_IMAGE
+const AITK_REF = process.env.AITK_REF
+const AITK_REMOTE_MAX_SECONDS = process.env.AITK_REMOTE_MAX_SECONDS ? Number(process.env.AITK_REMOTE_MAX_SECONDS) : undefined
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY
@@ -360,6 +374,14 @@ async function main(): Promise<void> {
         admitWarm: (m: Materia, models: Array<{ id?: string }>) => installCoordinator.ensureForGen(m, models),
         installLive: (m: Materia, ids: string[]) => installCoordinator.installLive(m, ids),
       } : {}),
+    } : {}),
+    ...(AITK_REMOTE_ENABLE ? {
+      aitoolkitRemote: {
+        statusUrl: RUNNER_STATUS_URL,
+        ...(AITK_REMOTE_IMAGE ? { image: AITK_REMOTE_IMAGE } : {}),
+        ...(AITK_REF ? { aitkRef: AITK_REF } : {}),
+        ...(AITK_REMOTE_MAX_SECONDS !== undefined ? { maxTrainingSeconds: AITK_REMOTE_MAX_SECONDS } : {}),
+      },
     } : {}),
     ...(process.env.HF_TOKEN ? { huggingFaceToken: process.env.HF_TOKEN } : {}),
     ...(openaiClient ? { openaiClient } : {}),
@@ -784,6 +806,17 @@ async function main(): Promise<void> {
     res.status(result.status).json(result.body)
   })
 
+  // Training finality at the completion webhook (Slice E): a remote (pod) training run
+  // completes here — host the pod-uploaded LoRA in R2 + register it as an Intella. Gated on
+  // R2 (needed to host); harmless for non-training completions (resolver returns null).
+  const trainingExitusResolver = RUNPOD_R2
+    ? makeTrainingExitusResolver(makeTrainingFinalizer({
+        reader: urlLoraReader(httpMediaFetcher),
+        store: new R2Uploader(RUNPOD_R2),
+        intellae,
+      }))
+    : undefined
+
   app.use('/webhooks', createWebhookRouter({
     actorum: ring.actorum,
     completor: ring.completor,
@@ -792,6 +825,7 @@ async function main(): Promise<void> {
     nexus,
     signorum: ring.signorum,
     modorum: ring.modorum,
+    ...(trainingExitusResolver ? { resolveExitus: trainingExitusResolver } : {}),
     modos: ring.modos,
     hospitia: ring.hospitia,
     deployments: ring.deployments,

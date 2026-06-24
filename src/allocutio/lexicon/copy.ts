@@ -46,6 +46,16 @@ export const COPY = {
       plugins: 'Loading plugins…',
       reloading: 'Reloading the pod…',
       generating: 'Generating…',
+      /** Step-counted run (e.g. LoRA training): "Training · step 420/600 (70%) · ~6m left".
+       *  `eta` arrives pre-formatted from the view's duration formatter. */
+      training: (step: number | undefined, total: number | undefined, eta: string | undefined): string => {
+        if (step === undefined) return 'Training…'
+        const prog = total && total > 0
+          ? `step ${step}/${total} (${Math.round((step / total) * 100)}%)`
+          : `step ${step}`
+        const left = eta ? ` · ~${eta} left` : ''
+        return `Training · ${prog}${left}`
+      },
       saving: 'Saving your result…',
     },
 

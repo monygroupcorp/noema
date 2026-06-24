@@ -53,13 +53,135 @@ function urlBasename(url: string, fallback: string): string {
   return seg || fallback
 }
 
-/** A minimal model card (README) so the repo is non-empty + discoverable. */
-export function renderModelCard(model: ModelView): string {
-  const lines = [`# ${model.nomen}`, '', `- **type:** ${model.genus}`]
-  if (model.familia) lines.push(`- **base:** ${model.familia}`)
-  if (model.trigger) lines.push(`- **trigger:** \`${model.trigger}\``)
-  lines.push('', '_Published via noema._', '')
-  return lines.join('\n')
+// ---------------------------------------------------------------------------
+// Model card — frontmatter + body, matching the StationThis card format.
+// Training details are DERIVED from a per-base-model facts table (keyed by the
+// Intella `familia`), so the card can never drift from what the trainer actually
+// ran; the few run-specific bits (steps, description, samples, provenance) thread
+// in via the optional ModelView fields and degrade gracefully when absent.
+// ---------------------------------------------------------------------------
+
+interface BaseFacts {
+  /** Display name in prose, e.g. "FLUX.2 [klein] 4B". */
+  displayBase: string
+  /** HF repo for the `base_model` frontmatter + load (the trainable/base checkpoint). */
+  baseRepo: string
+  /** HF repo to load for inference in the usage snippet. */
+  inferenceRepo: string
+  /** diffusers pipeline class for the usage snippet. */
+  pipelineClass: string
+  /** SPDX-ish license id for the frontmatter. */
+  license: string
+  /** Discovery tags. */
+  tags: string[]
+  rank: number
+  lr: string
+  /** Multi-res bucket list, as a display string. */
+  resolution: string
+}
+
+const KLEIN_4B: BaseFacts = {
+  displayBase: 'FLUX.2 [klein] 4B',
+  baseRepo: 'black-forest-labs/FLUX.2-klein-base-4B',
+  inferenceRepo: 'black-forest-labs/FLUX.2-klein-4B',
+  pipelineClass: 'Flux2Pipeline',
+  license: 'apache-2.0',
+  tags: ['text-to-image', 'lora', 'diffusers', 'flux2', 'klein', 'flowmatch', 'stationthis'],
+  rank: 32, lr: '1e-4', resolution: '512, 768, 1024',
+}
+
+const FLUX1_DEV: BaseFacts = {
+  displayBase: 'FLUX.1 [dev]',
+  baseRepo: 'black-forest-labs/FLUX.1-dev',
+  inferenceRepo: 'black-forest-labs/FLUX.1-dev',
+  pipelineClass: 'FluxPipeline',
+  license: 'wtfpl',
+  tags: ['text-to-image', 'lora', 'diffusers', 'flux', 'flowmatch', 'stationthis'],
+  rank: 32, lr: '1e-4', resolution: '512, 768, 1024',
+}
+
+/** Map an Intella `familia` to its card facts. Unknown familiae fall back to FLUX.1 [dev]. */
+function baseFacts(familia?: string): BaseFacts {
+  const f = (familia ?? '').toLowerCase()
+  if (f.includes('klein') || f.includes('flux2')) return KLEIN_4B
+  return FLUX1_DEV
+}
+
+/**
+ * Render the model card (README) — frontmatter + the StationThis body (description,
+ * trigger, sample gallery, usage, settings, training details, about). `repoId` is the
+ * `account/slug` used in the load snippet; falls back to the model slug.
+ */
+export function renderModelCard(model: ModelView, repoId?: string): string {
+  const facts = baseFacts(model.familia)
+  const trigger = model.trigger ?? ''
+  const repo = repoId ?? model.slug ?? model.nomen
+
+  // ── frontmatter ──────────────────────────────────────────────────────────
+  const fm: string[] = [
+    '---',
+    `license: ${facts.license}`,
+    `base_model: ${facts.baseRepo}`,
+    'base_model_relation: adapter',
+    'pipeline_tag: text-to-image',
+    `tags: [${facts.tags.join(', ')}]`,
+  ]
+  if (trigger) fm.push(`instance_prompt: ${trigger}`)
+  if (model.trainingSteps) fm.push(`training_steps: ${model.trainingSteps}`)
+  fm.push('network_type: lora', 'library_name: ai-toolkit', '---', '')
+
+  // ── body ─────────────────────────────────────────────────────────────────
+  const body: string[] = [`# ${model.nomen}`, '']
+  body.push(model.description?.trim() || `A LoRA for ${facts.displayBase}.`, '')
+  if (trigger) body.push(`**Trigger word:** \`${trigger}\``)
+  if (model.provenance) {
+    const from = model.provenance.base ? ` (${model.provenance.base})` : ''
+    body.push(`_Retrained onto ${facts.displayBase} from [${model.provenance.repo}](https://huggingface.co/${model.provenance.repo})${from}._`)
+  }
+  body.push('')
+
+  // Sample gallery (2-col), when previews were generated + committed.
+  if (model.samples && model.samples.length > 0) {
+    body.push('## Sample Outputs', '')
+    for (let i = 0; i < model.samples.length; i += 2) {
+      const row = model.samples.slice(i, i + 2)
+      body.push(`| ${row.map(s => `![sample](${s.pathInRepo})`).join(' | ')} |`)
+      body.push(`|${row.map(() => ':---:').join('|')}|`)
+      if (row.some(s => s.prompt)) body.push(`| ${row.map(s => (s.prompt ? `*${s.prompt}*` : '')).join(' | ')} |`)
+    }
+    body.push('')
+  }
+
+  // Usage.
+  body.push(
+    '## Usage (Diffusers)', '',
+    '```python',
+    'import torch',
+    `from diffusers import ${facts.pipelineClass}`,
+    '',
+    `pipe = ${facts.pipelineClass}.from_pretrained(`,
+    `    "${facts.inferenceRepo}", torch_dtype=torch.bfloat16`,
+    ').to("cuda")',
+    `pipe.load_lora_weights("${repo}")`,
+    `image = pipe("${trigger ? `${trigger}, ` : ''}a character portrait", guidance_scale=4.0, num_inference_steps=25).images[0]`,
+    'image.save("out.png")',
+    '```', '',
+    '## Recommended Settings', '',
+    '| LoRA strength | Guidance | Steps | Resolution |',
+    '|---|---|---|---|',
+    '| 0.8–1.0 | 4.0 | 25 | 1024×1024 |', '',
+    '## Training Details', '',
+    `- **Base:** ${facts.baseRepo}`,
+    `- **Steps:** ${model.trainingSteps ?? 'n/a'} · **Network:** LoRA rank ${facts.rank} / alpha ${facts.rank}`,
+    `- **Optimizer:** adamw8bit, lr ${facts.lr} · **Scheduler:** flowmatch`,
+    `- **Resolution:** ${facts.resolution} (multi-res bucketed) · **Precision:** bf16 train / fp16 save`, '',
+    '## About', '',
+    'Trained on [StationThis](https://miladystation2.net) — an AI creative platform powered by $MS2.',
+    'Train your own LoRAs via [@stationthisbot](https://t.me/stationthisbot) on Telegram.', '',
+    '<sub>Published via noema.</sub>', '',
+  )
+
+  return [...fm, ...body].join('\n')
 }
 
 export class HuggingFaceUploader implements RegistryUploader {
@@ -82,7 +204,7 @@ export class HuggingFaceUploader implements RegistryUploader {
       repoId,
       message: `Upload ${filename}`,
       lfsFiles: [{ pathInRepo: filename, oid, size }],
-      textFiles: [{ pathInRepo: 'README.md', content: renderModelCard(req.model) }],
+      textFiles: [{ pathInRepo: 'README.md', content: renderModelCard(req.model, repoId) }],
     })
     return { externalRef: url }
   }

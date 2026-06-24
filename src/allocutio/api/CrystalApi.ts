@@ -761,6 +761,10 @@ export class CrystalApi {
         ...(m.trigger !== undefined ? { trigger: m.trigger } : {}),
         ...(m.familia !== undefined ? { familia: m.familia } : {}),
         ...(m.auctor !== undefined ? { auctor: m.auctor } : {}),
+        // Model-card enrichment (carried through to ModelView for the registry card).
+        ...(m.description !== undefined ? { description: m.description } : {}),
+        ...(m.trainingSteps !== undefined ? { trainingSteps: m.trainingSteps } : {}),
+        ...(m.provenance !== undefined ? { provenance: m.provenance } : {}),
       }
     }
     if (ref.kind === 'collectio') {

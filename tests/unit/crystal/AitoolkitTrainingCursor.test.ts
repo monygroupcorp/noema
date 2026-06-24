@@ -7,6 +7,7 @@ import { AitoolkitTrainingCursor } from '../../../src/crystal/AitoolkitTrainingC
 import type { AitkJobStore } from '../../../src/crystal/AitkJobStore.js'
 import type { AitkSpawner, AitkRunSpec } from '../../../src/crystal/AitkSpawner.js'
 import type { AitkJob } from '../../../src/execution/aitkProgressus.js'
+import type { AitkOutcome } from '../../../src/crystal/aitoolkitRunnerClient.js'
 import { registerProgressusRecorder } from '../../../src/execution/progressusSink.js'
 import { withTrace, makeTraceContext } from '../../../src/lib/trace.js'
 import type { Actum } from '../../../src/types/actum.js'
@@ -31,7 +32,10 @@ class FakeStore implements AitkJobStore {
 
 class FakeSpawner implements AitkSpawner {
   started: AitkRunSpec[] = []
+  readableCalls = 0
+  order: string[] = []
   async start(spec: AitkRunSpec): Promise<void> { this.started.push(spec) }
+  async makeOutputsReadable(): Promise<void> { this.readableCalls++; this.order.push('readable') }
 }
 
 const actum = (aditus: Record<string, unknown>): Actum =>
@@ -90,6 +94,51 @@ test('run: jobId defaults to the Actum id when not in aditus', async () => {
   })
 })
 
+test('run: resolveOutput maps the completed outcome to exitus (training finality seam)', async () => {
+  const store = new FakeStore(COMPLETED)
+  const calls: AitkOutcome[] = []
+  const cursor = new AitoolkitTrainingCursor({
+    store, spawner: new FakeSpawner(), image: 'img:1', pollIntervalMs: 1,
+    resolveOutput: async (_actum, outcome) => { calls.push(outcome); return { trained: true, steps: outcome.lastStep, loraId: 'lora-1', loraUrl: 'https://cdn/x' } },
+  })
+  await withRecorder('act-train', async () => {
+    const result = await cursor.run(actum({ steps: 60, configPath: 'c.yaml' }))
+    assert.equal(result.kind, 'sync')
+    if (result.kind !== 'sync') return
+    assert.deepEqual(result.exitus.exitus, { trained: true, steps: 60, loraId: 'lora-1', loraUrl: 'https://cdn/x' })
+  })
+  assert.deepEqual(calls.map(c => c.status), ['completed'])
+})
+
+test('run: resolveOutput is NOT called when the run fails (no finality on a non-completed run)', async () => {
+  const calls: AitkOutcome[] = []
+  const spawner = new FakeSpawner()
+  const cursor = new AitoolkitTrainingCursor({
+    store: new FakeStore([{ status: 'error', step: 5, info: 'CUDA out of memory' }]),
+    spawner, image: 'img:1', pollIntervalMs: 1,
+    resolveOutput: async (_a, o) => { calls.push(o); return {} },
+  })
+  await withRecorder('act-train', async () => {
+    await assert.rejects(() => cursor.run(actum({ steps: 100, configPath: 'c.yaml' })))
+  })
+  assert.equal(calls.length, 0)
+  assert.equal(spawner.readableCalls, 0, 'no readability pass on a failed run')
+})
+
+test('run: a completed run makes outputs host-readable BEFORE the finalizer reads them', async () => {
+  const spawner = new FakeSpawner()
+  const order = spawner.order
+  const cursor = new AitoolkitTrainingCursor({
+    store: new FakeStore(COMPLETED), spawner, image: 'img:1', pollIntervalMs: 1,
+    resolveOutput: async () => { order.push('finalize'); return { trained: true, steps: 60 } },
+  })
+  await withRecorder('act-train', async () => {
+    await cursor.run(actum({ steps: 60, configPath: 'c.yaml' }))
+  })
+  assert.equal(spawner.readableCalls, 1)
+  assert.deepEqual(order, ['readable', 'finalize'], 'chmod the outputs, THEN read them')
+})
+
 test('run: an error outcome throws so the Actum goes fractus (and still records failed)', async () => {
   const store = new FakeStore([
     { status: 'running', step: 5, info: 'Training' },
@@ -102,13 +151,42 @@ test('run: an error outcome throws so the Actum goes fractus (and still records 
   })
 })
 
-test('run: a missing configPath is rejected before anything is seeded or spawned', async () => {
+test('run: with no configPath and no dataset, rejects before seeding or spawning', async () => {
   const store = new FakeStore(COMPLETED)
   const spawner = new FakeSpawner()
   const cursor = new AitoolkitTrainingCursor({ store, spawner, image: 'img:1', pollIntervalMs: 1 })
-  await assert.rejects(() => cursor.run(actum({ steps: 60 })), /configPath` is required/)
+  await assert.rejects(() => cursor.run(actum({ steps: 60 })), /`dataset` is required/)
   assert.equal(store.seeded.length, 0)
   assert.equal(spawner.started.length, 0)
+})
+
+test('run: the modus SYNTHESISES the config from the dataset + knobs, then spawns it', async () => {
+  const store = new FakeStore(COMPLETED)
+  const spawner = new FakeSpawner()
+  const written: Array<{ jobId: string; yaml: string }> = []
+  const cursor = new AitoolkitTrainingCursor({
+    store, spawner, image: 'img:1', pollIntervalMs: 1,
+    writeConfig: async (jobId, yaml) => { written.push({ jobId, yaml }); return `config/${jobId}.yaml` },
+  })
+  await withRecorder('act-train', async () => {
+    const result = await cursor.run(actum({ jobId: 'koh', steps: 500, dataset: '/data/koh', baseModel: 'klein-4b', triggerWord: 'koh' }))
+    assert.equal(result.kind, 'sync')
+  })
+  // one config generated for this run, carrying the user's knobs (no hand-authored yaml).
+  assert.equal(written.length, 1)
+  assert.equal(written[0].jobId, 'koh')
+  assert.match(written[0].yaml, /name: "koh"/)
+  assert.match(written[0].yaml, /trigger_word: "koh"/)
+  assert.match(written[0].yaml, /folder_path: "\/data\/koh"/)
+  assert.match(written[0].yaml, /steps: 500/)
+  assert.match(written[0].yaml, /FLUX\.2-klein-base-4B/)        // klein-4b preset resolved
+  // …and the spawner ran the GENERATED path.
+  assert.equal(spawner.started[0].configPath, 'config/koh.yaml')
+})
+
+test('run: a high-level run with no writeConfig configured is rejected', async () => {
+  const cursor = new AitoolkitTrainingCursor({ store: new FakeStore(COMPLETED), spawner: new FakeSpawner(), image: 'img:1', pollIntervalMs: 1 })
+  await assert.rejects(() => cursor.run(actum({ dataset: '/data/koh', baseModel: 'klein-4b', steps: 60 })), /no `writeConfig`/)
 })
 
 test('reserve: self-hosted on our GPU → modus.impetusFixum ?? 0n', async () => {
