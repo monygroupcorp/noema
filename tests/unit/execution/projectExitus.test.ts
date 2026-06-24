@@ -43,9 +43,33 @@ test('no schema → falls back to the bare media-type name', () => {
   assert.deepEqual(vid, { video: 'https://r2/x.webm' })
 })
 
-test('no URLs → raw items pass through under outputs', () => {
+test('text output lands under the declared text-typed exitus key (caption)', () => {
+  // ESSENTIA_QWEN3_VL_CAPTION declares exitus { caption: text } — a vLLM run returns {kind:'text',text}.
+  const m = modusWith({ caption: { type: 'text' } })
+  const out = projectExitus(m, [{ kind: 'text', text: 'a koh man, blonde hair, studio' }])
+  assert.deepEqual(out, { caption: 'a koh man, blonde hair, studio' })
+})
+
+test('text output: no schema → bare `text` key; extras under text2, text3', () => {
+  const out = projectExitus(null, [{ kind: 'text', text: 'first' }, { kind: 'text', text: 'second' }])
+  assert.deepEqual(out, { text: 'first', text2: 'second' })
+})
+
+test('media takes precedence over text when a run returns both', () => {
+  const m = modusWith({ image: { type: 'image' }, caption: { type: 'text' } })
+  const out = projectExitus(m, [{ kind: 'text', text: 'desc' }, { url: 'https://r2/a.png' }])
+  assert.deepEqual(out, { image: 'https://r2/a.png' })   // gen-path behavior unchanged
+})
+
+test('no URLs and no text → raw items pass through under outputs', () => {
   const m = modusWith({ text: { type: 'text' } })
   const items = [{ foo: 'bar' } as unknown as { url?: string }]
+  assert.deepEqual(projectExitus(m, items), { outputs: items })
+})
+
+test('empty text is not projected (falls through to outputs)', () => {
+  const m = modusWith({ caption: { type: 'text' } })
+  const items = [{ kind: 'text', text: '' }]
   assert.deepEqual(projectExitus(m, items), { outputs: items })
 })
 
