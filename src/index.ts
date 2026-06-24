@@ -102,8 +102,12 @@ const RUNPOD_WEBHOOK_URL = process.env.WEBHOOK_URL
 const RUNNER_STATUS_URL = process.env.WEBHOOK_URL
   ? `https://${process.env.WEBHOOK_URL.replace(/^https?:\/\//, '').replace(/\/$/, '')}/runner/status`
   : `http://localhost:${process.env.PORT ?? 3000}/runner/status`
-// Remote ai-toolkit training (Slice E) — present → the training modus runs on billed SECURE pods.
+// Remote ai-toolkit training (Slice E) — enabled → the training modus runs on billed SECURE pods.
+// ai-toolkit is bootstrapped over SSH onto a stock torch≥2.9 base (no custom image); AITK_REMOTE_IMAGE
+// optionally overrides the base, AITK_REF the cloned ai-toolkit commit.
+const AITK_REMOTE_ENABLE = process.env.AITK_REMOTE_ENABLE === '1' || !!process.env.AITK_REMOTE_IMAGE
 const AITK_REMOTE_IMAGE = process.env.AITK_REMOTE_IMAGE
+const AITK_REF = process.env.AITK_REF
 const AITK_REMOTE_MAX_SECONDS = process.env.AITK_REMOTE_MAX_SECONDS ? Number(process.env.AITK_REMOTE_MAX_SECONDS) : undefined
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID
@@ -371,10 +375,11 @@ async function main(): Promise<void> {
         installLive: (m: Materia, ids: string[]) => installCoordinator.installLive(m, ids),
       } : {}),
     } : {}),
-    ...(AITK_REMOTE_IMAGE ? {
+    ...(AITK_REMOTE_ENABLE ? {
       aitoolkitRemote: {
-        image: AITK_REMOTE_IMAGE,
         statusUrl: RUNNER_STATUS_URL,
+        ...(AITK_REMOTE_IMAGE ? { image: AITK_REMOTE_IMAGE } : {}),
+        ...(AITK_REF ? { aitkRef: AITK_REF } : {}),
         ...(AITK_REMOTE_MAX_SECONDS !== undefined ? { maxTrainingSeconds: AITK_REMOTE_MAX_SECONDS } : {}),
       },
     } : {}),

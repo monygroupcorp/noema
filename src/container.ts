@@ -209,8 +209,11 @@ export interface ContainerConfig {
    * `resolveExitus` seam, wired in index.ts.
    */
   aitoolkitRemote?: {
-    /** The ai-toolkit training image (ai-toolkit + run.py baked, base weights cached). */
-    image: string
+    /** Pod base image — a stock RunPod image with torch ≥2.9 (default `DEFAULT_AITK_IMAGE`);
+     *  ai-toolkit is bootstrapped onto it over SSH (no custom image to maintain). */
+    image?: string
+    /** ai-toolkit commit to clone on the pod (default the verified `DEFAULT_AITK_REF`). */
+    aitkRef?: string
     /** Our `/runner/status` sink URL — the pod POSTs its Progressus here. */
     statusUrl: string
     /** Reservation cap in pod-seconds (settled to actual at completion) — default 7200 (2h). */
@@ -520,7 +523,8 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
         config.runpodClient as unknown as { launchTrainingPod(opts: { image: string; env: Record<string, string> }): Promise<{ podId: string }> },
       ),
       resolver: makeDatasetResolver({ corpora }),
-      image: config.aitoolkitRemote.image,
+      ...(config.aitoolkitRemote.image ? { image: config.aitoolkitRemote.image } : {}),
+      ...(config.aitoolkitRemote.aitkRef ? { aitkRef: config.aitoolkitRemote.aitkRef } : {}),
       r2: config.runpodR2,
       statusUrl: config.aitoolkitRemote.statusUrl,
       webhookUrl: config.runpodWebhookUrl,
