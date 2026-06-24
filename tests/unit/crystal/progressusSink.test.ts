@@ -81,6 +81,13 @@ test('normalize: an empty/garbage pod is dropped', () => {
   assert.equal(normalizeProgressus({ phase: 'provisioning', pod: {} }, at(0)).pod, undefined)
 })
 
+test('normalize: a checkpoint rider is parsed (url string + step number); junk dropped', () => {
+  const p = normalizeProgressus({ phase: 'executing', checkpoint: { url: 'https://r2/ck.safetensors', step: 740 } }, at(0))
+  assert.deepEqual(p.checkpoint, { url: 'https://r2/ck.safetensors', step: 740 })
+  assert.equal(normalizeProgressus({ phase: 'executing', checkpoint: { url: 'x' } }, at(0)).checkpoint, undefined)        // no step
+  assert.equal(normalizeProgressus({ phase: 'executing', checkpoint: { step: 5 } }, at(0)).checkpoint, undefined)        // no url
+})
+
 // ── coldStartProgressus (build #6a — pod-lifecycle stages → timeline) ────────
 
 test('coldStartProgressus: maps the pod-lifecycle vocabulary; ignores comfyrunner stages', () => {
@@ -161,6 +168,24 @@ test('reportProgressus: appends transitions, coalesces per-tick, rolls up durati
     executing: 5000, // 4000 → 9000, ticks didn't fragment it
   })
   assert.deepEqual(final, { continue: true })
+})
+
+test('reportProgressus: captures the resume checkpoint anchor even on a coalesced per-tick report', async () => {
+  const { actorum, api } = await makeApi()
+  await actorum.create(makeActum())
+
+  await api.reportProgressus({ actumId: 'act-1', progressus: { phase: 'executing', at: at(0), progress: { done: 1, total: 1000, unit: 'steps' } } })
+  // a later per-tick executing report (the timeline coalesces it away) that ALSO carries a rescued checkpoint
+  await api.reportProgressus({ actumId: 'act-1', progressus: {
+    phase: 'executing', at: at(500), progress: { done: 250, total: 1000, unit: 'steps' },
+    checkpoint: { url: 'https://r2/training/koh/checkpoint.safetensors', step: 250 },
+  } })
+
+  const actum = await actorum.findById('act-1')
+  // the tick itself was coalesced (timeline still just the one executing) …
+  assert.deepEqual(actum?.progressus?.map(p => p.phase), ['executing'])
+  // … but the resume anchor was persisted regardless — survives a hard kill.
+  assert.deepEqual(actum?.resumeCheckpoint, { url: 'https://r2/training/koh/checkpoint.safetensors', step: 250 })
 })
 
 test('reportProgressus: a fractus Actum signals the runner to bail (continue:false)', async () => {

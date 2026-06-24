@@ -174,8 +174,17 @@ export function normalizeProgressus(raw: unknown, now: Date = new Date()): Progr
   else if (r.phase === undefined && typeof r.step === 'string') p.message = r.step  // legacy TEE {step}
   const resources = coerceResources(r.resources); if (resources) p.resources = resources
   const pod = coercePod(r.pod); if (pod) p.pod = pod
+  const checkpoint = coerceCheckpoint(r.checkpoint); if (checkpoint) p.checkpoint = checkpoint
   if (Array.isArray(r.parallel)) p.parallel = r.parallel.map(x => normalizeProgressus(x, now))
   return p
+}
+
+/** Coerce a `{url, step}` checkpoint rider — both fields required, else dropped. */
+function coerceCheckpoint(raw: unknown): { url: string; step: number } | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  if (typeof r.url !== 'string' || !r.url || typeof r.step !== 'number') return undefined
+  return { url: r.url, step: r.step }
 }
 
 // ── Cold-start projection (build #6a) ───────────────────────────────────────

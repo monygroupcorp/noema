@@ -4,7 +4,7 @@
 // manifest — no pod, no SSH, no GPU. The provisioner's SSH/GPU work is the live seam (step 5).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { RemoteAitkLauncher, securePodTrainingProvisioner, POD_DATASET_DIR, POD_AITK_DIR, DEFAULT_AITK_IMAGE, DEFAULT_AITK_REF } from '../../../src/crystal/RemoteAitkLauncher.js'
+import { RemoteAitkLauncher, securePodTrainingProvisioner, POD_DATASET_DIR, POD_AITK_DIR, POD_RESUME_PATH, DEFAULT_AITK_IMAGE, DEFAULT_AITK_REF } from '../../../src/crystal/RemoteAitkLauncher.js'
 import type { TrainingPodProvisioner } from '../../../src/crystal/RemoteAitkLauncher.js'
 import { makeDatasetResolver } from '../../../src/crystal/datasetManifest.js'
 import type { Corporum, Corpus, Corpora } from '../../../src/types/corpus.js'
@@ -94,6 +94,18 @@ test('launch: gpuId defaults to 0 when omitted', async () => {
   const h = harness()
   await h.launcher.launch({ actumId: 'a', jobId: 'j', dataset: MANIFEST, baseModel: 'klein-4b', triggerWord: 'koh', steps: 10 })
   assert.equal(h.calls[0].env.AITK_GPU_IDS, '0')
+})
+
+test('launch: resumeFrom sets AITK_RESUME_URL + pretrained_lora_path; absent on a fresh run', async () => {
+  const h = harness()
+  await h.launcher.launch({ actumId: 'a', jobId: 'j', dataset: MANIFEST, baseModel: 'klein-4b', triggerWord: 'koh', steps: 10, resumeFrom: 'https://r2/prior.safetensors' })
+  assert.equal(h.calls[0].env.AITK_RESUME_URL, 'https://r2/prior.safetensors')
+  assert.match(decode(h.calls[0].env.AITK_CONFIG_B64), new RegExp(`pretrained_lora_path: "${POD_RESUME_PATH}"`))
+
+  const h2 = harness()
+  await h2.launcher.launch({ actumId: 'a', jobId: 'j', dataset: MANIFEST, baseModel: 'klein-4b', triggerWord: 'koh', steps: 10 })
+  assert.equal(h2.calls[0].env.AITK_RESUME_URL, undefined)
+  assert.doesNotMatch(decode(h2.calls[0].env.AITK_CONFIG_B64), /pretrained_lora_path/)
 })
 
 test('launch: resolves a corpusId via the store (dataset ref, not just inline)', async () => {

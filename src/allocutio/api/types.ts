@@ -29,6 +29,9 @@ export interface Run {
   cost?: string
   /** When the run started, as an ISO-8601 string. */
   createdAt?: string
+  /** For a long run (training) that rescued checkpoints: the latest one. On a failed run this is
+   *  the resume anchor — fire a new run with `resumeFrom: url` and the remaining steps. */
+  resumeCheckpoint?: { url: string; step: number }
 }
 
 /** Public collection status — the externalised projection of CollectioStatus. */

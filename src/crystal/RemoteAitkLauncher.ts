@@ -30,6 +30,10 @@ export const POD_AITK_DIR = '/aitk'
  *  `folder_path` AND the pod's `AITK_DATASET_DIR`. Single-sourced here to keep them in lockstep. */
 export const POD_DATASET_DIR = `${POD_AITK_DIR}/dataset`
 
+/** Pod path the resume weights download to — the config's `pretrained_lora_path` AND the pod's
+ *  `AITK_RESUME_PATH` (default), single-sourced so they stay in lockstep. */
+export const POD_RESUME_PATH = `${POD_AITK_DIR}/resume.safetensors`
+
 /** ai-toolkit commit cloned on the pod — pinned to the SHA we live-verified locally (klein-4b). */
 export const DEFAULT_AITK_REF = 'af594061ab76402eb1261a0450538fba53b41411'
 
@@ -69,13 +73,15 @@ export class RemoteAitkLauncher implements RemoteAitkLauncherPort {
     // 1. dataset reference → manifest the pod pulls.
     const manifest = await this.deps.resolver.resolve(spec.dataset)
 
-    // 2. synthesise the config (pod-side dataset path) — the modus owns the yaml.
+    // 2. synthesise the config (pod-side dataset path) — the modus owns the yaml. On a resume,
+    //    point the network at the prior weights the pod will download (pretrained_lora_path).
     const yaml = buildAitkConfig({
       name: spec.jobId,
       datasetPath: POD_DATASET_DIR,
       triggerWord: spec.triggerWord,
       baseModel: spec.baseModel,
       steps: spec.steps,
+      ...(spec.resumeFrom ? { resumeFrom: POD_RESUME_PATH } : {}),
     })
 
     // 3. assemble the pod env (config + manifest base64'd; RUNPOD_POD_ID injected by the provisioner).
@@ -97,6 +103,10 @@ export class RemoteAitkLauncher implements RemoteAitkLauncherPort {
       R2_BUCKET_NAME: r2.bucket,
       R2_PUBLIC_URL: r2.publicUrl ?? '',
     }
+
+    // Resume/continue: the pod downloads these prior weights to POD_RESUME_PATH (where the
+    // config's pretrained_lora_path points) before training.
+    if (spec.resumeFrom) env.AITK_RESUME_URL = spec.resumeFrom
 
     // Auto-caption (default on): hand the pod an ai-toolkit Qwen3-VL caption config; it fills
     // captions for any staged image lacking a .txt sidecar BEFORE training (recaption:false →

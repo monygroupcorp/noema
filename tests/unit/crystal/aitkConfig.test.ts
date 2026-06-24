@@ -31,6 +31,13 @@ test('buildAitkConfig: aliases resolve, and overrides win over preset defaults',
   assert.match(yaml, /linear_alpha: 16/)
 })
 
+test('buildAitkConfig: resumeFrom emits network.pretrained_lora_path (weights-only resume); absent otherwise', () => {
+  const resumed = buildAitkConfig({ name: 'r', datasetPath: '/d', triggerWord: 't', baseModel: 'klein-4b', steps: 500, resumeFrom: '/aitk/resume.safetensors' })
+  assert.match(resumed, /pretrained_lora_path: "\/aitk\/resume\.safetensors"/)
+  const fresh = buildAitkConfig({ name: 'r', datasetPath: '/d', triggerWord: 't', baseModel: 'klein-4b', steps: 500 })
+  assert.doesNotMatch(fresh, /pretrained_lora_path/)
+})
+
 test('buildAitkConfig: an unknown base model is a hard error (no silent default)', () => {
   assert.throws(() => buildAitkConfig({ name: 'r', datasetPath: '/d', triggerWord: 't', baseModel: 'sdxl-not-seeded', steps: 100 }), /unknown baseModel/)
 })
