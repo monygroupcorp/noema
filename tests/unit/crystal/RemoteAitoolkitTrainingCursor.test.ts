@@ -29,7 +29,7 @@ test('run: launches the pod job with high-level inputs, stamps externusJobId + a
   assert.deepEqual(result, { kind: 'async', externusJobId: 'pod-42' })
   assert.equal(h.launched.length, 1)
   // the cursor passes the high-level training inputs — NOT a configPath (the launcher owns the yaml).
-  assert.deepEqual(h.launched[0], { actumId: 'act-remote', jobId: 'job-9', dataset: 'corpus-1', baseModel: 'klein-4b', triggerWord: 'koh', steps: 600, gpuId: '0', jobConfig: '{"x":1}' })
+  assert.deepEqual(h.launched[0], { actumId: 'act-remote', jobId: 'job-9', dataset: 'corpus-1', baseModel: 'klein-4b', triggerWord: 'koh', steps: 600, autocaption: true, gpuId: '0', jobConfig: '{"x":1}' })
   assert.deepEqual(h.updates, [{ id: 'act-remote', patch: { externusJobId: 'pod-42', status: 'agens' } }])
 })
 
@@ -37,7 +37,14 @@ test('run: jobId defaults to the actum id; optional fields omitted from the spec
   const h = harness()
   const cursor = new RemoteAitoolkitTrainingCursor({ launcher: h.launcher, actorum: h.actorum })
   await cursor.run(actum(HIGH_LEVEL))
-  assert.deepEqual(h.launched[0], { actumId: 'act-remote', jobId: 'act-remote', dataset: 'corpus-1', baseModel: 'klein-4b', triggerWord: 'koh', steps: 600 })
+  assert.deepEqual(h.launched[0], { actumId: 'act-remote', jobId: 'act-remote', dataset: 'corpus-1', baseModel: 'klein-4b', triggerWord: 'koh', steps: 600, autocaption: true })
+})
+
+test('run: autocaption defaults on, and aditus.autocaption:false threads through as opt-out', async () => {
+  const h = harness()
+  const cursor = new RemoteAitoolkitTrainingCursor({ launcher: h.launcher, actorum: h.actorum })
+  await cursor.run(actum({ ...HIGH_LEVEL, autocaption: false }))
+  assert.equal(h.launched[0].autocaption, false)
 })
 
 test('run: the required high-level inputs are validated before anything is launched or stamped', async () => {

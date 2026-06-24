@@ -63,6 +63,25 @@ class StageDatasetTests(unittest.TestCase):
         self.assertEqual([u for u, _ in fetched], ["https://r2/a.png", "https://r2/b.jpg"])
 
 
+class CaptionGapTests(unittest.TestCase):
+    def test_count_uncaptioned_counts_images_without_a_txt_sidecar(self):
+        with tempfile.TemporaryDirectory() as d:
+            # 0000 has a caption; 0001/0002 don't; notes.txt is not an image.
+            for name, body in [("0000.png", b"i"), ("0000.txt", b"c"), ("0001.png", b"i"),
+                               ("0002.jpg", b"i"), ("notes.txt", b"x")]:
+                with open(os.path.join(d, name), "wb") as f:
+                    f.write(body)
+            self.assertEqual(t.count_uncaptioned(d), 2)
+
+    def test_count_uncaptioned_zero_when_all_captioned_or_empty(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "a.png"), "wb") as f: f.write(b"i")
+            with open(os.path.join(d, "a.txt"), "wb") as f: f.write(b"c")
+            self.assertEqual(t.count_uncaptioned(d), 0)
+        with tempfile.TemporaryDirectory() as d2:
+            self.assertEqual(t.count_uncaptioned(d2), 0)
+
+
 class StatusSignalTests(unittest.TestCase):
     def test_running_is_executing_on_steps_with_total(self):
         sig = t.build_status_signal("act-1", {"status": "running", "step": 30, "info": "Training"}, cfg_steps=250)

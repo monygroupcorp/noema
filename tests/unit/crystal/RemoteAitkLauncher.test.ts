@@ -76,6 +76,18 @@ test('launch: resolves the dataset, generates the config, assembles env, provisi
   assert.equal(env.R2_PUBLIC_URL, 'https://cdn.example')
   // RUNPOD_POD_ID is injected by the provisioner (it knows the pod id), NOT by the launcher.
   assert.equal(env.RUNPOD_POD_ID, undefined)
+
+  // auto-caption on by default → a Qwen3-VL caption config rides along, pointed at the pod dataset dir.
+  const captionYaml = decode(env.AITK_CAPTION_CONFIG_B64)
+  assert.match(captionYaml, /type: Qwen3VLCaptioner/)
+  assert.match(captionYaml, /recaption: false/)                 // dataset captions win; fill only gaps
+  assert.match(captionYaml, new RegExp(`path_to_caption: "${POD_DATASET_DIR}"`))
+})
+
+test('launch: autocaption:false omits the caption config (raw images-as-given)', async () => {
+  const h = harness()
+  await h.launcher.launch({ actumId: 'a', jobId: 'j', dataset: MANIFEST, baseModel: 'klein-4b', triggerWord: 'koh', steps: 10, autocaption: false })
+  assert.equal(h.calls[0].env.AITK_CAPTION_CONFIG_B64, undefined)
 })
 
 test('launch: gpuId defaults to 0 when omitted', async () => {

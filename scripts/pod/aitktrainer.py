@@ -159,6 +159,21 @@ def stage_dataset(manifest: list, dataset_dir: str, fetch=_download) -> int:
     return len(manifest)
 
 
+def count_uncaptioned(dataset_dir: str) -> int:
+    """How many image files in the dir lack a sibling .txt caption — what the captioner will fill.
+    Dataset-provided captions (written by stage_dataset) already have a .txt, so they're skipped."""
+    try:
+        names = os.listdir(dataset_dir)
+    except OSError:
+        return 0
+    n = 0
+    for name in names:
+        stem, ext = os.path.splitext(name)
+        if ext.lower() in _IMG_EXTS and not os.path.exists(os.path.join(dataset_dir, f"{stem}.{CAPTION_EXT}")):
+            n += 1
+    return n
+
+
 def build_status_signal(actum_id: str, row: dict, cfg_steps=None) -> dict:
     """Project a Job row → the minimal Progressus signal POSTed to /runner/status. Maps to the
     SAME Phasis taxonomy aitkJobToProgressus uses (terminal done/failed; executing on steps)."""
@@ -240,6 +255,19 @@ def read_job_row(db_path: str, job_id: str) -> dict:
 # Main — drive the run (the untestable shell: subprocess + GPU + network)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def run_caption(aitk_dir: str, caption_path: str) -> None:
+    """Run ai-toolkit's Qwen3-VL captioner over the dataset dir (fills missing .txt sidecars).
+    Runs as a plain directory captioner — AITK_JOB_ID is removed from its env so the captioner
+    doesn't touch the training Job row we poll. Raises with the run.py tail on failure."""
+    cap_log = os.path.join(aitk_dir, "caption.runlog")
+    env = {k: v for k, v in os.environ.items() if k != "AITK_JOB_ID"}
+    with open(cap_log, "wb") as lf:
+        rc = subprocess.call(["python", "-u", "run.py", caption_path], cwd=aitk_dir, env=env,
+                             stdout=lf, stderr=subprocess.STDOUT)
+    if rc != 0:
+        raise RuntimeError(f"captioning failed (run.py exit {rc}) | run.py tail:\n{_tail(cap_log)}")
+
+
 def _env(name: str, default=None, required: bool = False) -> str:
     v = os.environ.get(name, default)
     if required and not v:
@@ -285,6 +313,21 @@ def main() -> int:
         manifest = parse_manifest(base64.b64decode(_env("AITK_MANIFEST_B64", required=True)).decode("utf-8"))
         n = stage_dataset(manifest, dataset_dir)
         log.info(f"staged {n} images → {dataset_dir}")
+
+        # 2b. auto-caption: fill captions for images that arrived without one (ai-toolkit's Qwen3-VL
+        #     captioner, in-process transformers). recaption:false in the config → dataset captions win.
+        caption_b64 = _env("AITK_CAPTION_CONFIG_B64", "")
+        missing = count_uncaptioned(dataset_dir)
+        if caption_b64 and missing > 0:
+            _post_status(status_url, {"actumId": actum_id,
+                                      "progressus": {"phase": "downloading", "target": "dataset",
+                                                     "message": f"captioning {missing} images"}})
+            caption_path = os.path.join(config_dir, "caption.yaml")
+            with open(caption_path, "w", encoding="utf-8") as f:
+                f.write(base64.b64decode(caption_b64).decode("utf-8"))
+            log.info(f"captioning {missing} uncaptioned images via {caption_path}")
+            run_caption(aitk_dir, caption_path)
+            log.info("captioning done")
 
         # 3. seed the Job row, then 4. run the trainer — capturing run.py's output so a startup
         #    crash (the reason it exited) travels back in the failure instead of a bare exit code.
