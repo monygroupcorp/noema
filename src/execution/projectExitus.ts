@@ -48,13 +48,32 @@ function primaryMediaKey(
   return media.find(([, p]) => p.type === urlType)?.[0]
 }
 
-type OutputItem = { url?: string } | string
+/**
+ * The exitus key to land the primary TEXT output under, from the Modus's schema: the sole
+ * text-typed Porta when there is one, else the first declared. (Text has no extension to
+ * disambiguate on, so first-declared is the sensible pick — most text flows declare one.)
+ */
+function primaryTextKey(exitus: Modus['exitus'] | undefined): string | undefined {
+  if (!exitus) return undefined
+  const text = Object.entries(exitus).filter(([, p]) => p.type === 'text')
+  return text[0]?.[0]
+}
+
+type OutputItem = { url?: string; text?: string; kind?: string } | string
+
+/** The text payload of a pod output item — `{ kind:'text', text }` (vLLM/LLM runs). */
+function textOf(o: OutputItem): string | undefined {
+  if (o !== null && typeof o === 'object' && typeof o.text === 'string' && o.text !== '') return o.text
+  return undefined
+}
 
 /**
- * Project raw pod outputs into `actum.exitus`, keyed by the Modus's declared
- * exitus schema. Extra media URLs beyond the first land under `<key>2`, `<key>3`…
- * (preserving the legacy multi-image behavior). When there are no URLs, the raw
- * items pass through under `outputs` (e.g. inline/text-only runs handled elsewhere).
+ * Project raw pod outputs into `actum.exitus`, keyed by the Modus's declared exitus schema.
+ *   - media URL outputs → the declared media-typed key (`<key>2`, `<key>3`… for extras);
+ *   - text outputs (`{kind:'text',text}` from LLM/VLM runs) → the declared text-typed key
+ *     (default `text`), so a caption/summary lands under `caption`/`summary` not a raw blob;
+ *   - neither → the raw items pass through under `outputs`.
+ * Media takes precedence when a run returns both (the existing gen-path behavior is unchanged).
  */
 export function projectExitus(
   modus: Pick<Modus, 'exitus'> | null | undefined,
@@ -64,11 +83,21 @@ export function projectExitus(
     .map(o => (typeof o === 'object' && o !== null && 'url' in o ? o.url : undefined))
     .filter((u): u is string => !!u)
 
-  if (urls.length === 0) return { outputs: outputItems }
+  if (urls.length > 0) {
+    const type = urlMediaType(urls[0])
+    const key = primaryMediaKey(modus?.exitus, type) ?? type
+    const out: Record<string, unknown> = { [key]: urls[0] }
+    urls.slice(1).forEach((u, i) => { out[`${key}${i + 2}`] = u })
+    return out
+  }
 
-  const type = urlMediaType(urls[0])
-  const key = primaryMediaKey(modus?.exitus, type) ?? type
-  const out: Record<string, unknown> = { [key]: urls[0] }
-  urls.slice(1).forEach((u, i) => { out[`${key}${i + 2}`] = u })
-  return out
+  const texts = outputItems.map(textOf).filter((t): t is string => t !== undefined)
+  if (texts.length > 0) {
+    const key = primaryTextKey(modus?.exitus) ?? 'text'
+    const out: Record<string, unknown> = { [key]: texts[0] }
+    texts.slice(1).forEach((t, i) => { out[`${key}${i + 2}`] = t })
+    return out
+  }
+
+  return { outputs: outputItems }
 }
