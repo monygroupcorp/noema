@@ -14,7 +14,11 @@ a LoRA on a dataset manifest and reports back through the same finality the loca
 ## What is / isn't baked
 - **Baked:** torch + ai-toolkit deps + the `/aitk` clone (pinned `AITK_REF`) + boto3 + sshd/start.sh.
 - **Not baked — pulled at boot:** the base weights (klein-4b + Qwen3-4B TE + flux2_vae, ~25 GB,
-  ungated) — ai-toolkit `from_pretrained`-pulls them on first run (~8–12 min cold). Keeps the image ~10 GB.
+  ungated) — ai-toolkit `from_pretrained`-pulls them on first run (~8–12 min cold).
+- **Image size ≈ 30 GB** (CUDA *devel* base + torch/cu128 + the full ai-toolkit dep tree). With
+  pull-at-boot weights, a cold pod fetches ~30 GB image + ~25 GB weights on its first run. A later
+  slim could swap the `runtime` CUDA base (saves ~5 GB) if no dep needs `nvcc`, and/or a RunPod
+  network-volume HF cache to avoid re-pulling weights per pod.
 - **Not baked — shipped over SSH:** `aitktrainer.py` (SecurePodClient uploads it at bootstrap), so the
   image is stable across runner edits.
 
