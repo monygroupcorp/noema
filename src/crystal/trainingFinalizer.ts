@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import type { Actum } from '../types/actum.js'
 import type { Intella, IntellaSource } from '../types/intelligendi.js'
-import type { Uploader } from './R2Uploader.js'
+import type { Uploader, ObjectStore } from './R2Uploader.js'
 import type { MediaFetcher } from './MediaFetcher.js'
 import type { AitkOutcome } from './aitoolkitRunnerClient.js'
 import { buildAitkConfig, DEFAULT_SAMPLE_PROMPTS } from './aitkConfig.js'
@@ -151,6 +151,17 @@ export function makeTrainingFinalizer(
       natum: now(),
     }
     await deps.intellae.upsert(intella)
+
+    // Cleanup (REMOTE success only): the run completed, so the rescued intermediate checkpoint is
+    // no longer a resume anchor, and the pod-uploaded final is now redundant (re-hosted above to
+    // models/<id>/). Sweep both scratch weights to reclaim space; KEEP samples/ — the Intella's
+    // durable previews reference them. Best-effort + last (after the durable upsert); idempotent.
+    // (A FAILED run never reaches here, so its checkpoint is preserved for resume.)
+    const store = deps.store as Partial<ObjectStore>
+    if (outcome.outputUrl && typeof store.del === 'function') {
+      await store.del(`training/${jobId}/checkpoint.safetensors`).catch(() => {})
+      await store.del(`training/${jobId}/${filename}`).catch(() => {})
+    }
 
     return { trained: true, steps: outcome.lastStep, loraId: id, loraUrl }
   }
