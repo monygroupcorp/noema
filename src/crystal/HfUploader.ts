@@ -120,6 +120,13 @@ function baseFacts(familia?: string): BaseFacts {
  * trigger, sample gallery, usage, settings, training details, about). `repoId` is the
  * `account/slug` used in the load snippet; falls back to the model slug.
  */
+/** One-line, pipe-safe, truncated caption — dataset-derived prompts are long + multi-paragraph,
+ *  which breaks markdown table cells and bloats widget text. Collapse whitespace, escape `|`, clip. */
+function galleryCaption(s: string, n = 90): string {
+  const one = s.replace(/\s+/g, ' ').replace(/\|/g, '/').trim()
+  return one.length > n ? `${one.slice(0, n - 1).trimEnd()}…` : one
+}
+
 export function renderModelCard(model: ModelView, repoId?: string): string {
   const facts = baseFacts(model.familia)
   const trigger = model.trigger ?? ''
@@ -136,7 +143,15 @@ export function renderModelCard(model: ModelView, repoId?: string): string {
   ]
   if (trigger) fm.push(`instance_prompt: ${JSON.stringify(trigger)}`)   // quoted — a numeric-looking trigger (e.g. "333") must stay a YAML string, else HF rejects the card
   if (model.trainingSteps) fm.push(`training_steps: ${model.trainingSteps}`)
-  fm.push('network_type: lora', 'library_name: ai-toolkit', '---', '')
+  fm.push('network_type: lora', 'library_name: ai-toolkit')
+  // widget → HF renders the first output as the model's preview thumbnail (uniform org grid, like the old cards).
+  if (model.samples && model.samples.length > 0) {
+    fm.push('widget:')
+    for (const s of model.samples) {
+      fm.push(`- text: ${JSON.stringify(galleryCaption(s.prompt ?? trigger, 120))}`, '  output:', `    url: ${s.pathInRepo}`)
+    }
+  }
+  fm.push('---', '')
 
   // ── body ─────────────────────────────────────────────────────────────────
   const body: string[] = [`# ${model.nomen}`, '']
@@ -155,7 +170,7 @@ export function renderModelCard(model: ModelView, repoId?: string): string {
       const row = model.samples.slice(i, i + 2)
       body.push(`| ${row.map(s => `![sample](${s.pathInRepo})`).join(' | ')} |`)
       body.push(`|${row.map(() => ':---:').join('|')}|`)
-      if (row.some(s => s.prompt)) body.push(`| ${row.map(s => (s.prompt ? `*${s.prompt}*` : '')).join(' | ')} |`)
+      if (row.some(s => s.prompt)) body.push(`| ${row.map(s => (s.prompt ? `*${galleryCaption(s.prompt)}*` : '')).join(' | ')} |`)
     }
     body.push('')
   }
