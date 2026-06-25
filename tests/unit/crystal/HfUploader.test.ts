@@ -140,6 +140,18 @@ test('renderModelCard: provenance backlink + sample gallery when present', () =>
   assert.match(card, /Retrained onto FLUX\.2 \[klein\] 4B from \[ms2stationthis\/drifella\]/)
   assert.match(card, /## Sample Outputs/)
   assert.match(card, /!\[sample\]\(samples\/sample_000\.jpg\)/)
+  // widget frontmatter → HF preview thumbnail
+  assert.match(card, /widget:\n- text: "mld, a portrait"\n {2}output:\n {4}url: samples\/sample_000\.jpg/)
+})
+
+test('renderModelCard: a long multi-line dataset caption is one-lined + clipped in the grid (and widget)', () => {
+  const long = 'mld, ' + 'This is a photograph with a grainy filter.\n\nThe subject faces right | pipe.'.repeat(4)
+  const card = renderModelCard({ ...MODEL, familia: 'flux2-klein',
+    samples: [{ url: 'https://cdn/s0.jpg', pathInRepo: 'samples/sample_000.jpg', prompt: long }] })
+  const galleryLine = card.split('\n').find(l => l.includes('*mld'))!
+  const caption = galleryLine.match(/\*(.+)\*/)![1]                     // the italic caption text in the cell
+  assert.ok(galleryLine.length < 140 && caption.endsWith('…'))          // single line, clipped + truncated
+  assert.ok(!caption.includes('|'))                                     // inner pipes escaped → table not broken
 })
 
 test('renderModelCard: unknown familia falls back to FLUX.1 [dev] facts', () => {
