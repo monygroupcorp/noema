@@ -134,7 +134,7 @@ export function renderModelCard(model: ModelView, repoId?: string): string {
     'pipeline_tag: text-to-image',
     `tags: [${facts.tags.join(', ')}]`,
   ]
-  if (trigger) fm.push(`instance_prompt: ${trigger}`)
+  if (trigger) fm.push(`instance_prompt: ${JSON.stringify(trigger)}`)   // quoted — a numeric-looking trigger (e.g. "333") must stay a YAML string, else HF rejects the card
   if (model.trainingSteps) fm.push(`training_steps: ${model.trainingSteps}`)
   fm.push('network_type: lora', 'library_name: ai-toolkit', '---', '')
 
