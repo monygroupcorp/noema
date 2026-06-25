@@ -146,15 +146,18 @@ async function trainingAditus(name: string, datasetDir: string): Promise<Record<
 
 // ─ train: local Docker cursor + full finality ─────────────────────────────────
 
-async function train(name: string): Promise<Record<string, unknown>> {
-  const { dir } = await fetchDataset(name)
-  const R2 = {
+function r2cfg() {
+  return {
     endpoint: `https://${r('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com`,
     accessKeyId: r('R2_ACCESS_KEY_ID'), secretAccessKey: r('R2_SECRET_ACCESS_KEY'),
     bucket: r('R2_BUCKET_NAME'), publicUrl: process.env.R2_PUBLIC_URL,
   }
+}
+
+async function train(name: string): Promise<Record<string, unknown>> {
+  const { dir } = await fetchDataset(name)
   const mongo = new MongoClient(r('MONGODB_URI')); await mongo.connect()
-  const store = new R2Uploader(R2)
+  const store = new R2Uploader(r2cfg())
   const finalize = withLocalSamples(
     makeTrainingFinalizer({
       reader: fsLoraReader(`${AITK_DIR}/output`),
@@ -221,7 +224,7 @@ async function publish(name: string): Promise<void> {
       // derive each sample's repo path exactly as CrystalApi._artifactOutput does.
       ...(Array.isArray(i.samples) && i.samples.length
         ? { samples: i.samples.map((s: { url: string; prompt?: string }, idx: number) =>
-            ({ url: s.url, pathInRepo: `samples/sample_${String(idx).padStart(3, '0')}.jpg`, ...(s.prompt ? { prompt: s.prompt } : {}) })) }
+            ({ url: s.url, pathInRepo: `samples/sample_${String(idx).padStart(3, '0')}${(s.url.match(/\.(png|jpe?g|webp)(?:\?|$)/i)?.[1] ? '.' + s.url.match(/\.(png|jpe?g|webp)(?:\?|$)/i)![1].toLowerCase() : '.jpg')}`, ...(s.prompt ? { prompt: s.prompt } : {}) })) }
         : {}),
       ...(typeof i.configYaml === 'string' ? { configYaml: i.configYaml } : {}),
     }
@@ -270,6 +273,98 @@ async function batch(limit: number, dryRun = false): Promise<void> {
   for (const r of results) console.log(`  ${r.ok ? '✓' : '✗'} ${r.name}${r.error ? ' — ' + r.error : ''}`)
 }
 
+// ─ backfill: re-render an already-published model's gallery on dataset captions ──────────────────
+
+const COMFY = process.env.COMFY_HOST ?? 'http://127.0.0.1:8188'
+const sleep = (ms: number): Promise<void> => new Promise((res) => setTimeout(res, ms))
+
+/** Flat FLUX.2 klein-4b (base) + LoRA text-to-image graph in ComfyUI API-prompt format. */
+function kleinApiGraph(loraFile: string, prompt: string, seed: number): Record<string, unknown> {
+  return {
+    '1':  { class_type: 'UNETLoader', inputs: { unet_name: 'flux-2-klein-base-4b.safetensors', weight_dtype: 'default' } },
+    '2':  { class_type: 'LoraLoaderModelOnly', inputs: { model: ['1', 0], lora_name: loraFile, strength_model: 1.0 } },
+    '3':  { class_type: 'CLIPLoader', inputs: { clip_name: 'qwen_3_4b.safetensors', type: 'flux2', device: 'default' } },
+    '4':  { class_type: 'CLIPTextEncode', inputs: { text: prompt, clip: ['3', 0] } },
+    '5':  { class_type: 'CLIPTextEncode', inputs: { text: '', clip: ['3', 0] } },
+    '6':  { class_type: 'VAELoader', inputs: { vae_name: 'flux2-vae.safetensors' } },
+    '7':  { class_type: 'EmptyFlux2LatentImage', inputs: { width: 1024, height: 1024, batch_size: 1 } },
+    '8':  { class_type: 'Flux2Scheduler', inputs: { steps: 20, width: 1024, height: 1024 } },
+    '9':  { class_type: 'KSamplerSelect', inputs: { sampler_name: 'euler' } },
+    '10': { class_type: 'CFGGuider', inputs: { model: ['2', 0], positive: ['4', 0], negative: ['5', 0], cfg: 5.0 } },
+    '11': { class_type: 'RandomNoise', inputs: { noise_seed: seed } },
+    '12': { class_type: 'SamplerCustomAdvanced', inputs: { noise: ['11', 0], guider: ['10', 0], sampler: ['9', 0], sigmas: ['8', 0], latent_image: ['7', 0] } },
+    '13': { class_type: 'VAEDecode', inputs: { samples: ['12', 0], vae: ['6', 0] } },
+    '14': { class_type: 'SaveImage', inputs: { filename_prefix: 'backfill', images: ['13', 0] } },
+  }
+}
+
+/** Submit a graph to ComfyUI, wait for the render, return the PNG bytes. */
+async function renderSample(loraFile: string, prompt: string, seed: number): Promise<Buffer> {
+  const sub = await fetch(`${COMFY}/prompt`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: kleinApiGraph(loraFile, prompt, seed) }) })
+  const body = await sub.json()
+  const pid = body?.prompt_id
+  if (!pid) throw new Error(`comfy rejected: ${JSON.stringify(body)}`)
+  for (let i = 0; i < 300; i++) {
+    await sleep(2000)
+    const h = await (await fetch(`${COMFY}/history/${pid}`)).json().catch(() => ({}))
+    const entry = h[pid]
+    if (!entry) continue
+    if (entry.status?.status_str === 'error') throw new Error('comfy render error')
+    for (const out of Object.values(entry.outputs ?? {}) as Array<{ images?: Array<{ filename: string; subfolder?: string; type?: string }> }>) {
+      const im = out.images?.[0]
+      if (im) {
+        const q = `filename=${encodeURIComponent(im.filename)}&subfolder=${encodeURIComponent(im.subfolder ?? '')}&type=${im.type ?? 'output'}`
+        return Buffer.from(await (await fetch(`${COMFY}/view?${q}`)).arrayBuffer())
+      }
+    }
+  }
+  throw new Error('comfy render timeout')
+}
+
+/** Delete files from an HF repo (NDJSON commit) — used to prune stale sample images. */
+async function deleteRepoFiles(repo: string, paths: string[]): Promise<void> {
+  if (paths.length === 0) return
+  const lines = [JSON.stringify({ key: 'header', value: { summary: 'prune stale samples' } })]
+  for (const p of paths) lines.push(JSON.stringify({ key: 'deletedFile', value: { path: p } }))
+  const res = await fetch(`${HF}/api/models/${repo}/commit/main`, {
+    method: 'POST', headers: { Authorization: `Bearer ${r('HF_TOKEN')}`, 'Content-Type': 'application/x-ndjson' },
+    body: lines.join('\n') + '\n',
+  })
+  if (!res.ok) throw new Error(`hf delete ${repo}: ${res.status} ${await res.text()}`)
+}
+
+/** Re-render an already-published model's card gallery on dataset captions, then re-publish. */
+async function backfill(name: string): Promise<void> {
+  const { Jimp } = await import('jimp')
+  const slug = `${name}-klein`
+  const trigger = await triggerWord(name)
+  const items = await sourceDatasetItems(name)
+  const prompts = deriveSamplePrompts(items.map((i) => i.caption)).map((p) => p.replace(/\[trigger\]/g, trigger))
+  const mongo = new MongoClient(r('MONGODB_URI')); await mongo.connect()
+  try {
+    const col = mongo.db(DB).collection('intellae')
+    const intella = await col.findOne({ slug })
+    if (!intella) throw new Error(`no registered Intella with slug ${slug} — train first`)
+    const store = new R2Uploader(r2cfg())
+    const samples: Array<{ url: string; prompt: string }> = []
+    for (let idx = 0; idx < prompts.length; idx++) {
+      console.log(`[${ts()}] render ${slug} sample ${idx + 1}/${prompts.length}: ${prompts[idx].slice(0, 70)}…`)
+      const png = await renderSample(`${slug}.safetensors`, prompts[idx], 42 + idx)
+      const jpg = await (await Jimp.read(png)).getBuffer('image/jpeg')   // .jpg overwrites the originals on re-publish
+      const url = await store.put(`models/${intella.id}/samples/sample_${String(idx).padStart(3, '0')}.jpg`, jpg, 'image/jpeg')
+      samples.push({ url, prompt: prompts[idx] })
+    }
+    await col.updateOne({ slug }, { $set: { samples } })
+    console.log(`[${ts()}] updated ${slug} Intella with ${samples.length} dataset-prompt samples`)
+  } finally { await mongo.close() }
+  await publish(name)
+  // prune any stale sample files (e.g. a prior .png set) the fresh .jpg commit didn't overwrite.
+  const keep = new Set(prompts.map((_, idx) => `samples/sample_${String(idx).padStart(3, '0')}.jpg`))
+  const sib: string[] = ((await (await fetch(`${HF}/api/models/${ORG}/${slug}`)).json()).siblings ?? []).map((s: { rfilename: string }) => s.rfilename)
+  const stale = sib.filter((f) => f.startsWith('samples/') && !keep.has(f))
+  if (stale.length) { await deleteRepoFiles(`${ORG}/${slug}`, stale); console.log(`[${ts()}] pruned ${stale.length} stale samples: ${stale.join(', ')}`) }
+}
+
 async function main(): Promise<void> {
   const [cmd, arg] = process.argv.slice(2)
   const confirm = process.argv.includes('--confirm')
@@ -292,6 +387,12 @@ async function main(): Promise<void> {
   }
   if (cmd === 'publish') { if (!arg) throw new Error('usage: publish <name>'); await publish(arg); return }
   if (cmd === 'batch') { await batch(arg ? Number(arg) : 99, !confirm); return }
+  if (cmd === 'backfill') {
+    if (!arg) throw new Error('usage: backfill <name|all>')
+    const names = arg === 'all' ? ['333flux','13angel33flux','aeonflux','aespaflux','animalcrossingflux'] : [arg]
+    for (const n of names) { console.log(`\n[${ts()}] ===== BACKFILL ${n} =====`); await backfill(n) }
+    return
+  }
   if (cmd === 'run') {
     if (!arg) throw new Error('usage: run <name> --confirm')
     if (!confirm) throw new Error('refusing a multi-hour GPU run without --confirm')
