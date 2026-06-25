@@ -2,7 +2,7 @@
 // steps} into the ai-toolkit ui_trainer yaml from a per-base-model preset. Deterministic.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildAitkConfig, resolveBasePreset, buildAitkCaptionConfig, DEFAULT_CAPTION_PROMPT } from '../../../src/crystal/aitkConfig.js'
+import { buildAitkConfig, resolveBasePreset, buildAitkCaptionConfig, DEFAULT_CAPTION_PROMPT, deriveSamplePrompts, parseSamplePrompts, DEFAULT_SAMPLE_PROMPTS } from '../../../src/crystal/aitkConfig.js'
 
 test('buildAitkConfig: user knobs + klein-4b preset → a complete ui_trainer config', () => {
   const yaml = buildAitkConfig({ name: 'koh', datasetPath: '/mnt/data/datasets/koh', triggerWord: 'koh', baseModel: 'flux2-klein-4b', steps: 500 })
@@ -59,6 +59,26 @@ test('buildAitkCaptionConfig: overrides win (model, prompt, tokens)', () => {
   assert.match(yaml, /model_name_or_path: "Qwen\/Qwen3-VL-4B"/)
   assert.match(yaml, /caption_prompt: "tag it"/)
   assert.match(yaml, /max_new_tokens: 64/)
+})
+
+test('deriveSamplePrompts: first n dataset captions, [trigger]-prefixed; falls back to defaults', () => {
+  const p = deriveSamplePrompts(['a cat on a roof', undefined, '  ', 'a dog in a [trigger] hat', 'x', 'y'], 3)
+  assert.deepEqual(p, ['[trigger], a cat on a roof', 'a dog in a [trigger] hat', '[trigger], x'])  // skips empties, keeps existing [trigger], caps at n
+  assert.deepEqual(deriveSamplePrompts([undefined, '']), DEFAULT_SAMPLE_PROMPTS)                    // no captions → defaults
+})
+
+test('parseSamplePrompts: a JSON array of strings, else undefined', () => {
+  assert.deepEqual(parseSamplePrompts('["a","b"]'), ['a', 'b'])
+  assert.equal(parseSamplePrompts('[]'), undefined)
+  assert.equal(parseSamplePrompts('not json'), undefined)
+  assert.equal(parseSamplePrompts('[1,2]'), undefined)
+  assert.equal(parseSamplePrompts(undefined), undefined)
+})
+
+test('buildAitkConfig: dataset-derived sample prompts land in the yaml', () => {
+  const yaml = buildAitkConfig({ name: 'k', datasetPath: '/d', triggerWord: 'koh', baseModel: 'klein-4b', steps: 500,
+    samplePrompts: ['[trigger], a koh by the sea'] })
+  assert.match(yaml, /- "\[trigger\], a koh by the sea"/)
 })
 
 test('buildAitkConfig is deterministic — identical inputs, identical yaml', () => {
