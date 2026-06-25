@@ -82,6 +82,7 @@ export class RemoteAitkLauncher implements RemoteAitkLauncherPort {
       baseModel: spec.baseModel,
       steps: spec.steps,
       ...(spec.resumeFrom ? { resumeFrom: POD_RESUME_PATH } : {}),
+      ...(spec.samplePrompts ? { samplePrompts: spec.samplePrompts } : {}),
     })
 
     // 3. assemble the pod env (config + manifest base64'd; RUNPOD_POD_ID injected by the provisioner).

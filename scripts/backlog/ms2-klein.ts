@@ -33,7 +33,7 @@ import { MongoClient } from 'mongodb'
 import { AitoolkitTrainingCursor } from '../../src/crystal/AitoolkitTrainingCursor.js'
 import { SqliteAitkJobStore } from '../../src/crystal/AitkJobStore.js'
 import { DockerAitkSpawner } from '../../src/crystal/AitkSpawner.js'
-import { fsConfigWriter } from '../../src/crystal/aitkConfig.js'
+import { fsConfigWriter, deriveSamplePrompts } from '../../src/crystal/aitkConfig.js'
 import { makeTrainingFinalizer, fsLoraReader, withLocalSamples } from '../../src/crystal/trainingFinalizer.js'
 import { R2Uploader } from '../../src/crystal/R2Uploader.js'
 import { MongoIntella } from '../../src/crystal/MongoIntella.js'
@@ -125,7 +125,11 @@ async function fetchDataset(name: string): Promise<{ dir: string; count: number 
 
 async function trainingAditus(name: string, datasetDir: string): Promise<Record<string, unknown>> {
   const trigger = await triggerWord(name)
+  // Sample the card gallery on the dataset's OWN captions — captures the LoRA's real look.
+  const items = await sourceDatasetItems(name).catch(() => [])
+  const samplePrompts = deriveSamplePrompts(items.map((i) => i.caption))
   return {
+    samplePrompts: JSON.stringify(samplePrompts),
     jobId: `${name}_klein`,
     dataset: datasetDir,                                     // host == container path (mounted identically)
     triggerWord: trigger,
@@ -236,6 +240,36 @@ async function publish(name: string): Promise<void> {
 
 // ─ entry ──────────────────────────────────────────────────────────────────────
 
+/** Has this repo already been converted? (its <name>-klein exists on HF). Makes batch resumable. */
+async function kleinExists(name: string): Promise<boolean> {
+  const res = await fetch(`${HF}/api/models/${ORG}/${name}-klein`)
+  return res.ok
+}
+
+/** Run the next N un-converted cohort-A repos serially, continuing past any failure. */
+async function batch(limit: number, dryRun = false): Promise<void> {
+  const models: Array<{ id: string }> = await hfJson(`/api/models?author=${ORG}&limit=100`)
+  const names = models.map((m) => m.id.split('/')[1]).filter((n) => !n.endsWith('-klein')).sort()
+  const queue: string[] = []
+  for (const name of names) {
+    if (queue.length >= limit) break
+    const info = await inspect(name).catch(() => null)
+    if (!info || info.images.length === 0) continue          // skip cohort B
+    if (await kleinExists(name)) { console.log(`[${ts()}] skip ${name} — ${name}-klein already exists`); continue }
+    queue.push(name)
+  }
+  console.log(`[${ts()}] batch of ${queue.length}: ${queue.join(', ')}`)
+  if (dryRun) { console.log(`[${ts()}] dry preview — pass --confirm to run`); return }
+  const results: Array<{ name: string; ok: boolean; error?: string }> = []
+  for (const name of queue) {
+    console.log(`\n[${ts()}] ===== START ${name} (${results.length + 1}/${queue.length}) =====`)
+    try { await train(name); await publish(name); results.push({ name, ok: true }); console.log(`[${ts()}] ===== OK ${name} =====`) }
+    catch (e) { const error = e instanceof Error ? e.message : String(e); results.push({ name, ok: false, error }); console.error(`[${ts()}] ===== FAILED ${name}: ${error} =====`) }
+  }
+  console.log(`\n[${ts()}] ===== BATCH DONE: ${results.filter((r) => r.ok).length}/${results.length} ok =====`)
+  for (const r of results) console.log(`  ${r.ok ? '✓' : '✗'} ${r.name}${r.error ? ' — ' + r.error : ''}`)
+}
+
 async function main(): Promise<void> {
   const [cmd, arg] = process.argv.slice(2)
   const confirm = process.argv.includes('--confirm')
@@ -257,6 +291,7 @@ async function main(): Promise<void> {
     await train(arg); return
   }
   if (cmd === 'publish') { if (!arg) throw new Error('usage: publish <name>'); await publish(arg); return }
+  if (cmd === 'batch') { await batch(arg ? Number(arg) : 99, !confirm); return }
   if (cmd === 'run') {
     if (!arg) throw new Error('usage: run <name> --confirm')
     if (!confirm) throw new Error('refusing a multi-hour GPU run without --confirm')

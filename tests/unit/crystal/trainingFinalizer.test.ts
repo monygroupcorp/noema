@@ -94,6 +94,19 @@ test('repro artifacts: persists samples (paired with prompts), datasetItems, and
   assert.match(i.configYaml ?? '', /arch: "flux2_klein_4b"/)
 })
 
+test('samples pair with dataset-derived samplePrompts (aditus), [trigger]-substituted, by index', async () => {
+  const h = harness()
+  const finalize = makeTrainingFinalizer({ ...h, newId: () => 'lora-sp', now: () => new Date(0) })
+  await finalize(
+    actum({ triggerWord: 'koh', baseModel: 'klein-4b', steps: 1000,
+      samplePrompts: JSON.stringify(['[trigger], a koh on a roof', '[trigger], a koh in the rain']) }),
+    { status: 'completed', lastStep: 1000, sampleUrls: ['https://cdn/s0.jpg', 'https://cdn/s1.jpg'] },
+  )
+  const i = h.upserts[0]
+  assert.equal(i.samples?.[0].prompt, 'koh, a koh on a roof')      // dataset caption, not the generic default
+  assert.equal(i.samples?.[1].prompt, 'koh, a koh in the rain')
+})
+
 test('cleanup: a remote completion sweeps the intermediate checkpoint + redundant pod-final (keeps samples)', async () => {
   const h = harness()
   const deleted: string[] = []

@@ -1,6 +1,7 @@
 import type { Cursor, CursorResult, Actorum } from '../types/cursus.js'
 import type { Actum } from '../types/actum.js'
 import type { Modus } from '../types/modus.js'
+import { parseSamplePrompts } from './aitkConfig.js'
 
 // =============================================================================
 // RemoteAitoolkitTrainingCursor — training on a provisioned, billed pod (Slice E)
@@ -45,6 +46,9 @@ export interface RemoteAitkLaunchSpec {
   /** Weights-only resume/continue: a URL of prior LoRA weights the pod inits the network from
    *  (a rescued checkpoint for crash-recovery, or a finished LoRA to extend). */
   resumeFrom?: string
+  /** End-of-run sample prompts for the card gallery (`[trigger]` substituted) — default a generic
+   *  set; pass dataset-caption-derived prompts to preview what the LoRA actually learned. */
+  samplePrompts?: string[]
   /** Auto-caption images that arrive without a caption (default true) — the modus does everything. */
   autocaption?: boolean
   gpuId?: string
@@ -88,12 +92,14 @@ export class RemoteAitoolkitTrainingCursor implements Cursor {
     const jobConfig = typeof aditus.jobConfig === 'string' ? aditus.jobConfig : undefined
     const autocaption = aditus.autocaption !== false   // default on — caption missing captions
     const resumeFrom = typeof aditus.resumeFrom === 'string' && aditus.resumeFrom.trim() ? aditus.resumeFrom.trim() : undefined
+    const samplePrompts = parseSamplePrompts(aditus.samplePrompts)
 
     const { externusJobId } = await this.deps.launcher.launch({
       actumId: actum.id, jobId, dataset, baseModel, triggerWord, steps, autocaption,
       ...(gpuId ? { gpuId } : {}),
       ...(jobConfig ? { jobConfig } : {}),
       ...(resumeFrom ? { resumeFrom } : {}),
+      ...(samplePrompts ? { samplePrompts } : {}),
     })
 
     // The training pod is dedicated + one-shot — flag it so the completor terminates it

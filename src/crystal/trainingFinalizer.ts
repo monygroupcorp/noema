@@ -4,7 +4,7 @@ import type { Intella, IntellaSource } from '../types/intelligendi.js'
 import type { Uploader, ObjectStore } from './R2Uploader.js'
 import type { MediaFetcher } from './MediaFetcher.js'
 import type { AitkOutcome } from './aitoolkitRunnerClient.js'
-import { buildAitkConfig, DEFAULT_SAMPLE_PROMPTS } from './aitkConfig.js'
+import { buildAitkConfig, DEFAULT_SAMPLE_PROMPTS, parseSamplePrompts } from './aitkConfig.js'
 import { parseManifest } from './datasetManifest.js'
 
 // =============================================================================
@@ -104,7 +104,8 @@ export function makeTrainingFinalizer(
     //  • datasetItems — the training images + captions (from the run's dataset manifest).
     //  • configYaml — the ai-toolkit config, regenerated with a repo-relative dataset path so a
     //    downloader can reproduce against the committed `dataset/` folder.
-    const samplePrompts = DEFAULT_SAMPLE_PROMPTS.map((p) => p.replace(/\[trigger\]/g, trigger || slug))
+    const samplePrompts = (parseSamplePrompts(a.samplePrompts) ?? DEFAULT_SAMPLE_PROMPTS)
+      .map((p) => p.replace(/\[trigger\]/g, trigger || slug))
     const samples = (outcome.sampleUrls ?? [])
       .filter((u) => typeof u === 'string' && u.length > 0)
       .map((url, i) => (samplePrompts[i] ? { url, prompt: samplePrompts[i] } : { url }))
@@ -112,10 +113,12 @@ export function makeTrainingFinalizer(
     let configYaml: string | undefined
     if (a.baseModel && typeof steps === 'number') {
       try {
+        const cfgPrompts = parseSamplePrompts(a.samplePrompts)
         configYaml = buildAitkConfig({
           name: slug, datasetPath: 'dataset', triggerWord: trigger || slug,
           baseModel: String(a.baseModel), steps,
           ...(asPositiveInt(a.rank) ? { rank: asPositiveInt(a.rank)! } : {}),
+          ...(cfgPrompts ? { samplePrompts: cfgPrompts } : {}),
         })
       } catch { /* config regeneration is best-effort — never block finality on it */ }
     }

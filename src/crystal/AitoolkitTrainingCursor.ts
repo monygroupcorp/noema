@@ -4,7 +4,7 @@ import type { Modus } from '../types/modus.js'
 import type { AitkJobStore } from './AitkJobStore.js'
 import type { AitkSpawner, AitkMount } from './AitkSpawner.js'
 import { awaitViaPoll, type AitkOutcome } from './aitoolkitRunnerClient.js'
-import { buildAitkConfig, type AitkConfigWriter } from './aitkConfig.js'
+import { buildAitkConfig, parseSamplePrompts, type AitkConfigWriter } from './aitkConfig.js'
 
 // =============================================================================
 // AitoolkitTrainingCursor — the crystal-native training runtime (build #5)
@@ -131,6 +131,7 @@ export class AitoolkitTrainingCursor implements Cursor {
 
     const saveEvery = asPositiveInt(aditus.saveEvery)
     const rank = asPositiveInt(aditus.rank)
+    const samplePrompts = parseSamplePrompts(aditus.samplePrompts)
     const yaml = buildAitkConfig({
       name: jobId,
       datasetPath: dataset,
@@ -139,6 +140,7 @@ export class AitoolkitTrainingCursor implements Cursor {
       steps: steps ?? 500,
       ...(saveEvery !== undefined ? { saveEvery } : {}),
       ...(rank !== undefined ? { rank } : {}),
+      ...(samplePrompts ? { samplePrompts } : {}),
     })
     return this.deps.writeConfig(jobId, yaml)
   }
