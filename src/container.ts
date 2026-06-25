@@ -57,7 +57,7 @@ import { makeDatasetResolver } from './crystal/datasetManifest.js'
 import { SqliteAitkJobStore } from './crystal/AitkJobStore.js'
 import { DockerAitkSpawner } from './crystal/AitkSpawner.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
-import { makeTrainingFinalizer, fsLoraReader } from './crystal/trainingFinalizer.js'
+import { makeTrainingFinalizer, fsLoraReader, withLocalSamples } from './crystal/trainingFinalizer.js'
 import { fsConfigWriter } from './crystal/aitkConfig.js'
 import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
@@ -505,11 +505,15 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     // Training finality (build #5b): a completed run hosts its LoRA in R2 + registers it
     // as a private Intella — only where both an output dir (to read it) and R2 (to host it) exist.
     if (config.aitoolkit.outputDir && config.runpodR2) {
-      aitkDeps.resolveOutput = makeTrainingFinalizer({
+      const store = new R2Uploader(config.runpodR2)
+      const finalize = makeTrainingFinalizer({
         reader: fsLoraReader(config.aitoolkit.outputDir),
-        store: new R2Uploader(config.runpodR2),
+        store,
         intellae: new MongoIntella(db.collection('intellae')),
       })
+      // Local runs leave their preview samples on disk — collect + host them so the Intella + a
+      // later HF publish carry previews, same as the remote pod path (aitktrainer.py).
+      aitkDeps.resolveOutput = withLocalSamples(finalize, { outputDir: config.aitoolkit.outputDir, store })
     }
     cursorum.register('aitoolkit', new AitoolkitTrainingCursor(aitkDeps))
   } else if (
