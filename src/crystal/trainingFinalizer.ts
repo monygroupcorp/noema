@@ -81,7 +81,11 @@ export function makeTrainingFinalizer(
     const a = actum.aditus
     const jobId = String(a.jobId ?? actum.id)
     const trigger = typeof a.triggerWord === 'string' ? a.triggerWord.trim() : ''
-    const slug = slugify(trigger || jobId)
+    // slug = the published repo name + dest stem. Defaults to the trigger, but is overridable so a
+    // model can publish under a name that differs from its invocation trigger (e.g. backlog repo
+    // `333flux-klein` whose /make trigger stays `333`).
+    const slugSource = (typeof a.slug === 'string' && a.slug.trim()) || trigger || jobId
+    const slug = slugify(slugSource)
     const familia = String(a.familia ?? a.baseModel ?? '').trim().toLowerCase()
     const nomen = (typeof a.name === 'string' && a.name.trim()) || trigger || jobId
 
