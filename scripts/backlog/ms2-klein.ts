@@ -77,6 +77,18 @@ async function inspect(name: string): Promise<RepoInfo> {
   const captions = new Set(sib.filter((f) => f.startsWith('dataset/') && f.endsWith('.txt')))
   return { name, images, captions }
 }
+/** The source repo's dataset as {url,caption} — its images are public, so the card's `dataset/`
+ *  re-hosts them into the new repo. Used to populate datasetItems for the local path, where the
+ *  `dataset` aditus is a folder (not a manifest the finalizer could parse). */
+async function sourceDatasetItems(name: string): Promise<Array<{ url: string; caption?: string }>> {
+  const info = await inspect(name)
+  return Promise.all(info.images.map(async (img) => {
+    const cap = img.replace(/\.(png|jpe?g|webp)$/i, '.txt')
+    const caption = info.captions.has(cap) ? (await hfText(name, cap)).trim() : undefined
+    return { url: resolveUrl(name, img), ...(caption ? { caption } : {}) }
+  }))
+}
+
 async function triggerWord(name: string): Promise<string> {
   try {
     const m = (await hfText(name, 'config.yaml')).match(/trigger_word:\s*'?"?([^'"\n]+)'?"?/i)
@@ -207,9 +219,14 @@ async function publish(name: string): Promise<void> {
         ? { samples: i.samples.map((s: { url: string; prompt?: string }, idx: number) =>
             ({ url: s.url, pathInRepo: `samples/sample_${String(idx).padStart(3, '0')}.jpg`, ...(s.prompt ? { prompt: s.prompt } : {}) })) }
         : {}),
-      ...(Array.isArray(i.datasetItems) ? { datasetItems: i.datasetItems } : {}),
       ...(typeof i.configYaml === 'string' ? { configYaml: i.configYaml } : {}),
     }
+    // Local training's `dataset` aditus is a folder, so the finalizer can't persist datasetItems.
+    // Re-host the source repo's public dataset into the new repo's `dataset/` for reproduction.
+    const datasetItems = Array.isArray(i.datasetItems) && i.datasetItems.length
+      ? i.datasetItems
+      : await sourceDatasetItems(name).catch(() => [])
+    if (datasetItems.length) model.datasetItems = datasetItems
     console.log(`[${ts()}] publishing → ${HF}/${ORG}/${slug} (${model.samples?.length ?? 0} samples, ${model.datasetItems?.length ?? 0} dataset items) …`)
     const uploader = new HuggingFaceUploader({ transport: new HfHttpTransport({ token: process.env.HF_TOKEN }), fetcher: httpMediaFetcher })
     const { externalRef } = await uploader.upload({ account: ORG, slug, private: false, model })

@@ -115,7 +115,7 @@ test('renderModelCard: frontmatter + body, name and trigger', () => {
   const card = renderModelCard(MODEL)
   assert.match(card, /^---\n/)                                  // YAML frontmatter
   assert.match(card, /# My LoRA/)
-  assert.match(card, /instance_prompt: mld/)
+  assert.match(card, /instance_prompt: "mld"/)                  // quoted so numeric-looking triggers stay strings
   assert.match(card, /\*\*Trigger word:\*\* `mld`/)
   assert.match(card, /## Usage \(Diffusers\)/)
   assert.match(card, /## Training Details/)
