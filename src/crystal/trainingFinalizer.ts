@@ -209,6 +209,61 @@ export function makeTrainingExitusResolver(
   }
 }
 
+/**
+ * Wrap the finalizer so a LOCAL run surfaces its preview samples. The remote pod runner
+ * (`aitktrainer.py`) uploads samples + rides them in the webhook → `outcome.sampleUrls`; the
+ * local cursor's outcome is bare `{ status, lastStep }`, leaving the previews unread on disk.
+ * This reads `<outputDir>/<jobId>/samples/`, uploads the END-OF-RUN images to R2, and injects
+ * `sampleUrls` (prompt-index order) before delegating — so local-trained LoRAs carry the same
+ * first-class previews as remote ones. A no-op if the outcome already carries samples (remote),
+ * or on a non-completed run. Best-effort: a sample-upload failure never sinks finality.
+ */
+export function withLocalSamples(
+  finalize: TrainingFinalize,
+  deps: { outputDir: string; store: Pick<Uploader, 'put'>; jobIdOf?: (a: Actum) => string },
+): TrainingFinalize {
+  return async (actum, outcome) => {
+    if (outcome.status === 'completed' && !outcome.sampleUrls?.length) {
+      const jobId = deps.jobIdOf?.(actum) ?? String(actum.aditus.jobId ?? actum.id)
+      const sampleUrls = await uploadLocalSamples(deps.outputDir, jobId, deps.store).catch(() => [])
+      if (sampleUrls.length) outcome = { ...outcome, sampleUrls }
+    }
+    return finalize(actum, outcome)
+  }
+}
+
+/**
+ * Collect a local run's END-OF-RUN sample previews and host them in R2. ai-toolkit names samples
+ * `<ts>__<step9>_<promptIdx>.<ext>` and writes one set at step 0 AND at the final step — so we keep
+ * only the highest-step image per prompt index (sorted by index, pairing with the config's prompt
+ * order) and skip the step-0 noise. Returns the hosted URLs in prompt-index order; [] if none.
+ */
+async function uploadLocalSamples(outputDir: string, jobId: string, store: Pick<Uploader, 'put'>): Promise<string[]> {
+  const { readFile, readdir } = await import('node:fs/promises')
+  const { join, extname } = await import('node:path')
+  const dir = join(outputDir, jobId, 'samples')
+  const IMG = new Set(['.png', '.jpg', '.jpeg', '.webp'])
+  let names: string[]
+  try { names = (await readdir(dir)).filter((n) => IMG.has(extname(n).toLowerCase())) } catch { return [] }
+
+  // Parse `__<step9>_<idx>.<ext>`; keep the max-step image per prompt index.
+  const parsed = names
+    .map((name) => { const m = name.match(/__(\d+)_(\d+)\.[a-z]+$/i); return m ? { name, step: Number(m[1]), idx: Number(m[2]) } : null })
+    .filter((p): p is { name: string; step: number; idx: number } => p !== null)
+  if (parsed.length === 0) return []
+  const maxStep = Math.max(...parsed.map((p) => p.step))
+  const finals = parsed.filter((p) => p.step === maxStep).sort((a, b) => a.idx - b.idx)
+
+  const urls: string[] = []
+  for (const f of finals) {
+    const ext = extname(f.name).toLowerCase()
+    const contentType = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
+    const bytes = await readFile(join(dir, f.name))
+    urls.push(await store.put(`training/${jobId}/samples/${String(f.idx).padStart(3, '0')}${ext}`, bytes, contentType))
+  }
+  return urls
+}
+
 /** The first resolvable media URL among the webhook's output items (string or `{ url }`). */
 function firstUrl(items: Array<{ url?: string; path?: string; kind?: string } | string>): string | undefined {
   for (const it of items) {
