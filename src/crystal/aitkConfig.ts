@@ -45,6 +45,20 @@ export const AITK_BASE_PRESETS: Record<string, AitkBasePreset> = {
     lowVram: true,
     qtype: 'qfloat8',
   },
+  // Krea 2 RAW (12.9B single_mmdit_large_wide, Qwen3-VL-4B encoder + Qwen-Image VAE). Train the
+  // LoRA on RAW; it transfers to Krea 2 Turbo for 8-step inference. qfloat8 + low-VRAM to fit the
+  // 12B on a 24GB card. ai-toolkit arch 'krea2'; the arch fills the encoder/VAE defaults.
+  'krea2-raw': {
+    nameOrPath: 'krea/Krea-2-Raw',
+    arch: 'krea2',
+    resolution: [512, 768, 1024],
+    rank: 32,
+    lr: 1e-4,
+    quantize: true,
+    quantizeTe: true,
+    lowVram: true,
+    qtype: 'qfloat8',
+  },
 }
 
 /** Common aliases → canonical preset key. */
@@ -52,6 +66,9 @@ const PRESET_ALIASES: Record<string, string> = {
   'klein-4b': 'flux2-klein-4b',
   'klein': 'flux2-klein-4b',
   'flux2-klein': 'flux2-klein-4b',
+  'krea2': 'krea2-raw',
+  'krea2-turbo': 'krea2-raw',   // we train on RAW even when targeting Turbo inference
+  'krea': 'krea2-raw',
 }
 
 export function resolveBasePreset(baseModel: string): AitkBasePreset {

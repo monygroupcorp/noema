@@ -78,8 +78,13 @@ interface BaseFacts {
   inferenceRepo: string
   /** diffusers pipeline class for the usage snippet. */
   pipelineClass: string
-  /** SPDX-ish license id for the frontmatter. */
+  /** SPDX-ish license id for the frontmatter (`other` when a custom license needs name+link). */
   license: string
+  /** Custom-license name + link (HF frontmatter `license_name`/`license_link`), when license==='other'. */
+  licenseName?: string
+  licenseLink?: string
+  /** A derivative/attribution notice required by the base license (e.g. Krea 2 Community License). */
+  attribution?: string
   /** Discovery tags. */
   tags: string[]
   rank: number
@@ -108,9 +113,26 @@ const FLUX1_DEV: BaseFacts = {
   rank: 32, lr: '1e-4', resolution: '512, 768, 1024',
 }
 
+// Krea 2 (12.9B). Train on RAW, run the LoRA on Turbo (8-step). Custom community license:
+// derivatives may be distributed (we own them) but the card must say it's a *modified derivative*
+// of Krea 2, not official/endorsed, and commercial use is for orgs under $1M annual revenue.
+const KREA2: BaseFacts = {
+  displayBase: 'Krea 2',
+  baseRepo: 'krea/Krea-2-Raw',
+  inferenceRepo: 'krea/Krea-2-Turbo',
+  pipelineClass: 'DiffusionPipeline',
+  license: 'other',
+  licenseName: 'krea-2-community-license',
+  licenseLink: 'https://www.krea.ai/krea-2-licensing',
+  attribution: 'This is a modified derivative of [Krea 2](https://huggingface.co/krea/Krea-2-Raw), trained on Krea 2 RAW and intended for use on Krea 2 Turbo. Not an official Krea product nor endorsed by Krea. Use is governed by the [Krea 2 Community License](https://www.krea.ai/krea-2-licensing) — commercial use permitted for entities under $1M USD annual revenue; above that, obtain an enterprise license from Krea.',
+  tags: ['text-to-image', 'lora', 'diffusers', 'krea2', 'krea', 'stationthis'],
+  rank: 32, lr: '1e-4', resolution: '512, 768, 1024',
+}
+
 /** Map an Intella `familia` to its card facts. Unknown familiae fall back to FLUX.1 [dev]. */
 function baseFacts(familia?: string): BaseFacts {
   const f = (familia ?? '').toLowerCase()
+  if (f.includes('krea')) return KREA2
   if (f.includes('klein') || f.includes('flux2')) return KLEIN_4B
   return FLUX1_DEV
 }
@@ -136,6 +158,8 @@ export function renderModelCard(model: ModelView, repoId?: string): string {
   const fm: string[] = [
     '---',
     `license: ${facts.license}`,
+    ...(facts.licenseName ? [`license_name: ${facts.licenseName}`] : []),
+    ...(facts.licenseLink ? [`license_link: ${facts.licenseLink}`] : []),
     `base_model: ${facts.baseRepo}`,
     'base_model_relation: adapter',
     'pipeline_tag: text-to-image',
@@ -161,6 +185,7 @@ export function renderModelCard(model: ModelView, repoId?: string): string {
     const from = model.provenance.base ? ` (${model.provenance.base})` : ''
     body.push(`_Retrained onto ${facts.displayBase} from [${model.provenance.repo}](https://huggingface.co/${model.provenance.repo})${from}._`)
   }
+  if (facts.attribution) body.push('', `> ${facts.attribution}`)
   body.push('')
 
   // Sample gallery (2-col), when previews were generated + committed.
