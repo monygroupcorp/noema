@@ -3,7 +3,7 @@
 // filesystem, no R2, no Mongo.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { makeTrainingFinalizer, urlLoraReader } from '../../../src/crystal/trainingFinalizer.js'
+import { makeTrainingFinalizer, urlLoraReader, withLocalSamples } from '../../../src/crystal/trainingFinalizer.js'
 import type { LoraReader, IntellaWriter } from '../../../src/crystal/trainingFinalizer.js'
 import type { Uploader } from '../../../src/crystal/R2Uploader.js'
 import type { MediaFetcher } from '../../../src/crystal/MediaFetcher.js'
@@ -117,6 +117,52 @@ test('cleanup: the LOCAL path (no outputUrl) sweeps nothing', async () => {
     actum({ jobId: 'koh', triggerWord: 'koh', baseModel: 'klein-4b', steps: 250 }), completed(250),
   )
   assert.deepEqual(deleted, [])
+})
+
+test('withLocalSamples: collects the END-OF-RUN previews (max step, by prompt index), hosts them, feeds sampleUrls', async () => {
+  const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const out = await mkdtemp(join(tmpdir(), 'aitk-'))
+  const samples = join(out, 'job9', 'samples')
+  await mkdir(samples, { recursive: true })
+  // step-0 noise + the real end-of-run set at step 1000, prompts 0..2 (out of filename order).
+  for (const n of ['111__000000000_0.jpg', '111__000000000_1.jpg',
+                   '777__000001000_2.jpg', '222__000001000_0.jpg', '555__000001000_1.png']) {
+    await writeFile(join(samples, n), Buffer.from(n))
+  }
+  const seen: Array<{ outcome: AitkOutcome }> = []
+  const put: string[] = []
+  const store = { async put(key: string) { put.push(key); return `https://cdn/${key}` } }
+  const inner: import('../../../src/crystal/trainingFinalizer.js').TrainingFinalize =
+    async (_a, outcome) => { seen.push({ outcome }); return { ok: true } }
+
+  await withLocalSamples(inner, { outputDir: out, store })(
+    actum({ jobId: 'job9' }), { status: 'completed', lastStep: 1000 },
+  )
+
+  // only the step-1000 set, ordered by prompt index 0,1,2 — step-0 images dropped.
+  assert.deepEqual(put, [
+    'training/job9/samples/000.jpg', 'training/job9/samples/001.png', 'training/job9/samples/002.jpg',
+  ])
+  assert.deepEqual(seen[0].outcome.sampleUrls, [
+    'https://cdn/training/job9/samples/000.jpg',
+    'https://cdn/training/job9/samples/001.png',
+    'https://cdn/training/job9/samples/002.jpg',
+  ])
+})
+
+test('withLocalSamples: no-op when the outcome already carries samples (remote path) or has no samples dir', async () => {
+  const seen: AitkOutcome[] = []
+  const store = { async put() { throw new Error('should not upload') } }
+  const inner: import('../../../src/crystal/trainingFinalizer.js').TrainingFinalize =
+    async (_a, outcome) => { seen.push(outcome); return {} }
+  const wrap = withLocalSamples(inner, { outputDir: '/nonexistent', store })
+
+  await wrap(actum({ jobId: 'r' }), { status: 'completed', lastStep: 1, sampleUrls: ['https://cdn/s.jpg'] }) // remote
+  await wrap(actum({ jobId: 'r' }), { status: 'completed', lastStep: 1 })                                    // no dir → []
+  assert.deepEqual(seen[0].sampleUrls, ['https://cdn/s.jpg'])  // untouched
+  assert.equal(seen[1].sampleUrls, undefined)                  // stayed bare, finality still ran
 })
 
 test('repro artifacts: no samples/dataset on a bare run leaves the fields unset', async () => {
