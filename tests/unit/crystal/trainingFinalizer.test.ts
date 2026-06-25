@@ -128,6 +128,21 @@ test('repro artifacts: no samples/dataset on a bare run leaves the fields unset'
   assert.equal(h.upserts[0].datasetItems, undefined)
 })
 
+test('slug override: publishes under a name that differs from the invocation trigger', async () => {
+  const h = harness()
+  const finalize = makeTrainingFinalizer({ ...h, newId: () => 'lora-s', now: () => new Date(0) })
+
+  await finalize(
+    actum({ triggerWord: '333', slug: '333flux-klein', baseModel: 'klein-4b', steps: 4000 }),
+    completed(4000),
+  )
+
+  const i = h.upserts[0]
+  assert.equal(i.trigger, '333')                 // /make invocation word unchanged
+  assert.equal(i.slug, '333flux-klein')          // repo name + dest stem use the override
+  assert.equal(i.dest, 'loras/333flux-klein.safetensors')
+})
+
 test('card enrichment: omits provenance when no source repo is given', async () => {
   const h = harness()
   await makeTrainingFinalizer({ ...h, newId: () => 'lora-n', now: () => new Date(0) })(
