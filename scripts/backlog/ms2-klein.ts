@@ -33,7 +33,7 @@ import { MongoClient } from 'mongodb'
 import { AitoolkitTrainingCursor } from '../../src/crystal/AitoolkitTrainingCursor.js'
 import { SqliteAitkJobStore } from '../../src/crystal/AitkJobStore.js'
 import { DockerAitkSpawner } from '../../src/crystal/AitkSpawner.js'
-import { fsConfigWriter } from '../../src/crystal/aitkConfig.js'
+import { fsConfigWriter, deriveSamplePrompts } from '../../src/crystal/aitkConfig.js'
 import { makeTrainingFinalizer, fsLoraReader, withLocalSamples } from '../../src/crystal/trainingFinalizer.js'
 import { R2Uploader } from '../../src/crystal/R2Uploader.js'
 import { MongoIntella } from '../../src/crystal/MongoIntella.js'
@@ -125,7 +125,11 @@ async function fetchDataset(name: string): Promise<{ dir: string; count: number 
 
 async function trainingAditus(name: string, datasetDir: string): Promise<Record<string, unknown>> {
   const trigger = await triggerWord(name)
+  // Sample the card gallery on the dataset's OWN captions — captures the LoRA's real look.
+  const items = await sourceDatasetItems(name).catch(() => [])
+  const samplePrompts = deriveSamplePrompts(items.map((i) => i.caption))
   return {
+    samplePrompts: JSON.stringify(samplePrompts),
     jobId: `${name}_klein`,
     dataset: datasetDir,                                     // host == container path (mounted identically)
     triggerWord: trigger,

@@ -109,6 +109,27 @@ export const DEFAULT_SAMPLE_PROMPTS: string[] = [
   '[trigger]',
 ]
 
+/**
+ * Build the end-of-run sample prompts from the dataset's own captions — so the card gallery shows
+ * what the LoRA actually learned, not a generic framing set. Takes the first `n` non-empty captions
+ * and prefixes `[trigger], ` (ai-toolkit substitutes the trigger at sample time; the finalizer does
+ * for the card). Falls back to DEFAULT_SAMPLE_PROMPTS when the dataset carries no captions.
+ */
+export function deriveSamplePrompts(captions: Array<string | undefined>, n = 4): string[] {
+  const picked = captions.map((c) => (typeof c === 'string' ? c.trim() : '')).filter((c) => c.length > 0).slice(0, n)
+  if (picked.length === 0) return DEFAULT_SAMPLE_PROMPTS
+  return picked.map((c) => (/\[trigger\]/i.test(c) ? c : `[trigger], ${c}`))
+}
+
+/** Parse a `samplePrompts` aditus value (JSON array of strings) → the prompt list, or undefined. */
+export function parseSamplePrompts(raw: unknown): string[] | undefined {
+  if (typeof raw !== 'string' || !raw.trim()) return undefined
+  try {
+    const a = JSON.parse(raw)
+    return Array.isArray(a) && a.length > 0 && a.every((x) => typeof x === 'string') ? (a as string[]) : undefined
+  } catch { return undefined }
+}
+
 /** Render the ai-toolkit `ui_trainer` training yaml for a run. Deterministic. */
 export function buildAitkConfig(p: AitkConfigParams): string {
   const preset = resolveBasePreset(p.baseModel)

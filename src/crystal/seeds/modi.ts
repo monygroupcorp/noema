@@ -159,6 +159,7 @@ export const MODUS_AITOOLKIT_TRAINING: Modus = make({
     dataset:       { type: 'text', required: true,  description: 'Image folder to train on (with optional .txt captions)' },
     triggerWord:   { type: 'text', required: true,  description: 'The LoRA trigger word — becomes its trigger, and its slug unless `slug` overrides' },
     slug:          { type: 'text', required: false, description: 'Published repo name + dest stem, when it must differ from the trigger (e.g. a `<name>-klein` backlog repo whose /make trigger stays the original word)' },
+    samplePrompts: { type: 'text', required: false, description: 'JSON array of end-of-run sample prompts for the card gallery (`[trigger]` substituted) — pass dataset-caption-derived prompts to preview what the LoRA actually learned; defaults to a generic framing set' },
     baseModel:     { type: 'text', required: true,  description: 'Base model preset (e.g. klein-4b) — also the familia /make resolves on' },
     steps:         { type: 'int',  required: true,  description: 'Training steps — additional steps when resuming (drives the config + step/ETA progress)' },
     resumeFrom:    { type: 'text', required: false, description: 'Resume/continue weights-only: a prior LoRA weights URL (a rescued checkpoint to recover a crashed run, or a finished LoRA to extend)' },
