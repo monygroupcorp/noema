@@ -1,89 +1,177 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Line, Html } from '@react-three/drei';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
+import { OrbitControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { AppShell } from '../shell/AppShell';
 import { ErrorBoundary } from '../shell/ErrorBoundary';
 import { Ic } from '../lib/icons';
+import { api } from '../lib/api';
 
-// The 3D Vestigium space — a mathematical embedding scatter (academic, not a star-field).
-// Points are creations positioned by their (mock) embedding; clusters emerge; axes are abstract dims.
+// The 3D Vestigium space — the real StationThis corpus, embedded with the platform's
+// canon OpenCLIP ViT-B/32. Two layers share one set of points & metadata:
+//   prompt → UMAP of the prompt-text embedding   ("what people asked for")
+//   image  → UMAP of the output-image embedding  ("what it looked like")
+// Both live in the same CLIP space. Data = precomputed artifact in /public/space*.
 
-interface Pt { id: string; pos: [number, number, number]; cluster: string; color: string; prompt: string; model: string }
+type Layer = 'text' | 'image';
+interface Manifest { n: number; k: number; projection: string }
+interface Cluster { label: string; terms: string[]; color: string; count: number }
+interface PtMeta { p: string; m: string; c: string; u: string; d: string; s?: string; l?: string[] }
+interface Corpus { positions: Float32Array; clusters: Uint16Array; manifest: Manifest; clusterInfo: Record<string, Cluster>; }
 
-const CLUSTERS = [
-  { key: 'dragons',    color: '#5b8cff', center: [1.3, 0.8, -0.6],  prompts: ['n64 dragon on a neon temple, dusk', 'low-poly wyvern over a canyon', 'crystalline dragon, ice'] },
-  { key: 'portraits',  color: '#d68f6f', center: [-1.4, 0.4, 0.9],  prompts: ['cinematic portrait, rim light', 'oil portrait of a sailor', 'studio headshot, soft key'] },
-  { key: 'landscapes', color: '#5fd0a8', center: [0.2, -1.3, 1.2],  prompts: ['misty fjord at dawn', 'alpine meadow, golden hour', 'desert mesa under storm'] },
-  { key: 'abstract',   color: '#d66f9a', center: [-0.8, 1.4, -1.3], prompts: ['flowing gradient mesh', 'generative noise field', 'iridescent fluid forms'] },
-  { key: 'cyber',      color: '#b98fe0', center: [1.0, -0.9, -1.4], prompts: ['neon alley, rain, reflections', 'cyberpunk skyline', 'holographic interface, glow'] },
-];
-const MODELS = ['flux-schnell', 'sd1-5', 'dalle-iii'];
-const g = () => (Math.random() + Math.random() + Math.random() - 1.5) * 0.55; // rough normal
+const BG = '#08090A';
+const base = (layer: Layer) => (layer === 'image' ? '/space-image' : '/space');
 
-function makePoints(): Pt[] {
-  const out: Pt[] = [];
-  CLUSTERS.forEach((c) => {
-    for (let i = 0; i < 28; i++) {
-      out.push({
-        id: `${c.key}-${i}`,
-        pos: [c.center[0] + g(), c.center[1] + g(), c.center[2] + g()],
-        cluster: c.key, color: c.color,
-        prompt: c.prompts[i % c.prompts.length],
-        model: MODELS[i % MODELS.length],
-      });
-    }
-  });
-  return out;
+// The corpus explorer is OFF by default so /space stays dormant and never hits
+// staging. Remount with:  VITE_CORPUS_SPACE=1 npm run dev
+const MOUNTED = import.meta.env.VITE_CORPUS_SPACE === '1';
+
+function DormantSpace() {
+  return (
+    <AppShell crumb="space">
+      <div className="space" style={{ display: 'grid', placeItems: 'center' }}>
+        <div style={{ textAlign: 'center', maxWidth: 470, padding: 24 }}>
+          <div style={{ fontSize: 22, color: 'var(--accent-soft)', opacity: .7, marginBottom: 12 }}><Ic name="sparkles" /></div>
+          <div style={{ color: 'var(--text)', fontSize: 14, marginBottom: 8 }}>Vestigium space — parked</div>
+          <div style={{ color: 'var(--faint)', fontSize: 12.5, lineHeight: 1.6 }}>
+            The corpus explorer is unmounted (no data loads, no training calls). Re-enable it with{' '}
+            <code style={{ color: 'var(--accent-soft)' }}>VITE_CORPUS_SPACE=1 npm run dev</code>. Artifacts live in{' '}
+            <code>public/space*</code>; rebuild via <code>scripts/corpus-space</code> if missing.
+          </div>
+        </div>
+      </div>
+    </AppShell>
+  );
 }
 
 function webglAvailable(): boolean {
-  try {
-    const c = document.createElement('canvas');
-    return !!(window.WebGLRenderingContext && (c.getContext('webgl') || c.getContext('experimental-webgl')));
-  } catch { return false; }
+  try { const c = document.createElement('canvas'); return !!(window.WebGLRenderingContext && (c.getContext('webgl') || c.getContext('experimental-webgl'))); } catch { return false; }
+}
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255];
+}
+
+async function loadCorpus(layer: Layer): Promise<Corpus> {
+  const b = base(layer);
+  const [manifest, clusterInfo, pointsBuf, attrsBuf] = await Promise.all([
+    fetch(`${b}/manifest.json`).then(r => { if (!r.ok) throw new Error('no layer'); return r.json(); }),
+    fetch(`${b}/clusters.json`).then(r => r.json()),
+    fetch(`${b}/points.bin`).then(r => r.arrayBuffer()),
+    fetch(`${b}/attrs.bin`).then(r => r.arrayBuffer()),
+  ]);
+  return { manifest, clusterInfo, positions: new Float32Array(pointsBuf), clusters: new Uint16Array(attrsBuf) };
 }
 
 function Axes() {
-  const L = 2.6;
-  const box = useMemo(() => new THREE.EdgesGeometry(new THREE.BoxGeometry(5.4, 5.4, 5.4)), []);
-  const lbl = { fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--faint)', whiteSpace: 'nowrap' as const, letterSpacing: '.06em' };
+  const box = useMemo(() => new THREE.EdgesGeometry(new THREE.BoxGeometry(5.8, 5.8, 5.8)), []);
+  return <lineSegments geometry={box}><lineBasicMaterial color="#161b21" /></lineSegments>;
+}
+
+function Cloud({ corpus, baseColors, dimMask, onPick, onFocusPoint }: {
+  corpus: Corpus; baseColors: Float32Array; dimMask: Uint8Array | null;
+  onPick: (i: number | null) => void; onFocusPoint: (i: number) => void;
+}) {
+  const { camera, gl, controls } = useThree() as any;
+  const pointsRef = useRef<THREE.Points>(null);
+  const n = corpus.clusters.length;
+
+  // round sprite so points render as circles, not squares
+  const circle = useMemo(() => {
+    const s = 64, c = document.createElement('canvas'); c.width = c.height = s;
+    const ctx = c.getContext('2d')!;
+    ctx.beginPath(); ctx.arc(s / 2, s / 2, s / 2 - 2, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff'; ctx.fill();
+    const t = new THREE.CanvasTexture(c); t.needsUpdate = true; return t;
+  }, []);
+
+  const geometry = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(corpus.positions, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    return g;
+  }, [corpus, n]);
+
+  useEffect(() => {
+    const col = geometry.getAttribute('color') as THREE.BufferAttribute;
+    const arr = col.array as Float32Array;
+    for (let i = 0; i < n; i++) {
+      const f = dimMask && dimMask[i] === 1 ? 0.045 : 1;
+      arr[i * 3] = baseColors[i * 3] * f; arr[i * 3 + 1] = baseColors[i * 3 + 1] * f; arr[i * 3 + 2] = baseColors[i * 3 + 2] * f;
+    }
+    col.needsUpdate = true;
+  }, [geometry, baseColors, dimMask, n]);
+
+  useEffect(() => {
+    const ray = new THREE.Raycaster(); const mouse = new THREE.Vector2(); const el = gl.domElement;
+    let downXY: [number, number] | null = null;
+    const pickAt = (cx: number, cy: number): number | null => {
+      if (!pointsRef.current) return null;
+      const rect = el.getBoundingClientRect();
+      mouse.x = ((cx - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((cy - rect.top) / rect.height) * 2 + 1;
+      // threshold scales with zoom level (camera distance to its orbit target)
+      const zoomDist = controls?.target ? camera.position.distanceTo(controls.target) : camera.position.length();
+      ray.params.Points!.threshold = zoomDist * 0.012;
+      ray.setFromCamera(mouse, camera);
+      const hits = ray.intersectObject(pointsRef.current);   // sorted nearest-first along ray
+      for (const h of hits) {
+        const idx = h.index ?? -1;
+        // when a filter is active, only highlighted (non-dimmed) points are selectable
+        if (idx >= 0 && (!dimMask || dimMask[idx] === 0)) return idx;
+      }
+      return null;
+    };
+    const onDown = (e: PointerEvent) => { if (e.button === 0) downXY = [e.clientX, e.clientY]; };
+    const onUp = (e: PointerEvent) => {
+      if (!downXY) return;
+      const moved = Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]); downXY = null;
+      if (moved > 5) return;                       // a drag = orbit, not a pick
+      onPick(pickAt(e.clientX, e.clientY));
+    };
+    const onDbl = (e: MouseEvent) => { const i = pickAt(e.clientX, e.clientY); if (i != null) onFocusPoint(i); };
+    el.addEventListener('pointerdown', onDown); el.addEventListener('pointerup', onUp); el.addEventListener('dblclick', onDbl);
+    return () => { el.removeEventListener('pointerdown', onDown); el.removeEventListener('pointerup', onUp); el.removeEventListener('dblclick', onDbl); };
+  }, [camera, gl, controls, onPick, onFocusPoint, dimMask]);
+
   return (
-    <group>
-      <lineSegments geometry={box}><lineBasicMaterial color="#1b2127" /></lineSegments>
-      <Line points={[[-L, 0, 0], [L, 0, 0]]} color="#33404f" lineWidth={1} />
-      <Line points={[[0, -L, 0], [0, L, 0]]} color="#33404f" lineWidth={1} />
-      <Line points={[[0, 0, -L], [0, 0, L]]} color="#33404f" lineWidth={1} />
-      <Html position={[L + 0.15, 0, 0]} style={lbl} center>dim 1</Html>
-      <Html position={[0, L + 0.15, 0]} style={lbl} center>dim 2</Html>
-      <Html position={[0, 0, L + 0.15]} style={lbl} center>dim 3</Html>
-    </group>
+    <points ref={pointsRef} geometry={geometry}>
+      <pointsMaterial map={circle} alphaTest={0.5} size={0.04} sizeAttenuation vertexColors transparent opacity={0.95} depthWrite={false} />
+    </points>
   );
 }
 
-function PointCloud({ points, query, hoveredId, selectedId, onHover, onSelect }: {
-  points: Pt[]; query: string; hoveredId?: string; selectedId?: string;
-  onHover: (p: Pt | null) => void; onSelect: (p: Pt) => void;
-}) {
-  const q = query.trim().toLowerCase();
+function Highlight({ corpus, index }: { corpus: Corpus; index: number | null }) {
+  if (index == null) return null;
+  const p = corpus.positions;
   return (
-    <>
-      {points.map((p) => {
-        const dim = q !== '' && !p.prompt.toLowerCase().includes(q);
-        const active = p.id === hoveredId || p.id === selectedId;
-        return (
-          <mesh key={p.id} position={p.pos} scale={active ? 2.1 : 1}
-            onPointerOver={(e) => { e.stopPropagation(); onHover(p); document.body.style.cursor = 'pointer'; }}
-            onPointerOut={() => { onHover(null); document.body.style.cursor = 'auto'; }}
-            onClick={(e) => { e.stopPropagation(); onSelect(p); }}>
-            <sphereGeometry args={[0.05, 14, 14]} />
-            <meshBasicMaterial color={p.color} transparent opacity={dim ? 0.1 : 1} toneMapped={false} />
-          </mesh>
-        );
-      })}
-    </>
+    <mesh position={[p[index * 3], p[index * 3 + 1], p[index * 3 + 2]]}>
+      <sphereGeometry args={[0.06, 16, 16]} /><meshBasicMaterial color="#ffffff" toneMapped={false} />
+    </mesh>
   );
+}
+
+interface Focus { x: number; y: number; z: number; dist: number; key: number }
+
+// Smoothly flies the orbit target + camera to a new origin (double-click point / cluster jump).
+function CameraRig({ focus }: { focus: Focus | null }) {
+  const { camera, controls } = useThree() as any;
+  const goal = useRef<{ target: THREE.Vector3; cam: THREE.Vector3 } | null>(null);
+  useEffect(() => {
+    if (!focus || !controls) return;
+    const t = new THREE.Vector3(focus.x, focus.y, focus.z);
+    const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+    goal.current = { target: t, cam: t.clone().add(dir.multiplyScalar(focus.dist)) };
+  }, [focus, controls, camera]);
+  useFrame(() => {
+    if (!controls || !goal.current) return;
+    controls.target.lerp(goal.current.target, 0.14);
+    camera.position.lerp(goal.current.cam, 0.14);
+    controls.update();
+    if (camera.position.distanceTo(goal.current.cam) < 0.02) goal.current = null;
+  });
+  return null;
 }
 
 function NoWebGL() {
@@ -92,63 +180,420 @@ function NoWebGL() {
       <div style={{ textAlign: 'center', maxWidth: 440 }}>
         <div style={{ fontSize: 24, color: 'var(--accent-soft)', marginBottom: 'var(--s3)', opacity: .7 }}><Ic name="sparkles" /></div>
         <div style={{ color: 'var(--text)', fontSize: 14, marginBottom: 'var(--s2)' }}>The 3D space needs WebGL</div>
-        <div style={{ color: 'var(--faint)', fontSize: 12.5, lineHeight: 1.55 }}>
-          Your browser has WebGL / hardware acceleration turned off (or this is a sandboxed context), so the 3D view can’t render.
-          Enable hardware acceleration to fly your creations — everything else in noema works without it.
-        </div>
+        <div style={{ color: 'var(--faint)', fontSize: 12.5, lineHeight: 1.55 }}>Enable hardware acceleration to fly the corpus.</div>
       </div>
     </div>
   );
 }
 
 export function Space() {
-  const points = useMemo(makePoints, []);
+  if (!MOUNTED) return <DormantSpace />;
+  return <CorpusSpace />;
+}
+
+function CorpusSpace() {
   const glOk = useMemo(webglAvailable, []);
+  const [layer, setLayer] = useState<Layer>('text');
+  const [imageLayerOk, setImageLayerOk] = useState(true);
+  const [corpus, setCorpus] = useState<Corpus | null>(null);
+  const [meta, setMeta] = useState<PtMeta[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [hovered, setHovered] = useState<Pt | null>(null);
-  const [selected, setSelected] = useState<Pt | null>(null);
-  const peek = selected ?? hovered;
-  const matches = query.trim() ? points.filter((p) => p.prompt.toLowerCase().includes(query.trim().toLowerCase())).length : points.length;
+  const [activeCluster, setActiveCluster] = useState<number | null>(null);
+  const [picked, setPicked] = useState<number | null>(null);   // hovered/clicked point → highlight + small peek
+  const [viewer, setViewer] = useState<number | null>(null);   // full-size image viewer
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galLimit, setGalLimit] = useState(12);                // infinite-scroll page size
+  const [focus, setFocus] = useState<Focus | null>(null);      // camera fly-to target
+  const [sphere, setSphere] = useState<{ x: number; y: number; z: number; r: number } | null>(null);
+  const [selection, setSelection] = useState<{ x: number; y: number; z: number; r: number; mode: 'inc' | 'exc' }[]>([]);
+  const focusKey = useRef(0);
+  const MIN_R = 0.03, DEFAULT_R = MIN_R;   // double-click starts atomic; expand outward via the slider
+
+  const addSel = (mode: 'inc' | 'exc') => { if (sphere) setSelection(s => [...s, { x: sphere.x, y: sphere.y, z: sphere.z, r: sphere.r, mode }]); };
+
+  const focusPoint = (i: number) => {                            // double-click: fly + select sphere neighborhood
+    if (!corpus) return;
+    const p = corpus.positions; focusKey.current++;
+    const x = p[i * 3], y = p[i * 3 + 1], z = p[i * 3 + 2];
+    setFocus({ x, y, z, dist: 1.5, key: focusKey.current });
+    setSphere({ x, y, z, r: DEFAULT_R });
+    setActiveCluster(null); setGalleryOpen(true); setPicked(i);
+  };
+  const focusCluster = (id: number) => {
+    if (!corpus) return;
+    setSphere(null);
+    const p = corpus.positions, cl = corpus.clusters;
+    let cx = 0, cy = 0, cz = 0, c = 0;
+    for (let i = 0; i < cl.length; i++) if (cl[i] === id) { cx += p[i * 3]; cy += p[i * 3 + 1]; cz += p[i * 3 + 2]; c++; }
+    if (!c) return; cx /= c; cy /= c; cz /= c;
+    let s = 0;
+    for (let i = 0; i < cl.length; i++) if (cl[i] === id) { const dx = p[i * 3] - cx, dy = p[i * 3 + 1] - cy, dz = p[i * 3 + 2] - cz; s += Math.sqrt(dx * dx + dy * dy + dz * dz); }
+    s /= c; focusKey.current++;
+    setFocus({ x: cx, y: cy, z: cz, dist: Math.min(Math.max(s * 2.4, 1.6), 8), key: focusKey.current });
+  };
+
+  useEffect(() => { fetch('/space/meta.json').then(r => r.json()).then(setMeta).catch(() => {}); }, []);
+  useEffect(() => {
+    setCorpus(null); setErr(null); setActiveCluster(null); setPicked(null); setGalleryOpen(false);
+    loadCorpus(layer).then(setCorpus).catch(e => {
+      if (layer === 'image') { setImageLayerOk(false); setLayer('text'); } else setErr(String(e));
+    });
+  }, [layer]);
+
+  const baseColors = useMemo(() => {
+    if (!corpus) return new Float32Array(0);
+    const n = corpus.clusters.length;
+    const rgb: Record<number, [number, number, number]> = {};
+    for (const k in corpus.clusterInfo) rgb[+k] = hexToRgb(corpus.clusterInfo[k].color);
+    const arr = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { const c = rgb[corpus.clusters[i]] ?? [0.6, 0.6, 0.6]; arr[i * 3] = c[0]; arr[i * 3 + 1] = c[1]; arr[i * 3 + 2] = c[2]; }
+    return arr;
+  }, [corpus]);
+
+  const q = query.trim().toLowerCase();
+  const dimMask = useMemo(() => {
+    if (!corpus) return null;
+    if (activeCluster == null && !q && !sphere) return null;
+    const p = corpus.positions, n = corpus.clusters.length, mask = new Uint8Array(n);
+    const r2 = sphere ? sphere.r * sphere.r : 0;
+    for (let i = 0; i < n; i++) {
+      let dim = false;
+      if (activeCluster != null && corpus.clusters[i] !== activeCluster) dim = true;
+      if (!dim && sphere) {
+        const dx = p[i * 3] - sphere.x, dy = p[i * 3 + 1] - sphere.y, dz = p[i * 3 + 2] - sphere.z;
+        dim = dx * dx + dy * dy + dz * dz > r2;
+      }
+      if (!dim && q && meta) dim = !meta[i].p.toLowerCase().includes(q);
+      mask[i] = dim ? 1 : 0;
+    }
+    return mask;
+  }, [corpus, activeCluster, q, meta, sphere]);
+
+  const shown = useMemo(() => {
+    if (!corpus) return 0;
+    if (!dimMask) return corpus.clusters.length;
+    let c = 0; for (let i = 0; i < dimMask.length; i++) if (dimMask[i] === 0) c++; return c;
+  }, [corpus, dimMask]);
+
+  // dataset membership: inside ANY include sphere AND inside NO exclude sphere
+  const selMask = useMemo(() => {
+    if (!corpus || selection.length === 0) return null;
+    const p = corpus.positions, n = corpus.clusters.length, mask = new Uint8Array(n);
+    const inc = selection.filter(s => s.mode === 'inc'), exc = selection.filter(s => s.mode === 'exc');
+    if (inc.length === 0) return mask;
+    const inR = (s: typeof inc[0], x: number, y: number, z: number) => {
+      const dx = x - s.x, dy = y - s.y, dz = z - s.z; return dx * dx + dy * dy + dz * dz <= s.r * s.r;
+    };
+    for (let i = 0; i < n; i++) {
+      const x = p[i * 3], y = p[i * 3 + 1], z = p[i * 3 + 2];
+      if (inc.some(s => inR(s, x, y, z)) && !exc.some(s => inR(s, x, y, z))) mask[i] = 1;
+    }
+    return mask;
+  }, [corpus, selection]);
+  const selCount = useMemo(() => { let c = 0; if (selMask) for (let i = 0; i < selMask.length; i++) c += selMask[i]; return c; }, [selMask]);
+
+  const selectedIndices = () => { const out: number[] = []; if (selMask) for (let i = 0; i < selMask.length; i++) if (selMask[i]) out.push(i); return out; };
+
+  const exportManifest = () => {
+    if (!corpus || !meta || !selMask) return;
+    const items = selectedIndices().map(i => { const m = meta[i]; return { idx: i, src: m.s, caption: m.p, model: m.m, corpus: m.c, loras: m.l }; });
+    const manifest = { version: 1, layer, created: new Date().toISOString(), spheres: selection, count: items.length, items };
+    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `selection-${layer}-${items.length}.json`; a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  // ── train: build an inline dataset manifest from the selection and start a
+  // canon ai-toolkit training run via POST /v1/runs (modus.aitoolkit-training).
+  const [trainOpen, setTrainOpen] = useState(false);
+  const [trigger, setTrigger] = useState('');
+  const [baseModel, setBaseModel] = useState('klein-4b');
+  const [steps, setSteps] = useState(500);
+  const [maxImages, setMaxImages] = useState(80);
+  const [autocap, setAutocap] = useState(false);
+  const [training, setTraining] = useState(false);
+  const [trainMsg, setTrainMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const startTraining = async () => {
+    if (!meta || !selMask || !trigger.trim() || training) return;
+    let idxs = selectedIndices().filter(i => meta[i]?.s);   // need an image url
+    if (idxs.length === 0) { setTrainMsg({ ok: false, text: 'no images with a usable url in selection' }); return; }
+    if (idxs.length > maxImages) {                            // stride-sample for diversity
+      const stride = idxs.length / maxImages;
+      const s: number[] = [];
+      for (let k = 0; k < maxImages; k++) s.push(idxs[Math.floor(k * stride)]);
+      idxs = s;
+    }
+    const dataset = JSON.stringify(idxs.map(i => autocap ? { url: meta[i].s } : { url: meta[i].s, caption: meta[i].p }));
+    if (!window.confirm(`Start a LoRA training run on ${idxs.length} images (trigger "${trigger.trim()}", ${steps} steps)?\n\nThis launches real GPU compute.`)) return;
+    setTraining(true); setTrainMsg(null);
+    try {
+      const { run } = await api.createRun({
+        modusId: 'modus.aitoolkit-training',
+        aditus: { dataset, baseModel, triggerWord: trigger.trim(), steps, name: trigger.trim(), autocaption: autocap },
+      });
+      setTrainMsg({ ok: true, text: `training started · run ${run.id.slice(0, 8)} · ${run.status}` });
+    } catch (e) {
+      setTrainMsg({ ok: false, text: `failed: ${String((e as Error).message).slice(0, 120)}` });
+    } finally { setTraining(false); }
+  };
+
+  // gallery source: a sphere neighborhood (double-click) OR an isolated cluster.
+  const GAL_CAP = 3000, GAL_PAGE = 12;
+  const galleryView = useMemo(() => {
+    if (!corpus) return { idx: [] as number[], total: 0 };
+    const p = corpus.positions, cl = corpus.clusters;
+    if (sphere) {
+      const r2 = sphere.r * sphere.r; const hits: { i: number; d: number }[] = [];
+      for (let i = 0; i < cl.length; i++) {
+        const dx = p[i * 3] - sphere.x, dy = p[i * 3 + 1] - sphere.y, dz = p[i * 3 + 2] - sphere.z;
+        const d = dx * dx + dy * dy + dz * dz;
+        if (d <= r2) hits.push({ i, d });
+      }
+      hits.sort((a, b) => a.d - b.d);                 // nearest first
+      return { idx: hits.slice(0, GAL_CAP).map(h => h.i), total: hits.length };
+    }
+    if (activeCluster != null) {
+      const out: number[] = []; let total = 0;
+      for (let i = 0; i < cl.length; i++) if (cl[i] === activeCluster) { total++; if (out.length < GAL_CAP) out.push(i); }
+      return { idx: out, total };
+    }
+    return { idx: [], total: 0 };
+  }, [corpus, activeCluster, sphere]);
+  const galleryIdx = galleryView.idx;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // reset the scroll window whenever the selection changes
+  useEffect(() => { setGalLimit(GAL_PAGE); }, [activeCluster, sphere, galleryOpen]);
+  // bootstrap: grow the page until the grid actually overflows, so there's
+  // something to scroll (12 thumbs alone don't fill a tall drawer).
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!galleryOpen || !el || galLimit >= galleryIdx.length) return;
+    if (el.scrollHeight <= el.clientHeight + 40) {
+      const id = setTimeout(() => setGalLimit((l) => Math.min(l + GAL_PAGE, galleryIdx.length)), 60);
+      return () => clearTimeout(id);
+    }
+  }, [galLimit, galleryIdx, galleryOpen]);
+
+  const sortedClusters = useMemo(() => corpus
+    ? Object.entries(corpus.clusterInfo).map(([id, c]) => ({ id: +id, ...c })).sort((a, b) => b.count - a.count)
+    : [], [corpus]);
+
+  const peek = picked != null && meta ? meta[picked] : null;
+  const activeInfo = activeCluster != null && corpus ? corpus.clusterInfo[activeCluster] : null;
+  const view = viewer != null && meta ? meta[viewer] : null;
+  // what the gallery is showing: a sphere neighborhood or an isolated cluster
+  const galInfo = sphere
+    ? { label: `◉ neighborhood · r=${sphere.r.toFixed(2)}`, color: '#cfe3ff', count: galleryView.total }
+    : activeInfo;
 
   return (
     <AppShell crumb="space">
-      <div className="space" onClick={() => setSelected(null)}>
-        {!glOk ? <NoWebGL /> : (
+      <div className="space" onClick={() => { setPicked(null); }}>
+        {!glOk ? <NoWebGL /> : err ? (
+          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 13, padding: 24, textAlign: 'center' }}>
+            Couldn’t load the corpus artifact (/space/*). Run <code style={{ color: 'var(--accent-soft)' }}>scripts/corpus-space</code> to build it.<br />{err}
+          </div>
+        ) : !corpus ? (
+          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 13 }}>loading the {layer} space…</div>
+        ) : (
           <ErrorBoundary fallback={<NoWebGL />}>
-            <Canvas dpr={[1, 2]} camera={{ position: [4.2, 3, 5.6], fov: 42 }} style={{ position: 'absolute', inset: 0 }}>
-              <color attach="background" args={['#08090A']} />
-              <fog attach="fog" args={['#08090A', 9, 18]} />
+            <Canvas dpr={[1, 2]} camera={{ position: [4.4, 3.2, 6], fov: 42 }} style={{ position: 'absolute', inset: 0 }}>
+              <color attach="background" args={[BG]} />
+              <fog attach="fog" args={[BG, 11, 22]} />
               <Axes />
-              <PointCloud points={points} query={query} hoveredId={hovered?.id} selectedId={selected?.id} onHover={setHovered} onSelect={(p) => setSelected(p)} />
-              <OrbitControls makeDefault enableDamping dampingFactor={0.08} minDistance={3.5} maxDistance={16} target={[0, 0, 0]} />
+              <Cloud corpus={corpus} baseColors={baseColors} dimMask={dimMask} onPick={(i) => setPicked(i)} onFocusPoint={focusPoint} />
+              <Highlight corpus={corpus} index={picked} />
+              {selection.map((s, i) => (
+                <mesh key={i} position={[s.x, s.y, s.z]}>
+                  <sphereGeometry args={[s.r, 20, 14]} />
+                  <meshBasicMaterial color={s.mode === 'inc' ? '#39d98a' : '#ff5470'} wireframe transparent opacity={0.18} depthWrite={false} />
+                </mesh>
+              ))}
+              {sphere && (
+                <mesh position={[sphere.x, sphere.y, sphere.z]}>
+                  <sphereGeometry args={[sphere.r, 24, 16]} />
+                  <meshBasicMaterial color="#9ec5ff" wireframe transparent opacity={0.14} depthWrite={false} />
+                </mesh>
+              )}
+              <CameraRig focus={focus} />
+              <OrbitControls makeDefault enableDamping dampingFactor={0.08} minDistance={0.4} maxDistance={22}
+                zoomToCursor screenSpacePanning panSpeed={1.1} zoomSpeed={1.1}
+                mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN }} />
             </Canvas>
 
-            <div className="spacebar">
+            {/* top bar: layer toggle + search */}
+            <div className="spacebar" onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8, justifyContent: 'center' }}>
+                {(['text', 'image'] as Layer[]).map(l => (
+                  <button key={l} onClick={() => setLayer(l)} disabled={l === 'image' && !imageLayerOk}
+                    style={{
+                      padding: '5px 12px', borderRadius: 8, fontSize: 12, cursor: l === 'image' && !imageLayerOk ? 'not-allowed' : 'pointer',
+                      border: '1px solid var(--hair)', background: layer === l ? 'var(--accent-bg)' : 'var(--raised)',
+                      color: layer === l ? 'var(--accent-soft)' : (l === 'image' && !imageLayerOk ? 'var(--faint)' : 'var(--muted)'),
+                    }}>
+                    {l === 'text' ? 'prompt space' : `image space${imageLayerOk ? '' : ' (building…)'}`}
+                  </button>
+                ))}
+              </div>
               <div className="search">
                 <Ic name="search" />
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search your space — by prompt, look, or model…" />
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={meta ? 'Search the prompt space…' : 'loading prompts…'} disabled={!meta} />
               </div>
               <div className="mono" style={{ textAlign: 'center', color: 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 'var(--s2)' }}>
-                {points.length} creations · {matches} shown · dim1×dim2×dim3 · UMAP projection · drag to orbit
+                {corpus.manifest.n.toLocaleString()} creations · {shown.toLocaleString()} shown · {sortedClusters.length} clusters · CLIP ViT-B/32 · {corpus.manifest.projection}
+              </div>
+              <div className="mono" style={{ textAlign: 'center', color: 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 2, opacity: .8 }}>
+                drag rotate · mid/right-drag pan · scroll = zoom-to-cursor · dbl-click point or cluster = fly there
               </div>
             </div>
 
-            <div className="legend">
-              {CLUSTERS.map((c) => (
-                <div className="lg" key={c.key}><span className="d" style={{ background: c.color }} />{c.key} · 28</div>
+            {/* legend */}
+            <div className="legend" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '58vh', overflowY: 'auto' }}>
+              {sortedClusters.map((c) => (
+                <div className="lg" key={c.id} style={{ cursor: 'pointer', opacity: activeCluster == null || activeCluster === c.id ? 1 : 0.4 }}
+                  onClick={() => { const on = activeCluster === c.id; setActiveCluster(on ? null : c.id); setGalleryOpen(!on); if (!on) focusCluster(c.id); }}>
+                  <span className="d" style={{ background: c.color }} />{c.label} · {c.count.toLocaleString()}
+                </div>
               ))}
             </div>
 
-            <div className={`peek${peek ? ' show' : ''}`}>
+            {/* dataset selection panel */}
+            {selection.length > 0 && (
+              <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', left: 18, top: 18, zIndex: 8, width: 232, background: 'color-mix(in srgb, var(--panel) 92%, transparent)', backdropFilter: 'blur(8px)', border: '1px solid var(--hair)', borderRadius: 12, padding: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <b style={{ fontSize: 13, color: 'var(--text)' }}>dataset selection</b>
+                  <span className="mono" style={{ marginLeft: 'auto', color: 'var(--accent-soft)', fontSize: 12 }}>{selCount.toLocaleString()} items</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 150, overflowY: 'auto', marginBottom: 9 }}>
+                  {selection.map((s, i) => (
+                    <div key={i} className="mono" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--muted)' }}>
+                      <span style={{ color: s.mode === 'inc' ? '#5fe0a0' : '#ff8098', flex: '0 0 auto' }}>{s.mode === 'inc' ? '＋' : '－'}</span>
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>r={s.r.toFixed(2)} · ({s.x.toFixed(1)},{s.y.toFixed(1)},{s.z.toFixed(1)})</span>
+                      <button onClick={() => setSelection(sel => sel.filter((_, j) => j !== i))} style={{ marginLeft: 'auto', background: 'none', border: 0, color: 'var(--faint)', cursor: 'pointer' }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={() => setTrainOpen(o => !o)} disabled={selCount === 0} style={{ flex: 1, padding: '6px 0', borderRadius: 8, border: '1px solid #2c6b4f', background: 'rgba(57,217,138,.12)', color: '#5fe0a0', fontSize: 12, cursor: selCount ? 'pointer' : 'not-allowed' }}>{trainOpen ? '▾ train' : '▸ train'}</button>
+                  <button onClick={exportManifest} disabled={selCount === 0} style={{ flex: 1, padding: '6px 0', borderRadius: 8, border: '1px solid var(--hair)', background: 'var(--accent-bg)', color: 'var(--accent-soft)', fontSize: 12, cursor: selCount ? 'pointer' : 'not-allowed' }}>export</button>
+                  <button onClick={() => setSelection([])} style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid var(--hair)', background: 'var(--raised)', color: 'var(--faint)', fontSize: 12, cursor: 'pointer' }}>clear</button>
+                </div>
+
+                {trainOpen && (
+                  <div style={{ marginTop: 9, paddingTop: 9, borderTop: '1px solid var(--hair)', display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    <input value={trigger} onChange={(e) => setTrigger(e.target.value)} placeholder="trigger word (required)"
+                      style={{ width: '100%', padding: '6px 8px', borderRadius: 7, border: '1px solid var(--hair)', background: 'var(--raised)', color: 'var(--text)', fontSize: 12, boxSizing: 'border-box' }} />
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <select value={baseModel} onChange={(e) => setBaseModel(e.target.value)} style={{ flex: 1, padding: '5px 6px', borderRadius: 7, border: '1px solid var(--hair)', background: 'var(--raised)', color: 'var(--text)', fontSize: 11.5 }}>
+                        <option value="klein-4b">klein-4b</option>
+                      </select>
+                      <label className="mono" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--faint)' }}>
+                        steps<input type="number" min={50} max={4000} step={50} value={steps} onChange={(e) => setSteps(parseInt(e.target.value) || 0)} style={{ width: 52, padding: '4px 5px', borderRadius: 6, border: '1px solid var(--hair)', background: 'var(--raised)', color: 'var(--text)', fontSize: 11.5 }} />
+                      </label>
+                    </div>
+                    <label className="mono" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--faint)' }}>
+                      max images<input type="number" min={5} max={500} step={5} value={maxImages} onChange={(e) => setMaxImages(parseInt(e.target.value) || 0)} style={{ width: 56, padding: '4px 5px', borderRadius: 6, border: '1px solid var(--hair)', background: 'var(--raised)', color: 'var(--text)', fontSize: 11.5 }} />
+                      <span style={{ marginLeft: 'auto' }}>{selCount > maxImages ? `sampling ${maxImages}/${selCount.toLocaleString()}` : `all ${selCount}`}</span>
+                    </label>
+                    <label className="mono" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--muted)', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={autocap} onChange={(e) => setAutocap(e.target.checked)} />
+                      auto-caption (ignore prompts)
+                    </label>
+                    <button onClick={startTraining} disabled={training || !trigger.trim()} style={{ padding: '7px 0', borderRadius: 8, border: '1px solid #2c6b4f', background: training ? 'var(--raised)' : 'rgba(57,217,138,.18)', color: '#5fe0a0', fontSize: 12.5, cursor: training || !trigger.trim() ? 'not-allowed' : 'pointer' }}>
+                      {training ? 'starting…' : '⚡ start training run'}
+                    </button>
+                    {trainMsg && <div className="mono" style={{ fontSize: 10.5, lineHeight: 1.4, color: trainMsg.ok ? '#5fe0a0' : '#ff8098' }}>{trainMsg.text}{trainMsg.ok && <> · <Link to="/status" style={{ color: 'var(--accent-soft)' }}>status →</Link></>}</div>}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* browse button when a cluster is isolated */}
+            {activeInfo && !galleryOpen && (
+              <button onClick={(e) => { e.stopPropagation(); setGalleryOpen(true); }}
+                style={{ position: 'absolute', left: 18, bottom: 18, zIndex: 6, transform: 'translateY(calc(-58vh - 8px))',
+                  padding: '7px 12px', borderRadius: 9, border: '1px solid var(--hair)', background: 'var(--raised)', color: 'var(--accent-soft)', fontSize: 12, cursor: 'pointer' }}>
+                ▦ browse {activeInfo.label} ({activeInfo.count.toLocaleString()})
+              </button>
+            )}
+
+            {/* small peek (hover/last pick) */}
+            <div className={`peek${peek ? ' show' : ''}`} onClick={(e) => { e.stopPropagation(); if (picked != null) setViewer(picked); }} style={{ cursor: peek ? 'pointer' : 'default' }}>
               {peek && <>
-                <div className="pimg" style={{ background: `linear-gradient(150deg, ${peek.color}33, #0c1a1c 70%)` }} />
+                {peek.s ? <div className="pimg" style={{ backgroundImage: `url(${peek.s})`, backgroundSize: 'cover', backgroundPosition: 'center' }} /> : <div className="pimg" />}
                 <div className="pmeta">
-                  <b>{peek.prompt}</b>
-                  <span className="mono" style={{ color: 'var(--faint)' }}>{peek.model} · {peek.cluster}</span>
-                  <div style={{ marginTop: 'var(--s3)' }}><Link to="/trace" style={{ color: 'var(--accent-soft)', textDecoration: 'none', fontSize: 12 }}>open creation →</Link></div>
+                  <b style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{peek.p || '(no prompt)'}</b>
+                  <span className="mono" style={{ color: 'var(--faint)' }}>{peek.m} · {peek.c} · {peek.d} · click to enlarge</span>
                 </div>
               </>}
             </div>
+
+            {/* gallery drawer */}
+            {galleryOpen && galInfo && (
+              <div onClick={(e) => e.stopPropagation()} style={{
+                position: 'absolute', top: 0, right: 0, bottom: 0, width: 'min(420px, 80vw)', zIndex: 7,
+                background: 'color-mix(in srgb, var(--panel) 96%, transparent)', backdropFilter: 'blur(10px)',
+                borderLeft: '1px solid var(--hair)', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--hair)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ flex: '0 0 auto', width: 9, height: 9, borderRadius: '50%', background: galInfo.color }} />
+                  <b style={{ fontSize: 13, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{galInfo.label}</b>
+                  <span className="mono" style={{ color: 'var(--faint)', fontSize: 11, flex: '0 0 auto' }}>{Math.min(galLimit, galleryIdx.length)} / {galInfo.count.toLocaleString()}</span>
+                  <button onClick={() => { setGalleryOpen(false); setSphere(null); }} style={{ marginLeft: 'auto', background: 'none', border: 0, color: 'var(--faint)', cursor: 'pointer', fontSize: 16 }}>✕</button>
+                </div>
+                {sphere && (
+                  <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--hair)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span className="mono" style={{ color: 'var(--faint)', fontSize: 11, flex: '0 0 auto' }}>radius</span>
+                      <input type="range" min={0.03} max={2.5} step={0.01} value={sphere.r}
+                        onChange={(e) => setSphere(s => s ? { ...s, r: parseFloat(e.target.value) } : s)} style={{ flex: 1 }} />
+                      <span className="mono" style={{ color: 'var(--muted)', fontSize: 11, flex: '0 0 auto', width: 30 }}>{sphere.r.toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => addSel('inc')} style={{ flex: 1, padding: '6px 0', borderRadius: 8, border: '1px solid #2c6b4f', background: 'rgba(57,217,138,.12)', color: '#5fe0a0', fontSize: 12, cursor: 'pointer' }}>＋ include in dataset</button>
+                      <button onClick={() => addSel('exc')} style={{ flex: 1, padding: '6px 0', borderRadius: 8, border: '1px solid #7a3140', background: 'rgba(255,84,112,.12)', color: '#ff8098', fontSize: 12, cursor: 'pointer' }}>－ exclude</button>
+                    </div>
+                  </div>
+                )}
+                <div ref={scrollRef}
+                  onScroll={(e) => { const el = e.currentTarget; if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) setGalLimit((l) => Math.min(l + GAL_PAGE, galleryIdx.length)); }}
+                  style={{ flex: 1, overflowY: 'auto', padding: 10, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridAutoRows: 'min-content', gap: 6, alignContent: 'start' }}>
+                  {galleryIdx.slice(0, galLimit).map((i) => {
+                    const m = meta?.[i];
+                    return (
+                      <div key={i} onClick={() => setViewer(i)} title={m?.p}
+                        style={{ position: 'relative', aspectRatio: '1 / 1', borderRadius: 6, overflow: 'hidden', background: '#0c1116', cursor: 'pointer', border: viewer === i ? '1px solid var(--accent)' : '1px solid var(--hair)' }}>
+                        {m?.s && <img src={m.s} loading="lazy" alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
+                      </div>
+                    );
+                  })}
+                  {!meta && <div className="mono" style={{ gridColumn: '1/-1', color: 'var(--faint)', fontSize: 12, padding: 12 }}>loading thumbnails…</div>}
+                  {meta && galLimit < galleryIdx.length && <div className="mono" style={{ gridColumn: '1/-1', color: 'var(--faint)', fontSize: 11, padding: 8, textAlign: 'center' }}>scroll for more…</div>}
+                </div>
+              </div>
+            )}
+
+            {/* full-size viewer */}
+            {view && (
+              <div onClick={() => setViewer(null)} style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'rgba(4,5,7,.82)', display: 'grid', placeItems: 'center', padding: 24 }}>
+                <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 16, maxWidth: 'min(1000px, 92vw)', maxHeight: '88vh', background: 'var(--panel)', border: '1px solid var(--hair)', borderRadius: 14, overflow: 'hidden' }}>
+                  <div style={{ flex: '0 0 auto', maxWidth: '62vw', background: '#06090c', display: 'grid', placeItems: 'center' }}>
+                    {view.s ? <img src={view.s} alt="" style={{ maxWidth: '100%', maxHeight: '88vh', objectFit: 'contain', display: 'block' }} /> : <div style={{ padding: 60, color: 'var(--faint)' }}>no image</div>}
+                  </div>
+                  <div style={{ width: 280, padding: '18px 18px', overflowY: 'auto', flexShrink: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <span className="mono" style={{ color: 'var(--faint)', fontSize: 11 }}>{view.m} · {view.c} · {view.d}</span>
+                      <button onClick={() => setViewer(null)} style={{ background: 'none', border: 0, color: 'var(--faint)', cursor: 'pointer', fontSize: 16 }}>✕</button>
+                    </div>
+                    <div style={{ color: 'var(--text)', fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{view.p || '(no prompt)'}</div>
+                    {view.l && view.l.length > 0 && <div className="mono" style={{ color: 'var(--accent-soft)', fontSize: 11.5, marginTop: 12 }}>{view.l.map(x => `<lora:${x}>`).join('  ')}</div>}
+                    {view.s && <a href={view.s} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 14, color: 'var(--accent-soft)', fontSize: 12, textDecoration: 'none' }}>open original ↗</a>}
+                  </div>
+                </div>
+              </div>
+            )}
           </ErrorBoundary>
         )}
       </div>

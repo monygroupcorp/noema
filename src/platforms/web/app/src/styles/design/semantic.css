@@ -1,0 +1,87 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   SEMANTIC TOKENS — the only layer components are allowed to reference.
+   Maps brand-neutral primitives to roles, with light + dark defined together.
+
+   To re-skin a brand you remap a handful of these (mostly the accent/surface
+   lines) in identity/<brand>/theme.css. Everything else inherits. (PRINCIPLES §3)
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Surfaces */
+  --color-bg:           var(--neutral-0);
+  --color-surface:      var(--neutral-50);
+  --color-surface-2:    var(--neutral-100);
+  --color-border:       var(--neutral-200);
+  --color-border-strong:var(--neutral-300);
+
+  /* Text */
+  --color-text:         var(--neutral-900);
+  --color-text-muted:   var(--neutral-600);
+  --color-text-subtle:  var(--neutral-500);
+  --color-text-onaccent:var(--neutral-0);
+
+  /* Accent — brands override --accent-500 / --accent-600 in their theme.css.
+     Fallback to a neutral so the skeleton renders before a brand is applied. */
+  --color-accent:       var(--accent-500, var(--neutral-900));
+  --color-accent-hover: var(--accent-600, var(--neutral-800));
+  --color-accent-subtle:var(--accent-100, var(--neutral-100));
+
+  /* Status */
+  --color-success: var(--green-500);
+  --color-warning: var(--amber-500);
+  --color-danger:  var(--red-500);
+  --color-info:    var(--blue-500);
+
+  /* Focus ring (accessibility — never remove, only restyle) */
+  --color-focus:   var(--accent-500, var(--blue-500));
+
+  --radius:       var(--radius-md);
+  --ring-width:   2px;
+}
+
+/* Font role aliases. These MUST be (re)declared on the brand scope, not only on
+   :root — a custom property with var() resolves at the element it's declared on,
+   so if these lived only on :root they'd freeze to the fallback before a brand's
+   --brand-font-* is ever seen. Declaring them on [data-brand]/.brand-* makes
+   them recompute per brand and inherit correctly to the subtree. */
+:root,
+[data-brand],
+[class*="brand-"] {
+  --font-body:    var(--brand-font-body, ui-sans-serif, system-ui, sans-serif);
+  --font-display: var(--brand-font-display, var(--font-body));
+  --font-mono:    var(--brand-font-mono, ui-monospace, "SFMono-Regular", monospace);
+  /* Marquee = marketing/hero headlines (advertising voice). Defaults to display,
+     but a brand can make it fiercer than its in-app display. The split matters:
+     in-app type should be calm/readable; advertising type should have teeth. */
+  --font-marquee: var(--brand-font-marquee, var(--font-display));
+}
+
+/* Dark theme — applied via [data-theme="dark"] or prefers-color-scheme.
+   Defined alongside light so the two never drift.
+   NOT applied to branded roots ([data-brand]): a brand owns its own surfaces
+   (e.g. NOEMA is intrinsically dark), so generic auto-dark must not clobber them. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-brand]) {
+    --color-bg:            var(--neutral-1000);
+    --color-surface:       var(--neutral-950);
+    --color-surface-2:     var(--neutral-900);
+    --color-border:        var(--neutral-800);
+    --color-border-strong: var(--neutral-700);
+
+    --color-text:          var(--neutral-50);
+    --color-text-muted:    var(--neutral-400);
+    --color-text-subtle:   var(--neutral-500);
+  }
+}
+
+[data-theme="dark"] {
+  --color-bg:            var(--neutral-1000);
+  --color-surface:       var(--neutral-950);
+  --color-surface-2:     var(--neutral-900);
+  --color-border:        var(--neutral-800);
+  --color-border-strong: var(--neutral-700);
+
+  --color-text:          var(--neutral-50);
+  --color-text-muted:    var(--neutral-400);
+  --color-text-subtle:   var(--neutral-500);
+}

@@ -1,14 +1,14 @@
 import { Ic } from '../lib/icons';
-import type { Ident } from '../lib/idents';
+import { chipKind, type Ident } from '../lib/idents';
 
-// identity chip: named = letter avatar · anon = venetian-mask · tee = eye-off (blindness, not a shield)
+// identity chip — the WHO (funding axis) only: named = letter avatar · bearer = venetian-mask.
+// Execution privacy (sealed / local) is a separate signal now, not baked into the avatar.
 export function Chip({ d }: { d: Ident }) {
-  if (d.chipCls === 'named')
+  if (chipKind(d) === 'named')
     return <span className="chip named" style={{ background: d.chipColor }}>{d.glyph}</span>;
-  const name = d.chipCls === 'masked' ? 'venetian-mask' : 'eye-off';
   return (
-    <span className={`chip ${d.chipCls}`}>
-      <Ic name={name} />
+    <span className="chip masked">
+      <Ic name="venetian-mask" />
     </span>
   );
 }
