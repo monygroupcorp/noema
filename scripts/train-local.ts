@@ -41,6 +41,7 @@ const IMAGE = process.env.AITK_IMAGE ?? 'stationthis-klein:1'
 const AITK_DIR_BY_BASE: Record<string, string> = {
   'krea2-raw': '/home/rth/projects/ai/training/ai-toolkit-krea',
   'krea2': '/home/rth/projects/ai/training/ai-toolkit-krea',
+  'zimage': '/home/rth/projects/ai/training/ai-toolkit-krea',   // latest clone carries both krea2 + zimage archs
   'klein-4b': '/home/rth/projects/ai/training/ai-toolkit-klein',
 }
 
