@@ -84,7 +84,7 @@ export function Landing() {
   return (
     <div className="landing-page">
       <nav className="topnav">
-        <div className="brand"><span className="dot" />noema</div>
+        <div className="brand"><svg className="dot" viewBox="0 0 24 24" aria-hidden="true"><path className="lit" d="M12,2 A10 10 0 0 0 12,22 Z" /><circle className="ring" cx="12" cy="12" r="10" fill="none" strokeWidth="1.4" /></svg>noema</div>
         <div className="right">
           <Link className="btn-ghost" to="/features">Features</Link>
           <Link className="btn-ghost" to="/pricing">Pricing</Link>

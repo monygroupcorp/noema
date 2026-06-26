@@ -5,7 +5,9 @@
 }
 .topnav{display:flex;align-items:center;justify-content:space-between;padding:15px 26px;border-bottom:1px solid var(--hair);position:sticky;top:0;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(8px);z-index:10}
 .topnav .brand{display:flex;align-items:center;gap:9px;font-weight:600;letter-spacing:-.01em;font-size:15px}
-.topnav .brand .dot{width:15px;height:15px;border-radius:5px;background:conic-gradient(from 200deg,var(--accent),#2b2e6b 60%,var(--accent))}
+.topnav .brand .dot{width:16px;height:16px;display:block}
+.topnav .brand .dot .lit{fill:var(--accent)}
+.topnav .brand .dot .ring{stroke:var(--accent)}
 .topnav .right{display:flex;align-items:center;gap:10px}
 
 .hero{position:relative;max-width:840px;margin:0 auto;padding:clamp(80px,12vh,144px) var(--px-section) 44px;text-align:center}

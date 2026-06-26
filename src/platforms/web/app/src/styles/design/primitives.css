@@ -1,0 +1,88 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   PRIMITIVES — the raw scales. Brand-neutral. Never reference these directly
+   in components; map them through semantic.css first (see PRINCIPLES.md §2).
+
+   Color is authored in OKLCH: perceptually uniform, wide-gamut, and you can
+   reason about lightness/chroma/hue as numbers instead of guessing hex codes.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* — Neutral ramp (the structural greys; every brand uses these) — */
+  --neutral-0:   oklch(99% 0 0);     /* near-white  */
+  --neutral-50:  oklch(97% 0 0);
+  --neutral-100: oklch(94% 0 0);
+  --neutral-200: oklch(88% 0 0);
+  --neutral-300: oklch(80% 0 0);
+  --neutral-400: oklch(68% 0 0);
+  --neutral-500: oklch(56% 0 0);
+  --neutral-600: oklch(46% 0 0);
+  --neutral-700: oklch(37% 0 0);
+  --neutral-800: oklch(27% 0 0);
+  --neutral-900: oklch(18% 0 0);
+  --neutral-950: oklch(13% 0 0);
+  --neutral-1000:oklch(9%  0 0);     /* near-black  */
+
+  /* — Accent ramps live per-brand in identity/<brand>/theme.css —
+     A brand defines --accent-500 etc. there. Kept out of primitives so the
+     skeleton stays brand-neutral. */
+
+  /* — Functional hues (shared across brands; rarely re-skinned) — */
+  --green-500:  oklch(72% 0.17 152);   /* success */
+  --amber-500:  oklch(80% 0.15 80);    /* warning */
+  --red-500:    oklch(63% 0.22 25);    /* danger  */
+  --blue-500:   oklch(62% 0.17 250);   /* info    */
+
+  /* — Spacing scale (4px base, geometric-ish) — */
+  --space-0:  0;
+  --space-1:  0.25rem;  /*  4 */
+  --space-2:  0.5rem;   /*  8 */
+  --space-3:  0.75rem;  /* 12 */
+  --space-4:  1rem;     /* 16 */
+  --space-5:  1.5rem;   /* 24 */
+  --space-6:  2rem;     /* 32 */
+  --space-7:  3rem;     /* 48 */
+  --space-8:  4rem;     /* 64 */
+  --space-9:  6rem;     /* 96 */
+  --space-10: 8rem;     /* 128 */
+
+  /* — Type scale (1.25 major-third, rem-based) — */
+  --text-xs:   0.75rem;
+  --text-sm:   0.875rem;
+  --text-base: 1rem;
+  --text-lg:   1.25rem;
+  --text-xl:   1.5rem;
+  --text-2xl:  1.875rem;
+  --text-3xl:  2.5rem;
+  --text-4xl:  3.25rem;
+  --text-5xl:  4.5rem;
+
+  --leading-tight:  1.1;
+  --leading-snug:   1.3;
+  --leading-normal: 1.5;
+  --leading-relaxed:1.7;
+
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* — Radii — */
+  --radius-none: 0;
+  --radius-sm:   0.25rem;
+  --radius-md:   0.5rem;
+  --radius-lg:   0.75rem;
+  --radius-xl:   1rem;
+  --radius-full: 9999px;
+
+  /* — Elevation (kept subtle; OKLCH-based shadows read better on dark) — */
+  --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.06);
+  --shadow-md: 0 4px 12px oklch(0% 0 0 / 0.10);
+  --shadow-lg: 0 12px 32px oklch(0% 0 0 / 0.14);
+
+  /* — Motion — */
+  --ease-out:   cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast:   120ms;
+  --dur-base:   200ms;
+  --dur-slow:   400ms;
+}
