@@ -359,13 +359,15 @@ export const INTELLA_FLUX2_VAE_FULL: Intella = {
 
 // ── Z-Image Turbo stack (Alibaba Tongyi, 6B S3-DiT, Apache-2.0) ──────────────
 // The 8-step distilled turbo for fast inference. Apache-clean (ungated). The DiT loads via UNETLoader;
-// its text encoder is Qwen3-4B (a CLIPLoader with type 'z_image') and it REUSES the FLUX VAE
-// (intella.flux-vae, ae.safetensors) — so only the unet + the Qwen3-4B encoder are new here. familia
-// 'zimage' is the LoRA-compat key: a LoRA trained on Z-Image (baseModel 'zimage' → familia 'zimage',
-// canonicalFamilia()) stacks on this base via the Coziness MultiLoraLoader.
+// its text encoder is Qwen3-4B and it REUSES the FLUX VAE (intella.flux-vae, ae.safetensors) — so only
+// the unet + the Qwen3-4B encoder are new here. familia 'zimage' is the LoRA-compat key: a LoRA trained
+// on Z-Image (baseModel 'zimage' → familia 'zimage', canonicalFamilia()) stacks on this base via the
+// Coziness MultiLoraLoader.
+// CLIPLoader type: ComfyUI has no 'z_image' type — it auto-detects the qwen_3_4b encoder as TEModel
+// QWEN3_4B and routes ANY non-flux clip_type to z_image.te (comfy/sd.py). So the workflow uses 'lumina2'
+// (Z-Image's architectural parent, a valid type) — VERIFIED on an H100 staging pod 2026-06-26.
 // SOURCES: our R2 mirror first (auth-free, our custody — scripts/mirror-weights.mjs), Comfy-Org HF
-// (the upstream ComfyUI repackage, ungated, verified 200) as fallback. CLIPLoader 'type' string is the
-// one bit still pending a real-pod confirm.
+// (the upstream ComfyUI repackage, ungated, verified 200) as fallback.
 export const INTELLA_ZIMAGE_TURBO: Intella = {
   id: 'intella.z-image-turbo',
   nomen: 'Z-Image Turbo (bf16)',
@@ -420,10 +422,11 @@ export const INTELLA_QWEN3_4B_ZIMAGE: Intella = {
 }
 
 // ── Krea 2 Turbo stack (12.9B single_mmdit_large_wide, Krea 2 Community License) ──────────────
-// The 8-step distilled turbo. Qwen3-VL-4B text encoder + the Qwen-Image VAE (qwen_image_vae.safetensors)
-// — Krea 2 is Qwen-Image-architecture-adjacent (shares its VAE), so the CLIPLoader 'type' is likely
-// 'qwen_image' (pending a real-pod confirm). familia 'krea2' is the LoRA-compat key: a LoRA trained on
-// Krea 2 RAW (baseModel 'krea2'/'krea-turbo' → familia 'krea2' via canonicalFamilia()) stacks on Turbo.
+// The 8-step distilled turbo. Qwen3-VL-4B text encoder + the Qwen-Image VAE (qwen_image_vae.safetensors).
+// CLIPLoader type MUST be 'krea2': ComfyUI detects the qwen3vl_4b encoder as TEModel QWEN3VL_4B and only
+// routes it to krea2.te when clip_type == KREA2 (comfy/sd.py:1633); any other type falls back to the
+// klein encoder (wrong). familia 'krea2' is the LoRA-compat key: a LoRA trained on Krea 2 RAW (baseModel
+// 'krea2'/'krea-turbo' → familia 'krea2' via canonicalFamilia()) stacks on Turbo.
 // LICENSE: Krea 2 Community License (commercial use only for entities under $1M annual revenue).
 // SOURCES: our R2 mirror first, the official ungated Comfy-Org/Krea-2 ComfyUI repackage (fp8_scaled) as
 // fallback (verified 200, gated:false). fp8_scaled fits a 24GB card.
