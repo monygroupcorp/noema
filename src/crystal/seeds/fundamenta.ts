@@ -122,6 +122,55 @@ export const FUNDAMENTUM_FLUX_KONTEXT_COMFYUI: Fundamentum = {
 }
 
 /**
+ * Z-Image Turbo · ComfyUI — Alibaba Tongyi's 6B S3-DiT, 8-step distilled turbo. The new Z-Image unet
+ * + its Qwen3-4B text encoder, reusing the SHARED FLUX VAE (intella.flux-vae). family 'zimage' (its
+ * own LoRA-compat key — flux/sdxl LoRAs don't apply). LoRA-capable via the Coziness MultiLoraLoader.
+ */
+export const FUNDAMENTUM_ZIMAGE_TURBO_COMFYUI: Fundamentum = {
+  id: 'z-image-turbo-comfyui',
+  nomen: 'Z-Image Turbo · ComfyUI',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'ComfyUI',
+  intellae: [
+    { id: 'intella.z-image-turbo', role: 'unet' },
+    { id: 'intella.qwen3-4b',      role: 'clip' },
+    { id: 'intella.flux-vae',      role: 'vae' },
+  ],
+  vramGb: 24,
+  canonica: true,
+  natum: new Date('2026-06-26'),
+  mutatum: new Date('2026-06-26'),
+}
+
+/**
+ * Krea 2 Turbo · ComfyUI — the 12.9B single_mmdit_large_wide DiT, 8-step distilled turbo. Carries the
+ * Krea 2 Turbo unet + its Qwen3-VL-4B text encoder + the Qwen-Image VAE (none shared with the flux
+ * stacks). family 'krea2' (its own LoRA-compat key). LoRA-capable via the Coziness MultiLoraLoader.
+ * License: Krea 2 Community License (commercial use under $1M annual revenue).
+ */
+export const FUNDAMENTUM_KREA2_TURBO_COMFYUI: Fundamentum = {
+  id: 'krea-turbo-comfyui',
+  nomen: 'Krea 2 Turbo · ComfyUI',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'ComfyUI',
+  intellae: [
+    { id: 'intella.krea-2-turbo',  role: 'unet' },
+    { id: 'intella.qwen3-vl-4b',   role: 'clip' },
+    { id: 'intella.qwen-image-vae', role: 'vae' },
+  ],
+  vramGb: 24,
+  canonica: true,
+  natum: new Date('2026-06-26'),
+  mutatum: new Date('2026-06-26'),
+}
+
+/**
  * ComfyUI base — a weightless ComfyUI substrate for pack-only flows whose custom node self-downloads
  * its own model (e.g. InspyrenetRembg pulls the transparent-background ckpt on first use). No pinned
  * intellae; the flow's template names its customNodes. Light pod.
@@ -323,6 +372,8 @@ export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_CHROMA_COMFYUI,
   FUNDAMENTUM_FLUX_KONTEXT_COMFYUI,
   FUNDAMENTUM_FLUX2_KLEIN_COMFYUI,
+  FUNDAMENTUM_ZIMAGE_TURBO_COMFYUI,
+  FUNDAMENTUM_KREA2_TURBO_COMFYUI,
   FUNDAMENTUM_COMFYUI_BASE,
   FUNDAMENTUM_UPSCALE_COMFYUI,
   FUNDAMENTUM_QWEN_VL_VLLM,

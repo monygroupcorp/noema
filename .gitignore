@@ -113,3 +113,13 @@ src/arcanum/circuit/artifacts/arcanum_js/
 docs/competitive/
 tee/native-test/native-test
 tee/wg-server/wg-server
+
+# ComfyDeploy pre-migration archive output (large; keep off git)
+/comfydeploy-archive/
+
+# Corpus-space pipeline: venv + large intermediate artifacts (regenerable)
+/scripts/corpus-space/.venv/
+/scripts/corpus-space/out/
+/scripts/corpus-space/out-smoke/
+# Generated 3D-space frontend artifact (built by scripts/corpus-space/project.py)
+/src/platforms/web/app/public/space*/

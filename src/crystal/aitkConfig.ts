@@ -82,10 +82,30 @@ const PRESET_ALIASES: Record<string, string> = {
   'flux2-klein': 'flux2-klein-4b',
   'krea2': 'krea2-raw',
   'krea2-turbo': 'krea2-raw',   // we train on RAW even when targeting Turbo inference
+  'krea-turbo': 'krea2-raw',
   'krea': 'krea2-raw',
   'z-image': 'zimage',
   'zimage-turbo': 'zimage',     // train on base, apply on Turbo
   'z-image-turbo': 'zimage',
+}
+
+/**
+ * Map a `baseModel` (any preset key or alias) → the canonical LoRA-compat `familia` — the EXACT string
+ * the inference base flow carries on its `Intella.familia`, so a trained LoRA stacks via the Coziness
+ * MultiLoraLoader regardless of which alias name the trainer was invoked with. triggerMap matches
+ * familia by exact equality, so 'krea2'/'krea-turbo'/'krea2-turbo' must all collapse to one key ('krea2')
+ * — the base flow's family. Unknown bases fall through to the lowercased baseModel (today's behaviour for
+ * flux/sd15/sdxl, where the short baseModel already IS the familia). Used by the training finalizer.
+ */
+const FAMILIA_BY_BASE: Record<string, string> = {
+  'krea2-raw': 'krea2', 'krea2': 'krea2', 'krea2-turbo': 'krea2', 'krea-turbo': 'krea2', 'krea': 'krea2',
+  'zimage': 'zimage', 'z-image': 'zimage', 'zimage-turbo': 'zimage', 'z-image-turbo': 'zimage',
+  'flux2-klein-4b': 'flux2', 'klein-4b': 'flux2', 'klein': 'flux2', 'flux2-klein': 'flux2',
+}
+
+export function canonicalFamilia(baseModel: string): string {
+  const k = (baseModel ?? '').trim().toLowerCase()
+  return FAMILIA_BY_BASE[k] ?? k
 }
 
 export function resolveBasePreset(baseModel: string): AitkBasePreset {

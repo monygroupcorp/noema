@@ -186,6 +186,96 @@ export const ESSENTIA_RUNMAKE_CHROMA: Essentia = {
   mutatum: new Date('2025-01-01'),
 }
 
+// Z-Image Turbo — text to image (8-step distilled). Alibaba Tongyi's 6B S3-DiT on the
+// z-image-turbo-comfyui substrate (new unet + Qwen3-4B encoder + shared FLUX VAE). LoRA-capable via the
+// Coziness MultiLoraLoader: a LoRA trained on Z-Image (familia 'zimage') stacks from its trigger word.
+// Turbo is distilled → few steps, cfg ~1. Family ('zimage') derives from the unet's `Intella.familia`.
+export const ESSENTIA_RUNMAKE_ZIMAGE_TURBO: Essentia = {
+  id: 'z-image-turbo',
+  nomen: 'Z-Image Turbo — text to image',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',        // set on registration via hashModus()
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  fundamentumId: 'z-image-turbo-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation' },
+    width:      { type: 'int',   required: false, default: 1024, description: 'Output width in pixels' },
+    height:     { type: 'int',   required: false, default: 1024, description: 'Output height in pixels' },
+    steps:      { type: 'int',   required: false, default: 8,    description: 'Sampling steps (Turbo is distilled — few steps)' },
+    guidance:   { type: 'float', required: false, default: 1,    description: 'CFG guidance scale (Turbo runs near 1)' },
+    input_seed: { type: 'int',   required: false,               description: 'Random seed — omit to shuffle' },
+  },
+
+  exitus: {
+    image: { type: 'image', description: 'Generated image' },
+  },
+
+  workflowTemplate: 'z-image-turbo',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: {
+    batchSize: 1,
+    seedStrategy: 'shuffle',
+    seedPlaceholder: 88888888,
+    privateMode: false,
+    vramGb: 24,
+  },
+
+  natum: new Date('2026-06-26'),
+  mutatum: new Date('2026-06-26'),
+}
+
+// Krea 2 Turbo — text to image (8-step distilled). The 12.9B single_mmdit_large_wide DiT on the
+// krea-turbo-comfyui substrate (Krea 2 Turbo unet + Qwen3-VL-4B encoder + Qwen-Image VAE). LoRA-capable
+// via the Coziness MultiLoraLoader: a LoRA trained on Krea 2 RAW (familia 'krea2') stacks from its
+// trigger word — train on RAW, run on Turbo. License: Krea 2 Community License (<$1M revenue commercial).
+export const ESSENTIA_RUNMAKE_KREA_TURBO: Essentia = {
+  id: 'krea-turbo',
+  nomen: 'Krea 2 Turbo — text to image',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',        // set on registration via hashModus()
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  fundamentumId: 'krea-turbo-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation' },
+    width:      { type: 'int',   required: false, default: 1024, description: 'Output width in pixels' },
+    height:     { type: 'int',   required: false, default: 1024, description: 'Output height in pixels' },
+    steps:      { type: 'int',   required: false, default: 8,    description: 'Sampling steps (Turbo is distilled — few steps)' },
+    guidance:   { type: 'float', required: false, default: 1,    description: 'CFG guidance scale (Turbo runs near 1)' },
+    input_seed: { type: 'int',   required: false,               description: 'Random seed — omit to shuffle' },
+  },
+
+  exitus: {
+    image: { type: 'image', description: 'Generated image' },
+  },
+
+  workflowTemplate: 'krea-turbo',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: {
+    batchSize: 1,
+    seedStrategy: 'shuffle',
+    seedPlaceholder: 88888888,
+    privateMode: false,
+    vramGb: 24,
+  },
+
+  natum: new Date('2026-06-26'),
+  mutatum: new Date('2026-06-26'),
+}
+
 // FLUX img2img / restyle — i2i (effect). The input image is VAE-encoded to a latent and partially
 // denoised (`strength`), so the output keeps the source composition and restyles per the prompt. Reuses
 // the shared flux-comfyui substrate (schnell unet + flux VAE + T5/CLIP — all seeded). The `image` aditus
@@ -647,6 +737,8 @@ export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_RUNMAKE_SD15,
   ESSENTIA_RUNMAKE_SDXL,
   ESSENTIA_RUNMAKE_CHROMA,
+  ESSENTIA_RUNMAKE_ZIMAGE_TURBO,
+  ESSENTIA_RUNMAKE_KREA_TURBO,
   ESSENTIA_FLUXI2I,
   ESSENTIA_KONTEXTEDIT,
   ESSENTIA_KLEINEDIT,
