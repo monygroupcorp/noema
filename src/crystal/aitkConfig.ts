@@ -59,6 +59,20 @@ export const AITK_BASE_PRESETS: Record<string, AitkBasePreset> = {
     lowVram: true,
     qtype: 'qfloat8',
   },
+  // Z-Image (Alibaba Tongyi, 6B S3-DiT, Apache-2.0). Qwen3-4B encoder + Flux VAE (both already local).
+  // Train on the base foundation `Tongyi-MAI/Z-Image`; apply on Z-Image-Turbo (8-step) for inference.
+  // 6B trains comfortably on 24GB; qfloat8 + low-VRAM kept for headroom. ai-toolkit arch 'zimage'.
+  'zimage': {
+    nameOrPath: 'Tongyi-MAI/Z-Image',
+    arch: 'zimage',
+    resolution: [512, 768, 1024],
+    rank: 32,
+    lr: 1e-4,
+    quantize: true,
+    quantizeTe: true,
+    lowVram: true,
+    qtype: 'qfloat8',
+  },
 }
 
 /** Common aliases → canonical preset key. */
@@ -69,6 +83,9 @@ const PRESET_ALIASES: Record<string, string> = {
   'krea2': 'krea2-raw',
   'krea2-turbo': 'krea2-raw',   // we train on RAW even when targeting Turbo inference
   'krea': 'krea2-raw',
+  'z-image': 'zimage',
+  'zimage-turbo': 'zimage',     // train on base, apply on Turbo
+  'z-image-turbo': 'zimage',
 }
 
 export function resolveBasePreset(baseModel: string): AitkBasePreset {
