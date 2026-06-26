@@ -12,6 +12,8 @@ const Space = lazy(() => import('./screens/Space').then((m) => ({ default: m.Spa
 const Canvas = lazy(() => import('./screens/Canvas').then((m) => ({ default: m.Canvas })));
 const lazyEl = (node: ReactNode) => <Suspense fallback={<div className="page"><div className="pw"><div className="empty"><div className="t">Loading…</div></div></div></div>}>{node}</Suspense>;
 import { Vault } from './screens/Vault';
+import { Projects } from './screens/Projects';
+import { Compute } from './screens/Compute';
 import { Trace } from './screens/Trace';
 import { Run } from './screens/Run';
 import { Studio } from './screens/Studio';
@@ -35,6 +37,8 @@ export function App() {
       <Route path="/" element={<Chat />} />
       <Route path="/card" element={<Card />} />
       <Route path="/catalog" element={<Catalog />} />
+      <Route path="/projects" element={<Projects />} />
+      <Route path="/compute" element={<Compute />} />
       <Route path="/run" element={<Run />} />
       <Route path="/canvas" element={lazyEl(<Canvas />)} />
       <Route path="/space" element={lazyEl(<Space />)} />

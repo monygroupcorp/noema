@@ -1,0 +1,68 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   NOEMA — privacy-by-construction generative media.
+   The skin: glacial, dark-first, surgical. Ships dark today.
+   Apply with <html data-brand="noema"> (or class .brand-noema).
+   Values mirror the live app (src/styles/app.css) — keep them in sync here.
+   ───────────────────────────────────────────────────────────────────────── */
+
+[data-brand="noema"], .brand-noema {
+  /* Typeface. Two registers: calm in-app (Geist), fierce in ads (Martian Mono).
+     The wordmark and marquee share Martian Mono so the brand reads as one
+     engineered system; Geist keeps running copy easy to read. */
+  --brand-font-marquee: "Martian Mono", ui-monospace, monospace; /* ad headlines */
+  --brand-font-display: "Geist", -apple-system, system-ui, sans-serif; /* in-app headings */
+  --brand-font-body:    "Geist", -apple-system, system-ui, sans-serif;
+  --brand-font-mono:    "Geist Mono", ui-monospace, monospace;
+
+  /* Accent ramp (icy blue) */
+  --accent-500: #5b8cff;   /* primary  */
+  --accent-600: #8fb0ff;   /* soft / hover-on-dark */
+  --accent-100: #19233f;   /* subtle surface tint */
+  --brand-indigo-depth: #2b2e6b;   /* the dot's gradient floor */
+
+  /* Surfaces (NOEMA is dark by construction) */
+  --color-bg:            #08090A;
+  --color-surface:       #0c0e10;
+  --color-surface-2:     #131619;
+  --color-border:        #1c2024;
+  --color-border-strong: #2a2f35;
+
+  --color-text:          #e7eaef;
+  --color-text-muted:    #8b929c;
+  --color-text-subtle:   #5b626c;
+
+  --color-accent:        var(--accent-500);
+  --color-accent-hover:  var(--accent-600);
+  --color-accent-subtle: rgba(91, 140, 255, 0.10);
+  --color-focus:         var(--accent-500);
+  --color-success:       #5fd0a8;
+
+  /* Modality + locality palette — one source of truth shared by the canvas
+     ports and the catalogue registry (see identity/noema/catalogue-spec.md §4).
+     Modality swatches: */
+  --m-text:  #5fd0a8;   /* text   */
+  --m-image: #5b8cff;   /* image  */
+  --m-video: #d68f6f;   /* video  */
+  --m-audio: #d66f9a;   /* audio  */
+  --m-3d:    #b98fe0;   /* 3d     */
+  /* Locality / visibility (the hemisphere device): */
+  --slate:   #7d8aa6;   /* sealed · stepping back */
+  --grey:    #6a7079;   /* remote · signal faded  */
+  /* Egress (chat) — does the request leave NOEMA, and to whom. Warm, honest,
+     not alarmist (egress is also the cheap/capable upside). See chat-spec.md. */
+  --egress:  #c98f6a;
+
+  --radius: 10px;
+}
+
+/* Signature mechanic — privacy is shown by the signal *fading*, never by a
+   shield icon. As the user steps toward anonymity, the accent desaturates.
+   Drive with data-trust on the same element. (PRINCIPLES §4: show by absence.) */
+[data-brand="noema"][data-trust="anon"] {
+  --color-accent: #7d8aa6;   /* slate — stepping back */
+  --color-focus:  #7d8aa6;
+}
+[data-brand="noema"][data-trust="private"] {
+  --color-accent: #6a7079;   /* grey-fade — we see nothing but the meter */
+  --color-focus:  #6a7079;
+}

@@ -62,7 +62,7 @@ export function Status() {
         )}
 
         <div className="sub" style={{ marginTop: 'var(--s5)', color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
-          Live from staging · {ident.tier === 'identified' ? 'signed-in account' : 'anonymous session'}.
+          Live from staging · {ident.funding === 'named' ? 'signed-in account' : 'anonymous session'}.
         </div>
       </div></div>
     </AppShell>

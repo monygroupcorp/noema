@@ -10,14 +10,36 @@ import './canvas.css';
 
 const PORT: Record<string, string> = { text: '#5fd0a8', image: '#5b8cff', video: '#d68f6f', audio: '#d66f9a', '3d': '#b98fe0' };
 interface Port { id: string; label: string; type: string }
-interface FlowData { name: string; verb: string; color: string; inputs: Port[]; outputs: Port[]; [k: string]: unknown }
+// Where a node runs / what we can see — mirrors the pricing Compute dial (Remote · TEE · Local).
+type Vis = 'remote' | 'tee' | 'local';
+interface FlowData { name: string; verb: string; color: string; inputs: Port[]; outputs: Port[]; vis: Vis; running?: boolean; [k: string]: unknown }
+
+const VIS_LABEL: Record<Vis, string> = {
+  remote: 'remote · we see',
+  tee: 'TEE · sealed',
+  local: 'local · off-grid',
+};
+
+// The visibility meter glyph — a 13px hemisphere (shares the Rail brand mark's geometry).
+// remote = lit (filled half-disc + ring), tee = ring only, local = dashed ring only.
+function Hemisphere({ vis }: { vis: Vis }) {
+  const remote = vis === 'remote';
+  const stroke = vis === 'remote' ? 'var(--accent)' : vis === 'tee' ? '#7d8aa6' : '#6a7079';
+  return (
+    <svg className="cnode-hemi" viewBox="0 0 24 24" aria-hidden="true">
+      {remote && <path d="M12,2 A10 10 0 0 0 12,22 Z" fill="var(--accent)" />}
+      <circle cx="12" cy="12" r="10" fill="none" stroke={stroke} strokeWidth="1.4"
+        strokeDasharray={vis === 'local' ? '2.4 2.4' : undefined} />
+    </svg>
+  );
+}
 
 const ROW = 26, HEAD = 41, PAD = 8;
 const handleTop = (i: number) => HEAD + PAD + i * ROW + 13;
 
 function FlowNode({ data }: { data: FlowData }) {
   return (
-    <div className="cnode">
+    <div className={`cnode vis-${data.vis}${data.running ? ' running' : ''}`}>
       <div className="cnode-head">
         <span className="cn-fav" style={{ background: data.color }} />
         <b>{data.name}</b>
@@ -41,6 +63,10 @@ function FlowNode({ data }: { data: FlowData }) {
           ))}
         </div>
       </div>
+      <div className="cnode-meter">
+        <Hemisphere vis={data.vis} />
+        <span className="cm-val">{VIS_LABEL[data.vis]}</span>
+      </div>
     </div>
   );
 }
@@ -48,18 +74,25 @@ function FlowNode({ data }: { data: FlowData }) {
 const nodeTypes = { flow: FlowNode };
 
 const initialNodes: Node<FlowData>[] = [
-  { id: 'in', type: 'flow', position: { x: 0, y: 140 }, data: { name: 'Prompt', verb: 'input', color: 'linear-gradient(160deg,#5fd0a8,#1c4a3c)', inputs: [], outputs: [{ id: 'text', label: '“…dragon, dusk”', type: 'text' }] } },
-  { id: 'flux', type: 'flow', position: { x: 280, y: 80 }, data: { name: 'FLUX Schnell', verb: 'make', color: 'linear-gradient(160deg,var(--accent),#23264f)', inputs: [{ id: 'prompt', label: 'prompt', type: 'text' }], outputs: [{ id: 'image', label: 'image', type: 'image' }] } },
-  { id: 'joy', type: 'flow', position: { x: 580, y: 0 }, data: { name: 'JoyCaption', verb: 'describe', color: 'linear-gradient(160deg,#9a8fd6,#2b2456)', inputs: [{ id: 'image', label: 'image', type: 'image' }], outputs: [{ id: 'text', label: 'caption', type: 'text' }] } },
-  { id: 'ltx', type: 'flow', position: { x: 580, y: 210 }, data: { name: 'LTX Video', verb: 'animate', color: 'linear-gradient(160deg,#d68f6f,#4a261c)', inputs: [{ id: 'prompt', label: 'prompt', type: 'text' }, { id: 'image', label: 'image', type: 'image' }], outputs: [{ id: 'video', label: 'video', type: 'video' }] } },
+  { id: 'in', type: 'flow', position: { x: 0, y: 140 }, data: { name: 'Prompt', verb: 'input', color: 'linear-gradient(160deg,#5fd0a8,#1c4a3c)', vis: 'local', inputs: [], outputs: [{ id: 'text', label: '“…dragon, dusk”', type: 'text' }] } },
+  { id: 'flux', type: 'flow', position: { x: 280, y: 80 }, data: { name: 'FLUX Schnell', verb: 'make', color: 'linear-gradient(160deg,var(--accent),#23264f)', vis: 'remote', running: true, inputs: [{ id: 'prompt', label: 'prompt', type: 'text' }], outputs: [{ id: 'image', label: 'image', type: 'image' }] } },
+  { id: 'joy', type: 'flow', position: { x: 580, y: 0 }, data: { name: 'JoyCaption', verb: 'describe', color: 'linear-gradient(160deg,#9a8fd6,#2b2456)', vis: 'tee', inputs: [{ id: 'image', label: 'image', type: 'image' }], outputs: [{ id: 'text', label: 'caption', type: 'text' }] } },
+  { id: 'ltx', type: 'flow', position: { x: 580, y: 210 }, data: { name: 'LTX Video', verb: 'animate', color: 'linear-gradient(160deg,#d68f6f,#4a261c)', vis: 'remote', inputs: [{ id: 'prompt', label: 'prompt', type: 'text' }, { id: 'image', label: 'image', type: 'image' }], outputs: [{ id: 'video', label: 'video', type: 'video' }] } },
 ];
 
-const initialEdges: Edge[] = [
+const rawEdges: Edge[] = [
   { id: 'e1', source: 'in', sourceHandle: 'text', target: 'flux', targetHandle: 'prompt' },
   { id: 'e2', source: 'flux', sourceHandle: 'image', target: 'joy', targetHandle: 'image' },
   { id: 'e3', source: 'flux', sourceHandle: 'image', target: 'ltx', targetHandle: 'image' },
   { id: 'e4', source: 'in', sourceHandle: 'text', target: 'ltx', targetHandle: 'prompt' },
 ];
+
+// An edge feeding a sealed (TEE) node can't be "seen into" — tag it so it renders as a
+// slate dashed trail instead of the solid type-colour.
+const sealed = new Set(initialNodes.filter((n) => n.data.vis === 'tee').map((n) => n.id));
+const initialEdges: Edge[] = rawEdges.map((e) =>
+  sealed.has(e.target) ? { ...e, className: 'to-sealed' } : e
+);
 
 export function Canvas() {
   const [nodes, , onNodesChange] = useNodesState(initialNodes);

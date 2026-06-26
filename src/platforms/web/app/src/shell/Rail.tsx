@@ -1,15 +1,33 @@
-import { Fragment, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Fragment } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Ic } from '../lib/icons';
-import { useIdentity } from '../state/identity';
-import { TIER_LABEL } from '../lib/idents';
 import { usePins } from '../lib/pins';
-import { Chip } from './Chip';
+import { useIdentity } from '../state/identity';
+import { WORK_PRIV, redactionFor } from '../lib/idents';
+import { ProjectSwitcher } from './ProjectSwitcher';
+
+// Ambient privacy reminder at the foot of the (now spacious) rail — the live "what actually
+// reaches us" table, reacting to the current profile × execution mode.
+function RailPrivacy() {
+  const { ident, execution } = useIdentity();
+  const work = WORK_PRIV[execution];
+  return (
+    <div className="railpriv">
+      <div className="rp-l"><Ic name={work[0]} /> what reaches us</div>
+      <div className="redact mono">
+        {redactionFor(ident, execution).map((r, i) => (
+          <div className="row" key={i}><span className="k">{r.k}</span><span className={`v ${r.block ? 'block' : ''}`}>{r.v}</span></div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 interface NavLeaf { to: string; ico: string; label: string; key?: string }
-interface NavMenu { ico: string; label: string; menu: NavLeaf[] }
-interface NavSection { sec: string; items: (NavLeaf | NavMenu)[] }
+interface NavSection { sec: string; items: NavLeaf[] }
 
+// Navigation only. Everything "you" — identity, wallet, live compute, account links —
+// now lives in the top-right Account control (was three separate surfaces).
 const NAV: NavSection[] = [
   // Catalog is the entry point for tools; a single "card" is the detail you reach from it.
   // "Cards" only earns a nav slot when there's something to show (active card / pinned) — see Rail().
@@ -22,77 +40,7 @@ const NAV: NavSection[] = [
     { to: '/space', ico: 'sparkles', label: 'Space', key: '⌘5' },
     { to: '/trace', ico: 'footprints', label: 'Traces' },
   ] },
-  { sec: 'You', items: [
-    { ico: 'circle-user', label: 'Account', menu: [
-      { to: '/vault', ico: 'key-round', label: 'Vault' },
-      { to: '/profile', ico: 'palette', label: 'Profile' },
-      { to: '/status', ico: 'receipt-text', label: 'Ledger' },
-    ] },
-  ] },
 ];
-
-const ACCOUNT_PATHS = ['/vault', '/profile', '/status'];
-
-function AccountMenu({ item }: { item: NavMenu }) {
-  const here = useLocation().pathname;
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<CSSProperties>({});
-  const ref = useRef<HTMLButtonElement>(null);
-
-  function toggle(e: React.MouseEvent) {
-    e.stopPropagation();
-    const r = ref.current?.getBoundingClientRect();
-    if (r) setPos({ left: Math.min(r.left, window.innerWidth - 196), bottom: window.innerHeight - r.top + 8 });
-    setOpen((o) => !o);
-  }
-  useEffect(() => {
-    if (!open) return;
-    const c = (e: MouseEvent) => {
-      const t = e.target as Element;
-      if (!t.closest('#navmenu') && !t.closest('#accountnav')) setOpen(false);
-    };
-    document.addEventListener('click', c);
-    return () => document.removeEventListener('click', c);
-  }, [open]);
-
-  return (
-    <>
-      <button id="accountnav" ref={ref} className={`navitem${ACCOUNT_PATHS.includes(here) ? ' active' : ''}`} onClick={toggle}>
-        <span className="ico"><Ic name={item.ico} /></span> {item.label}
-      </button>
-      {open && (
-        <div id="navmenu" className="open" style={pos}>
-          {item.menu.map((m) => (
-            <Link key={m.to} to={m.to} className={m.to === here ? 'on' : ''} onClick={() => setOpen(false)}>
-              <Ic name={m.ico} /> {m.label}
-            </Link>
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
-
-function Keyring() {
-  const { ident, idents, setIdentity } = useIdentity();
-  return (
-    <div className="keyring">
-      <div className="lbl">Keyring <Link to="/keyring" title="manage identities"><Ic name="settings-2" /></Link></div>
-      <div>
-        {idents.map((d) => (
-          <div key={d.id} className={`ident ${d.id === ident.id ? 'sel' : ''}`} onClick={() => setIdentity(d.id)}>
-            <Chip d={d} />
-            <span className="meta">
-              <div className="nm">{d.tier === 'anon' ? 'anonymous' : d.name}</div>
-              <div className="tt"><span className="ttdot" />{TIER_LABEL[d.tier]}</div>
-            </span>
-          </div>
-        ))}
-      </div>
-      <Link className="newid" to="/keyring"><span className="plus"><Ic name="plus" /></span><span>New identity…</span></Link>
-    </div>
-  );
-}
 
 export function Rail() {
   const loc = useLocation();
@@ -114,17 +62,16 @@ export function Rail() {
   return (
     <aside className="rail">
       <div className="brand">
-        <span className="glyph" /><b>noema</b>
+        <svg className="glyph" viewBox="0 0 24 24" aria-hidden="true"><path className="lit" d="M12,2 A10 10 0 0 0 12,22 Z" /><circle className="ring" cx="12" cy="12" r="10" fill="none" strokeWidth="1.4" /></svg><b>noema</b>
         <Link to="/map" className="maplink" title="all screens"><Ic name="map" /></Link>
       </div>
+      <ProjectSwitcher />
       <nav className="nav">
         {sections.map((s) => (
           <Fragment key={s.sec}>
             <div className="lbl">{s.sec}</div>
             {s.items.map((it) =>
-              'menu' in it ? (
-                <AccountMenu key="account" item={it} />
-              ) : it.to.includes('?') ? (
+              it.to.includes('?') ? (
                 // Card links share the /card path — match on the full url so only the
                 // card you're actually viewing highlights, not every pinned one.
                 <Link key={it.to} to={it.to} className={`navitem${it.to === here + loc.search ? ' active' : ''}`}>
@@ -140,7 +87,7 @@ export function Rail() {
           </Fragment>
         ))}
       </nav>
-      <Keyring />
+      <RailPrivacy />
     </aside>
   );
 }
