@@ -45,6 +45,34 @@ export const AITK_BASE_PRESETS: Record<string, AitkBasePreset> = {
     lowVram: true,
     qtype: 'qfloat8',
   },
+  // Krea 2 RAW (12.9B single_mmdit_large_wide, Qwen3-VL-4B encoder + Qwen-Image VAE). Train the
+  // LoRA on RAW; it transfers to Krea 2 Turbo for 8-step inference. qfloat8 + low-VRAM to fit the
+  // 12B on a 24GB card. ai-toolkit arch 'krea2'; the arch fills the encoder/VAE defaults.
+  'krea2-raw': {
+    nameOrPath: 'krea/Krea-2-Raw',
+    arch: 'krea2',
+    resolution: [512, 768, 1024],
+    rank: 32,
+    lr: 1e-4,
+    quantize: true,
+    quantizeTe: true,
+    lowVram: true,
+    qtype: 'qfloat8',
+  },
+  // Z-Image (Alibaba Tongyi, 6B S3-DiT, Apache-2.0). Qwen3-4B encoder + Flux VAE (both already local).
+  // Train on the base foundation `Tongyi-MAI/Z-Image`; apply on Z-Image-Turbo (8-step) for inference.
+  // 6B trains comfortably on 24GB; qfloat8 + low-VRAM kept for headroom. ai-toolkit arch 'zimage'.
+  'zimage': {
+    nameOrPath: 'Tongyi-MAI/Z-Image',
+    arch: 'zimage',
+    resolution: [512, 768, 1024],
+    rank: 32,
+    lr: 1e-4,
+    quantize: true,
+    quantizeTe: true,
+    lowVram: true,
+    qtype: 'qfloat8',
+  },
 }
 
 /** Common aliases → canonical preset key. */
@@ -52,6 +80,32 @@ const PRESET_ALIASES: Record<string, string> = {
   'klein-4b': 'flux2-klein-4b',
   'klein': 'flux2-klein-4b',
   'flux2-klein': 'flux2-klein-4b',
+  'krea2': 'krea2-raw',
+  'krea2-turbo': 'krea2-raw',   // we train on RAW even when targeting Turbo inference
+  'krea-turbo': 'krea2-raw',
+  'krea': 'krea2-raw',
+  'z-image': 'zimage',
+  'zimage-turbo': 'zimage',     // train on base, apply on Turbo
+  'z-image-turbo': 'zimage',
+}
+
+/**
+ * Map a `baseModel` (any preset key or alias) → the canonical LoRA-compat `familia` — the EXACT string
+ * the inference base flow carries on its `Intella.familia`, so a trained LoRA stacks via the Coziness
+ * MultiLoraLoader regardless of which alias name the trainer was invoked with. triggerMap matches
+ * familia by exact equality, so 'krea2'/'krea-turbo'/'krea2-turbo' must all collapse to one key ('krea2')
+ * — the base flow's family. Unknown bases fall through to the lowercased baseModel (today's behaviour for
+ * flux/sd15/sdxl, where the short baseModel already IS the familia). Used by the training finalizer.
+ */
+const FAMILIA_BY_BASE: Record<string, string> = {
+  'krea2-raw': 'krea2', 'krea2': 'krea2', 'krea2-turbo': 'krea2', 'krea-turbo': 'krea2', 'krea': 'krea2',
+  'zimage': 'zimage', 'z-image': 'zimage', 'zimage-turbo': 'zimage', 'z-image-turbo': 'zimage',
+  'flux2-klein-4b': 'flux2', 'klein-4b': 'flux2', 'klein': 'flux2', 'flux2-klein': 'flux2',
+}
+
+export function canonicalFamilia(baseModel: string): string {
+  const k = (baseModel ?? '').trim().toLowerCase()
+  return FAMILIA_BY_BASE[k] ?? k
 }
 
 export function resolveBasePreset(baseModel: string): AitkBasePreset {

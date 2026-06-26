@@ -4,7 +4,7 @@ import type { Intella, IntellaSource } from '../types/intelligendi.js'
 import type { Uploader, ObjectStore } from './R2Uploader.js'
 import type { MediaFetcher } from './MediaFetcher.js'
 import type { AitkOutcome } from './aitoolkitRunnerClient.js'
-import { buildAitkConfig, DEFAULT_SAMPLE_PROMPTS, parseSamplePrompts } from './aitkConfig.js'
+import { buildAitkConfig, canonicalFamilia, DEFAULT_SAMPLE_PROMPTS, parseSamplePrompts } from './aitkConfig.js'
 import { parseManifest } from './datasetManifest.js'
 
 // =============================================================================
@@ -86,7 +86,12 @@ export function makeTrainingFinalizer(
     // `333flux-klein` whose /make trigger stays `333`).
     const slugSource = (typeof a.slug === 'string' && a.slug.trim()) || trigger || jobId
     const slug = slugify(slugSource)
-    const familia = String(a.familia ?? a.baseModel ?? '').trim().toLowerCase()
+    // familia = the LoRA-compat key /make resolves on. An explicit `familia` wins as-is; otherwise
+    // canonicalise the `baseModel` so aliases collapse to the base flow's exact key (e.g. 'krea-turbo'
+    // → 'krea2', 'z-image-turbo' → 'zimage'), so the trained LoRA actually stacks via triggerMap.
+    const familia = typeof a.familia === 'string' && a.familia.trim()
+      ? a.familia.trim().toLowerCase()
+      : canonicalFamilia(String(a.baseModel ?? ''))
     const nomen = (typeof a.name === 'string' && a.name.trim()) || trigger || jobId
 
     // Model-card enrichment (optional aditus): the requested step count, a human description,

@@ -1,0 +1,37 @@
+{
+  "templateId": "z-image-turbo",
+  "version": "1",
+  "displayName": "Z-Image Turbo text-to-image (1024x1024, 8 steps)",
+  "seedInputKey": "input_seed",
+  "loraCapable": true,
+  "customNodes": [
+    { "url": "https://github.com/skfoo/ComfyUI-Coziness", "name": "ComfyUI-Coziness" }
+  ],
+  "inputTemplate": {
+    "6":  { "class_type": "EmptySD3LatentImage", "inputs": { "width": 1024, "height": 1024, "batch_size": 1 } },
+    "8":  { "class_type": "VAEDecode",           "inputs": { "samples": ["13", 0], "vae": ["10", 0] } },
+    "9":  { "class_type": "SaveImage",           "inputs": { "filename_prefix": "runmake", "images": ["8", 0] } },
+    "10": { "class_type": "VAELoader",           "inputs": { "vae_name": "ae.safetensors" } },
+    "11": { "class_type": "CLIPLoader",          "inputs": { "type": "z_image", "device": "default", "clip_name": "qwen_3_4b.safetensors" } },
+    "12": { "class_type": "UNETLoader",          "inputs": { "unet_name": "z_image_turbo_bf16.safetensors", "weight_dtype": "default" } },
+    "13": { "class_type": "KSampler",            "inputs": { "seed": 88888888, "steps": 8, "cfg": 1, "sampler_name": "euler", "scheduler": "simple", "denoise": 1, "model": ["21", 0], "positive": ["22", 0], "negative": ["23", 0], "latent_image": ["6", 0] } },
+    "20": { "class_type": "LoraTextExtractor-b1f83aa2", "inputs": { "text": "PLACEHOLDER" } },
+    "21": { "class_type": "MultiLoraLoader-70bf3d77",   "inputs": { "model": ["12", 0], "clip": ["11", 0], "text": ["20", 1] } },
+    "22": { "class_type": "CLIPTextEncode",      "inputs": { "clip": ["21", 1], "text": ["20", 0] } },
+    "23": { "class_type": "CLIPTextEncode",      "inputs": { "clip": ["21", 1], "text": "" } }
+  },
+  "slotMap": {
+    "/13/inputs/seed":   "input_seed",
+    "/13/inputs/steps":  "steps",
+    "/13/inputs/cfg":    "guidance",
+    "/6/inputs/width":   "width",
+    "/6/inputs/height":  "height",
+    "/20/inputs/text":   "prompt"
+  },
+  "requiredModels": [
+    { "role": "unet", "id": "intella.z-image-turbo", "url": "https://models.miladystation2.net/diffusion_models/z_image_turbo_bf16.safetensors", "dest": "diffusion_models/z_image_turbo_bf16.safetensors" },
+    { "role": "clip", "id": "intella.qwen3-4b", "url": "https://models.miladystation2.net/clip/qwen_3_4b.safetensors", "dest": "clip/qwen_3_4b.safetensors" },
+    { "role": "vae",  "id": "intella.flux-vae", "url": "https://models.miladystation2.net/vae/ae.safetensors", "dest": "vae/ae.safetensors" }
+  ],
+  "platformHints": { "vramGb": 24, "expectedSteps": 8 }
+}
