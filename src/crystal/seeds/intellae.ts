@@ -357,6 +357,158 @@ export const INTELLA_FLUX2_VAE_FULL: Intella = {
   natum: new Date('2025-01-01'),
 }
 
+// ── Z-Image Turbo stack (Alibaba Tongyi, 6B S3-DiT, Apache-2.0) ──────────────
+// The 8-step distilled turbo for fast inference. Apache-clean (ungated). The DiT loads via UNETLoader;
+// its text encoder is Qwen3-4B and it REUSES the FLUX VAE (intella.flux-vae, ae.safetensors) — so only
+// the unet + the Qwen3-4B encoder are new here. familia 'zimage' is the LoRA-compat key: a LoRA trained
+// on Z-Image (baseModel 'zimage' → familia 'zimage', canonicalFamilia()) stacks on this base via the
+// Coziness MultiLoraLoader.
+// CLIPLoader type: ComfyUI has no 'z_image' type — it auto-detects the qwen_3_4b encoder as TEModel
+// QWEN3_4B and routes ANY non-flux clip_type to z_image.te (comfy/sd.py). So the workflow uses 'lumina2'
+// (Z-Image's architectural parent, a valid type) — VERIFIED on an H100 staging pod 2026-06-26.
+// SOURCES: our R2 mirror first (auth-free, our custody — scripts/mirror-weights.mjs), Comfy-Org HF
+// (the upstream ComfyUI repackage, ungated, verified 200) as fallback.
+export const INTELLA_ZIMAGE_TURBO: Intella = {
+  id: 'intella.z-image-turbo',
+  nomen: 'Z-Image Turbo (bf16)',
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'zimage',
+  parametri: 6_000_000_000,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/diffusion_models/z_image_turbo_bf16.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/z_image_turbo', branch: 'main', filename: 'split_files/diffusion_models/z_image_turbo_bf16.safetensors' },
+    },
+  ],
+  dest: 'diffusion_models/z_image_turbo_bf16.safetensors',
+  sizeGb: 12.3,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-06-26'),
+}
+
+export const INTELLA_QWEN3_4B_ZIMAGE: Intella = {
+  id: 'intella.qwen3-4b',
+  nomen: 'Qwen3 4B (Z-Image text encoder)',
+  genus: 'embedding',
+  architectura: 'transformer',
+  parametri: 4_000_000_000,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/clip/qwen_3_4b.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/z_image_turbo', branch: 'main', filename: 'split_files/text_encoders/qwen_3_4b.safetensors' },
+    },
+  ],
+  dest: 'clip/qwen_3_4b.safetensors',
+  sizeGb: 8,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-06-26'),
+}
+
+// ── Krea 2 Turbo stack (12.9B single_mmdit_large_wide, Krea 2 Community License) ──────────────
+// The 8-step distilled turbo. Qwen3-VL-4B text encoder + the Qwen-Image VAE (qwen_image_vae.safetensors).
+// CLIPLoader type MUST be 'krea2': ComfyUI detects the qwen3vl_4b encoder as TEModel QWEN3VL_4B and only
+// routes it to krea2.te when clip_type == KREA2 (comfy/sd.py:1633); any other type falls back to the
+// klein encoder (wrong). familia 'krea2' is the LoRA-compat key: a LoRA trained on Krea 2 RAW (baseModel
+// 'krea2'/'krea-turbo' → familia 'krea2' via canonicalFamilia()) stacks on Turbo.
+// LICENSE: Krea 2 Community License (commercial use only for entities under $1M annual revenue).
+// SOURCES: our R2 mirror first, the official ungated Comfy-Org/Krea-2 ComfyUI repackage (fp8_scaled) as
+// fallback (verified 200, gated:false). fp8_scaled fits a 24GB card.
+export const INTELLA_KREA2_TURBO: Intella = {
+  id: 'intella.krea-2-turbo',
+  nomen: 'Krea 2 Turbo (fp8 scaled)',
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'krea2',
+  parametri: 12_900_000_000,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/diffusion_models/krea2_turbo_fp8_scaled.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/Krea-2', branch: 'main', filename: 'diffusion_models/krea2_turbo_fp8_scaled.safetensors' },
+    },
+  ],
+  dest: 'diffusion_models/krea2_turbo_fp8_scaled.safetensors',
+  sizeGb: 13.1,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-06-26'),
+}
+
+export const INTELLA_QWEN3_VL_4B_KREA: Intella = {
+  id: 'intella.qwen3-vl-4b',
+  nomen: 'Qwen3-VL 4B (Krea 2 text encoder, fp8 scaled)',
+  genus: 'embedding',
+  architectura: 'transformer',
+  parametri: 4_000_000_000,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/clip/qwen3vl_4b_fp8_scaled.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/Krea-2', branch: 'main', filename: 'text_encoders/qwen3vl_4b_fp8_scaled.safetensors' },
+    },
+  ],
+  dest: 'clip/qwen3vl_4b_fp8_scaled.safetensors',
+  sizeGb: 5.2,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-06-26'),
+}
+
+export const INTELLA_QWEN_IMAGE_VAE: Intella = {
+  id: 'intella.qwen-image-vae',
+  nomen: 'Qwen-Image VAE',
+  genus: 'embedding',
+  architectura: 'vae',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/vae/qwen_image_vae.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/vae/qwen_image_vae.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/Krea-2', branch: 'main', filename: 'vae/qwen_image_vae.safetensors' },
+    },
+  ],
+  dest: 'vae/qwen_image_vae.safetensors',
+  sizeGb: 0.25,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-06-26'),
+}
+
 // 4x-UltraSharp — an ESRGAN super-resolution model (~67MB) for the pack-free, model-only upscale flow
 // (core UpscaleModelLoader + ImageUpscaleWithModel; no UltimateSDUpscale, no checkpoint). Not a
 // generative base → no `familia` (carries no LoRA-compat). (Verify the HF mirror URL before a real run.)
@@ -509,6 +661,11 @@ export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_FLUX2_KLEIN_9B,
   INTELLA_QWEN3_8B_FLUX2,
   INTELLA_FLUX2_VAE_FULL,
+  INTELLA_ZIMAGE_TURBO,
+  INTELLA_QWEN3_4B_ZIMAGE,
+  INTELLA_KREA2_TURBO,
+  INTELLA_QWEN3_VL_4B_KREA,
+  INTELLA_QWEN_IMAGE_VAE,
   INTELLA_UPSCALE_ULTRASHARP,
   INTELLA_SMOLLM2_135M,
   INTELLA_LORA_ARMORED_DRESS,

@@ -21,8 +21,9 @@ import type { Intella } from '../types/intelligendi.js'
  *  families (which route to the llama.cpp runtime). A model's family is encoded in
  *  its TAGS (and, for base models, its name) across the imported catalog. */
 export const FAMILY_TAGS = [
-  'flux', 'sdxl', 'sd3', 'sd15', 'pony', 'illustrious', 'kontext', 'hunyuan',
-  'wan', 'ltx', 'noobai', 'smollm', 'qwen', 'llama', 'mistral', 'gemma', 'phi',
+  'flux2', 'flux', 'sdxl', 'sd3', 'sd15', 'pony', 'illustrious', 'kontext', 'hunyuan',
+  'wan', 'ltx', 'noobai', 'krea2', 'zimage', 'chroma',
+  'smollm', 'qwen', 'llama', 'mistral', 'gemma', 'phi',
 ] as const
 
 /** The shape inference reads — a loose subset of Intella so callers (incl. the
