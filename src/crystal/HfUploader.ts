@@ -129,9 +129,22 @@ const KREA2: BaseFacts = {
   rank: 32, lr: '1e-4', resolution: '512, 768, 1024',
 }
 
+// Z-Image (Alibaba Tongyi, 6B S3-DiT, Apache-2.0 — clean license, no attribution constraints).
+// Train on the base `Tongyi-MAI/Z-Image`, run the LoRA on Z-Image-Turbo (8-step) for inference.
+const ZIMAGE: BaseFacts = {
+  displayBase: 'Z-Image',
+  baseRepo: 'Tongyi-MAI/Z-Image',
+  inferenceRepo: 'Tongyi-MAI/Z-Image-Turbo',
+  pipelineClass: 'DiffusionPipeline',
+  license: 'apache-2.0',
+  tags: ['text-to-image', 'lora', 'diffusers', 'z-image', 'zimage', 'stationthis'],
+  rank: 32, lr: '1e-4', resolution: '512, 768, 1024',
+}
+
 /** Map an Intella `familia` to its card facts. Unknown familiae fall back to FLUX.1 [dev]. */
 function baseFacts(familia?: string): BaseFacts {
   const f = (familia ?? '').toLowerCase()
+  if (f.includes('zimage') || f.includes('z-image')) return ZIMAGE
   if (f.includes('krea')) return KREA2
   if (f.includes('klein') || f.includes('flux2')) return KLEIN_4B
   return FLUX1_DEV
