@@ -4,6 +4,7 @@ import crypto from 'node:crypto'
 import { AbiCoder } from 'ethers'
 import { handleAlchemyWebhook } from '../../../src/api/webhooks/alchemyWebhook.js'
 import type { AlchemyWebhookDeps, AlchemyWebhookRequest } from '../../../src/api/webhooks/alchemyWebhook.js'
+import { permissiveSanctionsScreen, makeBlocklistScreen } from '../../../src/compliance/SanctionsScreen.js'
 import type { Depositum, Depositorum, Petitio, Petitionum, Testimonium, Testimoniorum } from '../../../src/types/catena.js'
 import type { Signum, Signorum } from '../../../src/types/significandi.js'
 import type { Anima, AnimaStore } from '../../../src/types/anima.js'
@@ -13,6 +14,7 @@ import type { Anima, AnimaStore } from '../../../src/types/anima.js'
 const TOPIC_PAYMENT      = '0x1266483a1ee1398eb3bf0eb2a3ccbce80bffd031a593fa1b9dad6272b40e3121'
 const TOPIC_NFT_RECEIVED = '0x5302f22244b41ec8834e043efcb52482aa21c2a460a047422c4ae3df50bd44a9'
 const TOPIC_ERC1155      = '0x72d4fe4bd1118f3ff78811cc440bf989b6e515157dab466890aaed7c87ffb78c'
+const TOPIC_ANON_DEPOSIT = '0x879aadcc0b21da25bde4bcf799cb142a02d0135f66a1328fef12c8b78636c58d'
 
 const VAULT = '0x00000001152d633eb2ac3cf91eac9994aeefC021'.toLowerCase()
 const CHAIN_ID = '1'
@@ -144,6 +146,23 @@ function makeAnimae(byWallet?: Map<string, Anima>): AnimaStore {
   }
 }
 
+function makeArcanumTree() {
+  const leaves = new Map<string, bigint>()
+  return {
+    leaves,
+    async insert(commitment: string, valor: bigint) {
+      leaves.set(commitment, valor)
+      return { leafIndex: leaves.size - 1, proof: { pathElements: [], pathIndices: [], root: '0x0' } as never }
+    },
+    async getProof() { throw new Error('not used') },
+    async getRoot() { return '0x0' },
+    async findLeaf(commitment: string) {
+      return leaves.has(commitment) ? ({ commitment, valor: leaves.get(commitment)! } as never) : null
+    },
+    async size() { return leaves.size },
+  }
+}
+
 function makeAnima(custos: string): Anima {
   return {
     id: nextId('ani'),
@@ -226,6 +245,19 @@ function makeNftLog(overrides: {
   }
 }
 
+const COMMITMENT = '0x' + '11'.repeat(32)  // bytes32 Poseidon commitment
+
+// from: string → that sender; from: null → no tx.from at all (query didn't select it)
+function makeAnonDepositLog(overrides: { from?: string | null; commitment?: string; amount?: bigint } = {}) {
+  const from = overrides.from === undefined ? PAYER : overrides.from
+  return {
+    account: { address: VAULT },
+    topics: [TOPIC_ANON_DEPOSIT, overrides.commitment ?? COMMITMENT],
+    data: coder.encode(['address', 'uint256'], [TOKEN, overrides.amount ?? AMOUNT]),
+    transaction: from === null ? { hash: TX_HASH } : { hash: TX_HASH, from },
+  }
+}
+
 function makeErc1155Log() {
   return {
     account: { address: VAULT },
@@ -275,6 +307,8 @@ function makeDeps(overrides: Partial<AlchemyWebhookDeps> = {}): AlchemyWebhookDe
     petitiones: overrides.petitiones ?? makePetitiones(),
     testimonia,
     animae: overrides.animae ?? makeAnimae(),
+    arcanumTree: overrides.arcanumTree ?? makeArcanumTree(),
+    sanctions: overrides.sanctions ?? permissiveSanctionsScreen,
     signingKeys: overrides.signingKeys ?? {},
     vaultAddresses: overrides.vaultAddresses ?? { [CHAIN_ID]: VAULT },
     ethPriceUsd: overrides.ethPriceUsd ?? 3000,
@@ -548,6 +582,98 @@ test('multiple logs in block processed independently', async () => {
   assert.equal([...deps.deposita.store.values()].length, 1)
   assert.equal(deps.signorum.issued.length, 1)
   assert.equal(testimonia.store.length, 1)
+})
+
+// ── OFAC sanctions screening ─────────────────────────────────────────────────
+
+const SANCTIONED = '0x5555555555555555555555555555555555555555'
+
+// 16. Blocked payer → Depositum quarantined (fractum), NO Signum, even with known anima
+test('OFAC: blocked payer is quarantined (fractum), no Signum issued', async () => {
+  const anima = makeAnima(SANCTIONED)
+  const animae = makeAnimae(new Map([[SANCTIONED.toLowerCase(), anima]]))
+  const deps = makeDeps({ animae, sanctions: makeBlocklistScreen([SANCTIONED]) })
+
+  const body = makeWebhookBody([makePaymentLog({ payer: SANCTIONED })])
+  const result = await handleAlchemyWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(result.body.processed, 1)  // processed-as-quarantined
+
+  const deposita = [...deps.deposita.store.values()]
+  assert.equal(deposita.length, 1)
+  assert.equal(deposita[0].status, 'fractum')
+  assert.equal(deposita[0].ab, SANCTIONED.toLowerCase())
+  assert.equal(deps.signorum.issued.length, 0)  // critically: no credit extended
+})
+
+// 17. Non-blocked payer still flows normally under an active blocklist
+test('OFAC: clean payer flows normally under an active blocklist', async () => {
+  const anima = makeAnima(PAYER)
+  const animae = makeAnimae(new Map([[PAYER.toLowerCase(), anima]]))
+  const deps = makeDeps({ animae, sanctions: makeBlocklistScreen([SANCTIONED]) })
+
+  const body = makeWebhookBody([makePaymentLog({ payer: PAYER })])
+  const result = await handleAlchemyWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal([...deps.deposita.store.values()][0].status, 'processatum')
+  assert.equal(deps.signorum.issued.length, 1)
+})
+
+// 18. Blocked anonymous-deposit funder → leaf NOT inserted
+test('OFAC: blocked anonymous deposit funder is refused (no leaf)', async () => {
+  const arcanumTree = makeArcanumTree()
+  const deps = makeDeps({ arcanumTree, sanctions: makeBlocklistScreen([SANCTIONED]) })
+
+  const body = makeWebhookBody([makeAnonDepositLog({ from: SANCTIONED })])
+  const result = await handleAlchemyWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(result.body.processed, 0)
+  assert.equal(arcanumTree.leaves.size, 0)
+})
+
+// 19. Anonymous deposit with no tx.from → fail-CLOSED (no leaf), even with empty blocklist
+test('OFAC: anonymous deposit missing tx.from fails closed (no leaf)', async () => {
+  const arcanumTree = makeArcanumTree()
+  const deps = makeDeps({ arcanumTree, sanctions: makeBlocklistScreen([]) })
+
+  const body = makeWebhookBody([makeAnonDepositLog({ from: null })])
+  const result = await handleAlchemyWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(result.body.processed, 0)
+  assert.equal(arcanumTree.leaves.size, 0)  // refused: unscreenable
+})
+
+// 20. Clean anonymous deposit funder → leaf inserted
+test('OFAC: clean anonymous deposit funder is admitted (leaf inserted)', async () => {
+  const arcanumTree = makeArcanumTree()
+  const deps = makeDeps({ arcanumTree, sanctions: makeBlocklistScreen([SANCTIONED]) })
+
+  const body = makeWebhookBody([makeAnonDepositLog({ from: PAYER })])
+  const result = await handleAlchemyWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(result.body.processed, 1)
+  assert.equal(arcanumTree.leaves.size, 1)
+  assert.equal(arcanumTree.leaves.get(COMMITMENT), AMOUNT)
+})
+
+// 21. Blocked NFT sender → no Testimonium
+test('OFAC: blocked NFT sender creates no Testimonium', async () => {
+  const anima = makeAnima(SANCTIONED)
+  const animae = makeAnimae(new Map([[SANCTIONED.toLowerCase(), anima]]))
+  const testimonia = makeTestimonia()
+  const deps = makeDeps({ animae, testimonia, sanctions: makeBlocklistScreen([SANCTIONED]) })
+
+  const body = makeWebhookBody([makeNftLog({ from: SANCTIONED })])
+  const result = await handleAlchemyWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(result.body.processed, 0)
+  assert.equal(testimonia.store.length, 0)
 })
 
 // 15. Throws internally → returns 500
