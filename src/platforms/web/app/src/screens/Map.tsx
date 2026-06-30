@@ -9,11 +9,18 @@ const SHELL_ENTRY: Card[] = [
 ];
 
 const CREATE: Card[] = [
-  { title: 'Chat / Concierge', phase: 'P1', desc: 'The front door. Intent → verb → streamed result.',     to: '/' },
+  { title: 'Home / dashboard', phase: 'P1', desc: '"What NOEMA can see" + projects + recent.',             to: '/app' },
+  { title: 'Chat / Concierge', phase: 'P1', desc: 'The front door. Intent → verb → streamed result.',     to: '/chat' },
   { title: 'Flow card',        phase: 'P1', desc: 'One tool as a form: inputs, quote, run, result.',       to: '/card' },
   { title: 'Catalog',          phase: 'P1', desc: 'Discover runnable flows; feeds the card.',              to: '/catalog' },
   { title: 'Run detail',       phase: 'P1', desc: 'A run in flight — staged timeline → outputs.',          to: '/run' },
   { title: 'Canvas',           phase: 'P3', desc: 'Accumulated runs wired into a spell.',                  to: '/canvas' },
+];
+
+const BUILD: Card[] = [
+  { title: 'Datasets',         phase: 'P2', desc: 'Your raw material — the core every model trains from.', to: '/datasets' },
+  { title: 'Model shelf',      phase: 'P2', desc: 'Trained models — run, collection, earn.',               to: '/models' },
+  { title: 'Collections',      phase: 'P2', desc: 'Author an NFT collection; export / publish to noesis.',  to: '/collections' },
 ];
 
 const MEMORY: Card[] = [
@@ -65,6 +72,9 @@ export function Map() {
 
         <div className="sectionhead">Memory axis</div>
         <MapGrid cards={MEMORY} />
+
+        <div className="sectionhead">Build axis</div>
+        <MapGrid cards={BUILD} />
 
         <div className="sectionhead">Identity · vault · privacy</div>
         <MapGrid cards={IDENTITY} />

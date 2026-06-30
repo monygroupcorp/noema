@@ -649,6 +649,62 @@ export const INTELLA_HEARTCODEC: Intella = {
   natum: new Date('2026-06-12'),
 }
 
+// FLUX.2 Klein 4B (fp8) — the smaller DiT (~4.5GB), fits a 24GB 4090 with VRAM to spare for a LoRA.
+// Same FLUX.2 stack as the 9B (Qwen3-8B TE + flux2 VAE shared); only the diffusion model differs.
+// This is the base our `impresstation-klein` LoRA was trained on (ai-toolkit on klein-base-4B).
+export const INTELLA_FLUX2_KLEIN_4B: Intella = {
+  id: 'intella.flux2-klein-4b',
+  nomen: 'FLUX.2 Klein 4B (fp8)',
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'flux2',
+  parametri: 4_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/resolve/main/flux-2-klein-4b-fp8.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'black-forest-labs/FLUX.2-klein-4b-fp8', branch: 'main', filename: 'flux-2-klein-4b-fp8.safetensors' },
+    },
+  ],
+  dest: 'diffusion_models/flux-2-klein-4b-fp8.safetensors',
+  sizeGb: 4.5,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-06-30'),
+}
+
+// impresstation (stationthis) — our flagship FLUX.2 Klein LoRA: a low-poly PlayStation-screenshot
+// style. Trained via ai-toolkit on klein-base-4B; trigger `stationthis`. Public + canonica so the
+// loraResolver always knows the slug (Pass-1 passes through an explicit `<lora:impresstation_klein:…>`
+// tag). Hosted on our HF org (noema-art). defaultWeight 1.05 = the dialed-in strength.
+export const INTELLA_IMPRESSTATION_KLEIN: Intella = {
+  id: 'intella.impresstation-klein',
+  nomen: 'stationthis (PS2 low-poly) · FLUX.2 Klein LoRA',
+  genus: 'lora',
+  architectura: 'lora',
+  familia: 'flux2',
+  baseIntellaId: 'intella.flux2-klein-4b',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/noema-art/impresstation-klein/resolve/main/impresstation_klein.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'noema-art/impresstation-klein', branch: 'main', filename: 'impresstation_klein.safetensors' },
+    },
+  ],
+  dest: 'loras/impresstation_klein.safetensors',
+  slug: 'impresstation_klein',
+  trigger: 'stationthis',
+  defaultWeight: 1.05,
+  sizeGb: 0.2,
+  versio: '1.0.0',
+  tags: [{ tag: 'flux2', source: 'curator' }, { tag: 'lora', source: 'curator' }],
+  canonica: true,
+  natum: new Date('2026-06-30'),
+}
+
 export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_FLUX_SCHNELL,
   INTELLA_FLUX_VAE,
@@ -659,8 +715,10 @@ export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_CHROMA,
   INTELLA_FLUX_KONTEXT_DEV,
   INTELLA_FLUX2_KLEIN_9B,
+  INTELLA_FLUX2_KLEIN_4B,
   INTELLA_QWEN3_8B_FLUX2,
   INTELLA_FLUX2_VAE_FULL,
+  INTELLA_IMPRESSTATION_KLEIN,
   INTELLA_ZIMAGE_TURBO,
   INTELLA_QWEN3_4B_ZIMAGE,
   INTELLA_KREA2_TURBO,

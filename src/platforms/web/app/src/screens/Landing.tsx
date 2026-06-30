@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { SiteFooter } from './SiteFooter';
+import { entryPath } from '../lib/entry';
+import { Wordmark } from '../ui/Wordmark';
 import './landing.css';
 
 const FRONT_HALF_NODES = [
@@ -62,7 +64,7 @@ const BACK_HALF_NODES = [
 const FEATURES = [
   {
     id: 'intent',
-    icon: 'sparkles',
+    icon: 'wand-sparkles',
     title: 'Intent in, work out',
     desc: 'Describe what you want. A concierge picks the tools and runs them. Open the controls only when you care to.',
   },
@@ -84,28 +86,26 @@ export function Landing() {
   return (
     <div className="landing-page">
       <nav className="topnav">
-        <div className="brand"><svg className="dot" viewBox="0 0 24 24" aria-hidden="true"><path className="lit" d="M12,2 A10 10 0 0 0 12,22 Z" /><circle className="ring" cx="12" cy="12" r="10" fill="none" strokeWidth="1.4" /></svg>noema</div>
+        <Link to="/" className="brand" aria-label="noema home"><Wordmark height={22} /></Link>
         <div className="right">
           <Link className="btn-ghost" to="/features">Features</Link>
           <Link className="btn-ghost" to="/pricing">Pricing</Link>
           <Link className="btn-ghost" to="/about">About</Link>
-          <Link className="btn" to="/">Open app</Link>
+          <Link className="btn" to={entryPath()}>Open app</Link>
         </div>
       </nav>
 
       <div className="hero">
-        <div className="eyebrow">Generative studio</div>
-        <h1>Make anything.<br />We never have to see it.</h1>
-        <p className="lead">
-          A studio for generative media — images, video, 3D, sound. Run our models or
-          your own. Stay signed in, go anonymous, or seal your work in private compute we are{' '}
-          <em>architecturally</em> unable to read.
-        </p>
+        <span className="noema-glow hero-glow" aria-hidden="true" />
+        <div className="noema-kicker hero-kicker">Privacy-by-construction · Generative studio</div>
+        <h1 className="hero-display">A complete studio.<br /><span className="accent">Completely private.</span></h1>
+        <hr className="noema-rule hero-rule" />
+        <p className="lead">Run our models or your own — anonymous to fund, anonymous to make.</p>
         <div className="cta">
           <Link className="btn lg" to="/onboard">Start free <Ic name="arrow-right" /></Link>
-          <Link className="btn-ghost" to="/">See it work</Link>
+          <Link className="btn-ghost" to={entryPath()}>See it work</Link>
         </div>
-        <div className="proof">no email to start · pay anonymously · go fully private anytime</div>
+        <div className="proof">no email · pay anonymously · provably private</div>
       </div>
 
       <div className="stance">

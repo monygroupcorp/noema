@@ -215,6 +215,31 @@ export const FUNDAMENTUM_FLUX2_KLEIN_COMFYUI: Fundamentum = {
 }
 
 /**
+ * FLUX.2 Klein 4B · ComfyUI — the 4B DiT variant of the Klein stack (vs the 9B above). Same Qwen3-8B
+ * TE + flux2 VAE; only the diffusion model is the smaller 4B fp8, which leaves a 24GB 4090 ample VRAM
+ * for a LoRA. This is the LoRA-capable Klein substrate (the kleinedit4b workflow carries the Coziness
+ * MultiLoraLoader stack) — the base our `stationthis` flagship custom modus forks from.
+ */
+export const FUNDAMENTUM_FLUX2_KLEIN_4B_COMFYUI: Fundamentum = {
+  id: 'flux2-klein-4b-comfyui',
+  nomen: 'FLUX.2 Klein 4B · ComfyUI',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'ComfyUI',
+  intellae: [
+    { id: 'intella.flux2-klein-4b',          role: 'unet' },
+    { id: 'intella.qwen3-8b-flux2',          role: 'clip' },
+    { id: 'intella.flux2-vae-full-encoder',  role: 'vae' },
+  ],
+  vramGb: 24,
+  canonica: true,
+  natum: new Date('2026-06-30'),
+  mutatum: new Date('2026-06-30'),
+}
+
+/**
  * Upscale · ComfyUI — the lightest image substrate: an ESRGAN upscaler only, no checkpoint. The
  * model-only upscale flow (UpscaleModelLoader + ImageUpscaleWithModel) needs no diffusion model, so
  * this fundament carries just the 4x-UltraSharp weight and runs on a small pod.
@@ -372,6 +397,7 @@ export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_CHROMA_COMFYUI,
   FUNDAMENTUM_FLUX_KONTEXT_COMFYUI,
   FUNDAMENTUM_FLUX2_KLEIN_COMFYUI,
+  FUNDAMENTUM_FLUX2_KLEIN_4B_COMFYUI,
   FUNDAMENTUM_ZIMAGE_TURBO_COMFYUI,
   FUNDAMENTUM_KREA2_TURBO_COMFYUI,
   FUNDAMENTUM_COMFYUI_BASE,

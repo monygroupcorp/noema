@@ -37,6 +37,7 @@ import { registerProgressusRecorder } from './execution/progressusSink.js'
 import { CANONICAL_MODI } from './crystal/seeds/modi.js'
 import { CANONICAL_ESSENTIAE } from './crystal/seeds/essentiae.js'
 import { CANONICAL_COMPOSITI } from './crystal/seeds/compositi.js'
+import { CANONICAL_CUSTOM_MODI } from './crystal/seeds/modiCustom.js'
 import { CANONICAL_FUNDAMENTA } from './crystal/seeds/fundamenta.js'
 import { makeLogger } from './lib/logger.js'
 import { withTrace, makeTraceContext } from './lib/trace.js'
@@ -470,6 +471,12 @@ async function main(): Promise<void> {
     await ring.modorum.register(compositus)
   }
   log.info(`Seeded ${CANONICAL_COMPOSITI.length} canonical compositi`)
+
+  // Authored flagship custom modi (canonica:false) — registered after the essentiae they fork from.
+  for (const customModus of CANONICAL_CUSTOM_MODI) {
+    await ring.modorum.register(customModus)
+  }
+  log.info(`Seeded ${CANONICAL_CUSTOM_MODI.length} custom modi`)
 
   for (const intella of CANONICAL_INTELLAE) {
     await intellae.upsert(intella)
