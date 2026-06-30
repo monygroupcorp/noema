@@ -20,6 +20,7 @@ export function SiteFooter() {
         <div className="col">
           <h4>Company</h4>
           <Link to="/about">About</Link>
+          <Link to="/ceremony">Ceremony</Link>
           <Link to="/blog">Blog</Link>
           <a href="#">Source · VPL</a>
         </div>

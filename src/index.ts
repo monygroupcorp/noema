@@ -20,6 +20,7 @@ import { makeBlocklistScreen, permissiveSanctionsScreen } from './compliance/San
 import { loadOfacBlocklist } from './compliance/loadOfacBlocklist.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
+import { createCeremoniaRouter } from './api/arcanum/ceremoniaRouter.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
 import { IdentityResolver as ApiIdentityResolver, credentialsFromHeaders } from './allocutio/api/IdentityResolver.js'
 import { createApiRouter } from './allocutio/api/apiRouter.js'
@@ -727,6 +728,9 @@ async function main(): Promise<void> {
       ? (wei) => import('./arcanum/ethPrice.js').then(m => m.weiToCredits(wei, process.env.ALCHEMY_API_KEY!))
       : undefined,
   }))
+  // Ceremony coordinator (status + contributor slots) — mounted before the /v1
+  // catch-all so /v1/ceremony resolves here. Public read + slot-claim only.
+  app.use('/v1/ceremony', express.json(), createCeremoniaRouter(ring.ceremonia))
   app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub }))
 
   // TEE runner lifecycle callbacks — internal pod-to-platform signals, not user-facing API.
