@@ -382,6 +382,40 @@ export const ESSENTIA_KLEINEDIT: Essentia = {
   mutatum: new Date('2025-01-01'),
 }
 
+// FLUX.2 Klein 4B — instruction edit, LoRA-CAPABLE. Same edit graph as klein-edit (9B) but on the 4B
+// DiT (fits a 4090 with room for a LoRA) and carrying the Coziness MultiLoraLoader stack, so a
+// `<lora:slug:weight>` tag in the prompt stacks adapters. This is the canonical base our `stationthis`
+// flagship custom modus forks from (deriveSavedModus → one degree off). categoria 'image'.
+export const ESSENTIA_KLEINEDIT_4B: Essentia = {
+  id: 'klein-edit-4b',
+  nomen: 'FLUX.2 Klein 4B — instruction edit',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  fundamentumId: 'flux2-klein-4b-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:     { type: 'text',  required: true,  description: 'Edit instruction. A `<lora:slug:weight>` tag or a LoRA trigger word stacks adapters.' },
+    image:      { type: 'image', required: true,  description: 'Image to edit' },
+    steps:      { type: 'int',   required: false, default: 9,  description: 'Sampling steps' },
+    input_seed: { type: 'int',   required: false,             description: 'Random seed — omit to shuffle' },
+  },
+  exitus: { image: { type: 'image', description: 'Edited image' } },
+
+  workflowTemplate: 'kleinedit4b',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
+
+  natum: new Date('2026-06-30'),
+  mutatum: new Date('2026-06-30'),
+}
+
 // Background removal — i2i (enhance). InspyrenetRembg pack (self-downloads its ckpt) on the weightless
 // comfyui-base substrate. The `image` aditus rides the i2i primitive into a LoadImage feeding the rembg
 // node; output is the cut-out (transparent PNG). categoria 'image'.
@@ -742,6 +776,7 @@ export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_FLUXI2I,
   ESSENTIA_KONTEXTEDIT,
   ESSENTIA_KLEINEDIT,
+  ESSENTIA_KLEINEDIT_4B,
   ESSENTIA_RMBG,
   ESSENTIA_UPSCALE,
   ESSENTIA_QWEN3_VL,

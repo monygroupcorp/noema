@@ -16,6 +16,7 @@ import { MongoModorum } from '../../src/crystal/MongoModorum.js'
 import { hashModus } from '../../src/crystal/hashModus.js'
 import { CANONICAL_ESSENTIAE } from '../../src/crystal/seeds/essentiae.js'
 import { CANONICAL_COMPOSITI } from '../../src/crystal/seeds/compositi.js'
+import { CANONICAL_CUSTOM_MODI } from '../../src/crystal/seeds/modiCustom.js'
 import { CANONICAL_INTELLAE } from '../../src/crystal/seeds/intellae.js'
 
 const URI = process.env.MONGO_PASS ?? process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
@@ -68,6 +69,14 @@ async function run() {
     await modorum.register(withHash)
     modiSeeded++
     console.log(`  compositus: ${compositus.id}@${compositus.versio}  hash=${withHash.contentHash.slice(0, 12)}…`)
+  }
+
+  // Authored flagship custom modi (canonica:false) — registered after the essentiae they fork from.
+  for (const customModus of CANONICAL_CUSTOM_MODI) {
+    const withHash = { ...customModus, contentHash: hashModus(customModus) }
+    await modorum.register(withHash)
+    modiSeeded++
+    console.log(`  custom: ${customModus.id}@${customModus.versio}  hash=${withHash.contentHash.slice(0, 12)}…`)
   }
 
   console.log(`[seed-canon] Done. intellae=${intellaSeeded} modi=${modiSeeded}`)
