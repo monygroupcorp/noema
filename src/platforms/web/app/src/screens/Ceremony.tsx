@@ -44,32 +44,23 @@ const TRUST_NODES = [
   },
 ];
 
-// The real contributor flow — these are the exact snarkjs steps from
-// docs/arcanum-ceremony.md, surfaced inline so the announcement *is* the call to act.
+// What contributing actually does — all of it in this tab. No install, no command
+// line, no ZK math. Three steps, about a minute, nothing leaves your browser.
 const STEPS = [
   {
     n: '01',
-    title: 'Install snarkjs',
-    body: 'node ≥ 18, then one global install. No circom, no ZK math.',
-    cmd: 'npm install -g snarkjs',
+    title: 'Gather randomness',
+    body: 'Wiggle your mouse and type a secret only you know. Together they seed the entropy you fold in — your "toxic waste."',
   },
   {
     n: '02',
-    title: 'Verify what you received',
-    body: 'Confirm the .zkey the coordinator sent is a valid continuation before you touch it.',
-    cmd: 'snarkjs zkey verify arcanum.r1cs pot20_final.ptau arcanum_prev.zkey',
+    title: 'Your browser folds it in',
+    body: 'We fetch the current key (~5 MB) and mix your entropy into it right here, in WebAssembly. Your secret never leaves this tab.',
   },
   {
     n: '03',
-    title: 'Contribute your entropy',
-    body: 'Mash the keyboard when prompted. That string is your toxic waste — never reuse or save it.',
-    cmd: 'snarkjs zkey contribute arcanum_prev.zkey arcanum_you.zkey --name="your handle" -v',
-  },
-  {
-    n: '04',
-    title: 'Delete the input, send the output',
-    body: 'Deleting the input is the act that makes your contribution irreversible. Then send the coordinator your output + attestation.',
-    cmd: 'rm arcanum_prev.zkey',
+    title: 'Upload — and the chain grows',
+    body: 'The new key is published to the live transcript for anyone to verify. Delete nothing, save nothing: once it’s in, your contribution is irreversible.',
   },
 ];
 
@@ -312,30 +303,32 @@ export function Ceremony() {
       <section className="cer-contribute" id="contribute">
         <div className="cer-c-head">
           <div className="lab">Take part</div>
-          <h2>Contribute your randomness.</h2>
+          <h2>Contribute your randomness — right here.</h2>
           <p className="ah-sub">
-            Anyone with a stake in the system being trustworthy should join — core team,
-            testers, anyone who'll spend anonymous credits. Contribute right in your browser
-            (panel on the right), or use the command line below. You never have to trust the
-            other contributors.
+            No install, no command line, nothing to download and run. It all happens in
+            this tab, in about a minute. Anyone with a stake in the system being trustworthy
+            should join — and you never have to trust the other contributors.
           </p>
         </div>
 
         <div className="cer-grid">
-          <div className="cer-cli">
-            <div className="cer-cli-h">Prefer the command line?</div>
-          <ol className="cer-steps">
-            {STEPS.map((s) => (
-              <li key={s.n} className="cer-step">
-                <span className="cer-stepn">{s.n}</span>
-                <div className="cer-stepbody">
-                  <h3>{s.title}</h3>
-                  <p>{s.body}</p>
-                  <code className="cer-cmd">{s.cmd}</code>
-                </div>
-              </li>
-            ))}
-          </ol>
+          <div className="cer-how">
+            <ol className="cer-steps">
+              {STEPS.map((s) => (
+                <li key={s.n} className="cer-step">
+                  <span className="cer-stepn">{s.n}</span>
+                  <div className="cer-stepbody">
+                    <h3>{s.title}</h3>
+                    <p>{s.body}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <p className="cer-cli-note">
+              Running a validator or prefer the terminal? The same contribution works from
+              the command line — see the{' '}
+              <a href="https://github.com/monygroupcorp/noema/blob/main/docs/arcanum-ceremony.md" target="_blank" rel="noreferrer">contributor guide</a>.
+            </p>
           </div>
 
           <aside className="cer-side">
