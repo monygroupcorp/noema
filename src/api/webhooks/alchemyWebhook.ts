@@ -7,6 +7,7 @@ import type { Depositorum, Petitionum, Testimoniorum } from '../../types/catena.
 import type { Signorum } from '../../types/significandi.js'
 import type { AnimaStore } from '../../types/anima.js'
 import type { ArcanumTreeStore } from '../../arcanum/ArcanumTree.js'
+import type { SanctionsScreen } from '../../compliance/SanctionsScreen.js'
 
 // ---------------------------------------------------------------------------
 // Known CreditVault event topic hashes (pre-computed)
@@ -31,6 +32,12 @@ export interface AlchemyWebhookDeps {
   animae: AnimaStore
   /** Arcanum Merkle tree — receives anonymous deposits (no animaId). */
   arcanumTree: ArcanumTreeStore
+  /**
+   * OFAC sanctions screen. Every value-bearing deposit's sending wallet is
+   * screened here, before any Signum is issued or Arcanum leaf inserted — the
+   * deposit boundary is the one moment the funder address is observable.
+   */
+  sanctions: SanctionsScreen
   /** Per-chainId HMAC signing keys. Key: chainId string, value: secret string. */
   signingKeys: Record<string, string>
   /**
@@ -66,7 +73,11 @@ interface AlchemyLog {
   account: { address: string }  // GraphQL: logs { account { address } }
   topics: string[]
   data: string
-  transaction: { hash: string }
+  // GraphQL must select `transaction { hash from }`. `from` is the funding wallet,
+  // required to OFAC-screen anonymous deposits (whose sender is not in the event
+  // topics, only on the enclosing tx). Optional here so a not-yet-updated Alchemy
+  // query degrades to fail-closed screening rather than a crash.
+  transaction: { hash: string; from?: string }
 }
 
 interface AlchemyBlock {
@@ -185,22 +196,22 @@ export async function handleAlchemyWebhook(
 // ---------------------------------------------------------------------------
 
 async function handlePaymentLog(
-  log: AlchemyLog,
+  entry: AlchemyLog,
   chainId: string,
   vaultAddress: string,
   deps: AlchemyWebhookDeps,
 ): Promise<boolean> {
-  const txHash = log.transaction.hash
+  const txHash = entry.transaction.hash
 
   // Extract indexed params from topics
   // topics[1] = payer address (32-byte padded, last 20 bytes = address)
-  const payer = ('0x' + log.topics[1].slice(-40)).toLowerCase()
+  const payer = ('0x' + entry.topics[1].slice(-40)).toLowerCase()
 
   // Decode non-indexed params from data
   const coder = AbiCoder.defaultAbiCoder()
   const [token, amount] = coder.decode(
     ['address', 'uint256', 'uint256', 'uint256'],
-    log.data,
+    entry.data,
   ) as unknown as [string, bigint, bigint, bigint]
 
   const valor = BigInt(amount)
@@ -209,6 +220,24 @@ async function handlePaymentLog(
   const existing = await deps.deposita.findByHash(txHash, chainId)
   if (existing?.status === 'processatum') {
     return false  // already fully processed — skip
+  }
+
+  // OFAC screen the funding wallet BEFORE any credit is issued. A blocked payer's
+  // deposit is recorded as `fractum` (no Signum) and quarantined — the funds are
+  // detected and auditable, but no credit/value is extended to a sanctioned address.
+  const payerVerdict = await deps.sanctions.screen(payer)
+  if (!payerVerdict.ok) {
+    log.warn('OFAC: payment deposit blocked', { txHash, chainId, payer, reason: payerVerdict.reason })
+    await deps.deposita.create({
+      chainId,
+      transactioHash: txHash,
+      ab: payer,
+      ad: vaultAddress,
+      valor,
+      confirmationes: 1,
+      status: 'fractum',
+    })
+    return true  // processed (quarantined), not credited
   }
 
   // Create Depositum
@@ -284,6 +313,24 @@ async function handleAnonymousDepositLog(
     return false  // malformed log data — skip rather than 500ing the whole webhook
   }
 
+  // OFAC screen the depositing wallet BEFORE the note is admitted to the tree.
+  // The funder address lives on the enclosing transaction (the commitment in the
+  // event topics is unlinkable by design); screening here is the only moment it
+  // is observable. Fail-CLOSED: if the Alchemy query did not provide `from`, we
+  // cannot screen, so we refuse the leaf rather than admit an unscreened note.
+  // (Safe: anonymous notes are not yet spendable — see valor-scale note above —
+  // so refusing here cannot break a live spend path.)
+  const funder = entry.transaction?.from?.toLowerCase()
+  if (!funder) {
+    log.warn('OFAC: anonymous deposit has no tx.from — cannot screen, refusing leaf', { commitment, txHash: entry.transaction?.hash })
+    return false
+  }
+  const funderVerdict = await deps.sanctions.screen(funder)
+  if (!funderVerdict.ok) {
+    log.warn('OFAC: anonymous deposit blocked', { commitment, funder, reason: funderVerdict.reason })
+    return false
+  }
+
   // Idempotency: commitment is unique per note — skip if already in tree
   const existing = await deps.arcanumTree.findLeaf(commitment)
   if (existing) {
@@ -303,22 +350,30 @@ async function handleAnonymousDepositLog(
 // ---------------------------------------------------------------------------
 
 async function handleNftLog(
-  log: AlchemyLog,
+  entry: AlchemyLog,
   chainId: string,
   deps: AlchemyWebhookDeps,
 ): Promise<boolean> {
-  const txHash = log.transaction.hash
+  const txHash = entry.transaction.hash
 
   // topics[1] = operator (32-byte padded address)
   // topics[2] = from (previous owner / sender)
-  const from = ('0x' + log.topics[2].slice(-40)).toLowerCase()
+  const from = ('0x' + entry.topics[2].slice(-40)).toLowerCase()
 
   // Decode data: (address token, uint256 tokenId)
   const coder = AbiCoder.defaultAbiCoder()
   const [token, tokenId] = coder.decode(
     ['address', 'uint256'],
-    log.data,
+    entry.data,
   ) as unknown as [string, bigint]
+
+  // OFAC screen the sender before recording an ownership proof — a Testimonium
+  // can confer access, so do not process one from a sanctioned wallet.
+  const fromVerdict = await deps.sanctions.screen(from)
+  if (!fromVerdict.ok) {
+    log.warn('OFAC: NFT-received blocked', { txHash, from, reason: fromVerdict.reason })
+    return false
+  }
 
   // Look up anima by sender wallet
   const anima = await deps.animae.findByCustos(from)

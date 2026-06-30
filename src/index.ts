@@ -16,6 +16,8 @@ import { makeTelegramSender } from './allocutio/telegram/TelegramSenderAdapter.j
 import type { AuctorKey } from './flow/types.js'
 import { createWebhookRouter } from './api/webhooks/webhookRouter.js'
 import { handleAlchemyWebhook } from './api/webhooks/alchemyWebhook.js'
+import { makeBlocklistScreen, permissiveSanctionsScreen } from './compliance/SanctionsScreen.js'
+import { loadOfacBlocklist } from './compliance/loadOfacBlocklist.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
@@ -790,6 +792,21 @@ async function main(): Promise<void> {
   if (process.env.ALCHEMY_SIGNING_KEY_MAINNET) ALCHEMY_SIGNING_KEYS['1']    = process.env.ALCHEMY_SIGNING_KEY_MAINNET
   if (process.env.ALCHEMY_SIGNING_KEY_BASE)    ALCHEMY_SIGNING_KEYS['8453'] = process.env.ALCHEMY_SIGNING_KEY_BASE
   const CREDIT_VAULT = '0x00000001152d633eb2ac3cf91eac9994aeefc021'
+  // OFAC sanctions screen for deposit boundaries. Loads the SDN crypto-address
+  // list from OFAC_BLOCKLIST_PATH (synced by scripts/refresh-ofac-blocklist.ts).
+  // Falls back to the permissive screen with a LOUD warning if unconfigured so an
+  // un-synced production never silently runs unscreened — go-live blocker.
+  const ofacPath = process.env.OFAC_BLOCKLIST_PATH
+  let sanctions = permissiveSanctionsScreen
+  if (!ofacPath) {
+    log.warn('OFAC_BLOCKLIST_PATH unset — deposit sanctions screening is a NO-OP. Configure before real deposits.')
+  } else {
+    const blocklist = loadOfacBlocklist(ofacPath)
+    if (blocklist.length === 0) {
+      log.warn('OFAC blocklist empty — deposit sanctions screening is effectively a NO-OP. Run scripts/refresh-ofac-blocklist.ts.')
+    }
+    sanctions = makeBlocklistScreen(blocklist)
+  }
   const alchemyDeps = {
     deposita:     ring.deposita,
     signorum:     ring.signorum,
@@ -797,6 +814,7 @@ async function main(): Promise<void> {
     testimonia:   ring.testimonia,
     animae:       ring.animae,
     arcanumTree:  ring.arcanumTree,
+    sanctions,
     signingKeys:  ALCHEMY_SIGNING_KEYS,
     vaultAddresses: { '1': CREDIT_VAULT, '8453': CREDIT_VAULT },
     ethPriceUsd:  0,  // not yet used — valor stored in wei

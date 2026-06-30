@@ -105,15 +105,5 @@ export async function ensureIndexes(db: Db): Promise<void> {
 
     // arcanum_nullifiers — spent note registry (double-spend prevention)
     db.collection('arcanum_nullifiers').createIndex({ nullifierHash: 1 }, { unique: true }),
-
-    // octra_deposits — OCT funding-rail deposit state machine (anonymous side)
-    db.collection('octra_deposits').createIndex({ id: 1 }, { unique: true }),
-    db.collection('octra_deposits').createIndex({ depositAddr: 1 }, { unique: true }),
-    db.collection('octra_deposits').createIndex({ txHash: 1 }, { unique: true, sparse: true }),
-    db.collection('octra_deposits').createIndex({ commitment: 1 }, { unique: true, sparse: true }),
-    db.collection('octra_deposits').createIndex({ status: 1 }),
-
-    // octra_cursors — watcher resume marker (one doc per platform-seed scope)
-    db.collection('octra_cursors').createIndex({ id: 1 }, { unique: true }),
   ])
 }

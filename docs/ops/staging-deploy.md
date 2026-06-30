@@ -61,6 +61,29 @@ One container, one process.
       `/opt/noema/deploy-staging.sh` after the image push (needs a deploy key secret), so
       "push to staging = deployed."
 
+## OFAC deposit screening (compliance)
+
+The deposit sanctions screen (`src/compliance/SanctionsScreen.ts`) reads its blocklist
+from **`OFAC_BLOCKLIST_PATH`**. Set it in `.env` / `.env.staging` to the bundled file:
+
+```
+OFAC_BLOCKLIST_PATH=data/ofac-blocklist.json
+```
+
+If unset (or the file is empty) the container boots with a LOUD warning and screening is
+a NO-OP — never leave it unset once real deposits flow.
+
+Freshness:
+- `data/ofac-blocklist.json` is committed and **baked into the image**, so each deploy
+  ships the list as of that build.
+- The `Refresh OFAC blocklist` GitHub Action (`.github/workflows/ofac-blocklist.yml`)
+  refreshes the file daily and commits changes to `main`, so the repo (and the next build)
+  stays current. Run `npm run refresh:ofac` to update locally.
+- **Between-deploy liveness (optional, more robust):** add a host cron on the droplet that
+  runs the refresh into a path mounted into the container, so a new OFAC designation is
+  picked up without waiting for a redeploy. The OFAC SDN crypto-list changes rarely (a few
+  times a year), so the per-deploy + daily-commit baseline is adequate for launch.
+
 ## Production (for contrast)
 
 `noema.art` / `app.noema.art` → `hyperbot:4000` (the prod container). Prod is **not** gated
