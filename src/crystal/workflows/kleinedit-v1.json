@@ -10,7 +10,7 @@
     "70": { "class_type": "UNETLoader",             "inputs": { "unet_name": "flux-2-klein-9b-fp8.safetensors", "weight_dtype": "default" } },
     "71": { "class_type": "CLIPLoader",             "inputs": { "clip_name": "qwen_3_8b_fp8mixed.safetensors", "type": "flux2", "device": "default" } },
     "72": { "class_type": "VAELoader",              "inputs": { "vae_name": "full_encoder_small_decoder.safetensors" } },
-    "80": { "class_type": "ImageScaleToTotalPixels", "inputs": { "image": ["76", 0], "upscale_method": "nearest-exact", "megapixels": 1 } },
+    "80": { "class_type": "ImageScaleToTotalPixels", "inputs": { "image": ["76", 0], "upscale_method": "nearest-exact", "megapixels": 1, "resolution_steps": 64 } },
     "99": { "class_type": "GetImageSize",           "inputs": { "image": ["80", 0] } },
     "124": { "class_type": "VAEEncode",             "inputs": { "pixels": ["80", 0], "vae": ["72", 0] } },
     "74": { "class_type": "CLIPTextEncode",         "inputs": { "clip": ["71", 0], "text": "PLACEHOLDER" } },
