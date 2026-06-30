@@ -42,6 +42,27 @@
 .cer-card-foot{margin-top:14px;padding-top:14px;border-top:1px solid var(--hair)}
 .cer-card-foot .btn-ghost{width:100%;justify-content:center}
 
+.cer-cli-h{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:12px}
+
+/* in-browser contribution flow */
+.cer-contribute-flow{display:flex;flex-direction:column;gap:12px}
+.cer-field{display:flex;flex-direction:column;gap:5px}
+.cer-field > span{font-size:11.5px;color:var(--muted)}
+.cer-field > span em{color:var(--faint);font-style:normal;font-size:10.5px}
+.cer-entropy{border:1px dashed color-mix(in srgb,var(--accent) 35%,var(--hair));border-radius:10px;
+  background:var(--bg);padding:14px;cursor:crosshair;user-select:none;transition:border-color .2s}
+.cer-entropy.full{border-style:solid;border-color:color-mix(in srgb,var(--accent) 45%,var(--hair));cursor:default}
+.cer-entropy-bar{height:5px;border-radius:3px;background:var(--hair);overflow:hidden;margin-bottom:8px}
+.cer-entropy-bar span{display:block;height:100%;background:var(--accent);transition:width .12s linear}
+.cer-entropy-h{font-size:11.5px;color:var(--muted);text-align:center}
+.cer-contribute-flow .btn{width:100%;justify-content:center}
+.cer-running{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--text);padding:9px 0}
+.cer-spin{width:13px;height:13px;border-radius:50%;border:2px solid var(--hair);border-top-color:var(--accent);
+  animation:cer-spin .7s linear infinite;flex:none}
+@keyframes cer-spin{to{transform:rotate(360deg)}}
+.cer-err{font-size:12px;color:#d98a8a;line-height:1.5}
+.cer-fineprint{font-size:11px;color:var(--faint);line-height:1.55;margin:0}
+
 /* transcript / hash chain — the public record, empty until the ceremony opens */
 .cer-chain{border:1px solid var(--hair);border-radius:14px;background:var(--panel);padding:16px 18px}
 .cer-chain-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;

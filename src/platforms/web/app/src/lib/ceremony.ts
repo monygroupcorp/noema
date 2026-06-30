@@ -31,7 +31,12 @@ export interface CeremonyStatus {
   finalHash: string | null;
   /** Coordinator's open slots for new contributors, if accepting. */
   openSlots: number | null;
+  /** sha256 of the zkey the next contributor must build on (server-computed). */
+  headHash?: string | null;
 }
+
+/** Progress phases for an in-browser contribution. */
+export type ContributePhase = 'downloading' | 'contributing' | 'uploading' | 'done';
 
 // Pre-coordinator default: announced, empty chain. Not fabricated data — the honest
 // "we haven't started collecting yet" state.
@@ -67,5 +72,53 @@ export const ceremony = {
     } catch {
       return false;
     }
+  },
+
+  /**
+   * Contribute to the ceremony entirely in the browser:
+   *   download the head zkey → fold in your entropy via snarkjs (WASM) → upload.
+   * The proving key (~5MB) and your toxic waste never leave this tab except as the
+   * resulting zkey, which carries no recoverable trace of your entropy. Returns the
+   * updated ceremony status on success; throws with the server's reason on rejection.
+   */
+  async contribute(opts: {
+    name: string;
+    entropy: string;
+    onPhase?: (p: ContributePhase) => void;
+  }): Promise<CeremonyStatus> {
+    const { onPhase } = opts;
+
+    // 1 — download the current head (the exact zkey the transcript names).
+    onPhase?.('downloading');
+    const res = await fetch('/v1/ceremony/current.zkey');
+    if (!res.ok) throw new Error(`couldn't fetch the current key (${res.status}) — is the ceremony open?`);
+    const basedOn = res.headers.get('x-zkey-hash') ?? '';
+    const head = new Uint8Array(await res.arrayBuffer());
+
+    // 2 — fold in entropy (snarkjs in WASM, lazy-loaded — heavy, off the main bundle).
+    onPhase?.('contributing');
+    const snarkjs = await import('snarkjs');
+    const out: { type: 'mem'; data?: Uint8Array } = { type: 'mem' };
+    await snarkjs.zKey.contribute(head, out, opts.name || 'anonymous', opts.entropy);
+    if (!out.data) throw new Error('contribution produced no output');
+
+    // 3 — upload. The server verifies it's a valid continuation and appends it live.
+    onPhase?.('uploading');
+    const up = await fetch('/v1/ceremony/contributions', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-based-on': basedOn,
+        'x-contributor-name': opts.name || 'anonymous',
+      },
+      body: out.data as BodyInit,
+    });
+    if (!up.ok) {
+      let reason = up.statusText;
+      try { reason = (await up.json()).error ?? reason; } catch { /* keep statusText */ }
+      throw new Error(reason);
+    }
+    onPhase?.('done');
+    return up.json();
   },
 };

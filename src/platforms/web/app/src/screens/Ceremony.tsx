@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { SiteFooter } from './SiteFooter';
 import { Wordmark } from '../ui/Wordmark';
-import { ceremony, type CeremonyStatus } from '../lib/ceremony';
+import { ceremony, type CeremonyStatus, type ContributePhase } from '../lib/ceremony';
 import './landing.css';
 import './ceremony.css';
+
+const ENTROPY_TARGET = 240; // mouse samples before we consider the seed strong enough
 
 // The trust story, in the same three-node diagram grammar as the Landing architecture
 // section: randomness folds in, the chain compounds, one honest link secures it forever.
@@ -84,16 +86,135 @@ function StatusPill({ phase }: { phase: CeremonyStatus['phase'] }) {
   );
 }
 
+const PHASE_LABEL: Record<ContributePhase, string> = {
+  downloading: 'Fetching the current key…',
+  contributing: 'Folding in your randomness (this can take a moment)…',
+  uploading: 'Uploading your contribution…',
+  done: 'Done',
+};
+
+// In-browser contribution: capture entropy by mouse movement + a secret, then run the
+// snarkjs contribution in WASM and upload. Shown only while the ceremony is open.
+function ContributePanel({ onContributed }: { onContributed: () => void }) {
+  const [name, setName] = useState('');
+  const [secret, setSecret] = useState('');
+  const [samples, setSamples] = useState(0);
+  const entropyRef = useRef<string>('');
+  const [phase, setPhase] = useState<ContributePhase | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  const onMove = useCallback((e: React.MouseEvent) => {
+    if (phase) return;
+    entropyRef.current += `${e.clientX},${e.clientY},${e.timeStamp.toFixed(2)};`;
+    setSamples((n) => (n < ENTROPY_TARGET ? n + 1 : n));
+  }, [phase]);
+
+  const ready = samples >= ENTROPY_TARGET && secret.trim().length >= 6 && !phase;
+  const pct = Math.min(100, Math.round((samples / ENTROPY_TARGET) * 100));
+
+  async function run() {
+    if (!ready) return;
+    setError(null);
+    // Mix mouse entropy, the secret, and a CSPRNG draw into one seed string.
+    const rand = crypto.getRandomValues(new Uint8Array(32));
+    const entropy = `${entropyRef.current}|${secret}|${Array.from(rand).join(',')}`;
+    try {
+      await ceremony.contribute({
+        name: name.trim() || 'anonymous',
+        entropy,
+        onPhase: setPhase,
+      });
+      setSuccess(true);
+      onContributed();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setPhase(null);
+    }
+  }
+
+  if (success) {
+    return (
+      <div className="cer-claimed">
+        <Ic name="check" />
+        <span>Your contribution is in the chain. The proving key is now stronger — thank you.
+          Delete nothing to keep; your entropy never left this tab.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="cer-contribute-flow">
+      <label className="cer-field">
+        <span>Display name <em>(public, in the transcript)</em></span>
+        <input
+          className="cer-input"
+          placeholder="a handle — or leave blank for anonymous"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          disabled={!!phase}
+        />
+      </label>
+      <label className="cer-field">
+        <span>Your secret <em>(toxic waste — never sent)</em></span>
+        <input
+          className="cer-input"
+          type="password"
+          placeholder="type something only you know (6+ chars)"
+          value={secret}
+          onChange={(e) => setSecret(e.target.value)}
+          disabled={!!phase}
+        />
+      </label>
+
+      <div
+        className={`cer-entropy${samples >= ENTROPY_TARGET ? ' full' : ''}`}
+        onMouseMove={onMove}
+        role="application"
+        aria-label="move your mouse here to gather randomness"
+      >
+        <div className="cer-entropy-bar"><span style={{ width: `${pct}%` }} /></div>
+        <div className="cer-entropy-h">
+          {samples >= ENTROPY_TARGET
+            ? 'Randomness gathered ✓'
+            : `Move your mouse here to gather randomness · ${pct}%`}
+        </div>
+      </div>
+
+      {phase ? (
+        <div className="cer-running"><span className="cer-spin" /> {PHASE_LABEL[phase]}</div>
+      ) : (
+        <button className="btn" disabled={!ready} onClick={run}>
+          Fold in my randomness <Ic name="arrow-right" />
+        </button>
+      )}
+      {error && <div className="cer-err">{error}</div>}
+      <p className="cer-fineprint">
+        Your secret is the toxic waste — it's never sent and never stored. Only the
+        resulting key is uploaded; it carries no recoverable trace of it.
+      </p>
+    </div>
+  );
+}
+
 export function Ceremony() {
   const [status, setStatus] = useState<CeremonyStatus | null>(null);
   const [contact, setContact] = useState('');
   const [claimed, setClaimed] = useState(false);
 
+  const refresh = useCallback(() => {
+    ceremony.status().then(setStatus).catch(() => {});
+  }, []);
+
+  // Poll for the live chain — contributions land without a redeploy, so the transcript
+  // and phase update in place. Slower while announced, snappier once open.
   useEffect(() => {
     let live = true;
     ceremony.status().then((s) => { if (live) setStatus(s); });
-    return () => { live = false; };
-  }, []);
+    const ms = 5000;
+    const t = setInterval(() => { if (live) refresh(); }, ms);
+    return () => { live = false; clearInterval(t); };
+  }, [refresh]);
 
   const phase = status?.phase ?? 'announced';
   const chain = status?.chain ?? [];
@@ -194,12 +315,15 @@ export function Ceremony() {
           <h2>Contribute your randomness.</h2>
           <p className="ah-sub">
             Anyone with a stake in the system being trustworthy should join — core team,
-            testers, anyone who'll spend anonymous credits. The contribution is a single
-            command and about two minutes. You never have to trust the other contributors.
+            testers, anyone who'll spend anonymous credits. Contribute right in your browser
+            (panel on the right), or use the command line below. You never have to trust the
+            other contributors.
           </p>
         </div>
 
         <div className="cer-grid">
+          <div className="cer-cli">
+            <div className="cer-cli-h">Prefer the command line?</div>
           <ol className="cer-steps">
             {STEPS.map((s) => (
               <li key={s.n} className="cer-step">
@@ -212,27 +336,42 @@ export function Ceremony() {
               </li>
             ))}
           </ol>
+          </div>
 
           <aside className="cer-side">
             <div className="cer-card">
-              <div className="cer-card-h"><Ic name="user-round" /> Claim a contributor slot</div>
-              {claimed ? (
-                <div className="cer-claimed">
-                  <Ic name="check" />
-                  <span>You're on the list. We'll send you the current <code>.zkey</code> and your position in the chain.</span>
-                </div>
+              {phase === 'open' ? (
+                <>
+                  <div className="cer-card-h"><Ic name="shuffle" /> Contribute in your browser</div>
+                  <ContributePanel onContributed={refresh} />
+                </>
               ) : (
-                <form className="cer-claim" onSubmit={onClaim}>
-                  <p>Leave a handle or contact and the coordinator will hand you the next link in the chain.</p>
-                  <input
-                    className="cer-input"
-                    placeholder="email, Telegram, or wallet"
-                    value={contact}
-                    onChange={(e) => setContact(e.target.value)}
-                    aria-label="contact for ceremony slot"
-                  />
-                  <button className="btn" type="submit">Request a slot <Ic name="arrow-right" /></button>
-                </form>
+                <>
+                  <div className="cer-card-h"><Ic name="user-round" /> Claim a contributor slot</div>
+                  {phase === 'finalized' ? (
+                    <div className="cer-claimed">
+                      <Ic name="check" />
+                      <span>The ceremony is complete and the proving key is published. Thank you to everyone who folded in their randomness.</span>
+                    </div>
+                  ) : claimed ? (
+                    <div className="cer-claimed">
+                      <Ic name="check" />
+                      <span>You're on the list. We'll notify you the moment the ceremony opens so you can contribute right here.</span>
+                    </div>
+                  ) : (
+                    <form className="cer-claim" onSubmit={onClaim}>
+                      <p>The ceremony hasn't opened yet. Leave a handle and we'll ping you when it does — then you contribute in one click, in this tab.</p>
+                      <input
+                        className="cer-input"
+                        placeholder="email, Telegram, or wallet"
+                        value={contact}
+                        onChange={(e) => setContact(e.target.value)}
+                        aria-label="contact for ceremony slot"
+                      />
+                      <button className="btn" type="submit">Notify me <Ic name="arrow-right" /></button>
+                    </form>
+                  )}
+                </>
               )}
               <div className="cer-card-foot">
                 <a className="btn-ghost" href="https://github.com/monygroupcorp/noema/blob/main/docs/arcanum-ceremony.md" target="_blank" rel="noreferrer">
