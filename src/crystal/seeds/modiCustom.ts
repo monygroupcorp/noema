@@ -33,7 +33,7 @@ export const STATIONTHIS: Modus = deriveSavedModus(ESSENTIA_KLEINEDIT_4B, {
   name: 'STATIONTHIS',
   owner: { animaId: 'ca162446-6c2b-447c-8ed7-9f22f90d8cea' },
   promptMode: 'pinned',
-  aditus: { prompt: STATIONTHIS_PROMPT, steps: 9 },
+  aditus: { prompt: STATIONTHIS_PROMPT, steps: 9, guidance: 3 },
   pinned: [{ id: 'intella.impresstation-klein' }],
 })
 

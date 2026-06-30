@@ -21,7 +21,7 @@
     "82": { "class_type": "ConditioningZeroOut",    "inputs": { "conditioning": ["74", 0] } },
     "125": { "class_type": "ReferenceLatent",       "inputs": { "conditioning": ["74", 0], "latent": ["124", 0] } },
     "123": { "class_type": "ReferenceLatent",       "inputs": { "conditioning": ["82", 0], "latent": ["124", 0] } },
-    "63": { "class_type": "CFGGuider",              "inputs": { "model": ["201", 0], "positive": ["125", 0], "negative": ["123", 0], "cfg": 1 } },
+    "63": { "class_type": "CFGGuider",              "inputs": { "model": ["201", 0], "positive": ["125", 0], "negative": ["123", 0], "cfg": 3 } },
     "62": { "class_type": "Flux2Scheduler",         "inputs": { "steps": 9, "width": ["99", 0], "height": ["99", 1] } },
     "66": { "class_type": "EmptyFlux2LatentImage",  "inputs": { "width": ["99", 0], "height": ["99", 1], "batch_size": 1 } },
     "61": { "class_type": "KSamplerSelect",         "inputs": { "sampler_name": "euler" } },
@@ -33,6 +33,7 @@
   "slotMap": {
     "/73/inputs/noise_seed": "input_seed",
     "/62/inputs/steps":      "steps",
+    "/63/inputs/cfg":        "guidance",
     "/200/inputs/text":      "prompt",
     "/76/inputs/image":      "image"
   },
