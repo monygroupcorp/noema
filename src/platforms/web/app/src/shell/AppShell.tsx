@@ -1,26 +1,27 @@
 import { type ReactNode } from 'react';
 import { Rail } from './Rail';
-import { Webring } from './Webring';
 import { Account } from './Account';
 import { Concierge } from './Concierge';
 
-// The persistent frame. Screens compose their main content (+ optional right context).
+// The persistent frame (dashboard-spec.md §A): left rail (global nav) + a top bar carrying
+// the current surface TITLE (left) and the always-on POSTURE CLUSTER (right). Screens compose
+// their main content (+ optional right context). `crumb` is the surface title.
 export function AppShell({
-  crumb, context, concierge = true, children,
+  crumb, title, context, concierge = true, children,
 }: {
   crumb?: ReactNode;
+  title?: ReactNode;
   context?: ReactNode;
   concierge?: boolean;
   children: ReactNode;
 }) {
+  const heading = title ?? crumb;
   return (
     <div className={`app${context ? '' : ' two'}`}>
       <Rail />
       <section className="main">
         <div className="topbar">
-          <Webring />
-          {crumb && <div className="crumb"><span className="sep">/</span> {crumb}</div>}
-          <div className="vis" />
+          {heading && <div className="surface-title">{heading}</div>}
           <Account />
         </div>
         {children}

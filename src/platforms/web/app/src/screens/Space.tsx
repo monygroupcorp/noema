@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { AppShell } from '../shell/AppShell';
 import { ErrorBoundary } from '../shell/ErrorBoundary';
 import { Ic } from '../lib/icons';
-import { api } from '../lib/api';
+import { sampleImages, launchTraining } from '../lib/training';
 
 // The 3D Vestigium space — the real StationThis corpus, embedded with the platform's
 // canon OpenCLIP ViT-B/32. Two layers share one set of points & metadata:
@@ -318,22 +318,13 @@ function CorpusSpace() {
 
   const startTraining = async () => {
     if (!meta || !selMask || !trigger.trim() || training) return;
-    let idxs = selectedIndices().filter(i => meta[i]?.s);   // need an image url
-    if (idxs.length === 0) { setTrainMsg({ ok: false, text: 'no images with a usable url in selection' }); return; }
-    if (idxs.length > maxImages) {                            // stride-sample for diversity
-      const stride = idxs.length / maxImages;
-      const s: number[] = [];
-      for (let k = 0; k < maxImages; k++) s.push(idxs[Math.floor(k * stride)]);
-      idxs = s;
-    }
-    const dataset = JSON.stringify(idxs.map(i => autocap ? { url: meta[i].s } : { url: meta[i].s, caption: meta[i].p }));
-    if (!window.confirm(`Start a LoRA training run on ${idxs.length} images (trigger "${trigger.trim()}", ${steps} steps)?\n\nThis launches real GPU compute.`)) return;
+    const withUrl = selectedIndices().filter(i => meta[i]?.s);   // need an image url
+    if (withUrl.length === 0) { setTrainMsg({ ok: false, text: 'no images with a usable url in selection' }); return; }
+    const images = sampleImages(withUrl.map(i => ({ url: meta[i].s as string, caption: meta[i].p })), maxImages);
+    if (!window.confirm(`Start a LoRA training run on ${images.length} images (trigger "${trigger.trim()}", ${steps} steps)?\n\nThis launches real GPU compute.`)) return;
     setTraining(true); setTrainMsg(null);
     try {
-      const { run } = await api.createRun({
-        modusId: 'modus.aitoolkit-training',
-        aditus: { dataset, baseModel, triggerWord: trigger.trim(), steps, name: trigger.trim(), autocaption: autocap },
-      });
+      const run = await launchTraining({ images, triggerWord: trigger, baseModel, steps, autocaption: autocap });
       setTrainMsg({ ok: true, text: `training started · run ${run.id.slice(0, 8)} · ${run.status}` });
     } catch (e) {
       setTrainMsg({ ok: false, text: `failed: ${String((e as Error).message).slice(0, 120)}` });
