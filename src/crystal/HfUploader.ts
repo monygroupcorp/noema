@@ -93,13 +93,17 @@ interface BaseFacts {
   resolution: string
 }
 
+// NOEMA brand banner, hosted in the org's noema-brand repo. Referenced at the top of
+// every card so each model page reads as a noema.art landing surface.
+const NOEMA_BANNER = 'https://huggingface.co/noema-art/noema-brand/resolve/main/noema-banner.png'
+
 const KLEIN_4B: BaseFacts = {
   displayBase: 'FLUX.2 [klein] 4B',
   baseRepo: 'black-forest-labs/FLUX.2-klein-base-4B',
   inferenceRepo: 'black-forest-labs/FLUX.2-klein-4B',
   pipelineClass: 'Flux2Pipeline',
   license: 'apache-2.0',
-  tags: ['text-to-image', 'lora', 'diffusers', 'flux2', 'klein', 'flowmatch', 'stationthis'],
+  tags: ['text-to-image', 'lora', 'diffusers', 'flux2', 'klein', 'flowmatch', 'noema'],
   rank: 32, lr: '1e-4', resolution: '512, 768, 1024',
 }
 
@@ -109,7 +113,7 @@ const FLUX1_DEV: BaseFacts = {
   inferenceRepo: 'black-forest-labs/FLUX.1-dev',
   pipelineClass: 'FluxPipeline',
   license: 'wtfpl',
-  tags: ['text-to-image', 'lora', 'diffusers', 'flux', 'flowmatch', 'stationthis'],
+  tags: ['text-to-image', 'lora', 'diffusers', 'flux', 'flowmatch', 'noema'],
   rank: 32, lr: '1e-4', resolution: '512, 768, 1024',
 }
 
@@ -125,7 +129,7 @@ const KREA2: BaseFacts = {
   licenseName: 'krea-2-community-license',
   licenseLink: 'https://www.krea.ai/krea-2-licensing',
   attribution: 'This is a modified derivative of [Krea 2](https://huggingface.co/krea/Krea-2-Raw), trained on Krea 2 RAW and intended for use on Krea 2 Turbo. Not an official Krea product nor endorsed by Krea. Use is governed by the [Krea 2 Community License](https://www.krea.ai/krea-2-licensing) — commercial use permitted for entities under $1M USD annual revenue; above that, obtain an enterprise license from Krea.',
-  tags: ['text-to-image', 'lora', 'diffusers', 'krea2', 'krea', 'stationthis'],
+  tags: ['text-to-image', 'lora', 'diffusers', 'krea2', 'krea', 'noema'],
   rank: 32, lr: '1e-4', resolution: '512, 768, 1024',
 }
 
@@ -137,7 +141,7 @@ const ZIMAGE: BaseFacts = {
   inferenceRepo: 'Tongyi-MAI/Z-Image-Turbo',
   pipelineClass: 'DiffusionPipeline',
   license: 'apache-2.0',
-  tags: ['text-to-image', 'lora', 'diffusers', 'z-image', 'zimage', 'stationthis'],
+  tags: ['text-to-image', 'lora', 'diffusers', 'z-image', 'zimage', 'noema'],
   rank: 32, lr: '1e-4', resolution: '512, 768, 1024',
 }
 
@@ -191,7 +195,14 @@ export function renderModelCard(model: ModelView, repoId?: string): string {
   fm.push('---', '')
 
   // ── body ─────────────────────────────────────────────────────────────────
-  const body: string[] = [`# ${model.nomen}`, '']
+  // NOEMA banner + CTA up top — a static brand asset (does not touch the model's
+  // own sample/widget thumbnails); turns each card into a noema.art landing page.
+  const body: string[] = [
+    `<p align="center"><a href="https://noema.art"><img src="${NOEMA_BANNER}" alt="NOEMA — run this model privately at noema.art" width="100%"></a></p>`, '',
+    `# ${model.nomen}`, '',
+    '> **NOEMA** — privacy-by-construction generative studio.  ',
+    '> Run this model privately at **[noema.art](https://noema.art)** · no email · pay anonymously.', '',
+  ]
   body.push(model.description?.trim() || `A LoRA for ${facts.displayBase}.`, '')
   if (trigger) body.push(`**Trigger word:** \`${trigger}\``)
   if (model.provenance) {
@@ -245,9 +256,8 @@ export function renderModelCard(model: ModelView, repoId?: string): string {
   }
   body.push(
     '## About', '',
-    'Trained on [StationThis](https://miladystation2.net) — an AI creative platform powered by $MS2.',
-    'Train your own LoRAs via [@stationthisbot](https://t.me/stationthisbot) on Telegram.', '',
-    '<sub>Published via noema.</sub>', '',
+    '**NOEMA** is a privacy-by-construction generative studio. Run this model — and the rest of the catalogue — privately at **[noema.art](https://noema.art)**: no email to start, pay anonymously, go fully private anytime.', '',
+    '<sub>NOEMA · a complete studio, completely private · <a href="https://noema.art">noema.art</a></sub>', '',
   )
 
   return [...fm, ...body].join('\n')

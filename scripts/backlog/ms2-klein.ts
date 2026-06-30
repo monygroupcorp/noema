@@ -48,13 +48,17 @@ import { bus } from '../../src/lib/bus.js'
 import type { Actum } from '../../src/types/actum.js'
 
 const HF = 'https://huggingface.co'
-const ORG = process.env.HF_ORG ?? 'ms2stationthis'
+const ORG = process.env.HF_ORG ?? 'noema-art'        // org renamed from ms2stationthis (HF redirects old URLs)
 const STEPS = Number(process.env.STEPS ?? 4000)
 const DB = process.env.DB ?? 'noemaplane'                    // staging-prod; never 'noema'
 const AITK_DIR = '/home/rth/projects/ai/training/ai-toolkit-klein'
 const DS_ROOT = '/mnt/data/datasets/ms2-klein'
 const HF_CACHE = '/home/rth/.cache/huggingface'
 const IMAGE = 'stationthis-klein:1'
+const LORAS_DIR = process.env.LORAS_DIR ?? '/mnt/data/models/loras'   // shared ComfyUI lora dir
+// Repos to never train (dead clients / unwanted variants). Extend via SKIP env (comma-separated).
+const SKIP = new Set(['aoiflux', 'crimeflux', 'impresstation-zimage', 'hehehflux', 'wongflux', 'mimany_2flux', 'mogcat2_1flux',
+  ...(process.env.SKIP ?? '').split(',').map((s) => s.trim()).filter(Boolean)])
 
 const ts = (): string => new Date().toISOString().slice(11, 19)
 const r = (n: string): string => { const v = process.env[n]; if (!v) throw new Error(`missing env ${n}`); return v }
@@ -196,11 +200,37 @@ async function train(name: string): Promise<Record<string, unknown>> {
     expirat: new Date(Date.now() + 7 * 24 * 3600 * 1000),
   })
   console.log(`[${ts()}] training ${name} → ${aditus.slug} (${STEPS} steps, trigger "${aditus.triggerWord}")`)
+  await rmStaleContainer(String(aditus.jobId))   // clear any zombie container from a prior killed run
   try {
     const exitus = await withTrace(makeTraceContext({ actumId: actum.id }), () => cursor.run(actum))
     console.log(`[${ts()}] === TRAINED + FINALIZED ===`, JSON.stringify(exitus, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)))
+    await linkLora(String(aditus.jobId))
     return exitus
   } finally { await mongo.close() }
+}
+
+/** Remove any stale container from a prior killed/crashed run of this job — its deterministic name
+ *  (aitk-<jobId>) would otherwise name-conflict the next docker run, or worse keep pinning VRAM and
+ *  OOM every subsequent repo. Best-effort; no-op if none exists. */
+async function rmStaleContainer(jobId: string): Promise<void> {
+  const { exec } = await import('node:child_process')
+  await new Promise<void>((res) => exec(`docker rm -f aitk-${jobId}`, () => res()))
+}
+
+/** Copy a finished run's final LoRA into the shared loras dir (best-effort; never fails the run).
+ *  A real copy, not a symlink: the ComfyUI container mounts /mnt/data/models but NOT the ai-toolkit
+ *  output dir, so a symlink would dangle inside the container. */
+async function linkLora(jobId: string): Promise<void> {
+  const { copyFile, mkdir, access } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const final = `${AITK_DIR}/output/${jobId}/${jobId}.safetensors`
+  const dest = join(LORAS_DIR, `${jobId}.safetensors`)
+  try {
+    await access(final)
+    await mkdir(LORAS_DIR, { recursive: true })
+    await copyFile(final, dest)
+    console.log(`[${ts()}] copied → ${dest}`)
+  } catch (e) { console.warn(`[${ts()}] linkLora skipped: ${e instanceof Error ? e.message : e}`) }
 }
 
 // ─ publish: registered Intella → ms2stationthis/<name>-klein ──────────────────
@@ -256,6 +286,7 @@ async function batch(limit: number, dryRun = false): Promise<void> {
   const queue: string[] = []
   for (const name of names) {
     if (queue.length >= limit) break
+    if (SKIP.has(name)) { console.log(`[${ts()}] skip ${name} — on skip list`); continue }
     const info = await inspect(name).catch(() => null)
     if (!info || info.images.length === 0) continue          // skip cohort B
     if (await kleinExists(name)) { console.log(`[${ts()}] skip ${name} — ${name}-klein already exists`); continue }
