@@ -403,6 +403,7 @@ export const ESSENTIA_KLEINEDIT_4B: Essentia = {
     prompt:     { type: 'text',  required: true,  description: 'Edit instruction. A `<lora:slug:weight>` tag or a LoRA trigger word stacks adapters.' },
     image:      { type: 'image', required: true,  description: 'Image to edit' },
     steps:      { type: 'int',   required: false, default: 9,  description: 'Sampling steps' },
+    guidance:   { type: 'float', required: false, default: 3,  description: 'CFGGuider guidance — how strongly the edit follows the instruction/style. FLUX.2 klein uses this (not a FluxGuidance node); higher = stronger restyle.' },
     input_seed: { type: 'int',   required: false,             description: 'Random seed — omit to shuffle' },
   },
   exitus: { image: { type: 'image', description: 'Edited image' } },
