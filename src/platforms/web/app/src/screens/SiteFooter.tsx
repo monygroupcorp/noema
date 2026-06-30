@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { entryPath } from '../lib/entry';
 import './site-footer.css';
 
 export function SiteFooter() {
@@ -14,7 +15,7 @@ export function SiteFooter() {
           <Link to="/features">Features</Link>
           <Link to="/pricing">Pricing</Link>
           <Link to="/catalog">Catalog</Link>
-          <Link to="/">Open app</Link>
+          <Link to={entryPath()}>Open app</Link>
         </div>
         <div className="col">
           <h4>Company</h4>

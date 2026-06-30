@@ -2,6 +2,8 @@
 // Phase 0: structure + a few live calls; screens still mostly use local mock data
 // until each is wired. Dev server proxies /v1 + /api to the backend.
 
+import type { Editio, FeedFilter, PublishRequest } from './editio';
+
 export interface FlowSummary { id: string; nomen?: string; versio?: string; categoria?: unknown }
 export interface JsonSchema {
   type: string;
@@ -64,7 +66,41 @@ export const api = {
   // SSE — returns an EventSource the caller subscribes to.
   streamRun: (id: string) => new EventSource(`/v1/runs/${id}/stream`),
   meStatus: () => fetch('/v1/me/status', { headers: { 'x-commitment': commitment() } }).then(j<MeStatus>),
+
+  // ── Publishing (Editio) — feed read + publish/retract write ──────────────────
+  // GET /v1/feed — public, NO auth. Newest-first published, public-surface editions.
+  feed: (filter: FeedFilter = {}) => {
+    const q = new URLSearchParams();
+    if (filter.visibility) q.set('visibility', filter.visibility);
+    if (filter.destination) q.set('destination', filter.destination);
+    if (filter.limit != null) q.set('limit', String(filter.limit));
+    const qs = q.toString();
+    return fetch(`/v1/feed${qs ? `?${qs}` : ''}`).then(j<{ feed: Editio[] }>);
+  },
+  // POST /v1/editiones — publish an artifact. Public surfaces return a `pending`
+  // edition (async moderation) → it goes live once the worker settles it.
+  publish: (body: PublishRequest) =>
+    fetch('/v1/editiones', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+      .then(j<{ edition: Editio }>),
+  retract: (id: string) =>
+    fetch(`/v1/editiones/${id}/retract`, { method: 'POST', headers: anonHeaders() })
+      .then(j<{ edition: Editio }>),
+
+  // ── Training (modus.aitoolkit-training) — thin reads; launches go via createRun ──
+  // Dataset list/create live under the internal data API (/v1/data/*). Kept thin:
+  // the builder launches a training as a normal run, these only feed the picker/cost.
+  listDatasets: () => fetch('/v1/data/datasets', { headers: { 'x-commitment': commitment() } })
+    .then(j<{ datasets: DatasetSummary[] }>),
+  trainingCost: (body: { steps: number; baseModel?: string; images?: number }) =>
+    fetch('/v1/data/trainings/calculate-cost', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+      .then(j<{ impetus?: string; usd?: number }>),
+  // Signed upload for dataset images.
+  signUpload: (body: { filename: string; contentType: string }) =>
+    fetch('/api/v1/storage/uploads/sign', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+      .then(j<{ url: string; fields?: Record<string, string>; key?: string }>),
 };
+
+export interface DatasetSummary { id: string; name: string; images?: number; updatedAt?: string }
 
 export interface MeStatus {
   balanceImpetus: string;

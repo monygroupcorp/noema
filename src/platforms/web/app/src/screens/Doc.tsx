@@ -2,6 +2,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Link } from 'react-router-dom';
 import { SiteFooter } from './SiteFooter';
+import { entryPath } from '../lib/entry';
 import './landing.css'; // reuse .topnav / .btn chrome
 import './doc.css';
 
@@ -16,7 +17,7 @@ export function Doc({ md }: { md: string }) {
         <div className="right">
           <Link className="btn-ghost" to="/features">Features</Link>
           <Link className="btn-ghost" to="/pricing">Pricing</Link>
-          <Link className="btn" to="/">Open app</Link>
+          <Link className="btn" to={entryPath()}>Open app</Link>
         </div>
       </nav>
       <article className="prose">

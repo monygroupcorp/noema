@@ -37,21 +37,6 @@
   --color-focus:         var(--accent-500);
   --color-success:       #5fd0a8;
 
-  /* Modality + locality palette — one source of truth shared by the canvas
-     ports and the catalogue registry (see identity/noema/catalogue-spec.md §4).
-     Modality swatches: */
-  --m-text:  #5fd0a8;   /* text   */
-  --m-image: #5b8cff;   /* image  */
-  --m-video: #d68f6f;   /* video  */
-  --m-audio: #d66f9a;   /* audio  */
-  --m-3d:    #b98fe0;   /* 3d     */
-  /* Locality / visibility (the hemisphere device): */
-  --slate:   #7d8aa6;   /* sealed · stepping back */
-  --grey:    #6a7079;   /* remote · signal faded  */
-  /* Egress (chat) — does the request leave NOEMA, and to whom. Warm, honest,
-     not alarmist (egress is also the cheap/capable upside). See chat-spec.md. */
-  --egress:  #c98f6a;
-
   --radius: 10px;
 }
 
