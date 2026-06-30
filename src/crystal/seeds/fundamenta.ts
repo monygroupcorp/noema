@@ -230,7 +230,7 @@ export const FUNDAMENTUM_FLUX2_KLEIN_4B_COMFYUI: Fundamentum = {
   runtime: 'ComfyUI',
   intellae: [
     { id: 'intella.flux2-klein-4b',          role: 'unet' },
-    { id: 'intella.qwen3-8b-flux2',          role: 'clip' },
+    { id: 'intella.qwen3-4b-flux2',          role: 'clip' },
     { id: 'intella.flux2-vae-full-encoder',  role: 'vae' },
   ],
   vramGb: 24,
