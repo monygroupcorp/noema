@@ -90,7 +90,7 @@ export function Landing() {
         <div className="right">
           <Link className="btn-ghost" to="/features">Features</Link>
           <Link className="btn-ghost" to="/pricing">Pricing</Link>
-          <Link className="btn-ghost" to="/about">About</Link>
+          <Link className="btn-ghost" to="/ceremony">Ceremony</Link>
           <Link className="btn" to={entryPath()}>Open app</Link>
         </div>
       </nav>

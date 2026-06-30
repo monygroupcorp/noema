@@ -105,5 +105,8 @@ export async function ensureIndexes(db: Db): Promise<void> {
 
     // arcanum_nullifiers — spent note registry (double-spend prevention)
     db.collection('arcanum_nullifiers').createIndex({ nullifierHash: 1 }, { unique: true }),
+
+    // caeremonia_slots — ceremony contributor-slot requests (deduped by contact)
+    db.collection('caeremonia_slots').createIndex({ contact: 1 }, { unique: true }),
   ])
 }

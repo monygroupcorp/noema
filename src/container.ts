@@ -92,6 +92,7 @@ import { ArcanumIssuer } from './ledger/ArcanumIssuer.js'
 import { MongoArcanumTree } from './arcanum/ArcanumTree.js'
 import { ArcanumVerifier, MongoNullifierStore, type VerifyFn } from './arcanum/ArcanumVerifier.js'
 import { MongoBursarium } from './arcanum/MongoBursarium.js'
+import { MongoCeremoniaStore } from './arcanum/CeremoniaStore.js'
 
 export interface Ring {
   actorum: Actorum
@@ -127,6 +128,8 @@ export interface Ring {
   arcanumTree: MongoArcanumTree
   arcanumVerifier: ArcanumVerifier
   bursarium: MongoBursarium
+  /** Arcanum trusted-setup ceremony coordinator (status + contributor slots). */
+  ceremonia: MongoCeremoniaStore
   materiae: MateriaStore
   /** Identity-bearing hosting metadata (host + admins) — see types/hospitium.ts. */
   hospitia: HospitiumStore
@@ -279,6 +282,10 @@ export interface ContainerConfig {
   arcanumNullifiersCollection?: string
   /** Collection name for anonymous credit purses — default 'bursarium' */
   bursariumCollection?: string
+  /** Collection name for the ceremony status doc — default 'caeremonia' */
+  caeremoniaCollection?: string
+  /** Collection name for ceremony contributor-slot requests — default 'caeremonia_slots' */
+  caeremoniaSlotsCollection?: string
   /**
    * Groth16 verify function — inject makeSnarkjsVerifier(verificationKey) after running
    * arcanum-trusted-setup.sh. Absent: all ZK spend proofs will throw at verify().
@@ -555,6 +562,10 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   })
   const bursariumCol = db.collection(config.bursariumCollection ?? 'bursarium')
   const bursarium = new MongoBursarium(bursariumCol)
+  const ceremonia = new MongoCeremoniaStore(
+    db.collection(config.caeremoniaCollection ?? 'caeremonia'),
+    db.collection(config.caeremoniaSlotsCollection ?? 'caeremonia_slots'),
+  )
   const inceptor = new ActumInceptor({ modorum, cursorum, signorum, acta: actorum, arcanumVerifier, bursarium })
   const arcanumIssuer = new ArcanumIssuer({ signorum, tree: arcanumTree })
 
@@ -575,7 +586,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
     cursorum, completor, inceptor, arcanumIssuer,
-    arcanumTree, arcanumVerifier, bursarium,
+    arcanumTree, arcanumVerifier, bursarium, ceremonia,
     materiae, hospitia, actumIndex, deployments,
     fundamentorum,
     collectioCursor,
