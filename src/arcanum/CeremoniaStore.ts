@@ -36,6 +36,14 @@ const ANNOUNCED: CaeremoniaStatus = {
   phase: 'announced', rootHash: null, chain: [], finalHash: null, openSlots: null,
 }
 
+/**
+ * The hash of the zkey the NEXT contributor must build on — the last contribution's
+ * output, or the root when the chain is empty. null before the ceremony opens.
+ */
+export function headHash(status: CaeremoniaStatus): string | null {
+  return status.chain.length ? status.chain[status.chain.length - 1].outputHash : status.rootHash
+}
+
 export interface CeremoniaStore {
   /** Current ceremony status (announced fallback before the coordinator has run). */
   status(): Promise<CaeremoniaStatus>
@@ -43,8 +51,13 @@ export interface CeremoniaStore {
   requestSlot(contact: string): Promise<void>
   /** Coordinator: open the ceremony with the root zkey hash. */
   open(rootHash: string, openSlots?: number | null): Promise<void>
-  /** Coordinator: append a verified contribution to the public chain. */
-  appendContribution(c: Omit<Contributio, 'at'>): Promise<void>
+  /**
+   * Append a verified contribution to the public chain — the sequencer's atomic
+   * step. Optimistic lock: the push only lands if the chain head is still
+   * `expectHeadHash` (the zkey the contributor built on). Returns false when a
+   * concurrent contribution already moved the head — the caller re-syncs and retries.
+   */
+  appendContribution(c: Omit<Contributio, 'at'>, expectHeadHash: string): Promise<boolean>
   /** Coordinator: seal the ceremony with the beacon'd final proving-key hash. */
   finalize(finalHash: string): Promise<void>
 }
@@ -98,11 +111,23 @@ export class MongoCeremoniaStore implements CeremoniaStore {
     )
   }
 
-  async appendContribution(c: Omit<Contributio, 'at'>): Promise<void> {
-    await this.statusCol.updateOne(
-      { _id: DOC_ID },
+  async appendContribution(c: Omit<Contributio, 'at'>, expectHeadHash: string): Promise<boolean> {
+    // Conditional push: only when the current head still equals expectHeadHash.
+    // Head = last chain.outputHash, or rootHash when the chain is empty.
+    const res = await this.statusCol.updateOne(
+      {
+        _id: DOC_ID,
+        phase: 'open',
+        $expr: {
+          $eq: [
+            { $ifNull: [{ $last: '$chain.outputHash' }, '$rootHash'] },
+            expectHeadHash,
+          ],
+        },
+      },
       { $push: { chain: { ...c, at: new Date() } } },
     )
+    return res.modifiedCount === 1
   }
 
   async finalize(finalHash: string): Promise<void> {
@@ -125,8 +150,14 @@ export class MemoryCeremoniaStore implements CeremoniaStore {
   async open(rootHash: string, openSlots: number | null = null): Promise<void> {
     this.state.phase = 'open'; this.state.rootHash = rootHash; this.state.openSlots = openSlots
   }
-  async appendContribution(c: Omit<Contributio, 'at'>): Promise<void> {
+  async appendContribution(c: Omit<Contributio, 'at'>, expectHeadHash: string): Promise<boolean> {
+    if (this.state.phase !== 'open') return false
+    const head = this.state.chain.length
+      ? this.state.chain[this.state.chain.length - 1].outputHash
+      : this.state.rootHash
+    if (head !== expectHeadHash) return false
     this.state.chain.push({ ...c, at: new Date() })
+    return true
   }
   async finalize(finalHash: string): Promise<void> {
     this.state.phase = 'finalized'; this.state.finalHash = finalHash; this.state.openSlots = null
