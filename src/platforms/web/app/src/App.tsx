@@ -37,6 +37,7 @@ import { Tee } from './screens/Tee';
 import { Map } from './screens/Map';
 import { Onboard } from './screens/Onboard';
 import { Landing } from './screens/Landing';
+import { Ceremony } from './screens/Ceremony';
 import { Doc } from './screens/Doc';
 import { Stub } from './screens/Stub';
 import aboutMd from './content/about.md?raw';
@@ -88,6 +89,7 @@ export function App() {
       <Route path="/map" element={<Map />} />
       <Route path="/onboard" element={<Onboard />} />
       <Route path="/landing" element={<Landing />} />
+      <Route path="/ceremony" element={<Ceremony />} />
       <Route path="/about" element={<Doc md={aboutMd} />} />
       <Route path="/features" element={<Doc md={featuresMd} />} />
       <Route path="/pricing" element={<Doc md={pricingMd} />} />
