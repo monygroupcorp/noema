@@ -10,7 +10,7 @@
   "inputTemplate": {
     "76": { "class_type": "LoadImage",              "inputs": { "image": "PLACEHOLDER" } },
     "70": { "class_type": "UNETLoader",             "inputs": { "unet_name": "flux-2-klein-4b-fp8.safetensors", "weight_dtype": "default" } },
-    "71": { "class_type": "CLIPLoader",             "inputs": { "clip_name": "qwen_3_8b_fp8mixed.safetensors", "type": "flux2", "device": "default" } },
+    "71": { "class_type": "CLIPLoader",             "inputs": { "clip_name": "qwen_3_4b.safetensors", "type": "flux2", "device": "default" } },
     "72": { "class_type": "VAELoader",              "inputs": { "vae_name": "full_encoder_small_decoder.safetensors" } },
     "200": { "class_type": "LoraTextExtractor-b1f83aa2", "inputs": { "text": "PLACEHOLDER" } },
     "201": { "class_type": "MultiLoraLoader-70bf3d77",   "inputs": { "model": ["70", 0], "clip": ["71", 0], "text": ["200", 1] } },
@@ -38,7 +38,7 @@
   },
   "requiredModels": [
     { "role": "unet", "id": "intella.flux2-klein-4b", "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/resolve/main/flux-2-klein-4b-fp8.safetensors", "dest": "diffusion_models/flux-2-klein-4b-fp8.safetensors" },
-    { "role": "clip", "id": "intella.qwen3-8b-flux2", "url": "https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors", "dest": "text_encoders/qwen_3_8b_fp8mixed.safetensors" },
+    { "role": "clip", "id": "intella.qwen3-4b-flux2", "url": "https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors", "dest": "text_encoders/qwen_3_4b.safetensors" },
     { "role": "vae",  "id": "intella.flux2-vae-full-encoder", "url": "https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors", "dest": "vae/full_encoder_small_decoder.safetensors" }
   ],
   "platformHints": { "vramGb": 24 }

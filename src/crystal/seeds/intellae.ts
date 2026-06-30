@@ -336,6 +336,31 @@ export const INTELLA_QWEN3_8B_FLUX2: Intella = {
   natum: new Date('2025-01-01'),
 }
 
+// The 4B Klein DiT pairs with a Qwen3-*4B* text encoder (hidden 2560 → txt_in dim
+// 7680), NOT the 9B's qwen3-8b (hidden 4096 → 12288). Loading the 8B TE against the
+// 4B model fails in `txt_in` with a (…x12288 vs 7680x…) matmul shape mismatch. This
+// is the matching encoder from the official Comfy-Org klein-4b bundle.
+export const INTELLA_QWEN3_4B_FLUX2: Intella = {
+  id: 'intella.qwen3-4b-flux2',
+  nomen: 'Qwen3 4B (FLUX.2 Klein 4B text encoder)',
+  genus: 'embedding',
+  architectura: 'transformer',
+  parametri: 4_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/vae-text-encorder-for-flux-klein-4b', branch: 'main', filename: 'split_files/text_encoders/qwen_3_4b.safetensors' },
+    },
+  ],
+  dest: 'text_encoders/qwen_3_4b.safetensors',
+  sizeGb: 8.0,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-06-30'),
+}
+
 export const INTELLA_FLUX2_VAE_FULL: Intella = {
   id: 'intella.flux2-vae-full-encoder',
   nomen: 'FLUX.2 VAE (full encoder, small decoder)',
@@ -717,6 +742,7 @@ export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_FLUX2_KLEIN_9B,
   INTELLA_FLUX2_KLEIN_4B,
   INTELLA_QWEN3_8B_FLUX2,
+  INTELLA_QWEN3_4B_FLUX2,
   INTELLA_FLUX2_VAE_FULL,
   INTELLA_IMPRESSTATION_KLEIN,
   INTELLA_ZIMAGE_TURBO,
