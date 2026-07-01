@@ -41,3 +41,20 @@ export const permissiveModerationGate: ModerationGate = {
     return { ok: true }
   },
 }
+
+/**
+ * The SAFE default when no real scanner is configured: refuse every public publish.
+ * A CSAM gate must fail CLOSED — an unconfigured scanner means "we can't vouch for
+ * this content", which for a public surface means "it does not go live", never
+ * "approve it anyway". This is what keeps unscanned content off the feed/marketplace
+ * until the real scanner (+ NCMEC reporting) lands. Private/unlisted publishing is
+ * unaffected (the gate only runs for public surfaces).
+ *
+ * Dev/staging can opt into the permissive gate explicitly via MODERATION_ALLOW_UNSCANNED=1
+ * (wired in the container) — an informed, logged choice, never the silent default.
+ */
+export const denyModerationGate: ModerationGate = {
+  async scan(): Promise<ModerationVerdict> {
+    return { ok: false, reason: 'public publishing is unavailable — content moderation is not yet configured' }
+  },
+}

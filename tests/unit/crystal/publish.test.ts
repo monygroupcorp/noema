@@ -10,7 +10,7 @@ import { MintAdapter, MarketplaceAdapter } from '../../../src/crystal/MintAdapte
 import type { ObjectStore } from '../../../src/crystal/R2Uploader.js'
 import type { Collectio } from '../../../src/types/collectio.js'
 import type { MediaFetcher } from '../../../src/crystal/MediaFetcher.js'
-import type { ModerationGate } from '../../../src/crystal/ModerationGate.js'
+import { type ModerationGate, permissiveModerationGate } from '../../../src/crystal/ModerationGate.js'
 import type { Intella } from '../../../src/types/intelligendi.js'
 import type { Editio, Editiones, Editionum, ArtifactRef, FeedFilter } from '../../../src/types/editio.js'
 
@@ -74,7 +74,9 @@ function fakeActorum() {
 }
 const fakeSignorum = { ownsAny: async () => true }
 
-function makeApi(opts?: { gate?: ModerationGate; prefs?: Record<string, unknown> }) {
+// gate defaults to an approving scanner (the configured go-live posture); pass an
+// explicit gate to test a verdict, or noGate:true to exercise CrystalApi's fail-closed default.
+function makeApi(opts?: { gate?: ModerationGate; noGate?: boolean; prefs?: Record<string, unknown> }) {
   const editiones = new MemEditionum()
   const animae = {
     find: async (id: string) => (id === 'anima-1' && opts?.prefs ? ({ id, publicatio: opts.prefs }) : null),
@@ -133,7 +135,7 @@ function makeApi(opts?: { gate?: ModerationGate; prefs?: Record<string, unknown>
       new MintAdapter(),
       new MarketplaceAdapter({ base: 'https://noema.art/market' }),
     ],
-    ...(opts?.gate ? { moderationGate: opts.gate } : {}),
+    ...(opts?.noGate ? {} : { moderationGate: opts?.gate ?? permissiveModerationGate }),
   } as unknown as CrystalApiDeps)
   // The durable worker drives every settle (publish() only enqueues a pending Editio).
   // `flush` drains it deterministically — the test analogue of the in-process loop.
@@ -159,6 +161,15 @@ test('publish(): a feed publish returns pending, then settles to published via t
   assert.equal(feed[0].artifact.id, OWNED_ACTUM)
   assert.deepEqual(feed[0].output, { image: 'https://cdn/x.png' }, 'feed item carries the actum exitus')
 })
+
+test('publish(): with NO gate wired, a public publish fails CLOSED → rejected, never on the feed', async () => {
+  // The safety-critical default: an unconfigured CSAM gate must not approve public content.
+  const { api, editiones, flush } = makeApi({ noGate: true }); // CrystalApi default → denyModerationGate
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' });
+  await flush();
+  assert.equal((await editiones.find(ed.id))?.status, 'rejected');
+  assert.equal((await api.feed()).length, 0);
+});
 
 test('publish(): the moderation gate rejects → status rejected, never reaches the feed', async () => {
   const gate: ModerationGate = { async scan() { return { ok: false, reason: 'nope' } } }

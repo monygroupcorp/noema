@@ -36,6 +36,7 @@ import { ensureWideIndexes }      from './analytics/ensureWideIndexes.js'
 import { startAnalyticsListener } from './analytics/analyticsListener.js'
 import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
 import { PublicationWorker } from './crystal/PublicationWorker.js'
+import { permissiveModerationGate, denyModerationGate } from './crystal/ModerationGate.js'
 import { registerProgressusRecorder } from './execution/progressusSink.js'
 import { CANONICAL_MODI } from './crystal/seeds/modi.js'
 import { CANONICAL_ESSENTIAE } from './crystal/seeds/essentiae.js'
@@ -624,6 +625,13 @@ async function main(): Promise<void> {
   app.get('/api/health', (_req, res) => res.json({ ok: true, v: process.env.BUILD_VERSION ?? 'dev' }))
   app.use('/api/vestigia', createVestigiaRouter(ring.vestigiorum))
 
+  // →public moderation gate. No real CSAM/NCMEC scanner is built yet, so the gate
+  // fails CLOSED: public publishing (feed/marketplace) is DENIED until one is wired.
+  // Dev/staging can opt into unscanned publishing explicitly (never the silent default).
+  const moderationGate = process.env.MODERATION_ALLOW_UNSCANNED === '1'
+    ? (log.warn('MODERATION_ALLOW_UNSCANNED=1 — public publishing approves content WITHOUT CSAM/NCMEC scanning. Dev/staging only; NEVER in production.'), permissiveModerationGate)
+    : (log.warn('No CSAM/NCMEC scanner configured — public publishing (feed/marketplace) is DENIED (fail-closed). Private/unlisted still work.'), denyModerationGate)
+
   // Crystal Agent API (/v1) — ApiAllocutio (docs/agent-tasks/EPIC-api-allocutio.md).
   // The agent-shaped facade over the ring + the credential→AuctorKey resolver.
   const crystalApi = new CrystalApi({
@@ -645,8 +653,9 @@ async function main(): Promise<void> {
     collectioCursor: ring.collectioCursor,
     sodalitatum: ring.sodalitates,
     // Publishing spine (Editio): the feed adapter + the store + prefs source.
-    // No moderationGate wired → the permissive placeholder gate (real CSAM/NCMEC
-    // scanner is unbuilt; the async →public gate path still always runs).
+    // moderationGate fails closed (deny) unless MODERATION_ALLOW_UNSCANNED=1 — the
+    // async →public gate path always runs; only its verdict changes.
+    moderationGate,
     editiones: ring.editiones,
     publicationAdapters: ring.publicationAdapters,
     animae: ring.animae,
