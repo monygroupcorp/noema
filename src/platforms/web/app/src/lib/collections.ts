@@ -24,3 +24,23 @@ export const COLLECTIONS: Collection[] = [
 ];
 
 export const STATUS_LABEL: Record<CollStatus, string> = { draft: 'draft', locked: 'supply locked', minted: 'minted · live' };
+
+// ── Real backend helpers (Collections + EditioHub are wired; the other hub screens
+//    still use the mock above until their endpoints exist). ─────────────────────────
+import type { CollectionStatus } from './api';
+
+export const COLL_STATUS_LABEL: Record<CollectionStatus, string> = {
+  pending: 'queued', running: 'generating', complete: 'complete', cancelled: 'cancelled',
+};
+
+// A collection is local/private (dashed) until it's exported → minted. The Collectio
+// projection never mints (mint is a separate publish), so it stays dashed here.
+export const collGlyph = (): 'dashed' | 'lit' => 'dashed';
+
+// A deterministic mosaic gradient from the collection id (no image on the projection).
+export function collTile(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) & 0xffff;
+  const a = h % 360, b = (a + 40) % 360;
+  return `radial-gradient(120% 100% at 45% 30%, hsl(${a} 30% 28%), hsl(${b} 35% 14%))`;
+}
