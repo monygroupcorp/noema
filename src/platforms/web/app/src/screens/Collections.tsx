@@ -1,46 +1,138 @@
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { COLLECTIONS, STATUS_LABEL, type CollStatus } from '../lib/collections';
+import { api, type Collection, type FlowSummary } from '../lib/api';
+import { COLL_STATUS_LABEL, collGlyph, collTile } from '../lib/collections';
 
 // Collections (editio) — the BUILD-rail surface listing the user's collections. Each is a hub
-// (traits → rules → run → curation → export). Local-first; publishing to NOESIS is a choice at
-// the export crossing, never a funnel. The hemisphere stays dashed (private) until export.
-const statusGlyph: Record<CollStatus, string> = { draft: 'dashed', locked: 'dashed', minted: 'lit' };
+// (traits → run → curation → export). A collection is a batch-gen over a Tractus grid; creating
+// one LAUNCHES generation of `total` pieces, so create is a deliberate, confirmed action.
+
+// The create form: name + base flow + supply + one axis of variation (options woven into a port).
+function CreateForm({ onCreated }: { onCreated: (c: Collection) => void }) {
+  const [flows, setFlows] = useState<FlowSummary[]>([]);
+  const [nomen, setNomen] = useState('');
+  const [modusId, setModusId] = useState('');
+  const [total, setTotal] = useState(50);
+  const [porta, setPorta] = useState('prompt');
+  const [options, setOptions] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => { api.listFlows().then((r) => { setFlows(r.flows); if (r.flows[0]) setModusId(r.flows[0].id); }).catch(() => {}); }, []);
+
+  const values = options.split(',').map((s) => s.trim()).filter(Boolean);
+  const ready = !!modusId && total > 0 && values.length >= 2 && !busy;
+
+  async function submit() {
+    if (!ready) return;
+    if (!confirm(`Start generating ${total} pieces? This runs on real compute and spends credits.`)) return;
+    setBusy(true); setErr(null);
+    try {
+      const { collection } = await api.createCollection({
+        modusId, total, nomen: nomen.trim() || undefined,
+        tractus: [{ porta: porta.trim() || 'prompt', label: porta.trim() || 'prompt', valores: values.map((v) => ({ value: v, label: v })) }],
+      });
+      onCreated(collection);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e)); setBusy(false);
+    }
+  }
+
+  return (
+    <div className="coll-create">
+      <div className="cc-row">
+        <label className="cc-field"><span>Name</span>
+          <input className="cer-input" placeholder="untitled collection" value={nomen} onChange={(e) => setNomen(e.target.value)} /></label>
+        <label className="cc-field"><span>Base flow</span>
+          <select className="cer-input" value={modusId} onChange={(e) => setModusId(e.target.value)}>
+            {flows.length === 0 && <option value="">loading…</option>}
+            {flows.map((f) => <option key={f.id} value={f.id}>{f.nomen ?? f.id}</option>)}
+          </select></label>
+        <label className="cc-field cc-narrow"><span>Supply</span>
+          <input className="cer-input" type="number" min={1} value={total} onChange={(e) => setTotal(Math.max(1, Number(e.target.value) || 1))} /></label>
+      </div>
+      <div className="cc-row">
+        <label className="cc-field cc-narrow"><span>Vary this input</span>
+          <input className="cer-input" value={porta} onChange={(e) => setPorta(e.target.value)} /></label>
+        <label className="cc-field"><span>Options <em>(comma-separated — the axis of variation)</em></span>
+          <input className="cer-input" placeholder="a frost knight, an ember mage, an arcane oracle" value={options} onChange={(e) => setOptions(e.target.value)} /></label>
+      </div>
+      <div className="cc-foot">
+        <span className="cc-note">{values.length >= 2 ? `${values.length} variations across ${total} pieces` : 'add at least two options'}</span>
+        <button className="btn" disabled={!ready} onClick={submit}>{busy ? 'Starting…' : <>Start collection <Ic name="arrow-right" /></>}</button>
+      </div>
+      {err && <div className="cc-err">{err}</div>}
+    </div>
+  );
+}
+
+function Card({ c }: { c: Collection }) {
+  const active = c.status === 'pending' || c.status === 'running';
+  return (
+    <div className="collcard">
+      <div className="coll-mosaic" style={{ background: collTile(c.id) }}>
+        <span className="coll-status mono"><span className={`hemi2 ${collGlyph()}`} /> {COLL_STATUS_LABEL[c.status]}</span>
+      </div>
+      <div className="coll-body">
+        <div className="coll-title"><b>{c.nomen || 'Untitled collection'}</b></div>
+        <div className="coll-theme mono">{c.modusId}</div>
+        <div className="coll-stats mono">{c.completed.toLocaleString()} / {c.total.toLocaleString()} pieces{c.rejected ? ` · ${c.rejected} rejected` : ''}{c.failed ? ` · ${c.failed} failed` : ''}</div>
+        <div className="coll-actions">
+          <Link className="btn ghost" to={`/collections/${c.id}`}>Open hub</Link>
+          {active
+            ? <Link className="btn accent" to={`/collections/${c.id}/run`}>View run →</Link>
+            : <Link className="btn accent" to={`/collections/${c.id}/export`}>Export &amp; publish →</Link>}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function Collections() {
+  const nav = useNavigate();
+  const [items, setItems] = useState<Collection[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    api.listCollections().then((r) => { if (live) setItems(r.collections); }).catch((e) => { if (live) setErr(e instanceof Error ? e.message : String(e)); });
+    return () => { live = false; };
+  }, []);
+
   return (
     <AppShell title="Collections">
       <div className="page"><div className="pw wide">
         <div className="pagehead">
           <div>
-            <div className="noema-kicker" style={{ marginBottom: 8 }}>your collections · {COLLECTIONS.length}</div>
+            <div className="noema-kicker" style={{ marginBottom: 8 }}>your collections{items ? ` · ${items.length}` : ''}</div>
             <h1>Collections</h1>
-            <div className="sub">Author an NFT collection from your models — define traits, run the supply, curate, then choose where it goes. Local until you publish.</div>
+            <div className="sub">Author a collection from your flows — vary an input across a supply, curate, then choose where it goes. Local until you publish.</div>
           </div>
-          <div className="right"><button className="btn"><Ic name="plus" /> new collection</button></div>
+          <div className="right"><button className="btn" onClick={() => setCreating((v) => !v)}><Ic name={creating ? 'x' : 'plus'} /> {creating ? 'Cancel' : 'new collection'}</button></div>
         </div>
 
-        <div className="collgrid">
-          {COLLECTIONS.map((c) => (
-            <div key={c.id} className="collcard">
-              <div className="coll-mosaic" style={{ background: c.tile }}>
-                <span className="coll-status mono"><span className={`hemi2 ${statusGlyph[c.status]}`} /> {STATUS_LABEL[c.status]}</span>
-              </div>
-              <div className="coll-body">
-                <div className="coll-title"><b>{c.name}</b></div>
-                <div className="coll-theme mono">{c.theme}</div>
-                <div className="coll-stats mono">{c.supply.toLocaleString()} / {c.target.toLocaleString()} pieces · {c.traits} traits · {c.rarityDelta}</div>
-                <div className="coll-actions">
-                  <Link className="btn ghost" to={`/collections/${c.id}`}>Open hub</Link>
-                  {c.status === 'minted'
-                    ? <Link className="btn ghost" to="/collections"><span className="noesis-tag">on noesis ↗</span></Link>
-                    : <Link className="btn accent" to={`/collections/${c.id}/export`}>Export &amp; publish →</Link>}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        {creating && <CreateForm onCreated={(c) => nav(`/collections/${c.id}`)} />}
+
+        {err && <div className="warn">Couldn’t load collections: {err}</div>}
+
+        {items === null && !err && (
+          <div className="collgrid">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="collcard skel" />)}</div>
+        )}
+
+        {items !== null && items.length === 0 && !creating && (
+          <div className="empty">
+            <div className="t">No collections yet</div>
+            <div className="s">Start one — pick a flow, vary an input across a supply, and generate the set.</div>
+            <button className="btn" onClick={() => setCreating(true)}><Ic name="plus" /> new collection</button>
+          </div>
+        )}
+
+        {items !== null && items.length > 0 && (
+          <div className="collgrid">{items.map((c) => <Card key={c.id} c={c} />)}</div>
+        )}
       </div></div>
     </AppShell>
   );
