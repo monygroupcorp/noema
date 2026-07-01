@@ -51,7 +51,7 @@ import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
 import type { AnimaStore, PublishingPrefs } from '../../types/anima.js'
 import type { PublicationAdapter } from '../../crystal/PublicationAdapter.js'
 import type { ModerationGate } from '../../crystal/ModerationGate.js'
-import { permissiveModerationGate } from '../../crystal/ModerationGate.js'
+import { denyModerationGate } from '../../crystal/ModerationGate.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 import { provenanceHash } from '../../crystal/provenance.js'
 import { rarityReport, type RarityReport } from '../../crystal/rarityReport.js'
@@ -682,9 +682,11 @@ export class CrystalApi {
     return destination === 'civitai' ? !!prefs?.civitaiAccount : !!prefs?.huggingFaceAccount
   }
 
-  /** The →public moderation gate, or the permissive placeholder if none is wired. */
+  /** The →public moderation gate. Defaults to DENY (fail-closed) when none is wired:
+   *  an unconfigured CSAM gate must never approve public content. The container wires
+   *  the permissive gate only under an explicit MODERATION_ALLOW_UNSCANNED opt-in. */
   private _moderationGate(): ModerationGate {
-    return this.deps.moderationGate ?? permissiveModerationGate
+    return this.deps.moderationGate ?? denyModerationGate
   }
 
   /** An Editio owns by `{animaId}|{commitment}` only — bursaToken has no persistent owner. */
