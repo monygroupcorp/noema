@@ -20,16 +20,22 @@ async function uploadAsset(file: File): Promise<string> {
 
 export function Profile() {
   const [appr, setAppr] = useState<Appearance>({ accent: '#5b8cff', look: 'clean' });
+  const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
-    api.getMe().then((me) => { if (live && me.appearance) setAppr((a) => ({ ...a, ...me.appearance })); }).catch(() => {});
+    api.getMe()
+      .then((me) => { if (live) { if (me.appearance) setAppr((a) => ({ ...a, ...me.appearance })); setLoaded(true); } })
+      .catch(() => { if (live) setLoaded(true); });
     return () => { live = false; };
   }, []);
 
   // Persist a partial change (merges over current appearance) — fire-and-forget.
+  // Gated on `loaded` so an early click can't PUT a partial object that wipes the
+  // server's other saved fields (setAppearance replaces the whole appearance).
   function save(patch: Partial<Appearance>) {
+    if (!loaded) return;
     setAppr((cur) => { const next = { ...cur, ...patch }; api.setAppearance(next).catch((e) => setErr(msg(e))); return next; });
   }
 

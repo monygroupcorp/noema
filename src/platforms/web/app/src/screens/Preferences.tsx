@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
@@ -20,6 +20,9 @@ export function Preferences() {
   const [gen, setGen] = useState<Generatio>({});
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const genRef = useRef<Generatio>({});
+  genRef.current = gen;
+  const loaded = me !== null;
 
   useEffect(() => {
     let live = true;
@@ -27,13 +30,15 @@ export function Preferences() {
     return () => { live = false; };
   }, []);
 
-  function persist(patch: Partial<Generatio>) {
-    setGen((cur) => {
-      const next = { ...cur, ...patch };
-      api.setGeneratio(next).then(() => { setSaved(true); setTimeout(() => setSaved(false), 1500); }).catch((e) => setErr(msg(e)));
-      return next;
-    });
+  // Persist the FULL generatio (never a partial — a partial PUT would wipe the other
+  // fields). Gated on `loaded` so an early edit can't overwrite not-yet-loaded prefs.
+  function commit(next: Generatio) {
+    setGen(next);
+    if (!loaded) return;
+    api.setGeneratio(next).then(() => { setSaved(true); setTimeout(() => setSaved(false), 1500); }).catch((e) => setErr(msg(e)));
   }
+  const editLocal = (patch: Partial<Generatio>) => setGen((cur) => ({ ...cur, ...patch }));
+  const flush = () => commit(genRef.current);
 
   // Resolve /make's current model from the caller's bindings (else the canon default).
   const makeModel = me?.bindings.find((b) => b.verb === 'make')?.modusId ?? 'flux-schnell';
@@ -58,20 +63,20 @@ export function Preferences() {
           <div className="pref-card">
             <div className="pref-card-h"><Ic name="sparkles" /><b>Style &amp; prompt</b></div>
             <label className="ac-row"><span className="ac-rk mono">default style</span>
-              <input className="cer-input" placeholder="e.g. cinematic, cold" defaultValue={gen.style ?? ''} onBlur={(e) => persist({ style: e.target.value || undefined })} /></label>
+              <input className="cer-input" placeholder="e.g. cinematic, cold" value={gen.style ?? ''} onChange={(e) => editLocal({ style: e.target.value || undefined })} onBlur={flush} /></label>
             <label className="ac-row"><span className="ac-rk mono">negative prompt</span>
-              <input className="cer-input" placeholder="blurry, text, watermark" defaultValue={gen.negativePrompt ?? ''} onBlur={(e) => persist({ negativePrompt: e.target.value || undefined })} /></label>
+              <input className="cer-input" placeholder="blurry, text, watermark" value={gen.negativePrompt ?? ''} onChange={(e) => editLocal({ negativePrompt: e.target.value || undefined })} onBlur={flush} /></label>
             <div className="ac-row"><span className="ac-rk mono">auto-apply a model</span>
               <span className="ac-rv mono" style={{ color: 'var(--faint)' }}><span className="hemi2 dashed" /> needs a model picker — coming</span></div>
           </div>
           <div className="pref-card">
             <div className="pref-card-h"><Ic name="send" /><b>Output &amp; delivery</b></div>
             <label className="ac-row"><span className="ac-rk mono">format</span>
-              <select className="cer-input" value={gen.outputFormat ?? 'png'} onChange={(e) => persist({ outputFormat: e.target.value })}>
+              <select className="cer-input" value={gen.outputFormat ?? 'png'} onChange={(e) => commit({ ...gen, outputFormat: e.target.value })}>
                 <option value="png">PNG · max quality</option><option value="jpg">JPG</option><option value="webp">WebP</option>
               </select></label>
             <label className="ac-row"><span className="ac-rk mono">telegram: deliver as</span>
-              <select className="cer-input" value={gen.telegramDeliverAs ?? 'album'} onChange={(e) => persist({ telegramDeliverAs: e.target.value as Generatio['telegramDeliverAs'] })}>
+              <select className="cer-input" value={gen.telegramDeliverAs ?? 'album'} onChange={(e) => commit({ ...gen, telegramDeliverAs: e.target.value as Generatio['telegramDeliverAs'] })}>
                 <option value="album">album</option><option value="individual">individual</option>
               </select></label>
             <div className="ac-row"><span className="ac-rk mono">land in (project)</span>

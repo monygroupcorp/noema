@@ -3,28 +3,38 @@
 // =============================================================================
 //
 // "consuetudo" = custom, habit, established usage (Latin, 3rd decl. fem.;
-// gen. pl. consuetudinum). A user's habitual way of working — defaults that
+// gen. pl. consuetudinum). A user's habitual way of working — settings that
 // travel WITH the account across every surface (Telegram, web, API), not a
-// per-adapter setting. This is the owner-keyed "platform preferences" slot the
-// `Anima.affines` precedence chain already names ("cast-time > affines >
-// platform preferences > modus defaults"), made anon-capable (AuctorKey, not
-// anima-only). ADR-0003 sanctioned it as the one new bit of owner-keyed state.
+// per-adapter setting. THE one owner-keyed account-state home (ADR-0003), made
+// anon-capable (AuctorKey, not anima-only) so it works for anonymous callers the
+// identified-only Anima/Persona cannot. Its charter is deliberately "all owner-
+// keyed preferences share one home" — spanning both how a user GENERATES
+// (defaults) and how they PRESENT (skin), rather than spawning a new noun per
+// concern (crystal-first: minimize surface).
 //
-// Two occupants, both owner-keyed by AuctorKey (animaId for identified users,
+// Four occupants, all owner-keyed by AuctorKey (animaId for identified users,
 // commitment for anonymous):
 //
 //   1. verb→flow rebinds. A canon verb (`make`, `chat`) has a platform default
 //      (CANON_VERBS); an owner may rebind it to a different modus via
 //      `/bind <verb> <slug>`. `resolve` returns the override or `undefined`
-//      (fall through to the platform default).
+//      (fall through to the platform default). `listBindings` reads them all.
 //
 //   2. affines — per-modus input affinities (re-homed from `Anima.affines`). The
 //      owner's default input overrides for a specific flow:
 //      `{ [inputKey]: overrideValue }`. The cast-time precedence the resolver
-//      names is "cast-time input > affines > modus defaults"; affines are this
-//      account-level, anon-capable tier. `resolveAffines` returns the map or
-//      `undefined`. (Previously a required field on the Anima record, never read;
-//      moved here so all owner-keyed preferences share one home — ADR-0003.)
+//      names is "cast-time input > affines > generatio > modus defaults"; affines
+//      are this account-level, anon-capable tier. (Previously a required field on
+//      the Anima record, never read; moved here so all owner-keyed preferences
+//      share one home — ADR-0003.)
+//
+//   3. generatio — cross-cutting generation defaults (style, negative prompt, …),
+//      applied at cast time UNDER affines (see `applyAccountDefaults`).
+//
+//   4. appearance — the owner's presentation skin (avatar/accent/look). NOT a
+//      generation default — a distinct kind of owner-keyed preference that lives
+//      here for the same reason (one anon-capable home), not on the web Profile
+//      alone. The generation path never reads it.
 // =============================================================================
 
 import type { AuctorKey } from '../flow/types.js'

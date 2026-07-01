@@ -270,9 +270,10 @@ export class CrystalApi {
     }
 
     // Admission spend cap — refuse before dispatch if the upper-bound estimate exceeds
-    // maxImpetus. (Mid-run enforcement — the watchdog — is a Phase-4b follow-up.)
+    // maxImpetus. Estimate the EFFECTIVE aditus (post account-defaults) — the same inputs
+    // that will run — so an affine bumping a cost driver (steps/count/resolution) is capped.
     if (opts.maxImpetus !== undefined) {
-      const est = await this._estimate(modusId, aditus)
+      const est = await this._estimate(modusId, effectiveAditus)
       if (est > BigInt(opts.maxImpetus)) {
         throw Errors.capTooLow({ estimated: est.toString(), maxImpetus: String(opts.maxImpetus) })
       }
