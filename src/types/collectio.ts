@@ -21,13 +21,16 @@
 // configurable concurrency, collecting the resulting Acta into this record.
 //
 // Lifecycle:
-//   nascens    → created, not yet executing
+//   draft      → authored but NOT yet fired — tractus is still mutable (the only
+//                editable state; provenance re-derives on every tractus edit)
+//   nascens    → created + fired, not yet executing
 //   agens      → executing — some acta running, others queued
 //   completa   → all acta completed (some may be fractus)
 //   cancellata → cancelled mid-run
+// Firing (draft → nascens) FREEZES tractus: provenance is locked from then on.
 // =============================================================================
 
-export type CollectioStatus = 'nascens' | 'agens' | 'completa' | 'cancellata'
+export type CollectioStatus = 'draft' | 'nascens' | 'agens' | 'completa' | 'cancellata'
 
 /**
  * TraitValor — one option within a trait axis.
@@ -153,6 +156,13 @@ export interface Collectio {
    */
   dna?: boolean
 
+  /**
+   * When true, every completed piece is held for review (`reviewOutcome: 'pending'`)
+   * and does NOT count toward `completae` until a reviewer approves it. Off → a
+   * successful gen auto-counts. Absent → the CollectioCursor's global default applies.
+   */
+  reviewEnabled?: boolean
+
   status: CollectioStatus
 
   /** Total impetus consumed across all completed acta */
@@ -176,5 +186,5 @@ export interface Collectionum {
   list(filter?: Partial<Pick<Collectio, 'status'>>): Promise<Collectiones>
   listByStatus(status: CollectioStatus): Promise<Collectiones>
   create(collectio: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal'>): Promise<Collectio>
-  update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'numerus'>>): Promise<Collectio>
+  update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'numerus' | 'tractus' | 'provenanceHash'>>): Promise<Collectio>
 }

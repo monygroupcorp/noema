@@ -1,4 +1,5 @@
 import type { Collection, MongoClient } from 'mongodb'
+import { makeLogger } from './lib/logger.js'
 import type { Modus } from './types/modus.js'
 import type { Actorum, Cursorum, ActumCompletor as IActumCompletor, Inceptio } from './types/cursus.js'
 import type { RunPodClient } from './crystal/RunPodCursor.js'
@@ -63,6 +64,11 @@ import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
 import { FeedAdapter } from './crystal/FeedAdapter.js'
 import { BucketAdapter } from './crystal/BucketAdapter.js'
+import { ArchiveAdapter } from './crystal/ArchiveAdapter.js'
+import { GalleryAdapter } from './crystal/GalleryAdapter.js'
+import { ArweaveAdapter } from './crystal/ArweaveAdapter.js'
+import { ArweaveUploader, IrysTransport, type ArweaveCharger } from './crystal/ArweaveUploader.js'
+import { collectioArchiveSource } from './crystal/collectioArchiveSource.js'
 import { ModelPublishAdapter, huggingFaceRegistry, civitaiRegistry } from './crystal/ModelPublishAdapter.js'
 import { MintAdapter, MarketplaceAdapter } from './crystal/MintAdapter.js'
 import { HuggingFaceUploader, HfHttpTransport } from './crystal/HfUploader.js'
@@ -254,6 +260,9 @@ export interface ContainerConfig {
   huggingFaceOrg?: string
   /** HF_TOKEN — present → the HF registry gets a real LFS uploader; absent → projection-only. */
   huggingFaceToken?: string
+  /** ARWEAVE_PRIVATE_KEY — funding wallet for the Irys bundler. Present → the `arweave`
+   *  graduation destination is registered (LIVE-UNVERIFIED); absent → not offered. */
+  arweavePrivateKey?: string
   /** Base URL the MarketplaceAdapter projects listing handles under (default 'https://noema.art/market'). */
   marketplaceBaseUrl?: string
   sodalitatesCollection?: string
@@ -327,6 +336,8 @@ export interface ContainerConfig {
   /** TEE runner pod provisioner config — if present, POST /v1/sessions/tee boots real pods. */
   teeProvisioner?: TeeProvisionerConfig
 }
+
+const log = makeLogger('container')
 
 export function createContainer(mongo: MongoClient, config: ContainerConfig): Ring {
   const db = mongo.db(config.dbName)
@@ -480,6 +491,31 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     new MarketplaceAdapter({ base: config.marketplaceBaseUrl ?? 'https://noema.art/market' }),
   ]
 
+  // Shared piece-enumeration for the collection-export destinations (archive ZIP,
+  // gallery hosting, Arweave graduation) — closes over the stores, needs no R2.
+  const archiveSource = collectioArchiveSource({ collectiones, actorum })
+
+  // Arweave graduation (editio-hosting → permanence): push a collection's pieces to
+  // Arweave via the Irys bundler. Gated on a funding key (secret) — NOEMA-side, since
+  // NOESIS is static/secretless. LIVE-UNVERIFIED until a funded wallet is set up.
+  if (config.arweavePrivateKey) {
+    // PLACEHOLDER(publishing#6-arweave): metering is balance-check-only — it does NOT
+    // debit. Wire a real bytes→credits price/markup + signa settlement before funding.
+    const arweaveCharger: ArweaveCharger = {
+      async charge(by, bytes) {
+        const bal = await signorum.balance(by)
+        log.warn('arweave charge is a PLACEHOLDER — verifying balance, not debiting', { bytes, balance: bal.toString() })
+        if (bal <= 0n) throw new Error('insufficient credits for Arweave graduation')
+      },
+    }
+    const uploader = new ArweaveUploader({
+      transport: new IrysTransport({ privateKey: config.arweavePrivateKey }),
+      fetcher: httpMediaFetcher,
+      charger: arweaveCharger,
+    })
+    publicationAdapters.push(new ArweaveAdapter({ uploader, source: archiveSource }))
+  }
+
   // Host-side deterministic processing runtimes (spec §4a). They produce bytes
   // ON the host, so they need R2 to host the result — gate registration on it.
   if (config.runpodR2) {
@@ -496,6 +532,14 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     }))
     // Bucket custody (publishing #2): re-hosts an artifact's media to R2.
     publicationAdapters.push(new BucketAdapter({ fetcher: httpMediaFetcher, store: uploader }))
+    // Archive (editio-export): bundle a collection's approved pieces into a ZIP in
+    // OUR bucket — the sovereign-download destination. Private/custody-ours, so it
+    // never touches the moderation gate.
+    publicationAdapters.push(new ArchiveAdapter({ fetcher: httpMediaFetcher, store: uploader, source: archiveSource }))
+    // Gallery (editio-hosting): host a collection's approved pieces as PUBLIC ERC-721
+    // tokenURIs — the temporary bridge NOESIS (static/secretless) leans on. Public
+    // surface → the moderation gate applies (fail-closed until a CSAM scanner lands).
+    publicationAdapters.push(new GalleryAdapter({ fetcher: httpMediaFetcher, store: uploader, source: archiveSource }))
   }
 
   // Local ai-toolkit training (build #5) — only where a GPU + image + host-mounted DB exist.

@@ -1,62 +1,92 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { COLLECTIONS } from '../lib/collections';
+import { api, type Collection, type Tractus, type TractusValor } from '../lib/api';
 
-// Trait rules (editio-rules-spec.md, render noema-editio-rules.png) — exclusions & cohesion as
-// readable sentences: broad MOTIF rules (one rule covers every trait in the motif) + TRAIT
-// exceptions (a specific trait beats the motif rule). AI suggests; the human applies. Feasibility
-// is enforced — if valid combos fall below supply, the run is hard-blocked here.
+// Trait rules (editio-rules-spec.md) — the exclusion + cohesion primitives, wired to the live
+// draft. Each value carries `excludes` (labels in OTHER axes it blocks — hard exclusion) and
+// `tags` (motif labels for group-level mutual exclusion). Edited here and saved via
+// PATCH /collectiones/:id/tractus (same write as the garden). Frozen once fired.
+
+const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const toList = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
+const label = (v: TractusValor) => v.label || String(v.value);
+
 export function TraitRules() {
   const { id } = useParams();
-  const c = COLLECTIONS.find((x) => x.id === id) ?? COLLECTIONS[0];
-  const [view, setView] = useState<'list' | 'grid'>('list');
-  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`}>{c.name}</Link> <span className="sep">/</span> <b>rules</b></span>;
+  const [c, setC] = useState<Collection | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [axes, setAxes] = useState<Tractus[]>([]);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    let live = true;
+    api.getCollection(id).then((r) => { if (live) { setC(r.collection); setAxes(r.collection.tractus ?? []); } })
+      .catch((e) => { if (live) setErr(msg(e)); });
+    return () => { live = false; };
+  }, [id]);
+
+  if (err) return <AppShell title="Rules"><div className="page"><div className="pw wide"><div className="warn">Couldn’t load: {err}</div></div></div></AppShell>;
+  if (!c) return <AppShell title="Rules"><div className="page"><div className="pw wide"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
+
+  const editable = c.status === 'draft';
+  const patchValor = (i: number, j: number, p: Partial<TractusValor>) => {
+    setAxes(axes.map((a, k) => (k === i ? { ...a, valores: a.valores.map((v, m) => (m === j ? { ...v, ...p } : v)) } : a)));
+    setDirty(true);
+  };
+
+  async function save() {
+    if (!id || busy) return;
+    setBusy(true); setErr(null);
+    try { const { collection } = await api.patchCollectionTractus(id, axes); setC(collection); setAxes(collection.tractus ?? axes); setDirty(false); }
+    catch (e) { setErr(msg(e)); }
+    finally { setBusy(false); }
+  }
+
+  const empty = axes.every((a) => a.valores.length === 0);
+  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`}>{c.nomen || 'collection'}</Link> <span className="sep">/</span> <b>rules</b></span>;
 
   return (
     <AppShell title={crumb}>
       <div className="page"><div className="pw wide">
         <div className="pagehead">
-          <div><h1>Trait rules</h1><div className="sub mono">broad motif rules · trait exceptions</div></div>
-          <div className="right"><span className="badge ok">feasible ✓</span></div>
+          <div><h1>Trait rules</h1><div className="sub mono">excludes · motif tags {editable ? '' : '· frozen'}</div></div>
+          <div className="right">{editable ? <button className="btn" disabled={!dirty || busy} onClick={save}>{busy ? 'Saving…' : dirty ? 'Save rules' : 'Saved'}</button> : <span className="badge">locked</span>}</div>
         </div>
 
-        <div className="tr-toolbar">
-          <div className="seg tr-view">
-            <button className={view === 'list' ? 'on' : ''} onClick={() => setView('list')}>≡ List</button>
-            <button className={view === 'grid' ? 'on' : ''} onClick={() => setView('grid')}>▦ Grid · motif×motif</button>
+        {err && <div className="warn" style={{ marginBottom: 12 }}>{err}</div>}
+        <div className="rl-sec"><span className="noema-kicker">rules per value</span><span className="rl-hint mono"><b>excludes</b> = labels in other axes this value can’t appear with · <b>tags</b> = motif groups that repel each other</span></div>
+
+        {empty ? (
+          <div className="empty"><div className="t">No trait values yet</div><div className="s">Add values in the <Link to={`/collections/${id}/garden`}>traits garden</Link> first, then set their rules here.</div></div>
+        ) : axes.map((a, i) => (
+          <div key={i} className="rr-axis">
+            <div className="rr-axis-h"><b>{a.label || a.porta}</b> <span className="mono rl-hint">{a.valores.length} values</span></div>
+            {a.valores.map((v, j) => (
+              <div key={j} className="rr-row">
+                <span className="rr-name">{label(v)}</span>
+                <label className="rr-field"><span className="mono">excludes</span>
+                  {editable
+                    ? <input className="cer-input" value={(v.excludes ?? []).join(', ')} placeholder="e.g. Ember, Wizard hat" onChange={(e) => patchValor(i, j, { excludes: toList(e.target.value) })} />
+                    : <span className="mono">{(v.excludes ?? []).join(', ') || '—'}</span>}
+                </label>
+                <label className="rr-field"><span className="mono">tags</span>
+                  {editable
+                    ? <input className="cer-input" value={(v.tags ?? []).join(', ')} placeholder="e.g. frost, cool" onChange={(e) => patchValor(i, j, { tags: toList(e.target.value) })} />
+                    : <span className="mono">{(v.tags ?? []).join(', ') || '—'}</span>}
+                </label>
+              </div>
+            ))}
           </div>
-          <button className="btn">+ add rule</button>
-        </div>
+        ))}
 
-        {view === 'list' ? (
-          <>
-            <div className="rl-sec"><span className="noema-kicker">motif rules · broad strokes</span><span className="rl-hint mono">one rule covers every trait in the motif</span></div>
-            <div className="rl-row"><span className="rl-op exclude">✕</span><span className="motif frost">Frost <span className="m-n">6 traits</span></span> <span className="rl-verb">excludes</span> <span className="motif ember">Ember <span className="m-n">5 traits</span></span><span className="rl-cost mono">−312 combos</span></div>
-            <div className="rl-row"><span className="rl-op cohesion">⇄</span><span className="motif arcane">Arcane <span className="m-n">4 traits</span></span> <span className="rl-verb">prefers its own motif</span> <span className="rl-tag">cohesion</span><span className="rl-cost mono">weights ↑</span></div>
-
-            <div className="rl-sec"><span className="noema-kicker">trait exceptions · overrides</span><span className="rl-hint mono">a specific trait beats the motif rule above</span></div>
-            <div className="rl-row"><span className="rl-op allow">✓</span><b>Frostfire crown</b> <span className="rl-verb">allowed with</span> <span className="motif ember">Ember</span> <span className="rl-tag">intentional clash</span><span className="rl-cost mono good">+18</span></div>
-            <div className="rl-row"><span className="rl-op exclude">✕</span><b>Wizard hat</b> <span className="rl-verb">excludes</span> <b>Cathedral cape</b> <span className="rl-tag">prompts clash</span><span className="rl-cost mono">−84</span></div>
-
-            <div className="rl-ai">
-              <div className="rl-ai-l noema-kicker">✦ noema noticed</div>
-              <p>Three <b>Ember</b> traits have no rule against <span className="motif frost sm">Frost</span> backgrounds — and they scored low together in your tests. Extend <b>Frost excludes Ember</b> to cover them?</p>
-              <div className="rl-ai-actions"><button className="btn accent sm">Extend rule</button><button className="btn ghost sm">Dismiss</button></div>
-            </div>
-          </>
-        ) : (
-          <div className="empty"><div className="t">motif × motif grid — the pairwise matrix collapsed to motifs.</div></div>
-        )}
-
-        <div className="rl-foot">
-          <span className="mono"><span className="good">✓ 1,802 valid</span> / 1,944 supply</span>
-          <div className="rl-feas"><span className="cj-bar"><span style={{ width: '93%' }} /></span></div>
-          <span className="rl-legend mono"><span className="rl-dot exclude" /> exclude <span className="rl-dot require" /> require</span>
-        </div>
         <div className="garden-foot">
           <Link className="btn ghost" to={`/collections/${id}/garden`}>← garden</Link>
-          <Link className="btn accent" to={`/collections/${id}/run`}>Next · canonic run →</Link>
+          {editable
+            ? <Link className="btn accent" to={`/collections/${id}/garden`}>Back to garden to fire →</Link>
+            : <Link className="btn accent" to={`/collections/${id}/run`}>Canonic run →</Link>}
         </div>
       </div></div>
     </AppShell>

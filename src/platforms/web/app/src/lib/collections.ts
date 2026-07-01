@@ -30,7 +30,7 @@ export const STATUS_LABEL: Record<CollStatus, string> = { draft: 'draft', locked
 import type { CollectionStatus } from './api';
 
 export const COLL_STATUS_LABEL: Record<CollectionStatus, string> = {
-  pending: 'queued', running: 'generating', complete: 'complete', cancelled: 'cancelled',
+  draft: 'draft', pending: 'queued', running: 'generating', complete: 'complete', cancelled: 'cancelled',
 };
 
 // A collection is local/private (dashed) until it's exported → minted. The Collectio

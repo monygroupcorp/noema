@@ -128,6 +128,12 @@ export interface CollectOpts {
   nomen?: string
   /** Opt-in DNA uniqueness — no two pieces share a trait combination (see Collectio.dna). */
   dna?: boolean
+  /** Hold every completed piece for review before it counts (see Collectio.reviewEnabled).
+   *  Omit → the platform default applies. */
+  reviewEnabled?: boolean
+  /** Create as a DRAFT — author tractus (garden/rules) without firing. The run is
+   *  started later by `fireCollection`. Omit/false → create + fire in one shot. */
+  draft?: boolean
   /**
    * Own this collection by a team (Sodalitas) instead of the individual caller.
    * The caller must be a member. Snapshots an equal-weight `owners` split from
@@ -328,10 +334,60 @@ export class CrystalApi {
       ...(owners !== undefined ? { owners } : {}),
       concurrentia: opts.concurrentia ?? 3,
       ...(opts.dna !== undefined ? { dna: opts.dna } : {}),
-      status: 'nascens',
+      ...(opts.reviewEnabled !== undefined ? { reviewEnabled: opts.reviewEnabled } : {}),
+      // Draft = authored but not fired; tractus stays editable until fireCollection.
+      status: opts.draft ? 'draft' : 'nascens',
     })
-    await collectioCursor.start(collectio)
+    // A draft is NOT dispatched — the caller authors tractus, then fires it.
+    if (!opts.draft) await collectioCursor.start(collectio)
     return toCollection((await collectiones.find(collectio.id)) ?? collectio)
+  }
+
+  /**
+   * Fire a DRAFT collection — freeze its tractus and start the run. Re-derives the
+   * provenance hash from the current tractus + the flow's live version (pinning
+   * exactly what executes), then dispatches. Owner-scoped + funder-only (it spends).
+   * Idempotent-guarded: only a `draft` may be fired.
+   */
+  async fireCollection(auctor: AuctorKey, id: string): Promise<Collection> {
+    const { collectiones, collectioCursor } = this.deps
+    if (!collectiones || !collectioCursor) throw Errors.notFoundCollection('collections')
+    const c = await this._ownedCollection(auctor, id)
+    if (!this._isFunder(auctor, c)) {
+      throw Errors.authForbidden('only the collection funder can fire it')
+    }
+    if (c.status !== 'draft') throw Errors.inputMalformed('only a draft collection can be fired')
+    // Re-pin provenance to the flow version at fire time (the config that actually runs).
+    const modus = await this.deps.modorum.find(c.modusId)
+    const provenance = provenanceHash({
+      modusId: c.modusId,
+      modusVersio: modus?.versio,
+      tractus: c.tractus,
+      aditusBase: c.aditusBase,
+    })
+    const fired = await collectiones.update(id, { provenanceHash: provenance, status: 'nascens' })
+    await collectioCursor.start(fired)
+    return toCollection((await collectiones.find(id)) ?? fired)
+  }
+
+  /**
+   * Replace a DRAFT collection's tractus (the garden/rules authoring write) and
+   * re-derive its provenance hash — the content-address MUST change when the grid,
+   * a weight, an exclude, or a tag changes. Frozen once fired. Owner-scoped.
+   */
+  async patchCollectionTractus(auctor: AuctorKey, id: string, tractus: Tractus[]): Promise<Collection> {
+    const { collectiones } = this.deps
+    if (!collectiones) throw Errors.notFoundCollection('collections')
+    const c = await this._ownedCollection(auctor, id)
+    if (c.status !== 'draft') throw Errors.inputMalformed('a collection’s tractus is frozen once it is fired')
+    const modus = await this.deps.modorum.find(c.modusId)
+    const provenance = provenanceHash({
+      modusId: c.modusId,
+      modusVersio: modus?.versio,
+      tractus,
+      aditusBase: c.aditusBase,
+    })
+    return toCollection(await collectiones.update(id, { tractus, provenanceHash: provenance }))
   }
 
   /** Fetch a Collection, owner-scoped. */
@@ -490,7 +546,10 @@ export class CrystalApi {
     // everything else is private. Explicit opts/prefs still win.
     const visibility = opts.visibility ?? prefs?.defaultVisibility ??
       (destination === 'feed' ? 'feed'
-        : destination === 'mint' || destination === 'marketplace' ? 'marketplace'
+        // mint/marketplace list on-chain/at a venue; `gallery` hosts publicly-readable
+        // tokenURIs; `arweave` graduates them to permanent public storage — all PUBLIC
+        // surfaces, so they run the moderation gate.
+        : destination === 'mint' || destination === 'marketplace' || destination === 'gallery' || destination === 'arweave' ? 'marketplace'
         : 'private')
     const custody = opts.custody ?? prefs?.defaultCustody ?? 'ours'
 
@@ -605,6 +664,17 @@ export class CrystalApi {
     return out
   }
 
+  /** Fetch one publication. Author-scoped: only the publishing identity may read it
+   *  (an archive's `externalRef` is a private download url). Polled to watch a pending
+   *  settle land — an async archive ZIP build finishing, a public surface being gated. */
+  async getEdition(auctor: AuctorKey, id: string): Promise<Edition> {
+    const editiones = this.deps.editiones
+    if (!editiones) throw Errors.notFoundEdition(id)
+    const e = await editiones.find(id)
+    if (!e || !this._isEditionAuthor(auctor, e)) throw Errors.notFoundEdition(id)
+    return toEdition(e)
+  }
+
   /** Retract a publication where the destination allows it (feed/bucket = revocable;
    *  mint = permanent → 403). Author-scoped: only the publishing identity may retract. */
   async retractEdition(auctor: AuctorKey, id: string): Promise<Edition> {
@@ -628,7 +698,7 @@ export class CrystalApi {
     const e = await editiones.find(editioId)
     if (!e || e.status !== 'pending') return
 
-    const artifact = { ref: e.artifactRef, output: await this._artifactOutput(e.artifactRef), editioId: e.id }
+    const artifact = { ref: e.artifactRef, output: await this._artifactOutput(e.artifactRef), editioId: e.id, by: e.by }
     if (e.visibility === 'feed' || e.visibility === 'marketplace') {
       const verdict = await this._moderationGate().scan(artifact)
       if (!verdict.ok) {

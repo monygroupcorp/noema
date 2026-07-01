@@ -289,6 +289,85 @@ test('collect({ dna: true }): every produced piece has a unique trait combinatio
 })
 
 // =============================================================================
+// Draft lifecycle — create without firing, author tractus, then fire
+// =============================================================================
+
+test('collect({ draft: true }): creates a draft WITHOUT firing — nothing runs', async () => {
+  const { api, modorum, signorum, cursor } = makeApi()
+  await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const col = await api.collect({ animaId: 'anima-1' }, {
+    modusId: 'sd1-5', total: 4, draft: true,
+    aditusBase: { _basePrompt: 'a {{color}} cat' },
+    tractus: [{ porta: 'color', valores: [{ value: 'red', promptFragment: 'red' }] }],
+  })
+  assert.equal(col.status, 'draft')
+  assert.equal(col.completed, 0)
+  assert.equal(cursor.runs.length, 0, 'a draft dispatches nothing')
+  assert.equal(col.tractus?.length, 1, 'the projection surfaces the tractus for authoring')
+})
+
+test('patchCollectionTractus(): edits a draft’s grid + re-derives provenance; owner-scoped', async () => {
+  const { api, modorum, signorum } = makeApi()
+  await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const col = await api.collect({ animaId: 'anima-1' }, {
+    modusId: 'sd1-5', total: 2, draft: true,
+    aditusBase: { _basePrompt: 'a {{color}} cat' },
+    tractus: [{ porta: 'color', valores: [{ value: 'red', promptFragment: 'red' }] }],
+  })
+  const before = col.provenanceHash
+
+  const patched = await api.patchCollectionTractus({ animaId: 'anima-1' }, col.id, [
+    { porta: 'color', label: 'Color', valores: [
+      { value: 'red', promptFragment: 'red', excludes: ['blue'] },
+      { value: 'blue', promptFragment: 'blue', tags: ['cool'] },
+    ] },
+  ])
+  assert.equal(patched.tractus?.[0].valores.length, 2, 'the new axis replaced the old')
+  assert.notEqual(patched.provenanceHash, before, 'provenance re-derives when tractus changes')
+  assert.match(patched.provenanceHash, /^sha256:[0-9a-f]{64}$/)
+  await assert.rejects(() => api.patchCollectionTractus({ animaId: 'intruder' }, col.id, []), /not found/i)
+})
+
+test('fireCollection(): freezes tractus + starts the run; a fired collection rejects further edits', async () => {
+  const { api, modorum, signorum, cursor } = makeApi()
+  await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const draft = await api.collect({ animaId: 'anima-1' }, {
+    modusId: 'sd1-5', total: 2, draft: true,
+    aditusBase: { _basePrompt: 'a {{color}} cat' },
+    tractus: [{ porta: 'color', valores: [{ value: 'red', promptFragment: 'red' }, { value: 'blue', promptFragment: 'blue' }] }],
+  })
+  assert.equal(cursor.runs.length, 0)
+
+  const fired = await api.fireCollection({ animaId: 'anima-1' }, draft.id)
+  assert.equal(fired.status, 'complete', 'sync cursor runs the whole batch inline on fire')
+  assert.equal(fired.completed, 2)
+  assert.equal(cursor.runs.length, 2, 'firing dispatched the pieces')
+
+  // Tractus is now frozen, and a non-draft cannot be re-fired.
+  await assert.rejects(() => api.patchCollectionTractus({ animaId: 'anima-1' }, draft.id, []), /frozen/i)
+  await assert.rejects(() => api.fireCollection({ animaId: 'anima-1' }, draft.id), /draft/i)
+})
+
+test('fireCollection(): owner/funder-scoped — a stranger cannot fire it', async () => {
+  const { api, modorum, signorum } = makeApi()
+  await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const draft = await api.collect({ animaId: 'anima-1' }, {
+    modusId: 'sd1-5', total: 1, draft: true,
+    aditusBase: { _basePrompt: 'a {{color}} cat' },
+    tractus: [{ porta: 'color', valores: [{ value: 'red', promptFragment: 'red' }] }],
+  })
+  await assert.rejects(() => api.fireCollection({ animaId: 'intruder' }, draft.id), /not found/i)
+})
+
+// =============================================================================
 // Teams (Sodalitas) + team-owned collections + per-artifact split
 // =============================================================================
 

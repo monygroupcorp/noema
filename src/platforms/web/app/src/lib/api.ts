@@ -91,6 +91,11 @@ export const api = {
   cancelCollection: (id: string) => fetch(`/v1/collectiones/${id}/cancel`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
   extendCollection: (id: string, count: number) =>
     fetch(`/v1/collectiones/${id}/extend`, { method: 'POST', headers: anonHeaders(), body: JSON.stringify({ count }) }).then(j<{ collection: Collection }>),
+  // Draft authoring: replace a draft's trait grid (re-derives provenance), then fire it.
+  patchCollectionTractus: (id: string, tractus: Tractus[]) =>
+    fetch(`/v1/collectiones/${id}/tractus`, { method: 'PATCH', headers: anonHeaders(), body: JSON.stringify({ tractus }) }).then(j<{ collection: Collection }>),
+  fireCollection: (id: string) =>
+    fetch(`/v1/collectiones/${id}/fire`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
 
   // ── Publishing (Editio) — feed read + publish/retract write ──────────────────
   // GET /v1/feed — public, NO auth. Newest-first published, public-surface editions.
@@ -107,6 +112,11 @@ export const api = {
   publish: (body: PublishRequest) =>
     fetch('/v1/editiones', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
       .then(j<{ edition: Editio }>),
+  // GET /v1/editiones/:id — poll a publication (author-scoped) to watch an async
+  // settle land: an archive ZIP build finishing (`externalRef` = the download url),
+  // or a public surface being gated (→ rejected).
+  getEdition: (id: string) => fetch(`/v1/editiones/${id}`, { headers: { 'x-commitment': commitment() } })
+    .then(j<{ edition: Editio }>),
   retract: (id: string) =>
     fetch(`/v1/editiones/${id}/retract`, { method: 'POST', headers: anonHeaders() })
       .then(j<{ edition: Editio }>),
@@ -128,7 +138,7 @@ export const api = {
 export interface DatasetSummary { id: string; name: string; images?: number; updatedAt?: string }
 
 // Collection (Collectio) projection — mirrors the backend CollectionSchema.
-export type CollectionStatus = 'pending' | 'running' | 'complete' | 'cancelled';
+export type CollectionStatus = 'draft' | 'pending' | 'running' | 'complete' | 'cancelled';
 export interface Collection {
   id: string;
   nomen?: string;
@@ -137,6 +147,8 @@ export interface Collection {
   total: number;
   provenanceHash: string;
   owners?: Array<{ animaId: string; weight: number }>;
+  tractus?: Tractus[];
+  reviewEnabled?: boolean;
   completed: number;
   failed: number;
   rejected: number;
@@ -145,7 +157,8 @@ export interface Collection {
   completedAt?: string;
 }
 // One option within a trait axis; `value` is injected into the flow's aditus port.
-export interface TractusValor { value: string; label?: string; rarity?: number; promptFragment?: string }
+// `excludes` blocks named labels in OTHER axes; `tags` group options for motif-level exclusion.
+export interface TractusValor { value: string; label?: string; rarity?: number; promptFragment?: string; excludes?: string[]; tags?: string[] }
 // One axis of variation — the aditus port to vary and its options.
 export interface Tractus { porta: string; label?: string; valores: TractusValor[] }
 export interface CreateCollectionRequest {
@@ -154,6 +167,8 @@ export interface CreateCollectionRequest {
   tractus: Tractus[];
   nomen?: string;
   aditusBase?: Record<string, unknown>;
+  reviewEnabled?: boolean;
+  draft?: boolean;
 }
 // Realized-vs-target rarity report (GET /v1/collectiones/:id/rarity).
 export interface RarityValor { value: string; targetRarity: number; realizedCount: number; realizedRarity: number }

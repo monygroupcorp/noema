@@ -54,6 +54,7 @@ export function toRun(actum: Actum): Run {
 }
 
 const COLLECTION_STATUS_MAP: Record<CollectioStatus, CollectionStatus> = {
+  draft: 'draft',
   nascens: 'pending',
   agens: 'running',
   completa: 'complete',
@@ -74,6 +75,8 @@ export function toCollection(c: Collectio): Collection {
   }
   if (c.nomen !== undefined) out.nomen = c.nomen
   if (c.owners !== undefined) out.owners = c.owners
+  if (c.tractus !== undefined) out.tractus = c.tractus
+  if (c.reviewEnabled !== undefined) out.reviewEnabled = c.reviewEnabled
   if (c.impetusTotal !== undefined) out.cost = c.impetusTotal.toString()
   if (c.natum !== undefined) out.createdAt = c.natum.toISOString()
   if (c.completum !== undefined) out.completedAt = c.completum.toISOString()

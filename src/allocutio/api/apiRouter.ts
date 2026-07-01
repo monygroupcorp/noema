@@ -56,6 +56,8 @@ export interface ApiFacade {
   getTeeSession(auctor: AuctorKey, sessionId: string): Promise<TeeSessionView>
   endTeeSession(auctor: AuctorKey, sessionId: string): Promise<void>
   collect(auctor: AuctorKey, opts: CollectOpts): Promise<Collection>
+  fireCollection(auctor: AuctorKey, id: string): Promise<Collection>
+  patchCollectionTractus(auctor: AuctorKey, id: string, tractus: import('../../types/collectio.js').Tractus[]): Promise<Collection>
   getCollection(auctor: AuctorKey, id: string): Promise<Collection>
   getCollectionRarity(auctor: AuctorKey, id: string): Promise<RarityReport>
   extendCollection(auctor: AuctorKey, id: string, addCount: number): Promise<Collection>
@@ -67,6 +69,7 @@ export interface ApiFacade {
   rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
   listCollectionPieces(auctor: AuctorKey, id: string, review?: 'pending' | 'approved' | 'rejected' | 'all'): Promise<import('./types.js').CollectionPiece[]>
   publish(auctor: AuctorKey, opts: PublishOpts): Promise<Edition>
+  getEdition(auctor: AuctorKey, id: string): Promise<Edition>
   feed(filter?: FeedFilter): Promise<FeedItem[]>
   retractEdition(auctor: AuctorKey, id: string): Promise<Edition>
   createTeam(auctor: AuctorKey, opts: { nomen: string; members?: string[] }): Promise<Team>
@@ -218,8 +221,20 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   // POST /v1/collectiones — create + start a Collection.
   router.post('/collectiones', wrap(async (req, res) => {
     const auctor = await auth(req)
-    const { modusId, total, tractus, aditusBase, concurrentia, nomen, dna, teamId } = req.body ?? {}
-    res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen, dna, teamId }) })
+    const { modusId, total, tractus, aditusBase, concurrentia, nomen, dna, reviewEnabled, draft, teamId } = req.body ?? {}
+    res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen, dna, reviewEnabled, draft, teamId }) })
+  }))
+
+  // PATCH /v1/collectiones/:id/tractus — edit a DRAFT's trait axes/values/rules
+  // (the garden + rules authoring write). Re-derives provenance; frozen once fired.
+  router.patch('/collectiones/:id/tractus', wrap(async (req, res) => {
+    const { tractus } = req.body ?? {}
+    res.json({ collection: await api.patchCollectionTractus(await auth(req), String(req.params.id), tractus) })
+  }))
+
+  // POST /v1/collectiones/:id/fire — freeze a DRAFT's tractus and start the run (funder-only).
+  router.post('/collectiones/:id/fire', wrap(async (req, res) => {
+    res.json({ collection: await api.fireCollection(await auth(req), String(req.params.id)) })
   }))
 
   // GET /v1/collectiones — list the caller's collections (owner-scoped).
@@ -279,6 +294,12 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     const auctor = await auth(req)
     const { artifact, destination, visibility, custody, license, teamId, owners } = req.body ?? {}
     res.status(200).json({ edition: await api.publish(auctor, { artifact, destination, visibility, custody, license, teamId, owners }) })
+  }))
+
+  // GET /v1/editiones/:id — one publication (author-scoped). Polled to watch an async
+  // settle land: pending → published (with the `externalRef`, e.g. an archive ZIP url).
+  router.get('/editiones/:id', wrap(async (req, res) => {
+    res.json({ edition: await api.getEdition(await auth(req), String(req.params.id)) })
   }))
 
   // POST /v1/editiones/:id/retract — unpublish where the destination allows it (author-scoped).

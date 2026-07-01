@@ -34,7 +34,7 @@ export interface JsonSchema {
 
 /** One HTTP operation on the `/v1` surface. */
 export interface RouteSpec {
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE'
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   /** The path, RELATIVE to the `/v1` mount (e.g. `/runs`, `/runs/:id`). */
   path: string
   summary: string
@@ -445,9 +445,21 @@ const CollectRequestSchema: JsonSchema = {
     concurrentia: { type: 'number', description: 'Max concurrent pieces in flight (default 3).' },
     nomen: { type: 'string', description: 'Optional human name for the collection.' },
     dna: { type: 'boolean', description: 'Opt-in DNA uniqueness — no two pieces share a trait combination (across non-bypassDNA axes). Default false.' },
+    reviewEnabled: { type: 'boolean', description: 'Hold every completed piece for review before it counts toward the drop (approve/reject in curation). Omit → the platform default applies.' },
+    draft: { type: 'boolean', description: 'Create as a DRAFT — author tractus (garden/rules) without firing. Start it later with POST /:id/fire. Omit/false → create + fire in one shot.' },
     teamId: { type: 'string', description: 'Own this collection by a team (Sodalitas) the caller is a member of — snapshots an equal-weight owners split.' },
   },
   required: ['modusId', 'total', 'tractus'],
+}
+
+/** The request body for `PATCH /v1/collectiones/:id/tractus` (draft authoring). */
+const PatchTractusRequestSchema: JsonSchema = {
+  type: 'object',
+  description: 'Replace a draft Collection’s trait axes/values/rules. Re-derives the provenance hash; rejected once the collection is fired.',
+  properties: {
+    tractus: { type: 'array', items: TractusSchema, description: 'The full new set of axes of variation (replaces the existing grid).' },
+  },
+  required: ['tractus'],
 }
 
 /** The rarity-report response for `GET /v1/collectiones/:id/rarity`. */
@@ -500,12 +512,14 @@ const CollectionSchema: JsonSchema = {
     nomen: { type: 'string', description: 'The collection display name.' },
     status: {
       type: 'string',
-      enum: ['pending', 'running', 'complete', 'cancelled'],
-      description: 'The collection lifecycle status.',
+      enum: ['draft', 'pending', 'running', 'complete', 'cancelled'],
+      description: 'The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable).',
     },
     modusId: { type: 'string', description: 'The flow (modus) expanded across the grid.' },
     total: { type: 'number', description: 'Target piece count (the size of the run).' },
     provenanceHash: { type: 'string', description: 'Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash.' },
+    tractus: { type: 'array', items: TractusSchema, description: 'The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired.' },
+    reviewEnabled: { type: 'boolean', description: 'Whether each piece is held for review before it counts.' },
     owners: {
       type: 'array',
       description: 'Per-artifact ownership split (team-owned collections only) — weights sum to 1.',
@@ -853,9 +867,24 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'POST',
       path: '/collectiones',
-      summary: 'Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). Returns a Collection handle (poll GET /v1/collectiones/:id).',
+      summary: 'Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). With `draft:true` it is created but NOT fired (author tractus, then POST /:id/fire). Returns a Collection handle (poll GET /v1/collectiones/:id).',
       auth: true,
       request: CollectRequestSchema,
+      response: CollectionEnvelopeSchema,
+    },
+    {
+      method: 'PATCH',
+      path: '/collectiones/:id/tractus',
+      summary: 'Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authoring write). Re-derives the provenance hash; rejected (input.malformed) once the collection is fired. Owner-scoped.',
+      auth: true,
+      request: PatchTractusRequestSchema,
+      response: CollectionEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/collectiones/:id/fire',
+      summary: 'Freeze a DRAFT Collection’s tractus and start the run — pins provenance to the flow version at fire time, then dispatches. Funder-only; rejected unless the collection is a draft.',
+      auth: true,
       response: CollectionEnvelopeSchema,
     },
     {
@@ -940,6 +969,13 @@ export const API_CONTRACT: ApiContract = {
       summary: "Publish an artifact (an Actum for #1) to a destination under a visibility/custody policy. Public surfaces (feed/marketplace) return a `pending` Edition and settle asynchronously through the moderation gate — never a synchronous publish to public. Unspecified fields default from the caller's publishing prefs.",
       auth: true,
       request: PublishRequestSchema,
+      response: EditionEnvelopeSchema,
+    },
+    {
+      method: 'GET',
+      path: '/editiones/:id',
+      summary: 'Fetch one publication (author-scoped). Poll it to watch a `pending` settle land — an async archive ZIP build finishing (`externalRef` = the download url), or a public surface being gated.',
+      auth: true,
       response: EditionEnvelopeSchema,
     },
     {

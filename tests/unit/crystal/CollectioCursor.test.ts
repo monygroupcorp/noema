@@ -381,6 +381,38 @@ test('reviewEnabled: completion does NOT increment completae until approveActum(
   assert.equal(completaeUpdate, undefined, 'should NOT increment completae before approval')
 })
 
+// ── Per-collection reviewEnabled overrides the cursor's global default
+
+test('per-collection reviewEnabled:false overrides a global review-on default → auto-counts', async () => {
+  const collectio = makeCollectio({ numerus: 3, concurrentia: 2, reviewEnabled: false })
+  const collectiones = makeCollectionum(collectio)
+  const inceptor = makeInceptor()
+  // Global default is ON, but this collection opted OUT.
+  const cursor = new CollectioCursor(inceptor.dispatch, collectiones, inceptor.actorum, { reviewEnabled: true })
+
+  await cursor.start(collectio)
+  await cursor.onActumCompleta('col-1', 'actum-0', true)
+
+  const completaeUpdate = collectiones.updates.find(u => u.patch.completae !== undefined)
+  assert.equal(completaeUpdate?.patch.completae, 1, 'opting out counts the piece immediately')
+  assert.equal(inceptor.actorum.updates.find(u => u.patch.exitus?.reviewOutcome === 'pending'), undefined, 'no pending review')
+})
+
+test('per-collection reviewEnabled:true overrides a global review-off default → holds for review', async () => {
+  const collectio = makeCollectio({ numerus: 3, concurrentia: 2, reviewEnabled: true })
+  const collectiones = makeCollectionum(collectio)
+  const inceptor = makeInceptor()
+  // Global default is OFF, but this collection opted IN.
+  const cursor = new CollectioCursor(inceptor.dispatch, collectiones, inceptor.actorum, { reviewEnabled: false })
+
+  await cursor.start(collectio)
+  await cursor.onActumCompleta('col-1', 'actum-0', true)
+
+  assert.equal(collectiones.updates.find(u => u.patch.completae !== undefined), undefined, 'opting in holds the piece')
+  const exitusPatch = inceptor.actorum.updates.find(u => u.patch.exitus?.reviewOutcome === 'pending')
+  assert.ok(exitusPatch, 'sets reviewOutcome: pending')
+})
+
 // ── Test 12: reviewEnabled — approveActum() increments completae and dispatches next
 
 test('reviewEnabled: approveActum() increments completae and dispatches next piece', async () => {

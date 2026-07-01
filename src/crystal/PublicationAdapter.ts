@@ -43,6 +43,12 @@ export interface PublishArtifact {
    * a random one. Used by the bucket/mint adapters; the feed adapter ignores it.
    */
   editioId?: string
+  /**
+   * The publishing identity (the `Editio.by`) — who to charge / attribute. Threaded
+   * so a paid destination (Arweave graduation) can meter the byte cost against the
+   * publisher's credits. Most adapters ignore it.
+   */
+  by?: { animaId: string } | { commitment: string }
 }
 
 /**

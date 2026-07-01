@@ -366,6 +366,8 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .coll-create select.cer-input{appearance:none;cursor:pointer}
 .coll-create .cc-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:4px}
 .coll-create .cc-note{font-size:12px;color:var(--faint)}
+.coll-create .cc-check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--faint);margin-right:auto;cursor:pointer}
+.coll-create .cc-check input{cursor:pointer}
 .coll-create .cc-err{font-size:12px;color:#d98a8a}
 .collcard.skel{height:250px;animation:feed-pulse 1.4s ease-in-out infinite}
 .btn-ghost{border:1px solid var(--hair);background:var(--raised);color:var(--text);font:inherit;font-size:12.5px;padding:7px 12px;border-radius:8px;cursor:pointer;transition:.14s var(--ease)}
@@ -1070,6 +1072,9 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .ex-note .lnk{color:inherit;text-decoration:underline}
 .ex-foot{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;border-top:1px solid var(--hair-soft);margin-top:14px;padding-top:18px}
 .ex-foot-note{font-size:11.5px;color:var(--faint)}
+.ex-hosted{display:flex;flex-direction:column;gap:4px;width:100%}
+.ex-baseuri{display:block;padding:8px 10px;border:1px solid var(--hair);border-radius:8px;background:var(--panel);font-family:var(--font-mono);font-size:12px;word-break:break-all;user-select:all}
+.ex-hosted code{font-family:var(--font-mono)}
 .ex-consent{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--text);cursor:pointer}
 .btn.lg{padding:13px 22px;font-size:14px;border-radius:11px;display:inline-flex;flex-direction:column;align-items:center;gap:1px;line-height:1.2}
 .btn.good{background:var(--good);border:1px solid var(--good);color:#06241b}
@@ -1158,6 +1163,21 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .gt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
 @media(max-width:1080px){.gt-grid{grid-template-columns:1fr 1fr}}@media(max-width:620px){.gt-grid{grid-template-columns:1fr}}
 .traitcard{border:1px solid var(--hair);border-radius:12px;background:var(--panel);overflow:hidden;padding:0}
+/* Garden editor cards (wired draft authoring) — hold inputs, not just display. */
+.gt-grid .traitcard{position:relative;overflow:visible;padding:10px;display:flex;flex-direction:column;gap:8px}
+.gt-grid .traitcard .cer-input{width:100%}
+.gt-grid .tc-feeds{display:flex;flex-direction:column;gap:4px;align-items:stretch}
+.gt-grid .tc-feeds-l{color:var(--faint);font-size:11px}
+.tc-del{position:absolute;top:6px;right:6px;width:22px;height:22px;display:grid;place-items:center;border:none;background:transparent;color:var(--faint);cursor:pointer;border-radius:6px}
+.tc-del:hover{background:var(--hair);color:var(--text)}
+/* Trait rules editor rows */
+.rr-axis{margin:10px 0 4px}
+.rr-axis-h{padding:8px 0;border-bottom:1px solid var(--hair);margin-bottom:8px;display:flex;gap:10px;align-items:baseline}
+.rr-row{display:grid;grid-template-columns:160px 1fr 1fr;gap:12px;align-items:center;padding:6px 0}
+.rr-name{font-weight:600}
+.rr-field{display:flex;flex-direction:column;gap:3px}
+.rr-field>span{color:var(--faint);font-size:11px}
+@media(max-width:760px){.rr-row{grid-template-columns:1fr}}
 .tc-preview{height:96px;display:grid;place-items:center;background-image:repeating-conic-gradient(#0e1013 0% 25%, transparent 0% 50%);background-size:18px 18px}
 .tc-chip{width:42px;height:42px;border-radius:11px}
 .tc-num{font-size:26px;color:var(--muted);font-family:var(--font-mono)}
