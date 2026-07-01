@@ -342,6 +342,52 @@ const StatusViewSchema: JsonSchema = {
   required: ['balanceImpetus', 'balanceUsd', 'gens', 'studios', 'joinable', 'takenAt'],
 }
 
+/** The owner's presentation skin (Profile). */
+const AppearanceSchema: JsonSchema = {
+  type: 'object',
+  description: "The owner's presentation skin — all fields optional.",
+  properties: {
+    avatarUrl: { type: 'string', description: 'PFP / avatar image URL.' },
+    bannerUrl: { type: 'string', description: 'Banner image URL.' },
+    backgroundUrl: { type: 'string', description: 'Background image URL.' },
+    accent: { type: 'string', description: 'One signal color (hex).' },
+    look: { type: 'string', description: "Signature look tag (e.g. 'clean' | 'n64' | 'vapor' | 'editorial')." },
+  },
+}
+
+/** The owner's cross-cutting generation defaults (Preferences). */
+const GeneratioSchema: JsonSchema = {
+  type: 'object',
+  description: "The owner's cross-cutting generation defaults, applied at cast time — all optional.",
+  properties: {
+    style: { type: 'string', description: 'Prepended to the prompt when the flow has a prompt input.' },
+    negativePrompt: { type: 'string', description: "Fills a flow's negative-prompt input when the caller didn't provide one." },
+    outputFormat: { type: 'string', description: 'Preferred output encoding (stored; runner-applied where supported).' },
+    telegramDeliverAs: { type: 'string', enum: ['album', 'individual'], description: 'Telegram delivery shape (consumed by the Telegram adapter).' },
+    autoApplyModels: { type: 'array', items: { type: 'string' }, description: 'Models (intellaId) to auto-apply as pinnedModels. Stored; cast-time application pending model resolution.' },
+  },
+}
+
+/** The response body for `GET /v1/me` — the caller's account settings. */
+const MeViewSchema: JsonSchema = {
+  type: 'object',
+  description: "The caller's owner-keyed account settings — appearance + generation defaults + verb bindings.",
+  properties: {
+    appearance: AppearanceSchema,
+    generatio: GeneratioSchema,
+    bindings: { type: 'array', items: BindResponseSchema, description: 'The verb→flow overrides the owner has set.' },
+  },
+  required: ['bindings'],
+}
+
+/** The `{ affines }` request/response for `GET/PUT /v1/me/affines/:modusId`. */
+const AffinesEnvelopeSchema: JsonSchema = {
+  type: 'object',
+  description: "Per-flow input defaults (`{ inputKey: value }`) applied under the cast-time aditus.",
+  properties: { affines: { type: 'object', additionalProperties: true, description: 'Input-key → default value map.' } },
+  required: ['affines'],
+}
+
 /** The request body for `POST /v1/studios`. */
 const ProvisionStudioRequestSchema: JsonSchema = {
   type: 'object',
@@ -841,6 +887,44 @@ export const API_CONTRACT: ApiContract = {
       summary: "Return the authenticated caller's account snapshot — balance, in-flight gens, and studios.",
       auth: true,
       response: StatusViewSchema,
+    },
+    {
+      method: 'GET',
+      path: '/me',
+      summary: "The caller's owner-keyed account settings — presentation skin (Profile), cross-cutting generation defaults (Preferences), and verb→flow bindings. Anon-capable (keyed by AuctorKey).",
+      auth: true,
+      response: MeViewSchema,
+    },
+    {
+      method: 'PUT',
+      path: '/me/appearance',
+      summary: "Replace the caller's presentation skin (avatar/banner/background/accent/look).",
+      auth: true,
+      request: AppearanceSchema,
+      response: { type: 'object', properties: { appearance: AppearanceSchema }, required: ['appearance'] },
+    },
+    {
+      method: 'PUT',
+      path: '/me/generatio',
+      summary: "Replace the caller's cross-cutting generation defaults (style, negative prompt, output format, telegram delivery, auto-apply models). Applied at cast time under the affines precedence chain.",
+      auth: true,
+      request: GeneratioSchema,
+      response: { type: 'object', properties: { generatio: GeneratioSchema }, required: ['generatio'] },
+    },
+    {
+      method: 'GET',
+      path: '/me/affines/:modusId',
+      summary: "The caller's per-flow input defaults for one flow (`{ inputKey: value }`).",
+      auth: true,
+      response: AffinesEnvelopeSchema,
+    },
+    {
+      method: 'PUT',
+      path: '/me/affines/:modusId',
+      summary: "Replace the caller's per-flow input defaults for one flow. Applied under the cast-time aditus (cast-time > affines > generatio > modus defaults).",
+      auth: true,
+      request: AffinesEnvelopeSchema,
+      response: AffinesEnvelopeSchema,
     },
     {
       method: 'POST',

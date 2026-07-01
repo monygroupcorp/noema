@@ -722,6 +722,342 @@ Return the authenticated caller's account snapshot — balance, in-flight gens, 
 }
 ```
 
+### GET /v1/me
+
+The caller's owner-keyed account settings — presentation skin (Profile), cross-cutting generation defaults (Preferences), and verb→flow bindings. Anon-capable (keyed by AuctorKey).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The caller's owner-keyed account settings — appearance + generation defaults + verb bindings.",
+  "properties": {
+    "appearance": {
+      "type": "object",
+      "description": "The owner's presentation skin — all fields optional.",
+      "properties": {
+        "avatarUrl": {
+          "type": "string",
+          "description": "PFP / avatar image URL."
+        },
+        "bannerUrl": {
+          "type": "string",
+          "description": "Banner image URL."
+        },
+        "backgroundUrl": {
+          "type": "string",
+          "description": "Background image URL."
+        },
+        "accent": {
+          "type": "string",
+          "description": "One signal color (hex)."
+        },
+        "look": {
+          "type": "string",
+          "description": "Signature look tag (e.g. 'clean' | 'n64' | 'vapor' | 'editorial')."
+        }
+      }
+    },
+    "generatio": {
+      "type": "object",
+      "description": "The owner's cross-cutting generation defaults, applied at cast time — all optional.",
+      "properties": {
+        "style": {
+          "type": "string",
+          "description": "Prepended to the prompt when the flow has a prompt input."
+        },
+        "negativePrompt": {
+          "type": "string",
+          "description": "Fills a flow's negative-prompt input when the caller didn't provide one."
+        },
+        "outputFormat": {
+          "type": "string",
+          "description": "Preferred output encoding (stored; runner-applied where supported)."
+        },
+        "telegramDeliverAs": {
+          "type": "string",
+          "enum": [
+            "album",
+            "individual"
+          ],
+          "description": "Telegram delivery shape (consumed by the Telegram adapter)."
+        },
+        "autoApplyModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Models (intellaId) to auto-apply as pinnedModels. Stored; cast-time application pending model resolution."
+        }
+      }
+    },
+    "bindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "The resulting verb → flow binding.",
+        "properties": {
+          "verb": {
+            "type": "string",
+            "description": "The verb that was rebound."
+          },
+          "modusId": {
+            "type": "string",
+            "description": "The flow it now resolves to."
+          }
+        },
+        "required": [
+          "verb",
+          "modusId"
+        ]
+      },
+      "description": "The verb→flow overrides the owner has set."
+    }
+  },
+  "required": [
+    "bindings"
+  ]
+}
+```
+
+### PUT /v1/me/appearance
+
+Replace the caller's presentation skin (avatar/banner/background/accent/look).
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "The owner's presentation skin — all fields optional.",
+  "properties": {
+    "avatarUrl": {
+      "type": "string",
+      "description": "PFP / avatar image URL."
+    },
+    "bannerUrl": {
+      "type": "string",
+      "description": "Banner image URL."
+    },
+    "backgroundUrl": {
+      "type": "string",
+      "description": "Background image URL."
+    },
+    "accent": {
+      "type": "string",
+      "description": "One signal color (hex)."
+    },
+    "look": {
+      "type": "string",
+      "description": "Signature look tag (e.g. 'clean' | 'n64' | 'vapor' | 'editorial')."
+    }
+  }
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "appearance": {
+      "type": "object",
+      "description": "The owner's presentation skin — all fields optional.",
+      "properties": {
+        "avatarUrl": {
+          "type": "string",
+          "description": "PFP / avatar image URL."
+        },
+        "bannerUrl": {
+          "type": "string",
+          "description": "Banner image URL."
+        },
+        "backgroundUrl": {
+          "type": "string",
+          "description": "Background image URL."
+        },
+        "accent": {
+          "type": "string",
+          "description": "One signal color (hex)."
+        },
+        "look": {
+          "type": "string",
+          "description": "Signature look tag (e.g. 'clean' | 'n64' | 'vapor' | 'editorial')."
+        }
+      }
+    }
+  },
+  "required": [
+    "appearance"
+  ]
+}
+```
+
+### PUT /v1/me/generatio
+
+Replace the caller's cross-cutting generation defaults (style, negative prompt, output format, telegram delivery, auto-apply models). Applied at cast time under the affines precedence chain.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "The owner's cross-cutting generation defaults, applied at cast time — all optional.",
+  "properties": {
+    "style": {
+      "type": "string",
+      "description": "Prepended to the prompt when the flow has a prompt input."
+    },
+    "negativePrompt": {
+      "type": "string",
+      "description": "Fills a flow's negative-prompt input when the caller didn't provide one."
+    },
+    "outputFormat": {
+      "type": "string",
+      "description": "Preferred output encoding (stored; runner-applied where supported)."
+    },
+    "telegramDeliverAs": {
+      "type": "string",
+      "enum": [
+        "album",
+        "individual"
+      ],
+      "description": "Telegram delivery shape (consumed by the Telegram adapter)."
+    },
+    "autoApplyModels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Models (intellaId) to auto-apply as pinnedModels. Stored; cast-time application pending model resolution."
+    }
+  }
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "generatio": {
+      "type": "object",
+      "description": "The owner's cross-cutting generation defaults, applied at cast time — all optional.",
+      "properties": {
+        "style": {
+          "type": "string",
+          "description": "Prepended to the prompt when the flow has a prompt input."
+        },
+        "negativePrompt": {
+          "type": "string",
+          "description": "Fills a flow's negative-prompt input when the caller didn't provide one."
+        },
+        "outputFormat": {
+          "type": "string",
+          "description": "Preferred output encoding (stored; runner-applied where supported)."
+        },
+        "telegramDeliverAs": {
+          "type": "string",
+          "enum": [
+            "album",
+            "individual"
+          ],
+          "description": "Telegram delivery shape (consumed by the Telegram adapter)."
+        },
+        "autoApplyModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Models (intellaId) to auto-apply as pinnedModels. Stored; cast-time application pending model resolution."
+        }
+      }
+    }
+  },
+  "required": [
+    "generatio"
+  ]
+}
+```
+
+### GET /v1/me/affines/:modusId
+
+The caller's per-flow input defaults for one flow (`{ inputKey: value }`).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "Per-flow input defaults (`{ inputKey: value }`) applied under the cast-time aditus.",
+  "properties": {
+    "affines": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Input-key → default value map."
+    }
+  },
+  "required": [
+    "affines"
+  ]
+}
+```
+
+### PUT /v1/me/affines/:modusId
+
+Replace the caller's per-flow input defaults for one flow. Applied under the cast-time aditus (cast-time > affines > generatio > modus defaults).
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Per-flow input defaults (`{ inputKey: value }`) applied under the cast-time aditus.",
+  "properties": {
+    "affines": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Input-key → default value map."
+    }
+  },
+  "required": [
+    "affines"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "Per-flow input defaults (`{ inputKey: value }`) applied under the cast-time aditus.",
+  "properties": {
+    "affines": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Input-key → default value map."
+    }
+  },
+  "required": [
+    "affines"
+  ]
+}
+```
+
 ### POST /v1/studios
 
 Lease a hosted warm studio (a persistent GPU session) for fast repeated runs. Returns a provisioning handle immediately; poll GET /v1/studios/:id (or set options.webhookUrl). maxImpetus is the session budget — the studio drain-terminates at the cap.

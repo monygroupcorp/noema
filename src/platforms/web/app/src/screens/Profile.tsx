@@ -1,23 +1,39 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { usePromptAssist, useAssistField } from '../state/promptAssist';
-import { fieldExample } from '../lib/promptExamples';
+import { api, type Appearance } from '../lib/api';
 
 const SWATCHES = ['#5b8cff', '#8b76d6', '#57c8a6', '#d68f6f', '#d66f9a', '#d6c46f'];
-const LOOKS = ['Clean', 'N64 / low-poly', 'Vapor', 'Editorial'];
+const LOOKS: { key: string; label: string }[] = [
+  { key: 'clean', label: 'Clean' }, { key: 'n64', label: 'N64 / low-poly' },
+  { key: 'vapor', label: 'Vapor' }, { key: 'editorial', label: 'Editorial' },
+];
+const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+// Upload a file to R2 via the signed-PUT path, return its permanent public URL.
+async function uploadAsset(file: File): Promise<string> {
+  const { signedUrl, permanentUrl } = await api.signUpload({ filename: file.name, contentType: file.type });
+  const put = await fetch(signedUrl, { method: 'PUT', headers: { 'content-type': file.type }, body: file });
+  if (!put.ok) throw new Error(`upload failed (${put.status})`);
+  return permanentUrl;
+}
 
 export function Profile() {
-  const [accent, setAccent] = useState('#5b8cff');
-  const [look, setLook] = useState('Clean');
-  const [vibe, setVibe] = useState('');
+  const [appr, setAppr] = useState<Appearance>({ accent: '#5b8cff', look: 'clean' });
+  const [err, setErr] = useState<string | null>(null);
 
-  // The kit generator's "vibe" field gets Concierge augmentation too.
-  const { clear } = usePromptAssist();
-  const assist = useAssistField();
-  useEffect(() => () => clear(), [clear]);
+  useEffect(() => {
+    let live = true;
+    api.getMe().then((me) => { if (live && me.appearance) setAppr((a) => ({ ...a, ...me.appearance })); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
 
-  // live-preview the accent across this page's subtree (reverts on leaving the screen)
+  // Persist a partial change (merges over current appearance) — fire-and-forget.
+  function save(patch: Partial<Appearance>) {
+    setAppr((cur) => { const next = { ...cur, ...patch }; api.setAppearance(next).catch((e) => setErr(msg(e))); return next; });
+  }
+
+  const accent = appr.accent || '#5b8cff';
   const pageStyle = { ['--accent' as keyof CSSProperties]: accent } as CSSProperties;
 
   return (
@@ -25,21 +41,23 @@ export function Profile() {
       <div className="page" style={pageStyle}><div className="pw">
         <div className="pagehead"><div>
           <h1>Profile · skins</h1>
-          <div className="sub">Decorate freely — your skin is how this identity looks. The system voice stays reserved underneath.</div>
+          <div className="sub">Decorate freely — your skin is how this identity looks. Saved to your account (works anonymously too).</div>
         </div></div>
 
+        {err && <div className="warn" style={{ marginBottom: 'var(--s4)' }}>{err}</div>}
+
         <div className="sectionhead">Assets</div>
-        <div className="sub" style={{ marginBottom: 'var(--s4)' }}>Bring your own, or generate them.</div>
-        <div className="assetslot" onClick={() => {}}>Banner — drop an image or paste a URL</div>
+        <div className="sub" style={{ marginBottom: 'var(--s4)' }}>Bring your own — drop an image to upload.</div>
+        <AssetSlot label="Banner — click to upload" url={appr.bannerUrl} onUploaded={(u) => save({ bannerUrl: u })} onError={setErr} />
         <div style={{ display: 'flex', gap: 'var(--s4)', marginTop: 'var(--s4)', alignItems: 'flex-end' }}>
-          <div className="assetslot pfp">PFP</div>
-          <div className="assetslot" style={{ flex: 1 }}>Background</div>
+          <AssetSlot className="pfp" label="PFP" url={appr.avatarUrl} onUploaded={(u) => save({ avatarUrl: u })} onError={setErr} />
+          <AssetSlot style={{ flex: 1 }} label="Background" url={appr.backgroundUrl} onUploaded={(u) => save({ backgroundUrl: u })} onError={setErr} />
         </div>
 
         <div className="sectionhead">Accent</div>
         <div className="swatches">
           {SWATCHES.map((c) => (
-            <span key={c} className={`sw${accent === c ? ' on' : ''}`} style={{ background: c }} onClick={() => setAccent(c)} />
+            <span key={c} className={`sw${accent === c ? ' on' : ''}`} style={{ background: c }} onClick={() => save({ accent: c })} />
           ))}
         </div>
         <div className="sub" style={{ marginTop: 'var(--s3)' }}>One signal color — used sparingly.</div>
@@ -47,36 +65,41 @@ export function Profile() {
         <div className="sectionhead">Signature look</div>
         <div className="filters">
           {LOOKS.map((l) => (
-            <button key={l} className={`fchip${look === l ? ' on' : ''}`} onClick={() => setLook(l)}>{l}</button>
+            <button key={l.key} className={`fchip${appr.look === l.key ? ' on' : ''}`} onClick={() => save({ look: l.key })}>{l.label}</button>
           ))}
         </div>
         <div className="sub" style={{ marginTop: 'var(--s3)' }}>Heritage: we turn images into video-game-like images.</div>
 
         <div className="sectionhead">Generate a kit</div>
         <div className="sidecard">
-          <div style={{ display: 'flex', gap: 'var(--s3)' }}>
-            <input
-              className="inp"
-              placeholder="Describe the vibe…"
-              value={vibe}
-              onChange={(e) => setVibe(e.target.value)}
-              {...assist({
-                flowId: 'profile-kit',
-                flowName: 'Profile kit',
-                fieldKey: 'vibe',
-                fieldLabel: 'vibe',
-                example: fieldExample('profile-kit', 'vibe'),
-                hint: 'The aesthetic for your skin kit — colors, era, materials, mood.',
-                apply: setVibe,
-              })}
-            />
-            <button className="btn"><Ic name="sparkles" /> Generate kit</button>
+          <div className="mono" style={{ color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
+            <span className="hemi2 dashed" /> Kit generation is coming — it needs a dedicated <b>profile-kit</b> flow (compose the PS2/low-poly LoRA + an image model). For now, upload your own assets above.
           </div>
-          <div className="mono" style={{ color: 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 'var(--s3)' }}>
-            runs a flow · ≈ $0.08 · skin assets become creations
-          </div>
+          <button className="btn" disabled style={{ marginTop: 'var(--s3)' }}><Ic name="sparkles" /> Generate kit — soon</button>
         </div>
       </div></div>
     </AppShell>
+  );
+}
+
+function AssetSlot({ label, url, onUploaded, onError, className, style }: {
+  label: string; url?: string; onUploaded: (url: string) => void; onError: (e: string) => void;
+  className?: string; style?: CSSProperties;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  async function pick(file?: File) {
+    if (!file) return;
+    setBusy(true);
+    try { onUploaded(await uploadAsset(file)); }
+    catch (e) { onError(msg(e)); }
+    finally { setBusy(false); }
+  }
+  const bg = url ? { backgroundImage: `url(${url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined;
+  return (
+    <div className={`assetslot${className ? ` ${className}` : ''}`} style={{ ...style, ...bg }} onClick={() => inputRef.current?.click()}>
+      {!url && (busy ? 'Uploading…' : label)}
+      <input ref={inputRef} type="file" accept="image/*" hidden onChange={(e) => pick(e.target.files?.[0])} />
+    </div>
   );
 }
