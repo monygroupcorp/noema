@@ -182,9 +182,32 @@ export interface CollectionPiece {
   attributes?: Array<{ trait_type: string; value: string }>;
 }
 
+// The account snapshot (GET /v1/me/status) — mirrors the backend StatusView.
+// gens = ACTIVE gens (queued + running), not all-time history.
+export interface GenEntry {
+  actumId: string;
+  modusLabel: string;
+  studio: { id: string; hostLabel: string; isOwn: boolean } | null;
+  status: 'nascens' | 'agens';
+  elapsedMs?: number;
+  etaMs?: number;
+}
+export interface StudioEntry {
+  studioId: string;
+  materiaId: string;
+  label: string;
+  status: 'idle' | 'running' | 'provisioning' | 'terminated' | 'draining';
+  warmRemainingMs?: number;
+  guestsToday: number;
+  netImpetus: string; // bigint stringified by the backend
+  netUsd: number;
+}
+export interface JoinableEntry { studioId: string; label: string; hostLabel: string; queueDepth: number }
 export interface MeStatus {
   balanceImpetus: string;
   balanceUsd: number;
-  gens: unknown[];
-  studios: unknown[];
+  gens: GenEntry[];
+  studios: StudioEntry[];
+  joinable: JoinableEntry[];
+  takenAt: string;
 }
