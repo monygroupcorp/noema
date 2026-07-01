@@ -77,6 +77,13 @@ export const api = {
   createCollection: (body: CreateCollectionRequest) =>
     fetch('/v1/collectiones', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
       .then(j<{ collection: Collection }>),
+  getCollectionRarity: (id: string) => fetch(`/v1/collectiones/${id}/rarity`, { headers: { 'x-commitment': commitment() } })
+    .then(j<{ rarity: RarityReport }>),
+  pauseCollection: (id: string) => fetch(`/v1/collectiones/${id}/pause`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
+  resumeCollection: (id: string) => fetch(`/v1/collectiones/${id}/resume`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
+  cancelCollection: (id: string) => fetch(`/v1/collectiones/${id}/cancel`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
+  extendCollection: (id: string, count: number) =>
+    fetch(`/v1/collectiones/${id}/extend`, { method: 'POST', headers: anonHeaders(), body: JSON.stringify({ count }) }).then(j<{ collection: Collection }>),
 
   // ── Publishing (Editio) — feed read + publish/retract write ──────────────────
   // GET /v1/feed — public, NO auth. Newest-first published, public-surface editions.
@@ -141,6 +148,10 @@ export interface CreateCollectionRequest {
   nomen?: string;
   aditusBase?: Record<string, unknown>;
 }
+// Realized-vs-target rarity report (GET /v1/collectiones/:id/rarity).
+export interface RarityValor { value: string; targetRarity: number; realizedCount: number; realizedRarity: number }
+export interface RarityAxis { trait_type: string; valores: RarityValor[] }
+export interface RarityReport { totalPieces: number; axes: RarityAxis[] }
 
 export interface MeStatus {
   balanceImpetus: string;

@@ -1,67 +1,130 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { COLLECTIONS } from '../lib/collections';
+import { api, type Collection, type RarityReport } from '../lib/api';
+import { COLL_STATUS_LABEL } from '../lib/collections';
 
-// Canonic run (editio-canonic-run-spec.md, render noema-editio-canonic-run.png) — "here we go":
-// fire the modus N times, watch a grid live-fill, realized-vs-target rarity below. Stays LOCAL
-// (private · not minted) — the seam crosses to public only at export. Shares the run grammar.
-const TINTS = ['#2b3a5e', '#3a2f5e', '#2c4a44', '#34343a', '#5e3a2b', '#2f4a5e', '#2c5d54'];
-const DIST = [
-  { axis: 'Headwear', segs: [{ k: 'bare', v: 52, c: 'var(--grey)' }, { k: 'hood', v: 23, c: 'var(--good)' }, { k: 'hat', v: 17, c: 'var(--accent)' }, { k: 'halo', v: 8, c: 'var(--gold)' }] },
-  { axis: 'Background', segs: [{ k: 'void', v: 40, c: 'var(--grey)' }, { k: 'dawn', v: 35, c: 'var(--accent)' }, { k: 'storm', v: 25, c: 'var(--slate)' }] },
-  { axis: 'Aura', segs: [{ k: 'verdant', v: 38, c: 'var(--good)' }, { k: 'azure', v: 34, c: 'var(--accent)' }, { k: 'none', v: 28, c: 'var(--grey)' }] },
-];
+// Canonic run — the live view of a collection's batch generation. A collection fires the
+// moment it's created, so this SHOWS the run (progress + realized-vs-target rarity) and offers
+// the lifecycle controls (cancel while active, extend when done). Stays LOCAL until export.
+const CELLS = 60;
+const SEG = ['var(--accent)', 'var(--good)', 'var(--slate)', 'var(--gold)', 'var(--grey)'];
+const mix = (v: string) => `color-mix(in srgb, ${v} 62%, transparent)`;
 
 export function CanonicRun() {
   const { id } = useParams();
-  const c = COLLECTIONS.find((x) => x.id === id) ?? COLLECTIONS[0];
-  const total = 1944;
-  const [done, setDone] = useState(662);
-  useEffect(() => { const t = setInterval(() => setDone((d) => (d >= total ? d : Math.min(total, d + 7))), 500); return () => clearInterval(t); }, []);
-  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`}>{c.name}</Link> <span className="sep">/</span> <b>canonic run</b></span>;
+  const [c, setC] = useState<Collection | null>(null);
+  const [rarity, setRarity] = useState<RarityReport | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  const [extendN, setExtendN] = useState(50);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function poll() {
+      try {
+        const [col, rar] = await Promise.all([
+          api.getCollection(id!),
+          api.getCollectionRarity(id!).catch(() => null),
+        ]);
+        if (!live) return;
+        setC(col.collection);
+        if (rar?.rarity) setRarity(rar.rarity);
+        if ((col.collection.status === 'pending' || col.collection.status === 'running') && live) {
+          timer = setTimeout(poll, 2500);
+        }
+      } catch (e) {
+        if (live) setErr(e instanceof Error ? e.message : String(e));
+      }
+    }
+    poll();
+    return () => { live = false; if (timer) clearTimeout(timer); };
+  }, [id, reload]);
+
+  async function control(fn: () => Promise<{ collection: Collection }>) {
+    setBusy(true);
+    try { const { collection } = await fn(); setC(collection); setReload((r) => r + 1); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
+
+  if (err) return <AppShell title="Canonic run"><div className="page"><div className="pw wide"><div className="warn">{err}</div></div></div></AppShell>;
+  if (!c) return <AppShell title="Canonic run"><div className="page"><div className="pw wide"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
+
+  const active = c.status === 'pending' || c.status === 'running';
+  const done = c.status === 'complete';
+  const settled = c.completed + c.failed + c.rejected;
+  const pct = c.total ? Math.min(100, (c.completed / c.total) * 100) : 0;
+  const lit = Math.round((pct / 100) * CELLS);
+  const name = c.nomen || 'collection';
+  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`}>{name}</Link> <span className="sep">/</span> <b>canonic run</b></span>;
 
   return (
     <AppShell title={crumb}>
       <div className="page"><div className="pw wide">
         <div className="pagehead">
-          <div><h1>Fire the canonic run</h1><div className="sub mono">modus · 6 steps · 4 axes locked · seed 0x4af…</div></div>
+          <div><h1>Canonic run</h1><div className="sub mono">{c.modusId} · {c.total.toLocaleString()} pieces · {COLL_STATUS_LABEL[c.status]}</div></div>
           <div className="right"><span className="badge">private · not minted</span></div>
         </div>
 
         <div className="cj-run cr-run">
-          <div className="cr-hero"><b>{total.toLocaleString()}</b> <span>pieces to generate</span></div>
-          <button className="btn accent cr-fire">◆ Fire run</button>
+          <div className="cr-hero"><b>{c.completed.toLocaleString()}</b> <span>/ {c.total.toLocaleString()} pieces{active ? ' · generating' : ''}</span></div>
           <div className="cr-progress">
-            <div className="cj-bar"><span style={{ width: `${(done / total) * 100}%` }} /></div>
-            <div className="cr-prow mono"><span>generating <b className="accent">{done.toLocaleString()}</b> / {total.toLocaleString()} · 4 in flight</span><span>~18 min remaining</span></div>
+            <div className="cj-bar"><span style={{ width: `${pct}%` }} /></div>
+            <div className="cr-prow mono">
+              <span>{active ? <>generating <b className="accent">{c.completed.toLocaleString()}</b> / {c.total.toLocaleString()}</> : <>{COLL_STATUS_LABEL[c.status]} · <b className="accent">{c.completed.toLocaleString()}</b> pieces</>}{c.rejected ? ` · ${c.rejected} rejected` : ''}{c.failed ? ` · ${c.failed} failed` : ''}</span>
+              <span>{Math.round(pct)}% · {settled.toLocaleString()} / {c.total.toLocaleString()} settled</span>
+            </div>
+          </div>
+          <div className="cr-controls">
+            {active && <button className="btn ghost" disabled={busy} onClick={() => control(() => api.cancelCollection(id!))}>Cancel run</button>}
+            {done && (
+              <>
+                <input className="cr-extend-n" type="number" min={1} value={extendN} onChange={(e) => setExtendN(Math.max(1, Number(e.target.value) || 1))} />
+                <button className="btn ghost" disabled={busy} onClick={() => control(() => api.extendCollection(id!, extendN))}>Extend +{extendN}</button>
+              </>
+            )}
           </div>
         </div>
 
         <div className="cr-grid">
-          {Array.from({ length: 48 }, (_, i) => (
-            <span key={i} className={`cr-cell${i >= 44 ? ' frontier' : ''}`} style={{ background: `radial-gradient(120% 100% at 50% 30%, ${TINTS[i % TINTS.length]}, #14171c)` }} />
+          {Array.from({ length: CELLS }, (_, i) => (
+            <span key={i} className={`cr-cell${i < lit ? ' filled' : ''}${active && i === lit ? ' frontier' : ''}`}
+              style={i < lit ? { background: `radial-gradient(120% 100% at 50% 30%, ${SEG[i % SEG.length]}, #14171c)` } : undefined} />
           ))}
         </div>
 
         <div className="cr-dist">
-          <div className="cr-dist-head"><span className="noema-kicker">rarity · realized distribution</span><span className="cr-ok mono">◆ all axes within ±1.2% of target</span></div>
-          {DIST.map((d) => (
-            <div key={d.axis} className="cr-axis">
-              <div className="cr-axis-l"><span>{d.axis}</span><span className="mono">realized %</span></div>
+          <div className="cr-dist-head"><span className="noema-kicker">rarity · realized vs target</span>
+            {rarity && <span className="cr-ok mono">{rarity.totalPieces.toLocaleString()} pieces measured</span>}</div>
+          {!rarity && <div className="empty"><div className="s">Rarity fills in as pieces settle.</div></div>}
+          {rarity?.axes.map((ax) => (
+            <div key={ax.trait_type} className="cr-axis">
+              <div className="cr-axis-l"><span>{ax.trait_type}</span><span className="mono">realized %</span></div>
               <div className="cr-bar">
-                {d.segs.map((s) => <span key={s.k} className="cr-seg mono" style={{ width: `${s.v}%`, background: color(s.c) }}>{s.k} · {s.v}</span>)}
+                {ax.valores.map((v, i) => {
+                  const w = Math.round(v.realizedRarity * 100);
+                  const delta = Math.round((v.realizedRarity - v.targetRarity) * 100);
+                  return w > 0 ? (
+                    <span key={v.value} className="cr-seg mono" style={{ width: `${w}%`, background: mix(SEG[i % SEG.length]) }}
+                      title={`${v.value} · realized ${w}% · target ${Math.round(v.targetRarity * 100)}% (${delta >= 0 ? '+' : ''}${delta}%)`}>
+                      {v.value} · {w}%
+                    </span>
+                  ) : null;
+                })}
               </div>
             </div>
           ))}
         </div>
 
         <div className="garden-foot">
-          <Link className="btn ghost" to={`/collections/${id}/rules`}>← rules</Link>
+          <Link className="btn ghost" to={`/collections/${id}`}>← hub</Link>
           <Link className="btn accent" to={`/collections/${id}/curation`}>Next · curation →</Link>
         </div>
       </div></div>
     </AppShell>
   );
 }
-function color(v: string) { return `color-mix(in srgb, ${v} 60%, transparent)`; }
