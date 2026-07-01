@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { useIdentity } from '../state/identity';
 import { Ic } from '../lib/icons';
+import { api, type MeStatus, type StudioEntry } from '../lib/api';
 
 // Account / settings (account-spec.md, renders noema-account.png + noema-account-compute.png).
 // The control panel for the privacy machine — posture + sovereignty up front, then a card per
@@ -30,7 +31,15 @@ export function AccountSettings() {
   const { section } = useParams();
   const { ident } = useIdentity();
   const anon = ident.funding === 'bearer';
-  const credits = ident.bal.match(/(\d[\d,]*)\s*credits?/)?.[1] ?? '4,820';
+  const [me, setMe] = useState<MeStatus | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.meStatus().then((s) => { if (live) setMe(s); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  // Real balance (impetus credits) + live studio count from the account snapshot.
+  const credits = me ? Number(me.balanceImpetus).toLocaleString() : '…';
+  const liveStudios = me?.studios.filter((s) => s.status === 'idle' || s.status === 'running').length ?? 0;
 
   // ── account home ──────────────────────────────────────────────────────────
   if (!section) {
@@ -50,7 +59,7 @@ export function AccountSettings() {
             </div>
             <div className="ac-pcell">
               <div className="ac-l">live · what we can see</div>
-              <div className="ac-v">the meter · 2 sealed sessions</div>
+              <div className="ac-v">the meter · {liveStudios} live {liveStudios === 1 ? 'session' : 'sessions'}</div>
             </div>
             <div className="ac-pcell">
               <div className="ac-l">reach</div>
@@ -69,7 +78,7 @@ export function AccountSettings() {
           <div className="ac-cards">
             <SectionCard to="/account/billing" ico="wallet" name="Billing &amp; credits">
               <Row k="plan" v={<b>Subscription · $20/mo</b>} />
-              <Row k="credits" v={<span className="gold"><span className="gem">◈</span> {credits} · resets 12d</span>} />
+              <Row k="credits" v={<span className="gold"><span className="gem">◈</span> {credits}{me ? <> credits · ≈ ${me.balanceUsd.toFixed(2)}</> : ''}</span>} />
               <Row k="payment" v={<><b>card</b> · ···· 4242</>} />
               <div className="ac-note mono"><span className="hemi2 dashed" /> anonymous purse (Bursa): <span className="gold">◈ 1,200</span> · bearer · fund from a shielded wallet</div>
             </SectionCard>
@@ -80,7 +89,7 @@ export function AccountSettings() {
             </SectionCard>
             <SectionCard to="/account/compute" ico="server" name="Compute &amp; sessions">
               <Row k="availability" v={<><span className="fillg">◑</span> <b>balanced</b> · wait briefly for cheaper</>} />
-              <Row k="sealed sessions" v={<><span className="rdot good" /> 2 live</>} />
+              <Row k="live sessions" v={<><span className="rdot good" /> {liveStudios} live</>} />
               <Row k="local runner" v={<><b>RTX 4090</b> · connected</>} />
               <div className="ac-note mono">custody (local · TEE · remote) is chosen per run, not here.</div>
             </SectionCard>
@@ -115,7 +124,7 @@ export function AccountSettings() {
             ))}
           </aside>
           <div className="settings-pane">
-            {section === 'compute' ? <ComputeDetail /> : (
+            {section === 'compute' ? <ComputeDetail studios={me?.studios ?? null} /> : (
               <>
                 <h1>{active.label}</h1>
                 <div className="sub">This section opens here from the account home’s <b>manage ▸</b>.</div>
@@ -129,7 +138,9 @@ export function AccountSettings() {
   );
 }
 
-function ComputeDetail() {
+const fmtWarm = (ms?: number) => (ms == null ? 'idle' : ms <= 0 ? 'draining' : `~${Math.round(ms / 60000)}m left`);
+
+function ComputeDetail({ studios }: { studios: StudioEntry[] | null }) {
   const [avail, setAvail] = useState<Availability>(() => (localStorage.getItem('noema-availability') as Availability) || 'balanced');
   const set = (a: Availability) => { setAvail(a); localStorage.setItem('noema-availability', a); };
   return (
@@ -151,9 +162,16 @@ function ComputeDetail() {
       </div>
 
       <div className="ac-panel">
-        <div className="ac-panel-l">active sessions · sealed enclaves</div>
-        <SessionRow name="Frostfire drake · training" detail="SEV-SNP · WireGuard tunnel up · 2.1 it/s" state="~6m left" />
-        <SessionRow name="Canvas · Drake composite" detail="idle enclave · holds 12m then tears down" state="idle" />
+        <div className="ac-panel-l">active sessions · your studios</div>
+        {studios === null ? (
+          <div className="ac-note mono">loading your sessions…</div>
+        ) : studios.length === 0 ? (
+          <div className="ac-note mono">no live studios — lease one from the console to warm a GPU.</div>
+        ) : (
+          studios.map((s) => (
+            <SessionRow key={s.studioId} name={s.label} detail={`${s.status} · ${s.guestsToday} guest gens · net ≈ $${s.netUsd.toFixed(2)}`} state={fmtWarm(s.warmRemainingMs)} />
+          ))
+        )}
       </div>
 
       <div className="ac-panel">

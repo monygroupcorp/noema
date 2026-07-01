@@ -22,6 +22,7 @@ export function Status() {
   const usd = me ? (me.balanceUsd || credits * IMPETUS_USD) : 0;
   const runs = me?.gens.length ?? 0;
   const studios = me?.studios.length ?? 0;
+  const fmtElapsed = (ms?: number) => (ms == null ? '' : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60000)}m`);
 
   return (
     <AppShell crumb="account">
@@ -39,25 +40,25 @@ export function Status() {
           <div className="stat"><div className="l">Studios</div><div className="n">{me ? studios : '…'}</div><div className="d">warm sessions</div></div>
         </div>
 
-        <div className="sectionhead">Recent runs</div>
+        <div className="sectionhead">Active runs</div>
         {!me ? (
           <div className="empty"><div className="t">Loading your account…</div></div>
         ) : runs === 0 ? (
           <div className="empty">
             <div className="ico"><Ic name="sparkles" /></div>
-            <div className="t">No runs yet — your generations will appear here, and in your <Link to="/space" style={{ color: 'var(--accent-soft)' }}>space</Link>.</div>
+            <div className="t">Nothing running right now — queued &amp; in-flight gens show here; finished ones live in your <Link to="/space" style={{ color: 'var(--accent-soft)' }}>space</Link>.</div>
           </div>
         ) : (
           <div className="list">
-            {me.gens.slice(0, 8).map((gobj, i) => {
-              const gn = gobj as { modusId?: string; status?: string; createdAt?: string };
-              return (
-                <div className="lrow" key={i}>
-                  <div className="li-main"><div className="t">{gn.modusId ?? 'run'}</div><div className="s">{gn.status ?? ''}</div></div>
-                  <div className="li-right">{gn.createdAt?.slice(0, 10) ?? ''}</div>
+            {me.gens.slice(0, 8).map((gn) => (
+              <div className="lrow" key={gn.actumId}>
+                <div className="li-main">
+                  <div className="t">{gn.modusLabel}</div>
+                  <div className="s">{gn.status === 'agens' ? 'running' : 'queued'}{gn.studio ? ` · ${gn.studio.hostLabel}` : ''}</div>
                 </div>
-              );
-            })}
+                <div className="li-right">{gn.status === 'agens' ? fmtElapsed(gn.elapsedMs) : gn.etaMs ? `~${fmtElapsed(gn.etaMs)}` : ''}</div>
+              </div>
+            ))}
           </div>
         )}
 
