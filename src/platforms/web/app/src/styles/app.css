@@ -1199,7 +1199,7 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .cu-main{display:grid;grid-template-columns:300px 1fr;gap:26px;align-items:start}
 @media(max-width:760px){.cu-main{grid-template-columns:1fr}}
 .cu-piece{border:1px solid var(--hair);border-radius:13px;background:var(--panel);overflow:hidden;position:relative}
-.cu-img{display:block;height:280px}
+.cu-img{display:block;height:280px;width:100%;object-fit:cover}
 .cu-meta{position:absolute;top:12px;left:14px;font-size:11px;color:var(--muted)}
 .cu-flag{margin:0;padding:11px 14px;font-size:11px;color:var(--accent-soft);border-top:1px solid var(--hair-soft)}
 .cu-side{padding-top:4px}

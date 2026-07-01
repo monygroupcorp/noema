@@ -189,6 +189,32 @@ test('getCollectionRarity(): reports target vs realized from produced pieces', a
   for (const v of axis.valores) assert.ok(Math.abs(v.targetRarity - 0.5) < 1e-9)
 })
 
+test('listCollectionPieces(): enumerates produced pieces with attributes + review state', async () => {
+  const { api, modorum, signorum } = makeApi();
+  await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }));
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' });
+
+  const col = await api.collect({ animaId: 'anima-1' }, {
+    modusId: 'sd1-5', total: 3,
+    aditusBase: { _basePrompt: 'a {{color}} cat' },
+    tractus: [{ porta: 'color', label: 'Color', valores: [
+      { value: 'red', label: 'Red', promptFragment: 'red', rarity: 0.5 },
+      { value: 'blue', label: 'Blue', promptFragment: 'blue', rarity: 0.5 },
+    ] }],
+  });
+
+  const all = await api.listCollectionPieces({ animaId: 'anima-1' }, col.id, 'all');
+  assert.equal(all.length, 3, 'all three produced pieces enumerated');
+  for (const p of all) {
+    assert.ok(p.actumId, 'each piece carries its actumId (for approve/reject)');
+    assert.ok(Array.isArray(p.attributes) && p.attributes.length === 1, 'stamped trait attributes present');
+    assert.equal(p.attributes![0].trait_type, 'Color');
+  }
+  // Review is not enabled → nothing is 'pending'; the default filter returns empty.
+  const pending = await api.listCollectionPieces({ animaId: 'anima-1' }, col.id);
+  assert.equal(pending.length, 0, 'no pending pieces when review is off');
+});
+
 test('extendCollection(): re-opens a completed collection and fires another batch', async () => {
   const { api, modorum, signorum, cursor } = makeApi()
   await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))

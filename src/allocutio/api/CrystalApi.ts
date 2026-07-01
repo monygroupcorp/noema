@@ -44,7 +44,7 @@ import { Errors } from './errors.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { computeRecipient } from '../../arcanum/prover.js'
 import { impetusForPodMs } from '../../ledger/rates.js'
-import type { Run, Collection, Team, Edition, FeedItem } from './types.js'
+import type { Run, Collection, CollectionPiece, Team, Edition, FeedItem } from './types.js'
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
 import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
 import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
@@ -357,6 +357,35 @@ export class CrystalApi {
       if (Array.isArray(attrs)) pieces.push(attrs as Array<{ trait_type: string; value: string }>)
     }
     return rarityReport({ tractus: c.tractus, pieces })
+  }
+
+  /**
+   * List a Collection's generated pieces for the curation queue — each completed
+   * Actum's media + stamped attributes + review state. Filtered by `review`
+   * (default 'pending', the review use case; 'all' returns every completed piece).
+   * Owner-scoped.
+   */
+  async listCollectionPieces(
+    auctor: AuctorKey,
+    id: string,
+    review: 'pending' | 'approved' | 'rejected' | 'all' = 'pending',
+  ): Promise<CollectionPiece[]> {
+    const c = await this._ownedCollection(auctor, id)
+    const out: CollectionPiece[] = []
+    for (const actumId of c.acta) {
+      const actum = await this.deps.actorum.findById(actumId)
+      if (!actum || actum.status !== 'completus') continue
+      const outcome = (actum.exitus?.reviewOutcome as CollectionPiece['review'] | undefined) ?? 'none'
+      if (review !== 'all' && outcome !== review) continue
+      const attrs = actum.aditus?._attributes
+      out.push({
+        actumId,
+        review: outcome,
+        output: actum.exitus,
+        ...(Array.isArray(attrs) ? { attributes: attrs as CollectionPiece['attributes'] } : {}),
+      })
+    }
+    return out
   }
 
   /** List the caller's Collections. */

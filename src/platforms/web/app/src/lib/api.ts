@@ -79,6 +79,13 @@ export const api = {
       .then(j<{ collection: Collection }>),
   getCollectionRarity: (id: string) => fetch(`/v1/collectiones/${id}/rarity`, { headers: { 'x-commitment': commitment() } })
     .then(j<{ rarity: RarityReport }>),
+  listCollectionPieces: (id: string, review: 'pending' | 'approved' | 'rejected' | 'all' = 'pending') =>
+    fetch(`/v1/collectiones/${id}/pieces?review=${review}`, { headers: { 'x-commitment': commitment() } })
+      .then(j<{ pieces: CollectionPiece[] }>),
+  approvePiece: (id: string, actumId: string) =>
+    fetch(`/v1/collectiones/${id}/pieces/${actumId}/approve`, { method: 'POST', headers: anonHeaders() }).then(j<{ ok: true }>),
+  rejectPiece: (id: string, actumId: string) =>
+    fetch(`/v1/collectiones/${id}/pieces/${actumId}/reject`, { method: 'POST', headers: anonHeaders() }).then(j<{ ok: true }>),
   pauseCollection: (id: string) => fetch(`/v1/collectiones/${id}/pause`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
   resumeCollection: (id: string) => fetch(`/v1/collectiones/${id}/resume`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
   cancelCollection: (id: string) => fetch(`/v1/collectiones/${id}/cancel`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
@@ -152,6 +159,13 @@ export interface CreateCollectionRequest {
 export interface RarityValor { value: string; targetRarity: number; realizedCount: number; realizedRarity: number }
 export interface RarityAxis { trait_type: string; valores: RarityValor[] }
 export interface RarityReport { totalPieces: number; axes: RarityAxis[] }
+// One piece in the curation queue (GET /v1/collectiones/:id/pieces).
+export interface CollectionPiece {
+  actumId: string;
+  review: 'pending' | 'approved' | 'rejected' | 'none';
+  output?: Record<string, unknown>;
+  attributes?: Array<{ trait_type: string; value: string }>;
+}
 
 export interface MeStatus {
   balanceImpetus: string;
