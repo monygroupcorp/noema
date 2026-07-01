@@ -352,6 +352,22 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .pub-done svg.lucide{width:15px;height:15px;color:var(--accent)}
 .pub-done a{color:var(--accent-soft);text-decoration:underline;text-underline-offset:2px}
 .pub-err{font-size:12px;color:#d98a8a}
+
+/* collection create form */
+.coll-create{border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:18px;margin-bottom:20px;display:flex;flex-direction:column;gap:12px}
+.coll-create .cc-row{display:flex;gap:12px;flex-wrap:wrap}
+.coll-create .cc-field{display:flex;flex-direction:column;gap:5px;flex:1;min-width:180px}
+.coll-create .cc-field.cc-narrow{flex:0 0 120px;min-width:120px}
+.coll-create .cc-field > span{font-size:11.5px;color:var(--muted)}
+.coll-create .cc-field > span em{color:var(--faint);font-style:normal;font-size:10.5px}
+/* self-contained input styling (don't depend on ceremony.css load order) */
+.coll-create .cer-input{width:100%;box-sizing:border-box;font-size:13px;padding:9px 11px;border-radius:9px;border:1px solid var(--hair);background:var(--bg);color:var(--text);font-family:inherit}
+.coll-create .cer-input:focus{outline:none;border-color:color-mix(in srgb,var(--accent) 45%,var(--hair))}
+.coll-create select.cer-input{appearance:none;cursor:pointer}
+.coll-create .cc-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:4px}
+.coll-create .cc-note{font-size:12px;color:var(--faint)}
+.coll-create .cc-err{font-size:12px;color:#d98a8a}
+.collcard.skel{height:250px;animation:feed-pulse 1.4s ease-in-out infinite}
 .btn-ghost{border:1px solid var(--hair);background:var(--raised);color:var(--text);font:inherit;font-size:12.5px;padding:7px 12px;border-radius:8px;cursor:pointer;transition:.14s var(--ease)}
 .btn-ghost:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
 

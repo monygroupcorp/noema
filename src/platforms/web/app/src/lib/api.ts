@@ -67,6 +67,17 @@ export const api = {
   streamRun: (id: string) => new EventSource(`/v1/runs/${id}/stream`),
   meStatus: () => fetch('/v1/me/status', { headers: { 'x-commitment': commitment() } }).then(j<MeStatus>),
 
+  // ── Collections (Collectio) — a batch-gen over a Tractus grid ────────────────
+  // Owner-scoped by the caller commitment. Create LAUNCHES generation of `total`
+  // pieces (real compute) — always a deliberate, confirmed action.
+  listCollections: () => fetch('/v1/collectiones', { headers: { 'x-commitment': commitment() } })
+    .then(j<{ collections: Collection[] }>),
+  getCollection: (id: string) => fetch(`/v1/collectiones/${id}`, { headers: { 'x-commitment': commitment() } })
+    .then(j<{ collection: Collection }>),
+  createCollection: (body: CreateCollectionRequest) =>
+    fetch('/v1/collectiones', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+      .then(j<{ collection: Collection }>),
+
   // ── Publishing (Editio) — feed read + publish/retract write ──────────────────
   // GET /v1/feed — public, NO auth. Newest-first published, public-surface editions.
   feed: (filter: FeedFilter = {}) => {
@@ -101,6 +112,35 @@ export const api = {
 };
 
 export interface DatasetSummary { id: string; name: string; images?: number; updatedAt?: string }
+
+// Collection (Collectio) projection — mirrors the backend CollectionSchema.
+export type CollectionStatus = 'pending' | 'running' | 'complete' | 'cancelled';
+export interface Collection {
+  id: string;
+  nomen?: string;
+  status: CollectionStatus;
+  modusId: string;
+  total: number;
+  provenanceHash: string;
+  owners?: Array<{ animaId: string; weight: number }>;
+  completed: number;
+  failed: number;
+  rejected: number;
+  cost?: string;
+  createdAt?: string;
+  completedAt?: string;
+}
+// One option within a trait axis; `value` is injected into the flow's aditus port.
+export interface TractusValor { value: string; label?: string; rarity?: number; promptFragment?: string }
+// One axis of variation — the aditus port to vary and its options.
+export interface Tractus { porta: string; label?: string; valores: TractusValor[] }
+export interface CreateCollectionRequest {
+  modusId: string;
+  total: number;
+  tractus: Tractus[];
+  nomen?: string;
+  aditusBase?: Record<string, unknown>;
+}
 
 export interface MeStatus {
   balanceImpetus: string;
