@@ -1504,6 +1504,76 @@ Imagined-vs-realized rarity table for a Collection — target shares (from trait
 }
 ```
 
+### GET /v1/collectiones/:id/pieces
+
+The curation queue — a Collection's generated pieces (media + stamped attributes + review state), filtered by ?review=pending|approved|rejected|all (default pending). Owner-scoped.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "pieces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "A generated collection piece — the Actum's output media + stamped attributes + review state.",
+        "properties": {
+          "actumId": {
+            "type": "string",
+            "description": "The piece Actum id (pass to approve/reject)."
+          },
+          "review": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "none"
+            ],
+            "description": "Review state (none = review not enabled)."
+          },
+          "output": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The Actum's exitus (media URL under its declared Porta key)."
+          },
+          "attributes": {
+            "type": "array",
+            "description": "The trait attributes stamped on this piece.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "trait_type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "trait_type",
+                "value"
+              ]
+            }
+          }
+        },
+        "required": [
+          "actumId",
+          "review"
+        ]
+      }
+    }
+  },
+  "required": [
+    "pieces"
+  ]
+}
+```
+
 ### POST /v1/collectiones/:id/extend
 
 Extend a Collection — raise the target by `count` and dispatch the new pieces (incremental batches: fire a batch, review, fire more). Re-opens a completed Collection. Owner-scoped.

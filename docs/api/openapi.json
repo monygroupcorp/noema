@@ -1973,6 +1973,107 @@
         ]
       }
     },
+    "/collectiones/{id}/pieces": {
+      "get": {
+        "summary": "The curation queue — a Collection's generated pieces (media + stamped attributes + review state), filtered by ?review=pending|approved|rejected|all (default pending). Owner-scoped.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pieces": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "A generated collection piece — the Actum's output media + stamped attributes + review state.",
+                        "properties": {
+                          "actumId": {
+                            "type": "string",
+                            "description": "The piece Actum id (pass to approve/reject)."
+                          },
+                          "review": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "approved",
+                              "rejected",
+                              "none"
+                            ],
+                            "description": "Review state (none = review not enabled)."
+                          },
+                          "output": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "The Actum's exitus (media URL under its declared Porta key)."
+                          },
+                          "attributes": {
+                            "type": "array",
+                            "description": "The trait attributes stamped on this piece.",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "trait_type": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "trait_type",
+                                "value"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "actumId",
+                          "review"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "pieces"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/collectiones/{id}/extend": {
       "post": {
         "summary": "Extend a Collection — raise the target by `count` and dispatch the new pieces (incremental batches: fire a batch, review, fire more). Re-opens a completed Collection. Owner-scoped.",
