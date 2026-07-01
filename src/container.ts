@@ -578,7 +578,10 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const sharedDispatch = (inc: Inceptio) =>
     dispatchInceptio({ inceptor, modorum, cursorum, completor, actumIndex, compositusCursor }, inc)
   compositusCursor = new CompositusCursor(sharedDispatch, modorum, actorum)
-  const collectioCursor = new CollectioCursor(sharedDispatch, collectiones, actorum, {})
+  // Review ON by default: every completed piece waits for the creator's approve/reject
+  // (curation) before it counts toward the collection and the next piece fires. This is
+  // a GLOBAL flag today (not per-collection) — a per-collection review toggle is net-new.
+  const collectioCursor = new CollectioCursor(sharedDispatch, collectiones, actorum, { reviewEnabled: true })
 
   return {
     actorum, modorum, signorum, animae, personae, vestigiorum, modos,
