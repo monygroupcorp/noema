@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
 import { api, type FlowDescription, type Run } from '../lib/api';
+import { mediaFromOutput } from '../lib/media';
 import { isPinned, togglePin } from '../lib/pins';
 import { usePromptAssist, useAssistField } from '../state/promptAssist';
 import { fieldExample } from '../lib/promptExamples';
@@ -61,6 +62,8 @@ export function Card() {
   const [quoting, setQuoting] = useState(false);
   const [run, setRun] = useState<{ status: string; id?: string; error?: string; exitus?: Record<string, unknown> } | null>(null);
   const [pinned, setPinned] = useState(false);
+  // Publish-to-feed state for the current result.
+  const [pub, setPub] = useState<{ s: 'idle' | 'busy' | 'done' | 'err'; msg?: string }>({ s: 'idle' });
   // Selected compute posture — drives the quote, the subline, and the result frost.
   // Default to remote (the standard, lowest-credit posture).
   const [compute, setCompute] = useState<Compute>('remote');
@@ -108,7 +111,18 @@ export function Card() {
 
   function set(k: string, v: unknown) { setAditus((a) => ({ ...a, [k]: v })); }
 
+  async function publishToFeed(actumId: string) {
+    setPub({ s: 'busy' });
+    try {
+      await api.publish({ artifact: { kind: 'actum', id: actumId }, destination: 'feed', visibility: 'feed', custody: 'ours' });
+      setPub({ s: 'done' });
+    } catch (e) {
+      setPub({ s: 'err', msg: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
   async function doRun() {
+    setPub({ s: 'idle' });
     setRun({ status: 'dispatching…' });
     try {
       // TODO(backend): RunRequest has no locality/compute field yet. When the
@@ -260,6 +274,21 @@ export function Card() {
                   {run.exitus && Object.entries(run.exitus).map(([k, v]) => (
                     <div className="er" key={k}><span>{k}</span><span className="v" style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{String(v)}</span></div>
                   ))}
+                  {/* Publish-to-feed — only when the result carries shareable media. */}
+                  {run.id && mediaFromOutput(run.exitus) && (
+                    <div className="pub-row">
+                      {pub.s === 'done' ? (
+                        <span className="pub-done"><Ic name="check" /> In review — it appears in the <Link to="/feed">feed</Link> once approved.</span>
+                      ) : (
+                        <>
+                          <button className="btn ghost" disabled={pub.s === 'busy'} onClick={() => publishToFeed(run.id!)}>
+                            <Ic name="rss" /> {pub.s === 'busy' ? 'Publishing…' : 'Publish to feed'}
+                          </button>
+                          {pub.s === 'err' && <span className="pub-err">{pub.msg}</span>}
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
