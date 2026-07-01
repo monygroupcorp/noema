@@ -163,7 +163,10 @@ export class CollectioCursor {
     const collectio = await this.collectiones.find(collectioId)
     if (!collectio) return
 
-    if (success && this.config.reviewEnabled) {
+    // Review is a per-collection choice; the cursor config is the global default
+    // for collections that did not specify one (preserves "review on by default").
+    const reviewEnabled = collectio.reviewEnabled ?? this.config.reviewEnabled
+    if (success && reviewEnabled) {
       // Mark pending review — do not increment completae yet
       state.pendingReview.add(actumId)
       const actum = await this.actorum.findById(actumId)

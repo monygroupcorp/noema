@@ -1352,7 +1352,7 @@
     },
     "/collectiones": {
       "post": {
-        "summary": "Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). Returns a Collection handle (poll GET /v1/collectiones/:id).",
+        "summary": "Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). With `draft:true` it is created but NOT fired (author tractus, then POST /:id/fire). Returns a Collection handle (poll GET /v1/collectiones/:id).",
         "security": [
           {
             "ApiKeyAuth": []
@@ -1383,12 +1383,13 @@
                         "status": {
                           "type": "string",
                           "enum": [
+                            "draft",
                             "pending",
                             "running",
                             "complete",
                             "cancelled"
                           ],
-                          "description": "The collection lifecycle status."
+                          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
                         },
                         "modusId": {
                           "type": "string",
@@ -1401,6 +1402,74 @@
                         "provenanceHash": {
                           "type": "string",
                           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
+                        "tractus": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "One axis of variation — the aditus port to vary and its options.",
+                            "properties": {
+                              "porta": {
+                                "type": "string",
+                                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+                              },
+                              "label": {
+                                "type": "string",
+                                "description": "Human-facing category label (falls back to porta)."
+                              },
+                              "valores": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "description": "One option within a trait axis.",
+                                  "properties": {
+                                    "value": {
+                                      "description": "The aditus value injected when this option is selected."
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "description": "Human-facing display name (falls back to String(value))."
+                                    },
+                                    "rarity": {
+                                      "type": "number",
+                                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                                    },
+                                    "promptFragment": {
+                                      "type": "string",
+                                      "description": "Text woven into the assembled prompt when this option wins."
+                                    },
+                                    "excludes": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Labels in OTHER axes this option blocks."
+                                    },
+                                    "tags": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Theme tags for group-level mutual exclusion."
+                                    }
+                                  },
+                                  "required": [
+                                    "value"
+                                  ]
+                                },
+                                "description": "The options for this axis."
+                              }
+                            },
+                            "required": [
+                              "porta",
+                              "valores"
+                            ]
+                          },
+                          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+                        },
+                        "reviewEnabled": {
+                          "type": "boolean",
+                          "description": "Whether each piece is held for review before it counts."
                         },
                         "owners": {
                           "type": "array",
@@ -1575,6 +1644,14 @@
                     "type": "boolean",
                     "description": "Opt-in DNA uniqueness — no two pieces share a trait combination (across non-bypassDNA axes). Default false."
                   },
+                  "reviewEnabled": {
+                    "type": "boolean",
+                    "description": "Hold every completed piece for review before it counts toward the drop (approve/reject in curation). Omit → the platform default applies."
+                  },
+                  "draft": {
+                    "type": "boolean",
+                    "description": "Create as a DRAFT — author tractus (garden/rules) without firing. Start it later with POST /:id/fire. Omit/false → create + fire in one shot."
+                  },
                   "teamId": {
                     "type": "string",
                     "description": "Own this collection by a team (Sodalitas) the caller is a member of — snapshots an equal-weight owners split."
@@ -1624,12 +1701,13 @@
                           "status": {
                             "type": "string",
                             "enum": [
+                              "draft",
                               "pending",
                               "running",
                               "complete",
                               "cancelled"
                             ],
-                            "description": "The collection lifecycle status."
+                            "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
                           },
                           "modusId": {
                             "type": "string",
@@ -1642,6 +1720,74 @@
                           "provenanceHash": {
                             "type": "string",
                             "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                          },
+                          "tractus": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "description": "One axis of variation — the aditus port to vary and its options.",
+                              "properties": {
+                                "porta": {
+                                  "type": "string",
+                                  "description": "The aditus port key this axis varies (e.g. background, outfit)."
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "description": "Human-facing category label (falls back to porta)."
+                                },
+                                "valores": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "description": "One option within a trait axis.",
+                                    "properties": {
+                                      "value": {
+                                        "description": "The aditus value injected when this option is selected."
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                        "description": "Human-facing display name (falls back to String(value))."
+                                      },
+                                      "rarity": {
+                                        "type": "number",
+                                        "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                                      },
+                                      "promptFragment": {
+                                        "type": "string",
+                                        "description": "Text woven into the assembled prompt when this option wins."
+                                      },
+                                      "excludes": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "description": "Labels in OTHER axes this option blocks."
+                                      },
+                                      "tags": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "description": "Theme tags for group-level mutual exclusion."
+                                      }
+                                    },
+                                    "required": [
+                                      "value"
+                                    ]
+                                  },
+                                  "description": "The options for this axis."
+                                }
+                              },
+                              "required": [
+                                "porta",
+                                "valores"
+                              ]
+                            },
+                            "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+                          },
+                          "reviewEnabled": {
+                            "type": "boolean",
+                            "description": "Whether each piece is held for review before it counts."
                           },
                           "owners": {
                             "type": "array",
@@ -1722,6 +1868,504 @@
         }
       }
     },
+    "/collectiones/{id}/tractus": {
+      "patch": {
+        "summary": "Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authoring write). Re-derives the provenance hash; rejected (input.malformed) once the collection is fired. Owner-scoped.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "collection": {
+                      "type": "object",
+                      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "nomen": {
+                          "type": "string",
+                          "description": "The collection display name."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "pending",
+                            "running",
+                            "complete",
+                            "cancelled"
+                          ],
+                          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
+                        },
+                        "modusId": {
+                          "type": "string",
+                          "description": "The flow (modus) expanded across the grid."
+                        },
+                        "total": {
+                          "type": "number",
+                          "description": "Target piece count (the size of the run)."
+                        },
+                        "provenanceHash": {
+                          "type": "string",
+                          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
+                        "tractus": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "One axis of variation — the aditus port to vary and its options.",
+                            "properties": {
+                              "porta": {
+                                "type": "string",
+                                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+                              },
+                              "label": {
+                                "type": "string",
+                                "description": "Human-facing category label (falls back to porta)."
+                              },
+                              "valores": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "description": "One option within a trait axis.",
+                                  "properties": {
+                                    "value": {
+                                      "description": "The aditus value injected when this option is selected."
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "description": "Human-facing display name (falls back to String(value))."
+                                    },
+                                    "rarity": {
+                                      "type": "number",
+                                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                                    },
+                                    "promptFragment": {
+                                      "type": "string",
+                                      "description": "Text woven into the assembled prompt when this option wins."
+                                    },
+                                    "excludes": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Labels in OTHER axes this option blocks."
+                                    },
+                                    "tags": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Theme tags for group-level mutual exclusion."
+                                    }
+                                  },
+                                  "required": [
+                                    "value"
+                                  ]
+                                },
+                                "description": "The options for this axis."
+                              }
+                            },
+                            "required": [
+                              "porta",
+                              "valores"
+                            ]
+                          },
+                          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+                        },
+                        "reviewEnabled": {
+                          "type": "boolean",
+                          "description": "Whether each piece is held for review before it counts."
+                        },
+                        "owners": {
+                          "type": "array",
+                          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "animaId": {
+                                "type": "string"
+                              },
+                              "weight": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "animaId",
+                              "weight"
+                            ]
+                          }
+                        },
+                        "completed": {
+                          "type": "number",
+                          "description": "Pieces completed so far (approved, when review is on)."
+                        },
+                        "failed": {
+                          "type": "number",
+                          "description": "Pieces that failed to generate so far."
+                        },
+                        "rejected": {
+                          "type": "number",
+                          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+                        },
+                        "cost": {
+                          "type": "string",
+                          "description": "Total impetus across completed pieces, serialised as a string."
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When the collection started."
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When it finished (or was cancelled)."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "status",
+                        "modusId",
+                        "total",
+                        "provenanceHash",
+                        "completed",
+                        "failed",
+                        "rejected"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "collection"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Replace a draft Collection’s trait axes/values/rules. Re-derives the provenance hash; rejected once the collection is fired.",
+                "properties": {
+                  "tractus": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "description": "One axis of variation — the aditus port to vary and its options.",
+                      "properties": {
+                        "porta": {
+                          "type": "string",
+                          "description": "The aditus port key this axis varies (e.g. background, outfit)."
+                        },
+                        "label": {
+                          "type": "string",
+                          "description": "Human-facing category label (falls back to porta)."
+                        },
+                        "valores": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "One option within a trait axis.",
+                            "properties": {
+                              "value": {
+                                "description": "The aditus value injected when this option is selected."
+                              },
+                              "label": {
+                                "type": "string",
+                                "description": "Human-facing display name (falls back to String(value))."
+                              },
+                              "rarity": {
+                                "type": "number",
+                                "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                              },
+                              "promptFragment": {
+                                "type": "string",
+                                "description": "Text woven into the assembled prompt when this option wins."
+                              },
+                              "excludes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "description": "Labels in OTHER axes this option blocks."
+                              },
+                              "tags": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "description": "Theme tags for group-level mutual exclusion."
+                              }
+                            },
+                            "required": [
+                              "value"
+                            ]
+                          },
+                          "description": "The options for this axis."
+                        }
+                      },
+                      "required": [
+                        "porta",
+                        "valores"
+                      ]
+                    },
+                    "description": "The full new set of axes of variation (replaces the existing grid)."
+                  }
+                },
+                "required": [
+                  "tractus"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/collectiones/{id}/fire": {
+      "post": {
+        "summary": "Freeze a DRAFT Collection’s tractus and start the run — pins provenance to the flow version at fire time, then dispatches. Funder-only; rejected unless the collection is a draft.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "collection": {
+                      "type": "object",
+                      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "nomen": {
+                          "type": "string",
+                          "description": "The collection display name."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "pending",
+                            "running",
+                            "complete",
+                            "cancelled"
+                          ],
+                          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
+                        },
+                        "modusId": {
+                          "type": "string",
+                          "description": "The flow (modus) expanded across the grid."
+                        },
+                        "total": {
+                          "type": "number",
+                          "description": "Target piece count (the size of the run)."
+                        },
+                        "provenanceHash": {
+                          "type": "string",
+                          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
+                        "tractus": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "One axis of variation — the aditus port to vary and its options.",
+                            "properties": {
+                              "porta": {
+                                "type": "string",
+                                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+                              },
+                              "label": {
+                                "type": "string",
+                                "description": "Human-facing category label (falls back to porta)."
+                              },
+                              "valores": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "description": "One option within a trait axis.",
+                                  "properties": {
+                                    "value": {
+                                      "description": "The aditus value injected when this option is selected."
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "description": "Human-facing display name (falls back to String(value))."
+                                    },
+                                    "rarity": {
+                                      "type": "number",
+                                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                                    },
+                                    "promptFragment": {
+                                      "type": "string",
+                                      "description": "Text woven into the assembled prompt when this option wins."
+                                    },
+                                    "excludes": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Labels in OTHER axes this option blocks."
+                                    },
+                                    "tags": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Theme tags for group-level mutual exclusion."
+                                    }
+                                  },
+                                  "required": [
+                                    "value"
+                                  ]
+                                },
+                                "description": "The options for this axis."
+                              }
+                            },
+                            "required": [
+                              "porta",
+                              "valores"
+                            ]
+                          },
+                          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+                        },
+                        "reviewEnabled": {
+                          "type": "boolean",
+                          "description": "Whether each piece is held for review before it counts."
+                        },
+                        "owners": {
+                          "type": "array",
+                          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "animaId": {
+                                "type": "string"
+                              },
+                              "weight": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "animaId",
+                              "weight"
+                            ]
+                          }
+                        },
+                        "completed": {
+                          "type": "number",
+                          "description": "Pieces completed so far (approved, when review is on)."
+                        },
+                        "failed": {
+                          "type": "number",
+                          "description": "Pieces that failed to generate so far."
+                        },
+                        "rejected": {
+                          "type": "number",
+                          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+                        },
+                        "cost": {
+                          "type": "string",
+                          "description": "Total impetus across completed pieces, serialised as a string."
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When the collection started."
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When it finished (or was cancelled)."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "status",
+                        "modusId",
+                        "total",
+                        "provenanceHash",
+                        "completed",
+                        "failed",
+                        "rejected"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "collection"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/collectiones/{id}": {
       "get": {
         "summary": "Fetch one Collection by id — progress (completed/failed/total), status, cost. Owner-scoped (404 if not yours).",
@@ -1755,12 +2399,13 @@
                         "status": {
                           "type": "string",
                           "enum": [
+                            "draft",
                             "pending",
                             "running",
                             "complete",
                             "cancelled"
                           ],
-                          "description": "The collection lifecycle status."
+                          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
                         },
                         "modusId": {
                           "type": "string",
@@ -1773,6 +2418,74 @@
                         "provenanceHash": {
                           "type": "string",
                           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
+                        "tractus": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "One axis of variation — the aditus port to vary and its options.",
+                            "properties": {
+                              "porta": {
+                                "type": "string",
+                                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+                              },
+                              "label": {
+                                "type": "string",
+                                "description": "Human-facing category label (falls back to porta)."
+                              },
+                              "valores": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "description": "One option within a trait axis.",
+                                  "properties": {
+                                    "value": {
+                                      "description": "The aditus value injected when this option is selected."
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "description": "Human-facing display name (falls back to String(value))."
+                                    },
+                                    "rarity": {
+                                      "type": "number",
+                                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                                    },
+                                    "promptFragment": {
+                                      "type": "string",
+                                      "description": "Text woven into the assembled prompt when this option wins."
+                                    },
+                                    "excludes": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Labels in OTHER axes this option blocks."
+                                    },
+                                    "tags": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Theme tags for group-level mutual exclusion."
+                                    }
+                                  },
+                                  "required": [
+                                    "value"
+                                  ]
+                                },
+                                "description": "The options for this axis."
+                              }
+                            },
+                            "required": [
+                              "porta",
+                              "valores"
+                            ]
+                          },
+                          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+                        },
+                        "reviewEnabled": {
+                          "type": "boolean",
+                          "description": "Whether each piece is held for review before it counts."
                         },
                         "owners": {
                           "type": "array",
@@ -2107,12 +2820,13 @@
                         "status": {
                           "type": "string",
                           "enum": [
+                            "draft",
                             "pending",
                             "running",
                             "complete",
                             "cancelled"
                           ],
-                          "description": "The collection lifecycle status."
+                          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
                         },
                         "modusId": {
                           "type": "string",
@@ -2125,6 +2839,74 @@
                         "provenanceHash": {
                           "type": "string",
                           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
+                        "tractus": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "One axis of variation — the aditus port to vary and its options.",
+                            "properties": {
+                              "porta": {
+                                "type": "string",
+                                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+                              },
+                              "label": {
+                                "type": "string",
+                                "description": "Human-facing category label (falls back to porta)."
+                              },
+                              "valores": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "description": "One option within a trait axis.",
+                                  "properties": {
+                                    "value": {
+                                      "description": "The aditus value injected when this option is selected."
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "description": "Human-facing display name (falls back to String(value))."
+                                    },
+                                    "rarity": {
+                                      "type": "number",
+                                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                                    },
+                                    "promptFragment": {
+                                      "type": "string",
+                                      "description": "Text woven into the assembled prompt when this option wins."
+                                    },
+                                    "excludes": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Labels in OTHER axes this option blocks."
+                                    },
+                                    "tags": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Theme tags for group-level mutual exclusion."
+                                    }
+                                  },
+                                  "required": [
+                                    "value"
+                                  ]
+                                },
+                                "description": "The options for this axis."
+                              }
+                            },
+                            "required": [
+                              "porta",
+                              "valores"
+                            ]
+                          },
+                          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+                        },
+                        "reviewEnabled": {
+                          "type": "boolean",
+                          "description": "Whether each piece is held for review before it counts."
                         },
                         "owners": {
                           "type": "array",
@@ -2267,12 +3049,13 @@
                         "status": {
                           "type": "string",
                           "enum": [
+                            "draft",
                             "pending",
                             "running",
                             "complete",
                             "cancelled"
                           ],
-                          "description": "The collection lifecycle status."
+                          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
                         },
                         "modusId": {
                           "type": "string",
@@ -2285,6 +3068,74 @@
                         "provenanceHash": {
                           "type": "string",
                           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
+                        "tractus": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "One axis of variation — the aditus port to vary and its options.",
+                            "properties": {
+                              "porta": {
+                                "type": "string",
+                                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+                              },
+                              "label": {
+                                "type": "string",
+                                "description": "Human-facing category label (falls back to porta)."
+                              },
+                              "valores": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "description": "One option within a trait axis.",
+                                  "properties": {
+                                    "value": {
+                                      "description": "The aditus value injected when this option is selected."
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "description": "Human-facing display name (falls back to String(value))."
+                                    },
+                                    "rarity": {
+                                      "type": "number",
+                                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                                    },
+                                    "promptFragment": {
+                                      "type": "string",
+                                      "description": "Text woven into the assembled prompt when this option wins."
+                                    },
+                                    "excludes": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Labels in OTHER axes this option blocks."
+                                    },
+                                    "tags": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Theme tags for group-level mutual exclusion."
+                                    }
+                                  },
+                                  "required": [
+                                    "value"
+                                  ]
+                                },
+                                "description": "The options for this axis."
+                              }
+                            },
+                            "required": [
+                              "porta",
+                              "valores"
+                            ]
+                          },
+                          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+                        },
+                        "reviewEnabled": {
+                          "type": "boolean",
+                          "description": "Whether each piece is held for review before it counts."
                         },
                         "owners": {
                           "type": "array",
@@ -2407,12 +3258,13 @@
                         "status": {
                           "type": "string",
                           "enum": [
+                            "draft",
                             "pending",
                             "running",
                             "complete",
                             "cancelled"
                           ],
-                          "description": "The collection lifecycle status."
+                          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
                         },
                         "modusId": {
                           "type": "string",
@@ -2425,6 +3277,74 @@
                         "provenanceHash": {
                           "type": "string",
                           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
+                        "tractus": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "One axis of variation — the aditus port to vary and its options.",
+                            "properties": {
+                              "porta": {
+                                "type": "string",
+                                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+                              },
+                              "label": {
+                                "type": "string",
+                                "description": "Human-facing category label (falls back to porta)."
+                              },
+                              "valores": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "description": "One option within a trait axis.",
+                                  "properties": {
+                                    "value": {
+                                      "description": "The aditus value injected when this option is selected."
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "description": "Human-facing display name (falls back to String(value))."
+                                    },
+                                    "rarity": {
+                                      "type": "number",
+                                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                                    },
+                                    "promptFragment": {
+                                      "type": "string",
+                                      "description": "Text woven into the assembled prompt when this option wins."
+                                    },
+                                    "excludes": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Labels in OTHER axes this option blocks."
+                                    },
+                                    "tags": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Theme tags for group-level mutual exclusion."
+                                    }
+                                  },
+                                  "required": [
+                                    "value"
+                                  ]
+                                },
+                                "description": "The options for this axis."
+                              }
+                            },
+                            "required": [
+                              "porta",
+                              "valores"
+                            ]
+                          },
+                          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+                        },
+                        "reviewEnabled": {
+                          "type": "boolean",
+                          "description": "Whether each piece is held for review before it counts."
                         },
                         "owners": {
                           "type": "array",
@@ -2547,12 +3467,13 @@
                         "status": {
                           "type": "string",
                           "enum": [
+                            "draft",
                             "pending",
                             "running",
                             "complete",
                             "cancelled"
                           ],
-                          "description": "The collection lifecycle status."
+                          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
                         },
                         "modusId": {
                           "type": "string",
@@ -2565,6 +3486,74 @@
                         "provenanceHash": {
                           "type": "string",
                           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
+                        "tractus": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "One axis of variation — the aditus port to vary and its options.",
+                            "properties": {
+                              "porta": {
+                                "type": "string",
+                                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+                              },
+                              "label": {
+                                "type": "string",
+                                "description": "Human-facing category label (falls back to porta)."
+                              },
+                              "valores": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "description": "One option within a trait axis.",
+                                  "properties": {
+                                    "value": {
+                                      "description": "The aditus value injected when this option is selected."
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "description": "Human-facing display name (falls back to String(value))."
+                                    },
+                                    "rarity": {
+                                      "type": "number",
+                                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                                    },
+                                    "promptFragment": {
+                                      "type": "string",
+                                      "description": "Text woven into the assembled prompt when this option wins."
+                                    },
+                                    "excludes": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Labels in OTHER axes this option blocks."
+                                    },
+                                    "tags": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Theme tags for group-level mutual exclusion."
+                                    }
+                                  },
+                                  "required": [
+                                    "value"
+                                  ]
+                                },
+                                "description": "The options for this axis."
+                              }
+                            },
+                            "required": [
+                              "porta",
+                              "valores"
+                            ]
+                          },
+                          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+                        },
+                        "reviewEnabled": {
+                          "type": "boolean",
+                          "description": "Whether each piece is held for review before it counts."
                         },
                         "owners": {
                           "type": "array",
@@ -3011,6 +4000,164 @@
             }
           }
         }
+      }
+    },
+    "/editiones/{id}": {
+      "get": {
+        "summary": "Fetch one publication (author-scoped). Poll it to watch a `pending` settle land — an async archive ZIP build finishing (`externalRef` = the download url), or a public surface being gated.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "edition": {
+                      "type": "object",
+                      "description": "The public projection of an Editio — a publication record referencing a canonical artifact.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "artifact": {
+                          "type": "object",
+                          "description": "The canonical artifact being published (referenced, never copied).",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "actum",
+                                "intella",
+                                "collectio"
+                              ],
+                              "description": "Which artifact kind."
+                            },
+                            "id": {
+                              "type": "string",
+                              "description": "The artifact's id."
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "id"
+                          ]
+                        },
+                        "destination": {
+                          "type": "string",
+                          "description": "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …"
+                        },
+                        "visibility": {
+                          "type": "string",
+                          "enum": [
+                            "private",
+                            "unlisted",
+                            "feed",
+                            "marketplace"
+                          ]
+                        },
+                        "custody": {
+                          "type": "string",
+                          "enum": [
+                            "ours",
+                            "theirs",
+                            "both"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "published",
+                            "rejected",
+                            "failed",
+                            "retracted"
+                          ],
+                          "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+                        },
+                        "externalRef": {
+                          "type": "string",
+                          "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
+                        },
+                        "owners": {
+                          "type": "array",
+                          "description": "Rights split snapshot (team-owned only) — weights sum to ~1.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "animaId": {
+                                "type": "string"
+                              },
+                              "weight": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "animaId",
+                              "weight"
+                            ]
+                          }
+                        },
+                        "license": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "artifact",
+                        "destination",
+                        "visibility",
+                        "custody",
+                        "status",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "edition"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/editiones/{id}/retract": {
