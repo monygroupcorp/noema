@@ -59,7 +59,10 @@ function createPublicStorageApi(services) {
 
   // New preferred route for presigned uploads (alias for upload-url)
   router.post('/uploads/sign', async (req, res) => {
-    const { fileName, contentType, bucketName } = req.body;
+    // Accept both `fileName` (legacy) and `filename` (web client) so a casing
+    // mismatch never silently 400s a signed-upload request.
+    const { contentType, bucketName } = req.body;
+    const fileName = req.body.fileName || req.body.filename;
     if (!fileName || !contentType) {
       return res.status(400).json({ error: 'fileName and contentType are required.' });
     }

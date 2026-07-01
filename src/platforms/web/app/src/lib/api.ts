@@ -129,11 +129,38 @@ export const api = {
   trainingCost: (body: { steps: number; baseModel?: string; images?: number }) =>
     fetch('/v1/data/trainings/calculate-cost', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
       .then(j<{ impetus?: string; usd?: number }>),
-  // Signed upload for dataset images.
-  signUpload: (body: { filename: string; contentType: string }) =>
+  // Signed upload (R2). Returns a presigned PUT url + the permanent public url.
+  signUpload: (body: { filename: string; contentType: string; bucketName?: string }) =>
     fetch('/api/v1/storage/uploads/sign', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
-      .then(j<{ url: string; fields?: Record<string, string>; key?: string }>),
+      .then(j<{ signedUrl: string; permanentUrl: string; key?: string }>),
+
+  // ── Account settings (Consuetudinum, owner-keyed / anon-capable) ─────────────
+  // GET /v1/me — appearance (Profile) + generation defaults (Preferences) + bindings.
+  getMe: () => fetch('/v1/me', { headers: { 'x-commitment': commitment() } }).then(j<MeView>),
+  setAppearance: (appearance: Appearance) =>
+    fetch('/v1/me/appearance', { method: 'PUT', headers: anonHeaders(), body: JSON.stringify(appearance) }).then(j<{ appearance: Appearance }>),
+  setGeneratio: (generatio: Generatio) =>
+    fetch('/v1/me/generatio', { method: 'PUT', headers: anonHeaders(), body: JSON.stringify(generatio) }).then(j<{ generatio: Generatio }>),
+  getAffines: (modusId: string) =>
+    fetch(`/v1/me/affines/${encodeURIComponent(modusId)}`, { headers: { 'x-commitment': commitment() } }).then(j<{ affines: Record<string, unknown> }>),
+  setAffines: (modusId: string, affines: Record<string, unknown>) =>
+    fetch(`/v1/me/affines/${encodeURIComponent(modusId)}`, { method: 'PUT', headers: anonHeaders(), body: JSON.stringify({ affines }) }).then(j<{ affines: Record<string, unknown> }>),
 };
+
+// Account settings (mirror the backend Consuetudo shapes).
+export interface Appearance { avatarUrl?: string; bannerUrl?: string; backgroundUrl?: string; accent?: string; look?: string }
+export interface Generatio {
+  style?: string;
+  negativePrompt?: string;
+  outputFormat?: string;
+  telegramDeliverAs?: 'album' | 'individual';
+  autoApplyModels?: string[];
+}
+export interface MeView {
+  appearance?: Appearance;
+  generatio?: Generatio;
+  bindings: Array<{ verb: string; modusId: string }>;
+}
 
 export interface DatasetSummary { id: string; name: string; images?: number; updatedAt?: string }
 

@@ -22,7 +22,7 @@ import type { Modorum, Modus } from '../../types/modus.js'
 import type { Cursorum, ActumCompletor, Actorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
-import type { Consuetudinum } from '../../types/consuetudo.js'
+import type { Consuetudinum, Appearance, Generatio } from '../../types/consuetudo.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Fundamentorum } from '../../types/fundamentum.js'
 import type { Intelligens, IntelligentiumStore, IntelligensGenus, Intellarum, Intella } from '../../types/intelligendi.js'
@@ -194,6 +194,40 @@ export interface FlowSummary {
   steps?: number
 }
 
+/** Port keys a flow may use for its negative prompt (first present one is filled). */
+const NEGATIVE_PORT_KEYS = ['negative_prompt', 'negativePrompt', 'negative']
+
+/**
+ * Layer the owner's account-level defaults under the cast-time aditus:
+ * cast-time input > affines (per-modus) > generatio (cross-cutting) > modus defaults.
+ * Only DECLARED ports (`modus.aditus`) are filled — a stale default never injects an
+ * unknown input. `style` augments (prepends to) the final prompt rather than overriding it.
+ */
+export function applyAccountDefaults(
+  ports: Record<string, unknown>,
+  aditus: Record<string, unknown>,
+  affines: Record<string, unknown> | undefined,
+  generatio: Generatio | undefined,
+): Record<string, unknown> {
+  const account: Record<string, unknown> = {}
+  // generatio (lowest account tier): fill a negative-prompt port if the flow has one.
+  if (generatio?.negativePrompt) {
+    const key = NEGATIVE_PORT_KEYS.find((k) => k in ports)
+    if (key) account[key] = generatio.negativePrompt
+  }
+  // affines override generatio within the account tier — declared ports only.
+  if (affines) {
+    for (const [k, v] of Object.entries(affines)) if (k in ports) account[k] = v
+  }
+  // Cast-time input wins over every account default.
+  const out = { ...account, ...aditus }
+  // Default style prepends to the resolved prompt (augments, does not override).
+  if (generatio?.style && typeof out.prompt === 'string' && out.prompt.length > 0) {
+    out.prompt = `${generatio.style}, ${out.prompt}`
+  }
+  return out
+}
+
 export class CrystalApi {
   constructor(private readonly deps: CrystalApiDeps) {}
 
@@ -220,6 +254,21 @@ export class CrystalApi {
     }
     if (!modusId) throw Errors.notFoundFlow(target.verb ?? '?')
 
+    // Account-level defaults (Consuetudinum), applied UNDER the cast-time aditus:
+    //   cast-time input > affines (per-modus) > generatio (cross-cutting) > modus defaults.
+    // Only DECLARED ports are filled, so a stale default can never inject an unknown input.
+    let effectiveAditus = aditus
+    if (consuetudinum) {
+      const [affines, generatio] = await Promise.all([
+        consuetudinum.resolveAffines(auctor, modusId),
+        consuetudinum.resolveGeneratio(auctor),
+      ])
+      if (affines || generatio) {
+        const ports = (await modorum.find(modusId))?.aditus ?? {}
+        effectiveAditus = applyAccountDefaults(ports, aditus, affines, generatio)
+      }
+    }
+
     // Admission spend cap — refuse before dispatch if the upper-bound estimate exceeds
     // maxImpetus. (Mid-run enforcement — the watchdog — is a Phase-4b follow-up.)
     if (opts.maxImpetus !== undefined) {
@@ -231,7 +280,7 @@ export class CrystalApi {
 
     const inceptio: Inceptio = {
       modusId,
-      aditus,
+      aditus: effectiveAditus,
       by: opts.by ?? auctor,
       ...(opts.studioId ? { modoId: opts.studioId } : {}),
       ...(opts.pinnedModels?.length ? { pinnedModels: opts.pinnedModels } : {}),
@@ -1139,6 +1188,50 @@ export class CrystalApi {
     return { verb, modusId }
   }
 
+  // ── Account settings (Consuetudinum, owner-keyed / anon-capable) ─────────────
+
+  /** The caller's owner-keyed account settings — appearance (Profile) + generation
+   *  defaults (Preferences) + verb→flow bindings. All optional (unset → undefined). */
+  async getMe(auctor: AuctorKey): Promise<MeView> {
+    const c = this.deps.consuetudinum
+    if (!c) return { bindings: [] }
+    const [appearance, generatio, bindings] = await Promise.all([
+      c.resolveAppearance(auctor), c.resolveGeneratio(auctor), c.listBindings(auctor),
+    ])
+    return {
+      ...(appearance !== undefined ? { appearance } : {}),
+      ...(generatio !== undefined ? { generatio } : {}),
+      bindings,
+    }
+  }
+
+  /** Replace the caller's presentation skin (Profile). */
+  async setAppearance(auctor: AuctorKey, appearance: Appearance): Promise<Appearance> {
+    if (!this.deps.consuetudinum) throw Errors.internal('account settings not configured')
+    await this.deps.consuetudinum.setAppearance(auctor, appearance)
+    return appearance
+  }
+
+  /** Replace the caller's cross-cutting generation defaults (Preferences). */
+  async setGeneratio(auctor: AuctorKey, generatio: Generatio): Promise<Generatio> {
+    if (!this.deps.consuetudinum) throw Errors.internal('account settings not configured')
+    await this.deps.consuetudinum.setGeneratio(auctor, generatio)
+    return generatio
+  }
+
+  /** The caller's per-modus input defaults (affines) for one flow. */
+  async getAffines(auctor: AuctorKey, modusId: string): Promise<Record<string, unknown>> {
+    return (await this.deps.consuetudinum?.resolveAffines(auctor, modusId)) ?? {}
+  }
+
+  /** Replace the caller's per-modus input defaults (affines) for one flow. */
+  async setAffines(auctor: AuctorKey, modusId: string, affines: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.deps.consuetudinum) throw Errors.internal('account settings not configured')
+    if (!(await this.deps.modorum.find(modusId))) throw Errors.notFoundFlow(modusId)
+    await this.deps.consuetudinum.setAffines(auctor, modusId, affines)
+    return affines
+  }
+
   /** The caller's account snapshot — balance, in-flight gens, studios (JSON-projected). */
   async status(auctor: AuctorKey): Promise<StatusView> {
     const snap = await aggregateStatus(
@@ -1514,6 +1607,14 @@ export interface StatusView {
   studios: unknown[]
   joinable: unknown[]
   takenAt: string
+}
+
+/** The caller's owner-keyed account settings (GET /v1/me) — appearance + generation
+ *  defaults + verb→flow bindings. All optional; anon-capable. */
+export interface MeView {
+  appearance?: Appearance
+  generatio?: Generatio
+  bindings: Array<{ verb: string; modusId: string }>
 }
 
 /** Inputs for `provisionStudio`. Everything optional — the simplest call leases a default

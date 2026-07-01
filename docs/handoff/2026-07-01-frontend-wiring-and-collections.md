@@ -3,6 +3,41 @@
 Pick-up notes for continuing the go-live frontend wiring. Everything below is committed on
 `chainengine-migration` and deployed to `staging.noema.art`. Memory: `project_go_live_runway`.
 
+## Account / Profile / Preferences wiring (2026-07-01) — WIRED + MARKED GAPS
+Principle: the frontend is the spec. Every element is either wired to real backend or has its
+net-new backend gap named here (never silently left as mock).
+
+**Account (committed `5625a61a`):** fixed the `MeStatus` type (was `unknown[]`) to the real
+`StatusView` (`GenEntry`/`StudioEntry`/`JoinableEntry`); fixed a latent Status.tsx bug (rendered
+non-existent `GenEntry` fields → blank runs); wired AccountSettings billing balance + live-studio
+count + compute-session list to `meStatus`.
+
+**New owner-keyed settings home = `Consuetudinum`** (ADR-0003, AuctorKey-keyed → works anonymously,
+unlike the identified-only Anima/Persona). Extended it with `appearance` + `generatio` + `listBindings`;
+`GET /v1/me`, `PUT /v1/me/appearance`, `PUT /v1/me/generatio`, `GET/PUT /v1/me/affines/:modusId`.
+
+**Profile — WIRED:** accent + look + avatar/banner/background persist to `appearance` (load on mount,
+save on change); asset slots upload to R2 via the signed-PUT path (also fixed the `filename`/`fileName`
+casing bug in `storageApi.js` that 400'd every signed upload). **MARKED gap:** "Generate a kit" — needs a
+net-new `profile-kit` modus (compose the PS2/low-poly LoRA + an image model); button disabled with the note.
+
+**Preferences — WIRED:** the cross-cutting card (default **style**, **negative prompt**, output **format**,
+**telegram deliver-as**) persists to `generatio` and is **applied at cast time** — resurrected the DEAD
+`affines` slot: `invokeFlow` now layers `applyAccountDefaults` (cast-time > affines > generatio > modus
+defaults; declared ports only; `style` prepends the prompt). `/make`'s resolved model is read from real
+bindings. **MARKED gaps:**
+- Per-command param editor (model/size/steps/cfg/count) — **backend ready** (`affines` + cast-time apply +
+  `GET/PUT /me/affines/:modusId`); the inline per-command UI is the next step.
+- `/animate · /effect · /upscale` — **not canon verbs** (only `make`, `chat` in `CANON_VERBS`); need flows
+  + canon bindings first (the verb-ring backlog).
+- "land in (project)" — **no Projects entity exists** anywhere (Projects screen is also mock); blocked on that primitive.
+- auto-apply model — stored field exists (`generatio.autoApplyModels`) but **cast-time application is deferred**:
+  needs a model picker + `ModelRef` resolution (role/dest) into `pinnedModels`. Marked in `invokeFlow`.
+- `generatio.outputFormat` — stored; **runner-side application pending** (not a flow input).
+
+Tests: `applyAccountDefaults` (8), `MemoryConsuetudinum` appearance/generatio/listBindings (+2). Crystal
+1215 / hermetic 616 green. **Never staging-verified.**
+
 ## What shipped this session (all deployed + verified)
 
 - **Ceremony** — `/ceremony` page (announcement + live contribution), live **sequencer**

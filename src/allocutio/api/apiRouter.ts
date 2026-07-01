@@ -48,6 +48,11 @@ export interface ApiFacade {
   listModels(filter?: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number }): Promise<ModelCard[]>
   saveFlow(auctor: AuctorKey, opts: SaveFlowOpts): Promise<{ id: string }>
   bind(auctor: AuctorKey, verb: string, modusId: string): Promise<{ verb: string; modusId: string }>
+  getMe(auctor: AuctorKey): Promise<import('./CrystalApi.js').MeView>
+  setAppearance(auctor: AuctorKey, appearance: import('../../types/consuetudo.js').Appearance): Promise<import('../../types/consuetudo.js').Appearance>
+  setGeneratio(auctor: AuctorKey, generatio: import('../../types/consuetudo.js').Generatio): Promise<import('../../types/consuetudo.js').Generatio>
+  getAffines(auctor: AuctorKey, modusId: string): Promise<Record<string, unknown>>
+  setAffines(auctor: AuctorKey, modusId: string, affines: Record<string, unknown>): Promise<Record<string, unknown>>
   status(auctor: AuctorKey): Promise<StatusView>
   provisionStudio(auctor: AuctorKey, opts: ProvisionStudioOpts): Promise<StudioView>
   getStudio(auctor: AuctorKey, studioId: string): Promise<StudioView>
@@ -412,6 +417,29 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
       res.json(await api.status(auctor))
     }),
   )
+
+  // GET /v1/me — the caller's account settings: appearance + generation defaults + bindings.
+  router.get('/me', wrap(async (req, res) => {
+    res.json(await api.getMe(await auth(req)))
+  }))
+
+  // PUT /v1/me/appearance — replace the caller's presentation skin (Profile).
+  router.put('/me/appearance', wrap(async (req, res) => {
+    res.json({ appearance: await api.setAppearance(await auth(req), req.body ?? {}) })
+  }))
+
+  // PUT /v1/me/generatio — replace the caller's cross-cutting generation defaults (Preferences).
+  router.put('/me/generatio', wrap(async (req, res) => {
+    res.json({ generatio: await api.setGeneratio(await auth(req), req.body ?? {}) })
+  }))
+
+  // GET/PUT /v1/me/affines/:modusId — the caller's per-flow input defaults.
+  router.get('/me/affines/:modusId', wrap(async (req, res) => {
+    res.json({ affines: await api.getAffines(await auth(req), String(req.params.modusId)) })
+  }))
+  router.put('/me/affines/:modusId', wrap(async (req, res) => {
+    res.json({ affines: await api.setAffines(await auth(req), String(req.params.modusId), (req.body ?? {}).affines ?? {}) })
+  }))
 
   // POST /v1/studios — lease a hosted studio (auth required). Returns a `provisioning`
   // handle immediately; the pod boots in the background (observe via GET /v1/studios/:id
