@@ -1,0 +1,38 @@
+/* public feed — a masonry-ish media grid */
+.feed-grid{
+  columns:4 240px;         /* responsive masonry via CSS columns */
+  column-gap:14px;
+  margin-top:8px;
+}
+@media(max-width:900px){ .feed-grid{columns:2 180px} }
+@media(max-width:560px){ .feed-grid{columns:1} }
+
+.feed-tile{
+  break-inside:avoid;
+  margin:0 0 14px;
+  border:1px solid var(--hair);
+  border-radius:12px;
+  overflow:hidden;
+  background:var(--panel);
+  display:flex;flex-direction:column;
+}
+.feed-tile.skel{ height:230px; animation:feed-pulse 1.4s ease-in-out infinite }
+@keyframes feed-pulse{ 0%,100%{opacity:.5} 50%{opacity:.85} }
+
+.ft-media{ position:relative; background:var(--bg); line-height:0 }
+.ft-media img,.ft-media video{ width:100%; height:auto; display:block }
+.ft-fallback{
+  min-height:160px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:10px;color:var(--faint);padding:20px;line-height:1.5
+}
+.ft-fallback svg.lucide{width:26px;height:26px}
+.ft-fallback audio{width:100%}
+.ft-text{align-items:flex-start}
+.ft-text p{color:var(--muted);font-size:13px;line-height:1.6;margin:0;
+  display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
+
+.ft-foot{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 11px;font-family:var(--font-mono);font-size:10.5px;color:var(--faint)
+}
+.ft-by{color:var(--muted)}

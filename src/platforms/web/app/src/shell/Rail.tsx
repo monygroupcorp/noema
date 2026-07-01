@@ -13,7 +13,10 @@ interface NavLeaf { to: string; ico: string; label: string }
 interface NavSection { sec?: string; items: NavLeaf[] }
 
 const NAV: NavSection[] = [
-  { items: [{ to: '/app', ico: 'home', label: 'Home' }] },
+  { items: [
+    { to: '/app', ico: 'home', label: 'Home' },
+    { to: '/feed', ico: 'rss', label: 'Feed' },
+  ] },
   { sec: 'Make', items: [
     { to: '/chat', ico: 'message-square', label: 'Chat' },
     { to: '/canvas', ico: 'workflow', label: 'Canvas' },

@@ -38,6 +38,7 @@ import { Map } from './screens/Map';
 import { Onboard } from './screens/Onboard';
 import { Landing } from './screens/Landing';
 import { Ceremony } from './screens/Ceremony';
+import { Feed } from './screens/Feed';
 import { Doc } from './screens/Doc';
 import { Stub } from './screens/Stub';
 import aboutMd from './content/about.md?raw';
@@ -70,6 +71,7 @@ export function App() {
       <Route path="/collections/:id/export" element={<EditioExport />} />
       <Route path="/card" element={<Card />} />
       <Route path="/catalog" element={<Catalog />} />
+      <Route path="/feed" element={<Feed />} />
       <Route path="/projects" element={<Projects />} />
       <Route path="/projects/:id" element={<ProjectHub />} />
       <Route path="/run" element={<Run />} />
