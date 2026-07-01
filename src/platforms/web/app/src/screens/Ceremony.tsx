@@ -7,7 +7,10 @@ import { ceremony, type CeremonyStatus, type ContributePhase } from '../lib/cere
 import './landing.css';
 import './ceremony.css';
 
-const ENTROPY_TARGET = 240; // mouse samples before we consider the seed strong enough
+// Mouse samples gathered before the seed counts as "strong enough". This is
+// belt-and-suspenders on top of a 32-byte CSPRNG draw (the real entropy), so a
+// brief wiggle is plenty — no need to make people scrub for seconds.
+const ENTROPY_TARGET = 90;
 
 // The trust story, in the same three-node diagram grammar as the Landing architecture
 // section: randomness folds in, the chain compounds, one honest link secures it forever.
@@ -17,8 +20,8 @@ const TRUST_NODES = [
     icon: 'shuffle',
     title: 'Your randomness',
     items: [
-      { text: 'one command, ~2 minutes' },
-      { text: 'entropy generated on your machine' },
+      { text: 'a mouse-wiggle + a secret' },
+      { text: 'entropy made in your browser' },
       { text: 'never saved, never sent', mono: true },
     ],
   },
