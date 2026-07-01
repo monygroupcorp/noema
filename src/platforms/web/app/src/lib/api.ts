@@ -2,7 +2,7 @@
 // Phase 0: structure + a few live calls; screens still mostly use local mock data
 // until each is wired. Dev server proxies /v1 + /api to the backend.
 
-import type { Editio, FeedFilter, PublishRequest } from './editio';
+import type { Editio, FeedFilter, FeedItem, PublishRequest } from './editio';
 
 export interface FlowSummary { id: string; nomen?: string; versio?: string; categoria?: unknown }
 export interface JsonSchema {
@@ -75,7 +75,7 @@ export const api = {
     if (filter.destination) q.set('destination', filter.destination);
     if (filter.limit != null) q.set('limit', String(filter.limit));
     const qs = q.toString();
-    return fetch(`/v1/feed${qs ? `?${qs}` : ''}`).then(j<{ feed: Editio[] }>);
+    return fetch(`/v1/feed${qs ? `?${qs}` : ''}`).then(j<{ feed: FeedItem[] }>);
   },
   // POST /v1/editiones — publish an artifact. Public surfaces return a `pending`
   // edition (async moderation) → it goes live once the worker settles it.

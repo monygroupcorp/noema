@@ -30,6 +30,16 @@ export interface FeedFilter {
   limit?: number;
 }
 
+// One entry from GET /v1/feed — the published edition plus the referenced artifact's
+// produced output (an Actum's exitus media), so a tile renders without a second fetch.
+// Mirrors the backend FeedItem (src/allocutio/api/types.ts).
+export interface FeedItem {
+  editionId: string;
+  artifact: ArtifactRef;
+  output?: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface PublishRequest {
   artifact: ArtifactRef;
   destination: string;                        // 'feed' for the first cut
