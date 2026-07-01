@@ -532,6 +532,30 @@ const CollectionEnvelopeSchema: JsonSchema = {
   required: ['collection'],
 }
 
+/** One generated piece in the curation queue (`GET /v1/collectiones/:id/pieces`). */
+const CollectionPieceSchema: JsonSchema = {
+  type: 'object',
+  description: "A generated collection piece — the Actum's output media + stamped attributes + review state.",
+  properties: {
+    actumId: { type: 'string', description: 'The piece Actum id (pass to approve/reject).' },
+    review: { type: 'string', enum: ['pending', 'approved', 'rejected', 'none'], description: 'Review state (none = review not enabled).' },
+    output: { type: 'object', additionalProperties: true, description: "The Actum's exitus (media URL under its declared Porta key)." },
+    attributes: {
+      type: 'array',
+      description: 'The trait attributes stamped on this piece.',
+      items: { type: 'object', properties: { trait_type: { type: 'string' }, value: { type: 'string' } }, required: ['trait_type', 'value'] },
+    },
+  },
+  required: ['actumId', 'review'],
+}
+
+/** The `{ pieces }` envelope returned by `GET /v1/collectiones/:id/pieces`. */
+const CollectionPiecesSchema: JsonSchema = {
+  type: 'object',
+  properties: { pieces: { type: 'array', items: CollectionPieceSchema } },
+  required: ['pieces'],
+}
+
 /** The `{ collections }` envelope returned by `GET /v1/collectiones`. */
 const CollectionsListSchema: JsonSchema = {
   type: 'object',
@@ -854,6 +878,13 @@ export const API_CONTRACT: ApiContract = {
       summary: 'Imagined-vs-realized rarity table for a Collection — target shares (from trait weights) vs actual shares (from produced pieces). Owner-scoped.',
       auth: true,
       response: RarityEnvelopeSchema,
+    },
+    {
+      method: 'GET',
+      path: '/collectiones/:id/pieces',
+      summary: 'The curation queue — a Collection\'s generated pieces (media + stamped attributes + review state), filtered by ?review=pending|approved|rejected|all (default pending). Owner-scoped.',
+      auth: true,
+      response: CollectionPiecesSchema,
     },
     {
       method: 'POST',

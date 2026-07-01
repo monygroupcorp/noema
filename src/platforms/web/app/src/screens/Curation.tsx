@@ -1,76 +1,127 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { COLLECTIONS } from '../lib/collections';
+import { api, type Collection, type CollectionPiece } from '../lib/api';
+import { mediaFromOutput } from '../lib/media';
+import { collTile } from '../lib/collections';
 
-// Curation (editio-curation-spec.md, render noema-editio-curation.png) — approve the supply into
-// mint. Every piece is the human's call; AI only FLAGS & ORDERS, never auto-decides. Private &
-// reversible — nothing leaves your machine until you mint.
-type PieceState = 'kept' | 'rejected' | 'pending';
-const TRAITS = [
-  { axis: 'Headwear', title: 'Wizard hat', rarity: '17%' },
-  { axis: 'Background', title: 'Storm', rarity: '25%' },
-  { axis: 'Robe', title: 'Cathedral cape', rarity: '8%' },
-  { axis: 'Aura', title: 'Rare gold', rarity: '8%' },
-];
+// Curation — approve the supply. Every piece is the human's call (approve counts it toward the
+// collection; reject rerolls a fresh one). Private & reversible — nothing leaves until export.
 
 export function Curation() {
   const { id } = useParams();
-  const c = COLLECTIONS.find((x) => x.id === id) ?? COLLECTIONS[0];
-  const [reviewed, setReviewed] = useState(412);
-  const [kept, setKept] = useState(398);
-  const [rejected, setRejected] = useState(14);
-  const decide = (keep: boolean) => { setReviewed((n) => n + 1); keep ? setKept((n) => n + 1) : setRejected((n) => n + 1); };
-  const strip: PieceState[] = ['kept', 'rejected', 'kept', 'kept', 'pending', 'pending', 'pending', 'pending', 'pending', 'pending', 'pending'];
+  const [col, setCol] = useState<Collection | null>(null);
+  const [queue, setQueue] = useState<CollectionPiece[] | null>(null);
+  const [idx, setIdx] = useState(0);
+  const [kept, setKept] = useState(0);
+  const [rejected, setRejected] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`}>{c.name}</Link> <span className="sep">/</span> <b>curation</b></span>;
+  useEffect(() => {
+    if (!id) return;
+    let live = true;
+    Promise.all([api.getCollection(id).catch(() => null), api.listCollectionPieces(id, 'pending')])
+      .then(([c, p]) => { if (!live) return; if (c) setCol(c.collection); setQueue(p.pieces); })
+      .catch((e) => { if (live) setErr(e instanceof Error ? e.message : String(e)); });
+    return () => { live = false; };
+  }, [id]);
+
+  const current = queue?.[idx];
+
+  const decide = useCallback(async (keep: boolean) => {
+    if (!id || !current || busy) return;
+    setBusy(true); setErr(null);
+    try {
+      await (keep ? api.approvePiece(id, current.actumId) : api.rejectPiece(id, current.actumId));
+      keep ? setKept((n) => n + 1) : setRejected((n) => n + 1);
+      setIdx((i) => i + 1);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  }, [id, current, busy]);
+
+  // K = keep, R = reject.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return;
+      if (e.key === 'k' || e.key === 'K') decide(true);
+      if (e.key === 'r' || e.key === 'R') decide(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [decide]);
+
+  const name = col?.nomen || 'collection';
+  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`}>{name}</Link> <span className="sep">/</span> <b>curation</b></span>;
+  const reviewed = kept + rejected;
+  const totalQ = queue ? queue.length : 0;
 
   return (
     <AppShell title={crumb}>
       <div className="page"><div className="pw wide">
         <div className="pagehead">
-          <div><h1>Curate the supply</h1><div className="sub mono">every piece is your call · AI only flags &amp; orders</div></div>
+          <div><h1>Curate the supply</h1><div className="sub mono">approve counts a piece · reject rerolls a fresh one</div></div>
           <div className="right"><span className="badge">private · not minted</span></div>
         </div>
 
-        <div className="cu-prog">
-          <span className="mono"><b>{reviewed}</b> / 1,944 reviewed</span>
-          <div className="cj-bar"><span style={{ width: `${(reviewed / 1944) * 100}%` }} /></div>
-          <span className="mono"><span className="good">{kept} kept</span> · <span className="bad">{rejected} rejected</span></span>
-        </div>
+        {err && <div className="warn">{err}</div>}
 
-        <div className="cu-main">
-          <div className="cu-piece">
-            <span className="cu-img" style={{ background: 'radial-gradient(120% 100% at 40% 30%, #3b4f78, #1b2740)' }} />
-            <div className="cu-meta mono">#0413 · seed 0x4af…</div>
-            <div className="cu-flag mono">✦ AI flag: low contrast — likely fine, your call</div>
-          </div>
-          <div className="cu-side">
-            <div className="noema-kicker">traits on this piece</div>
-            <div className="cu-traits">
-              {TRAITS.map((t) => (
-                <div key={t.axis} className="cu-trow"><span className="cu-axis">{t.axis}</span><span className="cu-tv"><b>{t.title}</b><span className="cu-rar mono">{t.rarity}</span></span></div>
-              ))}
-            </div>
-            <div className="cu-actions">
-              <button className="cu-keep" onClick={() => decide(true)}>✓ Keep <span className="kbd">K</span></button>
-              <button className="cu-reject" onClick={() => decide(false)}>✕ Reject <span className="kbd">R</span></button>
-            </div>
-            <div className="cu-nav mono"><button className="lnk">← prev</button><button className="lnk">skip →</button></div>
-          </div>
-        </div>
+        {queue === null && !err && <div className="empty"><div className="t">Loading review queue…</div></div>}
 
-        <div className="cu-supply">
-          <div className="cu-supply-head"><span className="noema-kicker">supply · all 1,944</span><span className="mono cu-order">✦ ordered: AI-flagged first</span></div>
-          <div className="cu-strip">
-            {strip.map((s, i) => <span key={i} className={`cu-chip ${s}`}>{s === 'kept' ? '✓' : s === 'rejected' ? '✕' : '?'}</span>)}
-            <span className="cu-more mono">+1,932</span>
+        {queue !== null && totalQ === 0 && (
+          <div className="empty">
+            <div className="t">Nothing awaiting review</div>
+            <div className="s">This collection auto-approves pieces (review isn’t enabled), or you’ve reviewed them all.</div>
+            <Link className="btn accent" to={`/collections/${id}/export`}>Go to export →</Link>
           </div>
-        </div>
+        )}
+
+        {queue !== null && totalQ > 0 && (
+          <>
+            <div className="cu-prog">
+              <span className="mono"><b>{reviewed}</b> / {totalQ} reviewed</span>
+              <div className="cj-bar"><span style={{ width: `${(reviewed / totalQ) * 100}%` }} /></div>
+              <span className="mono"><span className="good">{kept} kept</span> · <span className="bad">{rejected} rerolled</span></span>
+            </div>
+
+            {current ? (
+              <div className="cu-main">
+                <div className="cu-piece">
+                  {(() => { const m = mediaFromOutput(current.output);
+                    return m?.kind === 'image'
+                      ? <img className="cu-img" src={m.url} alt="" />
+                      : <span className="cu-img" style={{ background: collTile(current.actumId) }} />; })()}
+                  <div className="cu-meta mono">{current.actumId.slice(0, 12)}…</div>
+                </div>
+                <div className="cu-side">
+                  <div className="noema-kicker">traits on this piece</div>
+                  <div className="cu-traits">
+                    {(current.attributes ?? []).map((t) => (
+                      <div key={t.trait_type} className="cu-trow"><span className="cu-axis">{t.trait_type}</span><span className="cu-tv"><b>{t.value}</b></span></div>
+                    ))}
+                    {(!current.attributes || current.attributes.length === 0) && <div className="cu-trow mono" style={{ color: 'var(--faint)' }}>no stamped attributes</div>}
+                  </div>
+                  <div className="cu-actions">
+                    <button className="cu-keep" disabled={busy} onClick={() => decide(true)}>✓ Keep <span className="kbd">K</span></button>
+                    <button className="cu-reject" disabled={busy} onClick={() => decide(false)}>✕ Reject <span className="kbd">R</span></button>
+                  </div>
+                  <div className="cu-nav mono">{idx + 1} of {totalQ} in the queue</div>
+                </div>
+              </div>
+            ) : (
+              <div className="empty">
+                <div className="t">Queue cleared ✓</div>
+                <div className="s">{kept} kept, {rejected} rerolled. Rerolled pieces regenerate and return here.</div>
+                <Link className="btn accent" to={`/collections/${id}/export`}>Go to export →</Link>
+              </div>
+            )}
+          </>
+        )}
 
         <div className="cu-foot">
-          <span className="mono"><span className="hemi2 dashed" /> Reviewed locally · nothing leaves your machine until you mint</span>
-          <Link className="btn accent" to={`/collections/${id}/export`}>rarity finalizes when you lock supply →</Link>
+          <span className="mono"><span className="hemi2 dashed" /> Reviewed locally · nothing leaves your machine until you export</span>
+          <Link className="btn ghost" to={`/collections/${id}/run`}>← run</Link>
         </div>
       </div></div>
     </AppShell>

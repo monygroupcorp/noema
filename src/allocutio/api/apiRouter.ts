@@ -65,6 +65,7 @@ export interface ApiFacade {
   cancelCollection(auctor: AuctorKey, id: string): Promise<Collection>
   approveCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
   rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
+  listCollectionPieces(auctor: AuctorKey, id: string, review?: 'pending' | 'approved' | 'rejected' | 'all'): Promise<import('./types.js').CollectionPiece[]>
   publish(auctor: AuctorKey, opts: PublishOpts): Promise<Edition>
   feed(filter?: FeedFilter): Promise<FeedItem[]>
   retractEdition(auctor: AuctorKey, id: string): Promise<Edition>
@@ -234,6 +235,13 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   // GET /v1/collectiones/:id/rarity — imagined-vs-realized rarity table (owner-scoped).
   router.get('/collectiones/:id/rarity', wrap(async (req, res) => {
     res.json({ rarity: await api.getCollectionRarity(await auth(req), String(req.params.id)) })
+  }))
+
+  // GET /v1/collectiones/:id/pieces — the curation queue. ?review=pending|approved|rejected|all (default pending).
+  router.get('/collectiones/:id/pieces', wrap(async (req, res) => {
+    const r = String(req.query.review ?? 'pending')
+    const review = (['pending', 'approved', 'rejected', 'all'].includes(r) ? r : 'pending') as 'pending' | 'approved' | 'rejected' | 'all'
+    res.json({ pieces: await api.listCollectionPieces(await auth(req), String(req.params.id), review) })
   }))
 
   // POST /v1/collectiones/:id/extend — raise the target + fire another batch (incremental batches).

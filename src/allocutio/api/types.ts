@@ -82,6 +82,21 @@ export interface Collection {
 }
 
 /**
+ * CollectionPiece — one generated piece of a Collection, for the curation queue.
+ * The Actum's produced output (media, so a client renders it) + its stamped trait
+ * attributes + its review state. `review` is 'pending' (awaiting review), 'approved',
+ * 'rejected' (rerolled), or 'none' (review not enabled → auto-counted).
+ */
+export interface CollectionPiece {
+  actumId: string
+  review: 'pending' | 'approved' | 'rejected' | 'none'
+  /** The Actum's exitus (media URL under its declared Porta key), when resolvable. */
+  output?: Record<string, unknown>
+  /** The trait attributes stamped on this piece. */
+  attributes?: Array<{ trait_type: string; value: string }>
+}
+
+/**
  * Edition — the public projection of an Editio (a publication record). JSON-safe;
  * `createdAt`/`updatedAt` are ISO-8601. An Edition references a canonical
  * artifact and records where + under what policy it was put forth.
