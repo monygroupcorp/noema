@@ -155,8 +155,8 @@ app.get('/', (_req, res) => {
 <header><h1>NOEMA widget sandbox</h1>
 <div class="sub">The real /widget surface with fake data + a mock wallet — click <b>Run</b> to watch the 402 → sign → result flow.</div></header>
 <div class="cols">
-  <div class="card agent"><h2>StationThis.init — per-agent widget (camel42)</h2><div id="agent" class="mount"></div></div>
-  <div class="card gallery"><h2>StationThis.initGallery — collection gallery</h2><div id="gallery" class="mount"></div></div>
+  <div class="card agent"><h2>Noema.init — per-agent widget (camel42)</h2><div id="agent" class="mount"></div></div>
+  <div class="card gallery"><h2>Noema.initGallery — collection gallery</h2><div id="gallery" class="mount"></div></div>
 </div>
 <div class="links">
   Raw views:
@@ -178,9 +178,9 @@ app.get('/', (_req, res) => {
 </script>
 <script src="/widget/sdk.js"></script>
 <script>
-  StationThis.init({ agentId: 'camel42', container: document.getElementById('agent'),
+  Noema.init({ agentId: 'camel42', container: document.getElementById('agent'),
     getProvider: function () { return mockWallet; }, onEvent: function (e) { console.log('[agent]', e); } });
-  StationThis.initGallery({ collectionAddress: '0xdemo', container: document.getElementById('gallery') });
+  Noema.initGallery({ collectionAddress: '0xdemo', container: document.getElementById('gallery') });
 </script>
 </body></html>`)
 })

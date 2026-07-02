@@ -2,8 +2,8 @@
 // widgetRouter — the `/widget` embed surface (ADR-0011 §7).
 // =============================================================================
 //
-// Mounts the human-facing embed surface the `StationThis` SDK drives:
-//   GET /widget/sdk.js                       — the browser SDK (window.StationThis)
+// Mounts the human-facing embed surface the `Noema` SDK drives:
+//   GET /widget/sdk.js                       — the browser SDK (window.Noema)
 //   GET /widget/:agentId                     — a chrome-less, themed per-agent view
 //   GET /widget/gallery/:collectionAddress   — a chrome-less recent-creations gallery
 //

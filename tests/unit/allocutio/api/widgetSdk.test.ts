@@ -4,8 +4,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { WIDGET_SDK_JS } from '../../../../src/allocutio/api/widgetSdk.js'
 
-test('exposes window.StationThis with init + initGallery', () => {
-  assert.match(WIDGET_SDK_JS, /global\.StationThis = StationThis/)
+test('exposes window.Noema with init + initGallery', () => {
+  assert.match(WIDGET_SDK_JS, /global\.Noema = Noema/)
   assert.match(WIDGET_SDK_JS, /init:\s*function/)
   assert.match(WIDGET_SDK_JS, /initGallery:\s*function/)
 })
