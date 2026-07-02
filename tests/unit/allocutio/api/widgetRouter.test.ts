@@ -15,7 +15,10 @@ function legatus(over: Partial<Legatus>): Legatus {
 function app(over: Partial<WidgetRouterDeps> = {}, capture?: { filter?: FeedFilter }) {
   const rawFeed = over.feed ?? (async () => [])
   const deps: WidgetRouterDeps = {
-    legati: over.legati ?? { findByAgentId: async (id) => (id === 'camel42' ? legatus({}) : null) },
+    legati: over.legati ?? {
+      findByAgentId: async (id) => (id === 'camel42' ? legatus({}) : null),
+      listByCollection: async (addr) => (addr.toLowerCase() === '0xcollection' ? [legatus({ adapter: '0xcollection' })] : []),
+    },
     feed: async (filter) => { if (capture) capture.filter = filter; return rawFeed(filter) },
     appearance: over.appearance ?? (async () => undefined),
     frameAncestors: over.frameAncestors ?? ['https://camelcabal.fun'],
@@ -62,24 +65,35 @@ test('GET /widget/:agentId unknown agent → 404 chrome-less page (still framed)
 })
 
 test('GET /widget/:agentId revoked agent → 404', async () => {
-  const a = app({ legati: { findByAgentId: async () => legatus({ status: 'revoked' }) } })
+  const a = app({ legati: { findByAgentId: async () => legatus({ status: 'revoked' }), listByCollection: async () => [] } })
   const res = await request(a).get('/widget/camel42')
   assert.equal(res.status, 404)
 })
 
-test('GET /widget/gallery/:addr → recent public feed (not author-scoped)', async () => {
+test('GET /widget/gallery/:addr → scoped to the collection\'s agents', async () => {
   const cap: { filter?: FeedFilter } = {}
   const a = app({ feed: async () => [imgItem('https://cdn.test/g.png')] }, cap)
-  const res = await request(a).get('/widget/gallery/0xABC')
+  const res = await request(a).get('/widget/gallery/0xCOLLECTION')
   assert.equal(res.status, 200)
   assert.match(res.text, /https:\/\/cdn\.test\/g\.png/)
-  assert.equal(cap.filter?.author, undefined)                    // gallery is cross-author
+  // feed was scoped to the collection's agent animaIds (not the whole platform feed).
+  assert.deepEqual(cap.filter?.authorAnimaIds, ['anima-1'])
+  assert.equal(cap.filter?.author, undefined)
+})
+
+test('GET /widget/gallery/:addr → unknown collection renders empty (no cross-collection leak)', async () => {
+  let feedCalled = false
+  const a = app({ feed: async () => { feedCalled = true; return [] } })
+  const res = await request(a).get('/widget/gallery/0xUNKNOWN')
+  assert.equal(res.status, 200)
+  assert.match(res.text, /No creations in this collection/)
+  assert.equal(feedCalled, false)                                // no agents → no feed query at all
 })
 
 test('route ordering: /sdk.js and /gallery are not swallowed by /:agentId', async () => {
   // If /:agentId caught these, findByAgentId('sdk.js') → 404. Assert it did NOT.
   const seen: string[] = []
-  const a = app({ legati: { findByAgentId: async (id) => { seen.push(id); return null } } })
+  const a = app({ legati: { findByAgentId: async (id) => { seen.push(id); return null }, listByCollection: async () => [] } })
   await request(a).get('/widget/sdk.js')
   await request(a).get('/widget/gallery/0xabc')
   assert.deepEqual(seen, [])                                     // neither hit the agent resolver

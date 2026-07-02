@@ -23,6 +23,11 @@ export class MongoLegatus implements LegatusStore {
     return doc ? fromDoc(doc as Record<string, unknown>) : null
   }
 
+  async listByCollection(adapter: string): Promise<Legatus[]> {
+    const docs = await this.col.find({ adapter: adapter.toLowerCase() }).toArray()
+    return docs.map((d) => fromDoc(d as Record<string, unknown>))
+  }
+
   async create(
     input: Omit<Legatus, 'id' | 'natum' | 'status'> & { status?: Legatus['status'] },
   ): Promise<Legatus> {

@@ -78,3 +78,16 @@ test('findByAgentId / findById return null when absent', async () => {
   assert.equal(await store.findByAgentId('nope'), null)
   assert.equal(await store.findById('nope'), null)
 })
+
+test('listByCollection returns every agent of one adapter/collection (case-insensitive)', async () => {
+  const A = '0x' + 'c'.repeat(40)
+  const B = '0x' + 'd'.repeat(40)
+  await store.create({ ...input('col-a1'), adapter: A })
+  await store.create({ ...input('col-a2'), adapter: A })
+  await store.create({ ...input('col-b1'), adapter: B })
+  const inA = await store.listByCollection(A.toUpperCase())    // uppercased → still matches
+  assert.deepEqual(new Set(inA.map((l) => l.agentId)), new Set(['col-a1', 'col-a2']))
+  const inB = await store.listByCollection(B)
+  assert.deepEqual(inB.map((l) => l.agentId), ['col-b1'])
+  assert.deepEqual(await store.listByCollection('0x' + 'e'.repeat(40)), [])
+})
