@@ -32,3 +32,13 @@ test('parent→iframe posts are pinned to iframeOrigin, never "*"', () => {
 test('derives baseUrl from its own script origin (must match provisioning origin)', () => {
   assert.match(WIDGET_SDK_JS, /script\[src\*="sdk\.js"\]/)
 })
+
+test('x402 v2: signs the iframe PaymentRequirements → returns PAYMENT_SIGNED (no session POST)', () => {
+  // PAYMENT_REQUIRED routes to the sign-only handler.
+  assert.match(WIDGET_SDK_JS, /PAYMENT_REQUIRED'\)\s*\{ _signX402Payment\(msg\.paymentRequired\)/)
+  // It signs EIP-3009 and posts the header back, rather than POSTing to a session endpoint.
+  assert.match(WIDGET_SDK_JS, /TransferWithAuthorization/)
+  assert.match(WIDGET_SDK_JS, /type: 'PAYMENT_SIGNED', header: header/)
+  // The legacy /session/x402 payment round-trip is gone.
+  assert.doesNotMatch(WIDGET_SDK_JS, /\/session\/x402/)
+})

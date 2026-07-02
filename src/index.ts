@@ -895,6 +895,10 @@ async function main(): Promise<void> {
     legati: ring.legati,
     feed: (filter) => crystalApi.feed(filter),
     appearance: (owner) => crystalApi.publicAppearance(owner),
+    // Interactive run panel: resolve the agent’s Modus + quote its price (§5 x402 pay-per-call).
+    modorum: ring.modorum,
+    quoteImpetus: async (modusId) => BigInt((await crystalApi.quote(SYSTEM_AUCTOR, { modusId }, {})).impetus),
+    x402Config,
     frameAncestors: widgetFrameAncestors,
   }))
 
