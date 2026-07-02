@@ -33,6 +33,12 @@ test('derives baseUrl from its own script origin (must match provisioning origin
   assert.match(WIDGET_SDK_JS, /script\[src\*="sdk\.js"\]/)
 })
 
+test('connect-wallet: CONNECT_WALLET → eth_requestAccounts → WALLET_AVAILABLE (real, no backend)', () => {
+  assert.match(WIDGET_SDK_JS, /CONNECT_WALLET'\)\s*\{ _connectWallet\(\)/)
+  assert.match(WIDGET_SDK_JS, /eth_requestAccounts/)
+  assert.match(WIDGET_SDK_JS, /type: 'WALLET_AVAILABLE', address: a\[0\]/)
+})
+
 test('x402 v2: signs the iframe PaymentRequirements → returns PAYMENT_SIGNED (no session POST)', () => {
   // PAYMENT_REQUIRED routes to the sign-only handler.
   assert.match(WIDGET_SDK_JS, /PAYMENT_REQUIRED'\)\s*\{ _signX402Payment\(msg\.paymentRequired\)/)

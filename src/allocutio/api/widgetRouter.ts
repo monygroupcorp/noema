@@ -43,6 +43,10 @@ export interface WidgetRouterDeps {
   x402Config?: X402Config
   /** CSP `frame-ancestors` allowlist — the origins allowed to embed the widgets. */
   frameAncestors: string[]
+  /** Show the identity SIGN-IN affordance (challenge→session). Requires the host to serve
+   *  the `/widget/:agentId/auth/wallet/*` endpoints. Default OFF: prod serves none, so the
+   *  widget shows only real connect-wallet (no session) — no way to ship a spoofable login. */
+  sessionAuth?: boolean
   /** How many feed tiles to render (default 24). */
   limit?: number
 }
@@ -129,8 +133,14 @@ function page(opts: { title: string; appearance?: Appearance; header?: string; b
   .kicker { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.14em; color:var(--accent); }
   .rule { height:1px; background:linear-gradient(90deg,var(--accent),transparent); margin:10px 0 14px; opacity:.5; }
   .hdr { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+  .hmeta { min-width:0; }
   .avatar { width:44px; height:44px; border-radius:var(--radius); background:var(--surface-2) center/cover; border:1px solid var(--border-strong); flex:0 0 auto; }
   .hname { font-weight:600; font-size:15px; }
+  .login { margin-left:auto; display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:11px; color:var(--text-muted); }
+  .lo-btn { font-family:var(--mono); font-size:11px; padding:6px 12px; border-radius:999px; border:1px solid var(--accent); background:color-mix(in oklab,var(--accent) 14%,transparent); color:var(--text); cursor:pointer; }
+  .lo-btn:hover { background:color-mix(in oklab,var(--accent) 22%,transparent); }
+  .lo-dot { width:7px; height:7px; border-radius:999px; background:var(--success); box-shadow:0 0 6px var(--success); flex:0 0 auto; }
+  .lo-badge { font-size:9px; text-transform:uppercase; letter-spacing:.08em; padding:2px 6px; border-radius:999px; background:var(--accent); color:#08090A; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; }
   .tile { position:relative; border-radius:var(--radius); overflow:hidden; background:var(--surface-2); aspect-ratio:1/1; cursor:pointer; border:1px solid var(--border); transition:border-color .12s cubic-bezier(0.16,1,0.3,1); }
   .tile img, .tile video { width:100%; height:100%; object-fit:cover; display:block; }
@@ -162,11 +172,16 @@ function page(opts: { title: string; appearance?: Appearance; header?: string; b
 <script>${opts.script}</script></body></html>`
 }
 
-/** The agent header — avatar + name + a NOEMA kicker/rule. */
-function agentHeader(agentId: string, appearance?: Appearance): string {
+/** The agent header — avatar + name + a NOEMA kicker/rule, and the login pill on the right.
+ *  `ownerAddress` (public on-chain) lets the client flip an "owner" badge; `sessionAuth`
+ *  toggles the sign-in step (off → connect-wallet only, so prod can't ship a spoofable login). */
+function agentHeader(agentId: string, appearance: Appearance | undefined, ownerAddress: string, sessionAuth: boolean): string {
   const avatarUrl = safeUrl(appearance?.avatarUrl)
   const avatar = `<div class="avatar"${avatarUrl ? ` style="background-image:url('${esc(avatarUrl)}')"` : ''}></div>`
-  return `<div class="hdr">${avatar}<div><div class="kicker">Agent · on-chain</div><div class="hname">${esc(agentId)}</div></div></div><div class="rule"></div>`
+  const owner = /^0x[0-9a-fA-F]{40}$/.test(ownerAddress) ? ownerAddress.toLowerCase() : ''
+  const login = `<div id="login" class="login" data-owner="${esc(owner)}" data-session="${sessionAuth ? '1' : '0'}"></div>`
+  return `<div class="hdr">${avatar}<div class="hmeta"><div class="kicker">Agent · on-chain</div>` +
+    `<div class="hname">${esc(agentId)}</div></div>${login}</div><div class="rule"></div>`
 }
 
 // The in-iframe bridge: announce readiness, and lift clicks to the parent lightbox.
@@ -177,6 +192,31 @@ const IFRAME_BRIDGE = `(function(){
     if (!t) return;
     try { parent.postMessage({ type:'GALLERY_LIGHTBOX', url:t.getAttribute('data-url') }, '*'); } catch(e){}
   });
+})();`
+
+// The login bridge (header pill). Connect-wallet is REAL (the SDK does eth_requestAccounts →
+// WALLET_AVAILABLE); the "owner" badge is a client-side compare against the agent's on-chain
+// owner. Sign-in (WALLET_AUTH_REQUEST → SESSION_READY) only renders when data-session=1 AND the
+// host serves the auth endpoints — prod serves none, so no spoofable login can ship.
+const LOGIN_JS = `(function(){
+  var el=document.getElementById('login'); if(!el) return;
+  var owner=(el.getAttribute('data-owner')||'').toLowerCase(), sessionAuth=el.getAttribute('data-session')==='1';
+  var addr=null, signed=false;
+  function short(a){ return a.slice(0,6)+'…'+a.slice(-4); }
+  function ownerBadge(a){ return owner && a.toLowerCase()===owner ? ' <span class="lo-badge">owner</span>' : ''; }
+  function render(){
+    if(signed && addr){ el.innerHTML='<span class="lo-dot"></span>Signed in · '+short(addr)+ownerBadge(addr); return; }
+    if(addr){ el.innerHTML='<span class="lo-dot"></span>'+short(addr)+ownerBadge(addr)+(sessionAuth?' <button class="lo-btn" id="lo-signin">Sign in</button>':'');
+      var si=document.getElementById('lo-signin'); if(si) si.addEventListener('click',function(){ parent.postMessage({type:'WALLET_AUTH_REQUEST'},'*'); }); return; }
+    el.innerHTML='<button class="lo-btn" id="lo-connect">Connect wallet</button>';
+    document.getElementById('lo-connect').addEventListener('click',function(){ parent.postMessage({type:'CONNECT_WALLET'},'*'); });
+  }
+  window.addEventListener('message',function(e){ if(e.source!==window.parent) return; var m=e.data; if(!m||!m.type) return;
+    if(m.type==='WALLET_AVAILABLE'){ addr=m.address; render(); }
+    else if(m.type==='WALLET_DISCONNECTED'){ addr=null; signed=false; render(); }
+    else if(m.type==='SESSION_READY'){ signed=true; render(); }
+    else if(m.type==='WALLET_AUTH_ERROR'){ signed=false; render(); } });
+  render();
 })();`
 
 // One form control per Modus `aditus` Porta. Text → textarea; int/float → number;
@@ -371,7 +411,8 @@ export function createWidgetRouter(deps: WidgetRouterDeps): Router {
     frame(res)
     res.status(200).send(page({
       title: agentId, ...(appearance ? { appearance } : {}),
-      header: agentHeader(agentId, appearance), body: runPanel + gallery, script,
+      header: agentHeader(agentId, appearance, legatus.ownerAddress, deps.sessionAuth ?? false),
+      body: runPanel + gallery, script: LOGIN_JS + script,
     }))
   })
 
