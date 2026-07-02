@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Signum, Signa, Signorum, Reservatio, Transferatio, SignumForma } from '../types/significandi.js'
+import { transferVia } from './transfer.js'
 
 export class MemorySignorum implements Signorum {
   private readonly store = new Map<string, Signum>()
@@ -93,27 +94,13 @@ export class MemorySignorum implements Signorum {
     return { ok: true, signaIds: selected, locked: covered }
   }
 
-  async transfer(
+  transfer(
     from: { animaId: string } | { commitment: string },
     to: { animaId: string },
     amount: bigint,
     opts?: { auctor?: string; forma?: SignumForma; testis?: string; contextId?: string },
   ): Promise<Transferatio> {
-    if (amount <= 0n) return { ok: true }
-    const actumId = `transfer:${randomUUID()}`
-    const reserved = await this.reserve(from, amount, actumId)
-    if (!reserved.ok) return { ok: false, available: reserved.available }
-    // Debit the sender for exactly `amount` (overshoot refunded), then credit the recipient.
-    await this.settle(reserved.signaIds, amount, actumId)
-    await this.issue({
-      animaId: to.animaId,
-      forma: opts?.forma ?? 'minted',
-      valor: amount,
-      auctor: opts?.auctor ?? 'transfer',
-      ...(opts?.testis ? { testis: opts.testis } : {}),
-      ...(opts?.contextId ? { contextId: opts.contextId } : {}),
-    })
-    return { ok: true }
+    return transferVia(this, from, to, amount, opts)
   }
 
   async release(signaIds: string[]): Promise<void> {
