@@ -190,6 +190,10 @@ export interface MeView {
   // Per-provider connect state. Absent (undefined) or all-'absent' when the store is
   // unconfigured server-side — never carries the token itself.
   secrets?: Record<SecretProvider, 'connected' | 'absent'>;
+  // Whether this deployment can store BYO secrets at all. false → connecting is unavailable
+  // here (SECRETA_MASTER_KEY unset); hide/disable the panel proactively. Older servers omit it
+  // (undefined) → treat as available and fall back to the reactive SecretsUnavailableError path.
+  secretsAvailable?: boolean;
 }
 
 // Result of connecting/disconnecting a BYO secret (`PUT/DELETE /v1/me/secrets/:provider`).

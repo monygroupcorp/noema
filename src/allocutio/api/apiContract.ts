@@ -403,6 +403,16 @@ const GeneratioSchema: JsonSchema = {
 }
 
 /** The response body for `GET /v1/me` — the caller's account settings. */
+const SecretPresenceSchema: JsonSchema = {
+  type: 'object',
+  description: 'BYO gated-origin credential connect state, per provider.',
+  properties: {
+    civitai: { type: 'string', enum: ['connected', 'absent'], description: 'Civitai token connect state.' },
+    huggingface: { type: 'string', enum: ['connected', 'absent'], description: 'HuggingFace token connect state.' },
+  },
+  required: ['civitai', 'huggingface'],
+}
+
 const MeViewSchema: JsonSchema = {
   type: 'object',
   description: "The caller's owner-keyed account settings — appearance + generation defaults + verb bindings.",
@@ -410,8 +420,34 @@ const MeViewSchema: JsonSchema = {
     appearance: AppearanceSchema,
     generatio: GeneratioSchema,
     bindings: { type: 'array', items: BindResponseSchema, description: 'The verb→flow overrides the owner has set.' },
+    secrets: SecretPresenceSchema,
+    secretsAvailable: { type: 'boolean', description: 'Whether this deployment can store BYO secrets (a secret store is wired). false → connecting is unavailable here; hide/disable the panel.' },
   },
-  required: ['bindings'],
+  required: ['bindings', 'secrets', 'secretsAvailable'],
+}
+
+/** The request body for `PUT /v1/me/secrets/:provider`. */
+const PutSecretRequestSchema: JsonSchema = {
+  type: 'object',
+  description: 'Connect a BYO gated-origin credential. The token is sealed at rest at once and never echoed back.',
+  properties: {
+    token: { type: 'string', description: 'The provider API token/key (Civitai key or HuggingFace token).' },
+    idleDays: { type: 'number', description: 'Idle-expiry window in days (default 90). The secret is forgotten after this long without a real use.' },
+  },
+  required: ['token'],
+}
+
+/** The response body for `PUT/DELETE /v1/me/secrets/:provider`. */
+const SecretViewSchema: JsonSchema = {
+  type: 'object',
+  description: 'Connect/disconnect result. Never includes the token.',
+  properties: {
+    provider: { type: 'string', enum: ['civitai', 'huggingface'], description: 'The provider affected.' },
+    status: { type: 'string', enum: ['connected', 'absent'], description: 'The resulting connect state.' },
+    expiresAt: { type: 'string', description: 'Idle-expiry deadline (ISO) — present when connected.' },
+    warning: { type: 'string', description: 'Deanonymization caution — present for anonymous (purse) callers.' },
+  },
+  required: ['provider', 'status'],
 }
 
 /** The `{ affines }` request/response for `GET/PUT /v1/me/affines/:modusId`. */
@@ -758,6 +794,7 @@ const EditionSchema: JsonSchema = {
     visibility: { type: 'string', enum: ['private', 'unlisted', 'feed', 'marketplace'] },
     custody: { type: 'string', enum: ['ours', 'theirs', 'both'] },
     status: { type: 'string', enum: ['pending', 'published', 'rejected', 'failed', 'retracted'], description: 'Lifecycle: pending → published | rejected | failed; retracted on unpublish.' },
+    reviewOutcome: { type: 'string', enum: ['pending', 'approved', 'rejected'], description: 'Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path.' },
     externalRef: { type: 'string', description: "The destination's handle — feed post id / HF repo / token id / R2 url." },
     owners: {
       type: 'array',
@@ -776,6 +813,13 @@ const EditionEnvelopeSchema: JsonSchema = {
   type: 'object',
   properties: { edition: EditionSchema },
   required: ['edition'],
+}
+
+/** The `{ editions }` envelope returned by the review queue. */
+const EditionListEnvelopeSchema: JsonSchema = {
+  type: 'object',
+  properties: { editions: { type: 'array', items: EditionSchema } },
+  required: ['editions'],
 }
 
 /** One entry in the public feed (`GET /v1/feed`). */
@@ -821,6 +865,58 @@ const ErrorEnvelopeSchema: JsonSchema = {
 // ---------------------------------------------------------------------------
 // The contract
 // ---------------------------------------------------------------------------
+
+const DepositConfigSchema: JsonSchema = {
+  type: 'object',
+  description: 'Static config for the buy-credits/deposit UI.',
+  properties: {
+    depositAddress: { type: 'string', description: 'CreditVault address to send deposits to (same on mainnet + Base).' },
+    pointsPerUsd: { type: 'number', description: 'Canonical impetus points per 1 USD (≈ 2967).' },
+    defaultFundingRatePct: { type: 'number', description: 'Default funding rate as a percent (70 = 70% of USD value converts to points).' },
+    chains: { type: 'array', description: 'Supported chains.', items: { type: 'object', properties: { chainId: { type: 'number' }, name: { type: 'string' } } } },
+  },
+  required: ['depositAddress', 'pointsPerUsd', 'defaultFundingRatePct', 'chains'],
+}
+const DepositQuoteRequestSchema: JsonSchema = {
+  type: 'object',
+  description: 'Quote how many impetus points a deposit would buy, right now (informational; the on-chain credit is authoritative and equal).',
+  properties: {
+    chainId: { type: 'string', description: "Chain id ('1' mainnet, '8453' Base)." },
+    token: { type: 'string', description: 'Token address; 0x000…000 for native ETH.' },
+    amount: { type: 'string', description: 'Deposit amount in RAW base units (wei for ETH, token-decimals for ERC-20), as a string.' },
+  },
+  required: ['chainId', 'token', 'amount'],
+}
+const DepositQuoteResponseSchema: JsonSchema = {
+  type: 'object',
+  description: 'The points a deposit would be credited (== what the webhook credits for the same input). Gas is NOT deducted.',
+  properties: {
+    chainId: { type: 'string' },
+    token: { type: 'string' },
+    amountRaw: { type: 'string', description: 'Echoed raw base units quoted.' },
+    grossUsd: { type: 'string', description: 'Gross USD FMV, formatted (e.g. "3.000000").' },
+    grossUsdMicro: { type: 'string', description: 'Exact gross USD FMV in micro-USD.' },
+    fundingRatePct: { type: 'number', description: 'Per-asset funding rate applied (e.g. 70).' },
+    pointsQuoted: { type: 'string', description: 'Impetus points the deposit would be credited.' },
+    depositAddress: { type: 'string' },
+  },
+  required: ['pointsQuoted', 'grossUsd', 'fundingRatePct', 'depositAddress'],
+}
+
+const RevenueReportSchema: JsonSchema = {
+  type: 'object',
+  description: 'Admin revenue report: company-wide trailing-12mo USD revenue vs the tightest active conditional-license cap (the tripwire, ADR-0012/0013 §5).',
+  properties: {
+    asOf: { type: 'string', description: 'ISO timestamp the trailing window was computed against.' },
+    trailingUsdRevenueMicro: { type: 'string', description: 'Trailing-12mo USD revenue in micro-USD (exact).' },
+    trailingUsdRevenue: { type: 'string', description: 'Trailing-12mo USD revenue, formatted.' },
+    band: { type: 'string', enum: ['clear', 'watch', 'warn', 'breach'], description: 'Live band of revenue against the binding cap.' },
+    bindingCapUsd: { type: 'number', nullable: true, description: 'Tightest active conditional cap (whole USD), or null when dormant.' },
+    activeConditionalLicenses: { type: 'array', items: { type: 'string' }, description: 'Conditional license ids currently reachable in the public catalog.' },
+    lastAlertedBand: { type: 'string', enum: ['clear', 'watch', 'warn', 'breach'], nullable: true, description: 'The last band the scheduled evaluator alerted/persisted.' },
+  },
+  required: ['asOf', 'trailingUsdRevenue', 'band', 'activeConditionalLicenses'],
+}
 
 export const API_CONTRACT: ApiContract = {
   version: 'v1',
@@ -900,6 +996,21 @@ export const API_CONTRACT: ApiContract = {
       response: ModelsListSchema,
     },
     {
+      method: 'GET',
+      path: '/deposit/config',
+      summary: 'Buy-credits/deposit UI config: deposit address, points/USD rate, default funding rate, supported chains.',
+      auth: false,
+      response: DepositConfigSchema,
+    },
+    {
+      method: 'POST',
+      path: '/deposit/quote',
+      summary: 'Quote how many impetus points a deposit of a given asset+amount would buy (informational; equals the on-chain credit).',
+      auth: false,
+      request: DepositQuoteRequestSchema,
+      response: DepositQuoteResponseSchema,
+    },
+    {
       method: 'POST',
       path: '/models/import',
       summary: 'Import a model/LoRA by URL (Civitai/HuggingFace/direct) as a private, owner-scoped model — usable in your flows immediately; promoting it to the public catalogue is a separate publish.',
@@ -921,6 +1032,13 @@ export const API_CONTRACT: ApiContract = {
       auth: true,
       request: ModelLicenseRequestSchema,
       response: ModelImportResponseSchema,
+    },
+    {
+      method: 'GET',
+      path: '/admin/revenue',
+      summary: 'Admin: company-wide trailing-12mo USD revenue vs the tightest active conditional-license cap (the tripwire). Platform-admin only.',
+      auth: true,
+      response: RevenueReportSchema,
     },
     {
       method: 'POST',
@@ -967,6 +1085,21 @@ export const API_CONTRACT: ApiContract = {
       auth: true,
       request: GeneratioSchema,
       response: { type: 'object', properties: { generatio: GeneratioSchema }, required: ['generatio'] },
+    },
+    {
+      method: 'PUT',
+      path: '/me/secrets/:provider',
+      summary: 'Connect a BYO gated-origin credential (civitai|huggingface) so gated model imports can download their weights. The token is sealed at rest at once and never echoed back. Anon-capable (a Bursa purse is a valid owner); anonymous callers receive a deanonymization warning.',
+      auth: true,
+      request: PutSecretRequestSchema,
+      response: SecretViewSchema,
+    },
+    {
+      method: 'DELETE',
+      path: '/me/secrets/:provider',
+      summary: 'Disconnect the caller\'s BYO credential for a provider (civitai|huggingface). Idempotent.',
+      auth: true,
+      response: SecretViewSchema,
     },
     {
       method: 'GET',
@@ -1114,6 +1247,13 @@ export const API_CONTRACT: ApiContract = {
     },
     {
       method: 'GET',
+      path: '/editiones/review',
+      summary: 'The human-review queue: publications the moderation gate HELD for review (spec §4). An author sees their own held items; the platform administrator sees all of them.',
+      auth: true,
+      response: EditionListEnvelopeSchema,
+    },
+    {
+      method: 'GET',
       path: '/editiones/:id',
       summary: 'Fetch one publication (author-scoped). Poll it to watch a `pending` settle land — an async archive ZIP build finishing (`externalRef` = the download url), or a public surface being gated.',
       auth: true,
@@ -1123,6 +1263,20 @@ export const API_CONTRACT: ApiContract = {
       method: 'POST',
       path: '/editiones/:id/retract',
       summary: 'Retract a publication where the destination allows it (feed/bucket = revocable; mint = permanent → 403). Author-scoped.',
+      auth: true,
+      response: EditionEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/editiones/:id/approve',
+      summary: 'Clear a moderation HOLD so the held publication re-settles and publishes (spec §4). Restricted to the platform administrator — an author cannot clear their own held content.',
+      auth: true,
+      response: EditionEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/editiones/:id/reject',
+      summary: 'Decline a held publication → terminal `rejected` (spec §4). Restricted to the platform administrator. Filing a CSAM report is a separate, explicit human action — never automatic.',
       auth: true,
       response: EditionEnvelopeSchema,
     },
