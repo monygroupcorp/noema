@@ -39,6 +39,16 @@ export interface Credentials {
 // lookup, web3 signature recovery) are wired in at app construction.
 
 export interface CredentialAcceptors {
+  /**
+   * Federated SSO (JWKS) verification of a Bearer token, tried BEFORE `verifyJwt`.
+   * Contract: resolves the token's `iss` against the trusted-issuer registry and
+   *   • returns `null` when `iss` is not a registered active issuer (or the token
+   *     is not an ES256 assertion) → the resolver falls through to `verifyJwt`;
+   *   • returns the `animaId` on successful federated verification;
+   *   • THROWS an `ApiError` (401 `auth.invalid` / 503) when the token IS federated
+   *     but fails verification — so a garbage assertion is a 401, never a 403.
+   */
+  verifyAgentJwt?(token: string): Promise<string | null>
   verifyJwt?(token: string): Promise<string | null>
   validateApiKey?(key: string): Promise<string | null>
   verifyWeb3?(w: { address: string; signature: string; nonce: string }): Promise<string | null>
@@ -83,10 +93,21 @@ export class IdentityResolver {
 
     // 3. authorization: Bearer <jwt>
     if (creds.authorization && creds.authorization.startsWith('Bearer ')) {
+      const token = creds.authorization.slice('Bearer '.length)
+
+      // 3a. Federated SSO (JWKS) first. It only claims tokens whose `iss` is a
+      //     registered active `Issuer`; otherwise it returns null and we fall
+      //     through to the legacy web JWT. A federated token that FAILS throws
+      //     its own ApiError (401/503) — never falls through to a catch-all 403.
+      if (this.acceptors.verifyAgentJwt) {
+        const federatedAnimaId = await this.acceptors.verifyAgentJwt(token)
+        if (federatedAnimaId) return { animaId: federatedAnimaId }
+      }
+
+      // 3b. Legacy web JWT (env-secret HS256).
       if (!this.acceptors.verifyJwt) {
         throw Errors.authInvalid('bearer auth not configured')
       }
-      const token = creds.authorization.slice('Bearer '.length)
       const animaId = await this.acceptors.verifyJwt(token)
       if (!animaId) throw Errors.authInvalid('invalid token')
       return { animaId }

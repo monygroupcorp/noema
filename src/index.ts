@@ -25,6 +25,7 @@ import { CrystalApi } from './allocutio/api/CrystalApi.js'
 import { IdentityResolver as ApiIdentityResolver, credentialsFromHeaders } from './allocutio/api/IdentityResolver.js'
 import { createApiRouter } from './allocutio/api/apiRouter.js'
 import { makeCredentialAcceptors } from './allocutio/api/apiAcceptors.js'
+import { parseJwksOverride } from './allocutio/api/AgentJwtVerifier.js'
 import { RunEventHub } from './allocutio/api/RunEventHub.js'
 import { isSafeWebhookUrl } from './allocutio/api/webhookGuard.js'
 import { createMcpRouter } from './allocutio/api/mcp/mcpRouter.js'
@@ -37,6 +38,8 @@ import { startAnalyticsListener } from './analytics/analyticsListener.js'
 import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
 import { PublicationWorker } from './crystal/PublicationWorker.js'
 import { permissiveModerationGate, denyModerationGate } from './crystal/ModerationGate.js'
+import { ModelImporter } from './crystal/ModelImporter.js'
+import { httpJsonFetcher } from './crystal/modelImportResolver.js'
 import { registerProgressusRecorder } from './execution/progressusSink.js'
 import { CANONICAL_MODI } from './crystal/seeds/modi.js'
 import { CANONICAL_ESSENTIAE } from './crystal/seeds/essentiae.js'
@@ -633,6 +636,12 @@ async function main(): Promise<void> {
     ? (log.warn('MODERATION_ALLOW_UNSCANNED=1 — public publishing approves content WITHOUT CSAM/NCMEC scanning. Dev/staging only; NEVER in production.'), permissiveModerationGate)
     : (log.warn('No CSAM/NCMEC scanner configured — public publishing (feed/marketplace) is DENIED (fail-closed). Private/unlisted still work.'), denyModerationGate)
 
+  // Import-by-URL (spec/model-import.md Tier 1): register a Civitai/HF/direct model as a
+  // private, owner-scoped Intella — ORIGIN-ONLY (no R2 copy; we don't custody third-party BYO
+  // weights for personal use). The R2 mirror happens only on a public promotion (BucketAdapter).
+  // Reuses the same moderation gate for the mandatory preview-media safety scan (fail-closed).
+  const modelImporter = new ModelImporter({ json: httpJsonFetcher, intellae, moderationGate })
+
   // Crystal Agent API (/v1) — ApiAllocutio (docs/agent-tasks/EPIC-api-allocutio.md).
   // The agent-shaped facade over the ring + the credential→AuctorKey resolver.
   const crystalApi = new CrystalApi({
@@ -661,6 +670,7 @@ async function main(): Promise<void> {
     publicationAdapters: ring.publicationAdapters,
     animae: ring.animae,
     intellarum: intellae,
+    modelImporter,
     ...(ring.conductor ? { conductor: ring.conductor } : {}),
     ...(ring.teeProvisioner ? { teeProvisioner: ring.teeProvisioner } : {}),
     // Fire-and-forget studio-ready/failed webhook (optional sugar over polling).
@@ -708,6 +718,9 @@ async function main(): Promise<void> {
     animae: ring.animae,
     ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
     verifyApiKeyToAccountId,
+    // Federated (JWKS) SSO — trusted-issuer registry + the live prod JWKS override.
+    issuers: ring.issuers,
+    jwksOverride: parseJwksOverride(process.env.AGENT_JWKS_OVERRIDE),
   }))
   // Run-event hub — projects the bus (actum.progressus/complete/fail) into per-run SSE
   // streams + fire-and-forget completion webhooks (Phase 2). In-process (single
