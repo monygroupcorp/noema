@@ -73,6 +73,7 @@ export const WIDGET_SDK_JS = `/* Noema Widget SDK — served by noema-crystal (A
         if (msg.type === 'WIDGET_READY') {
           onEvent({ type: 'WIDGET_READY' });
           _getAccount().then(function (a) { if (a) _postToIframe({ type: 'WALLET_AVAILABLE', address: a }); }).catch(function () {});
+        } else if (msg.type === 'CONNECT_WALLET')      { _connectWallet();
         } else if (msg.type === 'WALLET_AUTH_REQUEST') { _doWalletAuth(msg);
         } else if (msg.type === 'PAYMENT_REQUIRED')    { _signX402Payment(msg.paymentRequired);
         } else { onEvent(msg); }
@@ -86,6 +87,16 @@ export const WIDGET_SDK_JS = `/* Noema Widget SDK — served by noema-crystal (A
         var eth = _getProvider();
         if (!eth) return Promise.resolve(null);
         return eth.request({ method: 'eth_accounts' }).then(function (a) { return a && a.length ? a[0] : null; });
+      }
+
+      // Real connect-wallet: prompt the host wallet and relay the address to the iframe.
+      // No backend — the iframe shows the address + an owner badge (client-side compare).
+      function _connectWallet() {
+        var eth = _getProvider();
+        if (!eth) { _postToIframe({ type: 'WALLET_AUTH_ERROR', error: 'No wallet found' }); return; }
+        eth.request({ method: 'eth_requestAccounts' })
+          .then(function (a) { if (a && a.length) _postToIframe({ type: 'WALLET_AVAILABLE', address: a[0] }); })
+          .catch(function () { /* user rejected the connection */ });
       }
 
       // ── Wallet sign-in (one signature; server issues owner/user-tier JWT) ──────

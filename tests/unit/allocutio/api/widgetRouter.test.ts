@@ -27,6 +27,7 @@ function app(over: Partial<WidgetRouterDeps> = {}, capture?: { filter?: FeedFilt
     ...(over.modorum ? { modorum: over.modorum } : {}),
     ...(over.quoteImpetus ? { quoteImpetus: over.quoteImpetus } : {}),
     ...(over.x402Config ? { x402Config: over.x402Config } : {}),
+    ...(over.sessionAuth !== undefined ? { sessionAuth: over.sessionAuth } : {}),
     ...(over.limit !== undefined ? { limit: over.limit } : {}),
   }
   const a = express()
@@ -70,6 +71,22 @@ test('interactive: multiple modi → a picker with one chip + form (+ price) eac
   const p1 = res.text.match(/data-modus="m1"[^>]*data-price="([^"]+)"/)?.[1]
   const p2 = res.text.match(/data-modus="m2"[^>]*data-price="([^"]+)"/)?.[1]
   assert.ok(p1 && p2 && p1 !== p2, `m1 (${p1}) and m2 (${p2}) should be priced differently`)
+})
+
+test('login: header carries the connect-wallet pill + owner address; sign-in off by default', async () => {
+  const owner = '0x' + 'a'.repeat(40)
+  const a = app({ legati: { findByAgentId: async () => legatus({ ownerAddress: owner }), listByCollection: async () => [] } })
+  const res = await request(a).get('/widget/camel42')
+  assert.match(res.text, new RegExp(`id="login" class="login" data-owner="${owner}" data-session="0"`))
+  assert.match(res.text, /CONNECT_WALLET/)                          // connect-wallet bridge present
+  assert.match(res.text, /Connect wallet/)                          // the real (no-backend) affordance
+})
+
+test('login: sessionAuth flips data-session on (enables the sign-in step)', async () => {
+  const a = app({ sessionAuth: true, legati: { findByAgentId: async () => legatus({ ownerAddress: '0x' + 'b'.repeat(40) }), listByCollection: async () => [] } })
+  const res = await request(a).get('/widget/camel42')
+  assert.match(res.text, /data-session="1"/)
+  assert.match(res.text, /WALLET_AUTH_REQUEST/)                     // sign-in wired
 })
 
 test('interactive: agent with no callable modus falls back to the read-only gallery', async () => {

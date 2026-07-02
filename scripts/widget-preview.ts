@@ -73,8 +73,22 @@ app.use('/widget', createWidgetRouter({
   modorum: { find: async (id) => modusById(id), list: async () => MODI },
   quoteImpetus: async (id) => (id === 'm2' ? 2400n : id === 'm3' ? 400n : 1200n),
   x402Config: { ...DEFAULT_X402_CONFIG, payTo: '0x' + 'c'.repeat(40) },
+  sessionAuth: true,            // sandbox-only: show the sign-in step (mocked endpoints below)
   frameAncestors: ["'self'"],
 }))
+
+// MOCK sign-in endpoints (sandbox only — prod serves none, so the widget shows connect-wallet
+// only). The SDK's wallet-auth flow POSTs here: nonce → sign → verify → a fake session JWT.
+app.post('/widget/:agentId/auth/wallet/nonce', express.json(), (_req, res) => {
+  res.json({
+    domain: { name: 'NOEMA', version: '1', chainId: 8453 },
+    types: { Auth: [{ name: 'statement', type: 'string' }, { name: 'nonce', type: 'string' }] },
+    message: { statement: 'Sign in to this NOEMA agent (sandbox)', nonce: 'mock-nonce-' + Math.random().toString(36).slice(2) },
+  })
+})
+app.post('/widget/:agentId/auth/wallet/verify', express.json(), (_req, res) => {
+  res.json({ sessionJwt: 'mock.sandbox.session' })   // NOT a real credential
+})
 
 app.use(createAgentCardRouter({
   legati: { findByAgentId: async (id) => (id === 'camel42' ? legatus : null) },
