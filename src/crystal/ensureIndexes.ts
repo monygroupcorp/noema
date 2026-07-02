@@ -115,6 +115,8 @@ export async function ensureIndexes(db: Db): Promise<void> {
     // legati — agent sidecars (ADR-0011 §5); agentId is the provisioning idempotency key
     db.collection('legati').createIndex({ agentId: 1 }, { unique: true }),
     db.collection('legati').createIndex({ id: 1 }, { unique: true }),
+    // adapter = the ERC-8004 collection contract — the collection gallery scans by it (§7)
+    db.collection('legati').createIndex({ adapter: 1 }, { sparse: true }),
 
     // x402_payment_log — the unique signatureHash IS the replay guard (ADR-0011 §5)
     db.collection('x402_payment_log').createIndex({ signatureHash: 1 }, { unique: true }),

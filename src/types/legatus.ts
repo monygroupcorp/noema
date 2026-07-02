@@ -66,6 +66,9 @@ export interface LegatusStore {
   findByAgentId(agentId: string): Promise<Legatus | null>
   /** By the `agentAccountId` (manifest/revoke path key). */
   findById(id: string): Promise<Legatus | null>
+  /** Every agent of one NFT collection — the ERC-8004 `adapter` contract (lowercased)
+   *  parsed from the JWT `sub`. Backs the collection gallery (ADR-0011 §7). */
+  listByCollection(adapter: string): Promise<Legati>
   /**
    * Create a sidecar. `agentId` is uniquely indexed — a concurrent duplicate
    * throws a Mongo E11000 (code 11000) the saga treats as an idempotent race win.

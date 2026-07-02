@@ -17,6 +17,11 @@ export class MemoryLegatus implements LegatusStore {
     return this.byId.get(id) ?? null
   }
 
+  async listByCollection(adapter: string): Promise<Legatus[]> {
+    const key = adapter.toLowerCase()
+    return [...this.byId.values()].filter((l) => l.adapter?.toLowerCase() === key)
+  }
+
   async create(
     input: Omit<Legatus, 'id' | 'natum' | 'status'> & { status?: Legatus['status'] },
   ): Promise<Legatus> {

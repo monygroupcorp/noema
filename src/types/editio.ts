@@ -111,6 +111,9 @@ export interface FeedFilter {
    *  public `status:'published'` + public-visibility surface — this scopes the feed
    *  to one creator/agent, it never widens it to their private editions. */
   author?: Editio['by']
+  /** Restrict to ANY of these identified authors (animaIds) — the collection-gallery
+   *  scope (all agents of one NFT collection). Same public clamp as `author`. */
+  authorAnimaIds?: string[]
   /** Max items (newest first). */
   limit?: number
 }

@@ -67,6 +67,17 @@ test('no author → the whole public feed (both authors, published+feed only)', 
   assert.deepEqual(new Set(all.map((e) => e.id)), new Set(['A', 'D']))
 })
 
+test('authorAnimaIds ($in) is the collection-gallery scope, same public clamp', async () => {
+  await col.insertMany([
+    ed({ id: 'A', by: { animaId: 'agent-1' }, status: 'published', visibility: 'feed' }),   // ✓ in set
+    ed({ id: 'B', by: { animaId: 'agent-2' }, status: 'published', visibility: 'feed' }),   // ✓ in set
+    ed({ id: 'C', by: { animaId: 'agent-2' }, status: 'published', visibility: 'private' }),// clamp: not public
+    ed({ id: 'D', by: { animaId: 'agent-3' }, status: 'published', visibility: 'feed' }),   // not in set
+  ])
+  const gallery = await store.listFeed({ authorAnimaIds: ['agent-1', 'agent-2'], visibility: 'feed' })
+  assert.deepEqual(new Set(gallery.map((e) => e.id)), new Set(['A', 'B']))
+})
+
 test('a commitment (anon) author scopes the same way', async () => {
   await col.insertMany([
     ed({ id: 'X', by: { commitment: 'cmt-1' }, status: 'published', visibility: 'feed' }),

@@ -28,7 +28,7 @@ import type { FeedItem } from './types.js'
 import { WIDGET_SDK_JS } from './widgetSdk.js'
 
 export interface WidgetRouterDeps {
-  legati: Pick<LegatusStore, 'findByAgentId'>
+  legati: Pick<LegatusStore, 'findByAgentId' | 'listByCollection'>
   /** The public feed read (author-scoped for a per-agent view). */
   feed: (filter: FeedFilter) => Promise<FeedItem[]>
   /** Public appearance-by-owner projection (visual branding only). */
@@ -143,16 +143,18 @@ export function createWidgetRouter(deps: WidgetRouterDeps): Router {
     res.status(200).send(WIDGET_SDK_JS)
   })
 
-  // GET /widget/gallery/:collectionAddress — recent public creations (chrome-less).
-  // NOTE: collection-scoping (filter to the agents of one NFT collection) needs a
-  // collection→editions index we don't have yet — this renders the RECENT PUBLIC FEED
-  // and keeps the address only for display. Documented gap, not a silent cap.
-  router.get('/gallery/:collectionAddress', async (_req: Request, res: Response): Promise<void> => {
-    const items = await deps.feed({ visibility: 'feed', limit })
+  // GET /widget/gallery/:collectionAddress — the public creations of one NFT
+  // collection: the agents whose ERC-8004 `adapter` contract is this address (the
+  // JWT-parsed `Legatus.adapter`), scoped to their published feed editions.
+  router.get('/gallery/:collectionAddress', async (req: Request, res: Response): Promise<void> => {
+    const addr = String(req.params.collectionAddress)
+    const agents = await deps.legati.listByCollection(addr)
+    const animaIds = agents.filter((a) => a.status !== 'revoked').map((a) => a.animaId)
+    const items = animaIds.length ? await deps.feed({ visibility: 'feed', authorAnimaIds: animaIds, limit }) : []
     const tiles = items.flatMap((i) => tilesFromOutput(i.output))
     const body = tiles.length
       ? `<div class="grid">${tiles.map(tileHtml).join('')}</div>`
-      : `<div class="empty">No public creations yet.</div>`
+      : `<div class="empty">No creations in this collection yet.</div>`
     frame(res)
     res.status(200).send(page({ title: 'Gallery', body, script: IFRAME_BRIDGE }))
   })
