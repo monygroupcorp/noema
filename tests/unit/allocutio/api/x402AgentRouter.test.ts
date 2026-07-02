@@ -30,6 +30,8 @@ async function harness(opts: {
   enabled?: boolean
   withSpell?: boolean
   modi?: Array<{ id: string; nomen: string; auctor?: { animaId: string } }>
+  hub?: X402AgentDeps['hub']
+  getRun?: X402AgentDeps['getRun']
 } = {}) {
   const legati = new MemoryLegatus()
   const modorum = new MemoryModorum()
@@ -50,6 +52,8 @@ async function harness(opts: {
     quoteImpetus: async () => 1000n,
     runSpell: opts.runSpell ?? (async ({ modusId }): Promise<Run> => ({ id: 'run-1', status: 'complete', modusId, exitus: { image: 'https://out/img.png' } })),
     accrueAgentCut: async (input) => { cuts.push(input); return { status: 'accrued' } },
+    ...(opts.hub ? { hub: opts.hub } : {}),
+    ...(opts.getRun ? { getRun: opts.getRun } : {}),
     publicBase: 'https://noema.art',
   }
   const server = express()
@@ -132,6 +136,59 @@ test('feature-flagged off → 404', async () => {
   const post = await request(server).post('/api/v1/x402/agents/camel42/spell/memeify').set('x-payment', 'paid').send({ inputs: {} })
   assert.equal(get.status, 404)
   assert.equal(post.status, 404)
+})
+
+// A hub whose recentFor replays a pre-seeded event tape — so awaitTerminal resolves
+// deterministically (no test timing races), while still exercising the relay + terminal path.
+function tapeHub(runId: string, events: Array<Record<string, unknown>>): NonNullable<X402AgentDeps['hub']> {
+  return { subscribe: () => () => {}, recentFor: (id) => (id === runId ? events as any : []) }
+}
+const pendingRun = (id = 'run-async'): Run => ({ id, status: 'pending', modusId: 'agent-ws-camel42' })
+
+test('async run + Accept: text/event-stream → streams Progressus phases then a result event', async () => {
+  const events = [
+    { runId: 'run-async', kind: 'progress', terminal: false, progressus: { phase: 'downloading', target: 'model', progress: { done: 2, total: 5, unit: 'items' } } },
+    { runId: 'run-async', kind: 'progress', terminal: false, progressus: { phase: 'executing', progress: { done: 18, total: 30, unit: 'steps' } } },
+    { runId: 'run-async', kind: 'complete', terminal: true, status: 'complete' },
+  ]
+  const { server, log } = await harness({
+    runSpell: async () => pendingRun(),
+    hub: tapeHub('run-async', events),
+    getRun: async (id) => ({ id, status: 'complete', modusId: 'm', exitus: { image: 'https://out/final.png' } }),
+  })
+  const res = await request(server).post('/api/v1/x402/agents/camel42/spell/memeify')
+    .set('x-payment', 'paid').set('accept', 'text/event-stream').send({ inputs: {} })
+  assert.equal(res.status, 200)
+  assert.match(res.headers['content-type'], /text\/event-stream/)
+  assert.match(res.text, /"kind":"progress"[^]*"phase":"downloading"/)   // real phase streamed
+  assert.match(res.text, /"phase":"executing"[^]*"done":18/)             // step progress streamed
+  assert.match(res.text, /"kind":"result"[^]*final\.png/)                // final outputs streamed
+  assert.equal((await log.find('sig-123'))?.status, 'SETTLED')           // settled on completion
+})
+
+test('async run WITHOUT SSE → long-polls to completion, returns JSON with the exitus', async () => {
+  const { server } = await harness({
+    runSpell: async () => pendingRun(),
+    hub: tapeHub('run-async', [{ runId: 'run-async', kind: 'complete', terminal: true, status: 'complete' }]),
+    getRun: async (id) => ({ id, status: 'complete', modusId: 'm', exitus: { image: 'https://out/j.png' } }),
+  })
+  const res = await request(server).post('/api/v1/x402/agents/camel42/spell/memeify').set('x-payment', 'paid').send({ inputs: {} })
+  assert.equal(res.status, 200)
+  assert.deepEqual(res.body.outputs, { image: 'https://out/j.png' })     // awaited real completion
+})
+
+test('async run that FAILS → no settle (SSE failed event)', async () => {
+  let settled = false
+  const { server } = await harness({
+    facilitator: okFacilitator({ async settle() { settled = true; return { success: true, transaction: '0xtx' } } }),
+    runSpell: async () => pendingRun(),
+    hub: tapeHub('run-async', [{ runId: 'run-async', kind: 'failed', terminal: true, status: 'failed' }]),
+    getRun: async (id) => ({ id, status: 'failed', modusId: 'm', failure: { code: 'oom', message: 'out of memory' } }),
+  })
+  const res = await request(server).post('/api/v1/x402/agents/camel42/spell/memeify')
+    .set('x-payment', 'paid').set('accept', 'text/event-stream').send({ inputs: {} })
+  assert.match(res.text, /"kind":"failed"/)
+  assert.equal(settled, false)
 })
 
 test('run a SELECTED modus (picker): body.modusId owned by the agent → runs it', async () => {

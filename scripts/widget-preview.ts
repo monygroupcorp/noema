@@ -85,7 +85,9 @@ app.use(createAgentCardRouter({
   platform: { name: 'NOEMA', description: 'preview', publicBase: BASE },
 }))
 
-// Stub x402 run endpoint so the demo's Run button completes with a fake result.
+// Stub x402 run endpoint. The probe → 402. The paid POST STREAMS fake Progressus phases as
+// SSE (mirroring the real x402AgentRouter) so the widget's live-status UI is visible, then a
+// final result event — or returns JSON if the caller didn't ask for a stream.
 app.post('/api/v1/x402/agents/:agentId/spell/:name', express.json(), (req, res) => {
   const cfg = { ...DEFAULT_X402_CONFIG, payTo: '0x' + 'c'.repeat(40) }
   const quote = buildQuote(1200n, cfg)
@@ -97,9 +99,40 @@ app.post('/api/v1/x402/agents/:agentId/spell/:name', express.json(), (req, res) 
     })
     return
   }
-  // pretend we ran: echo the prompt + a fresh image
   const prompt = String(req.body?.inputs?.prompt ?? 'your prompt')
-  res.json({ runId: 'run-preview', status: 'complete', outputs: { image: `https://picsum.photos/seed/${encodeURIComponent(prompt).slice(0, 20)}/600`, caption: `“${prompt}” — made by agent camel42 (preview)` } })
+  const result = { runId: 'run-preview', status: 'complete', outputs: { image: `https://picsum.photos/seed/${encodeURIComponent(prompt).slice(0, 12)}/600`, caption: `“${prompt}” — made by agent camel42 (preview)` } }
+
+  // SSE stream of fake Progressus phases (mirrors the real x402AgentRouter). We write raw to
+  // the socket to sidestep Express's response buffering in this preview process; the widget's
+  // reader falls back to JSON automatically if a host doesn't stream.
+  if ((req.get('accept') ?? '').includes('text/event-stream')) {
+    const sock = res.socket
+    if (sock) {
+      sock.write('HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n')
+      const tape: Array<Record<string, unknown>> = [
+        { kind: 'started', runId: 'run-preview' },
+        { kind: 'progress', progressus: { phase: 'queued' } },
+        { kind: 'progress', progressus: { phase: 'provisioning', pod: { gpuType: 'RTX 4090', costPerHr: 0.34 } } },
+        { kind: 'progress', progressus: { phase: 'downloading', target: 'model', progress: { done: 2, total: 5, unit: 'items' } } },
+        { kind: 'progress', progressus: { phase: 'downloading', target: 'model', progress: { done: 5, total: 5, unit: 'items' } } },
+        { kind: 'progress', progressus: { phase: 'executing', progress: { done: 8, total: 30, unit: 'steps' } } },
+        { kind: 'progress', progressus: { phase: 'executing', progress: { done: 22, total: 30, unit: 'steps' } } },
+        { kind: 'progress', progressus: { phase: 'uploading' } },
+        { kind: 'result', ...result },
+      ]
+      let i = 0, alive = true
+      sock.on('close', () => { alive = false })
+      const step = (): void => {
+        if (!alive || sock.destroyed) return
+        if (i >= tape.length) { sock.end(); return }
+        sock.write('data: ' + JSON.stringify(tape[i++]) + '\n\n')
+        setTimeout(step, 550)
+      }
+      step()
+      return
+    }
+  }
+  res.json(result)
 })
 
 // A demo partner page: loads the SDK, mounts the widget + gallery, injects a MOCK wallet.
