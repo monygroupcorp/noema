@@ -34,8 +34,12 @@ export interface X402AgentDeps {
   runSpell: (input: {
     agentAnimaId: string; modusId: string; aditus: Record<string, unknown>; grossImpetus: bigint; agentId: string
   }) => Promise<Run>
-  /** Owner rev-share skim (best-effort, non-fatal). */
-  distributeOwnerReward: (input: { ownerAddress: string; grossImpetus: bigint; agentId: string }) => Promise<unknown>
+  /** Accrue the agent's cut of a settled call — the MARGIN (price − our serve cost) minus our
+   *  fee — to the payee's gated USD payout book (best-effort, non-fatal). Replaces the old
+   *  reward-signa skim; the tax gate lives behind this (ADR-0013 §4c). */
+  accrueAgentCut: (input: {
+    payoutAddress: string; priceAtomic: string; serveImpetus: bigint; sourceRef: string; agentId: string; network: string
+  }) => Promise<unknown>
   publicBase?: string
   /** `X402_ENABLED`. When false the endpoints 404 (feature-flagged like the legacy). */
   enabled?: boolean
@@ -50,7 +54,7 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
   const router = express.Router({ mergeParams: true })
 
   /** Resolve the agent + its spell modus, or write the appropriate error. */
-  async function resolve(req: Request, res: Response): Promise<{ agentId: string; animaId: string; ownerAddress: string; modus: Modus } | null> {
+  async function resolve(req: Request, res: Response): Promise<{ agentId: string; animaId: string; ownerAddress: string; payoutAddress: string; modus: Modus } | null> {
     if (deps.enabled === false) { fail(res, 404, 'NOT_FOUND', 'x402 is not enabled'); return null }
     const agentId = String(req.params.agentId)
     const legatus = await deps.legati.findByAgentId(agentId)
@@ -58,7 +62,9 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
     if (!legatus.workspaceModusId) { fail(res, 404, 'SPELL_NOT_FOUND', 'Agent has no runnable spell'); return null }
     const modus = await deps.modorum.find(legatus.workspaceModusId)
     if (!modus) { fail(res, 404, 'SPELL_NOT_FOUND', 'Agent spell not found'); return null }
-    return { agentId, animaId: legatus.animaId, ownerAddress: legatus.ownerAddress, modus }
+    // The agent's cut lands at their declared payout target, else the on-chain owner (§4c).
+    const payoutAddress = legatus.payoutPolicy?.withdrawAddress ?? legatus.ownerAddress
+    return { agentId, animaId: legatus.animaId, ownerAddress: legatus.ownerAddress, payoutAddress, modus }
   }
 
   const resourceUrl = (agentId: string, name: string): string => `${base}/api/v1/x402/agents/${agentId}/spell/${name}`
@@ -147,8 +153,10 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
       } else {
         await deps.log.recordFailed(verified.signatureHash, `settle failed: ${settlement.error ?? 'unknown'}`)
       }
-      await deps.distributeOwnerReward({ ownerAddress: r.ownerAddress, grossImpetus: impetus, agentId: r.agentId })
-        .catch(() => { /* rev-share is non-fatal */ })
+      await deps.accrueAgentCut({
+        payoutAddress: r.payoutAddress, priceAtomic: verified.amount ?? accept.amount, serveImpetus: impetus,
+        sourceRef: verified.signatureHash, agentId: r.agentId, network: accept.network,
+      }).catch(() => { /* the agent cut is non-fatal — the run + settle already succeeded */ })
 
       if (settlement.transaction) res.setHeader('X-PAYMENT-RESPONSE', Buffer.from(JSON.stringify({ success: settlement.success, transaction: settlement.transaction })).toString('base64'))
       res.status(200).json({

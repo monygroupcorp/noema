@@ -39,7 +39,7 @@ async function harness(opts: {
     ...(opts.withSpell === false ? {} : { workspaceModusId: 'agent-ws-camel42' }),
   })
   const log = new MemoryX402Log()
-  const rewards: Array<{ ownerAddress: string; grossImpetus: bigint }> = []
+  const cuts: Array<{ payoutAddress: string; priceAtomic: string; serveImpetus: bigint; sourceRef: string; network: string }> = []
   const deps: X402AgentDeps = {
     legati, modorum, log,
     facilitator: opts.facilitator ?? okFacilitator(),
@@ -47,12 +47,12 @@ async function harness(opts: {
     enabled: opts.enabled ?? true,
     quoteImpetus: async () => 1000n,
     runSpell: opts.runSpell ?? (async ({ modusId }): Promise<Run> => ({ id: 'run-1', status: 'complete', modusId, exitus: { image: 'https://out/img.png' } })),
-    distributeOwnerReward: async (input) => { rewards.push({ ownerAddress: input.ownerAddress, grossImpetus: input.grossImpetus }); return { status: 'credited' } },
+    accrueAgentCut: async (input) => { cuts.push(input); return { status: 'accrued' } },
     publicBase: 'https://noema.art',
   }
   const server = express()
   server.use('/api/v1/x402', express.json(), createX402AgentRouter(deps))
-  return { server, log, rewards }
+  return { server, log, cuts }
 }
 
 test('discover: schema + quote + accepts, no payment needed', async () => {
@@ -81,8 +81,8 @@ test('invalid payment → 402 PAYMENT_INVALID', async () => {
   assert.equal(res.body.error, 'PAYMENT_INVALID')
 })
 
-test('happy path: verify → run → settle → 200 with X-PAYMENT-RESPONSE + owner reward', async () => {
-  const { server, log, rewards } = await harness()
+test('happy path: verify → run → settle → 200 with X-PAYMENT-RESPONSE + agent cut accrued', async () => {
+  const { server, log, cuts } = await harness()
   const res = await request(server).post('/api/v1/x402/agents/camel42/spell/memeify').set('x-payment', 'paid').send({ inputs: { prompt: 'a cat' } })
   assert.equal(res.status, 200)
   assert.equal(res.body.runId, 'run-1')
@@ -90,10 +90,13 @@ test('happy path: verify → run → settle → 200 with X-PAYMENT-RESPONSE + ow
   assert.equal(res.body.x402.settled, true)
   assert.equal(res.body.x402.transaction, '0xtx')
   assert.ok(res.headers['x-payment-response'], 'settlement header set')
-  // Payment logged as SETTLED; owner rev-share fired with the gross.
+  // Payment logged SETTLED; the agent cut accrual fired with the paid price + serve cost.
   assert.equal((await log.find('sig-123'))?.status, 'SETTLED')
-  assert.equal(rewards.length, 1)
-  assert.equal(rewards[0].grossImpetus, 1000n)
+  assert.equal(cuts.length, 1)
+  assert.equal(cuts[0].payoutAddress, OWNER)          // no payoutPolicy → owner address
+  assert.equal(cuts[0].priceAtomic, '404400')         // the amount actually paid (verify.amount)
+  assert.equal(cuts[0].serveImpetus, 1000n)           // our cost basis, for the margin split
+  assert.equal(cuts[0].sourceRef, 'sig-123')          // the settlement's replay/idempotency key
 })
 
 test('replay: the same signatureHash is refused with 409, run not repeated', async () => {
