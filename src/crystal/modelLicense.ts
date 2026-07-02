@@ -1,0 +1,159 @@
+// =============================================================================
+// modelLicense — base-model → { family, license } classification (compliance)
+// =============================================================================
+//
+// `familia` is the COMPATIBILITY axis (architecture — which base flow a LoRA stacks
+// on). LICENSE is a DIFFERENT axis that `familia` collapses, and the collapse is
+// license-critical: FLUX.1-schnell (Apache 2.0, commercial ✅) and FLUX.1-dev (BFL
+// Non-Commercial, ❌) are the SAME `familia:'flux'`. So the family key cannot carry
+// the license — we classify both here and record them separately on the Intella.
+//
+// Ground truth: the Model license register in docs/legal/compliance-landscape.md
+// plus the per-seed license notes in seeds/intellae.ts. Commercial-catalog use
+// requires a ✅ (`commercial:'yes'`); everything else is fail-closed.
+//
+// ENFORCEMENT SPLIT (spec/model-import.md): a PRIVATE import is always allowed —
+// personal, non-commercial use of a non-commercially-licensed model is fine. The
+// license is enforced only at PUBLIC PROMOTION (the shared catalog is a commercial
+// surface): only `commercial:'yes'` auto-promotes; 'no'/'conditional'/'unknown' are
+// refused (fail-closed) pending a held license / manual clearance.
+// =============================================================================
+
+/** Catalog-eligibility verdict for a license. Only 'yes' clears the public (commercial) catalog. */
+export type CommercialVerdict = 'yes' | 'no' | 'conditional' | 'unknown'
+
+/** A base-model classification: the compat family (null = no base flow → not importable) + license id. */
+export interface BaseClassification {
+  familia: string | null
+  /** A stable license id (see LICENSE_COMMERCIAL). 'unknown' when we can't vouch for it. */
+  license: string
+}
+
+/**
+ * Commercial-catalog verdict per license id. Fail-closed: an id not listed here is 'unknown'
+ * (NOT auto-catalog-eligible). Grounded in docs/legal/compliance-landscape.md §"Model license
+ * register" + the seed license notes.
+ */
+const LICENSE_COMMERCIAL: Record<string, CommercialVerdict> = {
+  'apache-2.0': 'yes',
+  'mit': 'yes',
+  'openrail-m': 'yes',            // SD1.5 / SDXL — ✅ with flow-down use restrictions (T&C-bound)
+  'fair-ai-public': 'yes',        // Pony Diffusion (Fair AI Public License 1.0-SD)
+  'flux-1-dev-nc': 'no',          // BFL FLUX.1 [dev] Non-Commercial — ❌ unless separately licensed
+  'flux-2-dev-nc': 'no',          // BFL FLUX.2 [dev] Non-Commercial (klein is Apache — see below)
+  'closed': 'no',                 // FLUX.1 pro / API-only — not self-hostable
+  'cc-by-nc': 'no',               // any non-commercial Creative Commons variant
+  'stability-community': 'conditional',  // SD3/3.5, SDXL-Turbo — revenue/entity thresholds; verify
+  'krea-community': 'conditional',       // Krea 2 Community — commercial only for entities <$1M revenue
+  'unknown': 'unknown',
+}
+
+/** Catalog-eligibility verdict for a license id (fail-closed to 'unknown'). */
+export function licenseCommercial(license: string | undefined): CommercialVerdict {
+  if (!license) return 'unknown'
+  return LICENSE_COMMERCIAL[license] ?? 'unknown'
+}
+
+/**
+ * The PUBLIC-CATALOG admission policy over a commercial verdict — the single place the "may this
+ * list publicly?" decision lives. 'yes' AND 'conditional' pass: conditional licenses (SD3/3.5,
+ * Krea 2 <$1M) are fine while we're under their revenue/entity thresholds — we track revenue and
+ * take out licenses with the rights-holders as we approach the cap. 'no'/'unknown' are refused
+ * (fail-closed) pending an admin license clearance (see the backfill path).
+ */
+export function isCatalogEligible(verdict: CommercialVerdict | undefined): boolean {
+  return verdict === 'yes' || verdict === 'conditional'
+}
+
+// The family+license table, ORDERED most-specific-first. Each row: a matcher over the lowercased
+// base string, the compat `familia` (null = no base flow, reject), and the license id. Order is
+// load-bearing (variant checks before the bare family; 'kontext'/'flux2' before 'flux').
+const BASE_TABLE: Array<{ test: (t: string) => boolean; familia: string | null; license: string }> = [
+  // FLUX.1 Kontext — a DIFFERENT model, NO base flow. Must precede 'flux' ("Flux.1 Kontext" ⊃ 'flux').
+  { test: (t) => t.includes('kontext'), familia: null, license: 'flux-1-dev-nc' },
+  // FLUX.2 — a new family (before 'flux'). Variant drives the license, same as FLUX.1:
+  //   klein (4B/9B) = Apache 2.0 (commercial ✅), dev = Non-Commercial (❌), bare = fail-closed.
+  { test: (t) => isFlux2(t) && t.includes('klein'), familia: 'flux2', license: 'apache-2.0' },
+  { test: (t) => isFlux2(t) && isDev(t), familia: 'flux2', license: 'flux-2-dev-nc' },
+  { test: (t) => isFlux2(t), familia: 'flux2', license: 'unknown' },
+  // FLUX.1 — the license hinges on the VARIANT. schnell = Apache ✅, dev = Non-Commercial ❌.
+  { test: (t) => isFlux(t) && isSchnell(t), familia: 'flux', license: 'apache-2.0' },
+  { test: (t) => isFlux(t) && isDev(t), familia: 'flux', license: 'flux-1-dev-nc' },
+  // Bare FLUX with no variant stated → we cannot assume schnell. Unknown (fail-closed).
+  { test: (t) => isFlux(t), familia: 'flux', license: 'unknown' },
+  // SDXL family (architecturally sdxl → stacks on the sdxl base flow).
+  { test: (t) => t.includes('pony'), familia: 'sdxl', license: 'fair-ai-public' },
+  { test: (t) => t.includes('illustrious') || t.includes('noobai'), familia: 'sdxl', license: 'unknown' },
+  { test: (t) => isSdxl(t) && (t.includes('turbo') || t.includes('lightning')), familia: 'sdxl', license: 'stability-community' },
+  { test: (t) => isSdxl(t), familia: 'sdxl', license: 'openrail-m' },
+  // SD 1.5.
+  { test: (t) => t.includes('sd1.5') || t.includes('sd 1.5') || t.includes('sd-1.5') || t.includes('sd15') || t.includes('v1-5'), familia: 'sd15', license: 'openrail-m' },
+  // Newer self-hosted families with a base flow.
+  { test: (t) => t.includes('chroma'), familia: 'chroma', license: 'apache-2.0' },
+  { test: (t) => t.includes('krea'), familia: 'krea2', license: 'krea-community' },
+  { test: (t) => t.includes('z-image') || t.includes('zimage') || t.includes('z image'), familia: 'zimage', license: 'apache-2.0' },
+  // SD 2.x / SD 3.x — real models, but NO base flow yet → not importable (familia null).
+  { test: (t) => t.includes('sd3') || t.includes('sd 3') || t.includes('sd2') || t.includes('sd 2'), familia: null, license: 'stability-community' },
+]
+
+/**
+ * Classify an external base-model string into its compat `familia` (null = no base flow) and its
+ * license id. Exhaustive + ordered; anything unrecognised is `{ familia: null, license: 'unknown' }`.
+ */
+export function classifyBaseModel(base: string): BaseClassification {
+  const t = (base ?? '').toLowerCase().trim()
+  if (!t) return { familia: null, license: 'unknown' }
+  for (const row of BASE_TABLE) {
+    if (row.test(t)) return { familia: row.familia, license: row.license }
+  }
+  return { familia: null, license: 'unknown' }
+}
+
+// ── Origin-stated license (the imported artifact's OWN license may be stricter than its base) ──
+
+/**
+ * Map a HuggingFace `cardData.license` string to our license id. HF uses SPDX-ish ids
+ * ('apache-2.0', 'mit', 'creativeml-openrail-m', 'cc-by-nc-4.0', 'other', …).
+ */
+export function hfLicenseToId(license: unknown): string {
+  const l = String(license ?? '').toLowerCase()
+  if (!l) return 'unknown'
+  if (l.includes('apache')) return 'apache-2.0'
+  if (l === 'mit') return 'mit'
+  if (l.includes('openrail')) return 'openrail-m'
+  if (l.includes('-nc') || l.includes('noncommercial') || l.includes('non-commercial')) return 'cc-by-nc'
+  if (l.includes('flux-1-dev') || l.includes('flux.1-dev')) return 'flux-1-dev-nc'
+  if (l.includes('stabilityai') || l.includes('stability')) return 'stability-community'
+  return 'unknown'
+}
+
+/**
+ * Civitai's per-model commercial permission. The field is either a legacy boolean or an array of
+ * allowed uses (e.g. ["Image","Rent","Sell"] vs ["None"]). We only care whether ANY paid use is
+ * permitted → a 'yes'/'no'/'unknown' verdict we fold into the final license decision.
+ */
+export function civitaiCommercial(model: Record<string, unknown>): CommercialVerdict {
+  const raw = model.allowCommercialUse
+  if (typeof raw === 'boolean') return raw ? 'yes' : 'no'
+  if (Array.isArray(raw)) {
+    const uses = raw.map((u) => String(u).toLowerCase())
+    if (uses.some((u) => ['sell', 'rent', 'rentcivit', 'image'].includes(u))) return 'yes'
+    if (uses.length === 0 || uses.every((u) => u === 'none')) return 'no'
+    return 'conditional'
+  }
+  return 'unknown'
+}
+
+/** Fold two verdicts, taking the MORE RESTRICTIVE (a derivative can't out-license its base). */
+export function combineCommercial(a: CommercialVerdict, b: CommercialVerdict): CommercialVerdict {
+  const rank: Record<CommercialVerdict, number> = { no: 0, conditional: 1, unknown: 2, yes: 3 }
+  return rank[a] <= rank[b] ? a : b
+}
+
+// ── small predicates (shared, readable) ──────────────────────────────────────
+
+function isFlux(t: string): boolean { return t.includes('flux') }
+function isFlux2(t: string): boolean { return t.includes('flux.2') || t.includes('flux2') || t.includes('flux 2') }
+function isSchnell(t: string): boolean { return t.includes('schnell') || /\bflux\.?1?\s*\[?s(chnell)?\]?\b/.test(t) || t.includes('.1 s') || t.includes('.1s') }
+function isDev(t: string): boolean { return t.includes('dev') || t.includes('.1 d') || t.includes('.1d') || t.includes('[d]') }
+function isSdxl(t: string): boolean { return t.includes('sdxl') || t.includes('sd_xl') || t.includes('sd-xl') || t.includes('stable-diffusion-xl') || t.includes('sd xl') }

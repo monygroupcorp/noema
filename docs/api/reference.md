@@ -507,6 +507,28 @@ Browse the model weight catalog, optionally filtered by genus, basis, fundamentu
           "description": {
             "type": "string",
             "description": "Human-readable description."
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "public",
+              "private"
+            ],
+            "description": "Resolvability of the caller's own model (GET /me/models only)."
+          },
+          "license": {
+            "type": "string",
+            "description": "License id, e.g. 'apache-2.0' (owner/admin views)."
+          },
+          "commercialUse": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no",
+              "conditional",
+              "unknown"
+            ],
+            "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
           }
         },
         "required": [
@@ -519,6 +541,286 @@ Browse the model weight catalog, optionally filtered by genus, basis, fundamentu
   },
   "required": [
     "models"
+  ]
+}
+```
+
+### POST /v1/models/import
+
+Import a model/LoRA by URL (Civitai/HuggingFace/direct) as a private, owner-scoped model — usable in your flows immediately; promoting it to the public catalogue is a separate publish.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Import a model/LoRA by URL as a private, owner-scoped model — usable in your flows at once; never on the public catalogue until a separate publish promotion passes moderation.",
+  "properties": {
+    "url": {
+      "type": "string",
+      "description": "A Civitai page (or ?modelVersionId), a HuggingFace repo, or a direct .safetensors/.ckpt link."
+    },
+    "genus": {
+      "type": "string",
+      "enum": [
+        "lora",
+        "model"
+      ],
+      "description": "For a direct-file URL where the origin can't be scraped to infer it. Default lora."
+    }
+  },
+  "required": [
+    "url"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "model": {
+      "type": "object",
+      "properties": {
+        "intellaId": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "Display name."
+        },
+        "genus": {
+          "type": "string",
+          "description": "Weight class (lora, checkpoint, vae, …)."
+        },
+        "basis": {
+          "type": "string",
+          "description": "Base model family this weight is compatible with."
+        },
+        "trigger": {
+          "type": "string",
+          "description": "Trigger words (LoRA only)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description."
+        },
+        "access": {
+          "type": "string",
+          "enum": [
+            "public",
+            "private"
+          ],
+          "description": "Resolvability of the caller's own model (GET /me/models only)."
+        },
+        "license": {
+          "type": "string",
+          "description": "License id, e.g. 'apache-2.0' (owner/admin views)."
+        },
+        "commercialUse": {
+          "type": "string",
+          "enum": [
+            "yes",
+            "no",
+            "conditional",
+            "unknown"
+          ],
+          "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+        }
+      },
+      "required": [
+        "intellaId",
+        "nomen",
+        "genus"
+      ]
+    }
+  },
+  "required": [
+    "model"
+  ]
+}
+```
+
+### GET /v1/me/models
+
+List the caller's own privately-held models (imports + trained LoRAs), newest first — the public /v1/models catalog is canonical-only.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "intellaId": {
+            "type": "string"
+          },
+          "nomen": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "genus": {
+            "type": "string",
+            "description": "Weight class (lora, checkpoint, vae, …)."
+          },
+          "basis": {
+            "type": "string",
+            "description": "Base model family this weight is compatible with."
+          },
+          "trigger": {
+            "type": "string",
+            "description": "Trigger words (LoRA only)."
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable description."
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "public",
+              "private"
+            ],
+            "description": "Resolvability of the caller's own model (GET /me/models only)."
+          },
+          "license": {
+            "type": "string",
+            "description": "License id, e.g. 'apache-2.0' (owner/admin views)."
+          },
+          "commercialUse": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no",
+              "conditional",
+              "unknown"
+            ],
+            "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+          }
+        },
+        "required": [
+          "intellaId",
+          "nomen",
+          "genus"
+        ]
+      }
+    }
+  },
+  "required": [
+    "models"
+  ]
+}
+```
+
+### PUT /v1/models/:id/license
+
+Admin: clear or backfill a model's license so the public-catalog gate treats it correctly (explicit license/commercialUse, or reclassify from the base). Platform-admin only.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Admin: set a model's license clearance so the public-catalog gate treats it correctly. Provide an explicit license/commercialUse, or reclassify:true to re-derive from the base string.",
+  "properties": {
+    "license": {
+      "type": "string",
+      "description": "License id to record, e.g. 'apache-2.0', 'stability-community'."
+    },
+    "commercialUse": {
+      "type": "string",
+      "enum": [
+        "yes",
+        "no",
+        "conditional",
+        "unknown"
+      ],
+      "description": "The commercial-catalog verdict (the operator's clearance decision)."
+    },
+    "reclassify": {
+      "type": "boolean",
+      "description": "Re-derive license + verdict from the model's recorded base string (bulk-fix legacy imports)."
+    }
+  }
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "model": {
+      "type": "object",
+      "properties": {
+        "intellaId": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "Display name."
+        },
+        "genus": {
+          "type": "string",
+          "description": "Weight class (lora, checkpoint, vae, …)."
+        },
+        "basis": {
+          "type": "string",
+          "description": "Base model family this weight is compatible with."
+        },
+        "trigger": {
+          "type": "string",
+          "description": "Trigger words (LoRA only)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description."
+        },
+        "access": {
+          "type": "string",
+          "enum": [
+            "public",
+            "private"
+          ],
+          "description": "Resolvability of the caller's own model (GET /me/models only)."
+        },
+        "license": {
+          "type": "string",
+          "description": "License id, e.g. 'apache-2.0' (owner/admin views)."
+        },
+        "commercialUse": {
+          "type": "string",
+          "enum": [
+            "yes",
+            "no",
+            "conditional",
+            "unknown"
+          ],
+          "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+        }
+      },
+      "required": [
+        "intellaId",
+        "nomen",
+        "genus"
+      ]
+    }
+  },
+  "required": [
+    "model"
   ]
 }
 ```

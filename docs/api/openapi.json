@@ -821,6 +821,28 @@
                           "description": {
                             "type": "string",
                             "description": "Human-readable description."
+                          },
+                          "access": {
+                            "type": "string",
+                            "enum": [
+                              "public",
+                              "private"
+                            ],
+                            "description": "Resolvability of the caller's own model (GET /me/models only)."
+                          },
+                          "license": {
+                            "type": "string",
+                            "description": "License id, e.g. 'apache-2.0' (owner/admin views)."
+                          },
+                          "commercialUse": {
+                            "type": "string",
+                            "enum": [
+                              "yes",
+                              "no",
+                              "conditional",
+                              "unknown"
+                            ],
+                            "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
                           }
                         },
                         "required": [
@@ -844,6 +866,363 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models/import": {
+      "post": {
+        "summary": "Import a model/LoRA by URL (Civitai/HuggingFace/direct) as a private, owner-scoped model — usable in your flows immediately; promoting it to the public catalogue is a separate publish.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "type": "object",
+                      "properties": {
+                        "intellaId": {
+                          "type": "string"
+                        },
+                        "nomen": {
+                          "type": "string",
+                          "description": "Display name."
+                        },
+                        "genus": {
+                          "type": "string",
+                          "description": "Weight class (lora, checkpoint, vae, …)."
+                        },
+                        "basis": {
+                          "type": "string",
+                          "description": "Base model family this weight is compatible with."
+                        },
+                        "trigger": {
+                          "type": "string",
+                          "description": "Trigger words (LoRA only)."
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Human-readable description."
+                        },
+                        "access": {
+                          "type": "string",
+                          "enum": [
+                            "public",
+                            "private"
+                          ],
+                          "description": "Resolvability of the caller's own model (GET /me/models only)."
+                        },
+                        "license": {
+                          "type": "string",
+                          "description": "License id, e.g. 'apache-2.0' (owner/admin views)."
+                        },
+                        "commercialUse": {
+                          "type": "string",
+                          "enum": [
+                            "yes",
+                            "no",
+                            "conditional",
+                            "unknown"
+                          ],
+                          "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+                        }
+                      },
+                      "required": [
+                        "intellaId",
+                        "nomen",
+                        "genus"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "model"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Import a model/LoRA by URL as a private, owner-scoped model — usable in your flows at once; never on the public catalogue until a separate publish promotion passes moderation.",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "description": "A Civitai page (or ?modelVersionId), a HuggingFace repo, or a direct .safetensors/.ckpt link."
+                  },
+                  "genus": {
+                    "type": "string",
+                    "enum": [
+                      "lora",
+                      "model"
+                    ],
+                    "description": "For a direct-file URL where the origin can't be scraped to infer it. Default lora."
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/models": {
+      "get": {
+        "summary": "List the caller's own privately-held models (imports + trained LoRAs), newest first — the public /v1/models catalog is canonical-only.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "intellaId": {
+                            "type": "string"
+                          },
+                          "nomen": {
+                            "type": "string",
+                            "description": "Display name."
+                          },
+                          "genus": {
+                            "type": "string",
+                            "description": "Weight class (lora, checkpoint, vae, …)."
+                          },
+                          "basis": {
+                            "type": "string",
+                            "description": "Base model family this weight is compatible with."
+                          },
+                          "trigger": {
+                            "type": "string",
+                            "description": "Trigger words (LoRA only)."
+                          },
+                          "description": {
+                            "type": "string",
+                            "description": "Human-readable description."
+                          },
+                          "access": {
+                            "type": "string",
+                            "enum": [
+                              "public",
+                              "private"
+                            ],
+                            "description": "Resolvability of the caller's own model (GET /me/models only)."
+                          },
+                          "license": {
+                            "type": "string",
+                            "description": "License id, e.g. 'apache-2.0' (owner/admin views)."
+                          },
+                          "commercialUse": {
+                            "type": "string",
+                            "enum": [
+                              "yes",
+                              "no",
+                              "conditional",
+                              "unknown"
+                            ],
+                            "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+                          }
+                        },
+                        "required": [
+                          "intellaId",
+                          "nomen",
+                          "genus"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "models"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models/{id}/license": {
+      "put": {
+        "summary": "Admin: clear or backfill a model's license so the public-catalog gate treats it correctly (explicit license/commercialUse, or reclassify from the base). Platform-admin only.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "type": "object",
+                      "properties": {
+                        "intellaId": {
+                          "type": "string"
+                        },
+                        "nomen": {
+                          "type": "string",
+                          "description": "Display name."
+                        },
+                        "genus": {
+                          "type": "string",
+                          "description": "Weight class (lora, checkpoint, vae, …)."
+                        },
+                        "basis": {
+                          "type": "string",
+                          "description": "Base model family this weight is compatible with."
+                        },
+                        "trigger": {
+                          "type": "string",
+                          "description": "Trigger words (LoRA only)."
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Human-readable description."
+                        },
+                        "access": {
+                          "type": "string",
+                          "enum": [
+                            "public",
+                            "private"
+                          ],
+                          "description": "Resolvability of the caller's own model (GET /me/models only)."
+                        },
+                        "license": {
+                          "type": "string",
+                          "description": "License id, e.g. 'apache-2.0' (owner/admin views)."
+                        },
+                        "commercialUse": {
+                          "type": "string",
+                          "enum": [
+                            "yes",
+                            "no",
+                            "conditional",
+                            "unknown"
+                          ],
+                          "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+                        }
+                      },
+                      "required": [
+                        "intellaId",
+                        "nomen",
+                        "genus"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "model"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Admin: set a model's license clearance so the public-catalog gate treats it correctly. Provide an explicit license/commercialUse, or reclassify:true to re-derive from the base string.",
+                "properties": {
+                  "license": {
+                    "type": "string",
+                    "description": "License id to record, e.g. 'apache-2.0', 'stability-community'."
+                  },
+                  "commercialUse": {
+                    "type": "string",
+                    "enum": [
+                      "yes",
+                      "no",
+                      "conditional",
+                      "unknown"
+                    ],
+                    "description": "The commercial-catalog verdict (the operator's clearance decision)."
+                  },
+                  "reclassify": {
+                    "type": "boolean",
+                    "description": "Re-derive license + verdict from the model's recorded base string (bulk-fix legacy imports)."
+                  }
                 }
               }
             }

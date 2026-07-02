@@ -46,6 +46,9 @@ export interface ApiFacade {
   ): Promise<{ impetus: string }>
   listFundamenta(): Promise<Array<{ id: string; nomen?: string; versio: string; runtime?: string; imageId: string; imageVersion: string; vramGb?: number }>>
   listModels(filter?: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number }): Promise<ModelCard[]>
+  importModel(auctor: AuctorKey, opts: import('./CrystalApi.js').ImportModelOpts): Promise<ModelCard>
+  listMyModels(auctor: AuctorKey): Promise<ModelCard[]>
+  setModelLicense(auctor: AuctorKey, id: string, opts: import('./CrystalApi.js').SetModelLicenseOpts): Promise<ModelCard>
   saveFlow(auctor: AuctorKey, opts: SaveFlowOpts): Promise<{ id: string }>
   bind(auctor: AuctorKey, verb: string, modusId: string): Promise<{ verb: string; modusId: string }>
   getMe(auctor: AuctorKey): Promise<import('./CrystalApi.js').MeView>
@@ -374,6 +377,29 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
       res.json({ models: await api.listModels(filter) })
     }),
   )
+
+  // POST /v1/models/import — import a model/LoRA by URL as a PRIVATE, owner-scoped model
+  // (Civitai/HF/direct). Usable in the importer's flows at once; never on the public
+  // catalogue until a separate `publish` promotion passes moderation.
+  router.post('/models/import', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const { url, genus } = req.body ?? {}
+    res.status(200).json({ model: await api.importModel(auctor, { url, genus }) })
+  }))
+
+  // GET /v1/me/models — the caller's own private models (imports + trained), newest first.
+  // The public GET /v1/models catalog is canonical-only, so this is where an owner sees theirs.
+  router.get('/me/models', wrap(async (req, res) => {
+    res.json({ models: await api.listMyModels(await auth(req)) })
+  }))
+
+  // PUT /v1/models/:id/license — ADMIN license clearance/backfill (platform-admin only). Set an
+  // explicit { license, commercialUse } or { reclassify: true } to re-derive from the base string.
+  router.put('/models/:id/license', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const { license, commercialUse, reclassify } = req.body ?? {}
+    res.json({ model: await api.setModelLicense(auctor, String(req.params.id), { license, commercialUse, reclassify }) })
+  }))
 
   // GET /v1/flows — public flow discovery (no auth).
   router.get(

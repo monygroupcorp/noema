@@ -646,10 +646,18 @@ async function main(): Promise<void> {
     : (log.warn('No CSAM/NCMEC scanner configured — public publishing (feed/marketplace) is DENIED (fail-closed). Private/unlisted still work.'), denyModerationGate)
 
   // Import-by-URL (spec/model-import.md Tier 1): register a Civitai/HF/direct model as a
-  // private, owner-scoped Intella — ORIGIN-ONLY (no R2 copy; we don't custody third-party BYO
-  // weights for personal use). The R2 mirror happens only on a public promotion (BucketAdapter).
+  // private, owner-scoped Intella — WEIGHTS origin-only (no R2 copy; we don't custody third-party
+  // BYO weights for personal use — the R2 weight mirror happens only on a public promotion,
+  // BucketAdapter). The store/fetcher here re-host only the small PREVIEW image(s), so the CSAM
+  // scan covers the exact bytes we display (no TOCTOU) and our UI doesn't hot-link the origin.
   // Reuses the same moderation gate for the mandatory preview-media safety scan (fail-closed).
-  const modelImporter = new ModelImporter({ json: httpJsonFetcher, intellae, moderationGate })
+  const modelImporter = new ModelImporter({
+    json: httpJsonFetcher,
+    intellae,
+    moderationGate,
+    fetcher: httpMediaFetcher,
+    ...(RUNPOD_R2 ? { store: new R2Uploader(RUNPOD_R2) } : {}),
+  })
 
   // Crystal Agent API (/v1) — ApiAllocutio (docs/agent-tasks/EPIC-api-allocutio.md).
   // The agent-shaped facade over the ring + the credential→AuctorKey resolver.

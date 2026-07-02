@@ -52,6 +52,9 @@ import type { AnimaStore, PublishingPrefs } from '../../types/anima.js'
 import type { PublicationAdapter } from '../../crystal/PublicationAdapter.js'
 import type { ModerationGate } from '../../crystal/ModerationGate.js'
 import { denyModerationGate } from '../../crystal/ModerationGate.js'
+import type { ModelImporter } from '../../crystal/ModelImporter.js'
+import { ModelImportError } from '../../crystal/modelImportResolver.js'
+import { isCatalogEligible, licenseCommercial, classifyBaseModel, type CommercialVerdict } from '../../crystal/modelLicense.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 import { provenanceHash } from '../../crystal/provenance.js'
 import { rarityReport, type RarityReport } from '../../crystal/rarityReport.js'
@@ -108,6 +111,8 @@ export interface CrystalApiDeps {
   /** Model (Intella) registry — resolves + owner-scopes an `Intella` publish and is the
    *  reconciler's write seam (`setAccess`) for §5d. Absent → model publishing unavailable. */
   intellarum?: Intellarum
+  /** Import-by-URL service (Civitai/HF/direct → private Intella). Absent → import unavailable. */
+  modelImporter?: ModelImporter
   /** RunPod pod provisioner for TEE private compute sessions. Absent → local dev (manual runner). */
   teeProvisioner?: TeeProvisioner
 }
@@ -159,6 +164,24 @@ export interface PublishOpts {
   teamId?: string
   /** Explicit rights split (animaId → weight, Σ≈1). Mutually exclusive with `teamId`. */
   owners?: Array<{ animaId: string; weight: number }>
+}
+
+/** Inputs to import a model by URL (Civitai/HF/direct → a private Intella). */
+export interface ImportModelOpts {
+  /** Civitai page/`?modelVersionId`, HuggingFace repo, or a direct `.safetensors`/`.ckpt` URL. */
+  url: string
+  /** genus for a direct-file URL where the origin can't be scraped to infer it. Default 'lora'. */
+  genus?: 'lora' | 'model'
+}
+
+/** Admin inputs to clear/backfill a model's license (going-public review). */
+export interface SetModelLicenseOpts {
+  /** Explicit license id to record (e.g. 'apache-2.0', 'stability-community'). */
+  license?: string
+  /** Explicit commercial-catalog verdict — the operator's clearance decision. */
+  commercialUse?: CommercialVerdict
+  /** Re-derive license + verdict from the model's recorded base string (bulk-fix legacy). */
+  reclassify?: boolean
 }
 
 /** Where to send a run: an explicit modusId OR a canon verb to resolve. */
@@ -615,6 +638,20 @@ export class CrystalApi {
     const ref: ArtifactRef = { kind: opts.artifact.kind, id: opts.artifact.id }
     const owned = await this._assertOwnsArtifact(auctor, ref)
 
+    // License gate (compliance): the public catalog is a COMMERCIAL surface, so a model may only be
+    // PROMOTED there (visibility !== 'private') if its license clears commercial use. `familia` can't
+    // carry this — FLUX schnell (Apache ✅) and dev (Non-Commercial ❌) are both 'flux' — so it keys
+    // on the model's recorded `commercialUse` verdict (set at import/training via modelLicense.ts).
+    // `isCatalogEligible` is the policy: 'yes' + 'conditional' pass (we track revenue against the
+    // conditional caps); 'no'/'unknown' are refused pending an ADMIN license clearance (setModelLicense
+    // backfill). A model with NO recorded verdict (undefined) is not gated here (legacy). Private/
+    // personal use is never blocked — this is listing, not use (spec/model-import.md).
+    if (ref.kind === 'intella' && visibility !== 'private' && owned.intella?.commercialUse && !isCatalogEligible(owned.intella.commercialUse)) {
+      throw Errors.licenseRestricted(
+        `this model cannot be promoted to the public catalog under its license (${owned.intella.license ?? 'unknown'}, commercial use: ${owned.intella.commercialUse}). It remains usable privately; an admin can clear it after license review.`,
+      )
+    }
+
     // Freeze boundary (#5, spec §4e): a Collectio put on-chain or to a marketplace
     // must be COMPLETE — you cannot freeze the canon of a drop that is still minting
     // pieces. (Mutable team/collection above the freeze, immutable drop below it.)
@@ -749,7 +786,16 @@ export class CrystalApi {
     if (!e || e.status !== 'pending') return
 
     const artifact = { ref: e.artifactRef, output: await this._artifactOutput(e.artifactRef), editioId: e.id, by: e.by }
-    if (e.visibility === 'feed' || e.visibility === 'marketplace') {
+    // The curation/CSAM gate runs before anything goes live for (a) a public media surface
+    // (feed/marketplace) and (b) a PUBLIC MODEL PROMOTION — an intella becoming resolvable on
+    // the shared catalogue (visibility !== 'private'). A model has no media surface, so its
+    // "public" is catalogue resolvability; listing it publicly passes the same ModerationGate
+    // over its preview samples (spec/model-import.md §"Curation review"). Private model
+    // publishing (a private R2 mirror, visibility 'private') is unaffected — personal use is
+    // never gated here (its import-time CSAM scan already ran).
+    const isPublicSurface = e.visibility === 'feed' || e.visibility === 'marketplace'
+    const isModelPromotion = e.artifactRef.kind === 'intella' && e.visibility !== 'private'
+    if (isPublicSurface || isModelPromotion) {
       const verdict = await this._moderationGate().scan(artifact)
       if (!verdict.ok) {
         await editiones.update(editioId, { status: 'rejected' })
@@ -1140,6 +1186,97 @@ export class CrystalApi {
     })
     const limited = filter.limit ? hits.slice(0, filter.limit) : hits
     return limited.map(toModelCard)
+  }
+
+  /**
+   * Import a model/LoRA by URL (Civitai page/`?modelVersionId`, HuggingFace repo, or a
+   * direct `.safetensors`/`.ckpt` link) as a PRIVATE, owner-scoped Intella — usable in
+   * the importer's flows at once (spec/model-import.md Tier 1). The importer scrapes the
+   * origin metadata, CSAM-scans any preview media (fail-closed), mirrors the weights into
+   * OUR R2 bucket (auth-free `sources[0]`), and registers `access:'private'`,
+   * `canonica:false`, `ownerAnimaId` — so `buildAccessOrClauses` resolves it ONLY for the
+   * owner and it never appears on the public catalogue. Appearing publicly is a separate,
+   * user-invoked `publish` (an `intella`-kind Editio through `ModerationGate`).
+   *
+   * Identified callers only — a private model needs a durable owner (`animaId`).
+   */
+  async importModel(auctor: AuctorKey, opts: ImportModelOpts): Promise<ModelCard> {
+    const importer = this.deps.modelImporter
+    if (!importer) throw Errors.notFoundModel('import')
+    if (!('animaId' in auctor)) throw Errors.authForbidden('Importing a model requires an identified account')
+    if (typeof opts.url !== 'string' || !opts.url.trim()) throw Errors.inputMalformed('a model URL is required')
+    try {
+      const intella = await importer.import({
+        url: opts.url.trim(),
+        ownerAnimaId: auctor.animaId,
+        ...(opts.genus ? { genus: opts.genus } : {}),
+      })
+      return {
+        intellaId: intella.id,
+        nomen: intella.nomen,
+        genus: intella.genus,
+        ...(intella.familia ? { basis: intella.familia } : {}),
+        ...(intella.trigger ? { trigger: intella.trigger } : {}),
+        ...(intella.description ? { description: intella.description } : {}),
+      }
+    } catch (err) {
+      if (err instanceof ModelImportError) throw Errors.inputMalformed(err.message)
+      throw err
+    }
+  }
+
+  /**
+   * List the caller's OWN privately-held models — imports + trained LoRAs — newest first. The
+   * public `listModels` catalog is `canonica:true` only, so a private import (owner-scoped in the
+   * `Intellarum` registry) is otherwise invisible; this is where an importer sees + manages what
+   * they brought in. Identified callers only; anon/commitment callers own no durable models.
+   */
+  async listMyModels(auctor: AuctorKey): Promise<ModelCard[]> {
+    if (!('animaId' in auctor) || !this.deps.intellarum) return []
+    const registry = this.deps.intellarum
+    const models = registry.listByOwner
+      ? await registry.listByOwner(auctor.animaId)
+      : (await registry.list()).filter((i) => i.ownerAnimaId === auctor.animaId)
+    return models.map(toModelCardFromIntella)
+  }
+
+  /**
+   * ADMIN license backfill/clearance (going-public review). Sets a model's `license` +
+   * `commercialUse` so the public-catalog gate treats it correctly — for a legacy/unclassified
+   * import, a misclassification, or a model we've cleared by taking out a commercial license.
+   * Two modes: an explicit clearance ({ license, commercialUse }) — the operator's decision, e.g.
+   * marking an SD3 model `'yes'` once we hold the Stability license — or `reclassify:true`, which
+   * re-derives the verdict from the model's recorded base string (`provenance.base`) via the same
+   * classifier (bulk-fix models imported before license classification existed). Platform-admin only.
+   */
+  async setModelLicense(auctor: AuctorKey, id: string, opts: SetModelLicenseOpts): Promise<ModelCard> {
+    this._assertPlatformAdmin(auctor)
+    const registry = this.deps.intellarum
+    if (!registry?.setLicense) throw Errors.notFoundModel(id)
+    let { license, commercialUse } = opts
+    if (opts.reclassify) {
+      const m = await registry.find(id)
+      if (!m) throw Errors.notFoundModel(id)
+      const base = m.provenance?.base ?? m.familia ?? ''
+      license = classifyBaseModel(base).license
+      commercialUse = licenseCommercial(license)
+    }
+    if (license === undefined && commercialUse === undefined) {
+      throw Errors.inputMalformed('provide license and/or commercialUse, or reclassify:true')
+    }
+    const updated = await registry.setLicense(id, {
+      ...(license !== undefined ? { license } : {}),
+      ...(commercialUse !== undefined ? { commercialUse } : {}),
+    })
+    if (!updated) throw Errors.notFoundModel(id)
+    return toModelCardFromIntella(updated)
+  }
+
+  /** Platform-admin gate: only the platform identity (PLATFORM_ANIMA_ID) may perform the op. */
+  private _assertPlatformAdmin(auctor: AuctorKey): void {
+    if (!('animaId' in auctor) || auctor.animaId !== PLATFORM_ANIMA_ID) {
+      throw Errors.authForbidden('this operation is restricted to the platform administrator')
+    }
   }
 
   /**
@@ -1701,6 +1838,13 @@ export interface ModelCard {
   basis?: string
   trigger?: string
   description?: string
+  /** Resolvability of an owner's own model — 'private' (owner-only) | 'public' (on the catalog).
+   *  Present on the owner-scoped `listMyModels`; absent on the public catalog projection. */
+  access?: 'public' | 'private'
+  /** License id (e.g. 'apache-2.0', 'flux-1-dev-nc'). Owner/admin views. */
+  license?: string
+  /** Commercial-catalog verdict — whether this model may be promoted publicly. Owner/admin views. */
+  commercialUse?: 'yes' | 'no' | 'conditional' | 'unknown'
 }
 
 function toModelCard(i: Intelligens): ModelCard {
@@ -1712,6 +1856,22 @@ function toModelCard(i: Intelligens): ModelCard {
     ...(i.basis ? { basis: i.basis } : {}),
     ...(trigger ? { trigger } : {}),
     ...(i.descriptio ? { description: i.descriptio } : {}),
+  }
+}
+
+/** Project an `Intella` (the load/resolve registry record) to a `ModelCard` — the owner-scoped
+ *  `listMyModels` view. `basis` = the compat `familia`; `access` surfaces public/private status. */
+function toModelCardFromIntella(i: Intella): ModelCard {
+  return {
+    intellaId: i.id,
+    nomen: i.nomen || i.id,
+    genus: i.genus,
+    ...(i.familia ? { basis: i.familia } : {}),
+    ...(i.trigger ? { trigger: i.trigger } : {}),
+    ...(i.description ? { description: i.description } : {}),
+    access: i.access ?? (i.canonica ? 'public' : 'private'),
+    ...(i.license ? { license: i.license } : {}),
+    ...(i.commercialUse ? { commercialUse: i.commercialUse } : {}),
   }
 }
 

@@ -65,6 +65,9 @@ export const Errors = {
   notFoundTeam: (id: string) => new ApiError('not_found.team', `Team '${id}' not found`, 404),
   notFoundEdition: (id: string) => new ApiError('not_found.edition', `Edition '${id}' not found`, 404),
   notFoundModel: (id: string) => new ApiError('not_found.model', `Model '${id}' not found`, 404),
+  /** A model can't be promoted to the public (commercial) catalog under its license. Private use is
+   *  unaffected. 403 — a policy refusal, not a malformed request. */
+  licenseRestricted: (message: string) => new ApiError('license.restricted', message, 403),
   notFoundAdapter: (key: string) => new ApiError('not_found.adapter', `Publication destination '${key}' is not available`, 404),
   insufficientSigna: (details?: Record<string, unknown>) =>
     new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
