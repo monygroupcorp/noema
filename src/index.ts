@@ -36,6 +36,7 @@ import { distributeOwnerReward } from './crystal/ownerReward.js'
 import { createCdpX402Facilitator } from './crystal/CdpX402Facilitator.js'
 import type { X402Facilitator } from './types/x402.js'
 import { createSponsioRouter } from './allocutio/api/sponsioRouter.js'
+import { createWidgetRouter } from './allocutio/api/widgetRouter.js'
 import { startSubsidySweeper } from './crystal/SubsidySweeper.js'
 import { RunEventHub } from './allocutio/api/RunEventHub.js'
 import { isSafeWebhookUrl } from './allocutio/api/webhookGuard.js'
@@ -868,6 +869,19 @@ async function main(): Promise<void> {
     },
     distributeOwnerReward: (input) => distributeOwnerReward({ animae: ring.animae, signorum: ring.signorum }, input),
     ...(process.env.PUBLIC_BASE ? { publicBase: process.env.PUBLIC_BASE } : {}),
+  }))
+
+  // /widget — the StationThis embed surface (ADR-0011 §7): the SDK + chrome-less,
+  // themed per-agent & gallery views, composed from the public feed + owner appearance.
+  // Framing is a per-partner CSP allowlist (WIDGET_FRAME_ANCESTORS, space/comma-sep)
+  // replacing the legacy `frame-ancestors *`; default 'self' (same-origin only).
+  const widgetFrameAncestors = (process.env.WIDGET_FRAME_ANCESTORS ?? '')
+    .split(/[\s,]+/).map((o) => o.trim()).filter(Boolean)
+  app.use('/widget', createWidgetRouter({
+    legati: ring.legati,
+    feed: (filter) => crystalApi.feed(filter),
+    appearance: (owner) => crystalApi.publicAppearance(owner),
+    frameAncestors: widgetFrameAncestors,
   }))
 
   // TEE runner lifecycle callbacks — internal pod-to-platform signals, not user-facing API.

@@ -43,6 +43,9 @@ export class MongoEditionum implements Editionum {
       status: 'published',
       visibility: filter?.visibility ?? 'feed',
       ...(filter?.destination !== undefined ? { destination: filter.destination } : {}),
+      // Author scope keeps the public clamp (published + public visibility above) — it
+      // narrows to one creator/agent, never exposes their private/unlisted editions.
+      ...(filter?.author !== undefined ? authorQuery(filter.author) : {}),
     }
     let cursor = this.col.find(query).sort({ natum: -1 })
     if (filter?.limit !== undefined) cursor = cursor.limit(filter.limit)

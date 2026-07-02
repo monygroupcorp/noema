@@ -1340,7 +1340,60 @@ export class CrystalApi {
       ...(appearance !== undefined ? { appearance } : {}),
       ...(generatio !== undefined ? { generatio } : {}),
       bindings,
+      secrets,
     }
+  }
+
+  /** Public appearance-by-owner projection — the visual branding (avatar/banner/accent/
+   *  look) any embedder may read to theme a widget. Unlike `getMe` this is NOT self-
+   *  scoped: it exposes ONLY the `Appearance` (all visual, no secrets/prefs/bindings),
+   *  keyed by any owner. Backs the per-agent widget skin (an agent's own `{animaId}`). */
+  async publicAppearance(owner: AuctorKey): Promise<Appearance | undefined> {
+    return this.deps.consuetudinum?.resolveAppearance(owner)
+  }
+
+  /** Per-provider connect state for `getMe`. Uses the `has`-only presence view (no plaintext).
+   *  Absent store → every provider 'absent'. */
+  private async secretPresenceView(auctor: AuctorKey): Promise<Record<SecretProvider, 'connected' | 'absent'>> {
+    const p = this.deps.secretPresence
+    const ownerKey = ownerKeyOf(auctor)
+    const entries = await Promise.all(
+      SECRET_PROVIDERS.map(async provider =>
+        [provider, p && (await p.has(ownerKey, provider)) ? 'connected' : 'absent'] as const),
+    )
+    return Object.fromEntries(entries) as Record<SecretProvider, 'connected' | 'absent'>
+  }
+
+  // ── BYO secrets (Secretarium, owner-keyed / anon-capable) ────────────────────
+
+  /**
+   * Connect the caller's BYO gated-origin credential for `provider`. The token is sealed at
+   * rest at once and NEVER echoed back. `idleDays` (default 90) sets the idle-expiry window.
+   * Anon-capable: a Bursa purse is a valid owner (§ownerKeyOf) — but a BYO token is bound to a
+   * NAMED third-party account, so a purse caller gets a deanonymization `warning` to render.
+   */
+  async putSecret(auctor: AuctorKey, provider: string, token: string, idleDays?: number): Promise<SecretView> {
+    const w = this.deps.secretWriter
+    if (!w) throw Errors.internal('BYO secrets are not available on this deployment')
+    if (!isSecretProvider(provider)) throw Errors.inputMalformed(`unknown secret provider '${provider}'`)
+    if (typeof token !== 'string' || !token.trim()) throw Errors.inputMalformed('a token is required')
+    const days = Number.isFinite(idleDays) && (idleDays as number) > 0 ? Math.floor(idleDays as number) : DEFAULT_SECRET_IDLE_DAYS
+    const { expiresAt } = await w.put(ownerKeyOf(auctor), provider, token.trim(), days)
+    return {
+      provider,
+      status: 'connected',
+      expiresAt: expiresAt.toISOString(),
+      ...('bursaToken' in auctor || 'commitment' in auctor ? { warning: DEANON_WARNING } : {}),
+    }
+  }
+
+  /** Disconnect the caller's BYO credential for `provider`. Idempotent (absent → still 'absent'). */
+  async removeSecret(auctor: AuctorKey, provider: string): Promise<SecretView> {
+    const w = this.deps.secretWriter
+    if (!w) throw Errors.internal('BYO secrets are not available on this deployment')
+    if (!isSecretProvider(provider)) throw Errors.inputMalformed(`unknown secret provider '${provider}'`)
+    await w.remove(ownerKeyOf(auctor), provider)
+    return { provider, status: 'absent' }
   }
 
   /** Replace the caller's presentation skin (Profile). */

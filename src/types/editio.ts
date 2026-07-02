@@ -107,6 +107,10 @@ export interface FeedFilter {
   visibility?: EditioVisibility
   /** Restrict to one destination/adapter key. */
   destination?: string
+  /** Restrict to one author (same identity union as `by`). Still clamped to the
+   *  public `status:'published'` + public-visibility surface — this scopes the feed
+   *  to one creator/agent, it never widens it to their private editions. */
+  author?: Editio['by']
   /** Max items (newest first). */
   limit?: number
 }
