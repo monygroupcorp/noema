@@ -30,6 +30,10 @@ import { AgentProvisioner } from './crystal/AgentProvisioner.js'
 import { createAgentCompatRouter } from './allocutio/api/agentCompatRouter.js'
 import { createTreasuryAdminRouter } from './api/internal/treasuryAdminRouter.js'
 import { seedCamel, CAMEL_TREASURY } from './crystal/seeds/camel.js'
+import { createX402AgentRouter } from './allocutio/api/x402AgentRouter.js'
+import { DEFAULT_X402_CONFIG } from './crystal/x402Pricing.js'
+import { distributeOwnerReward } from './crystal/ownerReward.js'
+import type { X402Facilitator } from './types/x402.js'
 import { RunEventHub } from './allocutio/api/RunEventHub.js'
 import { isSafeWebhookUrl } from './allocutio/api/webhookGuard.js'
 import { createMcpRouter } from './allocutio/api/mcp/mcpRouter.js'
@@ -86,6 +90,14 @@ import type { Essentia } from './types/essendi.js'
 import path from 'node:path'
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { makeSnarkjsVerifier } from './arcanum/ArcanumVerifier.js'
+
+// A deny-all x402 facilitator — the safe default until the real @coinbase/x402 CDP
+// facilitator is wired. With x402 feature-flagged off, the endpoints 404 before this
+// is ever consulted; if flagged on without a real facilitator, payments fail closed.
+const disabledX402Facilitator: X402Facilitator = {
+  async verify() { return { valid: false, error: 'x402 facilitator not configured' } },
+  async settle() { return { success: false, error: 'x402 facilitator not configured' } },
+}
 
 // ---------------------------------------------------------------------------
 // Env
@@ -802,6 +814,32 @@ async function main(): Promise<void> {
     resolveAgentAnima,
     treasury: camelTreasury,
     balanceOf: (animaId: string) => ring.signorum.balance({ animaId }),
+    ...(process.env.PUBLIC_BASE ? { publicBase: process.env.PUBLIC_BASE } : {}),
+  }))
+
+  // x402 pay-per-call capability serving (ADR-0011 phase 4 — "the premise"). Feature-
+  // flagged: X402_ENABLED=true + X402_PAY_TO wire it live; otherwise the endpoints 404.
+  // The facilitator (on-chain verify/settle via @coinbase/x402) is edge I/O — a
+  // deny-stub until CDP creds are wired; the whole state machine is otherwise crystal.
+  const X402_PAY_TO = process.env.X402_PAY_TO
+  const x402Config = { ...DEFAULT_X402_CONFIG, payTo: X402_PAY_TO ?? '0x0000000000000000000000000000000000000000' }
+  const x402Enabled = process.env.X402_ENABLED === 'true' && !!X402_PAY_TO
+  const SYSTEM_AUCTOR = { animaId: process.env.PLATFORM_ANIMA_ID ?? 'platform' }
+  app.use('/api/v1/x402', express.json(), createX402AgentRouter({
+    legati: ring.legati,
+    modorum: ring.modorum,
+    facilitator: disabledX402Facilitator,   // TODO(x402): wire @coinbase/x402 CDP facilitator when creds exist
+    log: ring.x402Log,
+    config: x402Config,
+    enabled: x402Enabled,
+    quoteImpetus: async (modusId, aditus) => BigInt((await crystalApi.quote(SYSTEM_AUCTOR, { modusId }, aditus)).impetus),
+    // Prepaid run: the verified x402 payment backs a mint of the quote's impetus onto
+    // the agent's Anima, which the normal run path then spends. Payment funds the run.
+    runSpell: async ({ agentAnimaId, modusId, aditus, grossImpetus }) => {
+      await ring.signorum.issue({ animaId: agentAnimaId, forma: 'minted', valor: grossImpetus, auctor: 'x402:prepaid' })
+      return crystalApi.invokeFlow({ animaId: agentAnimaId }, { modusId }, aditus, { maxImpetus: grossImpetus })
+    },
+    distributeOwnerReward: (input) => distributeOwnerReward({ animae: ring.animae, signorum: ring.signorum }, input),
     ...(process.env.PUBLIC_BASE ? { publicBase: process.env.PUBLIC_BASE } : {}),
   }))
 
