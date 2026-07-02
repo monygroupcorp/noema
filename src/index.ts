@@ -33,6 +33,7 @@ import { seedCamel, CAMEL_TREASURY } from './crystal/seeds/camel.js'
 import { createX402AgentRouter } from './allocutio/api/x402AgentRouter.js'
 import { DEFAULT_X402_CONFIG } from './crystal/x402Pricing.js'
 import { distributeOwnerReward } from './crystal/ownerReward.js'
+import { createCdpX402Facilitator } from './crystal/CdpX402Facilitator.js'
 import type { X402Facilitator } from './types/x402.js'
 import { createSponsioRouter } from './allocutio/api/sponsioRouter.js'
 import { startSubsidySweeper } from './crystal/SubsidySweeper.js'
@@ -99,6 +100,24 @@ import { makeSnarkjsVerifier } from './arcanum/ArcanumVerifier.js'
 const disabledX402Facilitator: X402Facilitator = {
   async verify() { return { valid: false, error: 'x402 facilitator not configured' } },
   async settle() { return { success: false, error: 'x402 facilitator not configured' } },
+}
+
+// The real CDP facilitator, built only when `CDP_API_KEY_ID`/`CDP_API_KEY_SECRET` are set.
+// `node10` moduleResolution can't see @x402/core's `exports` map, so the client trio is
+// loaded via runtime `require` (Node honours exports maps) — the same combo the platform
+// x402 middleware uses. Our adapter maps the shapes; NETWORK is decided by x402Config
+// (DEFAULT_X402_CONFIG = Base mainnet, eip155:8453 — real USDC).
+function buildCdpX402Facilitator(): X402Facilitator | null {
+  const apiKeyId = process.env.CDP_API_KEY_ID
+  const apiKeySecret = process.env.CDP_API_KEY_SECRET
+  if (!apiKeyId || !apiKeySecret) return null
+  /* eslint-disable @typescript-eslint/no-var-requires */
+  const { createFacilitatorConfig } = require('@coinbase/x402')
+  const { HTTPFacilitatorClient } = require('@x402/core/server')
+  const { decodePaymentSignatureHeader } = require('@x402/core/http')
+  /* eslint-enable @typescript-eslint/no-var-requires */
+  const client = new HTTPFacilitatorClient(createFacilitatorConfig(apiKeyId, apiKeySecret))
+  return createCdpX402Facilitator({ client, decodePayment: decodePaymentSignatureHeader })
 }
 
 // ---------------------------------------------------------------------------
@@ -830,10 +849,13 @@ async function main(): Promise<void> {
   const x402Config = { ...DEFAULT_X402_CONFIG, payTo: X402_PAY_TO ?? '0x0000000000000000000000000000000000000000' }
   const x402Enabled = process.env.X402_ENABLED === 'true' && !!X402_PAY_TO
   const SYSTEM_AUCTOR = { animaId: process.env.PLATFORM_ANIMA_ID ?? 'platform' }
+  const cdpFacilitator = x402Enabled ? buildCdpX402Facilitator() : null
+  if (x402Enabled && cdpFacilitator) log.info(`x402: CDP facilitator wired (${x402Config.network}, payTo ${x402Config.payTo})`)
+  else if (x402Enabled) log.warn('x402: X402_ENABLED but CDP_API_KEY_ID/CDP_API_KEY_SECRET missing — payments fail closed (deny-stub)')
   app.use('/api/v1/x402', express.json(), createX402AgentRouter({
     legati: ring.legati,
     modorum: ring.modorum,
-    facilitator: disabledX402Facilitator,   // TODO(x402): wire @coinbase/x402 CDP facilitator when creds exist
+    facilitator: cdpFacilitator ?? disabledX402Facilitator,
     log: ring.x402Log,
     config: x402Config,
     enabled: x402Enabled,
