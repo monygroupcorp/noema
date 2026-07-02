@@ -27,6 +27,9 @@ export function Profile() {
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [secrets, setSecrets] = useState<Record<SecretProvider, 'connected' | 'absent'>>();
+  // undefined until /me loads (older servers omit it) → the panel assumes available; false = store
+  // unconfigured → the panel shows "unavailable" proactively without a failed connect (F3).
+  const [secretsAvailable, setSecretsAvailable] = useState<boolean>();
   const { ident } = useIdentity();
   const anon = ident.funding === 'bearer';
 
@@ -37,6 +40,7 @@ export function Profile() {
         if (!live) return;
         if (me.appearance) setAppr((a) => ({ ...a, ...me.appearance }));
         setSecrets(me.secrets);
+        setSecretsAvailable(me.secretsAvailable);
         setLoaded(true);
       })
       .catch(() => { if (live) setLoaded(true); });
@@ -96,7 +100,7 @@ export function Profile() {
           <button className="btn" disabled style={{ marginTop: 'var(--s3)' }}><Ic name="sparkles" /> Generate kit — soon</button>
         </div>
 
-        {loaded && <ConnectedAccounts initial={secrets} anon={anon} />}
+        {loaded && <ConnectedAccounts initial={secrets} available={secretsAvailable} anon={anon} />}
       </div></div>
     </AppShell>
   );
@@ -115,11 +119,13 @@ function daysUntil(iso?: string): number | null {
   return ms > 0 ? Math.max(1, Math.round(ms / 86_400_000)) : 0;
 }
 
-function ConnectedAccounts({ initial, anon }: {
-  initial?: Record<SecretProvider, 'connected' | 'absent'>; anon: boolean;
+function ConnectedAccounts({ initial, available, anon }: {
+  initial?: Record<SecretProvider, 'connected' | 'absent'>; available?: boolean; anon: boolean;
 }) {
-  // Set once a connect/disconnect reveals the store isn't configured on this deployment.
-  const [unavailable, setUnavailable] = useState(false);
+  // Seeded from /me (`available === false` → store unconfigured, known before any attempt) and also
+  // flipped reactively if a connect/disconnect reveals it (belt-and-suspenders for older servers that
+  // omit `secretsAvailable`).
+  const [unavailable, setUnavailable] = useState(available === false);
 
   return (
     <>

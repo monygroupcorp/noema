@@ -203,17 +203,19 @@ the backend already emits everything needed:
    with the provider pre-expanded (e.g. `?connect=civitai` → `SecretRow` reads it and focuses the token
    input).
 
-### F3. Proactive "unavailable" (hide the panel without a failed attempt) — *optional polish, ~20 min*
-**Current:** the panel only learns the store is unconfigured *after* the first connect attempt returns
-the 500 (then flips to "unavailable" via `SecretsUnavailableError`). Acceptance is already met — degrade
-is clean, no red error — but a first-time anonymous user can type a token before finding out.
-**Why it can't be detected today:** `getMe().secrets` is all-`'absent'` whether the store is unconfigured
-*or* just empty — `secretPresenceView` returns all-absent when `deps.secretPresence` is falsy
-(`CrystalApi.ts:1498-1506`). Indistinguishable from the client.
-**Fix (if desired):** add an availability boolean to `MeView` so the panel can hide/disable proactively.
-- `CrystalApi.ts`: `MeView` gains `secretsAvailable: boolean`; `getMe` sets it `= !!this.deps.secretWriter`.
-- `apiContract.ts`: add `secretsAvailable` to the `MeView` schema (+`required`).
-- `lib/api.ts`: mirror `secretsAvailable?: boolean` on the client `MeView`.
-- `Profile.tsx`: render `ConnectedAccounts` only when `me.secretsAvailable !== false` (keep the
-  reactive `SecretsUnavailableError` path as a belt-and-suspenders fallback).
-**Disposition:** nice-to-have, not required for go-live. Do it only if the pre-key window is user-facing.
+### F3. Proactive "unavailable" (hide the panel without a failed attempt) — ✅ **SHIPPED (2026-07-02)**
+**Was:** the panel only learned the store was unconfigured *after* the first connect attempt returned
+the 500 (then flipped to "unavailable" via `SecretsUnavailableError`) — a first-time anonymous user
+could type a token before finding out. `getMe().secrets` couldn't tell "unconfigured" from "wired but
+empty" (both all-`'absent'`).
+**Fix (landed):** `MeView` now carries a `secretsAvailable` boolean the panel keys off, so it
+hides/disables *before* any attempt. Reactive `SecretsUnavailableError` path kept as belt-and-suspenders
+for older servers that omit the field.
+- `CrystalApi.ts`: `MeView` gains `secretsAvailable: boolean`; `getMe` sets it `= !!this.deps.secretWriter`
+  (the write seam, not presence — an unconfigured store 500s on connect).
+- `apiContract.ts`: `secretsAvailable` added to `MeViewSchema` (+`required`).
+- `lib/api.ts`: client `MeView` mirrors `secretsAvailable?: boolean` (optional — older servers omit it).
+- `Profile.tsx`: `ConnectedAccounts` takes an `available` prop and seeds its `unavailable` state from
+  `available === false`, so the token inputs never render on an unconfigured deployment.
+- Tests: `tests/unit/allocutio/api/secrets.test.ts` asserts `secretsAvailable` true (store wired) /
+  false (no store).

@@ -1546,7 +1546,10 @@ export class CrystalApi {
   async getMe(auctor: AuctorKey): Promise<MeView> {
     const c = this.deps.consuetudinum
     const secrets = await this.secretPresenceView(auctor)
-    if (!c) return { bindings: [], secrets }
+    // Availability tracks the WRITE seam, not presence — an unconfigured store 500s on connect, so the
+    // panel can hide/disable proactively instead of waiting for the first failed PUT (F3).
+    const secretsAvailable = !!this.deps.secretWriter
+    if (!c) return { bindings: [], secrets, secretsAvailable }
     const [appearance, generatio, bindings] = await Promise.all([
       c.resolveAppearance(auctor), c.resolveGeneratio(auctor), c.listBindings(auctor),
     ])
@@ -1555,6 +1558,7 @@ export class CrystalApi {
       ...(generatio !== undefined ? { generatio } : {}),
       bindings,
       secrets,
+      secretsAvailable,
     }
   }
 
@@ -2071,6 +2075,11 @@ export interface MeView {
   bindings: Array<{ verb: string; modusId: string }>
   /** BYO gated-origin credential connect state, per provider. */
   secrets: Record<SecretProvider, 'connected' | 'absent'>
+  /** Whether this deployment can store BYO secrets at all (a secret store is wired). `false` →
+   *  `SECRETA_MASTER_KEY` is unset and `PUT/DELETE /v1/me/secrets` will 500; the UI hides/disables
+   *  the panel proactively rather than only learning on a failed connect. Distinct from every
+   *  provider being `absent` (which just means "wired but nothing connected"). */
+  secretsAvailable: boolean
 }
 
 /** Result of connecting/disconnecting a BYO secret (`PUT/DELETE /v1/me/secrets/:provider`).
