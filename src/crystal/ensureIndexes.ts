@@ -120,5 +120,10 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('x402_payment_log').createIndex({ signatureHash: 1 }, { unique: true }),
     db.collection('x402_payment_log').createIndex({ payer: 1 }),
     db.collection('x402_payment_log').createIndex({ status: 1, verifiedAt: -1 }),
+
+    // sponsiones — sponsorship pledges (ADR-0011 §2); the sweeper scans by status
+    db.collection('sponsiones').createIndex({ id: 1 }, { unique: true }),
+    db.collection('sponsiones').createIndex({ status: 1 }),
+    db.collection('sponsiones').createIndex({ 'sponsor.animaId': 1 }),
   ])
 }

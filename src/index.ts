@@ -34,6 +34,8 @@ import { createX402AgentRouter } from './allocutio/api/x402AgentRouter.js'
 import { DEFAULT_X402_CONFIG } from './crystal/x402Pricing.js'
 import { distributeOwnerReward } from './crystal/ownerReward.js'
 import type { X402Facilitator } from './types/x402.js'
+import { createSponsioRouter } from './allocutio/api/sponsioRouter.js'
+import { startSubsidySweeper } from './crystal/SubsidySweeper.js'
 import { RunEventHub } from './allocutio/api/RunEventHub.js'
 import { isSafeWebhookUrl } from './allocutio/api/webhookGuard.js'
 import { createMcpRouter } from './allocutio/api/mcp/mcpRouter.js'
@@ -802,6 +804,9 @@ async function main(): Promise<void> {
   // Live chain: public status + self-serve contribution upload (KZG-summoning model).
   // express.json() handles /slots; the contribution route brings its own raw() parser.
   await mountCeremony(app, ring.ceremonia)
+  // Sponsorship pledges (ADR-0011 §2) — mounted before the /v1 catch-all so
+  // /v1/sponsorships resolves here. The sweeper (below) does the actual dripping.
+  app.use('/v1/sponsorships', express.json(), createSponsioRouter({ sponsiones: ring.sponsiones, identity: apiResolver }))
   app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub }))
 
   // CAMEL agent compat surface (ADR-0011 §8) — the exact `/api/v1/...` paths the
@@ -896,6 +901,14 @@ async function main(): Promise<void> {
     modos: ring.modos,
   }, 60_000)
   log.info('census started', { tickMs: 60_000 })
+
+  // Subsidy sweeper (ADR-0011 §2) — drips every active sponsorship pledge once per
+  // cycle. Hourly sweep; the per-pledge cycle key makes the drip idempotent.
+  startSubsidySweeper(
+    { sponsiones: ring.sponsiones, signorum: ring.signorum },
+    { intervalMs: 60 * 60 * 1000, onError: (err) => log.error('subsidy sweep failed', { error: String(err) }) },
+  )
+  log.info('subsidy sweeper started', { tickMs: 60 * 60 * 1000 })
 
   app.use('/internal', createLiveRouter(INTERNAL_SECRET))
   app.use('/internal/analytics', createAnalyticsRouter(wideStore, INTERNAL_SECRET))

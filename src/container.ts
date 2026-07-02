@@ -47,6 +47,8 @@ import { MongoLegatus } from './crystal/MongoLegatus.js'
 import type { LegatusStore } from './types/legatus.js'
 import { MongoX402Log } from './crystal/MongoX402Log.js'
 import type { X402LogStore } from './types/x402.js'
+import { MongoSponsio } from './crystal/MongoSponsio.js'
+import type { SponsioStore } from './types/sponsio.js'
 import { MongoVestigiorum } from './crystal/MongoVestigiorum.js'
 import { MongoModo } from './crystal/MongoModo.js'
 import { RunPodCursor } from './crystal/RunPodCursor.js'
@@ -118,6 +120,8 @@ export interface Ring {
   legati: LegatusStore
   /** x402 payment audit trail (replay-protected) — see types/x402.ts. */
   x402Log: X402LogStore
+  /** Sponsorship pledges (the generalized faucet) — see types/sponsio.ts. */
+  sponsiones: SponsioStore
   vestigiorum: Vestigiorum
   modos: ModoStore
   mandatores: Mandatorum
@@ -266,6 +270,8 @@ export interface ContainerConfig {
   legatiCollection?: string
   /** Collection name for the x402 payment log — default 'x402_payment_log' */
   x402LogCollection?: string
+  /** Collection name for sponsorship pledges — default 'sponsiones' */
+  sponsionesCollection?: string
   /** Collection name for vestigia — default 'vestigia' */
   vestigiaCollection?: string
   /** Collection name for modos — default 'modos' */
@@ -388,6 +394,9 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   // x402 payment audit trail (replay-protected by a unique signatureHash index).
   const x402Log = new MongoX402Log(db.collection(config.x402LogCollection ?? 'x402_payment_log'))
+
+  // Sponsorship pledges (the generalized faucet).
+  const sponsiones = new MongoSponsio(db.collection(config.sponsionesCollection ?? 'sponsiones'))
 
   const vestigiaCol: Collection = db.collection(config.vestigiaCollection ?? 'vestigia')
   const vestigiorum = new MongoVestigiorum(vestigiaCol, config.embed, config.embedImage)
@@ -655,7 +664,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const collectioCursor = new CollectioCursor(sharedDispatch, collectiones, actorum, { reviewEnabled: true })
 
   return {
-    actorum, modorum, signorum, animae, personae, issuers, legati, x402Log, vestigiorum, modos,
+    actorum, modorum, signorum, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,
     mandatores, corpora, collectiones, editiones, publicationAdapters, sodalitates, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
