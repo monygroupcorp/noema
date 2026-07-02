@@ -18,8 +18,20 @@
 
 import type { PublishArtifact } from './PublicationAdapter.js'
 
-/** A gate verdict: pass, or refuse with a reason. */
-export type ModerationVerdict = { ok: true } | { ok: false; reason: string }
+/**
+ * A gate verdict:
+ *   - `{ ok: true }`                       — pass; publish may proceed.
+ *   - `{ ok: false, reason }`              — REJECT; content never goes live.
+ *   - `{ ok: false, reason, hold: true }`  — HOLD for human review: do NOT publish,
+ *                                            do NOT reject, do NOT report. An escalation
+ *                                            signal (e.g. the pre-Thorn NSFW router)
+ *                                            that a person must adjudicate (spec §4).
+ *
+ * `hold` is a REFUSAL to auto-publish (so `ok` is false), distinguished from a reject
+ * so the settle path can route it to the review queue instead of terminal rejection.
+ * A hold is NEVER a CSAM verdict and NEVER files a NCMEC report (§0-A).
+ */
+export type ModerationVerdict = { ok: true } | { ok: false; reason: string; hold?: boolean }
 
 /** Scans an artifact bound for a public surface. */
 export interface ModerationGate {

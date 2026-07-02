@@ -95,6 +95,7 @@ export function toEdition(e: Editio): Edition {
     createdAt: e.natum.toISOString(),
     updatedAt: e.mutatum.toISOString(),
   }
+  if (e.reviewOutcome !== undefined) out.reviewOutcome = e.reviewOutcome
   if (e.externalRef !== undefined) out.externalRef = e.externalRef
   if (e.owners !== undefined) out.owners = e.owners
   if (e.license !== undefined) out.license = e.license
