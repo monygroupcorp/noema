@@ -37,6 +37,7 @@ import { createCdpX402Facilitator } from './crystal/CdpX402Facilitator.js'
 import type { X402Facilitator } from './types/x402.js'
 import { createSponsioRouter } from './allocutio/api/sponsioRouter.js'
 import { createWidgetRouter } from './allocutio/api/widgetRouter.js'
+import { createAgentCardRouter } from './allocutio/api/agentCardRouter.js'
 import { startSubsidySweeper } from './crystal/SubsidySweeper.js'
 import { RunEventHub } from './allocutio/api/RunEventHub.js'
 import { isSafeWebhookUrl } from './allocutio/api/webhookGuard.js'
@@ -895,6 +896,27 @@ async function main(): Promise<void> {
     feed: (filter) => crystalApi.feed(filter),
     appearance: (owner) => crystalApi.publicAppearance(owner),
     frameAncestors: widgetFrameAncestors,
+  }))
+
+  // ERC-8004 agent cards (ADR-0011 §7/§8): the platform card + per-agent capability
+  // cards that advertise an agent's x402-callable Modus — the discoverable "agent link"
+  // an external agent resolves → pays → runs. Mounted at `/` (specific paths only).
+  const cardBase = process.env.PUBLIC_BASE ?? 'https://noema.art'
+  app.use(createAgentCardRouter({
+    legati: ring.legati,
+    modorum: ring.modorum,
+    quoteImpetus: async (modusId) => BigInt((await crystalApi.quote(SYSTEM_AUCTOR, { modusId }, {})).impetus),
+    x402Config,
+    publicBase: cardBase,
+    appearance: (owner) => crystalApi.publicAppearance(owner),
+    platform: {
+      name: 'NOEMA',
+      description: 'AI generation infrastructure — images, video, and media, with on-chain pay-per-call agents.',
+      publicBase: cardBase,
+      ...(process.env.ERC8004_AGENT_ID && process.env.ERC8004_IDENTITY_REGISTRY
+        ? { registration: { agentId: Number(process.env.ERC8004_AGENT_ID), agentRegistry: `eip155:1:${process.env.ERC8004_IDENTITY_REGISTRY}` } }
+        : {}),
+    },
   }))
 
   // TEE runner lifecycle callbacks — internal pod-to-platform signals, not user-facing API.
