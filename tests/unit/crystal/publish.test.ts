@@ -45,14 +45,20 @@ class MemEditionum implements Editionum {
     this.store.set(e.id, e)
     return e
   }
-  async update(id: string, patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody'>>) {
+  async listHeld(by?: Editio['by']): Promise<Editiones> {
+    return [...this.store.values()].filter((e) =>
+      e.reviewOutcome === 'pending' && (by === undefined ||
+        ('animaId' in by ? 'animaId' in e.by && e.by.animaId === by.animaId
+                         : 'commitment' in e.by && e.by.commitment === by.commitment)))
+  }
+  async update(id: string, patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody' | 'reviewOutcome' | 'leasedUntil'>>) {
     const e = { ...this.store.get(id)!, ...patch, mutatum: new Date() }
     this.store.set(id, e)
     return e
   }
   async claimPending(now: Date, leaseMs: number): Promise<Editio | null> {
     const claimable = [...this.store.values()]
-      .filter((e) => e.status === 'pending' && (!e.leasedUntil || e.leasedUntil.getTime() <= now.getTime()))
+      .filter((e) => e.status === 'pending' && e.reviewOutcome !== 'pending' && (!e.leasedUntil || e.leasedUntil.getTime() <= now.getTime()))
       .sort((a, b) => a.natum.getTime() - b.natum.getTime())[0]
     if (!claimable) return null
     const updated: Editio = { ...claimable, leasedUntil: new Date(now.getTime() + leaseMs), attempts: (claimable.attempts ?? 0) + 1, mutatum: new Date() }
@@ -548,4 +554,106 @@ test('publish(): an explicit owners split overrides the collection freeze defaul
   const owners = [{ animaId: 'anima-1', weight: 1 }]
   const ed = await api.publish(anima1, { artifact: { kind: 'collectio', id: 'col-done' }, destination: 'mint', owners })
   assert.deepEqual(ed.owners, owners)
+})
+
+// =============================================================================
+// A2 — human-review surface (spec §4). A gate that HOLDS (the pre-Thorn NSFW
+// router escalation) routes the publication to the review queue instead of the
+// feed or a terminal reject; an admin approves (→ publishes) or rejects.
+// =============================================================================
+
+const admin = { animaId: 'platform' } // PLATFORM_ANIMA_ID default (unset in test env)
+const anima2 = { animaId: 'anima-2' }
+
+/** A gate that HOLDS every scan (like the pre-Thorn router escalation), counting calls. */
+function holdGate(): { gate: ModerationGate; calls: () => number } {
+  let n = 0
+  return { gate: { async scan() { n++; return { ok: false, hold: true, reason: 'flagged for human review' } } }, calls: () => n }
+}
+
+test('A2 hold: a held publish lands in review — pending, not on the feed, no report', async () => {
+  const { gate } = holdGate()
+  const { api, editiones, flush } = makeApi({ gate })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+
+  const stored = await editiones.find(ed.id)
+  assert.equal(stored?.status, 'pending', 'a hold stays pending, NOT rejected')
+  assert.equal(stored?.reviewOutcome, 'pending', 'held for human review')
+  assert.equal((await api.feed()).length, 0, 'a held item is never on the feed')
+})
+
+test('A2 hold: the worker SKIPS a held item — no re-scan loop', async () => {
+  const held = holdGate()
+  const { api, flush } = makeApi({ gate: held.gate })
+  await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+  assert.equal(held.calls(), 1, 'scanned once → held')
+  await flush(); await flush()
+  assert.equal(held.calls(), 1, 'claimPending skips reviewOutcome:pending — the gate never re-runs')
+})
+
+test('A2 review queue: author sees only their OWN held items; admin sees all', async () => {
+  const { gate } = holdGate()
+  const { api, flush } = makeApi({ gate })
+  const mine = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+
+  const asAuthor = await api.listHeldEditions(anima1)
+  assert.equal(asAuthor.length, 1)
+  assert.equal(asAuthor[0].id, mine.id)
+  assert.equal(asAuthor[0].reviewOutcome, 'pending')
+
+  assert.equal((await api.listHeldEditions(anima2)).length, 0, 'another author sees none of it')
+  assert.equal((await api.listHeldEditions(admin)).length, 1, 'admin queue sees all held')
+})
+
+test('A2 approve: an admin approval clears the hold → the item re-settles and publishes (gate bypassed)', async () => {
+  const held = holdGate()
+  const { api, editiones, flush } = makeApi({ gate: held.gate })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+  assert.equal(held.calls(), 1)
+
+  const approved = await api.approveHeldEdition(admin, ed.id)
+  assert.equal(approved.reviewOutcome, 'approved')
+
+  await flush()
+  assert.equal((await editiones.find(ed.id))?.status, 'published', 'approved → publishes')
+  assert.equal(held.calls(), 1, 'the gate is BYPASSED on the approved re-settle (no re-scan)')
+  assert.equal((await api.feed()).length, 1, 'now on the feed')
+})
+
+test('A2 reject: an admin rejection is terminal — rejected, never on the feed', async () => {
+  const { gate } = holdGate()
+  const { api, editiones, flush } = makeApi({ gate })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+
+  const rejected = await api.rejectHeldEdition(admin, ed.id)
+  assert.equal(rejected.status, 'rejected')
+  assert.equal(rejected.reviewOutcome, 'rejected')
+
+  await flush()
+  assert.equal((await editiones.find(ed.id))?.status, 'rejected', 'stays rejected (terminal)')
+  assert.equal((await api.feed()).length, 0)
+})
+
+test('A2 authority: an AUTHOR cannot approve or reject their own held content (admin-only)', async () => {
+  const { gate } = holdGate()
+  const { api, flush } = makeApi({ gate })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+
+  await assert.rejects(() => api.approveHeldEdition(anima1, ed.id), /platform administrator/)
+  await assert.rejects(() => api.rejectHeldEdition(anima1, ed.id), /platform administrator/)
+})
+
+test('A2 reject/approve guard: only a pending-review Editio can be adjudicated', async () => {
+  const { api, flush } = makeApi() // permissive gate → publishes straight through (no hold)
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+  // Not held → approving/rejecting it is a not-found (nothing to adjudicate).
+  await assert.rejects(() => api.approveHeldEdition(admin, ed.id))
+  await assert.rejects(() => api.rejectHeldEdition(admin, ed.id))
 })

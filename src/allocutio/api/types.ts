@@ -117,6 +117,10 @@ export interface Edition {
   custody: 'ours' | 'theirs' | 'both'
   /** Lifecycle: pending → published | rejected | failed; retracted on unpublish. */
   status: 'pending' | 'published' | 'rejected' | 'failed' | 'retracted'
+  /** Human-review outcome when the moderation gate held this publication (spec §4):
+   *  pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent
+   *  on the normal path. */
+  reviewOutcome?: 'pending' | 'approved' | 'rejected'
   /** The destination's handle — feed post id / HF repo / token id / R2 url. */
   externalRef?: string
   /** Rights split snapshot (animaId → weight), when team-owned. */
