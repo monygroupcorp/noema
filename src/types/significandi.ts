@@ -122,6 +122,25 @@ export interface Signum {
 export type Signa = Signum[]
 
 /**
+ * Reservatio — the outcome of an atomic `reserve`.
+ * On success: the ids of the signa now locked against the actum, and their summed valor
+ * (`locked >= amount`, greedy overshoot refunded at settle time).
+ * On failure: `available` — the valor the identity could actually cover (< amount);
+ * everything this call locked has been released. Every failure fails closed (deny, never overpay).
+ */
+export type Reservatio =
+  | { ok: true; signaIds: string[]; locked: bigint }
+  | { ok: false; available: bigint }
+
+/**
+ * Transferatio — the outcome of a `transfer`. `ok:false` carries the sender's coverable
+ * `available` when it was short (no money moved — the transfer is all-or-nothing).
+ */
+export type Transferatio =
+  | { ok: true }
+  | { ok: false; available: bigint }
+
+/**
  * Signorum — genitive plural "of the signs."
  * The append-only ledger. No update() method — immutability is the contract.
  */
@@ -149,6 +168,20 @@ export interface Signorum {
    */
   lock(signaIds: string[], actumId: string): Promise<void>
   /**
+   * Atomically reserve `amount` worth of an identity's valid signa against `actumId`.
+   *
+   * The single "debit-if-sufficient" primitive: selects valid signa (greedy, smallest
+   * first), locks each with a guarded per-signum write (`status:'valid' → 'locked'` wins at
+   * most once), re-reads which now carry this `actumId`, and if still short grabs more /
+   * retries against a fresh read. If the identity's valid balance cannot cover `amount`,
+   * it releases everything this call locked and returns `{ ok:false, available }`.
+   *
+   * Overdraw is structurally impossible (each signum locks once, one winner per race) and
+   * every failure fails closed. This replaces the race-prone check-then-select-then-lock in
+   * callers. `amount <= 0n` is a no-op success with no signa locked.
+   */
+  reserve(by: { animaId: string } | { commitment: string }, amount: bigint, actumId: string): Promise<Reservatio>
+  /**
    * Release locked signa back to valid — called on actum failure.
    * No-op if any signum is already spent (prevents release after settlement).
    */
@@ -170,6 +203,22 @@ export interface Signorum {
    * This replaces the naive spend(all) + lose(delta) pattern.
    */
   settle(signaIds: string[], actualImpetus: bigint, actumId: string): Promise<void>
+  /**
+   * First-class inter-account move — spend `amount` from `from` and reissue it to `to`.
+   * Built on `reserve` + `settle` (so the sender is debited exactly `amount`, any greedy
+   * overshoot refunded to the sender) followed by an `issue` to the recipient. All-or-nothing:
+   * if the sender cannot cover `amount`, no money moves and `{ ok:false, available }` is returned.
+   *
+   * The recipient is always an identified Anima (a platform/treasury/agent account). The credit
+   * forma/auctor/testis default to a plain minted transfer and can be overridden via `opts` —
+   * this is the primitive that replaces the hand-rolled debit/credit pairs (TEE billing, grants).
+   */
+  transfer(
+    from: { animaId: string } | { commitment: string },
+    to: { animaId: string },
+    amount: bigint,
+    opts?: { auctor?: string; forma?: SignumForma; testis?: string; contextId?: string },
+  ): Promise<Transferatio>
   /**
    * Bulk-insert signa produced by Nexus hooks.
    * Each entry gets a generated id, status: 'valid', and natum: new Date().
