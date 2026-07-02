@@ -95,6 +95,13 @@ export function makeCredentialAcceptors(deps: AcceptorDeps): CredentialAcceptors
             return null
           }
           if (typeof payload === 'string') return null
+          // Fiat-auth session tokens (authRouter) carry the resolved `animaId` DIRECTLY in
+          // `sub` under `typ:'session'`. Return it as-is — the `'password'` persona already
+          // established this anima at register/verify, so re-resolving under `'web'` would
+          // split the account in two (docs/spec/fiat-auth.md §trap).
+          if (payload.typ === 'session') {
+            return typeof payload.sub === 'string' ? payload.sub : null
+          }
           const ext = payload.userId ?? payload.sub ?? payload._id ?? payload.id
           if (!ext) return null
           return resolveOrCreateAnima(personae, animae, 'web', String(ext))
