@@ -32,7 +32,7 @@ import { createTreasuryAdminRouter } from './api/internal/treasuryAdminRouter.js
 import { seedCamel, CAMEL_TREASURY } from './crystal/seeds/camel.js'
 import { createX402AgentRouter } from './allocutio/api/x402AgentRouter.js'
 import { DEFAULT_X402_CONFIG } from './crystal/x402Pricing.js'
-import { distributeOwnerReward } from './crystal/ownerReward.js'
+import { accruePayeePayout, agentCutMicro } from './crystal/accruePayeePayout.js'
 import { createCdpX402Facilitator } from './crystal/CdpX402Facilitator.js'
 import type { X402Facilitator } from './types/x402.js'
 import { createSponsioRouter } from './allocutio/api/sponsioRouter.js'
@@ -867,7 +867,20 @@ async function main(): Promise<void> {
       await ring.signorum.issue({ animaId: agentAnimaId, forma: 'minted', valor: grossImpetus, auctor: 'x402:prepaid' })
       return crystalApi.invokeFlow({ animaId: agentAnimaId }, { modusId }, aditus, { maxImpetus: grossImpetus })
     },
-    distributeOwnerReward: (input) => distributeOwnerReward({ animae: ring.animae, signorum: ring.signorum }, input),
+    // The agent's cut = the MARGIN (price − our serve cost) minus our fee, accrued to the
+    // payee's GATED USD payout book (ADR-0013 §4c). Not an at-settle on-chain split; held
+    // once the payee crosses the $600/yr reporting line without tax docs. Best-effort.
+    accrueAgentCut: ({ payoutAddress, priceAtomic, serveImpetus, sourceRef, network }) =>
+      accruePayeePayout(
+        { mercedum: ring.mercedum, animae: ring.animae },
+        {
+          payoutAddress,
+          usdMicro: agentCutMicro(BigInt(priceAtomic), serveImpetus),
+          fmvSource: `x402:margin-split@${network}`,
+          sourceRef: `x402:${sourceRef}`,
+          kind: 'agent',
+        },
+      ),
     ...(process.env.PUBLIC_BASE ? { publicBase: process.env.PUBLIC_BASE } : {}),
   }))
 

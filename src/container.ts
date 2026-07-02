@@ -46,6 +46,8 @@ import type { IssuerStore } from './types/issuer.js'
 import { MongoLegatus } from './crystal/MongoLegatus.js'
 import type { LegatusStore } from './types/legatus.js'
 import { MongoX402Log } from './crystal/MongoX402Log.js'
+import { MongoMerces } from './crystal/MongoMerces.js'
+import type { Mercedum } from './types/merces.js'
 import type { X402LogStore } from './types/x402.js'
 import { MongoSponsio } from './crystal/MongoSponsio.js'
 import type { SponsioStore } from './types/sponsio.js'
@@ -120,6 +122,8 @@ export interface Ring {
   legati: LegatusStore
   /** x402 payment audit trail (replay-protected) — see types/x402.ts. */
   x402Log: X402LogStore
+  /** Payee-payout book (ADR-0013 §4c) — money OUT, per-payee, gated at the $600 line. */
+  mercedum: Mercedum
   /** Sponsorship pledges (the generalized faucet) — see types/sponsio.ts. */
   sponsiones: SponsioStore
   vestigiorum: Vestigiorum
@@ -270,6 +274,8 @@ export interface ContainerConfig {
   legatiCollection?: string
   /** Collection name for the x402 payment log — default 'x402_payment_log' */
   x402LogCollection?: string
+  /** Collection name for the payee-payout book — default 'mercedes' */
+  mercesCollection?: string
   /** Collection name for sponsorship pledges — default 'sponsiones' */
   sponsionesCollection?: string
   /** Collection name for vestigia — default 'vestigia' */
@@ -394,6 +400,10 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   // x402 payment audit trail (replay-protected by a unique signatureHash index).
   const x402Log = new MongoX402Log(db.collection(config.x402LogCollection ?? 'x402_payment_log'))
+
+  // Payee-payout book (ADR-0013 §4c) — money OUT to a person, per-payee/per-year, gated at
+  // the $600 reporting line. Indexes in ensureIndexes().
+  const mercedum = new MongoMerces(db.collection(config.mercesCollection ?? 'mercedes'))
 
   // Sponsorship pledges (the generalized faucet).
   const sponsiones = new MongoSponsio(db.collection(config.sponsionesCollection ?? 'sponsiones'))
@@ -664,7 +674,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const collectioCursor = new CollectioCursor(sharedDispatch, collectiones, actorum, { reviewEnabled: true })
 
   return {
-    actorum, modorum, signorum, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,
+    actorum, modorum, signorum, mercedum, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,
     mandatores, corpora, collectiones, editiones, publicationAdapters, sodalitates, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
