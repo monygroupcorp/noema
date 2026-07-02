@@ -30,8 +30,14 @@ import type { PublishArtifact } from './PublicationAdapter.js'
  * `hold` is a REFUSAL to auto-publish (so `ok` is false), distinguished from a reject
  * so the settle path can route it to the review queue instead of terminal rejection.
  * A hold is NEVER a CSAM verdict and NEVER files a NCMEC report (§0-A).
+ *
+ * `billable` is set when the scan actually invoked the PAID classifier (Thorn) — the
+ * settle forwards the per-scan fee only for billable scans (spec §7). Pre-Thorn, or on
+ * a hash-only / router-cleared item, no paid call is made ⇒ not billable ⇒ no fee.
  */
-export type ModerationVerdict = { ok: true } | { ok: false; reason: string; hold?: boolean }
+export type ModerationVerdict =
+  | { ok: true; billable?: boolean }
+  | { ok: false; reason: string; hold?: boolean; billable?: boolean }
 
 /** Scans an artifact bound for a public surface. */
 export interface ModerationGate {
