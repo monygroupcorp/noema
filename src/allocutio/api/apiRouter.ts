@@ -317,10 +317,12 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
 
   // GET /v1/feed — the public feed (NO auth): published, public-surface editions, newest first.
   router.get('/feed', wrap(async (req, res) => {
-    const { visibility, destination, limit } = req.query
+    const { visibility, destination, limit, author } = req.query
     const filter: FeedFilter = {
       ...(typeof visibility === 'string' ? { visibility: visibility as FeedFilter['visibility'] } : {}),
       ...(typeof destination === 'string' ? { destination } : {}),
+      // `?author=<animaId>` scopes the feed to one creator/agent (still public-clamped).
+      ...(typeof author === 'string' && author ? { author: { animaId: author } } : {}),
       ...(typeof limit === 'string' && Number.isFinite(Number(limit)) ? { limit: Number(limit) } : {}),
     }
     res.json({ feed: await api.feed(filter) })
