@@ -37,8 +37,15 @@ export interface AcceptorDeps {
   jwksOverride?: Record<string, string>
 }
 
+/** The federated persona externusId for a verified `(iss, sub)` — issuer-namespaced
+ *  so subjects never collide across issuers. Shared by the JWKS acceptor and the
+ *  agent-provisioning compat route so re-auth lands on the same Anima. */
+export function federatedExternusId(iss: string, sub: string): string {
+  return `${iss}::${sub}`
+}
+
 /** Find the anima behind a VERIFIED external identity, or mint one on first sight. */
-async function resolveOrCreateAnima(
+export async function resolveOrCreateAnima(
   personae: AcceptorDeps['personae'],
   animae: AcceptorDeps['animae'],
   genus: PersonaGenus,
@@ -75,8 +82,7 @@ export function makeCredentialAcceptors(deps: AcceptorDeps): CredentialAcceptors
           const { payload, issuer } = result
           const sub = typeof payload.sub === 'string' ? payload.sub : undefined
           if (!sub) return null
-          const externusId = `${issuer.issuerId}::${sub}`
-          return resolveOrCreateAnima(personae, animae, 'federated', externusId)
+          return resolveOrCreateAnima(personae, animae, 'federated', federatedExternusId(issuer.issuerId, sub))
         }
       : undefined,
 
