@@ -545,6 +545,136 @@ Browse the model weight catalog, optionally filtered by genus, basis, fundamentu
 }
 ```
 
+### GET /v1/deposit/config
+
+Buy-credits/deposit UI config: deposit address, points/USD rate, default funding rate, supported chains.
+
+- **Auth:** public
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "Static config for the buy-credits/deposit UI.",
+  "properties": {
+    "depositAddress": {
+      "type": "string",
+      "description": "CreditVault address to send deposits to (same on mainnet + Base)."
+    },
+    "pointsPerUsd": {
+      "type": "number",
+      "description": "Canonical impetus points per 1 USD (≈ 2967)."
+    },
+    "defaultFundingRatePct": {
+      "type": "number",
+      "description": "Default funding rate as a percent (70 = 70% of USD value converts to points)."
+    },
+    "chains": {
+      "type": "array",
+      "description": "Supported chains.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "chainId": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "depositAddress",
+    "pointsPerUsd",
+    "defaultFundingRatePct",
+    "chains"
+  ]
+}
+```
+
+### POST /v1/deposit/quote
+
+Quote how many impetus points a deposit of a given asset+amount would buy (informational; equals the on-chain credit).
+
+- **Auth:** public
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Quote how many impetus points a deposit would buy, right now (informational; the on-chain credit is authoritative and equal).",
+  "properties": {
+    "chainId": {
+      "type": "string",
+      "description": "Chain id ('1' mainnet, '8453' Base)."
+    },
+    "token": {
+      "type": "string",
+      "description": "Token address; 0x000…000 for native ETH."
+    },
+    "amount": {
+      "type": "string",
+      "description": "Deposit amount in RAW base units (wei for ETH, token-decimals for ERC-20), as a string."
+    }
+  },
+  "required": [
+    "chainId",
+    "token",
+    "amount"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The points a deposit would be credited (== what the webhook credits for the same input). Gas is NOT deducted.",
+  "properties": {
+    "chainId": {
+      "type": "string"
+    },
+    "token": {
+      "type": "string"
+    },
+    "amountRaw": {
+      "type": "string",
+      "description": "Echoed raw base units quoted."
+    },
+    "grossUsd": {
+      "type": "string",
+      "description": "Gross USD FMV, formatted (e.g. \"3.000000\")."
+    },
+    "grossUsdMicro": {
+      "type": "string",
+      "description": "Exact gross USD FMV in micro-USD."
+    },
+    "fundingRatePct": {
+      "type": "number",
+      "description": "Per-asset funding rate applied (e.g. 70)."
+    },
+    "pointsQuoted": {
+      "type": "string",
+      "description": "Impetus points the deposit would be credited."
+    },
+    "depositAddress": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "pointsQuoted",
+    "grossUsd",
+    "fundingRatePct",
+    "depositAddress"
+  ]
+}
+```
+
 ### POST /v1/models/import
 
 Import a model/LoRA by URL (Civitai/HuggingFace/direct) as a private, owner-scoped model — usable in your flows immediately; promoting it to the public catalogue is a separate publish.
@@ -821,6 +951,74 @@ Admin: clear or backfill a model's license so the public-catalog gate treats it 
   },
   "required": [
     "model"
+  ]
+}
+```
+
+### GET /v1/admin/revenue
+
+Admin: company-wide trailing-12mo USD revenue vs the tightest active conditional-license cap (the tripwire). Platform-admin only.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "Admin revenue report: company-wide trailing-12mo USD revenue vs the tightest active conditional-license cap (the tripwire, ADR-0012/0013 §5).",
+  "properties": {
+    "asOf": {
+      "type": "string",
+      "description": "ISO timestamp the trailing window was computed against."
+    },
+    "trailingUsdRevenueMicro": {
+      "type": "string",
+      "description": "Trailing-12mo USD revenue in micro-USD (exact)."
+    },
+    "trailingUsdRevenue": {
+      "type": "string",
+      "description": "Trailing-12mo USD revenue, formatted."
+    },
+    "band": {
+      "type": "string",
+      "enum": [
+        "clear",
+        "watch",
+        "warn",
+        "breach"
+      ],
+      "description": "Live band of revenue against the binding cap."
+    },
+    "bindingCapUsd": {
+      "type": "number",
+      "nullable": true,
+      "description": "Tightest active conditional cap (whole USD), or null when dormant."
+    },
+    "activeConditionalLicenses": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Conditional license ids currently reachable in the public catalog."
+    },
+    "lastAlertedBand": {
+      "type": "string",
+      "enum": [
+        "clear",
+        "watch",
+        "warn",
+        "breach"
+      ],
+      "nullable": true,
+      "description": "The last band the scheduled evaluator alerted/persisted."
+    }
+  },
+  "required": [
+    "asOf",
+    "trailingUsdRevenue",
+    "band",
+    "activeConditionalLicenses"
   ]
 }
 ```
@@ -1117,10 +1315,42 @@ The caller's owner-keyed account settings — presentation skin (Profile), cross
         ]
       },
       "description": "The verb→flow overrides the owner has set."
+    },
+    "secrets": {
+      "type": "object",
+      "description": "BYO gated-origin credential connect state, per provider.",
+      "properties": {
+        "civitai": {
+          "type": "string",
+          "enum": [
+            "connected",
+            "absent"
+          ],
+          "description": "Civitai token connect state."
+        },
+        "huggingface": {
+          "type": "string",
+          "enum": [
+            "connected",
+            "absent"
+          ],
+          "description": "HuggingFace token connect state."
+        }
+      },
+      "required": [
+        "civitai",
+        "huggingface"
+      ]
+    },
+    "secretsAvailable": {
+      "type": "boolean",
+      "description": "Whether this deployment can store BYO secrets (a secret store is wired). false → connecting is unavailable here; hide/disable the panel."
     }
   },
   "required": [
-    "bindings"
+    "bindings",
+    "secrets",
+    "secretsAvailable"
   ]
 }
 ```
@@ -1287,6 +1517,118 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
   },
   "required": [
     "generatio"
+  ]
+}
+```
+
+### PUT /v1/me/secrets/:provider
+
+Connect a BYO gated-origin credential (civitai|huggingface) so gated model imports can download their weights. The token is sealed at rest at once and never echoed back. Anon-capable (a Bursa purse is a valid owner); anonymous callers receive a deanonymization warning.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Connect a BYO gated-origin credential. The token is sealed at rest at once and never echoed back.",
+  "properties": {
+    "token": {
+      "type": "string",
+      "description": "The provider API token/key (Civitai key or HuggingFace token)."
+    },
+    "idleDays": {
+      "type": "number",
+      "description": "Idle-expiry window in days (default 90). The secret is forgotten after this long without a real use."
+    }
+  },
+  "required": [
+    "token"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "Connect/disconnect result. Never includes the token.",
+  "properties": {
+    "provider": {
+      "type": "string",
+      "enum": [
+        "civitai",
+        "huggingface"
+      ],
+      "description": "The provider affected."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "connected",
+        "absent"
+      ],
+      "description": "The resulting connect state."
+    },
+    "expiresAt": {
+      "type": "string",
+      "description": "Idle-expiry deadline (ISO) — present when connected."
+    },
+    "warning": {
+      "type": "string",
+      "description": "Deanonymization caution — present for anonymous (purse) callers."
+    }
+  },
+  "required": [
+    "provider",
+    "status"
+  ]
+}
+```
+
+### DELETE /v1/me/secrets/:provider
+
+Disconnect the caller's BYO credential for a provider (civitai|huggingface). Idempotent.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "Connect/disconnect result. Never includes the token.",
+  "properties": {
+    "provider": {
+      "type": "string",
+      "enum": [
+        "civitai",
+        "huggingface"
+      ],
+      "description": "The provider affected."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "connected",
+        "absent"
+      ],
+      "description": "The resulting connect state."
+    },
+    "expiresAt": {
+      "type": "string",
+      "description": "Idle-expiry deadline (ISO) — present when connected."
+    },
+    "warning": {
+      "type": "string",
+      "description": "Deanonymization caution — present for anonymous (purse) callers."
+    }
+  },
+  "required": [
+    "provider",
+    "status"
   ]
 }
 ```
@@ -3796,6 +4138,15 @@ Publish an artifact (an Actum for #1) to a destination under a visibility/custod
           ],
           "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
         },
+        "reviewOutcome": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+        },
         "externalRef": {
           "type": "string",
           "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
@@ -3845,6 +4196,145 @@ Publish an artifact (an Actum for #1) to a destination under a visibility/custod
   },
   "required": [
     "edition"
+  ]
+}
+```
+
+### GET /v1/editiones/review
+
+The human-review queue: publications the moderation gate HELD for review (spec §4). An author sees their own held items; the platform administrator sees all of them.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "editions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "The public projection of an Editio — a publication record referencing a canonical artifact.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "artifact": {
+            "type": "object",
+            "description": "The canonical artifact being published (referenced, never copied).",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "actum",
+                  "intella",
+                  "collectio"
+                ],
+                "description": "Which artifact kind."
+              },
+              "id": {
+                "type": "string",
+                "description": "The artifact's id."
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ]
+          },
+          "destination": {
+            "type": "string",
+            "description": "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "unlisted",
+              "feed",
+              "marketplace"
+            ]
+          },
+          "custody": {
+            "type": "string",
+            "enum": [
+              "ours",
+              "theirs",
+              "both"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "published",
+              "rejected",
+              "failed",
+              "retracted"
+            ],
+            "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+          },
+          "reviewOutcome": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ],
+            "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+          },
+          "externalRef": {
+            "type": "string",
+            "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
+          },
+          "owners": {
+            "type": "array",
+            "description": "Rights split snapshot (team-owned only) — weights sum to ~1.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "animaId": {
+                  "type": "string"
+                },
+                "weight": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "animaId",
+                "weight"
+              ]
+            }
+          },
+          "license": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "artifact",
+          "destination",
+          "visibility",
+          "custody",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "editions"
   ]
 }
 ```
@@ -3922,6 +4412,15 @@ Fetch one publication (author-scoped). Poll it to watch a `pending` settle land 
             "retracted"
           ],
           "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+        },
+        "reviewOutcome": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
         },
         "externalRef": {
           "type": "string",
@@ -4049,6 +4548,287 @@ Retract a publication where the destination allows it (feed/bucket = revocable; 
             "retracted"
           ],
           "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+        },
+        "reviewOutcome": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+        },
+        "externalRef": {
+          "type": "string",
+          "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Rights split snapshot (team-owned only) — weights sum to ~1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "license": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "artifact",
+        "destination",
+        "visibility",
+        "custody",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "required": [
+    "edition"
+  ]
+}
+```
+
+### POST /v1/editiones/:id/approve
+
+Clear a moderation HOLD so the held publication re-settles and publishes (spec §4). Restricted to the platform administrator — an author cannot clear their own held content.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "edition": {
+      "type": "object",
+      "description": "The public projection of an Editio — a publication record referencing a canonical artifact.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "artifact": {
+          "type": "object",
+          "description": "The canonical artifact being published (referenced, never copied).",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "actum",
+                "intella",
+                "collectio"
+              ],
+              "description": "Which artifact kind."
+            },
+            "id": {
+              "type": "string",
+              "description": "The artifact's id."
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        "destination": {
+          "type": "string",
+          "description": "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …"
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "private",
+            "unlisted",
+            "feed",
+            "marketplace"
+          ]
+        },
+        "custody": {
+          "type": "string",
+          "enum": [
+            "ours",
+            "theirs",
+            "both"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "published",
+            "rejected",
+            "failed",
+            "retracted"
+          ],
+          "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+        },
+        "reviewOutcome": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+        },
+        "externalRef": {
+          "type": "string",
+          "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Rights split snapshot (team-owned only) — weights sum to ~1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "license": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "artifact",
+        "destination",
+        "visibility",
+        "custody",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "required": [
+    "edition"
+  ]
+}
+```
+
+### POST /v1/editiones/:id/reject
+
+Decline a held publication → terminal `rejected` (spec §4). Restricted to the platform administrator. Filing a CSAM report is a separate, explicit human action — never automatic.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "edition": {
+      "type": "object",
+      "description": "The public projection of an Editio — a publication record referencing a canonical artifact.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "artifact": {
+          "type": "object",
+          "description": "The canonical artifact being published (referenced, never copied).",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "actum",
+                "intella",
+                "collectio"
+              ],
+              "description": "Which artifact kind."
+            },
+            "id": {
+              "type": "string",
+              "description": "The artifact's id."
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        "destination": {
+          "type": "string",
+          "description": "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …"
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "private",
+            "unlisted",
+            "feed",
+            "marketplace"
+          ]
+        },
+        "custody": {
+          "type": "string",
+          "enum": [
+            "ours",
+            "theirs",
+            "both"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "published",
+            "rejected",
+            "failed",
+            "retracted"
+          ],
+          "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+        },
+        "reviewOutcome": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
         },
         "externalRef": {
           "type": "string",
