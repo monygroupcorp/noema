@@ -5,6 +5,7 @@ import type { Uploader, ObjectStore } from './R2Uploader.js'
 import type { MediaFetcher } from './MediaFetcher.js'
 import type { AitkOutcome } from './aitoolkitRunnerClient.js'
 import { buildAitkConfig, canonicalFamilia, DEFAULT_SAMPLE_PROMPTS, parseSamplePrompts } from './aitkConfig.js'
+import { classifyBaseModel, licenseCommercial } from './modelLicense.js'
 import { parseManifest } from './datasetManifest.js'
 
 // =============================================================================
@@ -150,6 +151,13 @@ export function makeTrainingFinalizer(
       canonica: false,
       access: 'private',
       ...(familia ? { familia } : {}),
+      // License axis (SEPARATE from familia): a LoRA inherits its base's license — a FLUX.1-dev-trained
+      // LoRA is a Non-Commercial derivative and must NOT be publicly (commercially) catalogued. Recorded
+      // so the publish gate enforces it uniformly with imports (modelLicense.ts). Fail-closed.
+      ...((): Partial<Intella> => {
+        const { license } = classifyBaseModel(String(a.baseModel ?? ''))
+        return { license, commercialUse: licenseCommercial(license) }
+      })(),
       ...(typeof a.baseIntellaId === 'string' ? { baseIntellaId: a.baseIntellaId } : {}),
       ...(trigger ? { trigger } : {}),
       slug,

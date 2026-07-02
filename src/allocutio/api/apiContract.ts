@@ -260,6 +260,9 @@ const ModelCardSchema: JsonSchema = {
     basis: { type: 'string', description: 'Base model family this weight is compatible with.' },
     trigger: { type: 'string', description: 'Trigger words (LoRA only).' },
     description: { type: 'string', description: 'Human-readable description.' },
+    access: { type: 'string', enum: ['public', 'private'], description: "Resolvability of the caller's own model (GET /me/models only)." },
+    license: { type: 'string', description: "License id, e.g. 'apache-2.0' (owner/admin views)." },
+    commercialUse: { type: 'string', enum: ['yes', 'no', 'conditional', 'unknown'], description: 'Whether this model may be promoted to the public (commercial) catalog (owner/admin views).' },
   },
   required: ['intellaId', 'nomen', 'genus'],
 }
@@ -271,6 +274,37 @@ const ModelsListSchema: JsonSchema = {
     models: { type: 'array', items: ModelCardSchema },
   },
   required: ['models'],
+}
+
+/** The `{ model }` envelope returned by `POST /v1/models/import`. */
+const ModelImportResponseSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    model: ModelCardSchema,
+  },
+  required: ['model'],
+}
+
+/** The request body for `POST /v1/models/import` (import a model/LoRA by URL). */
+const ModelImportRequestSchema: JsonSchema = {
+  type: 'object',
+  description: 'Import a model/LoRA by URL as a private, owner-scoped model — usable in your flows at once; never on the public catalogue until a separate publish promotion passes moderation.',
+  properties: {
+    url: { type: 'string', description: 'A Civitai page (or ?modelVersionId), a HuggingFace repo, or a direct .safetensors/.ckpt link.' },
+    genus: { type: 'string', enum: ['lora', 'model'], description: 'For a direct-file URL where the origin can\'t be scraped to infer it. Default lora.' },
+  },
+  required: ['url'],
+}
+
+/** The request body for `PUT /v1/models/:id/license` (admin license clearance/backfill). */
+const ModelLicenseRequestSchema: JsonSchema = {
+  type: 'object',
+  description: 'Admin: set a model\'s license clearance so the public-catalog gate treats it correctly. Provide an explicit license/commercialUse, or reclassify:true to re-derive from the base string.',
+  properties: {
+    license: { type: 'string', description: "License id to record, e.g. 'apache-2.0', 'stability-community'." },
+    commercialUse: { type: 'string', enum: ['yes', 'no', 'conditional', 'unknown'], description: 'The commercial-catalog verdict (the operator\'s clearance decision).' },
+    reclassify: { type: 'boolean', description: "Re-derive license + verdict from the model's recorded base string (bulk-fix legacy imports)." },
+  },
 }
 
 /** The request body for `POST /v1/flows` (save a reusable owner-keyed flow). */
@@ -864,6 +898,29 @@ export const API_CONTRACT: ApiContract = {
       summary: 'Browse the model weight catalog, optionally filtered by genus, basis, fundamentumId, trigger, or free-text query.',
       auth: false,
       response: ModelsListSchema,
+    },
+    {
+      method: 'POST',
+      path: '/models/import',
+      summary: 'Import a model/LoRA by URL (Civitai/HuggingFace/direct) as a private, owner-scoped model — usable in your flows immediately; promoting it to the public catalogue is a separate publish.',
+      auth: true,
+      request: ModelImportRequestSchema,
+      response: ModelImportResponseSchema,
+    },
+    {
+      method: 'GET',
+      path: '/me/models',
+      summary: "List the caller's own privately-held models (imports + trained LoRAs), newest first — the public /v1/models catalog is canonical-only.",
+      auth: true,
+      response: ModelsListSchema,
+    },
+    {
+      method: 'PUT',
+      path: '/models/:id/license',
+      summary: 'Admin: clear or backfill a model\'s license so the public-catalog gate treats it correctly (explicit license/commercialUse, or reclassify from the base). Platform-admin only.',
+      auth: true,
+      request: ModelLicenseRequestSchema,
+      response: ModelImportResponseSchema,
     },
     {
       method: 'POST',

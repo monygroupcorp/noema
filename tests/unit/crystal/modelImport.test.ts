@@ -1,0 +1,329 @@
+// Model import by URL (spec/model-import.md) — hermetic. The resolver is driven with a fake
+// JSON fetcher over fixture Civitai/HF payloads; the importer with a fake fetcher/store/writer/
+// gate. No network, no R2, no Mongo.
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { resolveImport, mapToFamilia, ModelImportError } from '../../../src/crystal/modelImportResolver.js'
+import { classifyBaseModel, licenseCommercial, civitaiCommercial, hfLicenseToId, combineCommercial } from '../../../src/crystal/modelLicense.js'
+import type { JsonFetcher } from '../../../src/crystal/modelImportResolver.js'
+import { ModelImporter } from '../../../src/crystal/ModelImporter.js'
+import type { IntellaWriter } from '../../../src/crystal/trainingFinalizer.js'
+import type { ModerationGate } from '../../../src/crystal/ModerationGate.js'
+import type { Intella } from '../../../src/types/intelligendi.js'
+
+// ── Fixtures ────────────────────────────────────────────────────────────────
+
+const CIVITAI_LORA = {
+  id: 92654,
+  name: 'Armored Dress',
+  type: 'LORA',
+  creator: { username: 'someartist' },
+  tags: ['clothing', 'armor'],
+  modelVersions: [
+    {
+      id: 1165788,
+      name: 'v2.0',
+      baseModel: 'SD 1.5',
+      description: '<p>trigger with armored_dress</p>',
+      trainedWords: ['gothic armor', 'armored_dress'],
+      images: [{ url: 'https://civitai.com/preview/1.png' }],
+      files: [{ name: 'armored_dress_V02.safetensors', downloadUrl: 'https://civitai.com/api/download/models/1165788', sizeKB: 13500 }],
+    },
+    { id: 999, name: 'v1.0', baseModel: 'SD 1.5', files: [{ name: 'old.safetensors', downloadUrl: 'https://civitai.com/api/download/models/999' }] },
+  ],
+}
+
+const HF_LORA = {
+  modelId: 'someuser/my-flux-lora',
+  author: 'someuser',
+  tags: ['lora', 'text-to-image'],
+  cardData: { base_model: 'black-forest-labs/FLUX.1-dev', trigger_words: ['mytoken'], title: 'My Flux LoRA', description: 'a nice lora' },
+  siblings: [{ rfilename: 'my_flux_lora.safetensors' }, { rfilename: 'preview.png' }, { rfilename: 'README.md' }],
+}
+
+const jsonOf = (payload: unknown): JsonFetcher => ({ async fetchJson() { return payload } })
+
+// ── Resolver: family mapping ──────────────────────────────────────────────────
+
+test('mapToFamilia: maps to families with a base flow (incl. SDXL finetunes); rejects the rest; order is load-bearing', () => {
+  assert.equal(mapToFamilia('SDXL 1.0'), 'sdxl')
+  assert.equal(mapToFamilia('SD 1.5'), 'sd15')
+  assert.equal(mapToFamilia('FLUX.1-dev'), 'flux')
+  assert.equal(mapToFamilia('FLUX.2 klein'), 'flux2')        // flux2 before flux
+  assert.equal(mapToFamilia('Chroma'), 'chroma')
+  assert.equal(mapToFamilia('Krea 2'), 'krea2')
+  assert.equal(mapToFamilia('Z-Image Turbo'), 'zimage')
+  assert.equal(mapToFamilia('Pony Realism'), 'sdxl')         // SDXL-architecture finetune → stacks on sdxl
+  // No base flow → rejected (null), NOT silently mismapped:
+  assert.equal(mapToFamilia('Flux.1 Kontext'), null)         // must NOT fall through to 'flux'
+  assert.equal(mapToFamilia('SD3 Medium'), null)
+  assert.equal(mapToFamilia('Stable Cascade'), null)
+})
+
+// ── License classification (the axis familia collapses) ───────────────────────
+
+test('classifyBaseModel: FLUX schnell vs dev — SAME familia, DIFFERENT license (the critical split)', () => {
+  const schnell = classifyBaseModel('FLUX.1-schnell')
+  const dev = classifyBaseModel('FLUX.1-dev')
+  assert.equal(schnell.familia, 'flux')
+  assert.equal(dev.familia, 'flux')                          // same compat family…
+  assert.equal(schnell.license, 'apache-2.0')
+  assert.equal(dev.license, 'flux-1-dev-nc')                 // …different license
+  assert.equal(licenseCommercial(schnell.license), 'yes')    // schnell clears the commercial catalog
+  assert.equal(licenseCommercial(dev.license), 'no')         // dev does NOT
+})
+
+test('classifyBaseModel: bare FLUX (no variant) is fail-closed, not assumed schnell', () => {
+  assert.equal(licenseCommercial(classifyBaseModel('FLUX').license), 'unknown')
+})
+
+test('classifyBaseModel: license verdicts across families', () => {
+  assert.equal(licenseCommercial(classifyBaseModel('SDXL 1.0').license), 'yes')     // openrail-m
+  assert.equal(licenseCommercial(classifyBaseModel('SD 1.5').license), 'yes')       // openrail-m
+  assert.equal(licenseCommercial(classifyBaseModel('Chroma').license), 'yes')       // apache
+  assert.equal(licenseCommercial(classifyBaseModel('Z-Image').license), 'yes')      // apache
+  assert.equal(licenseCommercial(classifyBaseModel('Krea 2').license), 'conditional') // <$1M community
+  assert.equal(licenseCommercial(classifyBaseModel('Pony').license), 'yes')         // fair-ai-public
+  // FLUX.2 variants: klein = Apache ✅, dev = Non-Commercial ❌, bare = fail-closed
+  assert.equal(classifyBaseModel('FLUX.2 klein').license, 'apache-2.0')
+  assert.equal(licenseCommercial(classifyBaseModel('FLUX.2 klein').license), 'yes')
+  assert.equal(licenseCommercial(classifyBaseModel('FLUX.2 dev').license), 'no')
+  assert.equal(licenseCommercial(classifyBaseModel('FLUX.2').license), 'unknown')
+})
+
+test('isCatalogEligible: yes + conditional pass; no + unknown are refused', async () => {
+  const { isCatalogEligible } = await import('../../../src/crystal/modelLicense.js')
+  assert.equal(isCatalogEligible('yes'), true)
+  assert.equal(isCatalogEligible('conditional'), true)   // SD3/Krea under-threshold — allowed
+  assert.equal(isCatalogEligible('no'), false)
+  assert.equal(isCatalogEligible('unknown'), false)
+  assert.equal(isCatalogEligible(undefined), false)
+})
+
+test('origin license signals: civitai commercial flags + HF license id + most-restrictive fold', () => {
+  assert.equal(civitaiCommercial({ allowCommercialUse: ['Image', 'Sell'] }), 'yes')
+  assert.equal(civitaiCommercial({ allowCommercialUse: ['None'] }), 'no')
+  assert.equal(civitaiCommercial({ allowCommercialUse: false }), 'no')
+  assert.equal(civitaiCommercial({}), 'unknown')
+  assert.equal(hfLicenseToId('apache-2.0'), 'apache-2.0')
+  assert.equal(hfLicenseToId('creativeml-openrail-m'), 'openrail-m')
+  assert.equal(hfLicenseToId('cc-by-nc-4.0'), 'cc-by-nc')
+  // a permissive base + a non-commercial artifact license → the artifact restriction wins
+  assert.equal(combineCommercial('yes', 'no'), 'no')
+  assert.equal(combineCommercial('yes', 'unknown'), 'unknown')
+})
+
+test('import resolve: license/commercialUse fold onto the resolved plan (Civitai)', async () => {
+  // schnell base + civitai "Sell" allowed → commercially clear
+  const schnell = { ...CIVITAI_LORA, allowCommercialUse: ['Image', 'Sell'], modelVersions: [{ id: 1, baseModel: 'FLUX.1-schnell', files: [{ name: 'a.safetensors', downloadUrl: 'https://civitai.com/api/download/models/1' }] }] }
+  assert.equal((await resolveImport('https://civitai.com/models/1', { json: jsonOf(schnell) })).commercialUse, 'yes')
+  // dev base → non-commercial, regardless of the uploader's flags
+  const dev = { ...CIVITAI_LORA, allowCommercialUse: ['Sell'], modelVersions: [{ id: 1, baseModel: 'FLUX.1-dev', files: [{ name: 'a.safetensors', downloadUrl: 'https://civitai.com/api/download/models/1' }] }] }
+  assert.equal((await resolveImport('https://civitai.com/models/1', { json: jsonOf(dev) })).commercialUse, 'no')
+  // schnell base but uploader forbids commercial → the restriction wins
+  const forbidden = { ...CIVITAI_LORA, allowCommercialUse: ['None'], modelVersions: [{ id: 1, baseModel: 'FLUX.1-schnell', files: [{ name: 'a.safetensors', downloadUrl: 'https://civitai.com/api/download/models/1' }] }] }
+  assert.equal((await resolveImport('https://civitai.com/models/1', { json: jsonOf(forbidden) })).commercialUse, 'no')
+})
+
+// ── Resolver: Civitai ─────────────────────────────────────────────────────────
+
+test('civitai: resolves genus/familia/trigger/dest + origin source with meta', async () => {
+  const r = await resolveImport('https://civitai.com/models/92654/armored-dress', { json: jsonOf(CIVITAI_LORA) })
+  assert.equal(r.genus, 'lora')
+  assert.equal(r.familia, 'sd15')
+  assert.equal(r.nomen, 'Armored Dress')
+  assert.equal(r.trigger, 'gothic armor,armored_dress')
+  assert.equal(r.slug, 'armored-dress-v02')
+  assert.equal(r.dest, 'loras/armored-dress-v02.safetensors')
+  assert.equal(r.downloadUrl, 'https://civitai.com/api/download/models/1165788')
+  assert.equal(r.filename, 'armored_dress_V02.safetensors')
+  assert.equal(r.description, 'trigger with armored_dress')      // HTML stripped
+  assert.deepEqual(r.samples, [{ url: 'https://civitai.com/preview/1.png' }])
+  assert.equal(r.sizeBytes, 13500 * 1024)
+  assert.equal(r.origin.provenance, 'civitai')
+  assert.deepEqual(r.origin.meta, { modelId: '92654', modelVersionId: '1165788', author: 'someartist' })
+})
+
+test('civitai: ?modelVersionId selects that version', async () => {
+  const r = await resolveImport('https://civitai.com/models/92654?modelVersionId=999', { json: jsonOf(CIVITAI_LORA) })
+  assert.equal(r.filename, 'old.safetensors')
+  assert.equal(r.origin.meta?.modelVersionId, '999')
+})
+
+test('civitai: unsupported base model (no base flow) is rejected', async () => {
+  const payload = { ...CIVITAI_LORA, modelVersions: [{ id: 1, baseModel: 'Stable Cascade', files: [{ name: 'x.safetensors', downloadUrl: 'https://civitai.com/api/download/models/1' }] }] }
+  await assert.rejects(() => resolveImport('https://civitai.com/models/92654', { json: jsonOf(payload) }), ModelImportError)
+})
+
+// ── Resolver: HuggingFace ─────────────────────────────────────────────────────
+
+test('huggingface: base_model → lora genus/familia, resolve download URL + preview', async () => {
+  const r = await resolveImport('https://huggingface.co/someuser/my-flux-lora/tree/main', { json: jsonOf(HF_LORA) })
+  assert.equal(r.genus, 'lora')
+  assert.equal(r.familia, 'flux')
+  assert.equal(r.nomen, 'My Flux LoRA')
+  assert.equal(r.trigger, 'mytoken')
+  assert.equal(r.downloadUrl, 'https://huggingface.co/someuser/my-flux-lora/resolve/main/my_flux_lora.safetensors')
+  assert.deepEqual(r.samples, [{ url: 'https://huggingface.co/someuser/my-flux-lora/resolve/main/preview.png' }])
+  assert.equal(r.origin.provenance, 'huggingface')
+  assert.deepEqual(r.provenance, { repo: 'someuser/my-flux-lora', base: 'black-forest-labs/FLUX.1-dev' })
+})
+
+test('huggingface: a multi-file diffusers repo (weights only in subfolders) is rejected, not grabbed', async () => {
+  const diffusers = {
+    modelId: 'org/flux-full', tags: ['diffusers'], cardData: {},
+    siblings: [{ rfilename: 'model_index.json' }, { rfilename: 'unet/diffusion_pytorch_model.safetensors' }, { rfilename: 'text_encoder/model.safetensors' }],
+  }
+  await assert.rejects(
+    () => resolveImport('https://huggingface.co/org/flux-full', { json: jsonOf(diffusers) }),
+    /multi-file diffusers/,
+  )
+})
+
+// ── Resolver: direct file + host policy ───────────────────────────────────────
+
+test('direct file: infers familia from filename', async () => {
+  const r = await resolveImport('https://example.com/weights/my-sdxl-style.safetensors', { json: jsonOf({}) })
+  assert.equal(r.genus, 'lora')
+  assert.equal(r.familia, 'sdxl')
+  assert.equal(r.filename, 'my-sdxl-style.safetensors')
+  assert.equal(r.origin.provenance, 'custom')
+})
+
+test('direct file: genus hint honored; unknown family rejected', async () => {
+  const r = await resolveImport('https://example.com/flux-checkpoint.safetensors', { json: jsonOf({}) }, { genus: 'model' })
+  assert.equal(r.genus, 'model')
+  assert.equal(r.dest, 'checkpoints/flux-checkpoint.safetensors')
+  await assert.rejects(() => resolveImport('https://example.com/mystery.safetensors', { json: jsonOf({}) }), ModelImportError)
+})
+
+test('host policy: r2.dev download host is rejected', async () => {
+  const payload = { ...CIVITAI_LORA, modelVersions: [{ id: 1, baseModel: 'SD 1.5', files: [{ name: 'x.safetensors', downloadUrl: 'https://abc.r2.dev/x.safetensors' }] }] }
+  await assert.rejects(() => resolveImport('https://civitai.com/models/92654', { json: jsonOf(payload) }), /not permitted/)
+})
+
+test('unsupported URL is rejected', async () => {
+  await assert.rejects(() => resolveImport('https://example.com/some-page', { json: jsonOf({}) }), ModelImportError)
+})
+
+// ── Importer: private Intella, dedup, preview re-host ─────────────────────────
+
+function harness(opts: { gate?: ModerationGate; store?: boolean } = {}) {
+  const gate = opts.gate ?? { async scan() { return { ok: true } } }
+  const upserts: Intella[] = []
+  const puts: Array<{ key: string; bytes: Buffer }> = []
+  const intellae: IntellaWriter = { async upsert(i) { upserts.push(i) } }
+  const deps: ConstructorParameters<typeof ModelImporter>[0] = { json: jsonOf(CIVITAI_LORA), intellae, moderationGate: gate, now: () => new Date(0) }
+  if (opts.store) {
+    deps.fetcher = { async fetch() { return Buffer.from('IMG') } }
+    deps.store = { async put(key, bytes) { puts.push({ key, bytes }); return `https://models.miladystation2.net/${key}` } }
+  }
+  return { upserts, puts, importer: new ModelImporter(deps) }
+}
+
+test('import: registers a private, owner-scoped, ORIGIN-ONLY Intella (no R2 weight copy)', async () => {
+  const h = harness()
+  const intella = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerAnimaId: 'anima-9' })
+
+  // private, owner-scoped, off the public catalogue; id is deterministic (dedup key)
+  assert.match(intella.id, /^import-[0-9a-f]{24}$/)
+  assert.equal(intella.access, 'private')
+  assert.equal(intella.canonica, false)
+  assert.equal(intella.ownerAnimaId, 'anima-9')
+  assert.equal(intella.auctor, 'anima-9')
+  assert.equal(intella.familia, 'sd15')
+  assert.equal(intella.trigger, 'gothic armor,armored_dress')
+  assert.equal(intella.dest, 'loras/armored-dress-v02.safetensors')
+
+  // WEIGHT sources = origin ONLY. No miladystation mirror at import — the pod downloads from the
+  // origin; a public promotion prepends the our-bucket source later.
+  assert.equal(intella.sources.length, 1)
+  assert.equal(intella.sources[0].provenance, 'civitai')
+  assert.equal(intella.sources[0].uri, 'https://civitai.com/api/download/models/1165788')
+  assert.equal(intella.sizeGb, (13500 * 1024) / 1e9)   // from Civitai metadata, no download
+})
+
+test('import: idempotent — re-importing the same URL yields the same id (dedup, no duplicate)', async () => {
+  const h = harness()
+  const a = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerAnimaId: 'anima-9' })
+  const b = await h.importer.import({ url: 'https://civitai.com/models/92654/renamed-slug', ownerAnimaId: 'anima-9' })
+  assert.equal(a.id, b.id)                                        // same (owner, origin) → same record
+  // a DIFFERENT owner importing the same model gets a distinct private record
+  const c = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerAnimaId: 'anima-other' })
+  assert.notEqual(a.id, c.id)
+})
+
+test('import: preview media is scanned on the ORIGIN url, then re-hosted into our bucket', async () => {
+  const h = harness({ store: true })
+  const intella = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerAnimaId: 'anima-9' })
+  // re-hosted: the sample now points at OUR bucket, not civitai
+  assert.equal(h.puts.length, 1)
+  assert.match(h.puts[0].key, /^model-previews\/import-[0-9a-f]{24}\/000\.png$/)
+  assert.equal(intella.samples?.[0].url, `https://models.miladystation2.net/${h.puts[0].key}`)
+})
+
+test('import: WEIGHTS are never re-hosted (only the preview is)', async () => {
+  const h = harness({ store: true })
+  await h.importer.import({ url: 'https://civitai.com/models/92654', ownerAnimaId: 'anima-9' })
+  // exactly one put — the preview. The weight source stays the civitai origin.
+  assert.equal(h.puts.length, 1)
+  assert.ok(h.puts[0].key.startsWith('model-previews/'))
+})
+
+test('import: preview scan refusal fails closed (no re-host, no Intella)', async () => {
+  const h = harness({ gate: { async scan() { return { ok: false, reason: 'no scanner configured' } } }, store: true })
+  await assert.rejects(
+    () => h.importer.import({ url: 'https://civitai.com/models/92654', ownerAnimaId: 'anima-9' }),
+    /safety scan/,
+  )
+  assert.equal(h.puts.length, 0)     // scanned the origin url — never wrote to our bucket
+  assert.equal(h.upserts.length, 0)  // fail-closed: no Intella
+})
+
+test('import: requires an owner', async () => {
+  const h = harness()
+  await assert.rejects(() => h.importer.import({ url: 'https://civitai.com/models/92654', ownerAnimaId: '' }), ModelImportError)
+})
+
+// ── CrystalApi facade: import auth/delegation + owner-scoped listing ──────────
+
+test('CrystalApi.importModel: identified caller → ModelCard; anon 403; refusal → 400', async () => {
+  const { CrystalApi } = await import('../../../src/allocutio/api/CrystalApi.js')
+  const h = harness()
+  const api = new CrystalApi({ modelImporter: h.importer } as unknown as import('../../../src/allocutio/api/CrystalApi.js').CrystalApiDeps)
+
+  const card = await api.importModel({ animaId: 'anima-9' } as never, { url: 'https://civitai.com/models/92654' })
+  assert.match(card.intellaId, /^import-/)
+  assert.equal(card.genus, 'lora')
+  assert.equal(card.basis, 'sd15')
+  assert.equal(card.trigger, 'gothic armor,armored_dress')
+
+  // anonymous (commitment) caller → 403
+  await assert.rejects(() => api.importModel({ commitment: '0xabc' } as never, { url: 'https://civitai.com/models/92654' }), /identified/)
+
+  // a resolver/import refusal surfaces as a 400 input.malformed (not a raw ModelImportError)
+  const denied = new CrystalApi({
+    modelImporter: new ModelImporter({ json: jsonOf(CIVITAI_LORA), intellae: { async upsert() {} }, moderationGate: { async scan() { return { ok: false, reason: 'x' } } } }),
+  } as unknown as import('../../../src/allocutio/api/CrystalApi.js').CrystalApiDeps)
+  await assert.rejects(
+    () => denied.importModel({ animaId: 'a' } as never, { url: 'https://civitai.com/models/92654' }),
+    (e: unknown) => (e as { code?: string }).code === 'input.malformed',
+  )
+})
+
+test('CrystalApi.listMyModels: owner-scoped; anon → []; uses listByOwner when present', async () => {
+  const { CrystalApi } = await import('../../../src/allocutio/api/CrystalApi.js')
+  const mine: Intella[] = [
+    { id: 'import-abc', nomen: 'My Import', genus: 'lora', architectura: 'lora', parametri: 0, sources: [], dest: 'loras/x.safetensors', sizeGb: 0, versio: '1', canonica: false, access: 'private', ownerAnimaId: 'anima-9', familia: 'flux', trigger: 'mytok', natum: new Date(0) } as unknown as Intella,
+  ]
+  const intellarum = { async listByOwner(id: string) { return id === 'anima-9' ? mine : [] } }
+  const api = new CrystalApi({ intellarum } as unknown as import('../../../src/allocutio/api/CrystalApi.js').CrystalApiDeps)
+
+  const cards = await api.listMyModels({ animaId: 'anima-9' } as never)
+  assert.equal(cards.length, 1)
+  assert.equal(cards[0].intellaId, 'import-abc')
+  assert.equal(cards[0].basis, 'flux')       // familia → basis
+  assert.equal(cards[0].access, 'private')
+
+  assert.deepEqual(await api.listMyModels({ commitment: '0xabc' } as never), [])
+})

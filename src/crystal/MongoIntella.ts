@@ -119,6 +119,17 @@ export class MongoIntella implements Intellarum {
     return docs.map(projectV2ToV1)
   }
 
+  /** An owner's privately-held models (imports + trained), newest first. Matches the owner on
+   *  either the v1 flat `ownerAnimaId` or the v2 nested `access.ownerAnimaId`. */
+  async listByOwner(animaId: string, genus?: IntellaGenus): Promise<Intellae> {
+    const query: Record<string, unknown> = {
+      $or: [{ ownerAnimaId: animaId }, { 'access.ownerAnimaId': animaId }],
+      ...(genus !== undefined ? { genus } : {}),
+    }
+    const docs = await this.col.find(query).sort({ natum: -1 }).toArray()
+    return docs.map(projectV2ToV1)
+  }
+
   async findByTrigger(trigger: string, familia: string, animaId?: string): Promise<Intellae> {
     const triggerLower = trigger.toLowerCase()
     // Compat keys on the model FAMILY (`familia`, exact equality), not the old
@@ -193,6 +204,16 @@ export class MongoIntella implements Intellarum {
       { $set: { access, mutatum: new Date() } },
       { returnDocument: 'after' },
     )
+    return doc ? projectV2ToV1(doc) : null
+  }
+
+  /** Admin license-clearance/backfill: set `license` and/or `commercialUse`. Only the provided
+   *  fields are written (a partial clearance), stamping `mutatum`. */
+  async setLicense(id: string, patch: { license?: string; commercialUse?: 'yes' | 'no' | 'conditional' | 'unknown' }): Promise<Intella | null> {
+    const set: Record<string, unknown> = { mutatum: new Date() }
+    if (patch.license !== undefined) set.license = patch.license
+    if (patch.commercialUse !== undefined) set.commercialUse = patch.commercialUse
+    const doc = await this.col.findOneAndUpdate({ id }, { $set: set }, { returnDocument: 'after' })
     return doc ? projectV2ToV1(doc) : null
   }
 

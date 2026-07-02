@@ -93,6 +93,13 @@ function makeApi(opts?: { gate?: ModerationGate; noGate?: boolean; prefs?: Recor
   const models = new Map<string, Intella>([
     ['lora-1', { id: 'lora-1', nomen: 'My LoRA', genus: 'lora', slug: 'my-lora', trigger: 'mld', familia: 'flux', ownerAnimaId: 'anima-1', access: 'private', canonica: false, sources: [{ provenance: 'miladystation', uri: 'https://x/lora.safetensors' }] } as unknown as Intella],
     ['canon-1', { id: 'canon-1', nomen: 'Canon Model', genus: 'lora', slug: 'canon', familia: 'flux', auctor: 'anima-1', canonica: true, sources: [{ provenance: 'miladystation', uri: 'https://x/c.safetensors' }] } as unknown as Intella],
+    // A NON-COMMERCIAL import (FLUX.1-dev derivative) the caller owns — usable privately, but
+    // barred from the public (commercial) catalog by the license gate.
+    ['lora-nc', { id: 'lora-nc', nomen: 'NC LoRA', genus: 'lora', slug: 'nc', familia: 'flux', ownerAnimaId: 'anima-1', access: 'private', canonica: false, license: 'flux-1-dev-nc', commercialUse: 'no', sources: [{ provenance: 'civitai', uri: 'https://civitai/nc' }] } as unknown as Intella],
+    // A commercially-clear import (schnell/Apache).
+    ['lora-ok', { id: 'lora-ok', nomen: 'OK LoRA', genus: 'lora', slug: 'ok', familia: 'flux', ownerAnimaId: 'anima-1', access: 'private', canonica: false, license: 'apache-2.0', commercialUse: 'yes', sources: [{ provenance: 'civitai', uri: 'https://civitai/ok' }] } as unknown as Intella],
+    // A CONDITIONAL import (Krea 2 / SD3 — allowed under-threshold): promotes.
+    ['lora-cond', { id: 'lora-cond', nomen: 'Cond LoRA', genus: 'lora', slug: 'cond', familia: 'krea2', ownerAnimaId: 'anima-1', access: 'private', canonica: false, license: 'krea-community', commercialUse: 'conditional', provenance: { repo: 'civitai:5', base: 'Krea 2' }, sources: [{ provenance: 'civitai', uri: 'https://civitai/cond' }] } as unknown as Intella],
   ])
   // A fake Collectio store: one COMPLETE owned drop (with a team owners[] split) and
   // one still AGENS (in-flight) — both funded by anima-1.
@@ -117,6 +124,11 @@ function makeApi(opts?: { gate?: ModerationGate; noGate?: boolean; prefs?: Recor
     removeSource: async (id: string, uri: string) => {
       const m = models.get(id); if (!m) return null
       m.sources = m.sources.filter((s) => s.uri !== uri)
+      return m
+    },
+    setLicense: async (id: string, patch: { license?: string; commercialUse?: string }) => {
+      const m = models.get(id); if (!m) return null
+      Object.assign(m as object, patch)
       return m
     },
   }
@@ -246,6 +258,72 @@ test('publish(): a model publishes to HuggingFace (custody ours) and becomes res
   // §5d reconciler: an unlisted (non-private) model publish flips access → public.
   assert.deepEqual(accessCalls, [{ id: 'lora-1', access: 'public' }])
   assert.equal((models.get('lora-1') as { access?: string }).access, 'public')
+})
+
+test('publish(): a non-commercially-licensed model cannot be promoted to the public catalog (license gate)', async () => {
+  const { api, models, accessCalls } = makeApi()
+  await assert.rejects(
+    () => api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-nc' }, destination: 'huggingface', visibility: 'unlisted' }),
+    (e: unknown) => (e as { code?: string }).code === 'license.restricted',
+  )
+  assert.deepEqual(accessCalls, [], 'a license-barred model never flips to public')
+  assert.equal((models.get('lora-nc') as { access?: string }).access, 'private')
+})
+
+test('publish(): commercial-clear AND conditional models promote; a PRIVATE publish of an NC model is allowed', async () => {
+  const { api, flush } = makeApi()
+  // commercial-clear (apache) → promotes
+  const ok = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-ok' }, destination: 'huggingface', visibility: 'unlisted' })
+  await flush()
+  assert.equal(ok.visibility, 'unlisted')
+  // conditional (Krea <$1M) → also promotes (we track revenue against the cap)
+  const cond = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-cond' }, destination: 'huggingface', visibility: 'unlisted' })
+  assert.equal(cond.visibility, 'unlisted')
+  // the NC model is still fine to publish PRIVATELY (personal use / our-bucket custody, not the catalog)
+  const priv = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-nc' }, destination: 'r2', visibility: 'private' })
+  assert.equal(priv.visibility, 'private')
+})
+
+test('setModelLicense(): admin clears an NC model → it then promotes; non-admin is refused', async () => {
+  const admin = { animaId: process.env.PLATFORM_ANIMA_ID ?? 'platform' }
+  const { api, models } = makeApi()
+
+  // non-admin cannot clear
+  await assert.rejects(
+    () => api.setModelLicense(anima1, 'lora-nc', { commercialUse: 'yes' }),
+    (e: unknown) => (e as { code?: string }).code === 'auth.forbidden',
+  )
+
+  // admin clears the NC model (e.g. a held commercial license) → verdict flips, gate now passes
+  const card = await api.setModelLicense(admin, 'lora-nc', { license: 'bfl-commercial', commercialUse: 'yes' })
+  assert.equal(card.commercialUse, 'yes')
+  assert.equal((models.get('lora-nc') as { commercialUse?: string }).commercialUse, 'yes')
+  const promoted = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-nc' }, destination: 'huggingface', visibility: 'unlisted' })
+  assert.equal(promoted.visibility, 'unlisted')
+})
+
+test('setModelLicense(): reclassify re-derives the verdict from the recorded base string', async () => {
+  const admin = { animaId: process.env.PLATFORM_ANIMA_ID ?? 'platform' }
+  const { api, models } = makeApi()
+  // lora-cond has provenance.base 'Krea 2' → reclassify → krea-community / conditional
+  const card = await api.setModelLicense(admin, 'lora-cond', { reclassify: true })
+  assert.equal(card.license, 'krea-community')
+  assert.equal(card.commercialUse, 'conditional')
+  assert.equal((models.get('lora-cond') as { license?: string }).license, 'krea-community')
+})
+
+test('publish(): a public model promotion is gated — a denied scan rejects it, access stays private', async () => {
+  // The curation gate (spec/model-import.md §"Curation review"): promoting a private import to
+  // the public catalogue runs the ModerationGate over its preview samples, fail-closed. A denial
+  // rejects the Editio and never flips the model to resolvable-public.
+  const gate: ModerationGate = { async scan() { return { ok: false, reason: 'nsfw on the front page' } } }
+  const { api, models, accessCalls, editiones, flush } = makeApi({ gate })
+  const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'huggingface', visibility: 'unlisted' })
+  await flush()
+
+  assert.equal((await editiones.find(ed.id))?.status, 'rejected')
+  assert.deepEqual(accessCalls, [], 'a rejected promotion never touches access')
+  assert.equal((models.get('lora-1') as { access?: string }).access, 'private')
 })
 
 test('publish(): a model to Civitai under the caller BYO account (custody theirs, from prefs)', async () => {
