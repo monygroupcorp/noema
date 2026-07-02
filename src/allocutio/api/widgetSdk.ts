@@ -74,7 +74,7 @@ export const WIDGET_SDK_JS = `/* StationThis Widget SDK — served by noema-crys
           onEvent({ type: 'WIDGET_READY' });
           _getAccount().then(function (a) { if (a) _postToIframe({ type: 'WALLET_AVAILABLE', address: a }); }).catch(function () {});
         } else if (msg.type === 'WALLET_AUTH_REQUEST') { _doWalletAuth(msg);
-        } else if (msg.type === 'PAYMENT_REQUIRED')    { _doX402Payment(msg);
+        } else if (msg.type === 'PAYMENT_REQUIRED')    { _signX402Payment(msg.paymentRequired);
         } else { onEvent(msg); }
       }
       global.addEventListener('message', _handleIframeMessage);
@@ -116,39 +116,35 @@ export const WIDGET_SDK_JS = `/* StationThis Widget SDK — served by noema-crys
           .catch(function (err) { _postToIframe({ type: 'WALLET_AUTH_ERROR', error: err.message }); });
       }
 
-      // ── x402 pay-per-call (probe 402 → sign EIP-3009 → X-Payment) ──────────────
-      function _doX402Payment() {
+      // ── x402 pay-per-call (v2, §5): SIGN the iframe's PaymentRequirements → return the
+      // X-Payment header. The iframe probed the run endpoint and does the paid POST itself;
+      // the SDK's only job is to sign the EIP-3009 authorization with the host-page wallet.
+      // No server round-trip here, no session — each run is one payment (PAYMENT_SIGNED).
+      function _signX402Payment(pr) {
         var eth = _getProvider();
         if (!eth) { _postToIframe({ type: 'PAYMENT_ERROR', error: 'No wallet connected' }); return; }
+        var req = pr && pr.accepts && pr.accepts[0];
+        if (!req) { _postToIframe({ type: 'PAYMENT_ERROR', error: 'Malformed PaymentRequired' }); return; }
         eth.request({ method: 'eth_accounts' }).then(function (a) {
           var account = a && a.length ? a[0] : null;
           if (!account) { _postToIframe({ type: 'PAYMENT_ERROR', error: 'No wallet connected' }); return; }
-          return _fetch('/widget/' + encodeURIComponent(agentId) + '/session/x402', { method: 'POST' })
-            .then(function (r) { return r.json().then(function (d) { return { status: r.status, data: d }; }); })
-            .then(function (probe) {
-              if (probe.status !== 402) throw new Error('x402 not available (' + probe.status + ')');
-              var pr = probe.data.paymentRequired; var req = pr && pr.accepts && pr.accepts[0];
-              if (!req) throw new Error('Malformed PaymentRequired');
-              var chainId = parseInt(req.network.split(':')[1], 10);
-              var now = Math.floor(Date.now() / 1000);
-              var nb = new Uint8Array(32); (global.crypto || global.msCrypto).getRandomValues(nb);
-              var nonce = '0x' + Array.from(nb, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
-              var authorization = { from: account, to: req.payTo, value: req.amount, validAfter: String(now - 600), validBefore: String(now + (req.maxTimeoutSeconds || 300)), nonce: nonce };
-              var typedData = JSON.stringify({
-                types: {
-                  EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'version', type: 'string' }, { name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }],
-                  TransferWithAuthorization: [{ name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'validAfter', type: 'uint256' }, { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' }],
-                },
-                domain: { name: (req.extra && req.extra.name) || 'USD Coin', version: (req.extra && req.extra.version) || '2', chainId: chainId, verifyingContract: req.asset },
-                primaryType: 'TransferWithAuthorization', message: authorization,
-              });
-              return eth.request({ method: 'eth_signTypedData_v4', params: [account, typedData] }).then(function (signature) {
-                var header = btoa(JSON.stringify({ x402Version: 2, payload: { authorization: authorization, signature: signature }, accepted: req, resource: pr.resource }));
-                return _fetch('/widget/' + encodeURIComponent(agentId) + '/session/x402', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Payment': header } })
-                  .then(function (r) { return r.json(); })
-                  .then(function (res) { if (!res.sessionJwt) throw new Error((res.error && res.error.message) || 'Payment rejected'); _sessionJwt = res.sessionJwt; _postToIframe({ type: 'SESSION_READY', sessionJwt: _sessionJwt }); onReady(); });
-              });
-            });
+          var chainId = parseInt(req.network.split(':')[1], 10);
+          var now = Math.floor(Date.now() / 1000);
+          var nb = new Uint8Array(32); (global.crypto || global.msCrypto).getRandomValues(nb);
+          var nonce = '0x' + Array.from(nb, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+          var authorization = { from: account, to: req.payTo, value: req.amount, validAfter: String(now - 600), validBefore: String(now + (req.maxTimeoutSeconds || 300)), nonce: nonce };
+          var typedData = JSON.stringify({
+            types: {
+              EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'version', type: 'string' }, { name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }],
+              TransferWithAuthorization: [{ name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'validAfter', type: 'uint256' }, { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' }],
+            },
+            domain: { name: (req.extra && req.extra.name) || 'USD Coin', version: (req.extra && req.extra.version) || '2', chainId: chainId, verifyingContract: req.asset },
+            primaryType: 'TransferWithAuthorization', message: authorization,
+          });
+          return eth.request({ method: 'eth_signTypedData_v4', params: [account, typedData] }).then(function (signature) {
+            var header = btoa(JSON.stringify({ x402Version: 2, payload: { authorization: authorization, signature: signature }, accepted: req, resource: pr.resource }));
+            _postToIframe({ type: 'PAYMENT_SIGNED', header: header });
+          });
         }).catch(function (err) { _postToIframe({ type: 'PAYMENT_ERROR', error: err.message }); });
       }
 

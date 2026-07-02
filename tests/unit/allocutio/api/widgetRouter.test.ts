@@ -7,6 +7,8 @@ import { createWidgetRouter, type WidgetRouterDeps } from '../../../../src/alloc
 import type { Legatus } from '../../../../src/types/legatus.js'
 import type { FeedItem } from '../../../../src/allocutio/api/types.js'
 import type { FeedFilter } from '../../../../src/types/editio.js'
+import type { Modus } from '../../../../src/types/modus.js'
+import { DEFAULT_X402_CONFIG } from '../../../../src/crystal/x402Pricing.js'
 
 function legatus(over: Partial<Legatus>): Legatus {
   return { agentId: 'camel42', animaId: 'anima-1', ownerAddress: '0xowner', status: 'active', ...over } as Legatus
@@ -22,6 +24,9 @@ function app(over: Partial<WidgetRouterDeps> = {}, capture?: { filter?: FeedFilt
     feed: async (filter) => { if (capture) capture.filter = filter; return rawFeed(filter) },
     appearance: over.appearance ?? (async () => undefined),
     frameAncestors: over.frameAncestors ?? ['https://camelcabal.fun'],
+    ...(over.modorum ? { modorum: over.modorum } : {}),
+    ...(over.quoteImpetus ? { quoteImpetus: over.quoteImpetus } : {}),
+    ...(over.x402Config ? { x402Config: over.x402Config } : {}),
     ...(over.limit !== undefined ? { limit: over.limit } : {}),
   }
   const a = express()
@@ -30,6 +35,42 @@ function app(over: Partial<WidgetRouterDeps> = {}, capture?: { filter?: FeedFilt
 }
 
 const imgItem = (url: string): FeedItem => ({ editionId: 'e1', artifact: { kind: 'actum', id: 'a1' }, output: { image: url }, createdAt: '2026-07-02T00:00:00.000Z' })
+
+const MODUS = { id: 'm1', nomen: 'memeify', aditus: { prompt: { type: 'text', required: true, label: 'Prompt' }, seed: { type: 'int' } } } as unknown as Modus
+function interactive() {
+  return app({
+    legati: { findByAgentId: async () => legatus({ workspaceModusId: 'm1' }), listByCollection: async () => [] },
+    modorum: { find: async () => MODUS },
+    quoteImpetus: async () => 1000n,
+    x402Config: { ...DEFAULT_X402_CONFIG, payTo: '0xReceiver' },
+  })
+}
+
+test('interactive: run panel renders the aditus form, a priced Run, and the §5 run script', async () => {
+  const res = await request(interactive()).get('/widget/camel42')
+  assert.equal(res.status, 200)
+  assert.match(res.text, /id="runform"/)
+  assert.match(res.text, /<textarea name="prompt"/)                 // text porta → textarea
+  assert.match(res.text, /name="seed"[^>]*type="number"|type="number"[^>]*name="seed"/) // int → number
+  assert.match(res.text, /id="runbtn">Run · \$/)                    // priced button
+  assert.match(res.text, /PAYMENT_REQUIRED/)                        // run script asks parent to sign
+  assert.match(res.text, /PAYMENT_SIGNED/)                          // then POSTs with the header
+  assert.match(res.text, /\/api\/v1\/x402\/agents\/camel42\/spell\/memeify/) // the §5 endpoint
+})
+
+test('interactive: agent with no callable modus falls back to the read-only gallery', async () => {
+  const a = app({
+    legati: { findByAgentId: async () => legatus({}), listByCollection: async () => [] },  // no workspaceModusId
+    modorum: { find: async () => MODUS },
+    quoteImpetus: async () => 1000n,
+    x402Config: { ...DEFAULT_X402_CONFIG, payTo: '0xReceiver' },
+    feed: async () => [imgItem('https://cdn.test/a.png')],
+  })
+  const res = await request(a).get('/widget/camel42')
+  assert.equal(res.status, 200)
+  assert.doesNotMatch(res.text, /id="runform"/)                     // no run panel
+  assert.match(res.text, /https:\/\/cdn\.test\/a\.png/)             // gallery still shown
+})
 
 test('GET /widget/sdk.js → JS with the StationThis contract, no framing header', async () => {
   const res = await request(app()).get('/widget/sdk.js')
