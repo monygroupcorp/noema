@@ -64,51 +64,93 @@ export function commitment(): string {
   return c;
 }
 
-const anonHeaders = () => ({ 'content-type': 'application/json', 'x-commitment': commitment() });
+// ── Real fiat session (JWT) — layered OVER the anon commitment ──────────────
+// A logged-in user's session token is stored here; when present it is sent as
+// `Authorization: Bearer <token>` and the backend resolves it to an animaId, so
+// every /v1 call becomes identified with no other change. Absent → anon commitment.
+const SESSION_KEY = 'noema-session';
+export function getSession(): string | null { return localStorage.getItem(SESSION_KEY); }
+export function setSession(token: string | null) {
+  if (token) localStorage.setItem(SESSION_KEY, token);
+  else localStorage.removeItem(SESSION_KEY);
+}
+
+// Write headers (POST/PUT/PATCH): content-type + bearer if signed in, else the anon commitment.
+const authHeaders = (): Record<string, string> => {
+  const s = getSession();
+  return { 'content-type': 'application/json', ...(s ? { authorization: `Bearer ${s}` } : { 'x-commitment': commitment() }) };
+};
+// Read headers (GET): bearer if signed in, else the anon commitment (no content-type).
+const readHeaders = (): Record<string, string> =>
+  getSession() ? { authorization: `Bearer ${getSession()}` } : { 'x-commitment': commitment() };
+
+// Session envelope returned by verify-email/login/refresh.
+export interface Session { token: string; tokenType: 'Bearer'; expiresIn: number }
+export interface AuthResult { session: Session; animaId: string }
+
+// Auth errors carry the backend's `error.code` so screens can branch (auth.email_unverified,
+// auth.invalid, auth.token_invalid, conflict.registration, input.malformed, …).
+export class AuthApiError extends Error {
+  code: string;
+  status: number;
+  constructor(code: string, message: string, status: number) {
+    super(message);
+    this.name = 'AuthApiError';
+    this.code = code;
+    this.status = status;
+  }
+}
+async function jAuth<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
+    throw new AuthApiError(body?.error?.code ?? `http.${res.status}`, body?.error?.message ?? res.statusText, res.status);
+  }
+  return res.json() as Promise<T>;
+}
 
 export const api = {
   listFlows: () => fetch('/v1/flows').then(j<{ flows: FlowSummary[] }>),
   getFlow: (id: string) => fetch(`/v1/flows/${id}`).then(j<FlowDescription>),
   quote: (body: Pick<RunRequest, 'modusId' | 'verb' | 'aditus'>) =>
-    fetch('/v1/runs/quote', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+    fetch('/v1/runs/quote', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ impetus: string; recipient?: string }>),
   createRun: (body: RunRequest) =>
-    fetch('/v1/runs', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+    fetch('/v1/runs', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ run: Run }>),
   getRun: (id: string) => fetch(`/v1/runs/${id}`).then(j<{ run: Run }>),
   // SSE — returns an EventSource the caller subscribes to.
   streamRun: (id: string) => new EventSource(`/v1/runs/${id}/stream`),
-  meStatus: () => fetch('/v1/me/status', { headers: { 'x-commitment': commitment() } }).then(j<MeStatus>),
+  meStatus: () => fetch('/v1/me/status', { headers: readHeaders() }).then(j<MeStatus>),
 
   // ── Collections (Collectio) — a batch-gen over a Tractus grid ────────────────
   // Owner-scoped by the caller commitment. Create LAUNCHES generation of `total`
   // pieces (real compute) — always a deliberate, confirmed action.
-  listCollections: () => fetch('/v1/collectiones', { headers: { 'x-commitment': commitment() } })
+  listCollections: () => fetch('/v1/collectiones', { headers: readHeaders() })
     .then(j<{ collections: Collection[] }>),
-  getCollection: (id: string) => fetch(`/v1/collectiones/${id}`, { headers: { 'x-commitment': commitment() } })
+  getCollection: (id: string) => fetch(`/v1/collectiones/${id}`, { headers: readHeaders() })
     .then(j<{ collection: Collection }>),
   createCollection: (body: CreateCollectionRequest) =>
-    fetch('/v1/collectiones', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+    fetch('/v1/collectiones', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ collection: Collection }>),
-  getCollectionRarity: (id: string) => fetch(`/v1/collectiones/${id}/rarity`, { headers: { 'x-commitment': commitment() } })
+  getCollectionRarity: (id: string) => fetch(`/v1/collectiones/${id}/rarity`, { headers: readHeaders() })
     .then(j<{ rarity: RarityReport }>),
   listCollectionPieces: (id: string, review: 'pending' | 'approved' | 'rejected' | 'all' = 'pending') =>
-    fetch(`/v1/collectiones/${id}/pieces?review=${review}`, { headers: { 'x-commitment': commitment() } })
+    fetch(`/v1/collectiones/${id}/pieces?review=${review}`, { headers: readHeaders() })
       .then(j<{ pieces: CollectionPiece[] }>),
   approvePiece: (id: string, actumId: string) =>
-    fetch(`/v1/collectiones/${id}/pieces/${actumId}/approve`, { method: 'POST', headers: anonHeaders() }).then(j<{ ok: true }>),
+    fetch(`/v1/collectiones/${id}/pieces/${actumId}/approve`, { method: 'POST', headers: authHeaders() }).then(j<{ ok: true }>),
   rejectPiece: (id: string, actumId: string) =>
-    fetch(`/v1/collectiones/${id}/pieces/${actumId}/reject`, { method: 'POST', headers: anonHeaders() }).then(j<{ ok: true }>),
-  pauseCollection: (id: string) => fetch(`/v1/collectiones/${id}/pause`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
-  resumeCollection: (id: string) => fetch(`/v1/collectiones/${id}/resume`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
-  cancelCollection: (id: string) => fetch(`/v1/collectiones/${id}/cancel`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
+    fetch(`/v1/collectiones/${id}/pieces/${actumId}/reject`, { method: 'POST', headers: authHeaders() }).then(j<{ ok: true }>),
+  pauseCollection: (id: string) => fetch(`/v1/collectiones/${id}/pause`, { method: 'POST', headers: authHeaders() }).then(j<{ collection: Collection }>),
+  resumeCollection: (id: string) => fetch(`/v1/collectiones/${id}/resume`, { method: 'POST', headers: authHeaders() }).then(j<{ collection: Collection }>),
+  cancelCollection: (id: string) => fetch(`/v1/collectiones/${id}/cancel`, { method: 'POST', headers: authHeaders() }).then(j<{ collection: Collection }>),
   extendCollection: (id: string, count: number) =>
-    fetch(`/v1/collectiones/${id}/extend`, { method: 'POST', headers: anonHeaders(), body: JSON.stringify({ count }) }).then(j<{ collection: Collection }>),
+    fetch(`/v1/collectiones/${id}/extend`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ count }) }).then(j<{ collection: Collection }>),
   // Draft authoring: replace a draft's trait grid (re-derives provenance), then fire it.
   patchCollectionTractus: (id: string, tractus: Tractus[]) =>
-    fetch(`/v1/collectiones/${id}/tractus`, { method: 'PATCH', headers: anonHeaders(), body: JSON.stringify({ tractus }) }).then(j<{ collection: Collection }>),
+    fetch(`/v1/collectiones/${id}/tractus`, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ tractus }) }).then(j<{ collection: Collection }>),
   fireCollection: (id: string) =>
-    fetch(`/v1/collectiones/${id}/fire`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
+    fetch(`/v1/collectiones/${id}/fire`, { method: 'POST', headers: authHeaders() }).then(j<{ collection: Collection }>),
 
   // ── Publishing (Editio) — feed read + publish/retract write ──────────────────
   // GET /v1/feed — public, NO auth. Newest-first published, public-surface editions.
@@ -123,50 +165,78 @@ export const api = {
   // POST /v1/editiones — publish an artifact. Public surfaces return a `pending`
   // edition (async moderation) → it goes live once the worker settles it.
   publish: (body: PublishRequest) =>
-    fetch('/v1/editiones', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+    fetch('/v1/editiones', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ edition: Editio }>),
   // GET /v1/editiones/:id — poll a publication (author-scoped) to watch an async
   // settle land: an archive ZIP build finishing (`externalRef` = the download url),
   // or a public surface being gated (→ rejected).
-  getEdition: (id: string) => fetch(`/v1/editiones/${id}`, { headers: { 'x-commitment': commitment() } })
+  getEdition: (id: string) => fetch(`/v1/editiones/${id}`, { headers: readHeaders() })
     .then(j<{ edition: Editio }>),
   retract: (id: string) =>
-    fetch(`/v1/editiones/${id}/retract`, { method: 'POST', headers: anonHeaders() })
+    fetch(`/v1/editiones/${id}/retract`, { method: 'POST', headers: authHeaders() })
       .then(j<{ edition: Editio }>),
 
   // ── Training (modus.aitoolkit-training) — thin reads; launches go via createRun ──
   // Dataset list/create live under the internal data API (/v1/data/*). Kept thin:
   // the builder launches a training as a normal run, these only feed the picker/cost.
-  listDatasets: () => fetch('/v1/data/datasets', { headers: { 'x-commitment': commitment() } })
+  listDatasets: () => fetch('/v1/data/datasets', { headers: readHeaders() })
     .then(j<{ datasets: DatasetSummary[] }>),
   trainingCost: (body: { steps: number; baseModel?: string; images?: number }) =>
-    fetch('/v1/data/trainings/calculate-cost', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+    fetch('/v1/data/trainings/calculate-cost', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ impetus?: string; usd?: number }>),
   // Signed upload (R2). Returns a presigned PUT url + the permanent public url.
   signUpload: (body: { filename: string; contentType: string; bucketName?: string }) =>
-    fetch('/api/v1/storage/uploads/sign', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+    fetch('/api/v1/storage/uploads/sign', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ signedUrl: string; permanentUrl: string; key?: string }>),
 
   // ── Account settings (Consuetudinum, owner-keyed / anon-capable) ─────────────
   // GET /v1/me — appearance (Profile) + generation defaults (Preferences) + bindings.
-  getMe: () => fetch('/v1/me', { headers: { 'x-commitment': commitment() } }).then(j<MeView>),
+  getMe: () => fetch('/v1/me', { headers: readHeaders() }).then(j<MeView>),
   setAppearance: (appearance: Appearance) =>
-    fetch('/v1/me/appearance', { method: 'PUT', headers: anonHeaders(), body: JSON.stringify(appearance) }).then(j<{ appearance: Appearance }>),
+    fetch('/v1/me/appearance', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(appearance) }).then(j<{ appearance: Appearance }>),
   setGeneratio: (generatio: Generatio) =>
-    fetch('/v1/me/generatio', { method: 'PUT', headers: anonHeaders(), body: JSON.stringify(generatio) }).then(j<{ generatio: Generatio }>),
+    fetch('/v1/me/generatio', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(generatio) }).then(j<{ generatio: Generatio }>),
   getAffines: (modusId: string) =>
-    fetch(`/v1/me/affines/${encodeURIComponent(modusId)}`, { headers: { 'x-commitment': commitment() } }).then(j<{ affines: Record<string, unknown> }>),
+    fetch(`/v1/me/affines/${encodeURIComponent(modusId)}`, { headers: readHeaders() }).then(j<{ affines: Record<string, unknown> }>),
   setAffines: (modusId: string, affines: Record<string, unknown>) =>
-    fetch(`/v1/me/affines/${encodeURIComponent(modusId)}`, { method: 'PUT', headers: anonHeaders(), body: JSON.stringify({ affines }) }).then(j<{ affines: Record<string, unknown> }>),
+    fetch(`/v1/me/affines/${encodeURIComponent(modusId)}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ affines }) }).then(j<{ affines: Record<string, unknown> }>),
 
   // ── BYO gated-origin secrets (Secretarium, owner-keyed / anon-capable) ───────
   // Connect a Civitai/HuggingFace token so gated imports scrape + download. The token
   // is sealed server-side and NEVER echoed back — presence-only (`getMe().secrets`).
   // Anon callers get a `warning` on connect (linking a named account deanonymizes them).
   putSecret: (provider: string, token: string, idleDays?: number) =>
-    fetch(`/v1/me/secrets/${provider}`, { method: 'PUT', headers: anonHeaders(), body: JSON.stringify({ token, idleDays }) }).then(jSecret),
+    fetch(`/v1/me/secrets/${provider}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ token, idleDays }) }).then(jSecret),
   removeSecret: (provider: string) =>
-    fetch(`/v1/me/secrets/${provider}`, { method: 'DELETE', headers: anonHeaders() }).then(jSecret),
+    fetch(`/v1/me/secrets/${provider}`, { method: 'DELETE', headers: authHeaders() }).then(jSecret),
+
+  // ── Fiat auth (username/password rail) ───────────────────────────────────────
+  // These deliberately do NOT send a commitment on register/login/forgot (a named
+  // account is a different soul than the anon purse); verify/reset carry only their
+  // emailed token; refresh carries the bearer. Errors surface via AuthApiError.code.
+  auth: {
+    register: (email: string, password: string) =>
+      fetch('/v1/auth/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) })
+        .then(jAuth<{ status: string }>),
+    login: (email: string, password: string) =>
+      fetch('/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) })
+        .then(jAuth<AuthResult>),
+    verifyEmail: (token: string) =>
+      fetch('/v1/auth/verify-email', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }) })
+        .then(jAuth<AuthResult>),
+    resendVerification: (email: string) =>
+      fetch('/v1/auth/resend-verification', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) })
+        .then(jAuth<{ status: string }>),
+    forgot: (email: string) =>
+      fetch('/v1/auth/forgot-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) })
+        .then(jAuth<{ status: string }>),
+    reset: (token: string, newPassword: string) =>
+      fetch('/v1/auth/reset-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, newPassword }) })
+        .then(jAuth<{ status: string }>),
+    refresh: () =>
+      fetch('/v1/auth/session/refresh', { method: 'POST', headers: { authorization: `Bearer ${getSession() ?? ''}` } })
+        .then(jAuth<AuthResult>),
+  },
 };
 
 // Account settings (mirror the backend Consuetudo shapes).
