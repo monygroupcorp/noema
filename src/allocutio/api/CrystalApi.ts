@@ -43,7 +43,9 @@ import { describeFlow, type FlowDescription, type DescribableModus } from './adi
 import { Errors } from './errors.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { computeRecipient } from '../../arcanum/prover.js'
-import { impetusForPodMs } from '../../ledger/rates.js'
+import { impetusForPodMs, usdMicroToImpetus } from '../../ledger/rates.js'
+import { fundingBps, applyFundingBps, DEFAULT_FUNDING_BPS } from '../../ledger/depositFunding.js'
+import type { AssetPricer } from '../../crystal/AssetPricer.js'
 import type { Run, Collection, CollectionPiece, Team, Edition, FeedItem } from './types.js'
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
 import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
@@ -52,9 +54,19 @@ import type { AnimaStore, PublishingPrefs } from '../../types/anima.js'
 import type { PublicationAdapter } from '../../crystal/PublicationAdapter.js'
 import type { ModerationGate } from '../../crystal/ModerationGate.js'
 import { denyModerationGate } from '../../crystal/ModerationGate.js'
+import type { VerdictCache } from '../../crystal/VerdictCache.js'
+import { contentKey, toCachedVerdict, fromCachedVerdict } from '../../crystal/VerdictCache.js'
+import type { ScanFeeCharger } from '../../crystal/ScanFeeCharger.js'
+import type { PromptGuard, PromptVerdict } from '../../crystal/PromptGuard.js'
+import { permissivePromptGuard } from '../../crystal/PromptGuard.js'
 import type { ModelImporter } from '../../crystal/ModelImporter.js'
-import { ModelImportError } from '../../crystal/modelImportResolver.js'
-import { isCatalogEligible, licenseCommercial, classifyBaseModel, type CommercialVerdict } from '../../crystal/modelLicense.js'
+import { ModelImportError, SecretRequiredError } from '../../crystal/modelImportResolver.js'
+import type { SecretWriter, SecretPresence, SecretProvider } from '../../types/secretum.js'
+import { isSecretProvider, SECRET_PROVIDERS, DEFAULT_SECRET_IDLE_DAYS } from '../../types/secretum.js'
+import { ownerKeyOf } from '../../crystal/ownerKey.js'
+import { isCatalogEligible, classifyModelLicense, activeConditionalLicenses, bindingCapUsd, type CommercialVerdict } from '../../crystal/modelLicense.js'
+import { band, bindingCapMicroUsd, type ThresholdBand, type TripwireBandStore } from '../../crystal/licenseTripwire.js'
+import type { Redituum } from '../../types/reditus.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 import { provenanceHash } from '../../crystal/provenance.js'
 import { rarityReport, type RarityReport } from '../../crystal/rarityReport.js'
@@ -106,6 +118,14 @@ export interface CrystalApiDeps {
   publicationAdapters?: PublicationAdapter[]
   /** Trust-boundary →public moderation gate (CSAM/NCMEC). Absent → permissive placeholder. */
   moderationGate?: ModerationGate
+  /** Content-addressed verdict cache (spec §7) — identical re-publishes reuse the gate
+   *  verdict (no re-scan, no re-charge). Absent → every public publish scans afresh. */
+  verdictCache?: VerdictCache
+  /** Per-scan fee charger (spec §7) — forwards the paid-classifier cost to the publisher
+   *  on a billable, non-cached scan. Absent → no fee (the config-knob default). */
+  scanFeeCharger?: ScanFeeCharger
+  /** Input-side CSAM prompt guard (generation boundary, fail-open). Absent → permissive. */
+  promptGuard?: PromptGuard
   /** Identity store — reads `Anima.publicatio` to default a publish from the caller's prefs. */
   animae?: AnimaStore
   /** Model (Intella) registry — resolves + owner-scopes an `Intella` publish and is the
@@ -113,8 +133,24 @@ export interface CrystalApiDeps {
   intellarum?: Intellarum
   /** Import-by-URL service (Civitai/HF/direct → private Intella). Absent → import unavailable. */
   modelImporter?: ModelImporter
+  /** BYO-secret WRITE slice (`put`/`remove` only — NEVER `resolve`; ASYMMETRY contract in
+   *  types/secretum.ts). Backs `PUT/DELETE /v1/me/secrets/:provider`. Absent → secrets 501. */
+  secretWriter?: SecretWriter
+  /** BYO-secret presence (`has` only). Backs `getMe.secrets`. Absent → all 'absent'. */
+  secretPresence?: SecretPresence
   /** RunPod pod provisioner for TEE private compute sessions. Absent → local dev (manual runner). */
   teeProvisioner?: TeeProvisioner
+  /** Per-asset USD FMV oracle — backs `depositQuote`. THE SAME instance the deposit webhook uses,
+   *  so a quote's `pointsQuoted` equals what the webhook credits. Absent → deposit quote 503. */
+  pricer?: AssetPricer
+  /** The CreditVault deposit address, echoed in the quote/config so the UI knows where to send. */
+  depositAddress?: string
+  /** USD revenue book — backs the admin `revenueReport` (the trailing-12mo rollup + license tripwire).
+   *  Absent → the report is unavailable. */
+  redituum?: Pick<Redituum, 'trailingUsdRevenue'>
+  /** The license-tripwire's persisted band — surfaced in `revenueReport` so the admin sees the
+   *  last edge-triggered band alongside the live figure. Absent → lastBand omitted. */
+  tripwireBand?: Pick<TripwireBandStore, 'last'>
 }
 
 /** Inputs to start a Collection (a Collectio): a base modus expanded over a Tractus[] grid. */
@@ -291,6 +327,17 @@ export class CrystalApi {
         effectiveAditus = applyAccountDefaults(ports, aditus, affines, generatio)
       }
     }
+
+    // Input CSAM guard — refuse a prompt that solicits CSAM before we spend anything.
+    // Runs on the EFFECTIVE aditus (post account-defaults, incl. affixes) so an injected
+    // default can't smuggle content past it. FAIL-OPEN: a guard implementation error must
+    // not break generation (the publish-time ModerationGate is the fail-closed backstop),
+    // so only an explicit `ok:false` refuses; a throw inside the guard is swallowed.
+    let promptVerdict: PromptVerdict = { ok: true }
+    try {
+      promptVerdict = await this._promptGuard().check(effectiveAditus)
+    } catch { /* fail-open: guard error → allow */ }
+    if (!promptVerdict.ok) throw Errors.contentRefused(promptVerdict.reason)
 
     // Admission spend cap — refuse before dispatch if the upper-bound estimate exceeds
     // maxImpetus. Estimate the EFFECTIVE aditus (post account-defaults) — the same inputs
@@ -777,6 +824,54 @@ export class CrystalApi {
     return toEdition(updated)
   }
 
+  /**
+   * The review queue (spec §4): publications the moderation gate HELD
+   * (`reviewOutcome:'pending'`) for a human to adjudicate. An author sees their OWN
+   * held items (transparency: "your publish is under review"); the platform admin sees
+   * ALL of them (the reviewer's queue). Adjudication itself is admin-only (below).
+   */
+  async listHeldEditions(auctor: AuctorKey): Promise<Edition[]> {
+    const editiones = this.deps.editiones
+    if (!editiones) return []
+    const isAdmin = 'animaId' in auctor && auctor.animaId === PLATFORM_ANIMA_ID
+    const held = await editiones.listHeld(isAdmin ? undefined : this._editionBy(auctor))
+    return held.map(toEdition)
+  }
+
+  /**
+   * APPROVE a held publication (spec §4) → clears the hold (`reviewOutcome:'approved'`);
+   * the worker re-settles it with the gate BYPASSED, so it publishes. PLATFORM-ADMIN
+   * ONLY — an author must never clear their own possibly-CSAM hold (that would defeat
+   * the review). Only a `reviewOutcome:'pending'` Editio can be approved.
+   */
+  async approveHeldEdition(auctor: AuctorKey, id: string): Promise<Edition> {
+    this._assertPlatformAdmin(auctor)
+    const editiones = this.deps.editiones
+    if (!editiones) throw Errors.notFoundEdition(id)
+    const e = await editiones.find(id)
+    if (!e || e.reviewOutcome !== 'pending') throw Errors.notFoundEdition(id)
+    // Clear the settle lease the worker stamped on the scan that held it, so the worker
+    // reclaims it on the next pass immediately (not after the ~5-min lease lapses) and
+    // re-settles with the gate bypassed → publishes.
+    const updated = await editiones.update(id, { reviewOutcome: 'approved', leasedUntil: new Date(0) })
+    return toEdition(updated)
+  }
+
+  /**
+   * REJECT a held publication (spec §4) → terminal `status:'rejected'`. PLATFORM-ADMIN
+   * ONLY. Rejection itself files NO NCMEC report — a confirmed-CSAM report is a separate,
+   * explicit human action through the private deferred reporter, NEVER automatic (§0-A).
+   */
+  async rejectHeldEdition(auctor: AuctorKey, id: string): Promise<Edition> {
+    this._assertPlatformAdmin(auctor)
+    const editiones = this.deps.editiones
+    if (!editiones) throw Errors.notFoundEdition(id)
+    const e = await editiones.find(id)
+    if (!e || e.reviewOutcome !== 'pending') throw Errors.notFoundEdition(id)
+    const updated = await editiones.update(id, { status: 'rejected', reviewOutcome: 'rejected' })
+    return toEdition(updated)
+  }
+
   /** Run the moderation gate (public surfaces only) then the adapter publish,
    *  recording the outcome on the Editio. Pending → published | rejected | failed. */
   private async _settlePublication(editioId: string): Promise<void> {
@@ -795,9 +890,38 @@ export class CrystalApi {
     // never gated here (its import-time CSAM scan already ran).
     const isPublicSurface = e.visibility === 'feed' || e.visibility === 'marketplace'
     const isModelPromotion = e.artifactRef.kind === 'intella' && e.visibility !== 'private'
-    if (isPublicSurface || isModelPromotion) {
-      const verdict = await this._moderationGate().scan(artifact)
+    // A prior human APPROVAL bypasses the gate — a reviewer already adjudicated this
+    // exact publication (spec §4); re-scanning would just HOLD it again in a loop.
+    if ((isPublicSurface || isModelPromotion) && e.reviewOutcome !== 'approved') {
+      // Content-addressed verdict cache (spec §7): an identical re-publish REUSES the
+      // prior verdict — no re-scan, and (below) no re-charge. Keyed on the artifact's
+      // media urls, computed without re-fetching bytes.
+      const key = this.deps.verdictCache ? contentKey(artifact.output) : null
+      const cached = key && this.deps.verdictCache ? await this.deps.verdictCache.get(key) : null
+      let verdict: import('../../crystal/ModerationGate.js').ModerationVerdict | null = cached ? fromCachedVerdict(cached) : null
+
+      if (!verdict) {
+        // Cache miss (or no cache): run the gate, cache the verdict, and forward the
+        // per-scan fee ONLY when the paid classifier actually ran (billable, spec §7).
+        verdict = await this._moderationGate().scan(artifact)
+        if (key && this.deps.verdictCache) {
+          await this.deps.verdictCache.put(toCachedVerdict(key, verdict, new Date().toISOString()))
+        }
+        if (verdict.billable && this.deps.scanFeeCharger) {
+          // Best-effort: a fee failure must NOT block or alter the publish decision.
+          try { await this.deps.scanFeeCharger.charge(e.by, e.id) }
+          catch { /* logged inside the charger; the safe publish outcome stands */ }
+        }
+      }
+
       if (!verdict.ok) {
+        if (verdict.hold) {
+          // HOLD for human review: NOT a reject, NOT a report. Stays `pending`, but the
+          // worker's claim skips reviewOutcome:'pending' so it won't re-scan — it waits
+          // for an admin to approve (→ re-settle, gate bypassed) or reject.
+          await editiones.update(editioId, { reviewOutcome: 'pending' })
+          return
+        }
         await editiones.update(editioId, { status: 'rejected' })
         return
       }
@@ -882,6 +1006,12 @@ export class CrystalApi {
    *  the permissive gate only under an explicit MODERATION_ALLOW_UNSCANNED opt-in. */
   private _moderationGate(): ModerationGate {
     return this.deps.moderationGate ?? denyModerationGate
+  }
+
+  /** Input CSAM prompt guard. Defaults PERMISSIVE (fail-open) — the fail-closed line is
+   *  the publish-time ModerationGate; an unconfigured guard must not block generation. */
+  private _promptGuard(): PromptGuard {
+    return this.deps.promptGuard ?? permissivePromptGuard
   }
 
   /** An Editio owns by `{animaId}|{commitment}` only — bursaToken has no persistent owner. */
@@ -1112,6 +1242,53 @@ export class CrystalApi {
   }
 
   /**
+   * Static config for the buy-points/deposit UI: where to send, the canonical points/USD rate,
+   * the default funding rate, and the supported chains. No auth, no oracle call.
+   */
+  depositConfig(): DepositConfig {
+    return {
+      depositAddress: this.deps.depositAddress ?? '',
+      pointsPerUsd: Number(usdMicroToImpetus(1_000_000n)),        // 1 USD (1e6 µUSD) → impetus ≈ 2967
+      defaultFundingRatePct: Number(DEFAULT_FUNDING_BPS) / 100,   // 70
+      chains: [{ chainId: 1, name: 'ethereum' }, { chainId: 8453, name: 'base' }],
+    }
+  }
+
+  /**
+   * Quote a deposit: how many impetus points `amount` base units of `token` would buy, right now.
+   * INFORMATIONAL — the webhook re-prices and credits authoritatively at deposit time. It reuses the
+   * exact same pricer + funding + rate as `alchemyWebhook.creditImpetus`, so `pointsQuoted` equals
+   * what the webhook credits for the same input (asserted in tests). Gas is NOT deducted (the webhook
+   * doesn't either — see creditImpetus doc); a UI may show network fee as a separate informational line.
+   */
+  async depositQuote(input: { chainId: number | string; token: string; amount: string }): Promise<DepositQuote> {
+    const pricer = this.deps.pricer
+    if (!pricer) throw Errors.depositUnavailable()
+
+    const token = String(input.token ?? '')
+    if (!/^0x[0-9a-fA-F]{40}$/.test(token)) throw Errors.inputMalformed('token must be a 20-byte hex address (0x000…000 for native ETH)')
+    let amountRaw: bigint
+    try { amountRaw = BigInt(input.amount) } catch { throw Errors.inputMalformed('amount must be an integer string of base units (wei for ETH, token-decimals for ERC-20)') }
+    if (amountRaw <= 0n) throw Errors.inputMalformed('amount must be a positive integer of base units')
+
+    const grossMicroUsd = await pricer.usdFmv(input.chainId, token, amountRaw)
+    if (grossMicroUsd === null || grossMicroUsd <= 0n) throw Errors.priceUnavailable()
+
+    const bps = fundingBps(token)
+    const points = usdMicroToImpetus(applyFundingBps(grossMicroUsd, bps))
+    return {
+      chainId: input.chainId,
+      token,
+      amountRaw: amountRaw.toString(),
+      grossUsd: microUsdToStr(grossMicroUsd),
+      grossUsdMicro: grossMicroUsd.toString(),
+      fundingRatePct: Number(bps) / 100,
+      pointsQuoted: points.toString(),
+      depositAddress: this.deps.depositAddress ?? '',
+    }
+  }
+
+  /**
    * The cursor's read-only upper-bound reservation for a modus + aditus.
    *
    * A compositus (spell) has no cursor of its own — its estimate is the SUM of its
@@ -1203,12 +1380,14 @@ export class CrystalApi {
   async importModel(auctor: AuctorKey, opts: ImportModelOpts): Promise<ModelCard> {
     const importer = this.deps.modelImporter
     if (!importer) throw Errors.notFoundModel('import')
-    if (!('animaId' in auctor)) throw Errors.authForbidden('Importing a model requires an identified account')
     if (typeof opts.url !== 'string' || !opts.url.trim()) throw Errors.inputMalformed('a model URL is required')
+    // Anon-capable: a Bursa purse is a valid owner (imports must be Bursa-possible). The generic
+    // ownerKey scopes ownership; ownerAnimaId is populated only when the caller is an anima.
     try {
       const intella = await importer.import({
         url: opts.url.trim(),
-        ownerAnimaId: auctor.animaId,
+        ownerKey: ownerKeyOf(auctor),
+        ...('animaId' in auctor ? { ownerAnimaId: auctor.animaId } : {}),
         ...(opts.genus ? { genus: opts.genus } : {}),
       })
       return {
@@ -1220,6 +1399,9 @@ export class CrystalApi {
         ...(intella.description ? { description: intella.description } : {}),
       }
     } catch (err) {
+      // A gated origin with no connected secret → typed `secret.required` (frontend deep-links to
+      // connect it). Checked before the generic branch — SecretRequiredError extends ModelImportError.
+      if (err instanceof SecretRequiredError) throw Errors.secretRequired(err.provider, err.message)
       if (err instanceof ModelImportError) throw Errors.inputMalformed(err.message)
       throw err
     }
@@ -1229,14 +1411,15 @@ export class CrystalApi {
    * List the caller's OWN privately-held models — imports + trained LoRAs — newest first. The
    * public `listModels` catalog is `canonica:true` only, so a private import (owner-scoped in the
    * `Intellarum` registry) is otherwise invisible; this is where an importer sees + manages what
-   * they brought in. Identified callers only; anon/commitment callers own no durable models.
+   * they brought in. Anon-capable: a Bursa purse owns its imports (keyed by ownerKey).
    */
   async listMyModels(auctor: AuctorKey): Promise<ModelCard[]> {
-    if (!('animaId' in auctor) || !this.deps.intellarum) return []
+    if (!this.deps.intellarum) return []
     const registry = this.deps.intellarum
+    const ownerKey = ownerKeyOf(auctor)
     const models = registry.listByOwner
-      ? await registry.listByOwner(auctor.animaId)
-      : (await registry.list()).filter((i) => i.ownerAnimaId === auctor.animaId)
+      ? await registry.listByOwner(ownerKey)
+      : (await registry.list()).filter((i) => i.ownerKey === ownerKey || `anima:${i.ownerAnimaId}` === ownerKey)
     return models.map(toModelCardFromIntella)
   }
 
@@ -1257,9 +1440,9 @@ export class CrystalApi {
     if (opts.reclassify) {
       const m = await registry.find(id)
       if (!m) throw Errors.notFoundModel(id)
-      const base = m.provenance?.base ?? m.familia ?? ''
-      license = classifyBaseModel(base).license
-      commercialUse = licenseCommercial(license)
+      // Re-derive from the model's recorded base via the shared classifier (provenance.base > nomen
+      // > familia) — the SAME path the backfill sweep runs, so admin + sweep never disagree.
+      ;({ license, commercialUse } = classifyModelLicense(m))
     }
     if (license === undefined && commercialUse === undefined) {
       throw Errors.inputMalformed('provide license and/or commercialUse, or reclassify:true')
@@ -1270,6 +1453,36 @@ export class CrystalApi {
     })
     if (!updated) throw Errors.notFoundModel(id)
     return toModelCardFromIntella(updated)
+  }
+
+  /**
+   * ADMIN revenue report (platform-admin only) — the conditional-license tripwire, surfaced for the
+   * accounting view (ADR-0013 §5, spec step 3). Reads the company-wide trailing-12-month USD revenue
+   * rollup `R`, finds the conditional licenses currently reachable in the public catalog + their
+   * tightest binding cap (ADR-0012), classifies the LIVE band, and echoes the last edge-triggered
+   * band the scheduled evaluator persisted. READ-ONLY: it neither persists a new band nor fires the
+   * alert seam — that is `evaluateTripwire`'s job on its cadence. This is the "what's our number"
+   * report a human reads, not the safety valve.
+   */
+  async revenueReport(auctor: AuctorKey, now: Date = new Date()): Promise<RevenueReport> {
+    this._assertPlatformAdmin(auctor)
+    const redituum = this.deps.redituum
+    if (!redituum) throw Errors.reportUnavailable()
+    const R = await redituum.trailingUsdRevenue(now)
+    const models = this.deps.intellarum ? await this.deps.intellarum.list() : []
+    const licenses = activeConditionalLicenses(models)
+    const capUsd = bindingCapUsd(licenses)
+    const liveBand = band(R, bindingCapMicroUsd(licenses))
+    const last = await this.deps.tripwireBand?.last()
+    return {
+      asOf: now.toISOString(),
+      trailingUsdRevenueMicro: R.toString(),
+      trailingUsdRevenue: microUsdToStr(R),
+      band: liveBand,
+      bindingCapUsd: capUsd,
+      activeConditionalLicenses: licenses,
+      lastAlertedBand: last?.band ?? null,
+    }
   }
 
   /** Platform-admin gate: only the platform identity (PLATFORM_ANIMA_ID) may perform the op. */
@@ -1332,7 +1545,8 @@ export class CrystalApi {
    *  defaults (Preferences) + verb→flow bindings. All optional (unset → undefined). */
   async getMe(auctor: AuctorKey): Promise<MeView> {
     const c = this.deps.consuetudinum
-    if (!c) return { bindings: [] }
+    const secrets = await this.secretPresenceView(auctor)
+    if (!c) return { bindings: [], secrets }
     const [appearance, generatio, bindings] = await Promise.all([
       c.resolveAppearance(auctor), c.resolveGeneratio(auctor), c.listBindings(auctor),
     ])
@@ -1802,11 +2016,79 @@ export interface StatusView {
 
 /** The caller's owner-keyed account settings (GET /v1/me) — appearance + generation
  *  defaults + verb→flow bindings. All optional; anon-capable. */
+/** Static config for the buy-points/deposit UI (`GET /v1/deposit/config`). */
+export interface DepositConfig {
+  /** The CreditVault address to send deposits to (same on mainnet + Base). */
+  depositAddress: string
+  /** Canonical impetus points per 1 USD (≈ 2967 at $0.000337/point) — informational. */
+  pointsPerUsd: number
+  /** Default funding rate as a percent (70 = 70% of USD value converts to points). */
+  defaultFundingRatePct: number
+  chains: Array<{ chainId: number; name: string }>
+}
+
+/** A deposit quote (`POST /v1/deposit/quote`) — informational; the webhook credit is authoritative. */
+export interface DepositQuote {
+  chainId: number | string
+  token: string
+  /** Echoed raw base units (wei / token-decimals) that were quoted. */
+  amountRaw: string
+  /** Gross USD FMV, formatted (e.g. "3.000000") — what we recognize as revenue. */
+  grossUsd: string
+  /** Exact gross USD FMV in micro-USD (bigint string) — for precise client math. */
+  grossUsdMicro: string
+  /** The per-asset funding rate applied, as a percent (e.g. 70). */
+  fundingRatePct: number
+  /** Impetus points the user would be credited — EQUALS what the webhook credits for this input. */
+  pointsQuoted: string
+  depositAddress: string
+}
+
+/**
+ * Admin revenue report (`GET /v1/admin/revenue`) — the conditional-license tripwire, surfaced. The
+ * company-wide trailing-12-month USD revenue vs the tightest active conditional cap (ADR-0012/0013 §5).
+ */
+export interface RevenueReport {
+  /** ISO timestamp the trailing window was computed against. */
+  asOf: string
+  /** Trailing-12mo USD revenue in micro-USD (bigint string) — exact, for client math. */
+  trailingUsdRevenueMicro: string
+  /** Trailing-12mo USD revenue, formatted (e.g. "12345.670000"). */
+  trailingUsdRevenue: string
+  /** LIVE band of revenue against the binding cap: clear <75% · watch ≥75% · warn ≥90% · breach ≥100%. */
+  band: ThresholdBand
+  /** The tightest active conditional cap in whole USD, or null when dormant (no conditional model catalog-active). */
+  bindingCapUsd: number | null
+  /** The distinct conditional license ids currently reachable in the public catalog. */
+  activeConditionalLicenses: string[]
+  /** The last band the scheduled evaluator alerted/persisted, or null before its first run. */
+  lastAlertedBand: ThresholdBand | null
+}
+
 export interface MeView {
   appearance?: Appearance
   generatio?: Generatio
   bindings: Array<{ verb: string; modusId: string }>
+  /** BYO gated-origin credential connect state, per provider. */
+  secrets: Record<SecretProvider, 'connected' | 'absent'>
 }
+
+/** Result of connecting/disconnecting a BYO secret (`PUT/DELETE /v1/me/secrets/:provider`).
+ *  The token is NEVER included. */
+export interface SecretView {
+  provider: SecretProvider
+  status: 'connected' | 'absent'
+  /** Idle-expiry deadline (ISO) — present when connected. */
+  expiresAt?: string
+  /** Deanonymization caution shown to anonymous (purse/commitment) callers. */
+  warning?: string
+}
+
+/** Shown to an anonymous caller connecting a BYO token — linking a named third-party account
+ *  to an anonymous purse is a self-inflicted correlation. Their choice; we surface it. */
+const DEANON_WARNING =
+  'Connecting a Civitai/HuggingFace token links your account there to this anonymous session on ' +
+  'our backend. This weakens your anonymity. Use a token scoped to only what you need, and rotate it regularly.'
 
 /** Inputs for `provisionStudio`. Everything optional — the simplest call leases a default
  *  studio capped at the caller's balance; each knob is opt-in (north-star). */
@@ -1876,6 +2158,13 @@ function modoStudioStatus(modo: { status: string }): string {
   return modo.status === 'terminated' ? 'terminated'
     : (modo.status === 'claiming' || modo.status === 'warming') ? 'provisioning'
     : 'idle'
+}
+
+/** micro-USD (bigint) → a fixed "D.dddddd" USD string (6 dp), exact, no float. */
+function microUsdToStr(micro: bigint): string {
+  const whole = micro / 1_000_000n
+  const frac = (micro % 1_000_000n).toString().padStart(6, '0')
+  return `${whole}.${frac}`
 }
 
 /** name → global-unique slug candidate (lowercase, dash-joined alnum). */

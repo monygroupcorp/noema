@@ -183,20 +183,25 @@ keys its pre-connect warning off `ident.funding` and surfaces whatever the respo
 returns. **Action: none here.** Do not add a client-only "named" shortcut that suppresses the warning —
 it would lie about what the backend sees.
 
-### F2. Deep-link from a failing gated import (handoff §4) — *blocked on a prerequisite, DEFER*
-**Why not done:** there is **no model-import-by-URL surface in the web app at all.** `/models`
+### F2. Deep-link from a failing gated import (handoff §4) — *backend prereq SHIPPED; frontend still blocked on the import UI*
+**Backend prerequisite — DONE (2026-07-02):** the import error is now a typed, provider-carrying signal.
+- A gated origin metadata fetch that 401/403s (no usable BYO token) is translated at the resolver
+  boundary into a `SecretRequiredError(provider)` (`modelImportResolver.ts` — `ModelImportError` gained
+  a `status`; `httpJsonFetcher` populates it; `resolveImport` maps auth-status failures on a Civitai/HF
+  host to the typed error).
+- `CrystalApi.importModel` maps `SecretRequiredError` → `Errors.secretRequired(provider)` = a **422**
+  with stable `code:'secret.required'` and `details.provider` (`errors.ts`). Distinct from the generic
+  `input.malformed` a bad URL returns, so the frontend can branch on it.
+- Covered by `tests/unit/crystal/modelImport.test.ts` (resolver translation + API mapping).
+**Frontend — still blocked:** there is **no model-import-by-URL surface in the web app at all.** `/models`
 (`screens/Shelf.tsx`) renders static `MODELS` mock data; nothing calls `POST /v1/models/import`. There
 is no failing-import UI to deep-link *from*.
-**Disposition:** **deferred until the import UI exists** — it's the natural home for this. When built:
-1. On an import that fails for a gated origin with no stored secret, deep-link to
-   `/profile#connected-accounts` (add an `id`/anchor to the `ConnectedAccounts` section) with the
-   provider pre-expanded (e.g. `?connect=civitai` → `SecretRow` reads it and focuses the token input).
-2. **Backend prerequisite to confirm first:** the import error must be distinguishable as "gated, no
-   secret" vs a generic failure. `ModelImporter` currently *falls back* to the public fetcher when no
-   secret is present (`ModelImporter.ts:97-98`) rather than emitting a typed "needs secret" error — so a
-   gated-but-private import fails later as a plain fetch/404, not a clear signal. Closing F2 needs a
-   small backend change to surface a `secret.required` (provider) error. Tiny, but a real prerequisite —
-   not a frontend-only task.
+**Disposition:** **deferred until the import UI exists** — it's the natural home for this. When built,
+the backend already emits everything needed:
+1. On a `POST /v1/models/import` that returns `code:'secret.required'`, read `details.provider` and
+   deep-link to `/profile#connected-accounts` (add an `id`/anchor to the `ConnectedAccounts` section)
+   with the provider pre-expanded (e.g. `?connect=civitai` → `SecretRow` reads it and focuses the token
+   input).
 
 ### F3. Proactive "unavailable" (hide the panel without a failed attempt) — *optional polish, ~20 min*
 **Current:** the panel only learns the store is unconfigured *after* the first connect attempt returns
