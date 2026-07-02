@@ -45,6 +45,8 @@ import { MongoIssuer } from './crystal/MongoIssuer.js'
 import type { IssuerStore } from './types/issuer.js'
 import { MongoLegatus } from './crystal/MongoLegatus.js'
 import type { LegatusStore } from './types/legatus.js'
+import { MongoX402Log } from './crystal/MongoX402Log.js'
+import type { X402LogStore } from './types/x402.js'
 import { MongoVestigiorum } from './crystal/MongoVestigiorum.js'
 import { MongoModo } from './crystal/MongoModo.js'
 import { RunPodCursor } from './crystal/RunPodCursor.js'
@@ -114,6 +116,8 @@ export interface Ring {
   issuers: IssuerStore
   /** Agent-sidecar registry (ERC-8004 CAMEL agents) — see types/legatus.ts. */
   legati: LegatusStore
+  /** x402 payment audit trail (replay-protected) — see types/x402.ts. */
+  x402Log: X402LogStore
   vestigiorum: Vestigiorum
   modos: ModoStore
   mandatores: Mandatorum
@@ -260,6 +264,8 @@ export interface ContainerConfig {
   issuersCollection?: string
   /** Collection name for the agent-sidecar registry — default 'legati' */
   legatiCollection?: string
+  /** Collection name for the x402 payment log — default 'x402_payment_log' */
+  x402LogCollection?: string
   /** Collection name for vestigia — default 'vestigia' */
   vestigiaCollection?: string
   /** Collection name for modos — default 'modos' */
@@ -379,6 +385,9 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   // Agent-sidecar registry (ERC-8004 CAMEL agents).
   const legati = new MongoLegatus(db.collection(config.legatiCollection ?? 'legati'))
+
+  // x402 payment audit trail (replay-protected by a unique signatureHash index).
+  const x402Log = new MongoX402Log(db.collection(config.x402LogCollection ?? 'x402_payment_log'))
 
   const vestigiaCol: Collection = db.collection(config.vestigiaCollection ?? 'vestigia')
   const vestigiorum = new MongoVestigiorum(vestigiaCol, config.embed, config.embedImage)
@@ -646,7 +655,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const collectioCursor = new CollectioCursor(sharedDispatch, collectiones, actorum, { reviewEnabled: true })
 
   return {
-    actorum, modorum, signorum, animae, personae, issuers, legati, vestigiorum, modos,
+    actorum, modorum, signorum, animae, personae, issuers, legati, x402Log, vestigiorum, modos,
     mandatores, corpora, collectiones, editiones, publicationAdapters, sodalitates, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
