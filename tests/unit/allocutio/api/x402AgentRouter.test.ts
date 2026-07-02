@@ -29,10 +29,12 @@ async function harness(opts: {
   runSpell?: X402AgentDeps['runSpell']
   enabled?: boolean
   withSpell?: boolean
+  modi?: Array<{ id: string; nomen: string; auctor?: { animaId: string } }>
 } = {}) {
   const legati = new MemoryLegatus()
   const modorum = new MemoryModorum()
   await modorum.register({ ...CAMEL_TEMPLATE_MODUS, id: 'agent-ws-camel42' })
+  for (const m of opts.modi ?? []) await modorum.register({ ...CAMEL_TEMPLATE_MODUS, id: m.id, nomen: m.nomen, ...(m.auctor ? { auctor: m.auctor } : {}) })
   await legati.create({
     agentId: 'camel42', ownerAddress: OWNER, animaId: 'anima-agent', treasuryId: 'camelcabal-1',
     issuerId: 'https://camelcabal.fun', scope: ['generate'], revokeToken: 'rvk',
@@ -130,6 +132,29 @@ test('feature-flagged off → 404', async () => {
   const post = await request(server).post('/api/v1/x402/agents/camel42/spell/memeify').set('x-payment', 'paid').send({ inputs: {} })
   assert.equal(get.status, 404)
   assert.equal(post.status, 404)
+})
+
+test('run a SELECTED modus (picker): body.modusId owned by the agent → runs it', async () => {
+  const ran: string[] = []
+  const { server } = await harness({
+    modi: [{ id: 'owned', nomen: 'extra', auctor: { animaId: 'anima-agent' } }],
+    runSpell: async ({ modusId }): Promise<Run> => { ran.push(modusId); return { id: 'r', status: 'complete', modusId, exitus: {} } },
+  })
+  const res = await request(server).post('/api/v1/x402/agents/camel42/spell/extra').set('x-payment', 'paid').send({ inputs: {}, modusId: 'owned' })
+  assert.equal(res.status, 200)
+  assert.deepEqual(ran, ['owned'])                      // it ran the SELECTED modus, not the workspace one
+})
+
+test('run a modus NOT owned by the agent → 403 NOT_AGENT_MODUS (no run, no settle)', async () => {
+  let ran = false
+  const { server } = await harness({
+    modi: [{ id: 'foreign', nomen: 'other', auctor: { animaId: 'someone-else' } }],
+    runSpell: async ({ modusId }): Promise<Run> => { ran = true; return { id: 'r', status: 'complete', modusId } },
+  })
+  const res = await request(server).post('/api/v1/x402/agents/camel42/spell/other').set('x-payment', 'paid').send({ inputs: {}, modusId: 'foreign' })
+  assert.equal(res.status, 403)
+  assert.equal(res.body.error.code, 'NOT_AGENT_MODUS')
+  assert.equal(ran, false)
 })
 
 test('unknown agent → 404', async () => {

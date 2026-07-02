@@ -36,12 +36,13 @@ function app(over: Partial<WidgetRouterDeps> = {}, capture?: { filter?: FeedFilt
 
 const imgItem = (url: string): FeedItem => ({ editionId: 'e1', artifact: { kind: 'actum', id: 'a1' }, output: { image: url }, createdAt: '2026-07-02T00:00:00.000Z' })
 
-const MODUS = { id: 'm1', nomen: 'memeify', aditus: { prompt: { type: 'text', required: true, label: 'Prompt' }, seed: { type: 'int' } } } as unknown as Modus
-function interactive() {
+const MODUS = { id: 'm1', nomen: 'memeify', auctor: { animaId: 'anima-1' }, aditus: { prompt: { type: 'text', required: true, label: 'Prompt' }, seed: { type: 'int' } } } as unknown as Modus
+const MODUS2 = { id: 'm2', nomen: 'upscale', auctor: { animaId: 'anima-1' }, aditus: { image: { type: 'image', required: true } } } as unknown as Modus
+function interactive(modi: Modus[] = [MODUS]) {
   return app({
     legati: { findByAgentId: async () => legatus({ workspaceModusId: 'm1' }), listByCollection: async () => [] },
-    modorum: { find: async () => MODUS },
-    quoteImpetus: async () => 1000n,
+    modorum: { find: async (id) => modi.find((m) => m.id === id) ?? null, list: async () => modi },
+    quoteImpetus: async (id) => (id === 'm2' ? 2000n : 1000n),
     x402Config: { ...DEFAULT_X402_CONFIG, payTo: '0xReceiver' },
   })
 }
@@ -49,13 +50,26 @@ function interactive() {
 test('interactive: run panel renders the aditus form, a priced Run, and the §5 run script', async () => {
   const res = await request(interactive()).get('/widget/camel42')
   assert.equal(res.status, 200)
-  assert.match(res.text, /id="runform"/)
+  assert.match(res.text, /class="mform active"[^>]*data-modus="m1"[^>]*data-endpoint="[^"]*spell\/memeify"/)
   assert.match(res.text, /<textarea name="prompt"/)                 // text porta → textarea
   assert.match(res.text, /name="seed"[^>]*type="number"|type="number"[^>]*name="seed"/) // int → number
   assert.match(res.text, /id="runbtn">Run · \$/)                    // priced button
   assert.match(res.text, /PAYMENT_REQUIRED/)                        // run script asks parent to sign
-  assert.match(res.text, /PAYMENT_SIGNED/)                          // then POSTs with the header
-  assert.match(res.text, /\/api\/v1\/x402\/agents\/camel42\/spell\/memeify/) // the §5 endpoint
+  assert.match(res.text, /PAYMENT_SIGNED/)                          // then re-POSTs with the header
+  // single modus → no picker chips
+  assert.doesNotMatch(res.text, /class="modchip/)
+})
+
+test('interactive: multiple modi → a picker with one chip + form (+ price) each', async () => {
+  const res = await request(interactive([MODUS, MODUS2])).get('/widget/camel42')
+  assert.equal(res.status, 200)
+  assert.match(res.text, /class="modchip active" data-modus="m1">memeify/)
+  assert.match(res.text, /class="modchip" data-modus="m2">upscale/)
+  // the second modus's form is present but inactive, with its own endpoint + a distinct price
+  assert.match(res.text, /class="mform" data-modus="m2"[^>]*spell\/upscale/)
+  const p1 = res.text.match(/data-modus="m1"[^>]*data-price="([^"]+)"/)?.[1]
+  const p2 = res.text.match(/data-modus="m2"[^>]*data-price="([^"]+)"/)?.[1]
+  assert.ok(p1 && p2 && p1 !== p2, `m1 (${p1}) and m2 (${p2}) should be priced differently`)
 })
 
 test('interactive: agent with no callable modus falls back to the read-only gallery', async () => {
@@ -147,8 +161,8 @@ test('XSS/URL safety: javascript: urls dropped, malicious accent rejected', asyn
   assert.equal(res.status, 200)
   assert.doesNotMatch(res.text, /javascript:alert/)              // unsafe url filtered out
   assert.match(res.text, /https:\/\/ok\.test\/b\.png/)          // safe url kept
-  assert.doesNotMatch(res.text, /display:none/)                  // css-injection accent rejected
-  assert.match(res.text, /--accent:#7c5cff/)                     // fell back to default accent
+  assert.doesNotMatch(res.text, /red;\} body\{display:none/)     // the injection payload never lands
+  assert.match(res.text, /--accent:#5b8cff/)                     // fell back to the NOEMA default accent
 })
 
 test('empty allowlist → frame-ancestors defaults to self', async () => {
