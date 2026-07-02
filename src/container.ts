@@ -41,6 +41,8 @@ import { MongoFundamentorum } from './crystal/MongoFundamentorum.js'
 import { MongoSignorum } from './crystal/MongoSignorum.js'
 import { MongoAnima } from './crystal/MongoAnima.js'
 import { MongoPersona } from './crystal/MongoPersona.js'
+import { MongoIssuer } from './crystal/MongoIssuer.js'
+import type { IssuerStore } from './types/issuer.js'
 import { MongoVestigiorum } from './crystal/MongoVestigiorum.js'
 import { MongoModo } from './crystal/MongoModo.js'
 import { RunPodCursor } from './crystal/RunPodCursor.js'
@@ -106,6 +108,8 @@ export interface Ring {
   signorum: Signorum
   animae: AnimaStore
   personae: PersonaStore
+  /** Trusted-issuer registry (federated JWKS SSO) — see types/issuer.ts. */
+  issuers: IssuerStore
   vestigiorum: Vestigiorum
   modos: ModoStore
   mandatores: Mandatorum
@@ -248,6 +252,8 @@ export interface ContainerConfig {
   animaeCollection?: string
   /** Collection name for personae — default 'personae' */
   personaeCollection?: string
+  /** Collection name for the trusted-issuer registry — default 'trusted_issuers' */
+  issuersCollection?: string
   /** Collection name for vestigia — default 'vestigia' */
   vestigiaCollection?: string
   /** Collection name for modos — default 'modos' */
@@ -361,6 +367,9 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   const personaeCol: Collection = db.collection(config.personaeCollection ?? 'personae')
   const personae = new MongoPersona(personaeCol)
+
+  // Trusted-issuer registry (collection matches the legacy JS `trusted_issuers`).
+  const issuers = new MongoIssuer(db.collection(config.issuersCollection ?? 'trusted_issuers'))
 
   const vestigiaCol: Collection = db.collection(config.vestigiaCollection ?? 'vestigia')
   const vestigiorum = new MongoVestigiorum(vestigiaCol, config.embed, config.embedImage)
@@ -628,7 +637,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const collectioCursor = new CollectioCursor(sharedDispatch, collectiones, actorum, { reviewEnabled: true })
 
   return {
-    actorum, modorum, signorum, animae, personae, vestigiorum, modos,
+    actorum, modorum, signorum, animae, personae, issuers, vestigiorum, modos,
     mandatores, corpora, collectiones, editiones, publicationAdapters, sodalitates, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,

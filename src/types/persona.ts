@@ -25,6 +25,7 @@ export type PersonaGenus =
   | 'web'       // Web app user — externusId is Privy DID or session token
   | 'api'       // Direct API user — externusId is API key hash
   | 'mcp'       // MCP (Model Context Protocol) client — externusId is client ID
+  | 'federated' // Federated SSO subject from a trusted `Issuer` (JWKS) — externusId is `<iss>::<sub>`
 
 /**
  * Persona — the platform-specific face of an anima.
