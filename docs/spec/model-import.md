@@ -145,8 +145,9 @@ key must NOT carry the license — both are classified and recorded separately.
 - **Recorded on the model:** `Intella.license` (id, display/audit) + `Intella.commercialUse` (verdict).
   Set at import AND at training finality (`trainingFinalizer` — a FLUX.1-dev-trained LoRA is a
   Non-Commercial derivative, classified the same way, so the gate can't be bypassed via training).
-- **FLUX.2 variants:** klein (4B/9B) = Apache 2.0 (✅), dev = Non-Commercial (❌), bare `flux2` =
-  fail-closed unknown — same variant-drives-license shape as FLUX.1.
+- **FLUX.2 variants (confirmed vs BFL — variant AND size):** ONLY **klein 4B = Apache 2.0 (✅)**;
+  **klein 9B = Non-Commercial (❌)** (our seed `INTELLA_FLUX2_KLEIN_9B` is the 9B → NC), **dev =
+  Non-Commercial (❌)**; a klein with no stated size is fail-closed to NC; bare `flux2` = unknown.
 - **Enforcement split (use ≠ listing):** a PRIVATE import/train is ALWAYS allowed — personal,
   non-commercial use of an NC-licensed model is fine. The license is enforced only at **PUBLIC
   PROMOTION** (commercial surface): `CrystalApi.publish` refuses an `intella` promotion
@@ -161,6 +162,12 @@ key must NOT carry the license — both are classified and recorded separately.
   `reclassify:true` to re-derive from the model's recorded `provenance.base` (bulk-fix legacy imports
   that predate classification). This is the escape hatch that keeps us protected while letting cleared
   models list. `Intellarum.setLicense` is the store seam; `ModelCard` surfaces `license`+`commercialUse`.
+- **Training UX messaging (built):** a trained LoRA inherits its BASE's license, so `trainingFinalizer`
+  classifies from `baseModel` and (a) records `license`+`commercialUse` on the Intella (the gate) and
+  (b) surfaces them + a plain-language `licenseNote` on the training EXITUS/receipt — the owner is told
+  at completion whether the model is commercially listable or private-use-only (`licenseNote()` in
+  `modelLicense.ts`). So training on schnell/apache → "✅ Commercially listable"; on FLUX.1-dev / Krea /
+  klein-9B → "🔒 Private use only". The note travels WITH the model (import result + `ModelCard` too).
 - **UX note (accepted):** many HF LoRAs don't declare `cardData.license`, so they resolve to
   `'unknown'` and can't auto-promote — private use still works, and an admin can clear them. That is
   the intended fail-closed posture (commercial catalog requires an explicit ✅), not a bug.

@@ -84,9 +84,11 @@ test('classifyBaseModel: license verdicts across families', () => {
   assert.equal(licenseCommercial(classifyBaseModel('Z-Image').license), 'yes')      // apache
   assert.equal(licenseCommercial(classifyBaseModel('Krea 2').license), 'conditional') // <$1M community
   assert.equal(licenseCommercial(classifyBaseModel('Pony').license), 'yes')         // fair-ai-public
-  // FLUX.2 variants: klein = Apache ✅, dev = Non-Commercial ❌, bare = fail-closed
-  assert.equal(classifyBaseModel('FLUX.2 klein').license, 'apache-2.0')
-  assert.equal(licenseCommercial(classifyBaseModel('FLUX.2 klein').license), 'yes')
+  // FLUX.2 variants (confirmed vs BFL): ONLY klein 4B is Apache; klein 9B + dev are Non-Commercial.
+  assert.equal(classifyBaseModel('FLUX.2 klein 4B').license, 'apache-2.0')
+  assert.equal(licenseCommercial(classifyBaseModel('FLUX.2 klein 4B').license), 'yes')
+  assert.equal(licenseCommercial(classifyBaseModel('FLUX.2 Klein 9B').license), 'no')   // our seed = 9B → NC
+  assert.equal(licenseCommercial(classifyBaseModel('flux2-klein').license), 'no')       // size unstated → fail-closed NC
   assert.equal(licenseCommercial(classifyBaseModel('FLUX.2 dev').license), 'no')
   assert.equal(licenseCommercial(classifyBaseModel('FLUX.2').license), 'unknown')
 })
@@ -98,6 +100,14 @@ test('isCatalogEligible: yes + conditional pass; no + unknown are refused', asyn
   assert.equal(isCatalogEligible('no'), false)
   assert.equal(isCatalogEligible('unknown'), false)
   assert.equal(isCatalogEligible(undefined), false)
+})
+
+test('licenseNote: a plain-language, use-vs-listing message per verdict', async () => {
+  const { licenseNote } = await import('../../../src/crystal/modelLicense.js')
+  assert.match(licenseNote('yes', 'apache-2.0'), /listable/i)
+  assert.match(licenseNote('conditional', 'krea-community'), /threshold/i)
+  assert.match(licenseNote('no', 'flux-1-dev-nc'), /Private use only/i)
+  assert.match(licenseNote('unknown'), /unverified/i)
 })
 
 test('origin license signals: civitai commercial flags + HF license id + most-restrictive fold', () => {

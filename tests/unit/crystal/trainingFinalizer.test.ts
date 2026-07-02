@@ -32,8 +32,14 @@ test('completed run: hosts the LoRA bytes in R2, registers a private Intella, re
     completed(600),
   )
 
-  // exitus carries the ids the receipt + modus contract surface.
-  assert.deepEqual(exitus, { trained: true, steps: 600, loraId: 'lora-xyz', loraUrl: 'https://cdn/models/lora-xyz/milady.safetensors' })
+  // exitus carries the ids the receipt + modus contract surface (+ the license verdict, below).
+  assert.equal(exitus.trained, true)
+  assert.equal(exitus.steps, 600)
+  assert.equal(exitus.loraId, 'lora-xyz')
+  assert.equal(exitus.loraUrl, 'https://cdn/models/lora-xyz/milady.safetensors')
+  // no baseModel on this actum → license unverified → private-use-only note (fail-closed)
+  assert.equal(exitus.commercialUse, 'unknown')
+  assert.match(String(exitus.licenseNote), /Private use only/i)
 
   // hosted under models/<id>/<filename>, real bytes.
   assert.equal(h.puts.length, 1)
@@ -55,6 +61,21 @@ test('completed run: hosts the LoRA bytes in R2, registers a private Intella, re
   assert.equal(i.access, 'private')          // never auto-public
   assert.equal(i.canonica, false)
   assert.deepEqual(i.sources, [{ provenance: 'miladystation', uri: exitus.loraUrl, format: 'safetensors' }])
+})
+
+test('license inherits the base: schnell → commercially listable; dev → private-use-only (training UX)', async () => {
+  const schnell = makeTrainingFinalizer({ ...harness(), newId: () => 'l1', now: () => new Date(0) })
+  const sx = await schnell(actum({ triggerWord: 'x', baseModel: 'FLUX.1-schnell', ownerAnimaId: 'a' }), completed())
+  assert.equal(sx.license, 'apache-2.0')
+  assert.equal(sx.commercialUse, 'yes')
+  assert.match(String(sx.licenseNote), /listable/i)
+
+  const h = harness()
+  const dev = makeTrainingFinalizer({ ...h, newId: () => 'l2', now: () => new Date(0) })
+  const dx = await dev(actum({ triggerWord: 'y', baseModel: 'FLUX.1-dev', ownerAnimaId: 'a' }), completed())
+  assert.equal(dx.commercialUse, 'no')                       // NC base → NC derivative
+  assert.match(String(dx.licenseNote), /Private use only/i)
+  assert.equal(h.upserts[0].commercialUse, 'no')             // and recorded on the Intella for the gate
 })
 
 test('card enrichment: persists trainingSteps (aditus steps wins), description, and retrain provenance', async () => {
@@ -244,7 +265,10 @@ test('urlLoraReader (remote path): fetches the pod-uploaded LoRA, re-hosts it, r
   assert.deepEqual(fetched, [podUrl])                                   // pulled from the pod's R2 URL
   assert.equal(h.puts[0].key, 'models/lora-r/milady.safetensors')      // re-hosted to OUR durable key
   assert.deepEqual(h.puts[0].bytes, Buffer.from(`bytes:${podUrl}`))
-  assert.deepEqual(exitus, { trained: true, steps: 800, loraId: 'lora-r', loraUrl: 'https://cdn/models/lora-r/milady.safetensors' })
+  assert.equal(exitus.trained, true)
+  assert.equal(exitus.steps, 800)
+  assert.equal(exitus.loraId, 'lora-r')
+  assert.equal(exitus.loraUrl, 'https://cdn/models/lora-r/milady.safetensors')
   assert.equal(h.upserts[0].familia, 'flux')
   assert.equal(h.upserts[0].ownerAnimaId, 'anima-2')
 })

@@ -5,7 +5,7 @@ import type { Uploader, ObjectStore } from './R2Uploader.js'
 import type { MediaFetcher } from './MediaFetcher.js'
 import type { AitkOutcome } from './aitoolkitRunnerClient.js'
 import { buildAitkConfig, canonicalFamilia, DEFAULT_SAMPLE_PROMPTS, parseSamplePrompts } from './aitkConfig.js'
-import { classifyBaseModel, licenseCommercial } from './modelLicense.js'
+import { classifyBaseModel, licenseCommercial, licenseNote } from './modelLicense.js'
 import { parseManifest } from './datasetManifest.js'
 
 // =============================================================================
@@ -95,6 +95,12 @@ export function makeTrainingFinalizer(
       : canonicalFamilia(String(a.baseModel ?? ''))
     const nomen = (typeof a.name === 'string' && a.name.trim()) || trigger || jobId
 
+    // License (SEPARATE axis from familia) — a trained LoRA inherits its BASE's license, so it's
+    // classified from `baseModel`. Recorded on the Intella (gate) AND surfaced on the exitus receipt
+    // so the owner is told at completion whether the model is commercially listable (training UX).
+    const { license } = classifyBaseModel(String(a.baseModel ?? ''))
+    const commercialUse = licenseCommercial(license)
+
     // Model-card enrichment (optional aditus): the requested step count, a human description,
     // and external retrain lineage (source repo + base) for the card's provenance backlink.
     const steps = typeof a.steps === 'number' ? a.steps : outcome.lastStep
@@ -154,10 +160,8 @@ export function makeTrainingFinalizer(
       // License axis (SEPARATE from familia): a LoRA inherits its base's license — a FLUX.1-dev-trained
       // LoRA is a Non-Commercial derivative and must NOT be publicly (commercially) catalogued. Recorded
       // so the publish gate enforces it uniformly with imports (modelLicense.ts). Fail-closed.
-      ...((): Partial<Intella> => {
-        const { license } = classifyBaseModel(String(a.baseModel ?? ''))
-        return { license, commercialUse: licenseCommercial(license) }
-      })(),
+      license,
+      commercialUse,
       ...(typeof a.baseIntellaId === 'string' ? { baseIntellaId: a.baseIntellaId } : {}),
       ...(trigger ? { trigger } : {}),
       slug,
@@ -183,7 +187,9 @@ export function makeTrainingFinalizer(
       await store.del(`training/${jobId}/${filename}`).catch(() => {})
     }
 
-    return { trained: true, steps: outcome.lastStep, loraId: id, loraUrl }
+    // Receipt carries the license verdict + a plain-language note — so the training UX tells the
+    // owner at completion whether the LoRA is publicly (commercially) listable or private-use-only.
+    return { trained: true, steps: outcome.lastStep, loraId: id, loraUrl, license, commercialUse, licenseNote: licenseNote(commercialUse, license) }
   }
 }
 
