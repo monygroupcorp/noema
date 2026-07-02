@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useIdentity } from '../state/identity';
+import { useSession } from '../state/session';
 import { api } from '../lib/api';
 import { clearOnboarded } from '../lib/entry';
 import { Ic } from '../lib/icons';
@@ -20,6 +21,7 @@ function computeLabel(exec: string): { glyph: 'lit' | 'ring' | 'dashed'; text: s
 
 export function Account() {
   const { ident, idents, setIdentity, execution } = useIdentity();
+  const { session, logout } = useSession();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<CSSProperties>({});
@@ -43,11 +45,13 @@ export function Account() {
     return () => document.removeEventListener('click', close);
   }, [open]);
 
+  const signedIn = !!session;
   const anon = ident.funding === 'bearer';
-  const name = anon ? 'anonymous' : ident.name;
+  // The real fiat session takes precedence over the cosmetic identity skin for the name/reach readout.
+  const name = signedIn ? (session!.email ?? 'your account') : anon ? 'anonymous' : ident.name;
   const credits = liveCredits ?? (ident.bal.match(/(\d[\d,]*)\s*credits?/)?.[1] ?? '—');
   const compute = useMemo(() => computeLabel(execution), [execution]);
-  const reach = anon ? 'bearer purse' : 'signed in · web · Telegram · API';
+  const reach = signedIn || !anon ? 'signed in · web · Telegram · API' : 'bearer purse';
 
   function toggle(e: React.MouseEvent) {
     e.stopPropagation();
@@ -61,7 +65,10 @@ export function Account() {
     if (other) setIdentity(other.id);
     setOpen(false);
   };
-  const signOut = () => { clearOnboarded(); setOpen(false); navigate('/'); };
+  // Real sign out: drop the fiat session (falls back to the anon commitment path), then
+  // clear the local onboarded flag and return home. Also used for the cosmetic-only case.
+  const signOut = () => { if (signedIn) logout(); clearOnboarded(); setOpen(false); navigate('/'); };
+  const signIn = () => { setOpen(false); navigate('/onboard'); };
 
   return (
     <div className="posture">
@@ -93,7 +100,9 @@ export function Account() {
             <Link to="/preferences" onClick={() => setOpen(false)}><Ic name="sparkles" /> Preferences <span className="meta">your defaults</span></Link>
             <Link to="/funding" onClick={() => setOpen(false)}><Ic name="wallet" /> Funding &amp; credits</Link>
           </div>
-          <button className="am-signout" onClick={signOut}><Ic name="arrow-right" /> Sign out</button>
+          {signedIn
+            ? <button className="am-signout" onClick={signOut}><Ic name="arrow-right" /> Sign out</button>
+            : <button className="am-signout" onClick={signIn}><Ic name="circle-user" /> Sign in</button>}
         </div>
       )}
     </div>
