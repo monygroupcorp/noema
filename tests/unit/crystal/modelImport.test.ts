@@ -3,8 +3,8 @@
 // gate. No network, no R2, no Mongo.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveImport, mapToFamilia, ModelImportError } from '../../../src/crystal/modelImportResolver.js'
-import { classifyBaseModel, licenseCommercial, civitaiCommercial, hfLicenseToId, combineCommercial } from '../../../src/crystal/modelLicense.js'
+import { resolveImport, mapToFamilia, ModelImportError, SecretRequiredError } from '../../../src/crystal/modelImportResolver.js'
+import { classifyBaseModel, licenseCommercial, civitaiCommercial, hfLicenseToId, combineCommercial, classifyModelLicense } from '../../../src/crystal/modelLicense.js'
 import type { JsonFetcher } from '../../../src/crystal/modelImportResolver.js'
 import { ModelImporter } from '../../../src/crystal/ModelImporter.js'
 import type { IntellaWriter } from '../../../src/crystal/trainingFinalizer.js'
@@ -93,6 +93,26 @@ test('classifyBaseModel: license verdicts across families', () => {
   assert.equal(licenseCommercial(classifyBaseModel('FLUX.2').license), 'unknown')
 })
 
+test('classifyModelLicense: base-string priority provenance.base > nomen > familia (reclassify + sweep share this)', () => {
+  // provenance.base wins even when nomen/familia disagree — the author-declared lineage is truth.
+  assert.deepEqual(
+    classifyModelLicense({ provenance: { base: 'FLUX.1-dev' }, nomen: 'My Schnell-ish LoRA', familia: 'flux' }),
+    { license: 'flux-1-dev-nc', commercialUse: 'no' },
+  )
+  // No provenance.base → fall to nomen (the descriptive title, e.g. canonical seeds).
+  assert.deepEqual(
+    classifyModelLicense({ nomen: 'FLUX.1 Schnell (fp8 scaled)', familia: 'flux' }),
+    { license: 'apache-2.0', commercialUse: 'yes' },
+  )
+  // Only bare familia → license-ambiguous ('flux' can't tell schnell from dev) → fail-closed unknown.
+  assert.deepEqual(
+    classifyModelLicense({ familia: 'flux' }),
+    { license: 'unknown', commercialUse: 'unknown' },
+  )
+  // Nothing to go on → fail-closed unknown (NOT a permissive default).
+  assert.deepEqual(classifyModelLicense({}), { license: 'unknown', commercialUse: 'unknown' })
+})
+
 test('isCatalogEligible: yes + conditional pass; no + unknown are refused', async () => {
   const { isCatalogEligible } = await import('../../../src/crystal/modelLicense.js')
   assert.equal(isCatalogEligible('yes'), true)
@@ -133,6 +153,29 @@ test('import resolve: license/commercialUse fold onto the resolved plan (Civitai
   // schnell base but uploader forbids commercial → the restriction wins
   const forbidden = { ...CIVITAI_LORA, allowCommercialUse: ['None'], modelVersions: [{ id: 1, baseModel: 'FLUX.1-schnell', files: [{ name: 'a.safetensors', downloadUrl: 'https://civitai.com/api/download/models/1' }] }] }
   assert.equal((await resolveImport('https://civitai.com/models/1', { json: jsonOf(forbidden) })).commercialUse, 'no')
+})
+
+// ── Resolver: gated origins → typed SecretRequiredError ────────────────────────
+
+test('resolve: a gated origin (401/403) → typed SecretRequiredError carrying the provider', async () => {
+  // A metadata fetch that 401s (private/gated Civitai model, no BYO token attached).
+  const gated401: JsonFetcher = { async fetchJson(url) { throw new ModelImportError(`fetch failed: ${url} → 401`, 401) } }
+  await assert.rejects(
+    () => resolveImport('https://civitai.com/models/92654', { json: gated401 }),
+    (e: unknown) => e instanceof SecretRequiredError && e.provider === 'civitai' && e.status === 401,
+  )
+  // HF host + 403 maps to the huggingface provider.
+  const gated403: JsonFetcher = { async fetchJson(url) { throw new ModelImportError(`fetch failed: ${url} → 403`, 403) } }
+  await assert.rejects(
+    () => resolveImport('https://huggingface.co/someuser/my-flux-lora', { json: gated403 }),
+    (e: unknown) => e instanceof SecretRequiredError && e.provider === 'huggingface',
+  )
+  // A non-auth failure (500) is NOT translated — stays a generic ModelImportError.
+  const err500: JsonFetcher = { async fetchJson(url) { throw new ModelImportError(`fetch failed: ${url} → 500`, 500) } }
+  await assert.rejects(
+    () => resolveImport('https://civitai.com/models/92654', { json: err500 }),
+    (e: unknown) => e instanceof ModelImportError && !(e instanceof SecretRequiredError),
+  )
 })
 
 // ── Resolver: Civitai ─────────────────────────────────────────────────────────
@@ -233,7 +276,7 @@ function harness(opts: { gate?: ModerationGate; store?: boolean } = {}) {
 
 test('import: registers a private, owner-scoped, ORIGIN-ONLY Intella (no R2 weight copy)', async () => {
   const h = harness()
-  const intella = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerAnimaId: 'anima-9' })
+  const intella = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' })
 
   // private, owner-scoped, off the public catalogue; id is deterministic (dedup key)
   assert.match(intella.id, /^import-[0-9a-f]{24}$/)
@@ -255,17 +298,17 @@ test('import: registers a private, owner-scoped, ORIGIN-ONLY Intella (no R2 weig
 
 test('import: idempotent — re-importing the same URL yields the same id (dedup, no duplicate)', async () => {
   const h = harness()
-  const a = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerAnimaId: 'anima-9' })
-  const b = await h.importer.import({ url: 'https://civitai.com/models/92654/renamed-slug', ownerAnimaId: 'anima-9' })
+  const a = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' })
+  const b = await h.importer.import({ url: 'https://civitai.com/models/92654/renamed-slug', ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' })
   assert.equal(a.id, b.id)                                        // same (owner, origin) → same record
   // a DIFFERENT owner importing the same model gets a distinct private record
-  const c = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerAnimaId: 'anima-other' })
+  const c = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerKey: 'anima:anima-other', ownerAnimaId: 'anima-other' })
   assert.notEqual(a.id, c.id)
 })
 
 test('import: preview media is scanned on the ORIGIN url, then re-hosted into our bucket', async () => {
   const h = harness({ store: true })
-  const intella = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerAnimaId: 'anima-9' })
+  const intella = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' })
   // re-hosted: the sample now points at OUR bucket, not civitai
   assert.equal(h.puts.length, 1)
   assert.match(h.puts[0].key, /^model-previews\/import-[0-9a-f]{24}\/000\.png$/)
@@ -274,7 +317,7 @@ test('import: preview media is scanned on the ORIGIN url, then re-hosted into ou
 
 test('import: WEIGHTS are never re-hosted (only the preview is)', async () => {
   const h = harness({ store: true })
-  await h.importer.import({ url: 'https://civitai.com/models/92654', ownerAnimaId: 'anima-9' })
+  await h.importer.import({ url: 'https://civitai.com/models/92654', ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' })
   // exactly one put — the preview. The weight source stays the civitai origin.
   assert.equal(h.puts.length, 1)
   assert.ok(h.puts[0].key.startsWith('model-previews/'))
@@ -283,7 +326,7 @@ test('import: WEIGHTS are never re-hosted (only the preview is)', async () => {
 test('import: preview scan refusal fails closed (no re-host, no Intella)', async () => {
   const h = harness({ gate: { async scan() { return { ok: false, reason: 'no scanner configured' } } }, store: true })
   await assert.rejects(
-    () => h.importer.import({ url: 'https://civitai.com/models/92654', ownerAnimaId: 'anima-9' }),
+    () => h.importer.import({ url: 'https://civitai.com/models/92654', ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' }),
     /safety scan/,
   )
   assert.equal(h.puts.length, 0)     // scanned the origin url — never wrote to our bucket
@@ -292,12 +335,27 @@ test('import: preview scan refusal fails closed (no re-host, no Intella)', async
 
 test('import: requires an owner', async () => {
   const h = harness()
-  await assert.rejects(() => h.importer.import({ url: 'https://civitai.com/models/92654', ownerAnimaId: '' }), ModelImportError)
+  await assert.rejects(() => h.importer.import({ url: 'https://civitai.com/models/92654', ownerKey: '' }), ModelImportError)
+})
+
+test('import: a Bursa purse (no animaId) can own an import — ownerKey set, ownerAnimaId absent', async () => {
+  const h = harness()
+  const intella = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerKey: 'bursa:deadbeef' })
+  assert.equal(intella.ownerKey, 'bursa:deadbeef')
+  assert.equal(intella.ownerAnimaId, undefined)
+  assert.equal(intella.auctor, 'bursa:deadbeef')
+  assert.equal(intella.access, 'private')
+  // A purse import dedups on ownerKey (no animaId to key on).
+  const again = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerKey: 'bursa:deadbeef' })
+  assert.equal(intella.id, again.id)
+  // A different purse → distinct record.
+  const other = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerKey: 'bursa:cafe' })
+  assert.notEqual(intella.id, other.id)
 })
 
 // ── CrystalApi facade: import auth/delegation + owner-scoped listing ──────────
 
-test('CrystalApi.importModel: identified caller → ModelCard; anon 403; refusal → 400', async () => {
+test('CrystalApi.importModel: identified AND anon (Bursa) callers → ModelCard; refusal → 400', async () => {
   const { CrystalApi } = await import('../../../src/allocutio/api/CrystalApi.js')
   const h = harness()
   const api = new CrystalApi({ modelImporter: h.importer } as unknown as import('../../../src/allocutio/api/CrystalApi.js').CrystalApiDeps)
@@ -308,8 +366,12 @@ test('CrystalApi.importModel: identified caller → ModelCard; anon 403; refusal
   assert.equal(card.basis, 'sd15')
   assert.equal(card.trigger, 'gothic armor,armored_dress')
 
-  // anonymous (commitment) caller → 403
-  await assert.rejects(() => api.importModel({ commitment: '0xabc' } as never, { url: 'https://civitai.com/models/92654' }), /identified/)
+  // anonymous callers own their imports too (imports must be Bursa-possible).
+  const purseCard = await api.importModel({ bursaToken: 'purse-1' } as never, { url: 'https://civitai.com/models/92654' })
+  assert.match(purseCard.intellaId, /^import-/)
+  // a commitment caller likewise succeeds (no 403).
+  const anonCard = await api.importModel({ commitment: '0xabc' } as never, { url: 'https://civitai.com/models/92654' })
+  assert.match(anonCard.intellaId, /^import-/)
 
   // a resolver/import refusal surfaces as a 400 input.malformed (not a raw ModelImportError)
   const denied = new CrystalApi({
@@ -319,14 +381,35 @@ test('CrystalApi.importModel: identified caller → ModelCard; anon 403; refusal
     () => denied.importModel({ animaId: 'a' } as never, { url: 'https://civitai.com/models/92654' }),
     (e: unknown) => (e as { code?: string }).code === 'input.malformed',
   )
+
+  // a gated origin with no connected secret → typed `secret.required` (422) carrying the provider,
+  // NOT a generic input.malformed — the frontend deep-links to Profile → Connected accounts (F2).
+  const gated = new CrystalApi({
+    modelImporter: new ModelImporter({
+      json: { async fetchJson(url: string) { throw new ModelImportError(`fetch failed: ${url} → 401`, 401) } },
+      intellae: { async upsert() {} },
+      moderationGate: { async scan() { return { ok: true } } },
+    }),
+  } as unknown as import('../../../src/allocutio/api/CrystalApi.js').CrystalApiDeps)
+  await assert.rejects(
+    () => gated.importModel({ animaId: 'a' } as never, { url: 'https://civitai.com/models/92654' }),
+    (e: unknown) => {
+      const err = e as { code?: string; httpStatus?: number; opts?: { details?: { provider?: string } } }
+      return err.code === 'secret.required' && err.httpStatus === 422 && err.opts?.details?.provider === 'civitai'
+    },
+  )
 })
 
-test('CrystalApi.listMyModels: owner-scoped; anon → []; uses listByOwner when present', async () => {
+test('CrystalApi.listMyModels: owner-scoped by ownerKey (anima AND Bursa); uses listByOwner', async () => {
   const { CrystalApi } = await import('../../../src/allocutio/api/CrystalApi.js')
-  const mine: Intella[] = [
-    { id: 'import-abc', nomen: 'My Import', genus: 'lora', architectura: 'lora', parametri: 0, sources: [], dest: 'loras/x.safetensors', sizeGb: 0, versio: '1', canonica: false, access: 'private', ownerAnimaId: 'anima-9', familia: 'flux', trigger: 'mytok', natum: new Date(0) } as unknown as Intella,
+  const anima: Intella[] = [
+    { id: 'import-abc', nomen: 'My Import', genus: 'lora', architectura: 'lora', parametri: 0, sources: [], dest: 'loras/x.safetensors', sizeGb: 0, versio: '1', canonica: false, access: 'private', ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9', familia: 'flux', trigger: 'mytok', natum: new Date(0) } as unknown as Intella,
   ]
-  const intellarum = { async listByOwner(id: string) { return id === 'anima-9' ? mine : [] } }
+  const purse: Intella[] = [
+    { id: 'import-xyz', nomen: 'Purse Import', genus: 'lora', architectura: 'lora', parametri: 0, sources: [], dest: 'loras/p.safetensors', sizeGb: 0, versio: '1', canonica: false, access: 'private', ownerKey: 'bursa:2f2ce3c0', familia: 'flux', trigger: 'ptok', natum: new Date(0) } as unknown as Intella,
+  ]
+  // Fake keys on the generic ownerKey now (not a bare animaId).
+  const intellarum = { async listByOwner(ownerKey: string) { return ownerKey === 'anima:anima-9' ? anima : ownerKey.startsWith('bursa:') ? purse : [] } }
   const api = new CrystalApi({ intellarum } as unknown as import('../../../src/allocutio/api/CrystalApi.js').CrystalApiDeps)
 
   const cards = await api.listMyModels({ animaId: 'anima-9' } as never)
@@ -335,5 +418,8 @@ test('CrystalApi.listMyModels: owner-scoped; anon → []; uses listByOwner when 
   assert.equal(cards[0].basis, 'flux')       // familia → basis
   assert.equal(cards[0].access, 'private')
 
-  assert.deepEqual(await api.listMyModels({ commitment: '0xabc' } as never), [])
+  // a Bursa purse sees ITS OWN imports (no longer forced empty).
+  const purseCards = await api.listMyModels({ bursaToken: 'purse-1' } as never)
+  assert.equal(purseCards.length, 1)
+  assert.equal(purseCards[0].intellaId, 'import-xyz')
 })
