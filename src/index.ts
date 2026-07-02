@@ -16,8 +16,8 @@ import { makeTelegramSender } from './allocutio/telegram/TelegramSenderAdapter.j
 import type { AuctorKey } from './flow/types.js'
 import { createWebhookRouter } from './api/webhooks/webhookRouter.js'
 import { handleAlchemyWebhook } from './api/webhooks/alchemyWebhook.js'
-import { makeBlocklistScreen, permissiveSanctionsScreen } from './compliance/SanctionsScreen.js'
-import { loadOfacBlocklist } from './compliance/loadOfacBlocklist.js'
+import { AlchemyPricer, nullPricer } from './crystal/AssetPricer.js'
+import { permissiveSanctionsScreen, type SanctionsScreen } from './compliance/SanctionsScreen.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
 import { mountCeremony } from './api/arcanum/mountCeremony.js'
@@ -36,9 +36,13 @@ import { accruePayeePayout, agentCutMicro } from './crystal/accruePayeePayout.js
 import { createCdpX402Facilitator } from './crystal/CdpX402Facilitator.js'
 import type { X402Facilitator } from './types/x402.js'
 import { createSponsioRouter } from './allocutio/api/sponsioRouter.js'
+import { createAuthRouter } from './allocutio/api/authRouter.js'
+import { MongoCredentum } from './crystal/MongoCredentum.js'
+import { mailerFromEnv } from './allocutio/api/Mailer.js'
 import { createWidgetRouter } from './allocutio/api/widgetRouter.js'
 import { createAgentCardRouter } from './allocutio/api/agentCardRouter.js'
 import { startSubsidySweeper } from './crystal/SubsidySweeper.js'
+import { startLicenseTripwire } from './crystal/licenseTripwire.js'
 import { RunEventHub } from './allocutio/api/RunEventHub.js'
 import { isSafeWebhookUrl } from './allocutio/api/webhookGuard.js'
 import { createMcpRouter } from './allocutio/api/mcp/mcpRouter.js'
@@ -50,9 +54,16 @@ import { ensureWideIndexes }      from './analytics/ensureWideIndexes.js'
 import { startAnalyticsListener } from './analytics/analyticsListener.js'
 import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
 import { PublicationWorker } from './crystal/PublicationWorker.js'
-import { permissiveModerationGate, denyModerationGate } from './crystal/ModerationGate.js'
+import { permissiveModerationGate, denyModerationGate, type ModerationGate } from './crystal/ModerationGate.js'
+import { permissivePromptGuard, type PromptGuard } from './crystal/PromptGuard.js'
 import { ModelImporter } from './crystal/ModelImporter.js'
-import { httpJsonFetcher } from './crystal/modelImportResolver.js'
+import { MongoVerdictCache } from './crystal/MongoVerdictCache.js'
+import { ledgerScanFeeCharger } from './crystal/ScanFeeCharger.js'
+import { httpJsonFetcher, secretJsonFetcher } from './crystal/modelImportResolver.js'
+import { secretBoxFromEnv } from './crystal/secretBox.js'
+import { MongoSecretarium } from './crystal/MongoSecretarium.js'
+import { mintJobToken, verifyJobToken } from './crystal/jobToken.js'
+import { createWeightProxyRouter } from './api/internal/weightProxyRouter.js'
 import { registerProgressusRecorder } from './execution/progressusSink.js'
 import { CANONICAL_MODI } from './crystal/seeds/modi.js'
 import { CANONICAL_ESSENTIAE } from './crystal/seeds/essentiae.js'
@@ -367,13 +378,35 @@ async function main(): Promise<void> {
   const consuetudinum = new MongoConsuetudinum(consuetudinumCol)
   // Compute-substrate registry (ADR-0005) — the Fundamenta essentiae reference for image/runtime/weights.
   const fundamentorum = new MongoFundamentorum(mongo.db(DB_NAME).collection('fundamenta'))
-  const compiler = new Compiler(templateRegistry, undefined, intellae, fundamentorum)
-  const compile = async (modus: unknown, aditus: Record<string, unknown>, pinnedModels?: import('./types/actum.js').ModelRef[]): Promise<{ hash: string; input: unknown }> => {
+
+  // BYO-secrets Phase C: the per-job pod credential + weight-download proxy. Three envs gate it,
+  // and ALL must be set together (plus a runner that attaches its token — see docs):
+  //   JOB_TOKEN_SECRET   — HMAC secret for minting/verifying job tokens.
+  //   SECRETA_MASTER_KEY — the secret store (secretBox below); resolve() serves the BYO origin token.
+  //   WEIGHT_PROXY_BASE  — our public API base; when set, the Compiler rewrites gated private
+  //                        weight urls to `${base}/internal/weights/:id` (opt-in once the runner
+  //                        forwards its token). Unset → no rewrite (pre-Phase-C behavior).
+  // The rewrite is enabled only when the token secret is ALSO present, so we never point a pod at a
+  // proxy that can't authenticate it.
+  const JOB_TOKEN_SECRET = process.env.JOB_TOKEN_SECRET
+  const WEIGHT_PROXY_BASE = (process.env.WEIGHT_PROXY_BASE && JOB_TOKEN_SECRET)
+    ? process.env.WEIGHT_PROXY_BASE : undefined
+  const mintJobTokenFn = JOB_TOKEN_SECRET
+    ? (claims: { actumId: string; ownerKey: string; exp: number }) => mintJobToken(JOB_TOKEN_SECRET, claims)
+    : undefined
+
+  const compiler = new Compiler(templateRegistry, undefined, intellae, fundamentorum, WEIGHT_PROXY_BASE)
+  const compile = async (modus: unknown, aditus: Record<string, unknown>, pinnedModels?: import('./types/actum.js').ModelRef[], ownerKey?: string): Promise<{ hash: string; input: unknown }> => {
     const essentia = modus as Essentia
     if (!essentia.fundamentumId) {
       throw new Error(`Modus '${essentia.id}' has no fundamentumId — cannot compile for a pod`)
     }
-    const { hash, spec } = await compiler.compile(essentia, aditus, pinnedModels ? { pinnedModels } : {})
+    // ownerKey scopes private-model resolution: the runner's own private imports resolve by
+    // trigger, and a private id the runner does NOT own is refused (Compiler enforcement).
+    const { hash, spec } = await compiler.compile(essentia, aditus, {
+      ...(pinnedModels ? { pinnedModels } : {}),
+      ...(ownerKey ? { ownerKey } : {}),
+    })
     return { hash, input: spec }
   }
 
@@ -422,6 +455,7 @@ async function main(): Promise<void> {
         admitWarm: (m: Materia, models: Array<{ id?: string }>) => installCoordinator.ensureForGen(m, models),
         installLive: (m: Materia, ids: string[]) => installCoordinator.installLive(m, ids),
       } : {}),
+      ...(mintJobTokenFn ? { mintJobToken: mintJobTokenFn } : {}),
     } : {}),
     aitoolkitRemote: {
       statusUrl: RUNNER_STATUS_URL,
@@ -673,12 +707,42 @@ async function main(): Promise<void> {
   app.get('/api/health', (_req, res) => res.json({ ok: true, v: process.env.BUILD_VERSION ?? 'dev' }))
   app.use('/api/vestigia', createVestigiaRouter(ring.vestigiorum))
 
-  // →public moderation gate. No real CSAM/NCMEC scanner is built yet, so the gate
-  // fails CLOSED: public publishing (feed/marketplace) is DENIED until one is wired.
-  // Dev/staging can opt into unscanned publishing explicitly (never the silent default).
-  const moderationGate = process.env.MODERATION_ALLOW_UNSCANNED === '1'
-    ? (log.warn('MODERATION_ALLOW_UNSCANNED=1 — public publishing approves content WITHOUT CSAM/NCMEC scanning. Dev/staging only; NEVER in production.'), permissiveModerationGate)
-    : (log.warn('No CSAM/NCMEC scanner configured — public publishing (feed/marketplace) is DENIED (fail-closed). Private/unlisted still work.'), denyModerationGate)
+  // PRIVATE compliance module (ADR-0012 §49 — abuse surface, not published): the real
+  // CSAM/NCMEC gate AND the OFAC sanctions screen live in the gitignored
+  // `src/private/compliance` module, injected at deploy. This public repo ships only
+  // the PORTS + fail-closed/permissive stubs. Loaded ONCE here via a guarded dynamic
+  // import (path in a variable so a public build doesn't statically resolve it); absent
+  // (public build) → both fall back to their stubs. The OFAC block below reuses it.
+  interface PrivateCompliance {
+    configureModerationGate(deps: { fetcher: typeof httpMediaFetcher; log: typeof log }): Promise<ModerationGate | null>
+    configureSanctionsScreen(deps: { log: typeof log }): SanctionsScreen | null
+    configurePromptGuard(deps: { log: typeof log }): PromptGuard | null
+  }
+  let compliance: PrivateCompliance | null = null
+  const compliancePath = './private/compliance/index.js'
+  try {
+    compliance = (await import(compliancePath)) as PrivateCompliance
+  } catch {
+    log.warn('Private compliance module (src/private/compliance) not present — CSAM/NCMEC + OFAC screening unavailable in this build.')
+  }
+
+  // →public moderation gate (CSAM/NCMEC). Preference order, all fail-closed:
+  //   1. the real PRIVATE gate when present AND detection is configured (CSAM_HASHSET_PATH / classifier);
+  //   2. else the permissive no-op ONLY under an explicit MODERATION_ALLOW_UNSCANNED opt-in;
+  //   3. else DENY (the safe default — public publishing off until the scanner is wired).
+  const privateGate = compliance ? await compliance.configureModerationGate({ fetcher: httpMediaFetcher, log }) : null
+  const moderationGate: ModerationGate = privateGate
+    ? privateGate
+    : process.env.MODERATION_ALLOW_UNSCANNED === '1'
+      ? (log.warn('MODERATION_ALLOW_UNSCANNED=1 — public publishing approves content WITHOUT CSAM/NCMEC scanning. Dev/staging only; NEVER in production.'), permissiveModerationGate)
+      : (log.warn('No CSAM/NCMEC scanner active (private compliance module absent or unconfigured) — public publishing (feed/marketplace) is DENIED (fail-closed). Private/unlisted still work.'), denyModerationGate)
+
+  // Input-side CSAM prompt guard (generation boundary, FAIL-OPEN). From the private
+  // module; absent (public build) → permissive stub. Refuses only minor∧sexual prompts
+  // (+ an out-of-band code-word lexicon) — adult content passes. The publish-time gate
+  // above is the fail-closed backstop.
+  const promptGuard: PromptGuard = compliance?.configurePromptGuard({ log })
+    ?? (log.warn('Input CSAM prompt guard inactive (private compliance module absent) — generation prompts are NOT screened. The publish-time gate still applies.'), permissivePromptGuard)
 
   // Import-by-URL (spec/model-import.md Tier 1): register a Civitai/HF/direct model as a
   // private, owner-scoped Intella — WEIGHTS origin-only (no R2 copy; we don't custody third-party
@@ -686,17 +750,65 @@ async function main(): Promise<void> {
   // BucketAdapter). The store/fetcher here re-host only the small PREVIEW image(s), so the CSAM
   // scan covers the exact bytes we display (no TOCTOU) and our UI doesn't hot-link the origin.
   // Reuses the same moderation gate for the mandatory preview-media safety scan (fail-closed).
+  // BYO secrets (Secretarium) — sealed gated-origin credentials, keyed by ownerKey. Gated on
+  // SECRETA_MASTER_KEY: no key → store absent → /v1/me/secrets 501 + getMe.secrets all 'absent'.
+  // The full resolve-capable store stays local (its ASYMMETRY: only the two server-side consumers
+  // get resolve — the import gated-fetcher here + the future weight-proxy). CrystalApi is handed
+  // only the write + presence slices.
+  const secretBox = secretBoxFromEnv()
+  const secretarium = secretBox ? new MongoSecretarium(mongo.db(DB_NAME).collection('secreta'), secretBox) : undefined
+  if (secretarium) void secretarium.ensureIndexes().catch(err => log.warn('secretarium: ensureIndexes failed', { error: String(err) }))
+
+  // Fiat username/password auth (docs/spec/fiat-auth.md): the credential store (email/hash/
+  // single-use verify+reset token hashes) + a vendor-neutral mailer. Both degrade gracefully —
+  // no RESEND_API_KEY ⇒ NoopMailer (links land in the logs). The auth router is mounted below.
+  const credenta = new MongoCredentum(mongo.db(DB_NAME).collection('credenta'))
+  void credenta.ensureIndexes().catch(err => log.warn('credenta: ensureIndexes failed', { error: String(err) }))
+  const mailer = mailerFromEnv()
+
   const modelImporter = new ModelImporter({
     json: httpJsonFetcher,
+    // Gated Civitai/HF metadata scrape: wrap the fetcher with the owner's BYO token (server-side,
+    // via Secretarium.resolve in the closure — a legitimate resolve consumer, never CrystalApi).
+    ...(secretarium ? {
+      gatedFetcherFor: (ownerKey: string) =>
+        secretJsonFetcher(httpJsonFetcher, (provider) => secretarium.resolve(ownerKey, provider)),
+    } : {}),
     intellae,
     moderationGate,
     fetcher: httpMediaFetcher,
     ...(RUNPOD_R2 ? { store: new R2Uploader(RUNPOD_R2) } : {}),
   })
 
+  // Deposit boundary shared by the /v1 quote endpoint AND the Alchemy webhook: the CreditVault
+  // address + the per-asset USD FMV oracle. Constructed once here so the quote and the webhook
+  // credit use the SAME pricer (they must agree — one source of truth).
+  const CREDIT_VAULT = '0x00000001152d633eb2ac3cf91eac9994aeefc021'
+  // The Alchemy Prices API key (chain-agnostic; used in the request path). Prefer the crystal name,
+  // but fall back to the legacy bot's env names (`ALCHEMY_KEY` / per-chain `ALCHEMY_KEY_1`) so a
+  // deployment that already carries them lights up the pipeline without a rename.
+  const ALCHEMY_API_KEY = process.env.ALCHEMY_API_KEY ?? process.env.ALCHEMY_KEY ?? process.env.ALCHEMY_KEY_1
+  const pricer = ALCHEMY_API_KEY
+    ? new AlchemyPricer(ALCHEMY_API_KEY)
+    : (log.warn('Alchemy price key unset (ALCHEMY_API_KEY / ALCHEMY_KEY) — deposits will NOT be priced (no revenue booked, no credits issued, quote unavailable). Configure before real deposits.'), nullPricer)
+
+  // Publish-safety cost forwarding (spec/moderation-classifier.md §7): a content-addressed
+  // verdict cache so an identical re-publish reuses the gate verdict (no re-scan, no re-fee),
+  // and a per-scan fee charger that forwards the paid-classifier cost to the publisher — only
+  // on a BILLABLE scan (a real Thorn call). PUBLISH_SCAN_FEE (impetus points) is the config
+  // knob until Thorn quotes; unset/0 ⇒ no fee.
+  const verdictCache = new MongoVerdictCache(mongo.db(DB_NAME).collection('verdict_cache'))
+  void verdictCache.ensureIndexes().catch(err => log.warn('verdictCache: ensureIndexes failed', { error: String(err) }))
+  const PUBLISH_SCAN_FEE = BigInt(process.env.PUBLISH_SCAN_FEE ?? '0')
+  const scanFeeCharger = ledgerScanFeeCharger({ signorum: ring.signorum, amount: PUBLISH_SCAN_FEE })
+
   // Crystal Agent API (/v1) — ApiAllocutio (docs/agent-tasks/EPIC-api-allocutio.md).
   // The agent-shaped facade over the ring + the credential→AuctorKey resolver.
   const crystalApi = new CrystalApi({
+    pricer,
+    depositAddress: CREDIT_VAULT,
+    verdictCache,
+    scanFeeCharger,
     inceptor: ring.inceptor,
     modorum: ring.modorum,
     cursorum: ring.cursorum,
@@ -718,11 +830,19 @@ async function main(): Promise<void> {
     // moderationGate fails closed (deny) unless MODERATION_ALLOW_UNSCANNED=1 — the
     // async →public gate path always runs; only its verdict changes.
     moderationGate,
+    // Input CSAM prompt guard (generation boundary, fail-open) — refuses minor∧sexual prompts.
+    promptGuard,
     editiones: ring.editiones,
     publicationAdapters: ring.publicationAdapters,
     animae: ring.animae,
     intellarum: intellae,
+    // Admin revenue report (conditional-license tripwire, ADR-0013 §5): the trailing-12mo rollup
+    // + the last persisted band. Read-only; the scheduled evaluator (below) owns alerts/persistence.
+    redituum: ring.redituum,
+    tripwireBand: ring.tripwireBand,
     modelImporter,
+    // Only the write + presence slices — never the resolve-capable store (ASYMMETRY).
+    ...(secretarium ? { secretWriter: secretarium, secretPresence: secretarium } : {}),
     ...(ring.conductor ? { conductor: ring.conductor } : {}),
     ...(ring.teeProvisioner ? { teeProvisioner: ring.teeProvisioner } : {}),
     // Fire-and-forget studio-ready/failed webhook (optional sugar over polling).
@@ -817,8 +937,8 @@ async function main(): Promise<void> {
     }),
     verifier:   ring.arcanumVerifier,
     bursarium:  ring.bursarium,
-    weiToCredits: process.env.ALCHEMY_API_KEY
-      ? (wei) => import('./arcanum/ethPrice.js').then(m => m.weiToCredits(wei, process.env.ALCHEMY_API_KEY!))
+    weiToCredits: ALCHEMY_API_KEY
+      ? (wei) => import('./arcanum/ethPrice.js').then(m => m.weiToCredits(wei, ALCHEMY_API_KEY))
       : undefined,
   }))
   // Ceremony sequencer — mounted before the /v1 catch-all so /v1/ceremony resolves here.
@@ -828,6 +948,31 @@ async function main(): Promise<void> {
   // Sponsorship pledges (ADR-0011 §2) — mounted before the /v1 catch-all so
   // /v1/sponsorships resolves here. The sweeper (below) does the actual dripping.
   app.use('/v1/sponsorships', express.json(), createSponsioRouter({ sponsiones: ring.sponsiones, identity: apiResolver }))
+
+  // Fiat username/password auth (docs/spec/fiat-auth.md). Mounted at BOTH `/v1/auth` (native)
+  // and `/api/v1/auth` (compat) — BEFORE the `/v1` + `/api/v1` catch-alls so the literal auth
+  // paths resolve here. Only wired when JWT_SECRET is set (it signs + verifies the session).
+  // Auth-sensitive routes are IP-rate-limited (express-rate-limit) to blunt credential stuffing.
+  if (process.env.JWT_SECRET) {
+    const { default: rateLimit } = await import('express-rate-limit')
+    const limiter = (max: number) => rateLimit({ windowMs: 15 * 60 * 1000, max, standardHeaders: true, legacyHeaders: false })
+    const buildAuthRouter = () => createAuthRouter({
+      credenta,
+      personae: ring.personae,
+      animae: ring.animae,
+      mailer,
+      jwtSecret: process.env.JWT_SECRET as string,
+      ...(process.env.AUTH_APP_BASE_URL ? { appBaseUrl: process.env.AUTH_APP_BASE_URL } : {}),
+      ...(process.env.SESSION_TTL_SECONDS ? { ttl: { sessionSeconds: Number(process.env.SESSION_TTL_SECONDS) } } : {}),
+      rateLimiters: { register: limiter(20), login: limiter(20), forgot: limiter(10), resend: limiter(10) },
+    })
+    app.use('/v1/auth', express.json(), buildAuthRouter())
+    app.use('/api/v1/auth', express.json(), buildAuthRouter())
+    log.info('fiat auth rail mounted at /v1/auth + /api/v1/auth')
+  } else {
+    log.warn('JWT_SECRET unset — fiat username/password auth is DISABLED (no session minting/verify)')
+  }
+
   app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub }))
 
   // CAMEL agent compat surface (ADR-0011 §8) — the exact `/api/v1/...` paths the
@@ -898,7 +1043,7 @@ async function main(): Promise<void> {
     legati: ring.legati,
     feed: (filter) => crystalApi.feed(filter),
     appearance: (owner) => crystalApi.publicAppearance(owner),
-    // Interactive run panel: resolve the agent’s Modus + quote its price (§5 x402 pay-per-call).
+    // Interactive run panel: resolve the agent's Modus + quote its price (§5 x402 pay-per-call).
     modorum: ring.modorum,
     quoteImpetus: async (modusId) => BigInt((await crystalApi.quote(SYSTEM_AUCTOR, { modusId }, {})).impetus),
     x402Config,
@@ -988,8 +1133,30 @@ async function main(): Promise<void> {
   )
   log.info('subsidy sweeper started', { tickMs: 60 * 60 * 1000 })
 
+  // Conditional-license revenue tripwire (ADR-0012/0013 §5) — evaluates the company-wide
+  // trailing-12mo USD revenue against the tightest active conditional cap and fires an
+  // edge-triggered ops alert on band transitions (breach = compliance incident). Slow-moving
+  // line → 6h cadence; the persisted band makes transitions detectable across restarts.
+  startLicenseTripwire(
+    { redituum: ring.redituum, intellarum: intellae, bandStore: ring.tripwireBand },
+    { intervalMs: 6 * 60 * 60 * 1000, onError: (err) => log.error('license tripwire eval failed', { error: String(err) }) },
+  )
+  log.info('license tripwire started', { tickMs: 6 * 60 * 60 * 1000 })
+
   app.use('/internal', createLiveRouter(INTERNAL_SECRET))
   app.use('/internal/analytics', createAnalyticsRouter(wideStore, INTERNAL_SECRET))
+  // BYO-secrets Phase C: the weight-download proxy. Mounted only when a job-token secret AND a
+  // secret store are configured (the same envs that let the Compiler rewrite gated urls). A pod
+  // presents its per-job token; we stream the owner's gated private weights with their BYO token
+  // attached to the OUTBOUND request only. Authn is the job token itself (not INTERNAL_SECRET).
+  if (JOB_TOKEN_SECRET && secretarium) {
+    app.use('/internal', createWeightProxyRouter({
+      verifyToken: (t: string) => verifyJobToken(JOB_TOKEN_SECRET, t),
+      intellae,
+      secrets: secretarium,   // resolve-only slice (SecretResolver); never handed to CrystalApi
+    }))
+    log.info('weight-download proxy mounted at /internal/weights/:intellaId (BYO-secrets Phase C)')
+  }
   // Manual treasury funding (faucet off in prod) — fund the treasury Anima / top up an agent.
   app.use('/internal/v1', express.json(), createTreasuryAdminRouter({
     signorum: ring.signorum,
@@ -1000,28 +1167,29 @@ async function main(): Promise<void> {
 
   // Alchemy address-activity webhook — processes CreditVault events.
   // Route: POST /webhooks/alchemy/:chainId  (chainId = '1' mainnet, '8453' Base)
+  // Per-chain webhook HMAC signing secrets. Prefer the crystal names, fall back to the legacy bot's
+  // chainId-suffixed names (`ALCHEMY_SIGNING_KEY_1`/`_8453`), then a single shared `ALCHEMY_SIGNING_KEY`.
+  // When a chain's key is absent the webhook SKIPS HMAC validation (dev mode) — a prod hole — so this
+  // reconciliation is what actually enforces signature checks on a deployment carrying the legacy names.
   const ALCHEMY_SIGNING_KEYS: Record<string, string> = {}
-  if (process.env.ALCHEMY_SIGNING_KEY_MAINNET) ALCHEMY_SIGNING_KEYS['1']    = process.env.ALCHEMY_SIGNING_KEY_MAINNET
-  if (process.env.ALCHEMY_SIGNING_KEY_BASE)    ALCHEMY_SIGNING_KEYS['8453'] = process.env.ALCHEMY_SIGNING_KEY_BASE
-  const CREDIT_VAULT = '0x00000001152d633eb2ac3cf91eac9994aeefc021'
-  // OFAC sanctions screen for deposit boundaries. Loads the SDN crypto-address
-  // list from OFAC_BLOCKLIST_PATH (synced by scripts/refresh-ofac-blocklist.ts).
-  // Falls back to the permissive screen with a LOUD warning if unconfigured so an
-  // un-synced production never silently runs unscreened — go-live blocker.
-  const ofacPath = process.env.OFAC_BLOCKLIST_PATH
-  let sanctions = permissiveSanctionsScreen
-  if (!ofacPath) {
-    log.warn('OFAC_BLOCKLIST_PATH unset — deposit sanctions screening is a NO-OP. Configure before real deposits.')
-  } else {
-    const blocklist = loadOfacBlocklist(ofacPath)
-    if (blocklist.length === 0) {
-      log.warn('OFAC blocklist empty — deposit sanctions screening is effectively a NO-OP. Run scripts/refresh-ofac-blocklist.ts.')
-    }
-    sanctions = makeBlocklistScreen(blocklist)
+  const mainnetSigningKey = process.env.ALCHEMY_SIGNING_KEY_MAINNET ?? process.env.ALCHEMY_SIGNING_KEY_1 ?? process.env.ALCHEMY_SIGNING_KEY
+  const baseSigningKey    = process.env.ALCHEMY_SIGNING_KEY_BASE    ?? process.env.ALCHEMY_SIGNING_KEY_8453 ?? process.env.ALCHEMY_SIGNING_KEY
+  if (mainnetSigningKey) ALCHEMY_SIGNING_KEYS['1']    = mainnetSigningKey
+  if (baseSigningKey)    ALCHEMY_SIGNING_KEYS['8453'] = baseSigningKey
+  // CREDIT_VAULT + `pricer` are constructed once above (shared with the /v1 deposit-quote endpoint).
+  // OFAC sanctions screen for deposit boundaries. The real Set-backed screen + SDN
+  // loader are PRIVATE (ADR-0012 §49) — from the `compliance` module loaded above.
+  // Falls back to the permissive screen with a LOUD warning if unconfigured/absent so
+  // an un-synced production never silently runs unscreened — go-live blocker.
+  const privateScreen = compliance?.configureSanctionsScreen({ log }) ?? null
+  const sanctions: SanctionsScreen = privateScreen ?? permissiveSanctionsScreen
+  if (!privateScreen) {
+    log.warn('OFAC sanctions screening inactive (private compliance module absent or OFAC_BLOCKLIST_PATH unset) — deposit screening is a NO-OP. Configure before real deposits.')
   }
   const alchemyDeps = {
     deposita:     ring.deposita,
     signorum:     ring.signorum,
+    redituum:     ring.redituum,
     petitiones:   ring.petitiones,
     testimonia:   ring.testimonia,
     animae:       ring.animae,
@@ -1029,7 +1197,7 @@ async function main(): Promise<void> {
     sanctions,
     signingKeys:  ALCHEMY_SIGNING_KEYS,
     vaultAddresses: { '1': CREDIT_VAULT, '8453': CREDIT_VAULT },
-    ethPriceUsd:  0,  // not yet used — valor stored in wei
+    pricer,
   }
   app.post('/webhooks/alchemy/:chainId', async (req, res) => {
     const result = await handleAlchemyWebhook({
