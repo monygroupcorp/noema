@@ -40,7 +40,7 @@ const LICENSE_COMMERCIAL: Record<string, CommercialVerdict> = {
   'openrail-m': 'yes',            // SD1.5 / SDXL — ✅ with flow-down use restrictions (T&C-bound)
   'fair-ai-public': 'yes',        // Pony Diffusion (Fair AI Public License 1.0-SD)
   'flux-1-dev-nc': 'no',          // BFL FLUX.1 [dev] Non-Commercial — ❌ unless separately licensed
-  'flux-2-dev-nc': 'no',          // BFL FLUX.2 [dev] Non-Commercial (klein is Apache — see below)
+  'flux-2-dev-nc': 'no',          // BFL FLUX.2 [dev] + [klein] 9B Non-Commercial (only klein 4B is Apache)
   'closed': 'no',                 // FLUX.1 pro / API-only — not self-hostable
   'cc-by-nc': 'no',               // any non-commercial Creative Commons variant
   'stability-community': 'conditional',  // SD3/3.5, SDXL-Turbo — revenue/entity thresholds; verify
@@ -65,16 +65,38 @@ export function isCatalogEligible(verdict: CommercialVerdict | undefined): boole
   return verdict === 'yes' || verdict === 'conditional'
 }
 
+/**
+ * A short, user-facing note on what a model's license means for the owner — surfaced on a training
+ * receipt, an import result, and the model card, so the "why can't I list this?" answer travels
+ * WITH the model. Frames it as use vs listing: everything is usable privately; only some may be
+ * promoted to the public (commercial) catalog.
+ */
+export function licenseNote(commercialUse: CommercialVerdict | undefined, license?: string): string {
+  const lic = license && license !== 'unknown' ? ` (${license})` : ''
+  switch (commercialUse) {
+    case 'yes':
+      return `✅ Commercially listable${lic} — you can publish this to the public catalog.`
+    case 'conditional':
+      return `⚠️ Conditionally listable${lic} — the license has revenue/entity thresholds; usable privately and publishable while under them.`
+    case 'no':
+      return `🔒 Private use only — trained on a non-commercial base${lic}. Usable in your own flows, but not listable on the public catalog.`
+    default:
+      return `🔒 Private use only for now — the base license${lic} is unverified. Usable privately; listing needs a license review.`
+  }
+}
+
 // The family+license table, ORDERED most-specific-first. Each row: a matcher over the lowercased
 // base string, the compat `familia` (null = no base flow, reject), and the license id. Order is
 // load-bearing (variant checks before the bare family; 'kontext'/'flux2' before 'flux').
 const BASE_TABLE: Array<{ test: (t: string) => boolean; familia: string | null; license: string }> = [
   // FLUX.1 Kontext — a DIFFERENT model, NO base flow. Must precede 'flux' ("Flux.1 Kontext" ⊃ 'flux').
   { test: (t) => t.includes('kontext'), familia: null, license: 'flux-1-dev-nc' },
-  // FLUX.2 — a new family (before 'flux'). Variant drives the license, same as FLUX.1:
-  //   klein (4B/9B) = Apache 2.0 (commercial ✅), dev = Non-Commercial (❌), bare = fail-closed.
-  { test: (t) => isFlux2(t) && t.includes('klein'), familia: 'flux2', license: 'apache-2.0' },
-  { test: (t) => isFlux2(t) && isDev(t), familia: 'flux2', license: 'flux-2-dev-nc' },
+  // FLUX.2 — a new family (before 'flux'). Variant AND SIZE drive the license (confirmed against the
+  // FLUX.2 [klein] 4B HF card + bfl.ai): ONLY klein 4B is Apache 2.0 (✅); klein 9B and [dev] are the
+  // FLUX Non-Commercial License (❌ — our seed INTELLA_FLUX2_KLEIN_9B is the 9B, so it is NC). A klein
+  // with no stated size is fail-closed to NC (the restrictive default); a bare flux2 → unknown.
+  { test: (t) => isFlux2(t) && t.includes('klein') && is4b(t), familia: 'flux2', license: 'apache-2.0' },
+  { test: (t) => isFlux2(t) && (t.includes('klein') || isDev(t)), familia: 'flux2', license: 'flux-2-dev-nc' },
   { test: (t) => isFlux2(t), familia: 'flux2', license: 'unknown' },
   // FLUX.1 — the license hinges on the VARIANT. schnell = Apache ✅, dev = Non-Commercial ❌.
   { test: (t) => isFlux(t) && isSchnell(t), familia: 'flux', license: 'apache-2.0' },
@@ -107,6 +129,35 @@ export function classifyBaseModel(base: string): BaseClassification {
     if (row.test(t)) return { familia: row.familia, license: row.license }
   }
   return { familia: null, license: 'unknown' }
+}
+
+// ── Classify a STORED model (reclassify path + backfill sweep share this) ────────────────────
+
+/**
+ * The doc-shaped subset a stored model carries that we can derive a license from — a runtime
+ * `Intella` or a raw Mongo doc both satisfy it. Kept structural so the migration/sweep (which sees
+ * plain BSON) and the API (which sees a typed `Intella`) call ONE classifier.
+ */
+export interface LicenseClassifiable {
+  provenance?: { base?: string } | null
+  nomen?: string
+  familia?: string | null
+}
+
+/**
+ * Derive `{ license, commercialUse }` for an already-stored model from the most trustworthy base
+ * string it carries. Priority: `provenance.base` (author-declared lineage, e.g. 'FLUX.1-dev') >
+ * `nomen` (descriptive title, e.g. 'FLUX.1 Schnell (fp8 scaled)') > `familia` (the compat key —
+ * bare, license-ambiguous: 'flux' can't tell schnell from dev, so it's the last resort → 'unknown').
+ *
+ * This is the single source for BOTH the admin `reclassify` path (`CrystalApi.setModelLicense`) and
+ * the license backfill sweep, so a model gets the same verdict whichever runs it. Fail-closed: an
+ * unrecognised base yields `{ license:'unknown', commercialUse:'unknown' }` (NOT catalog-eligible).
+ */
+export function classifyModelLicense(m: LicenseClassifiable): { license: string; commercialUse: CommercialVerdict } {
+  const base = m.provenance?.base || m.nomen || m.familia || ''
+  const license = classifyBaseModel(base).license
+  return { license, commercialUse: licenseCommercial(license) }
 }
 
 // ── Origin-stated license (the imported artifact's OWN license may be stricter than its base) ──
@@ -154,6 +205,7 @@ export function combineCommercial(a: CommercialVerdict, b: CommercialVerdict): C
 
 function isFlux(t: string): boolean { return t.includes('flux') }
 function isFlux2(t: string): boolean { return t.includes('flux.2') || t.includes('flux2') || t.includes('flux 2') }
+function is4b(t: string): boolean { return t.includes('4b') || t.includes('4-b') || t.includes('4 b') }
 function isSchnell(t: string): boolean { return t.includes('schnell') || /\bflux\.?1?\s*\[?s(chnell)?\]?\b/.test(t) || t.includes('.1 s') || t.includes('.1s') }
 function isDev(t: string): boolean { return t.includes('dev') || t.includes('.1 d') || t.includes('.1d') || t.includes('[d]') }
 function isSdxl(t: string): boolean { return t.includes('sdxl') || t.includes('sd_xl') || t.includes('sd-xl') || t.includes('stable-diffusion-xl') || t.includes('sd xl') }

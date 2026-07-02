@@ -148,7 +148,12 @@ test('COMPLETED training payload runs finality and bills real pod-seconds', asyn
   assert.equal(puts.length, 1)                                           // re-hosted in our bucket
   assert.equal(upserts.length, 1)
   assert.equal(upserts[0].familia, 'flux')                              // registered + /make-resolvable
-  assert.deepEqual(completor.completed[0].exitus.exitus, { trained: true, steps: 600, loraId: 'lora-w', loraUrl: 'https://cdn/models/lora-w/milady.safetensors' })
+  const ex = completor.completed[0].exitus.exitus as Record<string, unknown>
+  assert.equal(ex.trained, true)
+  assert.equal(ex.steps, 600)
+  assert.equal(ex.loraId, 'lora-w')
+  assert.equal(ex.loraUrl, 'https://cdn/models/lora-w/milady.safetensors')
+  assert.equal(ex.commercialUse, 'unknown')                            // no baseModel → license unverified
   assert.equal(completor.completed[0].exitus.impetus, 900n)            // pod-seconds = executionTime/1000
 })
 
