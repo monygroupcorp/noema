@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { api, type Appearance } from '../lib/api';
+import {
+  api, SecretsUnavailableError, SECRET_PROVIDERS, SECRET_PROVIDER_LABEL,
+  type Appearance, type SecretProvider,
+} from '../lib/api';
+import { useIdentity } from '../state/identity';
 
 const SWATCHES = ['#5b8cff', '#8b76d6', '#57c8a6', '#d68f6f', '#d66f9a', '#d6c46f'];
 const LOOKS: { key: string; label: string }[] = [
@@ -22,11 +26,19 @@ export function Profile() {
   const [appr, setAppr] = useState<Appearance>({ accent: '#5b8cff', look: 'clean' });
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [secrets, setSecrets] = useState<Record<SecretProvider, 'connected' | 'absent'>>();
+  const { ident } = useIdentity();
+  const anon = ident.funding === 'bearer';
 
   useEffect(() => {
     let live = true;
     api.getMe()
-      .then((me) => { if (live) { if (me.appearance) setAppr((a) => ({ ...a, ...me.appearance })); setLoaded(true); } })
+      .then((me) => {
+        if (!live) return;
+        if (me.appearance) setAppr((a) => ({ ...a, ...me.appearance }));
+        setSecrets(me.secrets);
+        setLoaded(true);
+      })
       .catch(() => { if (live) setLoaded(true); });
     return () => { live = false; };
   }, []);
@@ -83,8 +95,134 @@ export function Profile() {
           </div>
           <button className="btn" disabled style={{ marginTop: 'var(--s3)' }}><Ic name="sparkles" /> Generate kit — soon</button>
         </div>
+
+        {loaded && <ConnectedAccounts initial={secrets} anon={anon} />}
       </div></div>
     </AppShell>
+  );
+}
+
+// ── Connected accounts (BYO gated-origin secrets) ────────────────────────────
+// Connect a Civitai/HuggingFace token so gated model/LoRA imports can scrape metadata
+// and download weights. The token is sealed server-side and never returned — we only
+// ever see per-provider presence. Anonymous (purse) callers get a deanonymization
+// caution both before and after connecting; connecting is still their choice.
+const IDLE_WINDOWS = [30, 90, 180, 365];
+
+function daysUntil(iso?: string): number | null {
+  if (!iso) return null;
+  const ms = new Date(iso).getTime() - Date.now();
+  return ms > 0 ? Math.max(1, Math.round(ms / 86_400_000)) : 0;
+}
+
+function ConnectedAccounts({ initial, anon }: {
+  initial?: Record<SecretProvider, 'connected' | 'absent'>; anon: boolean;
+}) {
+  // Set once a connect/disconnect reveals the store isn't configured on this deployment.
+  const [unavailable, setUnavailable] = useState(false);
+
+  return (
+    <>
+      <div className="sectionhead">Connected accounts</div>
+      {unavailable ? (
+        <div className="sub">Connecting Civitai / HuggingFace accounts isn’t available on this deployment.</div>
+      ) : (
+        <>
+          <div className="sub" style={{ marginBottom: 'var(--s4)' }}>
+            Connect a Civitai or HuggingFace token to import gated models and LoRAs. Your token is
+            stored sealed — it is never shown again, only its connection state.
+          </div>
+          {SECRET_PROVIDERS.map((p) => (
+            <SecretRow key={p} provider={p} initialStatus={initial?.[p] ?? 'absent'} anon={anon}
+              onUnavailable={() => setUnavailable(true)} />
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
+function SecretRow({ provider, initialStatus, anon, onUnavailable }: {
+  provider: SecretProvider; initialStatus: 'connected' | 'absent'; anon: boolean; onUnavailable: () => void;
+}) {
+  const [status, setStatus] = useState(initialStatus);
+  const [expiresAt, setExpiresAt] = useState<string>();
+  const [token, setToken] = useState('');
+  const [idleDays, setIdleDays] = useState(90);
+  const [busy, setBusy] = useState(false);
+  const [rowErr, setRowErr] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const label = SECRET_PROVIDER_LABEL[provider];
+
+  async function connect() {
+    if (!token.trim() || busy) return;
+    setBusy(true); setRowErr(null);
+    try {
+      const v = await api.putSecret(provider, token.trim(), idleDays);
+      setToken('');                       // drop the token from state the instant it's sealed
+      setStatus('connected');
+      setExpiresAt(v.expiresAt);
+      setWarning(v.warning ?? null);      // authoritative deanon caution for anon callers
+    } catch (e) {
+      if (e instanceof SecretsUnavailableError) { onUnavailable(); return; }
+      setRowErr(msg(e));
+    } finally { setBusy(false); }
+  }
+
+  async function disconnect() {
+    if (busy) return;
+    setBusy(true); setRowErr(null);
+    try {
+      await api.removeSecret(provider);
+      setStatus('absent'); setExpiresAt(undefined); setWarning(null);
+    } catch (e) {
+      if (e instanceof SecretsUnavailableError) { onUnavailable(); return; }
+      setRowErr(msg(e));
+    } finally { setBusy(false); }
+  }
+
+  const days = daysUntil(expiresAt);
+
+  return (
+    <div className="byo-row">
+      <div className="byo-head">
+        <span className="byo-prov">{label}</span>
+        <span className={`byo-state ${status}`}>{status === 'connected' ? 'connected' : 'not connected'}</span>
+      </div>
+
+      {status === 'connected' ? (
+        <div className="byo-body">
+          <span className="sub">{days != null ? `expires in ${days} day${days === 1 ? '' : 's'} · renews on use` : 'renews on each use'}</span>
+          <button className="btn-ghost" disabled={busy} onClick={disconnect}>{busy ? '…' : 'Disconnect'}</button>
+        </div>
+      ) : (
+        <>
+          <div className="byo-body byo-connect">
+            <input className="byo-input" type="password" autoComplete="off" placeholder={`${label} API token`}
+              value={token} onChange={(e) => setToken(e.target.value)} />
+            <select className="byo-input byo-idle" value={idleDays} onChange={(e) => setIdleDays(Number(e.target.value))} title="Idle-expiry window">
+              {IDLE_WINDOWS.map((d) => <option key={d} value={d}>{d} days</option>)}
+            </select>
+            <button className="btn" disabled={busy || !token.trim()} onClick={connect}>{busy ? 'Connecting…' : 'Connect'}</button>
+          </div>
+          <div className="sub byo-note">Expires after the idle window if unused; each import renews it. Use a minimally-scoped token and rotate it.</div>
+          {anon && (
+            <div className="warn byo-warn">
+              Connecting a {label} token links that account to this anonymous session on our backend,
+              weakening your anonymity. It’s your choice — use a token scoped to only what you need, and rotate it.
+            </div>
+          )}
+        </>
+      )}
+
+      {warning && (
+        <div className="warn byo-warn">
+          <span>{warning}</span>
+          <button className="byo-dismiss" onClick={() => setWarning(null)} aria-label="Dismiss">✕</button>
+        </div>
+      )}
+      {rowErr && <div className="warn byo-warn">{rowErr}</div>}
+    </div>
   );
 }
 
