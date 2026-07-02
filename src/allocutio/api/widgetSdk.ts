@@ -4,11 +4,11 @@
 //
 // The human-facing embed surface is a SCRIPT-INJECTED SDK, not a raw iframe URL:
 // a partner does `<script src="https://noema.art/widget/sdk.js">` and gets
-// `window.StationThis`. THE CONTRACT TO PRESERVE IS THAT SDK API — the camel404
+// `window.Noema`. THE CONTRACT TO PRESERVE IS THAT SDK API — the camel404
 // client (deployed, referenced from on-chain agentURI data) calls exactly:
-//   StationThis.init({ agentId, container, getProvider, onEvent })  → handle
+//   Noema.init({ agentId, container, getProvider, onEvent })  → handle
 //     .walletConnected(address) / .destroy()
-//   StationThis.initGallery({ collectionAddress, container })       → { destroy }
+//   Noema.initGallery({ collectionAddress, container })       → { destroy }
 // The iframe the SDK builds (served by widgetRouter) is an implementation detail.
 //
 // This is a faithful port of the legacy SDK with the framing HARDENED:
@@ -17,11 +17,11 @@
 // It is a browser string (served with a JS content-type), not compiled by tsc — so
 // it lives as one exported constant, versioned in crystal alongside the router.
 
-export const WIDGET_SDK_JS = `/* StationThis Widget SDK — served by noema-crystal (ADR-0011 §7).
+export const WIDGET_SDK_JS = `/* Noema Widget SDK — served by noema-crystal (ADR-0011 §7).
  * <script src="https://noema.art/widget/sdk.js"></script>
- *   const w = await StationThis.init({ agentId, container, getProvider, onEvent })
+ *   const w = await Noema.init({ agentId, container, getProvider, onEvent })
  *   w.walletConnected(addr); w.destroy();
- *   const g = await StationThis.initGallery({ collectionAddress, container }); g.destroy();
+ *   const g = await Noema.initGallery({ collectionAddress, container }); g.destroy();
  */
 (function (global) {
   'use strict';
@@ -35,7 +35,7 @@ export const WIDGET_SDK_JS = `/* StationThis Widget SDK — served by noema-crys
     return global.location.origin;
   }
 
-  var StationThis = {
+  var Noema = {
     init: function (opts) {
       opts = opts || {};
       var agentId      = opts.agentId;
@@ -46,8 +46,8 @@ export const WIDGET_SDK_JS = `/* StationThis Widget SDK — served by noema-crys
       var onEvent      = opts.onEvent     || function () {};
       var _getProvider = opts.getProvider || function () { return global.ethereum; };
 
-      if (!agentId)   return Promise.reject(new Error('StationThis.init: agentId is required'));
-      if (!container) return Promise.reject(new Error('StationThis.init: container element is required'));
+      if (!agentId)   return Promise.reject(new Error('Noema.init: agentId is required'));
+      if (!container) return Promise.reject(new Error('Noema.init: container element is required'));
 
       var iframeOrigin = baseUrl;
       var iframe = document.createElement('iframe');
@@ -168,8 +168,8 @@ export const WIDGET_SDK_JS = `/* StationThis Widget SDK — served by noema-crys
       opts = opts || {};
       var collectionAddress = opts.collectionAddress;
       var container = opts.container;
-      if (!collectionAddress) return Promise.reject(new Error('StationThis.initGallery: collectionAddress is required'));
-      if (!container)         return Promise.reject(new Error('StationThis.initGallery: container element is required'));
+      if (!collectionAddress) return Promise.reject(new Error('Noema.initGallery: collectionAddress is required'));
+      if (!container)         return Promise.reject(new Error('Noema.initGallery: container element is required'));
 
       var baseUrl = (opts.baseUrl || _scriptOrigin()).replace(/\\/$/, '');
       var iframeOrigin = baseUrl;
@@ -216,6 +216,6 @@ export const WIDGET_SDK_JS = `/* StationThis Widget SDK — served by noema-crys
     },
   };
 
-  global.StationThis = StationThis;
+  global.Noema = Noema;
 })(window);
 `

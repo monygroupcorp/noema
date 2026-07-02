@@ -221,7 +221,7 @@ export const COPY = {
     working: '⏳ Working on it…',
     done: '✅ Done.',
     podInvite: [
-      'A StationThis pod is warming up.',
+      'A NOEMA pod is warming up.',
       'Send /make [your prompt] to queue your generation on this pod.',
       '',
       'Powered by noema.',

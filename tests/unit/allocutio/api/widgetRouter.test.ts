@@ -86,11 +86,11 @@ test('interactive: agent with no callable modus falls back to the read-only gall
   assert.match(res.text, /https:\/\/cdn\.test\/a\.png/)             // gallery still shown
 })
 
-test('GET /widget/sdk.js → JS with the StationThis contract, no framing header', async () => {
+test('GET /widget/sdk.js → JS with the Noema contract, no framing header', async () => {
   const res = await request(app()).get('/widget/sdk.js')
   assert.equal(res.status, 200)
   assert.match(res.headers['content-type'], /application\/javascript/)
-  assert.match(res.text, /global\.StationThis = StationThis/)
+  assert.match(res.text, /global\.Noema = Noema/)
   assert.match(res.text, /init:\s*function/)
   assert.match(res.text, /initGallery:\s*function/)
   // sdk.js is a <script> include — it must NOT carry a frame-ancestors header.

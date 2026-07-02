@@ -62,7 +62,7 @@ function urlImageExt(url: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Model card — frontmatter + body, matching the StationThis card format.
+// Model card — frontmatter + body, matching the NOEMA card format.
 // Training details are DERIVED from a per-base-model facts table (keyed by the
 // Intella `familia`), so the card can never drift from what the trainer actually
 // ran; the few run-specific bits (steps, description, samples, provenance) thread
@@ -155,7 +155,7 @@ function baseFacts(familia?: string): BaseFacts {
 }
 
 /**
- * Render the model card (README) — frontmatter + the StationThis body (description,
+ * Render the model card (README) — frontmatter + the NOEMA body (description,
  * trigger, sample gallery, usage, settings, training details, about). `repoId` is the
  * `account/slug` used in the load snippet; falls back to the model slug.
  */

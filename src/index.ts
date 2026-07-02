@@ -888,7 +888,7 @@ async function main(): Promise<void> {
     ...(process.env.PUBLIC_BASE ? { publicBase: process.env.PUBLIC_BASE } : {}),
   }))
 
-  // /widget — the StationThis embed surface (ADR-0011 §7): the SDK + chrome-less,
+  // /widget — the Noema embed surface (ADR-0011 §7): the SDK + chrome-less,
   // themed per-agent & gallery views, composed from the public feed + owner appearance.
   // Framing is a per-partner CSP allowlist (WIDGET_FRAME_ANCESTORS, space/comma-sep)
   // replacing the legacy `frame-ancestors *`; default 'self' (same-origin only).
