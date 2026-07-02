@@ -59,9 +59,17 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
     const agentId = String(req.params.agentId)
     const legatus = await deps.legati.findByAgentId(agentId)
     if (!legatus || legatus.status !== 'active') { fail(res, 404, 'AGENT_NOT_FOUND', 'Agent not found or inactive'); return null }
-    if (!legatus.workspaceModusId) { fail(res, 404, 'SPELL_NOT_FOUND', 'Agent has no runnable spell'); return null }
-    const modus = await deps.modorum.find(legatus.workspaceModusId)
+    // Which modus to run: an explicit `modusId` (from the widget's modus picker) if given,
+    // else the agent's starter workspace modus. A requested modus MUST be the workspace one OR
+    // owned by the agent's animaId — you can only run an agent's own capabilities.
+    const requested = (typeof req.body?.modusId === 'string' && req.body.modusId)
+      || (typeof req.query?.modusId === 'string' && req.query.modusId) || legatus.workspaceModusId
+    if (!requested) { fail(res, 404, 'SPELL_NOT_FOUND', 'Agent has no runnable spell'); return null }
+    const modus = await deps.modorum.find(requested)
     if (!modus) { fail(res, 404, 'SPELL_NOT_FOUND', 'Agent spell not found'); return null }
+    const ownsIt = requested === legatus.workspaceModusId
+      || (modus.auctor !== undefined && 'animaId' in modus.auctor && modus.auctor.animaId === legatus.animaId)
+    if (!ownsIt) { fail(res, 403, 'NOT_AGENT_MODUS', 'That modus does not belong to this agent'); return null }
     // The agent's cut lands at their declared payout target, else the on-chain owner (§4c).
     const payoutAddress = legatus.payoutPolicy?.withdrawAddress ?? legatus.ownerAddress
     return { agentId, animaId: legatus.animaId, ownerAddress: legatus.ownerAddress, payoutAddress, modus }

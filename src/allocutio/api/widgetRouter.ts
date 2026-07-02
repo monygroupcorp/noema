@@ -35,8 +35,8 @@ export interface WidgetRouterDeps {
   feed: (filter: FeedFilter) => Promise<FeedItem[]>
   /** Public appearance-by-owner projection (visual branding only). */
   appearance: (owner: AuctorKey) => Promise<Appearance | undefined>
-  /** Resolve the agent's callable Modus — enables the interactive run panel. */
-  modorum?: Pick<Modorum, 'find'>
+  /** Resolve + LIST the agent's callable modi — enables the interactive run panel + picker. */
+  modorum?: Pick<Modorum, 'find' | 'list'>
   /** Baseline run-cost estimate → the displayed price. Required with `modorum`. */
   quoteImpetus?: (modusId: string) => Promise<bigint>
   /** x402 rail config (currency label / markup) for the price display. */
@@ -90,49 +90,79 @@ function tileHtml(t: Tile): string {
   return `<div class="tile" data-url="${u}"><img src="${u}" loading="lazy" alt=""></div>`
 }
 
-/** The shared chrome-less document skin, themed from the owner's Appearance. */
-function page(opts: { title: string; appearance?: Appearance; body: string; script: string }): string {
+/** The shared chrome-less document skin — the real NOEMA design system (design/ tokens):
+ *  Geist type, the surface + accent ramps, `--radius`, and the signature devices
+ *  (.noema-frame hairline corners, .noema-kicker overline, .noema-rule). Themed live from
+ *  the agent's Appearance (accent / avatar / banner / background). The `look` field is not
+ *  yet wired (no per-look skins exist in the app); trust-fade is available but its viewer-
+ *  identity trigger is gated on the auth work, so the agent's accent shows at full strength. */
+function page(opts: { title: string; appearance?: Appearance; header?: string; body: string; script: string }): string {
   const a = opts.appearance ?? {}
-  const accent = safeColor(a.accent) ?? '#7c5cff'
-  const bg = safeColor((a as { bg?: string }).bg) ?? '#0b0b0d'
+  const accent = safeColor(a.accent) ?? '#5b8cff'          // NOEMA --accent-500 default
   const bannerUrl = safeUrl(a.bannerUrl)
-  const banner = bannerUrl
-    ? `<div class="banner" style="background-image:url('${esc(bannerUrl)}')"></div>` : ''
+  const bgUrl = safeUrl(a.backgroundUrl)
+  const banner = bannerUrl ? `<div class="banner" style="background-image:url('${esc(bannerUrl)}')"></div>` : ''
+  const bgLayer = bgUrl ? `<div class="bgart" style="background-image:url('${esc(bgUrl)}')"></div>` : ''
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(opts.title)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root { --accent:${accent}; --bg:${bg}; }
+  :root {
+    --accent:${accent};
+    --bg:#08090A; --surface:#0c0e10; --surface-2:#131619; --border:#1c2024; --border-strong:#2a2f35;
+    --text:#e7eaef; --text-muted:#8b929c; --text-subtle:#5b626c; --success:#5fd0a8;
+    --radius:10px; --font:'Geist',ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    --mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
   * { box-sizing:border-box; }
-  html,body { margin:0; padding:0; height:100%; background:var(--bg); color:#e8e8ea;
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
-  .banner { height:96px; background-size:cover; background-position:center;
-    border-bottom:1px solid rgba(255,255,255,.06); }
-  .wrap { padding:12px; }
+  html,body { margin:0; padding:0; min-height:100%; background:var(--bg); color:var(--text); font-family:var(--font); font-size:14px; line-height:1.45; }
+  .bgart { position:fixed; inset:0; background-size:cover; background-position:center; opacity:.10; filter:saturate(.7); pointer-events:none; z-index:0; }
+  .banner { height:104px; background-size:cover; background-position:center; }
+  .wrap { position:relative; z-index:1; padding:16px; }
+  /* signature frame — hairline border + icy corner ticks (.noema-frame) */
+  .noema-frame { position:relative; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); padding:16px; }
+  .noema-frame::before, .noema-frame::after { content:''; position:absolute; width:10px; height:10px; border:1.5px solid var(--accent); }
+  .noema-frame::before { top:-1px; left:-1px; border-right:0; border-bottom:0; border-top-left-radius:var(--radius); }
+  .noema-frame::after { bottom:-1px; right:-1px; border-left:0; border-top:0; border-bottom-right-radius:var(--radius); }
+  .kicker { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.14em; color:var(--accent); }
+  .rule { height:1px; background:linear-gradient(90deg,var(--accent),transparent); margin:10px 0 14px; opacity:.5; }
+  .hdr { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+  .avatar { width:44px; height:44px; border-radius:var(--radius); background:var(--surface-2) center/cover; border:1px solid var(--border-strong); flex:0 0 auto; }
+  .hname { font-weight:600; font-size:15px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; }
-  .tile { position:relative; border-radius:8px; overflow:hidden; background:#151519;
-    aspect-ratio:1/1; cursor:pointer; border:1px solid rgba(255,255,255,.05); }
+  .tile { position:relative; border-radius:var(--radius); overflow:hidden; background:var(--surface-2); aspect-ratio:1/1; cursor:pointer; border:1px solid var(--border); transition:border-color .12s cubic-bezier(0.16,1,0.3,1); }
   .tile img, .tile video { width:100%; height:100%; object-fit:cover; display:block; }
   .tile--audio { aspect-ratio:auto; padding:10px; display:flex; align-items:center; cursor:default; }
   .tile--audio audio { width:100%; }
   .tile:hover { border-color:var(--accent); }
-  .empty { padding:32px 12px; text-align:center; color:#6a6a72; font-size:13px; }
-  .run { margin-bottom:16px; }
-  .field { display:block; margin-bottom:10px; }
-  .flabel { display:block; font-size:12px; color:#b9b9c2; margin-bottom:4px; }
-  .field textarea, .field input { width:100%; background:#151519; color:#e8e8ea; border:1px solid rgba(255,255,255,.1);
-    border-radius:6px; padding:8px; font:inherit; font-size:13px; }
-  .field textarea:focus, .field input:focus { outline:none; border-color:var(--accent); }
-  .help { display:block; font-size:11px; color:#6a6a72; margin-top:3px; }
-  #runbtn { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 16px;
-    font:inherit; font-weight:600; cursor:pointer; }
-  #runbtn:disabled { opacity:.5; cursor:default; }
-  #rstatus { font-size:12px; color:#9a9aa4; margin:8px 0; min-height:14px; }
-  .txt { white-space:pre-wrap; background:#151519; border-radius:8px; padding:10px; font-size:13px; }
-  .sect { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#6a6a72; margin:16px 0 8px; }
+  .empty { padding:36px 12px; text-align:center; color:var(--text-subtle); font-size:13px; }
+  .modpick { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
+  .modchip { font-family:var(--mono); font-size:11px; padding:5px 10px; border-radius:999px; border:1px solid var(--border-strong); background:transparent; color:var(--text-muted); cursor:pointer; }
+  .modchip.active { border-color:var(--accent); color:var(--text); background:color-mix(in oklab,var(--accent) 14%,transparent); }
+  .mform { display:none; } .mform.active { display:block; }
+  .field { display:block; margin-bottom:12px; }
+  .flabel { display:block; font-size:12px; color:var(--text-muted); margin-bottom:5px; }
+  .field textarea, .field input { width:100%; background:var(--surface-2); color:var(--text); border:1px solid var(--border-strong); border-radius:8px; padding:9px 10px; font:inherit; font-size:13px; }
+  .field textarea { resize:vertical; min-height:64px; }
+  .field textarea:focus, .field input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 18%,transparent); }
+  .help { display:block; font-size:11px; color:var(--text-subtle); margin-top:4px; }
+  #runbtn { background:var(--accent); color:#08090A; border:none; border-radius:8px; padding:10px 18px; font:inherit; font-weight:600; font-size:13px; cursor:pointer; }
+  #runbtn:disabled { opacity:.45; cursor:default; }
+  #rstatus { font-family:var(--mono); font-size:11px; color:var(--text-muted); margin:10px 0; min-height:14px; }
+  .txt { white-space:pre-wrap; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius); padding:12px; font-size:13px; }
+  .sect { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.12em; color:var(--text-subtle); margin:18px 0 10px; }
 </style></head>
-<body>${banner}<div class="wrap">${opts.body}</div>
+<body>${bgLayer}${banner}<div class="wrap">${opts.header ?? ''}${opts.body}</div>
 <script>${opts.script}</script></body></html>`
+}
+
+/** The agent header — avatar + name + a NOEMA kicker/rule. */
+function agentHeader(agentId: string, appearance?: Appearance): string {
+  const avatarUrl = safeUrl(appearance?.avatarUrl)
+  const avatar = `<div class="avatar"${avatarUrl ? ` style="background-image:url('${esc(avatarUrl)}')"` : ''}></div>`
+  return `<div class="hdr">${avatar}<div><div class="kicker">Agent · on-chain</div><div class="hname">${esc(agentId)}</div></div></div><div class="rule"></div>`
 }
 
 // The in-iframe bridge: announce readiness, and lift clicks to the parent lightbox.
@@ -164,19 +194,24 @@ function fieldHtml(name: string, porta: Porta): string {
   return `<label class="field"><span class="flabel">${label}${star}</span>${control}${help}</label>`
 }
 
-// The interactive run bridge (§5 x402, browser side). The IFRAME probes the run endpoint
-// (POST → 402 + PaymentRequirements), hands the requirements to the parent SDK to SIGN with
-// the user's wallet (PAYMENT_REQUIRED → PAYMENT_SIGNED{header}), then POSTs the run with the
-// X-Payment header and renders the exitus. No session, no auth — the payment IS the auth.
-function runScript(agentId: string, modusNomen: string): string {
-  const ep = `/api/v1/x402/agents/${encodeURIComponent(agentId)}/spell/${encodeURIComponent(modusNomen)}`
-  return `(function(){
-  var EP = ${JSON.stringify(ep)};
-  var form=document.getElementById('runform'), btn=document.getElementById('runbtn');
-  var st=document.getElementById('rstatus'), out=document.getElementById('rresult');
-  var lastInputs=null;
+// The interactive run bridge (§5 x402, browser side), MULTI-MODUS aware. Each Modus is one
+// <form class="mform" data-endpoint data-price data-modus>; chips toggle which is active. The
+// run uses the ACTIVE form's endpoint + inputs: probe (POST → 402 + PaymentRequirements) → the
+// parent SDK signs with the user's wallet (PAYMENT_REQUIRED → PAYMENT_SIGNED{header}) → re-POST
+// with X-Payment → render the exitus. No session, no auth — the payment IS the auth (login is
+// a separate, still-unwired concern; see the deps).
+const RUN_SCRIPT = `(function(){
+  var btn=document.getElementById('runbtn'), st=document.getElementById('rstatus'), out=document.getElementById('rresult');
+  var chips=Array.prototype.slice.call(document.querySelectorAll('.modchip'));
+  var forms=Array.prototype.slice.call(document.querySelectorAll('.mform'));
+  var lastInputs=null, lastEP=null, lastModus=null;
+  function active(){ return document.querySelector('.mform.active') || forms[0]; }
   function status(m){ st.textContent=m||''; }
-  function collect(){ var o={}; Array.prototype.forEach.call(form.elements,function(el){
+  function selectModus(id){ forms.forEach(function(f){ f.classList.toggle('active', f.getAttribute('data-modus')===id); });
+    chips.forEach(function(c){ c.classList.toggle('active', c.getAttribute('data-modus')===id); });
+    var f=active(); if(f&&btn) btn.textContent='Run · '+f.getAttribute('data-price'); out.innerHTML=''; status(''); }
+  chips.forEach(function(c){ c.addEventListener('click', function(){ selectModus(c.getAttribute('data-modus')); }); });
+  function collect(f){ var o={}; Array.prototype.forEach.call(f.elements,function(el){
     if(!el.name||el.value==='')return; o[el.name]=(el.type==='number')?Number(el.value):el.value; }); return o; }
   function render(outputs){ out.innerHTML='';
     if(!outputs){ status('Done.'); return; }
@@ -188,9 +223,10 @@ function runScript(agentId: string, modusNomen: string): string {
         var t=document.createElement('div');t.className='tile';t.appendChild(m);out.appendChild(t);
       } else if(typeof v==='string'){ var p=document.createElement('p');p.className='txt';p.textContent=v;out.appendChild(p); } });
     status('Done.'); }
-  btn.addEventListener('click', function(){
-    btn.disabled=true; out.innerHTML=''; status('Requesting quote…'); lastInputs=collect();
-    fetch(EP,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({inputs:lastInputs})})
+  if(btn) btn.addEventListener('click', function(){
+    var f=active(); if(!f) return; lastEP=f.getAttribute('data-endpoint'); lastModus=f.getAttribute('data-modus'); lastInputs=collect(f);
+    btn.disabled=true; out.innerHTML=''; status('Requesting quote…');
+    fetch(lastEP,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({inputs:lastInputs,modusId:lastModus})})
       .then(function(r){ return r.json().then(function(d){return{status:r.status,data:d};}); })
       .then(function(p){ if(p.status!==402){ status('Error: '+((p.data&&p.data.message)||('status '+p.status))); btn.disabled=false; return; }
         status('Waiting for wallet payment…');
@@ -199,7 +235,7 @@ function runScript(agentId: string, modusNomen: string): string {
   window.addEventListener('message', function(e){ if(e.source!==window.parent) return;
     var m=e.data; if(!m||!m.type) return;
     if(m.type==='PAYMENT_SIGNED'){ status('Running…');
-      fetch(EP,{method:'POST',headers:{'content-type':'application/json','X-Payment':m.header},body:JSON.stringify({inputs:lastInputs})})
+      fetch(lastEP,{method:'POST',headers:{'content-type':'application/json','X-Payment':m.header},body:JSON.stringify({inputs:lastInputs,modusId:lastModus})})
         .then(function(r){ return r.json().then(function(d){return{ok:r.ok,data:d};}); })
         .then(function(r){ if(r.ok) render(r.data.outputs); else status('Error: '+((r.data&&r.data.message)||'run failed')); btn.disabled=false; })
         .catch(function(err){ status('Error: '+err.message); btn.disabled=false; });
@@ -208,7 +244,6 @@ function runScript(agentId: string, modusNomen: string): string {
   document.addEventListener('click', function(ev){ var t=ev.target.closest&&ev.target.closest('.tile[data-url]');
     if(t){ try{ parent.postMessage({type:'GALLERY_LIGHTBOX',url:t.getAttribute('data-url')},'*'); }catch(e){} } });
 })();`
-}
 
 export function createWidgetRouter(deps: WidgetRouterDeps): Router {
   const router = express.Router({ mergeParams: true })
@@ -261,25 +296,43 @@ export function createWidgetRouter(deps: WidgetRouterDeps): Router {
       deps.feed({ visibility: 'feed', author: owner, limit }),
     ])
 
-    // Resolve the callable Modus → the run panel (only when the run deps are wired and the
-    // agent actually has a runnable Modus; otherwise the view is the read-only gallery).
-    let modus: Modus | null = null
-    if (deps.modorum && deps.quoteImpetus && legatus.workspaceModusId) {
-      modus = await deps.modorum.find(legatus.workspaceModusId)
+    // The agent's callable modi: everything the owning animaId authored, plus the private
+    // starter workspace modus (which may not be owned by the animaId). Deduped, workspace first.
+    let modi: Modus[] = []
+    if (deps.modorum && deps.quoteImpetus && deps.x402Config) {
+      const authored = deps.modorum.list ? await deps.modorum.list({ auctor: owner }) : []
+      const byId = new Map(authored.map((m) => [m.id, m]))
+      if (legatus.workspaceModusId && !byId.has(legatus.workspaceModusId)) {
+        const ws = await deps.modorum.find(legatus.workspaceModusId)
+        if (ws) modi = [ws, ...authored]
+        else modi = authored
+      } else {
+        modi = authored
+      }
     }
 
     let runPanel = ''
     let script = IFRAME_BRIDGE
-    if (modus && deps.quoteImpetus && deps.x402Config) {
-      const impetus = await deps.quoteImpetus(modus.id)
-      const quote = buildQuote(impetus, deps.x402Config)
-      const price = `$${quote.totalCostUsd.toFixed(quote.totalCostUsd < 1 ? 4 : 2)} ${quote.currency}`
-      const fields = Object.entries(modus.aditus).map(([name, porta]) => fieldHtml(name, porta)).join('')
+    if (modi.length && deps.quoteImpetus && deps.x402Config) {
+      const cfg = deps.x402Config
+      const quoteImpetus = deps.quoteImpetus
+      const panels = await Promise.all(modi.map(async (m, i) => {
+        const quote = buildQuote(await quoteImpetus(m.id), cfg)
+        const price = `$${quote.totalCostUsd.toFixed(quote.totalCostUsd < 1 ? 4 : 2)} ${quote.currency}`
+        const ep = `/api/v1/x402/agents/${encodeURIComponent(agentId)}/spell/${encodeURIComponent(m.nomen)}`
+        const fields = Object.entries(m.aditus).map(([name, porta]) => fieldHtml(name, porta)).join('')
+        return {
+          chip: `<button class="modchip${i === 0 ? ' active' : ''}" data-modus="${esc(m.id)}">${esc(m.nomen)}</button>`,
+          form: `<form class="mform${i === 0 ? ' active' : ''}" data-modus="${esc(m.id)}" data-endpoint="${esc(ep)}" data-price="${esc(price)}" onsubmit="return false">${fields}</form>`,
+          price,
+        }
+      }))
+      const picker = modi.length > 1 ? `<div class="modpick">${panels.map((p) => p.chip).join('')}</div>` : ''
       runPanel =
-        `<div class="run"><form id="runform" onsubmit="return false">${fields}</form>` +
-        `<button id="runbtn">Run · ${esc(price)}</button>` +
+        `<div class="run">${picker}${panels.map((p) => p.form).join('')}` +
+        `<button id="runbtn">Run · ${esc(panels[0].price)}</button>` +
         `<div id="rstatus"></div><div id="rresult" class="grid"></div></div>`
-      script = runScript(agentId, modus.nomen)
+      script = RUN_SCRIPT
     }
 
     const tiles = items.flatMap((i) => tilesFromOutput(i.output))
@@ -287,7 +340,10 @@ export function createWidgetRouter(deps: WidgetRouterDeps): Router {
       ? `<div class="sect">Recent creations</div><div class="grid">${tiles.map(tileHtml).join('')}</div>`
       : (runPanel ? '' : `<div class="empty">This agent hasn't published anything yet.</div>`)
     frame(res)
-    res.status(200).send(page({ title: agentId, ...(appearance ? { appearance } : {}), body: runPanel + gallery, script }))
+    res.status(200).send(page({
+      title: agentId, ...(appearance ? { appearance } : {}),
+      header: agentHeader(agentId, appearance), body: runPanel + gallery, script,
+    }))
   })
 
   return router
