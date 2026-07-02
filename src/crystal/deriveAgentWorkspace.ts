@@ -98,8 +98,15 @@ export function deriveAgentWorkspace<M extends Modus>(template: M, opts: DeriveA
     },
   }
 
-  // $NFT_* substitution across string fields, then re-seal the content hash.
-  if (opts.placeholders) derived = substitutePlaceholders(derived, opts.placeholders)
+  // $NFT_* substitution across string fields, then re-seal the content hash. The
+  // JSON round-trip inside substitutePlaceholders would flatten Date fields to ISO
+  // strings, so restore the two Modus dates afterward (they carry no placeholders).
+  if (opts.placeholders) {
+    const { natum, mutatum } = derived
+    derived = substitutePlaceholders(derived, opts.placeholders)
+    derived.natum = natum
+    derived.mutatum = mutatum
+  }
   derived.contentHash = hashModus(derived)
   return derived
 }

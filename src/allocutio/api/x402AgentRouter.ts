@@ -16,7 +16,7 @@
 
 import express, { type Router, type Request, type Response } from 'express'
 import type { LegatusStore } from '../../types/legatus.js'
-import type { Modorum } from '../../types/modus.js'
+import type { Modorum, Modus } from '../../types/modus.js'
 import type { X402Facilitator, X402LogStore } from '../../types/x402.js'
 import type { Run } from './types.js'
 import { aditusToJsonSchema } from './aditusToJsonSchema.js'
@@ -50,7 +50,7 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
   const router = express.Router({ mergeParams: true })
 
   /** Resolve the agent + its spell modus, or write the appropriate error. */
-  async function resolve(req: Request, res: Response): Promise<{ agentId: string; animaId: string; ownerAddress: string; modusId: string; modusNomen: string } | null> {
+  async function resolve(req: Request, res: Response): Promise<{ agentId: string; animaId: string; ownerAddress: string; modus: Modus } | null> {
     if (deps.enabled === false) { fail(res, 404, 'NOT_FOUND', 'x402 is not enabled'); return null }
     const agentId = String(req.params.agentId)
     const legatus = await deps.legati.findByAgentId(agentId)
@@ -58,7 +58,7 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
     if (!legatus.workspaceModusId) { fail(res, 404, 'SPELL_NOT_FOUND', 'Agent has no runnable spell'); return null }
     const modus = await deps.modorum.find(legatus.workspaceModusId)
     if (!modus) { fail(res, 404, 'SPELL_NOT_FOUND', 'Agent spell not found'); return null }
-    return { agentId, animaId: legatus.animaId, ownerAddress: legatus.ownerAddress, modusId: modus.id, modusNomen: modus.nomen }
+    return { agentId, animaId: legatus.animaId, ownerAddress: legatus.ownerAddress, modus }
   }
 
   const resourceUrl = (agentId: string, name: string): string => `${base}/api/v1/x402/agents/${agentId}/spell/${name}`
@@ -68,14 +68,13 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
     const r = await resolve(req, res)
     if (!r) return
     const name = String(req.params.name)
-    const modus = await deps.modorum.find(r.modusId)
-    const impetus = await deps.quoteImpetus(r.modusId, {})
+    const impetus = await deps.quoteImpetus(r.modus.id, {})
     const quote = buildQuote(impetus, deps.config)
     res.status(200).json({
       agentId: r.agentId,
       spell: name,
-      name: r.modusNomen,
-      inputSchema: aditusToJsonSchema(modus!.aditus),
+      name: r.modus.nomen,
+      inputSchema: aditusToJsonSchema(r.modus.aditus),
       quote,
       accepts: [acceptFor(quote, deps.config)],
     })
@@ -90,7 +89,7 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
       const aditus = (req.body?.inputs ?? {}) as Record<string, unknown>
 
       // 1. Quote → payment requirements.
-      const impetus = await deps.quoteImpetus(r.modusId, aditus)
+      const impetus = await deps.quoteImpetus(r.modus.id, aditus)
       const quote = buildQuote(impetus, deps.config)
       const accept = acceptFor(quote, deps.config)
 
@@ -101,7 +100,7 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
           error: 'PAYMENT_REQUIRED',
           message: 'Payment required to run this spell',
           paymentRequired: buildPaymentRequirements(quote, deps.config, {
-            url: resourceUrl(r.agentId, name), description: `${r.modusNomen} execution`,
+            url: resourceUrl(r.agentId, name), description: `${r.modus.nomen} execution`,
           }),
           quote: { baseCostUsd: quote.baseCostUsd, markupUsd: quote.markupUsd, totalCostUsd: quote.totalCostUsd },
         })
@@ -121,14 +120,14 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
         payer: (verified.payer ?? '').toLowerCase(),
         amount: verified.amount ?? accept.amount,
         network: accept.network, asset: accept.asset, payTo: accept.payTo,
-        agentId: r.agentId, spellName: name, modusId: r.modusId, costUsd: quote.totalCostUsd,
+        agentId: r.agentId, spellName: name, modusId: r.modus.id, costUsd: quote.totalCostUsd,
       })
       if (!fresh) { fail(res, 409, 'PAYMENT_REPLAY', 'This payment has already been used'); return }
 
       // 5. Run the agent's spell (funded by the payment).
       let run: Run
       try {
-        run = await deps.runSpell({ agentAnimaId: r.animaId, modusId: r.modusId, aditus, grossImpetus: impetus, agentId: r.agentId })
+        run = await deps.runSpell({ agentAnimaId: r.animaId, modusId: r.modus.id, aditus, grossImpetus: impetus, agentId: r.agentId })
       } catch (err) {
         await deps.log.recordFailed(verified.signatureHash, `run threw: ${(err as Error).message}`)
         fail(res, 502, 'EXECUTION_FAILED', `Spell execution failed: ${(err as Error).message}`)

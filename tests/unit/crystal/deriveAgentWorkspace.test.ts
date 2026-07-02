@@ -59,6 +59,12 @@ test('substitutes $NFT_* placeholders across string fields', () => {
   assert.ok(!JSON.stringify(ws).includes('$NFT_'), 'no unsubstituted $NFT_* tokens remain')
 })
 
+test('preserves Date-typed fields through $NFT_* substitution (no JSON-flatten to string)', () => {
+  const ws = derive({ placeholders: { '$NFT_NAME': 'Sir Camel', '$NFT_IMAGE': NFT_URL } })
+  assert.ok(ws.natum instanceof Date, 'natum stays a Date, not an ISO string')
+  assert.ok(ws.mutatum instanceof Date, 'mutatum stays a Date')
+})
+
 test('does not mutate the shared template modus', () => {
   const before = JSON.stringify(CAMEL_TEMPLATE_MODUS)
   derive()
