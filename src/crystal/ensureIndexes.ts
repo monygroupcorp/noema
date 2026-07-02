@@ -108,5 +108,12 @@ export async function ensureIndexes(db: Db): Promise<void> {
 
     // caeremonia_slots — ceremony contributor-slot requests (deduped by contact)
     db.collection('caeremonia_slots').createIndex({ contact: 1 }, { unique: true }),
+
+    // trusted_issuers — federated JWKS SSO allow-list (ADR-0011 §4), iss lookup is hot
+    db.collection('trusted_issuers').createIndex({ issuerId: 1 }, { unique: true }),
+
+    // legati — agent sidecars (ADR-0011 §5); agentId is the provisioning idempotency key
+    db.collection('legati').createIndex({ agentId: 1 }, { unique: true }),
+    db.collection('legati').createIndex({ id: 1 }, { unique: true }),
   ])
 }

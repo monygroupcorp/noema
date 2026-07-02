@@ -24,8 +24,12 @@ import { mountCeremony } from './api/arcanum/mountCeremony.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
 import { IdentityResolver as ApiIdentityResolver, credentialsFromHeaders } from './allocutio/api/IdentityResolver.js'
 import { createApiRouter } from './allocutio/api/apiRouter.js'
-import { makeCredentialAcceptors } from './allocutio/api/apiAcceptors.js'
-import { parseJwksOverride } from './allocutio/api/AgentJwtVerifier.js'
+import { makeCredentialAcceptors, resolveOrCreateAnima, federatedExternusId } from './allocutio/api/apiAcceptors.js'
+import { AgentJwtVerifier, parseJwksOverride } from './allocutio/api/AgentJwtVerifier.js'
+import { AgentProvisioner } from './crystal/AgentProvisioner.js'
+import { createAgentCompatRouter } from './allocutio/api/agentCompatRouter.js'
+import { createTreasuryAdminRouter } from './api/internal/treasuryAdminRouter.js'
+import { seedCamel, CAMEL_TREASURY } from './crystal/seeds/camel.js'
 import { RunEventHub } from './allocutio/api/RunEventHub.js'
 import { isSafeWebhookUrl } from './allocutio/api/webhookGuard.js'
 import { createMcpRouter } from './allocutio/api/mcp/mcpRouter.js'
@@ -486,6 +490,11 @@ async function main(): Promise<void> {
   }
   log.info(`Seeded ${CANONICAL_CUSTOM_MODI.length} custom modi`)
 
+  // CAMEL onboarding seed (ADR-0011 §8): the trusted issuer, the treasury Anima,
+  // and the CamelMemify starter template. Idempotent.
+  await seedCamel({ issuers: ring.issuers, modorum: ring.modorum, db: mongo.db(DB_NAME) })
+  log.info('Seeded CAMEL issuer + treasury + starter template')
+
   for (const intella of CANONICAL_INTELLAE) {
     await intellae.upsert(intella)
   }
@@ -722,6 +731,24 @@ async function main(): Promise<void> {
     issuers: ring.issuers,
     jwksOverride: parseJwksOverride(process.env.AGENT_JWKS_OVERRIDE),
   }))
+
+  // ── CAMEL agent onboarding (ADR-0011 phase 3) ─────────────────────────────────
+  // Treasury config is injected (not a stored noun): prod has exactly one treasury.
+  const camelTreasury = (treasuryId: string) => (treasuryId === CAMEL_TREASURY.treasuryId ? CAMEL_TREASURY : null)
+  const agentVerifier = new AgentJwtVerifier({
+    issuers: ring.issuers,
+    jwksOverride: parseJwksOverride(process.env.AGENT_JWKS_OVERRIDE),
+  })
+  const agentProvisioner = new AgentProvisioner({
+    legati: ring.legati,
+    signorum: ring.signorum,
+    modorum: ring.modorum,
+    treasury: camelTreasury,
+  })
+  // The compat route resolves the agent's Anima with the SAME federated find-or-create
+  // the JWKS acceptor uses, so provisioning and later auth land on one soul.
+  const resolveAgentAnima = (iss: string, sub: string): Promise<string> =>
+    resolveOrCreateAnima(ring.personae, ring.animae, 'federated', federatedExternusId(iss, sub))
   // Run-event hub — projects the bus (actum.progressus/complete/fail) into per-run SSE
   // streams + fire-and-forget completion webhooks (Phase 2). In-process (single
   // instance), per the epic's distribution note. Webhook POSTs are best-effort.
@@ -756,6 +783,19 @@ async function main(): Promise<void> {
   // express.json() handles /slots; the contribution route brings its own raw() parser.
   await mountCeremony(app, ring.ceremonia)
   app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub }))
+
+  // CAMEL agent compat surface (ADR-0011 §8) — the exact `/api/v1/...` paths the
+  // deployed camel404 client bakes (on-chain-referenced). No catch-all in front,
+  // so a bad assertion is a 401 INVALID_ASSERTION, never a 403 (the go/no-go probe).
+  app.use('/api/v1', express.json(), createAgentCompatRouter({
+    verifier: agentVerifier,
+    provisioner: agentProvisioner,
+    legati: ring.legati,
+    resolveAgentAnima,
+    treasury: camelTreasury,
+    balanceOf: (animaId: string) => ring.signorum.balance({ animaId }),
+    ...(process.env.PUBLIC_BASE ? { publicBase: process.env.PUBLIC_BASE } : {}),
+  }))
 
   // TEE runner lifecycle callbacks — internal pod-to-platform signals, not user-facing API.
   // Mounted at /runner/* (not /v1) so PLATFORM_CALLBACK env var on the pod points here directly.
@@ -813,6 +853,13 @@ async function main(): Promise<void> {
 
   app.use('/internal', createLiveRouter(INTERNAL_SECRET))
   app.use('/internal/analytics', createAnalyticsRouter(wideStore, INTERNAL_SECRET))
+  // Manual treasury funding (faucet off in prod) — fund the treasury Anima / top up an agent.
+  app.use('/internal/v1', express.json(), createTreasuryAdminRouter({
+    signorum: ring.signorum,
+    legati: ring.legati,
+    treasury: camelTreasury,
+    ...(INTERNAL_SECRET ? { secret: INTERNAL_SECRET } : {}),
+  }))
 
   // Alchemy address-activity webhook — processes CreditVault events.
   // Route: POST /webhooks/alchemy/:chainId  (chainId = '1' mainnet, '8453' Base)

@@ -43,6 +43,8 @@ import { MongoAnima } from './crystal/MongoAnima.js'
 import { MongoPersona } from './crystal/MongoPersona.js'
 import { MongoIssuer } from './crystal/MongoIssuer.js'
 import type { IssuerStore } from './types/issuer.js'
+import { MongoLegatus } from './crystal/MongoLegatus.js'
+import type { LegatusStore } from './types/legatus.js'
 import { MongoVestigiorum } from './crystal/MongoVestigiorum.js'
 import { MongoModo } from './crystal/MongoModo.js'
 import { RunPodCursor } from './crystal/RunPodCursor.js'
@@ -110,6 +112,8 @@ export interface Ring {
   personae: PersonaStore
   /** Trusted-issuer registry (federated JWKS SSO) — see types/issuer.ts. */
   issuers: IssuerStore
+  /** Agent-sidecar registry (ERC-8004 CAMEL agents) — see types/legatus.ts. */
+  legati: LegatusStore
   vestigiorum: Vestigiorum
   modos: ModoStore
   mandatores: Mandatorum
@@ -254,6 +258,8 @@ export interface ContainerConfig {
   personaeCollection?: string
   /** Collection name for the trusted-issuer registry — default 'trusted_issuers' */
   issuersCollection?: string
+  /** Collection name for the agent-sidecar registry — default 'legati' */
+  legatiCollection?: string
   /** Collection name for vestigia — default 'vestigia' */
   vestigiaCollection?: string
   /** Collection name for modos — default 'modos' */
@@ -370,6 +376,9 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   // Trusted-issuer registry (collection matches the legacy JS `trusted_issuers`).
   const issuers = new MongoIssuer(db.collection(config.issuersCollection ?? 'trusted_issuers'))
+
+  // Agent-sidecar registry (ERC-8004 CAMEL agents).
+  const legati = new MongoLegatus(db.collection(config.legatiCollection ?? 'legati'))
 
   const vestigiaCol: Collection = db.collection(config.vestigiaCollection ?? 'vestigia')
   const vestigiorum = new MongoVestigiorum(vestigiaCol, config.embed, config.embedImage)
@@ -637,7 +646,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const collectioCursor = new CollectioCursor(sharedDispatch, collectiones, actorum, { reviewEnabled: true })
 
   return {
-    actorum, modorum, signorum, animae, personae, issuers, vestigiorum, modos,
+    actorum, modorum, signorum, animae, personae, issuers, legati, vestigiorum, modos,
     mandatores, corpora, collectiones, editiones, publicationAdapters, sodalitates, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
