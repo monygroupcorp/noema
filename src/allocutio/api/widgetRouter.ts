@@ -150,7 +150,11 @@ function page(opts: { title: string; appearance?: Appearance; header?: string; b
   .help { display:block; font-size:11px; color:var(--text-subtle); margin-top:4px; }
   #runbtn { background:var(--accent); color:#08090A; border:none; border-radius:8px; padding:10px 18px; font:inherit; font-weight:600; font-size:13px; cursor:pointer; }
   #runbtn:disabled { opacity:.45; cursor:default; }
-  #rstatus { font-family:var(--mono); font-size:11px; color:var(--text-muted); margin:10px 0; min-height:14px; }
+  #rstatus { font-family:var(--mono); font-size:11px; color:var(--text-muted); margin:10px 0 6px; min-height:14px; }
+  .bar { height:4px; border-radius:999px; background:var(--surface-2); border:1px solid var(--border); overflow:hidden; margin:0 0 12px; display:none; }
+  .bar.on { display:block; } .bar > span { display:block; height:100%; width:0; background:var(--accent); transition:width .3s cubic-bezier(0.16,1,0.3,1); }
+  .bar.indet > span { width:35%; animation:slide 1.1s infinite cubic-bezier(0.4,0,0.6,1); }
+  @keyframes slide { 0%{margin-left:-35%} 100%{margin-left:100%} }
   .txt { white-space:pre-wrap; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius); padding:12px; font-size:13px; }
   .sect { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.12em; color:var(--text-subtle); margin:18px 0 10px; }
 </style></head>
@@ -201,19 +205,29 @@ function fieldHtml(name: string, porta: Porta): string {
 // with X-Payment → render the exitus. No session, no auth — the payment IS the auth (login is
 // a separate, still-unwired concern; see the deps).
 const RUN_SCRIPT = `(function(){
-  var btn=document.getElementById('runbtn'), st=document.getElementById('rstatus'), out=document.getElementById('rresult');
+  var btn=document.getElementById('runbtn'), st=document.getElementById('rstatus'), out=document.getElementById('rresult'), bar=document.getElementById('rbar');
   var chips=Array.prototype.slice.call(document.querySelectorAll('.modchip'));
   var forms=Array.prototype.slice.call(document.querySelectorAll('.mform'));
   var lastInputs=null, lastEP=null, lastModus=null;
   function active(){ return document.querySelector('.mform.active') || forms[0]; }
   function status(m){ st.textContent=m||''; }
+  function setBar(pct){ if(!bar) return; if(pct==null){ bar.className='bar on indet'; bar.firstChild.style.width='35%'; }
+    else { bar.className='bar on'; bar.firstChild.style.width=Math.max(0,Math.min(100,pct))+'%'; } }
+  function hideBar(){ if(bar) bar.className='bar'; }
+  var PHASE={queued:'Queued',provisioning:'Provisioning GPU',pulling:'Pulling image',downloading:'Downloading',loading:'Loading model',executing:'Generating',uploading:'Uploading',complete:'Complete'};
+  function showProgress(p){ if(!p) return; var line=PHASE[p.phase]||p.phase; if(p.target) line+=' · '+p.target;
+    var pct=null;
+    if(p.pod&&(p.pod.gpuType||p.pod.costPerHr)){ line+='  ('+(p.pod.gpuType||'gpu')+(p.pod.costPerHr?' @ $'+p.pod.costPerHr+'/hr':'')+')'; }
+    if(p.progress&&typeof p.progress.done==='number'){ if(p.progress.total){ pct=Math.round(100*p.progress.done/p.progress.total); line+='  '+p.progress.done+'/'+p.progress.total+' '+(p.progress.unit||''); } else { line+='  '+p.progress.done+' '+(p.progress.unit||''); } }
+    if(p.message) line+=' — '+p.message;
+    status('▸ '+line); setBar(pct); }
   function selectModus(id){ forms.forEach(function(f){ f.classList.toggle('active', f.getAttribute('data-modus')===id); });
     chips.forEach(function(c){ c.classList.toggle('active', c.getAttribute('data-modus')===id); });
     var f=active(); if(f&&btn) btn.textContent='Run · '+f.getAttribute('data-price'); out.innerHTML=''; status(''); }
   chips.forEach(function(c){ c.addEventListener('click', function(){ selectModus(c.getAttribute('data-modus')); }); });
   function collect(f){ var o={}; Array.prototype.forEach.call(f.elements,function(el){
     if(!el.name||el.value==='')return; o[el.name]=(el.type==='number')?Number(el.value):el.value; }); return o; }
-  function render(outputs){ out.innerHTML='';
+  function render(outputs){ out.innerHTML=''; hideBar();
     if(!outputs){ status('Done.'); return; }
     Object.keys(outputs).forEach(function(k){ var v=outputs[k];
       if(typeof v==='string'&&/^https?:/.test(v)){ var ext=v.split('?')[0].split('.').pop().toLowerCase(), m;
@@ -234,12 +248,27 @@ const RUN_SCRIPT = `(function(){
       .catch(function(e){ status('Error: '+e.message); btn.disabled=false; }); });
   window.addEventListener('message', function(e){ if(e.source!==window.parent) return;
     var m=e.data; if(!m||!m.type) return;
-    if(m.type==='PAYMENT_SIGNED'){ status('Running…');
-      fetch(lastEP,{method:'POST',headers:{'content-type':'application/json','X-Payment':m.header},body:JSON.stringify({inputs:lastInputs,modusId:lastModus})})
-        .then(function(r){ return r.json().then(function(d){return{ok:r.ok,data:d};}); })
-        .then(function(r){ if(r.ok) render(r.data.outputs); else status('Error: '+((r.data&&r.data.message)||'run failed')); btn.disabled=false; })
-        .catch(function(err){ status('Error: '+err.message); btn.disabled=false; });
-    } else if(m.type==='PAYMENT_ERROR'){ status('Payment failed: '+(m.error||'')); btn.disabled=false; } });
+    if(m.type==='PAYMENT_SIGNED'){ status('Starting…'); setBar(null);
+      fetch(lastEP,{method:'POST',headers:{'content-type':'application/json','X-Payment':m.header,'accept':'text/event-stream'},body:JSON.stringify({inputs:lastInputs,modusId:lastModus})})
+        .then(function(r){
+          var ct=r.headers.get('content-type')||'';
+          if(ct.indexOf('text/event-stream')===-1){ return r.json().then(function(d){ hideBar(); if(r.ok) render(d&&d.outputs); else status('Error: '+((d&&d.message)||'run failed')); btn.disabled=false; }); }
+          var reader=r.body.getReader(), dec=new TextDecoder(), buf='';
+          function handle(ev){
+            if(ev.kind==='progress') showProgress(ev.progressus);
+            else if(ev.kind==='result'){ hideBar(); render(ev.outputs); btn.disabled=false; }
+            else if(ev.kind==='failed'){ hideBar(); status('Error: '+(ev.message||'run failed')); btn.disabled=false; }
+            else if(ev.kind==='started') status('Started…'); }
+          function pump(){ return reader.read().then(function(res){
+            if(res.done){ btn.disabled=false; return; }
+            buf+=dec.decode(res.value,{stream:true});
+            var parts=buf.split('\\n\\n'); buf=parts.pop();
+            parts.forEach(function(chunk){ var line=chunk.replace(/^data: ?/,'').trim(); if(!line||line[0]===':') return; try{ handle(JSON.parse(line)); }catch(e){} });
+            return pump(); }); }
+          return pump();
+        })
+        .catch(function(err){ hideBar(); status('Error: '+err.message); btn.disabled=false; });
+    } else if(m.type==='PAYMENT_ERROR'){ hideBar(); status('Payment failed: '+(m.error||'')); btn.disabled=false; } });
   try{ parent.postMessage({type:'WIDGET_READY'},'*'); }catch(e){}
   document.addEventListener('click', function(ev){ var t=ev.target.closest&&ev.target.closest('.tile[data-url]');
     if(t){ try{ parent.postMessage({type:'GALLERY_LIGHTBOX',url:t.getAttribute('data-url')},'*'); }catch(e){} } });
@@ -331,7 +360,7 @@ export function createWidgetRouter(deps: WidgetRouterDeps): Router {
       runPanel =
         `<div class="run">${picker}${panels.map((p) => p.form).join('')}` +
         `<button id="runbtn">Run · ${esc(panels[0].price)}</button>` +
-        `<div id="rstatus"></div><div id="rresult" class="grid"></div></div>`
+        `<div id="rstatus"></div><div id="rbar" class="bar"><span></span></div><div id="rresult" class="grid"></div></div>`
       script = RUN_SCRIPT
     }
 

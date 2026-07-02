@@ -19,6 +19,7 @@ import type { LegatusStore } from '../../types/legatus.js'
 import type { Modorum, Modus } from '../../types/modus.js'
 import type { X402Facilitator, X402LogStore } from '../../types/x402.js'
 import type { Run } from './types.js'
+import type { RunEvent } from './runEvents.js'
 import { aditusToJsonSchema } from './aditusToJsonSchema.js'
 import { buildQuote, buildPaymentRequirements, acceptFor, type X402Config } from '../../crystal/x402Pricing.js'
 
@@ -40,6 +41,15 @@ export interface X402AgentDeps {
   accrueAgentCut: (input: {
     payoutAddress: string; priceAtomic: string; serveImpetus: bigint; sourceRef: string; agentId: string; network: string
   }) => Promise<unknown>
+  /** The run-event bus (per-runId). Present → the paid run AWAITS real completion and can
+   *  stream the run's `Progressus` phases (SSE) to the caller. Absent → only synchronous
+   *  (already-terminal) runs are served. */
+  hub?: { subscribe(runId: string, cb: (ev: RunEvent) => void): () => void; recentFor(runId: string): RunEvent[] }
+  /** Fetch the finished run (owner-scoped by the agent's animaId) for its exitus — the terminal
+   *  event carries no outputs. Required alongside `hub` for async runs. */
+  getRun?: (runId: string, ownerAnimaId: string) => Promise<Run | null>
+  /** Max ms to await an async run's completion before giving up (default 300000 = 5 min). */
+  runTimeoutMs?: number
   publicBase?: string
   /** `X402_ENABLED`. When false the endpoints 404 (feature-flagged like the legacy). */
   enabled?: boolean
@@ -76,6 +86,20 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
   }
 
   const resourceUrl = (agentId: string, name: string): string => `${base}/api/v1/x402/agents/${agentId}/spell/${name}`
+
+  /** Await an async run's terminal event via the hub, relaying every event through `onEvent`
+   *  (the SSE writer, when streaming). Subscribes BEFORE backfilling `recentFor` so no event is
+   *  missed; rejects on timeout. Resolves with the terminal RunEvent. */
+  function awaitTerminal(runId: string, onEvent?: (ev: RunEvent) => void): Promise<RunEvent> {
+    const hub = deps.hub!
+    return new Promise<RunEvent>((resolve, reject) => {
+      let done = false
+      const finish = (fn: () => void) => { if (done) return; done = true; clearTimeout(timer); off(); fn() }
+      const off = hub.subscribe(runId, (ev) => { if (done) return; onEvent?.(ev); if (ev.terminal) finish(() => resolve(ev)) })
+      const timer = setTimeout(() => finish(() => reject(new Error('run did not complete in time'))), deps.runTimeoutMs ?? 300000)
+      for (const ev of hub.recentFor(runId)) { if (done) break; onEvent?.(ev); if (ev.terminal) finish(() => resolve(ev)) }
+    })
+  }
 
   // ── GET — discover: input schema + quote + payment requirements ───────────────
   router.get('/agents/:agentId/spell/:name', async (req: Request, res: Response): Promise<void> => {
@@ -138,7 +162,8 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
       })
       if (!fresh) { fail(res, 409, 'PAYMENT_REPLAY', 'This payment has already been used'); return }
 
-      // 5. Run the agent's spell (funded by the payment).
+      // 5. Dispatch the run (funded by the payment). For real (async) runs this returns a
+      //    PENDING run; sync/fast cursors return an already-terminal one.
       let run: Run
       try {
         run = await deps.runSpell({ agentAnimaId: r.animaId, modusId: r.modus.id, aditus, grossImpetus: impetus, agentId: r.agentId })
@@ -147,14 +172,57 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
         fail(res, 502, 'EXECUTION_FAILED', `Spell execution failed: ${(err as Error).message}`)
         return
       }
+
+      // Content-negotiated live status: if the caller accepts an event stream, relay the run's
+      // real Progressus phases as SSE; otherwise long-poll to completion and return JSON.
+      const wantsSSE = (req.get('accept') ?? '').includes('text/event-stream')
+      let sseOpen = false
+      let keepalive: ReturnType<typeof setInterval> | undefined
+      const openSSE = (): void => {
+        res.setHeader('Content-Type', 'text/event-stream')
+        res.setHeader('Cache-Control', 'no-cache')
+        res.setHeader('Connection', 'keep-alive')
+        const rr = res as unknown as { flushHeaders?: () => void }
+        rr.flushHeaders?.()
+        sseOpen = true
+        keepalive = setInterval(() => res.write(': keepalive\n\n'), 15000)
+      }
+      const emit = (obj: unknown): void => { if (sseOpen) res.write('data: ' + JSON.stringify(obj) + '\n\n') }
+      const endSSE = (): void => { if (keepalive) clearInterval(keepalive); if (sseOpen) res.end() }
+
+      // 6. Resolve the terminal outcome — synchronously if already terminal, else via the hub.
+      if (run.status !== 'complete' && run.status !== 'failed') {
+        if (!deps.hub) {
+          await deps.log.recordFailed(verified.signatureHash, 'no run-event hub to await async run')
+          fail(res, 502, 'EXECUTION_FAILED', 'Run tracking unavailable'); return
+        }
+        if (wantsSSE) { openSSE(); emit({ kind: 'started', runId: run.id }) }
+        let term: RunEvent
+        try {
+          term = await awaitTerminal(run.id, wantsSSE ? emit : undefined)
+        } catch (err) {
+          await deps.log.recordFailed(verified.signatureHash, `run wait: ${(err as Error).message}`)
+          if (sseOpen) { emit({ kind: 'failed', message: (err as Error).message }); endSSE() }
+          else fail(res, 504, 'RUN_TIMEOUT', (err as Error).message)
+          return
+        }
+        // Refresh the run for its terminal status + exitus (the terminal event carries neither).
+        const fetched = deps.getRun ? await deps.getRun(run.id, r.animaId) : null
+        if (fetched) run = fetched
+        else if (term.status) run = { ...run, status: term.status }
+      } else if (wantsSSE) {
+        openSSE(); emit({ kind: 'started', runId: run.id })
+      }
+
+      // 7. Failed run → do NOT settle (payer keeps their USDC).
       if (run.status === 'failed') {
-        // Do NOT settle — the payer keeps their USDC.
         await deps.log.recordFailed(verified.signatureHash, run.failure?.code ?? 'run_failed')
-        fail(res, 502, 'EXECUTION_FAILED', run.failure?.message ?? 'Spell execution failed')
+        if (sseOpen) { emit({ kind: 'failed', message: run.failure?.message ?? 'Spell execution failed' }); endSSE() }
+        else fail(res, 502, 'EXECUTION_FAILED', run.failure?.message ?? 'Spell execution failed')
         return
       }
 
-      // 6. Settle the USDC on-chain, then skim the owner rev-share (best-effort).
+      // 8. Settle the USDC on-chain, then accrue the agent's margin cut (best-effort).
       const settlement = await deps.facilitator.settle(paymentHeader, accept)
       if (settlement.success) {
         await deps.log.recordSettled(verified.signatureHash, settlement.transaction ?? '', run.id)
@@ -166,17 +234,19 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
         sourceRef: verified.signatureHash, agentId: r.agentId, network: accept.network,
       }).catch(() => { /* the agent cut is non-fatal — the run + settle already succeeded */ })
 
-      if (settlement.transaction) res.setHeader('X-PAYMENT-RESPONSE', Buffer.from(JSON.stringify({ success: settlement.success, transaction: settlement.transaction })).toString('base64'))
-      res.status(200).json({
-        runId: run.id,
-        status: run.status,
-        outputs: run.exitus ?? null,
-        agentId: r.agentId,
-        spell: name,
+      const result = {
+        runId: run.id, status: run.status, outputs: run.exitus ?? null,
+        agentId: r.agentId, spell: name,
         x402: { settled: settlement.success, transaction: settlement.transaction ?? null },
-      })
+      }
+      if (sseOpen) { emit({ kind: 'result', ...result }); endSSE() }
+      else {
+        if (settlement.transaction) res.setHeader('X-PAYMENT-RESPONSE', Buffer.from(JSON.stringify({ success: settlement.success, transaction: settlement.transaction })).toString('base64'))
+        res.status(200).json(result)
+      }
     } catch (err) {
-      fail(res, 500, 'INTERNAL_ERROR', `Unexpected x402 error: ${(err as Error).message}`)
+      if (!res.headersSent) fail(res, 500, 'INTERNAL_ERROR', `Unexpected x402 error: ${(err as Error).message}`)
+      else res.end()
     }
   })
 

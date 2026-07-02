@@ -882,6 +882,9 @@ async function main(): Promise<void> {
           kind: 'agent',
         },
       ),
+    // Live status: await the async run + stream its real Progressus phases (SSE) to the caller.
+    hub: runHub,
+    getRun: (runId, ownerAnimaId) => crystalApi.getRun({ animaId: ownerAnimaId }, runId).catch(() => null),
     ...(process.env.PUBLIC_BASE ? { publicBase: process.env.PUBLIC_BASE } : {}),
   }))
 
