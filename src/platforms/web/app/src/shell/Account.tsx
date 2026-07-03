@@ -100,11 +100,10 @@ export function Account() {
           <button className="am-switch" onClick={switchIdentity}>
             <Ic name="shuffle" /> switch to {anon ? 'identified' : 'anonymous'}
           </button>
+          {/* Account-only actions. Profile · Settings · Preferences · Funding · Activity now live on
+              the Rail (UX handoff 2, Decision 1) — this menu keeps only what's identity-scoped and
+              the collaboration surfaces that have no Rail home yet. */}
           <div className="am-links">
-            <Link to="/profile" onClick={() => setOpen(false)}><Ic name="palette" /> Profile <span className="meta">appearance &amp; purses</span></Link>
-            <Link to="/account" onClick={() => setOpen(false)}><Ic name="settings-2" /> Account &amp; settings</Link>
-            <Link to="/preferences" onClick={() => setOpen(false)}><Ic name="sparkles" /> Preferences <span className="meta">your defaults</span></Link>
-            <Link to="/funding" onClick={() => setOpen(false)}><Ic name="wallet" /> Funding</Link>
             <Link to="/teams" onClick={() => setOpen(false)}><Ic name="users" /> Teams <span className="meta">co-own work</span></Link>
             <Link to="/sponsorships" onClick={() => setOpen(false)}><Ic name="hand-coins" /> Sponsorships <span className="meta">top up others</span></Link>
             {admin && <Link to="/admin/review" onClick={() => setOpen(false)}><Ic name="eye" /> Feed review <span className="meta">moderation</span></Link>}

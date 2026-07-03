@@ -43,12 +43,12 @@ export function Preferences() {
   // Resolve /make's current model from the caller's bindings (else the canon default).
   const makeModel = me?.bindings.find((b) => b.verb === 'make')?.modusId ?? 'flux-schnell';
 
-  const crumb = <span className="ph-crumb"><Link to="/app">you</Link> <span className="sep">/</span> <b>Preferences</b></span>;
+  const crumb = <span className="ph-crumb"><Link to="/account">Settings</Link> <span className="sep">/</span> <b>Preferences</b></span>;
   return (
     <AppShell title={crumb}>
       <div className="page"><div className="pw wide">
         <div className="pref-tabs">
-          <Link to="/app" className="pref-tab">Overview</Link>
+          <Link to="/account" className="pref-tab">Settings</Link>
           <span className="pref-tab on">Preferences</span>
           {saved && <span className="pref-saved mono" style={{ color: 'var(--good, #57c8a6)' }}>✓ saved</span>}
         </div>

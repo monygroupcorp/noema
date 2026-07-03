@@ -6,29 +6,38 @@ import { useIdentity } from '../state/identity';
 import { IDENTITY_PRIV } from '../lib/idents';
 import { Chip } from './Chip';
 
-// The single global nav (app-shell-overview.md / dashboard-spec.md): Home; Make (Chat·Canvas);
-// Library (Catalogue·Datasets); Build (Models·Collections); pinned bottom Funding · Settings ·
-// account avatar. This rail replaces every surface's ad-hoc breadcrumb. The privacy posture
-// is NOT here — it rides the top-bar posture cluster on every surface.
+// The single global nav — the production pillars that cover the whole product (UX handoff 2,
+// Decision 1): Create · Memory · Build · Publish · Identity · Account (pinned footer). "Create"
+// is the generate bucket — deliberately NOT "Make" (a protected canon verb / the default
+// text→image flow). This rail replaces every surface's ad-hoc breadcrumb. The privacy posture is
+// NOT here — it rides the top-bar posture cluster on every surface.
+// Deferred to their own specs and still reachable via /map until then: Keyring (multi-account),
+// Tee/Studio (privacy home, D8), Trace (D7). /map stays until they all have real homes.
 interface NavLeaf { to: string; ico: string; label: string }
 interface NavSection { sec?: string; items: NavLeaf[] }
 
 const NAV: NavSection[] = [
   { items: [
     { to: '/app', ico: 'home', label: 'Home' },
-    { to: '/feed', ico: 'rss', label: 'Feed' },
   ] },
-  { sec: 'Make', items: [
+  { sec: 'Create', items: [
     { to: '/chat', ico: 'message-square', label: 'Chat' },
+    { to: '/catalog', ico: 'layout-grid', label: 'Catalogue' },
     { to: '/canvas', ico: 'workflow', label: 'Canvas' },
   ] },
-  { sec: 'Library', items: [
-    { to: '/catalog', ico: 'layout-grid', label: 'Catalogue' },
-    { to: '/datasets', ico: 'database', label: 'Datasets' },
+  { sec: 'Memory', items: [
+    { to: '/space', ico: 'footprints', label: 'Space' },
   ] },
   { sec: 'Build', items: [
+    { to: '/datasets', ico: 'database', label: 'Datasets' },
     { to: '/models', ico: 'box', label: 'Models' },
     { to: '/collections', ico: 'hexagon', label: 'Collections' },
+  ] },
+  { sec: 'Publish', items: [
+    { to: '/feed', ico: 'rss', label: 'Feed' },
+  ] },
+  { sec: 'Identity', items: [
+    { to: '/profile', ico: 'circle-user', label: 'Profile' },
   ] },
 ];
 
@@ -70,15 +79,18 @@ export function Rail() {
         )}
       </nav>
 
-      {/* pinned bottom: funding · settings · the account avatar (sign-in state) */}
+      {/* pinned bottom — the Account pillar: funding · activity · settings · the identity avatar */}
       <div className="railfoot">
         <NavLink to="/funding" className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
           <span className="ico"><Ic name="wallet" /></span> Funding
         </NavLink>
+        <NavLink to="/status" className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+          <span className="ico"><Ic name="receipt-text" /></span> Activity
+        </NavLink>
         <NavLink to="/account" className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
           <span className="ico"><Ic name="settings-2" /></span> Settings
         </NavLink>
-        <Link to="/status" className="railavatar" title={`${ident.funding === 'bearer' ? 'anonymous' : ident.name} · account`}>
+        <Link to="/profile" className="railavatar" title={`${ident.funding === 'bearer' ? 'anonymous' : ident.name} · identity`}>
           <Chip d={ident} />
           <span className="ra-main">
             <span className="nm">{ident.funding === 'bearer' ? 'anonymous' : ident.name}</span>
