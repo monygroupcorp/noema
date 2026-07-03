@@ -159,9 +159,28 @@ key must NOT carry the license — both are classified and recorded separately.
 - **Admin license backfill/clearance (going-public review):** `CrystalApi.setModelLicense` (platform-
   admin only, `PUT /v1/models/:id/license`) sets a model's `license` + `commercialUse` — either an
   explicit operator decision (e.g. mark an SD3 model `'yes'` once we hold the Stability license) or
-  `reclassify:true` to re-derive from the model's recorded `provenance.base` (bulk-fix legacy imports
-  that predate classification). This is the escape hatch that keeps us protected while letting cleared
-  models list. `Intellarum.setLicense` is the store seam; `ModelCard` surfaces `license`+`commercialUse`.
+  `reclassify:true` to re-derive from the model's recorded base. This is the escape hatch that keeps us
+  protected while letting cleared models list. `Intellarum.setLicense` is the store seam; `ModelCard`
+  surfaces `license`+`commercialUse`.
+- **Backfill sweep (built 2026-07-02) — the go-public gate closure.** An ABSENT verdict is treated as
+  "not gated" (legacy passthrough), so an unclassified catalog model could slip onto the public
+  catalogue unchecked. Three pieces close that:
+  1. **Shared classifier** `classifyModelLicense({provenance,nomen,familia})` in `modelLicense.ts` —
+     one function, base-string priority `provenance.base > nomen > familia`, fail-closed to `unknown`.
+     BOTH `setModelLicense`'s `reclassify` path AND the sweep call it, so admin + sweep never disagree.
+  2. **Canonical seeds carry an explicit verdict** (`seeds/intellae.ts`, all 28) — the authoritative
+     register in code: 19 `yes`, 1 `no` (Kontext = BFL-NC), 1 `no` (klein-9B = FLUX-NC), 1 `conditional`
+     (Krea 2), 6 `unknown` (unverified audio/upscaler/fine-tunes, fail-closed). The seed nomen is often
+     too coarse for the classifier, so canonical license is AUTHORED, not swept.
+  3. **The sweep** `scripts/migrations/2026_07_backfill_intella_license.ts` — stamps every NON-canonical
+     record missing a verdict (canonical is seed-owned + re-seeded, hence skipped). Dry-run-validated
+     against `noemaplane`: the ~36 legacy `FLUX.1-dev` LoRAs correctly land `commercialUse:'no'` (NC
+     derivatives, gated off the commercial catalog until BFL-cleared). `--reclassify` forces re-derive
+     after a classifier fix; `--db`/`--prod` guards mirror the familia backfill. NOT yet run against prod.
+  - **Legacy migration reconcile:** `legacyToIntella` now derives `license`+`commercialUse` from the
+    trained-on `checkpoint` (a FLUX.1-dev-trained LoRA is a NC derivative — can't be laundered clean by
+    re-hosting), and its local `license` enum is widened from the old CC-only set to a free-form `string`
+    reconciled with `modelLicense.ts` ids (`openrail-m`/`flux-1-dev-nc`/`krea-community`/…).
 - **Training UX messaging (built):** a trained LoRA inherits its BASE's license, so `trainingFinalizer`
   classifies from `baseModel` and (a) records `license`+`commercialUse` on the Intella (the gate) and
   (b) surfaces them + a plain-language `licenseNote` on the training EXITUS/receipt — the owner is told

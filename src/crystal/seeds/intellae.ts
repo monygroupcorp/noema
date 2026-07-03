@@ -16,6 +16,8 @@ import type { Intella } from '../../types/intelligendi.js'
 export const INTELLA_FLUX_SCHNELL: Intella = {
   id: 'intella.flux-schnell-fp8-scaled',
   nomen: 'FLUX.1 Schnell (fp8 scaled)',
+  license: 'apache-2.0',
+  commercialUse: 'yes',
   genus: 'model',
   architectura: 'dit',
   // family — the LoRA-compat key (NOT architectura, which is the structural 'dit')
@@ -38,6 +40,8 @@ export const INTELLA_FLUX_SCHNELL: Intella = {
 export const INTELLA_FLUX_VAE: Intella = {
   id: 'intella.flux-vae',
   nomen: 'FLUX VAE (ae.safetensors)',
+  license: 'apache-2.0',            // ships with FLUX.1-schnell (Apache 2.0)
+  commercialUse: 'yes',
   genus: 'embedding',
   architectura: 'vae',
   parametri: 0,
@@ -64,6 +68,8 @@ export const INTELLA_FLUX_VAE: Intella = {
 export const INTELLA_T5XXL: Intella = {
   id: 'intella.t5xxl-fp16',
   nomen: 'T5-XXL FP16 (CLIP encoder)',
+  license: 'apache-2.0',            // Google T5
+  commercialUse: 'yes',
   genus: 'embedding',
   architectura: 'transformer',
   parametri: 11_000_000_000,
@@ -90,6 +96,8 @@ export const INTELLA_T5XXL: Intella = {
 export const INTELLA_CLIP_L: Intella = {
   id: 'intella.clip-l',
   nomen: 'CLIP-L (text encoder)',
+  license: 'mit',                   // OpenAI CLIP
+  commercialUse: 'yes',
   genus: 'embedding',
   architectura: 'transformer',
   parametri: 123_000_000,
@@ -121,6 +129,8 @@ export const INTELLA_CLIP_L: Intella = {
 export const INTELLA_SMOLLM2_135M: Intella = {
   id: 'intella.smollm2-135m-instruct',
   nomen: 'SmolLM2 135M Instruct (Q8)',
+  license: 'apache-2.0',            // HuggingFace SmolLM2
+  commercialUse: 'yes',
   genus: 'model',
   architectura: 'gguf',
   parametri: 135_000_000,
@@ -146,6 +156,8 @@ export const INTELLA_SMOLLM2_135M: Intella = {
 export const INTELLA_SD15: Intella = {
   id: 'intella.sd15-v1-5',
   nomen: 'Stable Diffusion 1.5 (pruned emaonly)',
+  license: 'openrail-m',           // CreativeML OpenRAIL-M (flow-down use restrictions)
+  commercialUse: 'yes',
   genus: 'model',
   architectura: 'sd15',
   // family — the LoRA-compat key. Carries the SAME string as compatible LoRAs
@@ -174,6 +186,8 @@ export const INTELLA_SD15: Intella = {
 export const INTELLA_LORA_ARMORED_DRESS: Intella = {
   id: 'intella.lora.armored-dress',
   nomen: 'Armored Dress (v2.0)',
+  license: 'openrail-m',           // SD1.5 derivative → inherits base license
+  commercialUse: 'yes',
   genus: 'lora',
   architectura: 'lora',
   parametri: 0,
@@ -213,6 +227,8 @@ export const INTELLA_LORA_ARMORED_DRESS: Intella = {
 export const INTELLA_SDXL_BASE: Intella = {
   id: 'intella.sdxl-base-1-0',
   nomen: 'Stable Diffusion XL Base 1.0',
+  license: 'openrail-m',           // CreativeML OpenRAIL-M (flow-down use restrictions)
+  commercialUse: 'yes',
   genus: 'model',
   architectura: 'sdxl',
   // family — the LoRA-compat key (SDXL LoRAs carry the same 'sdxl' string).
@@ -239,6 +255,8 @@ export const INTELLA_SDXL_BASE: Intella = {
 export const INTELLA_CHROMA: Intella = {
   id: 'intella.chroma-unlocked-v35',
   nomen: 'Chroma (unlocked v35)',
+  license: 'apache-2.0',
+  commercialUse: 'yes',
   genus: 'model',
   architectura: 'dit',
   familia: 'chroma',
@@ -264,6 +282,8 @@ export const INTELLA_CHROMA: Intella = {
 export const INTELLA_FLUX_KONTEXT_DEV: Intella = {
   id: 'intella.flux-kontext-dev',
   nomen: 'FLUX.1 Kontext [dev] (fp8 scaled)',
+  license: 'flux-1-dev-nc',        // BFL Non-Commercial — NOT catalog-eligible without a BFL license
+  commercialUse: 'no',
   genus: 'model',
   architectura: 'dit',
   familia: 'flux',
@@ -296,6 +316,8 @@ export const INTELLA_FLUX_KONTEXT_DEV: Intella = {
 export const INTELLA_FLUX2_KLEIN_9B: Intella = {
   id: 'intella.flux2-klein-9b',
   nomen: 'FLUX.2 Klein 9B (fp8)',
+  license: 'flux-2-dev-nc',        // ONLY klein 4B is Apache; 9B is the FLUX Non-Commercial License (see modelLicense.ts)
+  commercialUse: 'no',
   genus: 'model',
   architectura: 'dit',
   familia: 'flux2',
@@ -318,6 +340,8 @@ export const INTELLA_FLUX2_KLEIN_9B: Intella = {
 export const INTELLA_QWEN3_8B_FLUX2: Intella = {
   id: 'intella.qwen3-8b-flux2',
   nomen: 'Qwen3 8B (FLUX.2 text encoder, fp8 mixed)',
+  license: 'apache-2.0',           // Qwen3 (Apache 2.0)
+  commercialUse: 'yes',
   genus: 'embedding',
   architectura: 'transformer',
   parametri: 8_000_000_000,
@@ -343,6 +367,8 @@ export const INTELLA_QWEN3_8B_FLUX2: Intella = {
 export const INTELLA_QWEN3_4B_FLUX2: Intella = {
   id: 'intella.qwen3-4b-flux2',
   nomen: 'Qwen3 4B (FLUX.2 Klein 4B text encoder)',
+  license: 'apache-2.0',           // Qwen3 (Apache 2.0)
+  commercialUse: 'yes',
   genus: 'embedding',
   architectura: 'transformer',
   parametri: 4_000_000_000,
@@ -364,6 +390,8 @@ export const INTELLA_QWEN3_4B_FLUX2: Intella = {
 export const INTELLA_FLUX2_VAE_FULL: Intella = {
   id: 'intella.flux2-vae-full-encoder',
   nomen: 'FLUX.2 VAE (full encoder, small decoder)',
+  license: 'apache-2.0',           // ships with FLUX.2 Klein (Apache 2.0)
+  commercialUse: 'yes',
   genus: 'embedding',
   architectura: 'vae',
   parametri: 0,
@@ -396,6 +424,8 @@ export const INTELLA_FLUX2_VAE_FULL: Intella = {
 export const INTELLA_ZIMAGE_TURBO: Intella = {
   id: 'intella.z-image-turbo',
   nomen: 'Z-Image Turbo (bf16)',
+  license: 'apache-2.0',
+  commercialUse: 'yes',
   genus: 'model',
   architectura: 'dit',
   familia: 'zimage',
@@ -423,6 +453,8 @@ export const INTELLA_ZIMAGE_TURBO: Intella = {
 export const INTELLA_QWEN3_4B_ZIMAGE: Intella = {
   id: 'intella.qwen3-4b',
   nomen: 'Qwen3 4B (Z-Image text encoder)',
+  license: 'apache-2.0',           // Qwen3 (Apache 2.0)
+  commercialUse: 'yes',
   genus: 'embedding',
   architectura: 'transformer',
   parametri: 4_000_000_000,
@@ -458,6 +490,8 @@ export const INTELLA_QWEN3_4B_ZIMAGE: Intella = {
 export const INTELLA_KREA2_TURBO: Intella = {
   id: 'intella.krea-2-turbo',
   nomen: 'Krea 2 Turbo (fp8 scaled)',
+  license: 'krea-community',        // Krea 2 Community — commercial only under the <$1M-revenue threshold
+  commercialUse: 'conditional',
   genus: 'model',
   architectura: 'dit',
   familia: 'krea2',
@@ -485,6 +519,8 @@ export const INTELLA_KREA2_TURBO: Intella = {
 export const INTELLA_QWEN3_VL_4B_KREA: Intella = {
   id: 'intella.qwen3-vl-4b',
   nomen: 'Qwen3-VL 4B (Krea 2 text encoder, fp8 scaled)',
+  license: 'apache-2.0',           // Qwen3-VL (Apache 2.0)
+  commercialUse: 'yes',
   genus: 'embedding',
   architectura: 'transformer',
   parametri: 4_000_000_000,
@@ -511,6 +547,8 @@ export const INTELLA_QWEN3_VL_4B_KREA: Intella = {
 export const INTELLA_QWEN_IMAGE_VAE: Intella = {
   id: 'intella.qwen-image-vae',
   nomen: 'Qwen-Image VAE',
+  license: 'apache-2.0',           // Qwen-Image (Apache 2.0)
+  commercialUse: 'yes',
   genus: 'embedding',
   architectura: 'vae',
   parametri: 0,
@@ -540,6 +578,8 @@ export const INTELLA_QWEN_IMAGE_VAE: Intella = {
 export const INTELLA_UPSCALE_ULTRASHARP: Intella = {
   id: 'intella.upscale-4x-ultrasharp',
   nomen: '4x-UltraSharp (ESRGAN upscaler)',
+  license: 'unknown',              // upscaler license unverified — fail-closed pending clearance
+  commercialUse: 'unknown',
   genus: 'model',
   architectura: 'esrgan',
   parametri: 0,
@@ -568,6 +608,8 @@ export const INTELLA_UPSCALE_ULTRASHARP: Intella = {
 export const INTELLA_QWEN3_VL_8B: Intella = {
   id: 'intella.qwen3-vl-8b',
   nomen: 'Qwen3-VL 8B Instruct',
+  license: 'apache-2.0',           // Qwen3-VL (Apache 2.0)
+  commercialUse: 'yes',
   genus: 'model',
   architectura: 'qwen3-vl',
   parametri: 8_000_000_000,
@@ -588,6 +630,8 @@ export const INTELLA_QWEN3_VL_8B: Intella = {
 export const INTELLA_MOSS_MUSIC_8B: Intella = {
   id: 'intella.moss-music-8b',
   nomen: 'MOSS-Music 8B Instruct',
+  license: 'unknown',              // MOSS-Music license unverified — fail-closed pending clearance
+  commercialUse: 'unknown',
   genus: 'model',
   architectura: 'qwen3-audio',   // Qwen3-8B backbone + audio encoder
   parametri: 9_100_000_000,
@@ -608,6 +652,8 @@ export const INTELLA_MOSS_MUSIC_8B: Intella = {
 export const INTELLA_SHOTVL_7B: Intella = {
   id: 'intella.shotvl-7b',
   nomen: 'ShotVL 7B (cinematography)',
+  license: 'unknown',              // third-party Qwen2.5-VL fine-tune; own terms unverified — fail-closed
+  commercialUse: 'unknown',
   genus: 'model',
   architectura: 'qwen2.5-vl',   // fine-tune of Qwen2.5-VL-7B-Instruct
   parametri: 8_000_000_000,
@@ -632,6 +678,8 @@ export const INTELLA_SHOTVL_7B: Intella = {
 export const INTELLA_HEARTMULA_GEN: Intella = {
   id: 'intella.heartmula-gen',
   nomen: 'HeartMuLa Gen (config + tokenizer)',
+  license: 'unknown',              // HeartMuLa license unverified — fail-closed pending clearance
+  commercialUse: 'unknown',
   genus: 'model',
   architectura: 'heartmula',
   parametri: 0,
@@ -647,6 +695,8 @@ export const INTELLA_HEARTMULA_GEN: Intella = {
 export const INTELLA_HEARTMULA_3B: Intella = {
   id: 'intella.heartmula-3b',
   nomen: 'HeartMuLa 3B',
+  license: 'unknown',              // HeartMuLa license unverified — fail-closed pending clearance
+  commercialUse: 'unknown',
   genus: 'model',
   architectura: 'heartmula',
   parametri: 4_000_000_000,
@@ -662,6 +712,8 @@ export const INTELLA_HEARTMULA_3B: Intella = {
 export const INTELLA_HEARTCODEC: Intella = {
   id: 'intella.heartcodec',
   nomen: 'HeartCodec (audio decoder)',
+  license: 'unknown',              // HeartMuLa stack — license unverified — fail-closed pending clearance
+  commercialUse: 'unknown',
   genus: 'embedding',
   architectura: 'codec',
   parametri: 0,
@@ -680,6 +732,8 @@ export const INTELLA_HEARTCODEC: Intella = {
 export const INTELLA_FLUX2_KLEIN_4B: Intella = {
   id: 'intella.flux2-klein-4b',
   nomen: 'FLUX.2 Klein 4B (fp8)',
+  license: 'apache-2.0',           // FLUX.2 Klein 4B is Apache 2.0 (ADR-0012)
+  commercialUse: 'yes',
   genus: 'model',
   architectura: 'dit',
   familia: 'flux2',
@@ -706,6 +760,8 @@ export const INTELLA_FLUX2_KLEIN_4B: Intella = {
 export const INTELLA_IMPRESSTATION_KLEIN: Intella = {
   id: 'intella.impresstation-klein',
   nomen: 'stationthis (PS2 low-poly) · FLUX.2 Klein LoRA',
+  license: 'apache-2.0',           // our own LoRA on Klein 4B (Apache 2.0); noema owns it
+  commercialUse: 'yes',
   genus: 'lora',
   architectura: 'lora',
   familia: 'flux2',

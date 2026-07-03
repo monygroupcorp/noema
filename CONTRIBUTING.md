@@ -2,6 +2,14 @@
 
 Welcome!  We use **Docs-as-Code** to keep architecture, roadmap, and code in sync.
 
+## Contributor License Agreement (required)
+
+Before your first pull request can be merged, you must agree to our
+**[Contributor License Agreement](CLA.md)**. You keep ownership of your work; the CLA grants
+NOEMA a broad license (including the right to relicense) so the project can run an open-core
+/ dual-licensing model. Agreement is a one-time step covering all your future contributions —
+a CLA check on your PR will prompt you to confirm.
+
 ## Quick Start
 1. Fork & clone the repo
 2. Create a branch: `git checkout -b feature/your-change`

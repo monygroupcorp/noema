@@ -161,6 +161,14 @@ chain, `contentHash`). Agent defaults/bindings reuse `Consuetudinum` (already Au
 The legacy git-like template `getSyncStatus`/`merge`/`propagate` is **replaced** by crystal's
 re-derive-and-bump-`versio` model (content-hash + `fonte` already give provenance).
 
+**Fork-once is intentional (owner-confirmed 2026-07-02), not a gap.** An agent gets a private
+fork it owns and can modify; it does **not** auto-inherit later master-template revisions. The
+git-style cascade merge (rebase agent customizations onto a new template rev) is deliberately NOT
+built — it is complex and poorly scoped for the value. If cross-workspace propagation is ever
+wanted, the lightweight path is a *transfer-canvas-items* primitive (copy specific steps/bindings
+between workspaces on demand), NOT a background merge/propagate worker. Master improvements reach
+**newly provisioned** agents only; existing forks keep their frozen copy (`fonte` records lineage).
+
 ### 7. Presentation = the `StationThis` widget SDK over a feed+appearance shell.
 
 The client integrates the human-facing surface via a **script-injected SDK**, not a raw

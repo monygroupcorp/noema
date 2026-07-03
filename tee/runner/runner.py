@@ -13,6 +13,9 @@ Environment:
   WG_INTERFACE         WireGuard interface name (default: wg-tee-server)
   WG_ENDPOINT          public endpoint returned to peers (default: 127.0.0.1:51820)
   ATTESTATION_STUB     set to "true" to skip hardware attestation (local dev)
+  RUNNER_TOKEN         per-session secret from the platform — echoed on every
+                       callback (platform drops unauthenticated ones) and required
+                       as a Bearer token on the /debug/* endpoints. Empty = local dev.
 """
 
 import asyncio
@@ -40,6 +43,7 @@ RUNNER_BIND       = os.environ.get("RUNNER_BIND", "10.13.0.1:7998")
 WG_INTERFACE      = os.environ.get("WG_INTERFACE", "wg-tee-server")
 WG_ENDPOINT       = os.environ.get("WG_ENDPOINT", "127.0.0.1:51820")
 ATTESTATION_STUB  = os.environ.get("ATTESTATION_STUB", "true").lower() == "true"
+RUNNER_TOKEN      = os.environ.get("RUNNER_TOKEN", "")
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", "60"))
 
 session_start = time.time()
@@ -81,13 +85,13 @@ async def signal_ready():
         wg_log = open("/tmp/wg-server.log").read()[-4000:]
     except Exception:
         wg_log = "(wg-server.log not found)"
-    payload = {
+    payload = _with_token({
         "sessionId": SESSION_ID,
         "endpoint": WG_ENDPOINT,
         "wgPublicKey": _read_wg_pubkey(),
         "attestation": "stub" if ATTESTATION_STUB else await _get_attestation(),
         "wgServerLog": wg_log,
-    }
+    })
     async with aiohttp.ClientSession() as s:
         async with s.post(f"{PLATFORM_CALLBACK}/runner/ready", json=payload) as r:
             log.info(f"ready → platform: {r.status}")
@@ -95,7 +99,7 @@ async def signal_ready():
 
 async def signal_heartbeat() -> bool:
     hours = (time.time() - session_start) / 3600
-    payload = {"sessionId": SESSION_ID, "gpuHours": round(hours, 6), "status": "active"}
+    payload = _with_token({"sessionId": SESSION_ID, "gpuHours": round(hours, 6), "status": "active"})
     try:
         async with aiohttp.ClientSession() as s:
             async with s.post(f"{PLATFORM_CALLBACK}/runner/heartbeat", json=payload,
@@ -108,7 +112,7 @@ async def signal_heartbeat() -> bool:
 
 async def signal_ended(reason: str):
     hours = (time.time() - session_start) / 3600
-    payload = {"sessionId": SESSION_ID, "gpuHours": round(hours, 6), "status": reason}
+    payload = _with_token({"sessionId": SESSION_ID, "gpuHours": round(hours, 6), "status": reason})
     async with aiohttp.ClientSession() as s:
         await s.post(f"{PLATFORM_CALLBACK}/runner/ended", json=payload)
     log.info(f"ended: {reason}")
@@ -124,13 +128,19 @@ async def signal_status(phase: str, target: str = None, message: str = None):
     prog = {"phase": phase}
     if target:  prog["target"] = target
     if message: prog["message"] = message
-    payload = {"v": 1, "sessionId": SESSION_ID, "progressus": prog}
+    payload = _with_token({"v": 1, "sessionId": SESSION_ID, "progressus": prog})
     try:
         async with aiohttp.ClientSession() as s:
             await s.post(f"{PLATFORM_CALLBACK}/runner/status", json=payload,
                          timeout=aiohttp.ClientTimeout(total=10))
     except Exception as e:
         log.warning(f"status post failed ({phase}): {e} — continuing")
+
+
+def _with_token(payload: dict) -> dict:
+    if RUNNER_TOKEN:
+        payload["runnerToken"] = RUNNER_TOKEN
+    return payload
 
 
 async def _get_attestation() -> str:
@@ -324,8 +334,20 @@ async def health():
     return {"ok": True}
 
 
+def _require_debug_auth(request: Request):
+    """The /debug/* endpoints are reachable through the pod's public :8080 — WG metadata,
+    not payload plaintext, but not for strangers on a privacy product. When the platform
+    issued a RUNNER_TOKEN, require it as a Bearer token (the platform's wglog proxy sends
+    it). No token (local dev) = open."""
+    if not RUNNER_TOKEN:
+        return
+    if request.headers.get("authorization", "") != f"Bearer {RUNNER_TOKEN}":
+        raise HTTPException(401, "debug endpoints require the session runner token")
+
+
 @app.get("/debug/wglog")
-async def debug_wglog():
+async def debug_wglog(request: Request):
+    _require_debug_auth(request)
     try:
         return {"log": open("/tmp/wg-server.log").read()}
     except Exception as e:
@@ -333,7 +355,8 @@ async def debug_wglog():
 
 
 @app.get("/debug/netstat")
-async def debug_netstat():
+async def debug_netstat(request: Request):
+    _require_debug_auth(request)
     import subprocess
     out = subprocess.run(["ss", "-ulnp"], capture_output=True, text=True).stdout
     return {"ss_udp": out}

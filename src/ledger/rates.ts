@@ -15,6 +15,20 @@
 export const IMPETUS_USD_RATE = 0.000337
 
 /**
+ * Micro-USD per impetus point — the integer form of IMPETUS_USD_RATE for exact bigint conversion
+ * of USD revenue → credits at the deposit boundary. 1 impetus = $0.000337 = 337 micro-USD. This
+ * is the CANONICAL buy/spend rate (== the published ratesApi rate, 2967 pts/USD); do NOT use the
+ * legacy 0.00037 straggler (2703 pts/USD — a typo; the arcanum weiToCredits path was reconciled to
+ * this canonical rate + funding on 2026-07-02).
+ */
+export const MICRO_USD_PER_IMPETUS = 337n
+
+/** Convert a micro-USD amount to impetus points (floor). The buy-side conversion. */
+export function usdMicroToImpetus(usdMicro: bigint): bigint {
+  return usdMicro / MICRO_USD_PER_IMPETUS
+}
+
+/**
  * Flat per-guest-gen surcharge for landing on a warm pod (skip cold start).
  * Set platform-wide, not derived from this specific pod's accounting — guests
  * pay "the going rate to skip cold start anywhere," predictable across pods.

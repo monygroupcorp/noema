@@ -57,6 +57,13 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('deposita').createIndex({ id: 1 }, { unique: true }),
     db.collection('deposita').createIndex({ transactioHash: 1, chainId: 1 }, { sparse: true }),
 
+    // reditus — USD revenue book (ADR-0013). The UNIQUE PARTIAL index on depositumId is the
+    // deposit-booking idempotency guard (only over rows that have one; fiat rows omit it). The
+    // natum index bounds the trailing-12mo revenue range-scan. Mirrors MongoRedituum.ensureIndexes().
+    db.collection('reditus').createIndex({ id: 1 }, { unique: true }),
+    db.collection('reditus').createIndex({ depositumId: 1 }, { unique: true, partialFilterExpression: { depositumId: { $exists: true } } }),
+    db.collection('reditus').createIndex({ natum: 1 }),
+
     // solutiones — payment settlements
     db.collection('solutiones').createIndex({ id: 1 }, { unique: true }),
 

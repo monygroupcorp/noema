@@ -5,9 +5,9 @@
 
 ## Hero
 
-**Headline:** Private compute. Mathematically guaranteed.
+**Headline:** Private compute. You hold the keys.
 
-**Subhead:** We built the infrastructure so that privacy isn't a promise — it's an architectural fact.
+**Subhead:** We built the infrastructure so that privacy isn't a promise — it's an architectural fact: your session travels through a tunnel we're not part of.
 
 ---
 
@@ -35,7 +35,7 @@ When we ship hardware attestation, you will be able to cryptographically verify 
 
 Noema is a private AI compute platform. We provide:
 
-- **Private compute sessions** — TEE-isolated GPU pods, WireGuard-tunneled, platform-blind
+- **Private compute sessions** — single-tenant GPU pods, WireGuard-tunneled, platform-blind. A hardware-sealed tier (confidential compute with browser-verified attestation) is in development.
 - **AI generation** — text, image, video, audio, via best-in-class open-source and frontier models
 - **A creative workspace** — a typed, composable canvas for building multi-step AI flows
 - **Anonymous billing** — zero-knowledge credit proofs; no identity required
@@ -54,7 +54,7 @@ We are a small team of engineers and researchers. We believe privacy is an engin
 
 ## Transparency
 
-Our TEE runner is open source. The image hash used for hardware attestation is published. The zero-knowledge circuit for Bursa credits is open source and has undergone a trusted setup ceremony.
+Our tunnel runner is open source. When the hardware-sealed tier ships, the reproducible enclave measurement used for attestation will be published so anyone can recompute and verify it. The zero-knowledge circuit for Bursa credits is open source and has undergone a trusted setup ceremony.
 
 If you find a discrepancy between what we say we do and what the code does, we want to know: [SECURITY EMAIL]
 

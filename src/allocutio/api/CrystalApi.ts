@@ -29,7 +29,7 @@ import type { Intelligens, IntelligentiumStore, IntelligensGenus, Intellarum, In
 import type { HospitiumStore } from '../../types/hospitium.js'
 import type { MateriaStore } from '../../types/materia.js'
 import type { Conductor, StudioHandle, ConduceOpts } from '../../crystal/Conductor.js'
-import type { TeeProvisioner } from '../../crystal/TeeProvisioner.js'
+import type { TeePodProvisioner } from '../../crystal/TeePodProvisioner.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { Actum, ComputeStrategy, GpuClass, ModelRef } from '../../types/actum.js'
 import type { Inceptio } from '../../types/cursus.js'
@@ -57,6 +57,9 @@ import { denyModerationGate } from '../../crystal/ModerationGate.js'
 import type { VerdictCache } from '../../crystal/VerdictCache.js'
 import { contentKey, toCachedVerdict, fromCachedVerdict } from '../../crystal/VerdictCache.js'
 import type { ScanFeeCharger } from '../../crystal/ScanFeeCharger.js'
+import type { CsamReviewReporter } from '../../crystal/CsamReviewReporter.js'
+import { allMediaUrls } from '../../crystal/BucketAdapter.js'
+import { makeLogger } from '../../lib/logger.js'
 import type { PromptGuard, PromptVerdict } from '../../crystal/PromptGuard.js'
 import { permissivePromptGuard } from '../../crystal/PromptGuard.js'
 import type { ModelImporter } from '../../crystal/ModelImporter.js'
@@ -71,7 +74,12 @@ import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 import { provenanceHash } from '../../crystal/provenance.js'
 import { rarityReport, type RarityReport } from '../../crystal/rarityReport.js'
 
+const log = makeLogger('crystal-api')
 const PLATFORM_ANIMA_ID = process.env.PLATFORM_ANIMA_ID ?? 'platform'
+/** How long a provisioned TEE session may sit without /runner/ready before the
+ *  watchdog fails it and kills the pod. Covers the confidential-CVM multi-minute
+ *  boot and up to 3 RunPod WS-probe re-provision rounds (~5 min each). */
+const TEE_READY_WATCHDOG_MS = Number(process.env.TEE_READY_WATCHDOG_MS ?? 20 * 60_000)
 
 /** The ring slices CrystalApi composes. */
 export interface CrystalApiDeps {
@@ -124,6 +132,10 @@ export interface CrystalApiDeps {
   /** Per-scan fee charger (spec §7) — forwards the paid-classifier cost to the publisher
    *  on a billable, non-cached scan. Absent → no fee (the config-knob default). */
   scanFeeCharger?: ScanFeeCharger
+  /** Reviewer-confirmed-CSAM NCMEC report seam (spec §4) — filed by `confirmCsamAndReport`
+   *  when an admin affirmatively confirms a held item is CSAM. Absent → the confirm action
+   *  still rejects but logs LOUDLY that no report was filed (never a silent miss). */
+  csamReviewReporter?: CsamReviewReporter
   /** Input-side CSAM prompt guard (generation boundary, fail-open). Absent → permissive. */
   promptGuard?: PromptGuard
   /** Identity store — reads `Anima.publicatio` to default a publish from the caller's prefs. */
@@ -138,8 +150,10 @@ export interface CrystalApiDeps {
   secretWriter?: SecretWriter
   /** BYO-secret presence (`has` only). Backs `getMe.secrets`. Absent → all 'absent'. */
   secretPresence?: SecretPresence
-  /** RunPod pod provisioner for TEE private compute sessions. Absent → local dev (manual runner). */
-  teeProvisioner?: TeeProvisioner
+  /** Pod provisioner for TEE private compute sessions — RunPod (TeeProvisioner) or the
+   *  confidential-CVM backend (ConfidentialPodClient), picked in container.ts.
+   *  Absent → local dev (manual runner). */
+  teeProvisioner?: TeePodProvisioner
   /** Per-asset USD FMV oracle — backs `depositQuote`. THE SAME instance the deposit webhook uses,
    *  so a quote's `pointsQuoted` equals what the webhook credits. Absent → deposit quote 503. */
   pricer?: AssetPricer
@@ -869,6 +883,53 @@ export class CrystalApi {
     const e = await editiones.find(id)
     if (!e || e.reviewOutcome !== 'pending') throw Errors.notFoundEdition(id)
     const updated = await editiones.update(id, { status: 'rejected', reviewOutcome: 'rejected' })
+    return toEdition(updated)
+  }
+
+  /**
+   * CONFIRM a held publication as CSAM (spec §4) — the human-review path's terminal
+   * action, and the thing that makes review a Thorn-INDEPENDENT adjudicator. PLATFORM-
+   * ADMIN ONLY. It (1) REJECTS the content (never goes live) and (2) files a NCMEC
+   * CyberTipline report via the injected `csamReviewReporter` — an EXPLICIT human
+   * confirmation is "actual knowledge" (18 U.S.C. §2258A), so the report is a duty, not
+   * an option. This is the ONLY path that reports from review; a plain `reject` never
+   * reports (§0-A). A report failure does NOT un-reject — the content stays rejected and
+   * the failure is logged LOUDLY (a lost report is investigable; live unsafe content is not).
+   *
+   * NOTE: with the deferred reporter, the report is ASSEMBLED + PRESERVED but not
+   * LIVE-submitted to NCMEC until an ESP account exists (Track B2/C4). `submitted` in the
+   * result reflects that.
+   */
+  async confirmCsamAndReport(auctor: AuctorKey, id: string): Promise<Edition> {
+    this._assertPlatformAdmin(auctor)
+    const editiones = this.deps.editiones
+    if (!editiones) throw Errors.notFoundEdition(id)
+    const e = await editiones.find(id)
+    if (!e || e.reviewOutcome !== 'pending') throw Errors.notFoundEdition(id)
+
+    // Reject FIRST — the content must not go live regardless of the report outcome.
+    const updated = await editiones.update(id, { status: 'rejected', reviewOutcome: 'rejected' })
+
+    const reporter = this.deps.csamReviewReporter
+    if (!reporter) {
+      log.error('confirmCsamAndReport: content REJECTED but NO CsamReviewReporter configured — the mandated NCMEC report was NOT filed. Configure the compliance module + ESP.', { editioId: e.id })
+      return toEdition(updated)
+    }
+    try {
+      const urls = allMediaUrls(await this._artifactOutput(e.artifactRef))
+      const out = await reporter.reportConfirmed({
+        editioId: e.id,
+        artifact: { kind: e.artifactRef.kind, id: e.artifactRef.id },
+        uploader: e.by,
+        urls,
+        reviewedBy: 'animaId' in auctor ? auctor.animaId : PLATFORM_ANIMA_ID,
+        confirmedAt: new Date().toISOString(),
+      })
+      log.warn('CSAM confirmed by reviewer — CyberTipline report assembled', { editioId: e.id, reportIds: out.reportIds, submitted: out.submitted })
+    } catch (err) {
+      // Content stays rejected; a report loss is a loud, investigable event.
+      log.error('confirmCsamAndReport: report FAILED — content still rejected, report may be lost — investigate immediately', { editioId: e.id, error: err instanceof Error ? err.message : String(err) })
+    }
     return toEdition(updated)
   }
 
@@ -1736,6 +1797,10 @@ export class CrystalApi {
     if (budget <= 0n) throw Errors.insufficientSigna({ available: balance.toString() })
 
     const sessionId = randomUUID()
+    // Per-session secret injected into the pod; the runner echoes it on every callback
+    // and spoofed /runner/* posts (which can move real pod billing) are dropped.
+    // Local dev (no provisioner) skips it — a manually started runner can't know it.
+    const runnerToken = this.deps.teeProvisioner ? randomUUID() : undefined
     this.teeSessions.set(sessionId, {
       sessionId,
       auctor,
@@ -1744,6 +1809,7 @@ export class CrystalApi {
       gpuClass: opts.gpuClass,
       budgetImpetus: budget,
       wgClientPublicKey: opts.wgClientPublicKey,
+      ...(runnerToken ? { runnerToken } : {}),
       ...(opts.costPerHrUsd !== undefined ? { costPerHrUsd: opts.costPerHrUsd } : {}),
       wsProbeAttempts: 0,
       lastBilledGpuHours: 0,
@@ -1755,11 +1821,11 @@ export class CrystalApi {
       // Fire-and-forget: pod boot is async; session transitions to 'ready' via /runner/ready callback.
       // onPodCreated sets podId immediately after _startPod() so that when the runner/ready callback
       // arrives (while _waitForRuntime is still polling), session.podId is already set and
-      // handleRunnerReady picks the correct RunPod proxy URL instead of the localhost fallback.
+      // handleRunnerReady picks the correct provisioner ingress instead of the localhost fallback.
       this.deps.teeProvisioner.provision(sessionId, opts.wgClientPublicKey, (podId) => {
         const s = this.teeSessions.get(sessionId)
         if (s) s.podId = podId
-      }).then(result => {
+      }, runnerToken).then(result => {
         const s = this.teeSessions.get(sessionId)
         if (!s) return
         s.podId = result.podId
@@ -1769,6 +1835,25 @@ export class CrystalApi {
         if (s) { s.status = 'ended'; s.phase = 'failed'; s.error = String(err) }
         console.error('[tee] pod provision failed', { sessionId, err: String(err) })
       })
+
+      // Ready watchdog: the pod can reach 'running' and then die guest-side (IMDS miss,
+      // runner crash) without ever calling /runner/ready — no heartbeat means budget
+      // enforcement never engages, so the pod would bill forever. If the session is
+      // still 'provisioning' at the deadline, fail it and kill the pod. Generous window:
+      // covers the CVM multi-minute boot AND up to 3 RunPod WS-probe re-provisions.
+      const watchdog = setTimeout(() => {
+        const s = this.teeSessions.get(sessionId)
+        if (!s || s.status !== 'provisioning') return
+        s.status = 'ended'
+        s.phase = 'failed'
+        s.error = 'runner never became ready — pod terminated'
+        console.error('[tee] ready watchdog fired — terminating pod', { sessionId, podId: s.podId })
+        if (s.podId) {
+          this.deps.teeProvisioner!.terminate(s.podId).catch(err =>
+            console.warn('[tee] watchdog pod terminate failed', { sessionId, podId: s.podId, err: String(err) }))
+        }
+      }, TEE_READY_WATCHDOG_MS)
+      watchdog.unref?.()
     }
     // Without teeProvisioner (local dev): start runner.py manually with SESSION_ID matching sessionId.
 
@@ -1792,6 +1877,51 @@ export class CrystalApi {
     }
   }
 
+  /**
+   * Proxy the pod's token-gated `/debug/wglog` over the platform (avoids CORS; the
+   * per-session runner token never reaches the browser). Owner-scoped. Null when the
+   * session has no reachable proxy URL yet.
+   */
+  async fetchTeeWglog(auctor: AuctorKey, sessionId: string, tail?: string): Promise<string | null> {
+    const session = this.teeSessions.get(sessionId)
+    if (!session || !_auctorMatch(session.auctor, auctor)) throw Errors.notFoundStudio(sessionId)
+    if (!session.proxyUrl) return null
+    const httpBase = session.proxyUrl
+      .replace(/^socks5\+wss:\/\//, 'https://')
+      .replace(/^socks5\+ws:\/\//, 'http://')
+      .replace(/\?.*$/, '')
+      .replace(/\/$/, '')
+    const qs = tail ? `?tail=${encodeURIComponent(tail)}` : ''
+    const res = await fetch(httpBase + '/debug/wglog' + qs, {
+      ...(session.runnerToken ? { headers: { 'Authorization': `Bearer ${session.runnerToken}` } } : {}),
+    })
+    return res.text()
+  }
+
+  /**
+   * Callbacks that can move a live pod's billing must carry the per-session token the
+   * pod was provisioned with. Sessions without one (local dev) skip the check.
+   *
+   * Grace + ratchet (deploy-order decoupling): a runner image published before the token
+   * existed never echoes it, so a tokenless callback is TOLERATED — the same exposure as
+   * before the token shipped (unguessable UUID sessionId) — until the pod proves it knows
+   * the token once; from then on the session is strict. A present-but-wrong token is
+   * always dropped. Remove the grace path once only token-echoing tee-runner images exist.
+   */
+  private _runnerTokenOk(session: TeeSession, token: string | undefined, kind: string): boolean {
+    if (!session.runnerToken) return true   // local dev — no token was issued
+    if (token === session.runnerToken) {
+      session.runnerTokenConfirmed = true
+      return true
+    }
+    if (token === undefined && !session.runnerTokenConfirmed) {
+      console.warn('[tee] tokenless runner callback tolerated (legacy runner image — rebuild tee-runner to enforce)', { sessionId: session.sessionId, kind })
+      return true
+    }
+    console.warn('[tee] runner callback with bad token — dropped', { sessionId: session.sessionId, kind })
+    return false
+  }
+
   async handleRunnerReady(signal: RunnerReadySignal): Promise<void> {
     console.info('[tee] runner ready', { sessionId: signal.sessionId, wgKey: signal.wgPublicKey?.slice(0, 12) })
     if (signal.wgServerLog) console.info('[tee] wg-server.log at ready:\n' + signal.wgServerLog)
@@ -1800,6 +1930,7 @@ export class CrystalApi {
       console.warn('[tee] runner ready: no session found', { sessionId: signal.sessionId })
       return
     }
+    if (!this._runnerTokenOk(session, signal.runnerToken, 'ready')) return
 
     session.serverPublicKey = signal.wgPublicKey
     session.tunnelIp = '10.13.0.2'
@@ -1832,7 +1963,7 @@ export class CrystalApi {
         this.deps.teeProvisioner.provision(signal.sessionId, session.wgClientPublicKey, (podId) => {
           const s = this.teeSessions.get(signal.sessionId)
           if (s) s.podId = podId
-        }).then(result => {
+        }, session.runnerToken).then(result => {
           const s = this.teeSessions.get(signal.sessionId)
           if (s) { s.podId = result.podId; if (result.costPerHrUsd !== undefined) s.costPerHrUsd = result.costPerHrUsd }
         }).catch(err => {
@@ -1841,14 +1972,15 @@ export class CrystalApi {
         })
         return
       }
-      // SECURE RunPod pod: no raw public IP. RunPod proxies WSS → socksgo on port 8080.
-      // ?gost&insecureudp: force GostUDPTun (CmdGostUDPTun 0xF3) and allow UDP through
-      // the WSS tunnel. wss:// sets IsTLS()=true which disables UDP by default; InsecureUDP
-      // overrides that. UDP is tunneled inside the WSS stream — no plaintext exposure.
-      session.proxyUrl = `socks5+wss://${session.podId}-8080.proxy.runpod.net/?gost&insecureudp`
-      session.endpoint = '127.0.0.1:51820'
+    }
+
+    // Browser-facing tunnel ingress is the provisioner's to define (RunPod proxy URL /
+    // owned confidential-CVM ingress); null → runner self-reports (community cloud, local dev).
+    const ingress = session.podId ? this.deps.teeProvisioner?.ingress(session.podId) ?? null : null
+    if (ingress) {
+      session.proxyUrl = ingress.proxyUrl
+      session.endpoint = ingress.endpoint
     } else {
-      // Community cloud or local dev: runner self-reports its public endpoint.
       const host = signal.endpoint.split(':')[0]
       session.proxyUrl = `socks5+ws://${host}:8080?bind=true&gost=true`
       session.endpoint = signal.endpoint
@@ -1860,6 +1992,7 @@ export class CrystalApi {
   async handleRunnerHeartbeat(signal: RunnerHeartbeatSignal): Promise<{ continue: boolean }> {
     const session = this.teeSessions.get(signal.sessionId)
     if (!session) return { continue: false }
+    if (!this._runnerTokenOk(session, signal.runnerToken, 'heartbeat')) return { continue: false }
     session.gpuHours = signal.gpuHours
     const { continue: ok } = await this._billTeeHours(session, signal.gpuHours)
     if (!ok) {
@@ -1879,6 +2012,7 @@ export class CrystalApi {
   async handleRunnerEnded(signal: RunnerEndedSignal): Promise<void> {
     const session = this.teeSessions.get(signal.sessionId)
     if (!session) return
+    if (!this._runnerTokenOk(session, signal.runnerToken, 'ended')) return
     console.info('[tee] runner ended', { sessionId: signal.sessionId, status: signal.status, podId: session.podId })
     session.gpuHours = signal.gpuHours
     await this._billTeeHours(session, signal.gpuHours)
@@ -1921,6 +2055,7 @@ export class CrystalApi {
       // A `fractus`/ended session tells the runner to bail (replacing the heartbeat's role).
       const session = sessionId ? this.teeSessions.get(sessionId) : undefined
       if (session) {
+        if (!this._runnerTokenOk(session, signal.runnerToken, 'status')) return { continue: true }
         session.phase = progressus.phase
         return { continue: session.status !== 'ended' }
       }
@@ -2261,18 +2396,22 @@ export interface RunnerReadySignal {
   wgPublicKey: string
   attestation?: string
   wgServerLog?: string
+  /** Per-session secret injected at provision — required when the session has one. */
+  runnerToken?: string
 }
 
 export interface RunnerHeartbeatSignal {
   sessionId: string
   gpuHours: number
   status: string
+  runnerToken?: string
 }
 
 export interface RunnerEndedSignal {
   sessionId: string
   gpuHours: number
   status: string
+  runnerToken?: string
 }
 
 /**
@@ -2289,6 +2428,8 @@ export interface ProgressusSignal {
   progressus?: unknown
   /** Legacy TEE stub field — `{ sessionId, step }` — folded in by normalizeProgressus. */
   step?: string
+  /** Per-session secret — enforced on the sessionId-bound (TEE) branch only. */
+  runnerToken?: string
 }
 
 interface TeeSession {
@@ -2301,6 +2442,10 @@ interface TeeSession {
   gpuClass?: string
   budgetImpetus: bigint
   wgClientPublicKey: string
+  /** Per-session secret the pod echoes on callbacks. NEVER surfaced on TeeSessionView. */
+  runnerToken?: string
+  /** Set once the pod echoed the right token — ratchets the session to strict enforcement. */
+  runnerTokenConfirmed?: boolean
   podId?: string
   wsProbeAttempts: number
   serverPublicKey?: string

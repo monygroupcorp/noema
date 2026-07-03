@@ -13,6 +13,7 @@
 
 import tls from 'tls'
 import crypto from 'crypto'
+import type { TeePodProvisioner, TeeProvisionResult, TeeIngress } from './TeePodProvisioner.js'
 import { makeLogger } from '../lib/logger.js'
 
 const log = makeLogger('tee:provisioner')
@@ -38,21 +39,18 @@ export interface TeeProvisionerConfig {
   containerDiskGb?: number
 }
 
-export interface TeeProvisionResult {
-  podId: string
-  /** USD/hr from the RunPod API — set as costPerHrUsd on the TeeSession for billing. */
-  costPerHrUsd?: number
-}
+export type { TeeProvisionResult } from './TeePodProvisioner.js'
 
-export class TeeProvisioner {
+export class TeeProvisioner implements TeePodProvisioner {
   constructor(private readonly config: TeeProvisionerConfig) {}
 
   async provision(
     sessionId: string,
     wgClientPublicKey: string,
     onPodCreated?: (podId: string) => void,
+    runnerToken?: string,
   ): Promise<TeeProvisionResult> {
-    const { podId, costPerHrUsd } = await this._startPod(sessionId, wgClientPublicKey)
+    const { podId, costPerHrUsd } = await this._startPod(sessionId, wgClientPublicKey, runnerToken)
     // Notify caller immediately so session.podId is set before the pod's runner/ready callback
     // can arrive (which happens while _waitForRuntime is still polling).
     onPodCreated?.(podId)
@@ -85,7 +83,20 @@ export class TeeProvisioner {
     }
   }
 
-  private async _startPod(sessionId: string, wgClientPublicKey: string): Promise<{ podId: string; costPerHrUsd?: number }> {
+  /**
+   * SECURE RunPod pods have no raw public IP — RunPod proxies WSS → the pod's :8080.
+   * ?gost&insecureudp: force GostUDPTun (CmdGostUDPTun 0xF3) and allow UDP through
+   * the WSS tunnel. wss:// sets IsTLS()=true which disables UDP by default; InsecureUDP
+   * overrides that. UDP is tunneled inside the WSS stream — no plaintext exposure.
+   */
+  ingress(podId: string): TeeIngress {
+    return {
+      proxyUrl: `socks5+wss://${podId}-8080.proxy.runpod.net/?gost&insecureudp`,
+      endpoint: '127.0.0.1:51820',
+    }
+  }
+
+  private async _startPod(sessionId: string, wgClientPublicKey: string, runnerToken?: string): Promise<{ podId: string; costPerHrUsd?: number }> {
     // REST v1 is used for SECURE cloud (podFindAndDeployOnDemand GQL creates community pods).
     // SECURE pods on dedicated hardware have NET_ADMIN by default — no dockerArgs needed.
     const body: Record<string, unknown> = {
@@ -101,6 +112,7 @@ export class TeeProvisioner {
         SESSION_ID:        sessionId,
         PLATFORM_CALLBACK: this.config.platformCallback,
         WG_CLIENT_PUBKEY:  wgClientPublicKey,
+        ...(runnerToken ? { RUNNER_TOKEN: runnerToken } : {}),
       },
     }
 

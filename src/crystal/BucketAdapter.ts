@@ -48,6 +48,31 @@ export function primaryMediaUrl(output?: Record<string, unknown>): string | unde
   return undefined
 }
 
+/**
+ * Pull EVERY media URL out of an artifact's produced output (deduped, order-preserving).
+ * `primaryMediaUrl` picks the one the adapters re-host; the moderation gate must hash
+ * ALL of them (an actum with multiple images, an intella's full `samples[]`) so nothing
+ * crosses the trust boundary unscanned. Covers the single/array media keys plus `samples`
+ * (the intella preview shape `_artifactOutput` emits).
+ */
+export function allMediaUrls(output?: Record<string, unknown>): string[] {
+  if (!output) return []
+  const urls: string[] = []
+  const push = (v: unknown): void => { if (typeof v === 'string' && v.length > 0) urls.push(v) }
+  for (const k of SINGLE_MEDIA_KEYS) push(output[k])
+  for (const k of [...ARRAY_MEDIA_KEYS, 'samples']) {
+    const v = output[k]
+    if (!Array.isArray(v)) continue
+    for (const item of v) {
+      if (typeof item === 'string') push(item)
+      else if (item && typeof item === 'object' && typeof (item as { url?: unknown }).url === 'string') {
+        push((item as { url: string }).url)
+      }
+    }
+  }
+  return [...new Set(urls)]
+}
+
 const CONTENT_TYPES: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
   mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
