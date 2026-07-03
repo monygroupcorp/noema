@@ -121,7 +121,10 @@ export function Curation() {
 
         <div className="cu-foot">
           <span className="mono"><span className="hemi2 dashed" /> Reviewed locally · nothing leaves your machine until you export</span>
-          <Link className="btn ghost" to={`/collections/${id}/run`}>← run</Link>
+          <div className="right" style={{ display: 'flex', gap: 'var(--s3)' }}>
+            <Link className="btn ghost" to={`/collections/${id}/run`}>← run</Link>
+            <Link className="btn accent" to={`/collections/${id}/export`}>Export →</Link>
+          </div>
         </div>
       </div></div>
     </AppShell>
