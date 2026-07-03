@@ -20,24 +20,19 @@ contract CreditVault is OwnableRoles, UUPSUpgradeable, Initializable, Reentrancy
     /// @dev Sentinel address representing ETH in balance mappings.
     address public constant ETH = address(0);
 
-    /// @dev Maximum referral cut admin can assign (50%).
-    uint16 public constant MAX_REFERRAL_BPS = 5000;
-
     // -------------------------------------------------------------------------
     // Storage
     // -------------------------------------------------------------------------
 
-    /// @dev keccak256(name) => address that registered the name
-    mapping(bytes32 => address) public referralOwner;
-
-    /// @dev keccak256(name) => address that receives referral payouts
-    mapping(bytes32 => address) public referralAddress;
-
-    /// @dev keccak256(name) => basis points for this referrer (0 = use default)
-    mapping(bytes32 => uint16) public referralBps;
-
-    /// @dev Default referral cut in basis points. Initialized to 500 (5%).
-    uint16 public defaultReferralBps;
+    // @dev DEPRECATED — on-chain referral payouts were removed (tax-liability
+    //      surface; rewards now pay spend-only internal credits off-chain). These
+    //      four slots are retained UNCHANGED to preserve the UUPS storage layout of
+    //      the live proxy — do not reorder, repurpose, or delete them. They are no
+    //      longer written or read by any function.
+    mapping(bytes32 => address) private __deprecated_referralOwner;
+    mapping(bytes32 => address) private __deprecated_referralAddress;
+    mapping(bytes32 => uint16)  private __deprecated_referralBps;
+    uint16                      private __deprecated_defaultReferralBps;
 
     /// @dev commitment => already deposited. Prevents front-running: a second payAnonymous
     ///      with the same commitment would otherwise lock the second depositor's funds forever
@@ -56,6 +51,11 @@ contract CreditVault is OwnableRoles, UUPSUpgradeable, Initializable, Reentrancy
     // Events
     // -------------------------------------------------------------------------
 
+    /// @dev Emitted on every identified deposit. The on-chain referral cut was
+    ///      removed, so `referralAmount` is always 0 and `protocolAmount == amount`.
+    ///      `referralKey` is retained as an inert attribution tag: the backend uses
+    ///      it to credit the referrer with spend-only internal credits off-chain.
+    ///      Fields kept stable for ABI/decoder compatibility.
     event Payment(
         address indexed payer,
         bytes32 indexed referralKey,
@@ -75,19 +75,10 @@ contract CreditVault is OwnableRoles, UUPSUpgradeable, Initializable, Reentrancy
     event NFTReceived(address indexed from, address indexed token, uint256 tokenId);
     event ERC1155TokenReceived(address indexed from, address indexed token, uint256 id, uint256 amount);
 
-    event ReferralRegistered(bytes32 indexed key, string name, address owner);
-    event ReferralAddressUpdated(bytes32 indexed key, address newAddress);
-    event ReferralTransferred(bytes32 indexed key, address newOwner);
-    event ReferralBpsSet(bytes32 indexed key, uint16 bps);
-    event DefaultBpsSet(uint16 bps);
-
     // -------------------------------------------------------------------------
     // Errors
     // -------------------------------------------------------------------------
 
-    error AlreadyRegistered();
-    error NotReferralOwner();
-    error BpsExceedsCap();
     error ZeroAmount();
     error TransferFailed();
     error ZeroAddress();
@@ -99,7 +90,6 @@ contract CreditVault is OwnableRoles, UUPSUpgradeable, Initializable, Reentrancy
 
     function initialize(address _owner) external initializer {
         _initializeOwner(_owner);
-        defaultReferralBps = 500;
     }
 
     function _guardInitializeOwner() internal pure override returns (bool) {
@@ -114,12 +104,16 @@ contract CreditVault is OwnableRoles, UUPSUpgradeable, Initializable, Reentrancy
         _processPayment(msg.sender, ETH, msg.value, bytes32(0));
     }
 
-    /// @notice Identified ETH deposit. referralKey = bytes32(0) for no referral.
+    /// @notice Identified ETH deposit. `referralKey` is an optional attribution tag
+    ///         (bytes32(0) for none) echoed in the Payment event; it moves no funds
+    ///         on-chain — referral rewards are issued off-chain as internal credits.
     function pay(bytes32 referralKey) external payable nonReentrant {
         _processPayment(msg.sender, ETH, msg.value, referralKey);
     }
 
-    /// @notice Identified ERC20 deposit. referralKey = bytes32(0) for no referral.
+    /// @notice Identified ERC20 deposit. `referralKey` is an optional attribution tag
+    ///         (bytes32(0) for none) echoed in the Payment event; it moves no funds
+    ///         on-chain — referral rewards are issued off-chain as internal credits.
     function payCoin(address token, uint256 amount, bytes32 referralKey)
         external nonReentrant
     {
@@ -149,46 +143,8 @@ contract CreditVault is OwnableRoles, UUPSUpgradeable, Initializable, Reentrancy
     }
 
     // -------------------------------------------------------------------------
-    // Referral Registry
-    // -------------------------------------------------------------------------
-
-    function register(string calldata name) external {
-        bytes32 key = keccak256(bytes(name));
-        if (referralOwner[key] != address(0)) revert AlreadyRegistered();
-        referralOwner[key] = msg.sender;
-        referralAddress[key] = msg.sender;
-        emit ReferralRegistered(key, name, msg.sender);
-    }
-
-    function setAddress(bytes32 key, address to) external {
-        if (referralOwner[key] != msg.sender) revert NotReferralOwner();
-        if (to == address(0)) revert ZeroAddress();
-        referralAddress[key] = to;
-        emit ReferralAddressUpdated(key, to);
-    }
-
-    function transferName(bytes32 key, address newOwner) external {
-        if (referralOwner[key] != msg.sender) revert NotReferralOwner();
-        if (newOwner == address(0)) revert ZeroAddress();
-        referralOwner[key] = newOwner;
-        emit ReferralTransferred(key, newOwner);
-    }
-
-    // -------------------------------------------------------------------------
     // Admin
     // -------------------------------------------------------------------------
-
-    function setReferralBps(bytes32 key, uint16 bps) external onlyOwner {
-        if (bps > MAX_REFERRAL_BPS) revert BpsExceedsCap();
-        referralBps[key] = bps;
-        emit ReferralBpsSet(key, bps);
-    }
-
-    function setDefaultBps(uint16 bps) external onlyOwner {
-        if (bps > MAX_REFERRAL_BPS) revert BpsExceedsCap();
-        defaultReferralBps = bps;
-        emit DefaultBpsSet(bps);
-    }
 
     function withdrawProtocol(address token, address to, uint256 amount) external onlyOwner {
         if (to == address(0)) revert ZeroAddress();
@@ -261,30 +217,10 @@ contract CreditVault is OwnableRoles, UUPSUpgradeable, Initializable, Reentrancy
     function _processPayment(address payer, address token, uint256 amount, bytes32 referralKey) internal {
         if (amount == 0) revert ZeroAmount();
 
-        uint256 referralAmount;
-
-        if (referralKey != bytes32(0) && referralAddress[referralKey] != address(0)) {
-            uint16 bps = referralBps[referralKey] > 0
-                ? referralBps[referralKey]
-                : defaultReferralBps;
-            referralAmount = amount * bps / 10000;
-
-            if (referralAmount > 0) {
-                address recipient = referralAddress[referralKey];
-                if (token == ETH) {
-                    // If the referral recipient reverts (broken contract, non-payable),
-                    // skip the cut rather than blocking the payer. Protocol keeps it.
-                    (bool ok,) = recipient.call{value: referralAmount}("");
-                    if (!ok) referralAmount = 0;
-                } else {
-                    SafeTransferLib.safeTransfer(token, recipient, referralAmount);
-                }
-            }
-        }
-
-        uint256 protocolAmount = amount - referralAmount;
-
-        emit Payment(payer, referralKey, token, amount, protocolAmount, referralAmount);
+        // No on-chain referral cut is taken — the full deposit is retained by the
+        // protocol. Any referral reward is issued off-chain as spend-only internal
+        // credits, keyed off `referralKey` in this event.
+        emit Payment(payer, referralKey, token, amount, amount, 0);
     }
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
