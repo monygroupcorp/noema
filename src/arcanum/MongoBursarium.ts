@@ -1,25 +1,48 @@
 import { randomUUID } from 'node:crypto'
 import type { Collection } from 'mongodb'
-import type { Bursa, Bursarum } from '../types/bursa.js'
+import type { Bursa, Bursarum, BursaCreateOpts } from '../types/bursa.js'
+
+function fromDoc(doc: Record<string, unknown>): Bursa {
+  return {
+    id: doc.token as string,
+    credits: BigInt(doc.credits as string),
+    createdAt: doc.createdAt as Date,
+    ...(doc.ownerAnimaId ? { owner: { animaId: doc.ownerAnimaId as string } } : {}),
+    ...(doc.label !== undefined ? { label: doc.label as string } : {}),
+    ...(doc.status !== undefined ? { status: doc.status as Bursa['status'] } : {}),
+  }
+}
 
 export class MongoBursarium implements Bursarum {
   constructor(private readonly col: Collection) {}
 
   async ensureIndexes(): Promise<void> {
     await this.col.createIndex({ token: 1 }, { unique: true })
+    await this.col.createIndex({ ownerAnimaId: 1 }, { sparse: true })   // the owner dashboard
   }
 
-  async create(credits: bigint): Promise<Bursa> {
+  async create(credits: bigint, opts?: BursaCreateOpts): Promise<Bursa> {
     const token = randomUUID()
     const createdAt = new Date()
-    await this.col.insertOne({ token, credits: credits.toString(), createdAt })
-    return { id: token, credits, createdAt }
+    const doc: Record<string, unknown> = { token, credits: credits.toString(), createdAt }
+    if (opts?.owner) { doc.ownerAnimaId = opts.owner.animaId; doc.status = 'active' }
+    if (opts?.label !== undefined) doc.label = opts.label
+    await this.col.insertOne(doc)
+    return fromDoc(doc)
   }
 
   async findByToken(token: string): Promise<Bursa | null> {
     const doc = await this.col.findOne({ token })
-    if (!doc) return null
-    return { id: doc.token as string, credits: BigInt(doc.credits as string), createdAt: doc.createdAt as Date }
+    return doc ? fromDoc(doc as Record<string, unknown>) : null
+  }
+
+  async listByOwner(animaId: string): Promise<Bursa[]> {
+    const docs = await this.col.find({ ownerAnimaId: animaId }).sort({ createdAt: -1 }).toArray()
+    return docs.map((d) => fromDoc(d as Record<string, unknown>))
+  }
+
+  async setStatus(token: string, status: NonNullable<Bursa['status']>): Promise<void> {
+    await this.col.updateOne({ token }, { $set: { status } })
   }
 
   // OCC debit: read → check → CAS update. Retries on concurrent debit (rare).
@@ -39,7 +62,7 @@ export class MongoBursarium implements Bursarum {
       )
 
       if (updated) {
-        return { id: updated.token as string, credits: BigInt(updated.credits as string), createdAt: updated.createdAt as Date }
+        return fromDoc(updated as Record<string, unknown>)
       }
       // CAS miss — concurrent debit won the race; retry
     }
