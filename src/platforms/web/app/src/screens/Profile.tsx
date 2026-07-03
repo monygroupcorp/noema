@@ -3,9 +3,10 @@ import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import {
   api, SecretsUnavailableError, SECRET_PROVIDERS, SECRET_PROVIDER_LABEL,
-  type Appearance, type SecretProvider,
+  type Appearance, type SecretProvider, type Purse,
 } from '../lib/api';
 import { useIdentity } from '../state/identity';
+import { useSession } from '../state/session';
 
 const SWATCHES = ['#5b8cff', '#8b76d6', '#57c8a6', '#d68f6f', '#d66f9a', '#d6c46f'];
 const LOOKS: { key: string; label: string }[] = [
@@ -31,6 +32,7 @@ export function Profile() {
   // unconfigured → the panel shows "unavailable" proactively without a failed connect (F3).
   const [secretsAvailable, setSecretsAvailable] = useState<boolean>();
   const { ident } = useIdentity();
+  const { session } = useSession();
   const anon = ident.funding === 'bearer';
 
   useEffect(() => {
@@ -101,8 +103,121 @@ export function Profile() {
         </div>
 
         {loaded && <ConnectedAccounts initial={secrets} available={secretsAvailable} anon={anon} />}
+
+        <Purses signedIn={!!session} />
       </div></div>
     </AppShell>
+  );
+}
+
+// ── Purses (owned Bursa purses, §7) ──────────────────────────────────────────
+// Convert part of your credit balance into a shareable bearer token — an "owned purse".
+// Whoever holds the token can spend it on runs (the widget's entrance), and you keep a
+// dashboard over the drain (you see the balance fall, never who spent it). Reclaim pulls
+// leftover credits back to your balance; revoke drains + retires the token. Identified
+// accounts only — the backend refuses anonymous/purse callers, so we gate on a real session.
+function Purses({ signedIn }: { signedIn: boolean }) {
+  const [purses, setPurses] = useState<Purse[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [credits, setCredits] = useState('');
+  const [label, setLabel] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!signedIn) { setPurses([]); return; }
+    let live = true;
+    api.listPurses()
+      .then((r) => { if (live) setPurses(r.purses); })
+      .catch((e) => { if (live) { setErr(msg(e)); setPurses([]); } });
+    return () => { live = false; };
+  }, [signedIn]);
+
+  async function mint() {
+    const n = Number(credits);
+    if (!Number.isInteger(n) || n <= 0 || busy) return;
+    setBusy(true); setErr(null);
+    try {
+      const purse = await api.mintPurse({ credits: n, ...(label.trim() ? { label: label.trim() } : {}) });
+      setPurses((cur) => [purse, ...(cur ?? [])]);
+      setCredits(''); setLabel('');
+    } catch (e) { setErr(msg(e)); }
+    finally { setBusy(false); }
+  }
+
+  // Reclaim (leave the token, pull leftover back) or revoke (drain + retire). Both refresh the row.
+  async function act(token: string, verb: 'reclaim' | 'revoke') {
+    setBusy(true); setErr(null);
+    try {
+      await (verb === 'reclaim' ? api.reclaimPurse(token) : api.revokePurse(token));
+      const r = await api.listPurses();
+      setPurses(r.purses);
+    } catch (e) { setErr(msg(e)); }
+    finally { setBusy(false); }
+  }
+
+  async function copyToken(token: string) {
+    try { await navigator.clipboard.writeText(token); setCopied(token); setTimeout(() => setCopied((c) => (c === token ? null : c)), 1500); }
+    catch { /* clipboard blocked — the token is still visible in the row */ }
+  }
+
+  if (!signedIn) {
+    return (
+      <>
+        <div className="sectionhead">Purses</div>
+        <div className="sub">Sign in to a named account to mint shareable purses — a bearer token others can spend on your credits. Anonymous sessions can’t own purses.</div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="sectionhead">Purses</div>
+      <div className="sub" style={{ marginBottom: 'var(--s4)' }}>
+        Turn some of your credits into a shareable <b>bearer token</b>. Anyone with the token spends it on runs —
+        you keep a dashboard over the balance (you see it drain, never who spent it). Reclaim pulls leftover credits back; revoke retires it.
+      </div>
+
+      {err && <div className="warn" style={{ marginBottom: 'var(--s4)' }}>{err}</div>}
+
+      <div className="byo-row">
+        <div className="byo-body byo-connect">
+          <input className="byo-input" type="number" min={1} step={1} inputMode="numeric" placeholder="Credits"
+            value={credits} onChange={(e) => setCredits(e.target.value)} style={{ maxWidth: 140 }} />
+          <input className="byo-input" type="text" placeholder="Label (optional, e.g. “discord mods”)"
+            value={label} maxLength={120} onChange={(e) => setLabel(e.target.value)} />
+          <button className="btn" disabled={busy || !(Number(credits) > 0)} onClick={mint}>
+            {busy ? 'Minting…' : `Mint${Number(credits) > 0 ? ` — ${Number(credits)} cr` : ''}`}
+          </button>
+        </div>
+        <div className="sub byo-note">Minting spends the credits from your balance now. The token below is the only credential to share — treat it like a password.</div>
+      </div>
+
+      {purses === null && <div className="sub" style={{ marginTop: 'var(--s3)' }}>Loading your purses…</div>}
+      {purses !== null && purses.length === 0 && <div className="sub" style={{ marginTop: 'var(--s3)' }}>No purses yet — mint one above.</div>}
+
+      {purses !== null && purses.map((p) => {
+        const revoked = p.status === 'revoked';
+        return (
+          <div key={p.token} className="byo-row" style={revoked ? { opacity: 0.6 } : undefined}>
+            <div className="byo-head">
+              <span className="byo-prov">{p.label || 'Untitled purse'}</span>
+              <span className={`byo-state ${revoked ? 'absent' : 'connected'}`}>{revoked ? 'revoked' : `${p.credits} cr left`}</span>
+            </div>
+            <div className="byo-body">
+              <code className="mono" style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)', wordBreak: 'break-all' }}>{p.token}</code>
+            </div>
+            {!revoked && (
+              <div className="byo-body byo-connect" style={{ gap: 'var(--s3)' }}>
+                <button className="btn-ghost" disabled={busy} onClick={() => copyToken(p.token)}>{copied === p.token ? 'Copied ✓' : 'Copy token'}</button>
+                <button className="btn-ghost" disabled={busy} onClick={() => act(p.token, 'reclaim')} title="Pull leftover credits back to your balance">Reclaim</button>
+                <button className="btn-ghost" disabled={busy} onClick={() => act(p.token, 'revoke')} title="Drain and retire this purse">Revoke</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
   );
 }
 
