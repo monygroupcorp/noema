@@ -1,15 +1,22 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
+import { api, type DepositConfig } from '../lib/api';
 
-// Credit packs — pay-as-you-go top-ups. On the honest ledger these live on the
-// anonymous rail (a bearer purse is PAYG-only; it can't hold a subscription).
-const PACKS = [
-  { id: 'starter', credits: '1,000', price: '$5' },
-  { id: 'plus', credits: '5,000', price: '$20' },
-  { id: 'pro', credits: '25,000', price: '$80' },
+// Credit packs — pay-as-you-go top-ups anchored on a USD price. The credit amount
+// is computed LIVE from the deposit config (pointsPerUsd × funding rate), so it's the
+// real number the deposit webhook would credit, not a hardcoded guess.
+const PACK_USD = [
+  { id: 'starter', usd: 5 },
+  { id: 'plus', usd: 20 },
+  { id: 'pro', usd: 80 },
 ];
+
+// Native ETH sentinel for the deposit pricer (0x000…000 = the chain's native coin).
+const NATIVE_ETH = '0x0000000000000000000000000000000000000000';
+const fmt = (n: number) => n.toLocaleString('en-US');
+const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
 
 type Sees = 'nothing' | 'pseudonym' | 'you';
 
@@ -51,6 +58,35 @@ function WarnIc() {
 
 export function Funding() {
   const [pack, setPack] = useState('plus');
+  const [cfg, setCfg] = useState<DepositConfig | null>(null);
+  // Live ETH → points quote for the onchain rail.
+  const [eth, setEth] = useState('');
+  const [quote, setQuote] = useState<{ points?: string; usd?: string; err?: string; busy?: boolean }>({});
+
+  useEffect(() => {
+    let live = true;
+    api.getDepositConfig().then((c) => { if (live) setCfg(c); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+
+  // Credits a USD price buys, from the live config (gross points × funding rate).
+  const packCredits = (usd: number): number | null =>
+    cfg ? Math.round(usd * cfg.pointsPerUsd * (cfg.defaultFundingRatePct / 100)) : null;
+
+  // Debounced live deposit quote as the user types an ETH amount.
+  useEffect(() => {
+    const v = parseFloat(eth);
+    if (!eth || Number.isNaN(v) || v <= 0) { setQuote({}); return; }
+    const t = setTimeout(() => {
+      let wei: string;
+      try { wei = (BigInt(Math.round(v * 1e6)) * 10n ** 12n).toString(); } catch { setQuote({ err: 'bad amount' }); return; }
+      setQuote({ busy: true });
+      api.depositQuote({ chainId: 1, token: NATIVE_ETH, amount: wei })
+        .then((d) => setQuote({ points: d.pointsQuoted, usd: d.grossUsd }))
+        .catch((e) => setQuote({ err: e instanceof Error ? e.message : String(e) }));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [eth]);
 
   return (
     <AppShell crumb="add credits">
@@ -120,16 +156,19 @@ export function Funding() {
 
             <div className="fund-actions">
               <div className="filters">
-                {PACKS.map((p) => (
-                  <button
-                    key={p.id}
-                    className={`fchip${pack === p.id ? ' on' : ''}`}
-                    onClick={() => setPack(p.id)}
-                  >
-                    <span className="fc-cr">{p.credits}</span>
-                    <span className="fc-pr">{p.price}</span>
-                  </button>
-                ))}
+                {PACK_USD.map((p) => {
+                  const cr = packCredits(p.usd);
+                  return (
+                    <button
+                      key={p.id}
+                      className={`fchip${pack === p.id ? ' on' : ''}`}
+                      onClick={() => setPack(p.id)}
+                    >
+                      <span className="fc-cr">{cr != null ? fmt(cr) : '…'}</span>
+                      <span className="fc-pr">${p.usd}</span>
+                    </button>
+                  );
+                })}
               </div>
               <Link className="btn-ghost" to="/vault">
                 <Ic name="venetian-mask" /> Mint a purse <Ic name="arrow-right" />
@@ -156,6 +195,39 @@ export function Funding() {
                   Connect <Ic name="arrow-right" />
                 </button>
               </div>
+            </div>
+
+            {/* Live deposit — send ETH to the CreditVault; points credit on confirmation. */}
+            <div className="fund-guide">
+              <div className="fund-guide-h">
+                <Ic name="wallet" /> Send ETH to the CreditVault — points credit on confirmation
+              </div>
+              <div className="meta-line">
+                <span>deposit address</span>
+                <span className="v mono" title={cfg?.depositAddress}>{cfg ? shortAddr(cfg.depositAddress) : '…'}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s3)', marginTop: 'var(--s3)' }}>
+                <input
+                  className="inp mono"
+                  style={{ maxWidth: 120 }}
+                  placeholder="0.01"
+                  inputMode="decimal"
+                  value={eth}
+                  onChange={(e) => setEth(e.target.value)}
+                />
+                <span className="mono">ETH →</span>
+                <span className="mono">
+                  {quote.busy ? '…'
+                    : quote.err ? 'quote failed'
+                    : quote.points ? `${fmt(Number(quote.points))} credits`
+                    : '—'}
+                </span>
+              </div>
+              {quote.usd && (
+                <div className="fund-guide-h" style={{ marginTop: 'var(--s2)' }}>
+                  ≈ ${quote.usd} · {cfg?.defaultFundingRatePct}% funding rate · informational, the deposit re-prices at confirmation
+                </div>
+              )}
             </div>
           </section>
 

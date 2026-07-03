@@ -21,6 +21,8 @@ import { CaptionJob } from './screens/CaptionJob';
 import { Derive } from './screens/Derive';
 import { TrainRun } from './screens/TrainRun';
 import { Shelf } from './screens/Shelf';
+import { Teams } from './screens/Teams';
+import { Sponsorships } from './screens/Sponsorships';
 import { AccountSettings } from './screens/AccountSettings';
 import { Preferences } from './screens/Preferences';
 import { Collections } from './screens/Collections';
@@ -64,6 +66,8 @@ export function App() {
       <Route path="/datasets/:id/derive" element={<Derive />} />
       <Route path="/train/run/:id" element={<TrainRun />} />
       <Route path="/models" element={<Shelf />} />
+      <Route path="/teams" element={<Teams />} />
+      <Route path="/sponsorships" element={<Sponsorships />} />
       <Route path="/collections" element={<Collections />} />
       <Route path="/collections/:id" element={<EditioHub />} />
       <Route path="/collections/:id/garden" element={<TraitsGarden />} />

@@ -11,13 +11,27 @@ class FakeProvisioner implements TeePodProvisioner {
   captured: { sessionId?: string; runnerToken?: string } = {}
   ingressValue: TeeIngress | null = { proxyUrl: 'socks5+wss://vm-a.tee.example/?gost&insecureudp', endpoint: '127.0.0.1:51820' }
   terminated: string[] = []
+  /** Shift()ed per probe call; empty → true. Seed [false, …] to simulate strip-Upgrade hosts. */
+  probeQueue: boolean[] = []
+  /** When true, provision() stalls until releaseProvision() — simulates a slow pod create. */
+  manual = false
+  private podCounter = 0
+  private pending: Array<() => void> = []
 
   async provision(sessionId: string, _wg: string, onPodCreated?: (podId: string) => void, runnerToken?: string): Promise<TeeProvisionResult> {
     this.captured = { sessionId, runnerToken }
-    onPodCreated?.('pod-1')
-    return { podId: 'pod-1', costPerHrUsd: 1 }
+    const podId = `pod-${++this.podCounter}`
+    if (this.manual) {
+      return new Promise(resolve => this.pending.push(() => {
+        onPodCreated?.(podId)
+        resolve({ podId, costPerHrUsd: 1 })
+      }))
+    }
+    onPodCreated?.(podId)
+    return { podId, costPerHrUsd: 1 }
   }
-  async probeWSUpgrade(): Promise<boolean> { return true }
+  releaseProvision(): void { this.pending.shift()?.() }
+  async probeWSUpgrade(): Promise<boolean> { return this.probeQueue.length ? this.probeQueue.shift()! : true }
   async terminate(podId: string): Promise<void> { this.terminated.push(podId) }
   ingress(): TeeIngress | null { return this.ingressValue }
 }
@@ -94,6 +108,52 @@ test('sessionId-bound status report with a wrong token does not move the session
   assert.equal((await api.getTeeSession(auctor, sessionId)).phase, 'provisioning')
   await api.reportProgressus({ sessionId, progressus: { phase: 'loading' }, runnerToken: token })
   assert.equal((await api.getTeeSession(auctor, sessionId)).phase, 'loading')
+})
+
+test('probe-kill race: the dying pod\'s clean ended is ignored while the re-provision is in flight', async () => {
+  const { api, auctor, provisioner, sessionId, token } = await makeApi()
+  provisioner.probeQueue = [false, true]   // first host strips Upgrade, replacement is good
+
+  // Ready from pod-1 → probe fails → pod-1 killed, replacement (pod-2) provisioning.
+  await api.handleRunnerReady({ sessionId, endpoint: '1.2.3.4:51820', wgPublicKey: 'pk1', runnerToken: token })
+  assert.deepEqual(provisioner.terminated, ['pod-1'])
+  assert.equal((await api.getTeeSession(auctor, sessionId)).status, 'provisioning')
+
+  // The corpse posts a clean 'ended' on its way down (seen live 2026-07-03) —
+  // it must NOT kill the session out from under the transparent retry.
+  await api.handleRunnerEnded({ sessionId, gpuHours: 0, status: 'ended', runnerToken: token })
+  assert.equal((await api.getTeeSession(auctor, sessionId)).status, 'provisioning')
+
+  // Replacement comes up, probe passes → session ready.
+  await new Promise(r => setImmediate(r))
+  await api.handleRunnerReady({ sessionId, endpoint: '1.2.3.4:51820', wgPublicKey: 'pk2', runnerToken: token })
+  assert.equal((await api.getTeeSession(auctor, sessionId)).status, 'ready')
+})
+
+test('ready on an ended session does not resurrect it; the live pod is killed', async () => {
+  const { api, auctor, provisioner, sessionId, token } = await makeApi()
+  await api.endTeeSession(auctor, sessionId)
+  await api.handleRunnerReady({ sessionId, endpoint: '1.2.3.4:51820', wgPublicKey: 'pk', runnerToken: token })
+  const view = await api.getTeeSession(auctor, sessionId)
+  assert.equal(view.status, 'ended')
+  assert.equal(view.serverPublicKey, undefined)
+  assert.ok(provisioner.terminated.includes('pod-1'))
+})
+
+test('provision resolving after the session ended terminates the fresh pod (no orphan)', async () => {
+  const provisioner = new FakeProvisioner()
+  provisioner.manual = true
+  const signorum = { balance: async () => 1_000_000n }
+  const api = new CrystalApi({ signorum, teeProvisioner: provisioner } as unknown as CrystalApiDeps)
+  const auctor = { animaId: 'anima-orphan' }
+  const session = await api.provisionTeeSession(auctor, { wgClientPublicKey: 'wg-pub' })
+
+  await api.endTeeSession(auctor, session.sessionId)   // podId not set yet — nothing to terminate
+  assert.deepEqual(provisioner.terminated, [])
+
+  provisioner.releaseProvision()                       // pod create finally completes
+  await new Promise(r => setImmediate(r))
+  assert.deepEqual(provisioner.terminated, ['pod-1'])  // fresh pod killed, not orphaned
 })
 
 test('ready watchdog: a session that never becomes ready is failed and its pod terminated', async (t) => {
