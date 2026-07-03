@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { api, type Collection, type Tractus, type TractusValor } from '../lib/api';
+
+// Product of per-axis value counts — how many pieces the canonic run would generate.
+const combos = (axes: Tractus[]) => axes.reduce((n, a) => n * Math.max(1, a.valores.length), 1);
 
 // Trait rules (editio-rules-spec.md) — the exclusion + cohesion primitives, wired to the live
 // draft. Each value carries `excludes` (labels in OTHER axes it blocks — hard exclusion) and
@@ -14,11 +17,13 @@ const label = (v: TractusValor) => v.label || String(v.value);
 
 export function TraitRules() {
   const { id } = useParams();
+  const nav = useNavigate();
   const [c, setC] = useState<Collection | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [axes, setAxes] = useState<Tractus[]>([]);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [firing, setFiring] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -43,6 +48,21 @@ export function TraitRules() {
     try { const { collection } = await api.patchCollectionTractus(id, axes); setC(collection); setAxes(collection.tractus ?? axes); setDirty(false); }
     catch (e) { setErr(msg(e)); }
     finally { setBusy(false); }
+  }
+
+  // Forward seam: fire straight from the rules step. Firing freezes the traits + rules and
+  // spends credits, so we persist any unsaved rule edits first, then confirm, then dispatch.
+  async function fire() {
+    if (!id || firing) return;
+    const total = combos(axes);
+    if (total === 0) return;
+    if (!confirm(`Fire this collection — generate ${total} pieces on real compute? This freezes the traits and rules and spends credits.`)) return;
+    setFiring(true); setErr(null);
+    try {
+      if (dirty) { const { collection } = await api.patchCollectionTractus(id, axes); setC(collection); setAxes(collection.tractus ?? axes); setDirty(false); }
+      await api.fireCollection(id);
+      nav(`/collections/${id}/run`);
+    } catch (e) { setErr(msg(e)); setFiring(false); }
   }
 
   const empty = axes.every((a) => a.valores.length === 0);
@@ -85,7 +105,7 @@ export function TraitRules() {
         <div className="garden-foot">
           <Link className="btn ghost" to={`/collections/${id}/garden`}>← garden</Link>
           {editable
-            ? <Link className="btn accent" to={`/collections/${id}/garden`}>Back to garden to fire →</Link>
+            ? <button className="btn accent" disabled={firing || empty} onClick={fire}>{firing ? 'Firing…' : 'Fire collection →'}</button>
             : <Link className="btn accent" to={`/collections/${id}/run`}>Canonic run →</Link>}
         </div>
       </div></div>
