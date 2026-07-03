@@ -6,6 +6,7 @@ import type { Materia, MateriaStore } from '../types/materia.js'
 import type { HospitiumStore } from '../types/hospitium.js'
 import type { ActumExecutio } from '../types/actum.js'
 import { makeLogger } from '../lib/logger.js'
+import { SshTransport } from './SshTransport.js'
 import { getTrace } from '../lib/trace.js'
 import { bus } from '../lib/bus.js'
 import { recordProgressus } from '../execution/progressusSink.js'
@@ -791,25 +792,11 @@ export class SecurePodClient implements RunPodClient, Procurator {
 }
 
 // ---------------------------------------------------------------------------
-// Default SSH factory — uses the system ssh binary via SshTransport.js
+// Default SSH factory — uses the system ssh binary via the crystal SshTransport.
 // ---------------------------------------------------------------------------
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SshTransportCtor = new (opts: { host: string; port: number; username: string; privateKeyPath: string; logger?: unknown }) => SshTransportLike
-let _SshTransport: SshTransportCtor | null = null
-
-function loadSshTransport(): SshTransportCtor {
-  if (!_SshTransport) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    _SshTransport = require('../core/services/remote/SshTransport.js') as SshTransportCtor
-  }
-  return _SshTransport
-}
 
 export function makeSecurePodSshFactory(sshKeyPath: string): (info: SshInfo) => SshTransportLike {
   const sshLog = makeLogger('ssh:transport')
-  return (info: SshInfo) => {
-    const Ctor = loadSshTransport()
-    return new Ctor({ host: info.host, port: info.port, username: info.user, privateKeyPath: sshKeyPath, logger: sshLog })
-  }
+  return (info: SshInfo) =>
+    new SshTransport({ host: info.host, port: info.port, username: info.user, privateKeyPath: sshKeyPath, logger: sshLog })
 }
