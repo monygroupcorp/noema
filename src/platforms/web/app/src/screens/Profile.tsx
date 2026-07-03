@@ -7,6 +7,7 @@ import {
 } from '../lib/api';
 import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
+import { connectWallet } from '../lib/wallet';
 
 const SWATCHES = ['#5b8cff', '#8b76d6', '#57c8a6', '#d68f6f', '#d66f9a', '#d6c46f'];
 const LOOKS: { key: string; label: string }[] = [
@@ -64,8 +65,8 @@ export function Profile() {
     <AppShell crumb="profile">
       <div className="page" style={pageStyle}><div className="pw">
         <div className="pagehead"><div>
-          <h1>Profile · skins</h1>
-          <div className="sub">Decorate freely — your skin is how this identity looks. Saved to your account (works anonymously too).</div>
+          <h1>Profile</h1>
+          <div className="sub">Decorate freely — this is how your identity looks across NOEMA. Saved to your account (works anonymously too).</div>
         </div></div>
 
         {err && <div className="warn" style={{ marginBottom: 'var(--s4)' }}>{err}</div>}
@@ -101,6 +102,8 @@ export function Profile() {
           </div>
           <button className="btn" disabled style={{ marginTop: 'var(--s3)' }}><Ic name="sparkles" /> Generate kit — soon</button>
         </div>
+
+        <BackupRecovery signedIn={!!session} />
 
         {loaded && <ConnectedAccounts initial={secrets} available={secretsAvailable} anon={anon} />}
 
@@ -232,6 +235,118 @@ function daysUntil(iso?: string): number | null {
   if (!iso) return null;
   const ms = new Date(iso).getTime() - Date.now();
   return ms > 0 ? Math.max(1, Math.round(ms / 86_400_000)) : 0;
+}
+
+// ── Account backup & recovery (wallet + Telegram channels) ────────────────────
+// Bind a channel to the soul so a forgotten password is recoverable — there's no email
+// reset. Wallet: sign a challenge → a `'web'` persona on the same anima. Telegram: tap a
+// deep link → the bot re-points your Telegram persona at this account. Both then let you
+// log straight in from the sign-in screen (wallet sig / bot `/recover` code).
+function BackupRecovery({ signedIn }: { signedIn: boolean }) {
+  const anyLinked = signedIn;
+  return (
+    <>
+      <div className="sectionhead">Account backup &amp; recovery</div>
+      {!anyLinked ? (
+        <div className="sub">Sign in to a username account to add a wallet or Telegram backup — it’s how you get back in if you forget your password. There’s no email reset.</div>
+      ) : (
+        <>
+          <div className="sub" style={{ marginBottom: 'var(--s4)' }}>
+            Add at least one backup. Forget your password and you can recover from the sign-in
+            screen with a linked channel — no email, no reset links.
+          </div>
+          <WalletRow />
+          <TelegramRow />
+        </>
+      )}
+    </>
+  );
+}
+
+function WalletRow() {
+  const [wallets, setWallets] = useState<string[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [rowErr, setRowErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    api.auth.listWallets().then((r) => { if (live) setWallets(r.wallets); }).catch(() => { if (live) setWallets([]); });
+    return () => { live = false; };
+  }, []);
+
+  async function connect() {
+    if (busy) return;
+    setBusy(true); setRowErr(null);
+    try {
+      const wallet = await connectWallet();
+      const { token, statement } = await api.auth.walletChallenge(wallet.address);
+      const signature = await wallet.signMessage(statement);
+      const { address } = await api.auth.walletLink(token, signature);
+      setWallets((w) => Array.from(new Set([...(w ?? []), address])));
+    } catch (e) {
+      setRowErr(msg(e));
+    } finally { setBusy(false); }
+  }
+
+  const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+  const linked = (wallets?.length ?? 0) > 0;
+
+  return (
+    <div className="byo-row">
+      <div className="byo-head">
+        <span className="byo-prov">Recovery wallet</span>
+        <span className={`byo-state ${linked ? 'connected' : 'absent'}`}>{linked ? 'linked' : 'not linked'}</span>
+      </div>
+      {linked && <div className="byo-body"><span className="sub mono">{wallets!.map(short).join(', ')}</span></div>}
+      <div className="byo-body byo-connect">
+        <button className="btn" disabled={busy} onClick={connect}>
+          {busy ? 'Waiting for wallet…' : linked ? 'Link another wallet' : 'Connect a wallet'}
+        </button>
+      </div>
+      {rowErr && <div className="warn byo-warn">{rowErr}</div>}
+    </div>
+  );
+}
+
+function TelegramRow() {
+  const [linked, setLinked] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [rowErr, setRowErr] = useState<string | null>(null);
+  const [prompted, setPrompted] = useState(false);   // showed the deep link, awaiting a refresh
+
+  function refresh() {
+    api.auth.telegramStatus().then((r) => setLinked(r.linked)).catch(() => setLinked(false));
+  }
+  useEffect(() => { refresh(); }, []);
+
+  async function link() {
+    if (busy) return;
+    setBusy(true); setRowErr(null);
+    try {
+      const { deepLink } = await api.auth.telegramChallenge();
+      if (deepLink) window.open(deepLink, '_blank', 'noopener');
+      setPrompted(true);
+    } catch (e) {
+      setRowErr(msg(e));
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="byo-row">
+      <div className="byo-head">
+        <span className="byo-prov">Recovery Telegram</span>
+        <span className={`byo-state ${linked ? 'connected' : 'absent'}`}>{linked === null ? '…' : linked ? 'linked' : 'not linked'}</span>
+      </div>
+      <div className="byo-body byo-connect">
+        <button className="btn" disabled={busy} onClick={link}>
+          {busy ? 'Opening Telegram…' : linked ? 'Re-link Telegram' : 'Link Telegram'}
+        </button>
+        {prompted && <button className="btn-ghost" onClick={refresh}>I’ve tapped Start — refresh</button>}
+      </div>
+      {prompted && <div className="sub byo-note">Opened Telegram — tap <b>Start</b> in the bot, then hit refresh. Later, forgot your password? Send <b>/recover</b> to the bot for a code.</div>}
+      {rowErr && <div className="warn byo-warn">{rowErr}</div>}
+    </div>
+  );
 }
 
 function ConnectedAccounts({ initial, available, anon }: {
