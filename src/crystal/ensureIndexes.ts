@@ -134,10 +134,7 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('sponsiones').createIndex({ status: 1 }),
     db.collection('sponsiones').createIndex({ 'sponsor.animaId': 1 }),
 
-    // delegationes — agent-balance invite tokens (§7). Unique token = the redeem key;
-    // agentId bounds the owner-dashboard list.
-    db.collection('delegationes').createIndex({ id: 1 }, { unique: true }),
-    db.collection('delegationes').createIndex({ token: 1 }, { unique: true }),
-    db.collection('delegationes').createIndex({ agentId: 1 }),
+    // bursarium — owned purses carry an ownerAnimaId for the creator dashboard (§7 delegation-via-Bursa)
+    db.collection('bursarium').createIndex({ ownerAnimaId: 1 }, { sparse: true }),
   ])
 }

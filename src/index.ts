@@ -40,8 +40,7 @@ import { createAuthRouter } from './allocutio/api/authRouter.js'
 import { MongoCredentum } from './crystal/MongoCredentum.js'
 import { mailerFromEnv } from './allocutio/api/Mailer.js'
 import { createWidgetRouter } from './allocutio/api/widgetRouter.js'
-import { createDelegationRouter } from './allocutio/api/delegationRouter.js'
-import { DelegationService } from './crystal/DelegationService.js'
+import { createPurseRouter } from './allocutio/api/purseRouter.js'
 import { createAgentCardRouter } from './allocutio/api/agentCardRouter.js'
 import { startSubsidySweeper } from './crystal/SubsidySweeper.js'
 import { startLicenseTripwire } from './crystal/licenseTripwire.js'
@@ -1052,23 +1051,21 @@ async function main(): Promise<void> {
     frameAncestors: widgetFrameAncestors,
   }))
 
-  // Delegation tokens (§7): the agent owner mints invite codes; community members redeem
-  // them to run on the agent's sponsor-fed balance. Owner ops are gated by a REAL check —
-  // the caller's linked wallet (Anima.custos) must equal the agent's on-chain ownerAddress.
-  const delegationService = new DelegationService({
-    delegationes: ring.delegationes,
-    jwtSecret: process.env.JWT_SECRET ?? 'dev-delegation-secret-change-me',
-  })
-  app.use('/widget', express.json(), createDelegationRouter({
-    delegations: delegationService,
-    legati: ring.legati,
-    authorizeOwner: async (req, legatus) => {
-      try {
-        const auctor = await apiResolver.resolve(credentialsFromHeaders(req.headers as Record<string, string | undefined>, req.body))
-        if (!('animaId' in auctor)) return false
-        const anima = await ring.animae.find(auctor.animaId)
-        return !!anima?.custos && anima.custos.toLowerCase() === legatus.ownerAddress.toLowerCase()
-      } catch { return false }
+  // Owned purses (§7) — the crystal-core "delegation": an identified account mints a
+  // shareable Bursa funded from its balance (or an agent's it owns); the purse token is
+  // the invite code, runs spend it via the existing `/v1/runs` x-bursa-token path. Purses
+  // are owner-linked (dashboard/reclaim); the anon Bursa path is untouched (privacy).
+  app.use('/v1/purses', express.json(), createPurseRouter({
+    identity: apiResolver,
+    signorum: ring.signorum,
+    bursarium: ring.bursarium,
+    // fund-from-agent: the caller's linked wallet (Anima.custos) must equal the agent owner.
+    fundFromAgent: async (agentId, callerAnimaId) => {
+      const legatus = await ring.legati.findByAgentId(agentId)
+      if (!legatus) return null
+      const caller = await ring.animae.find(callerAnimaId)
+      if (!caller?.custos || caller.custos.toLowerCase() !== legatus.ownerAddress.toLowerCase()) return null
+      return { animaId: legatus.animaId }   // spend the agent's (sponsor-fed) balance
     },
     ...(process.env.PUBLIC_BASE ? { publicBase: process.env.PUBLIC_BASE } : {}),
   }))

@@ -51,8 +51,6 @@ import type { Mercedum } from './types/merces.js'
 import type { X402LogStore } from './types/x402.js'
 import { MongoSponsio } from './crystal/MongoSponsio.js'
 import type { SponsioStore } from './types/sponsio.js'
-import { MongoDelegatio } from './crystal/MongoDelegatio.js'
-import type { Delegationum } from './types/delegatio.js'
 import { MongoVestigiorum } from './crystal/MongoVestigiorum.js'
 import { MongoModo } from './crystal/MongoModo.js'
 import { RunPodCursor } from './crystal/RunPodCursor.js'
@@ -128,8 +126,6 @@ export interface Ring {
   mercedum: Mercedum
   /** Sponsorship pledges (the generalized faucet) — see types/sponsio.ts. */
   sponsiones: SponsioStore
-  /** Agent-balance delegation tokens (the widget's invite-code entrance) — types/delegatio.ts. */
-  delegationes: Delegationum
   vestigiorum: Vestigiorum
   modos: ModoStore
   mandatores: Mandatorum
@@ -282,8 +278,6 @@ export interface ContainerConfig {
   mercesCollection?: string
   /** Collection name for sponsorship pledges — default 'sponsiones' */
   sponsionesCollection?: string
-  /** Collection name for delegation tokens — default 'delegationes' */
-  delegationesCollection?: string
   /** Collection name for vestigia — default 'vestigia' */
   vestigiaCollection?: string
   /** Collection name for modos — default 'modos' */
@@ -413,7 +407,6 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   // Sponsorship pledges (the generalized faucet).
   const sponsiones = new MongoSponsio(db.collection(config.sponsionesCollection ?? 'sponsiones'))
-  const delegationes = new MongoDelegatio(db.collection(config.delegationesCollection ?? 'delegationes'))
 
   const vestigiaCol: Collection = db.collection(config.vestigiaCollection ?? 'vestigia')
   const vestigiorum = new MongoVestigiorum(vestigiaCol, config.embed, config.embedImage)
@@ -681,7 +674,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const collectioCursor = new CollectioCursor(sharedDispatch, collectiones, actorum, { reviewEnabled: true })
 
   return {
-    actorum, modorum, signorum, mercedum, animae, personae, issuers, legati, x402Log, sponsiones, delegationes, vestigiorum, modos,
+    actorum, modorum, signorum, mercedum, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,
     mandatores, corpora, collectiones, editiones, publicationAdapters, sodalitates, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
