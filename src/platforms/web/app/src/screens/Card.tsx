@@ -8,6 +8,7 @@ import { mediaFromOutput } from '../lib/media';
 import { isPinned, togglePin } from '../lib/pins';
 import { usePromptAssist, useAssistField } from '../state/promptAssist';
 import { fieldExample } from '../lib/promptExamples';
+import { humanizeKey } from '../lib/labels';
 
 type Aditus = Record<string, unknown>;
 
@@ -199,7 +200,7 @@ export function Card() {
   );
 
   return (
-    <AppShell crumb={<>catalog <span className="sep">/</span> {id}</>} context={context}>
+    <AppShell crumb={<>Catalogue <span className="sep">/</span> {id}</>} context={context}>
       <div className="cardscroll"><div className="card">
         {loadErr && <div className="warn">Couldn’t load this flow from staging — {loadErr}</div>}
         {!flow && !loadErr && <div className="empty"><div className="t">Loading flow…</div></div>}
@@ -211,9 +212,9 @@ export function Card() {
               <h1>{name} <span className="verbtag">{String((flow as { categoria?: unknown }).categoria ?? 'flow')}</span></h1>
               <div className="desc">{(flow.nomen || '').includes('—') ? flow.nomen.split('—').slice(1).join('—').trim() : 'Live flow from staging.'}</div>
               <div className="ports">
-                {Object.keys(flow.input?.properties ?? {}).slice(0, 4).map((k) => <span key={k} className="p">{k}</span>)}
+                {Object.entries(flow.input?.properties ?? {}).slice(0, 4).map(([k, p]) => <span key={k} className="p">{p.title || humanizeKey(k)}</span>)}
                 {' → '}
-                {Object.keys(flow.output?.properties ?? {}).map((k) => <span key={k} className="p">{k}</span>)}
+                {Object.entries(flow.output?.properties ?? {}).map(([k, p]) => <span key={k} className="p">{p.title || humanizeKey(k)}</span>)}
               </div>
             </div>
             <span className="ver mono">v{flow.versio}</span>
@@ -251,7 +252,7 @@ export function Card() {
             return (
               <div className="field" key={k}>
                 <label>
-                  {p.title || k} {req ? <span className="req">required</span> : <span className="opt">optional</span>}
+                  {p.title || humanizeKey(k)} {req ? <span className="req">required</span> : <span className="opt">optional</span>}
                   <span className="ty">{isUri ? `${p.type} · uri` : p.type}</span>
                 </label>
                 {isUri ? (
