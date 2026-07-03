@@ -145,7 +145,7 @@ export function Shelf() {
                     )}
                     {m.description && <div className="mc-meta">{m.description}</div>}
                     <div className="mc-actions">
-                      <Link className="btn ghost" to={`/card?id=${m.intellaId}`}>Use in modus</Link>
+                      <Link className="btn ghost" to={`/card?id=${m.intellaId}`}>Use in a flow</Link>
                       <Link className="btn accent" to="/collections"><Ic name="hexagon" /> Collection</Link>
                       {admin && (
                         <button className="btn ghost" onClick={() => reclassify(m.intellaId)} disabled={licBusy === m.intellaId} title="Admin: re-derive license from the base model">
