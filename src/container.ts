@@ -5,6 +5,7 @@ import type { Actorum, Cursorum, ActumCompletor as IActumCompletor, Inceptio } f
 import type { RunPodClient } from './crystal/RunPodCursor.js'
 import type { ActumInceptor as IActumInceptor } from './execution/ActumInceptor.js'
 import type { Signorum } from './types/significandi.js'
+import type { Redituum } from './types/reditus.js'
 import type { Modorum } from './types/modus.js'
 import type { AnimaStore } from './types/anima.js'
 import type { PersonaStore } from './types/persona.js'
@@ -34,11 +35,19 @@ import { Conductor } from './crystal/Conductor.js'
 import type { Procurator } from './crystal/Procurator.js'
 import { TeeProvisioner } from './crystal/TeeProvisioner.js'
 import type { TeeProvisionerConfig } from './crystal/TeeProvisioner.js'
+import { ConfidentialPodClient } from './crystal/ConfidentialPodClient.js'
+import type { ConfidentialPodClientConfig } from './crystal/ConfidentialPodClient.js'
+import type { TeePodProvisioner } from './crystal/TeePodProvisioner.js'
 
 import { MongoActorum } from './crystal/MongoActorum.js'
 import { MongoModorum } from './crystal/MongoModorum.js'
 import { MongoFundamentorum } from './crystal/MongoFundamentorum.js'
 import { MongoSignorum } from './crystal/MongoSignorum.js'
+import { MongoRedituum } from './crystal/MongoRedituum.js'
+import { MongoMerces } from './crystal/MongoMerces.js'
+import type { Mercedum } from './types/merces.js'
+import { MongoTripwireBandStore } from './crystal/MongoTripwireBand.js'
+import type { TripwireBandStore } from './crystal/licenseTripwire.js'
 import { MongoAnima } from './crystal/MongoAnima.js'
 import { MongoPersona } from './crystal/MongoPersona.js'
 import { MongoIssuer } from './crystal/MongoIssuer.js'
@@ -46,8 +55,6 @@ import type { IssuerStore } from './types/issuer.js'
 import { MongoLegatus } from './crystal/MongoLegatus.js'
 import type { LegatusStore } from './types/legatus.js'
 import { MongoX402Log } from './crystal/MongoX402Log.js'
-import { MongoMerces } from './crystal/MongoMerces.js'
-import type { Mercedum } from './types/merces.js'
 import type { X402LogStore } from './types/x402.js'
 import { MongoSponsio } from './crystal/MongoSponsio.js'
 import type { SponsioStore } from './types/sponsio.js'
@@ -114,6 +121,12 @@ export interface Ring {
   actorum: Actorum
   modorum: Modorum
   signorum: Signorum
+  /** USD revenue book (ADR-0013) — the second ledger, distinct from `signorum` (credits). */
+  redituum: Redituum
+  /** Payee-payout book (ADR-0013 §4c) — money OUT, per-payee, gated at the $600 line. */
+  mercedum: Mercedum
+  /** Conditional-license revenue tripwire's persisted band (edge-triggered across restarts). */
+  tripwireBand: TripwireBandStore
   animae: AnimaStore
   personae: PersonaStore
   /** Trusted-issuer registry (federated JWKS SSO) — see types/issuer.ts. */
@@ -122,8 +135,6 @@ export interface Ring {
   legati: LegatusStore
   /** x402 payment audit trail (replay-protected) — see types/x402.ts. */
   x402Log: X402LogStore
-  /** Payee-payout book (ADR-0013 §4c) — money OUT, per-payee, gated at the $600 line. */
-  mercedum: Mercedum
   /** Sponsorship pledges (the generalized faucet) — see types/sponsio.ts. */
   sponsiones: SponsioStore
   vestigiorum: Vestigiorum
@@ -172,7 +183,7 @@ export interface Ring {
    *  + Modo + budget tessera into one verb both adapters call. */
   conductor?: Conductor
   /** TEE pod provisioner — present when TEE_IMAGE_ID + RUNPOD_API_KEY are configured. */
-  teeProvisioner?: TeeProvisioner
+  teeProvisioner?: TeePodProvisioner
 }
 
 export interface ContainerConfig {
@@ -184,7 +195,7 @@ export interface ContainerConfig {
    * Compile a Modus + aditus into the RunPod job input payload.
    * Bridges to the Fractal Tool Compiler. Injected to avoid circular deps.
    */
-  compile: (modus: Modus, aditus: Record<string, unknown>, pinnedModels?: import('./types/actum.js').ModelRef[]) => Promise<{ hash: string; input: unknown }>
+  compile: (modus: Modus, aditus: Record<string, unknown>, pinnedModels?: import('./types/actum.js').ModelRef[], ownerKey?: string) => Promise<{ hash: string; input: unknown }>
   /**
    * RunPod SECURE pod client — provisions a GPU pod, runs the workflow via SSH,
    * and POSTs the result to webhookUrl. Absent: RunPod tools will throw at run().
@@ -258,12 +269,18 @@ export interface ContainerConfig {
   /** Install models live onto a just-leased studio pod (the InstallCoordinator seam) — handed to
    *  the `Conductor` so `conducere` installs the loadout after park. Wired to the same coordinator. */
   installLive?: (materia: Materia, intellaIds: string[]) => Promise<unknown>
+  /** BYO-secrets Phase C: mint the per-job pod credential (bound to `JOB_TOKEN_SECRET`) so a run's
+   *  pod can fetch gated private weights through our proxy. Absent → no token minted. */
+  mintJobToken?: (claims: { actumId: string; ownerKey: string; exp: number }) => string
   /** Collection name for acta — default 'acta' */
   actaCollection?: string
   /** Collection name for modi — default 'modi' */
   modiCollection?: string
   /** Collection name for signa — default 'signa' */
   signaCollection?: string
+  reditusCollection?: string
+  /** Collection name for the license-tripwire band state — default 'license_tripwire' */
+  tripwireBandCollection?: string
   /** Collection name for animae — default 'animae' */
   animaeCollection?: string
   /** Collection name for personae — default 'personae' */
@@ -363,6 +380,9 @@ export interface ContainerConfig {
   apiProviders?: Array<{ provider: ApiProvider; apiKey: string }>
   /** TEE runner pod provisioner config — if present, POST /v1/sessions/tee boots real pods. */
   teeProvisioner?: TeeProvisionerConfig
+  /** Confidential-CVM backend (Azure NCC H100) — the hardware-sealed tier. Takes
+   *  precedence over teeProvisioner (docs/plans/2026-07-02-tee-hardware-path.md §3). */
+  confidentialPod?: ConfidentialPodClientConfig
 }
 
 const log = makeLogger('container')
@@ -384,6 +404,19 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const signaCol: Collection = db.collection(config.signaCollection ?? 'signa')
   const signorum = new MongoSignorum(signaCol)
 
+  // USD revenue book (ADR-0013) — the second ledger, distinct from signa (credits). Indexes
+  // (incl. the unique partial index on depositumId that guarantees idempotent deposit booking)
+  // are created centrally in ensureIndexes(). See src/types/reditus.ts.
+  const redituum = new MongoRedituum(db.collection(config.reditusCollection ?? 'reditus'))
+
+  // Payee-payout book (ADR-0013 §4c) — money OUT to a person (agent cut / royalty / referral),
+  // per-payee/per-year, gated at the $600 reporting line. Indexes in ensureIndexes().
+  const mercedum = new MongoMerces(db.collection(config.mercesCollection ?? 'mercedes'))
+
+  // Conditional-license revenue tripwire — the single-doc persisted band (ADR-0012/0013 §5). See
+  // src/crystal/licenseTripwire.ts; the evaluator/scheduler is wired in index.ts.
+  const tripwireBand = new MongoTripwireBandStore(db.collection(config.tripwireBandCollection ?? 'license_tripwire'))
+
   const animaeCol: Collection = db.collection(config.animaeCollection ?? 'animae')
   const animae = new MongoAnima(animaeCol)
 
@@ -398,10 +431,6 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   // x402 payment audit trail (replay-protected by a unique signatureHash index).
   const x402Log = new MongoX402Log(db.collection(config.x402LogCollection ?? 'x402_payment_log'))
-
-  // Payee-payout book (ADR-0013 §4c) — money OUT to a person, per-payee/per-year, gated at
-  // the $600 reporting line. Indexes in ensureIndexes().
-  const mercedum = new MongoMerces(db.collection(config.mercesCollection ?? 'mercedes'))
 
   // Sponsorship pledges (the generalized faucet).
   const sponsiones = new MongoSponsio(db.collection(config.sponsionesCollection ?? 'sponsiones'))
@@ -478,6 +507,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
           return materiae.findWarm({ materiaId: modo.materiamId })
         },
         ...(config.admitWarm ? { admitWarm: config.admitWarm } : {}),
+        ...(config.mintJobToken ? { mintJobToken: config.mintJobToken } : {}),
         deployments,
         hospitia,
       },
@@ -673,7 +703,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const collectioCursor = new CollectioCursor(sharedDispatch, collectiones, actorum, { reviewEnabled: true })
 
   return {
-    actorum, modorum, signorum, mercedum, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,
+    actorum, modorum, signorum, redituum, mercedum, tripwireBand, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,
     mandatores, corpora, collectiones, editiones, publicationAdapters, sodalitates, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
@@ -684,6 +714,8 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     collectioCursor,
     compositusCursor,
     ...(conductor ? { conductor } : {}),
-    ...(config.teeProvisioner ? { teeProvisioner: new TeeProvisioner(config.teeProvisioner) } : {}),
+    ...(config.confidentialPod
+      ? { teeProvisioner: new ConfidentialPodClient(config.confidentialPod) }
+      : config.teeProvisioner ? { teeProvisioner: new TeeProvisioner(config.teeProvisioner) } : {}),
   }
 }

@@ -191,6 +191,12 @@ export interface Intella {
    */
   ownerAnimaId?: string
   /**
+   * Generic owner key (`ownerKeyOf(auctor)` — `anima:<id>` / `bursa:<hash>` / `commitment:<hash>`).
+   * Set on NEW private imports so a NON-anima owner (a Bursa purse) can own + resolve a private
+   * model. `ownerAnimaId` stays populated when the owner is an anima (display + legacy resolution).
+   */
+  ownerKey?: string
+  /**
    * Default application weight when none is specified by the user.
    * Range: 0.0–2.0. Typical values: 0.6–1.0.
    * Users can override with word:weight syntax or dot/exclamation modifiers.
@@ -276,14 +282,14 @@ export interface Intellarum {
    * otherwise invisible on the public catalog). Optional: fakes/read-only stores may omit it
    * (the facade falls back to filtering `list()`).
    */
-  listByOwner?(animaId: string, genus?: IntellaGenus): Promise<Intellae>
+  listByOwner?(ownerKey: string, genus?: IntellaGenus): Promise<Intellae>
   /**
    * Resolve all LoRA intellae that match a trigger word and are compatible
    * with the given model FAMILY (via `familia` — exact string equality).
-   * animaId scopes results to public + private LoRAs the user can access.
-   * Absent animaId returns public LoRAs only.
+   * ownerKey (`ownerKeyOf(auctor)` — anima OR Bursa purse) scopes results to public +
+   * private LoRAs that owner can access. Absent ownerKey returns public LoRAs only.
    */
-  findByTrigger(trigger: string, familia: string, animaId?: string): Promise<Intellae>
+  findByTrigger(trigger: string, familia: string, ownerKey?: string): Promise<Intellae>
   /**
    * Bulk-load the trigger map for a model FAMILY: every LoRA the caller can
    * access (public + their own private) whose `familia` matches, keyed by
@@ -297,7 +303,7 @@ export interface Intellarum {
    * resolve only flux LoRAs. (Composite compilation is a future task; the
    * signature is family-keyed now so it plugs in with no rework.)
    */
-  triggerMap(familia: string, animaId?: string): Promise<Map<string, Intellae>>
+  triggerMap(familia: string, ownerKey?: string): Promise<Map<string, Intellae>>
   /**
    * Set a model's resolvability (`access`). The publishing reconciler (§5d) calls
    * this so `Intella.access` DERIVES from its `Editio` — a model becomes resolvable

@@ -27,6 +27,7 @@ import { makeCredentialAcceptors, resolveOrCreateAnima, federatedExternusId } fr
 import { AgentJwtVerifier, parseJwksOverride } from './allocutio/api/AgentJwtVerifier.js'
 import { AgentProvisioner } from './crystal/AgentProvisioner.js'
 import { createAgentCompatRouter } from './allocutio/api/agentCompatRouter.js'
+import { createStorageRouter } from './allocutio/api/storageRouter.js'
 import { createTreasuryAdminRouter } from './api/internal/treasuryAdminRouter.js'
 import { seedCamel, CAMEL_TREASURY } from './crystal/seeds/camel.js'
 import { createX402AgentRouter } from './allocutio/api/x402AgentRouter.js'
@@ -180,6 +181,43 @@ const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL
 const TEE_IMAGE_ID        = process.env.TEE_IMAGE_ID         // e.g. "monyrth/tee-runner:latest"
 const TEE_PLATFORM_CALLBACK = process.env.TEE_PLATFORM_CALLBACK  // e.g. "https://api.noema.ai"
 const TEE_GPU_TYPE_IDS    = process.env.TEE_GPU_TYPE_IDS?.split(',').map(s => s.trim()).filter(Boolean)
+// Confidential-CVM tier (Azure NCCads_H100_v5, SEV-SNP + H100 CC-On) — the hardware-sealed
+// backend behind /v1/sessions/tee. ALL TEE_AZURE_* vars (incl. the ingress template) must be
+// set to enable it; it then takes precedence over the RunPod TeeProvisioner.
+// Pool = pre-created, deallocated CVMs.
+const TEE_AZURE_TENANT_ID       = process.env.TEE_AZURE_TENANT_ID
+const TEE_AZURE_CLIENT_ID       = process.env.TEE_AZURE_CLIENT_ID
+const TEE_AZURE_CLIENT_SECRET   = process.env.TEE_AZURE_CLIENT_SECRET
+const TEE_AZURE_SUBSCRIPTION_ID = process.env.TEE_AZURE_SUBSCRIPTION_ID
+const TEE_AZURE_RESOURCE_GROUP  = process.env.TEE_AZURE_RESOURCE_GROUP
+const TEE_AZURE_VM_NAMES        = process.env.TEE_AZURE_VM_NAMES?.split(',').map(s => s.trim()).filter(Boolean)
+// Billing rate — fail fast on a malformed value: NaN here would flow into every session's
+// costPerHrUsd and either 500 the heartbeat billing or silently bill 0.
+const TEE_AZURE_COST_PER_HR = (() => {
+  const raw = process.env.TEE_AZURE_COST_PER_HR
+  if (raw === undefined) return 6.98   // NCC40ads_H100_v5 East US 2 list (2026-07)
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n <= 0) throw new Error(`TEE_AZURE_COST_PER_HR must be a positive number, got "${raw}"`)
+  return n
+})()
+// REQUIRED for the Azure backend: without it, sessions would go 'ready' with the runner's
+// self-reported localhost endpoint — billed but unreachable.
+const TEE_AZURE_INGRESS_TEMPLATE = process.env.TEE_AZURE_INGRESS_TEMPLATE  // e.g. "socks5+wss://{vm}.tee.noema.art/?gost&insecureudp"
+
+// A privacy-tier downgrade must never be silent: if the Azure backend is partially
+// configured, say exactly what's missing instead of quietly serving the RunPod tier.
+{
+  const req: Record<string, unknown> = {
+    TEE_AZURE_TENANT_ID, TEE_AZURE_CLIENT_ID, TEE_AZURE_CLIENT_SECRET,
+    TEE_AZURE_SUBSCRIPTION_ID, TEE_AZURE_RESOURCE_GROUP,
+    TEE_AZURE_VM_NAMES: TEE_AZURE_VM_NAMES?.length, TEE_AZURE_INGRESS_TEMPLATE,
+    TEE_PLATFORM_CALLBACK,
+  }
+  const missing = Object.entries(req).filter(([, v]) => !v).map(([k]) => k)
+  if (missing.length > 0 && missing.length < Object.keys(req).length) {
+    console.warn(`[tee] confidential-CVM backend DISABLED — partial config, missing: ${missing.join(', ')}. /v1/sessions/tee will serve the RunPod (non-confidential) tier if configured.`)
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Arcanum verifier — load snarkjs VerifyFn when the ceremony key is present
@@ -457,6 +495,21 @@ async function main(): Promise<void> {
         ...(TEE_GPU_TYPE_IDS?.length ? { gpuTypeIds: TEE_GPU_TYPE_IDS } : {}),
       },
     } : {}),
+    ...(TEE_AZURE_TENANT_ID && TEE_AZURE_CLIENT_ID && TEE_AZURE_CLIENT_SECRET
+        && TEE_AZURE_SUBSCRIPTION_ID && TEE_AZURE_RESOURCE_GROUP && TEE_AZURE_VM_NAMES?.length
+        && TEE_AZURE_INGRESS_TEMPLATE && TEE_PLATFORM_CALLBACK ? {
+      confidentialPod: {
+        tenantId:         TEE_AZURE_TENANT_ID,
+        clientId:         TEE_AZURE_CLIENT_ID,
+        clientSecret:     TEE_AZURE_CLIENT_SECRET,
+        subscriptionId:   TEE_AZURE_SUBSCRIPTION_ID,
+        resourceGroup:    TEE_AZURE_RESOURCE_GROUP,
+        vmNames:          TEE_AZURE_VM_NAMES,
+        platformCallback: TEE_PLATFORM_CALLBACK,
+        costPerHrUsd:     TEE_AZURE_COST_PER_HR,
+        ingressProxyUrlTemplate: TEE_AZURE_INGRESS_TEMPLATE,
+      },
+    } : {}),
   })
 
   // 3b. Rehydrate in-flight collections from DB (recovery after restart)
@@ -696,6 +749,7 @@ async function main(): Promise<void> {
     configureModerationGate(deps: { fetcher: typeof httpMediaFetcher; log: typeof log }): Promise<ModerationGate | null>
     configureSanctionsScreen(deps: { log: typeof log }): SanctionsScreen | null
     configurePromptGuard(deps: { log: typeof log }): PromptGuard | null
+    configureCsamReviewReporter(deps: { fetcher: typeof httpMediaFetcher }): import('./crystal/CsamReviewReporter.js').CsamReviewReporter
   }
   let compliance: PrivateCompliance | null = null
   const compliancePath = './private/compliance/index.js'
@@ -783,11 +837,17 @@ async function main(): Promise<void> {
 
   // Crystal Agent API (/v1) — ApiAllocutio (docs/agent-tasks/EPIC-api-allocutio.md).
   // The agent-shaped facade over the ring + the credential→AuctorKey resolver.
+  // Reviewer-confirmed-CSAM NCMEC report seam (human-review path, spec §4). From the
+  // private module; absent (public build) → the confirm action rejects but logs that no
+  // report was filed. Assembles + preserves; live NCMEC submission needs the ESP account.
+  const csamReviewReporter = compliance?.configureCsamReviewReporter({ fetcher: httpMediaFetcher })
+
   const crystalApi = new CrystalApi({
     pricer,
     depositAddress: CREDIT_VAULT,
     verdictCache,
     scanFeeCharger,
+    ...(csamReviewReporter ? { csamReviewReporter } : {}),
     inceptor: ring.inceptor,
     modorum: ring.modorum,
     cursorum: ring.cursorum,
@@ -950,6 +1010,20 @@ async function main(): Promise<void> {
     log.info('fiat auth rail mounted at /v1/auth + /api/v1/auth')
   } else {
     log.warn('JWT_SECRET unset — fiat username/password auth is DISABLED (no session minting/verify)')
+  }
+
+  // Storage upload front door (JS-nuke blocker #10) — presigned browser→R2 uploads
+  // for i2i input images + profile avatar/banner. One router, mounted at BOTH the
+  // compat path the web app bakes (`/api/v1/storage`) and the native `/v1/storage`,
+  // BEFORE the `/v1` + `/api/v1` catch-alls so the literal paths resolve here. Only
+  // wired when R2 is configured (otherwise the upload path is genuinely unavailable).
+  if (RUNPOD_R2) {
+    const buildStorageRouter = () => createStorageRouter({ store: new R2Uploader(RUNPOD_R2), identity: apiResolver })
+    app.use('/v1/storage', buildStorageRouter())
+    app.use('/api/v1/storage', buildStorageRouter())
+    log.info('storage upload front door mounted at /v1/storage + /api/v1/storage')
+  } else {
+    log.warn('R2 unconfigured — storage upload front door DISABLED (/storage/uploads/sign will 404)')
   }
 
   app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub }))

@@ -13,6 +13,7 @@ Example:
 
 ## Checklist
 
+- [ ] I have read and agree to the [Contributor License Agreement](../CLA.md).
 - [ ] I have updated or confirmed the Status row in `roadmap/master-outline.md` (or related epic outline).
 - [ ] I added/updated an ADR log entry if this PR introduces a new decision.
 - [ ] CI passes locally.

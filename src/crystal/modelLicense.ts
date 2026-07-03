@@ -57,12 +57,85 @@ export function licenseCommercial(license: string | undefined): CommercialVerdic
 /**
  * The PUBLIC-CATALOG admission policy over a commercial verdict — the single place the "may this
  * list publicly?" decision lives. 'yes' AND 'conditional' pass: conditional licenses (SD3/3.5,
- * Krea 2 <$1M) are fine while we're under their revenue/entity thresholds — we track revenue and
- * take out licenses with the rights-holders as we approach the cap. 'no'/'unknown' are refused
- * (fail-closed) pending an admin license clearance (see the backfill path).
+ * Krea 2 <$1M) are fine while we're under their revenue/entity thresholds — a company-wide
+ * trailing-12mo USD revenue TRIPWIRE (see `licenseTripwire.ts` + `CONDITIONAL_CAP_USD` below)
+ * watches that revenue against the tightest active cap and alerts before we cross it, so counsel
+ * can pre-negotiate an enterprise license (ADR-0012). 'no'/'unknown' are refused (fail-closed)
+ * pending an admin license clearance (see the backfill path).
  */
 export function isCatalogEligible(verdict: CommercialVerdict | undefined): boolean {
   return verdict === 'yes' || verdict === 'conditional'
+}
+
+// ── Conditional-license revenue caps (the tripwire's registry) ───────────────────────────────
+//
+// A `conditional` license admits a model to the public catalog only while the COMPANY-WIDE
+// trailing-12-month USD revenue stays under a ceiling (ADR-0012). This is a property of *us*, not
+// of the model's usage — so every conditional cap is compared against the SAME single scalar `R`
+// (see docs/spec/conditional-license-revenue.md, "The crystal reduction"). This registry maps a
+// conditional license id → that ceiling, in WHOLE US DOLLARS. Keeping it beside LICENSE_COMMERCIAL
+// keeps modelLicense.ts the one source of "what does this license permit, and at what ceiling".
+
+/**
+ * USD revenue ceiling per conditional license id (WHOLE dollars). Only licenses that resolve to
+ * `conditional` belong here; 'yes' licenses have no cap, and 'no'/'unknown' never reach the catalog
+ * so never bind. **[counsel]** the Stability figure/semantics (revenue-or-headcount) must be
+ * confirmed against the current Stability Community License before this is treated as authoritative.
+ */
+export const CONDITIONAL_CAP_USD: Record<string, number> = {
+  'krea-community': 1_000_000,        // ADR-0012: commercial only for entities <$1M total revenue, trailing 12mo
+  'stability-community': 1_000_000,   // SD3/3.5, SDXL-Turbo — entity revenue threshold [counsel: verify exact figure]
+}
+
+/** The USD cap (whole dollars) a license binds at, or undefined if the license carries no cap. */
+export function conditionalCapUsd(license: string | undefined): number | undefined {
+  if (!license) return undefined
+  return CONDITIONAL_CAP_USD[license]
+}
+
+/**
+ * The tightest (minimum) USD cap among the given active conditional license ids — the binding cap.
+ * Returns null when NONE of them carry a cap (the tripwire is then dormant: ∞ ceiling). Licenses
+ * with no cap entry are ignored. The minimum wins because the strictest license is the one we'd
+ * breach first.
+ */
+export function bindingCapUsd(licenses: Iterable<string>): number | null {
+  let min: number | null = null
+  for (const lic of licenses) {
+    const cap = CONDITIONAL_CAP_USD[lic]
+    if (cap === undefined) continue
+    if (min === null || cap < min) min = cap
+  }
+  return min
+}
+
+/** The doc-shaped subset the active-cap query reads off a stored model (a runtime Intella satisfies it). */
+export interface CatalogLicenseView {
+  commercialUse?: CommercialVerdict
+  license?: string
+  access?: 'public' | 'private'
+  canonica?: boolean
+}
+
+/**
+ * From a set of stored models, the DISTINCT conditional license ids that are ACTUALLY reachable in
+ * the public (commercial) catalog — i.e. publicly listed (`access:'public'` OR `canonica:true`),
+ * catalog-eligible, verdict `conditional`, and carrying a known cap. This is the set the tripwire
+ * feeds to `bindingCapUsd`. A model whose `commercialUse` isn't stored is classified on the fly from
+ * its `license` so a legacy record that only carries a license id still counts. Private/unlisted
+ * conditional models don't bind (they're not on the commercial surface).
+ */
+export function activeConditionalLicenses(models: Iterable<CatalogLicenseView>): string[] {
+  const active = new Set<string>()
+  for (const m of models) {
+    const verdict = m.commercialUse ?? licenseCommercial(m.license)
+    if (verdict !== 'conditional') continue
+    const isPublic = m.access === 'public' || m.canonica === true
+    if (!isPublic) continue
+    if (!m.license || CONDITIONAL_CAP_USD[m.license] === undefined) continue
+    active.add(m.license)
+  }
+  return [...active]
 }
 
 /**

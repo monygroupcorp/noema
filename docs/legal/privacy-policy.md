@@ -7,9 +7,9 @@
 
 ## The short version
 
-We built the architecture so that private compute sessions are **technically impossible for us to surveil** — not just a promise we make. Here is what that means in practice:
+We built the architecture so that private compute sessions **do not route through our servers** — being out of the data path is an architectural fact, not just a promise we make. Here is what that means in practice:
 
-- In a private (TEE) session, your prompts, outputs, and model selection never reach our servers. We see: a session opened, GPU-hours consumed, a session ended.
+- In a private session, your prompts, outputs, and model selection never reach our servers. We see: a session opened, GPU-hours consumed, a session ended.
 - We do not run Google Analytics or any third-party tracking.
 - If you use Bursa anonymous credits, we cannot link your spend to an identity. The billing is a zero-knowledge proof.
 - We do not train on your data.
@@ -22,7 +22,7 @@ The long version follows.
 
 [ENTITY NAME] operates the Noema Crystal platform, a private AI compute service. References to "we," "us," or "our" mean [ENTITY NAME]. Our registered address is [ADDRESS].
 
-For GDPR purposes, [ENTITY NAME] is the data controller for account and billing data. For TEE private sessions, we are not a controller of session content — we never receive it.
+For GDPR purposes, [ENTITY NAME] is the data controller for account and billing data. For private sessions, we are not a controller of session content — we never receive it.
 
 ---
 
@@ -59,7 +59,7 @@ Anonymous credit (Bursa): a Bursa token is a Groth16 zero-knowledge proof. We ve
 
 We do not retain IP addresses beyond 24 hours. We do not correlate IPs with account identities.
 
-### 2d. Session content — TEE private sessions
+### 2d. Session content — private sessions
 
 **We do not receive, store, or have access to:**
 - Your prompts or inputs
@@ -69,11 +69,13 @@ We do not retain IP addresses beyond 24 hours. We do not correlate IPs with acco
 
 The WireGuard tunnel is established directly between your browser and the GPU pod. After tunnel establishment, our servers are architecturally excluded from the data path. The pod receives only what you send through the tunnel.
 
-The platform receives exactly three signals from a TEE session, all content-free: session started, heartbeat (GPU-hours), session ended.
+The pod runs on single-tenant infrastructure from our compute provider. Until the confidential-compute hardware tier ships, the provider hosting the pod is technically positioned to access the pod's memory (see Section 5); we are not.
 
-### 2e. Session content — non-TEE sessions (API, bot)
+The platform receives exactly three signals from a private session, all content-free: session started, heartbeat (GPU-hours), session ended.
 
-In non-private sessions (Telegram bot, direct API without TEE), we process your prompts and outputs to deliver the service. We do not retain prompt or output content after the request completes. We do not use prompt or output content to train models.
+### 2e. Session content — non-private sessions (API, bot)
+
+In non-private sessions (Telegram bot, direct API without a private session), we process your prompts and outputs to deliver the service. We do not retain prompt or output content after the request completes. We do not use prompt or output content to train models.
 
 We retain session metadata as described in 2c.
 
@@ -125,7 +127,7 @@ We do not:
 
 We share data only in these limited circumstances:
 
-**Infrastructure providers:** We use RunPod for GPU compute. Session metadata is shared as necessary to provision and bill for compute. Session content in TEE sessions is never transmitted to us or them in readable form.
+**Infrastructure providers:** We use RunPod for GPU compute. Session metadata is shared as necessary to provision and bill for compute. Session content in private sessions is never transmitted to us; it reaches the provider's GPU pod only through your encrypted tunnel. Because the pod runs on the provider's hardware, the provider is technically positioned to access pod memory until the confidential-compute tier ships; we do not share content with them, and NOEMA has no access path of its own.
 
 **Payment processors:** [PROCESSOR NAME] handles payment card processing. We share only what's necessary to process your payment.
 
@@ -153,8 +155,8 @@ We run content classifiers and hash-matching against known CSAM databases at the
 | Session metadata (billing) | 90 days |
 | IP addresses | 24 hours |
 | Error logs | 30 days |
-| Prompt / output content (TEE sessions) | Never received |
-| Prompt / output content (non-TEE sessions) | Not retained after request |
+| Prompt / output content (private sessions) | Never received |
+| Prompt / output content (non-private sessions) | Not retained after request |
 | OFAC screening records | 5 years (legal requirement) |
 | CSAM reporting records | As required by law |
 | Bursa ZK proof records | Proof verification timestamp + credit amount, 90 days |
@@ -173,7 +175,7 @@ Depending on your jurisdiction, you may have the right to:
 
 To exercise these rights: [CONTACT EMAIL]
 
-Because we hold minimal data by architecture, most requests can be fulfilled immediately. TEE session content is not held by us and cannot be retrieved or deleted — it was never received.
+Because we hold minimal data by architecture, most requests can be fulfilled immediately. Private-session content is not held by us and cannot be retrieved or deleted — it was never received.
 
 ---
 

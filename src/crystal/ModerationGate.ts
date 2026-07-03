@@ -9,11 +9,15 @@
 // posture's trust-boundary CSAM/NCMEC scan expressed as the →public gate
 // (docs/spec/publishing.md §8; memory project_compliance_posture).
 //
-// The interface is the seam; it is injected exactly like the deterministic
-// runtime engines (real impl + fake for tests). The REAL scanner (CSAM/NCMEC
-// classification + reporting) is specced, NOT built — so the spine ships against
-// the interface and the real implementation drops in behind it later without a
-// spine change.
+// The interface is the seam; it is injected exactly like the deterministic runtime
+// engines. This PUBLIC file ships only the PORT + two stubs. The REAL scanner —
+// fetch → hash → known-CSAM match (exact + perceptual) → optional classifier →
+// reject + NCMEC CyberTipline report — is the compliance abuse surface and is
+// therefore PRIVATE (ADR-0012 §49 — not published): it lives in the gitignored
+// `src/private/compliance` module and is injected at deploy. `src/index.ts` loads
+// it via a guarded dynamic import and falls back to the fail-closed
+// `denyModerationGate` when it is absent (a public build). The other stub,
+// `permissiveModerationGate`, is the explicit dev/staging opt-in only.
 // =============================================================================
 
 import type { PublishArtifact } from './PublicationAdapter.js'
@@ -45,14 +49,15 @@ export interface ModerationGate {
 }
 
 /**
- * PLACEHOLDER gate — approves everything. The real CSAM/NCMEC scanner is unbuilt
- * (compliance posture); this preserves the async-gate ARCHITECTURE (the pending
- * → scan → published path always runs) while the scanner that decides verdicts
- * lands later. Wired by the container until then. Do NOT treat its `ok:true` as
- * a real safety guarantee — it is a structural no-op, flagged here on purpose.
+ * PERMISSIVE gate — approves everything. This is the explicit DEV/STAGING opt-in
+ * (`MODERATION_ALLOW_UNSCANNED=1`), NOT the default: the real gate is
+ * `makeCsamModerationGate` (CsamModerationGate.ts), wired by the container whenever
+ * detection is configured. Do NOT treat its `ok:true` as a real safety guarantee —
+ * it is a structural no-op, flagged here on purpose; it must NEVER be active in
+ * production. Preserves the async-gate architecture for local work without a scanner.
  *
- * PLACEHOLDER(publishing#1): inert stand-in for the real CSAM/NCMEC scanner+reporter.
- * MUST be replaced before the feed sees real public traffic. Ledger: docs/spec/publishing.md §10.
+ * PLACEHOLDER(publishing#1): permissive no-op, active only under MODERATION_ALLOW_UNSCANNED.
+ * MUST NOT be active before the feed sees real public traffic. Ledger: docs/spec/publishing.md §10.
  */
 export const permissiveModerationGate: ModerationGate = {
   async scan(): Promise<ModerationVerdict> {

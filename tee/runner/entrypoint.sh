@@ -6,13 +6,44 @@ set -euo pipefail
 
 log() { echo "[entrypoint] $*"; }
 
+# — Azure confidential-CVM path: session parameters arrive as VM tags (a deallocated
+#   VM has no per-boot env channel — ConfidentialPodClient stamps tags, we read IMDS).
+#   RunPod path injects real env vars, so this is skipped when SESSION_ID is set.
+#   IMDS can be briefly unavailable / throttled (410/429/5xx) during early boot and
+#   Azure documents that callers must retry — a headless runner (no SESSION_ID) never
+#   calls back and the platform watchdog would kill the pod, so retry hard here.
+if [ -z "${SESSION_ID:-}" ]; then
+  IMDS_TAGS=""
+  for _attempt in 1 2 3 4 5 6; do
+    IMDS_TAGS=$(curl -sf -H "Metadata:true" --connect-timeout 2 \
+      "http://169.254.169.254/metadata/instance/compute/tagsList?api-version=2021-02-01" || true)
+    [ -n "$IMDS_TAGS" ] && break
+    log "IMDS tags fetch attempt ${_attempt} failed — retrying"
+    sleep 2
+  done
+  [ -z "$IMDS_TAGS" ] && log "WARNING: IMDS tags unavailable after 6 attempts — runner will start without session parameters"
+  if [ -n "$IMDS_TAGS" ]; then
+    eval "$(echo "$IMDS_TAGS" | python3 -c '
+import json, shlex, sys
+tags = {t["name"]: t["value"] for t in json.loads(sys.stdin.read() or "[]")}
+for tag, var in [("noemaSessionId", "SESSION_ID"), ("noemaPlatformCallback", "PLATFORM_CALLBACK"),
+                 ("noemaWgClientPubkey", "WG_CLIENT_PUBKEY"), ("noemaRunnerToken", "RUNNER_TOKEN")]:
+    if tag in tags:
+        print(f"export {var}={shlex.quote(tags[tag])}")
+')"
+    log "session parameters loaded from Azure IMDS tags (session ${SESSION_ID:-unset})"
+  fi
+fi
+
 status() {
   local step="$1"
   log "status: $step"
   if [ -n "${PLATFORM_CALLBACK:-}" ] && [ -n "${SESSION_ID:-}" ]; then
+    local token_field=""
+    [ -n "${RUNNER_TOKEN:-}" ] && token_field=",\"runnerToken\":\"${RUNNER_TOKEN}\""
     curl -sf -X POST "${PLATFORM_CALLBACK}/runner/status" \
       -H "Content-Type: application/json" \
-      -d "{\"sessionId\":\"${SESSION_ID}\",\"step\":\"${step}\"}" || true
+      -d "{\"sessionId\":\"${SESSION_ID}\",\"step\":\"${step}\"${token_field}}" || true
   fi
 }
 

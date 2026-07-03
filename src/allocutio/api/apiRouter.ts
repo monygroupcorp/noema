@@ -17,7 +17,7 @@ import express, { type Request, type Response, type Router } from 'express'
 import type { Run, Collection, Team, Edition, FeedItem } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { FeedFilter } from '../../types/editio.js'
-import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts } from './CrystalApi.js'
+import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote } from './CrystalApi.js'
 import type { RarityReport } from '../../crystal/rarityReport.js'
 import { ApiError, Errors } from './errors.js'
 import { makeLogger } from '../../lib/logger.js'
@@ -46,12 +46,17 @@ export interface ApiFacade {
   ): Promise<{ impetus: string }>
   listFundamenta(): Promise<Array<{ id: string; nomen?: string; versio: string; runtime?: string; imageId: string; imageVersion: string; vramGb?: number }>>
   listModels(filter?: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number }): Promise<ModelCard[]>
+  depositConfig(): DepositConfig
+  depositQuote(input: { chainId: number | string; token: string; amount: string }): Promise<DepositQuote>
   importModel(auctor: AuctorKey, opts: import('./CrystalApi.js').ImportModelOpts): Promise<ModelCard>
   listMyModels(auctor: AuctorKey): Promise<ModelCard[]>
   setModelLicense(auctor: AuctorKey, id: string, opts: import('./CrystalApi.js').SetModelLicenseOpts): Promise<ModelCard>
+  revenueReport(auctor: AuctorKey): Promise<import('./CrystalApi.js').RevenueReport>
   saveFlow(auctor: AuctorKey, opts: SaveFlowOpts): Promise<{ id: string }>
   bind(auctor: AuctorKey, verb: string, modusId: string): Promise<{ verb: string; modusId: string }>
   getMe(auctor: AuctorKey): Promise<import('./CrystalApi.js').MeView>
+  putSecret(auctor: AuctorKey, provider: string, token: string, idleDays?: number): Promise<import('./CrystalApi.js').SecretView>
+  removeSecret(auctor: AuctorKey, provider: string): Promise<import('./CrystalApi.js').SecretView>
   setAppearance(auctor: AuctorKey, appearance: import('../../types/consuetudo.js').Appearance): Promise<import('../../types/consuetudo.js').Appearance>
   setGeneratio(auctor: AuctorKey, generatio: import('../../types/consuetudo.js').Generatio): Promise<import('../../types/consuetudo.js').Generatio>
   getAffines(auctor: AuctorKey, modusId: string): Promise<Record<string, unknown>>
@@ -63,6 +68,7 @@ export interface ApiFacade {
   provisionTeeSession(auctor: AuctorKey, opts: ProvisionTeeSessionOpts): Promise<TeeSessionView>
   getTeeSession(auctor: AuctorKey, sessionId: string): Promise<TeeSessionView>
   endTeeSession(auctor: AuctorKey, sessionId: string): Promise<void>
+  fetchTeeWglog(auctor: AuctorKey, sessionId: string, tail?: string): Promise<string | null>
   collect(auctor: AuctorKey, opts: CollectOpts): Promise<Collection>
   fireCollection(auctor: AuctorKey, id: string): Promise<Collection>
   patchCollectionTractus(auctor: AuctorKey, id: string, tractus: import('../../types/collectio.js').Tractus[]): Promise<Collection>
@@ -80,6 +86,10 @@ export interface ApiFacade {
   getEdition(auctor: AuctorKey, id: string): Promise<Edition>
   feed(filter?: FeedFilter): Promise<FeedItem[]>
   retractEdition(auctor: AuctorKey, id: string): Promise<Edition>
+  listHeldEditions(auctor: AuctorKey): Promise<Edition[]>
+  approveHeldEdition(auctor: AuctorKey, id: string): Promise<Edition>
+  rejectHeldEdition(auctor: AuctorKey, id: string): Promise<Edition>
+  confirmCsamAndReport(auctor: AuctorKey, id: string): Promise<Edition>
   createTeam(auctor: AuctorKey, opts: { nomen: string; members?: string[] }): Promise<Team>
   getTeam(auctor: AuctorKey, id: string): Promise<Team>
   listTeams(auctor: AuctorKey): Promise<Team[]>
@@ -304,6 +314,13 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     res.status(200).json({ edition: await api.publish(auctor, { artifact, destination, visibility, custody, license, teamId, owners }) })
   }))
 
+  // GET /v1/editiones/review — the human-review queue (spec §4): editions the moderation
+  // gate HELD. Author sees their own held items; the platform admin sees all. MUST be
+  // declared before '/editiones/:id' so the literal path isn't captured as an id.
+  router.get('/editiones/review', wrap(async (req, res) => {
+    res.json({ editions: await api.listHeldEditions(await auth(req)) })
+  }))
+
   // GET /v1/editiones/:id — one publication (author-scoped). Polled to watch an async
   // settle land: pending → published (with the `externalRef`, e.g. an archive ZIP url).
   router.get('/editiones/:id', wrap(async (req, res) => {
@@ -313,6 +330,25 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   // POST /v1/editiones/:id/retract — unpublish where the destination allows it (author-scoped).
   router.post('/editiones/:id/retract', wrap(async (req, res) => {
     res.json({ edition: await api.retractEdition(await auth(req), String(req.params.id)) })
+  }))
+
+  // POST /v1/editiones/:id/approve — clear a moderation HOLD → the item re-settles and
+  // publishes (spec §4). PLATFORM-ADMIN ONLY (an author cannot clear their own hold).
+  router.post('/editiones/:id/approve', wrap(async (req, res) => {
+    res.json({ edition: await api.approveHeldEdition(await auth(req), String(req.params.id)) })
+  }))
+
+  // POST /v1/editiones/:id/reject — decline a held publication → terminal 'rejected'
+  // (spec §4). PLATFORM-ADMIN ONLY. Never files a report (that is a separate human action).
+  router.post('/editiones/:id/reject', wrap(async (req, res) => {
+    res.json({ edition: await api.rejectHeldEdition(await auth(req), String(req.params.id)) })
+  }))
+
+  // POST /v1/editiones/:id/confirm-csam — reviewer affirmatively confirms a held item is
+  // CSAM → reject + file the NCMEC report (spec §4). PLATFORM-ADMIN ONLY. This is the ONLY
+  // review action that reports; the report is a legal duty on human confirmation (§2258A).
+  router.post('/editiones/:id/confirm-csam', wrap(async (req, res) => {
+    res.json({ edition: await api.confirmCsamAndReport(await auth(req), String(req.params.id)) })
   }))
 
   // GET /v1/feed — the public feed (NO auth): published, public-surface editions, newest first.
@@ -380,6 +416,20 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     }),
   )
 
+  // GET /v1/deposit/config — static config for the buy-points/deposit UI (address, rate, chains).
+  // Public, no auth.
+  router.get('/deposit/config', wrap(async (_req, res) => {
+    res.json(api.depositConfig())
+  }))
+
+  // POST /v1/deposit/quote — how many impetus points `amount` base units of `token` buys, now.
+  // Public, no auth (informational; the webhook credit at deposit time is authoritative and equal).
+  // Body: { chainId, token, amount }  — amount = raw base units (wei / token-decimals), string.
+  router.post('/deposit/quote', wrap(async (req, res) => {
+    const { chainId, token, amount } = req.body ?? {}
+    res.json(await api.depositQuote({ chainId, token: String(token ?? ''), amount: String(amount ?? '') }))
+  }))
+
   // POST /v1/models/import — import a model/LoRA by URL as a PRIVATE, owner-scoped model
   // (Civitai/HF/direct). Usable in the importer's flows at once; never on the public
   // catalogue until a separate `publish` promotion passes moderation.
@@ -401,6 +451,12 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     const auctor = await auth(req)
     const { license, commercialUse, reclassify } = req.body ?? {}
     res.json({ model: await api.setModelLicense(auctor, String(req.params.id), { license, commercialUse, reclassify }) })
+  }))
+
+  // GET /v1/admin/revenue — ADMIN revenue report (platform-admin only): company-wide trailing-12mo
+  // USD revenue vs the tightest active conditional-license cap (the tripwire, ADR-0012/0013 §5).
+  router.get('/admin/revenue', wrap(async (req, res) => {
+    res.json(await api.revenueReport(await auth(req)))
   }))
 
   // GET /v1/flows — public flow discovery (no auth).
@@ -459,6 +515,19 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   // PUT /v1/me/generatio — replace the caller's cross-cutting generation defaults (Preferences).
   router.put('/me/generatio', wrap(async (req, res) => {
     res.json({ generatio: await api.setGeneratio(await auth(req), req.body ?? {}) })
+  }))
+
+  // PUT/DELETE /v1/me/secrets/:provider — connect/disconnect a BYO gated-origin credential
+  // (Civitai/HF token). Auth required (identified OR anonymous purse). The token is sealed at
+  // rest at once and NEVER echoed back; a purse caller receives a deanonymization warning.
+  router.put('/me/secrets/:provider', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const { token, idleDays } = req.body ?? {}
+    res.json(await api.putSecret(auctor, String(req.params.provider), token, idleDays))
+  }))
+  router.delete('/me/secrets/:provider', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    res.json(await api.removeSecret(auctor, String(req.params.provider)))
   }))
 
   // GET/PUT /v1/me/affines/:modusId — the caller's per-flow input defaults.
@@ -550,25 +619,19 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     }),
   )
 
-  // GET /v1/sessions/tee/:id/wglog — proxy /debug/wglog from the pod over the platform.
-  // Avoids CORS: browser calls this instead of fetching the RunPod URL directly.
+  // GET /v1/sessions/tee/:id/wglog — proxy the pod's token-gated /debug/wglog over the
+  // platform. Avoids CORS, and the per-session runner token (which the pod requires
+  // since the debug endpoints were gated) stays server-side.
   router.get(
     '/sessions/tee/:id/wglog',
     wrap(async (req, res) => {
       const auctor = await auth(req)
-      const session = await api.getTeeSession(auctor, String(req.params.id))
-      if (!session.proxyUrl) {
+      const text = await api.fetchTeeWglog(auctor, String(req.params.id),
+        req.query.tail ? String(req.query.tail) : undefined)
+      if (text === null) {
         res.status(404).json({ error: { code: 'not_found', message: 'session has no proxy URL yet' } })
         return
       }
-      const httpBase = session.proxyUrl
-        .replace(/^socks5\+wss:\/\//, 'https://')
-        .replace(/^socks5\+ws:\/\//, 'http://')
-        .replace(/\?.*$/, '')
-        .replace(/\/$/, '')
-      const tail = req.query.tail ? `?tail=${encodeURIComponent(String(req.query.tail))}` : ''
-      const podRes = await fetch(httpBase + '/debug/wglog' + tail)
-      const text = await podRes.text()
       res.setHeader('Content-Type', 'text/plain')
       res.send(text)
     }),

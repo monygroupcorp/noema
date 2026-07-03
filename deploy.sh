@@ -11,6 +11,11 @@ set -euo pipefail
 #     ./deploy.sh           # deploys :latest
 #     ./deploy.sh 4.1.0     # deploys :4.1.0
 #     ./deploy.sh 4.0.0     # rollback to :4.0.0
+#
+# Deploys the single crystal app container (blue-green) behind Caddy.
+# The legacy export/training/sweeper worker containers were removed with
+# the JS nuke; hung-pod recovery is now handled in-app (Census wall-clock
+# billing + idle reaper).
 # ------------------------------------------------------------------
 
 DEPLOY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,13 +30,6 @@ IMAGE="${REGISTRY}:${VERSION}"
 APP_CONTAINER="hyperbotcontained"
 NETWORK_NAME="hyperbot_network"
 CONTAINER_ALIAS="hyperbot"
-WORKER_CONTAINER="hyperbotworker"
-WORKER_ALIAS="hyperbot-worker"
-TRAINING_WORKER_CONTAINER="hyperbottraining"
-TRAINING_WORKER_ALIAS="hyperbot-training"
-SWEEPER_CONTAINER="hyperbotsweeper"
-SWEEPER_ALIAS="hyperbot-sweeper"
-SWEEPER_INTERVAL="${SWEEPER_INTERVAL_SECONDS:-900}"
 
 # Caddy
 CADDY_CONTAINER="caddy_proxy"
@@ -48,20 +46,13 @@ MAINT_FLAG="${MAINT_DIR}/maintenance.flag"
 KEYSTORE_SCRIPT="${DEPLOY_ROOT}/keystore/loadKeystore.js"
 KEYSTORE_PATH="/etc/account/STATIONTHIS"
 
-# Worker control
-INTERNAL_API_URL="http://${CONTAINER_ALIAS}:4000/internal/v1/data"
-WORKER_WAIT_TIMEOUT="${WORKER_WAIT_TIMEOUT:-1800}"
-WORKER_POLL_INTERVAL="${WORKER_POLL_INTERVAL:-15}"
-
 # Health check tuning
 HEALTH_CHECK_RETRIES="${HEALTH_CHECK_RETRIES:-80}"
 HEALTH_CHECK_DELAY="${HEALTH_CHECK_DELAY:-5}"
 
-# Graceful shutdown: 35s allows credit worker 30s cleanup + buffer
+# Graceful shutdown: 35s allows the app's in-flight cleanup + buffer
 STOP_TIMEOUT=35
 
-WORKER_PAUSED=0
-WORKER_RESUMED=0
 MAINTENANCE_ENABLED=0
 
 # ------------------------------------------------------------------
@@ -80,8 +71,6 @@ load_env_var() {
   printf ''
 }
 
-INTERNAL_API_KEY_ADMIN="$(load_env_var INTERNAL_API_KEY_ADMIN)"
-
 mkdir -p "${LOG_DIR}" "${MAINT_DIR}"
 
 log() { echo "[deploy] $1" | tee -a "${LOG_FILE}"; }
@@ -95,86 +84,6 @@ run_logged() {
 rotate_logs() {
   if [[ -f "${LOG_FILE}" ]]; then
     tail -n 1000 "${LOG_FILE}" > "${LOG_FILE}.tmp" && mv "${LOG_FILE}.tmp" "${LOG_FILE}"
-  fi
-}
-
-# ------------------------------------------------------------------
-# Worker control (via export-worker-control.js inside running container)
-# ------------------------------------------------------------------
-
-worker_ctl() {
-  local cmd="$1"; shift
-  if [[ -z "${INTERNAL_API_KEY_ADMIN}" ]]; then
-    log "INTERNAL_API_KEY_ADMIN not set; skipping worker ${cmd}."
-    return 1
-  fi
-  if ! docker ps --format '{{.Names}}' | grep -q "^${APP_CONTAINER}$"; then
-    log "Container ${APP_CONTAINER} not running; cannot execute worker ${cmd}."
-    return 1
-  fi
-  local output
-  output=$(docker exec "${APP_CONTAINER}" \
-    env INTERNAL_API_BASE="http://localhost:4000/internal/v1/data" \
-    INTERNAL_API_KEY_ADMIN="${INTERNAL_API_KEY_ADMIN}" \
-    node /usr/src/app/scripts/export-worker-control.js "$cmd" "$@" 2>> "${LOG_FILE}")
-  if [[ -n "${output}" ]]; then
-    printf '%s\n' "${output}" >> "${LOG_FILE}"
-    printf '%s\n' "${output}"
-  fi
-}
-
-pause_worker() {
-  if [[ -z "${INTERNAL_API_KEY_ADMIN}" ]]; then
-    log "INTERNAL_API_KEY_ADMIN not set; skipping worker pause."
-    return
-  fi
-  if worker_ctl pause "deploy" >/dev/null; then
-    WORKER_PAUSED=1
-    log "Worker pause acknowledged."
-  else
-    log "Warning: unable to pause worker; proceeding."
-  fi
-}
-
-wait_for_worker_idle() {
-  if [[ -z "${INTERNAL_API_KEY_ADMIN}" ]]; then return; fi
-  log "Waiting for worker to become idle..."
-  local start_ts
-  start_ts=$(date +%s)
-  while true; do
-    local status_json
-    status_json=$(worker_ctl status || true)
-    if [[ -z "${status_json}" ]]; then
-      log "Warning: unable to query worker status; assuming idle."
-      return
-    fi
-    local state currentJob
-    state=$(printf '%s' "${status_json}" | python3 -c 'import json,sys; obj=json.loads(sys.stdin.read()); print(obj.get("status",""))' 2>/dev/null || printf '')
-    currentJob=$(printf '%s' "${status_json}" | python3 -c 'import json,sys; obj=json.loads(sys.stdin.read()); print(obj.get("activeJobId",""))' 2>/dev/null || printf '')
-    log "Worker status: ${state:-unknown} ${currentJob:+(job ${currentJob})}"
-    if [[ "${state}" != "busy" ]]; then return; fi
-    local now elapsed
-    now=$(date +%s)
-    elapsed=$((now - start_ts))
-    if (( elapsed > WORKER_WAIT_TIMEOUT )); then
-      if [[ "${FORCE_DEPLOY:-0}" == "1" ]]; then
-        log "Worker still busy after ${elapsed}s but FORCE_DEPLOY=1; continuing."
-        return
-      fi
-      log "Worker still busy after ${elapsed}s; aborting deploy."
-      exit 1
-    fi
-    sleep "${WORKER_POLL_INTERVAL}"
-  done
-}
-
-resume_worker() {
-  if [[ -z "${INTERNAL_API_KEY_ADMIN}" ]]; then return; fi
-  if worker_ctl resume >/dev/null; then
-    WORKER_RESUMED=1
-    log "Worker resume acknowledged."
-  else
-    log "Warning: unable to resume worker."
   fi
 }
 
@@ -196,11 +105,8 @@ disable_maintenance() {
   log "Maintenance flag cleared."
 }
 
-# Safety net: resume worker + clear maintenance on unexpected exit
+# Safety net: clear maintenance on unexpected exit
 cleanup() {
-  if [[ "${WORKER_PAUSED}" == "1" && "${WORKER_RESUMED}" == "0" ]]; then
-    resume_worker || true
-  fi
   if [[ "${MAINTENANCE_ENABLED}" == "1" ]]; then
     disable_maintenance || true
   fi
@@ -276,118 +182,12 @@ health_check_app() {
   return 1
 }
 
-# ------------------------------------------------------------------
-# Worker management
-# ------------------------------------------------------------------
-
-start_worker_container() {
-  run_logged "Starting export worker container..." docker run -d \
-    --env COLLECTION_EXPORT_PROCESSING_ENABLED=true \
-    --env-file "${ENV_FILE}" \
-    --network "${NETWORK_NAME}" \
-    --network-alias "${WORKER_ALIAS}" \
-    --name "${WORKER_CONTAINER}" \
-    --restart unless-stopped \
-    --cap-drop ALL \
-    --security-opt no-new-privileges \
-    "${IMAGE}" \
-    node worker.js
-}
-
-ensure_worker_running() {
-  if docker ps --format '{{.Names}}' | grep -q "^${WORKER_CONTAINER}$"; then
-    log "Worker container already running."
-    return
-  fi
-  log "Worker container not running; starting..."
-  start_worker_container
-}
-
-start_training_worker_container() {
-  local ssh_key_path
-  ssh_key_path="$(load_env_var VASTAI_SSH_KEY_PATH)"
-  local ssh_key_dir ssh_key_name container_ssh_dir="/home/node/.ssh/vastai"
-  ssh_key_dir="$(dirname "${ssh_key_path}")"
-  ssh_key_name="$(basename "${ssh_key_path}")"
-
-  if [[ -z "${ssh_key_path}" ]]; then
-    log "WARNING: VASTAI_SSH_KEY_PATH not set, training worker may fail SSH operations"
-  fi
-
-  if [[ -n "${ssh_key_path}" && -f "${ssh_key_path}" ]]; then
-    log "Setting SSH key permissions for container node user (uid 1000)..."
-    chmod 755 "${ssh_key_dir}"
-    chown 1000:1000 "${ssh_key_path}" "${ssh_key_path}.pub" 2>/dev/null || true
-    chmod 600 "${ssh_key_path}"
-    chmod 644 "${ssh_key_path}.pub" 2>/dev/null || true
-  fi
-
-  run_logged "Starting VastAI training worker..." docker run -d \
-    --env-file "${ENV_FILE}" \
-    --env "VASTAI_SSH_KEY_PATH=${container_ssh_dir}/${ssh_key_name}" \
-    --network "${NETWORK_NAME}" \
-    --network-alias "${TRAINING_WORKER_ALIAS}" \
-    --name "${TRAINING_WORKER_CONTAINER}" \
-    --restart unless-stopped \
-    --cap-drop ALL \
-    --security-opt no-new-privileges \
-    -v "${ssh_key_dir}:${container_ssh_dir}:ro" \
-    "${IMAGE}" \
-    node scripts/workers/vastaiTrainingWorker.js
-}
-
-ensure_training_worker_running() {
-  local vastai_key
-  vastai_key="$(load_env_var VASTAI_API_KEY)"
-  if [[ -z "${vastai_key}" ]]; then
-    log "VASTAI_API_KEY not set; skipping training worker."
-    return
-  fi
-  if docker ps --format '{{.Names}}' | grep -q "^${TRAINING_WORKER_CONTAINER}$"; then
-    log "Training worker already running."
-    return
-  fi
-  log "Training worker not running; starting..."
-  start_training_worker_container
-}
-
-start_sweeper_container() {
-  run_logged "Starting instance sweeper..." docker run -d \
-    --env-file "${ENV_FILE}" \
-    --network "${NETWORK_NAME}" \
-    --network-alias "${SWEEPER_ALIAS}" \
-    --name "${SWEEPER_CONTAINER}" \
-    --restart unless-stopped \
-    --cap-drop ALL \
-    --security-opt no-new-privileges \
-    "${IMAGE}" \
-    /bin/sh -c "while true; do sleep ${SWEEPER_INTERVAL}; node scripts/workers/instanceSweeper.js || true; done"
-}
-
-ensure_sweeper_running() {
-  local vastai_key
-  vastai_key="$(load_env_var VASTAI_API_KEY)"
-  if [[ -z "${vastai_key}" ]]; then
-    log "VASTAI_API_KEY not set; skipping sweeper."
-    return
-  fi
-  if docker ps --format '{{.Names}}' | grep -q "^${SWEEPER_CONTAINER}$"; then
-    log "Sweeper already running."
-    return
-  fi
-  log "Sweeper not running; starting..."
-  start_sweeper_container
-}
-
 # ==================================================================
 # DEPLOY SEQUENCE
 # ==================================================================
 
 log "=== Noema deploy started (image: ${IMAGE}) ==="
 rotate_logs
-
-DEPLOY_WORKER_FLAG="${DEPLOY_WORKER:-0}"
-DEPLOY_TRAINING_WORKER_FLAG="${DEPLOY_TRAINING_WORKER:-0}"
 
 # 1. Free disk space before pull — remove all unused images (old versioned tags accumulate)
 log "Pruning unused Docker images to free disk space..."
@@ -396,14 +196,6 @@ docker image prune -a -f >> "${LOG_FILE}" 2>&1 || true
 # 2. Pull image from registry
 log "Pulling image ${IMAGE}..."
 docker pull "${IMAGE}" 2>&1 | tee -a "${LOG_FILE}"
-
-# 3. Pause export worker if requested
-if [[ "${DEPLOY_WORKER_FLAG}" == "1" ]]; then
-  pause_worker
-  wait_for_worker_idle
-else
-  log "Skipping worker pause (DEPLOY_WORKER not set)."
-fi
 
 # 3. Enable maintenance mode
 enable_maintenance
@@ -416,20 +208,11 @@ if [[ -z "${PRIVATE_KEY}" ]]; then
   exit 1
 fi
 
-# 5. Stop worker containers if requested (before app blue-green swap)
-if [[ "${DEPLOY_WORKER_FLAG}" == "1" ]]; then
-  stop_container_if_exists "${WORKER_CONTAINER}"
-fi
-if [[ "${DEPLOY_TRAINING_WORKER_FLAG}" == "1" ]]; then
-  stop_container_if_exists "${TRAINING_WORKER_CONTAINER}"
-  stop_container_if_exists "${SWEEPER_CONTAINER}"
-fi
-
-# 6. Ensure infrastructure
+# 5. Ensure infrastructure
 ensure_network
 start_caddy
 
-# 7. Blue-green: start new container alongside old
+# 6. Blue-green: start new container alongside old
 NEW_CONTAINER="${APP_CONTAINER}-new"
 NEW_ALIAS="${CONTAINER_ALIAS}-new"
 stop_container_if_exists "${NEW_CONTAINER}"
@@ -437,7 +220,6 @@ stop_container_if_exists "${NEW_CONTAINER}"
 run_logged "Starting new container (${IMAGE})..." docker run -d \
   --env ETHEREUM_SIGNER_PRIVATE_KEY="${PRIVATE_KEY}" \
   --env MAINTENANCE_MODE_FILE="${MAINT_FLAG}" \
-  --env COLLECTION_EXPORT_PROCESSING_ENABLED=false \
   --env-file "${ENV_FILE}" \
   --network "${NETWORK_NAME}" \
   --network-alias "${NEW_ALIAS}" \
@@ -448,7 +230,7 @@ run_logged "Starting new container (${IMAGE})..." docker run -d \
   --security-opt no-new-privileges \
   "${IMAGE}"
 
-# 8. Health check new container — old keeps serving traffic
+# 7. Health check new container — old keeps serving traffic
 if ! health_check_app "${NEW_CONTAINER}" "${NEW_ALIAS}"; then
   log "Health check failed on new container; old container still serving."
   docker logs "${NEW_CONTAINER}" 2>&1 | tail -n 200 >> "${LOG_FILE}" || true
@@ -459,7 +241,7 @@ if ! health_check_app "${NEW_CONTAINER}" "${NEW_ALIAS}"; then
   exit 1
 fi
 
-# 9. Swap: disconnect old, reconnect new with production alias
+# 8. Swap: disconnect old, reconnect new with production alias
 log "Swapping traffic to new container..."
 if docker ps --format '{{.Names}}' | grep -q "^${APP_CONTAINER}$"; then
   docker network disconnect "${NETWORK_NAME}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1 || true
@@ -468,7 +250,7 @@ docker network disconnect "${NETWORK_NAME}" "${NEW_CONTAINER}" >> "${LOG_FILE}" 
 docker network connect --alias "${CONTAINER_ALIAS}" "${NETWORK_NAME}" "${NEW_CONTAINER}" >> "${LOG_FILE}" 2>&1
 log "Traffic swapped to new container."
 
-# 10. Stop old container (capturing shutdown logs), then rename new
+# 9. Stop old container (capturing shutdown logs), then rename new
 if docker ps -a --format '{{.Names}}' | grep -q "^${APP_CONTAINER}$"; then
   log "Stopping ${APP_CONTAINER} (${STOP_TIMEOUT}s graceful)..."
   docker stop --time "${STOP_TIMEOUT}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1
@@ -482,25 +264,16 @@ fi
 docker rename "${NEW_CONTAINER}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1
 log "Container renamed to ${APP_CONTAINER}."
 
-# 11. Clear private key from memory
+# 10. Clear private key from memory
 unset PRIVATE_KEY
 
-# 12. Disable maintenance
+# 11. Disable maintenance
 disable_maintenance
 
-# 13. Ensure workers are running
-ensure_worker_running
-ensure_training_worker_running
-ensure_sweeper_running
-
-if [[ "${DEPLOY_WORKER_FLAG}" == "1" ]]; then
-  resume_worker
-fi
-
-# 14. Tag current image as 'previous' for future rollbacks
+# 12. Tag current image as 'previous' for future rollbacks
 docker tag "${IMAGE}" "${REGISTRY}:previous" >> "${LOG_FILE}" 2>&1 || true
 
-# 15. Cleanup unused images (belt-and-suspenders after pre-pull prune)
+# 13. Cleanup unused images (belt-and-suspenders after pre-pull prune)
 docker image prune -a -f >> "${LOG_FILE}" 2>&1 || true
 
 log "Deployment complete. Recent app logs:"

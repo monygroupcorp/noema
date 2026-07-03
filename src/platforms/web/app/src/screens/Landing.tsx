@@ -52,10 +52,10 @@ const BACK_HALF_NODES = [
   {
     id: 'pod',
     icon: 'server',
-    title: 'Sealed GPU pod',
+    title: 'Private GPU pod',
     items: [
-      { text: 'confidential compute — SEV-SNP / TDX' },
-      { text: 'your model runs inside the enclave' },
+      { text: 'single-tenant GPU — your session only' },
+      { text: 'tunnel ends at the pod — we stay outside' },
       { text: 'pod terminates · nothing persisted', mono: true },
     ],
   },

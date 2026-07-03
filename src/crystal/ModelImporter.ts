@@ -42,15 +42,24 @@ const log = makeLogger('cursor:import')
 
 export interface ImportModelInput {
   url: string
-  /** FK → Anima. The importer — owner of the private Intella. */
-  ownerAnimaId: string
+  /** Generic owner key (`ownerKeyOf(auctor)`). The importer — owner of the private Intella.
+   *  Anon-capable: a Bursa purse is a valid owner. */
+  ownerKey: string
+  /** Owner's animaId when the owner is an anima (populates `Intella.ownerAnimaId` for display +
+   *  legacy resolution). Absent for a purse/commitment owner. */
+  ownerAnimaId?: string
   /** genus hint for a direct-file URL (no scrape to infer it). Default 'lora'. */
   genus?: 'lora' | 'model'
 }
 
 export interface ModelImporterDeps {
-  /** Origin metadata seam (Civitai/HF JSON). Injected → hermetic. */
+  /** Origin metadata seam (Civitai/HF JSON) for AUTH-FREE origins. Injected → hermetic. */
   json: JsonFetcher
+  /** Owner-scoped gated fetcher factory — wraps `json` with the owner's BYO token (server-side,
+   *  `Secretarium.resolve` in the closure). Present → gated Civitai/HF metadata scrape works;
+   *  absent → gated origins fall back to the auth-free `json` (public metadata only). A legitimate
+   *  `resolve` consumer per the Secretarium ASYMMETRY — never exposed to CrystalApi/router. */
+  gatedFetcherFor?: (ownerKey: string) => JsonFetcher
   /** The Intella write seam — `MongoIntella.upsert` satisfies it. */
   intellae: IntellaWriter
   /** Trust-boundary CSAM/NCMEC scan for preview media (fail-closed). */
@@ -82,12 +91,18 @@ export class ModelImporter {
    * `ModelImportError` on a refused import.
    */
   async import(input: ImportModelInput): Promise<Intella> {
-    if (!input.ownerAnimaId) throw new ModelImportError('an owner identity is required to import a model')
+    if (!input.ownerKey) throw new ModelImportError('an owner identity is required to import a model')
     const hint: ImportHint = input.genus ? { genus: input.genus } : {}
-    const resolved = await resolveImport(input.url, { json: this.deps.json }, hint)
+    // Gated origins (private Civitai/HF) need the owner's BYO token; the factory wraps `json` with
+    // it server-side. Auth-free origins (and owners with no stored secret) use plain `json`.
+    const json = this.deps.gatedFetcherFor ? this.deps.gatedFetcherFor(input.ownerKey) : this.deps.json
+    const resolved = await resolveImport(input.url, { json }, hint)
 
-    // Deterministic id — same (owner, origin) re-import upserts the same record (dedup).
-    const id = `import-${createHash('sha256').update(`${input.ownerAnimaId}|${resolved.origin.uri}`).digest('hex').slice(0, 24)}`
+    // Deterministic id — same (owner, origin) re-import upserts the same record (dedup). The dedup
+    // key is the animaId for anima owners (STABLE — keeps existing import ids) and the ownerKey for
+    // a purse/commitment owner (no animaId to key on).
+    const idOwner = input.ownerAnimaId ?? input.ownerKey
+    const id = `import-${createHash('sha256').update(`${idOwner}|${resolved.origin.uri}`).digest('hex').slice(0, 24)}`
 
     // Gate (legal, always): any preview media crossing the trust boundary is CSAM/NCMEC-scanned
     // BEFORE we register or re-host anything. Fail-closed — the default gate DENIES when no real
@@ -98,7 +113,8 @@ export class ModelImporter {
       const verdict = await this.deps.moderationGate.scan({
         ref: { kind: 'intella', id: `import:${resolved.slug}` },
         output: { samples },
-        by: { animaId: input.ownerAnimaId },
+        // Attribute to the anima when there is one; a purse/commitment import scans unattributed.
+        ...(input.ownerAnimaId ? { by: { animaId: input.ownerAnimaId } } : {}),
       })
       if (!verdict.ok) throw new ModelImportError(`preview media rejected by the safety scan: ${verdict.reason}`)
       samples = await this.rehostPreviews(id, samples)
@@ -118,8 +134,10 @@ export class ModelImporter {
       versio: '1.0.0',
       canonica: false,            // NOT on the public catalogue
       access: 'private',          // owner-scoped resolution (buildAccessOrClauses)
-      ownerAnimaId: input.ownerAnimaId,
-      auctor: input.ownerAnimaId,
+      ownerKey: input.ownerKey,   // generic owner (Bursa-capable) — the resolution gate
+      // Legacy display/resolution field — only when the owner is an anima.
+      ...(input.ownerAnimaId ? { ownerAnimaId: input.ownerAnimaId } : {}),
+      auctor: input.ownerAnimaId ?? input.ownerKey,
       familia: resolved.familia,
       // License axis (SEPARATE from familia): recorded for display + audit + the public-promotion
       // commercial gate. A private import is allowed regardless; only PUBLIC promotion checks it.

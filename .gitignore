@@ -34,6 +34,9 @@ tmp/
 temp/
 storage/
 secrets/
+# Private compliance module (ADR-0012 §49 — abuse surface, not published; injected at deploy).
+# CSAM/NCMEC detection logic + thresholds live here and MUST NOT enter the public repo.
+src/private/
 pids/
 *.pid
 *.seed
