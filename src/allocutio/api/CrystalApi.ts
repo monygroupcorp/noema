@@ -1833,6 +1833,13 @@ export class CrystalApi {
       }, runnerToken).then(result => {
         const s = this.teeSessions.get(sessionId)
         if (!s) return
+        if (s.status === 'ended') {
+          // Session ended (user DELETE / watchdog) while the pod was still being created —
+          // nothing else will ever terminate the fresh pod.
+          console.warn('[tee] session ended during provision — terminating fresh pod', { sessionId, podId: result.podId })
+          this.deps.teeProvisioner!.terminate(result.podId).catch(() => {})
+          return
+        }
         s.podId = result.podId
         if (result.costPerHrUsd !== undefined) s.costPerHrUsd = result.costPerHrUsd
       }).catch(err => {
@@ -1936,6 +1943,15 @@ export class CrystalApi {
       return
     }
     if (!this._runnerTokenOk(session, signal.runnerToken, 'ready')) return
+    if (session.status === 'ended') {
+      // Ready from a pod whose session already ended (user DELETE / watchdog) — don't
+      // resurrect the session; make sure the live pod dies.
+      console.warn('[tee] ready on an ended session — terminating pod', { sessionId: signal.sessionId, podId: session.podId })
+      if (session.podId && this.deps.teeProvisioner) {
+        await this.deps.teeProvisioner.terminate(session.podId).catch(() => {})
+      }
+      return
+    }
 
     session.serverPublicKey = signal.wgPublicKey
     session.tunnelIp = '10.13.0.2'
@@ -1970,7 +1986,14 @@ export class CrystalApi {
           if (s) s.podId = podId
         }, session.runnerToken).then(result => {
           const s = this.teeSessions.get(signal.sessionId)
-          if (s) { s.podId = result.podId; if (result.costPerHrUsd !== undefined) s.costPerHrUsd = result.costPerHrUsd }
+          if (!s) return
+          if (s.status === 'ended') {
+            console.warn('[tee] session ended during re-provision — terminating fresh pod', { sessionId: signal.sessionId, podId: result.podId })
+            this.deps.teeProvisioner!.terminate(result.podId).catch(() => {})
+            return
+          }
+          s.podId = result.podId
+          if (result.costPerHrUsd !== undefined) s.costPerHrUsd = result.costPerHrUsd
         }).catch(err => {
           const s = this.teeSessions.get(signal.sessionId)
           if (s) { s.status = 'ended'; s.phase = 'failed'; s.error = String(err) }
@@ -2018,6 +2041,15 @@ export class CrystalApi {
     const session = this.teeSessions.get(signal.sessionId)
     if (!session) return
     if (!this._runnerTokenOk(session, signal.runnerToken, 'ended')) return
+    // A pod we killed for a failed WS probe posts a clean 'ended' on its way down — while
+    // its replacement is still provisioning. Marking the session ended here would destroy
+    // the transparent retry (seen live 2026-07-03: sessions died at probe attempt 1 on
+    // strip-Upgrade hosts). The replacement's ready — or the watchdog — owns the session's
+    // fate; ignore the corpse's sign-off.
+    if (session.status === 'provisioning' && session.wsProbeAttempts > 0 && signal.status === 'ended') {
+      console.info('[tee] ignoring clean ended from a probe-killed pod — re-provision in flight', { sessionId: signal.sessionId })
+      return
+    }
     console.info('[tee] runner ended', { sessionId: signal.sessionId, status: signal.status, podId: session.podId })
     session.gpuHours = signal.gpuHours
     await this._billTeeHours(session, signal.gpuHours)
