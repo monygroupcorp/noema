@@ -96,7 +96,7 @@ export function Catalog() {
   const workflows = Math.max(1, Math.round(models / 13));
 
   return (
-    <AppShell crumb="catalog">
+    <AppShell crumb="Catalogue">
       <div className="page"><div className="pw wide">
         <div className="registry">
 

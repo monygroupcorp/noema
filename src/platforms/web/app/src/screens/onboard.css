@@ -22,7 +22,8 @@
 .door-cta:hover{filter:brightness(1.06)}
 .door-opt{width:100%;display:flex;align-items:center;gap:9px;border:1px solid var(--hair);background:var(--bg);
   color:var(--text);font:inherit;font-size:13px;padding:10px 14px;border-radius:10px;cursor:pointer;transition:.14s var(--ease)}
-.door-opt:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
+.door-opt:hover:not(:disabled){border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
+.door-opt:disabled{opacity:.5;cursor:not-allowed}
 .door-opt svg.lucide{width:15px;height:15px;color:var(--muted)}
 .door-opt .opt-meta{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--faint)}
 .door-warn{font-family:var(--font-mono);font-size:11px;line-height:1.5;color:var(--amber,#d9a13a);margin:4px 0 0}
