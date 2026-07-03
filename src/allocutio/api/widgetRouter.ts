@@ -167,6 +167,13 @@ function page(opts: { title: string; appearance?: Appearance; header?: string; b
   @keyframes slide { 0%{margin-left:-35%} 100%{margin-left:100%} }
   .txt { white-space:pre-wrap; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius); padding:12px; font-size:13px; }
   .sect { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.12em; color:var(--text-subtle); margin:18px 0 10px; }
+  .gate { border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); padding:20px; margin-bottom:16px; }
+  .gate .kicker { margin-bottom:8px; } .gate h3 { margin:0 0 6px; font-size:16px; font-weight:600; }
+  .gate p { margin:0 0 14px; font-size:13px; color:var(--text-muted); }
+  .gate form { display:flex; gap:8px; }
+  .gate input { flex:1; background:var(--surface-2); color:var(--text); border:1px solid var(--border-strong); border-radius:8px; padding:10px; font:inherit; font-size:13px; }
+  .gate input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 18%,transparent); }
+  .gate button { background:var(--accent); color:#08090A; border:none; border-radius:8px; padding:10px 18px; font:inherit; font-weight:600; font-size:13px; cursor:pointer; }
 </style></head>
 <body>${bgLayer}${banner}<div class="wrap">${opts.header ?? ''}${opts.body}</div>
 <script>${opts.script}</script></body></html>`
@@ -277,38 +284,46 @@ const RUN_SCRIPT = `(function(){
         var t=document.createElement('div');t.className='tile';t.appendChild(m);out.appendChild(t);
       } else if(typeof v==='string'){ var p=document.createElement('p');p.className='txt';p.textContent=v;out.appendChild(p); } });
     status('Done.'); }
+  // The purse run (§7): the widget holds a Bursa token (the access code) and runs the agent's
+  // modus on it via the existing /v1/runs path — no wallet, no x402 (that's the machine surface).
+  // Dispatch → stream the run's real Progressus (/v1/runs/:id/stream) → fetch the exitus.
+  var TOKEN=(document.getElementById('runwrap')||{}).getAttribute?document.getElementById('runwrap').getAttribute('data-code'):'';
+  function finishRun(id){ fetch('/v1/runs/'+encodeURIComponent(id),{headers:{'x-bursa-token':TOKEN}})
+    .then(function(r){return r.json();}).then(function(run){ hideBar(); render(run&&(run.outputs||run.exitus)); btn.disabled=false; })
+    .catch(function(){ hideBar(); status('Done.'); btn.disabled=false; }); }
+  function streamRun(id){ status('Started…'); setBar(null);
+    fetch('/v1/runs/'+encodeURIComponent(id)+'/stream',{headers:{'x-bursa-token':TOKEN,'accept':'text/event-stream'}})
+      .then(function(r){ var reader=r.body.getReader(),dec=new TextDecoder(),buf='';
+        function handle(ev){ if(ev.kind==='progress') showProgress(ev.progressus);
+          else if(ev.kind==='failed'||ev.status==='failed'){ hideBar(); status('Error: run failed'); btn.disabled=false; }
+          else if(ev.terminal||ev.kind==='complete'){ finishRun(id); } }
+        function pump(){ return reader.read().then(function(res){ if(res.done){ btn.disabled=false; return; }
+          buf+=dec.decode(res.value,{stream:true}); var parts=buf.split('\\n\\n'); buf=parts.pop();
+          parts.forEach(function(chunk){ var line=chunk.replace(/^data: ?/,'').trim(); if(!line||line[0]===':') return; try{ handle(JSON.parse(line)); }catch(e){} });
+          return pump(); }); }
+        return pump(); })
+      .catch(function(e){ hideBar(); status('Error: '+e.message); btn.disabled=false; }); }
   if(btn) btn.addEventListener('click', function(){
-    var f=active(); if(!f) return; lastEP=f.getAttribute('data-endpoint'); lastModus=f.getAttribute('data-modus'); lastInputs=collect(f);
-    btn.disabled=true; out.innerHTML=''; status('Requesting quote…');
-    fetch(lastEP,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({inputs:lastInputs,modusId:lastModus})})
+    var f=active(); if(!f) return; lastModus=f.getAttribute('data-modus'); lastInputs=collect(f);
+    if(!TOKEN){ status('No access code — reload with your code.'); return; }
+    btn.disabled=true; out.innerHTML=''; status('Dispatching…');
+    fetch('/v1/runs',{method:'POST',headers:{'content-type':'application/json','x-bursa-token':TOKEN},body:JSON.stringify({modusId:lastModus,aditus:lastInputs})})
       .then(function(r){ return r.json().then(function(d){return{status:r.status,data:d};}); })
-      .then(function(p){ if(p.status!==402){ status('Error: '+((p.data&&p.data.message)||('status '+p.status))); btn.disabled=false; return; }
-        status('Waiting for wallet payment…');
-        parent.postMessage({type:'PAYMENT_REQUIRED', paymentRequired:p.data.paymentRequired}, '*'); })
+      .then(function(p){ var id=p.data&&(p.data.id||p.data.runId);
+        if(!id){ status('Error: '+((p.data&&p.data.error&&p.data.error.message)||('status '+p.status))); btn.disabled=false; return; }
+        streamRun(id); })
       .catch(function(e){ status('Error: '+e.message); btn.disabled=false; }); });
-  window.addEventListener('message', function(e){ if(e.source!==window.parent) return;
-    var m=e.data; if(!m||!m.type) return;
-    if(m.type==='PAYMENT_SIGNED'){ status('Starting…'); setBar(null);
-      fetch(lastEP,{method:'POST',headers:{'content-type':'application/json','X-Payment':m.header,'accept':'text/event-stream'},body:JSON.stringify({inputs:lastInputs,modusId:lastModus})})
-        .then(function(r){
-          var ct=r.headers.get('content-type')||'';
-          if(ct.indexOf('text/event-stream')===-1){ return r.json().then(function(d){ hideBar(); if(r.ok) render(d&&d.outputs); else status('Error: '+((d&&d.message)||'run failed')); btn.disabled=false; }); }
-          var reader=r.body.getReader(), dec=new TextDecoder(), buf='';
-          function handle(ev){
-            if(ev.kind==='progress') showProgress(ev.progressus);
-            else if(ev.kind==='result'){ hideBar(); render(ev.outputs); btn.disabled=false; }
-            else if(ev.kind==='failed'){ hideBar(); status('Error: '+(ev.message||'run failed')); btn.disabled=false; }
-            else if(ev.kind==='started') status('Started…'); }
-          function pump(){ return reader.read().then(function(res){
-            if(res.done){ btn.disabled=false; return; }
-            buf+=dec.decode(res.value,{stream:true});
-            var parts=buf.split('\\n\\n'); buf=parts.pop();
-            parts.forEach(function(chunk){ var line=chunk.replace(/^data: ?/,'').trim(); if(!line||line[0]===':') return; try{ handle(JSON.parse(line)); }catch(e){} });
-            return pump(); }); }
-          return pump();
-        })
-        .catch(function(err){ hideBar(); status('Error: '+err.message); btn.disabled=false; });
-    } else if(m.type==='PAYMENT_ERROR'){ hideBar(); status('Payment failed: '+(m.error||'')); btn.disabled=false; } });
+  try{ parent.postMessage({type:'WIDGET_READY'},'*'); }catch(e){}
+  document.addEventListener('click', function(ev){ var t=ev.target.closest&&ev.target.closest('.tile[data-url]');
+    if(t){ try{ parent.postMessage({type:'GALLERY_LIGHTBOX',url:t.getAttribute('data-url')},'*'); }catch(e){} } });
+})();`
+
+// The entrance gate — shown when the widget has no access code. Redeeming = navigating to
+// ?code=<token>, which reloads into the run panel holding that Bursa token.
+const ENTRANCE_JS = `(function(){
+  var form=document.getElementById('gateform'), inp=document.getElementById('gatecode');
+  if(form) form.addEventListener('submit', function(e){ e.preventDefault(); var c=(inp.value||'').trim();
+    if(c){ var u=new URL(location.href); u.searchParams.set('code', c); location.href=u.toString(); } });
   try{ parent.postMessage({type:'WIDGET_READY'},'*'); }catch(e){}
   document.addEventListener('click', function(ev){ var t=ev.target.closest&&ev.target.closest('.tile[data-url]');
     if(t){ try{ parent.postMessage({type:'GALLERY_LIGHTBOX',url:t.getAttribute('data-url')},'*'); }catch(e){} } });
@@ -380,39 +395,50 @@ export function createWidgetRouter(deps: WidgetRouterDeps): Router {
       }
     }
 
-    let runPanel = ''
+    // The access code (a Bursa token) — from `?code=`. Present → the run panel (runs spend
+    // that purse via /v1/runs); absent → the entrance gate. The widget is for code/account
+    // holders (§7); x402 is the separate machine surface.
+    const code = typeof req.query.code === 'string' ? req.query.code : ''
+    let panel = ''
     let script = IFRAME_BRIDGE
-    if (modi.length && deps.quoteImpetus && deps.x402Config) {
-      const cfg = deps.x402Config
-      const quoteImpetus = deps.quoteImpetus
-      const panels = await Promise.all(modi.map(async (m, i) => {
-        const quote = buildQuote(await quoteImpetus(m.id), cfg)
-        const price = `$${quote.totalCostUsd.toFixed(quote.totalCostUsd < 1 ? 4 : 2)} ${quote.currency}`
-        const ep = `/api/v1/x402/agents/${encodeURIComponent(agentId)}/spell/${encodeURIComponent(m.nomen)}`
-        const fields = Object.entries(m.aditus).map(([name, porta]) => fieldHtml(name, porta)).join('')
-        return {
-          chip: `<button class="modchip${i === 0 ? ' active' : ''}" data-modus="${esc(m.id)}">${esc(m.nomen)}</button>`,
-          form: `<form class="mform${i === 0 ? ' active' : ''}" data-modus="${esc(m.id)}" data-endpoint="${esc(ep)}" data-price="${esc(price)}" onsubmit="return false">${fields}</form>`,
-          price,
-        }
-      }))
-      const picker = modi.length > 1 ? `<div class="modpick">${panels.map((p) => p.chip).join('')}</div>` : ''
-      runPanel =
-        `<div class="run">${picker}${panels.map((p) => p.form).join('')}` +
-        `<button id="runbtn">Run · ${esc(panels[0].price)}</button>` +
-        `<div id="rstatus"></div><div id="rbar" class="bar"><span></span></div><div id="rresult" class="grid"></div></div>`
-      script = RUN_SCRIPT
+    if (modi.length && deps.quoteImpetus) {
+      if (code) {
+        const quoteImpetus = deps.quoteImpetus
+        const panels = await Promise.all(modi.map(async (m, i) => {
+          const impetus = await quoteImpetus(m.id)
+          const price = `~${impetus.toString()} cr`
+          const fields = Object.entries(m.aditus).map(([name, porta]) => fieldHtml(name, porta)).join('')
+          return {
+            chip: `<button class="modchip${i === 0 ? ' active' : ''}" data-modus="${esc(m.id)}">${esc(m.nomen)}</button>`,
+            form: `<form class="mform${i === 0 ? ' active' : ''}" data-modus="${esc(m.id)}" data-price="${esc(price)}" onsubmit="return false">${fields}</form>`,
+            price,
+          }
+        }))
+        const picker = modi.length > 1 ? `<div class="modpick">${panels.map((p) => p.chip).join('')}</div>` : ''
+        panel =
+          `<div class="run" id="runwrap" data-code="${esc(code)}">${picker}${panels.map((p) => p.form).join('')}` +
+          `<button id="runbtn">Run · ${esc(panels[0].price)}</button>` +
+          `<div id="rstatus"></div><div id="rbar" class="bar"><span></span></div><div id="rresult" class="grid"></div></div>`
+        script = RUN_SCRIPT
+      } else {
+        panel =
+          `<div class="gate"><div class="kicker">Access</div><h3>Enter your access code</h3>` +
+          `<p>Paste the invite code the owner shared to run this agent on its balance.</p>` +
+          `<form id="gateform"><input id="gatecode" placeholder="access code" autocomplete="off" spellcheck="false" autofocus>` +
+          `<button type="submit">Continue</button></form></div>`
+        script = ENTRANCE_JS
+      }
     }
 
     const tiles = items.flatMap((i) => tilesFromOutput(i.output))
     const gallery = tiles.length
       ? `<div class="sect">Recent creations</div><div class="grid">${tiles.map(tileHtml).join('')}</div>`
-      : (runPanel ? '' : `<div class="empty">This agent hasn't published anything yet.</div>`)
+      : (panel ? '' : `<div class="empty">This agent hasn't published anything yet.</div>`)
     frame(res)
     res.status(200).send(page({
       title: agentId, ...(appearance ? { appearance } : {}),
       header: agentHeader(agentId, appearance, legatus.ownerAddress, deps.sessionAuth ?? false),
-      body: runPanel + gallery, script: LOGIN_JS + script,
+      body: panel + gallery, script: LOGIN_JS + script,
     }))
   })
 
