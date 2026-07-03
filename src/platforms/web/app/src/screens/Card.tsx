@@ -75,10 +75,13 @@ export function Card() {
   const assist = useAssistField();
   useEffect(() => () => clear(), [clear]);
 
-  // fetch the real flow schema + seed the form from defaults
+  // Per-flow saved input defaults (affines). Loaded over the schema defaults, saved on demand.
+  const [affSave, setAffSave] = useState<{ s: 'idle' | 'busy' | 'done' | 'err'; msg?: string }>({ s: 'idle' });
+
+  // fetch the real flow schema + seed the form from defaults, then overlay saved affines
   useEffect(() => {
     let live = true;
-    setFlow(null); setLoadErr(null); setRun(null); setQuote(null);
+    setFlow(null); setLoadErr(null); setRun(null); setQuote(null); setAffSave({ s: 'idle' });
     api.getFlow(id).then((f) => {
       if (!live) return;
       setFlow(f);
@@ -88,10 +91,23 @@ export function Card() {
         else if (k === 'prompt') init[k] = 'a low-poly n64-style dragon perched on a neon temple, dusk';
         else init[k] = '';
       }
-      setAditus(init);
+      // Overlay the caller's saved defaults for this flow (best-effort — anon-capable).
+      api.getAffines(id)
+        .then((r) => { if (live) setAditus({ ...init, ...(r.affines ?? {}) }); })
+        .catch(() => { if (live) setAditus(init); });
     }).catch((e) => { if (live) setLoadErr(String(e)); });
     return () => { live = false; };
   }, [id]);
+
+  async function saveDefaults() {
+    setAffSave({ s: 'busy' });
+    try {
+      await api.setAffines(id, cleanAditus(aditus));
+      setAffSave({ s: 'done' });
+    } catch (e) {
+      setAffSave({ s: 'err', msg: e instanceof Error ? e.message : String(e) });
+    }
+  }
 
   // live quote (debounced) once required fields are present
   const required = useMemo(() => flow?.input?.required ?? [], [flow]);
@@ -269,6 +285,7 @@ export function Card() {
                 <div className="exitus">
                   <div className="er"><span>run</span><span className="v">{run.id ?? '—'}</span></div>
                   <div className="er"><span>status</span><span className="v">{run.status}</span></div>
+                  {run.id && <div className="er"><span>detail</span><span className="v"><Link to={`/run?id=${run.id}`}>open run view →</Link></span></div>}
                   {compute === 'tee' && <div className="er"><span>sealed</span><span className="v" style={{ color: 'var(--slate)' }}>we see nothing but the meter</span></div>}
                   {run.error && <div className="er"><span>error</span><span className="v" style={{ color: 'var(--text)' }}>{run.error}</span></div>}
                   {run.exitus && Object.entries(run.exitus).map(([k, v]) => (
@@ -316,8 +333,17 @@ export function Card() {
                 <span className="q mono">{creditText}</span>
                 <span className="qh">{subline}</span>
               </div>
+              <button
+                className="btn ghost"
+                onClick={saveDefaults}
+                disabled={affSave.s === 'busy'}
+                title="Remember these inputs as your defaults for this flow"
+              >
+                <Ic name="star" /> {affSave.s === 'done' ? 'saved' : affSave.s === 'busy' ? 'saving…' : 'save defaults'}
+              </button>
               <button className="btn-run" onClick={doRun} disabled={!quote?.impetus}>Run <span className="kbd">⌘⏎</span></button>
             </div>
+            {affSave.s === 'err' && <div className="pub-err">{affSave.msg}</div>}
           </div></div>
         </>}
       </div></div>

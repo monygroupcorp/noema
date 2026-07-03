@@ -20,7 +20,7 @@ function computeLabel(exec: string): { glyph: 'lit' | 'ring' | 'dashed'; text: s
 }
 
 export function Account() {
-  const { ident, idents, setIdentity, execution } = useIdentity();
+  const { ident, execution } = useIdentity();
   const { session, logout } = useSession();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -62,11 +62,13 @@ export function Account() {
     if (r) setPos({ right: Math.max(12, window.innerWidth - r.right), top: r.bottom + 8 });
     setOpen((o) => !o);
   }
-  // switch identity between the named profile and the bearer (the signature "change who you are here").
+  // Switch who you are here — a real act now, not a cosmetic toggle: identified ⇄ anonymous
+  // IS sign in / sign out. Signed in → sign out drops the fiat session onto the anon
+  // commitment path; anonymous → the onboarding door to bring an identity.
   const switchIdentity = () => {
-    const other = idents.find((d) => (anon ? d.funding === 'named' : d.funding === 'bearer'));
-    if (other) setIdentity(other.id);
     setOpen(false);
+    if (signedIn) { logout(); clearOnboarded(); navigate('/'); }
+    else navigate('/onboard');
   };
   // Real sign out: drop the fiat session (falls back to the anon commitment path), then
   // clear the local onboarded flag and return home. Also used for the cosmetic-only case.
@@ -103,6 +105,8 @@ export function Account() {
             <Link to="/account" onClick={() => setOpen(false)}><Ic name="settings-2" /> Account &amp; settings</Link>
             <Link to="/preferences" onClick={() => setOpen(false)}><Ic name="sparkles" /> Preferences <span className="meta">your defaults</span></Link>
             <Link to="/funding" onClick={() => setOpen(false)}><Ic name="wallet" /> Funding &amp; credits</Link>
+            <Link to="/teams" onClick={() => setOpen(false)}><Ic name="users" /> Teams <span className="meta">co-own work</span></Link>
+            <Link to="/sponsorships" onClick={() => setOpen(false)}><Ic name="hand-coins" /> Sponsorships <span className="meta">top up others</span></Link>
             {admin && <Link to="/admin/review" onClick={() => setOpen(false)}><Ic name="eye" /> Feed review <span className="meta">moderation</span></Link>}
           </div>
           {signedIn

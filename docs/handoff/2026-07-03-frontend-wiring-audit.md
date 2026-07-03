@@ -52,6 +52,42 @@
 
 ## B. Backend EXISTS, frontend mock or absent — the WIRE-NOW backlog (ranked)
 
+> **Landed 2026-07-03 (this session): #1–4 wired.** App typecheck + production build green.
+> - **#1 Run.tsx** — now streams a real run over `GET /v1/runs/:id/stream` (SSE), keyed on `?id=`.
+>   Progressus phases → the 5-stage timeline; terminal `complete` fetches the run for its exitus
+>   (media rendered via `mediaFromOutput`). Card's dispatched result got an "open run view →" link so
+>   it's reachable end-to-end. `setTimeout` mock deleted. `api.streamRun` now has a caller.
+> - **#2 Funding.tsx** — new `api.getDepositConfig`/`api.depositQuote` client methods; pack credits
+>   computed live from `pointsPerUsd × funding rate`, real CreditVault address shown, and a live
+>   ETH→points quote widget on the onchain rail. Hardcoded `PACKS` gone.
+> - **#3 Shelf.tsx** — new `api.listMyModels` client method; renders real owned models from
+>   `GET /v1/me/models` (base/trigger/license/commercial/listing). Mock `lib/models.ts` **deleted**
+>   (royalty/run economics don't exist server-side → not shown; see #5).
+> - **#4 Identity** — `state/identity.tsx` now DERIVES the current `ident` from the real
+>   `useSession()` + live `/v1/me/status` balance (funding follows auth; balance is real).
+>   `IDENTS` mock **deleted**; `idents` is a singleton, `setIdentity` a no-op; Account's
+>   "switch identity" is now honest sign-in/sign-out. De-mocks `ident.bal`/`.name`/`.role`/`.funding`
+>   across Card, Run, Studio, Tee, Trace, Status, Dashboard, shell.
+>
+> **Also landed 2026-07-03: #5–8.** App typecheck + build still green.
+> - **#5 Model import + license** — new `api.importModel` (`POST /v1/models/import`) wired as an
+>   "import by URL" panel on `Shelf.tsx` (Civitai/HF/direct, genus select); result prepends to the
+>   shelf. `api.setModelLicense` (`PUT /v1/models/:id/license`, admin-only) wired as an admin-gated
+>   "reclassify license" control on each card (admin detected via `getMe().admin`).
+> - **#6 Sponsorships** — net-new `src/screens/Sponsorships.tsx` (`/sponsorships`): create pledge
+>   (beneficiary/grant/cadence/caps), list, pause/resume over `/v1/sponsorships`. New client methods
+>   `listSponsorships`/`createSponsorship`/`pauseSponsorship`/`resumeSponsorship`. Identified-only.
+> - **#7 Teams** — net-new `src/screens/Teams.tsx` (`/teams`): create, list, add/remove members over
+>   `/v1/teams`. New client methods `listTeams`/`getTeam`/`createTeam`/`addTeamMember`/`removeTeamMember`.
+> - **#8 Affinity** — `Card.tsx` now loads saved per-flow defaults via `getAffines` (overlaid on the
+>   schema defaults) and has a "save defaults" control calling `setAffines`. The two dead methods now
+>   have callers.
+> - Both new screens linked from the Account dropdown; routes added in `App.tsx`. Icons added:
+>   `download`, `users`, `hand-coins`, `pause`, `play`, `user-plus`.
+>
+> **All of Tier B (#1–8) is now wired.** Not yet done: staging live-verify with real accounts/gens,
+> and Tier C (endpoints that don't exist yet).
+
 | # | Screen / gap | Backend (exists) | Current state | Notes for the wirer |
 |---|---|---|---|---|
 | 1 | **`src/screens/Run.tsx`** | `GET /v1/runs/:id/stream` (SSE) + `GET /v1/runs/:id` | `setTimeout`-simulated fake progress (`INITIAL_STEPS`, `Run.tsx:20,38`) | ⭐ Core loop. **Client method `api.streamRun()` already exists (`api.ts:122`) with ZERO callers** — mirror how `Card.tsx` consumes runs. Verify against staging with a real gen. |

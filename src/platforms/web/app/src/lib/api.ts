@@ -122,6 +122,18 @@ export const api = {
   streamRun: (id: string) => new EventSource(`/v1/runs/${id}/stream`),
   meStatus: () => fetch('/v1/me/status', { headers: readHeaders() }).then(j<MeStatus>),
 
+  // ── Deposit / buy-points (Funding) — public, no auth ─────────────────────────
+  // GET /v1/deposit/config — the CreditVault address + canonical points-per-USD +
+  // default funding rate + supported chains. Static; drives the buy-credits UI.
+  getDepositConfig: () => fetch('/v1/deposit/config').then(j<DepositConfig>),
+  // POST /v1/deposit/quote — how many impetus points `amount` base units of `token`
+  // buys right now. INFORMATIONAL: the on-chain deposit webhook re-prices + credits
+  // authoritatively (equal to this) at deposit time. token = 20-byte hex address
+  // (0x000…000 for native ETH); amount = raw base units (wei / token-decimals) string.
+  depositQuote: (body: { chainId: number | string; token: string; amount: string }) =>
+    fetch('/v1/deposit/quote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      .then(j<DepositQuote>),
+
   // ── Collections (Collectio) — a batch-gen over a Tractus grid ────────────────
   // Owner-scoped by the caller commitment. Create LAUNCHES generation of `total`
   // pieces (real compute) — always a deliberate, confirmed action.
@@ -219,6 +231,42 @@ export const api = {
   signUpload: (body: { filename: string; contentType: string; bucketName?: string }) =>
     fetch('/api/v1/storage/uploads/sign', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ signedUrl: string; permanentUrl: string; key?: string }>),
+
+  // ── Owned models (Model shelf) — the caller's private imports + trained LoRAs ─
+  // GET /v1/me/models — owner-scoped, newest first. Anon-capable (commitment-keyed).
+  listMyModels: () => fetch('/v1/me/models', { headers: readHeaders() }).then(j<{ models: ModelCard[] }>),
+  // POST /v1/models/import — import a model/LoRA by URL as a PRIVATE, owner-scoped model
+  // (Civitai page / HF repo / direct .safetensors). Usable in your flows at once; never on
+  // the public catalog until a separate publish promotion passes moderation.
+  importModel: (body: { url: string; genus?: 'lora' | 'model' }) =>
+    fetch('/v1/models/import', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(j<{ model: ModelCard }>),
+  // PUT /v1/models/:id/license — PLATFORM-ADMIN ONLY (403 otherwise): set an explicit
+  // { license, commercialUse } or { reclassify: true } to re-derive from the base string.
+  setModelLicense: (id: string, body: { license?: string; commercialUse?: ModelCard['commercialUse']; reclassify?: boolean }) =>
+    fetch(`/v1/models/${encodeURIComponent(id)}/license`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(j<{ model: ModelCard }>),
+
+  // ── Teams (Sodalitas) — a fellowship of Animae that co-owns work ─────────────
+  // All member-scoped; identified accounts only. Founder is the first member.
+  listTeams: () => fetch('/v1/teams', { headers: readHeaders() }).then(j<{ teams: Team[] }>),
+  getTeam: (id: string) => fetch(`/v1/teams/${encodeURIComponent(id)}`, { headers: readHeaders() }).then(j<{ team: Team }>),
+  createTeam: (body: { nomen: string; members?: string[] }) =>
+    fetch('/v1/teams', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) }).then(j<{ team: Team }>),
+  addTeamMember: (id: string, animaId: string) =>
+    fetch(`/v1/teams/${encodeURIComponent(id)}/members`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ animaId }) }).then(j<{ team: Team }>),
+  removeTeamMember: (id: string, animaId: string) =>
+    fetch(`/v1/teams/${encodeURIComponent(id)}/members/${encodeURIComponent(animaId)}`, { method: 'DELETE', headers: authHeaders() }).then(j<{ team: Team }>),
+
+  // ── Sponsorships (Sponsio, ADR-0011 §2) — a standing capped top-up pledge ────
+  // Identified accounts only (401 for anon/purse). Mounted at /v1/sponsorships.
+  listSponsorships: () => fetch('/v1/sponsorships', { headers: readHeaders() }).then(j<{ sponsorships: Sponsorship[] }>),
+  createSponsorship: (body: { beneficiaryAnimaId: string; grant: string; cadence: SubsidyCadence; balanceCap?: string; capTotal?: string }) =>
+    fetch('/v1/sponsorships', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) }).then(j<{ sponsorship: Sponsorship }>),
+  pauseSponsorship: (id: string) =>
+    fetch(`/v1/sponsorships/${encodeURIComponent(id)}/pause`, { method: 'POST', headers: authHeaders() }).then(j<{ sponsorship: Sponsorship }>),
+  resumeSponsorship: (id: string) =>
+    fetch(`/v1/sponsorships/${encodeURIComponent(id)}/resume`, { method: 'POST', headers: authHeaders() }).then(j<{ sponsorship: Sponsorship }>),
 
   // ── Account settings (Consuetudinum, owner-keyed / anon-capable) ─────────────
   // GET /v1/me — appearance (Profile) + generation defaults (Preferences) + bindings.
@@ -324,6 +372,43 @@ export interface SecretView {
 
 export interface DatasetSummary { id: string; name: string; images?: number; updatedAt?: string }
 
+// An owned model (GET /v1/me/models) — mirrors the backend ModelCard. Imports + trained
+// LoRAs, owner-scoped. No royalty/run economics exist server-side yet.
+export interface ModelCard {
+  intellaId: string;
+  nomen: string;
+  genus: string;
+  basis?: string;
+  trigger?: string;
+  description?: string;
+  access?: 'public' | 'private';
+  license?: string;
+  commercialUse?: 'yes' | 'no' | 'conditional' | 'unknown';
+}
+
+// A team (Sodalitas) — GET/POST /v1/teams. Members co-own work; founder is the first member.
+export interface Team {
+  id: string;
+  nomen: string;
+  members: string[];
+  founder: string;
+  createdAt: string;
+}
+
+// A sponsorship pledge (Sponsio) — GET/POST /v1/sponsorships. bigints ride as strings.
+export type SubsidyCadence = 'weekly' | 'biweekly' | 'monthly';
+export interface Sponsorship {
+  id: string;
+  sponsor: { animaId: string };
+  beneficiarius: { animaId: string };
+  subsidia: { grant: string; cadence: SubsidyCadence; balanceCap?: string };
+  capTotal?: string;
+  drippedTotal: string;
+  lastDripCycle?: string;
+  status: 'active' | 'paused' | 'exhausted';
+  natum: string;
+}
+
 // Collection (Collectio) projection — mirrors the backend CollectionSchema.
 export type CollectionStatus = 'draft' | 'pending' | 'running' | 'complete' | 'cancelled';
 export interface Collection {
@@ -397,4 +482,25 @@ export interface MeStatus {
   studios: StudioEntry[];
   joinable: JoinableEntry[];
   takenAt: string;
+}
+
+// Deposit / buy-points config (GET /v1/deposit/config) — mirrors the backend DepositConfig.
+export interface DepositConfig {
+  depositAddress: string;
+  // Canonical impetus points per 1 USD (gross, before the funding rate) — ≈ 2967.
+  pointsPerUsd: number;
+  // Default funding rate as a percent (70 = 70% of USD value converts to points).
+  defaultFundingRatePct: number;
+  chains: Array<{ chainId: number; name: string }>;
+}
+// A deposit quote (POST /v1/deposit/quote) — informational; the webhook credit is authoritative.
+export interface DepositQuote {
+  chainId: number | string;
+  token: string;
+  amountRaw: string;
+  grossUsd: string;
+  grossUsdMicro: string;
+  fundingRatePct: number;
+  pointsQuoted: string;
+  depositAddress: string;
 }

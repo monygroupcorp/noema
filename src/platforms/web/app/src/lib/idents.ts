@@ -101,15 +101,3 @@ export const PRESETS: IdentPreset[] = [
   { id: 'anonymous', ico: 'venetian-mask', t: 'Anonymous', funding: 'bearer',
     s: 'A bearer purse from an arcanum bursa. Continuous history and XP, linked to no wallet, email, or name.' },
 ];
-
-// ── The profiles (continuous animas), distinguished only by funding ───────────
-export const IDENTS: Ident[] = [
-  {
-    id: 'studio', name: 'studio', role: 'monyrth', funding: 'named',
-    chipColor: '#cdd2ff', glyph: 'S', bal: '214 credits', exp: '4,820 xp',
-  },
-  {
-    id: 'untitled', name: 'untitled', role: 'bearer purse', funding: 'bearer',
-    glyph: '◷', bal: 'purse · 38 credits', exp: '610 xp',
-  },
-];
