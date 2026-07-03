@@ -51,7 +51,7 @@ export function Account() {
   const signedIn = !!session;
   const anon = ident.funding === 'bearer';
   // The real fiat session takes precedence over the cosmetic identity skin for the name/reach readout.
-  const name = signedIn ? (session!.email ?? 'your account') : anon ? 'anonymous' : ident.name;
+  const name = signedIn ? (session!.username ?? 'your account') : anon ? 'anonymous' : ident.name;
   const credits = liveCredits ?? (ident.bal.match(/(\d[\d,]*)\s*credits?/)?.[1] ?? '—');
   const compute = useMemo(() => computeLabel(execution), [execution]);
   const reach = signedIn || !anon ? 'signed in · web · Telegram · API' : 'bearer purse';
@@ -101,10 +101,10 @@ export function Account() {
             <Ic name="shuffle" /> switch to {anon ? 'identified' : 'anonymous'}
           </button>
           <div className="am-links">
-            <Link to="/profile" onClick={() => setOpen(false)}><Ic name="palette" /> Profile <span className="meta">skins &amp; purses</span></Link>
+            <Link to="/profile" onClick={() => setOpen(false)}><Ic name="palette" /> Profile <span className="meta">appearance &amp; purses</span></Link>
             <Link to="/account" onClick={() => setOpen(false)}><Ic name="settings-2" /> Account &amp; settings</Link>
             <Link to="/preferences" onClick={() => setOpen(false)}><Ic name="sparkles" /> Preferences <span className="meta">your defaults</span></Link>
-            <Link to="/funding" onClick={() => setOpen(false)}><Ic name="wallet" /> Funding &amp; credits</Link>
+            <Link to="/funding" onClick={() => setOpen(false)}><Ic name="wallet" /> Funding</Link>
             <Link to="/teams" onClick={() => setOpen(false)}><Ic name="users" /> Teams <span className="meta">co-own work</span></Link>
             <Link to="/sponsorships" onClick={() => setOpen(false)}><Ic name="hand-coins" /> Sponsorships <span className="meta">top up others</span></Link>
             {admin && <Link to="/admin/review" onClick={() => setOpen(false)}><Ic name="eye" /> Feed review <span className="meta">moderation</span></Link>}
