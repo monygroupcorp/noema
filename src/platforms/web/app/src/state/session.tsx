@@ -2,10 +2,10 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { api, getSession, setSession, type AuthResult } from '../lib/api';
 
 // The REAL fiat session — a JWT the backend resolves to an animaId. This is the
-// authoritative "who is signed in" layer, distinct from state/identity.tsx (which
-// is a cosmetic skin over mock IDENTS and NOT real auth). When a session is present,
-// every /v1 call in lib/api carries `Authorization: Bearer …` instead of the anon
-// commitment, so the account's own credits/collections/settings load.
+// authoritative "who is signed in" layer; state/identity.tsx now DERIVES the current
+// identity (funding + balance) from it. When a session is present, every /v1 call in
+// lib/api carries `Authorization: Bearer …` instead of the anon commitment, so the
+// account's own credits/collections/settings load.
 //
 // Identity note: the anon commitment and a named anima are DIFFERENT souls — anon
 // work does not migrate on login. The login screen says so.
