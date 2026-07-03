@@ -1,7 +1,6 @@
 import { MongoClient } from 'mongodb'
 import { Telegraf } from 'telegraf'
 import express from 'express'
-import OpenAI from 'openai'
 
 import { createContainer } from './container.js'
 import type { Ring, ContainerConfig } from './container.js'
@@ -67,6 +66,7 @@ import { mintJobToken, verifyJobToken } from './crystal/jobToken.js'
 import { createWeightProxyRouter } from './api/internal/weightProxyRouter.js'
 import { registerProgressusRecorder } from './execution/progressusSink.js'
 import { CANONICAL_MODI } from './crystal/seeds/modi.js'
+import { API_PROVIDERS } from './crystal/apiProviders.js'
 import { CANONICAL_ESSENTIAE } from './crystal/seeds/essentiae.js'
 import { CANONICAL_COMPOSITI } from './crystal/seeds/compositi.js'
 import { CANONICAL_CUSTOM_MODI } from './crystal/seeds/modiCustom.js'
@@ -307,7 +307,7 @@ async function main(): Promise<void> {
   await ensureWideIndexes(mongo.db(DB_NAME))
   log.info('Indexes ensured')
 
-  // 2. Build embedding functions (CLIP service) and OpenAI client
+  // 2. Build embedding functions (CLIP service) and hosted-API providers
   const CLIP_SERVICE_URL = process.env.CLIP_SERVICE_URL
 
   let embed: ContainerConfig['embed'] | undefined
@@ -333,35 +333,13 @@ async function main(): Promise<void> {
     log.warn('CLIP_SERVICE_URL not set — vestigium embeddings disabled')
   }
 
-  let openaiClient: ContainerConfig['openaiClient'] | undefined
-  if (process.env.OPENAI_API_KEY) {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-    openaiClient = {
-      chat: async (rawParams) => {
-        const params = rawParams as { model: string; messages: unknown[]; temperature?: number }
-        const res = await openai.chat.completions.create({
-          model: params.model,
-          messages: params.messages as OpenAI.Chat.ChatCompletionMessageParam[],
-          temperature: params.temperature,
-        })
-        return {
-          content: res.choices[0]?.message?.content ?? '',
-          usage: { total_tokens: res.usage?.total_tokens },
-        }
-      },
-      image: async (rawParams) => {
-        const params = rawParams as { model: string; prompt: string; size?: string; quality?: string; n?: number }
-        const res = await openai.images.generate({
-          model: params.model,
-          prompt: params.prompt,
-          size: params.size as OpenAI.ImageGenerateParams['size'],
-          quality: params.quality as OpenAI.ImageGenerateParams['quality'],
-          n: params.n,
-        })
-        return { url: res.data?.[0]?.url ?? '' }
-      },
-    }
-  }
+  // Hosted-API inference providers: register each descriptor whose key is set.
+  // Adding a provider is a descriptor in apiProviders.ts + its env key — no SDK,
+  // no cursor. The generic OpenAI-compatible wire is handled inside ApiCursor.
+  const apiProviders = API_PROVIDERS.flatMap((provider) => {
+    const apiKey = process.env[provider.authEnv]
+    return apiKey ? [{ provider, apiKey }] : []
+  })
 
   // 3. Create Ring
   // Create materiae + intellae stores before container so they can be shared
@@ -466,7 +444,7 @@ async function main(): Promise<void> {
     },
     ...(process.env.HF_TOKEN ? { huggingFaceToken: process.env.HF_TOKEN } : {}),
     ...(process.env.ARWEAVE_PRIVATE_KEY ? { arweavePrivateKey: process.env.ARWEAVE_PRIVATE_KEY } : {}),
-    ...(openaiClient ? { openaiClient } : {}),
+    ...(apiProviders.length ? { apiProviders } : {}),
     ...(embed ? { embed } : {}),
     ...(embedImage ? { embedImage } : {}),
     ...(_arcanumVerifyFn ? { arcanumVerifyFn: _arcanumVerifyFn } : {}),

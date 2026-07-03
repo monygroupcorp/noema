@@ -46,6 +46,17 @@ test('aditusToJsonSchema omits required array when nothing is required', () => {
   assert.equal('required' in schema, false)
 })
 
+test('aditusToJsonSchema hides internal __-prefixed routing keys from the public surface', () => {
+  const schema = aditusToJsonSchema({
+    prompt: { type: 'text', required: true },
+    __capability: { type: 'text', required: false, default: 'chat' },
+  })
+  assert.equal('__capability' in schema.properties, false)
+  assert.equal('prompt' in schema.properties, true)
+  // A hidden key must never leak into `required` either.
+  assert.deepEqual(schema.required, ['prompt'])
+})
+
 test('describeFlow projects input/output and passes through meta', () => {
   const modus = {
     id: 'flow-1',

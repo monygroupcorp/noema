@@ -72,6 +72,10 @@ export function aditusToJsonSchema(aditus: Forma): JsonSchema {
   const required: string[] = []
 
   for (const [key, porta] of Object.entries(aditus)) {
+    // Skip internal routing keys (`__capability`, legacy `__spaceUrl`, …). They
+    // carry a default and are consumed by the cursor — never something an external
+    // client (or the Concierge/agent surface) should see or supply.
+    if (key.startsWith('__')) continue
     properties[key] = portaToProperty(porta)
     if (porta.required === true) required.push(key)
   }

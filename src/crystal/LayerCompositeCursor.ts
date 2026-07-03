@@ -10,7 +10,7 @@ import type { Uploader } from './R2Uploader.js'
 // =============================================================================
 //
 // A deterministic, host-side cursor (ministerium 'composite') — a sibling of
-// OpenAICursor/HuggingFaceCursor: synchronous, no GPU pod. It fetches the
+// the ApiCursor: synchronous, no GPU pod. It fetches the
 // ordered layer images, composites them (z-order, bottom→top), hosts the result
 // and returns the URL inline.
 //
