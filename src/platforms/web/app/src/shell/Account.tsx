@@ -26,6 +26,7 @@ export function Account() {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<CSSProperties>({});
   const [liveCredits, setLiveCredits] = useState<string | null>(null);
+  const [admin, setAdmin] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -33,6 +34,8 @@ export function Account() {
     api.meStatus()
       .then((s) => { if (live && s?.balanceImpetus != null) setLiveCredits(Number(s.balanceImpetus).toLocaleString()); })
       .catch(() => { /* mock fallback */ });
+    // Reveal the moderation surface only to the platform reviewer (server-authoritative).
+    api.getMe().then((me) => { if (live) setAdmin(!!me.admin); }).catch(() => { /* not admin */ });
     return () => { live = false; };
   }, []);
   useEffect(() => {
@@ -96,9 +99,11 @@ export function Account() {
             <Ic name="shuffle" /> switch to {anon ? 'identified' : 'anonymous'}
           </button>
           <div className="am-links">
+            <Link to="/profile" onClick={() => setOpen(false)}><Ic name="palette" /> Profile <span className="meta">skins &amp; purses</span></Link>
             <Link to="/account" onClick={() => setOpen(false)}><Ic name="settings-2" /> Account &amp; settings</Link>
             <Link to="/preferences" onClick={() => setOpen(false)}><Ic name="sparkles" /> Preferences <span className="meta">your defaults</span></Link>
             <Link to="/funding" onClick={() => setOpen(false)}><Ic name="wallet" /> Funding &amp; credits</Link>
+            {admin && <Link to="/admin/review" onClick={() => setOpen(false)}><Ic name="eye" /> Feed review <span className="meta">moderation</span></Link>}
           </div>
           {signedIn
             ? <button className="am-signout" onClick={signOut}><Ic name="arrow-right" /> Sign out</button>

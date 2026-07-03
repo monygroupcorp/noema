@@ -5,23 +5,29 @@
 export type EditioVisibility = 'private' | 'unlisted' | 'feed' | 'marketplace';
 export type EditioCustody = 'ours' | 'theirs' | 'both';
 export type EditioStatus = 'pending' | 'published' | 'rejected' | 'failed' | 'retracted';
+// The human-review outcome for an item the moderation gate HELD. Absent = never held
+// (the normal path); 'pending' = awaiting a reviewer; 'approved'/'rejected' = adjudicated.
+export type ReviewOutcome = 'pending' | 'approved' | 'rejected';
 export type ArtifactKind = 'actum' | 'intella' | 'collectio';
 
 export interface ArtifactRef { kind: ArtifactKind; id: string }
 
+// Mirrors the backend Edition projection (src/allocutio/api/types.ts `Edition`) exactly —
+// what GET/POST /v1/editiones/* actually return (artifact, createdAt/updatedAt), NOT the
+// internal Latin Editio store shape.
 export interface Editio {
   id: string;
-  artifactRef: ArtifactRef;
+  artifact: ArtifactRef;                      // the canonical artifact put forth
   destination: string;                       // 'feed' | 'r2' | 'huggingface' | 'mint' …
   visibility: EditioVisibility;
   custody: EditioCustody;
-  by: { animaId: string } | { commitment: string };
   owners?: Array<{ animaId: string; weight: number }>;
   license?: string;
   externalRef?: string;                       // feed post id / HF repo / token id / R2 url
   status: EditioStatus;
-  natum: string;                              // born (ISO)
-  mutatum: string;                            // changed (ISO)
+  reviewOutcome?: ReviewOutcome;              // present only for a moderation-gate HELD item
+  createdAt: string;                          // ISO
+  updatedAt: string;                          // ISO
 }
 
 export interface FeedFilter {

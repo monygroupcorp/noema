@@ -1610,7 +1610,11 @@ export class CrystalApi {
     // Availability tracks the WRITE seam, not presence — an unconfigured store 500s on connect, so the
     // panel can hide/disable proactively instead of waiting for the first failed PUT (F3).
     const secretsAvailable = !!this.deps.secretWriter
-    if (!c) return { bindings: [], secrets, secretsAvailable }
+    // Platform-admin flag — the SAME identity check that gates the moderation review actions
+    // (`_assertPlatformAdmin`). Surfaced so the web app can reveal the feed-review surface + its
+    // approve/reject controls only to the reviewer; it is `true` only on the platform's own session.
+    const admin = 'animaId' in auctor && auctor.animaId === PLATFORM_ANIMA_ID
+    if (!c) return { bindings: [], secrets, secretsAvailable, admin }
     const [appearance, generatio, bindings] = await Promise.all([
       c.resolveAppearance(auctor), c.resolveGeneratio(auctor), c.listBindings(auctor),
     ])
@@ -1620,6 +1624,7 @@ export class CrystalApi {
       bindings,
       secrets,
       secretsAvailable,
+      admin,
     }
   }
 
@@ -2215,6 +2220,11 @@ export interface MeView {
    *  the panel proactively rather than only learning on a failed connect. Distinct from every
    *  provider being `absent` (which just means "wired but nothing connected"). */
   secretsAvailable: boolean
+  /** Whether this caller is the platform administrator (the moderation reviewer). Gates the
+   *  web app's feed-review surface + its approve/reject/confirm-csam controls. Server-authoritative
+   *  — the same check `_assertPlatformAdmin` enforces, so the UI never diverges from what the API
+   *  will permit. `true` only on the platform's own session; every normal account sees `false`. */
+  admin: boolean
 }
 
 /** Result of connecting/disconnecting a BYO secret (`PUT/DELETE /v1/me/secrets/:provider`).

@@ -39,6 +39,7 @@ import { Onboard } from './screens/Onboard';
 import { Landing } from './screens/Landing';
 import { Ceremony } from './screens/Ceremony';
 import { Feed } from './screens/Feed';
+import { Review } from './screens/Review';
 import { VerifyEmail, ForgotPassword, ResetPassword } from './screens/Auth';
 import { Doc } from './screens/Doc';
 import { Stub } from './screens/Stub';
@@ -73,6 +74,9 @@ export function App() {
       <Route path="/card" element={<Card />} />
       <Route path="/catalog" element={<Catalog />} />
       <Route path="/feed" element={<Feed />} />
+      {/* Moderation held-queue (publishing spec §4). Author sees own held items; the platform
+          admin (me.admin) sees all + gets approve/reject/confirm-csam. Server-gated regardless. */}
+      <Route path="/admin/review" element={<Review />} />
       <Route path="/projects" element={<Projects />} />
       <Route path="/projects/:id" element={<ProjectHub />} />
       <Route path="/run" element={<Run />} />

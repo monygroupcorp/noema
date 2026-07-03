@@ -422,8 +422,9 @@ const MeViewSchema: JsonSchema = {
     bindings: { type: 'array', items: BindResponseSchema, description: 'The verb→flow overrides the owner has set.' },
     secrets: SecretPresenceSchema,
     secretsAvailable: { type: 'boolean', description: 'Whether this deployment can store BYO secrets (a secret store is wired). false → connecting is unavailable here; hide/disable the panel.' },
+    admin: { type: 'boolean', description: 'Whether this caller is the platform administrator (the moderation reviewer). Gates the feed-review surface + approve/reject/confirm-csam controls. true only on the platform session.' },
   },
-  required: ['bindings', 'secrets', 'secretsAvailable'],
+  required: ['bindings', 'secrets', 'secretsAvailable', 'admin'],
 }
 
 /** The request body for `PUT /v1/me/secrets/:provider`. */

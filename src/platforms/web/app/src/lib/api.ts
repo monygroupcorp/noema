@@ -176,6 +176,37 @@ export const api = {
     fetch(`/v1/editiones/${id}/retract`, { method: 'POST', headers: authHeaders() })
       .then(j<{ edition: Editio }>),
 
+  // ── Feed moderation review (Editio held-queue, spec §4) ──────────────────────
+  // GET /v1/editiones/review — the review queue. An author sees their OWN held items
+  // ("your publish is under review"); the platform admin (me.admin) sees ALL of them.
+  // approve/reject/confirm-csam are PLATFORM-ADMIN ONLY server-side (403 otherwise).
+  listReviewQueue: () => fetch('/v1/editiones/review', { headers: readHeaders() })
+    .then(j<{ editions: Editio[] }>),
+  // Clear a moderation hold → the item re-settles and publishes.
+  approveEdition: (id: string) =>
+    fetch(`/v1/editiones/${id}/approve`, { method: 'POST', headers: authHeaders() }).then(j<{ edition: Editio }>),
+  // Decline a held publication → terminal 'rejected'. Files NO report.
+  rejectEdition: (id: string) =>
+    fetch(`/v1/editiones/${id}/reject`, { method: 'POST', headers: authHeaders() }).then(j<{ edition: Editio }>),
+  // Affirmatively confirm a held item is CSAM → reject + file the NCMEC report. The only
+  // review action that reports; a legal duty on human confirmation (18 U.S.C. §2258A).
+  confirmCsam: (id: string) =>
+    fetch(`/v1/editiones/${id}/confirm-csam`, { method: 'POST', headers: authHeaders() }).then(j<{ edition: Editio }>),
+
+  // ── Owned Bursa purses (delegation, §7) — identified accounts only ───────────
+  // A purse converts part of your Signum balance into a shareable bearer token; runs
+  // spend it via /v1/runs (x-bursa-token). You see the balance drain, never who spent it.
+  // All four require a signed-in anima (401/403 for anon/purse callers).
+  listPurses: () => fetch('/v1/purses', { headers: readHeaders() }).then(j<{ purses: Purse[] }>),
+  mintPurse: (body: { credits: number; label?: string; fundFromAgentId?: string }) =>
+    fetch('/v1/purses', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) }).then(j<Purse>),
+  reclaimPurse: (token: string) =>
+    fetch(`/v1/purses/${encodeURIComponent(token)}/reclaim`, { method: 'POST', headers: authHeaders() })
+      .then(j<{ ok: boolean; refunded: string }>),
+  revokePurse: (token: string) =>
+    fetch(`/v1/purses/${encodeURIComponent(token)}/revoke`, { method: 'POST', headers: authHeaders() })
+      .then(j<{ ok: boolean; refunded: string }>),
+
   // ── Training (modus.aitoolkit-training) — thin reads; launches go via createRun ──
   // Dataset list/create live under the internal data API (/v1/data/*). Kept thin:
   // the builder launches a training as a normal run, these only feed the picker/cost.
@@ -264,6 +295,22 @@ export interface MeView {
   // here (SECRETA_MASTER_KEY unset); hide/disable the panel proactively. Older servers omit it
   // (undefined) → treat as available and fall back to the reactive SecretsUnavailableError path.
   secretsAvailable?: boolean;
+  // Whether this caller is the platform administrator (the moderation reviewer). Gates the
+  // feed-review surface + its approve/reject controls. Server-authoritative; `true` only on
+  // the platform session. Older servers omit it (undefined) → treated as not-admin.
+  admin?: boolean;
+}
+
+// An owned Bursa purse (delegation, §7) — a shareable bearer token funded from your balance.
+// `token` is the bearer credential (the invite code); `credits` is the remaining balance as a
+// decimal string (bigint-as-string). `joinUrl` is present only for agent-funded mints.
+export interface Purse {
+  token: string;
+  credits: string;
+  createdAt: string;
+  label?: string;
+  status: 'active' | 'revoked';
+  joinUrl?: string;
 }
 
 // Result of connecting/disconnecting a BYO secret (`PUT/DELETE /v1/me/secrets/:provider`).

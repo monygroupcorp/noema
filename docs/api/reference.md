@@ -1345,12 +1345,17 @@ The caller's owner-keyed account settings — presentation skin (Profile), cross
     "secretsAvailable": {
       "type": "boolean",
       "description": "Whether this deployment can store BYO secrets (a secret store is wired). false → connecting is unavailable here; hide/disable the panel."
+    },
+    "admin": {
+      "type": "boolean",
+      "description": "Whether this caller is the platform administrator (the moderation reviewer). Gates the feed-review surface + approve/reject/confirm-csam controls. true only on the platform session."
     }
   },
   "required": [
     "bindings",
     "secrets",
-    "secretsAvailable"
+    "secretsAvailable",
+    "admin"
   ]
 }
 ```
