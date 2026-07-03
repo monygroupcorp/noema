@@ -40,6 +40,8 @@ import { createAuthRouter } from './allocutio/api/authRouter.js'
 import { MongoCredentum } from './crystal/MongoCredentum.js'
 import { mailerFromEnv } from './allocutio/api/Mailer.js'
 import { createWidgetRouter } from './allocutio/api/widgetRouter.js'
+import { createDelegationRouter } from './allocutio/api/delegationRouter.js'
+import { DelegationService } from './crystal/DelegationService.js'
 import { createAgentCardRouter } from './allocutio/api/agentCardRouter.js'
 import { startSubsidySweeper } from './crystal/SubsidySweeper.js'
 import { startLicenseTripwire } from './crystal/licenseTripwire.js'
@@ -1048,6 +1050,27 @@ async function main(): Promise<void> {
     quoteImpetus: async (modusId) => BigInt((await crystalApi.quote(SYSTEM_AUCTOR, { modusId }, {})).impetus),
     x402Config,
     frameAncestors: widgetFrameAncestors,
+  }))
+
+  // Delegation tokens (§7): the agent owner mints invite codes; community members redeem
+  // them to run on the agent's sponsor-fed balance. Owner ops are gated by a REAL check —
+  // the caller's linked wallet (Anima.custos) must equal the agent's on-chain ownerAddress.
+  const delegationService = new DelegationService({
+    delegationes: ring.delegationes,
+    jwtSecret: process.env.JWT_SECRET ?? 'dev-delegation-secret-change-me',
+  })
+  app.use('/widget', express.json(), createDelegationRouter({
+    delegations: delegationService,
+    legati: ring.legati,
+    authorizeOwner: async (req, legatus) => {
+      try {
+        const auctor = await apiResolver.resolve(credentialsFromHeaders(req.headers as Record<string, string | undefined>, req.body))
+        if (!('animaId' in auctor)) return false
+        const anima = await ring.animae.find(auctor.animaId)
+        return !!anima?.custos && anima.custos.toLowerCase() === legatus.ownerAddress.toLowerCase()
+      } catch { return false }
+    },
+    ...(process.env.PUBLIC_BASE ? { publicBase: process.env.PUBLIC_BASE } : {}),
   }))
 
   // ERC-8004 agent cards (ADR-0011 §7/§8): the platform card + per-agent capability

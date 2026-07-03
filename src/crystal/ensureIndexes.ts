@@ -133,5 +133,11 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('sponsiones').createIndex({ id: 1 }, { unique: true }),
     db.collection('sponsiones').createIndex({ status: 1 }),
     db.collection('sponsiones').createIndex({ 'sponsor.animaId': 1 }),
+
+    // delegationes — agent-balance invite tokens (§7). Unique token = the redeem key;
+    // agentId bounds the owner-dashboard list.
+    db.collection('delegationes').createIndex({ id: 1 }, { unique: true }),
+    db.collection('delegationes').createIndex({ token: 1 }, { unique: true }),
+    db.collection('delegationes').createIndex({ agentId: 1 }),
   ])
 }
