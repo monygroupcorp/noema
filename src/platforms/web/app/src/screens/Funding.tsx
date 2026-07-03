@@ -89,7 +89,7 @@ export function Funding() {
   }, [eth]);
 
   return (
-    <AppShell crumb="add credits">
+    <AppShell crumb="Funding">
       <div className="page"><div className="pw narrow fund">
 
         <div className="fund-head">
