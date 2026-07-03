@@ -82,7 +82,7 @@ const fakeSignorum = { ownsAny: async () => true }
 
 // gate defaults to an approving scanner (the configured go-live posture); pass an
 // explicit gate to test a verdict, or noGate:true to exercise CrystalApi's fail-closed default.
-function makeApi(opts?: { gate?: ModerationGate; noGate?: boolean; prefs?: Record<string, unknown> }) {
+function makeApi(opts?: { gate?: ModerationGate; noGate?: boolean; prefs?: Record<string, unknown>; verdictCache?: unknown; scanFeeCharger?: unknown; csamReviewReporter?: unknown }) {
   const editiones = new MemEditionum()
   const animae = {
     find: async (id: string) => (id === 'anima-1' && opts?.prefs ? ({ id, publicatio: opts.prefs }) : null),
@@ -154,6 +154,9 @@ function makeApi(opts?: { gate?: ModerationGate; noGate?: boolean; prefs?: Recor
       new MarketplaceAdapter({ base: 'https://noema.art/market' }),
     ],
     ...(opts?.noGate ? {} : { moderationGate: opts?.gate ?? permissiveModerationGate }),
+    ...(opts?.verdictCache ? { verdictCache: opts.verdictCache } : {}),
+    ...(opts?.scanFeeCharger ? { scanFeeCharger: opts.scanFeeCharger } : {}),
+    ...(opts?.csamReviewReporter ? { csamReviewReporter: opts.csamReviewReporter } : {}),
   } as unknown as CrystalApiDeps)
   // The durable worker drives every settle (publish() only enqueues a pending Editio).
   // `flush` drains it deterministically — the test analogue of the in-process loop.
@@ -656,4 +659,142 @@ test('A2 reject/approve guard: only a pending-review Editio can be adjudicated',
   // Not held → approving/rejecting it is a not-found (nothing to adjudicate).
   await assert.rejects(() => api.approveHeldEdition(admin, ed.id))
   await assert.rejects(() => api.rejectHeldEdition(admin, ed.id))
+})
+
+// =============================================================================
+// A4 — cost forwarding (spec §7): the content-addressed verdict cache (identical
+// re-publish reuses the verdict, no re-scan) + the billable-gated scan fee.
+// =============================================================================
+
+import type { VerdictCache, CachedVerdict } from '../../../src/crystal/VerdictCache.js'
+import type { ScanFeeCharger } from '../../../src/crystal/ScanFeeCharger.js'
+
+function memCache(): VerdictCache & { store: Map<string, CachedVerdict> } {
+  const store = new Map<string, CachedVerdict>()
+  return { store, async get(k) { return store.get(k) ?? null }, async put(v) { store.set(v.key, v) } }
+}
+function countingCharger(): { charger: ScanFeeCharger; charges: Array<{ editioId: string }> } {
+  const charges: Array<{ editioId: string }> = []
+  return { charger: { async charge(_by, editioId) { charges.push({ editioId }) } }, charges }
+}
+
+/** A gate that counts scans and reports the scan as billable (a paid classifier ran). */
+function billableGate(): { gate: ModerationGate; calls: () => number } {
+  let n = 0
+  return { gate: { async scan() { n++; return { ok: true, billable: true } } }, calls: () => n }
+}
+
+test('A4 cache: an identical re-publish REUSES the verdict — no re-scan, no re-charge', async () => {
+  const cache = memCache()
+  const charger = countingCharger()
+  const g = billableGate()
+  const { api, flush } = makeApi({ gate: g.gate, verdictCache: cache, scanFeeCharger: charger.charger })
+
+  // First publish of the actum → scans once, caches, charges the billable fee.
+  const first = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+  assert.equal(g.calls(), 1)
+  assert.equal(charger.charges.length, 1)
+  assert.equal(charger.charges[0].editioId, first.id)
+  assert.equal(cache.store.size, 1, 'the verdict was cached by content key')
+
+  // Re-publish the SAME artifact (identical media) → cache hit: no scan, no charge.
+  await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'marketplace' })
+  await flush()
+  assert.equal(g.calls(), 1, 'identical content is not re-scanned (cache hit)')
+  assert.equal(charger.charges.length, 1, 'identical content is not re-charged')
+  assert.equal((await api.feed({ visibility: 'feed' })).length, 1)
+})
+
+test('A4 fee: a non-billable scan (no paid classifier) is NOT charged', async () => {
+  const charger = countingCharger()
+  // permissive gate returns { ok: true } with no `billable` → nothing was paid for.
+  const { api, flush } = makeApi({ gate: permissiveModerationGate, scanFeeCharger: charger.charger })
+  await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+  assert.equal(charger.charges.length, 0, 'no paid classifier ran → no fee (spec §7)')
+})
+
+test('A4 fee: a fee-charger failure does NOT block the publish', async () => {
+  const g = billableGate()
+  const throwingCharger: ScanFeeCharger = { async charge() { throw new Error('ledger down') } }
+  const { api, editiones, flush } = makeApi({ gate: g.gate, scanFeeCharger: throwingCharger })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+  assert.equal((await editiones.find(ed.id))?.status, 'published', 'the safe publish stands despite the fee failure')
+})
+
+test('A4 cache: a cached REJECT blocks an identical re-publish without re-scanning', async () => {
+  const cache = memCache()
+  let scans = 0
+  const rejectGate: ModerationGate = { async scan() { scans++; return { ok: false, reason: 'nope' } } }
+  const { api, editiones, flush } = makeApi({ gate: rejectGate, verdictCache: cache })
+  const a = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+  assert.equal((await editiones.find(a.id))?.status, 'rejected')
+  assert.equal(scans, 1)
+  const b = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'marketplace' })
+  await flush()
+  assert.equal((await editiones.find(b.id))?.status, 'rejected', 'reused the cached reject')
+  assert.equal(scans, 1, 'identical rejected content is not re-scanned')
+})
+
+// =============================================================================
+// Human-review CONFIRM-AND-REPORT (spec §4) — the Thorn-independent adjudicator.
+// A reviewer confirming CSAM rejects the item AND files the NCMEC report; a plain
+// reject never reports (§0-A). Admin-only.
+// =============================================================================
+
+import type { CsamReviewReporter, ReviewedCsamReport } from '../../../src/crystal/CsamReviewReporter.js'
+
+function spyReporter(): { reporter: CsamReviewReporter; reports: ReviewedCsamReport[] } {
+  const reports: ReviewedCsamReport[] = []
+  return { reporter: { async reportConfirmed(r) { reports.push(r); return { reportId: 'ncmec:1', reportIds: ['ncmec:1'], submitted: false } } }, reports }
+}
+
+test('confirm-CSAM: admin confirmation rejects the held item AND files a report', async () => {
+  const spy = spyReporter()
+  const { gate } = holdGate()
+  const { api, editiones, flush } = makeApi({ gate, csamReviewReporter: spy.reporter })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush() // → held (reviewOutcome pending)
+
+  const out = await api.confirmCsamAndReport(admin, ed.id)
+  assert.equal(out.status, 'rejected')
+  assert.equal(out.reviewOutcome, 'rejected')
+  assert.equal((await editiones.find(ed.id))?.status, 'rejected')
+  assert.equal(spy.reports.length, 1, 'a report was filed')
+  assert.equal(spy.reports[0].editioId, ed.id)
+  assert.deepEqual(spy.reports[0].artifact, { kind: 'actum', id: OWNED_ACTUM })
+  assert.deepEqual(spy.reports[0].uploader, { animaId: 'anima-1' })
+  assert.equal(spy.reports[0].reviewedBy, 'platform')
+  assert.ok(spy.reports[0].urls.length >= 1, 'the confirmed media urls are included')
+})
+
+test('confirm-CSAM: a plain reject files NO report (only confirm does)', async () => {
+  const spy = spyReporter()
+  const { gate } = holdGate()
+  const { api, flush } = makeApi({ gate, csamReviewReporter: spy.reporter })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+  await api.rejectHeldEdition(admin, ed.id)
+  assert.equal(spy.reports.length, 0, 'reject must never file a report (§0-A)')
+})
+
+test('confirm-CSAM: platform-admin only; an author cannot confirm', async () => {
+  const { gate } = holdGate()
+  const { api, flush } = makeApi({ gate, csamReviewReporter: spyReporter().reporter })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+  await assert.rejects(() => api.confirmCsamAndReport(anima1, ed.id), /platform administrator/)
+})
+
+test('confirm-CSAM: no reporter configured → still rejects (fail-safe), no throw', async () => {
+  const { gate } = holdGate()
+  const { api, editiones, flush } = makeApi({ gate }) // no csamReviewReporter
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+  const out = await api.confirmCsamAndReport(admin, ed.id)
+  assert.equal(out.status, 'rejected', 'content is rejected even when no reporter is wired')
+  assert.equal((await editiones.find(ed.id))?.status, 'rejected')
 })
