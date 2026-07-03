@@ -48,26 +48,34 @@ function interactive(modi: Modus[] = [MODUS]) {
   })
 }
 
-test('interactive: run panel renders the aditus form, a priced Run, and the §5 run script', async () => {
+test('entrance gate: no access code → the enter-code gate, not the run panel', async () => {
   const res = await request(interactive()).get('/widget/camel42')
   assert.equal(res.status, 200)
-  assert.match(res.text, /class="mform active"[^>]*data-modus="m1"[^>]*data-endpoint="[^"]*spell\/memeify"/)
-  assert.match(res.text, /<textarea name="prompt"/)                 // text porta → textarea
-  assert.match(res.text, /name="seed"[^>]*type="number"|type="number"[^>]*name="seed"/) // int → number
-  assert.match(res.text, /id="runbtn">Run · \$/)                    // priced button
-  assert.match(res.text, /PAYMENT_REQUIRED/)                        // run script asks parent to sign
-  assert.match(res.text, /PAYMENT_SIGNED/)                          // then re-POSTs with the header
-  // single modus → no picker chips
-  assert.doesNotMatch(res.text, /class="modchip/)
+  assert.match(res.text, /id="gateform"/)
+  assert.match(res.text, /Enter your access code/)
+  assert.doesNotMatch(res.text, /id="runbtn"/)                      // no run until a code
 })
 
-test('interactive: multiple modi → a picker with one chip + form (+ price) each', async () => {
-  const res = await request(interactive([MODUS, MODUS2])).get('/widget/camel42')
+test('with a code: run panel holds the token + runs on the purse via /v1/runs (no x402/wallet)', async () => {
+  const res = await request(interactive()).get('/widget/camel42?code=purse-abc')
+  assert.equal(res.status, 200)
+  assert.match(res.text, /id="runwrap" data-code="purse-abc"/)      // the Bursa token is held
+  assert.match(res.text, /class="mform active"[^>]*data-modus="m1"/)
+  assert.match(res.text, /<textarea name="prompt"/)                 // text porta → textarea
+  assert.match(res.text, /name="seed"[^>]*type="number"|type="number"[^>]*name="seed"/) // int → number
+  assert.match(res.text, /id="runbtn">Run · ~\d+ cr/)               // priced in credits, not USDC
+  assert.match(res.text, /\/v1\/runs/)                              // runs via the identified path
+  assert.match(res.text, /x-bursa-token/)                           // spending the purse
+  assert.doesNotMatch(res.text, /PAYMENT_REQUIRED/)                 // no wallet/x402 on the human surface
+  assert.doesNotMatch(res.text, /class="modchip/)                  // single modus → no picker
+})
+
+test('with a code: multiple modi → a picker with one chip + form (distinct credit prices)', async () => {
+  const res = await request(interactive([MODUS, MODUS2])).get('/widget/camel42?code=x')
   assert.equal(res.status, 200)
   assert.match(res.text, /class="modchip active" data-modus="m1">memeify/)
   assert.match(res.text, /class="modchip" data-modus="m2">upscale/)
-  // the second modus's form is present but inactive, with its own endpoint + a distinct price
-  assert.match(res.text, /class="mform" data-modus="m2"[^>]*spell\/upscale/)
+  assert.match(res.text, /class="mform" data-modus="m2"/)
   const p1 = res.text.match(/data-modus="m1"[^>]*data-price="([^"]+)"/)?.[1]
   const p2 = res.text.match(/data-modus="m2"[^>]*data-price="([^"]+)"/)?.[1]
   assert.ok(p1 && p2 && p1 !== p2, `m1 (${p1}) and m2 (${p2}) should be priced differently`)

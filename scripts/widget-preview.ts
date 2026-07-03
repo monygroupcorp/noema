@@ -149,6 +149,35 @@ app.post('/api/v1/x402/agents/:agentId/spell/:name', express.json(), (req, res) 
   res.json(result)
 })
 
+// MOCK purse-run endpoints (the widget's human path). The widget POSTs /v1/runs with an
+// x-bursa-token (the access code), streams /v1/runs/:id/stream, then fetches the outputs.
+app.post('/v1/runs', express.json(), (_req, res) => res.json({ id: 'run-purse', status: 'pending' }))
+app.get('/v1/runs/:id', (_req, res) =>
+  res.json({ id: 'run-purse', status: 'complete', outputs: { image: `https://picsum.photos/seed/purse${Math.floor(Math.random() * 1e6)}/600`, caption: 'Made on your purse (preview)' } }))
+app.get('/v1/runs/:id/stream', (_req, res) => {
+  const sock = res.socket
+  if (!sock) { res.status(204).end(); return }
+  sock.write('HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n')
+  const tape: Array<Record<string, unknown>> = [
+    { kind: 'snapshot', run: { id: 'run-purse', status: 'pending' } },
+    { kind: 'progress', terminal: false, progressus: { phase: 'queued' } },
+    { kind: 'progress', terminal: false, progressus: { phase: 'provisioning', pod: { gpuType: 'RTX 4090', costPerHr: 0.34 } } },
+    { kind: 'progress', terminal: false, progressus: { phase: 'downloading', target: 'model', progress: { done: 3, total: 5, unit: 'items' } } },
+    { kind: 'progress', terminal: false, progressus: { phase: 'executing', progress: { done: 14, total: 30, unit: 'steps' } } },
+    { kind: 'progress', terminal: false, progressus: { phase: 'uploading' } },
+    { kind: 'complete', terminal: true, status: 'complete' },
+  ]
+  let i = 0, alive = true
+  sock.on('close', () => { alive = false })
+  const step = (): void => {
+    if (!alive || sock.destroyed) return
+    if (i >= tape.length) { sock.end(); return }
+    sock.write('data: ' + JSON.stringify(tape[i++]) + '\n\n')
+    setTimeout(step, 550)
+  }
+  step()
+})
+
 // A demo partner page: loads the SDK, mounts the widget + gallery, injects a MOCK wallet.
 app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html><html><head><meta charset="utf-8">
