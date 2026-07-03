@@ -126,3 +126,6 @@ tee/wg-server/wg-server
 /scripts/corpus-space/out-smoke/
 # Generated 3D-space frontend artifact (built by scripts/corpus-space/project.py)
 /src/platforms/web/app/public/space*/
+
+# Compiled Go binary (build artifact)
+tee/wg-server/tee-wg-server
