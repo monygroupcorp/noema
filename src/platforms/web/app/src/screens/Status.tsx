@@ -25,10 +25,10 @@ export function Status() {
   const fmtElapsed = (ms?: number) => (ms == null ? '' : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60000)}m`);
 
   return (
-    <AppShell crumb="account">
+    <AppShell crumb="activity">
       <div className="page"><div className="pw">
         <div className="pagehead">
-          <div><h1>Account</h1><div className="sub">{ident.name} · {ident.role}</div></div>
+          <div><h1>Activity</h1><div className="sub">Your balance, what’s running now, and where your credits go.</div></div>
           <div className="right"><Link className="btn" to="/funding"><Ic name="plus" /> Add credits</Link></div>
         </div>
 
@@ -61,6 +61,16 @@ export function Status() {
             ))}
           </div>
         )}
+
+        <div className="sectionhead">Spend</div>
+        <div className="empty">
+          <div className="ico"><Ic name="receipt-text" /></div>
+          <div className="t">
+            <span className="hemi2 dashed" /> A per-run credit ledger — what each generation cost, over time — lands here
+            once the backend exposes spend history. For now your live balance is above and finished work lives in your{' '}
+            <Link to="/space" style={{ color: 'var(--accent-soft)' }}>space</Link>.
+          </div>
+        </div>
 
         <div className="sub" style={{ marginTop: 'var(--s5)', color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
           Live from staging · {ident.funding === 'named' ? 'signed-in account' : 'anonymous session'}.

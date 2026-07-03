@@ -12,10 +12,13 @@ import { api, type MeStatus, type StudioEntry } from '../lib/api';
 //    a custody default — custody (local/TEE/remote) is a per-run choice in the console.
 //  · NOEMA is multi-interface (web · Telegram · API) — the posture names this "reach".
 
-const SECTIONS = [
+// Preferences is folded in here (UX handoff 2, Decision 2) — it's its own screen, so its sub-nav
+// entry links out to /preferences via `to` rather than an /account/:section pane.
+const SECTIONS: { key: string; label: string; ico: string; to?: string }[] = [
   { key: 'account', label: 'Account', ico: 'circle-user' },
   { key: 'billing', label: 'Billing & credits', ico: 'wallet' },
   { key: 'compute', label: 'Compute', ico: 'server' },
+  { key: 'preferences', label: 'Preferences', ico: 'sparkles', to: '/preferences' },
   { key: 'api', label: 'API keys', ico: 'key-round' },
   { key: 'security', label: 'Security & privacy', ico: 'eye-off' },
 ];
@@ -80,7 +83,7 @@ export function AccountSettings() {
               <Row k="plan" v={<b>Subscription · $20/mo</b>} />
               <Row k="credits" v={<span className="gold"><span className="gem">◈</span> {credits}{me ? <> credits · ≈ ${me.balanceUsd.toFixed(2)}</> : ''}</span>} />
               <Row k="payment" v={<><b>card</b> · ···· 4242</>} />
-              <div className="ac-note mono"><span className="hemi2 dashed" /> anonymous purse (Bursa): <span className="gold">◈ 1,200</span> · bearer · fund from a shielded wallet</div>
+              <div className="ac-note mono"><span className="hemi2 dashed" /> anonymous credit (Bursa note): <span className="gold">◈ 1,200</span> · bearer · fund from a shielded wallet</div>
             </SectionCard>
             <SectionCard to="/account/api" ico="key-round" name="API keys">
               <Row k="sk-noema-···· a3f9" v={<><b>active</b> · 84k calls</>} />
@@ -97,11 +100,11 @@ export function AccountSettings() {
               <Row k="devices" v={<><b>2</b> active</>} />
               <Row k="conditional anonymity" v={<span className="accent">learn the rule ▸</span>} />
             </SectionCard>
-          </div>
-
-          {/* preferences pointer */}
-          <div className="ac-prefptr">
-            <Ic name="sparkles" /> Generation defaults for <span className="mono">/make · /effect · …</span> — portable across web · Telegram · API — live in your <Link to="/preferences">preferences profile ▸</Link>
+            <SectionCard to="/preferences" ico="sparkles" name="Preferences &amp; defaults">
+              <Row k="scope" v={<>portable across web · Telegram · API</>} />
+              <Row k="applies to" v={<span className="mono">/make · style · output · delivery</span>} />
+              <div className="ac-note mono">generation defaults that travel with you — override inline anytime.</div>
+            </SectionCard>
           </div>
         </div></div>
       </AppShell>
@@ -118,7 +121,7 @@ export function AccountSettings() {
           <aside className="settings-nav">
             <div className="sn-l">settings</div>
             {SECTIONS.map((s) => (
-              <Link key={s.key} to={`/account/${s.key}`} className={`sn-item${s.key === section ? ' on' : ''}`}>
+              <Link key={s.key} to={s.to ?? `/account/${s.key}`} className={`sn-item${s.key === section ? ' on' : ''}`}>
                 <Ic name={s.ico} /> {s.label}
               </Link>
             ))}
