@@ -30,6 +30,8 @@ export const MODUS_CHATGPT: Modus = make({
     prompt:      { type: 'text',  required: true,  description: 'The user message or prompt' },
     model:       { type: 'text',  required: false, default: 'gpt-4o',  description: 'OpenAI model ID' },
     temperature: { type: 'float', required: false, default: 0.7,       description: 'Sampling temperature' },
+    // Routing key (mirrors __spaceUrl): declares the ApiCursor capability. Hidden internal port.
+    __capability: { type: 'text', required: false, default: 'chat',    description: 'ApiCursor capability (internal)' },
   },
 
   exitus: {
@@ -54,6 +56,7 @@ export const MODUS_DALLE_III: Modus = make({
     prompt:  { type: 'text', required: true,  description: 'Image description' },
     size:    { type: 'text', required: false, default: '1024x1024', description: 'Image dimensions' },
     quality: { type: 'text', required: false, default: 'standard',  description: 'standard or hd' },
+    __capability: { type: 'text', required: false, default: 'image', description: 'ApiCursor capability (internal)' },
   },
 
   exitus: {
@@ -64,28 +67,59 @@ export const MODUS_DALLE_III: Modus = make({
   mutatum: new Date('2025-01-01'),
 })
 
-export const MODUS_JOYCAPTION: Modus = make({
-  id: 'modus.joycaption',
-  nomen: 'JoyCaption — image captioning',
+// OpenAI image editing (gpt-image edit): input image (+ optional mask) + prompt → edited image.
+// Closes the imageEdit / gpt-image-compose VERIFY seam. Same `ministerium: 'openai'`, capability 'imageEdit'.
+export const MODUS_GPT_IMAGE_EDIT: Modus = make({
+  id: 'modus.gpt-image-edit',
+  nomen: 'GPT Image — image editing',
   genus: 'atomicus',
   versio: '1.0.0',
-  ministerium: 'huggingface',
+  ministerium: 'openai',
   deliveryMode: 'sync',
   canonica: true,
-  impetusFixum: 5n,
+  impetusFixum: 50n,
 
   aditus: {
-    __spaceUrl:   { type: 'text',  required: true,  default: 'fancyfeast/joy-caption-pre-alpha', description: 'HuggingFace space URL' },
-    image:        { type: 'image', required: true,  description: 'Image to caption' },
-    caption_type: { type: 'text',  required: false, default: 'Descriptive', description: 'Caption style' },
+    image:  { type: 'image', required: true,  description: 'The source image to edit' },
+    prompt: { type: 'text',  required: true,  description: 'What to change / the edit instruction' },
+    mask:   { type: 'image', required: false, description: 'Optional mask — transparent areas are edited' },
+    model:  { type: 'text',  required: false, default: 'gpt-image-1', description: 'OpenAI image model ID' },
+    __capability: { type: 'text', required: false, default: 'imageEdit', description: 'ApiCursor capability (internal)' },
   },
 
   exitus: {
-    caption: { type: 'text', description: 'Generated caption' },
+    image: { type: 'image', description: 'The edited image (URL)' },
   },
 
-  natum:   new Date('2025-01-01'),
-  mutatum: new Date('2025-01-01'),
+  natum:   new Date('2026-07-02'),
+  mutatum: new Date('2026-07-02'),
+})
+
+// OpenRouter chat — proves the descriptor generalizes: a new provider is a
+// descriptor + env key + this one seed, with ZERO new cursor code.
+export const MODUS_OPENROUTER_CHAT: Modus = make({
+  id: 'modus.openrouter-chat',
+  nomen: 'OpenRouter — text generation',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  ministerium: 'openrouter',
+  deliveryMode: 'sync',
+  canonica: true,
+  impetusFixum: 10n,
+
+  aditus: {
+    prompt:      { type: 'text',  required: true,  description: 'The user message or prompt' },
+    model:       { type: 'text',  required: false, default: 'openai/gpt-4o', description: 'OpenRouter model ID (provider/model)' },
+    temperature: { type: 'float', required: false, default: 0.7,       description: 'Sampling temperature' },
+    __capability: { type: 'text', required: false, default: 'chat',    description: 'ApiCursor capability (internal)' },
+  },
+
+  exitus: {
+    response: { type: 'text', description: 'Generated text response' },
+  },
+
+  natum:   new Date('2026-07-02'),
+  mutatum: new Date('2026-07-02'),
 })
 
 export const MODUS_LAYER_COMPOSITE: Modus = make({
@@ -190,7 +224,8 @@ export const MODUS_AITOOLKIT_TRAINING: Modus = make({
 export const CANONICAL_MODI: Modus[] = [
   MODUS_CHATGPT,
   MODUS_DALLE_III,
-  MODUS_JOYCAPTION,
+  MODUS_GPT_IMAGE_EDIT,
+  MODUS_OPENROUTER_CHAT,
   MODUS_LAYER_COMPOSITE,
   MODUS_FRAMES_TO_VIDEO,
   MODUS_AITOOLKIT_TRAINING,

@@ -85,8 +85,9 @@ export interface Exitus {
 /**
  * Cursor — "one who runs" in Latin (agent noun from currere).
  *
- * One cursor per service type: RunPodCursor, OpenAICursor, ReplicateCursor,
- * LocalCursor (self-hosted), etc. Registered in Cursorum by modus.ministerium.
+ * One cursor per service type: RunPodCursor, ApiCursor (descriptor-driven —
+ * OpenAI/OpenRouter/…), LocalCursor (self-hosted), etc. Registered in Cursorum
+ * by modus.ministerium.
  *
  * PURE EXECUTION CONTRACT:
  *   - reserve() must not have side effects (read-only cost estimate)

@@ -55,8 +55,8 @@ import { MongoVestigiorum } from './crystal/MongoVestigiorum.js'
 import { MongoModo } from './crystal/MongoModo.js'
 import { RunPodCursor } from './crystal/RunPodCursor.js'
 import { TesseraCursor } from './crystal/TesseraCursor.js'
-import { OpenAICursor } from './crystal/OpenAICursor.js'
-import { HuggingFaceCursor } from './crystal/HuggingFaceCursor.js'
+import { ApiCursor, httpApiTransport } from './crystal/ApiCursor.js'
+import type { ApiProvider } from './crystal/apiProviders.js'
 import { LayerCompositeCursor } from './crystal/LayerCompositeCursor.js'
 import { JimpLayerCompositeEngine } from './crystal/LayerCompositeEngine.js'
 import { FfmpegCursor } from './crystal/FfmpegCursor.js'
@@ -354,15 +354,13 @@ export interface ContainerConfig {
    */
   embed?: (text: string) => Promise<number[]>
   embedImage?: (imageUrl: string) => Promise<number[]>
-  /** OpenAI-compatible client — absent: OpenAI tools will throw at reserve() */
-  openaiClient?: {
-    chat(params: unknown): Promise<{ content: string; usage?: { total_tokens?: number } }>
-    image(params: unknown): Promise<{ url: string }>
-  }
-  /** HuggingFace client — absent: HuggingFace tools will throw at reserve() */
-  huggingfaceClient?: {
-    predict(spaceUrl: string, params: Record<string, unknown>): Promise<Record<string, unknown>>
-  }
+  /**
+   * Hosted-API inference providers (OpenAI, OpenRouter, …). Each entry is a
+   * declarative descriptor + its resolved bearer key. One ApiCursor is
+   * registered per provider under `provider.id`. Absent providers → their tools
+   * throw at resolve(). Adding a provider is a descriptor + env key — no code.
+   */
+  apiProviders?: Array<{ provider: ApiProvider; apiKey: string }>
   /** TEE runner pod provisioner config — if present, POST /v1/sessions/tee boots real pods. */
   teeProvisioner?: TeeProvisionerConfig
 }
@@ -507,14 +505,15 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     }
   }
 
-  if (config.openaiClient) {
-    const openaiCursor = new OpenAICursor(config.openaiClient as ConstructorParameters<typeof OpenAICursor>[0])
-    cursorum.register('openai', openaiCursor)
-  }
-
-  if (config.huggingfaceClient) {
-    const hfCursor = new HuggingFaceCursor(config.huggingfaceClient)
-    cursorum.register('huggingface', hfCursor)
+  // Hosted-API inference: ONE cursor class, one registration per provider
+  // descriptor. `ministerium: 'openai'` (ChatGPT/DALL·E/gpt-image-edit) and
+  // `ministerium: 'openrouter'` resolve here with no per-provider code.
+  for (const { provider, apiKey } of config.apiProviders ?? []) {
+    cursorum.register(provider.id, new ApiCursor(provider, {
+      apiKey,
+      http: httpApiTransport,
+      mediaFetcher: httpMediaFetcher,
+    }))
   }
 
   // Publication adapters (spec §5b): feed + model registries need nothing; the
