@@ -81,11 +81,29 @@ function projectV2ToV1(doc: Document): Intella {
   return projected as unknown as Intella
 }
 
+const ANIMA_PREFIX = 'anima:'
+
+/**
+ * Owner-match clauses for a generic `ownerKey`. Matches NEW records (which carry the flat
+ * `ownerKey` field) AND — when the owner is an anima — LEGACY records that only have
+ * `ownerAnimaId` (migration-free: we decode `anima:<id>` back to the bare id). A Bursa/commitment
+ * owner has only the `ownerKey` clause (no legacy records ever had a non-anima owner).
+ */
+function ownerClauses(ownerKey: string): Record<string, unknown>[] {
+  const clauses: Record<string, unknown>[] = [{ ownerKey }]
+  if (ownerKey.startsWith(ANIMA_PREFIX)) {
+    const animaId = ownerKey.slice(ANIMA_PREFIX.length)
+    clauses.push({ ownerAnimaId: animaId })            // v1 legacy
+    clauses.push({ 'access.ownerAnimaId': animaId })   // v2 legacy
+  }
+  return clauses
+}
+
 /**
  * Build the access half of a $or query: matches a public record (v1 OR v2)
- * plus (when animaId given) any private record owned by that anima.
+ * plus (when an ownerKey is given) any private record owned by that owner.
  */
-function buildAccessOrClauses(animaId: string | undefined): Record<string, unknown>[] {
+function buildAccessOrClauses(ownerKey: string | undefined): Record<string, unknown>[] {
   const clauses: Record<string, unknown>[] = [
     { access: 'public' },              // v1
     { 'access.kind': 'public' },       // v2
@@ -93,10 +111,7 @@ function buildAccessOrClauses(animaId: string | undefined): Record<string, unkno
                                        // seeded LoRAs set no `access` field, so without this they'd
                                        // be filtered out of trigger resolution entirely.
   ]
-  if (animaId) {
-    clauses.push({ ownerAnimaId: animaId })            // v1
-    clauses.push({ 'access.ownerAnimaId': animaId })   // v2
-  }
+  if (ownerKey) clauses.push(...ownerClauses(ownerKey))
   return clauses
 }
 
@@ -119,7 +134,18 @@ export class MongoIntella implements Intellarum {
     return docs.map(projectV2ToV1)
   }
 
-  async findByTrigger(trigger: string, familia: string, animaId?: string): Promise<Intellae> {
+  /** An owner's privately-held models (imports + trained), newest first. Matches the owner on the
+   *  new flat `ownerKey` (Bursa-capable) OR legacy `ownerAnimaId` for anima owners (migration-free). */
+  async listByOwner(ownerKey: string, genus?: IntellaGenus): Promise<Intellae> {
+    const query: Record<string, unknown> = {
+      $or: ownerClauses(ownerKey),
+      ...(genus !== undefined ? { genus } : {}),
+    }
+    const docs = await this.col.find(query).sort({ natum: -1 }).toArray()
+    return docs.map(projectV2ToV1)
+  }
+
+  async findByTrigger(trigger: string, familia: string, ownerKey?: string): Promise<Intellae> {
     const triggerLower = trigger.toLowerCase()
     // Compat keys on the model FAMILY (`familia`, exact equality), not the old
     // baseIntellaId join. Trigger still substring-matches either v1's flat
@@ -135,14 +161,14 @@ export class MongoIntella implements Intellarum {
             { 'params.triggerWords': { $regex: new RegExp(triggerLower, 'i') } }, // v2 array
           ],
         },
-        { $or: buildAccessOrClauses(animaId) },
+        { $or: buildAccessOrClauses(ownerKey) },
       ],
     }
     const docs = await this.col.find(query).toArray()
     return docs.map(projectV2ToV1)
   }
 
-  async triggerMap(familia: string, animaId?: string): Promise<Map<string, Intellae>> {
+  async triggerMap(familia: string, ownerKey?: string): Promise<Map<string, Intellae>> {
     // Compat keys on the model FAMILY (`familia`, exact equality).
     const query: Record<string, unknown> = {
       genus: 'lora',
@@ -154,7 +180,7 @@ export class MongoIntella implements Intellarum {
             { 'params.triggerWords.0': { $exists: true } },   // v2 array
           ],
         },
-        { $or: buildAccessOrClauses(animaId) },
+        { $or: buildAccessOrClauses(ownerKey) },
       ],
     }
     const docs = await this.col.find(query).toArray()
@@ -193,6 +219,16 @@ export class MongoIntella implements Intellarum {
       { $set: { access, mutatum: new Date() } },
       { returnDocument: 'after' },
     )
+    return doc ? projectV2ToV1(doc) : null
+  }
+
+  /** Admin license-clearance/backfill: set `license` and/or `commercialUse`. Only the provided
+   *  fields are written (a partial clearance), stamping `mutatum`. */
+  async setLicense(id: string, patch: { license?: string; commercialUse?: 'yes' | 'no' | 'conditional' | 'unknown' }): Promise<Intella | null> {
+    const set: Record<string, unknown> = { mutatum: new Date() }
+    if (patch.license !== undefined) set.license = patch.license
+    if (patch.commercialUse !== undefined) set.commercialUse = patch.commercialUse
+    const doc = await this.col.findOneAndUpdate({ id }, { $set: set }, { returnDocument: 'after' })
     return doc ? projectV2ToV1(doc) : null
   }
 

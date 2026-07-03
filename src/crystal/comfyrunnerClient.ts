@@ -92,6 +92,9 @@ export async function submitToRunner(
   input: unknown,
   webhook?: string,
   r2?: R2Config,
+  /** BYO-secrets Phase C: the per-job pod credential. The runner presents it as
+   *  `Authorization: Bearer <jobToken>` when fetching a `gated` model url (our weight-proxy). */
+  jobToken?: string,
 ): Promise<void> {
   const body: Record<string, unknown> = { jobId }
   if (isComfyUISpec(input)) {
@@ -110,8 +113,9 @@ export async function submitToRunner(
     body.models      = []
     body.customNodes = []
   }
-  if (webhook) body.webhook = webhook
-  if (r2)      body.r2 = r2
+  if (webhook)  body.webhook = webhook
+  if (r2)       body.r2 = r2
+  if (jobToken) body.jobToken = jobToken
 
   const res = await fetchFn(`${runnerBase}/job`, {
     method: 'POST',

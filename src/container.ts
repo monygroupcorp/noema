@@ -1,9 +1,11 @@
 import type { Collection, MongoClient } from 'mongodb'
+import { makeLogger } from './lib/logger.js'
 import type { Modus } from './types/modus.js'
 import type { Actorum, Cursorum, ActumCompletor as IActumCompletor, Inceptio } from './types/cursus.js'
 import type { RunPodClient } from './crystal/RunPodCursor.js'
 import type { ActumInceptor as IActumInceptor } from './execution/ActumInceptor.js'
 import type { Signorum } from './types/significandi.js'
+import type { Redituum } from './types/reditus.js'
 import type { Modorum } from './types/modus.js'
 import type { AnimaStore } from './types/anima.js'
 import type { PersonaStore } from './types/persona.js'
@@ -33,19 +35,35 @@ import { Conductor } from './crystal/Conductor.js'
 import type { Procurator } from './crystal/Procurator.js'
 import { TeeProvisioner } from './crystal/TeeProvisioner.js'
 import type { TeeProvisionerConfig } from './crystal/TeeProvisioner.js'
+import { ConfidentialPodClient } from './crystal/ConfidentialPodClient.js'
+import type { ConfidentialPodClientConfig } from './crystal/ConfidentialPodClient.js'
+import type { TeePodProvisioner } from './crystal/TeePodProvisioner.js'
 
 import { MongoActorum } from './crystal/MongoActorum.js'
 import { MongoModorum } from './crystal/MongoModorum.js'
 import { MongoFundamentorum } from './crystal/MongoFundamentorum.js'
 import { MongoSignorum } from './crystal/MongoSignorum.js'
+import { MongoRedituum } from './crystal/MongoRedituum.js'
+import { MongoMerces } from './crystal/MongoMerces.js'
+import type { Mercedum } from './types/merces.js'
+import { MongoTripwireBandStore } from './crystal/MongoTripwireBand.js'
+import type { TripwireBandStore } from './crystal/licenseTripwire.js'
 import { MongoAnima } from './crystal/MongoAnima.js'
 import { MongoPersona } from './crystal/MongoPersona.js'
+import { MongoIssuer } from './crystal/MongoIssuer.js'
+import type { IssuerStore } from './types/issuer.js'
+import { MongoLegatus } from './crystal/MongoLegatus.js'
+import type { LegatusStore } from './types/legatus.js'
+import { MongoX402Log } from './crystal/MongoX402Log.js'
+import type { X402LogStore } from './types/x402.js'
+import { MongoSponsio } from './crystal/MongoSponsio.js'
+import type { SponsioStore } from './types/sponsio.js'
 import { MongoVestigiorum } from './crystal/MongoVestigiorum.js'
 import { MongoModo } from './crystal/MongoModo.js'
 import { RunPodCursor } from './crystal/RunPodCursor.js'
 import { TesseraCursor } from './crystal/TesseraCursor.js'
-import { OpenAICursor } from './crystal/OpenAICursor.js'
-import { HuggingFaceCursor } from './crystal/HuggingFaceCursor.js'
+import { ApiCursor, httpApiTransport } from './crystal/ApiCursor.js'
+import type { ApiProvider } from './crystal/apiProviders.js'
 import { LayerCompositeCursor } from './crystal/LayerCompositeCursor.js'
 import { JimpLayerCompositeEngine } from './crystal/LayerCompositeEngine.js'
 import { FfmpegCursor } from './crystal/FfmpegCursor.js'
@@ -63,6 +81,11 @@ import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
 import { FeedAdapter } from './crystal/FeedAdapter.js'
 import { BucketAdapter } from './crystal/BucketAdapter.js'
+import { ArchiveAdapter } from './crystal/ArchiveAdapter.js'
+import { GalleryAdapter } from './crystal/GalleryAdapter.js'
+import { ArweaveAdapter } from './crystal/ArweaveAdapter.js'
+import { ArweaveUploader, IrysTransport, type ArweaveCharger } from './crystal/ArweaveUploader.js'
+import { collectioArchiveSource } from './crystal/collectioArchiveSource.js'
 import { ModelPublishAdapter, huggingFaceRegistry, civitaiRegistry } from './crystal/ModelPublishAdapter.js'
 import { MintAdapter, MarketplaceAdapter } from './crystal/MintAdapter.js'
 import { HuggingFaceUploader, HfHttpTransport } from './crystal/HfUploader.js'
@@ -98,8 +121,22 @@ export interface Ring {
   actorum: Actorum
   modorum: Modorum
   signorum: Signorum
+  /** USD revenue book (ADR-0013) — the second ledger, distinct from `signorum` (credits). */
+  redituum: Redituum
+  /** Payee-payout book (ADR-0013 §4c) — money OUT, per-payee, gated at the $600 line. */
+  mercedum: Mercedum
+  /** Conditional-license revenue tripwire's persisted band (edge-triggered across restarts). */
+  tripwireBand: TripwireBandStore
   animae: AnimaStore
   personae: PersonaStore
+  /** Trusted-issuer registry (federated JWKS SSO) — see types/issuer.ts. */
+  issuers: IssuerStore
+  /** Agent-sidecar registry (ERC-8004 CAMEL agents) — see types/legatus.ts. */
+  legati: LegatusStore
+  /** x402 payment audit trail (replay-protected) — see types/x402.ts. */
+  x402Log: X402LogStore
+  /** Sponsorship pledges (the generalized faucet) — see types/sponsio.ts. */
+  sponsiones: SponsioStore
   vestigiorum: Vestigiorum
   modos: ModoStore
   mandatores: Mandatorum
@@ -146,7 +183,7 @@ export interface Ring {
    *  + Modo + budget tessera into one verb both adapters call. */
   conductor?: Conductor
   /** TEE pod provisioner — present when TEE_IMAGE_ID + RUNPOD_API_KEY are configured. */
-  teeProvisioner?: TeeProvisioner
+  teeProvisioner?: TeePodProvisioner
 }
 
 export interface ContainerConfig {
@@ -158,7 +195,7 @@ export interface ContainerConfig {
    * Compile a Modus + aditus into the RunPod job input payload.
    * Bridges to the Fractal Tool Compiler. Injected to avoid circular deps.
    */
-  compile: (modus: Modus, aditus: Record<string, unknown>, pinnedModels?: import('./types/actum.js').ModelRef[]) => Promise<{ hash: string; input: unknown }>
+  compile: (modus: Modus, aditus: Record<string, unknown>, pinnedModels?: import('./types/actum.js').ModelRef[], ownerKey?: string) => Promise<{ hash: string; input: unknown }>
   /**
    * RunPod SECURE pod client — provisions a GPU pod, runs the workflow via SSH,
    * and POSTs the result to webhookUrl. Absent: RunPod tools will throw at run().
@@ -232,16 +269,32 @@ export interface ContainerConfig {
   /** Install models live onto a just-leased studio pod (the InstallCoordinator seam) — handed to
    *  the `Conductor` so `conducere` installs the loadout after park. Wired to the same coordinator. */
   installLive?: (materia: Materia, intellaIds: string[]) => Promise<unknown>
+  /** BYO-secrets Phase C: mint the per-job pod credential (bound to `JOB_TOKEN_SECRET`) so a run's
+   *  pod can fetch gated private weights through our proxy. Absent → no token minted. */
+  mintJobToken?: (claims: { actumId: string; ownerKey: string; exp: number }) => string
   /** Collection name for acta — default 'acta' */
   actaCollection?: string
   /** Collection name for modi — default 'modi' */
   modiCollection?: string
   /** Collection name for signa — default 'signa' */
   signaCollection?: string
+  reditusCollection?: string
+  /** Collection name for the license-tripwire band state — default 'license_tripwire' */
+  tripwireBandCollection?: string
   /** Collection name for animae — default 'animae' */
   animaeCollection?: string
   /** Collection name for personae — default 'personae' */
   personaeCollection?: string
+  /** Collection name for the trusted-issuer registry — default 'trusted_issuers' */
+  issuersCollection?: string
+  /** Collection name for the agent-sidecar registry — default 'legati' */
+  legatiCollection?: string
+  /** Collection name for the x402 payment log — default 'x402_payment_log' */
+  x402LogCollection?: string
+  /** Collection name for the payee-payout book — default 'mercedes' */
+  mercesCollection?: string
+  /** Collection name for sponsorship pledges — default 'sponsiones' */
+  sponsionesCollection?: string
   /** Collection name for vestigia — default 'vestigia' */
   vestigiaCollection?: string
   /** Collection name for modos — default 'modos' */
@@ -254,6 +307,9 @@ export interface ContainerConfig {
   huggingFaceOrg?: string
   /** HF_TOKEN — present → the HF registry gets a real LFS uploader; absent → projection-only. */
   huggingFaceToken?: string
+  /** ARWEAVE_PRIVATE_KEY — funding wallet for the Irys bundler. Present → the `arweave`
+   *  graduation destination is registered (LIVE-UNVERIFIED); absent → not offered. */
+  arweavePrivateKey?: string
   /** Base URL the MarketplaceAdapter projects listing handles under (default 'https://noema.art/market'). */
   marketplaceBaseUrl?: string
   sodalitatesCollection?: string
@@ -315,18 +371,21 @@ export interface ContainerConfig {
    */
   embed?: (text: string) => Promise<number[]>
   embedImage?: (imageUrl: string) => Promise<number[]>
-  /** OpenAI-compatible client — absent: OpenAI tools will throw at reserve() */
-  openaiClient?: {
-    chat(params: unknown): Promise<{ content: string; usage?: { total_tokens?: number } }>
-    image(params: unknown): Promise<{ url: string }>
-  }
-  /** HuggingFace client — absent: HuggingFace tools will throw at reserve() */
-  huggingfaceClient?: {
-    predict(spaceUrl: string, params: Record<string, unknown>): Promise<Record<string, unknown>>
-  }
+  /**
+   * Hosted-API inference providers (OpenAI, OpenRouter, …). Each entry is a
+   * declarative descriptor + its resolved bearer key. One ApiCursor is
+   * registered per provider under `provider.id`. Absent providers → their tools
+   * throw at resolve(). Adding a provider is a descriptor + env key — no code.
+   */
+  apiProviders?: Array<{ provider: ApiProvider; apiKey: string }>
   /** TEE runner pod provisioner config — if present, POST /v1/sessions/tee boots real pods. */
   teeProvisioner?: TeeProvisionerConfig
+  /** Confidential-CVM backend (Azure NCC H100) — the hardware-sealed tier. Takes
+   *  precedence over teeProvisioner (docs/plans/2026-07-02-tee-hardware-path.md §3). */
+  confidentialPod?: ConfidentialPodClientConfig
 }
+
+const log = makeLogger('container')
 
 export function createContainer(mongo: MongoClient, config: ContainerConfig): Ring {
   const db = mongo.db(config.dbName)
@@ -345,11 +404,36 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const signaCol: Collection = db.collection(config.signaCollection ?? 'signa')
   const signorum = new MongoSignorum(signaCol)
 
+  // USD revenue book (ADR-0013) — the second ledger, distinct from signa (credits). Indexes
+  // (incl. the unique partial index on depositumId that guarantees idempotent deposit booking)
+  // are created centrally in ensureIndexes(). See src/types/reditus.ts.
+  const redituum = new MongoRedituum(db.collection(config.reditusCollection ?? 'reditus'))
+
+  // Payee-payout book (ADR-0013 §4c) — money OUT to a person (agent cut / royalty / referral),
+  // per-payee/per-year, gated at the $600 reporting line. Indexes in ensureIndexes().
+  const mercedum = new MongoMerces(db.collection(config.mercesCollection ?? 'mercedes'))
+
+  // Conditional-license revenue tripwire — the single-doc persisted band (ADR-0012/0013 §5). See
+  // src/crystal/licenseTripwire.ts; the evaluator/scheduler is wired in index.ts.
+  const tripwireBand = new MongoTripwireBandStore(db.collection(config.tripwireBandCollection ?? 'license_tripwire'))
+
   const animaeCol: Collection = db.collection(config.animaeCollection ?? 'animae')
   const animae = new MongoAnima(animaeCol)
 
   const personaeCol: Collection = db.collection(config.personaeCollection ?? 'personae')
   const personae = new MongoPersona(personaeCol)
+
+  // Trusted-issuer registry (collection matches the legacy JS `trusted_issuers`).
+  const issuers = new MongoIssuer(db.collection(config.issuersCollection ?? 'trusted_issuers'))
+
+  // Agent-sidecar registry (ERC-8004 CAMEL agents).
+  const legati = new MongoLegatus(db.collection(config.legatiCollection ?? 'legati'))
+
+  // x402 payment audit trail (replay-protected by a unique signatureHash index).
+  const x402Log = new MongoX402Log(db.collection(config.x402LogCollection ?? 'x402_payment_log'))
+
+  // Sponsorship pledges (the generalized faucet).
+  const sponsiones = new MongoSponsio(db.collection(config.sponsionesCollection ?? 'sponsiones'))
 
   const vestigiaCol: Collection = db.collection(config.vestigiaCollection ?? 'vestigia')
   const vestigiorum = new MongoVestigiorum(vestigiaCol, config.embed, config.embedImage)
@@ -423,6 +507,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
           return materiae.findWarm({ materiaId: modo.materiamId })
         },
         ...(config.admitWarm ? { admitWarm: config.admitWarm } : {}),
+        ...(config.mintJobToken ? { mintJobToken: config.mintJobToken } : {}),
         deployments,
         hospitia,
       },
@@ -450,14 +535,15 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     }
   }
 
-  if (config.openaiClient) {
-    const openaiCursor = new OpenAICursor(config.openaiClient as ConstructorParameters<typeof OpenAICursor>[0])
-    cursorum.register('openai', openaiCursor)
-  }
-
-  if (config.huggingfaceClient) {
-    const hfCursor = new HuggingFaceCursor(config.huggingfaceClient)
-    cursorum.register('huggingface', hfCursor)
+  // Hosted-API inference: ONE cursor class, one registration per provider
+  // descriptor. `ministerium: 'openai'` (ChatGPT/DALL·E/gpt-image-edit) and
+  // `ministerium: 'openrouter'` resolve here with no per-provider code.
+  for (const { provider, apiKey } of config.apiProviders ?? []) {
+    cursorum.register(provider.id, new ApiCursor(provider, {
+      apiKey,
+      http: httpApiTransport,
+      mediaFetcher: httpMediaFetcher,
+    }))
   }
 
   // Publication adapters (spec §5b): feed + model registries need nothing; the
@@ -480,6 +566,31 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     new MarketplaceAdapter({ base: config.marketplaceBaseUrl ?? 'https://noema.art/market' }),
   ]
 
+  // Shared piece-enumeration for the collection-export destinations (archive ZIP,
+  // gallery hosting, Arweave graduation) — closes over the stores, needs no R2.
+  const archiveSource = collectioArchiveSource({ collectiones, actorum })
+
+  // Arweave graduation (editio-hosting → permanence): push a collection's pieces to
+  // Arweave via the Irys bundler. Gated on a funding key (secret) — NOEMA-side, since
+  // NOESIS is static/secretless. LIVE-UNVERIFIED until a funded wallet is set up.
+  if (config.arweavePrivateKey) {
+    // PLACEHOLDER(publishing#6-arweave): metering is balance-check-only — it does NOT
+    // debit. Wire a real bytes→credits price/markup + signa settlement before funding.
+    const arweaveCharger: ArweaveCharger = {
+      async charge(by, bytes) {
+        const bal = await signorum.balance(by)
+        log.warn('arweave charge is a PLACEHOLDER — verifying balance, not debiting', { bytes, balance: bal.toString() })
+        if (bal <= 0n) throw new Error('insufficient credits for Arweave graduation')
+      },
+    }
+    const uploader = new ArweaveUploader({
+      transport: new IrysTransport({ privateKey: config.arweavePrivateKey }),
+      fetcher: httpMediaFetcher,
+      charger: arweaveCharger,
+    })
+    publicationAdapters.push(new ArweaveAdapter({ uploader, source: archiveSource }))
+  }
+
   // Host-side deterministic processing runtimes (spec §4a). They produce bytes
   // ON the host, so they need R2 to host the result — gate registration on it.
   if (config.runpodR2) {
@@ -496,6 +607,14 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     }))
     // Bucket custody (publishing #2): re-hosts an artifact's media to R2.
     publicationAdapters.push(new BucketAdapter({ fetcher: httpMediaFetcher, store: uploader }))
+    // Archive (editio-export): bundle a collection's approved pieces into a ZIP in
+    // OUR bucket — the sovereign-download destination. Private/custody-ours, so it
+    // never touches the moderation gate.
+    publicationAdapters.push(new ArchiveAdapter({ fetcher: httpMediaFetcher, store: uploader, source: archiveSource }))
+    // Gallery (editio-hosting): host a collection's approved pieces as PUBLIC ERC-721
+    // tokenURIs — the temporary bridge NOESIS (static/secretless) leans on. Public
+    // surface → the moderation gate applies (fail-closed until a CSAM scanner lands).
+    publicationAdapters.push(new GalleryAdapter({ fetcher: httpMediaFetcher, store: uploader, source: archiveSource }))
   }
 
   // Local ai-toolkit training (build #5) — only where a GPU + image + host-mounted DB exist.
@@ -584,7 +703,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const collectioCursor = new CollectioCursor(sharedDispatch, collectiones, actorum, { reviewEnabled: true })
 
   return {
-    actorum, modorum, signorum, animae, personae, vestigiorum, modos,
+    actorum, modorum, signorum, redituum, mercedum, tripwireBand, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,
     mandatores, corpora, collectiones, editiones, publicationAdapters, sodalitates, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
@@ -595,6 +714,8 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     collectioCursor,
     compositusCursor,
     ...(conductor ? { conductor } : {}),
-    ...(config.teeProvisioner ? { teeProvisioner: new TeeProvisioner(config.teeProvisioner) } : {}),
+    ...(config.confidentialPod
+      ? { teeProvisioner: new ConfidentialPodClient(config.confidentialPod) }
+      : config.teeProvisioner ? { teeProvisioner: new TeeProvisioner(config.teeProvisioner) } : {}),
   }
 }

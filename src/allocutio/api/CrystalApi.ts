@@ -22,14 +22,14 @@ import type { Modorum, Modus } from '../../types/modus.js'
 import type { Cursorum, ActumCompletor, Actorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
-import type { Consuetudinum } from '../../types/consuetudo.js'
+import type { Consuetudinum, Appearance, Generatio } from '../../types/consuetudo.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Fundamentorum } from '../../types/fundamentum.js'
 import type { Intelligens, IntelligentiumStore, IntelligensGenus, Intellarum, Intella } from '../../types/intelligendi.js'
 import type { HospitiumStore } from '../../types/hospitium.js'
 import type { MateriaStore } from '../../types/materia.js'
 import type { Conductor, StudioHandle, ConduceOpts } from '../../crystal/Conductor.js'
-import type { TeeProvisioner } from '../../crystal/TeeProvisioner.js'
+import type { TeePodProvisioner } from '../../crystal/TeePodProvisioner.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { Actum, ComputeStrategy, GpuClass, ModelRef } from '../../types/actum.js'
 import type { Inceptio } from '../../types/cursus.js'
@@ -43,7 +43,9 @@ import { describeFlow, type FlowDescription, type DescribableModus } from './adi
 import { Errors } from './errors.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { computeRecipient } from '../../arcanum/prover.js'
-import { impetusForPodMs } from '../../ledger/rates.js'
+import { impetusForPodMs, usdMicroToImpetus } from '../../ledger/rates.js'
+import { fundingBps, applyFundingBps, DEFAULT_FUNDING_BPS } from '../../ledger/depositFunding.js'
+import type { AssetPricer } from '../../crystal/AssetPricer.js'
 import type { Run, Collection, CollectionPiece, Team, Edition, FeedItem } from './types.js'
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
 import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
@@ -52,11 +54,32 @@ import type { AnimaStore, PublishingPrefs } from '../../types/anima.js'
 import type { PublicationAdapter } from '../../crystal/PublicationAdapter.js'
 import type { ModerationGate } from '../../crystal/ModerationGate.js'
 import { denyModerationGate } from '../../crystal/ModerationGate.js'
+import type { VerdictCache } from '../../crystal/VerdictCache.js'
+import { contentKey, toCachedVerdict, fromCachedVerdict } from '../../crystal/VerdictCache.js'
+import type { ScanFeeCharger } from '../../crystal/ScanFeeCharger.js'
+import type { CsamReviewReporter } from '../../crystal/CsamReviewReporter.js'
+import { allMediaUrls } from '../../crystal/BucketAdapter.js'
+import { makeLogger } from '../../lib/logger.js'
+import type { PromptGuard, PromptVerdict } from '../../crystal/PromptGuard.js'
+import { permissivePromptGuard } from '../../crystal/PromptGuard.js'
+import type { ModelImporter } from '../../crystal/ModelImporter.js'
+import { ModelImportError, SecretRequiredError } from '../../crystal/modelImportResolver.js'
+import type { SecretWriter, SecretPresence, SecretProvider } from '../../types/secretum.js'
+import { isSecretProvider, SECRET_PROVIDERS, DEFAULT_SECRET_IDLE_DAYS } from '../../types/secretum.js'
+import { ownerKeyOf } from '../../crystal/ownerKey.js'
+import { isCatalogEligible, classifyModelLicense, activeConditionalLicenses, bindingCapUsd, type CommercialVerdict } from '../../crystal/modelLicense.js'
+import { band, bindingCapMicroUsd, type ThresholdBand, type TripwireBandStore } from '../../crystal/licenseTripwire.js'
+import type { Redituum } from '../../types/reditus.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 import { provenanceHash } from '../../crystal/provenance.js'
 import { rarityReport, type RarityReport } from '../../crystal/rarityReport.js'
 
+const log = makeLogger('crystal-api')
 const PLATFORM_ANIMA_ID = process.env.PLATFORM_ANIMA_ID ?? 'platform'
+/** How long a provisioned TEE session may sit without /runner/ready before the
+ *  watchdog fails it and kills the pod. Covers the confidential-CVM multi-minute
+ *  boot and up to 3 RunPod WS-probe re-provision rounds (~5 min each). */
+const TEE_READY_WATCHDOG_MS = Number(process.env.TEE_READY_WATCHDOG_MS ?? 20 * 60_000)
 
 /** The ring slices CrystalApi composes. */
 export interface CrystalApiDeps {
@@ -103,13 +126,45 @@ export interface CrystalApiDeps {
   publicationAdapters?: PublicationAdapter[]
   /** Trust-boundary →public moderation gate (CSAM/NCMEC). Absent → permissive placeholder. */
   moderationGate?: ModerationGate
+  /** Content-addressed verdict cache (spec §7) — identical re-publishes reuse the gate
+   *  verdict (no re-scan, no re-charge). Absent → every public publish scans afresh. */
+  verdictCache?: VerdictCache
+  /** Per-scan fee charger (spec §7) — forwards the paid-classifier cost to the publisher
+   *  on a billable, non-cached scan. Absent → no fee (the config-knob default). */
+  scanFeeCharger?: ScanFeeCharger
+  /** Reviewer-confirmed-CSAM NCMEC report seam (spec §4) — filed by `confirmCsamAndReport`
+   *  when an admin affirmatively confirms a held item is CSAM. Absent → the confirm action
+   *  still rejects but logs LOUDLY that no report was filed (never a silent miss). */
+  csamReviewReporter?: CsamReviewReporter
+  /** Input-side CSAM prompt guard (generation boundary, fail-open). Absent → permissive. */
+  promptGuard?: PromptGuard
   /** Identity store — reads `Anima.publicatio` to default a publish from the caller's prefs. */
   animae?: AnimaStore
   /** Model (Intella) registry — resolves + owner-scopes an `Intella` publish and is the
    *  reconciler's write seam (`setAccess`) for §5d. Absent → model publishing unavailable. */
   intellarum?: Intellarum
-  /** RunPod pod provisioner for TEE private compute sessions. Absent → local dev (manual runner). */
-  teeProvisioner?: TeeProvisioner
+  /** Import-by-URL service (Civitai/HF/direct → private Intella). Absent → import unavailable. */
+  modelImporter?: ModelImporter
+  /** BYO-secret WRITE slice (`put`/`remove` only — NEVER `resolve`; ASYMMETRY contract in
+   *  types/secretum.ts). Backs `PUT/DELETE /v1/me/secrets/:provider`. Absent → secrets 501. */
+  secretWriter?: SecretWriter
+  /** BYO-secret presence (`has` only). Backs `getMe.secrets`. Absent → all 'absent'. */
+  secretPresence?: SecretPresence
+  /** Pod provisioner for TEE private compute sessions — RunPod (TeeProvisioner) or the
+   *  confidential-CVM backend (ConfidentialPodClient), picked in container.ts.
+   *  Absent → local dev (manual runner). */
+  teeProvisioner?: TeePodProvisioner
+  /** Per-asset USD FMV oracle — backs `depositQuote`. THE SAME instance the deposit webhook uses,
+   *  so a quote's `pointsQuoted` equals what the webhook credits. Absent → deposit quote 503. */
+  pricer?: AssetPricer
+  /** The CreditVault deposit address, echoed in the quote/config so the UI knows where to send. */
+  depositAddress?: string
+  /** USD revenue book — backs the admin `revenueReport` (the trailing-12mo rollup + license tripwire).
+   *  Absent → the report is unavailable. */
+  redituum?: Pick<Redituum, 'trailingUsdRevenue'>
+  /** The license-tripwire's persisted band — surfaced in `revenueReport` so the admin sees the
+   *  last edge-triggered band alongside the live figure. Absent → lastBand omitted. */
+  tripwireBand?: Pick<TripwireBandStore, 'last'>
 }
 
 /** Inputs to start a Collection (a Collectio): a base modus expanded over a Tractus[] grid. */
@@ -128,6 +183,12 @@ export interface CollectOpts {
   nomen?: string
   /** Opt-in DNA uniqueness — no two pieces share a trait combination (see Collectio.dna). */
   dna?: boolean
+  /** Hold every completed piece for review before it counts (see Collectio.reviewEnabled).
+   *  Omit → the platform default applies. */
+  reviewEnabled?: boolean
+  /** Create as a DRAFT — author tractus (garden/rules) without firing. The run is
+   *  started later by `fireCollection`. Omit/false → create + fire in one shot. */
+  draft?: boolean
   /**
    * Own this collection by a team (Sodalitas) instead of the individual caller.
    * The caller must be a member. Snapshots an equal-weight `owners` split from
@@ -153,6 +214,24 @@ export interface PublishOpts {
   teamId?: string
   /** Explicit rights split (animaId → weight, Σ≈1). Mutually exclusive with `teamId`. */
   owners?: Array<{ animaId: string; weight: number }>
+}
+
+/** Inputs to import a model by URL (Civitai/HF/direct → a private Intella). */
+export interface ImportModelOpts {
+  /** Civitai page/`?modelVersionId`, HuggingFace repo, or a direct `.safetensors`/`.ckpt` URL. */
+  url: string
+  /** genus for a direct-file URL where the origin can't be scraped to infer it. Default 'lora'. */
+  genus?: 'lora' | 'model'
+}
+
+/** Admin inputs to clear/backfill a model's license (going-public review). */
+export interface SetModelLicenseOpts {
+  /** Explicit license id to record (e.g. 'apache-2.0', 'stability-community'). */
+  license?: string
+  /** Explicit commercial-catalog verdict — the operator's clearance decision. */
+  commercialUse?: CommercialVerdict
+  /** Re-derive license + verdict from the model's recorded base string (bulk-fix legacy). */
+  reclassify?: boolean
 }
 
 /** Where to send a run: an explicit modusId OR a canon verb to resolve. */
@@ -188,6 +267,40 @@ export interface FlowSummary {
   steps?: number
 }
 
+/** Port keys a flow may use for its negative prompt (first present one is filled). */
+const NEGATIVE_PORT_KEYS = ['negative_prompt', 'negativePrompt', 'negative']
+
+/**
+ * Layer the owner's account-level defaults under the cast-time aditus:
+ * cast-time input > affines (per-modus) > generatio (cross-cutting) > modus defaults.
+ * Only DECLARED ports (`modus.aditus`) are filled — a stale default never injects an
+ * unknown input. `style` augments (prepends to) the final prompt rather than overriding it.
+ */
+export function applyAccountDefaults(
+  ports: Record<string, unknown>,
+  aditus: Record<string, unknown>,
+  affines: Record<string, unknown> | undefined,
+  generatio: Generatio | undefined,
+): Record<string, unknown> {
+  const account: Record<string, unknown> = {}
+  // generatio (lowest account tier): fill a negative-prompt port if the flow has one.
+  if (generatio?.negativePrompt) {
+    const key = NEGATIVE_PORT_KEYS.find((k) => k in ports)
+    if (key) account[key] = generatio.negativePrompt
+  }
+  // affines override generatio within the account tier — declared ports only.
+  if (affines) {
+    for (const [k, v] of Object.entries(affines)) if (k in ports) account[k] = v
+  }
+  // Cast-time input wins over every account default.
+  const out = { ...account, ...aditus }
+  // Default style prepends to the resolved prompt (augments, does not override).
+  if (generatio?.style && typeof out.prompt === 'string' && out.prompt.length > 0) {
+    out.prompt = `${generatio.style}, ${out.prompt}`
+  }
+  return out
+}
+
 export class CrystalApi {
   constructor(private readonly deps: CrystalApiDeps) {}
 
@@ -214,10 +327,37 @@ export class CrystalApi {
     }
     if (!modusId) throw Errors.notFoundFlow(target.verb ?? '?')
 
+    // Account-level defaults (Consuetudinum), applied UNDER the cast-time aditus:
+    //   cast-time input > affines (per-modus) > generatio (cross-cutting) > modus defaults.
+    // Only DECLARED ports are filled, so a stale default can never inject an unknown input.
+    let effectiveAditus = aditus
+    if (consuetudinum) {
+      const [affines, generatio] = await Promise.all([
+        consuetudinum.resolveAffines(auctor, modusId),
+        consuetudinum.resolveGeneratio(auctor),
+      ])
+      if (affines || generatio) {
+        const ports = (await modorum.find(modusId))?.aditus ?? {}
+        effectiveAditus = applyAccountDefaults(ports, aditus, affines, generatio)
+      }
+    }
+
+    // Input CSAM guard — refuse a prompt that solicits CSAM before we spend anything.
+    // Runs on the EFFECTIVE aditus (post account-defaults, incl. affixes) so an injected
+    // default can't smuggle content past it. FAIL-OPEN: a guard implementation error must
+    // not break generation (the publish-time ModerationGate is the fail-closed backstop),
+    // so only an explicit `ok:false` refuses; a throw inside the guard is swallowed.
+    let promptVerdict: PromptVerdict = { ok: true }
+    try {
+      promptVerdict = await this._promptGuard().check(effectiveAditus)
+    } catch { /* fail-open: guard error → allow */ }
+    if (!promptVerdict.ok) throw Errors.contentRefused(promptVerdict.reason)
+
     // Admission spend cap — refuse before dispatch if the upper-bound estimate exceeds
-    // maxImpetus. (Mid-run enforcement — the watchdog — is a Phase-4b follow-up.)
+    // maxImpetus. Estimate the EFFECTIVE aditus (post account-defaults) — the same inputs
+    // that will run — so an affine bumping a cost driver (steps/count/resolution) is capped.
     if (opts.maxImpetus !== undefined) {
-      const est = await this._estimate(modusId, aditus)
+      const est = await this._estimate(modusId, effectiveAditus)
       if (est > BigInt(opts.maxImpetus)) {
         throw Errors.capTooLow({ estimated: est.toString(), maxImpetus: String(opts.maxImpetus) })
       }
@@ -225,7 +365,7 @@ export class CrystalApi {
 
     const inceptio: Inceptio = {
       modusId,
-      aditus,
+      aditus: effectiveAditus,
       by: opts.by ?? auctor,
       ...(opts.studioId ? { modoId: opts.studioId } : {}),
       ...(opts.pinnedModels?.length ? { pinnedModels: opts.pinnedModels } : {}),
@@ -328,10 +468,60 @@ export class CrystalApi {
       ...(owners !== undefined ? { owners } : {}),
       concurrentia: opts.concurrentia ?? 3,
       ...(opts.dna !== undefined ? { dna: opts.dna } : {}),
-      status: 'nascens',
+      ...(opts.reviewEnabled !== undefined ? { reviewEnabled: opts.reviewEnabled } : {}),
+      // Draft = authored but not fired; tractus stays editable until fireCollection.
+      status: opts.draft ? 'draft' : 'nascens',
     })
-    await collectioCursor.start(collectio)
+    // A draft is NOT dispatched — the caller authors tractus, then fires it.
+    if (!opts.draft) await collectioCursor.start(collectio)
     return toCollection((await collectiones.find(collectio.id)) ?? collectio)
+  }
+
+  /**
+   * Fire a DRAFT collection — freeze its tractus and start the run. Re-derives the
+   * provenance hash from the current tractus + the flow's live version (pinning
+   * exactly what executes), then dispatches. Owner-scoped + funder-only (it spends).
+   * Idempotent-guarded: only a `draft` may be fired.
+   */
+  async fireCollection(auctor: AuctorKey, id: string): Promise<Collection> {
+    const { collectiones, collectioCursor } = this.deps
+    if (!collectiones || !collectioCursor) throw Errors.notFoundCollection('collections')
+    const c = await this._ownedCollection(auctor, id)
+    if (!this._isFunder(auctor, c)) {
+      throw Errors.authForbidden('only the collection funder can fire it')
+    }
+    if (c.status !== 'draft') throw Errors.inputMalformed('only a draft collection can be fired')
+    // Re-pin provenance to the flow version at fire time (the config that actually runs).
+    const modus = await this.deps.modorum.find(c.modusId)
+    const provenance = provenanceHash({
+      modusId: c.modusId,
+      modusVersio: modus?.versio,
+      tractus: c.tractus,
+      aditusBase: c.aditusBase,
+    })
+    const fired = await collectiones.update(id, { provenanceHash: provenance, status: 'nascens' })
+    await collectioCursor.start(fired)
+    return toCollection((await collectiones.find(id)) ?? fired)
+  }
+
+  /**
+   * Replace a DRAFT collection's tractus (the garden/rules authoring write) and
+   * re-derive its provenance hash — the content-address MUST change when the grid,
+   * a weight, an exclude, or a tag changes. Frozen once fired. Owner-scoped.
+   */
+  async patchCollectionTractus(auctor: AuctorKey, id: string, tractus: Tractus[]): Promise<Collection> {
+    const { collectiones } = this.deps
+    if (!collectiones) throw Errors.notFoundCollection('collections')
+    const c = await this._ownedCollection(auctor, id)
+    if (c.status !== 'draft') throw Errors.inputMalformed('a collection’s tractus is frozen once it is fired')
+    const modus = await this.deps.modorum.find(c.modusId)
+    const provenance = provenanceHash({
+      modusId: c.modusId,
+      modusVersio: modus?.versio,
+      tractus,
+      aditusBase: c.aditusBase,
+    })
+    return toCollection(await collectiones.update(id, { tractus, provenanceHash: provenance }))
   }
 
   /** Fetch a Collection, owner-scoped. */
@@ -490,7 +680,10 @@ export class CrystalApi {
     // everything else is private. Explicit opts/prefs still win.
     const visibility = opts.visibility ?? prefs?.defaultVisibility ??
       (destination === 'feed' ? 'feed'
-        : destination === 'mint' || destination === 'marketplace' ? 'marketplace'
+        // mint/marketplace list on-chain/at a venue; `gallery` hosts publicly-readable
+        // tokenURIs; `arweave` graduates them to permanent public storage — all PUBLIC
+        // surfaces, so they run the moderation gate.
+        : destination === 'mint' || destination === 'marketplace' || destination === 'gallery' || destination === 'arweave' ? 'marketplace'
         : 'private')
     const custody = opts.custody ?? prefs?.defaultCustody ?? 'ours'
 
@@ -505,6 +698,20 @@ export class CrystalApi {
     // (model / collection) so the freeze + license below reuse it — one read, not two.
     const ref: ArtifactRef = { kind: opts.artifact.kind, id: opts.artifact.id }
     const owned = await this._assertOwnsArtifact(auctor, ref)
+
+    // License gate (compliance): the public catalog is a COMMERCIAL surface, so a model may only be
+    // PROMOTED there (visibility !== 'private') if its license clears commercial use. `familia` can't
+    // carry this — FLUX schnell (Apache ✅) and dev (Non-Commercial ❌) are both 'flux' — so it keys
+    // on the model's recorded `commercialUse` verdict (set at import/training via modelLicense.ts).
+    // `isCatalogEligible` is the policy: 'yes' + 'conditional' pass (we track revenue against the
+    // conditional caps); 'no'/'unknown' are refused pending an ADMIN license clearance (setModelLicense
+    // backfill). A model with NO recorded verdict (undefined) is not gated here (legacy). Private/
+    // personal use is never blocked — this is listing, not use (spec/model-import.md).
+    if (ref.kind === 'intella' && visibility !== 'private' && owned.intella?.commercialUse && !isCatalogEligible(owned.intella.commercialUse)) {
+      throw Errors.licenseRestricted(
+        `this model cannot be promoted to the public catalog under its license (${owned.intella.license ?? 'unknown'}, commercial use: ${owned.intella.commercialUse}). It remains usable privately; an admin can clear it after license review.`,
+      )
+    }
 
     // Freeze boundary (#5, spec §4e): a Collectio put on-chain or to a marketplace
     // must be COMPLETE — you cannot freeze the canon of a drop that is still minting
@@ -605,6 +812,17 @@ export class CrystalApi {
     return out
   }
 
+  /** Fetch one publication. Author-scoped: only the publishing identity may read it
+   *  (an archive's `externalRef` is a private download url). Polled to watch a pending
+   *  settle land — an async archive ZIP build finishing, a public surface being gated. */
+  async getEdition(auctor: AuctorKey, id: string): Promise<Edition> {
+    const editiones = this.deps.editiones
+    if (!editiones) throw Errors.notFoundEdition(id)
+    const e = await editiones.find(id)
+    if (!e || !this._isEditionAuthor(auctor, e)) throw Errors.notFoundEdition(id)
+    return toEdition(e)
+  }
+
   /** Retract a publication where the destination allows it (feed/bucket = revocable;
    *  mint = permanent → 403). Author-scoped: only the publishing identity may retract. */
   async retractEdition(auctor: AuctorKey, id: string): Promise<Edition> {
@@ -620,6 +838,101 @@ export class CrystalApi {
     return toEdition(updated)
   }
 
+  /**
+   * The review queue (spec §4): publications the moderation gate HELD
+   * (`reviewOutcome:'pending'`) for a human to adjudicate. An author sees their OWN
+   * held items (transparency: "your publish is under review"); the platform admin sees
+   * ALL of them (the reviewer's queue). Adjudication itself is admin-only (below).
+   */
+  async listHeldEditions(auctor: AuctorKey): Promise<Edition[]> {
+    const editiones = this.deps.editiones
+    if (!editiones) return []
+    const isAdmin = 'animaId' in auctor && auctor.animaId === PLATFORM_ANIMA_ID
+    const held = await editiones.listHeld(isAdmin ? undefined : this._editionBy(auctor))
+    return held.map(toEdition)
+  }
+
+  /**
+   * APPROVE a held publication (spec §4) → clears the hold (`reviewOutcome:'approved'`);
+   * the worker re-settles it with the gate BYPASSED, so it publishes. PLATFORM-ADMIN
+   * ONLY — an author must never clear their own possibly-CSAM hold (that would defeat
+   * the review). Only a `reviewOutcome:'pending'` Editio can be approved.
+   */
+  async approveHeldEdition(auctor: AuctorKey, id: string): Promise<Edition> {
+    this._assertPlatformAdmin(auctor)
+    const editiones = this.deps.editiones
+    if (!editiones) throw Errors.notFoundEdition(id)
+    const e = await editiones.find(id)
+    if (!e || e.reviewOutcome !== 'pending') throw Errors.notFoundEdition(id)
+    // Clear the settle lease the worker stamped on the scan that held it, so the worker
+    // reclaims it on the next pass immediately (not after the ~5-min lease lapses) and
+    // re-settles with the gate bypassed → publishes.
+    const updated = await editiones.update(id, { reviewOutcome: 'approved', leasedUntil: new Date(0) })
+    return toEdition(updated)
+  }
+
+  /**
+   * REJECT a held publication (spec §4) → terminal `status:'rejected'`. PLATFORM-ADMIN
+   * ONLY. Rejection itself files NO NCMEC report — a confirmed-CSAM report is a separate,
+   * explicit human action through the private deferred reporter, NEVER automatic (§0-A).
+   */
+  async rejectHeldEdition(auctor: AuctorKey, id: string): Promise<Edition> {
+    this._assertPlatformAdmin(auctor)
+    const editiones = this.deps.editiones
+    if (!editiones) throw Errors.notFoundEdition(id)
+    const e = await editiones.find(id)
+    if (!e || e.reviewOutcome !== 'pending') throw Errors.notFoundEdition(id)
+    const updated = await editiones.update(id, { status: 'rejected', reviewOutcome: 'rejected' })
+    return toEdition(updated)
+  }
+
+  /**
+   * CONFIRM a held publication as CSAM (spec §4) — the human-review path's terminal
+   * action, and the thing that makes review a Thorn-INDEPENDENT adjudicator. PLATFORM-
+   * ADMIN ONLY. It (1) REJECTS the content (never goes live) and (2) files a NCMEC
+   * CyberTipline report via the injected `csamReviewReporter` — an EXPLICIT human
+   * confirmation is "actual knowledge" (18 U.S.C. §2258A), so the report is a duty, not
+   * an option. This is the ONLY path that reports from review; a plain `reject` never
+   * reports (§0-A). A report failure does NOT un-reject — the content stays rejected and
+   * the failure is logged LOUDLY (a lost report is investigable; live unsafe content is not).
+   *
+   * NOTE: with the deferred reporter, the report is ASSEMBLED + PRESERVED but not
+   * LIVE-submitted to NCMEC until an ESP account exists (Track B2/C4). `submitted` in the
+   * result reflects that.
+   */
+  async confirmCsamAndReport(auctor: AuctorKey, id: string): Promise<Edition> {
+    this._assertPlatformAdmin(auctor)
+    const editiones = this.deps.editiones
+    if (!editiones) throw Errors.notFoundEdition(id)
+    const e = await editiones.find(id)
+    if (!e || e.reviewOutcome !== 'pending') throw Errors.notFoundEdition(id)
+
+    // Reject FIRST — the content must not go live regardless of the report outcome.
+    const updated = await editiones.update(id, { status: 'rejected', reviewOutcome: 'rejected' })
+
+    const reporter = this.deps.csamReviewReporter
+    if (!reporter) {
+      log.error('confirmCsamAndReport: content REJECTED but NO CsamReviewReporter configured — the mandated NCMEC report was NOT filed. Configure the compliance module + ESP.', { editioId: e.id })
+      return toEdition(updated)
+    }
+    try {
+      const urls = allMediaUrls(await this._artifactOutput(e.artifactRef))
+      const out = await reporter.reportConfirmed({
+        editioId: e.id,
+        artifact: { kind: e.artifactRef.kind, id: e.artifactRef.id },
+        uploader: e.by,
+        urls,
+        reviewedBy: 'animaId' in auctor ? auctor.animaId : PLATFORM_ANIMA_ID,
+        confirmedAt: new Date().toISOString(),
+      })
+      log.warn('CSAM confirmed by reviewer — CyberTipline report assembled', { editioId: e.id, reportIds: out.reportIds, submitted: out.submitted })
+    } catch (err) {
+      // Content stays rejected; a report loss is a loud, investigable event.
+      log.error('confirmCsamAndReport: report FAILED — content still rejected, report may be lost — investigate immediately', { editioId: e.id, error: err instanceof Error ? err.message : String(err) })
+    }
+    return toEdition(updated)
+  }
+
   /** Run the moderation gate (public surfaces only) then the adapter publish,
    *  recording the outcome on the Editio. Pending → published | rejected | failed. */
   private async _settlePublication(editioId: string): Promise<void> {
@@ -628,10 +941,48 @@ export class CrystalApi {
     const e = await editiones.find(editioId)
     if (!e || e.status !== 'pending') return
 
-    const artifact = { ref: e.artifactRef, output: await this._artifactOutput(e.artifactRef), editioId: e.id }
-    if (e.visibility === 'feed' || e.visibility === 'marketplace') {
-      const verdict = await this._moderationGate().scan(artifact)
+    const artifact = { ref: e.artifactRef, output: await this._artifactOutput(e.artifactRef), editioId: e.id, by: e.by }
+    // The curation/CSAM gate runs before anything goes live for (a) a public media surface
+    // (feed/marketplace) and (b) a PUBLIC MODEL PROMOTION — an intella becoming resolvable on
+    // the shared catalogue (visibility !== 'private'). A model has no media surface, so its
+    // "public" is catalogue resolvability; listing it publicly passes the same ModerationGate
+    // over its preview samples (spec/model-import.md §"Curation review"). Private model
+    // publishing (a private R2 mirror, visibility 'private') is unaffected — personal use is
+    // never gated here (its import-time CSAM scan already ran).
+    const isPublicSurface = e.visibility === 'feed' || e.visibility === 'marketplace'
+    const isModelPromotion = e.artifactRef.kind === 'intella' && e.visibility !== 'private'
+    // A prior human APPROVAL bypasses the gate — a reviewer already adjudicated this
+    // exact publication (spec §4); re-scanning would just HOLD it again in a loop.
+    if ((isPublicSurface || isModelPromotion) && e.reviewOutcome !== 'approved') {
+      // Content-addressed verdict cache (spec §7): an identical re-publish REUSES the
+      // prior verdict — no re-scan, and (below) no re-charge. Keyed on the artifact's
+      // media urls, computed without re-fetching bytes.
+      const key = this.deps.verdictCache ? contentKey(artifact.output) : null
+      const cached = key && this.deps.verdictCache ? await this.deps.verdictCache.get(key) : null
+      let verdict: import('../../crystal/ModerationGate.js').ModerationVerdict | null = cached ? fromCachedVerdict(cached) : null
+
+      if (!verdict) {
+        // Cache miss (or no cache): run the gate, cache the verdict, and forward the
+        // per-scan fee ONLY when the paid classifier actually ran (billable, spec §7).
+        verdict = await this._moderationGate().scan(artifact)
+        if (key && this.deps.verdictCache) {
+          await this.deps.verdictCache.put(toCachedVerdict(key, verdict, new Date().toISOString()))
+        }
+        if (verdict.billable && this.deps.scanFeeCharger) {
+          // Best-effort: a fee failure must NOT block or alter the publish decision.
+          try { await this.deps.scanFeeCharger.charge(e.by, e.id) }
+          catch { /* logged inside the charger; the safe publish outcome stands */ }
+        }
+      }
+
       if (!verdict.ok) {
+        if (verdict.hold) {
+          // HOLD for human review: NOT a reject, NOT a report. Stays `pending`, but the
+          // worker's claim skips reviewOutcome:'pending' so it won't re-scan — it waits
+          // for an admin to approve (→ re-settle, gate bypassed) or reject.
+          await editiones.update(editioId, { reviewOutcome: 'pending' })
+          return
+        }
         await editiones.update(editioId, { status: 'rejected' })
         return
       }
@@ -716,6 +1067,12 @@ export class CrystalApi {
    *  the permissive gate only under an explicit MODERATION_ALLOW_UNSCANNED opt-in. */
   private _moderationGate(): ModerationGate {
     return this.deps.moderationGate ?? denyModerationGate
+  }
+
+  /** Input CSAM prompt guard. Defaults PERMISSIVE (fail-open) — the fail-closed line is
+   *  the publish-time ModerationGate; an unconfigured guard must not block generation. */
+  private _promptGuard(): PromptGuard {
+    return this.deps.promptGuard ?? permissivePromptGuard
   }
 
   /** An Editio owns by `{animaId}|{commitment}` only — bursaToken has no persistent owner. */
@@ -946,6 +1303,53 @@ export class CrystalApi {
   }
 
   /**
+   * Static config for the buy-points/deposit UI: where to send, the canonical points/USD rate,
+   * the default funding rate, and the supported chains. No auth, no oracle call.
+   */
+  depositConfig(): DepositConfig {
+    return {
+      depositAddress: this.deps.depositAddress ?? '',
+      pointsPerUsd: Number(usdMicroToImpetus(1_000_000n)),        // 1 USD (1e6 µUSD) → impetus ≈ 2967
+      defaultFundingRatePct: Number(DEFAULT_FUNDING_BPS) / 100,   // 70
+      chains: [{ chainId: 1, name: 'ethereum' }, { chainId: 8453, name: 'base' }],
+    }
+  }
+
+  /**
+   * Quote a deposit: how many impetus points `amount` base units of `token` would buy, right now.
+   * INFORMATIONAL — the webhook re-prices and credits authoritatively at deposit time. It reuses the
+   * exact same pricer + funding + rate as `alchemyWebhook.creditImpetus`, so `pointsQuoted` equals
+   * what the webhook credits for the same input (asserted in tests). Gas is NOT deducted (the webhook
+   * doesn't either — see creditImpetus doc); a UI may show network fee as a separate informational line.
+   */
+  async depositQuote(input: { chainId: number | string; token: string; amount: string }): Promise<DepositQuote> {
+    const pricer = this.deps.pricer
+    if (!pricer) throw Errors.depositUnavailable()
+
+    const token = String(input.token ?? '')
+    if (!/^0x[0-9a-fA-F]{40}$/.test(token)) throw Errors.inputMalformed('token must be a 20-byte hex address (0x000…000 for native ETH)')
+    let amountRaw: bigint
+    try { amountRaw = BigInt(input.amount) } catch { throw Errors.inputMalformed('amount must be an integer string of base units (wei for ETH, token-decimals for ERC-20)') }
+    if (amountRaw <= 0n) throw Errors.inputMalformed('amount must be a positive integer of base units')
+
+    const grossMicroUsd = await pricer.usdFmv(input.chainId, token, amountRaw)
+    if (grossMicroUsd === null || grossMicroUsd <= 0n) throw Errors.priceUnavailable()
+
+    const bps = fundingBps(token)
+    const points = usdMicroToImpetus(applyFundingBps(grossMicroUsd, bps))
+    return {
+      chainId: input.chainId,
+      token,
+      amountRaw: amountRaw.toString(),
+      grossUsd: microUsdToStr(grossMicroUsd),
+      grossUsdMicro: grossMicroUsd.toString(),
+      fundingRatePct: Number(bps) / 100,
+      pointsQuoted: points.toString(),
+      depositAddress: this.deps.depositAddress ?? '',
+    }
+  }
+
+  /**
    * The cursor's read-only upper-bound reservation for a modus + aditus.
    *
    * A compositus (spell) has no cursor of its own — its estimate is the SUM of its
@@ -1023,6 +1427,133 @@ export class CrystalApi {
   }
 
   /**
+   * Import a model/LoRA by URL (Civitai page/`?modelVersionId`, HuggingFace repo, or a
+   * direct `.safetensors`/`.ckpt` link) as a PRIVATE, owner-scoped Intella — usable in
+   * the importer's flows at once (spec/model-import.md Tier 1). The importer scrapes the
+   * origin metadata, CSAM-scans any preview media (fail-closed), mirrors the weights into
+   * OUR R2 bucket (auth-free `sources[0]`), and registers `access:'private'`,
+   * `canonica:false`, `ownerAnimaId` — so `buildAccessOrClauses` resolves it ONLY for the
+   * owner and it never appears on the public catalogue. Appearing publicly is a separate,
+   * user-invoked `publish` (an `intella`-kind Editio through `ModerationGate`).
+   *
+   * Identified callers only — a private model needs a durable owner (`animaId`).
+   */
+  async importModel(auctor: AuctorKey, opts: ImportModelOpts): Promise<ModelCard> {
+    const importer = this.deps.modelImporter
+    if (!importer) throw Errors.notFoundModel('import')
+    if (typeof opts.url !== 'string' || !opts.url.trim()) throw Errors.inputMalformed('a model URL is required')
+    // Anon-capable: a Bursa purse is a valid owner (imports must be Bursa-possible). The generic
+    // ownerKey scopes ownership; ownerAnimaId is populated only when the caller is an anima.
+    try {
+      const intella = await importer.import({
+        url: opts.url.trim(),
+        ownerKey: ownerKeyOf(auctor),
+        ...('animaId' in auctor ? { ownerAnimaId: auctor.animaId } : {}),
+        ...(opts.genus ? { genus: opts.genus } : {}),
+      })
+      return {
+        intellaId: intella.id,
+        nomen: intella.nomen,
+        genus: intella.genus,
+        ...(intella.familia ? { basis: intella.familia } : {}),
+        ...(intella.trigger ? { trigger: intella.trigger } : {}),
+        ...(intella.description ? { description: intella.description } : {}),
+      }
+    } catch (err) {
+      // A gated origin with no connected secret → typed `secret.required` (frontend deep-links to
+      // connect it). Checked before the generic branch — SecretRequiredError extends ModelImportError.
+      if (err instanceof SecretRequiredError) throw Errors.secretRequired(err.provider, err.message)
+      if (err instanceof ModelImportError) throw Errors.inputMalformed(err.message)
+      throw err
+    }
+  }
+
+  /**
+   * List the caller's OWN privately-held models — imports + trained LoRAs — newest first. The
+   * public `listModels` catalog is `canonica:true` only, so a private import (owner-scoped in the
+   * `Intellarum` registry) is otherwise invisible; this is where an importer sees + manages what
+   * they brought in. Anon-capable: a Bursa purse owns its imports (keyed by ownerKey).
+   */
+  async listMyModels(auctor: AuctorKey): Promise<ModelCard[]> {
+    if (!this.deps.intellarum) return []
+    const registry = this.deps.intellarum
+    const ownerKey = ownerKeyOf(auctor)
+    const models = registry.listByOwner
+      ? await registry.listByOwner(ownerKey)
+      : (await registry.list()).filter((i) => i.ownerKey === ownerKey || `anima:${i.ownerAnimaId}` === ownerKey)
+    return models.map(toModelCardFromIntella)
+  }
+
+  /**
+   * ADMIN license backfill/clearance (going-public review). Sets a model's `license` +
+   * `commercialUse` so the public-catalog gate treats it correctly — for a legacy/unclassified
+   * import, a misclassification, or a model we've cleared by taking out a commercial license.
+   * Two modes: an explicit clearance ({ license, commercialUse }) — the operator's decision, e.g.
+   * marking an SD3 model `'yes'` once we hold the Stability license — or `reclassify:true`, which
+   * re-derives the verdict from the model's recorded base string (`provenance.base`) via the same
+   * classifier (bulk-fix models imported before license classification existed). Platform-admin only.
+   */
+  async setModelLicense(auctor: AuctorKey, id: string, opts: SetModelLicenseOpts): Promise<ModelCard> {
+    this._assertPlatformAdmin(auctor)
+    const registry = this.deps.intellarum
+    if (!registry?.setLicense) throw Errors.notFoundModel(id)
+    let { license, commercialUse } = opts
+    if (opts.reclassify) {
+      const m = await registry.find(id)
+      if (!m) throw Errors.notFoundModel(id)
+      // Re-derive from the model's recorded base via the shared classifier (provenance.base > nomen
+      // > familia) — the SAME path the backfill sweep runs, so admin + sweep never disagree.
+      ;({ license, commercialUse } = classifyModelLicense(m))
+    }
+    if (license === undefined && commercialUse === undefined) {
+      throw Errors.inputMalformed('provide license and/or commercialUse, or reclassify:true')
+    }
+    const updated = await registry.setLicense(id, {
+      ...(license !== undefined ? { license } : {}),
+      ...(commercialUse !== undefined ? { commercialUse } : {}),
+    })
+    if (!updated) throw Errors.notFoundModel(id)
+    return toModelCardFromIntella(updated)
+  }
+
+  /**
+   * ADMIN revenue report (platform-admin only) — the conditional-license tripwire, surfaced for the
+   * accounting view (ADR-0013 §5, spec step 3). Reads the company-wide trailing-12-month USD revenue
+   * rollup `R`, finds the conditional licenses currently reachable in the public catalog + their
+   * tightest binding cap (ADR-0012), classifies the LIVE band, and echoes the last edge-triggered
+   * band the scheduled evaluator persisted. READ-ONLY: it neither persists a new band nor fires the
+   * alert seam — that is `evaluateTripwire`'s job on its cadence. This is the "what's our number"
+   * report a human reads, not the safety valve.
+   */
+  async revenueReport(auctor: AuctorKey, now: Date = new Date()): Promise<RevenueReport> {
+    this._assertPlatformAdmin(auctor)
+    const redituum = this.deps.redituum
+    if (!redituum) throw Errors.reportUnavailable()
+    const R = await redituum.trailingUsdRevenue(now)
+    const models = this.deps.intellarum ? await this.deps.intellarum.list() : []
+    const licenses = activeConditionalLicenses(models)
+    const capUsd = bindingCapUsd(licenses)
+    const liveBand = band(R, bindingCapMicroUsd(licenses))
+    const last = await this.deps.tripwireBand?.last()
+    return {
+      asOf: now.toISOString(),
+      trailingUsdRevenueMicro: R.toString(),
+      trailingUsdRevenue: microUsdToStr(R),
+      band: liveBand,
+      bindingCapUsd: capUsd,
+      activeConditionalLicenses: licenses,
+      lastAlertedBand: last?.band ?? null,
+    }
+  }
+
+  /** Platform-admin gate: only the platform identity (PLATFORM_ANIMA_ID) may perform the op. */
+  private _assertPlatformAdmin(auctor: AuctorKey): void {
+    if (!('animaId' in auctor) || auctor.animaId !== PLATFORM_ANIMA_ID) {
+      throw Errors.authForbidden('this operation is restricted to the platform administrator')
+    }
+  }
+
+  /**
    * Save a reusable, owner-keyed flow — the agent twin of the bot's Save-as. Derive a
    * new Modus from a base (an owned run via `fromRun`, or an explicit `modusId`), baking
    * the captured `aditus` as input defaults + folding pinned LoRAs + prompt affixes. The
@@ -1067,6 +1598,113 @@ export class CrystalApi {
     if (!(await this.deps.modorum.find(modusId))) throw Errors.notFoundFlow(modusId)
     await this.deps.consuetudinum.bind(auctor, verb, modusId)
     return { verb, modusId }
+  }
+
+  // ── Account settings (Consuetudinum, owner-keyed / anon-capable) ─────────────
+
+  /** The caller's owner-keyed account settings — appearance (Profile) + generation
+   *  defaults (Preferences) + verb→flow bindings. All optional (unset → undefined). */
+  async getMe(auctor: AuctorKey): Promise<MeView> {
+    const c = this.deps.consuetudinum
+    const secrets = await this.secretPresenceView(auctor)
+    // Availability tracks the WRITE seam, not presence — an unconfigured store 500s on connect, so the
+    // panel can hide/disable proactively instead of waiting for the first failed PUT (F3).
+    const secretsAvailable = !!this.deps.secretWriter
+    // Platform-admin flag — the SAME identity check that gates the moderation review actions
+    // (`_assertPlatformAdmin`). Surfaced so the web app can reveal the feed-review surface + its
+    // approve/reject controls only to the reviewer; it is `true` only on the platform's own session.
+    const admin = 'animaId' in auctor && auctor.animaId === PLATFORM_ANIMA_ID
+    if (!c) return { bindings: [], secrets, secretsAvailable, admin }
+    const [appearance, generatio, bindings] = await Promise.all([
+      c.resolveAppearance(auctor), c.resolveGeneratio(auctor), c.listBindings(auctor),
+    ])
+    return {
+      ...(appearance !== undefined ? { appearance } : {}),
+      ...(generatio !== undefined ? { generatio } : {}),
+      bindings,
+      secrets,
+      secretsAvailable,
+      admin,
+    }
+  }
+
+  /** Public appearance-by-owner projection — the visual branding (avatar/banner/accent/
+   *  look) any embedder may read to theme a widget. Unlike `getMe` this is NOT self-
+   *  scoped: it exposes ONLY the `Appearance` (all visual, no secrets/prefs/bindings),
+   *  keyed by any owner. Backs the per-agent widget skin (an agent's own `{animaId}`). */
+  async publicAppearance(owner: AuctorKey): Promise<Appearance | undefined> {
+    return this.deps.consuetudinum?.resolveAppearance(owner)
+  }
+
+  /** Per-provider connect state for `getMe`. Uses the `has`-only presence view (no plaintext).
+   *  Absent store → every provider 'absent'. */
+  private async secretPresenceView(auctor: AuctorKey): Promise<Record<SecretProvider, 'connected' | 'absent'>> {
+    const p = this.deps.secretPresence
+    const ownerKey = ownerKeyOf(auctor)
+    const entries = await Promise.all(
+      SECRET_PROVIDERS.map(async provider =>
+        [provider, p && (await p.has(ownerKey, provider)) ? 'connected' : 'absent'] as const),
+    )
+    return Object.fromEntries(entries) as Record<SecretProvider, 'connected' | 'absent'>
+  }
+
+  // ── BYO secrets (Secretarium, owner-keyed / anon-capable) ────────────────────
+
+  /**
+   * Connect the caller's BYO gated-origin credential for `provider`. The token is sealed at
+   * rest at once and NEVER echoed back. `idleDays` (default 90) sets the idle-expiry window.
+   * Anon-capable: a Bursa purse is a valid owner (§ownerKeyOf) — but a BYO token is bound to a
+   * NAMED third-party account, so a purse caller gets a deanonymization `warning` to render.
+   */
+  async putSecret(auctor: AuctorKey, provider: string, token: string, idleDays?: number): Promise<SecretView> {
+    const w = this.deps.secretWriter
+    if (!w) throw Errors.internal('BYO secrets are not available on this deployment')
+    if (!isSecretProvider(provider)) throw Errors.inputMalformed(`unknown secret provider '${provider}'`)
+    if (typeof token !== 'string' || !token.trim()) throw Errors.inputMalformed('a token is required')
+    const days = Number.isFinite(idleDays) && (idleDays as number) > 0 ? Math.floor(idleDays as number) : DEFAULT_SECRET_IDLE_DAYS
+    const { expiresAt } = await w.put(ownerKeyOf(auctor), provider, token.trim(), days)
+    return {
+      provider,
+      status: 'connected',
+      expiresAt: expiresAt.toISOString(),
+      ...('bursaToken' in auctor || 'commitment' in auctor ? { warning: DEANON_WARNING } : {}),
+    }
+  }
+
+  /** Disconnect the caller's BYO credential for `provider`. Idempotent (absent → still 'absent'). */
+  async removeSecret(auctor: AuctorKey, provider: string): Promise<SecretView> {
+    const w = this.deps.secretWriter
+    if (!w) throw Errors.internal('BYO secrets are not available on this deployment')
+    if (!isSecretProvider(provider)) throw Errors.inputMalformed(`unknown secret provider '${provider}'`)
+    await w.remove(ownerKeyOf(auctor), provider)
+    return { provider, status: 'absent' }
+  }
+
+  /** Replace the caller's presentation skin (Profile). */
+  async setAppearance(auctor: AuctorKey, appearance: Appearance): Promise<Appearance> {
+    if (!this.deps.consuetudinum) throw Errors.internal('account settings not configured')
+    await this.deps.consuetudinum.setAppearance(auctor, appearance)
+    return appearance
+  }
+
+  /** Replace the caller's cross-cutting generation defaults (Preferences). */
+  async setGeneratio(auctor: AuctorKey, generatio: Generatio): Promise<Generatio> {
+    if (!this.deps.consuetudinum) throw Errors.internal('account settings not configured')
+    await this.deps.consuetudinum.setGeneratio(auctor, generatio)
+    return generatio
+  }
+
+  /** The caller's per-modus input defaults (affines) for one flow. */
+  async getAffines(auctor: AuctorKey, modusId: string): Promise<Record<string, unknown>> {
+    return (await this.deps.consuetudinum?.resolveAffines(auctor, modusId)) ?? {}
+  }
+
+  /** Replace the caller's per-modus input defaults (affines) for one flow. */
+  async setAffines(auctor: AuctorKey, modusId: string, affines: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.deps.consuetudinum) throw Errors.internal('account settings not configured')
+    if (!(await this.deps.modorum.find(modusId))) throw Errors.notFoundFlow(modusId)
+    await this.deps.consuetudinum.setAffines(auctor, modusId, affines)
+    return affines
   }
 
   /** The caller's account snapshot — balance, in-flight gens, studios (JSON-projected). */
@@ -1164,6 +1802,10 @@ export class CrystalApi {
     if (budget <= 0n) throw Errors.insufficientSigna({ available: balance.toString() })
 
     const sessionId = randomUUID()
+    // Per-session secret injected into the pod; the runner echoes it on every callback
+    // and spoofed /runner/* posts (which can move real pod billing) are dropped.
+    // Local dev (no provisioner) skips it — a manually started runner can't know it.
+    const runnerToken = this.deps.teeProvisioner ? randomUUID() : undefined
     this.teeSessions.set(sessionId, {
       sessionId,
       auctor,
@@ -1172,6 +1814,7 @@ export class CrystalApi {
       gpuClass: opts.gpuClass,
       budgetImpetus: budget,
       wgClientPublicKey: opts.wgClientPublicKey,
+      ...(runnerToken ? { runnerToken } : {}),
       ...(opts.costPerHrUsd !== undefined ? { costPerHrUsd: opts.costPerHrUsd } : {}),
       wsProbeAttempts: 0,
       lastBilledGpuHours: 0,
@@ -1183,11 +1826,11 @@ export class CrystalApi {
       // Fire-and-forget: pod boot is async; session transitions to 'ready' via /runner/ready callback.
       // onPodCreated sets podId immediately after _startPod() so that when the runner/ready callback
       // arrives (while _waitForRuntime is still polling), session.podId is already set and
-      // handleRunnerReady picks the correct RunPod proxy URL instead of the localhost fallback.
+      // handleRunnerReady picks the correct provisioner ingress instead of the localhost fallback.
       this.deps.teeProvisioner.provision(sessionId, opts.wgClientPublicKey, (podId) => {
         const s = this.teeSessions.get(sessionId)
         if (s) s.podId = podId
-      }).then(result => {
+      }, runnerToken).then(result => {
         const s = this.teeSessions.get(sessionId)
         if (!s) return
         s.podId = result.podId
@@ -1197,6 +1840,25 @@ export class CrystalApi {
         if (s) { s.status = 'ended'; s.phase = 'failed'; s.error = String(err) }
         console.error('[tee] pod provision failed', { sessionId, err: String(err) })
       })
+
+      // Ready watchdog: the pod can reach 'running' and then die guest-side (IMDS miss,
+      // runner crash) without ever calling /runner/ready — no heartbeat means budget
+      // enforcement never engages, so the pod would bill forever. If the session is
+      // still 'provisioning' at the deadline, fail it and kill the pod. Generous window:
+      // covers the CVM multi-minute boot AND up to 3 RunPod WS-probe re-provisions.
+      const watchdog = setTimeout(() => {
+        const s = this.teeSessions.get(sessionId)
+        if (!s || s.status !== 'provisioning') return
+        s.status = 'ended'
+        s.phase = 'failed'
+        s.error = 'runner never became ready — pod terminated'
+        console.error('[tee] ready watchdog fired — terminating pod', { sessionId, podId: s.podId })
+        if (s.podId) {
+          this.deps.teeProvisioner!.terminate(s.podId).catch(err =>
+            console.warn('[tee] watchdog pod terminate failed', { sessionId, podId: s.podId, err: String(err) }))
+        }
+      }, TEE_READY_WATCHDOG_MS)
+      watchdog.unref?.()
     }
     // Without teeProvisioner (local dev): start runner.py manually with SESSION_ID matching sessionId.
 
@@ -1220,6 +1882,51 @@ export class CrystalApi {
     }
   }
 
+  /**
+   * Proxy the pod's token-gated `/debug/wglog` over the platform (avoids CORS; the
+   * per-session runner token never reaches the browser). Owner-scoped. Null when the
+   * session has no reachable proxy URL yet.
+   */
+  async fetchTeeWglog(auctor: AuctorKey, sessionId: string, tail?: string): Promise<string | null> {
+    const session = this.teeSessions.get(sessionId)
+    if (!session || !_auctorMatch(session.auctor, auctor)) throw Errors.notFoundStudio(sessionId)
+    if (!session.proxyUrl) return null
+    const httpBase = session.proxyUrl
+      .replace(/^socks5\+wss:\/\//, 'https://')
+      .replace(/^socks5\+ws:\/\//, 'http://')
+      .replace(/\?.*$/, '')
+      .replace(/\/$/, '')
+    const qs = tail ? `?tail=${encodeURIComponent(tail)}` : ''
+    const res = await fetch(httpBase + '/debug/wglog' + qs, {
+      ...(session.runnerToken ? { headers: { 'Authorization': `Bearer ${session.runnerToken}` } } : {}),
+    })
+    return res.text()
+  }
+
+  /**
+   * Callbacks that can move a live pod's billing must carry the per-session token the
+   * pod was provisioned with. Sessions without one (local dev) skip the check.
+   *
+   * Grace + ratchet (deploy-order decoupling): a runner image published before the token
+   * existed never echoes it, so a tokenless callback is TOLERATED — the same exposure as
+   * before the token shipped (unguessable UUID sessionId) — until the pod proves it knows
+   * the token once; from then on the session is strict. A present-but-wrong token is
+   * always dropped. Remove the grace path once only token-echoing tee-runner images exist.
+   */
+  private _runnerTokenOk(session: TeeSession, token: string | undefined, kind: string): boolean {
+    if (!session.runnerToken) return true   // local dev — no token was issued
+    if (token === session.runnerToken) {
+      session.runnerTokenConfirmed = true
+      return true
+    }
+    if (token === undefined && !session.runnerTokenConfirmed) {
+      console.warn('[tee] tokenless runner callback tolerated (legacy runner image — rebuild tee-runner to enforce)', { sessionId: session.sessionId, kind })
+      return true
+    }
+    console.warn('[tee] runner callback with bad token — dropped', { sessionId: session.sessionId, kind })
+    return false
+  }
+
   async handleRunnerReady(signal: RunnerReadySignal): Promise<void> {
     console.info('[tee] runner ready', { sessionId: signal.sessionId, wgKey: signal.wgPublicKey?.slice(0, 12) })
     if (signal.wgServerLog) console.info('[tee] wg-server.log at ready:\n' + signal.wgServerLog)
@@ -1228,6 +1935,7 @@ export class CrystalApi {
       console.warn('[tee] runner ready: no session found', { sessionId: signal.sessionId })
       return
     }
+    if (!this._runnerTokenOk(session, signal.runnerToken, 'ready')) return
 
     session.serverPublicKey = signal.wgPublicKey
     session.tunnelIp = '10.13.0.2'
@@ -1260,7 +1968,7 @@ export class CrystalApi {
         this.deps.teeProvisioner.provision(signal.sessionId, session.wgClientPublicKey, (podId) => {
           const s = this.teeSessions.get(signal.sessionId)
           if (s) s.podId = podId
-        }).then(result => {
+        }, session.runnerToken).then(result => {
           const s = this.teeSessions.get(signal.sessionId)
           if (s) { s.podId = result.podId; if (result.costPerHrUsd !== undefined) s.costPerHrUsd = result.costPerHrUsd }
         }).catch(err => {
@@ -1269,14 +1977,15 @@ export class CrystalApi {
         })
         return
       }
-      // SECURE RunPod pod: no raw public IP. RunPod proxies WSS → socksgo on port 8080.
-      // ?gost&insecureudp: force GostUDPTun (CmdGostUDPTun 0xF3) and allow UDP through
-      // the WSS tunnel. wss:// sets IsTLS()=true which disables UDP by default; InsecureUDP
-      // overrides that. UDP is tunneled inside the WSS stream — no plaintext exposure.
-      session.proxyUrl = `socks5+wss://${session.podId}-8080.proxy.runpod.net/?gost&insecureudp`
-      session.endpoint = '127.0.0.1:51820'
+    }
+
+    // Browser-facing tunnel ingress is the provisioner's to define (RunPod proxy URL /
+    // owned confidential-CVM ingress); null → runner self-reports (community cloud, local dev).
+    const ingress = session.podId ? this.deps.teeProvisioner?.ingress(session.podId) ?? null : null
+    if (ingress) {
+      session.proxyUrl = ingress.proxyUrl
+      session.endpoint = ingress.endpoint
     } else {
-      // Community cloud or local dev: runner self-reports its public endpoint.
       const host = signal.endpoint.split(':')[0]
       session.proxyUrl = `socks5+ws://${host}:8080?bind=true&gost=true`
       session.endpoint = signal.endpoint
@@ -1288,6 +1997,7 @@ export class CrystalApi {
   async handleRunnerHeartbeat(signal: RunnerHeartbeatSignal): Promise<{ continue: boolean }> {
     const session = this.teeSessions.get(signal.sessionId)
     if (!session) return { continue: false }
+    if (!this._runnerTokenOk(session, signal.runnerToken, 'heartbeat')) return { continue: false }
     session.gpuHours = signal.gpuHours
     const { continue: ok } = await this._billTeeHours(session, signal.gpuHours)
     if (!ok) {
@@ -1307,6 +2017,7 @@ export class CrystalApi {
   async handleRunnerEnded(signal: RunnerEndedSignal): Promise<void> {
     const session = this.teeSessions.get(signal.sessionId)
     if (!session) return
+    if (!this._runnerTokenOk(session, signal.runnerToken, 'ended')) return
     console.info('[tee] runner ended', { sessionId: signal.sessionId, status: signal.status, podId: session.podId })
     session.gpuHours = signal.gpuHours
     await this._billTeeHours(session, signal.gpuHours)
@@ -1349,6 +2060,7 @@ export class CrystalApi {
       // A `fractus`/ended session tells the runner to bail (replacing the heartbeat's role).
       const session = sessionId ? this.teeSessions.get(sessionId) : undefined
       if (session) {
+        if (!this._runnerTokenOk(session, signal.runnerToken, 'status')) return { continue: true }
         session.phase = progressus.phase
         return { continue: session.status !== 'ended' }
       }
@@ -1446,6 +2158,92 @@ export interface StatusView {
   takenAt: string
 }
 
+/** The caller's owner-keyed account settings (GET /v1/me) — appearance + generation
+ *  defaults + verb→flow bindings. All optional; anon-capable. */
+/** Static config for the buy-points/deposit UI (`GET /v1/deposit/config`). */
+export interface DepositConfig {
+  /** The CreditVault address to send deposits to (same on mainnet + Base). */
+  depositAddress: string
+  /** Canonical impetus points per 1 USD (≈ 2967 at $0.000337/point) — informational. */
+  pointsPerUsd: number
+  /** Default funding rate as a percent (70 = 70% of USD value converts to points). */
+  defaultFundingRatePct: number
+  chains: Array<{ chainId: number; name: string }>
+}
+
+/** A deposit quote (`POST /v1/deposit/quote`) — informational; the webhook credit is authoritative. */
+export interface DepositQuote {
+  chainId: number | string
+  token: string
+  /** Echoed raw base units (wei / token-decimals) that were quoted. */
+  amountRaw: string
+  /** Gross USD FMV, formatted (e.g. "3.000000") — what we recognize as revenue. */
+  grossUsd: string
+  /** Exact gross USD FMV in micro-USD (bigint string) — for precise client math. */
+  grossUsdMicro: string
+  /** The per-asset funding rate applied, as a percent (e.g. 70). */
+  fundingRatePct: number
+  /** Impetus points the user would be credited — EQUALS what the webhook credits for this input. */
+  pointsQuoted: string
+  depositAddress: string
+}
+
+/**
+ * Admin revenue report (`GET /v1/admin/revenue`) — the conditional-license tripwire, surfaced. The
+ * company-wide trailing-12-month USD revenue vs the tightest active conditional cap (ADR-0012/0013 §5).
+ */
+export interface RevenueReport {
+  /** ISO timestamp the trailing window was computed against. */
+  asOf: string
+  /** Trailing-12mo USD revenue in micro-USD (bigint string) — exact, for client math. */
+  trailingUsdRevenueMicro: string
+  /** Trailing-12mo USD revenue, formatted (e.g. "12345.670000"). */
+  trailingUsdRevenue: string
+  /** LIVE band of revenue against the binding cap: clear <75% · watch ≥75% · warn ≥90% · breach ≥100%. */
+  band: ThresholdBand
+  /** The tightest active conditional cap in whole USD, or null when dormant (no conditional model catalog-active). */
+  bindingCapUsd: number | null
+  /** The distinct conditional license ids currently reachable in the public catalog. */
+  activeConditionalLicenses: string[]
+  /** The last band the scheduled evaluator alerted/persisted, or null before its first run. */
+  lastAlertedBand: ThresholdBand | null
+}
+
+export interface MeView {
+  appearance?: Appearance
+  generatio?: Generatio
+  bindings: Array<{ verb: string; modusId: string }>
+  /** BYO gated-origin credential connect state, per provider. */
+  secrets: Record<SecretProvider, 'connected' | 'absent'>
+  /** Whether this deployment can store BYO secrets at all (a secret store is wired). `false` →
+   *  `SECRETA_MASTER_KEY` is unset and `PUT/DELETE /v1/me/secrets` will 500; the UI hides/disables
+   *  the panel proactively rather than only learning on a failed connect. Distinct from every
+   *  provider being `absent` (which just means "wired but nothing connected"). */
+  secretsAvailable: boolean
+  /** Whether this caller is the platform administrator (the moderation reviewer). Gates the
+   *  web app's feed-review surface + its approve/reject/confirm-csam controls. Server-authoritative
+   *  — the same check `_assertPlatformAdmin` enforces, so the UI never diverges from what the API
+   *  will permit. `true` only on the platform's own session; every normal account sees `false`. */
+  admin: boolean
+}
+
+/** Result of connecting/disconnecting a BYO secret (`PUT/DELETE /v1/me/secrets/:provider`).
+ *  The token is NEVER included. */
+export interface SecretView {
+  provider: SecretProvider
+  status: 'connected' | 'absent'
+  /** Idle-expiry deadline (ISO) — present when connected. */
+  expiresAt?: string
+  /** Deanonymization caution shown to anonymous (purse/commitment) callers. */
+  warning?: string
+}
+
+/** Shown to an anonymous caller connecting a BYO token — linking a named third-party account
+ *  to an anonymous purse is a self-inflicted correlation. Their choice; we surface it. */
+const DEANON_WARNING =
+  'Connecting a Civitai/HuggingFace token links your account there to this anonymous session on ' +
+  'our backend. This weakens your anonymity. Use a token scoped to only what you need, and rotate it regularly.'
+
 /** Inputs for `provisionStudio`. Everything optional — the simplest call leases a default
  *  studio capped at the caller's balance; each knob is opt-in (north-star). */
 export interface ProvisionStudioOpts {
@@ -1516,6 +2314,13 @@ function modoStudioStatus(modo: { status: string }): string {
     : 'idle'
 }
 
+/** micro-USD (bigint) → a fixed "D.dddddd" USD string (6 dp), exact, no float. */
+function microUsdToStr(micro: bigint): string {
+  const whole = micro / 1_000_000n
+  const frac = (micro % 1_000_000n).toString().padStart(6, '0')
+  return `${whole}.${frac}`
+}
+
 /** name → global-unique slug candidate (lowercase, dash-joined alnum). */
 function slugify(name: string): string {
   return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
@@ -1529,6 +2334,13 @@ export interface ModelCard {
   basis?: string
   trigger?: string
   description?: string
+  /** Resolvability of an owner's own model — 'private' (owner-only) | 'public' (on the catalog).
+   *  Present on the owner-scoped `listMyModels`; absent on the public catalog projection. */
+  access?: 'public' | 'private'
+  /** License id (e.g. 'apache-2.0', 'flux-1-dev-nc'). Owner/admin views. */
+  license?: string
+  /** Commercial-catalog verdict — whether this model may be promoted publicly. Owner/admin views. */
+  commercialUse?: 'yes' | 'no' | 'conditional' | 'unknown'
 }
 
 function toModelCard(i: Intelligens): ModelCard {
@@ -1540,6 +2352,22 @@ function toModelCard(i: Intelligens): ModelCard {
     ...(i.basis ? { basis: i.basis } : {}),
     ...(trigger ? { trigger } : {}),
     ...(i.descriptio ? { description: i.descriptio } : {}),
+  }
+}
+
+/** Project an `Intella` (the load/resolve registry record) to a `ModelCard` — the owner-scoped
+ *  `listMyModels` view. `basis` = the compat `familia`; `access` surfaces public/private status. */
+function toModelCardFromIntella(i: Intella): ModelCard {
+  return {
+    intellaId: i.id,
+    nomen: i.nomen || i.id,
+    genus: i.genus,
+    ...(i.familia ? { basis: i.familia } : {}),
+    ...(i.trigger ? { trigger: i.trigger } : {}),
+    ...(i.description ? { description: i.description } : {}),
+    access: i.access ?? (i.canonica ? 'public' : 'private'),
+    ...(i.license ? { license: i.license } : {}),
+    ...(i.commercialUse ? { commercialUse: i.commercialUse } : {}),
   }
 }
 
@@ -1578,18 +2406,22 @@ export interface RunnerReadySignal {
   wgPublicKey: string
   attestation?: string
   wgServerLog?: string
+  /** Per-session secret injected at provision — required when the session has one. */
+  runnerToken?: string
 }
 
 export interface RunnerHeartbeatSignal {
   sessionId: string
   gpuHours: number
   status: string
+  runnerToken?: string
 }
 
 export interface RunnerEndedSignal {
   sessionId: string
   gpuHours: number
   status: string
+  runnerToken?: string
 }
 
 /**
@@ -1606,6 +2438,8 @@ export interface ProgressusSignal {
   progressus?: unknown
   /** Legacy TEE stub field — `{ sessionId, step }` — folded in by normalizeProgressus. */
   step?: string
+  /** Per-session secret — enforced on the sessionId-bound (TEE) branch only. */
+  runnerToken?: string
 }
 
 interface TeeSession {
@@ -1618,6 +2452,10 @@ interface TeeSession {
   gpuClass?: string
   budgetImpetus: bigint
   wgClientPublicKey: string
+  /** Per-session secret the pod echoes on callbacks. NEVER surfaced on TeeSessionView. */
+  runnerToken?: string
+  /** Set once the pod echoed the right token — ratchets the session to strict enforcement. */
+  runnerTokenConfirmed?: boolean
   podId?: string
   wsProbeAttempts: number
   serverPublicKey?: string

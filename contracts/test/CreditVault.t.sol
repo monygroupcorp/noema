@@ -6,7 +6,6 @@ import {VmSafe} from "forge-std/Vm.sol";
 import {CreditVault} from "src/CreditVault.sol";
 import {TestToken} from "test/mocks/TestToken.sol";
 import {MockERC721} from "test/mocks/MockERC721.sol";
-import {ReentrancyAttackerV2} from "test/mocks/ReentrancyAttackerV2.sol";
 import {MockERC1155} from "test/mocks/MockERC1155.sol";
 import {LibClone} from "solady/utils/LibClone.sol";
 
@@ -40,92 +39,6 @@ contract CreditVaultTest is Test {
     }
 
     // =========================================================================
-    // register
-    // =========================================================================
-
-    function test_register_claimsName() public {
-        vm.prank(alice);
-        vault.register("alice");
-        bytes32 key = keccak256("alice");
-        assertEq(vault.referralOwner(key), alice);
-        assertEq(vault.referralAddress(key), alice);
-    }
-
-    function test_register_emitsEvent() public {
-        bytes32 key = keccak256("alice");
-        vm.expectEmit(true, false, false, true);
-        emit CreditVault.ReferralRegistered(key, "alice", alice);
-        vm.prank(alice);
-        vault.register("alice");
-    }
-
-    function test_register_revertsIfTaken() public {
-        vm.prank(alice);
-        vault.register("alice");
-        vm.prank(bob);
-        vm.expectRevert(CreditVault.AlreadyRegistered.selector);
-        vault.register("alice");
-    }
-
-    // =========================================================================
-    // setAddress
-    // =========================================================================
-
-    function test_setAddress_updatesPayoutAddress() public {
-        vm.prank(alice);
-        vault.register("alice");
-        bytes32 key = keccak256("alice");
-
-        vm.prank(alice);
-        vault.setAddress(key, bob);
-        assertEq(vault.referralAddress(key), bob);
-    }
-
-    function test_setAddress_revertsIfNotOwner() public {
-        vm.prank(alice);
-        vault.register("alice");
-        bytes32 key = keccak256("alice");
-
-        vm.prank(bob);
-        vm.expectRevert(CreditVault.NotReferralOwner.selector);
-        vault.setAddress(key, bob);
-    }
-
-    // =========================================================================
-    // transferName
-    // =========================================================================
-
-    function test_transferName_changesOwner() public {
-        vm.prank(alice);
-        vault.register("alice");
-        bytes32 key = keccak256("alice");
-
-        vm.prank(alice);
-        vault.transferName(key, bob);
-        assertEq(vault.referralOwner(key), bob);
-    }
-
-    function test_transferName_revertsIfNotOwner() public {
-        vm.prank(alice);
-        vault.register("alice");
-        bytes32 key = keccak256("alice");
-
-        vm.prank(bob);
-        vm.expectRevert(CreditVault.NotReferralOwner.selector);
-        vault.transferName(key, bob);
-    }
-
-    function test_transferName_revertsIfZeroAddress() public {
-        vm.prank(alice);
-        vault.register("alice");
-        bytes32 key = keccak256("alice");
-
-        vm.prank(alice);
-        vm.expectRevert(CreditVault.ZeroAddress.selector);
-        vault.transferName(key, address(0));
-    }
-
-    // =========================================================================
     // payCoin (ERC20, no referral)
     // =========================================================================
 
@@ -149,12 +62,12 @@ contract CreditVaultTest is Test {
     }
 
     // =========================================================================
-    // payCoin (ERC20, with referral)
+    // payCoin (ERC20, referralKey is inert — no on-chain cut)
     // =========================================================================
 
-    function test_payCoin_withReferral_splitsPushesToReferrer() public {
-        vm.prank(bob);
-        vault.register("bob");
+    function test_payCoin_withReferralKey_takesNoCut() public {
+        // A non-zero referralKey no longer moves any funds on-chain: the protocol
+        // keeps the full amount and bob (a would-be referrer) receives nothing.
         bytes32 key = keccak256("bob");
 
         vm.startPrank(alice);
@@ -162,38 +75,20 @@ contract CreditVaultTest is Test {
         vault.payCoin(address(token), 100e18, key);
         vm.stopPrank();
 
-        assertEq(token.balanceOf(bob), 1000e18 + 5e18);
-        assertEq(token.balanceOf(address(vault)), 95e18);
+        assertEq(token.balanceOf(bob), 1000e18);
+        assertEq(token.balanceOf(address(vault)), 100e18);
     }
 
-    function test_payCoin_withReferral_emitsCorrectAmounts() public {
-        vm.prank(bob);
-        vault.register("bob");
+    function test_payCoin_withReferralKey_emitsZeroReferralAmount() public {
         bytes32 key = keccak256("bob");
 
         vm.startPrank(alice);
         token.approve(address(vault), 100e18);
         vm.expectEmit(true, true, false, true);
-        emit CreditVault.Payment(alice, key, address(token), 100e18, 95e18, 5e18);
+        // protocolAmount == amount, referralAmount == 0, key echoed for attribution.
+        emit CreditVault.Payment(alice, key, address(token), 100e18, 100e18, 0);
         vault.payCoin(address(token), 100e18, key);
         vm.stopPrank();
-    }
-
-    function test_payCoin_withCustomBps_usesCustomRate() public {
-        vm.prank(bob);
-        vault.register("bob");
-        bytes32 key = keccak256("bob");
-
-        vm.prank(owner);
-        vault.setReferralBps(key, 1000);
-
-        vm.startPrank(alice);
-        token.approve(address(vault), 100e18);
-        vault.payCoin(address(token), 100e18, key);
-        vm.stopPrank();
-
-        assertEq(token.balanceOf(bob), 1000e18 + 10e18);
-        assertEq(token.balanceOf(address(vault)), 90e18);
     }
 
     function test_payCoin_zeroAmount_reverts() public {
@@ -215,17 +110,16 @@ contract CreditVaultTest is Test {
         assertEq(address(vault).balance, 1 ether);
     }
 
-    function test_pay_withReferral_pushesToReferrer() public {
-        vm.prank(bob);
-        vault.register("bob");
+    function test_pay_withReferralKey_takesNoCut() public {
         bytes32 key = keccak256("bob");
 
         vm.deal(alice, 1 ether);
         vm.prank(alice);
         vault.pay{value: 1 ether}(key);
 
-        assertEq(bob.balance, 0.05 ether);
-        assertEq(address(vault).balance, 0.95 ether);
+        // No on-chain referral cut: bob gets nothing, protocol keeps the full amount.
+        assertEq(bob.balance, 0);
+        assertEq(address(vault).balance, 1 ether);
     }
 
     function test_receive_noReferral_accumulatesProtocol() public {
@@ -335,42 +229,6 @@ contract CreditVaultTest is Test {
         vm.expectRevert(CreditVault.CommitmentAlreadyUsed.selector);
         vault.payCoinAnonymous(address(token), 100e18, commitment);
         vm.stopPrank();
-    }
-
-    // =========================================================================
-    // setDefaultBps
-    // =========================================================================
-
-    function test_setDefaultBps_updatesDefault() public {
-        vm.prank(owner);
-        vault.setDefaultBps(1000);
-        assertEq(vault.defaultReferralBps(), 1000);
-    }
-
-    function test_setDefaultBps_revertsIfExceedsCap() public {
-        vm.prank(owner);
-        vm.expectRevert(CreditVault.BpsExceedsCap.selector);
-        vault.setDefaultBps(5001);
-    }
-
-    function test_setDefaultBps_revertsIfNotOwner() public {
-        vm.prank(alice);
-        vm.expectRevert();
-        vault.setDefaultBps(1000);
-    }
-
-    // =========================================================================
-    // setReferralBps
-    // =========================================================================
-
-    function test_setReferralBps_revertsIfExceedsCap() public {
-        vm.prank(bob);
-        vault.register("bob");
-        bytes32 key = keccak256("bob");
-
-        vm.prank(owner);
-        vm.expectRevert(CreditVault.BpsExceedsCap.selector);
-        vault.setReferralBps(key, 5001);
     }
 
     // =========================================================================
@@ -502,42 +360,6 @@ contract CreditVaultTest is Test {
     }
 
     // =========================================================================
-    // Reentrancy
-    // =========================================================================
-
-    function test_pay_revertingReferrer_skipsCut() public {
-        address nonPayable = address(new NonPayableContract());
-
-        vm.prank(nonPayable);
-        vault.register("broken");
-        bytes32 key = keccak256("broken");
-
-        vm.deal(alice, 1 ether);
-        vm.prank(alice);
-        vault.pay{value: 1 ether}(key);
-
-        assertEq(address(vault).balance, 1 ether);
-        assertEq(nonPayable.balance, 0);
-    }
-
-    function test_pay_reentrancy_cutSkipped() public {
-        bytes32 key = keccak256("attacker");
-        address attacker = address(new ReentrancyAttackerV2(address(vault), key));
-
-        vm.prank(attacker);
-        vault.register("attacker");
-        vm.prank(attacker);
-        vault.setAddress(key, attacker);
-
-        vm.deal(alice, 1 ether);
-        vm.prank(alice);
-        vault.pay{value: 1 ether}(key);
-
-        assertEq(address(vault).balance, 1 ether);
-        assertEq(attacker.balance, 0);
-    }
-
-    // =========================================================================
     // Multicall
     // =========================================================================
 
@@ -568,6 +390,3 @@ contract CreditVaultTest is Test {
         assertEq(token.balanceOf(owner), 100e18);
     }
 }
-
-/// @dev Helper: a contract with no receive() — reverts on ETH push
-contract NonPayableContract {}

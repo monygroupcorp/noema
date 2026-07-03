@@ -1,7 +1,6 @@
 import { MongoClient } from 'mongodb'
 import { Telegraf } from 'telegraf'
 import express from 'express'
-import OpenAI from 'openai'
 
 import { createContainer } from './container.js'
 import type { Ring, ContainerConfig } from './container.js'
@@ -16,15 +15,35 @@ import { makeTelegramSender } from './allocutio/telegram/TelegramSenderAdapter.j
 import type { AuctorKey } from './flow/types.js'
 import { createWebhookRouter } from './api/webhooks/webhookRouter.js'
 import { handleAlchemyWebhook } from './api/webhooks/alchemyWebhook.js'
-import { makeBlocklistScreen, permissiveSanctionsScreen } from './compliance/SanctionsScreen.js'
-import { loadOfacBlocklist } from './compliance/loadOfacBlocklist.js'
+import { AlchemyPricer, nullPricer } from './crystal/AssetPricer.js'
+import { permissiveSanctionsScreen, type SanctionsScreen } from './compliance/SanctionsScreen.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
 import { mountCeremony } from './api/arcanum/mountCeremony.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
 import { IdentityResolver as ApiIdentityResolver, credentialsFromHeaders } from './allocutio/api/IdentityResolver.js'
 import { createApiRouter } from './allocutio/api/apiRouter.js'
-import { makeCredentialAcceptors } from './allocutio/api/apiAcceptors.js'
+import { makeCredentialAcceptors, resolveOrCreateAnima, federatedExternusId } from './allocutio/api/apiAcceptors.js'
+import { AgentJwtVerifier, parseJwksOverride } from './allocutio/api/AgentJwtVerifier.js'
+import { AgentProvisioner } from './crystal/AgentProvisioner.js'
+import { createAgentCompatRouter } from './allocutio/api/agentCompatRouter.js'
+import { createStorageRouter } from './allocutio/api/storageRouter.js'
+import { createTreasuryAdminRouter } from './api/internal/treasuryAdminRouter.js'
+import { seedCamel, CAMEL_TREASURY } from './crystal/seeds/camel.js'
+import { createX402AgentRouter } from './allocutio/api/x402AgentRouter.js'
+import { DEFAULT_X402_CONFIG } from './crystal/x402Pricing.js'
+import { accruePayeePayout, agentCutMicro } from './crystal/accruePayeePayout.js'
+import { createCdpX402Facilitator } from './crystal/CdpX402Facilitator.js'
+import type { X402Facilitator } from './types/x402.js'
+import { createSponsioRouter } from './allocutio/api/sponsioRouter.js'
+import { createAuthRouter } from './allocutio/api/authRouter.js'
+import { MongoCredentum } from './crystal/MongoCredentum.js'
+import { mailerFromEnv } from './allocutio/api/Mailer.js'
+import { createWidgetRouter } from './allocutio/api/widgetRouter.js'
+import { createPurseRouter } from './allocutio/api/purseRouter.js'
+import { createAgentCardRouter } from './allocutio/api/agentCardRouter.js'
+import { startSubsidySweeper } from './crystal/SubsidySweeper.js'
+import { startLicenseTripwire } from './crystal/licenseTripwire.js'
 import { RunEventHub } from './allocutio/api/RunEventHub.js'
 import { isSafeWebhookUrl } from './allocutio/api/webhookGuard.js'
 import { createMcpRouter } from './allocutio/api/mcp/mcpRouter.js'
@@ -36,9 +55,19 @@ import { ensureWideIndexes }      from './analytics/ensureWideIndexes.js'
 import { startAnalyticsListener } from './analytics/analyticsListener.js'
 import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
 import { PublicationWorker } from './crystal/PublicationWorker.js'
-import { permissiveModerationGate, denyModerationGate } from './crystal/ModerationGate.js'
+import { permissiveModerationGate, denyModerationGate, type ModerationGate } from './crystal/ModerationGate.js'
+import { permissivePromptGuard, type PromptGuard } from './crystal/PromptGuard.js'
+import { ModelImporter } from './crystal/ModelImporter.js'
+import { MongoVerdictCache } from './crystal/MongoVerdictCache.js'
+import { ledgerScanFeeCharger } from './crystal/ScanFeeCharger.js'
+import { httpJsonFetcher, secretJsonFetcher } from './crystal/modelImportResolver.js'
+import { secretBoxFromEnv } from './crystal/secretBox.js'
+import { MongoSecretarium } from './crystal/MongoSecretarium.js'
+import { mintJobToken, verifyJobToken } from './crystal/jobToken.js'
+import { createWeightProxyRouter } from './api/internal/weightProxyRouter.js'
 import { registerProgressusRecorder } from './execution/progressusSink.js'
 import { CANONICAL_MODI } from './crystal/seeds/modi.js'
+import { API_PROVIDERS } from './crystal/apiProviders.js'
 import { CANONICAL_ESSENTIAE } from './crystal/seeds/essentiae.js'
 import { CANONICAL_COMPOSITI } from './crystal/seeds/compositi.js'
 import { CANONICAL_CUSTOM_MODI } from './crystal/seeds/modiCustom.js'
@@ -79,6 +108,32 @@ import type { Essentia } from './types/essendi.js'
 import path from 'node:path'
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { makeSnarkjsVerifier } from './arcanum/ArcanumVerifier.js'
+
+// A deny-all x402 facilitator — the safe default until the real @coinbase/x402 CDP
+// facilitator is wired. With x402 feature-flagged off, the endpoints 404 before this
+// is ever consulted; if flagged on without a real facilitator, payments fail closed.
+const disabledX402Facilitator: X402Facilitator = {
+  async verify() { return { valid: false, error: 'x402 facilitator not configured' } },
+  async settle() { return { success: false, error: 'x402 facilitator not configured' } },
+}
+
+// The real CDP facilitator, built only when `CDP_API_KEY_ID`/`CDP_API_KEY_SECRET` are set.
+// `node10` moduleResolution can't see @x402/core's `exports` map, so the client trio is
+// loaded via runtime `require` (Node honours exports maps) — the same combo the platform
+// x402 middleware uses. Our adapter maps the shapes; NETWORK is decided by x402Config
+// (DEFAULT_X402_CONFIG = Base mainnet, eip155:8453 — real USDC).
+function buildCdpX402Facilitator(): X402Facilitator | null {
+  const apiKeyId = process.env.CDP_API_KEY_ID
+  const apiKeySecret = process.env.CDP_API_KEY_SECRET
+  if (!apiKeyId || !apiKeySecret) return null
+  /* eslint-disable @typescript-eslint/no-var-requires */
+  const { createFacilitatorConfig } = require('@coinbase/x402')
+  const { HTTPFacilitatorClient } = require('@x402/core/server')
+  const { decodePaymentSignatureHeader } = require('@x402/core/http')
+  /* eslint-enable @typescript-eslint/no-var-requires */
+  const client = new HTTPFacilitatorClient(createFacilitatorConfig(apiKeyId, apiKeySecret))
+  return createCdpX402Facilitator({ client, decodePayment: decodePaymentSignatureHeader })
+}
 
 // ---------------------------------------------------------------------------
 // Env
@@ -126,6 +181,43 @@ const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL
 const TEE_IMAGE_ID        = process.env.TEE_IMAGE_ID         // e.g. "monyrth/tee-runner:latest"
 const TEE_PLATFORM_CALLBACK = process.env.TEE_PLATFORM_CALLBACK  // e.g. "https://api.noema.ai"
 const TEE_GPU_TYPE_IDS    = process.env.TEE_GPU_TYPE_IDS?.split(',').map(s => s.trim()).filter(Boolean)
+// Confidential-CVM tier (Azure NCCads_H100_v5, SEV-SNP + H100 CC-On) — the hardware-sealed
+// backend behind /v1/sessions/tee. ALL TEE_AZURE_* vars (incl. the ingress template) must be
+// set to enable it; it then takes precedence over the RunPod TeeProvisioner.
+// Pool = pre-created, deallocated CVMs.
+const TEE_AZURE_TENANT_ID       = process.env.TEE_AZURE_TENANT_ID
+const TEE_AZURE_CLIENT_ID       = process.env.TEE_AZURE_CLIENT_ID
+const TEE_AZURE_CLIENT_SECRET   = process.env.TEE_AZURE_CLIENT_SECRET
+const TEE_AZURE_SUBSCRIPTION_ID = process.env.TEE_AZURE_SUBSCRIPTION_ID
+const TEE_AZURE_RESOURCE_GROUP  = process.env.TEE_AZURE_RESOURCE_GROUP
+const TEE_AZURE_VM_NAMES        = process.env.TEE_AZURE_VM_NAMES?.split(',').map(s => s.trim()).filter(Boolean)
+// Billing rate — fail fast on a malformed value: NaN here would flow into every session's
+// costPerHrUsd and either 500 the heartbeat billing or silently bill 0.
+const TEE_AZURE_COST_PER_HR = (() => {
+  const raw = process.env.TEE_AZURE_COST_PER_HR
+  if (raw === undefined) return 6.98   // NCC40ads_H100_v5 East US 2 list (2026-07)
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n <= 0) throw new Error(`TEE_AZURE_COST_PER_HR must be a positive number, got "${raw}"`)
+  return n
+})()
+// REQUIRED for the Azure backend: without it, sessions would go 'ready' with the runner's
+// self-reported localhost endpoint — billed but unreachable.
+const TEE_AZURE_INGRESS_TEMPLATE = process.env.TEE_AZURE_INGRESS_TEMPLATE  // e.g. "socks5+wss://{vm}.tee.noema.art/?gost&insecureudp"
+
+// A privacy-tier downgrade must never be silent: if the Azure backend is partially
+// configured, say exactly what's missing instead of quietly serving the RunPod tier.
+{
+  const req: Record<string, unknown> = {
+    TEE_AZURE_TENANT_ID, TEE_AZURE_CLIENT_ID, TEE_AZURE_CLIENT_SECRET,
+    TEE_AZURE_SUBSCRIPTION_ID, TEE_AZURE_RESOURCE_GROUP,
+    TEE_AZURE_VM_NAMES: TEE_AZURE_VM_NAMES?.length, TEE_AZURE_INGRESS_TEMPLATE,
+    TEE_PLATFORM_CALLBACK,
+  }
+  const missing = Object.entries(req).filter(([, v]) => !v).map(([k]) => k)
+  if (missing.length > 0 && missing.length < Object.keys(req).length) {
+    console.warn(`[tee] confidential-CVM backend DISABLED — partial config, missing: ${missing.join(', ')}. /v1/sessions/tee will serve the RunPod (non-confidential) tier if configured.`)
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Arcanum verifier — load snarkjs VerifyFn when the ceremony key is present
@@ -253,7 +345,7 @@ async function main(): Promise<void> {
   await ensureWideIndexes(mongo.db(DB_NAME))
   log.info('Indexes ensured')
 
-  // 2. Build embedding functions (CLIP service) and OpenAI client
+  // 2. Build embedding functions (CLIP service) and hosted-API providers
   const CLIP_SERVICE_URL = process.env.CLIP_SERVICE_URL
 
   let embed: ContainerConfig['embed'] | undefined
@@ -279,35 +371,13 @@ async function main(): Promise<void> {
     log.warn('CLIP_SERVICE_URL not set — vestigium embeddings disabled')
   }
 
-  let openaiClient: ContainerConfig['openaiClient'] | undefined
-  if (process.env.OPENAI_API_KEY) {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-    openaiClient = {
-      chat: async (rawParams) => {
-        const params = rawParams as { model: string; messages: unknown[]; temperature?: number }
-        const res = await openai.chat.completions.create({
-          model: params.model,
-          messages: params.messages as OpenAI.Chat.ChatCompletionMessageParam[],
-          temperature: params.temperature,
-        })
-        return {
-          content: res.choices[0]?.message?.content ?? '',
-          usage: { total_tokens: res.usage?.total_tokens },
-        }
-      },
-      image: async (rawParams) => {
-        const params = rawParams as { model: string; prompt: string; size?: string; quality?: string; n?: number }
-        const res = await openai.images.generate({
-          model: params.model,
-          prompt: params.prompt,
-          size: params.size as OpenAI.ImageGenerateParams['size'],
-          quality: params.quality as OpenAI.ImageGenerateParams['quality'],
-          n: params.n,
-        })
-        return { url: res.data?.[0]?.url ?? '' }
-      },
-    }
-  }
+  // Hosted-API inference providers: register each descriptor whose key is set.
+  // Adding a provider is a descriptor in apiProviders.ts + its env key — no SDK,
+  // no cursor. The generic OpenAI-compatible wire is handled inside ApiCursor.
+  const apiProviders = API_PROVIDERS.flatMap((provider) => {
+    const apiKey = process.env[provider.authEnv]
+    return apiKey ? [{ provider, apiKey }] : []
+  })
 
   // 3. Create Ring
   // Create materiae + intellae stores before container so they can be shared
@@ -325,13 +395,35 @@ async function main(): Promise<void> {
   const consuetudinum = new MongoConsuetudinum(consuetudinumCol)
   // Compute-substrate registry (ADR-0005) — the Fundamenta essentiae reference for image/runtime/weights.
   const fundamentorum = new MongoFundamentorum(mongo.db(DB_NAME).collection('fundamenta'))
-  const compiler = new Compiler(templateRegistry, undefined, intellae, fundamentorum)
-  const compile = async (modus: unknown, aditus: Record<string, unknown>, pinnedModels?: import('./types/actum.js').ModelRef[]): Promise<{ hash: string; input: unknown }> => {
+
+  // BYO-secrets Phase C: the per-job pod credential + weight-download proxy. Three envs gate it,
+  // and ALL must be set together (plus a runner that attaches its token — see docs):
+  //   JOB_TOKEN_SECRET   — HMAC secret for minting/verifying job tokens.
+  //   SECRETA_MASTER_KEY — the secret store (secretBox below); resolve() serves the BYO origin token.
+  //   WEIGHT_PROXY_BASE  — our public API base; when set, the Compiler rewrites gated private
+  //                        weight urls to `${base}/internal/weights/:id` (opt-in once the runner
+  //                        forwards its token). Unset → no rewrite (pre-Phase-C behavior).
+  // The rewrite is enabled only when the token secret is ALSO present, so we never point a pod at a
+  // proxy that can't authenticate it.
+  const JOB_TOKEN_SECRET = process.env.JOB_TOKEN_SECRET
+  const WEIGHT_PROXY_BASE = (process.env.WEIGHT_PROXY_BASE && JOB_TOKEN_SECRET)
+    ? process.env.WEIGHT_PROXY_BASE : undefined
+  const mintJobTokenFn = JOB_TOKEN_SECRET
+    ? (claims: { actumId: string; ownerKey: string; exp: number }) => mintJobToken(JOB_TOKEN_SECRET, claims)
+    : undefined
+
+  const compiler = new Compiler(templateRegistry, undefined, intellae, fundamentorum, WEIGHT_PROXY_BASE)
+  const compile = async (modus: unknown, aditus: Record<string, unknown>, pinnedModels?: import('./types/actum.js').ModelRef[], ownerKey?: string): Promise<{ hash: string; input: unknown }> => {
     const essentia = modus as Essentia
     if (!essentia.fundamentumId) {
       throw new Error(`Modus '${essentia.id}' has no fundamentumId — cannot compile for a pod`)
     }
-    const { hash, spec } = await compiler.compile(essentia, aditus, pinnedModels ? { pinnedModels } : {})
+    // ownerKey scopes private-model resolution: the runner's own private imports resolve by
+    // trigger, and a private id the runner does NOT own is refused (Compiler enforcement).
+    const { hash, spec } = await compiler.compile(essentia, aditus, {
+      ...(pinnedModels ? { pinnedModels } : {}),
+      ...(ownerKey ? { ownerKey } : {}),
+    })
     return { hash, input: spec }
   }
 
@@ -380,6 +472,7 @@ async function main(): Promise<void> {
         admitWarm: (m: Materia, models: Array<{ id?: string }>) => installCoordinator.ensureForGen(m, models),
         installLive: (m: Materia, ids: string[]) => installCoordinator.installLive(m, ids),
       } : {}),
+      ...(mintJobTokenFn ? { mintJobToken: mintJobTokenFn } : {}),
     } : {}),
     aitoolkitRemote: {
       statusUrl: RUNNER_STATUS_URL,
@@ -388,7 +481,8 @@ async function main(): Promise<void> {
       ...(AITK_REMOTE_MAX_SECONDS !== undefined ? { maxTrainingSeconds: AITK_REMOTE_MAX_SECONDS } : {}),
     },
     ...(process.env.HF_TOKEN ? { huggingFaceToken: process.env.HF_TOKEN } : {}),
-    ...(openaiClient ? { openaiClient } : {}),
+    ...(process.env.ARWEAVE_PRIVATE_KEY ? { arweavePrivateKey: process.env.ARWEAVE_PRIVATE_KEY } : {}),
+    ...(apiProviders.length ? { apiProviders } : {}),
     ...(embed ? { embed } : {}),
     ...(embedImage ? { embedImage } : {}),
     ...(_arcanumVerifyFn ? { arcanumVerifyFn: _arcanumVerifyFn } : {}),
@@ -399,6 +493,21 @@ async function main(): Promise<void> {
         platformCallback: TEE_PLATFORM_CALLBACK,
         cloudType:        RUNPOD_CLOUD_TYPE,
         ...(TEE_GPU_TYPE_IDS?.length ? { gpuTypeIds: TEE_GPU_TYPE_IDS } : {}),
+      },
+    } : {}),
+    ...(TEE_AZURE_TENANT_ID && TEE_AZURE_CLIENT_ID && TEE_AZURE_CLIENT_SECRET
+        && TEE_AZURE_SUBSCRIPTION_ID && TEE_AZURE_RESOURCE_GROUP && TEE_AZURE_VM_NAMES?.length
+        && TEE_AZURE_INGRESS_TEMPLATE && TEE_PLATFORM_CALLBACK ? {
+      confidentialPod: {
+        tenantId:         TEE_AZURE_TENANT_ID,
+        clientId:         TEE_AZURE_CLIENT_ID,
+        clientSecret:     TEE_AZURE_CLIENT_SECRET,
+        subscriptionId:   TEE_AZURE_SUBSCRIPTION_ID,
+        resourceGroup:    TEE_AZURE_RESOURCE_GROUP,
+        vmNames:          TEE_AZURE_VM_NAMES,
+        platformCallback: TEE_PLATFORM_CALLBACK,
+        costPerHrUsd:     TEE_AZURE_COST_PER_HR,
+        ingressProxyUrlTemplate: TEE_AZURE_INGRESS_TEMPLATE,
       },
     } : {}),
   })
@@ -481,6 +590,11 @@ async function main(): Promise<void> {
     await ring.modorum.register(customModus)
   }
   log.info(`Seeded ${CANONICAL_CUSTOM_MODI.length} custom modi`)
+
+  // CAMEL onboarding seed (ADR-0011 §8): the trusted issuer, the treasury Anima,
+  // and the CamelMemify starter template. Idempotent.
+  await seedCamel({ issuers: ring.issuers, modorum: ring.modorum, db: mongo.db(DB_NAME) })
+  log.info('Seeded CAMEL issuer + treasury + starter template')
 
   for (const intella of CANONICAL_INTELLAE) {
     await intellae.upsert(intella)
@@ -625,16 +739,115 @@ async function main(): Promise<void> {
   app.get('/api/health', (_req, res) => res.json({ ok: true, v: process.env.BUILD_VERSION ?? 'dev' }))
   app.use('/api/vestigia', createVestigiaRouter(ring.vestigiorum))
 
-  // →public moderation gate. No real CSAM/NCMEC scanner is built yet, so the gate
-  // fails CLOSED: public publishing (feed/marketplace) is DENIED until one is wired.
-  // Dev/staging can opt into unscanned publishing explicitly (never the silent default).
-  const moderationGate = process.env.MODERATION_ALLOW_UNSCANNED === '1'
-    ? (log.warn('MODERATION_ALLOW_UNSCANNED=1 — public publishing approves content WITHOUT CSAM/NCMEC scanning. Dev/staging only; NEVER in production.'), permissiveModerationGate)
-    : (log.warn('No CSAM/NCMEC scanner configured — public publishing (feed/marketplace) is DENIED (fail-closed). Private/unlisted still work.'), denyModerationGate)
+  // PRIVATE compliance module (ADR-0012 §49 — abuse surface, not published): the real
+  // CSAM/NCMEC gate AND the OFAC sanctions screen live in the gitignored
+  // `src/private/compliance` module, injected at deploy. This public repo ships only
+  // the PORTS + fail-closed/permissive stubs. Loaded ONCE here via a guarded dynamic
+  // import (path in a variable so a public build doesn't statically resolve it); absent
+  // (public build) → both fall back to their stubs. The OFAC block below reuses it.
+  interface PrivateCompliance {
+    configureModerationGate(deps: { fetcher: typeof httpMediaFetcher; log: typeof log }): Promise<ModerationGate | null>
+    configureSanctionsScreen(deps: { log: typeof log }): SanctionsScreen | null
+    configurePromptGuard(deps: { log: typeof log }): PromptGuard | null
+    configureCsamReviewReporter(deps: { fetcher: typeof httpMediaFetcher }): import('./crystal/CsamReviewReporter.js').CsamReviewReporter
+  }
+  let compliance: PrivateCompliance | null = null
+  const compliancePath = './private/compliance/index.js'
+  try {
+    compliance = (await import(compliancePath)) as PrivateCompliance
+  } catch {
+    log.warn('Private compliance module (src/private/compliance) not present — CSAM/NCMEC + OFAC screening unavailable in this build.')
+  }
+
+  // →public moderation gate (CSAM/NCMEC). Preference order, all fail-closed:
+  //   1. the real PRIVATE gate when present AND detection is configured (CSAM_HASHSET_PATH / classifier);
+  //   2. else the permissive no-op ONLY under an explicit MODERATION_ALLOW_UNSCANNED opt-in;
+  //   3. else DENY (the safe default — public publishing off until the scanner is wired).
+  const privateGate = compliance ? await compliance.configureModerationGate({ fetcher: httpMediaFetcher, log }) : null
+  const moderationGate: ModerationGate = privateGate
+    ? privateGate
+    : process.env.MODERATION_ALLOW_UNSCANNED === '1'
+      ? (log.warn('MODERATION_ALLOW_UNSCANNED=1 — public publishing approves content WITHOUT CSAM/NCMEC scanning. Dev/staging only; NEVER in production.'), permissiveModerationGate)
+      : (log.warn('No CSAM/NCMEC scanner active (private compliance module absent or unconfigured) — public publishing (feed/marketplace) is DENIED (fail-closed). Private/unlisted still work.'), denyModerationGate)
+
+  // Input-side CSAM prompt guard (generation boundary, FAIL-OPEN). From the private
+  // module; absent (public build) → permissive stub. Refuses only minor∧sexual prompts
+  // (+ an out-of-band code-word lexicon) — adult content passes. The publish-time gate
+  // above is the fail-closed backstop.
+  const promptGuard: PromptGuard = compliance?.configurePromptGuard({ log })
+    ?? (log.warn('Input CSAM prompt guard inactive (private compliance module absent) — generation prompts are NOT screened. The publish-time gate still applies.'), permissivePromptGuard)
+
+  // Import-by-URL (spec/model-import.md Tier 1): register a Civitai/HF/direct model as a
+  // private, owner-scoped Intella — WEIGHTS origin-only (no R2 copy; we don't custody third-party
+  // BYO weights for personal use — the R2 weight mirror happens only on a public promotion,
+  // BucketAdapter). The store/fetcher here re-host only the small PREVIEW image(s), so the CSAM
+  // scan covers the exact bytes we display (no TOCTOU) and our UI doesn't hot-link the origin.
+  // Reuses the same moderation gate for the mandatory preview-media safety scan (fail-closed).
+  // BYO secrets (Secretarium) — sealed gated-origin credentials, keyed by ownerKey. Gated on
+  // SECRETA_MASTER_KEY: no key → store absent → /v1/me/secrets 501 + getMe.secrets all 'absent'.
+  // The full resolve-capable store stays local (its ASYMMETRY: only the two server-side consumers
+  // get resolve — the import gated-fetcher here + the future weight-proxy). CrystalApi is handed
+  // only the write + presence slices.
+  const secretBox = secretBoxFromEnv()
+  const secretarium = secretBox ? new MongoSecretarium(mongo.db(DB_NAME).collection('secreta'), secretBox) : undefined
+  if (secretarium) void secretarium.ensureIndexes().catch(err => log.warn('secretarium: ensureIndexes failed', { error: String(err) }))
+
+  // Fiat username/password auth (docs/spec/fiat-auth.md): the credential store (email/hash/
+  // single-use verify+reset token hashes) + a vendor-neutral mailer. Both degrade gracefully —
+  // no RESEND_API_KEY ⇒ NoopMailer (links land in the logs). The auth router is mounted below.
+  const credenta = new MongoCredentum(mongo.db(DB_NAME).collection('credenta'))
+  void credenta.ensureIndexes().catch(err => log.warn('credenta: ensureIndexes failed', { error: String(err) }))
+  const mailer = mailerFromEnv()
+
+  const modelImporter = new ModelImporter({
+    json: httpJsonFetcher,
+    // Gated Civitai/HF metadata scrape: wrap the fetcher with the owner's BYO token (server-side,
+    // via Secretarium.resolve in the closure — a legitimate resolve consumer, never CrystalApi).
+    ...(secretarium ? {
+      gatedFetcherFor: (ownerKey: string) =>
+        secretJsonFetcher(httpJsonFetcher, (provider) => secretarium.resolve(ownerKey, provider)),
+    } : {}),
+    intellae,
+    moderationGate,
+    fetcher: httpMediaFetcher,
+    ...(RUNPOD_R2 ? { store: new R2Uploader(RUNPOD_R2) } : {}),
+  })
+
+  // Deposit boundary shared by the /v1 quote endpoint AND the Alchemy webhook: the CreditVault
+  // address + the per-asset USD FMV oracle. Constructed once here so the quote and the webhook
+  // credit use the SAME pricer (they must agree — one source of truth).
+  const CREDIT_VAULT = '0x00000001152d633eb2ac3cf91eac9994aeefc021'
+  // The Alchemy Prices API key (chain-agnostic; used in the request path). Prefer the crystal name,
+  // but fall back to the legacy bot's env names (`ALCHEMY_KEY` / per-chain `ALCHEMY_KEY_1`) so a
+  // deployment that already carries them lights up the pipeline without a rename.
+  const ALCHEMY_API_KEY = process.env.ALCHEMY_API_KEY ?? process.env.ALCHEMY_KEY ?? process.env.ALCHEMY_KEY_1
+  const pricer = ALCHEMY_API_KEY
+    ? new AlchemyPricer(ALCHEMY_API_KEY)
+    : (log.warn('Alchemy price key unset (ALCHEMY_API_KEY / ALCHEMY_KEY) — deposits will NOT be priced (no revenue booked, no credits issued, quote unavailable). Configure before real deposits.'), nullPricer)
+
+  // Publish-safety cost forwarding (spec/moderation-classifier.md §7): a content-addressed
+  // verdict cache so an identical re-publish reuses the gate verdict (no re-scan, no re-fee),
+  // and a per-scan fee charger that forwards the paid-classifier cost to the publisher — only
+  // on a BILLABLE scan (a real Thorn call). PUBLISH_SCAN_FEE (impetus points) is the config
+  // knob until Thorn quotes; unset/0 ⇒ no fee.
+  const verdictCache = new MongoVerdictCache(mongo.db(DB_NAME).collection('verdict_cache'))
+  void verdictCache.ensureIndexes().catch(err => log.warn('verdictCache: ensureIndexes failed', { error: String(err) }))
+  const PUBLISH_SCAN_FEE = BigInt(process.env.PUBLISH_SCAN_FEE ?? '0')
+  const scanFeeCharger = ledgerScanFeeCharger({ signorum: ring.signorum, amount: PUBLISH_SCAN_FEE })
 
   // Crystal Agent API (/v1) — ApiAllocutio (docs/agent-tasks/EPIC-api-allocutio.md).
   // The agent-shaped facade over the ring + the credential→AuctorKey resolver.
+  // Reviewer-confirmed-CSAM NCMEC report seam (human-review path, spec §4). From the
+  // private module; absent (public build) → the confirm action rejects but logs that no
+  // report was filed. Assembles + preserves; live NCMEC submission needs the ESP account.
+  const csamReviewReporter = compliance?.configureCsamReviewReporter({ fetcher: httpMediaFetcher })
+
   const crystalApi = new CrystalApi({
+    pricer,
+    depositAddress: CREDIT_VAULT,
+    verdictCache,
+    scanFeeCharger,
+    ...(csamReviewReporter ? { csamReviewReporter } : {}),
     inceptor: ring.inceptor,
     modorum: ring.modorum,
     cursorum: ring.cursorum,
@@ -656,10 +869,19 @@ async function main(): Promise<void> {
     // moderationGate fails closed (deny) unless MODERATION_ALLOW_UNSCANNED=1 — the
     // async →public gate path always runs; only its verdict changes.
     moderationGate,
+    // Input CSAM prompt guard (generation boundary, fail-open) — refuses minor∧sexual prompts.
+    promptGuard,
     editiones: ring.editiones,
     publicationAdapters: ring.publicationAdapters,
     animae: ring.animae,
     intellarum: intellae,
+    // Admin revenue report (conditional-license tripwire, ADR-0013 §5): the trailing-12mo rollup
+    // + the last persisted band. Read-only; the scheduled evaluator (below) owns alerts/persistence.
+    redituum: ring.redituum,
+    tripwireBand: ring.tripwireBand,
+    modelImporter,
+    // Only the write + presence slices — never the resolve-capable store (ASYMMETRY).
+    ...(secretarium ? { secretWriter: secretarium, secretPresence: secretarium } : {}),
     ...(ring.conductor ? { conductor: ring.conductor } : {}),
     ...(ring.teeProvisioner ? { teeProvisioner: ring.teeProvisioner } : {}),
     // Fire-and-forget studio-ready/failed webhook (optional sugar over polling).
@@ -707,7 +929,28 @@ async function main(): Promise<void> {
     animae: ring.animae,
     ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
     verifyApiKeyToAccountId,
+    // Federated (JWKS) SSO — trusted-issuer registry + the live prod JWKS override.
+    issuers: ring.issuers,
+    jwksOverride: parseJwksOverride(process.env.AGENT_JWKS_OVERRIDE),
   }))
+
+  // ── CAMEL agent onboarding (ADR-0011 phase 3) ─────────────────────────────────
+  // Treasury config is injected (not a stored noun): prod has exactly one treasury.
+  const camelTreasury = (treasuryId: string) => (treasuryId === CAMEL_TREASURY.treasuryId ? CAMEL_TREASURY : null)
+  const agentVerifier = new AgentJwtVerifier({
+    issuers: ring.issuers,
+    jwksOverride: parseJwksOverride(process.env.AGENT_JWKS_OVERRIDE),
+  })
+  const agentProvisioner = new AgentProvisioner({
+    legati: ring.legati,
+    signorum: ring.signorum,
+    modorum: ring.modorum,
+    treasury: camelTreasury,
+  })
+  // The compat route resolves the agent's Anima with the SAME federated find-or-create
+  // the JWKS acceptor uses, so provisioning and later auth land on one soul.
+  const resolveAgentAnima = (iss: string, sub: string): Promise<string> =>
+    resolveOrCreateAnima(ring.personae, ring.animae, 'federated', federatedExternusId(iss, sub))
   // Run-event hub — projects the bus (actum.progressus/complete/fail) into per-run SSE
   // streams + fire-and-forget completion webhooks (Phase 2). In-process (single
   // instance), per the epic's distribution note. Webhook POSTs are best-effort.
@@ -733,15 +976,172 @@ async function main(): Promise<void> {
     }),
     verifier:   ring.arcanumVerifier,
     bursarium:  ring.bursarium,
-    weiToCredits: process.env.ALCHEMY_API_KEY
-      ? (wei) => import('./arcanum/ethPrice.js').then(m => m.weiToCredits(wei, process.env.ALCHEMY_API_KEY!))
+    weiToCredits: ALCHEMY_API_KEY
+      ? (wei) => import('./arcanum/ethPrice.js').then(m => m.weiToCredits(wei, ALCHEMY_API_KEY))
       : undefined,
   }))
   // Ceremony sequencer — mounted before the /v1 catch-all so /v1/ceremony resolves here.
   // Live chain: public status + self-serve contribution upload (KZG-summoning model).
   // express.json() handles /slots; the contribution route brings its own raw() parser.
   await mountCeremony(app, ring.ceremonia)
+  // Sponsorship pledges (ADR-0011 §2) — mounted before the /v1 catch-all so
+  // /v1/sponsorships resolves here. The sweeper (below) does the actual dripping.
+  app.use('/v1/sponsorships', express.json(), createSponsioRouter({ sponsiones: ring.sponsiones, identity: apiResolver }))
+
+  // Fiat username/password auth (docs/spec/fiat-auth.md). Mounted at BOTH `/v1/auth` (native)
+  // and `/api/v1/auth` (compat) — BEFORE the `/v1` + `/api/v1` catch-alls so the literal auth
+  // paths resolve here. Only wired when JWT_SECRET is set (it signs + verifies the session).
+  // Auth-sensitive routes are IP-rate-limited (express-rate-limit) to blunt credential stuffing.
+  if (process.env.JWT_SECRET) {
+    const { default: rateLimit } = await import('express-rate-limit')
+    const limiter = (max: number) => rateLimit({ windowMs: 15 * 60 * 1000, max, standardHeaders: true, legacyHeaders: false })
+    const buildAuthRouter = () => createAuthRouter({
+      credenta,
+      personae: ring.personae,
+      animae: ring.animae,
+      mailer,
+      jwtSecret: process.env.JWT_SECRET as string,
+      ...(process.env.AUTH_APP_BASE_URL ? { appBaseUrl: process.env.AUTH_APP_BASE_URL } : {}),
+      ...(process.env.SESSION_TTL_SECONDS ? { ttl: { sessionSeconds: Number(process.env.SESSION_TTL_SECONDS) } } : {}),
+      rateLimiters: { register: limiter(20), login: limiter(20), forgot: limiter(10), resend: limiter(10) },
+    })
+    app.use('/v1/auth', express.json(), buildAuthRouter())
+    app.use('/api/v1/auth', express.json(), buildAuthRouter())
+    log.info('fiat auth rail mounted at /v1/auth + /api/v1/auth')
+  } else {
+    log.warn('JWT_SECRET unset — fiat username/password auth is DISABLED (no session minting/verify)')
+  }
+
+  // Storage upload front door (JS-nuke blocker #10) — presigned browser→R2 uploads
+  // for i2i input images + profile avatar/banner. One router, mounted at BOTH the
+  // compat path the web app bakes (`/api/v1/storage`) and the native `/v1/storage`,
+  // BEFORE the `/v1` + `/api/v1` catch-alls so the literal paths resolve here. Only
+  // wired when R2 is configured (otherwise the upload path is genuinely unavailable).
+  if (RUNPOD_R2) {
+    const buildStorageRouter = () => createStorageRouter({ store: new R2Uploader(RUNPOD_R2), identity: apiResolver })
+    app.use('/v1/storage', buildStorageRouter())
+    app.use('/api/v1/storage', buildStorageRouter())
+    log.info('storage upload front door mounted at /v1/storage + /api/v1/storage')
+  } else {
+    log.warn('R2 unconfigured — storage upload front door DISABLED (/storage/uploads/sign will 404)')
+  }
+
   app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub }))
+
+  // CAMEL agent compat surface (ADR-0011 §8) — the exact `/api/v1/...` paths the
+  // deployed camel404 client bakes (on-chain-referenced). No catch-all in front,
+  // so a bad assertion is a 401 INVALID_ASSERTION, never a 403 (the go/no-go probe).
+  app.use('/api/v1', express.json(), createAgentCompatRouter({
+    verifier: agentVerifier,
+    provisioner: agentProvisioner,
+    legati: ring.legati,
+    resolveAgentAnima,
+    treasury: camelTreasury,
+    balanceOf: (animaId: string) => ring.signorum.balance({ animaId }),
+    ...(process.env.PUBLIC_BASE ? { publicBase: process.env.PUBLIC_BASE } : {}),
+  }))
+
+  // x402 pay-per-call capability serving (ADR-0011 phase 4 — "the premise"). Feature-
+  // flagged: X402_ENABLED=true + X402_PAY_TO wire it live; otherwise the endpoints 404.
+  // The facilitator (on-chain verify/settle via @coinbase/x402) is edge I/O — a
+  // deny-stub until CDP creds are wired; the whole state machine is otherwise crystal.
+  const X402_PAY_TO = process.env.X402_PAY_TO
+  const x402Config = { ...DEFAULT_X402_CONFIG, payTo: X402_PAY_TO ?? '0x0000000000000000000000000000000000000000' }
+  const x402Enabled = process.env.X402_ENABLED === 'true' && !!X402_PAY_TO
+  const SYSTEM_AUCTOR = { animaId: process.env.PLATFORM_ANIMA_ID ?? 'platform' }
+  const cdpFacilitator = x402Enabled ? buildCdpX402Facilitator() : null
+  if (x402Enabled && cdpFacilitator) log.info(`x402: CDP facilitator wired (${x402Config.network}, payTo ${x402Config.payTo})`)
+  else if (x402Enabled) log.warn('x402: X402_ENABLED but CDP_API_KEY_ID/CDP_API_KEY_SECRET missing — payments fail closed (deny-stub)')
+  app.use('/api/v1/x402', express.json(), createX402AgentRouter({
+    legati: ring.legati,
+    modorum: ring.modorum,
+    facilitator: cdpFacilitator ?? disabledX402Facilitator,
+    log: ring.x402Log,
+    config: x402Config,
+    enabled: x402Enabled,
+    quoteImpetus: async (modusId, aditus) => BigInt((await crystalApi.quote(SYSTEM_AUCTOR, { modusId }, aditus)).impetus),
+    // Prepaid run: the verified x402 payment backs a mint of the quote's impetus onto
+    // the agent's Anima, which the normal run path then spends. Payment funds the run.
+    runSpell: async ({ agentAnimaId, modusId, aditus, grossImpetus }) => {
+      await ring.signorum.issue({ animaId: agentAnimaId, forma: 'minted', valor: grossImpetus, auctor: 'x402:prepaid' })
+      return crystalApi.invokeFlow({ animaId: agentAnimaId }, { modusId }, aditus, { maxImpetus: grossImpetus })
+    },
+    // The agent's cut = the MARGIN (price − our serve cost) minus our fee, accrued to the
+    // payee's GATED USD payout book (ADR-0013 §4c). Not an at-settle on-chain split; held
+    // once the payee crosses the $600/yr reporting line without tax docs. Best-effort.
+    accrueAgentCut: ({ payoutAddress, priceAtomic, serveImpetus, sourceRef, network }) =>
+      accruePayeePayout(
+        { mercedum: ring.mercedum, animae: ring.animae },
+        {
+          payoutAddress,
+          usdMicro: agentCutMicro(BigInt(priceAtomic), serveImpetus),
+          fmvSource: `x402:margin-split@${network}`,
+          sourceRef: `x402:${sourceRef}`,
+          kind: 'agent',
+        },
+      ),
+    // Live status: await the async run + stream its real Progressus phases (SSE) to the caller.
+    hub: runHub,
+    getRun: (runId, ownerAnimaId) => crystalApi.getRun({ animaId: ownerAnimaId }, runId).catch(() => null),
+    ...(process.env.PUBLIC_BASE ? { publicBase: process.env.PUBLIC_BASE } : {}),
+  }))
+
+  // /widget — the Noema embed surface (ADR-0011 §7): the SDK + chrome-less,
+  // themed per-agent & gallery views, composed from the public feed + owner appearance.
+  // Framing is a per-partner CSP allowlist (WIDGET_FRAME_ANCESTORS, space/comma-sep)
+  // replacing the legacy `frame-ancestors *`; default 'self' (same-origin only).
+  const widgetFrameAncestors = (process.env.WIDGET_FRAME_ANCESTORS ?? '')
+    .split(/[\s,]+/).map((o) => o.trim()).filter(Boolean)
+  app.use('/widget', createWidgetRouter({
+    legati: ring.legati,
+    feed: (filter) => crystalApi.feed(filter),
+    appearance: (owner) => crystalApi.publicAppearance(owner),
+    // Interactive run panel: resolve the agent's Modus + quote its price (§5 x402 pay-per-call).
+    modorum: ring.modorum,
+    quoteImpetus: async (modusId) => BigInt((await crystalApi.quote(SYSTEM_AUCTOR, { modusId }, {})).impetus),
+    x402Config,
+    frameAncestors: widgetFrameAncestors,
+  }))
+
+  // Owned purses (§7) — the crystal-core "delegation": an identified account mints a
+  // shareable Bursa funded from its balance (or an agent's it owns); the purse token is
+  // the invite code, runs spend it via the existing `/v1/runs` x-bursa-token path. Purses
+  // are owner-linked (dashboard/reclaim); the anon Bursa path is untouched (privacy).
+  app.use('/v1/purses', express.json(), createPurseRouter({
+    identity: apiResolver,
+    signorum: ring.signorum,
+    bursarium: ring.bursarium,
+    // fund-from-agent: the caller's linked wallet (Anima.custos) must equal the agent owner.
+    fundFromAgent: async (agentId, callerAnimaId) => {
+      const legatus = await ring.legati.findByAgentId(agentId)
+      if (!legatus) return null
+      const caller = await ring.animae.find(callerAnimaId)
+      if (!caller?.custos || caller.custos.toLowerCase() !== legatus.ownerAddress.toLowerCase()) return null
+      return { animaId: legatus.animaId }   // spend the agent's (sponsor-fed) balance
+    },
+    ...(process.env.PUBLIC_BASE ? { publicBase: process.env.PUBLIC_BASE } : {}),
+  }))
+
+  // ERC-8004 agent cards (ADR-0011 §7/§8): the platform card + per-agent capability
+  // cards that advertise an agent's x402-callable Modus — the discoverable "agent link"
+  // an external agent resolves → pays → runs. Mounted at `/` (specific paths only).
+  const cardBase = process.env.PUBLIC_BASE ?? 'https://noema.art'
+  app.use(createAgentCardRouter({
+    legati: ring.legati,
+    modorum: ring.modorum,
+    quoteImpetus: async (modusId) => BigInt((await crystalApi.quote(SYSTEM_AUCTOR, { modusId }, {})).impetus),
+    x402Config,
+    publicBase: cardBase,
+    appearance: (owner) => crystalApi.publicAppearance(owner),
+    platform: {
+      name: 'NOEMA',
+      description: 'AI generation infrastructure — images, video, and media, with on-chain pay-per-call agents.',
+      publicBase: cardBase,
+      ...(process.env.ERC8004_AGENT_ID && process.env.ERC8004_IDENTITY_REGISTRY
+        ? { registration: { agentId: Number(process.env.ERC8004_AGENT_ID), agentRegistry: `eip155:1:${process.env.ERC8004_IDENTITY_REGISTRY}` } }
+        : {}),
+    },
+  }))
 
   // TEE runner lifecycle callbacks — internal pod-to-platform signals, not user-facing API.
   // Mounted at /runner/* (not /v1) so PLATFORM_CALLBACK env var on the pod points here directly.
@@ -797,33 +1197,71 @@ async function main(): Promise<void> {
   }, 60_000)
   log.info('census started', { tickMs: 60_000 })
 
+  // Subsidy sweeper (ADR-0011 §2) — drips every active sponsorship pledge once per
+  // cycle. Hourly sweep; the per-pledge cycle key makes the drip idempotent.
+  startSubsidySweeper(
+    { sponsiones: ring.sponsiones, signorum: ring.signorum },
+    { intervalMs: 60 * 60 * 1000, onError: (err) => log.error('subsidy sweep failed', { error: String(err) }) },
+  )
+  log.info('subsidy sweeper started', { tickMs: 60 * 60 * 1000 })
+
+  // Conditional-license revenue tripwire (ADR-0012/0013 §5) — evaluates the company-wide
+  // trailing-12mo USD revenue against the tightest active conditional cap and fires an
+  // edge-triggered ops alert on band transitions (breach = compliance incident). Slow-moving
+  // line → 6h cadence; the persisted band makes transitions detectable across restarts.
+  startLicenseTripwire(
+    { redituum: ring.redituum, intellarum: intellae, bandStore: ring.tripwireBand },
+    { intervalMs: 6 * 60 * 60 * 1000, onError: (err) => log.error('license tripwire eval failed', { error: String(err) }) },
+  )
+  log.info('license tripwire started', { tickMs: 6 * 60 * 60 * 1000 })
+
   app.use('/internal', createLiveRouter(INTERNAL_SECRET))
   app.use('/internal/analytics', createAnalyticsRouter(wideStore, INTERNAL_SECRET))
+  // BYO-secrets Phase C: the weight-download proxy. Mounted only when a job-token secret AND a
+  // secret store are configured (the same envs that let the Compiler rewrite gated urls). A pod
+  // presents its per-job token; we stream the owner's gated private weights with their BYO token
+  // attached to the OUTBOUND request only. Authn is the job token itself (not INTERNAL_SECRET).
+  if (JOB_TOKEN_SECRET && secretarium) {
+    app.use('/internal', createWeightProxyRouter({
+      verifyToken: (t: string) => verifyJobToken(JOB_TOKEN_SECRET, t),
+      intellae,
+      secrets: secretarium,   // resolve-only slice (SecretResolver); never handed to CrystalApi
+    }))
+    log.info('weight-download proxy mounted at /internal/weights/:intellaId (BYO-secrets Phase C)')
+  }
+  // Manual treasury funding (faucet off in prod) — fund the treasury Anima / top up an agent.
+  app.use('/internal/v1', express.json(), createTreasuryAdminRouter({
+    signorum: ring.signorum,
+    legati: ring.legati,
+    treasury: camelTreasury,
+    ...(INTERNAL_SECRET ? { secret: INTERNAL_SECRET } : {}),
+  }))
 
   // Alchemy address-activity webhook — processes CreditVault events.
   // Route: POST /webhooks/alchemy/:chainId  (chainId = '1' mainnet, '8453' Base)
+  // Per-chain webhook HMAC signing secrets. Prefer the crystal names, fall back to the legacy bot's
+  // chainId-suffixed names (`ALCHEMY_SIGNING_KEY_1`/`_8453`), then a single shared `ALCHEMY_SIGNING_KEY`.
+  // When a chain's key is absent the webhook SKIPS HMAC validation (dev mode) — a prod hole — so this
+  // reconciliation is what actually enforces signature checks on a deployment carrying the legacy names.
   const ALCHEMY_SIGNING_KEYS: Record<string, string> = {}
-  if (process.env.ALCHEMY_SIGNING_KEY_MAINNET) ALCHEMY_SIGNING_KEYS['1']    = process.env.ALCHEMY_SIGNING_KEY_MAINNET
-  if (process.env.ALCHEMY_SIGNING_KEY_BASE)    ALCHEMY_SIGNING_KEYS['8453'] = process.env.ALCHEMY_SIGNING_KEY_BASE
-  const CREDIT_VAULT = '0x00000001152d633eb2ac3cf91eac9994aeefc021'
-  // OFAC sanctions screen for deposit boundaries. Loads the SDN crypto-address
-  // list from OFAC_BLOCKLIST_PATH (synced by scripts/refresh-ofac-blocklist.ts).
-  // Falls back to the permissive screen with a LOUD warning if unconfigured so an
-  // un-synced production never silently runs unscreened — go-live blocker.
-  const ofacPath = process.env.OFAC_BLOCKLIST_PATH
-  let sanctions = permissiveSanctionsScreen
-  if (!ofacPath) {
-    log.warn('OFAC_BLOCKLIST_PATH unset — deposit sanctions screening is a NO-OP. Configure before real deposits.')
-  } else {
-    const blocklist = loadOfacBlocklist(ofacPath)
-    if (blocklist.length === 0) {
-      log.warn('OFAC blocklist empty — deposit sanctions screening is effectively a NO-OP. Run scripts/refresh-ofac-blocklist.ts.')
-    }
-    sanctions = makeBlocklistScreen(blocklist)
+  const mainnetSigningKey = process.env.ALCHEMY_SIGNING_KEY_MAINNET ?? process.env.ALCHEMY_SIGNING_KEY_1 ?? process.env.ALCHEMY_SIGNING_KEY
+  const baseSigningKey    = process.env.ALCHEMY_SIGNING_KEY_BASE    ?? process.env.ALCHEMY_SIGNING_KEY_8453 ?? process.env.ALCHEMY_SIGNING_KEY
+  if (mainnetSigningKey) ALCHEMY_SIGNING_KEYS['1']    = mainnetSigningKey
+  if (baseSigningKey)    ALCHEMY_SIGNING_KEYS['8453'] = baseSigningKey
+  // CREDIT_VAULT + `pricer` are constructed once above (shared with the /v1 deposit-quote endpoint).
+  // OFAC sanctions screen for deposit boundaries. The real Set-backed screen + SDN
+  // loader are PRIVATE (ADR-0012 §49) — from the `compliance` module loaded above.
+  // Falls back to the permissive screen with a LOUD warning if unconfigured/absent so
+  // an un-synced production never silently runs unscreened — go-live blocker.
+  const privateScreen = compliance?.configureSanctionsScreen({ log }) ?? null
+  const sanctions: SanctionsScreen = privateScreen ?? permissiveSanctionsScreen
+  if (!privateScreen) {
+    log.warn('OFAC sanctions screening inactive (private compliance module absent or OFAC_BLOCKLIST_PATH unset) — deposit screening is a NO-OP. Configure before real deposits.')
   }
   const alchemyDeps = {
     deposita:     ring.deposita,
     signorum:     ring.signorum,
+    redituum:     ring.redituum,
     petitiones:   ring.petitiones,
     testimonia:   ring.testimonia,
     animae:       ring.animae,
@@ -831,7 +1269,7 @@ async function main(): Promise<void> {
     sanctions,
     signingKeys:  ALCHEMY_SIGNING_KEYS,
     vaultAddresses: { '1': CREDIT_VAULT, '8453': CREDIT_VAULT },
-    ethPriceUsd:  0,  // not yet used — valor stored in wei
+    pricer,
   }
   app.post('/webhooks/alchemy/:chainId', async (req, res) => {
     const result = await handleAlchemyWebhook({

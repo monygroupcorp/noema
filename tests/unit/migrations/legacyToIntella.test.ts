@@ -36,9 +36,10 @@ test('platform-trained: trainer becomes author + owner; not authorless', () => {
   if (intella.genus !== 'lora') throw new Error('expected lora')
   assert.equal(intella.params.baseIntellaId, 'intella.flux-base')
   assert.deepEqual(intella.access, { kind: 'public' })
-  // platform-trained docs typically have no external sourceUri; "no source URI"
-  // warning is informational + expected. Anything else is a real issue.
-  const unexpected = log.warnings.filter(w => !w.includes('no source URI'))
+  // platform-trained docs typically have no external sourceUri ("no source URI"), and a bare
+  // 'FLUX' checkpoint is license-indeterminable (schnell vs dev) → a fail-closed 'unknown' notice.
+  // Both are informational + expected. Anything else is a real issue.
+  const unexpected = log.warnings.filter(w => !w.includes('no source URI') && !w.includes('license indeterminable'))
   assert.deepEqual(unexpected, [], `unexpected warnings: ${unexpected.join('; ')}`)
 })
 
@@ -219,4 +220,33 @@ test("tags source 'auto': rewritten to 'admin'", () => {
     intella.tags?.map(t => ({ tag: t.tag, source: t.source })),
     [{ tag: 'style', source: 'user' }, { tag: 'portrait', source: 'admin' }],
   )
+})
+
+// ── License backfill (go-public gate): derive license + commercialUse from the checkpoint ──
+test('license reconcile: SDXL checkpoint → openrail-m / yes; bare FLUX → fail-closed unknown', () => {
+  const sdxl: LegacyLoraDoc = {
+    _id: 'ee11ee11ee11ee11ee11ee11',
+    slug: 'sdxl-lora', triggerWords: ['sdxlstyle'],
+    defaultWeight: 0.8, checkpoint: 'SDXL',
+    createdBy: 'anima-x',
+    importedFrom: { source: 'civitai', importedAt: new Date() },
+    createdAt: new Date(),
+  }
+  const s = legacyToIntella(sdxl, LOOKUPS).intella
+  assert.equal(s.license, 'openrail-m')
+  assert.equal(s.commercialUse, 'yes')
+
+  // Bare 'FLUX' can't disambiguate schnell (Apache) from dev (Non-Commercial) → fail-closed.
+  const flux: LegacyLoraDoc = {
+    _id: 'ff22ff22ff22ff22ff22ff22',
+    slug: 'flux-lora', triggerWords: ['fluxstyle'],
+    defaultWeight: 1.0, checkpoint: 'FLUX',
+    createdBy: 'anima-y',
+    importedFrom: { source: 'civitai', importedAt: new Date() },
+    createdAt: new Date(),
+  }
+  const { intella: f, log } = legacyToIntella(flux, LOOKUPS)
+  assert.equal(f.license, 'unknown')
+  assert.equal(f.commercialUse, 'unknown')
+  assert.ok(log.warnings.some(w => w.includes('license indeterminable')), 'fail-closed license warning emitted')
 })

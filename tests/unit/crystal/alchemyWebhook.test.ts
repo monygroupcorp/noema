@@ -4,8 +4,18 @@ import crypto from 'node:crypto'
 import { AbiCoder } from 'ethers'
 import { handleAlchemyWebhook } from '../../../src/api/webhooks/alchemyWebhook.js'
 import type { AlchemyWebhookDeps, AlchemyWebhookRequest } from '../../../src/api/webhooks/alchemyWebhook.js'
-import { permissiveSanctionsScreen, makeBlocklistScreen } from '../../../src/compliance/SanctionsScreen.js'
+import { permissiveSanctionsScreen } from '../../../src/compliance/SanctionsScreen.js'
+import type { SanctionsScreen } from '../../../src/compliance/SanctionsScreen.js'
+import { fixedPricer, nullPricer, type AssetPricer } from '../../../src/crystal/AssetPricer.js'
+import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/CrystalApi.js'
 import type { Depositum, Depositorum, Petitio, Petitionum, Testimonium, Testimoniorum } from '../../../src/types/catena.js'
+
+// Local fake screen — blocks the given addresses (case-insensitive). Keeps this public
+// webhook test self-contained; the real Set-backed OFAC screen is private (ADR-0012 §49).
+const blockingScreen = (addresses: string[]): SanctionsScreen => {
+  const blocked = new Set(addresses.map((a) => a.trim().toLowerCase()))
+  return { async screen(a: string) { return blocked.has(a.trim().toLowerCase()) ? { ok: false, reason: `address ${a} is on the OFAC SDN blocklist` } : { ok: true } } }
+}
 import type { Signum, Signorum } from '../../../src/types/significandi.js'
 import type { Anima, AnimaStore } from '../../../src/types/anima.js'
 
@@ -70,6 +80,25 @@ function makeSignorum(): Signorum & { issued: Signum[] } {
     async release() {},
     async history() { return [] },
     async settle() {},
+  }
+}
+
+function makeRedituum() {
+  const rows: import('../../../src/types/reditus.js').Reditus[] = []
+  return {
+    rows,
+    async record(draft: import('../../../src/types/reditus.js').ReditusDraft) {
+      if (typeof draft.usdFmv !== 'bigint' || draft.usdFmv <= 0n) throw new Error('Reditus fail-closed: usdFmv')
+      if (!draft.fmvSource || draft.fmvSource.trim() === '') throw new Error('Reditus fail-closed: fmvSource')
+      if (draft.depositumId !== undefined) {
+        const existing = rows.find(r => r.depositumId === draft.depositumId)
+        if (existing) return existing   // idempotent, mirrors MemoryRedituum
+      }
+      const r = { id: nextId('red'), natum: draft.natum ?? new Date(), usdFmv: draft.usdFmv, fmvSource: draft.fmvSource, origo: draft.origo, ...(draft.depositumId !== undefined ? { depositumId: draft.depositumId } : {}) }
+      rows.push(r)
+      return r
+    },
+    async trailingUsdRevenue() { return rows.reduce((s, r) => s + r.usdFmv, 0n) },
   }
 }
 
@@ -297,13 +326,16 @@ function makeDeps(overrides: Partial<AlchemyWebhookDeps> = {}): AlchemyWebhookDe
   deposita: ReturnType<typeof makeDeposita>
   signorum: ReturnType<typeof makeSignorum>
   testimonia: ReturnType<typeof makeTestimonia>
+  redituum: ReturnType<typeof makeRedituum>
 } {
   const deposita = overrides.deposita as ReturnType<typeof makeDeposita> ?? makeDeposita()
   const signorum = overrides.signorum as ReturnType<typeof makeSignorum> ?? makeSignorum()
   const testimonia = overrides.testimonia as ReturnType<typeof makeTestimonia> ?? makeTestimonia()
+  const redituum = overrides.redituum as ReturnType<typeof makeRedituum> ?? makeRedituum()
   return {
     deposita,
     signorum,
+    redituum,
     petitiones: overrides.petitiones ?? makePetitiones(),
     testimonia,
     animae: overrides.animae ?? makeAnimae(),
@@ -311,9 +343,15 @@ function makeDeps(overrides: Partial<AlchemyWebhookDeps> = {}): AlchemyWebhookDe
     sanctions: overrides.sanctions ?? permissiveSanctionsScreen,
     signingKeys: overrides.signingKeys ?? {},
     vaultAddresses: overrides.vaultAddresses ?? { [CHAIN_ID]: VAULT },
-    ethPriceUsd: overrides.ethPriceUsd ?? 3000,
+    // Default pricer: $3000/ETH at 18 decimals → 0.001 ETH = $3 gross.
+    pricer: overrides.pricer ?? fixedPricer(3000, 18),
   }
 }
+
+// 0.001 ETH @ $3000 = $3 gross = 3_000_000 micro-USD (revenue). Credit is NET: × 0.70 default
+// funding = $2.10 = 2_100_000 µUSD ÷ 337 µUSD/impetus = 6231 impetus.
+const EXPECTED_GROSS_USD_FMV = 3_000_000n
+const EXPECTED_CREDIT_IMPETUS = 6231n
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
@@ -338,11 +376,11 @@ test('payment log with known anima: creates Depositum, issues Signum, marks proc
   assert.equal(deposita[0].ab, PAYER.toLowerCase())
   assert.equal(deposita[0].animaId, anima.id)
 
-  // Signum issued
+  // Signum issued — valor is NET impetus credits (after 0.70 funding), NOT the raw wei amount
   assert.equal(deps.signorum.issued.length, 1)
   assert.equal(deps.signorum.issued[0].forma, 'eth')
   assert.equal(deps.signorum.issued[0].animaId, anima.id)
-  assert.equal(deps.signorum.issued[0].valor, AMOUNT)
+  assert.equal(deps.signorum.issued[0].valor, EXPECTED_CREDIT_IMPETUS)
 
   // signumId linked back to depositum
   assert.equal(deposita[0].signumId, deps.signorum.issued[0].id)
@@ -592,7 +630,7 @@ const SANCTIONED = '0x5555555555555555555555555555555555555555'
 test('OFAC: blocked payer is quarantined (fractum), no Signum issued', async () => {
   const anima = makeAnima(SANCTIONED)
   const animae = makeAnimae(new Map([[SANCTIONED.toLowerCase(), anima]]))
-  const deps = makeDeps({ animae, sanctions: makeBlocklistScreen([SANCTIONED]) })
+  const deps = makeDeps({ animae, sanctions: blockingScreen([SANCTIONED]) })
 
   const body = makeWebhookBody([makePaymentLog({ payer: SANCTIONED })])
   const result = await handleAlchemyWebhook(makeReq(body), deps)
@@ -611,7 +649,7 @@ test('OFAC: blocked payer is quarantined (fractum), no Signum issued', async () 
 test('OFAC: clean payer flows normally under an active blocklist', async () => {
   const anima = makeAnima(PAYER)
   const animae = makeAnimae(new Map([[PAYER.toLowerCase(), anima]]))
-  const deps = makeDeps({ animae, sanctions: makeBlocklistScreen([SANCTIONED]) })
+  const deps = makeDeps({ animae, sanctions: blockingScreen([SANCTIONED]) })
 
   const body = makeWebhookBody([makePaymentLog({ payer: PAYER })])
   const result = await handleAlchemyWebhook(makeReq(body), deps)
@@ -624,7 +662,7 @@ test('OFAC: clean payer flows normally under an active blocklist', async () => {
 // 18. Blocked anonymous-deposit funder → leaf NOT inserted
 test('OFAC: blocked anonymous deposit funder is refused (no leaf)', async () => {
   const arcanumTree = makeArcanumTree()
-  const deps = makeDeps({ arcanumTree, sanctions: makeBlocklistScreen([SANCTIONED]) })
+  const deps = makeDeps({ arcanumTree, sanctions: blockingScreen([SANCTIONED]) })
 
   const body = makeWebhookBody([makeAnonDepositLog({ from: SANCTIONED })])
   const result = await handleAlchemyWebhook(makeReq(body), deps)
@@ -637,7 +675,7 @@ test('OFAC: blocked anonymous deposit funder is refused (no leaf)', async () => 
 // 19. Anonymous deposit with no tx.from → fail-CLOSED (no leaf), even with empty blocklist
 test('OFAC: anonymous deposit missing tx.from fails closed (no leaf)', async () => {
   const arcanumTree = makeArcanumTree()
-  const deps = makeDeps({ arcanumTree, sanctions: makeBlocklistScreen([]) })
+  const deps = makeDeps({ arcanumTree, sanctions: blockingScreen([]) })
 
   const body = makeWebhookBody([makeAnonDepositLog({ from: null })])
   const result = await handleAlchemyWebhook(makeReq(body), deps)
@@ -650,7 +688,7 @@ test('OFAC: anonymous deposit missing tx.from fails closed (no leaf)', async () 
 // 20. Clean anonymous deposit funder → leaf inserted
 test('OFAC: clean anonymous deposit funder is admitted (leaf inserted)', async () => {
   const arcanumTree = makeArcanumTree()
-  const deps = makeDeps({ arcanumTree, sanctions: makeBlocklistScreen([SANCTIONED]) })
+  const deps = makeDeps({ arcanumTree, sanctions: blockingScreen([SANCTIONED]) })
 
   const body = makeWebhookBody([makeAnonDepositLog({ from: PAYER })])
   const result = await handleAlchemyWebhook(makeReq(body), deps)
@@ -666,7 +704,7 @@ test('OFAC: blocked NFT sender creates no Testimonium', async () => {
   const anima = makeAnima(SANCTIONED)
   const animae = makeAnimae(new Map([[SANCTIONED.toLowerCase(), anima]]))
   const testimonia = makeTestimonia()
-  const deps = makeDeps({ animae, testimonia, sanctions: makeBlocklistScreen([SANCTIONED]) })
+  const deps = makeDeps({ animae, testimonia, sanctions: blockingScreen([SANCTIONED]) })
 
   const body = makeWebhookBody([makeNftLog({ from: SANCTIONED })])
   const result = await handleAlchemyWebhook(makeReq(body), deps)
@@ -674,6 +712,122 @@ test('OFAC: blocked NFT sender creates no Testimonium', async () => {
   assert.equal(result.status, 200)
   assert.equal(result.body.processed, 0)
   assert.equal(testimonia.store.length, 0)
+})
+
+// ── USD revenue booking + buy-points conversion (ADR-0013 §2/§4/§7) ───────────
+
+// 22. Known-anima deposit books GROSS revenue + credits NET impetus, linked to the Depositum
+test('revenue+credit: known-anima deposit books gross FMV and credits net impetus', async () => {
+  const anima = makeAnima(PAYER)
+  const animae = makeAnimae(new Map([[PAYER.toLowerCase(), anima]]))
+  const deps = makeDeps({ animae })
+
+  await handleAlchemyWebhook(makeReq(makeWebhookBody([makePaymentLog()])), deps)
+
+  // revenue = GROSS FMV
+  assert.equal(deps.redituum.rows.length, 1)
+  assert.equal(deps.redituum.rows[0].usdFmv, EXPECTED_GROSS_USD_FMV)
+  assert.equal(deps.redituum.rows[0].origo, 'crypto')
+  const depositum = [...deps.deposita.store.values()][0]
+  assert.equal(deps.redituum.rows[0].depositumId, depositum.id)
+  // credit = NET impetus (gross − funding haircut), NOT gross and NOT raw wei
+  assert.equal(deps.signorum.issued[0].valor, EXPECTED_CREDIT_IMPETUS)
+})
+
+// 23. Revenue is recognized at RECEIPT — booked even when no Anima is linked yet (§4)
+test('revenue: unknown-wallet deposit still books revenue (recognized at receipt, before linkage)', async () => {
+  const deps = makeDeps()  // no animae → deposit stays confirmatum, no Signum
+  await handleAlchemyWebhook(makeReq(makeWebhookBody([makePaymentLog()])), deps)
+
+  assert.equal(deps.signorum.issued.length, 0)          // not credited yet
+  assert.equal(deps.redituum.rows.length, 1)            // but revenue IS recognized
+  assert.equal(deps.redituum.rows[0].usdFmv, EXPECTED_GROSS_USD_FMV)
+})
+
+// 24. OFAC-quarantined (fractum) deposit books NO revenue — no value recognized on refused funds
+test('revenue: OFAC-blocked deposit books no revenue', async () => {
+  const anima = makeAnima(SANCTIONED)
+  const animae = makeAnimae(new Map([[SANCTIONED.toLowerCase(), anima]]))
+  const deps = makeDeps({ animae, sanctions: blockingScreen([SANCTIONED]) })
+
+  await handleAlchemyWebhook(makeReq(makeWebhookBody([makePaymentLog({ payer: SANCTIONED })])), deps)
+
+  assert.equal([...deps.deposita.store.values()][0].status, 'fractum')
+  assert.equal(deps.redituum.rows.length, 0)
+})
+
+// 25. Re-delivery of an uncredited (confirmatum) deposit: no duplicate Depositum, no double revenue
+test('revenue: webhook re-delivery does not duplicate the Depositum or double-count revenue', async () => {
+  const deps = makeDeps()  // unknown wallet → confirmatum, uncredited
+  const body = makeWebhookBody([makePaymentLog()])
+
+  await handleAlchemyWebhook(makeReq(body), deps)
+  await handleAlchemyWebhook(makeReq(body), deps)   // Alchemy re-delivers the same block
+
+  assert.equal([...deps.deposita.store.values()].length, 1)   // reused, not duplicated
+  assert.equal(deps.redituum.rows.length, 1)                  // idempotent on depositumId
+  assert.equal(await deps.redituum.trailingUsdRevenue(new Date()), EXPECTED_GROSS_USD_FMV)
+})
+
+// 26. Unpriceable deposit (no oracle): NOT credited and NOT booked — parked confirmatum, loud (no silent zero)
+test('revenue+credit: an unpriceable deposit is parked (no credit, no revenue), not credited at zero', async () => {
+  const anima = makeAnima(PAYER)
+  const animae = makeAnimae(new Map([[PAYER.toLowerCase(), anima]]))
+  const deps = makeDeps({ animae, pricer: nullPricer })
+
+  const result = await handleAlchemyWebhook(makeReq(makeWebhookBody([makePaymentLog()])), deps)
+
+  assert.equal(result.body.processed, 1)
+  assert.equal(deps.signorum.issued.length, 0)          // NOT credited — cannot value it
+  assert.equal([...deps.deposita.store.values()][0].status, 'confirmatum')  // parked for retry
+  assert.equal(deps.redituum.rows.length, 0)            // no revenue booked (loud, not a silent $0)
+})
+
+// 27. Anonymous deposit books revenue in aggregate (§7), with no depositumId
+test('revenue: clean anonymous deposit books revenue with no identity (§7)', async () => {
+  const arcanumTree = makeArcanumTree()
+  const deps = makeDeps({ arcanumTree })
+
+  await handleAlchemyWebhook(makeReq(makeWebhookBody([makeAnonDepositLog({ from: PAYER })])), deps)
+
+  assert.equal(arcanumTree.leaves.size, 1)
+  assert.equal(deps.redituum.rows.length, 1)
+  assert.equal(deps.redituum.rows[0].usdFmv, EXPECTED_GROSS_USD_FMV)
+  assert.equal(deps.redituum.rows[0].depositumId, undefined)   // anon: no Depositum
+})
+
+// 28. Per-asset funding override: a favored asset converts at PAR (1.0) — gross == net credit rate
+test('credit: a favored asset (funding override = 1.0) credits the full FMV, not the 0.7 haircut', async () => {
+  const FAVORED = '0x524cab2ec69124574082676e6f654a18df49a048'  // MiladyStation — override 10000 bps
+  const anima = makeAnima(PAYER)
+  const animae = makeAnimae(new Map([[PAYER.toLowerCase(), anima]]))
+  // Price this token at $3000/unit, 18 decimals, same amount → $3 gross; par funding → 3_000_000/337.
+  const deps = makeDeps({ animae, pricer: fixedPricer(3000, 18) })
+
+  const log = { ...makePaymentLog(), data: encodePaymentData(FAVORED, AMOUNT, 0n, 0n) }
+  await handleAlchemyWebhook(makeReq(makeWebhookBody([log])), deps)
+
+  assert.equal(deps.redituum.rows[0].usdFmv, 3_000_000n)          // gross unchanged
+  assert.equal(deps.signorum.issued[0].valor, 3_000_000n / 337n)  // 8902 — full value, no 0.7 haircut
+})
+
+// 29. LOAD-BEARING: a deposit quote agrees with what the webhook actually credits (same pricer).
+test('quote == credit: depositQuote.pointsQuoted equals the webhook-credited impetus for the same input', async () => {
+  const pricer = fixedPricer(3000, 18)
+  const anima = makeAnima(PAYER)
+  const animae = makeAnimae(new Map([[PAYER.toLowerCase(), anima]]))
+  const deps = makeDeps({ animae, pricer })
+
+  // What the webhook actually credits:
+  await handleAlchemyWebhook(makeReq(makeWebhookBody([makePaymentLog()])), deps)
+  const credited = deps.signorum.issued[0].valor.toString()
+
+  // What the quote endpoint promises for the same {chainId, token, amount}, via the SAME pricer:
+  const api = new CrystalApi({ pricer, depositAddress: VAULT } as unknown as CrystalApiDeps)
+  const q = await api.depositQuote({ chainId: CHAIN_ID, token: TOKEN, amount: AMOUNT.toString() })
+
+  assert.equal(q.pointsQuoted, credited)   // if these ever diverge, users get a different number than promised
+  assert.equal(q.pointsQuoted, '6231')
 })
 
 // 15. Throws internally → returns 500

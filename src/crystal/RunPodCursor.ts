@@ -7,6 +7,8 @@ import type { HospitiumStore, HostKey } from '../types/hospitium.js'
 import type { DeploymentumStore } from '../types/deploymentum.js'
 import type { Praefectus } from './Praefectus.js'
 import { getTrace } from '../lib/trace.js'
+import type { AuctorKey } from '../flow/types.js'
+import { ownerKeyOf } from './ownerKey.js'
 import { tierOf, impetusFor } from '../ledger/rates.js'
 import { isCompiledSpec } from './comfyrunnerClient.js'
 import { makeLogger } from '../lib/logger.js'
@@ -43,6 +45,10 @@ export interface RunPodClient {
      * Normal deployment: our server (e.g. https://api.noema.io/webhooks/runpod)
      * TEE deployment: the TEE pod's local endpoint. */
     webhook?: string
+    /** BYO-secrets Phase C: the per-job pod credential (minted at dispatch, bound to
+     *  `{actumId, ownerKey, exp}`). The runner presents it when fetching a `gated` weight
+     *  from our proxy. Omitted when no job-token secret is configured. */
+    jobToken?: string
     /** See ProvisioningContext — passed for hosting/economic bookkeeping. */
     provisioningContext?: ProvisioningContext
     /**
@@ -91,12 +97,19 @@ interface Config {
    * completor to use at emit time. Materia stays identity-blind.
    */
   hospitia?: HospitiumStore
+  /** BYO-secrets Phase C: mint the per-job pod credential bound to `{actumId, ownerKey, exp}`.
+   *  Injected (bound to `JOB_TOKEN_SECRET`) so the cursor stays decoupled from the crypto. Present
+   *  only when a job-token secret is configured; absent → no token minted (gated-weight path dark). */
+  mintJobToken?: (claims: { actumId: string; ownerKey: string; exp: number }) => string
+  /** TTL (ms) for a minted job token. Default 6h — long enough for a cold pod to boot, download,
+   *  and run; short enough that a leaked token expires with the job. */
+  jobTokenTtlMs?: number
 }
 
 export class RunPodCursor implements Cursor {
   constructor(
     private readonly client: RunPodClient,
-    private readonly compile: (modus: Modus, aditus: Record<string, unknown>, pinnedModels?: ModelRef[]) => Promise<{ hash: string; input: unknown }>,
+    private readonly compile: (modus: Modus, aditus: Record<string, unknown>, pinnedModels?: ModelRef[], ownerKey?: string) => Promise<{ hash: string; input: unknown }>,
     private readonly modorum: Modorum,
     private readonly actorum: Actorum,
     private readonly config: Config,
@@ -111,7 +124,29 @@ export class RunPodCursor implements Cursor {
     const modus = await this.modorum.find(actum.modusId, actum.modusVersiono)
     if (!modus) throw new Error(`Modus '${actum.modusId}' not found`)
 
-    const { hash, input } = await this.compile(modus, actum.aditus, actum.pinnedModels)
+    // Owner-scope compilation: private imports resolve for their owner (by trigger) and a private
+    // model id the runner doesn't own is refused. Identity is off-schema — from the trace (anima/
+    // commitment) or the actum's Bursa token (the purse that paid owns the run).
+    const runTrace = getTrace()
+    const runOwner: AuctorKey | undefined =
+      actum.bursaToken    ? { bursaToken: actum.bursaToken } :
+      runTrace?.animaId    ? { animaId:    runTrace.animaId }    :
+      runTrace?.commitment ? { commitment: runTrace.commitment } :
+      undefined
+    const runOwnerKey = runOwner ? ownerKeyOf(runOwner) : undefined
+    const { hash, input } = await this.compile(modus, actum.aditus, actum.pinnedModels, runOwnerKey)
+
+    // BYO-secrets Phase C: mint the per-job pod credential so the pod can fetch this owner's gated
+    // private weights through our proxy (the Compiler rewrote those urls + flagged them `gated`).
+    // Only when both a mint fn is configured AND the run has an owner (anon-no-purse runs can't own
+    // private gated imports, so they need no token). The pod presents it on `/internal/weights/:id`.
+    const jobToken = (this.config.mintJobToken && runOwnerKey)
+      ? this.config.mintJobToken({
+          actumId: actum.id,
+          ownerKey: runOwnerKey,
+          exp: Date.now() + (this.config.jobTokenTtlMs ?? 6 * 60 * 60 * 1000),
+        })
+      : undefined
 
     if (this.config.deployments) {
       await this.config.deployments.upsert({
@@ -169,6 +204,7 @@ export class RunPodCursor implements Cursor {
     const { id: externusJobId } = await client.submit({
       input,
       webhook: this.config.webhookUrl,
+      ...(jobToken ? { jobToken } : {}),
       provisioningContext: provCtx,
       onPodActive: async (newPodId) => {
         // Retry pod is now active — update so boot recovery and reconciliation see the right pod

@@ -1,5 +1,6 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { Upload } from '@aws-sdk/lib-storage'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import type { Readable } from 'node:stream'
 import type { R2Config } from './comfyrunnerClient.js'
 
@@ -32,6 +33,17 @@ export interface ObjectStore extends Uploader {
    * fall back to `put` when absent. `contentLength` is a hint (may be unknown).
    */
   putStream?(key: string, body: Readable, contentType: string, contentLength?: number): Promise<string>
+  /**
+   * Mint a short-lived presigned PUT URL so a browser can upload bytes straight to
+   * the bucket (bypassing the host). Returns the `signedUrl` to `PUT` to, plus the
+   * `publicUrl` the object will be reachable at afterwards. Optional — used by the
+   * storage/upload front door; callers that only server-side upload never need it.
+   */
+  getSignedUploadUrl?(
+    key: string,
+    contentType: string,
+    opts?: { expiresIn?: number },
+  ): Promise<{ signedUrl: string; publicUrl: string }>
 }
 
 /** The real uploader — Cloudflare R2 via the S3 API (same R2Config the pods use). */
@@ -50,8 +62,7 @@ export class R2Uploader implements ObjectStore {
     await this.s3.send(
       new PutObjectCommand({ Bucket: this.cfg.bucket, Key: key, Body: bytes, ContentType: contentType }),
     )
-    const base = (this.cfg.publicUrl ?? `${this.cfg.endpoint}/${this.cfg.bucket}`).replace(/\/$/, '')
-    return `${base}/${key}`
+    return this.publicUrlFor(key)
   }
 
   async del(key: string): Promise<void> {
@@ -67,6 +78,22 @@ export class R2Uploader implements ObjectStore {
       params: { Bucket: this.cfg.bucket, Key: key, Body: body, ContentType: contentType },
     })
     await upload.done()
+    return this.publicUrlFor(key)
+  }
+
+  /** Presigned PUT (S3 request-presigner). Short TTL (default 5 min) — the URL is
+   *  a one-shot upload grant, so it should expire well before it could be shared. */
+  async getSignedUploadUrl(
+    key: string,
+    contentType: string,
+    opts?: { expiresIn?: number },
+  ): Promise<{ signedUrl: string; publicUrl: string }> {
+    const cmd = new PutObjectCommand({ Bucket: this.cfg.bucket, Key: key, ContentType: contentType })
+    const signedUrl = await getSignedUrl(this.s3, cmd, { expiresIn: opts?.expiresIn ?? 300 })
+    return { signedUrl, publicUrl: this.publicUrlFor(key) }
+  }
+
+  private publicUrlFor(key: string): string {
     const base = (this.cfg.publicUrl ?? `${this.cfg.endpoint}/${this.cfg.bucket}`).replace(/\/$/, '')
     return `${base}/${key}`
   }

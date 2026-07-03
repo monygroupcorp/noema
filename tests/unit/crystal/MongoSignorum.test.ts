@@ -216,15 +216,15 @@ test('settle issues refund signum for delta when actualImpetus < total', async (
   assert.equal(b, 200n) // 300 - 100 = 200 refunded
 })
 
-test('settle refund signum has forma minted and auctor system:refund', async () => {
-  const s = await signorum.issue(makeSignum({ valor: 300n }))
+test('settle refund signum preserves source forma and is auctored settle:delta (Memory parity)', async () => {
+  const s = await signorum.issue(makeSignum({ valor: 300n }))   // forma: 'minted'
   await signorum.lock([s.id], 'actum-1')
   await signorum.settle([s.id], 100n, 'actum-1')
   const history = await signorum.history({ animaId: 'anima-abc' })
   const refund = history.find(s => s.status === 'valid')
   assert.ok(refund)
-  assert.equal(refund.forma, 'minted')
-  assert.equal(refund.auctor, 'system:refund')
+  assert.equal(refund.forma, 'minted')        // mirrors MemorySignorum: refund carries the source forma
+  assert.equal(refund.auctor, 'settle:delta')
   assert.equal(refund.valor, 200n)
 })
 

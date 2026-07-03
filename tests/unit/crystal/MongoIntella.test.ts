@@ -261,8 +261,8 @@ test('shim: triggerMap() finds v2 PRIVATE record only for owner animaId', async 
   // Without animaId — should NOT find
   const mapAnon = await intellae.triggerMap('flux')
   assert.equal(mapAnon.has('privateword'), false)
-  // With owner animaId — should find
-  const mapAlice = await intellae.triggerMap('flux', 'anima-alice')
+  // With the owner's ownerKey (namespaced `anima:<id>`, as the Compiler builds it) — should find
+  const mapAlice = await intellae.triggerMap('flux', 'anima:anima-alice')
   assert.ok(mapAlice.has('privateword'))
   const entry = mapAlice.get('privateword')![0]
   assert.equal(entry.access, 'private')

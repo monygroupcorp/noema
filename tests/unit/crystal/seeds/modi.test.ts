@@ -4,14 +4,21 @@ import {
   CANONICAL_MODI,
   MODUS_CHATGPT,
   MODUS_DALLE_III,
-  MODUS_JOYCAPTION,
+  MODUS_GPT_IMAGE_EDIT,
+  MODUS_OPENROUTER_CHAT,
   MODUS_LAYER_COMPOSITE,
   MODUS_FRAMES_TO_VIDEO,
   MODUS_AITOOLKIT_TRAINING,
 } from '../../../../src/crystal/seeds/modi.js'
 
-test('CANONICAL_MODI contains six entries', () => {
-  assert.equal(CANONICAL_MODI.length, 6)
+test('CANONICAL_MODI contains seven entries', () => {
+  assert.equal(CANONICAL_MODI.length, 7)
+})
+
+test('no canonical modus is still on the dropped huggingface ministerium', () => {
+  for (const m of CANONICAL_MODI) {
+    assert.notEqual(m.ministerium, 'huggingface', `${m.id} must not dangle on huggingface`)
+  }
 })
 
 test('aitoolkit-training modus is a canon training flow (ministerium aitoolkit, sync, duration-billed)', () => {
@@ -56,9 +63,23 @@ test('dalle modus has ministerium openai and impetusFixum 50n', () => {
   assert.equal(MODUS_DALLE_III.impetusFixum, 50n)
 })
 
-test('joycaption modus has ministerium huggingface and __spaceUrl in aditus', () => {
-  assert.equal(MODUS_JOYCAPTION.ministerium, 'huggingface')
-  assert.ok('__spaceUrl' in MODUS_JOYCAPTION.aditus)
+test('chatgpt / dalle declare their ApiCursor capability via __capability', () => {
+  assert.equal(MODUS_CHATGPT.aditus.__capability?.default, 'chat')
+  assert.equal(MODUS_DALLE_III.aditus.__capability?.default, 'image')
+})
+
+test('gpt-image-edit modus is openai imageEdit with image+prompt in, image out', () => {
+  assert.equal(MODUS_GPT_IMAGE_EDIT.ministerium, 'openai')
+  assert.equal(MODUS_GPT_IMAGE_EDIT.aditus.__capability?.default, 'imageEdit')
+  assert.equal(MODUS_GPT_IMAGE_EDIT.aditus.image?.required, true)
+  assert.equal(MODUS_GPT_IMAGE_EDIT.aditus.prompt?.required, true)
+  assert.equal(MODUS_GPT_IMAGE_EDIT.exitus.image?.type, 'image')
+})
+
+test('openrouter chat modus proves the descriptor generalizes (new ministerium, chat capability)', () => {
+  assert.equal(MODUS_OPENROUTER_CHAT.ministerium, 'openrouter')
+  assert.equal(MODUS_OPENROUTER_CHAT.aditus.__capability?.default, 'chat')
+  assert.equal(MODUS_OPENROUTER_CHAT.exitus.response?.type, 'text')
 })
 
 test('all modi have canonica true', () => {

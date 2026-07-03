@@ -172,10 +172,17 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	// Debug log endpoint — readable from outside the WG tunnel (port 8080 is publicly proxied).
+	// Debug log endpoint — reachable through the publicly proxied :8080, so when the
+	// platform issued a per-session RUNNER_TOKEN it is required as a Bearer token
+	// (the platform's wglog proxy sends it). No token = local dev, open.
 	// Exposes /tmp/wg-server.log: everything tee-wg-server has printed to stdout/stderr.
 	// ?tail=N returns only the last N lines (default: all).
+	runnerToken := os.Getenv("RUNNER_TOKEN")
 	mux.HandleFunc("/debug/wglog", func(w http.ResponseWriter, r *http.Request) {
+		if runnerToken != "" && r.Header.Get("Authorization") != "Bearer "+runnerToken {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		data, err := os.ReadFile("/tmp/wg-server.log")
 		if err != nil {
 			http.Error(w, "log not found: "+err.Error(), http.StatusNotFound)

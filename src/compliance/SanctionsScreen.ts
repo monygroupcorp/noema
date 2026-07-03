@@ -11,15 +11,16 @@
 // the address is visible, and never need it again.
 //
 // OFAC compliance: do not process value transfers for wallets on the SDN list.
-// OFAC publishes specific sanctioned crypto addresses (the Tornado Cash
-// designations are the governing precedent). The screenable list is a finite,
-// published dataset — so this ships a REAL Set-backed implementation, not a
-// stub. The seam that remains is keeping the list FRESH: the authoritative SDN
-// set must be synced (see scripts/refresh-ofac-blocklist.ts) before go-live and
-// on a schedule after. See docs/legal + memory project_compliance_posture.
 //
-// Mirrors the ModerationGate seam (src/crystal/ModerationGate.ts): an interface
-// injected like the deterministic engines, with a real impl behind it.
+// This PUBLIC file ships only the PORT + the permissive stub. The real Set-backed
+// screen (`makeBlocklistScreen`) + the SDN list loader are the compliance abuse
+// surface and are therefore PRIVATE (ADR-0012 §49 — not published): they live in
+// the gitignored `src/private/compliance` module, injected at deploy. `src/index.ts`
+// loads the private `configureSanctionsScreen` via a guarded dynamic import and
+// falls back to `permissiveSanctionsScreen` when it is absent (a public build).
+//
+// Mirrors the ModerationGate seam (src/crystal/ModerationGate.ts): a public port +
+// public stub, with the real impl injected privately behind it.
 // =============================================================================
 
 /** A screening verdict: clear, or blocked with a reason. */
@@ -32,29 +33,6 @@ export interface SanctionsScreen {
    *   normalize to lowercase before comparison.
    */
   screen(address: string): Promise<SanctionsVerdict>
-}
-
-/**
- * Real Set-backed screen over an explicit blocklist (the OFAC SDN crypto-address
- * set). Addresses are normalized to lowercase 0x-hex on construction, so callers
- * may pass them in any case. Lookup is O(1); the async signature leaves room for
- * a future live oracle/API without a call-site change.
- */
-export function makeBlocklistScreen(addresses: Iterable<string>): SanctionsScreen {
-  const blocked = new Set<string>()
-  for (const a of addresses) {
-    const norm = a.trim().toLowerCase()
-    if (norm) blocked.add(norm)
-  }
-  return {
-    async screen(address: string): Promise<SanctionsVerdict> {
-      const norm = address.trim().toLowerCase()
-      if (blocked.has(norm)) {
-        return { ok: false, reason: `address ${norm} is on the OFAC SDN blocklist` }
-      }
-      return { ok: true }
-    },
-  }
 }
 
 /**

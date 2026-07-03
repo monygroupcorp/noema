@@ -228,6 +228,28 @@ test('invokeFlow by canon verb resolves CANON_VERBS default and returns a comple
   assert.deepEqual(run.exitus, { image: 'x' })
 })
 
+test('invokeFlow refuses a prompt the CSAM prompt guard rejects (content.refused, no dispatch)', async () => {
+  const { deps, dispatched } = makeDeps({
+    promptGuard: { async check() { return { ok: false, reason: 'sexual content involving minors is prohibited' } } },
+  })
+  const api = new CrystalApi(deps)
+  await assert.rejects(
+    () => api.invokeFlow(auctor, { modusId: 'sd1-5' }, { prompt: 'anything' }),
+    (err: unknown) => (err as { code?: string }).code === 'content.refused',
+  )
+  assert.equal(dispatched.modusId, undefined, 'nothing should have dispatched')
+})
+
+test('invokeFlow fails OPEN when the prompt guard itself throws (generation proceeds)', async () => {
+  const { deps, dispatched } = makeDeps({
+    promptGuard: { async check() { throw new Error('guard exploded') } },
+  })
+  const api = new CrystalApi(deps)
+  const run = await api.invokeFlow(auctor, { modusId: 'sd1-5' }, { prompt: 'hi' })
+  assert.equal(run.status, 'complete')
+  assert.equal(dispatched.modusId, 'sd1-5', 'a guard error must not block generation')
+})
+
 test('a consuetudinum-bound verb overrides the CANON default', async () => {
   const consuetudinum = new MemoryConsuetudinum()
   await consuetudinum.bind(auctor, 'make', 'verb-bound')

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type { Signum, Signa, Signorum } from '../types/significandi.js'
+import type { Signum, Signa, Signorum, Reservatio, Transferatio, SignumForma } from '../types/significandi.js'
+import { transferVia } from './transfer.js'
 
 export class MemorySignorum implements Signorum {
   private readonly store = new Map<string, Signum>()
@@ -52,6 +53,54 @@ export class MemorySignorum implements Signorum {
       const s = this.store.get(id)!
       this.store.set(id, { ...s, status: 'locked', actumId })
     }
+  }
+
+  async reserve(
+    by: { animaId: string } | { commitment: string },
+    amount: bigint,
+    actumId: string,
+  ): Promise<Reservatio> {
+    if (amount <= 0n) return { ok: true, signaIds: [], locked: 0n }
+
+    // Greedy, smallest-first — matches the historical selection order in ActumInceptor.
+    const candidates = this.forIdentity(by)
+      .filter(s => s.status === 'valid')
+      .sort((a, b) => (a.valor < b.valor ? -1 : 1))
+
+    const selected: string[] = []
+    let covered = 0n
+    for (const s of candidates) {
+      if (covered >= amount) break
+      // Guarded per-signum lock: only a still-valid signum can be taken (single-writer here,
+      // but the check mirrors the Mongo atomic-write contract so the two impls stay in step).
+      const cur = this.store.get(s.id)
+      if (!cur || cur.status !== 'valid') continue
+      this.store.set(s.id, { ...cur, status: 'locked', actumId })
+      selected.push(s.id)
+      covered += cur.valor
+    }
+
+    if (covered < amount) {
+      // Fail closed: release everything this call locked, report what was coverable.
+      for (const id of selected) {
+        const s = this.store.get(id)
+        if (s && s.status === 'locked' && s.actumId === actumId) {
+          this.store.set(id, { ...s, status: 'valid', actumId: undefined })
+        }
+      }
+      return { ok: false, available: covered }
+    }
+
+    return { ok: true, signaIds: selected, locked: covered }
+  }
+
+  transfer(
+    from: { animaId: string } | { commitment: string },
+    to: { animaId: string },
+    amount: bigint,
+    opts?: { auctor?: string; forma?: SignumForma; testis?: string; contextId?: string },
+  ): Promise<Transferatio> {
+    return transferVia(this, from, to, amount, opts)
   }
 
   async release(signaIds: string[]): Promise<void> {

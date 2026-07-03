@@ -17,6 +17,7 @@ function CreateForm({ onCreated }: { onCreated: (c: Collection) => void }) {
   const [total, setTotal] = useState(50);
   const [porta, setPorta] = useState('prompt');
   const [options, setOptions] = useState('');
+  const [review, setReview] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -25,13 +26,13 @@ function CreateForm({ onCreated }: { onCreated: (c: Collection) => void }) {
   const values = options.split(',').map((s) => s.trim()).filter(Boolean);
   const ready = !!modusId && total > 0 && values.length >= 2 && !busy;
 
-  async function submit() {
+  async function submit(draft: boolean) {
     if (!ready) return;
-    if (!confirm(`Start generating ${total} pieces? This runs on real compute and spends credits.`)) return;
+    if (!draft && !confirm(`Start generating ${total} pieces? This runs on real compute and spends credits.`)) return;
     setBusy(true); setErr(null);
     try {
       const { collection } = await api.createCollection({
-        modusId, total, nomen: nomen.trim() || undefined,
+        modusId, total, nomen: nomen.trim() || undefined, reviewEnabled: review, draft,
         tractus: [{ porta: porta.trim() || 'prompt', label: porta.trim() || 'prompt', valores: values.map((v) => ({ value: v, label: v })) }],
       });
       onCreated(collection);
@@ -60,8 +61,10 @@ function CreateForm({ onCreated }: { onCreated: (c: Collection) => void }) {
           <input className="cer-input" placeholder="a frost knight, an ember mage, an arcane oracle" value={options} onChange={(e) => setOptions(e.target.value)} /></label>
       </div>
       <div className="cc-foot">
+        <label className="cc-check"><input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} /> Review each piece before it counts</label>
         <span className="cc-note">{values.length >= 2 ? `${values.length} variations across ${total} pieces` : 'add at least two options'}</span>
-        <button className="btn" disabled={!ready} onClick={submit}>{busy ? 'Starting…' : <>Start collection <Ic name="arrow-right" /></>}</button>
+        <button className="btn ghost" disabled={!ready} onClick={() => submit(true)} title="Author traits + rules before spending">Save as draft</button>
+        <button className="btn" disabled={!ready} onClick={() => submit(false)}>{busy ? 'Starting…' : <>Start collection <Ic name="arrow-right" /></>}</button>
       </div>
       {err && <div className="cc-err">{err}</div>}
     </div>
@@ -70,6 +73,7 @@ function CreateForm({ onCreated }: { onCreated: (c: Collection) => void }) {
 
 function Card({ c }: { c: Collection }) {
   const active = c.status === 'pending' || c.status === 'running';
+  const draft = c.status === 'draft';
   return (
     <div className="collcard">
       <div className="coll-mosaic" style={{ background: collTile(c.id) }}>
@@ -81,7 +85,9 @@ function Card({ c }: { c: Collection }) {
         <div className="coll-stats mono">{c.completed.toLocaleString()} / {c.total.toLocaleString()} pieces{c.rejected ? ` · ${c.rejected} rejected` : ''}{c.failed ? ` · ${c.failed} failed` : ''}</div>
         <div className="coll-actions">
           <Link className="btn ghost" to={`/collections/${c.id}`}>Open hub</Link>
-          {active
+          {draft
+            ? <Link className="btn accent" to={`/collections/${c.id}/garden`}>Author draft →</Link>
+            : active
             ? <Link className="btn accent" to={`/collections/${c.id}/run`}>View run →</Link>
             : <Link className="btn accent" to={`/collections/${c.id}/export`}>Export &amp; publish →</Link>}
         </div>
@@ -114,7 +120,7 @@ export function Collections() {
           <div className="right"><button className="btn" onClick={() => setCreating((v) => !v)}><Ic name={creating ? 'x' : 'plus'} /> {creating ? 'Cancel' : 'new collection'}</button></div>
         </div>
 
-        {creating && <CreateForm onCreated={(c) => nav(`/collections/${c.id}`)} />}
+        {creating && <CreateForm onCreated={(c) => nav(c.status === 'draft' ? `/collections/${c.id}/garden` : `/collections/${c.id}`)} />}
 
         {err && <div className="warn">Couldn’t load collections: {err}</div>}
 

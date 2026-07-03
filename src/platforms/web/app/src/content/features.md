@@ -15,13 +15,13 @@
 
 ### 1. Private Compute
 
-**Headline:** The only AI compute you can verify.
+**Headline:** Transit-private compute. We're out of the data path.
 
-**Body:** A private session tunnels directly from your browser to the GPU. Our servers never receive your prompts, your model choice, or your outputs. We see a session opened and a session ended. That's it — not because we promise not to look, but because the architecture doesn't give us a path to look.
+**Body:** A private session tunnels directly from your browser to a single-tenant GPU pod, over WireGuard keys generated on your device. Our servers never receive your prompts, your model choice, or your outputs. We see a session opened, GPU-hours metered, and a session ended. That's it — not because we promise not to look, but because the architecture doesn't give us a path to look.
 
-When running on TEE hardware, you can cryptographically verify this claim. The pod generates a hardware-signed attestation report. Your browser checks it. If the hash matches the published image, you know the unmodified runner is what's executing — and that neither we nor the compute provider can inspect your session.
+A hardware-sealed tier is in development: confidential-compute GPUs whose attestation your browser verifies — a hardware-signed report proving the published, unmodified runner is what's executing, with the tunnel key bound to the enclave — so that neither we nor the compute provider can inspect your session. Until it ships, the compute provider hosting the pod is inside the trust boundary; we are not.
 
-**CTA:** Learn how TEE works →
+**CTA:** Learn how private sessions work →
 
 ---
 
@@ -97,7 +97,7 @@ No other AI platform has this. Venice's "crypto = private" angle does the opposi
 
 **Headline:** One OpenAI-compatible API. Full privacy options.
 
-**Body:** Every modality through a single API: text, image, video, audio, embeddings. Swap out your OpenAI base URL and your existing stack works. Add a `x-bursa-token` header for anonymous billing, or use a session key. TEE sessions available via `/v1/sessions/tee`.
+**Body:** Every modality through a single API: text, image, video, audio, embeddings. Swap out your OpenAI base URL and your existing stack works. Add a `x-bursa-token` header for anonymous billing, or use a session key. Private sessions available via `/v1/sessions/tee`.
 
 **CTA:** API docs →
 
@@ -105,12 +105,12 @@ No other AI platform has this. Venice's "crypto = private" angle does the opposi
 
 ## Privacy tier comparison (inline table for features page)
 
-| | Standard API | TEE Private Session | TEE + E2EE (coming) |
+| | Standard API | Private Session (transit-private) | Hardware-sealed (coming) |
 |---|---|---|---|
 | Prompts reach our servers | Yes | No | No |
 | We know which model you used | Yes | No | No |
 | Content logged | No | N/A — never received | N/A |
 | Credit trail anonymous | Optional (Bursa) | Optional (Bursa) | Optional (Bursa) |
-| Hardware-verifiable | No | Yes | Yes |
-| Client-side encryption | No | No | Yes |
-| Web search, memory | Yes | Yes | No (plaintext req.) |
+| Compute provider in trust boundary | Yes | Yes | No — confidential compute |
+| Hardware-verifiable in browser | No | No | Yes — attestation |
+| Web search, memory | Yes | Yes | Yes |

@@ -16,7 +16,9 @@
 import jwt, { type JwtPayload } from 'jsonwebtoken'
 import type { AnimaStore } from '../../types/anima.js'
 import type { PersonaStore, PersonaGenus } from '../../types/persona.js'
+import type { IssuerStore } from '../../types/issuer.js'
 import type { CredentialAcceptors } from './IdentityResolver.js'
+import { AgentJwtVerifier, type JwksFetch } from './AgentJwtVerifier.js'
 
 export interface AcceptorDeps {
   personae: Pick<PersonaStore, 'findByExternus' | 'findOrCreate'>
@@ -27,10 +29,23 @@ export interface AcceptorDeps {
   verifyApiKeyToAccountId?: (apiKey: string) => Promise<string | null>
   /** Verify a web3 sig bundle → the signer address, or null. Injected. */
   verifyWeb3ToAddress?: (w: { address: string; signature: string; nonce: string }) => Promise<string | null>
+  /** Trusted-issuer registry for federated (JWKS) SSO. Absent → no federated acceptor. */
+  issuers?: Pick<IssuerStore, 'findByIssuerId'>
+  /** Injected JWKS fetch (defaults to global fetch inside the verifier). */
+  jwksFetch?: JwksFetch
+  /** Parsed `AGENT_JWKS_OVERRIDE` (host → base-url) for the JWKS acceptor. */
+  jwksOverride?: Record<string, string>
+}
+
+/** The federated persona externusId for a verified `(iss, sub)` — issuer-namespaced
+ *  so subjects never collide across issuers. Shared by the JWKS acceptor and the
+ *  agent-provisioning compat route so re-auth lands on the same Anima. */
+export function federatedExternusId(iss: string, sub: string): string {
+  return `${iss}::${sub}`
 }
 
 /** Find the anima behind a VERIFIED external identity, or mint one on first sight. */
-async function resolveOrCreateAnima(
+export async function resolveOrCreateAnima(
   personae: AcceptorDeps['personae'],
   animae: AcceptorDeps['animae'],
   genus: PersonaGenus,
@@ -44,8 +59,33 @@ async function resolveOrCreateAnima(
 }
 
 export function makeCredentialAcceptors(deps: AcceptorDeps): CredentialAcceptors {
-  const { personae, animae, jwtSecret, verifyApiKeyToAccountId, verifyWeb3ToAddress } = deps
+  const { personae, animae, jwtSecret, verifyApiKeyToAccountId, verifyWeb3ToAddress, issuers } = deps
+
+  // Federated SSO acceptor — built only when a trusted-issuer registry is wired.
+  // A verified assertion lands as a `'federated'` persona keyed by `<iss>::<sub>`
+  // (issuer-namespaced so subjects never collide across issuers), minting an anima
+  // on first sight exactly like the web/api paths. Verification failures throw
+  // their own ApiError (401/503) up through the resolver — they do NOT return null.
+  const agentVerifier = issuers
+    ? new AgentJwtVerifier({
+        issuers,
+        ...(deps.jwksFetch ? { fetchFn: deps.jwksFetch } : {}),
+        ...(deps.jwksOverride ? { jwksOverride: deps.jwksOverride } : {}),
+      })
+    : undefined
+
   return {
+    verifyAgentJwt: agentVerifier
+      ? async (token: string): Promise<string | null> => {
+          const result = await agentVerifier.verify(token)
+          if (!result) return null   // not a registered federated issuer → try the next acceptor
+          const { payload, issuer } = result
+          const sub = typeof payload.sub === 'string' ? payload.sub : undefined
+          if (!sub) return null
+          return resolveOrCreateAnima(personae, animae, 'federated', federatedExternusId(issuer.issuerId, sub))
+        }
+      : undefined,
+
     verifyJwt: jwtSecret
       ? async (token: string): Promise<string | null> => {
           let payload: JwtPayload | string
@@ -55,6 +95,13 @@ export function makeCredentialAcceptors(deps: AcceptorDeps): CredentialAcceptors
             return null
           }
           if (typeof payload === 'string') return null
+          // Fiat-auth session tokens (authRouter) carry the resolved `animaId` DIRECTLY in
+          // `sub` under `typ:'session'`. Return it as-is — the `'password'` persona already
+          // established this anima at register/verify, so re-resolving under `'web'` would
+          // split the account in two (docs/spec/fiat-auth.md §trap).
+          if (payload.typ === 'session') {
+            return typeof payload.sub === 'string' ? payload.sub : null
+          }
           const ext = payload.userId ?? payload.sub ?? payload._id ?? payload.id
           if (!ext) return null
           return resolveOrCreateAnima(personae, animae, 'web', String(ext))

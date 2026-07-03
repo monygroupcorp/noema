@@ -65,6 +65,16 @@ export const Errors = {
   notFoundTeam: (id: string) => new ApiError('not_found.team', `Team '${id}' not found`, 404),
   notFoundEdition: (id: string) => new ApiError('not_found.edition', `Edition '${id}' not found`, 404),
   notFoundModel: (id: string) => new ApiError('not_found.model', `Model '${id}' not found`, 404),
+  /** A model can't be promoted to the public (commercial) catalog under its license. Private use is
+   *  unaffected. 403 — a policy refusal, not a malformed request. */
+  licenseRestricted: (message: string) => new ApiError('license.restricted', message, 403),
+  /** A prompt was refused by the input CSAM guard. 403 — a policy refusal, not a malformed request. */
+  contentRefused: (message: string) => new ApiError('content.refused', message, 403),
+  /** A gated model import needs a connected BYO secret for `provider` (Civitai/HF). 422 — the request
+   *  is well-formed but a precondition (a connected token) is unmet. `details.provider` drives the
+   *  frontend deep-link to Profile → Connected accounts (BYO-secrets F2). */
+  secretRequired: (provider: string, message?: string) =>
+    new ApiError('secret.required', message ?? `Connect a ${provider} token to import this gated model`, 422, { details: { provider } }),
   notFoundAdapter: (key: string) => new ApiError('not_found.adapter', `Publication destination '${key}' is not available`, 404),
   insufficientSigna: (details?: Record<string, unknown>) =>
     new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
@@ -75,5 +85,8 @@ export const Errors = {
     new ApiError('capacity.no_pods', 'No GPU capacity available to provision a studio', 503, { retryable: true, retryAfter: 30, ...(details ? { details } : {}) }),
   /** The deployment has no studio-provisioning rail wired (no Procurator). */
   studioUnavailable: () => new ApiError('internal.unavailable', 'Studio provisioning is not available on this deployment', 503, { retryable: true }),
+  depositUnavailable: () => new ApiError('internal.unavailable', 'Deposit pricing is not available on this deployment (no price oracle configured)', 503, { retryable: true }),
+  reportUnavailable: () => new ApiError('internal.unavailable', 'The revenue report is not available on this deployment (no revenue book configured)', 503, { retryable: true }),
+  priceUnavailable: (message = 'Could not price this asset — it is not supported or has no available price') => new ApiError('deposit.price_unavailable', message, 422),
   internal: (message = 'Internal error') => new ApiError('internal.error', message, 500, { retryable: true }),
 } as const

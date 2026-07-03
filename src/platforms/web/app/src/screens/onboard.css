@@ -43,3 +43,18 @@
 @media (max-width:620px){
   .auth-doors{grid-template-columns:1fr}
 }
+
+/* email/password entry — the inline form inside Door A + the standalone token screens.
+   Reuses the door frame; adds only what a form needs (headings, inputs, alt links). */
+.auth-token{max-width:400px;width:100%;margin-top:34px;text-align:left}
+.auth-token h2{font-size:18px;font-weight:600;margin:0;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
+.auth-token h2 svg.lucide{width:17px;height:17px;color:var(--accent)}
+.door .byo-input{width:100%}
+.auth-alt{margin-top:8px;font-size:12.5px;color:var(--muted);text-align:center;line-height:1.6}
+.auth-alt a{color:var(--accent-soft);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.auth-note{margin-top:8px;font-size:11px;line-height:1.5;color:var(--faint)}
+/* the inline auth form swaps in over Door A's three buttons */
+.door-auth{display:flex;flex-direction:column;gap:10px}
+.door-auth .link-row{display:flex;justify-content:space-between;font-size:12px}
+.door-auth .link-row a,.door-auth .link-row button.linkish{color:var(--accent-soft);text-decoration:underline;
+  text-underline-offset:2px;cursor:pointer;background:none;border:0;font:inherit;padding:0}

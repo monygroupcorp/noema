@@ -43,6 +43,11 @@ export class MongoEditionum implements Editionum {
       status: 'published',
       visibility: filter?.visibility ?? 'feed',
       ...(filter?.destination !== undefined ? { destination: filter.destination } : {}),
+      // Author scope keeps the public clamp (published + public visibility above) — it
+      // narrows to one creator/agent, never exposes their private/unlisted editions.
+      ...(filter?.author !== undefined ? authorQuery(filter.author) : {}),
+      // Multi-author scope (collection gallery): any of these identified animaIds.
+      ...(filter?.authorAnimaIds !== undefined ? { 'by.animaId': { $in: filter.authorAnimaIds } } : {}),
     }
     let cursor = this.col.find(query).sort({ natum: -1 })
     if (filter?.limit !== undefined) cursor = cursor.limit(filter.limit)
@@ -50,9 +55,20 @@ export class MongoEditionum implements Editionum {
     return docs.map((d) => fromDoc(d as Record<string, unknown>))
   }
 
+  async listHeld(by?: Editio['by']): Promise<Editiones> {
+    // The review queue: editions the gate held (reviewOutcome:'pending'). Author-scoped
+    // when `by` is given (a creator's own held items), else the full admin queue.
+    const query: Record<string, unknown> = {
+      reviewOutcome: 'pending',
+      ...(by !== undefined ? authorQuery(by) : {}),
+    }
+    const docs = await this.col.find(query).sort({ natum: -1 }).toArray()
+    return docs.map((d) => fromDoc(d as Record<string, unknown>))
+  }
+
   async update(
     id: string,
-    patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody'>>,
+    patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody' | 'reviewOutcome' | 'leasedUntil'>>,
   ): Promise<Editio> {
     const result = await this.col.findOneAndUpdate(
       { id },
@@ -68,7 +84,13 @@ export class MongoEditionum implements Editionum {
     // `leasedUntil` + bumping `attempts` in the same findOneAndUpdate is the lock —
     // a competing worker's identical query won't match a freshly-leased row.
     const result = await this.col.findOneAndUpdate(
-      { status: 'pending', $or: [{ leasedUntil: { $exists: false } }, { leasedUntil: { $lte: now } }] },
+      {
+        status: 'pending',
+        // Skip items held for human review (reviewOutcome:'pending') so a hold does not
+        // re-scan every pass; an admin approval sets it to 'approved' → claimable again.
+        reviewOutcome: { $ne: 'pending' },
+        $or: [{ leasedUntil: { $exists: false } }, { leasedUntil: { $lte: now } }],
+      },
       { $set: { leasedUntil: new Date(now.getTime() + leaseMs), mutatum: now }, $inc: { attempts: 1 } },
       { returnDocument: 'after', sort: { natum: 1 } },
     )

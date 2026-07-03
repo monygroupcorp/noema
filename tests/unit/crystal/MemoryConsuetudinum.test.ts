@@ -70,3 +70,27 @@ test('MemoryConsuetudinum — verb rebinds and affines never collide on the same
   assert.equal(await store.resolve(owner, 'make'), 'sd1-5', 'verb rebind intact')
   assert.deepEqual(await store.resolveAffines(owner, 'make'), { steps: 99 }, 'affines intact')
 })
+
+test('MemoryConsuetudinum — appearance + generatio round-trip, replace, owner-isolated', async () => {
+  const store = new MemoryConsuetudinum()
+  const owner = { commitment: 'c-1' }
+  assert.equal(await store.resolveAppearance(owner), undefined)
+  await store.setAppearance(owner, { accent: '#fff', look: 'n64' })
+  assert.deepEqual(await store.resolveAppearance(owner), { accent: '#fff', look: 'n64' })
+  await store.setAppearance(owner, { accent: '#000' }) // replaces
+  assert.deepEqual(await store.resolveAppearance(owner), { accent: '#000' })
+
+  await store.setGeneratio(owner, { style: 'cinematic', negativePrompt: 'blurry' })
+  assert.deepEqual(await store.resolveGeneratio(owner), { style: 'cinematic', negativePrompt: 'blurry' })
+  assert.equal(await store.resolveGeneratio({ commitment: 'c-2' }), undefined, 'owner isolation')
+})
+
+test('MemoryConsuetudinum — listBindings returns every verb override, that owner only', async () => {
+  const store = new MemoryConsuetudinum()
+  const owner = { animaId: 'anima-1' }
+  await store.bind(owner, 'make', 'flux-schnell')
+  await store.bind(owner, 'chat', 'modus.chatgpt')
+  await store.bind({ animaId: 'other' }, 'make', 'sd1-5')
+  const bindings = (await store.listBindings(owner)).sort((a, b) => a.verb.localeCompare(b.verb))
+  assert.deepEqual(bindings, [{ verb: 'chat', modusId: 'modus.chatgpt' }, { verb: 'make', modusId: 'flux-schnell' }])
+})

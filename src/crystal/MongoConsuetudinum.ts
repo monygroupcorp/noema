@@ -1,6 +1,6 @@
 import { Collection } from 'mongodb'
 import type { AuctorKey } from '../flow/types.js'
-import type { Consuetudinum } from '../types/consuetudo.js'
+import type { Consuetudinum, Appearance, Generatio, Binding } from '../types/consuetudo.js'
 
 /** Flatten the AuctorKey discriminant for storage (mirrors MongoVestigiorum). */
 function auctorKeyDoc(owner: AuctorKey): { animaId?: string; commitment?: string; bursaToken?: string } {
@@ -50,6 +50,40 @@ export class MongoConsuetudinum implements Consuetudinum {
     await this.col.updateOne(
       { ...auctorKeyQuery(owner), modusId, verb: null },
       { $set: { auctorKey: auctorKeyDoc(owner), verb: null, modusId, affines, mutatum: new Date() } },
+      { upsert: true },
+    )
+  }
+
+  // Verb-rebind docs carry a string `verb`; the affines/appearance/generatio docs do not.
+  async listBindings(owner: AuctorKey): Promise<Binding[]> {
+    const docs = await this.col.find({ ...auctorKeyQuery(owner), verb: { $type: 'string' } }).toArray()
+    return docs.map((d) => ({ verb: d.verb as string, modusId: d.modusId as string }))
+  }
+
+  // Appearance + generatio are singleton docs per owner, discriminated by `kind`
+  // (affines docs have no `kind`, so the queries never collide).
+  async resolveAppearance(owner: AuctorKey): Promise<Appearance | undefined> {
+    const doc = await this.col.findOne({ ...auctorKeyQuery(owner), kind: 'appearance' })
+    return doc ? (doc.appearance as Appearance) : undefined
+  }
+
+  async setAppearance(owner: AuctorKey, appearance: Appearance): Promise<void> {
+    await this.col.updateOne(
+      { ...auctorKeyQuery(owner), kind: 'appearance' },
+      { $set: { auctorKey: auctorKeyDoc(owner), kind: 'appearance', appearance, mutatum: new Date() } },
+      { upsert: true },
+    )
+  }
+
+  async resolveGeneratio(owner: AuctorKey): Promise<Generatio | undefined> {
+    const doc = await this.col.findOne({ ...auctorKeyQuery(owner), kind: 'generatio' })
+    return doc ? (doc.generatio as Generatio) : undefined
+  }
+
+  async setGeneratio(owner: AuctorKey, generatio: Generatio): Promise<void> {
+    await this.col.updateOne(
+      { ...auctorKeyQuery(owner), kind: 'generatio' },
+      { $set: { auctorKey: auctorKeyDoc(owner), kind: 'generatio', generatio, mutatum: new Date() } },
       { upsert: true },
     )
   }

@@ -191,6 +191,12 @@ export interface Intella {
    */
   ownerAnimaId?: string
   /**
+   * Generic owner key (`ownerKeyOf(auctor)` — `anima:<id>` / `bursa:<hash>` / `commitment:<hash>`).
+   * Set on NEW private imports so a NON-anima owner (a Bursa purse) can own + resolve a private
+   * model. `ownerAnimaId` stays populated when the owner is an anima (display + legacy resolution).
+   */
+  ownerKey?: string
+  /**
    * Default application weight when none is specified by the user.
    * Range: 0.0–2.0. Typical values: 0.6–1.0.
    * Users can override with word:weight syntax or dot/exclamation modifiers.
@@ -232,6 +238,21 @@ export interface Intella {
    */
   provenance?: { repo: string; base?: string }
 
+  /**
+   * License id of this model (e.g. 'apache-2.0', 'openrail-m', 'flux-1-dev-nc', 'krea-community',
+   * 'unknown'). For imports: the artifact's own license folded with its base's (most-restrictive).
+   * Display + audit; the commercial-catalog verdict lives in `commercialUse`.
+   */
+  license?: string
+  /**
+   * Commercial-catalog eligibility, fail-closed. `familia` collapses license-distinct variants
+   * (FLUX schnell=Apache vs dev=Non-Commercial both → 'flux'), so this is a SEPARATE axis from
+   * `familia`. Only 'yes' clears the public (commercial) catalog; 'no'/'conditional'/'unknown' are
+   * refused at PUBLIC PROMOTION — a PRIVATE import for personal use is unaffected. Set at import
+   * from the base license register + the origin's stated permission (see modelLicense.ts).
+   */
+  commercialUse?: 'yes' | 'no' | 'conditional' | 'unknown'
+
   /** Discovery/classification tags (e.g. base family 'flux'/'sd15', 'trained'). The catalog derives
    *  a model's base family from these (the import sets them; canonical seeds set them directly). */
   tags?: Array<{ tag: string; source?: string }>
@@ -255,12 +276,20 @@ export interface Intellarum {
   /** Returns only platform-canonical (canonica: true) intellae */
   canonical(): Promise<Intellae>
   /**
+   * List the models a given owner privately holds (imports + trained LoRAs), newest first.
+   * Owner-scoped counterpart to `canonical()` — backs a "my models" listing so an importer can
+   * actually see/manage what they brought in (a private import is resolvable by trigger but
+   * otherwise invisible on the public catalog). Optional: fakes/read-only stores may omit it
+   * (the facade falls back to filtering `list()`).
+   */
+  listByOwner?(ownerKey: string, genus?: IntellaGenus): Promise<Intellae>
+  /**
    * Resolve all LoRA intellae that match a trigger word and are compatible
    * with the given model FAMILY (via `familia` — exact string equality).
-   * animaId scopes results to public + private LoRAs the user can access.
-   * Absent animaId returns public LoRAs only.
+   * ownerKey (`ownerKeyOf(auctor)` — anima OR Bursa purse) scopes results to public +
+   * private LoRAs that owner can access. Absent ownerKey returns public LoRAs only.
    */
-  findByTrigger(trigger: string, familia: string, animaId?: string): Promise<Intellae>
+  findByTrigger(trigger: string, familia: string, ownerKey?: string): Promise<Intellae>
   /**
    * Bulk-load the trigger map for a model FAMILY: every LoRA the caller can
    * access (public + their own private) whose `familia` matches, keyed by
@@ -274,7 +303,7 @@ export interface Intellarum {
    * resolve only flux LoRAs. (Composite compilation is a future task; the
    * signature is family-keyed now so it plugs in with no rework.)
    */
-  triggerMap(familia: string, animaId?: string): Promise<Map<string, Intellae>>
+  triggerMap(familia: string, ownerKey?: string): Promise<Map<string, Intellae>>
   /**
    * Set a model's resolvability (`access`). The publishing reconciler (§5d) calls
    * this so `Intella.access` DERIVES from its `Editio` — a model becomes resolvable
@@ -292,6 +321,12 @@ export interface Intellarum {
   /** Remove a download source by `uri` — the inverse of `addSource`, called when an
    *  our-bucket model publish is retracted (the hosted copy is gone). Optional. */
   removeSource?(id: string, uri: string): Promise<Intella | null>
+  /**
+   * Set a model's `license` + `commercialUse` verdict — the admin license-clearance/backfill seam
+   * (going-public review). Lets an operator correct a misclassified or unclassified model (e.g. a
+   * legacy import, or one cleared after taking out a commercial license) so the public-catalog gate
+   * lets it through. Optional: fakes/read-only stores may omit it. */
+  setLicense?(id: string, patch: { license?: string; commercialUse?: 'yes' | 'no' | 'conditional' | 'unknown' }): Promise<Intella | null>
 }
 
 // =============================================================================

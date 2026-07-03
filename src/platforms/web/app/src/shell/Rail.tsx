@@ -1,6 +1,7 @@
-import { Fragment } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { Ic } from '../lib/icons';
+import { api } from '../lib/api';
 import { useIdentity } from '../state/identity';
 import { IDENTITY_PRIV } from '../lib/idents';
 import { Chip } from './Chip';
@@ -34,6 +35,13 @@ const NAV: NavSection[] = [
 export function Rail() {
   const { ident } = useIdentity();
   const who = IDENTITY_PRIV[ident.funding];
+  // Moderation nav appears only for the platform reviewer (server-authoritative me.admin).
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api.getMe().then((me) => { if (live) setAdmin(!!me.admin); }).catch(() => { /* not admin */ });
+    return () => { live = false; };
+  }, []);
   return (
     <aside className="rail">
       <div className="brand">
@@ -52,6 +60,14 @@ export function Rail() {
             ))}
           </Fragment>
         ))}
+        {admin && (
+          <Fragment key="admin">
+            <div className="lbl">Admin</div>
+            <NavLink to="/admin/review" className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+              <span className="ico"><Ic name="eye" /></span> Feed review
+            </NavLink>
+          </Fragment>
+        )}
       </nav>
 
       {/* pinned bottom: funding · settings · the account avatar (sign-in state) */}

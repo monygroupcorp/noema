@@ -38,6 +38,19 @@ async function j<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Thrown when the BYO-secret store isn't configured server-side (SECRETA_MASTER_KEY unset).
+// The backend answers the connect/disconnect endpoints with an "not available on this
+// deployment" internal error; the UI treats this as "unavailable", not a real failure.
+export class SecretsUnavailableError extends Error {}
+async function jSecret(res: Response): Promise<SecretView> {
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    if (/not available on this deployment/i.test(text)) throw new SecretsUnavailableError('BYO secrets are unavailable here');
+    throw new Error(`${res.status} ${text}`);
+  }
+  return res.json() as Promise<SecretView>;
+}
+
 // Anonymous self-asserting spend identity (arcanum commitment). Stable per browser session.
 // For quotes it just identifies the caller; real spend is validated downstream against a funded note.
 export function commitment(): string {
@@ -51,46 +64,93 @@ export function commitment(): string {
   return c;
 }
 
-const anonHeaders = () => ({ 'content-type': 'application/json', 'x-commitment': commitment() });
+// ── Real fiat session (JWT) — layered OVER the anon commitment ──────────────
+// A logged-in user's session token is stored here; when present it is sent as
+// `Authorization: Bearer <token>` and the backend resolves it to an animaId, so
+// every /v1 call becomes identified with no other change. Absent → anon commitment.
+const SESSION_KEY = 'noema-session';
+export function getSession(): string | null { return localStorage.getItem(SESSION_KEY); }
+export function setSession(token: string | null) {
+  if (token) localStorage.setItem(SESSION_KEY, token);
+  else localStorage.removeItem(SESSION_KEY);
+}
+
+// Write headers (POST/PUT/PATCH): content-type + bearer if signed in, else the anon commitment.
+const authHeaders = (): Record<string, string> => {
+  const s = getSession();
+  return { 'content-type': 'application/json', ...(s ? { authorization: `Bearer ${s}` } : { 'x-commitment': commitment() }) };
+};
+// Read headers (GET): bearer if signed in, else the anon commitment (no content-type).
+const readHeaders = (): Record<string, string> =>
+  getSession() ? { authorization: `Bearer ${getSession()}` } : { 'x-commitment': commitment() };
+
+// Session envelope returned by verify-email/login/refresh.
+export interface Session { token: string; tokenType: 'Bearer'; expiresIn: number }
+export interface AuthResult { session: Session; animaId: string }
+
+// Auth errors carry the backend's `error.code` so screens can branch (auth.email_unverified,
+// auth.invalid, auth.token_invalid, conflict.registration, input.malformed, …).
+export class AuthApiError extends Error {
+  code: string;
+  status: number;
+  constructor(code: string, message: string, status: number) {
+    super(message);
+    this.name = 'AuthApiError';
+    this.code = code;
+    this.status = status;
+  }
+}
+async function jAuth<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
+    throw new AuthApiError(body?.error?.code ?? `http.${res.status}`, body?.error?.message ?? res.statusText, res.status);
+  }
+  return res.json() as Promise<T>;
+}
 
 export const api = {
   listFlows: () => fetch('/v1/flows').then(j<{ flows: FlowSummary[] }>),
   getFlow: (id: string) => fetch(`/v1/flows/${id}`).then(j<FlowDescription>),
   quote: (body: Pick<RunRequest, 'modusId' | 'verb' | 'aditus'>) =>
-    fetch('/v1/runs/quote', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+    fetch('/v1/runs/quote', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ impetus: string; recipient?: string }>),
   createRun: (body: RunRequest) =>
-    fetch('/v1/runs', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+    fetch('/v1/runs', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ run: Run }>),
   getRun: (id: string) => fetch(`/v1/runs/${id}`).then(j<{ run: Run }>),
   // SSE — returns an EventSource the caller subscribes to.
   streamRun: (id: string) => new EventSource(`/v1/runs/${id}/stream`),
-  meStatus: () => fetch('/v1/me/status', { headers: { 'x-commitment': commitment() } }).then(j<MeStatus>),
+  meStatus: () => fetch('/v1/me/status', { headers: readHeaders() }).then(j<MeStatus>),
 
   // ── Collections (Collectio) — a batch-gen over a Tractus grid ────────────────
   // Owner-scoped by the caller commitment. Create LAUNCHES generation of `total`
   // pieces (real compute) — always a deliberate, confirmed action.
-  listCollections: () => fetch('/v1/collectiones', { headers: { 'x-commitment': commitment() } })
+  listCollections: () => fetch('/v1/collectiones', { headers: readHeaders() })
     .then(j<{ collections: Collection[] }>),
-  getCollection: (id: string) => fetch(`/v1/collectiones/${id}`, { headers: { 'x-commitment': commitment() } })
+  getCollection: (id: string) => fetch(`/v1/collectiones/${id}`, { headers: readHeaders() })
     .then(j<{ collection: Collection }>),
   createCollection: (body: CreateCollectionRequest) =>
-    fetch('/v1/collectiones', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+    fetch('/v1/collectiones', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ collection: Collection }>),
-  getCollectionRarity: (id: string) => fetch(`/v1/collectiones/${id}/rarity`, { headers: { 'x-commitment': commitment() } })
+  getCollectionRarity: (id: string) => fetch(`/v1/collectiones/${id}/rarity`, { headers: readHeaders() })
     .then(j<{ rarity: RarityReport }>),
   listCollectionPieces: (id: string, review: 'pending' | 'approved' | 'rejected' | 'all' = 'pending') =>
-    fetch(`/v1/collectiones/${id}/pieces?review=${review}`, { headers: { 'x-commitment': commitment() } })
+    fetch(`/v1/collectiones/${id}/pieces?review=${review}`, { headers: readHeaders() })
       .then(j<{ pieces: CollectionPiece[] }>),
   approvePiece: (id: string, actumId: string) =>
-    fetch(`/v1/collectiones/${id}/pieces/${actumId}/approve`, { method: 'POST', headers: anonHeaders() }).then(j<{ ok: true }>),
+    fetch(`/v1/collectiones/${id}/pieces/${actumId}/approve`, { method: 'POST', headers: authHeaders() }).then(j<{ ok: true }>),
   rejectPiece: (id: string, actumId: string) =>
-    fetch(`/v1/collectiones/${id}/pieces/${actumId}/reject`, { method: 'POST', headers: anonHeaders() }).then(j<{ ok: true }>),
-  pauseCollection: (id: string) => fetch(`/v1/collectiones/${id}/pause`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
-  resumeCollection: (id: string) => fetch(`/v1/collectiones/${id}/resume`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
-  cancelCollection: (id: string) => fetch(`/v1/collectiones/${id}/cancel`, { method: 'POST', headers: anonHeaders() }).then(j<{ collection: Collection }>),
+    fetch(`/v1/collectiones/${id}/pieces/${actumId}/reject`, { method: 'POST', headers: authHeaders() }).then(j<{ ok: true }>),
+  pauseCollection: (id: string) => fetch(`/v1/collectiones/${id}/pause`, { method: 'POST', headers: authHeaders() }).then(j<{ collection: Collection }>),
+  resumeCollection: (id: string) => fetch(`/v1/collectiones/${id}/resume`, { method: 'POST', headers: authHeaders() }).then(j<{ collection: Collection }>),
+  cancelCollection: (id: string) => fetch(`/v1/collectiones/${id}/cancel`, { method: 'POST', headers: authHeaders() }).then(j<{ collection: Collection }>),
   extendCollection: (id: string, count: number) =>
-    fetch(`/v1/collectiones/${id}/extend`, { method: 'POST', headers: anonHeaders(), body: JSON.stringify({ count }) }).then(j<{ collection: Collection }>),
+    fetch(`/v1/collectiones/${id}/extend`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ count }) }).then(j<{ collection: Collection }>),
+  // Draft authoring: replace a draft's trait grid (re-derives provenance), then fire it.
+  patchCollectionTractus: (id: string, tractus: Tractus[]) =>
+    fetch(`/v1/collectiones/${id}/tractus`, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ tractus }) }).then(j<{ collection: Collection }>),
+  fireCollection: (id: string) =>
+    fetch(`/v1/collectiones/${id}/fire`, { method: 'POST', headers: authHeaders() }).then(j<{ collection: Collection }>),
 
   // ── Publishing (Editio) — feed read + publish/retract write ──────────────────
   // GET /v1/feed — public, NO auth. Newest-first published, public-surface editions.
@@ -105,30 +165,167 @@ export const api = {
   // POST /v1/editiones — publish an artifact. Public surfaces return a `pending`
   // edition (async moderation) → it goes live once the worker settles it.
   publish: (body: PublishRequest) =>
-    fetch('/v1/editiones', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+    fetch('/v1/editiones', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ edition: Editio }>),
+  // GET /v1/editiones/:id — poll a publication (author-scoped) to watch an async
+  // settle land: an archive ZIP build finishing (`externalRef` = the download url),
+  // or a public surface being gated (→ rejected).
+  getEdition: (id: string) => fetch(`/v1/editiones/${id}`, { headers: readHeaders() })
+    .then(j<{ edition: Editio }>),
   retract: (id: string) =>
-    fetch(`/v1/editiones/${id}/retract`, { method: 'POST', headers: anonHeaders() })
+    fetch(`/v1/editiones/${id}/retract`, { method: 'POST', headers: authHeaders() })
       .then(j<{ edition: Editio }>),
+
+  // ── Feed moderation review (Editio held-queue, spec §4) ──────────────────────
+  // GET /v1/editiones/review — the review queue. An author sees their OWN held items
+  // ("your publish is under review"); the platform admin (me.admin) sees ALL of them.
+  // approve/reject/confirm-csam are PLATFORM-ADMIN ONLY server-side (403 otherwise).
+  listReviewQueue: () => fetch('/v1/editiones/review', { headers: readHeaders() })
+    .then(j<{ editions: Editio[] }>),
+  // Clear a moderation hold → the item re-settles and publishes.
+  approveEdition: (id: string) =>
+    fetch(`/v1/editiones/${id}/approve`, { method: 'POST', headers: authHeaders() }).then(j<{ edition: Editio }>),
+  // Decline a held publication → terminal 'rejected'. Files NO report.
+  rejectEdition: (id: string) =>
+    fetch(`/v1/editiones/${id}/reject`, { method: 'POST', headers: authHeaders() }).then(j<{ edition: Editio }>),
+  // Affirmatively confirm a held item is CSAM → reject + file the NCMEC report. The only
+  // review action that reports; a legal duty on human confirmation (18 U.S.C. §2258A).
+  confirmCsam: (id: string) =>
+    fetch(`/v1/editiones/${id}/confirm-csam`, { method: 'POST', headers: authHeaders() }).then(j<{ edition: Editio }>),
+
+  // ── Owned Bursa purses (delegation, §7) — identified accounts only ───────────
+  // A purse converts part of your Signum balance into a shareable bearer token; runs
+  // spend it via /v1/runs (x-bursa-token). You see the balance drain, never who spent it.
+  // All four require a signed-in anima (401/403 for anon/purse callers).
+  listPurses: () => fetch('/v1/purses', { headers: readHeaders() }).then(j<{ purses: Purse[] }>),
+  mintPurse: (body: { credits: number; label?: string; fundFromAgentId?: string }) =>
+    fetch('/v1/purses', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) }).then(j<Purse>),
+  reclaimPurse: (token: string) =>
+    fetch(`/v1/purses/${encodeURIComponent(token)}/reclaim`, { method: 'POST', headers: authHeaders() })
+      .then(j<{ ok: boolean; refunded: string }>),
+  revokePurse: (token: string) =>
+    fetch(`/v1/purses/${encodeURIComponent(token)}/revoke`, { method: 'POST', headers: authHeaders() })
+      .then(j<{ ok: boolean; refunded: string }>),
 
   // ── Training (modus.aitoolkit-training) — thin reads; launches go via createRun ──
   // Dataset list/create live under the internal data API (/v1/data/*). Kept thin:
   // the builder launches a training as a normal run, these only feed the picker/cost.
-  listDatasets: () => fetch('/v1/data/datasets', { headers: { 'x-commitment': commitment() } })
+  listDatasets: () => fetch('/v1/data/datasets', { headers: readHeaders() })
     .then(j<{ datasets: DatasetSummary[] }>),
   trainingCost: (body: { steps: number; baseModel?: string; images?: number }) =>
-    fetch('/v1/data/trainings/calculate-cost', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
+    fetch('/v1/data/trainings/calculate-cost', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ impetus?: string; usd?: number }>),
-  // Signed upload for dataset images.
-  signUpload: (body: { filename: string; contentType: string }) =>
-    fetch('/api/v1/storage/uploads/sign', { method: 'POST', headers: anonHeaders(), body: JSON.stringify(body) })
-      .then(j<{ url: string; fields?: Record<string, string>; key?: string }>),
+  // Signed upload (R2). Returns a presigned PUT url + the permanent public url.
+  signUpload: (body: { filename: string; contentType: string; bucketName?: string }) =>
+    fetch('/api/v1/storage/uploads/sign', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(j<{ signedUrl: string; permanentUrl: string; key?: string }>),
+
+  // ── Account settings (Consuetudinum, owner-keyed / anon-capable) ─────────────
+  // GET /v1/me — appearance (Profile) + generation defaults (Preferences) + bindings.
+  getMe: () => fetch('/v1/me', { headers: readHeaders() }).then(j<MeView>),
+  setAppearance: (appearance: Appearance) =>
+    fetch('/v1/me/appearance', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(appearance) }).then(j<{ appearance: Appearance }>),
+  setGeneratio: (generatio: Generatio) =>
+    fetch('/v1/me/generatio', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(generatio) }).then(j<{ generatio: Generatio }>),
+  getAffines: (modusId: string) =>
+    fetch(`/v1/me/affines/${encodeURIComponent(modusId)}`, { headers: readHeaders() }).then(j<{ affines: Record<string, unknown> }>),
+  setAffines: (modusId: string, affines: Record<string, unknown>) =>
+    fetch(`/v1/me/affines/${encodeURIComponent(modusId)}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ affines }) }).then(j<{ affines: Record<string, unknown> }>),
+
+  // ── BYO gated-origin secrets (Secretarium, owner-keyed / anon-capable) ───────
+  // Connect a Civitai/HuggingFace token so gated imports scrape + download. The token
+  // is sealed server-side and NEVER echoed back — presence-only (`getMe().secrets`).
+  // Anon callers get a `warning` on connect (linking a named account deanonymizes them).
+  putSecret: (provider: string, token: string, idleDays?: number) =>
+    fetch(`/v1/me/secrets/${provider}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ token, idleDays }) }).then(jSecret),
+  removeSecret: (provider: string) =>
+    fetch(`/v1/me/secrets/${provider}`, { method: 'DELETE', headers: authHeaders() }).then(jSecret),
+
+  // ── Fiat auth (username/password rail) ───────────────────────────────────────
+  // These deliberately do NOT send a commitment on register/login/forgot (a named
+  // account is a different soul than the anon purse); verify/reset carry only their
+  // emailed token; refresh carries the bearer. Errors surface via AuthApiError.code.
+  auth: {
+    register: (email: string, password: string) =>
+      fetch('/v1/auth/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) })
+        .then(jAuth<{ status: string }>),
+    login: (email: string, password: string) =>
+      fetch('/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) })
+        .then(jAuth<AuthResult>),
+    verifyEmail: (token: string) =>
+      fetch('/v1/auth/verify-email', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }) })
+        .then(jAuth<AuthResult>),
+    resendVerification: (email: string) =>
+      fetch('/v1/auth/resend-verification', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) })
+        .then(jAuth<{ status: string }>),
+    forgot: (email: string) =>
+      fetch('/v1/auth/forgot-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) })
+        .then(jAuth<{ status: string }>),
+    reset: (token: string, newPassword: string) =>
+      fetch('/v1/auth/reset-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, newPassword }) })
+        .then(jAuth<{ status: string }>),
+    refresh: () =>
+      fetch('/v1/auth/session/refresh', { method: 'POST', headers: { authorization: `Bearer ${getSession() ?? ''}` } })
+        .then(jAuth<AuthResult>),
+  },
 };
+
+// Account settings (mirror the backend Consuetudo shapes).
+export interface Appearance { avatarUrl?: string; bannerUrl?: string; backgroundUrl?: string; accent?: string; look?: string }
+export interface Generatio {
+  style?: string;
+  negativePrompt?: string;
+  outputFormat?: string;
+  telegramDeliverAs?: 'album' | 'individual';
+  autoApplyModels?: string[];
+}
+// BYO gated-origin credential providers (mirror the server `SecretProvider` union).
+export type SecretProvider = 'civitai' | 'huggingface';
+export const SECRET_PROVIDERS: SecretProvider[] = ['civitai', 'huggingface'];
+export const SECRET_PROVIDER_LABEL: Record<SecretProvider, string> = { civitai: 'Civitai', huggingface: 'HuggingFace' };
+
+export interface MeView {
+  appearance?: Appearance;
+  generatio?: Generatio;
+  bindings: Array<{ verb: string; modusId: string }>;
+  // Per-provider connect state. Absent (undefined) or all-'absent' when the store is
+  // unconfigured server-side — never carries the token itself.
+  secrets?: Record<SecretProvider, 'connected' | 'absent'>;
+  // Whether this deployment can store BYO secrets at all. false → connecting is unavailable
+  // here (SECRETA_MASTER_KEY unset); hide/disable the panel proactively. Older servers omit it
+  // (undefined) → treat as available and fall back to the reactive SecretsUnavailableError path.
+  secretsAvailable?: boolean;
+  // Whether this caller is the platform administrator (the moderation reviewer). Gates the
+  // feed-review surface + its approve/reject controls. Server-authoritative; `true` only on
+  // the platform session. Older servers omit it (undefined) → treated as not-admin.
+  admin?: boolean;
+}
+
+// An owned Bursa purse (delegation, §7) — a shareable bearer token funded from your balance.
+// `token` is the bearer credential (the invite code); `credits` is the remaining balance as a
+// decimal string (bigint-as-string). `joinUrl` is present only for agent-funded mints.
+export interface Purse {
+  token: string;
+  credits: string;
+  createdAt: string;
+  label?: string;
+  status: 'active' | 'revoked';
+  joinUrl?: string;
+}
+
+// Result of connecting/disconnecting a BYO secret (`PUT/DELETE /v1/me/secrets/:provider`).
+// The token is NEVER included. `warning` is present only for anonymous (purse) callers.
+export interface SecretView {
+  provider: SecretProvider;
+  status: 'connected' | 'absent';
+  expiresAt?: string;
+  warning?: string;
+}
 
 export interface DatasetSummary { id: string; name: string; images?: number; updatedAt?: string }
 
 // Collection (Collectio) projection — mirrors the backend CollectionSchema.
-export type CollectionStatus = 'pending' | 'running' | 'complete' | 'cancelled';
+export type CollectionStatus = 'draft' | 'pending' | 'running' | 'complete' | 'cancelled';
 export interface Collection {
   id: string;
   nomen?: string;
@@ -137,6 +334,8 @@ export interface Collection {
   total: number;
   provenanceHash: string;
   owners?: Array<{ animaId: string; weight: number }>;
+  tractus?: Tractus[];
+  reviewEnabled?: boolean;
   completed: number;
   failed: number;
   rejected: number;
@@ -145,7 +344,8 @@ export interface Collection {
   completedAt?: string;
 }
 // One option within a trait axis; `value` is injected into the flow's aditus port.
-export interface TractusValor { value: string; label?: string; rarity?: number; promptFragment?: string }
+// `excludes` blocks named labels in OTHER axes; `tags` group options for motif-level exclusion.
+export interface TractusValor { value: string; label?: string; rarity?: number; promptFragment?: string; excludes?: string[]; tags?: string[] }
 // One axis of variation — the aditus port to vary and its options.
 export interface Tractus { porta: string; label?: string; valores: TractusValor[] }
 export interface CreateCollectionRequest {
@@ -154,6 +354,8 @@ export interface CreateCollectionRequest {
   tractus: Tractus[];
   nomen?: string;
   aditusBase?: Record<string, unknown>;
+  reviewEnabled?: boolean;
+  draft?: boolean;
 }
 // Realized-vs-target rarity report (GET /v1/collectiones/:id/rarity).
 export interface RarityValor { value: string; targetRarity: number; realizedCount: number; realizedRarity: number }
@@ -167,9 +369,32 @@ export interface CollectionPiece {
   attributes?: Array<{ trait_type: string; value: string }>;
 }
 
+// The account snapshot (GET /v1/me/status) — mirrors the backend StatusView.
+// gens = ACTIVE gens (queued + running), not all-time history.
+export interface GenEntry {
+  actumId: string;
+  modusLabel: string;
+  studio: { id: string; hostLabel: string; isOwn: boolean } | null;
+  status: 'nascens' | 'agens';
+  elapsedMs?: number;
+  etaMs?: number;
+}
+export interface StudioEntry {
+  studioId: string;
+  materiaId: string;
+  label: string;
+  status: 'idle' | 'running' | 'provisioning' | 'terminated' | 'draining';
+  warmRemainingMs?: number;
+  guestsToday: number;
+  netImpetus: string; // bigint stringified by the backend
+  netUsd: number;
+}
+export interface JoinableEntry { studioId: string; label: string; hostLabel: string; queueDepth: number }
 export interface MeStatus {
   balanceImpetus: string;
   balanceUsd: number;
-  gens: unknown[];
-  studios: unknown[];
+  gens: GenEntry[];
+  studios: StudioEntry[];
+  joinable: JoinableEntry[];
+  takenAt: string;
 }

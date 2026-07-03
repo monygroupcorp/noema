@@ -37,7 +37,7 @@ export class MongoCollectio implements Collectionum {
     return this.list({ status })
   }
 
-  async update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'impetusTotal' | 'completum'>>): Promise<Collectio> {
+  async update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'numerus' | 'tractus' | 'provenanceHash'>>): Promise<Collectio> {
     const result = await this.col.findOneAndUpdate(
       { id },
       { $set: toDoc(patch) },

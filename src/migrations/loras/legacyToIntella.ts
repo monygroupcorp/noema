@@ -16,6 +16,8 @@
 // `src/types/intelligendi.ts` and the migration becomes idempotent + safe to
 // re-run against the production collection.
 
+import { classifyModelLicense, type CommercialVerdict } from '../../crystal/modelLicense.js'
+
 // ─ Types (mirroring docs/spec/intella-schema.md §3) ────────────────────────
 
 export type Genus = 'lora' | 'model' | 'vae' | 'controlnet' | 'embedding' | 'upscaler' | 'audio' | 'video' | 'llm'
@@ -90,9 +92,12 @@ export interface IntellaBaseV2 {
   reviewState?: 'pending' | 'approved' | 'rejected'
   moderationNotes?: string
 
-  // License
-  license?: 'cc0' | 'cc-by' | 'cc-by-sa' | 'cc-by-nc' | 'cc-by-nc-sa' | 'cc-by-nd' | 'cc-by-nc-nd'
-         | 'mit' | 'apache-2.0' | 'proprietary' | 'custom'
+  // License. `license` is a free-form id reconciled with the runtime `Intella.license` (string) and
+  // the `modelLicense.ts` register — the old CC-only enum couldn't express 'openrail-m' /
+  // 'flux-1-dev-nc' / 'krea-community' etc., so it's widened to string. `commercialUse` is the
+  // public-catalog verdict the go-public gate reads (fail-closed; see modelLicense.ts).
+  license?: string
+  commercialUse?: CommercialVerdict
   usageTerms?: string
 
   // Lifecycle
@@ -276,6 +281,20 @@ export function legacyToIntella(
   if (doc.modelType) drops.push(`modelType=${doc.modelType}`)
   if (doc.strength)  drops.push(`strength=${doc.strength}`)
 
+  // ─ License (go-public gate) ────────────────────────────────────────────
+  // Legacy records carry no license field; derive one from the trained-on base (`checkpoint`,
+  // e.g. 'FLUX'/'SDXL'/'SD1.5') via the shared classifier — a FLUX.1-dev-trained LoRA is a
+  // Non-Commercial derivative and can't be laundered clean by re-hosting. Fail-closed: a bare
+  // 'FLUX' (schnell vs dev indeterminable) → 'unknown', so it can't auto-promote until an admin
+  // clears it. `commercialUse` is what the public-catalog gate reads.
+  const { license, commercialUse } = classifyModelLicense({
+    provenance: doc.checkpoint ? { base: doc.checkpoint } : undefined,
+    nomen: doc.name,
+  })
+  if (commercialUse === 'unknown') {
+    warnings.push(`license indeterminable from checkpoint='${doc.checkpoint ?? '(none)'}' — commercialUse='unknown' (fail-closed; admin must clear before public promotion)`)
+  }
+
   // ─ Moderation ─────────────────────────────────────────────────────────
   const moderation = doc.moderation
   const blocked = !!moderation?.flagged
@@ -375,6 +394,9 @@ export function legacyToIntella(
     blocked,
     reviewState,
     moderationNotes,
+
+    license,
+    commercialUse,
 
     natum,
     mutatum,

@@ -57,6 +57,17 @@ test('verifyJwt accepts sub/_id/id as the external id', async () => {
   assert.equal(await acc.verifyJwt!(jwt.sign({ sub: 's1' }, SECRET)), 'anima-1')
 })
 
+test('verifyJwt: a typ:session token returns sub as a DIRECT animaId (no re-resolution)', async () => {
+  const { personae, animae, created } = fakes()
+  const acc = makeCredentialAcceptors({ personae, animae, jwtSecret: SECRET })
+  // The fiat-auth session shape — sub IS the animaId; must NOT mint a new anima via a 'web' persona.
+  const session = jwt.sign({ sub: 'anima-xyz', typ: 'session' }, SECRET)
+  assert.equal(await acc.verifyJwt!(session), 'anima-xyz')
+  assert.deepEqual(created, [], 'no anima minted for a session token')
+  // A session token with a non-string sub is rejected.
+  assert.equal(await acc.verifyJwt!(jwt.sign({ typ: 'session' }, SECRET)), null)
+})
+
 test('validateApiKey: injected verifier → anima via an api persona', async () => {
   const { personae, animae } = fakes()
   const acc = makeCredentialAcceptors({

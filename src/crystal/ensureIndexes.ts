@@ -57,6 +57,13 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('deposita').createIndex({ id: 1 }, { unique: true }),
     db.collection('deposita').createIndex({ transactioHash: 1, chainId: 1 }, { sparse: true }),
 
+    // reditus — USD revenue book (ADR-0013). The UNIQUE PARTIAL index on depositumId is the
+    // deposit-booking idempotency guard (only over rows that have one; fiat rows omit it). The
+    // natum index bounds the trailing-12mo revenue range-scan. Mirrors MongoRedituum.ensureIndexes().
+    db.collection('reditus').createIndex({ id: 1 }, { unique: true }),
+    db.collection('reditus').createIndex({ depositumId: 1 }, { unique: true, partialFilterExpression: { depositumId: { $exists: true } } }),
+    db.collection('reditus').createIndex({ natum: 1 }),
+
     // solutiones — payment settlements
     db.collection('solutiones').createIndex({ id: 1 }, { unique: true }),
 
@@ -108,5 +115,33 @@ export async function ensureIndexes(db: Db): Promise<void> {
 
     // caeremonia_slots — ceremony contributor-slot requests (deduped by contact)
     db.collection('caeremonia_slots').createIndex({ contact: 1 }, { unique: true }),
+
+    // trusted_issuers — federated JWKS SSO allow-list (ADR-0011 §4), iss lookup is hot
+    db.collection('trusted_issuers').createIndex({ issuerId: 1 }, { unique: true }),
+
+    // legati — agent sidecars (ADR-0011 §5); agentId is the provisioning idempotency key
+    db.collection('legati').createIndex({ agentId: 1 }, { unique: true }),
+    db.collection('legati').createIndex({ id: 1 }, { unique: true }),
+    // adapter = the ERC-8004 collection contract — the collection gallery scans by it (§7)
+    db.collection('legati').createIndex({ adapter: 1 }, { sparse: true }),
+
+    // mercedes — payee-payout book (ADR-0013 §4c). Unique sourceRef = per-event accrual
+    // idempotency; (payeeAnimaId, taxYear) bounds the $600 annual-rollup scan.
+    db.collection('mercedes').createIndex({ id: 1 }, { unique: true }),
+    db.collection('mercedes').createIndex({ sourceRef: 1 }, { unique: true }),
+    db.collection('mercedes').createIndex({ payeeAnimaId: 1, taxYear: 1 }),
+
+    // x402_payment_log — the unique signatureHash IS the replay guard (ADR-0011 §5)
+    db.collection('x402_payment_log').createIndex({ signatureHash: 1 }, { unique: true }),
+    db.collection('x402_payment_log').createIndex({ payer: 1 }),
+    db.collection('x402_payment_log').createIndex({ status: 1, verifiedAt: -1 }),
+
+    // sponsiones — sponsorship pledges (ADR-0011 §2); the sweeper scans by status
+    db.collection('sponsiones').createIndex({ id: 1 }, { unique: true }),
+    db.collection('sponsiones').createIndex({ status: 1 }),
+    db.collection('sponsiones').createIndex({ 'sponsor.animaId': 1 }),
+
+    // bursarium — owned purses carry an ownerAnimaId for the creator dashboard (§7 delegation-via-Bursa)
+    db.collection('bursarium').createIndex({ ownerAnimaId: 1 }, { sparse: true }),
   ])
 }

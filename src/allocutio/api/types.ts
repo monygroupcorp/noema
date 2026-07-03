@@ -34,8 +34,9 @@ export interface Run {
   resumeCheckpoint?: { url: string; step: number }
 }
 
-/** Public collection status — the externalised projection of CollectioStatus. */
-export type CollectionStatus = 'pending' | 'running' | 'complete' | 'cancelled'
+/** Public collection status — the externalised projection of CollectioStatus.
+ *  `draft` = authored but not yet fired (tractus still editable). */
+export type CollectionStatus = 'draft' | 'pending' | 'running' | 'complete' | 'cancelled'
 
 /**
  * Team — the public projection of a Sodalitas (a fellowship of Animae that
@@ -67,6 +68,11 @@ export interface Collection {
   provenanceHash: string
   /** Per-artifact ownership split (team-owned collections only) — animaId → weight (sum 1). */
   owners?: Array<{ animaId: string; weight: number }>
+  /** The trait axes + values (the parameter grid). Exposed so the garden/rules
+   *  authoring surfaces can read + edit them; frozen once the collection is fired. */
+  tractus?: import('../../types/collectio.js').Tractus[]
+  /** Whether each piece is held for review before it counts (see Collectio.reviewEnabled). */
+  reviewEnabled?: boolean
   /** Pieces completed so far (approved, when review is on). */
   completed: number
   /** Pieces that failed to generate so far. */
@@ -111,6 +117,10 @@ export interface Edition {
   custody: 'ours' | 'theirs' | 'both'
   /** Lifecycle: pending → published | rejected | failed; retracted on unpublish. */
   status: 'pending' | 'published' | 'rejected' | 'failed' | 'retracted'
+  /** Human-review outcome when the moderation gate held this publication (spec §4):
+   *  pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent
+   *  on the normal path. */
+  reviewOutcome?: 'pending' | 'approved' | 'rejected'
   /** The destination's handle — feed post id / HF repo / token id / R2 url. */
   externalRef?: string
   /** Rights split snapshot (animaId → weight), when team-owned. */

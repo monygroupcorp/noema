@@ -507,6 +507,28 @@ Browse the model weight catalog, optionally filtered by genus, basis, fundamentu
           "description": {
             "type": "string",
             "description": "Human-readable description."
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "public",
+              "private"
+            ],
+            "description": "Resolvability of the caller's own model (GET /me/models only)."
+          },
+          "license": {
+            "type": "string",
+            "description": "License id, e.g. 'apache-2.0' (owner/admin views)."
+          },
+          "commercialUse": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no",
+              "conditional",
+              "unknown"
+            ],
+            "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
           }
         },
         "required": [
@@ -519,6 +541,484 @@ Browse the model weight catalog, optionally filtered by genus, basis, fundamentu
   },
   "required": [
     "models"
+  ]
+}
+```
+
+### GET /v1/deposit/config
+
+Buy-credits/deposit UI config: deposit address, points/USD rate, default funding rate, supported chains.
+
+- **Auth:** public
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "Static config for the buy-credits/deposit UI.",
+  "properties": {
+    "depositAddress": {
+      "type": "string",
+      "description": "CreditVault address to send deposits to (same on mainnet + Base)."
+    },
+    "pointsPerUsd": {
+      "type": "number",
+      "description": "Canonical impetus points per 1 USD (≈ 2967)."
+    },
+    "defaultFundingRatePct": {
+      "type": "number",
+      "description": "Default funding rate as a percent (70 = 70% of USD value converts to points)."
+    },
+    "chains": {
+      "type": "array",
+      "description": "Supported chains.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "chainId": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "depositAddress",
+    "pointsPerUsd",
+    "defaultFundingRatePct",
+    "chains"
+  ]
+}
+```
+
+### POST /v1/deposit/quote
+
+Quote how many impetus points a deposit of a given asset+amount would buy (informational; equals the on-chain credit).
+
+- **Auth:** public
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Quote how many impetus points a deposit would buy, right now (informational; the on-chain credit is authoritative and equal).",
+  "properties": {
+    "chainId": {
+      "type": "string",
+      "description": "Chain id ('1' mainnet, '8453' Base)."
+    },
+    "token": {
+      "type": "string",
+      "description": "Token address; 0x000…000 for native ETH."
+    },
+    "amount": {
+      "type": "string",
+      "description": "Deposit amount in RAW base units (wei for ETH, token-decimals for ERC-20), as a string."
+    }
+  },
+  "required": [
+    "chainId",
+    "token",
+    "amount"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The points a deposit would be credited (== what the webhook credits for the same input). Gas is NOT deducted.",
+  "properties": {
+    "chainId": {
+      "type": "string"
+    },
+    "token": {
+      "type": "string"
+    },
+    "amountRaw": {
+      "type": "string",
+      "description": "Echoed raw base units quoted."
+    },
+    "grossUsd": {
+      "type": "string",
+      "description": "Gross USD FMV, formatted (e.g. \"3.000000\")."
+    },
+    "grossUsdMicro": {
+      "type": "string",
+      "description": "Exact gross USD FMV in micro-USD."
+    },
+    "fundingRatePct": {
+      "type": "number",
+      "description": "Per-asset funding rate applied (e.g. 70)."
+    },
+    "pointsQuoted": {
+      "type": "string",
+      "description": "Impetus points the deposit would be credited."
+    },
+    "depositAddress": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "pointsQuoted",
+    "grossUsd",
+    "fundingRatePct",
+    "depositAddress"
+  ]
+}
+```
+
+### POST /v1/models/import
+
+Import a model/LoRA by URL (Civitai/HuggingFace/direct) as a private, owner-scoped model — usable in your flows immediately; promoting it to the public catalogue is a separate publish.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Import a model/LoRA by URL as a private, owner-scoped model — usable in your flows at once; never on the public catalogue until a separate publish promotion passes moderation.",
+  "properties": {
+    "url": {
+      "type": "string",
+      "description": "A Civitai page (or ?modelVersionId), a HuggingFace repo, or a direct .safetensors/.ckpt link."
+    },
+    "genus": {
+      "type": "string",
+      "enum": [
+        "lora",
+        "model"
+      ],
+      "description": "For a direct-file URL where the origin can't be scraped to infer it. Default lora."
+    }
+  },
+  "required": [
+    "url"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "model": {
+      "type": "object",
+      "properties": {
+        "intellaId": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "Display name."
+        },
+        "genus": {
+          "type": "string",
+          "description": "Weight class (lora, checkpoint, vae, …)."
+        },
+        "basis": {
+          "type": "string",
+          "description": "Base model family this weight is compatible with."
+        },
+        "trigger": {
+          "type": "string",
+          "description": "Trigger words (LoRA only)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description."
+        },
+        "access": {
+          "type": "string",
+          "enum": [
+            "public",
+            "private"
+          ],
+          "description": "Resolvability of the caller's own model (GET /me/models only)."
+        },
+        "license": {
+          "type": "string",
+          "description": "License id, e.g. 'apache-2.0' (owner/admin views)."
+        },
+        "commercialUse": {
+          "type": "string",
+          "enum": [
+            "yes",
+            "no",
+            "conditional",
+            "unknown"
+          ],
+          "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+        }
+      },
+      "required": [
+        "intellaId",
+        "nomen",
+        "genus"
+      ]
+    }
+  },
+  "required": [
+    "model"
+  ]
+}
+```
+
+### GET /v1/me/models
+
+List the caller's own privately-held models (imports + trained LoRAs), newest first — the public /v1/models catalog is canonical-only.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "intellaId": {
+            "type": "string"
+          },
+          "nomen": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "genus": {
+            "type": "string",
+            "description": "Weight class (lora, checkpoint, vae, …)."
+          },
+          "basis": {
+            "type": "string",
+            "description": "Base model family this weight is compatible with."
+          },
+          "trigger": {
+            "type": "string",
+            "description": "Trigger words (LoRA only)."
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable description."
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "public",
+              "private"
+            ],
+            "description": "Resolvability of the caller's own model (GET /me/models only)."
+          },
+          "license": {
+            "type": "string",
+            "description": "License id, e.g. 'apache-2.0' (owner/admin views)."
+          },
+          "commercialUse": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no",
+              "conditional",
+              "unknown"
+            ],
+            "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+          }
+        },
+        "required": [
+          "intellaId",
+          "nomen",
+          "genus"
+        ]
+      }
+    }
+  },
+  "required": [
+    "models"
+  ]
+}
+```
+
+### PUT /v1/models/:id/license
+
+Admin: clear or backfill a model's license so the public-catalog gate treats it correctly (explicit license/commercialUse, or reclassify from the base). Platform-admin only.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Admin: set a model's license clearance so the public-catalog gate treats it correctly. Provide an explicit license/commercialUse, or reclassify:true to re-derive from the base string.",
+  "properties": {
+    "license": {
+      "type": "string",
+      "description": "License id to record, e.g. 'apache-2.0', 'stability-community'."
+    },
+    "commercialUse": {
+      "type": "string",
+      "enum": [
+        "yes",
+        "no",
+        "conditional",
+        "unknown"
+      ],
+      "description": "The commercial-catalog verdict (the operator's clearance decision)."
+    },
+    "reclassify": {
+      "type": "boolean",
+      "description": "Re-derive license + verdict from the model's recorded base string (bulk-fix legacy imports)."
+    }
+  }
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "model": {
+      "type": "object",
+      "properties": {
+        "intellaId": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "Display name."
+        },
+        "genus": {
+          "type": "string",
+          "description": "Weight class (lora, checkpoint, vae, …)."
+        },
+        "basis": {
+          "type": "string",
+          "description": "Base model family this weight is compatible with."
+        },
+        "trigger": {
+          "type": "string",
+          "description": "Trigger words (LoRA only)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description."
+        },
+        "access": {
+          "type": "string",
+          "enum": [
+            "public",
+            "private"
+          ],
+          "description": "Resolvability of the caller's own model (GET /me/models only)."
+        },
+        "license": {
+          "type": "string",
+          "description": "License id, e.g. 'apache-2.0' (owner/admin views)."
+        },
+        "commercialUse": {
+          "type": "string",
+          "enum": [
+            "yes",
+            "no",
+            "conditional",
+            "unknown"
+          ],
+          "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+        }
+      },
+      "required": [
+        "intellaId",
+        "nomen",
+        "genus"
+      ]
+    }
+  },
+  "required": [
+    "model"
+  ]
+}
+```
+
+### GET /v1/admin/revenue
+
+Admin: company-wide trailing-12mo USD revenue vs the tightest active conditional-license cap (the tripwire). Platform-admin only.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "Admin revenue report: company-wide trailing-12mo USD revenue vs the tightest active conditional-license cap (the tripwire, ADR-0012/0013 §5).",
+  "properties": {
+    "asOf": {
+      "type": "string",
+      "description": "ISO timestamp the trailing window was computed against."
+    },
+    "trailingUsdRevenueMicro": {
+      "type": "string",
+      "description": "Trailing-12mo USD revenue in micro-USD (exact)."
+    },
+    "trailingUsdRevenue": {
+      "type": "string",
+      "description": "Trailing-12mo USD revenue, formatted."
+    },
+    "band": {
+      "type": "string",
+      "enum": [
+        "clear",
+        "watch",
+        "warn",
+        "breach"
+      ],
+      "description": "Live band of revenue against the binding cap."
+    },
+    "bindingCapUsd": {
+      "type": "number",
+      "nullable": true,
+      "description": "Tightest active conditional cap (whole USD), or null when dormant."
+    },
+    "activeConditionalLicenses": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Conditional license ids currently reachable in the public catalog."
+    },
+    "lastAlertedBand": {
+      "type": "string",
+      "enum": [
+        "clear",
+        "watch",
+        "warn",
+        "breach"
+      ],
+      "nullable": true,
+      "description": "The last band the scheduled evaluator alerted/persisted."
+    }
+  },
+  "required": [
+    "asOf",
+    "trailingUsdRevenue",
+    "band",
+    "activeConditionalLicenses"
   ]
 }
 ```
@@ -718,6 +1218,491 @@ Return the authenticated caller's account snapshot — balance, in-flight gens, 
     "studios",
     "joinable",
     "takenAt"
+  ]
+}
+```
+
+### GET /v1/me
+
+The caller's owner-keyed account settings — presentation skin (Profile), cross-cutting generation defaults (Preferences), and verb→flow bindings. Anon-capable (keyed by AuctorKey).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The caller's owner-keyed account settings — appearance + generation defaults + verb bindings.",
+  "properties": {
+    "appearance": {
+      "type": "object",
+      "description": "The owner's presentation skin — all fields optional.",
+      "properties": {
+        "avatarUrl": {
+          "type": "string",
+          "description": "PFP / avatar image URL."
+        },
+        "bannerUrl": {
+          "type": "string",
+          "description": "Banner image URL."
+        },
+        "backgroundUrl": {
+          "type": "string",
+          "description": "Background image URL."
+        },
+        "accent": {
+          "type": "string",
+          "description": "One signal color (hex)."
+        },
+        "look": {
+          "type": "string",
+          "description": "Signature look tag (e.g. 'clean' | 'n64' | 'vapor' | 'editorial')."
+        }
+      }
+    },
+    "generatio": {
+      "type": "object",
+      "description": "The owner's cross-cutting generation defaults, applied at cast time — all optional.",
+      "properties": {
+        "style": {
+          "type": "string",
+          "description": "Prepended to the prompt when the flow has a prompt input."
+        },
+        "negativePrompt": {
+          "type": "string",
+          "description": "Fills a flow's negative-prompt input when the caller didn't provide one."
+        },
+        "outputFormat": {
+          "type": "string",
+          "description": "Preferred output encoding (stored; runner-applied where supported)."
+        },
+        "telegramDeliverAs": {
+          "type": "string",
+          "enum": [
+            "album",
+            "individual"
+          ],
+          "description": "Telegram delivery shape (consumed by the Telegram adapter)."
+        },
+        "autoApplyModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Models (intellaId) to auto-apply as pinnedModels. Stored; cast-time application pending model resolution."
+        }
+      }
+    },
+    "bindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "The resulting verb → flow binding.",
+        "properties": {
+          "verb": {
+            "type": "string",
+            "description": "The verb that was rebound."
+          },
+          "modusId": {
+            "type": "string",
+            "description": "The flow it now resolves to."
+          }
+        },
+        "required": [
+          "verb",
+          "modusId"
+        ]
+      },
+      "description": "The verb→flow overrides the owner has set."
+    },
+    "secrets": {
+      "type": "object",
+      "description": "BYO gated-origin credential connect state, per provider.",
+      "properties": {
+        "civitai": {
+          "type": "string",
+          "enum": [
+            "connected",
+            "absent"
+          ],
+          "description": "Civitai token connect state."
+        },
+        "huggingface": {
+          "type": "string",
+          "enum": [
+            "connected",
+            "absent"
+          ],
+          "description": "HuggingFace token connect state."
+        }
+      },
+      "required": [
+        "civitai",
+        "huggingface"
+      ]
+    },
+    "secretsAvailable": {
+      "type": "boolean",
+      "description": "Whether this deployment can store BYO secrets (a secret store is wired). false → connecting is unavailable here; hide/disable the panel."
+    },
+    "admin": {
+      "type": "boolean",
+      "description": "Whether this caller is the platform administrator (the moderation reviewer). Gates the feed-review surface + approve/reject/confirm-csam controls. true only on the platform session."
+    }
+  },
+  "required": [
+    "bindings",
+    "secrets",
+    "secretsAvailable",
+    "admin"
+  ]
+}
+```
+
+### PUT /v1/me/appearance
+
+Replace the caller's presentation skin (avatar/banner/background/accent/look).
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "The owner's presentation skin — all fields optional.",
+  "properties": {
+    "avatarUrl": {
+      "type": "string",
+      "description": "PFP / avatar image URL."
+    },
+    "bannerUrl": {
+      "type": "string",
+      "description": "Banner image URL."
+    },
+    "backgroundUrl": {
+      "type": "string",
+      "description": "Background image URL."
+    },
+    "accent": {
+      "type": "string",
+      "description": "One signal color (hex)."
+    },
+    "look": {
+      "type": "string",
+      "description": "Signature look tag (e.g. 'clean' | 'n64' | 'vapor' | 'editorial')."
+    }
+  }
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "appearance": {
+      "type": "object",
+      "description": "The owner's presentation skin — all fields optional.",
+      "properties": {
+        "avatarUrl": {
+          "type": "string",
+          "description": "PFP / avatar image URL."
+        },
+        "bannerUrl": {
+          "type": "string",
+          "description": "Banner image URL."
+        },
+        "backgroundUrl": {
+          "type": "string",
+          "description": "Background image URL."
+        },
+        "accent": {
+          "type": "string",
+          "description": "One signal color (hex)."
+        },
+        "look": {
+          "type": "string",
+          "description": "Signature look tag (e.g. 'clean' | 'n64' | 'vapor' | 'editorial')."
+        }
+      }
+    }
+  },
+  "required": [
+    "appearance"
+  ]
+}
+```
+
+### PUT /v1/me/generatio
+
+Replace the caller's cross-cutting generation defaults (style, negative prompt, output format, telegram delivery, auto-apply models). Applied at cast time under the affines precedence chain.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "The owner's cross-cutting generation defaults, applied at cast time — all optional.",
+  "properties": {
+    "style": {
+      "type": "string",
+      "description": "Prepended to the prompt when the flow has a prompt input."
+    },
+    "negativePrompt": {
+      "type": "string",
+      "description": "Fills a flow's negative-prompt input when the caller didn't provide one."
+    },
+    "outputFormat": {
+      "type": "string",
+      "description": "Preferred output encoding (stored; runner-applied where supported)."
+    },
+    "telegramDeliverAs": {
+      "type": "string",
+      "enum": [
+        "album",
+        "individual"
+      ],
+      "description": "Telegram delivery shape (consumed by the Telegram adapter)."
+    },
+    "autoApplyModels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Models (intellaId) to auto-apply as pinnedModels. Stored; cast-time application pending model resolution."
+    }
+  }
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "generatio": {
+      "type": "object",
+      "description": "The owner's cross-cutting generation defaults, applied at cast time — all optional.",
+      "properties": {
+        "style": {
+          "type": "string",
+          "description": "Prepended to the prompt when the flow has a prompt input."
+        },
+        "negativePrompt": {
+          "type": "string",
+          "description": "Fills a flow's negative-prompt input when the caller didn't provide one."
+        },
+        "outputFormat": {
+          "type": "string",
+          "description": "Preferred output encoding (stored; runner-applied where supported)."
+        },
+        "telegramDeliverAs": {
+          "type": "string",
+          "enum": [
+            "album",
+            "individual"
+          ],
+          "description": "Telegram delivery shape (consumed by the Telegram adapter)."
+        },
+        "autoApplyModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Models (intellaId) to auto-apply as pinnedModels. Stored; cast-time application pending model resolution."
+        }
+      }
+    }
+  },
+  "required": [
+    "generatio"
+  ]
+}
+```
+
+### PUT /v1/me/secrets/:provider
+
+Connect a BYO gated-origin credential (civitai|huggingface) so gated model imports can download their weights. The token is sealed at rest at once and never echoed back. Anon-capable (a Bursa purse is a valid owner); anonymous callers receive a deanonymization warning.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Connect a BYO gated-origin credential. The token is sealed at rest at once and never echoed back.",
+  "properties": {
+    "token": {
+      "type": "string",
+      "description": "The provider API token/key (Civitai key or HuggingFace token)."
+    },
+    "idleDays": {
+      "type": "number",
+      "description": "Idle-expiry window in days (default 90). The secret is forgotten after this long without a real use."
+    }
+  },
+  "required": [
+    "token"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "Connect/disconnect result. Never includes the token.",
+  "properties": {
+    "provider": {
+      "type": "string",
+      "enum": [
+        "civitai",
+        "huggingface"
+      ],
+      "description": "The provider affected."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "connected",
+        "absent"
+      ],
+      "description": "The resulting connect state."
+    },
+    "expiresAt": {
+      "type": "string",
+      "description": "Idle-expiry deadline (ISO) — present when connected."
+    },
+    "warning": {
+      "type": "string",
+      "description": "Deanonymization caution — present for anonymous (purse) callers."
+    }
+  },
+  "required": [
+    "provider",
+    "status"
+  ]
+}
+```
+
+### DELETE /v1/me/secrets/:provider
+
+Disconnect the caller's BYO credential for a provider (civitai|huggingface). Idempotent.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "Connect/disconnect result. Never includes the token.",
+  "properties": {
+    "provider": {
+      "type": "string",
+      "enum": [
+        "civitai",
+        "huggingface"
+      ],
+      "description": "The provider affected."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "connected",
+        "absent"
+      ],
+      "description": "The resulting connect state."
+    },
+    "expiresAt": {
+      "type": "string",
+      "description": "Idle-expiry deadline (ISO) — present when connected."
+    },
+    "warning": {
+      "type": "string",
+      "description": "Deanonymization caution — present for anonymous (purse) callers."
+    }
+  },
+  "required": [
+    "provider",
+    "status"
+  ]
+}
+```
+
+### GET /v1/me/affines/:modusId
+
+The caller's per-flow input defaults for one flow (`{ inputKey: value }`).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "Per-flow input defaults (`{ inputKey: value }`) applied under the cast-time aditus.",
+  "properties": {
+    "affines": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Input-key → default value map."
+    }
+  },
+  "required": [
+    "affines"
+  ]
+}
+```
+
+### PUT /v1/me/affines/:modusId
+
+Replace the caller's per-flow input defaults for one flow. Applied under the cast-time aditus (cast-time > affines > generatio > modus defaults).
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Per-flow input defaults (`{ inputKey: value }`) applied under the cast-time aditus.",
+  "properties": {
+    "affines": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Input-key → default value map."
+    }
+  },
+  "required": [
+    "affines"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "Per-flow input defaults (`{ inputKey: value }`) applied under the cast-time aditus.",
+  "properties": {
+    "affines": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Input-key → default value map."
+    }
+  },
+  "required": [
+    "affines"
   ]
 }
 ```
@@ -987,7 +1972,7 @@ Fetch one of the caller's studios by id (owner-scoped) — poll its status (prov
 
 ### POST /v1/collectiones
 
-Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). Returns a Collection handle (poll GET /v1/collectiones/:id).
+Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). With `draft:true` it is created but NOT fired (author tractus, then POST /:id/fire). Returns a Collection handle (poll GET /v1/collectiones/:id).
 
 - **Auth:** required
 
@@ -1087,6 +2072,14 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
       "type": "boolean",
       "description": "Opt-in DNA uniqueness — no two pieces share a trait combination (across non-bypassDNA axes). Default false."
     },
+    "reviewEnabled": {
+      "type": "boolean",
+      "description": "Hold every completed piece for review before it counts toward the drop (approve/reject in curation). Omit → the platform default applies."
+    },
+    "draft": {
+      "type": "boolean",
+      "description": "Create as a DRAFT — author tractus (garden/rules) without firing. Start it later with POST /:id/fire. Omit/false → create + fire in one shot."
+    },
     "teamId": {
       "type": "string",
       "description": "Own this collection by a team (Sodalitas) the caller is a member of — snapshots an equal-weight owners split."
@@ -1120,12 +2113,13 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
         "status": {
           "type": "string",
           "enum": [
+            "draft",
             "pending",
             "running",
             "complete",
             "cancelled"
           ],
-          "description": "The collection lifecycle status."
+          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
         },
         "modusId": {
           "type": "string",
@@ -1138,6 +2132,508 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
         "provenanceHash": {
           "type": "string",
           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
+        "tractus": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "One axis of variation — the aditus port to vary and its options.",
+            "properties": {
+              "porta": {
+                "type": "string",
+                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+              },
+              "label": {
+                "type": "string",
+                "description": "Human-facing category label (falls back to porta)."
+              },
+              "valores": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One option within a trait axis.",
+                  "properties": {
+                    "value": {
+                      "description": "The aditus value injected when this option is selected."
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Human-facing display name (falls back to String(value))."
+                    },
+                    "rarity": {
+                      "type": "number",
+                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                    },
+                    "promptFragment": {
+                      "type": "string",
+                      "description": "Text woven into the assembled prompt when this option wins."
+                    },
+                    "excludes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Labels in OTHER axes this option blocks."
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Theme tags for group-level mutual exclusion."
+                    }
+                  },
+                  "required": [
+                    "value"
+                  ]
+                },
+                "description": "The options for this axis."
+              }
+            },
+            "required": [
+              "porta",
+              "valores"
+            ]
+          },
+          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+        },
+        "reviewEnabled": {
+          "type": "boolean",
+          "description": "Whether each piece is held for review before it counts."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "completed": {
+          "type": "number",
+          "description": "Pieces completed so far (approved, when review is on)."
+        },
+        "failed": {
+          "type": "number",
+          "description": "Pieces that failed to generate so far."
+        },
+        "rejected": {
+          "type": "number",
+          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+        },
+        "cost": {
+          "type": "string",
+          "description": "Total impetus across completed pieces, serialised as a string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the collection started."
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it finished (or was cancelled)."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "modusId",
+        "total",
+        "provenanceHash",
+        "completed",
+        "failed",
+        "rejected"
+      ]
+    }
+  },
+  "required": [
+    "collection"
+  ]
+}
+```
+
+### PATCH /v1/collectiones/:id/tractus
+
+Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authoring write). Re-derives the provenance hash; rejected (input.malformed) once the collection is fired. Owner-scoped.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Replace a draft Collection’s trait axes/values/rules. Re-derives the provenance hash; rejected once the collection is fired.",
+  "properties": {
+    "tractus": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "One axis of variation — the aditus port to vary and its options.",
+        "properties": {
+          "porta": {
+            "type": "string",
+            "description": "The aditus port key this axis varies (e.g. background, outfit)."
+          },
+          "label": {
+            "type": "string",
+            "description": "Human-facing category label (falls back to porta)."
+          },
+          "valores": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One option within a trait axis.",
+              "properties": {
+                "value": {
+                  "description": "The aditus value injected when this option is selected."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Human-facing display name (falls back to String(value))."
+                },
+                "rarity": {
+                  "type": "number",
+                  "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                },
+                "promptFragment": {
+                  "type": "string",
+                  "description": "Text woven into the assembled prompt when this option wins."
+                },
+                "excludes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Labels in OTHER axes this option blocks."
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Theme tags for group-level mutual exclusion."
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            "description": "The options for this axis."
+          }
+        },
+        "required": [
+          "porta",
+          "valores"
+        ]
+      },
+      "description": "The full new set of axes of variation (replaces the existing grid)."
+    }
+  },
+  "required": [
+    "tractus"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "object",
+      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The collection display name."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "pending",
+            "running",
+            "complete",
+            "cancelled"
+          ],
+          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
+        },
+        "modusId": {
+          "type": "string",
+          "description": "The flow (modus) expanded across the grid."
+        },
+        "total": {
+          "type": "number",
+          "description": "Target piece count (the size of the run)."
+        },
+        "provenanceHash": {
+          "type": "string",
+          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
+        "tractus": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "One axis of variation — the aditus port to vary and its options.",
+            "properties": {
+              "porta": {
+                "type": "string",
+                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+              },
+              "label": {
+                "type": "string",
+                "description": "Human-facing category label (falls back to porta)."
+              },
+              "valores": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One option within a trait axis.",
+                  "properties": {
+                    "value": {
+                      "description": "The aditus value injected when this option is selected."
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Human-facing display name (falls back to String(value))."
+                    },
+                    "rarity": {
+                      "type": "number",
+                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                    },
+                    "promptFragment": {
+                      "type": "string",
+                      "description": "Text woven into the assembled prompt when this option wins."
+                    },
+                    "excludes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Labels in OTHER axes this option blocks."
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Theme tags for group-level mutual exclusion."
+                    }
+                  },
+                  "required": [
+                    "value"
+                  ]
+                },
+                "description": "The options for this axis."
+              }
+            },
+            "required": [
+              "porta",
+              "valores"
+            ]
+          },
+          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+        },
+        "reviewEnabled": {
+          "type": "boolean",
+          "description": "Whether each piece is held for review before it counts."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "completed": {
+          "type": "number",
+          "description": "Pieces completed so far (approved, when review is on)."
+        },
+        "failed": {
+          "type": "number",
+          "description": "Pieces that failed to generate so far."
+        },
+        "rejected": {
+          "type": "number",
+          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+        },
+        "cost": {
+          "type": "string",
+          "description": "Total impetus across completed pieces, serialised as a string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the collection started."
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it finished (or was cancelled)."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "modusId",
+        "total",
+        "provenanceHash",
+        "completed",
+        "failed",
+        "rejected"
+      ]
+    }
+  },
+  "required": [
+    "collection"
+  ]
+}
+```
+
+### POST /v1/collectiones/:id/fire
+
+Freeze a DRAFT Collection’s tractus and start the run — pins provenance to the flow version at fire time, then dispatches. Funder-only; rejected unless the collection is a draft.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "object",
+      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nomen": {
+          "type": "string",
+          "description": "The collection display name."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "pending",
+            "running",
+            "complete",
+            "cancelled"
+          ],
+          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
+        },
+        "modusId": {
+          "type": "string",
+          "description": "The flow (modus) expanded across the grid."
+        },
+        "total": {
+          "type": "number",
+          "description": "Target piece count (the size of the run)."
+        },
+        "provenanceHash": {
+          "type": "string",
+          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
+        "tractus": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "One axis of variation — the aditus port to vary and its options.",
+            "properties": {
+              "porta": {
+                "type": "string",
+                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+              },
+              "label": {
+                "type": "string",
+                "description": "Human-facing category label (falls back to porta)."
+              },
+              "valores": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One option within a trait axis.",
+                  "properties": {
+                    "value": {
+                      "description": "The aditus value injected when this option is selected."
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Human-facing display name (falls back to String(value))."
+                    },
+                    "rarity": {
+                      "type": "number",
+                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                    },
+                    "promptFragment": {
+                      "type": "string",
+                      "description": "Text woven into the assembled prompt when this option wins."
+                    },
+                    "excludes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Labels in OTHER axes this option blocks."
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Theme tags for group-level mutual exclusion."
+                    }
+                  },
+                  "required": [
+                    "value"
+                  ]
+                },
+                "description": "The options for this axis."
+              }
+            },
+            "required": [
+              "porta",
+              "valores"
+            ]
+          },
+          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+        },
+        "reviewEnabled": {
+          "type": "boolean",
+          "description": "Whether each piece is held for review before it counts."
         },
         "owners": {
           "type": "array",
@@ -1231,12 +2727,13 @@ List the authenticated caller's Collections (owner-scoped).
           "status": {
             "type": "string",
             "enum": [
+              "draft",
               "pending",
               "running",
               "complete",
               "cancelled"
             ],
-            "description": "The collection lifecycle status."
+            "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
           },
           "modusId": {
             "type": "string",
@@ -1249,6 +2746,74 @@ List the authenticated caller's Collections (owner-scoped).
           "provenanceHash": {
             "type": "string",
             "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+          },
+          "tractus": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One axis of variation — the aditus port to vary and its options.",
+              "properties": {
+                "porta": {
+                  "type": "string",
+                  "description": "The aditus port key this axis varies (e.g. background, outfit)."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Human-facing category label (falls back to porta)."
+                },
+                "valores": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "description": "One option within a trait axis.",
+                    "properties": {
+                      "value": {
+                        "description": "The aditus value injected when this option is selected."
+                      },
+                      "label": {
+                        "type": "string",
+                        "description": "Human-facing display name (falls back to String(value))."
+                      },
+                      "rarity": {
+                        "type": "number",
+                        "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                      },
+                      "promptFragment": {
+                        "type": "string",
+                        "description": "Text woven into the assembled prompt when this option wins."
+                      },
+                      "excludes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "Labels in OTHER axes this option blocks."
+                      },
+                      "tags": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "Theme tags for group-level mutual exclusion."
+                      }
+                    },
+                    "required": [
+                      "value"
+                    ]
+                  },
+                  "description": "The options for this axis."
+                }
+              },
+              "required": [
+                "porta",
+                "valores"
+              ]
+            },
+            "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+          },
+          "reviewEnabled": {
+            "type": "boolean",
+            "description": "Whether each piece is held for review before it counts."
           },
           "owners": {
             "type": "array",
@@ -1341,12 +2906,13 @@ Fetch one Collection by id — progress (completed/failed/total), status, cost. 
         "status": {
           "type": "string",
           "enum": [
+            "draft",
             "pending",
             "running",
             "complete",
             "cancelled"
           ],
-          "description": "The collection lifecycle status."
+          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
         },
         "modusId": {
           "type": "string",
@@ -1359,6 +2925,74 @@ Fetch one Collection by id — progress (completed/failed/total), status, cost. 
         "provenanceHash": {
           "type": "string",
           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
+        "tractus": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "One axis of variation — the aditus port to vary and its options.",
+            "properties": {
+              "porta": {
+                "type": "string",
+                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+              },
+              "label": {
+                "type": "string",
+                "description": "Human-facing category label (falls back to porta)."
+              },
+              "valores": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One option within a trait axis.",
+                  "properties": {
+                    "value": {
+                      "description": "The aditus value injected when this option is selected."
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Human-facing display name (falls back to String(value))."
+                    },
+                    "rarity": {
+                      "type": "number",
+                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                    },
+                    "promptFragment": {
+                      "type": "string",
+                      "description": "Text woven into the assembled prompt when this option wins."
+                    },
+                    "excludes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Labels in OTHER axes this option blocks."
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Theme tags for group-level mutual exclusion."
+                    }
+                  },
+                  "required": [
+                    "value"
+                  ]
+                },
+                "description": "The options for this axis."
+              }
+            },
+            "required": [
+              "porta",
+              "valores"
+            ]
+          },
+          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+        },
+        "reviewEnabled": {
+          "type": "boolean",
+          "description": "Whether each piece is held for review before it counts."
         },
         "owners": {
           "type": "array",
@@ -1618,12 +3252,13 @@ Extend a Collection — raise the target by `count` and dispatch the new pieces 
         "status": {
           "type": "string",
           "enum": [
+            "draft",
             "pending",
             "running",
             "complete",
             "cancelled"
           ],
-          "description": "The collection lifecycle status."
+          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
         },
         "modusId": {
           "type": "string",
@@ -1636,6 +3271,74 @@ Extend a Collection — raise the target by `count` and dispatch the new pieces 
         "provenanceHash": {
           "type": "string",
           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
+        "tractus": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "One axis of variation — the aditus port to vary and its options.",
+            "properties": {
+              "porta": {
+                "type": "string",
+                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+              },
+              "label": {
+                "type": "string",
+                "description": "Human-facing category label (falls back to porta)."
+              },
+              "valores": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One option within a trait axis.",
+                  "properties": {
+                    "value": {
+                      "description": "The aditus value injected when this option is selected."
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Human-facing display name (falls back to String(value))."
+                    },
+                    "rarity": {
+                      "type": "number",
+                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                    },
+                    "promptFragment": {
+                      "type": "string",
+                      "description": "Text woven into the assembled prompt when this option wins."
+                    },
+                    "excludes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Labels in OTHER axes this option blocks."
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Theme tags for group-level mutual exclusion."
+                    }
+                  },
+                  "required": [
+                    "value"
+                  ]
+                },
+                "description": "The options for this axis."
+              }
+            },
+            "required": [
+              "porta",
+              "valores"
+            ]
+          },
+          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+        },
+        "reviewEnabled": {
+          "type": "boolean",
+          "description": "Whether each piece is held for review before it counts."
         },
         "owners": {
           "type": "array",
@@ -1727,12 +3430,13 @@ Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Own
         "status": {
           "type": "string",
           "enum": [
+            "draft",
             "pending",
             "running",
             "complete",
             "cancelled"
           ],
-          "description": "The collection lifecycle status."
+          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
         },
         "modusId": {
           "type": "string",
@@ -1745,6 +3449,74 @@ Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Own
         "provenanceHash": {
           "type": "string",
           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
+        "tractus": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "One axis of variation — the aditus port to vary and its options.",
+            "properties": {
+              "porta": {
+                "type": "string",
+                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+              },
+              "label": {
+                "type": "string",
+                "description": "Human-facing category label (falls back to porta)."
+              },
+              "valores": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One option within a trait axis.",
+                  "properties": {
+                    "value": {
+                      "description": "The aditus value injected when this option is selected."
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Human-facing display name (falls back to String(value))."
+                    },
+                    "rarity": {
+                      "type": "number",
+                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                    },
+                    "promptFragment": {
+                      "type": "string",
+                      "description": "Text woven into the assembled prompt when this option wins."
+                    },
+                    "excludes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Labels in OTHER axes this option blocks."
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Theme tags for group-level mutual exclusion."
+                    }
+                  },
+                  "required": [
+                    "value"
+                  ]
+                },
+                "description": "The options for this axis."
+              }
+            },
+            "required": [
+              "porta",
+              "valores"
+            ]
+          },
+          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+        },
+        "reviewEnabled": {
+          "type": "boolean",
+          "description": "Whether each piece is held for review before it counts."
         },
         "owners": {
           "type": "array",
@@ -1836,12 +3608,13 @@ Resume a paused Collection — continue dispatching toward the target. Owner-sco
         "status": {
           "type": "string",
           "enum": [
+            "draft",
             "pending",
             "running",
             "complete",
             "cancelled"
           ],
-          "description": "The collection lifecycle status."
+          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
         },
         "modusId": {
           "type": "string",
@@ -1854,6 +3627,74 @@ Resume a paused Collection — continue dispatching toward the target. Owner-sco
         "provenanceHash": {
           "type": "string",
           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
+        "tractus": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "One axis of variation — the aditus port to vary and its options.",
+            "properties": {
+              "porta": {
+                "type": "string",
+                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+              },
+              "label": {
+                "type": "string",
+                "description": "Human-facing category label (falls back to porta)."
+              },
+              "valores": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One option within a trait axis.",
+                  "properties": {
+                    "value": {
+                      "description": "The aditus value injected when this option is selected."
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Human-facing display name (falls back to String(value))."
+                    },
+                    "rarity": {
+                      "type": "number",
+                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                    },
+                    "promptFragment": {
+                      "type": "string",
+                      "description": "Text woven into the assembled prompt when this option wins."
+                    },
+                    "excludes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Labels in OTHER axes this option blocks."
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Theme tags for group-level mutual exclusion."
+                    }
+                  },
+                  "required": [
+                    "value"
+                  ]
+                },
+                "description": "The options for this axis."
+              }
+            },
+            "required": [
+              "porta",
+              "valores"
+            ]
+          },
+          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+        },
+        "reviewEnabled": {
+          "type": "boolean",
+          "description": "Whether each piece is held for review before it counts."
         },
         "owners": {
           "type": "array",
@@ -1945,12 +3786,13 @@ Cancel a Collection — stop dispatching and mark it cancelled. Owner-scoped.
         "status": {
           "type": "string",
           "enum": [
+            "draft",
             "pending",
             "running",
             "complete",
             "cancelled"
           ],
-          "description": "The collection lifecycle status."
+          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
         },
         "modusId": {
           "type": "string",
@@ -1963,6 +3805,74 @@ Cancel a Collection — stop dispatching and mark it cancelled. Owner-scoped.
         "provenanceHash": {
           "type": "string",
           "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+        },
+        "tractus": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "One axis of variation — the aditus port to vary and its options.",
+            "properties": {
+              "porta": {
+                "type": "string",
+                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+              },
+              "label": {
+                "type": "string",
+                "description": "Human-facing category label (falls back to porta)."
+              },
+              "valores": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One option within a trait axis.",
+                  "properties": {
+                    "value": {
+                      "description": "The aditus value injected when this option is selected."
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Human-facing display name (falls back to String(value))."
+                    },
+                    "rarity": {
+                      "type": "number",
+                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                    },
+                    "promptFragment": {
+                      "type": "string",
+                      "description": "Text woven into the assembled prompt when this option wins."
+                    },
+                    "excludes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Labels in OTHER axes this option blocks."
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Theme tags for group-level mutual exclusion."
+                    }
+                  },
+                  "required": [
+                    "value"
+                  ]
+                },
+                "description": "The options for this axis."
+              }
+            },
+            "required": [
+              "porta",
+              "valores"
+            ]
+          },
+          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+        },
+        "reviewEnabled": {
+          "type": "boolean",
+          "description": "Whether each piece is held for review before it counts."
         },
         "owners": {
           "type": "array",
@@ -2233,6 +4143,290 @@ Publish an artifact (an Actum for #1) to a destination under a visibility/custod
           ],
           "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
         },
+        "reviewOutcome": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+        },
+        "externalRef": {
+          "type": "string",
+          "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Rights split snapshot (team-owned only) — weights sum to ~1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "license": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "artifact",
+        "destination",
+        "visibility",
+        "custody",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "required": [
+    "edition"
+  ]
+}
+```
+
+### GET /v1/editiones/review
+
+The human-review queue: publications the moderation gate HELD for review (spec §4). An author sees their own held items; the platform administrator sees all of them.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "editions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "The public projection of an Editio — a publication record referencing a canonical artifact.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "artifact": {
+            "type": "object",
+            "description": "The canonical artifact being published (referenced, never copied).",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "actum",
+                  "intella",
+                  "collectio"
+                ],
+                "description": "Which artifact kind."
+              },
+              "id": {
+                "type": "string",
+                "description": "The artifact's id."
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ]
+          },
+          "destination": {
+            "type": "string",
+            "description": "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "unlisted",
+              "feed",
+              "marketplace"
+            ]
+          },
+          "custody": {
+            "type": "string",
+            "enum": [
+              "ours",
+              "theirs",
+              "both"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "published",
+              "rejected",
+              "failed",
+              "retracted"
+            ],
+            "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+          },
+          "reviewOutcome": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ],
+            "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+          },
+          "externalRef": {
+            "type": "string",
+            "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
+          },
+          "owners": {
+            "type": "array",
+            "description": "Rights split snapshot (team-owned only) — weights sum to ~1.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "animaId": {
+                  "type": "string"
+                },
+                "weight": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "animaId",
+                "weight"
+              ]
+            }
+          },
+          "license": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "artifact",
+          "destination",
+          "visibility",
+          "custody",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "editions"
+  ]
+}
+```
+
+### GET /v1/editiones/:id
+
+Fetch one publication (author-scoped). Poll it to watch a `pending` settle land — an async archive ZIP build finishing (`externalRef` = the download url), or a public surface being gated.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "edition": {
+      "type": "object",
+      "description": "The public projection of an Editio — a publication record referencing a canonical artifact.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "artifact": {
+          "type": "object",
+          "description": "The canonical artifact being published (referenced, never copied).",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "actum",
+                "intella",
+                "collectio"
+              ],
+              "description": "Which artifact kind."
+            },
+            "id": {
+              "type": "string",
+              "description": "The artifact's id."
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        "destination": {
+          "type": "string",
+          "description": "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …"
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "private",
+            "unlisted",
+            "feed",
+            "marketplace"
+          ]
+        },
+        "custody": {
+          "type": "string",
+          "enum": [
+            "ours",
+            "theirs",
+            "both"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "published",
+            "rejected",
+            "failed",
+            "retracted"
+          ],
+          "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+        },
+        "reviewOutcome": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+        },
         "externalRef": {
           "type": "string",
           "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
@@ -2359,6 +4553,287 @@ Retract a publication where the destination allows it (feed/bucket = revocable; 
             "retracted"
           ],
           "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+        },
+        "reviewOutcome": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+        },
+        "externalRef": {
+          "type": "string",
+          "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Rights split snapshot (team-owned only) — weights sum to ~1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "license": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "artifact",
+        "destination",
+        "visibility",
+        "custody",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "required": [
+    "edition"
+  ]
+}
+```
+
+### POST /v1/editiones/:id/approve
+
+Clear a moderation HOLD so the held publication re-settles and publishes (spec §4). Restricted to the platform administrator — an author cannot clear their own held content.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "edition": {
+      "type": "object",
+      "description": "The public projection of an Editio — a publication record referencing a canonical artifact.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "artifact": {
+          "type": "object",
+          "description": "The canonical artifact being published (referenced, never copied).",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "actum",
+                "intella",
+                "collectio"
+              ],
+              "description": "Which artifact kind."
+            },
+            "id": {
+              "type": "string",
+              "description": "The artifact's id."
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        "destination": {
+          "type": "string",
+          "description": "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …"
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "private",
+            "unlisted",
+            "feed",
+            "marketplace"
+          ]
+        },
+        "custody": {
+          "type": "string",
+          "enum": [
+            "ours",
+            "theirs",
+            "both"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "published",
+            "rejected",
+            "failed",
+            "retracted"
+          ],
+          "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+        },
+        "reviewOutcome": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+        },
+        "externalRef": {
+          "type": "string",
+          "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Rights split snapshot (team-owned only) — weights sum to ~1.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "animaId": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "animaId",
+              "weight"
+            ]
+          }
+        },
+        "license": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "artifact",
+        "destination",
+        "visibility",
+        "custody",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "required": [
+    "edition"
+  ]
+}
+```
+
+### POST /v1/editiones/:id/reject
+
+Decline a held publication → terminal `rejected` (spec §4). Restricted to the platform administrator. Filing a CSAM report is a separate, explicit human action — never automatic.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "edition": {
+      "type": "object",
+      "description": "The public projection of an Editio — a publication record referencing a canonical artifact.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "artifact": {
+          "type": "object",
+          "description": "The canonical artifact being published (referenced, never copied).",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "actum",
+                "intella",
+                "collectio"
+              ],
+              "description": "Which artifact kind."
+            },
+            "id": {
+              "type": "string",
+              "description": "The artifact's id."
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        "destination": {
+          "type": "string",
+          "description": "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …"
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "private",
+            "unlisted",
+            "feed",
+            "marketplace"
+          ]
+        },
+        "custody": {
+          "type": "string",
+          "enum": [
+            "ours",
+            "theirs",
+            "both"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "published",
+            "rejected",
+            "failed",
+            "retracted"
+          ],
+          "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+        },
+        "reviewOutcome": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
         },
         "externalRef": {
           "type": "string",

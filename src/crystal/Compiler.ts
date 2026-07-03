@@ -5,6 +5,8 @@ import type { Intella, Intellarum } from '../types/intelligendi.js'
 import type { ModelRef } from '../types/actum.js'
 import { WorkflowTemplateRegistry, WorkflowTemplateError } from './WorkflowTemplateRegistry.js'
 import { resolveLoraTriggers, type ResolvedLora } from './loraResolver.js'
+import { importSecretProviderForUrl } from './modelImportResolver.js'
+import { ownsBy as ownsIntella } from './ownerKey.js'
 import type { Porta } from '../types/modus.js'
 
 /**
@@ -44,6 +46,12 @@ function byRoleThenId(a: { role: string; id: string }, b: { role: string; id: st
   return r !== 0 ? r : a.id.localeCompare(b.id)
 }
 
+/** The effective owner key for a compile — the generic `ownerKey`, or the legacy `animaId`
+ *  lifted into its `anima:<id>` form. Undefined when the run carries no identity. */
+function effectiveOwnerKey(opts: CompileOptions): string | undefined {
+  return opts.ownerKey ?? (opts.animaId ? `anima:${opts.animaId}` : undefined)
+}
+
 function deepSort(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(deepSort)
   if (value !== null && typeof value === 'object') {
@@ -76,8 +84,11 @@ function deepSort(value: unknown): unknown {
 export interface CompiledSpecBase {
   image: { imageId: string; imageVersion: string; ociRef: string }
   /** Resolved weight manifest. `repo` (HF repo id) is set only for repo-download runtimes
-   *  (vLLM/transformers, via `huggingface-cli`); ComfyUI single-file downloads omit it. */
-  models: Array<{ role: string; id: string; url: string; dest: string; repo?: string }>
+   *  (vLLM/transformers, via `huggingface-cli`); ComfyUI single-file downloads omit it.
+   *  `gated` marks a model whose `url` points at OUR weight-proxy (BYO-secrets Phase C) — the
+   *  runner must attach its per-job token when fetching it. Set only when true (hash-stable
+   *  for every non-gated model). */
+  models: Array<{ role: string; id: string; url: string; dest: string; repo?: string; gated?: boolean }>
   genFlags: Record<string, unknown>
   sourceTool: { id: string; versio: string }
   /** On-pod runtime this spec targets — the dispatch key (ADR-0005 single-source, ADR-0007 dispatch). */
@@ -155,8 +166,12 @@ export interface CompileResult {
 }
 
 export interface CompileOptions {
-  /** The runner's anima — scopes private-LoRA conflict resolution. */
+  /** The runner's anima — scopes private-LoRA conflict resolution. Legacy; prefer `ownerKey`
+   *  (an anima value is converted to `anima:<id>` for the owner-scoped query). */
   animaId?: string
+  /** Generic owner key (`ownerKeyOf(auctor)`) — scopes private-LoRA resolution for ANY owner
+   *  (anima OR Bursa purse). Takes precedence over `animaId`. */
+  ownerKey?: string
   /** Models the host pinned onto the studio loadout via `Mod • → Add`. Unioned into
    *  `spec.models` (deduped against the template + prompt-resolved LoRAs). */
   pinnedModels?: ModelRef[]
@@ -183,8 +198,27 @@ export class Compiler {
     randomSeed?: () => number,
     private readonly intellarum?: Intellarum,
     private readonly fundamentorum?: Fundamentorum,
+    /** Public base URL of the weight-download proxy (BYO-secrets Phase C, e.g.
+     *  `https://api.noema.art`). When set, a PRIVATE import whose origin is a gated host
+     *  (Civitai/HF) has its download `url` rewritten to `${base}/internal/weights/:id` and is
+     *  flagged `gated` so the pod fetches through us with its per-job token — never seeing the
+     *  BYO origin secret. UNSET (default) → no rewrite: gated private weights keep their origin
+     *  url (the pre-Phase-C status quo). Feature-gate + the runner-side header-attach must be
+     *  deployed before this is set. */
+    private readonly weightProxyBase?: string,
   ) {
     this.randomSeed = randomSeed ?? (() => Math.floor(Math.random() * 0x100000000))
+  }
+
+  /** The proxy download URL for a gated private import, or null when the rewrite doesn't apply:
+   *  the proxy isn't configured, the model isn't private, or its origin host isn't a gated
+   *  (Civitai/HF) provider (direct/our-bucket sources need no BYO token, so no proxy). */
+  private gatedProxyUrl(intella: Intella): string | null {
+    if (!this.weightProxyBase) return null
+    if (intella.access !== 'private') return null
+    const origin = intella.sources?.[0]?.uri
+    if (!origin || !importSecretProviderForUrl(origin)) return null
+    return `${this.weightProxyBase.replace(/\/$/, '')}/internal/weights/${encodeURIComponent(intella.id)}`
   }
 
   async compile(
@@ -273,10 +307,14 @@ export class Compiler {
       }
     })
 
+    // The runner's owner key — scopes private-model resolution for the whole compile (trigger map
+    // + pinned/base ref resolution). Undefined for an unidentified run (public models only).
+    const ownerKey = effectiveOwnerKey(opts)
+
     // Resolve the base weights FIRST — this loads each weight's Intella record
     // (the same find() the family derivation needs), so we derive the family
     // fetch-once from those records rather than a second N+1 pass.
-    const { resolved: baseWeights, records } = await this._resolveModelsWithRecords(weightRefs)
+    const { resolved: baseWeights, records } = await this._resolveModelsWithRecords(weightRefs, ownerKey)
 
     // ── Derive the flow's model family (role-agnostic) ─────────────────────
     // The distinct non-empty `familia` across the flow's weights (atomic → one;
@@ -310,7 +348,9 @@ export class Compiler {
     let loraWarnings: string[] = []
     let promptForSlots: Record<string, unknown> = wovenAditus
     if (template.loraCapable && this.intellarum && families.length > 0 && typeof wovenAditus.prompt === 'string') {
-      const map = await this.intellarum.triggerMap(families[0], opts.animaId)
+      // Owner-scope the trigger map so the runner's OWN private imports resolve by trigger word
+      // (and no one else's). `ownerKey` is threaded from the run identity (RunPodCursor → compile).
+      const map = await this.intellarum.triggerMap(families[0], ownerKey)
       const r = resolveLoraTriggers(wovenAditus.prompt, { triggerMap: map, ...(opts.animaId ? { animaId: opts.animaId } : {}) })
       appliedLoras = r.appliedLoras
       loraWarnings = r.warnings
@@ -347,7 +387,7 @@ export class Compiler {
     const loraRefs = await this._loraIntellaeToRefs(appliedLoras)
     const seen = new Set([...weightRefs.map(r => r.id), ...loraRefs.map(r => r.id)])
     const pinnedRefs = (opts.pinnedModels ?? []).filter(r => !seen.has(r.id))
-    const extraModels = await this._resolveModels([...loraRefs, ...pinnedRefs])
+    const extraModels = await this._resolveModels([...loraRefs, ...pinnedRefs], ownerKey)
     const models = [...baseWeights, ...extraModels].sort(byRoleThenId)
 
     const spec: ComfyUICompiledSpec = {
@@ -396,8 +436,9 @@ export class Compiler {
 
   private async _resolveModels(
     refs: Array<{ role: string; id: string; url?: string; dest: string; sizeBytes?: number }>,
-  ): Promise<Array<{ role: string; id: string; url: string; dest: string; sizeBytes?: number }>> {
-    const { resolved } = await this._resolveModelsWithRecords(refs)
+    ownerKey?: string,
+  ): Promise<Array<{ role: string; id: string; url: string; dest: string; sizeBytes?: number; gated?: boolean }>> {
+    const { resolved } = await this._resolveModelsWithRecords(refs, ownerKey)
     return resolved.sort(byRoleThenId)
   }
 
@@ -420,29 +461,43 @@ export class Compiler {
    */
   private async _resolveModelsWithRecords(
     refs: Array<{ role: string; id: string; url?: string; dest: string; sizeBytes?: number }>,
+    ownerKey?: string,
   ): Promise<{
-    resolved: Array<{ role: string; id: string; url: string; dest: string; sizeBytes?: number }>
+    resolved: Array<{ role: string; id: string; url: string; dest: string; sizeBytes?: number; gated?: boolean }>
     records: Map<string, Intella>
   }> {
-    const resolved: Array<{ role: string; id: string; url: string; dest: string; sizeBytes?: number }> = []
+    const resolved: Array<{ role: string; id: string; url: string; dest: string; sizeBytes?: number; gated?: boolean }> = []
     const records = new Map<string, Intella>()
     for (const ref of refs) {
       let url = ref.url
       let dest = ref.dest
+      let gated = false
       if (this.intellarum) {
         const intella = await this.intellarum.find(ref.id)
         if (intella) {
+          // Access control: a PRIVATE model resolves ONLY for its owner. Public/canonica models
+          // resolve for anyone. This closes the `find(id)`-by-id hole — a run cannot load someone
+          // else's private import/LoRA by supplying its id as a pinned model.
+          if (intella.access === 'private' && !ownsIntella(intella, ownerKey)) {
+            throw new CompilerError('MODEL_FORBIDDEN', `Model '${ref.id}' is private`)
+          }
           records.set(ref.id, intella)
           if (intella.sources.length > 0) {
             url = intella.sources[0].uri
             dest = intella.dest
           }
+          // BYO-secrets Phase C: a private import from a gated origin (Civitai/HF) fetches through
+          // OUR weight-proxy so the pod never sees the owner's origin token. Rewrite the download
+          // url to the proxy and flag it; the runner attaches its per-job token for `gated` models.
+          // No-op unless the proxy is configured (see `gatedProxyUrl`).
+          const proxied = this.gatedProxyUrl(intella)
+          if (proxied) { url = proxied; gated = true }
         }
       }
       if (!url) {
         throw new CompilerError('MODEL_NOT_RESOLVED', `No URL for model '${ref.id}' — register it in the model registry`)
       }
-      resolved.push({ role: ref.role, id: ref.id, url, dest, sizeBytes: ref.sizeBytes })
+      resolved.push({ role: ref.role, id: ref.id, url, dest, sizeBytes: ref.sizeBytes, ...(gated ? { gated: true } : {}) })
     }
     return { resolved, records }
   }
@@ -470,8 +525,9 @@ export class Compiler {
     // ── Weight manifest = fundament base ∪ flow weights (no template fallback) ─
     // Unlike ComfyUI there is no template to enrich url/dest from — the weights MUST
     // resolve from the registered Intella (the seeds provide sources[0]).
+    const ownerKey = effectiveOwnerKey(opts)
     const weightRefs = this._manifestRefs(fundamentum, essentia).map(w => ({ role: w.role, id: w.id, dest: '' }))
-    const { resolved: baseWeights, records } = await this._resolveModelsWithRecords(weightRefs)
+    const { resolved: baseWeights, records } = await this._resolveModelsWithRecords(weightRefs, ownerKey)
 
     // Enrich with the HF repo id — the pod's vLLM executor downloads the WHOLE repo via
     // `huggingface-cli download <repo>`, not a single file (so `url`/`dest` alone aren't
@@ -485,7 +541,7 @@ export class Compiler {
     // Host-pinned models (the studio loadout) union in, same as the ComfyUI path.
     const seen = new Set(weightRefs.map(r => r.id))
     const pinnedRefs = (opts.pinnedModels ?? []).filter(r => !seen.has(r.id))
-    const extraModels = await this._resolveModels(pinnedRefs)
+    const extraModels = await this._resolveModels(pinnedRefs, ownerKey)
     const models = [...withRepo, ...extraModels].sort(byRoleThenId)
 
     // ── The user prompt, affix-woven (same seam as ComfyUI's text Portae) ──────

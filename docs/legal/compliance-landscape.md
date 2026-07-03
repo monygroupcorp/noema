@@ -136,12 +136,25 @@ commercial license.
 | FLUX.1 | pro / 1.1 pro | Closed | ❌ | API-only, not self-hostable |
 | Stable Diffusion | 1.5 / SDXL | CreativeML OpenRAIL-M | ✅ (with use restrictions) | Flow-down behavioral restrictions to users |
 | Stable Diffusion | 3 / 3.5 | Stability Community License | ⚠️ conditional | Revenue/entity thresholds; verify before use |
+| FLUX.1 | Kontext [dev] | BFL Non-Commercial | ❌ unless licensed | Separate model (no base flow); NC like FLUX.1 [dev] |
+| FLUX.2 | klein 4B | Apache 2.0 | ✅ | Fully clear |
+| FLUX.2 | klein 9B / [dev] | FLUX Non-Commercial | ❌ unless licensed | ONLY klein 4B is Apache; 9B + dev are NC |
+| Chroma | unlocked | Apache 2.0 | ✅ | Fully clear |
+| Z-Image | Turbo | Apache 2.0 | ✅ | Fully clear |
+| Krea | 2 | Krea 2 Community | ⚠️ conditional | Commercial only under <$1M-revenue threshold |
+| Pony Diffusion | (SDXL) | Fair AI Public License 1.0-SD | ✅ | Flow-down restrictions |
 | Llama | 3.x | Meta Community License | ✅ (with conditions) | 700M MAU cap, attribution/naming, flow-down AUP |
-| Qwen | (varies) | Apache 2.0 / Tongyi Qianwen | ⚠️ per size | Verify per checkpoint |
+| Qwen | 3 / 3-VL / Image | Apache 2.0 | ✅ | Verify per checkpoint; Qwen3 generation is Apache |
 
 > Action: extend this table for **every** model in the catalog before it can be billed.
 > Tie it to the `Fundamentum` / `Essentia` registry so license metadata is single-sourced
 > with the model spec (see ADR-0005, ADR-0007).
+>
+> **Encoded in code (2026-07-02):** this register is the ground truth for `src/crystal/modelLicense.ts`
+> (`classifyBaseModel`/`classifyModelLicense`), which stamps a `commercialUse` verdict on every model
+> at import/train and via the license backfill sweep. Canonical models carry an explicit verdict in
+> `src/crystal/seeds/intellae.ts`. The public-catalog gate (`isCatalogEligible`) refuses `no`/`unknown`
+> promotions fail-closed — see `docs/spec/model-import.md` §Licensing.
 
 ---
 

@@ -6,6 +6,7 @@ import type { Materia, MateriaStore } from '../types/materia.js'
 import type { HospitiumStore } from '../types/hospitium.js'
 import type { ActumExecutio } from '../types/actum.js'
 import { makeLogger } from '../lib/logger.js'
+import { SshTransport } from './SshTransport.js'
 import { getTrace } from '../lib/trace.js'
 import { bus } from '../lib/bus.js'
 import { recordProgressus } from '../execution/progressusSink.js'
@@ -143,6 +144,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
   async submit(params: {
     input: unknown
     webhook?: string
+    jobToken?: string
     provisioningContext?: ProvisioningContext
     onPodActive?: (podId: string) => Promise<void>
     onMetrics?: (executio: ActumExecutio) => Promise<void>
@@ -185,7 +187,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     let runnerAcceptedJob = false
     const runWithRetry = async () => {
       try {
-        await this._runBackground(podId!, imageName, params.input, params.webhook, undefined, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.provisioningContext)
+        await this._runBackground(podId!, imageName, params.input, params.webhook, undefined, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.provisioningContext, params.jobToken)
       } catch (firstErr) {
         // Once comfyrunner accepted the job it OWNS the run and the webhook. A
         // dropped SSE stream after that point means we lost visibility, not that
@@ -218,7 +220,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
           // Update DB so the retry pod is tracked; webhook will fire with retryPodId
           await params.onPodActive?.(retryPodId).catch(() => {})
           try {
-            await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.provisioningContext)
+            await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.provisioningContext, params.jobToken)
             return
           } catch (runErr) {
             if (runnerAcceptedJob && !(runErr as { isThrottleError?: boolean }).isThrottleError) {
@@ -543,6 +545,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     onRunnerAccepted?: (accepted: boolean) => void,
     onMetrics?: (executio: ActumExecutio) => Promise<void>,
     provisioningContext?: ProvisioningContext,
+    jobToken?: string,
   ): Promise<void> {
     const startMs = Date.now()
     let ssh: SshTransportLike | null = null
@@ -585,7 +588,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
       signal('comfy-ready')
 
       const jobId = externusJobId ?? podId
-      await submitToRunner(this.fetchFn, runnerBase, jobId, input, webhook, this.config.r2)
+      await submitToRunner(this.fetchFn, runnerBase, jobId, input, webhook, this.config.r2, jobToken)
       onRunnerAccepted?.(true)  // comfyrunner now owns the failure webhook
 
       const submitCtx = getTrace()
@@ -791,25 +794,11 @@ export class SecurePodClient implements RunPodClient, Procurator {
 }
 
 // ---------------------------------------------------------------------------
-// Default SSH factory — uses the system ssh binary via SshTransport.js
+// Default SSH factory — uses the system ssh binary via the crystal SshTransport.
 // ---------------------------------------------------------------------------
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SshTransportCtor = new (opts: { host: string; port: number; username: string; privateKeyPath: string; logger?: unknown }) => SshTransportLike
-let _SshTransport: SshTransportCtor | null = null
-
-function loadSshTransport(): SshTransportCtor {
-  if (!_SshTransport) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    _SshTransport = require('../core/services/remote/SshTransport.js') as SshTransportCtor
-  }
-  return _SshTransport
-}
 
 export function makeSecurePodSshFactory(sshKeyPath: string): (info: SshInfo) => SshTransportLike {
   const sshLog = makeLogger('ssh:transport')
-  return (info: SshInfo) => {
-    const Ctor = loadSshTransport()
-    return new Ctor({ host: info.host, port: info.port, username: info.user, privateKeyPath: sshKeyPath, logger: sshLog })
-  }
+  return (info: SshInfo) =>
+    new SshTransport({ host: info.host, port: info.port, username: info.user, privateKeyPath: sshKeyPath, logger: sshLog })
 }
