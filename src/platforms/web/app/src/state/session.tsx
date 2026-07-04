@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, getSession, setSession, type AuthResult } from '../lib/api';
+import { connectWallet } from '../lib/wallet';
 
 // The REAL fiat session — a JWT the backend resolves to an animaId. This is the
 // authoritative "who is signed in" layer; state/identity.tsx now DERIVES the current
@@ -7,23 +8,25 @@ import { api, getSession, setSession, type AuthResult } from '../lib/api';
 // lib/api carries `Authorization: Bearer …` instead of the anon commitment, so the
 // account's own credits/collections/settings load.
 //
-// Identity note: the anon commitment and a named anima are DIFFERENT souls — anon
-// work does not migrate on login. The login screen says so.
+// Anonymous username+password — NO email. Register logs you straight in. Identity note:
+// the anon commitment and a named anima are DIFFERENT souls — anon work does not migrate
+// on login. The login screen says so.
 
-interface SessionState { token: string; animaId: string; email?: string }
+interface SessionState { token: string; animaId: string; username?: string }
 
-// The email isn't echoed by refresh/verify — cache it locally so the account readout
+// The username isn't echoed by refresh — cache it locally so the account readout
 // survives a reload. Cleared on logout.
-const EMAIL_KEY = 'noema-session-email';
-const rememberEmail = (email?: string) => { if (email) localStorage.setItem(EMAIL_KEY, email); };
-const recallEmail = (): string | undefined => localStorage.getItem(EMAIL_KEY) ?? undefined;
+const NAME_KEY = 'noema-session-username';
+const rememberName = (username?: string) => { if (username) localStorage.setItem(NAME_KEY, username); };
+const recallName = (): string | undefined => localStorage.getItem(NAME_KEY) ?? undefined;
 
 interface SessionCtx {
   session: SessionState | null;   // null = logged out (anon commitment path)
   ready: boolean;                 // false until the initial refresh settles
-  register: (email: string, password: string) => Promise<void>;   // no session — verify first
-  login: (email: string, password: string) => Promise<void>;
-  verifyEmail: (token: string) => Promise<void>;                  // auto-login
+  register: (username: string, password: string) => Promise<void>;   // mints a session (auto-login)
+  login: (username: string, password: string) => Promise<void>;
+  recoverWithWallet: () => Promise<void>;   // prove a linked wallet → log straight in
+  recoverWithTelegram: (code: string) => Promise<void>;   // paste a bot recovery code → log in
   logout: () => void;
 }
 
@@ -35,11 +38,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Adopt a fresh {session, animaId} — persist the token and schedule a pre-expiry refresh.
-  function adopt(res: AuthResult, email?: string) {
-    const em = email ?? recallEmail();
-    rememberEmail(em);
+  function adopt(res: AuthResult, username?: string) {
+    const nm = username ?? recallName();
+    rememberName(nm);
     setSession(res.session.token);
-    setSessionState({ token: res.session.token, animaId: res.animaId, email: em });
+    setSessionState({ token: res.session.token, animaId: res.animaId, username: nm });
     scheduleRefresh(res.session.expiresIn);
   }
 
@@ -49,7 +52,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const ms = Math.max(30_000, (expiresIn - 60) * 1000);
     refreshTimer.current = setTimeout(() => {
       api.auth.refresh()
-        .then((res) => adopt(res, session?.email))
+        .then((res) => adopt(res, session?.username))
         .catch(() => {/* token likely expired — leave it; next guarded call re-auths */});
     }, ms);
   }
@@ -70,29 +73,41 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const register = async (email: string, password: string) => {
-    await api.auth.register(email, password); // 202 — no session; user must verify their email
+  const register = async (username: string, password: string) => {
+    const res = await api.auth.register(username, password); // 201 — mints a session (no verify step)
+    adopt(res, username);
   };
 
-  const login = async (email: string, password: string) => {
-    const res = await api.auth.login(email, password);
-    adopt(res, email);
+  const login = async (username: string, password: string) => {
+    const res = await api.auth.login(username, password);
+    adopt(res, username);
   };
 
-  const verifyEmail = async (token: string) => {
-    const res = await api.auth.verifyEmail(token);
+  // Forgot-password recovery: prove control of a linked wallet, log straight in. The
+  // username isn't known here (recall from a prior session if any) — the animaId is what matters.
+  const recoverWithWallet = async () => {
+    const wallet = await connectWallet();
+    const { token, statement } = await api.auth.walletChallenge(wallet.address);
+    const signature = await wallet.signMessage(statement);
+    const res = await api.auth.walletRecover(token, signature);
+    adopt(res);
+  };
+
+  // Forgot-password recovery via Telegram: the user pastes a code the bot handed them.
+  const recoverWithTelegram = async (code: string) => {
+    const res = await api.auth.telegramRecover(code.trim());
     adopt(res);
   };
 
   const logout = () => {
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
-    localStorage.removeItem(EMAIL_KEY);
+    localStorage.removeItem(NAME_KEY);
     setSession(null);
     setSessionState(null);
   };
 
   return (
-    <Ctx.Provider value={{ session, ready, register, login, verifyEmail, logout }}>
+    <Ctx.Provider value={{ session, ready, register, login, recoverWithWallet, recoverWithTelegram, logout }}>
       {children}
     </Ctx.Provider>
   );

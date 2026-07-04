@@ -42,7 +42,6 @@ import { Landing } from './screens/Landing';
 import { Ceremony } from './screens/Ceremony';
 import { Feed } from './screens/Feed';
 import { Review } from './screens/Review';
-import { VerifyEmail, ForgotPassword, ResetPassword } from './screens/Auth';
 import { Doc } from './screens/Doc';
 import { Stub } from './screens/Stub';
 import aboutMd from './content/about.md?raw';
@@ -101,12 +100,8 @@ export function App() {
       <Route path="/onboard" element={<Onboard />} />
       <Route path="/landing" element={<Landing />} />
       <Route path="/ceremony" element={<Ceremony />} />
-      {/* Fiat auth — sign-in / create lives inline in Door A (/onboard). These are the
-          standalone token handlers; the two token paths are FIXED by the backend's emailed
-          links (AUTH_APP_BASE_URL/verify-email?token / /reset-password?token). */}
-      <Route path="/verify-email" element={<VerifyEmail />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/reset-password" element={<ResetPassword />} />
+      {/* Fiat auth — sign-in / create lives inline in Door A (/onboard). No email, so
+          no verify/reset token pages; recovery is via backup channels bound in the profile. */}
       <Route path="/about" element={<Doc md={aboutMd} />} />
       <Route path="/features" element={<Doc md={featuresMd} />} />
       <Route path="/pricing" element={<Doc md={pricingMd} />} />

@@ -88,8 +88,8 @@ const readHeaders = (): Record<string, string> =>
 export interface Session { token: string; tokenType: 'Bearer'; expiresIn: number }
 export interface AuthResult { session: Session; animaId: string }
 
-// Auth errors carry the backend's `error.code` so screens can branch (auth.email_unverified,
-// auth.invalid, auth.token_invalid, conflict.registration, input.malformed, …).
+// Auth errors carry the backend's `error.code` so screens can branch (auth.invalid,
+// conflict.registration, input.malformed, …).
 export class AuthApiError extends Error {
   code: string;
   status: number;
@@ -290,30 +290,46 @@ export const api = {
     fetch(`/v1/me/secrets/${provider}`, { method: 'DELETE', headers: authHeaders() }).then(jSecret),
 
   // ── Fiat auth (username/password rail) ───────────────────────────────────────
-  // These deliberately do NOT send a commitment on register/login/forgot (a named
-  // account is a different soul than the anon purse); verify/reset carry only their
-  // emailed token; refresh carries the bearer. Errors surface via AuthApiError.code.
+  // Anonymous username+password — NO email. Register logs you in immediately (mints a
+  // session). These deliberately do NOT send a commitment (a named account is a different
+  // soul than the anon purse); refresh carries the bearer. Errors surface via AuthApiError.code.
+  // Account recovery (forgot password) is via backup channels bound in the profile, not email.
   auth: {
-    register: (email: string, password: string) =>
-      fetch('/v1/auth/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) })
-        .then(jAuth<{ status: string }>),
-    login: (email: string, password: string) =>
-      fetch('/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) })
+    register: (username: string, password: string) =>
+      fetch('/v1/auth/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) })
         .then(jAuth<AuthResult>),
-    verifyEmail: (token: string) =>
-      fetch('/v1/auth/verify-email', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }) })
+    login: (username: string, password: string) =>
+      fetch('/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) })
         .then(jAuth<AuthResult>),
-    resendVerification: (email: string) =>
-      fetch('/v1/auth/resend-verification', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) })
-        .then(jAuth<{ status: string }>),
-    forgot: (email: string) =>
-      fetch('/v1/auth/forgot-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) })
-        .then(jAuth<{ status: string }>),
-    reset: (token: string, newPassword: string) =>
-      fetch('/v1/auth/reset-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, newPassword }) })
-        .then(jAuth<{ status: string }>),
     refresh: () =>
       fetch('/v1/auth/session/refresh', { method: 'POST', headers: { authorization: `Bearer ${getSession() ?? ''}` } })
+        .then(jAuth<AuthResult>),
+
+    // ── Wallet backup / recovery channel ───────────────────────────────────────
+    // challenge → sign the returned `statement` → link (authed, binds to your soul) or
+    // recover (public, logs into the soul the wallet is bound to). listWallets is authed.
+    walletChallenge: (address: string) =>
+      fetch('/v1/auth/wallet/challenge', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address }) })
+        .then(jAuth<{ token: string; statement: string }>),
+    walletLink: (challengeToken: string, signature: string) =>
+      fetch('/v1/auth/wallet/link', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ challengeToken, signature }) })
+        .then(jAuth<{ address: string }>),
+    walletRecover: (challengeToken: string, signature: string) =>
+      fetch('/v1/auth/wallet/recover', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeToken, signature }) })
+        .then(jAuth<AuthResult>),
+    listWallets: () =>
+      fetch('/v1/auth/wallet', { headers: readHeaders() }).then(jAuth<{ wallets: string[] }>),
+
+    // ── Telegram backup / recovery channel ─────────────────────────────────────
+    // challenge (authed) → open the deepLink in Telegram + tap Start to bind. status (authed)
+    // reflects whether it's linked. recover (public) redeems a code the bot handed the user.
+    telegramChallenge: () =>
+      fetch('/v1/auth/telegram/challenge', { method: 'POST', headers: authHeaders(), body: '{}' })
+        .then(jAuth<{ code: string; deepLink?: string; botUsername?: string }>),
+    telegramStatus: () =>
+      fetch('/v1/auth/telegram', { headers: readHeaders() }).then(jAuth<{ linked: boolean }>),
+    telegramRecover: (code: string) =>
+      fetch('/v1/auth/telegram/recover', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) })
         .then(jAuth<AuthResult>),
   },
 };
