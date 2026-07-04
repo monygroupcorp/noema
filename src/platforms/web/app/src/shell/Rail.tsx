@@ -11,8 +11,9 @@ import { Chip } from './Chip';
 // is the generate bucket — deliberately NOT "Make" (a protected canon verb / the default
 // text→image flow). This rail replaces every surface's ad-hoc breadcrumb. The privacy posture is
 // NOT here — it rides the top-bar posture cluster on every surface.
-// Deferred to their own specs and still reachable via /map until then: Keyring (multi-account),
-// Tee/Studio (privacy home, D8), Trace (D7). /map stays until they all have real homes.
+// Keyring (multi-account) now has its real home on the Identity pillar (Keyring handoff, D7).
+// Still deferred to their own specs and reachable only via /map until then: Tee/Studio (privacy
+// home, D8), Trace (D7). /map stays until those last two also have real homes.
 interface NavLeaf { to: string; ico: string; label: string }
 interface NavSection { sec?: string; items: NavLeaf[] }
 
@@ -38,6 +39,7 @@ const NAV: NavSection[] = [
   ] },
   { sec: 'Identity', items: [
     { to: '/profile', ico: 'circle-user', label: 'Profile' },
+    { to: '/keyring', ico: 'key-round', label: 'Keyring' },
   ] },
 ];
 

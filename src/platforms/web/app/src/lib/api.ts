@@ -64,15 +64,101 @@ export function commitment(): string {
   return c;
 }
 
-// ── Real fiat session (JWT) — layered OVER the anon commitment ──────────────
-// A logged-in user's session token is stored here; when present it is sent as
-// `Authorization: Bearer <token>` and the backend resolves it to an animaId, so
-// every /v1 call becomes identified with no other change. Absent → anon commitment.
-const SESSION_KEY = 'noema-session';
-export function getSession(): string | null { return localStorage.getItem(SESSION_KEY); }
-export function setSession(token: string | null) {
-  if (token) localStorage.setItem(SESSION_KEY, token);
-  else localStorage.removeItem(SESSION_KEY);
+// ── Multi-session store (JWT) — layered OVER the anon commitment ─────────────
+// The Twitter model: one browser holds several named logins at once, keyed by
+// animaId, with a single ACTIVE pointer. When an account is active its token is
+// sent as `Authorization: Bearer <token>` and the backend resolves it to that
+// animaId, so every /v1 call is identified with no other change. No active
+// account (all signed out) → the anon commitment path. There is NO new backend:
+// each account is already an independent soul; this is purely a client store.
+//
+// The API layer only ever reads the ACTIVE token via getSession(), so authHeaders
+// / readHeaders are unchanged — the multi-account machinery lives above them.
+// expiresAt = absolute ms epoch (issued-at + expiresIn), so a later switch can tell
+// "instant if unexpired" from "refresh-then-activate" without tracking issued-at separately.
+export interface StoredAccount { animaId: string; token: string; username?: string; expiresAt?: number }
+export interface SessionStore { accounts: StoredAccount[]; activeAnimaId: string | null }
+
+const STORE_KEY = 'noema-sessions';
+// Pre-multi-account single-token keys (state/session.tsx before this change).
+const LEGACY_TOKEN_KEY = 'noema-session';
+const LEGACY_NAME_KEY = 'noema-session-username';
+
+// A transient token used while a session isn't yet in the store: during legacy
+// migration (no animaId known until refresh) and during switch-with-refresh (the
+// target's stale token must sign its own refresh call). Cleared once adopted.
+let pendingToken: string | null = null;
+export function setPendingToken(token: string | null) { pendingToken = token; }
+
+function readStore(): SessionStore {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) {
+      const v = JSON.parse(raw) as Partial<SessionStore>;
+      if (v && Array.isArray(v.accounts)) return { accounts: v.accounts, activeAnimaId: v.activeAnimaId ?? null };
+    }
+  } catch { /* fall through to empty */ }
+  return { accounts: [], activeAnimaId: null };
+}
+function writeStore(s: SessionStore) { localStorage.setItem(STORE_KEY, JSON.stringify(s)); }
+
+export function getAccounts(): SessionStore { return readStore(); }
+
+// The active account's token — what every /v1 call carries. pendingToken covers
+// the brief window before a fresh/switched session lands in the store.
+export function getSession(): string | null {
+  const s = readStore();
+  const active = s.accounts.find((a) => a.animaId === s.activeAnimaId);
+  return active?.token ?? pendingToken;
+}
+
+// Upsert an account by animaId and make it active (register / login / refresh / switch-refresh).
+export function upsertAccount(acc: StoredAccount): SessionStore {
+  const s = readStore();
+  const rest = s.accounts.filter((a) => a.animaId !== acc.animaId);
+  const next: SessionStore = { accounts: [...rest, acc], activeAnimaId: acc.animaId };
+  writeStore(next);
+  pendingToken = null;
+  return next;
+}
+
+// Point at an already-stored account (instant switch; token assumed live).
+export function setActiveAnimaId(animaId: string | null): SessionStore {
+  const s = readStore();
+  const next: SessionStore = { ...s, activeAnimaId: s.accounts.some((a) => a.animaId === animaId) ? animaId : null };
+  writeStore(next);
+  return next;
+}
+
+// Drop the active account; activate the next remaining (or null → anon). Returns the new store.
+export function dropActiveAccount(): SessionStore {
+  const s = readStore();
+  const rest = s.accounts.filter((a) => a.animaId !== s.activeAnimaId);
+  const next: SessionStore = { accounts: rest, activeAnimaId: rest[rest.length - 1]?.animaId ?? null };
+  writeStore(next);
+  return next;
+}
+
+// Sign out of every account → the anon commitment path.
+export function clearAllAccounts(): SessionStore {
+  const empty: SessionStore = { accounts: [], activeAnimaId: null };
+  writeStore(empty);
+  return empty;
+}
+
+// One-time migration of the pre-multi-account single token. If the new store is
+// empty but a legacy token exists, hand it back (animaId unknown until refresh)
+// and clear the legacy keys so this runs exactly once. The provider refreshes it
+// into a real account. Returns null when there's nothing to migrate.
+export function takeLegacySession(): { token: string; username?: string } | null {
+  const store = readStore();
+  if (store.accounts.length) return null;
+  const token = localStorage.getItem(LEGACY_TOKEN_KEY);
+  if (!token) return null;
+  const username = localStorage.getItem(LEGACY_NAME_KEY) ?? undefined;
+  localStorage.removeItem(LEGACY_TOKEN_KEY);
+  localStorage.removeItem(LEGACY_NAME_KEY);
+  return { token, username };
 }
 
 // Write headers (POST/PUT/PATCH): content-type + bearer if signed in, else the anon commitment.
