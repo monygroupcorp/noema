@@ -43,13 +43,13 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
 
   const ident: Ident = useMemo(() => {
     const named = !!session;
-    const email = session?.email;
-    const name = named ? (email?.split('@')[0] ?? 'account') : 'anonymous';
+    const username = session?.username;
+    const name = named ? (username ?? 'account') : 'anonymous';
     const bal = balance != null ? `${balance} credits` : '…';
     return {
       id: session?.animaId ?? 'anon',
       name,
-      role: named ? (email ?? 'account') : 'bearer purse',
+      role: named ? (username ?? 'account') : 'bearer purse',
       funding: named ? 'named' : 'bearer',
       glyph: named ? (name[0]?.toUpperCase() ?? 'A') : '◷',
       bal,
