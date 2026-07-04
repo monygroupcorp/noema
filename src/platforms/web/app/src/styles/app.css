@@ -792,6 +792,15 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .am-stat .v{font-size:13.5px;margin-top:3px;display:flex;align-items:center;gap:6px}
 .am-switch{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--hair);background:var(--bg);color:var(--text);font:inherit;font-size:12.5px;padding:9px;border-radius:9px;cursor:pointer;margin-bottom:8px}
 .am-switch:hover{border-color:color-mix(in srgb,var(--accent) 35%,var(--hair))} .am-switch svg.lucide{width:14px;height:14px;color:var(--muted)}
+/* multi-account switcher — the held logins + anon slot + add-account */
+.am-accounts{display:flex;flex-direction:column;gap:2px;margin-bottom:8px;border-top:1px solid var(--hair-soft);padding-top:6px}
+.am-acct{width:100%;display:flex;align-items:center;gap:10px;border:0;background:none;color:var(--text);font:inherit;font-size:13px;padding:8px;border-radius:8px;cursor:pointer;text-align:left}
+.am-acct:hover{background:var(--raised)}
+.am-acct.on{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.am-acct .chip{width:24px;height:24px;font-size:11px}
+.am-acct .nm{font-weight:500}
+.am-acct .chk{margin-left:auto;color:var(--accent);font-size:13px}
+.am-acct.add{color:var(--muted)} .am-acct.add svg.lucide{width:15px;height:15px;color:var(--faint)}
 .am-links{display:flex;flex-direction:column;border-top:1px solid var(--hair-soft);padding-top:6px}
 .am-links a{display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:8px;color:var(--text);text-decoration:none;font-size:13px}
 .am-links a:hover{background:var(--raised)} .am-links a svg.lucide{width:15px;height:15px;color:var(--faint)}

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
@@ -18,34 +18,48 @@ import './onboard.css';
 // username" expands inline into a sign-in / create-account form (useSession). No email —
 // registering logs you straight in. Wallet/Passkey remain cosmetic placeholders. Door B
 // (anonymous) stays the local/bearer identity skin.
+//
+// ADDITIVE MODE (`/onboard?add=1`, Keyring Decision 3): reached via "Add account" from the
+// Keyring / account menu. The multi-session store APPENDS a login rather than replacing, so
+// this flag only governs copy + where we land afterwards (back to /keyring, not /app).
 
 const MIN_PASSWORD = 8;
 const MIN_USERNAME = 3;
 
 export function Onboard() {
-  const { setIdentity, setExecution } = useIdentity();
+  const { setExecution } = useIdentity();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const addMode = params.get('add') === '1';
 
-  // Cosmetic entry (anon door + wallet/passkey placeholders): set the durable profile +
-  // session execution mode, mark onboarded, drop into the app shell.
-  const enter = (ident: string, exec: Execution) => {
-    setIdentity(ident);       // 'studio' = named · 'untitled' = bearer
+  // Anon entry (Door B): the anon commitment path is a session with no account, so there's
+  // nothing to set beyond the execution mode — funding derives from the (absent) session.
+  const enter = (exec: Execution) => {
     setExecution(exec);       // session mode; custody is still per-run inside the app
     markOnboarded();
-    navigate('/app');
+    navigate(addMode ? '/keyring' : '/app');
   };
 
   return (
     <div className="auth-root">
       <header className="auth-head">
         <Wordmark height={26} />
-        <h1 className="auth-display">Make anything.<br />We never have to see it.</h1>
-        <p className="auth-sub">Choose how you enter — you decide what we can know.</p>
+        {addMode ? (
+          <>
+            <h1 className="auth-display">Add another account.</h1>
+            <p className="auth-sub">Your current account stays signed in — this one joins your keyring, and you switch between them freely.</p>
+          </>
+        ) : (
+          <>
+            <h1 className="auth-display">Make anything.<br />We never have to see it.</h1>
+            <p className="auth-sub">Choose how you enter — you decide what we can know.</p>
+          </>
+        )}
       </header>
 
       <div className="auth-doors">
         {/* Door A — bring an identity (real account) */}
-        <IdentityDoor />
+        <IdentityDoor addMode={addMode} />
 
         {/* Door B — stay anonymous (slate / dashed hemisphere) */}
         <section className="door anon">
@@ -54,7 +68,7 @@ export function Onboard() {
             <h2>Stay anonymous</h2>
           </div>
           <p className="door-d">No account. Run on your own machine — nothing ever leaves — or fund a bearer purse to use our compute without a name.</p>
-          <button className="door-cta slate" onClick={() => enter('untitled', 'local')}>Enter local · off-grid →</button>
+          <button className="door-cta slate" onClick={() => enter('local')}>Enter local · off-grid →</button>
           <button className="door-opt" disabled title="Coming soon"><Ic name="venetian-mask" /> Set up a Bursa <span className="opt-meta">coming soon</span></button>
           <p className="door-warn">* a Bursa is anonymous only if funded from a shielded wallet. A doxxed source links you to us at funding time — permanently.</p>
           <div className="door-knows"><span className="hemi dashed sm" aria-hidden="true" /> noema knows: <b>nothing*</b></div>
@@ -68,7 +82,7 @@ export function Onboard() {
 
 // Door A: collapsed (buttons) → username form (sign in / create). On success the session
 // context adopts a live session; here we mark the named profile + onboarded and enter the app.
-function IdentityDoor() {
+function IdentityDoor({ addMode }: { addMode: boolean }) {
   const { login, register, recoverWithWallet, recoverWithTelegram } = useSession();
   const navigate = useNavigate();
   const [mode, setMode] = useState<'collapsed' | 'signin' | 'register'>('collapsed');
@@ -96,7 +110,8 @@ function IdentityDoor() {
   }
 
   const reset = () => { setErr(null); };
-  const done = () => { markOnboarded(); navigate('/app'); };   // session is live; enter identified
+  // session is live; land in the app, or back on the keyring when adding an account.
+  const done = () => { markOnboarded(); navigate(addMode ? '/keyring' : '/app'); };
 
   async function onSignin(e: FormEvent) {
     e.preventDefault();
