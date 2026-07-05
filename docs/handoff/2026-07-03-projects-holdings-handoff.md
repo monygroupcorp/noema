@@ -1,6 +1,10 @@
 # Handoff · Projects / real holdings
 
-> **STATUS — SHIPPED (working tree, hermetic-green, never live-verified) 2026-07-04.**
+> **STATUS — SHIPPED + E2E-VERIFIED against noemaplane 2026-07-05** (working tree; committed
+> `39658fe5` + fix `85f421c2`). Full `/v1/me/projects` HTTP lifecycle driven over real
+> noemaplane Mongo (22/22): auth gate, CRUD, idempotent holdings file/unfile, cross-account
+> 404, team link+clear, persistence re-read. The E2E caught a `$set:{x:undefined}`→null Mongo
+> quirk the in-memory fakes hid (fixed: `$unset`).
 > All 6 decisions built backend-first. The crystal type is **`Provincia`** (an account-owned
 > workspace lens), store **`Provinciarum`** (`MongoProvinciarum`, `provinciae` collection).
 > - **D1** — `/v1/me/projects` CRUD (`GET`/`POST`/`GET :id`/`PATCH :id`/`DELETE :id` +
