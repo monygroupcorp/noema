@@ -3,19 +3,22 @@ import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type Generatio, type MeView } from '../lib/api';
+import { useProject } from '../state/project';
 
 // Preferences — portable generation defaults that travel across web · Telegram · API.
 // WIRED: the cross-cutting card persists to `generatio` (GET/PUT /v1/me/generatio),
 // applied at cast time (style prepends the prompt; negativePrompt fills the flow's
 // negative input). The per-command param defaults have a ready backend too
 // (GET/PUT /v1/me/affines/:modusId, applied cast-time) — the inline per-command editor
-// is the marked next step. MARKED gaps: /animate·/effect·/upscale aren't canon verbs
-// yet; "land in / project" needs a Projects entity that doesn't exist; auto-apply model
-// needs a model picker + cast-time model resolution.
+// is the marked next step. "land in (project)" is a live picker persisting
+// generatio.defaultProjectId (Provincia) — stored + portable; cast-time auto-filing is the
+// marked next step. MARKED gaps: /animate·/effect·/upscale aren't canon verbs yet; auto-apply
+// model needs a model picker + cast-time model resolution.
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function Preferences() {
+  const { projects } = useProject();
   const [me, setMe] = useState<MeView | null>(null);
   const [gen, setGen] = useState<Generatio>({});
   const [err, setErr] = useState<string | null>(null);
@@ -79,8 +82,11 @@ export function Preferences() {
               <select className="cer-input" value={gen.telegramDeliverAs ?? 'album'} onChange={(e) => commit({ ...gen, telegramDeliverAs: e.target.value as Generatio['telegramDeliverAs'] })}>
                 <option value="album">album</option><option value="individual">individual</option>
               </select></label>
-            <div className="ac-row"><span className="ac-rk mono">land in (project)</span>
-              <span className="ac-rv mono" style={{ color: 'var(--faint)' }}><span className="hemi2 dashed" /> needs a Projects entity — not built</span></div>
+            <label className="ac-row"><span className="ac-rk mono">land in (project)</span>
+              <select className="cer-input" value={gen.defaultProjectId ?? ''} onChange={(e) => commit({ ...gen, defaultProjectId: e.target.value || undefined })}>
+                <option value="">— none (unfiled) —</option>
+                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select></label>
           </div>
         </div>
 

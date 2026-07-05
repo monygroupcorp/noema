@@ -63,6 +63,7 @@ export const Errors = {
   notFoundRun: (id: string) => new ApiError('not_found.run', `Run '${id}' not found`, 404),
   notFoundCollection: (id: string) => new ApiError('not_found.collection', `Collection '${id}' not found`, 404),
   notFoundTeam: (id: string) => new ApiError('not_found.team', `Team '${id}' not found`, 404),
+  notFoundProject: (id: string) => new ApiError('not_found.project', `Project '${id}' not found`, 404),
   notFoundEdition: (id: string) => new ApiError('not_found.edition', `Edition '${id}' not found`, 404),
   notFoundModel: (id: string) => new ApiError('not_found.model', `Model '${id}' not found`, 404),
   /** A model can't be promoted to the public (commercial) catalog under its license. Private use is
