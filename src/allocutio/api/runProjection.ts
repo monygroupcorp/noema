@@ -126,7 +126,7 @@ export function toProject(p: Provincia): Project {
     datasetIds: p.res.datasetIds,
     modelIds: p.res.modelIds,
     collectionIds: p.res.collectionIds,
-    ...(p.sodalitasId !== undefined ? { teamId: p.sodalitasId } : {}),
+    ...(p.sodalitasId != null ? { teamId: p.sodalitasId } : {}),
     createdAt: p.natum.toISOString(),
     updatedAt: p.mutatum.toISOString(),
   }

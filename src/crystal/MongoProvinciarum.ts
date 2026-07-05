@@ -27,11 +27,18 @@ export class MongoProvinciarum implements Provinciarum {
   }
 
   async update(id: string, patch: ProvinciaPatch): Promise<Provincia> {
-    const result = await this.col.findOneAndUpdate(
-      { id },
-      { $set: { ...patch, mutatum: new Date() } },
-      { returnDocument: 'after' },
-    )
+    // Split the patch: defined fields → $set, undefined fields → $unset (so clearing an
+    // optional field like `sodalitasId` REMOVES it, not stores a null the projection would
+    // then emit as teamId:null). $set always carries the mutatum bump.
+    const set: Record<string, unknown> = { mutatum: new Date() }
+    const unset: Record<string, ''> = {}
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) unset[k] = ''
+      else set[k] = v
+    }
+    const update: Record<string, unknown> = { $set: set }
+    if (Object.keys(unset).length) update.$unset = unset
+    const result = await this.col.findOneAndUpdate({ id }, update, { returnDocument: 'after' })
     if (!result) throw new Error(`Provincia '${id}' not found`)
     return fromDoc(result)
   }

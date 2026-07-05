@@ -21,7 +21,14 @@ class MemProvinciarum implements Provinciarum {
     return full
   }
   async update(id: string, patch: ProvinciaPatch) {
-    const p = { ...this.store.get(id)!, ...patch, mutatum: new Date() }
+    // Model Mongo's $set/$unset split: an undefined patch value REMOVES the key (it does not
+    // store a present-but-undefined/null field). This mirrors MongoProvinciarum so the clear
+    // path is faithfully asserted here too (an E2E-caught quirk: $set:{x:undefined}→null).
+    const p: Provincia = { ...this.store.get(id)!, mutatum: new Date() }
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) delete (p as Record<string, unknown>)[k]
+      else (p as Record<string, unknown>)[k] = v
+    }
     this.store.set(id, p)
     return p
   }
@@ -130,6 +137,7 @@ test('updateProject: patch metadata + clear team reference', async () => {
 
   const cleared = await api.updateProject(ANIMA, p.id, { teamId: null })
   assert.equal(cleared.teamId, undefined)
+  assert.ok(!('teamId' in cleared), 'cleared DTO omits teamId entirely (no null)')
 })
 
 test('createProject with teamId: caller must be a member', async () => {
