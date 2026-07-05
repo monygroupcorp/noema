@@ -11,7 +11,8 @@ import type { Actum, ActumStatus } from '../../types/actum.js'
 import type { Collectio, CollectioStatus } from '../../types/collectio.js'
 import type { Editio } from '../../types/editio.js'
 import type { Sodalitas } from '../../types/sodalitas.js'
-import type { Run, RunStatus, Collection, CollectionStatus, Team, Edition } from './types.js'
+import type { Provincia } from '../../types/provincia.js'
+import type { Run, RunStatus, Collection, CollectionStatus, Team, Edition, Project } from './types.js'
 
 /** Map the Latin ActumStatus onto the public English RunStatus. */
 const STATUS_MAP: Record<ActumStatus, RunStatus> = {
@@ -110,5 +111,23 @@ export function toTeam(s: Sodalitas): Team {
     members: s.membra,
     founder: s.auctor,
     createdAt: s.natum.toISOString(),
+  }
+}
+
+/** Project a Provincia onto its public, JSON-safe Project shape. Pure. */
+export function toProject(p: Provincia): Project {
+  return {
+    id: p.id,
+    owner: p.animaId,
+    name: p.nomen,
+    ...(p.descriptio !== undefined ? { desc: p.descriptio } : {}),
+    ...(p.ornatus?.glyph !== undefined ? { glyph: p.ornatus.glyph } : {}),
+    ...(p.ornatus?.color !== undefined ? { color: p.ornatus.color } : {}),
+    datasetIds: p.res.datasetIds,
+    modelIds: p.res.modelIds,
+    collectionIds: p.res.collectionIds,
+    ...(p.sodalitasId !== undefined ? { teamId: p.sodalitasId } : {}),
+    createdAt: p.natum.toISOString(),
+    updatedAt: p.mutatum.toISOString(),
   }
 }

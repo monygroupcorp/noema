@@ -1,27 +1,35 @@
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { DATASETS, READINESS, MODALITY_TOKEN, custodyGlyph, CUSTODY_LABEL } from '../lib/datasets';
+import { useProjectScope } from '../state/project';
+import { ScopeBanner } from '../lib/ScopeBanner';
 
 // Datasets library (train-datasets-library-spec.md, render noema-train-datasets-library.png) —
 // the entry to the training stack: a recognizable shelf of raw material with each set's own
 // facts + a readiness line that names the next action. No downstream counts (datasets are
 // inputs, not scoreboards). Imagery is earned here (personal assets, unlike the Registry).
 export function Datasets() {
+  const [params] = useSearchParams();
+  const scope = useProjectScope(params.get('project'));
+  // When scoped to a project, show only its filed datasets (Provincia.res.datasetIds).
+  const list = scope ? DATASETS.filter((d) => scope.datasetIds.includes(d.id)) : DATASETS;
   return (
     <AppShell title="Datasets">
       <div className="page"><div className="pw wide">
         <div className="pagehead">
           <div>
-            <div className="noema-kicker" style={{ marginBottom: 8 }}>your datasets · {DATASETS.length}</div>
+            <div className="noema-kicker" style={{ marginBottom: 8 }}>your datasets · {list.length}</div>
             <h1>Datasets</h1>
             <div className="sub">Your raw material — the core every model is trained from. Reusable, versioned, captioned many ways.</div>
           </div>
           <div className="right"><button className="btn"><Ic name="plus" /> new dataset</button></div>
         </div>
 
+        {scope && <ScopeBanner project={scope} noun="datasets" />}
+
         <div className="dsgrid">
-          {DATASETS.map((d) => {
+          {list.map((d) => {
             const r = READINESS[d.readiness];
             return (
               <Link key={d.id} className="dscard" to={`/datasets/${d.id}`}>

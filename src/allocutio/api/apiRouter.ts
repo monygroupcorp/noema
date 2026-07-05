@@ -14,7 +14,7 @@
 
 import express, { type Request, type Response, type Router } from 'express'
 
-import type { Run, Collection, Team, Edition, FeedItem } from './types.js'
+import type { Run, Collection, Team, Edition, FeedItem, Project } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { FeedFilter } from '../../types/editio.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote } from './CrystalApi.js'
@@ -95,6 +95,13 @@ export interface ApiFacade {
   listTeams(auctor: AuctorKey): Promise<Team[]>
   addTeamMember(auctor: AuctorKey, id: string, animaId: string): Promise<Team>
   removeTeamMember(auctor: AuctorKey, id: string, animaId: string): Promise<Team>
+  listProjects(auctor: AuctorKey): Promise<Project[]>
+  createProject(auctor: AuctorKey, opts: { name: string; desc?: string; glyph?: string; color?: string; teamId?: string }): Promise<Project>
+  getProject(auctor: AuctorKey, id: string): Promise<Project>
+  updateProject(auctor: AuctorKey, id: string, patch: { name?: string; desc?: string; glyph?: string; color?: string; teamId?: string | null }): Promise<Project>
+  deleteProject(auctor: AuctorKey, id: string): Promise<void>
+  fileAsset(auctor: AuctorKey, id: string, kind: string, assetId: string): Promise<Project>
+  unfileAsset(auctor: AuctorKey, id: string, kind: string, assetId: string): Promise<Project>
 }
 
 /** The slice of IdentityResolver this router needs. */
@@ -390,6 +397,46 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   // DELETE /v1/teams/:id/members/:animaId — remove a member (not the founder). Member-scoped.
   router.delete('/teams/:id/members/:animaId', wrap(async (req, res) => {
     res.json({ team: await api.removeTeamMember(await auth(req), String(req.params.id), String(req.params.animaId)) })
+  }))
+
+  // ── Projects (Provincia) — an account-owned workspace lens ──────────────────────
+  // GET /v1/me/projects — list the caller's projects (owner-scoped, identified only).
+  router.get('/me/projects', wrap(async (req, res) => {
+    res.json({ projects: await api.listProjects(await auth(req)) })
+  }))
+
+  // POST /v1/me/projects — create a project { name, desc?, glyph?, color?, teamId? }.
+  router.post('/me/projects', wrap(async (req, res) => {
+    const { name, desc, glyph, color, teamId } = req.body ?? {}
+    res.status(201).json({ project: await api.createProject(await auth(req), { name, desc, glyph, color, teamId }) })
+  }))
+
+  // GET /v1/me/projects/:id — fetch one owned project (404 if not the owner).
+  router.get('/me/projects/:id', wrap(async (req, res) => {
+    res.json({ project: await api.getProject(await auth(req), String(req.params.id)) })
+  }))
+
+  // PATCH /v1/me/projects/:id — patch metadata { name?, desc?, glyph?, color?, teamId? }.
+  router.patch('/me/projects/:id', wrap(async (req, res) => {
+    const { name, desc, glyph, color, teamId } = req.body ?? {}
+    res.json({ project: await api.updateProject(await auth(req), String(req.params.id), { name, desc, glyph, color, teamId }) })
+  }))
+
+  // DELETE /v1/me/projects/:id — delete a project (filed assets untouched).
+  router.delete('/me/projects/:id', wrap(async (req, res) => {
+    await api.deleteProject(await auth(req), String(req.params.id))
+    res.status(204).end()
+  }))
+
+  // POST /v1/me/projects/:id/holdings — file an asset { kind: dataset|model|collection, assetId }.
+  router.post('/me/projects/:id/holdings', wrap(async (req, res) => {
+    const { kind, assetId } = req.body ?? {}
+    res.json({ project: await api.fileAsset(await auth(req), String(req.params.id), String(kind), String(assetId)) })
+  }))
+
+  // DELETE /v1/me/projects/:id/holdings/:kind/:assetId — unfile an asset from a project.
+  router.delete('/me/projects/:id/holdings/:kind/:assetId', wrap(async (req, res) => {
+    res.json({ project: await api.unfileAsset(await auth(req), String(req.params.id), String(req.params.kind), String(req.params.assetId)) })
   }))
 
   // GET /v1/fundamenta — list compute substrates (public).

@@ -53,6 +53,34 @@ export interface Team {
 }
 
 /**
+ * Project — the public projection of a Provincia (an account-owned workspace
+ * lens). JSON-safe; timestamps are ISO-8601. Holdings are id references into
+ * the canonical asset stores (datasets / models / collections) — never copies.
+ */
+export interface Project {
+  id: string
+  /** The owning Anima id (the project's hard ownership boundary). */
+  owner: string
+  /** Display name. */
+  name: string
+  /** Optional description. */
+  desc?: string
+  /** Presentation hints (glyph + color). */
+  glyph?: string
+  color?: string
+  /** Filed dataset ids. */
+  datasetIds: string[]
+  /** Filed model (Intella) ids. */
+  modelIds: string[]
+  /** Filed collection (Collectio) ids. */
+  collectionIds: string[]
+  /** Optional referenced Team (Sodalitas) id — the shared member set. */
+  teamId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+/**
  * Collection — the public projection of a Collectio (a generated collection /
  * batch) for the HTTP API. The internal Collectio is keyed by `numerus` /
  * `completae` / `fractae` and a Latin status; this is the JSON-safe English face.

@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type ModelCard } from '../lib/api';
+import { useProjectScope } from '../state/project';
+import { ScopeBanner } from '../lib/ScopeBanner';
 
 // Model shelf (train-shelf-spec.md) — the caller's own trained + imported models, from
 // GET /v1/me/models. Cards show real provenance (base model, trigger, license, listing
@@ -70,7 +72,11 @@ export function Shelf() {
     }
   }
 
-  const count = models?.length ?? 0;
+  const [params] = useSearchParams();
+  const scope = useProjectScope(params.get('project'));
+  // When scoped to a project, show only its filed models (Provincia.res.modelIds).
+  const shown = scope && models ? models.filter((m) => scope.modelIds.includes(m.intellaId)) : models;
+  const count = shown?.length ?? 0;
 
   return (
     <AppShell title="Models">
@@ -110,18 +116,20 @@ export function Shelf() {
           </div>
         )}
 
+        {scope && <ScopeBanner project={scope} noun="models" />}
+
         {err && <div className="warn">Couldn’t load your models — {err}</div>}
         {!models && !err && <div className="empty"><div className="t">Loading your models…</div></div>}
-        {models && models.length === 0 && (
+        {shown && shown.length === 0 && (
           <div className="empty">
-            <div className="t">No models yet</div>
+            <div className="t">{scope ? `No models filed into ${scope.name} yet` : 'No models yet'}</div>
             <div className="s">Train a LoRA from a <Link to="/datasets">dataset</Link>, or import one by URL — it lands here.</div>
           </div>
         )}
 
-        {models && models.length > 0 && (
+        {shown && shown.length > 0 && (
           <div className="shelfgrid">
-            {models.map((m) => {
+            {shown.map((m) => {
               const listed = m.access === 'public';
               return (
                 <div key={m.intellaId} className="modelcard">
