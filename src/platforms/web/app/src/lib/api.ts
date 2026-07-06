@@ -414,7 +414,7 @@ export const api = {
         .then(jAuth<{ token: string; statement: string }>),
     walletLink: (challengeToken: string, signature: string) =>
       fetch('/v1/auth/wallet/link', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ challengeToken, signature }) })
-        .then(jAuth<{ address: string }>),
+        .then(jAuth<{ address: string; moved?: boolean }>),
     walletRecover: (challengeToken: string, signature: string) =>
       fetch('/v1/auth/wallet/recover', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeToken, signature }) })
         .then(jAuth<AuthResult>),

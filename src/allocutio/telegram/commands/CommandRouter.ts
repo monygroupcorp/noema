@@ -58,7 +58,21 @@ export interface CommandDeps {
    * its dep). Wired by TelegramAllocutio against the same owner-keyed store.
    */
   bindVerb?(userId: string, verb: string, modusId: string): Promise<void>
+  /**
+   * Redeem a web-issued account-link code (`/start link_<code>`): re-point this Telegram
+   * identity at the web account so it becomes a recoverable backup. Returns the outcome.
+   * Optional — absent in contexts without the link-token store.
+   */
+  linkTelegram?(userId: string, code: string): Promise<'linked' | 'invalid'>
+  /**
+   * Mint a one-time recovery code for this Telegram identity (`/recover`) — the user pastes
+   * it on the web sign-in screen to log back in. Optional — same wiring as linkTelegram.
+   */
+  issueTelegramRecovery?(userId: string): Promise<string>
 }
+
+/** Deep-link account-link payload: `/start link_<code>` (code is base64url from makeLinkToken). */
+const LINK_PAYLOAD_RE = /^link_([A-Za-z0-9_-]+)$/
 
 /**
  * CommandRouter — maps slash commands to flow-router actions. The reaction-prep
@@ -80,6 +94,22 @@ export class CommandRouter {
         // Telegram deep links arrive as `/start <arg>` (e.g. /start pod_<token>).
         // Validate strictly — attacker-controllable input.
         const arg = text.split(/\s+/)[1] ?? ''
+        // Account-link deep link: `/start link_<code>` binds this Telegram as an account backup.
+        const linkM = arg.match(LINK_PAYLOAD_RE)
+        if (linkM && this.deps.linkTelegram) {
+          const outcome = await this.deps.linkTelegram(userId, linkM[1])
+          await this.deps.sendMessage(chatId, outcome === 'linked'
+            ? '✅ Your Telegram is now linked as a backup — if you forget your password, send /recover here to get back in.'
+            : '⚠️ That link expired or was already used. Open your NOEMA profile and start the Telegram link again.')
+          ack()
+          return
+        }
+        // Recovery deep link: `/start recover` = the /recover command (for a tapped link).
+        if (arg === 'recover' && this.deps.issueTelegramRecovery) {
+          await this._sendRecoveryCode(userId, chatId)
+          ack()
+          return
+        }
         const m = arg.match(SHARE_TOKEN_RE)
         if (m && this.deps.setPendingShareToken) {
           this.deps.setPendingShareToken(userId, m[1])
@@ -229,6 +259,15 @@ export class CommandRouter {
         })
         return
 
+      case '/recover':
+        if (this.deps.issueTelegramRecovery) {
+          await this._sendRecoveryCode(userId, chatId)
+          ack()
+        } else {
+          await this.deps.sendMessage(chatId, COPY.command.unknown)
+        }
+        return
+
       case '/help':
         await this.deps.sendMessage(chatId, COPY.command.help)
         return
@@ -237,5 +276,13 @@ export class CommandRouter {
         await this.deps.sendMessage(chatId, COPY.command.unknown)
         return
     }
+  }
+
+  /** Mint + deliver a one-time recovery code the user pastes on the web sign-in screen. */
+  private async _sendRecoveryCode(userId: string, chatId: number): Promise<void> {
+    const code = await this.deps.issueTelegramRecovery!(userId)
+    await this.deps.sendMessage(chatId,
+      `Your NOEMA recovery code (valid 10 minutes):\n\n${code}\n\n` +
+      'On the sign-in screen, tap "Recover with Telegram" and paste this code to get back in.')
   }
 }

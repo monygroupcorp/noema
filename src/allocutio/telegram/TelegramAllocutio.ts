@@ -170,6 +170,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     consuetudinum?: Consuetudinum
     /** Bot's @username — used to compose `https://t.me/<bot>?start=pod_<token>` share links. */
     botUsername?: string
+    /** Redeem a web-issued account-link code (`/start link_<code>`) — binds this Telegram as
+     *  an account backup. Optional — absent when the link-token store isn't wired. */
+    linkTelegramAccount?: (telegramUserId: string, code: string) => Promise<'linked' | 'invalid'>
+    /** Mint a one-time recovery code (`/recover`) for this Telegram identity. Optional. */
+    issueTelegramRecovery?: (telegramUserId: string) => Promise<string>
     /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
     autoSettleMs?: number
   }) {
@@ -280,6 +285,10 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         resolveVerb: async (userId, verb) => deps.consuetudinum!.resolve(await this.identity.resolve(userId), verb),
         bindVerb: async (userId, verb, modusId) => deps.consuetudinum!.bind(await this.identity.resolve(userId), verb, modusId),
       } : {}),
+      // Account backup/recovery (username-auth soul ⇆ Telegram) — wired in index.ts against
+      // the link-token store. Absent → /recover + link deep links report unavailable.
+      ...(deps.linkTelegramAccount ? { linkTelegram: deps.linkTelegramAccount } : {}),
+      ...(deps.issueTelegramRecovery ? { issueTelegramRecovery: deps.issueTelegramRecovery } : {}),
     })
 
     // Wire router callbacks
