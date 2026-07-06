@@ -11,9 +11,9 @@ import { Chip } from './Chip';
 // is the generate bucket — deliberately NOT "Make" (a protected canon verb / the default
 // text→image flow). This rail replaces every surface's ad-hoc breadcrumb. The privacy posture is
 // NOT here — it rides the top-bar posture cluster on every surface.
-// Keyring (multi-account) now has its real home on the Identity pillar (Keyring handoff, D7).
-// Still deferred to their own specs and reachable only via /map until then: Tee/Studio (privacy
-// home, D8), Trace (D7). /map stays until those last two also have real homes.
+// Keyring (multi-account) and Private/sealed compute (Tee, D8) both have real homes on the
+// Identity pillar now. Trace (D7) was deleted (superseded by Space's in-page viewer). Studio
+// (the warm-pod HUD) is reached from Settings → Compute; /map is retired.
 interface NavLeaf { to: string; ico: string; label: string }
 interface NavSection { sec?: string; items: NavLeaf[] }
 
@@ -40,6 +40,7 @@ const NAV: NavSection[] = [
   { sec: 'Identity', items: [
     { to: '/profile', ico: 'circle-user', label: 'Profile' },
     { to: '/keyring', ico: 'key-round', label: 'Keyring' },
+    { to: '/tee', ico: 'eye-off', label: 'Private' },
   ] },
 ];
 
@@ -57,7 +58,6 @@ export function Rail() {
     <aside className="rail">
       <div className="brand">
         <svg className="glyph" viewBox="0 0 24 24" aria-hidden="true"><path className="lit" d="M12,2 A10 10 0 0 0 12,22 Z" /><circle className="ring" cx="12" cy="12" r="10" fill="none" strokeWidth="1.4" /></svg><b>noema</b>
-        <Link to="/map" className="maplink" title="all screens"><Ic name="map" /></Link>
       </div>
 
       <nav className="nav">

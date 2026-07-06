@@ -376,6 +376,10 @@ export const api = {
     fetch('/v1/me/appearance', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(appearance) }).then(j<{ appearance: Appearance }>),
   setGeneratio: (generatio: Generatio) =>
     fetch('/v1/me/generatio', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(generatio) }).then(j<{ generatio: Generatio }>),
+  // PUT /v1/me/bindings/:verb — rebind a canon verb (e.g. `make`) to a chosen flow. Auth
+  // required (bearer purses can't rebind). Powers the Preferences default-flow picker.
+  setBinding: (verb: string, modusId: string) =>
+    fetch(`/v1/me/bindings/${encodeURIComponent(verb)}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ modusId }) }).then(j<{ verb: string; modusId: string }>),
   getAffines: (modusId: string) =>
     fetch(`/v1/me/affines/${encodeURIComponent(modusId)}`, { headers: readHeaders() }).then(j<{ affines: Record<string, unknown> }>),
   setAffines: (modusId: string, affines: Record<string, unknown>) =>
@@ -414,7 +418,7 @@ export const api = {
         .then(jAuth<{ token: string; statement: string }>),
     walletLink: (challengeToken: string, signature: string) =>
       fetch('/v1/auth/wallet/link', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ challengeToken, signature }) })
-        .then(jAuth<{ address: string; moved?: boolean }>),
+        .then(jAuth<{ address: string }>),
     walletRecover: (challengeToken: string, signature: string) =>
       fetch('/v1/auth/wallet/recover', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeToken, signature }) })
         .then(jAuth<AuthResult>),

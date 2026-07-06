@@ -76,8 +76,8 @@ export function Account() {
     <div className="posture">
       {/* credits — gold economy colour */}
       <Link to="/funding" className="pc-pill credits" title="credits"><span className="gem">◈</span> {credits} <span className="u">cr</span></Link>
-      {/* active compute — the hemisphere device */}
-      <span className="pc-pill compute" title="active compute"><span className={`hemi2 ${compute.glyph}`} /> {compute.text}</span>
+      {/* active compute — the hemisphere device; links to the sealed-session (private compute) view */}
+      <Link to="/tee" className="pc-pill compute" title="active compute · sealed session"><span className={`hemi2 ${compute.glyph}`} /> {compute.text}</Link>
       {/* identity chip — opens the account dropdown */}
       <button className="pc-pill id-chip" ref={btnRef} onClick={toggle}>
         <Chip d={ident} /><span className="nm">{anon ? 'anonymous' : 'you'}</span><span className="cv"><Ic name="chevron-down" /></span>
