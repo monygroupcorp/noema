@@ -50,7 +50,7 @@ import type { Run, Collection, CollectionPiece, Team, Edition, FeedItem, Project
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
 import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
 import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
-import type { Provincia, ProvinciaRes, ProvinciaResKind, Provinciarum } from '../../types/provincia.js'
+import type { Provincia, ProvinciaResKind, Provinciarum } from '../../types/provincia.js'
 import type { AnimaStore, PublishingPrefs } from '../../types/anima.js'
 import type { PublicationAdapter } from '../../crystal/PublicationAdapter.js'
 import type { ModerationGate } from '../../crystal/ModerationGate.js'
@@ -1257,7 +1257,7 @@ export class CrystalApi {
       nomen: opts.name,
       ...(opts.desc !== undefined ? { descriptio: opts.desc } : {}),
       ...(ornatus !== undefined ? { ornatus } : {}),
-      res: { datasetIds: [], modelIds: [], collectionIds: [] },
+      datasetIds: [], modelIds: [], collectionIds: [],
       ...(opts.teamId !== undefined ? { sodalitasId: opts.teamId } : {}),
     })
     return toProject(created)
@@ -1301,21 +1301,19 @@ export class CrystalApi {
 
   /** File an asset reference into a project's holdings (idempotent). Owner-only. */
   async fileAsset(auctor: AuctorKey, id: string, kind: string, assetId: string): Promise<Project> {
-    const k = resKind(kind)
     if (!assetId) throw Errors.inputMalformed('assetId is required')
+    const field = HOLDING_FIELD[resKind(kind)]
     const project = await this._ownedProject(auctor, id)
-    const res = resWith(project.res, k, assetId, true)
-    if (res === project.res) return toProject(project)
-    return toProject(await this._projectStore().setRes(id, res))
+    if (project[field].includes(assetId)) return toProject(project)
+    return toProject(await this._projectStore().update(id, { [field]: [...project[field], assetId] }))
   }
 
   /** Remove an asset reference from a project's holdings (idempotent). Owner-only. */
   async unfileAsset(auctor: AuctorKey, id: string, kind: string, assetId: string): Promise<Project> {
-    const k = resKind(kind)
+    const field = HOLDING_FIELD[resKind(kind)]
     const project = await this._ownedProject(auctor, id)
-    const res = resWith(project.res, k, assetId, false)
-    if (res === project.res) return toProject(project)
-    return toProject(await this._projectStore().setRes(id, res))
+    if (!project[field].includes(assetId)) return toProject(project)
+    return toProject(await this._projectStore().update(id, { [field]: project[field].filter((x) => x !== assetId) }))
   }
 
   private _projectStore(): Provinciarum {
@@ -2461,7 +2459,8 @@ function ornatusOf(
   return { ...(glyph !== undefined ? { glyph } : {}), ...(color !== undefined ? { color } : {}) }
 }
 
-const RES_FIELD: Record<ProvinciaResKind, keyof ProvinciaRes> = {
+/** Which flat holding list each asset kind writes to. */
+const HOLDING_FIELD: Record<ProvinciaResKind, 'datasetIds' | 'modelIds' | 'collectionIds'> = {
   dataset: 'datasetIds',
   model: 'modelIds',
   collection: 'collectionIds',
@@ -2471,17 +2470,6 @@ const RES_FIELD: Record<ProvinciaResKind, keyof ProvinciaRes> = {
 function resKind(kind: string): ProvinciaResKind {
   if (kind === 'dataset' || kind === 'model' || kind === 'collection') return kind
   throw Errors.inputMalformed(`unknown holding kind '${kind}' (expected dataset|model|collection)`)
-}
-
-/** Return a holdings set with `assetId` added to / removed from `kind`'s list.
- *  Returns the SAME reference when it would be a no-op (idempotent short-circuit). */
-function resWith(res: ProvinciaRes, kind: ProvinciaResKind, assetId: string, add: boolean): ProvinciaRes {
-  const field = RES_FIELD[kind]
-  const list = res[field]
-  const has = list.includes(assetId)
-  if (add ? has : !has) return res
-  const nextList = add ? [...list, assetId] : list.filter((x) => x !== assetId)
-  return { ...res, [field]: nextList }
 }
 
 /** micro-USD (bigint) → a fixed "D.dddddd" USD string (6 dp), exact, no float. */

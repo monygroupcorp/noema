@@ -4,8 +4,9 @@ import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type Collection, type FlowSummary } from '../lib/api';
 import { COLL_STATUS_LABEL, collGlyph, collTile } from '../lib/collections';
-import { useProjectScope } from '../state/project';
+import { useProject, useProjectScope } from '../state/project';
 import { ScopeBanner } from '../lib/ScopeBanner';
+import { HoldingToggle } from '../lib/HoldingToggle';
 
 // Collections (editio) — the BUILD-rail surface listing the user's collections. Each is a hub
 // (traits → run → curation → export). A collection is a batch-gen over a Tractus grid; creating
@@ -73,7 +74,7 @@ function CreateForm({ onCreated }: { onCreated: (c: Collection) => void }) {
   );
 }
 
-function Card({ c }: { c: Collection }) {
+function Card({ c, projectId }: { c: Collection; projectId: string }) {
   const active = c.status === 'pending' || c.status === 'running';
   const draft = c.status === 'draft';
   return (
@@ -92,6 +93,7 @@ function Card({ c }: { c: Collection }) {
             : active
             ? <Link className="btn accent" to={`/collections/${c.id}/run`}>View run →</Link>
             : <Link className="btn accent" to={`/collections/${c.id}/export`}>Export &amp; publish →</Link>}
+          <HoldingToggle kind="collection" assetId={c.id} projectId={projectId} />
         </div>
       </div>
     </div>
@@ -100,12 +102,14 @@ function Card({ c }: { c: Collection }) {
 
 export function Collections() {
   const nav = useNavigate();
+  const { project: active, fileAsset } = useProject();
   const [items, setItems] = useState<Collection[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
   const [params] = useSearchParams();
   const scope = useProjectScope(params.get('project'));
+  const target = (scope ?? active).id;
 
   useEffect(() => {
     let live = true;
@@ -130,7 +134,11 @@ export function Collections() {
 
         {scope && <ScopeBanner project={scope} noun="collections" />}
 
-        {creating && <CreateForm onCreated={(c) => nav(c.status === 'draft' ? `/collections/${c.id}/garden` : `/collections/${c.id}`)} />}
+        {creating && <CreateForm onCreated={(c) => {
+          // Creation-time filing (Decision 3): a new collection lands in the active project.
+          fileAsset(active.id, 'collection', c.id);
+          nav(c.status === 'draft' ? `/collections/${c.id}/garden` : `/collections/${c.id}`);
+        }} />}
 
         {err && <div className="warn">Couldn’t load collections: {err}</div>}
 
@@ -147,7 +155,7 @@ export function Collections() {
         )}
 
         {shown !== null && shown.length > 0 && (
-          <div className="collgrid">{shown.map((c) => <Card key={c.id} c={c} />)}</div>
+          <div className="collgrid">{shown.map((c) => <Card key={c.id} c={c} projectId={target} />)}</div>
         )}
       </div></div>
     </AppShell>

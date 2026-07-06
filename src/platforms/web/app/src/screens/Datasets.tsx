@@ -2,8 +2,9 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { DATASETS, READINESS, MODALITY_TOKEN, custodyGlyph, CUSTODY_LABEL } from '../lib/datasets';
-import { useProjectScope } from '../state/project';
+import { useProject, useProjectScope } from '../state/project';
 import { ScopeBanner } from '../lib/ScopeBanner';
+import { HoldingToggle } from '../lib/HoldingToggle';
 
 // Datasets library (train-datasets-library-spec.md, render noema-train-datasets-library.png) —
 // the entry to the training stack: a recognizable shelf of raw material with each set's own
@@ -11,8 +12,11 @@ import { ScopeBanner } from '../lib/ScopeBanner';
 // inputs, not scoreboards). Imagery is earned here (personal assets, unlike the Registry).
 export function Datasets() {
   const [params] = useSearchParams();
+  const { project: active } = useProject();
   const scope = useProjectScope(params.get('project'));
-  // When scoped to a project, show only its filed datasets (Provincia.res.datasetIds).
+  // File actions target the scoped project (on a ?project= surface) else the active one.
+  const target = (scope ?? active).id;
+  // When scoped to a project, show only its filed datasets (Provincia.datasetIds).
   const list = scope ? DATASETS.filter((d) => scope.datasetIds.includes(d.id)) : DATASETS;
   return (
     <AppShell title="Datasets">
@@ -46,6 +50,7 @@ export function Datasets() {
                     <span className="ds-state"><span className={`rdot ${r.dot}`} /> {r.label}</span>
                     <span className="ds-action">{r.action}</span>
                   </div>
+                  <div className="ds-file"><HoldingToggle kind="dataset" assetId={d.id} projectId={target} /></div>
                 </div>
               </Link>
             );
