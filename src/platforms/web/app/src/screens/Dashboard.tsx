@@ -64,12 +64,12 @@ export function Dashboard() {
             <div className="ib-cell">
               <div className="ib-l">credits</div>
               <div className="ib-n gold"><span className="gem">◈</span> {cr}</div>
-              <div className="ib-sub">subscription · resets 12d</div>
+              <div className="ib-sub"><Link to="/funding">fund from a wallet ▸</Link></div>
             </div>
             <div className="ib-cell">
               <div className="ib-l">royalties · lifetime</div>
-              <div className="ib-n gold"><span className="gem">◈</span> 18,400</div>
-              <div className="ib-sub">+1,240 ↑30d · payout on noesis</div>
+              <div className="ib-n gold"><span className="gem">◈</span> —</div>
+              <div className="ib-sub">coming soon — payouts land with noesis</div>
             </div>
           </div>
         </div>
