@@ -22,8 +22,16 @@ interface NewProject { name: string; desc?: string; glyph?: string; color?: stri
 interface ProjectCtx {
   project: Project;
   projects: Project[];
+  /** True when the project set is backend-backed (identified account) — the anon path is a local mock. */
+  identified: boolean;
   setProject: (id: string) => void;
   addProject: (input: NewProject) => Project;
+  /** Rename / re-describe a project (backend-authoritative when identified). */
+  renameProject: (projectId: string, patch: { name?: string; desc?: string }) => void;
+  /** Delete a project. Clears the active selection if it pointed here, resets the Preferences
+   *  "land in" default (generatio.defaultProjectId) if it pointed here, and reseeds a default
+   *  Personal project when the last one goes. */
+  removeProject: (projectId: string) => void;
   /** File/unfile an asset into a project's holdings (backend-backed when identified). */
   fileAsset: (projectId: string, kind: HoldingKind, assetId: string) => void;
   unfileAsset: (projectId: string, kind: HoldingKind, assetId: string) => void;
@@ -171,6 +179,50 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const fileAsset = (projectId: string, kind: HoldingKind, assetId: string) => patchHoldings(projectId, kind, assetId, true);
   const unfileAsset = (projectId: string, kind: HoldingKind, assetId: string) => patchHoldings(projectId, kind, assetId, false);
 
+  // Rename / re-describe — optimistic local edit + backend write when identified (same
+  // pattern as linkTeam; the server reply reconciles identity + holdings).
+  const renameProject = (projectId: string, patch: { name?: string; desc?: string }) => {
+    setProjects((ps) => ps.map((p) => (p.id === projectId ? { ...p, ...patch } : p)));
+    if (identified) {
+      api.updateProject(projectId, patch)
+        .then(({ project: updated }) => setProjects((ps) => ps.map((p) => (p.id === updated.id ? fromRemote(updated, overlayOf(p)) : p))))
+        .catch(() => { /* keep the optimistic edit on failure */ });
+    }
+  };
+
+  // Delete — optimistic local removal + backend delete when identified. Guards:
+  //  · active project: if the deleted project was scoped, fall to the first remaining;
+  //  · last project: reseed a default Personal (server-side when identified) so there is
+  //    always an active workspace;
+  //  · Preferences default: if generatio.defaultProjectId pointed here, reset it to none
+  //    (full-object PUT — a partial would wipe the other generatio fields).
+  const removeProject = (projectId: string) => {
+    const remaining = projects.filter((p) => p.id !== projectId);
+    const next = remaining.length ? remaining : [placeholderPersonal()];
+    setProjects(next);
+    setId((cur) => (cur === projectId ? next[0].id : cur));
+    api.getMe().then((m) => {
+      if (m.generatio?.defaultProjectId === projectId) {
+        const { defaultProjectId: _drop, ...rest } = m.generatio;
+        return api.setGeneratio(rest).then(() => undefined);
+      }
+    }).catch(() => { /* anon / offline — nothing to reset */ });
+    if (identified) {
+      api.deleteProject(projectId).catch(() => { /* keep the optimistic removal */ });
+      if (remaining.length === 0) {
+        // Mirror the empty-account reconcile: create the real Personal server-side and
+        // swap the local placeholder for it.
+        api.createProject({
+          name: 'Personal', glyph: '◇', color: '#9aa3b8',
+          desc: 'Your default space — anything not filed into a project lands here.',
+        }).then(({ project: created }) => {
+          setProjects((ps) => ps.map((p) => (p.id === 'personal' ? fromRemote(created, overlayOf(p)) : p)));
+          setId((cur) => (cur === 'personal' ? created.id : cur));
+        }).catch(() => { /* keep the local placeholder */ });
+      }
+    }
+  };
+
   const linkTeam = (projectId: string, teamId: string | null) => {
     setProjects((ps) => ps.map((p) => (p.id === projectId ? { ...p, ...(teamId ? { teamId } : { teamId: undefined }) } : p)));
     if (identified) {
@@ -180,7 +232,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  return <Ctx.Provider value={{ project, projects, setProject: setId, addProject, fileAsset, unfileAsset, linkTeam }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ project, projects, identified, setProject: setId, addProject, renameProject, removeProject, fileAsset, unfileAsset, linkTeam }}>{children}</Ctx.Provider>;
 }
 
 export function useProject() {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { useProject } from '../state/project';
 import { counts } from '../lib/projects';
@@ -28,10 +28,30 @@ const QUICK = [
 
 export function ProjectHub() {
   const { id } = useParams();
-  const { projects, linkTeam } = useProject();
+  const { projects, linkTeam, renameProject, removeProject } = useProject();
+  const navigate = useNavigate();
   const p = projects.find((x) => x.id === id) ?? projects[0];
   const c = counts(p);
   const [tab, setTab] = useState('Overview');
+
+  // Rename — inline edit of name + description in the header, persisted via the
+  // update client method (backend-authoritative for identified accounts; the anon
+  // mock path degrades to the local workspace cache).
+  const [editing, setEditing] = useState(false);
+  const [eName, setEName] = useState('');
+  const [eDesc, setEDesc] = useState('');
+  const startEdit = () => { setEName(p.name); setEDesc(p.desc); setEditing(true); };
+  const saveEdit = () => {
+    if (!eName.trim()) return;
+    renameProject(p.id, { name: eName.trim(), desc: eDesc.trim() });
+    setEditing(false);
+  };
+  // Delete — explicit two-step armed confirm (never window.confirm). The provider
+  // clears the active selection + the Preferences "land in" default if they pointed here.
+  const [armDelete, setArmDelete] = useState(false);
+  const doDelete = () => { removeProject(p.id); navigate('/projects'); };
+  // Leaving for another project (or after a delete-redirect) disarms + closes the editor.
+  useEffect(() => { setArmDelete(false); setEditing(false); }, [p.id]);
 
   // Teams the caller can reference for this project's shared member set (Decision 6 — a project
   // references a Team; it doesn't carry its own membership). Empty/failed → the picker hides.
@@ -70,10 +90,23 @@ export function ProjectHub() {
 
         {/* header */}
         <div className="ph-head">
-          <div>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div className="ph-kick noema-kicker">project</div>
-            <h1 className="ph-name">{p.name}</h1>
-            <p className="ph-desc">{p.desc || 'No description yet.'}</p>
+            {editing ? (
+              <div className="projnew" style={{ marginTop: 'var(--s2, 8px)' }}>
+                <input autoFocus value={eName} onChange={(e) => setEName(e.target.value)} placeholder="Project name"
+                  onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditing(false); }} />
+                <input value={eDesc} onChange={(e) => setEDesc(e.target.value)} placeholder="What's it for? (optional)"
+                  onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditing(false); }} />
+                <button className="btn accent" onClick={saveEdit} disabled={!eName.trim()}>Save</button>
+                <button className="btn ghost" onClick={() => setEditing(false)}>Cancel</button>
+              </div>
+            ) : (
+              <>
+                <h1 className="ph-name">{p.name} <button className="hc-open" title="Rename this project" onClick={startEdit}>rename ▸</button></h1>
+                <p className="ph-desc">{p.desc || 'No description yet.'}</p>
+              </>
+            )}
           </div>
           <div className="ph-people">
             {p.shared ? <span className="ph-avatars">{Array.from({ length: Math.min(p.shared, 3) }).map((_, i) => <span key={i} className="av" style={{ background: p.color }} />)}</span> : null}
@@ -155,6 +188,22 @@ export function ProjectHub() {
                 <div className="ph-ev"><span className="av" style={{ background: p.color }} /><span className="ev-t"><b>you</b> started a chat <span className="mono ev-meta"><span className="hemi2 lit" /> shared · {p.updated}</span></span></div>
                 {p.shared ? <div className="ph-ev"><span className="av" /><span className="ev-t"><b>a teammate</b> added work <span className="mono ev-meta"><span className="hemi2 ring" /> sealed · 1d</span></span></div> : null}
               </div>
+            </div>
+
+            {/* danger zone — delete is a two-step armed confirm (no browser dialogs). Deleting
+                removes the project (a grouping lens); its assets stay in your account. */}
+            <div style={{ marginTop: 'var(--s5, 20px)' }}>
+              {armDelete ? (
+                <div className="warn" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span>Delete <b>{p.name}</b>? The project (its grouping + holdings references) goes away — the datasets, models and collections themselves stay in your account.</span>
+                  <span style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+                    <button className="btn ghost bad" onClick={doDelete}><Ic name="trash-2" /> Delete permanently</button>
+                    <button className="btn ghost" onClick={() => setArmDelete(false)}>Cancel</button>
+                  </span>
+                </div>
+              ) : (
+                <button className="btn ghost bad" onClick={() => setArmDelete(true)}><Ic name="trash-2" /> Delete project…</button>
+              )}
             </div>
           </>
         ) : tab === 'Chats' ? (
