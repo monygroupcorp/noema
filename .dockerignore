@@ -20,6 +20,7 @@ src/platforms/web/app/dist
 research
 tests
 **/*.md
+!src/platforms/web/app/src/content/*.md
 deploy.sh
 deploy-staging.sh
 docker-compose.yml
