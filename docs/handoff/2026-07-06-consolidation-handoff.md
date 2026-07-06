@@ -98,5 +98,22 @@ Update the status blocks (wiring audit + this doc) and the memory. The four thre
    Team shared-member count.
 
 ## Status
-- **2026-07-06:** docs created; steps 1–7 NOT yet executed. Working tree = strays listed in
-  step 1. Update this block as steps land.
+- **2026-07-06 (created):** docs created; steps 1–7 not yet executed.
+- **2026-07-06 (CLOSED — all 7 steps executed, loop-manager run, same day):**
+  1–2 ✓ strays committed, clean-worktree gates green (tsc 0, 877/877, app build).
+  3 ✓ pushed; merged → staging twice (`37d8895c` broke on a dockerignore/md-import interaction,
+  fixed `21ea711a`; final `276ac55d`). Also fixed en route: internal docs no longer ship in the
+  docker image (`**/*.md` + `docs` in .dockerignore, app content md re-included).
+  4 ✓ owner swapped twice; credenta clean-swap fired once (purged 2 legacy rows), self-disabled.
+  5 ✓ `scripts/verify-authed.sh` (rescued from scratchpad, committed): me/status, teams CRUD,
+  sponsorships lifecycle, HF import (after staging `MODERATION_ALLOW_UNSCANNED=1`) all green;
+  private HF repos correctly gated-origin. FLUX funded run = still owner-optional.
+  6 ✓ keyring + projects browser-verified 9/11 (gaps → rename/delete UI + AccountSettings
+  honesty, both FIXED same day, `c2cc05ce`/`2aee5389`); MetaMask link+recover ✓ and Telegram
+  link+recover ✓ done by the owner against staging (`TELEGRAM_BOT_USERNAME` set).
+  7 ✓ this block + memory updated.
+  **Follow-up spawned:** recovery-channel hardening (show bound identities, unlink, bind
+  notifications) — the tg/wallet link codes are magic-link-class bearer capabilities; the gap
+  is silent coexisting binds with no unlink/visibility (ledger task #19).
+  **The four threads are now one verified platform. Forward queue = T1–T5 + Concierge
+  (investigation done: `2026-07-06-concierge-investigation.md`; prototype = option (b)).**
