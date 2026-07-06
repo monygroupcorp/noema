@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/CrystalApi.js'
-import type { Provincia, Provinciae, ProvinciaPatch, ProvinciaRes, Provinciarum } from '../../../src/types/provincia.js'
+import type { Provincia, Provinciae, ProvinciaPatch, Provinciarum } from '../../../src/types/provincia.js'
 import type { Sodalitas, Sodalitates, Sodalitatum } from '../../../src/types/sodalitas.js'
 
 // =============================================================================
@@ -29,11 +29,6 @@ class MemProvinciarum implements Provinciarum {
       if (v === undefined) delete (p as Record<string, unknown>)[k]
       else (p as Record<string, unknown>)[k] = v
     }
-    this.store.set(id, p)
-    return p
-  }
-  async setRes(id: string, res: ProvinciaRes) {
-    const p = { ...this.store.get(id)!, res, mutatum: new Date() }
     this.store.set(id, p)
     return p
   }

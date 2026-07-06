@@ -13,15 +13,20 @@ import { useSession } from './session';
 // (`noema-<scope>-projects` / `noema-<scope>-project`) — switching accounts swaps the whole
 // workspace. The ANON path (no animaId) stays local-only, seeded from the PROJECTS mock.
 // Legacy un-namespaced keys are read as a one-time seed fallback (non-destructive).
+export type HoldingKind = 'dataset' | 'model' | 'collection';
+const HOLDING_FIELD: Record<HoldingKind, 'datasetIds' | 'modelIds' | 'collectionIds'> = {
+  dataset: 'datasetIds', model: 'modelIds', collection: 'collectionIds',
+};
+
 interface NewProject { name: string; desc?: string; glyph?: string; color?: string }
 interface ProjectCtx {
   project: Project;
   projects: Project[];
   setProject: (id: string) => void;
   addProject: (input: NewProject) => Project;
-  /** File/unfile an asset into the active project's holdings (backend-backed when identified). */
-  fileAsset: (kind: 'dataset' | 'model' | 'collection', assetId: string) => void;
-  unfileAsset: (kind: 'dataset' | 'model' | 'collection', assetId: string) => void;
+  /** File/unfile an asset into a project's holdings (backend-backed when identified). */
+  fileAsset: (projectId: string, kind: HoldingKind, assetId: string) => void;
+  unfileAsset: (projectId: string, kind: HoldingKind, assetId: string) => void;
   /** Link the active project to a Team (Sodalitas) for its shared member set, or null to unlink
    *  (Decision 6 — a project references a Team; it does not carry its own membership). */
   linkTeam: (projectId: string, teamId: string | null) => void;
@@ -146,25 +151,25 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     return next;
   };
 
-  // Holdings edits — optimistic local update + backend write when identified.
-  const patchHoldings = (kind: 'dataset' | 'model' | 'collection', assetId: string, add: boolean) => {
-    const field = kind === 'dataset' ? 'datasetIds' : kind === 'model' ? 'modelIds' : 'collectionIds';
+  // Holdings edits — optimistic local update on the named project + backend write when identified.
+  const patchHoldings = (projectId: string, kind: HoldingKind, assetId: string, add: boolean) => {
+    const field = HOLDING_FIELD[kind];
     setProjects((ps) => ps.map((p) => {
-      if (p.id !== id) return p;
+      if (p.id !== projectId) return p;
       const list = p[field];
       const has = list.includes(assetId);
       if (add ? has : !has) return p;
       return { ...p, [field]: add ? [...list, assetId] : list.filter((x) => x !== assetId) };
     }));
     if (identified) {
-      const call = add ? api.fileAsset(id, kind, assetId) : api.unfileAsset(id, kind, assetId);
+      const call = add ? api.fileAsset(projectId, kind, assetId) : api.unfileAsset(projectId, kind, assetId);
       call.then(({ project: updated }) => {
         setProjects((ps) => ps.map((p) => (p.id === updated.id ? fromRemote(updated, overlayOf(p)) : p)));
       }).catch(() => { /* keep the optimistic edit on failure */ });
     }
   };
-  const fileAsset = (kind: 'dataset' | 'model' | 'collection', assetId: string) => patchHoldings(kind, assetId, true);
-  const unfileAsset = (kind: 'dataset' | 'model' | 'collection', assetId: string) => patchHoldings(kind, assetId, false);
+  const fileAsset = (projectId: string, kind: HoldingKind, assetId: string) => patchHoldings(projectId, kind, assetId, true);
+  const unfileAsset = (projectId: string, kind: HoldingKind, assetId: string) => patchHoldings(projectId, kind, assetId, false);
 
   const linkTeam = (projectId: string, teamId: string | null) => {
     setProjects((ps) => ps.map((p) => (p.id === projectId ? { ...p, ...(teamId ? { teamId } : { teamId: undefined }) } : p)));

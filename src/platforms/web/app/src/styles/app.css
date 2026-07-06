@@ -882,6 +882,15 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .ph-team{display:inline-flex;align-items:center;gap:6px}
 .ph-team select{min-width:150px}
 
+/* ── file-into-project toggle (Projects · Decision 3) ──────────────────────── */
+.holding-toggle{display:inline-flex;align-items:center;gap:5px;
+  padding:5px 10px;border-radius:6px;font-size:11px;line-height:1;cursor:pointer;
+  background:transparent;border:1px solid var(--line,rgba(255,255,255,.14));color:var(--faint)}
+.holding-toggle:hover{border-color:var(--accent,#5b8cff);color:var(--text)}
+.holding-toggle.on{border-color:var(--accent,#5b8cff);color:var(--accent,#5b8cff);
+  background:color-mix(in srgb, var(--accent,#5b8cff) 12%, transparent)}
+.ds-file{margin-top:8px}
+
 /* ── scoped-surface banner (Projects · Decision 4) ─────────────────────────── */
 .scope-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
   padding:10px 14px;margin-bottom:16px;border-radius:8px;

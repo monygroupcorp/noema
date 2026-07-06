@@ -12,9 +12,11 @@
 // anonymous/commitment-owned project (the seam Keyring Decision 6 defined).
 //
 // HOLDINGS ARE REFERENCES, NOT COPIES. A project FILES existing assets — it
-// does not own new nouns. `res` carries id references into the canonical asset
-// stores (datasets / models(Intella) / collections(Collectio)). Counts and the
-// scoped surfaces read these lengths; nothing is duplicated here.
+// does not own new nouns. `datasetIds`/`modelIds`/`collectionIds` are flat id
+// references into the canonical asset stores (datasets / models(Intella) /
+// collections(Collectio)) — the same convention every neighbor uses for
+// id-reference lists (cf. `Editio.authorAnimaIds`, `Vestigium.intellaIds`).
+// Counts and the scoped surfaces read these lengths; nothing is duplicated.
 //
 // SHARING references a Sodalitas (Team), it does not re-implement membership
 // (Decision 6). `sodalitasId` is an optional FK into the team store; the member
@@ -25,17 +27,7 @@
 // client-local — it has no backend store to reference yet.
 // =============================================================================
 
-/** A project's filed asset references. Ids into the canonical asset stores. */
-export interface ProvinciaRes {
-  /** FK[] → dataset ids (the training library). */
-  datasetIds: string[]
-  /** FK[] → Intella ids (the model shelf). */
-  modelIds: string[]
-  /** FK[] → Collectio ids (published/draft collections). */
-  collectionIds: string[]
-}
-
-/** The kinds of asset a project can hold — the `res` sub-lists, keyed. */
+/** The kinds of asset a project can hold — selects one holding list. */
 export type ProvinciaResKind = 'dataset' | 'model' | 'collection'
 
 export interface Provincia {
@@ -48,8 +40,12 @@ export interface Provincia {
   descriptio?: string
   /** Presentation hints (glyph + color). Opaque to the backend, pure display. */
   ornatus?: { glyph?: string; color?: string }
-  /** Filed asset references (datasets/models/collections). References, not copies. */
-  res: ProvinciaRes
+  /** FK[] → dataset ids (the training library). Filed references, not copies. */
+  datasetIds: string[]
+  /** FK[] → Intella ids (the model shelf). */
+  modelIds: string[]
+  /** FK[] → Collectio ids (published/draft collections). */
+  collectionIds: string[]
   /** Optional FK → Sodalitas (Team) for the shared member set (Decision 6). */
   sodalitasId?: string
   /** "natum" = born — when the project was created. */
@@ -61,8 +57,10 @@ export interface Provincia {
 /** "Provinciae" — nominative plural. */
 export type Provinciae = Provincia[]
 
-/** The mutable metadata fields a project's owner may patch (never `animaId`/`res`). */
-export type ProvinciaPatch = Partial<Pick<Provincia, 'nomen' | 'descriptio' | 'ornatus' | 'sodalitasId'>>
+/** The mutable fields a project's owner may patch (never `animaId`/`id`/timestamps). */
+export type ProvinciaPatch = Partial<
+  Pick<Provincia, 'nomen' | 'descriptio' | 'ornatus' | 'sodalitasId' | 'datasetIds' | 'modelIds' | 'collectionIds'>
+>
 
 /**
  * Provinciarum — genitive plural "of the projects." The project store.
@@ -70,10 +68,9 @@ export type ProvinciaPatch = Partial<Pick<Provincia, 'nomen' | 'descriptio' | 'o
 export interface Provinciarum {
   find(id: string): Promise<Provincia | null>
   create(input: Omit<Provincia, 'id' | 'natum' | 'mutatum'>): Promise<Provincia>
-  /** Patch mutable metadata (name/description/ornatus/sodalitasId). Bumps `mutatum`. */
+  /** Patch mutable fields (metadata or a holdings list). Bumps `mutatum`; an
+   *  undefined value clears (unsets) that field. */
   update(id: string, patch: ProvinciaPatch): Promise<Provincia>
-  /** Replace the whole holdings set (used by file/unfile). Bumps `mutatum`. */
-  setRes(id: string, res: ProvinciaRes): Promise<Provincia>
   /** Delete a project (its filed assets are untouched — holdings are references). */
   remove(id: string): Promise<void>
   /** Every project the given Anima owns. */

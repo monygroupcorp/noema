@@ -1,6 +1,6 @@
 import type { Collection, Document } from 'mongodb'
 import { randomUUID } from 'node:crypto'
-import type { Provincia, Provinciae, ProvinciaPatch, ProvinciaRes, Provinciarum } from '../types/provincia.js'
+import type { Provincia, Provinciae, ProvinciaPatch, Provinciarum } from '../types/provincia.js'
 
 // =============================================================================
 // MongoProvinciarum — the project store (no bigint fields → plain marshalling)
@@ -39,16 +39,6 @@ export class MongoProvinciarum implements Provinciarum {
     const update: Record<string, unknown> = { $set: set }
     if (Object.keys(unset).length) update.$unset = unset
     const result = await this.col.findOneAndUpdate({ id }, update, { returnDocument: 'after' })
-    if (!result) throw new Error(`Provincia '${id}' not found`)
-    return fromDoc(result)
-  }
-
-  async setRes(id: string, res: ProvinciaRes): Promise<Provincia> {
-    const result = await this.col.findOneAndUpdate(
-      { id },
-      { $set: { res, mutatum: new Date() } },
-      { returnDocument: 'after' },
-    )
     if (!result) throw new Error(`Provincia '${id}' not found`)
     return fromDoc(result)
   }
