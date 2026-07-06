@@ -76,7 +76,10 @@ export function App() {
       <Route path="/catalog" element={<Catalog />} />
       <Route path="/feed" element={<Feed />} />
       {/* Moderation held-queue (publishing spec §4). Author sees own held items; the platform
-          admin (me.admin) sees all + gets approve/reject/confirm-csam. Server-gated regardless. */}
+          admin (me.admin) sees all + gets approve/reject/confirm-csam. Server-gated regardless.
+          Two routes, one component: /review is the author-facing home (Publish pillar), /admin/review
+          the admin entry — the component self-adjusts on me.admin. */}
+      <Route path="/review" element={<Review />} />
       <Route path="/admin/review" element={<Review />} />
       <Route path="/projects" element={<Projects />} />
       <Route path="/projects/:id" element={<ProjectHub />} />

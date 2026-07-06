@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type DepositConfig } from '../lib/api';
+import { connectWallet } from '../lib/wallet';
 
 // Credit packs — pay-as-you-go top-ups anchored on a USD price. The credit amount
 // is computed LIVE from the deposit config (pointsPerUsd × funding rate), so it's the
@@ -62,6 +63,23 @@ export function Funding() {
   // Live ETH → points quote for the onchain rail.
   const [eth, setEth] = useState('');
   const [quote, setQuote] = useState<{ points?: string; usd?: string; err?: string; busy?: boolean }>({});
+  // Onchain rail: the connected wallet address (we see an address, not a person) + copy state
+  // for the deposit address, so the send-ETH path is completable in-app. We never send the
+  // transaction ourselves (no custody of keys) — the user sends from their own wallet.
+  const [wallet, setWallet] = useState<string | null>(null);
+  const [walletErr, setWalletErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function connect() {
+    setWalletErr(null);
+    try { const w = await connectWallet(); setWallet(w.address); }
+    catch (e) { setWalletErr(e instanceof Error ? e.message : String(e)); }
+  }
+  async function copyDepositAddr() {
+    if (!cfg) return;
+    try { await navigator.clipboard.writeText(cfg.depositAddress); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch { /* clipboard blocked — the address is still shown in full via the title tooltip */ }
+  }
 
   useEffect(() => {
     let live = true;
@@ -191,9 +209,10 @@ export function Funding() {
               </div>
               <div className="fund-aside">
                 <Meter sees="pseudonym" label="a pseudonym" />
-                <button className="btn-ghost">
-                  Connect <Ic name="arrow-right" />
+                <button className="btn-ghost" onClick={connect}>
+                  {wallet ? <>Connected: {shortAddr(wallet)}</> : <>Connect <Ic name="arrow-right" /></>}
                 </button>
+                {walletErr && <div className="warn byo-warn" style={{ marginTop: 'var(--s2)' }}>{walletErr}</div>}
               </div>
             </div>
 
@@ -204,7 +223,10 @@ export function Funding() {
               </div>
               <div className="meta-line">
                 <span>deposit address</span>
-                <span className="v mono" title={cfg?.depositAddress}>{cfg ? shortAddr(cfg.depositAddress) : '…'}</span>
+                <span className="v mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--s2)' }}>
+                  <span title={cfg?.depositAddress}>{cfg ? shortAddr(cfg.depositAddress) : '…'}</span>
+                  {cfg && <button className="btn-ghost sm" onClick={copyDepositAddr}>{copied ? 'copied ✓' : 'copy'}</button>}
+                </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s3)', marginTop: 'var(--s3)' }}>
                 <input
@@ -246,8 +268,8 @@ export function Funding() {
               </div>
               <div className="fund-aside">
                 <Meter sees="you" label="you" />
-                <button className="btn">
-                  Pay with card <Ic name="arrow-right" />
+                <button className="btn" disabled title="Card payments aren’t available yet">
+                  Pay with card — coming soon
                 </button>
               </div>
             </div>

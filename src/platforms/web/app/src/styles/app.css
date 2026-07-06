@@ -460,7 +460,8 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 
 /* the registry table: column-header row + data rows */
 .reg-bar{display:flex;align-items:center;gap:7px;padding:14px 6px 9px;border-bottom:1px solid var(--hair);font-family:var(--font-mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint)}
-.reg-bar .c-name{flex:1} .reg-bar .c-mod{width:96px} .reg-bar .c-lic{width:140px} .reg-bar .c-size{width:64px;text-align:right} .reg-bar .c-run{width:150px;text-align:right}
+.reg-bar .c-name{flex:1} .reg-bar .c-mod{width:96px} .reg-bar .c-ver{width:96px;text-align:right}
+.reg-ver{width:96px;text-align:right;font-size:10.5px;color:var(--faint)}
 .reg-row{display:flex;align-items:center;gap:7px;padding:13px 6px;border-bottom:1px solid var(--hair-soft);text-decoration:none;color:inherit;transition:.12s var(--ease)}
 .reg-row:hover{background:var(--raised);border-radius:8px;border-bottom-color:transparent}
 .reg-name{flex:1;min-width:0;display:flex;align-items:baseline;gap:11px}

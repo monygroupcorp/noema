@@ -27,7 +27,7 @@ export function Datasets() {
             <h1>Datasets</h1>
             <div className="sub">Your raw material — the core every model is trained from. Reusable, versioned, captioned many ways.</div>
           </div>
-          <div className="right"><button className="btn"><Ic name="plus" /> new dataset</button></div>
+          <div className="right"><button className="btn" disabled title="Coming soon — dataset creation isn’t wired yet"><Ic name="plus" /> new dataset — soon</button></div>
         </div>
 
         {scope && <ScopeBanner project={scope} noun="datasets" />}
@@ -55,10 +55,10 @@ export function Datasets() {
               </Link>
             );
           })}
-          <button className="dscard new">
+          <button className="dscard new" disabled title="Coming soon — dataset creation isn’t wired yet">
             <Ic name="plus" />
-            <div className="t">new dataset</div>
-            <div className="s mono">drop media · or seed from a generation</div>
+            <div className="t">new dataset — soon</div>
+            <div className="s mono">drop media · or seed from a generation · coming soon</div>
           </button>
         </div>
       </div></div>
