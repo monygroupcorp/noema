@@ -94,13 +94,16 @@
 >   balance; stream endpoint wired + owner-scoped 404), #4 identity (real `0 cr`/`anonymous` from
 >   session+me/status), #8 Card (`save defaults`→setAffines round-trip), #5 import panel renders,
 >   #6/#7 render + 403-gate correctly for anon.
-> - **Authenticated close-out DEFERRED to the coordinated staging push.** Staging currently runs the
->   OLD email-verify auth (`register → verification_sent`), so a session can't be minted headlessly.
->   Once the pending threads land and the tree (incl. the username+password auth) deploys, run
->   `scratchpad/verify-authed.sh` (registers 2 throwaway accounts → exercises #4 me, #7 teams CRUD,
->   #6 sponsorships create/list/pause/resume, #5 real HF-LoRA import). **#1 full FLUX run** (owner's
->   call) needs a FUNDED test account — the script quotes + prints the dispatch+stream commands, and
->   auto-runs them when the account has balance.
+> - **Authenticated close-out RUN 2026-07-06** (post coordinated push; script now committed as
+>   `scripts/verify-authed.sh`): **#4 me/status ✓ · #7 teams full CRUD ✓ · #6 sponsorships
+>   create/list/pause/resume ✓** against the new username+password staging build (register mints a
+>   session; credenta clean-swap fired on boot, purged 2 legacy rows). **#5 HF-LoRA import ✓
+>   VERIFIED 2026-07-06** after the owner set `MODERATION_ALLOW_UNSCANNED=1` (staging-only):
+>   public `noema-art/yumemonoflux` imported end-to-end (intellaId minted, basis `flux`, trigger
+>   `yumemono`, license auto-classified `flux-1-dev-nc`); private repos correctly rejected as
+>   gated-origin (`secret.required`). Telegram deep-links live (`TELEGRAM_BOT_USERNAME` set).
+>   **#1 full FLUX run** still needs a FUNDED account (script printed the dispatch/stream
+>   commands; owner's call).
 
 | # | Screen / gap | Backend (exists) | Current state | Notes for the wirer |
 |---|---|---|---|---|
