@@ -417,6 +417,45 @@ export const ESSENTIA_KLEINEDIT_4B: Essentia = {
   mutatum: new Date('2026-06-30'),
 }
 
+// FLUX.2 Klein 4B — TEXT TO IMAGE, LoRA-CAPABLE. The plain txt2img counterpart of klein-edit-4b:
+// same substrate (flux2-klein-4b-comfyui — 4B DiT + Qwen3-4B TE + flux2 VAE) and the same Coziness
+// MultiLoraLoader stack, minus the image-injection chain (no LoadImage/VAEEncode/ReferenceLatent —
+// conditioning feeds CFGGuider directly; width/height feed Flux2Scheduler + EmptyFlux2LatentImage).
+// This is the canonical base that imported `-klein` LoRAs (familia 'flux2') stack on via prompt
+// trigger words / `<lora:slug:weight>` tags. Guidance rides CFGGuider's `cfg` (FLUX.2 klein has no
+// FluxGuidance node). Defaults mirror klein-edit-4b (steps 9, guidance 3). categoria 'image'.
+export const ESSENTIA_KLEIN: Essentia = {
+  id: 'klein',
+  nomen: 'FLUX.2 Klein 4B — text to image',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  fundamentumId: 'flux2-klein-4b-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation. A `<lora:slug:weight>` tag or a LoRA trigger word stacks adapters.' },
+    width:      { type: 'int',   required: false, default: 1024, description: 'Output width in pixels' },
+    height:     { type: 'int',   required: false, default: 1024, description: 'Output height in pixels' },
+    steps:      { type: 'int',   required: false, default: 9,   description: 'Sampling steps' },
+    guidance:   { type: 'float', required: false, default: 3,   description: 'CFGGuider guidance — how strongly the image follows the prompt/style. FLUX.2 klein uses this (not a FluxGuidance node).' },
+    input_seed: { type: 'int',   required: false,              description: 'Random seed — omit to shuffle' },
+  },
+  exitus: { image: { type: 'image', description: 'Generated image' } },
+
+  workflowTemplate: 'klein',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
+
+  natum: new Date('2026-07-06'),
+  mutatum: new Date('2026-07-06'),
+}
+
 // Background removal — i2i (enhance). InspyrenetRembg pack (self-downloads its ckpt) on the weightless
 // comfyui-base substrate. The `image` aditus rides the i2i primitive into a LoadImage feeding the rembg
 // node; output is the cut-out (transparent PNG). categoria 'image'.
@@ -778,6 +817,7 @@ export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_KONTEXTEDIT,
   ESSENTIA_KLEINEDIT,
   ESSENTIA_KLEINEDIT_4B,
+  ESSENTIA_KLEIN,
   ESSENTIA_RMBG,
   ESSENTIA_UPSCALE,
   ESSENTIA_QWEN3_VL,
