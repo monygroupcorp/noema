@@ -1,6 +1,6 @@
 # TEE Hardware Path — Working Document
 
-**Status:** ACTIVE — rungs 0–1 in progress, rung 2 blocked on Azure access (§8)
+**Status:** ACTIVE — rung 0 largely done (`tee/attest/`), rung 1 next, rung 2 blocked on Azure (§8)
 **Updated:** 2026-07-06
 **Goal:** the sealed-pod tier becomes a real enclave (SEV-SNP CVM + H100 CC-On, browser-verified
 attestation) with the property that **live iteration on the H100 can only surface Azure's bugs,
@@ -70,14 +70,25 @@ seams collapse onto it. `ConfidentialPodClient` does not know or care that a poo
 
 ## 4. The ladder
 
-### Rung 0 — fixtures (free)
-- [ ] `scripts/tee-harvest/` scaffolding + fixture layout under `tests/fixtures/tee/` (§5)
-- [ ] Replace remaining hand-written ARM fake behaviors with fixture replays as harvests land
-- [ ] Conformance suite skeleton over vendor-published sample evidence (§6)
-- [ ] SNP report parser + VCEK chain verification against AMD KDS fixtures
-- [ ] MAA JWT verification against recorded JWKS
-- [ ] `report_data == hash(wgServerPubKey)` binding math, both directions, tamper vectors
-- **Exit:** conformance suite green on fixtures; every external response format in tests is a recording, not a belief.
+### Rung 0 — fixtures (free) — **mostly DONE 2026-07-06** (`tee/attest/`, Go, 22 tests, 81% cov)
+- [x] `scripts/tee-harvest/` scaffolding + fixture layout (Go `testdata/` convention, not
+      `tests/fixtures/tee/` — the verifier is Go, so fixtures live with the package; §5 updated)
+- [x] Conformance suite skeleton over vendor-published sample evidence (`verify.go`, six checks,
+      fail-closed, `Sealed()` vs `CPUVerified()`)
+- [x] SNP report parser against the AMD ABI, validated by parsing a real report (`snp.go`)
+- [x] Report signature verification (`signature.go`) — **real VCEK verifies the real report**
+      (the parser's ABI understanding is proven against hardware output)
+- [x] VCEK→ASK→ARK chain verification against the real go-sev-guest chain (injectable root)
+- [x] `report_data == hash(wgServerPubKey)` binding (`binding.go`) — canonical
+      `SHA-512(rawWGpubkey)`, both directions + tamper vectors, constant-time
+- [ ] MAA JWT verification against recorded JWKS — **deferred to rung 2** (needs a real MAA
+      token; the raw-VCEK path above is the alternative and is fully covered now)
+- [ ] Replace remaining hand-written ARM fake behaviors with fixture replays — as harvests land (rung 2)
+- [ ] Wire `tee/attest` into the browser WASM build (go.work / replace) — integration, rung 2/3
+- **Exit (met for CPU seam):** conformance suite green on real fixtures; every external format in
+  tests is a recording, not a belief. The one all-CPU-green `Verify()` fixture (real report whose
+  report_data == hash(our key)) is intentionally left for the rung-2 harvest — cannot exist without
+  real hardware, and faking it would violate the fixture rule.
 
 ### Rung 1 — local guest image (free)
 - [ ] Reproducible guest image build (measured boot; runner + tee-wg-server inside; model weights
@@ -110,14 +121,17 @@ seams collapse onto it. `ConfidentialPodClient` does not know or care that a poo
 
 ## 5. Fixture harvest registry
 
-One script per seam family in `scripts/tee-harvest/`; outputs are committed fixtures.
+One script per seam family in `scripts/tee-harvest/`; outputs are committed fixtures under
+`tee/attest/testdata/` (Go `testdata/` convention — the verifier is a Go package, so fixtures
+live with it; go tooling ignores the dir). Every fixture is logged in
+`tee/attest/testdata/PROVENANCE.md` (source + fetch date + hash); no provenance ⇒ not a fixture.
 
-| Script | Runs against | Records |
-|---|---|---|
-| `harvest-arm.ts` | rung-2 CVM | start/deallocate LRO status sequences, instanceView shapes, tags merge responses, error bodies (409/404/429) |
-| `harvest-imds.sh` | inside rung-2 guest | `tagsList` JSON incl. early-boot retry behavior |
-| `harvest-snp.sh` | inside rung-2 guest | raw SNP report (with known `report_data`), VCEK/cert chain from AMD KDS, MAA JWT + JWKS |
-| `harvest-gpu.sh` | rung-3 pod, hour 1 | nvtrust evidence bundle, NRAS response, RIM data, composite token |
+| Script | Rung | Runs against | Records |
+|---|---|---|---|
+| `fetch-sample-evidence.sh` | 0 | go-sev-guest samples | SNP report + VCEK/ASK/ARK chain — **DONE 2026-07-06** |
+| `harvest-arm.ts` | 2 | ARM control plane | start/deallocate LRO status sequences, instanceView, tags merge, error bodies (409/404/429) |
+| `harvest-snp.sh` | 2 | inside rung-2 guest | real SNP report (our `report_data` binding), MAA JWT + JWKS |
+| `harvest-gpu.sh` | 3 | rung-3 pod, hour 1 | nvtrust evidence bundle, NRAS response, RIM data, composite token |
 
 Fixture rule: filenames carry harvest date + api-version; tests fail loudly if a fixture is
 older than a stated trust window rather than silently passing on stale reality.
