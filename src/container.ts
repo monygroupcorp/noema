@@ -16,6 +16,7 @@ import type { Corporum } from './types/corpus.js'
 import type { Collectionum } from './types/collectio.js'
 import type { Editionum } from './types/editio.js'
 import type { Sodalitatum } from './types/sodalitas.js'
+import type { Provinciarum } from './types/provincia.js'
 import type { Tabularum } from './types/tabula.js'
 import type { Testimoniorum, Depositorum, Solutionum, Petitionum } from './types/catena.js'
 import type { Scholiorum } from './types/scholium.js'
@@ -99,6 +100,7 @@ import { MongoCorpus } from './crystal/MongoCorpus.js'
 import { MongoCollectio } from './crystal/MongoCollectio.js'
 import { MongoEditionum } from './crystal/MongoEditionum.js'
 import { MongoSodalitatum } from './crystal/MongoSodalitatum.js'
+import { MongoProvinciarum } from './crystal/MongoProvinciarum.js'
 import { MongoTabula } from './crystal/MongoTabula.js'
 import { MongoTestimoniorum } from './crystal/MongoTestimoniorum.js'
 import { MongoDepositum } from './crystal/MongoDepositum.js'
@@ -147,6 +149,8 @@ export interface Ring {
   /** Registered publication adapters (FeedAdapter always; BucketAdapter when R2 is configured). */
   publicationAdapters: PublicationAdapter[]
   sodalitates: Sodalitatum
+  /** Project store (Provincia) — account-scoped workspace lenses + holdings. */
+  provinciae: Provinciarum
   tabulae: Tabularum
   testimonia: Testimoniorum
   deposita: Depositorum
@@ -313,6 +317,7 @@ export interface ContainerConfig {
   /** Base URL the MarketplaceAdapter projects listing handles under (default 'https://noema.art/market'). */
   marketplaceBaseUrl?: string
   sodalitatesCollection?: string
+  provinciaeCollection?: string
   tabulaeCollection?: string
   testimoniaCollection?: string
   depositaCollection?: string
@@ -446,6 +451,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const collectiones = new MongoCollectio(db.collection(config.collectionesCollection ?? 'collectiones'))
   const editiones = new MongoEditionum(db.collection(config.editionesCollection ?? 'editiones'))
   const sodalitates = new MongoSodalitatum(db.collection(config.sodalitatesCollection ?? 'sodalitates'))
+  const provinciae = new MongoProvinciarum(db.collection(config.provinciaeCollection ?? 'provinciae'))
   const tabulae = new MongoTabula(db.collection(config.tabulaeCollection ?? 'tabulae'))
   const testimonia = new MongoTestimoniorum(db.collection(config.testimoniaCollection ?? 'testimonia'))
   const deposita = new MongoDepositum(db.collection(config.depositaCollection ?? 'deposita'))
@@ -704,7 +710,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   return {
     actorum, modorum, signorum, redituum, mercedum, tripwireBand, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,
-    mandatores, corpora, collectiones, editiones, publicationAdapters, sodalitates, tabulae, testimonia,
+    mandatores, corpora, collectiones, editiones, publicationAdapters, sodalitates, provinciae, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, memoriae, intelligendi,
     cursorum, completor, inceptor, arcanumIssuer,

@@ -107,7 +107,7 @@ export function TraitsGarden() {
                   {editable && <button className="btn ghost sm" onClick={() => removeAxis(active)}><Ic name="trash-2" /> remove axis</button>}
                 </div>
                 <div className="gt-sub mono">
-                  varies input port <b>{editable ? <input className="cer-input" value={cat.porta} onChange={(e) => patchAxis(active, { porta: e.target.value })} style={{ maxWidth: 140, display: 'inline-block' }} /> : cat.porta}</b> · the value is spliced into the modus
+                  varies input port <b>{editable ? <input className="cer-input" value={cat.porta} onChange={(e) => patchAxis(active, { porta: e.target.value })} style={{ maxWidth: 140, display: 'inline-block' }} /> : cat.porta}</b> · the value is spliced into the flow
                 </div>
                 <div className="gt-grid">
                   {cat.valores.map((v, j) => (

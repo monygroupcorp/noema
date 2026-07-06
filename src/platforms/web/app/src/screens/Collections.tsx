@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type Collection, type FlowSummary } from '../lib/api';
 import { COLL_STATUS_LABEL, collGlyph, collTile } from '../lib/collections';
+import { useProject, useProjectScope } from '../state/project';
+import { ScopeBanner } from '../lib/ScopeBanner';
+import { HoldingToggle } from '../lib/HoldingToggle';
 
 // Collections (editio) — the BUILD-rail surface listing the user's collections. Each is a hub
 // (traits → run → curation → export). A collection is a batch-gen over a Tractus grid; creating
@@ -71,7 +74,7 @@ function CreateForm({ onCreated }: { onCreated: (c: Collection) => void }) {
   );
 }
 
-function Card({ c }: { c: Collection }) {
+function Card({ c, projectId }: { c: Collection; projectId: string }) {
   const active = c.status === 'pending' || c.status === 'running';
   const draft = c.status === 'draft';
   return (
@@ -90,6 +93,7 @@ function Card({ c }: { c: Collection }) {
             : active
             ? <Link className="btn accent" to={`/collections/${c.id}/run`}>View run →</Link>
             : <Link className="btn accent" to={`/collections/${c.id}/export`}>Export &amp; publish →</Link>}
+          <HoldingToggle kind="collection" assetId={c.id} projectId={projectId} />
         </div>
       </div>
     </div>
@@ -98,9 +102,14 @@ function Card({ c }: { c: Collection }) {
 
 export function Collections() {
   const nav = useNavigate();
+  const { project: active, fileAsset } = useProject();
   const [items, setItems] = useState<Collection[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+
+  const [params] = useSearchParams();
+  const scope = useProjectScope(params.get('project'));
+  const target = (scope ?? active).id;
 
   useEffect(() => {
     let live = true;
@@ -108,36 +117,45 @@ export function Collections() {
     return () => { live = false; };
   }, []);
 
+  // When scoped to a project, show only its filed collections (Provincia.res.collectionIds).
+  const shown = scope && items ? items.filter((c) => scope.collectionIds.includes(c.id)) : items;
+
   return (
     <AppShell title="Collections">
       <div className="page"><div className="pw wide">
         <div className="pagehead">
           <div>
-            <div className="noema-kicker" style={{ marginBottom: 8 }}>your collections{items ? ` · ${items.length}` : ''}</div>
+            <div className="noema-kicker" style={{ marginBottom: 8 }}>your collections{shown ? ` · ${shown.length}` : ''}</div>
             <h1>Collections</h1>
             <div className="sub">Author a collection from your flows — vary an input across a supply, curate, then choose where it goes. Local until you publish.</div>
           </div>
           <div className="right"><button className="btn" onClick={() => setCreating((v) => !v)}><Ic name={creating ? 'x' : 'plus'} /> {creating ? 'Cancel' : 'new collection'}</button></div>
         </div>
 
-        {creating && <CreateForm onCreated={(c) => nav(c.status === 'draft' ? `/collections/${c.id}/garden` : `/collections/${c.id}`)} />}
+        {scope && <ScopeBanner project={scope} noun="collections" />}
+
+        {creating && <CreateForm onCreated={(c) => {
+          // Creation-time filing (Decision 3): a new collection lands in the active project.
+          fileAsset(active.id, 'collection', c.id);
+          nav(c.status === 'draft' ? `/collections/${c.id}/garden` : `/collections/${c.id}`);
+        }} />}
 
         {err && <div className="warn">Couldn’t load collections: {err}</div>}
 
-        {items === null && !err && (
+        {shown === null && !err && (
           <div className="collgrid">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="collcard skel" />)}</div>
         )}
 
-        {items !== null && items.length === 0 && !creating && (
+        {shown !== null && shown.length === 0 && !creating && (
           <div className="empty">
-            <div className="t">No collections yet</div>
+            <div className="t">{scope ? `No collections filed into ${scope.name} yet` : 'No collections yet'}</div>
             <div className="s">Start one — pick a flow, vary an input across a supply, and generate the set.</div>
             <button className="btn" onClick={() => setCreating(true)}><Ic name="plus" /> new collection</button>
           </div>
         )}
 
-        {items !== null && items.length > 0 && (
-          <div className="collgrid">{items.map((c) => <Card key={c.id} c={c} />)}</div>
+        {shown !== null && shown.length > 0 && (
+          <div className="collgrid">{shown.map((c) => <Card key={c.id} c={c} projectId={target} />)}</div>
         )}
       </div></div>
     </AppShell>

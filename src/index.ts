@@ -38,7 +38,8 @@ import type { X402Facilitator } from './types/x402.js'
 import { createSponsioRouter } from './allocutio/api/sponsioRouter.js'
 import { createAuthRouter } from './allocutio/api/authRouter.js'
 import { MongoCredentum } from './crystal/MongoCredentum.js'
-import { mailerFromEnv } from './allocutio/api/Mailer.js'
+import { MongoLinkToken } from './crystal/MongoLinkToken.js'
+import { linkTelegramToAccount, issueTelegramRecoveryCode } from './allocutio/telegram/telegramRecovery.js'
 import { createWidgetRouter } from './allocutio/api/widgetRouter.js'
 import { createPurseRouter } from './allocutio/api/purseRouter.js'
 import { createAgentCardRouter } from './allocutio/api/agentCardRouter.js'
@@ -690,6 +691,11 @@ async function main(): Promise<void> {
       }
     : undefined
 
+  // One-time link/recovery codes bridging web ⇆ this bot — the Telegram account-backup
+  // channel (docs/spec/fiat-auth.md §recovery). Shared with the auth router below.
+  const linkTokens = new MongoLinkToken(mongo.db(DB_NAME).collection('link_tokens'))
+  void linkTokens.ensureIndexes().catch(err => log.warn('linkTokens: ensureIndexes failed', { error: String(err) }))
+
   const allocutio = new TelegramAllocutio({
     router: routerDeps,
     sender: makeTelegramSender(tgBot.telegram),
@@ -697,6 +703,9 @@ async function main(): Promise<void> {
     botStartupTime,
     materiae,
     hospitia,
+    // Account backup/recovery: bind this Telegram at a web soul, and mint recovery codes.
+    linkTelegramAccount: (tgUserId, code) => linkTelegramToAccount({ personae: ring.personae, linkTokens }, tgUserId, code),
+    issueTelegramRecovery: (tgUserId) => issueTelegramRecoveryCode({ personae: ring.personae, animae: ring.animae, linkTokens }, tgUserId),
     ...(provisionStudio ? { provisionStudio } : {}),
     ...(installStudioModels ? { installStudioModels } : {}),
     signorum: ring.signorum,
@@ -792,12 +801,11 @@ async function main(): Promise<void> {
   const secretarium = secretBox ? new MongoSecretarium(mongo.db(DB_NAME).collection('secreta'), secretBox) : undefined
   if (secretarium) void secretarium.ensureIndexes().catch(err => log.warn('secretarium: ensureIndexes failed', { error: String(err) }))
 
-  // Fiat username/password auth (docs/spec/fiat-auth.md): the credential store (email/hash/
-  // single-use verify+reset token hashes) + a vendor-neutral mailer. Both degrade gracefully —
-  // no RESEND_API_KEY ⇒ NoopMailer (links land in the logs). The auth router is mounted below.
+  // Fiat username/password auth (docs/spec/fiat-auth.md): the credential store (username +
+  // password hash). NO EMAIL — accounts are anonymous username/password and recover via
+  // backup channels (Telegram/wallet), not email links. The auth router is mounted below.
   const credenta = new MongoCredentum(mongo.db(DB_NAME).collection('credenta'))
   void credenta.ensureIndexes().catch(err => log.warn('credenta: ensureIndexes failed', { error: String(err) }))
-  const mailer = mailerFromEnv()
 
   const modelImporter = new ModelImporter({
     json: httpJsonFetcher,
@@ -865,6 +873,7 @@ async function main(): Promise<void> {
     collectiones: ring.collectiones,
     collectioCursor: ring.collectioCursor,
     sodalitatum: ring.sodalitates,
+    provinciarum: ring.provinciae,
     // Publishing spine (Editio): the feed adapter + the store + prefs source.
     // moderationGate fails closed (deny) unless MODERATION_ALLOW_UNSCANNED=1 — the
     // async →public gate path always runs; only its verdict changes.
@@ -999,11 +1008,11 @@ async function main(): Promise<void> {
       credenta,
       personae: ring.personae,
       animae: ring.animae,
-      mailer,
       jwtSecret: process.env.JWT_SECRET as string,
-      ...(process.env.AUTH_APP_BASE_URL ? { appBaseUrl: process.env.AUTH_APP_BASE_URL } : {}),
+      linkTokens,
+      ...(process.env.TELEGRAM_BOT_USERNAME ? { botUsername: process.env.TELEGRAM_BOT_USERNAME } : {}),
       ...(process.env.SESSION_TTL_SECONDS ? { ttl: { sessionSeconds: Number(process.env.SESSION_TTL_SECONDS) } } : {}),
-      rateLimiters: { register: limiter(20), login: limiter(20), forgot: limiter(10), resend: limiter(10) },
+      rateLimiters: { register: limiter(20), login: limiter(20), wallet: limiter(30) },
     })
     app.use('/v1/auth', express.json(), buildAuthRouter())
     app.use('/api/v1/auth', express.json(), buildAuthRouter())

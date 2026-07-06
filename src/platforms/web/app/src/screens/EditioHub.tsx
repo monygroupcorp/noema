@@ -13,6 +13,9 @@ export function EditioHub() {
   const { id } = useParams();
   const [c, setC] = useState<Collection | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Cross-link into the other publish system: post the whole collection to the moderated feed
+  // (UX handoff 2, D6). Mirrors Card's per-result publish, but with a `collectio` artifact ref.
+  const [pub, setPub] = useState<{ s: 'idle' | 'busy' | 'done' | 'err'; msg?: string }>({ s: 'idle' });
 
   useEffect(() => {
     if (!id) return;
@@ -20,6 +23,16 @@ export function EditioHub() {
     api.getCollection(id).then((r) => { if (live) setC(r.collection); }).catch((e) => { if (live) setErr(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
   }, [id]);
+
+  async function postToFeed(collId: string) {
+    setPub({ s: 'busy' });
+    try {
+      await api.publish({ artifact: { kind: 'collectio', id: collId }, destination: 'feed', visibility: 'feed', custody: 'ours' });
+      setPub({ s: 'done' });
+    } catch (e) {
+      setPub({ s: 'err', msg: e instanceof Error ? e.message : String(e) });
+    }
+  }
 
   if (err) {
     return <AppShell title="Collection"><div className="page"><div className="pw wide"><div className="warn">Couldn’t load this collection: {err}</div></div></div></AppShell>;
@@ -64,6 +77,23 @@ export function EditioHub() {
               {i < STEPS.length - 1 && <span className="ed-step-arrow">→</span>}
             </Link>
           ))}
+        </div>
+
+        {/* Cross-link to the feed — the collection author's path into the single-result publish system. */}
+        <div className="pub-row" style={{ margin: 'var(--s4) 0' }}>
+          {pub.s === 'done' ? (
+            <span className="pub-done"><Ic name="check" /> In review — it appears in the <Link to="/feed">feed</Link> once approved.</span>
+          ) : (
+            <>
+              <button className="btn ghost" disabled={pub.s === 'busy'} onClick={() => postToFeed(c.id)}>
+                <Ic name="rss" /> {pub.s === 'busy' ? 'Posting…' : 'Post collection to feed'}
+              </button>
+              <span className="sub" style={{ marginLeft: 'var(--s3)', color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
+                Shares this collection to the public feed (moderated) — separate from Export’s archive · hosting · noesis.
+              </span>
+              {pub.s === 'err' && <span className="pub-err" style={{ marginLeft: 'var(--s3)' }}>{pub.msg}</span>}
+            </>
+          )}
         </div>
 
         <div className="ph-band">

@@ -1,27 +1,39 @@
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { DATASETS, READINESS, MODALITY_TOKEN, custodyGlyph, CUSTODY_LABEL } from '../lib/datasets';
+import { useProject, useProjectScope } from '../state/project';
+import { ScopeBanner } from '../lib/ScopeBanner';
+import { HoldingToggle } from '../lib/HoldingToggle';
 
 // Datasets library (train-datasets-library-spec.md, render noema-train-datasets-library.png) —
 // the entry to the training stack: a recognizable shelf of raw material with each set's own
 // facts + a readiness line that names the next action. No downstream counts (datasets are
 // inputs, not scoreboards). Imagery is earned here (personal assets, unlike the Registry).
 export function Datasets() {
+  const [params] = useSearchParams();
+  const { project: active } = useProject();
+  const scope = useProjectScope(params.get('project'));
+  // File actions target the scoped project (on a ?project= surface) else the active one.
+  const target = (scope ?? active).id;
+  // When scoped to a project, show only its filed datasets (Provincia.datasetIds).
+  const list = scope ? DATASETS.filter((d) => scope.datasetIds.includes(d.id)) : DATASETS;
   return (
     <AppShell title="Datasets">
       <div className="page"><div className="pw wide">
         <div className="pagehead">
           <div>
-            <div className="noema-kicker" style={{ marginBottom: 8 }}>your datasets · {DATASETS.length}</div>
+            <div className="noema-kicker" style={{ marginBottom: 8 }}>your datasets · {list.length}</div>
             <h1>Datasets</h1>
             <div className="sub">Your raw material — the core every model is trained from. Reusable, versioned, captioned many ways.</div>
           </div>
-          <div className="right"><button className="btn"><Ic name="plus" /> new dataset</button></div>
+          <div className="right"><button className="btn" disabled title="Coming soon — dataset creation isn’t wired yet"><Ic name="plus" /> new dataset — soon</button></div>
         </div>
 
+        {scope && <ScopeBanner project={scope} noun="datasets" />}
+
         <div className="dsgrid">
-          {DATASETS.map((d) => {
+          {list.map((d) => {
             const r = READINESS[d.readiness];
             return (
               <Link key={d.id} className="dscard" to={`/datasets/${d.id}`}>
@@ -38,14 +50,15 @@ export function Datasets() {
                     <span className="ds-state"><span className={`rdot ${r.dot}`} /> {r.label}</span>
                     <span className="ds-action">{r.action}</span>
                   </div>
+                  <div className="ds-file"><HoldingToggle kind="dataset" assetId={d.id} projectId={target} /></div>
                 </div>
               </Link>
             );
           })}
-          <button className="dscard new">
+          <button className="dscard new" disabled title="Coming soon — dataset creation isn’t wired yet">
             <Ic name="plus" />
-            <div className="t">new dataset</div>
-            <div className="s mono">drop media · or seed from a generation</div>
+            <div className="t">new dataset — soon</div>
+            <div className="s mono">drop media · or seed from a generation · coming soon</div>
           </button>
         </div>
       </div></div>

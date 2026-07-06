@@ -1,5 +1,11 @@
 # Handoff — Fiat auth FRONTEND (login/register/verify/reset screens + session wiring)
 
+> **⚠ SUPERSEDED (2026-07-03/04).** Email was dropped (username+password + wallet/Telegram
+> recovery instead), and the single-session `noema-session` store described below was replaced by
+> the **multi-account keyring** `noema-sessions` store (`2026-07-03-keyring-multi-account-handoff.md`).
+> Do not build from this doc. Current map: `docs/handoff/2026-07-06-thread-consolidation.md`
+> (Threads A + B).
+
 **For:** a fresh-context agent working in the React web app. **Goal:** wire the **already-built**
 fiat username/password backend (`/v1/auth/*`) into the web frontend — register/login/verify/reset
 screens, plus a real **session** layer so a logged-in user's `/v1` calls carry

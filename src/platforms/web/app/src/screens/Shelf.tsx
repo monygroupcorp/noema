@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type ModelCard } from '../lib/api';
+import { useProject, useProjectScope } from '../state/project';
+import { ScopeBanner } from '../lib/ScopeBanner';
+import { HoldingToggle } from '../lib/HoldingToggle';
 
 // Model shelf (train-shelf-spec.md) — the caller's own trained + imported models, from
 // GET /v1/me/models. Cards show real provenance (base model, trigger, license, listing
@@ -27,6 +30,7 @@ const COMMERCIAL_LABEL: Record<NonNullable<ModelCard['commercialUse']>, string> 
 };
 
 export function Shelf() {
+  const { project: active, fileAsset } = useProject();
   const [models, setModels] = useState<ModelCard[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -64,13 +68,20 @@ export function Shelf() {
     try {
       const { model } = await api.importModel({ url: url.trim(), genus });
       setModels((cur) => [model, ...(cur ?? [])]);
+      // Creation-time filing (Decision 3): a freshly imported model lands in the active project.
+      fileAsset(active.id, 'model', model.intellaId);
       setUrl(''); setImp({ s: 'idle' }); setShowImport(false);
     } catch (e) {
       setImp({ s: 'err', msg: e instanceof Error ? e.message : String(e) });
     }
   }
 
-  const count = models?.length ?? 0;
+  const [params] = useSearchParams();
+  const scope = useProjectScope(params.get('project'));
+  const target = (scope ?? active).id;
+  // When scoped to a project, show only its filed models (Provincia.modelIds).
+  const shown = scope && models ? models.filter((m) => scope.modelIds.includes(m.intellaId)) : models;
+  const count = shown?.length ?? 0;
 
   return (
     <AppShell title="Models">
@@ -110,18 +121,20 @@ export function Shelf() {
           </div>
         )}
 
+        {scope && <ScopeBanner project={scope} noun="models" />}
+
         {err && <div className="warn">Couldn’t load your models — {err}</div>}
         {!models && !err && <div className="empty"><div className="t">Loading your models…</div></div>}
-        {models && models.length === 0 && (
+        {shown && shown.length === 0 && (
           <div className="empty">
-            <div className="t">No models yet</div>
+            <div className="t">{scope ? `No models filed into ${scope.name} yet` : 'No models yet'}</div>
             <div className="s">Train a LoRA from a <Link to="/datasets">dataset</Link>, or import one by URL — it lands here.</div>
           </div>
         )}
 
-        {models && models.length > 0 && (
+        {shown && shown.length > 0 && (
           <div className="shelfgrid">
-            {models.map((m) => {
+            {shown.map((m) => {
               const listed = m.access === 'public';
               return (
                 <div key={m.intellaId} className="modelcard">
@@ -145,8 +158,9 @@ export function Shelf() {
                     )}
                     {m.description && <div className="mc-meta">{m.description}</div>}
                     <div className="mc-actions">
-                      <Link className="btn ghost" to={`/card?id=${m.intellaId}`}>Use in modus</Link>
+                      <Link className="btn ghost" to={`/card?id=${m.intellaId}`}>Use in a flow</Link>
                       <Link className="btn accent" to="/collections"><Ic name="hexagon" /> Collection</Link>
+                      <HoldingToggle kind="model" assetId={m.intellaId} projectId={target} />
                       {admin && (
                         <button className="btn ghost" onClick={() => reclassify(m.intellaId)} disabled={licBusy === m.intellaId} title="Admin: re-derive license from the base model">
                           {licBusy === m.intellaId ? 'reclassifying…' : 'reclassify license'}

@@ -4,10 +4,10 @@ import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type FlowSummary } from '../lib/api';
 
-// Where a model runs / what we can see — the visibility device carried over from
-// the canvas (canvas-spec.md), read here from the model's capability angle.
-type Vis = 'remote' | 'tee' | 'local';
-interface UIFlow { id: string; name: string; media: string; version: string; license: string; size: string; vis: Vis }
+// Only the fields the live /v1/flows payload actually carries. License / size / run-locality
+// are NOT in FlowSummary, so we don't show them at all rather than invent them (P0-4,
+// compliance-sensitive: license especially must never be fabricated).
+interface UIFlow { id: string; name: string; media: string; version: string }
 
 // Modality swatch colour — the same five tokens the canvas ports use, promoted
 // to shared --m-* tokens in noema-theme.css (one palette, two surfaces).
@@ -26,46 +26,21 @@ const FILTERS: { key: string; label: string }[] = [
   { key: 'text', label: 'Text' },
 ];
 
-const RUN_LABEL: Record<Vis, string> = { local: 'local-capable', tee: 'remote · sealed', remote: 'remote' };
-
-// The registry hemisphere — the canvas visibility glyph, inverted to the model's
-// capability angle: local-capable is the strongest privacy posture (you run it,
-// we never see it) so it gets the lit/accent treatment; tee + remote are ring
-// only. Inlined rather than imported from Canvas.tsx, which would pull ReactFlow
-// into this bundle and carries the opposite local/remote polarity (see spec §3).
-function Hemisphere({ vis }: { vis: Vis }) {
-  const c = vis === 'local' ? 'var(--accent)' : vis === 'tee' ? 'var(--slate)' : 'var(--grey)';
-  return (
-    <svg className="reg-hemi" viewBox="0 0 12 12" aria-hidden="true">
-      {vis === 'local' && <path d="M6,1 A5,5 0 0,1 6,11 Z" fill={c} />}
-      <circle cx="6" cy="6" r="5" fill="none" stroke={c} strokeWidth="1.2" />
-    </svg>
-  );
-}
 
 // NOTE: the live /v1/flows payload exposes id / name / modality / version only.
 // License, size and run-locality are not in FlowSummary yet, so we derive stable
 // per-model values from the id hash purely for presentation. Swap these for real
 // fields once the API carries them. (Reported back to the user.)
-const LICENSES = ['Apache-2.0', 'OpenRAIL-M', 'OpenRAIL++', 'MIT', 'Stability-CL', 'Tencent-CL', 'CreativeML'];
-const SIZES = ['0.5B', '1.3B', '2B', '3.5B', '7B', '8B', '10B', '12B', '—'];
-const VIS_POOL: Vis[] = ['local', 'local', 'local', 'tee', 'tee', 'remote']; // weighted toward local-capable
-function hash(s: string): number { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); }
-
 // "FLUX Schnell — text to image" → "FLUX Schnell"
 function toUI(f: FlowSummary): UIFlow {
   const nomen = (typeof f.nomen === 'string' && f.nomen) || f.id;
   const name = nomen.split('—')[0].trim();
   const media = (typeof f.categoria === 'string' && f.categoria) || 'other';
-  const h = hash(f.id);
   return {
     id: f.id,
     name,
     media,
     version: (typeof f.versio === 'string' && f.versio) || '',
-    license: LICENSES[h % LICENSES.length],
-    size: SIZES[(h >> 3) % SIZES.length],
-    vis: VIS_POOL[(h >> 6) % VIS_POOL.length],
   };
 }
 
@@ -91,12 +66,9 @@ export function Catalog() {
   }, [flows, q, filter]);
 
   const models = flows?.length ?? 0;
-  // Live model count is real; the catalogue API has no separate workflow count
-  // yet, so the workflow figure is derived from the model count (placeholder).
-  const workflows = Math.max(1, Math.round(models / 13));
 
   return (
-    <AppShell crumb="catalog">
+    <AppShell crumb="Catalogue">
       <div className="page"><div className="pw wide">
         <div className="registry">
 
@@ -106,7 +78,7 @@ export function Catalog() {
               {flows === null
                 ? <span style={{ color: 'var(--faint)' }}>loading the corpus…</span>
                 : <>
-                    <span className="n">{models.toLocaleString()}</span> open models, <span className="n">{workflows.toLocaleString()}</span> workflows — yours to run.
+                    <span className="n">{models.toLocaleString()}</span> open models — yours to run.
                   </>}
             </h1>
             <div className="corpus-meta">
@@ -135,9 +107,7 @@ export function Catalog() {
           <div className="reg-bar">
             <span className="c-name">Model</span>
             <span className="c-mod">Modality</span>
-            <span className="c-lic">License</span>
-            <span className="c-size">Size</span>
-            <span className="c-run">Runs</span>
+            <span className="c-ver">Version</span>
           </div>
 
           {shown.map((f) => (
@@ -150,12 +120,7 @@ export function Catalog() {
                 <span className="mg" style={{ background: MOD_TOKEN[f.media] || 'var(--muted)' }} />
                 {f.media}
               </div>
-              <div className="reg-lic">{f.license}</div>
-              <div className="reg-size">{f.size}</div>
-              <div className={`reg-run r-${f.vis}`}>
-                <Hemisphere vis={f.vis} />
-                <span>{RUN_LABEL[f.vis]}</span>
-              </div>
+              <div className="reg-ver mono">{f.version || '—'}</div>
             </Link>
           ))}
 

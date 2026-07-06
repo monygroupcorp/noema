@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { useIdentity } from '../state/identity';
+import { useSession } from '../state/session';
 import { Ic } from '../lib/icons';
 import { api, type MeStatus, type StudioEntry } from '../lib/api';
 
@@ -12,10 +13,13 @@ import { api, type MeStatus, type StudioEntry } from '../lib/api';
 //    a custody default — custody (local/TEE/remote) is a per-run choice in the console.
 //  · NOEMA is multi-interface (web · Telegram · API) — the posture names this "reach".
 
-const SECTIONS = [
+// Preferences is folded in here (UX handoff 2, Decision 2) — it's its own screen, so its sub-nav
+// entry links out to /preferences via `to` rather than an /account/:section pane.
+const SECTIONS: { key: string; label: string; ico: string; to?: string }[] = [
   { key: 'account', label: 'Account', ico: 'circle-user' },
   { key: 'billing', label: 'Billing & credits', ico: 'wallet' },
   { key: 'compute', label: 'Compute', ico: 'server' },
+  { key: 'preferences', label: 'Preferences', ico: 'sparkles', to: '/preferences' },
   { key: 'api', label: 'API keys', ico: 'key-round' },
   { key: 'security', label: 'Security & privacy', ico: 'eye-off' },
 ];
@@ -30,7 +34,12 @@ const AVAIL: { key: Availability; glyph: string; t: string; s: string }[] = [
 export function AccountSettings() {
   const { section } = useParams();
   const { ident } = useIdentity();
+  const { goAnonymous } = useSession();
+  const navigate = useNavigate();
   const anon = ident.funding === 'bearer';
+  // Go anonymous = deactivate to the anon slot, keeping any held logins (real, reversible — switch
+  // back anytime). Export/Delete are legal (GDPR) but have no backend endpoint yet — honestly gated.
+  const leaveToAnon = () => { goAnonymous(); navigate('/'); };
   const [me, setMe] = useState<MeStatus | null>(null);
   useEffect(() => {
     let live = true;
@@ -67,11 +76,15 @@ export function AccountSettings() {
             </div>
           </div>
 
-          {/* sovereignty trio — a right, shown up front */}
+          {/* sovereignty trio — a right, shown up front. Go anonymous is real; Export/Delete are
+              legal (GDPR) obligations with no backend endpoint yet, so they're honestly gated. */}
           <div className="ac-sov">
-            <button className="btn ghost"><Ic name="arrow-up" /> Export everything</button>
-            <button className="btn ghost amber"><span className="hemi2 dashed" /> Go anonymous</button>
-            <button className="btn ghost bad"><Ic name="x" /> Delete account &amp; data</button>
+            <button className="btn ghost" disabled title="Coming soon — a full data export isn’t wired yet"><Ic name="arrow-up" /> Export everything — soon</button>
+            <button className="btn ghost amber" onClick={leaveToAnon}><span className="hemi2 dashed" /> Go anonymous</button>
+            <button className="btn ghost bad" disabled title="Coming soon — account deletion isn’t wired yet"><Ic name="x" /> Delete account &amp; data — soon</button>
+          </div>
+          <div className="ac-note mono" style={{ marginTop: 'var(--s3)' }}>
+            <span className="hemi2 dashed" /> Data export &amp; account deletion are your legal rights — the backend endpoints are in progress; they’ll be wired here when ready.
           </div>
 
           {/* section cards */}
@@ -80,7 +93,7 @@ export function AccountSettings() {
               <Row k="plan" v={<b>Subscription · $20/mo</b>} />
               <Row k="credits" v={<span className="gold"><span className="gem">◈</span> {credits}{me ? <> credits · ≈ ${me.balanceUsd.toFixed(2)}</> : ''}</span>} />
               <Row k="payment" v={<><b>card</b> · ···· 4242</>} />
-              <div className="ac-note mono"><span className="hemi2 dashed" /> anonymous purse (Bursa): <span className="gold">◈ 1,200</span> · bearer · fund from a shielded wallet</div>
+              <div className="ac-note mono"><span className="hemi2 dashed" /> anonymous credit (Bursa note): <span className="gold">◈ 1,200</span> · bearer · fund from a shielded wallet</div>
             </SectionCard>
             <SectionCard to="/account/api" ico="key-round" name="API keys">
               <Row k="sk-noema-···· a3f9" v={<><b>active</b> · 84k calls</>} />
@@ -97,11 +110,11 @@ export function AccountSettings() {
               <Row k="devices" v={<><b>2</b> active</>} />
               <Row k="conditional anonymity" v={<span className="accent">learn the rule ▸</span>} />
             </SectionCard>
-          </div>
-
-          {/* preferences pointer */}
-          <div className="ac-prefptr">
-            <Ic name="sparkles" /> Generation defaults for <span className="mono">/make · /effect · …</span> — portable across web · Telegram · API — live in your <Link to="/preferences">preferences profile ▸</Link>
+            <SectionCard to="/preferences" ico="sparkles" name="Preferences &amp; defaults">
+              <Row k="scope" v={<>portable across web · Telegram · API</>} />
+              <Row k="applies to" v={<span className="mono">/make · style · output · delivery</span>} />
+              <div className="ac-note mono">generation defaults that travel with you — override inline anytime.</div>
+            </SectionCard>
           </div>
         </div></div>
       </AppShell>
@@ -118,7 +131,7 @@ export function AccountSettings() {
           <aside className="settings-nav">
             <div className="sn-l">settings</div>
             {SECTIONS.map((s) => (
-              <Link key={s.key} to={`/account/${s.key}`} className={`sn-item${s.key === section ? ' on' : ''}`}>
+              <Link key={s.key} to={s.to ?? `/account/${s.key}`} className={`sn-item${s.key === section ? ' on' : ''}`}>
                 <Ic name={s.ico} /> {s.label}
               </Link>
             ))}
@@ -162,11 +175,11 @@ function ComputeDetail({ studios }: { studios: StudioEntry[] | null }) {
       </div>
 
       <div className="ac-panel">
-        <div className="ac-panel-l">active sessions · your studios</div>
+        <div className="ac-panel-l">active sessions · your studios <Link to="/studio" className="accent" style={{ float: 'right', fontWeight: 400 }}>open studio ▸</Link></div>
         {studios === null ? (
           <div className="ac-note mono">loading your sessions…</div>
         ) : studios.length === 0 ? (
-          <div className="ac-note mono">no live studios — lease one from the console to warm a GPU.</div>
+          <div className="ac-note mono">no live studios — <Link to="/studio" className="accent">lease one</Link> to warm a GPU.</div>
         ) : (
           studios.map((s) => (
             <SessionRow key={s.studioId} name={s.label} detail={`${s.status} · ${s.guestsToday} guest gens · net ≈ $${s.netUsd.toFixed(2)}`} state={fmtWarm(s.warmRemainingMs)} />

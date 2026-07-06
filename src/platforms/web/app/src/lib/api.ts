@@ -64,15 +64,101 @@ export function commitment(): string {
   return c;
 }
 
-// ── Real fiat session (JWT) — layered OVER the anon commitment ──────────────
-// A logged-in user's session token is stored here; when present it is sent as
-// `Authorization: Bearer <token>` and the backend resolves it to an animaId, so
-// every /v1 call becomes identified with no other change. Absent → anon commitment.
-const SESSION_KEY = 'noema-session';
-export function getSession(): string | null { return localStorage.getItem(SESSION_KEY); }
-export function setSession(token: string | null) {
-  if (token) localStorage.setItem(SESSION_KEY, token);
-  else localStorage.removeItem(SESSION_KEY);
+// ── Multi-session store (JWT) — layered OVER the anon commitment ─────────────
+// The Twitter model: one browser holds several named logins at once, keyed by
+// animaId, with a single ACTIVE pointer. When an account is active its token is
+// sent as `Authorization: Bearer <token>` and the backend resolves it to that
+// animaId, so every /v1 call is identified with no other change. No active
+// account (all signed out) → the anon commitment path. There is NO new backend:
+// each account is already an independent soul; this is purely a client store.
+//
+// The API layer only ever reads the ACTIVE token via getSession(), so authHeaders
+// / readHeaders are unchanged — the multi-account machinery lives above them.
+// expiresAt = absolute ms epoch (issued-at + expiresIn), so a later switch can tell
+// "instant if unexpired" from "refresh-then-activate" without tracking issued-at separately.
+export interface StoredAccount { animaId: string; token: string; username?: string; expiresAt?: number }
+export interface SessionStore { accounts: StoredAccount[]; activeAnimaId: string | null }
+
+const STORE_KEY = 'noema-sessions';
+// Pre-multi-account single-token keys (state/session.tsx before this change).
+const LEGACY_TOKEN_KEY = 'noema-session';
+const LEGACY_NAME_KEY = 'noema-session-username';
+
+// A transient token used while a session isn't yet in the store: during legacy
+// migration (no animaId known until refresh) and during switch-with-refresh (the
+// target's stale token must sign its own refresh call). Cleared once adopted.
+let pendingToken: string | null = null;
+export function setPendingToken(token: string | null) { pendingToken = token; }
+
+function readStore(): SessionStore {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) {
+      const v = JSON.parse(raw) as Partial<SessionStore>;
+      if (v && Array.isArray(v.accounts)) return { accounts: v.accounts, activeAnimaId: v.activeAnimaId ?? null };
+    }
+  } catch { /* fall through to empty */ }
+  return { accounts: [], activeAnimaId: null };
+}
+function writeStore(s: SessionStore) { localStorage.setItem(STORE_KEY, JSON.stringify(s)); }
+
+export function getAccounts(): SessionStore { return readStore(); }
+
+// The active account's token — what every /v1 call carries. pendingToken covers
+// the brief window before a fresh/switched session lands in the store.
+export function getSession(): string | null {
+  const s = readStore();
+  const active = s.accounts.find((a) => a.animaId === s.activeAnimaId);
+  return active?.token ?? pendingToken;
+}
+
+// Upsert an account by animaId and make it active (register / login / refresh / switch-refresh).
+export function upsertAccount(acc: StoredAccount): SessionStore {
+  const s = readStore();
+  const rest = s.accounts.filter((a) => a.animaId !== acc.animaId);
+  const next: SessionStore = { accounts: [...rest, acc], activeAnimaId: acc.animaId };
+  writeStore(next);
+  pendingToken = null;
+  return next;
+}
+
+// Point at an already-stored account (instant switch; token assumed live).
+export function setActiveAnimaId(animaId: string | null): SessionStore {
+  const s = readStore();
+  const next: SessionStore = { ...s, activeAnimaId: s.accounts.some((a) => a.animaId === animaId) ? animaId : null };
+  writeStore(next);
+  return next;
+}
+
+// Drop the active account; activate the next remaining (or null → anon). Returns the new store.
+export function dropActiveAccount(): SessionStore {
+  const s = readStore();
+  const rest = s.accounts.filter((a) => a.animaId !== s.activeAnimaId);
+  const next: SessionStore = { accounts: rest, activeAnimaId: rest[rest.length - 1]?.animaId ?? null };
+  writeStore(next);
+  return next;
+}
+
+// Sign out of every account → the anon commitment path.
+export function clearAllAccounts(): SessionStore {
+  const empty: SessionStore = { accounts: [], activeAnimaId: null };
+  writeStore(empty);
+  return empty;
+}
+
+// One-time migration of the pre-multi-account single token. If the new store is
+// empty but a legacy token exists, hand it back (animaId unknown until refresh)
+// and clear the legacy keys so this runs exactly once. The provider refreshes it
+// into a real account. Returns null when there's nothing to migrate.
+export function takeLegacySession(): { token: string; username?: string } | null {
+  const store = readStore();
+  if (store.accounts.length) return null;
+  const token = localStorage.getItem(LEGACY_TOKEN_KEY);
+  if (!token) return null;
+  const username = localStorage.getItem(LEGACY_NAME_KEY) ?? undefined;
+  localStorage.removeItem(LEGACY_TOKEN_KEY);
+  localStorage.removeItem(LEGACY_NAME_KEY);
+  return { token, username };
 }
 
 // Write headers (POST/PUT/PATCH): content-type + bearer if signed in, else the anon commitment.
@@ -88,8 +174,8 @@ const readHeaders = (): Record<string, string> =>
 export interface Session { token: string; tokenType: 'Bearer'; expiresIn: number }
 export interface AuthResult { session: Session; animaId: string }
 
-// Auth errors carry the backend's `error.code` so screens can branch (auth.email_unverified,
-// auth.invalid, auth.token_invalid, conflict.registration, input.malformed, …).
+// Auth errors carry the backend's `error.code` so screens can branch (auth.invalid,
+// conflict.registration, input.malformed, …).
 export class AuthApiError extends Error {
   code: string;
   status: number;
@@ -258,6 +344,21 @@ export const api = {
   removeTeamMember: (id: string, animaId: string) =>
     fetch(`/v1/teams/${encodeURIComponent(id)}/members/${encodeURIComponent(animaId)}`, { method: 'DELETE', headers: authHeaders() }).then(j<{ team: Team }>),
 
+  // ── Projects (Provincia) — an account-owned workspace lens ───────────────────
+  // Owner-scoped; identified accounts only (the anon path keeps a local mock).
+  // Holdings are id references (datasetIds/modelIds/collectionIds), never copies.
+  listProjects: () => fetch('/v1/me/projects', { headers: readHeaders() }).then(j<{ projects: RemoteProject[] }>),
+  createProject: (body: { name: string; desc?: string; glyph?: string; color?: string; teamId?: string }) =>
+    fetch('/v1/me/projects', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) }).then(j<{ project: RemoteProject }>),
+  updateProject: (id: string, patch: { name?: string; desc?: string; glyph?: string; color?: string; teamId?: string | null }) =>
+    fetch(`/v1/me/projects/${encodeURIComponent(id)}`, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify(patch) }).then(j<{ project: RemoteProject }>),
+  deleteProject: (id: string) =>
+    fetch(`/v1/me/projects/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() }).then((r) => { if (!r.ok) throw new Error(`delete failed: ${r.status}`); }),
+  fileAsset: (id: string, kind: 'dataset' | 'model' | 'collection', assetId: string) =>
+    fetch(`/v1/me/projects/${encodeURIComponent(id)}/holdings`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ kind, assetId }) }).then(j<{ project: RemoteProject }>),
+  unfileAsset: (id: string, kind: 'dataset' | 'model' | 'collection', assetId: string) =>
+    fetch(`/v1/me/projects/${encodeURIComponent(id)}/holdings/${kind}/${encodeURIComponent(assetId)}`, { method: 'DELETE', headers: authHeaders() }).then(j<{ project: RemoteProject }>),
+
   // ── Sponsorships (Sponsio, ADR-0011 §2) — a standing capped top-up pledge ────
   // Identified accounts only (401 for anon/purse). Mounted at /v1/sponsorships.
   listSponsorships: () => fetch('/v1/sponsorships', { headers: readHeaders() }).then(j<{ sponsorships: Sponsorship[] }>),
@@ -275,6 +376,10 @@ export const api = {
     fetch('/v1/me/appearance', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(appearance) }).then(j<{ appearance: Appearance }>),
   setGeneratio: (generatio: Generatio) =>
     fetch('/v1/me/generatio', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(generatio) }).then(j<{ generatio: Generatio }>),
+  // PUT /v1/me/bindings/:verb — rebind a canon verb (e.g. `make`) to a chosen flow. Auth
+  // required (bearer purses can't rebind). Powers the Preferences default-flow picker.
+  setBinding: (verb: string, modusId: string) =>
+    fetch(`/v1/me/bindings/${encodeURIComponent(verb)}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ modusId }) }).then(j<{ verb: string; modusId: string }>),
   getAffines: (modusId: string) =>
     fetch(`/v1/me/affines/${encodeURIComponent(modusId)}`, { headers: readHeaders() }).then(j<{ affines: Record<string, unknown> }>),
   setAffines: (modusId: string, affines: Record<string, unknown>) =>
@@ -290,30 +395,46 @@ export const api = {
     fetch(`/v1/me/secrets/${provider}`, { method: 'DELETE', headers: authHeaders() }).then(jSecret),
 
   // ── Fiat auth (username/password rail) ───────────────────────────────────────
-  // These deliberately do NOT send a commitment on register/login/forgot (a named
-  // account is a different soul than the anon purse); verify/reset carry only their
-  // emailed token; refresh carries the bearer. Errors surface via AuthApiError.code.
+  // Anonymous username+password — NO email. Register logs you in immediately (mints a
+  // session). These deliberately do NOT send a commitment (a named account is a different
+  // soul than the anon purse); refresh carries the bearer. Errors surface via AuthApiError.code.
+  // Account recovery (forgot password) is via backup channels bound in the profile, not email.
   auth: {
-    register: (email: string, password: string) =>
-      fetch('/v1/auth/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) })
-        .then(jAuth<{ status: string }>),
-    login: (email: string, password: string) =>
-      fetch('/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) })
+    register: (username: string, password: string) =>
+      fetch('/v1/auth/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) })
         .then(jAuth<AuthResult>),
-    verifyEmail: (token: string) =>
-      fetch('/v1/auth/verify-email', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }) })
+    login: (username: string, password: string) =>
+      fetch('/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) })
         .then(jAuth<AuthResult>),
-    resendVerification: (email: string) =>
-      fetch('/v1/auth/resend-verification', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) })
-        .then(jAuth<{ status: string }>),
-    forgot: (email: string) =>
-      fetch('/v1/auth/forgot-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) })
-        .then(jAuth<{ status: string }>),
-    reset: (token: string, newPassword: string) =>
-      fetch('/v1/auth/reset-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, newPassword }) })
-        .then(jAuth<{ status: string }>),
     refresh: () =>
       fetch('/v1/auth/session/refresh', { method: 'POST', headers: { authorization: `Bearer ${getSession() ?? ''}` } })
+        .then(jAuth<AuthResult>),
+
+    // ── Wallet backup / recovery channel ───────────────────────────────────────
+    // challenge → sign the returned `statement` → link (authed, binds to your soul) or
+    // recover (public, logs into the soul the wallet is bound to). listWallets is authed.
+    walletChallenge: (address: string) =>
+      fetch('/v1/auth/wallet/challenge', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address }) })
+        .then(jAuth<{ token: string; statement: string }>),
+    walletLink: (challengeToken: string, signature: string) =>
+      fetch('/v1/auth/wallet/link', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ challengeToken, signature }) })
+        .then(jAuth<{ address: string; moved?: boolean }>),
+    walletRecover: (challengeToken: string, signature: string) =>
+      fetch('/v1/auth/wallet/recover', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeToken, signature }) })
+        .then(jAuth<AuthResult>),
+    listWallets: () =>
+      fetch('/v1/auth/wallet', { headers: readHeaders() }).then(jAuth<{ wallets: string[] }>),
+
+    // ── Telegram backup / recovery channel ─────────────────────────────────────
+    // challenge (authed) → open the deepLink in Telegram + tap Start to bind. status (authed)
+    // reflects whether it's linked. recover (public) redeems a code the bot handed the user.
+    telegramChallenge: () =>
+      fetch('/v1/auth/telegram/challenge', { method: 'POST', headers: authHeaders(), body: '{}' })
+        .then(jAuth<{ code: string; deepLink?: string; botUsername?: string }>),
+    telegramStatus: () =>
+      fetch('/v1/auth/telegram', { headers: readHeaders() }).then(jAuth<{ linked: boolean }>),
+    telegramRecover: (code: string) =>
+      fetch('/v1/auth/telegram/recover', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) })
         .then(jAuth<AuthResult>),
   },
 };
@@ -326,6 +447,7 @@ export interface Generatio {
   outputFormat?: string;
   telegramDeliverAs?: 'album' | 'individual';
   autoApplyModels?: string[];
+  defaultProjectId?: string;
 }
 // BYO gated-origin credential providers (mirror the server `SecretProvider` union).
 export type SecretProvider = 'civitai' | 'huggingface';
@@ -393,6 +515,24 @@ export interface Team {
   members: string[];
   founder: string;
   createdAt: string;
+}
+
+// A project (Provincia) as the server sees it — GET/POST /v1/me/projects. The durable,
+// account-owned backbone: identity + holdings (id references). The web `Project` (lib/projects.ts)
+// layers client-local view state (chats/canvases/favorites) on top of this.
+export interface RemoteProject {
+  id: string;
+  owner: string;
+  name: string;
+  desc?: string;
+  glyph?: string;
+  color?: string;
+  datasetIds: string[];
+  modelIds: string[];
+  collectionIds: string[];
+  teamId?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // A sponsorship pledge (Sponsio) — GET/POST /v1/sponsorships. bigints ride as strings.

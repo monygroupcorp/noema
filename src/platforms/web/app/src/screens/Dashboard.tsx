@@ -74,6 +74,14 @@ export function Dashboard() {
           </div>
         </div>
 
+        {/* Primary action — the one obvious way to start making (P0-2). New users land here with
+            no generate CTA otherwise; this routes straight to the Catalogue → Card path. */}
+        <div className="db-start" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center', flexWrap: 'wrap', margin: 'var(--s5) 0 var(--s6)' }}>
+          <Link className="btn" to="/catalog"><Ic name="sparkles" /> Create something</Link>
+          <Link className="btn ghost" to="/chat"><Ic name="message-square" /> Ask the Concierge</Link>
+          <span className="sub" style={{ color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>Pick a model to run, or just describe what you want.</span>
+        </div>
+
         {/* your projects */}
         <div className="sectionhead db-head">your projects · {projects.length}<Link className="db-all" to="/projects">all projects ▸</Link></div>
         <div className="dbprojgrid">

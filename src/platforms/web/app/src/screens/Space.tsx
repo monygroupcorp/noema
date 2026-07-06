@@ -23,27 +23,9 @@ interface Corpus { positions: Float32Array; clusters: Uint16Array; manifest: Man
 const BG = '#08090A';
 const base = (layer: Layer) => (layer === 'image' ? '/space-image' : '/space');
 
-// The corpus explorer is OFF by default so /space stays dormant and never hits
-// staging. Remount with:  VITE_CORPUS_SPACE=1 npm run dev
-const MOUNTED = import.meta.env.VITE_CORPUS_SPACE === '1';
-
-function DormantSpace() {
-  return (
-    <AppShell crumb="space">
-      <div className="space" style={{ display: 'grid', placeItems: 'center' }}>
-        <div style={{ textAlign: 'center', maxWidth: 470, padding: 24 }}>
-          <div style={{ fontSize: 22, color: 'var(--accent-soft)', opacity: .7, marginBottom: 12 }}><Ic name="sparkles" /></div>
-          <div style={{ color: 'var(--text)', fontSize: 14, marginBottom: 8 }}>Vestigium space — parked</div>
-          <div style={{ color: 'var(--faint)', fontSize: 12.5, lineHeight: 1.6 }}>
-            The corpus explorer is unmounted (no data loads, no training calls). Re-enable it with{' '}
-            <code style={{ color: 'var(--accent-soft)' }}>VITE_CORPUS_SPACE=1 npm run dev</code>. Artifacts live in{' '}
-            <code>public/space*</code>; rebuild via <code>scripts/corpus-space</code> if missing.
-          </div>
-        </div>
-      </div>
-    </AppShell>
-  );
-}
+// The corpus explorer mounts on data presence, not a build flag (UX handoff 2, D7): it always
+// loads and shows a real loading → space | empty state. Corpus artifacts are static files under
+// `public/space*` (built by scripts/corpus-space); absent → the honest empty state below.
 
 function webglAvailable(): boolean {
   try { const c = document.createElement('canvas'); return !!(window.WebGLRenderingContext && (c.getContext('webgl') || c.getContext('experimental-webgl'))); } catch { return false; }
@@ -187,7 +169,6 @@ function NoWebGL() {
 }
 
 export function Space() {
-  if (!MOUNTED) return <DormantSpace />;
   return <CorpusSpace />;
 }
 
@@ -384,8 +365,12 @@ function CorpusSpace() {
     <AppShell crumb="space">
       <div className="space" onClick={() => { setPicked(null); }}>
         {!glOk ? <NoWebGL /> : err ? (
-          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 13, padding: 24, textAlign: 'center' }}>
-            Couldn’t load the corpus artifact (/space/*). Run <code style={{ color: 'var(--accent-soft)' }}>scripts/corpus-space</code> to build it.<br />{err}
+          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 13, padding: 24, textAlign: 'center', maxWidth: 460, margin: '0 auto' }}>
+            <div>
+              <div style={{ fontSize: 22, color: 'var(--accent-soft)', opacity: .7, marginBottom: 12 }}><Ic name="footprints" /></div>
+              <div style={{ color: 'var(--text)', fontSize: 14, marginBottom: 8 }}>Your space is empty</div>
+              <div style={{ lineHeight: 1.6 }}>Nothing to explore yet — as you generate, your creations gather here as a 3D memory you can fly through, cluster, and cultivate.</div>
+            </div>
           </div>
         ) : !corpus ? (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 13 }}>loading the {layer} space…</div>

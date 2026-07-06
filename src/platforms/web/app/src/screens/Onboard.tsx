@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
-import { api, AuthApiError } from '../lib/api';
+import { AuthApiError } from '../lib/api';
 import { markOnboarded } from '../lib/entry';
 import { Wordmark } from '../ui/Wordmark';
 import type { Execution } from '../lib/idents';
@@ -14,36 +14,52 @@ import './onboard.css';
 // The door sets the IDENTITY axis (who we are to you); compute custody (what we see of the
 // work) is a per-run choice — said in the footer, never set here.
 //
-// Door A now carries the REAL fiat session (username/password rail): "Continue with email"
-// expands inline into a sign-in / create-account form (useSession). Wallet/Passkey remain
-// cosmetic placeholders. Door B (anonymous) stays the local/bearer identity skin.
+// Door A now carries the REAL fiat session (username/password rail): "Continue with a
+// username" expands inline into a sign-in / create-account form (useSession). No email —
+// registering logs you straight in. Wallet/Passkey remain cosmetic placeholders. Door B
+// (anonymous) stays the local/bearer identity skin.
+//
+// ADDITIVE MODE (`/onboard?add=1`, Keyring Decision 3): reached via "Add account" from the
+// Keyring / account menu. The multi-session store APPENDS a login rather than replacing, so
+// this flag only governs copy + where we land afterwards (back to /keyring, not /app).
 
 const MIN_PASSWORD = 8;
+const MIN_USERNAME = 3;
 
 export function Onboard() {
-  const { setIdentity, setExecution } = useIdentity();
+  const { setExecution } = useIdentity();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const addMode = params.get('add') === '1';
 
-  // Cosmetic entry (anon door + wallet/passkey placeholders): set the durable profile +
-  // session execution mode, mark onboarded, drop into the app shell.
-  const enter = (ident: string, exec: Execution) => {
-    setIdentity(ident);       // 'studio' = named · 'untitled' = bearer
+  // Anon entry (Door B): the anon commitment path is a session with no account, so there's
+  // nothing to set beyond the execution mode — funding derives from the (absent) session.
+  const enter = (exec: Execution) => {
     setExecution(exec);       // session mode; custody is still per-run inside the app
     markOnboarded();
-    navigate('/app');
+    navigate(addMode ? '/keyring' : '/app');
   };
 
   return (
     <div className="auth-root">
       <header className="auth-head">
         <Wordmark height={26} />
-        <h1 className="auth-display">Make anything.<br />We never have to see it.</h1>
-        <p className="auth-sub">Choose how you enter — you decide what we can know.</p>
+        {addMode ? (
+          <>
+            <h1 className="auth-display">Add another account.</h1>
+            <p className="auth-sub">Your current account stays signed in — this one joins your keyring, and you switch between them freely.</p>
+          </>
+        ) : (
+          <>
+            <h1 className="auth-display">Make anything.<br />We never have to see it.</h1>
+            <p className="auth-sub">Choose how you enter — you decide what we can know.</p>
+          </>
+        )}
       </header>
 
       <div className="auth-doors">
         {/* Door A — bring an identity (real account) */}
-        <IdentityDoor enter={enter} />
+        <IdentityDoor addMode={addMode} />
 
         {/* Door B — stay anonymous (slate / dashed hemisphere) */}
         <section className="door anon">
@@ -52,8 +68,8 @@ export function Onboard() {
             <h2>Stay anonymous</h2>
           </div>
           <p className="door-d">No account. Run on your own machine — nothing ever leaves — or fund a bearer purse to use our compute without a name.</p>
-          <button className="door-cta slate" onClick={() => enter('untitled', 'local')}>Enter local · off-grid →</button>
-          <button className="door-opt" onClick={() => enter('untitled', 'rented')}><Ic name="venetian-mask" /> Set up a Bursa <span className="opt-meta">pay anonymously</span></button>
+          <button className="door-cta slate" onClick={() => enter('local')}>Enter local · off-grid →</button>
+          <button className="door-opt" disabled title="Coming soon"><Ic name="venetian-mask" /> Set up a Bursa <span className="opt-meta">coming soon</span></button>
           <p className="door-warn">* a Bursa is anonymous only if funded from a shielded wallet. A doxxed source links you to us at funding time — permanently.</p>
           <div className="door-knows"><span className="hemi dashed sm" aria-hidden="true" /> noema knows: <b>nothing*</b></div>
         </section>
@@ -64,51 +80,62 @@ export function Onboard() {
   );
 }
 
-// Door A: collapsed (buttons) → email form (sign in / create). On login/verify success the
-// session context navigates; here we mark the named profile + onboarded and enter the app.
-function IdentityDoor({ enter }: { enter: (ident: string, exec: Execution) => void }) {
-  const { login, register } = useSession();
+// Door A: collapsed (buttons) → username form (sign in / create). On success the session
+// context adopts a live session; here we mark the named profile + onboarded and enter the app.
+function IdentityDoor({ addMode }: { addMode: boolean }) {
+  const { login, register, recoverWithWallet, recoverWithTelegram } = useSession();
   const navigate = useNavigate();
   const [mode, setMode] = useState<'collapsed' | 'signin' | 'register'>('collapsed');
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [err, setErr] = useState<string | null>(null);
-  const [unverified, setUnverified] = useState(false);
-  const [resent, setResent] = useState(false);
-  const [sent, setSent] = useState(false);          // register → "check your email"
   const [busy, setBusy] = useState(false);
+  const [tgRecover, setTgRecover] = useState(false);   // reveal the Telegram code input
+  const [tgCode, setTgCode] = useState('');
 
-  const reset = () => { setErr(null); setUnverified(false); setResent(false); };
+  async function onRecoverWallet() {
+    reset(); setBusy(true);
+    try { await recoverWithWallet(); done(); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
+
+  async function onRecoverTelegram() {
+    if (!tgCode.trim()) return;
+    reset(); setBusy(true);
+    try { await recoverWithTelegram(tgCode.trim()); done(); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
+
+  const reset = () => { setErr(null); };
+  // session is live; land in the app, or back on the keyring when adding an account.
+  const done = () => { markOnboarded(); navigate(addMode ? '/keyring' : '/app'); };
 
   async function onSignin(e: FormEvent) {
     e.preventDefault();
     reset(); setBusy(true);
     try {
-      await login(email.trim(), password);
-      markOnboarded();
-      navigate('/app');            // session is live; enter identified
+      await login(username.trim(), password);
+      done();
     } catch (e) {
-      if (e instanceof AuthApiError && e.code === 'auth.email_unverified') { setUnverified(true); setErr('Verify your email before signing in.'); }
-      else setErr(e instanceof Error ? e.message : String(e));
+      setErr(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
   }
 
   async function onRegister(e: FormEvent) {
     e.preventDefault();
     reset();
+    if (username.trim().length < MIN_USERNAME) { setErr(`Username must be at least ${MIN_USERNAME} characters.`); return; }
     if (password.length < MIN_PASSWORD) { setErr(`Password must be at least ${MIN_PASSWORD} characters.`); return; }
     if (password !== confirm) { setErr('Passwords do not match.'); return; }
     setBusy(true);
-    try { await register(email.trim(), password); setSent(true); }
+    try { await register(username.trim(), password); done(); }   // register logs you straight in
     catch (e) {
-      if (e instanceof AuthApiError && e.code === 'conflict.registration') setErr('Could not create the account. Try signing in, or reset your password.');
+      if (e instanceof AuthApiError && e.code === 'conflict.registration') setErr('That username is taken — try another, or sign in.');
       else setErr(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
-  }
-
-  async function resend() {
-    try { await api.auth.resendVerification(email.trim()); setResent(true); } catch { setResent(true); }
   }
 
   return (
@@ -120,51 +147,47 @@ function IdentityDoor({ enter }: { enter: (ident: string, exec: Execution) => vo
 
       {mode === 'collapsed' && (
         <>
-          <p className="door-d">Sign in or create an account. Synced across web, Telegram, and the API — pick up anywhere.</p>
-          <button className="door-cta primary" onClick={() => { reset(); setMode('signin'); }}>Continue with email</button>
-          <button className="door-opt" onClick={() => enter('studio', 'rented')}><Ic name="wallet" /> Wallet</button>
-          <button className="door-opt" onClick={() => enter('studio', 'rented')}><Ic name="key-round" /> Passkey</button>
+          <p className="door-d">Sign in or create an account — just a username, no email. Synced across web, Telegram, and the API — pick up anywhere.</p>
+          <button className="door-cta primary" onClick={() => { reset(); setMode('signin'); }}>Continue with a username</button>
+          <button className="door-opt" disabled title="Coming soon"><Ic name="wallet" /> Wallet <span className="opt-meta">coming soon</span></button>
+          <button className="door-opt" disabled title="Coming soon"><Ic name="key-round" /> Passkey <span className="opt-meta">coming soon</span></button>
           <div className="door-knows"><span className="hemi lit sm" aria-hidden="true" /> noema knows: <b>it's you</b></div>
         </>
       )}
 
-      {mode !== 'collapsed' && sent && (
-        <>
-          <p className="door-d"><Ic name="send" /> We sent a verification link to <b>{email.trim()}</b>. Click it to activate your account and sign in.</p>
-          <button className="door-opt" onClick={resend}>Resend link</button>
-          <button className="door-cta primary" onClick={() => { setSent(false); setMode('signin'); }}>Back to sign in</button>
-        </>
-      )}
-
-      {mode === 'signin' && !sent && (
+      {mode === 'signin' && (
         <form className="door-auth" onSubmit={onSignin}>
           <p className="door-d">Sign in to your account.</p>
           {err && <div className="warn">{err}</div>}
-          {unverified && (
-            <div className="auth-note">
-              {resent ? 'Verification email sent — check your inbox.'
-                : <>Didn't get the link? <span className="linkish" role="button" tabIndex={0} onClick={resend} style={{ color: 'var(--accent-soft)', cursor: 'pointer', textDecoration: 'underline' }}>Resend verification</span>.</>}
-            </div>
-          )}
-          <input className="byo-input" type="email" required placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" aria-label="email" />
+          <input className="byo-input" type="text" required placeholder="username" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" aria-label="username" />
           <input className="byo-input" type="password" required placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" aria-label="password" />
           <button className="door-cta primary" type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+          <button type="button" className="door-opt" disabled={busy} onClick={onRecoverWallet}><Ic name="wallet" /> Recover with a linked wallet</button>
+          {tgRecover ? (
+            <div className="door-auth" style={{ gap: 8 }}>
+              <input className="byo-input" type="text" placeholder="Paste the code from the bot" value={tgCode} onChange={(e) => setTgCode(e.target.value)} aria-label="Telegram recovery code" />
+              <button type="button" className="door-cta primary" disabled={busy || !tgCode.trim()} onClick={onRecoverTelegram}>{busy ? 'Recovering…' : 'Recover'}</button>
+            </div>
+          ) : (
+            <button type="button" className="door-opt" disabled={busy} onClick={() => { reset(); setTgRecover(true); }}><Ic name="send" /> Recover with Telegram</button>
+          )}
           <div className="link-row">
             <button type="button" className="linkish" onClick={() => { reset(); setMode('register'); }}>Create an account</button>
-            <Link to="/forgot-password">Forgot password?</Link>
           </div>
+          <p className="auth-note">Forgot your password? Recover with a wallet or Telegram you linked in your profile — there's no email reset. For Telegram, open our bot and send <b>/recover</b>.</p>
           <p className="auth-note">Work or credits from anonymous browsing stay with that anonymous session — they don't move into your account.</p>
         </form>
       )}
 
-      {mode === 'register' && !sent && (
+      {mode === 'register' && (
         <form className="door-auth" onSubmit={onRegister}>
-          <p className="door-d">Create your account — one identity across web, Telegram, and the API.</p>
+          <p className="door-d">Create your account — one identity across web, Telegram, and the API. No email required.</p>
           {err && <div className="warn">{err}</div>}
-          <input className="byo-input" type="email" required placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" aria-label="email" />
+          <input className="byo-input" type="text" required placeholder={`username (min ${MIN_USERNAME} chars)`} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" aria-label="username" />
           <input className="byo-input" type="password" required placeholder={`Password (min ${MIN_PASSWORD} chars)`} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" aria-label="password" />
           <input className="byo-input" type="password" required placeholder="Confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" aria-label="confirm password" />
           <button className="door-cta primary" type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create account'}</button>
+          <p className="auth-note">Keep your password safe — add a Telegram or wallet backup in your profile so you can recover the account.</p>
           <div className="link-row">
             <button type="button" className="linkish" onClick={() => { reset(); setMode('signin'); }}>I already have an account</button>
           </div>

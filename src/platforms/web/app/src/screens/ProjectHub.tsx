@@ -1,17 +1,22 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { useProject } from '../state/project';
 import { counts } from '../lib/projects';
+import { DATASETS } from '../lib/datasets';
 import { Ic } from '../lib/icons';
+import { api, type Team } from '../lib/api';
 
 // Project hub (project-hub-spec.md, render noema-project-hub.png) — one project's home: a
-// tabbed workbench. Overview summarizes the six holdings; the other tabs reuse the canonical
-// surfaces scoped to this project (datasets library / model shelf / collections / lists) once
-// those are built. Lives in the shell; the top bar shows the breadcrumb.
+// tabbed workbench. Overview summarizes the six holdings; the asset tabs (Datasets/Models/
+// Collections) open the CANONICAL surfaces filtered to this project via `?project=<id>`
+// (Decision 4 — one list surface, two entry modes). Lives in the shell; the top bar shows
+// the breadcrumb.
 //
-// The mock Project carries chats/canvases/cards/gens; datasets/models/collections seed at 0
-// until the project backend carries them. TODO(backend: project holdings + activity).
+// Holdings are real now: datasets/models/collections read the project's filed id-reference
+// lengths, not a hardcoded 0, and the Overview resolves those ids to friendly names (falling
+// back to the raw id for a dangling reference). Chats/canvases/favorites stay client-local
+// overlay (no backend store yet).
 
 const QUICK = [
   { to: '/chat', ico: 'message-square', label: 'New chat' },
@@ -23,15 +28,35 @@ const QUICK = [
 
 export function ProjectHub() {
   const { id } = useParams();
-  const { projects } = useProject();
+  const { projects, linkTeam } = useProject();
   const p = projects.find((x) => x.id === id) ?? projects[0];
   const c = counts(p);
   const [tab, setTab] = useState('Overview');
 
+  // Teams the caller can reference for this project's shared member set (Decision 6 — a project
+  // references a Team; it doesn't carry its own membership). Empty/failed → the picker hides.
+  const [teams, setTeams] = useState<Team[]>([]);
+  // id→name maps so the Overview shows friendly holding names, not raw ids. Datasets come from
+  // the (mock) library; models + collections from the caller's canonical lists.
+  const [modelNames, setModelNames] = useState<Record<string, string>>({});
+  const [collNames, setCollNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let live = true;
+    api.listTeams().then((r) => { if (live) setTeams(r.teams); }).catch(() => { if (live) setTeams([]); });
+    api.listMyModels().then((r) => { if (live) setModelNames(Object.fromEntries(r.models.map((m) => [m.intellaId, m.nomen]))); }).catch(() => {});
+    api.listCollections().then((r) => { if (live) setCollNames(Object.fromEntries(r.collections.map((x) => [x.id, x.nomen || 'Untitled collection']))); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  const dsNames = useMemo(() => Object.fromEntries(DATASETS.map((d) => [d.id, d.name])), []);
+  const nameOf = (map: Record<string, string>, id: string) => map[id] ?? id;
+
   const tabs: { key: string; n?: number }[] = [
     { key: 'Overview' }, { key: 'Chats', n: c.chats }, { key: 'Canvases', n: c.canvases },
-    { key: 'Datasets', n: 0 }, { key: 'Models', n: 0 }, { key: 'Collections', n: 0 }, { key: 'Favorites', n: c.cards },
+    { key: 'Datasets', n: c.datasets }, { key: 'Models', n: c.models }, { key: 'Collections', n: c.collections }, { key: 'Favorites', n: c.cards },
   ];
+
+  // The asset tabs open the canonical surface scoped to this project.
+  const SCOPED: Record<string, string> = { Datasets: '/datasets', Models: '/models', Collections: '/collections' };
 
   const crumb = (
     <span className="ph-crumb">
@@ -52,7 +77,18 @@ export function ProjectHub() {
           </div>
           <div className="ph-people">
             {p.shared ? <span className="ph-avatars">{Array.from({ length: Math.min(p.shared, 3) }).map((_, i) => <span key={i} className="av" style={{ background: p.color }} />)}</span> : null}
-            <button className="btn"><Ic name="circle-user" /> share ▸</button>
+            {teams.length > 0 ? (
+              // Share by referencing a Team (Sodalitas) — the project's member set IS the team.
+              <label className="ph-team mono" title="Share this project with a team">
+                <Ic name="circle-user" />
+                <select className="cer-input" value={p.teamId ?? ''} onChange={(e) => linkTeam(p.id, e.target.value || null)}>
+                  <option value="">private (just you)</option>
+                  {teams.map((t) => <option key={t.id} value={t.id}>{t.nomen}</option>)}
+                </select>
+              </label>
+            ) : (
+              <Link className="btn" to="/teams"><Ic name="circle-user" /> share via a team ▸</Link>
+            )}
           </div>
         </div>
 
@@ -63,26 +99,38 @@ export function ProjectHub() {
           ))}
         </div>
 
-        {/* tabs */}
+        {/* tabs — asset tabs are LINKS into the canonical surface scoped to this project */}
         <div className="ph-tabs">
           {tabs.map((t) => (
-            <button key={t.key} className={`ph-tab${tab === t.key ? ' on' : ''}`} onClick={() => setTab(t.key)}>
-              {t.key}{t.n != null && <span className="tn">{t.n}</span>}
-            </button>
+            SCOPED[t.key] ? (
+              <Link key={t.key} className="ph-tab" to={`${SCOPED[t.key]}?project=${p.id}`}>
+                {t.key}{t.n != null && <span className="tn">{t.n}</span>}
+              </Link>
+            ) : (
+              <button key={t.key} className={`ph-tab${tab === t.key ? ' on' : ''}`} onClick={() => setTab(t.key)}>
+                {t.key}{t.n != null && <span className="tn">{t.n}</span>}
+              </button>
+            )
           ))}
         </div>
 
         {tab === 'Overview' ? (
           <>
             <div className="ph-overview">
-              <HoldingCard ico="database" name="Datasets" n={0} foot="no datasets yet" onTo={() => setTab('Datasets')}>
-                <div className="hc-empty">the core asset — start one to train from</div>
+              <HoldingCard ico="database" name="Datasets" n={c.datasets} foot={c.datasets ? `${c.datasets} filed` : 'no datasets yet'} to={`/datasets?project=${p.id}`}>
+                {c.datasets
+                  ? p.datasetIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {nameOf(dsNames, x)}</div>)
+                  : <div className="hc-empty">the core asset — start one to train from</div>}
               </HoldingCard>
-              <HoldingCard ico="box" name="Models" n={0} foot={<span className="gold"><span className="gem">◈</span> — royalties</span>} onTo={() => setTab('Models')}>
-                <div className="hc-empty">trained LoRAs land on the shelf</div>
+              <HoldingCard ico="box" name="Models" n={c.models} foot={<span className="gold"><span className="gem">◈</span> — royalties</span>} to={`/models?project=${p.id}`}>
+                {c.models
+                  ? p.modelIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {nameOf(modelNames, x)}</div>)
+                  : <div className="hc-empty">trained LoRAs land on the shelf</div>}
               </HoldingCard>
-              <HoldingCard ico="hexagon" name="Collections" n={0} foot="0 minted · 0 draft" onTo={() => setTab('Collections')}>
-                <div className="hc-empty">publishable drops → noesis</div>
+              <HoldingCard ico="hexagon" name="Collections" n={c.collections} foot={c.collections ? `${c.collections} filed` : '0 minted · 0 draft'} to={`/collections?project=${p.id}`}>
+                {c.collections
+                  ? p.collectionIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {nameOf(collNames, x)}</div>)
+                  : <div className="hc-empty">publishable drops → noesis</div>}
               </HoldingCard>
               <HoldingCard ico="message-square" name="Chats" n={c.chats} foot={`last ${p.updated}`} onTo={() => setTab('Chats')}>
                 {p.chats.slice(0, 2).map((ch) => <div className="hc-line" key={ch.id}>› {ch.title}</div>)}
@@ -109,10 +157,15 @@ export function ProjectHub() {
               </div>
             </div>
           </>
+        ) : tab === 'Chats' ? (
+          <ScopedList empty="No chats in this project yet." rows={p.chats.map((ch) => `${ch.title} · ${ch.when}`)} />
+        ) : tab === 'Canvases' ? (
+          <ScopedList empty="No canvases in this project yet." rows={p.canvases.map((cv) => `${cv.name} · ${cv.nodes} nodes`)} />
+        ) : tab === 'Favorites' ? (
+          <ScopedList empty="No favorite cards pinned to this project yet." rows={p.cards.map((cd) => `${cd.name} · ${cd.verb}`)} />
         ) : (
           <div className="empty ph-scoped">
             <div className="t">{tab} for <b>{p.name}</b> — opens the {tab.toLowerCase()} list scoped to this project.</div>
-            <div className="s">Reuses the canonical {tab.toLowerCase()} surface (scoped); building that surface is a later phase.</div>
           </div>
         )}
 
@@ -121,14 +174,28 @@ export function ProjectHub() {
   );
 }
 
-function HoldingCard({ ico, name, n, foot, onTo, children }: {
-  ico: string; name: string; n: number; foot: React.ReactNode; onTo: () => void; children: React.ReactNode;
+// A local (overlay) holding list — chats / canvases / favorites. These have no backend
+// store yet, so they render straight from the project's client-local view state.
+function ScopedList({ rows, empty }: { rows: string[]; empty: string }) {
+  if (rows.length === 0) return <div className="empty ph-scoped"><div className="t">{empty}</div></div>;
+  return (
+    <div className="ph-scoped-list">
+      {rows.map((r, i) => <div className="hc-line" key={i}>› {r}</div>)}
+    </div>
+  );
+}
+
+function HoldingCard({ ico, name, n, foot, onTo, to, children }: {
+  ico: string; name: string; n: number; foot: React.ReactNode; onTo?: () => void; to?: string; children: React.ReactNode;
 }) {
   return (
     <div className="holding">
       <div className="hc-head"><span className="hc-ico"><Ic name={ico} /></span><b>{name}</b><span className="hc-n">{n}</span></div>
       <div className="hc-body">{children}</div>
-      <div className="hc-foot"><span className="hc-sig">{foot}</span><button className="hc-open" onClick={onTo}>open ▸</button></div>
+      <div className="hc-foot">
+        <span className="hc-sig">{foot}</span>
+        {to ? <Link className="hc-open" to={to}>open ▸</Link> : <button className="hc-open" onClick={onTo}>open ▸</button>}
+      </div>
     </div>
   );
 }

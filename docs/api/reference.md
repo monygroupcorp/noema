@@ -1291,6 +1291,10 @@ The caller's owner-keyed account settings — presentation skin (Profile), cross
             "type": "string"
           },
           "description": "Models (intellaId) to auto-apply as pinnedModels. Stored; cast-time application pending model resolution."
+        },
+        "defaultProjectId": {
+          "type": "string",
+          "description": "Default project (Provincia id) new work files into. Stored; cast-time auto-filing pending."
         }
       }
     },
@@ -1475,6 +1479,10 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
         "type": "string"
       },
       "description": "Models (intellaId) to auto-apply as pinnedModels. Stored; cast-time application pending model resolution."
+    },
+    "defaultProjectId": {
+      "type": "string",
+      "description": "Default project (Provincia id) new work files into. Stored; cast-time auto-filing pending."
     }
   }
 }
@@ -1516,6 +1524,10 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
             "type": "string"
           },
           "description": "Models (intellaId) to auto-apply as pinnedModels. Stored; cast-time application pending model resolution."
+        },
+        "defaultProjectId": {
+          "type": "string",
+          "description": "Default project (Provincia id) new work files into. Stored; cast-time auto-filing pending."
         }
       }
     }
@@ -5273,6 +5285,650 @@ Remove a member from a team (the founder cannot be removed). Member-scoped.
 }
 ```
 
+### GET /v1/me/projects
+
+List the caller's projects (Provincia) — account-owned workspace lenses. Identified callers only.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string",
+            "description": "The owning Anima id (the project's hard ownership boundary)."
+          },
+          "name": {
+            "type": "string",
+            "description": "The project display name."
+          },
+          "desc": {
+            "type": "string",
+            "description": "Optional description."
+          },
+          "glyph": {
+            "type": "string",
+            "description": "Presentation glyph."
+          },
+          "color": {
+            "type": "string",
+            "description": "Presentation color."
+          },
+          "datasetIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filed dataset ids."
+          },
+          "modelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filed model (Intella) ids."
+          },
+          "collectionIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filed collection ids."
+          },
+          "teamId": {
+            "type": "string",
+            "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "owner",
+          "name",
+          "datasetIds",
+          "modelIds",
+          "collectionIds",
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "projects"
+  ]
+}
+```
+
+### POST /v1/me/projects
+
+Create a project owned by the caller. Holdings start empty; assets are filed in by reference.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Create a project owned by the caller.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "The project display name."
+    },
+    "desc": {
+      "type": "string",
+      "description": "Optional description."
+    },
+    "glyph": {
+      "type": "string",
+      "description": "Presentation glyph."
+    },
+    "color": {
+      "type": "string",
+      "description": "Presentation color."
+    },
+    "teamId": {
+      "type": "string",
+      "description": "Optional Team (Sodalitas) to reference for the shared member set."
+    }
+  },
+  "required": [
+    "name"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "object",
+      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "The owning Anima id (the project's hard ownership boundary)."
+        },
+        "name": {
+          "type": "string",
+          "description": "The project display name."
+        },
+        "desc": {
+          "type": "string",
+          "description": "Optional description."
+        },
+        "glyph": {
+          "type": "string",
+          "description": "Presentation glyph."
+        },
+        "color": {
+          "type": "string",
+          "description": "Presentation color."
+        },
+        "datasetIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed dataset ids."
+        },
+        "modelIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed model (Intella) ids."
+        },
+        "collectionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed collection ids."
+        },
+        "teamId": {
+          "type": "string",
+          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "name",
+        "datasetIds",
+        "modelIds",
+        "collectionIds",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "required": [
+    "project"
+  ]
+}
+```
+
+### GET /v1/me/projects/:id
+
+Fetch one owned project by id (404 if not the owner).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "object",
+      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "The owning Anima id (the project's hard ownership boundary)."
+        },
+        "name": {
+          "type": "string",
+          "description": "The project display name."
+        },
+        "desc": {
+          "type": "string",
+          "description": "Optional description."
+        },
+        "glyph": {
+          "type": "string",
+          "description": "Presentation glyph."
+        },
+        "color": {
+          "type": "string",
+          "description": "Presentation color."
+        },
+        "datasetIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed dataset ids."
+        },
+        "modelIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed model (Intella) ids."
+        },
+        "collectionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed collection ids."
+        },
+        "teamId": {
+          "type": "string",
+          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "name",
+        "datasetIds",
+        "modelIds",
+        "collectionIds",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "required": [
+    "project"
+  ]
+}
+```
+
+### PATCH /v1/me/projects/:id
+
+Patch project metadata (name/desc/glyph/color/teamId). Owner-only.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Patch project metadata. Omitted fields are left unchanged; teamId null clears the reference.",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "desc": {
+      "type": "string"
+    },
+    "glyph": {
+      "type": "string"
+    },
+    "color": {
+      "type": "string"
+    },
+    "teamId": {
+      "type": "string",
+      "description": "Set/clear the referenced Team (Sodalitas)."
+    }
+  }
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "object",
+      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "The owning Anima id (the project's hard ownership boundary)."
+        },
+        "name": {
+          "type": "string",
+          "description": "The project display name."
+        },
+        "desc": {
+          "type": "string",
+          "description": "Optional description."
+        },
+        "glyph": {
+          "type": "string",
+          "description": "Presentation glyph."
+        },
+        "color": {
+          "type": "string",
+          "description": "Presentation color."
+        },
+        "datasetIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed dataset ids."
+        },
+        "modelIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed model (Intella) ids."
+        },
+        "collectionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed collection ids."
+        },
+        "teamId": {
+          "type": "string",
+          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "name",
+        "datasetIds",
+        "modelIds",
+        "collectionIds",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "required": [
+    "project"
+  ]
+}
+```
+
+### DELETE /v1/me/projects/:id
+
+Delete a project. Owner-only. Filed assets are untouched (holdings are references).
+
+- **Auth:** required
+
+### POST /v1/me/projects/:id/holdings
+
+File an asset reference (dataset|model|collection) into the project. Owner-only; idempotent.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "File an asset reference into the project (idempotent).",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "dataset",
+        "model",
+        "collection"
+      ],
+      "description": "Which holding list."
+    },
+    "assetId": {
+      "type": "string",
+      "description": "The asset's id."
+    }
+  },
+  "required": [
+    "kind",
+    "assetId"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "object",
+      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "The owning Anima id (the project's hard ownership boundary)."
+        },
+        "name": {
+          "type": "string",
+          "description": "The project display name."
+        },
+        "desc": {
+          "type": "string",
+          "description": "Optional description."
+        },
+        "glyph": {
+          "type": "string",
+          "description": "Presentation glyph."
+        },
+        "color": {
+          "type": "string",
+          "description": "Presentation color."
+        },
+        "datasetIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed dataset ids."
+        },
+        "modelIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed model (Intella) ids."
+        },
+        "collectionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed collection ids."
+        },
+        "teamId": {
+          "type": "string",
+          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "name",
+        "datasetIds",
+        "modelIds",
+        "collectionIds",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "required": [
+    "project"
+  ]
+}
+```
+
+### DELETE /v1/me/projects/:id/holdings/:kind/:assetId
+
+Unfile an asset reference from the project. Owner-only; idempotent.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "object",
+      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "The owning Anima id (the project's hard ownership boundary)."
+        },
+        "name": {
+          "type": "string",
+          "description": "The project display name."
+        },
+        "desc": {
+          "type": "string",
+          "description": "Optional description."
+        },
+        "glyph": {
+          "type": "string",
+          "description": "Presentation glyph."
+        },
+        "color": {
+          "type": "string",
+          "description": "Presentation color."
+        },
+        "datasetIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed dataset ids."
+        },
+        "modelIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed model (Intella) ids."
+        },
+        "collectionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filed collection ids."
+        },
+        "teamId": {
+          "type": "string",
+          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "name",
+        "datasetIds",
+        "modelIds",
+        "collectionIds",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "required": [
+    "project"
+  ]
+}
+```
+
 ## Error codes
 
 Every failed request returns the uniform envelope `{ error: { code, message, retryable?, retryAfter?, details? } }`. Branch on the stable `code`.
@@ -5289,6 +5945,7 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `not_found.studio` | 404 | no |
 | `not_found.collection` | 404 | no |
 | `not_found.team` | 404 | no |
+| `not_found.project` | 404 | no |
 | `not_found.edition` | 404 | no |
 | `not_found.model` | 404 | no |
 | `not_found.adapter` | 404 | no |

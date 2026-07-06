@@ -8,6 +8,7 @@ import { mediaFromOutput } from '../lib/media';
 import { isPinned, togglePin } from '../lib/pins';
 import { usePromptAssist, useAssistField } from '../state/promptAssist';
 import { fieldExample } from '../lib/promptExamples';
+import { humanizeKey } from '../lib/labels';
 
 type Aditus = Record<string, unknown>;
 
@@ -199,7 +200,7 @@ export function Card() {
   );
 
   return (
-    <AppShell crumb={<>catalog <span className="sep">/</span> {id}</>} context={context}>
+    <AppShell crumb={<>Catalogue <span className="sep">/</span> {id}</>} context={context}>
       <div className="cardscroll"><div className="card">
         {loadErr && <div className="warn">Couldn’t load this flow from staging — {loadErr}</div>}
         {!flow && !loadErr && <div className="empty"><div className="t">Loading flow…</div></div>}
@@ -211,9 +212,9 @@ export function Card() {
               <h1>{name} <span className="verbtag">{String((flow as { categoria?: unknown }).categoria ?? 'flow')}</span></h1>
               <div className="desc">{(flow.nomen || '').includes('—') ? flow.nomen.split('—').slice(1).join('—').trim() : 'Live flow from staging.'}</div>
               <div className="ports">
-                {Object.keys(flow.input?.properties ?? {}).slice(0, 4).map((k) => <span key={k} className="p">{k}</span>)}
+                {Object.entries(flow.input?.properties ?? {}).slice(0, 4).map(([k, p]) => <span key={k} className="p">{p.title || humanizeKey(k)}</span>)}
                 {' → '}
-                {Object.keys(flow.output?.properties ?? {}).map((k) => <span key={k} className="p">{k}</span>)}
+                {Object.entries(flow.output?.properties ?? {}).map(([k, p]) => <span key={k} className="p">{p.title || humanizeKey(k)}</span>)}
               </div>
             </div>
             <span className="ver mono">v{flow.versio}</span>
@@ -251,7 +252,7 @@ export function Card() {
             return (
               <div className="field" key={k}>
                 <label>
-                  {p.title || k} {req ? <span className="req">required</span> : <span className="opt">optional</span>}
+                  {p.title || humanizeKey(k)} {req ? <span className="req">required</span> : <span className="opt">optional</span>}
                   <span className="ty">{isUri ? `${p.type} · uri` : p.type}</span>
                 </label>
                 {isUri ? (
@@ -295,7 +296,7 @@ export function Card() {
                   {run.id && mediaFromOutput(run.exitus) && (
                     <div className="pub-row">
                       {pub.s === 'done' ? (
-                        <span className="pub-done"><Ic name="check" /> In review — it appears in the <Link to="/feed">feed</Link> once approved.</span>
+                        <span className="pub-done"><Ic name="check" /> In review — track it in <Link to="/review">your review queue</Link>; it appears in the <Link to="/feed">feed</Link> once approved.</span>
                       ) : (
                         <>
                           <button className="btn ghost" disabled={pub.s === 'busy'} onClick={() => publishToFeed(run.id!)}>
@@ -328,6 +329,11 @@ export function Card() {
                 </button>
               ))}
             </div>
+            {compute === 'tee' && (
+              <Link to="/tee" className="mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 'var(--s2)', fontSize: 'var(--fs-xs)', color: 'var(--accent-soft)' }}>
+                <Ic name="eye-off" /> set up / view sealed session ▸
+              </Link>
+            )}
             <div className="run-row">
               <div className="quote">
                 <span className="q mono">{creditText}</span>

@@ -71,6 +71,10 @@ export interface Generatio {
   telegramDeliverAs?: 'album' | 'individual'
   /** Models (intellaId) auto-applied as pinnedModels on every run (unless overridden). */
   autoApplyModels?: string[]
+  /** Default project (Provincia id) new work files into ("land in project", web Preferences).
+   *  Stored here so the choice travels across web · Telegram · API; cast-time auto-filing is
+   *  the marked next step (like the other applied-where-supported fields above). */
+  defaultProjectId?: string
 }
 
 /** One verb→modus binding row (for the read side — `listBindings`). */

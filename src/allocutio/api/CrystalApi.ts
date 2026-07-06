@@ -38,7 +38,7 @@ import { aggregateStatus, materiaStudioStatus } from '../lexicon/status/aggregat
 import type { ModoStore } from '../../types/modo.js'
 import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModus.js'
 import { dispatchInceptio, type DispatchDeps } from '../../execution/dispatchInceptio.js'
-import { toRun, toCollection, toTeam, toEdition } from './runProjection.js'
+import { toRun, toCollection, toTeam, toEdition, toProject } from './runProjection.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
 import { Errors } from './errors.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
@@ -46,10 +46,11 @@ import { computeRecipient } from '../../arcanum/prover.js'
 import { impetusForPodMs, usdMicroToImpetus } from '../../ledger/rates.js'
 import { fundingBps, applyFundingBps, DEFAULT_FUNDING_BPS } from '../../ledger/depositFunding.js'
 import type { AssetPricer } from '../../crystal/AssetPricer.js'
-import type { Run, Collection, CollectionPiece, Team, Edition, FeedItem } from './types.js'
+import type { Run, Collection, CollectionPiece, Team, Edition, FeedItem, Project } from './types.js'
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
 import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
 import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
+import type { Provincia, ProvinciaResKind, Provinciarum } from '../../types/provincia.js'
 import type { AnimaStore, PublishingPrefs } from '../../types/anima.js'
 import type { PublicationAdapter } from '../../crystal/PublicationAdapter.js'
 import type { ModerationGate } from '../../crystal/ModerationGate.js'
@@ -120,6 +121,8 @@ export interface CrystalApiDeps {
   collectioCursor?: Pick<CollectioCursor, 'start' | 'extend' | 'approveActum' | 'rejectAndRevive' | 'pause' | 'resume'>
   /** Team store — backs the team CRUD + team-owned collections. Absent → team ops unavailable. */
   sodalitatum?: Sodalitatum
+  /** Project store (Provincia) — backs the account-scoped project CRUD + holdings. Absent → project ops unavailable. */
+  provinciarum?: Provinciarum
   /** Publication store (Editio) — backs `publish`/`feed`/`retract`. Absent → publishing unavailable. */
   editiones?: Editionum
   /** Registered publication adapters, resolved by `destination` key (FeedAdapter, …). */
@@ -1235,6 +1238,104 @@ export class CrystalApi {
     return team
   }
 
+  // ── Projects (Provincia) — an account-owned workspace lens ────────────────────
+
+  /**
+   * Create a project the caller owns. Projects require an identified (animaId)
+   * caller — the account IS the ownership boundary (there is no anon project).
+   * If `teamId` is given the caller must be a member of that team.
+   */
+  async createProject(
+    auctor: AuctorKey,
+    opts: { name: string; desc?: string; glyph?: string; color?: string; teamId?: string },
+  ): Promise<Project> {
+    const animaId = this._projectAnimaId(auctor)
+    if (opts.teamId !== undefined) await this._memberTeam(auctor, opts.teamId)
+    const ornatus = ornatusOf(opts)
+    const created = await this._projectStore().create({
+      animaId,
+      nomen: opts.name,
+      ...(opts.desc !== undefined ? { descriptio: opts.desc } : {}),
+      ...(ornatus !== undefined ? { ornatus } : {}),
+      datasetIds: [], modelIds: [], collectionIds: [],
+      ...(opts.teamId !== undefined ? { sodalitasId: opts.teamId } : {}),
+    })
+    return toProject(created)
+  }
+
+  /** List the projects the caller owns. */
+  async listProjects(auctor: AuctorKey): Promise<Project[]> {
+    const animaId = this._projectAnimaId(auctor)
+    return (await this._projectStore().listByOwner(animaId)).map(toProject)
+  }
+
+  /** Fetch one owned project, or 404. */
+  async getProject(auctor: AuctorKey, id: string): Promise<Project> {
+    return toProject(await this._ownedProject(auctor, id))
+  }
+
+  /** Patch a project's metadata (name/desc/glyph/color/teamId). Owner-only. */
+  async updateProject(
+    auctor: AuctorKey,
+    id: string,
+    patch: { name?: string; desc?: string; glyph?: string; color?: string; teamId?: string | null },
+  ): Promise<Project> {
+    const project = await this._ownedProject(auctor, id)
+    if (patch.teamId != null) await this._memberTeam(auctor, patch.teamId)
+    const ornatus = ornatusOf(patch, project.ornatus)
+    const next = await this._projectStore().update(id, {
+      ...(patch.name !== undefined ? { nomen: patch.name } : {}),
+      ...(patch.desc !== undefined ? { descriptio: patch.desc } : {}),
+      ...(ornatus !== undefined ? { ornatus } : {}),
+      // teamId: null clears the reference; a string sets it; undefined leaves it.
+      ...(patch.teamId === null ? { sodalitasId: undefined } : patch.teamId !== undefined ? { sodalitasId: patch.teamId } : {}),
+    })
+    return toProject(next)
+  }
+
+  /** Delete a project. Owner-only. Filed assets are untouched (holdings are references). */
+  async deleteProject(auctor: AuctorKey, id: string): Promise<void> {
+    await this._ownedProject(auctor, id)
+    await this._projectStore().remove(id)
+  }
+
+  /** File an asset reference into a project's holdings (idempotent). Owner-only. */
+  async fileAsset(auctor: AuctorKey, id: string, kind: string, assetId: string): Promise<Project> {
+    if (!assetId) throw Errors.inputMalformed('assetId is required')
+    const field = HOLDING_FIELD[resKind(kind)]
+    const project = await this._ownedProject(auctor, id)
+    if (project[field].includes(assetId)) return toProject(project)
+    return toProject(await this._projectStore().update(id, { [field]: [...project[field], assetId] }))
+  }
+
+  /** Remove an asset reference from a project's holdings (idempotent). Owner-only. */
+  async unfileAsset(auctor: AuctorKey, id: string, kind: string, assetId: string): Promise<Project> {
+    const field = HOLDING_FIELD[resKind(kind)]
+    const project = await this._ownedProject(auctor, id)
+    if (!project[field].includes(assetId)) return toProject(project)
+    return toProject(await this._projectStore().update(id, { [field]: project[field].filter((x) => x !== assetId) }))
+  }
+
+  private _projectStore(): Provinciarum {
+    const store = this.deps.provinciarum
+    if (!store) throw Errors.notFoundProject('projects')
+    return store
+  }
+
+  /** Projects are animaId-keyed — anonymous (commitment/bursa) callers cannot own one. */
+  private _projectAnimaId(auctor: AuctorKey): string {
+    if ('animaId' in auctor) return auctor.animaId
+    throw Errors.authForbidden('projects require an identified account')
+  }
+
+  /** Resolve a project the caller owns, or 404. */
+  private async _ownedProject(auctor: AuctorKey, id: string): Promise<Provincia> {
+    const animaId = this._projectAnimaId(auctor)
+    const project = await this._projectStore().find(id)
+    if (!project || project.animaId !== animaId) throw Errors.notFoundProject(id)
+    return project
+  }
+
   /** A Collectio owns by `{animaId}|{commitment}` only — bursaToken/proof have no persistent owner record. */
   private _collectionBy(auctor: AuctorKey): Collectio['by'] {
     if ('animaId' in auctor) return { animaId: auctor.animaId }
@@ -2344,6 +2445,31 @@ function modoStudioStatus(modo: { status: string }): string {
   return modo.status === 'terminated' ? 'terminated'
     : (modo.status === 'claiming' || modo.status === 'warming') ? 'provisioning'
     : 'idle'
+}
+
+/** Build a Provincia `ornatus` (glyph/color) from create/patch input, over an existing one.
+ *  Returns undefined when nothing is set (so an empty object is never persisted). */
+function ornatusOf(
+  input: { glyph?: string; color?: string },
+  base?: { glyph?: string; color?: string },
+): { glyph?: string; color?: string } | undefined {
+  const glyph = input.glyph ?? base?.glyph
+  const color = input.color ?? base?.color
+  if (glyph === undefined && color === undefined) return undefined
+  return { ...(glyph !== undefined ? { glyph } : {}), ...(color !== undefined ? { color } : {}) }
+}
+
+/** Which flat holding list each asset kind writes to. */
+const HOLDING_FIELD: Record<ProvinciaResKind, 'datasetIds' | 'modelIds' | 'collectionIds'> = {
+  dataset: 'datasetIds',
+  model: 'modelIds',
+  collection: 'collectionIds',
+}
+
+/** Narrow an untrusted `kind` string to a ProvinciaResKind, or 400. */
+function resKind(kind: string): ProvinciaResKind {
+  if (kind === 'dataset' || kind === 'model' || kind === 'collection') return kind
+  throw Errors.inputMalformed(`unknown holding kind '${kind}' (expected dataset|model|collection)`)
 }
 
 /** micro-USD (bigint) → a fixed "D.dddddd" USD string (6 dp), exact, no float. */

@@ -91,8 +91,15 @@ export function TrainRun() {
         </div>
 
         <div className="tr-foot">
-          <div className="tr-foot-note"><span className={`hemi2 ${glyph}`} /> {sealed ? 'training in TEE — samples render inside your enclave; we see the meter above, never your model or your data.' : 'training on our compute — we can see the work.'} &nbsp;↳ lands on your model shelf when it finishes</div>
-          <div className="tr-actions"><button className="btn ghost"><Ic name="x" /> pause</button><button className="btn ghost danger">■ stop</button></div>
+          <div className="tr-foot-note"><span className={`hemi2 ${glyph}`} /> {sealed ? 'training in TEE — samples render inside your enclave; we see the meter above, never your model or your data.' : 'training on our compute — we can see the work.'} &nbsp;↳ lands on <Link to="/models" className="accent">your model shelf</Link> when it finishes</div>
+          <div className="tr-actions">
+            <Link className="btn ghost" to="/models"><Ic name="box" /> View your shelf →</Link>
+            <button className="btn ghost" disabled title="Live job controls aren’t wired yet"><Ic name="x" /> pause</button>
+            <button className="btn ghost danger" disabled title="Live job controls aren’t wired yet">■ stop</button>
+          </div>
+        </div>
+        <div className="sub mono" style={{ marginTop: 'var(--s3)', color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
+          <span className="hemi2 dashed" /> Preview — this monitor isn’t bound to a live training job yet (no training-runs index in the backend). Progress shown is illustrative.
         </div>
       </div></div>
     </AppShell>

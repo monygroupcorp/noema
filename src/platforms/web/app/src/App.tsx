@@ -32,17 +32,14 @@ import { TraitRules } from './screens/TraitRules';
 import { CanonicRun } from './screens/CanonicRun';
 import { Curation } from './screens/Curation';
 import { EditioExport } from './screens/EditioExport';
-import { Trace } from './screens/Trace';
 import { Run } from './screens/Run';
 import { Studio } from './screens/Studio';
 import { Tee } from './screens/Tee';
-import { Map } from './screens/Map';
 import { Onboard } from './screens/Onboard';
 import { Landing } from './screens/Landing';
 import { Ceremony } from './screens/Ceremony';
 import { Feed } from './screens/Feed';
 import { Review } from './screens/Review';
-import { VerifyEmail, ForgotPassword, ResetPassword } from './screens/Auth';
 import { Doc } from './screens/Doc';
 import { Stub } from './screens/Stub';
 import aboutMd from './content/about.md?raw';
@@ -79,14 +76,16 @@ export function App() {
       <Route path="/catalog" element={<Catalog />} />
       <Route path="/feed" element={<Feed />} />
       {/* Moderation held-queue (publishing spec §4). Author sees own held items; the platform
-          admin (me.admin) sees all + gets approve/reject/confirm-csam. Server-gated regardless. */}
+          admin (me.admin) sees all + gets approve/reject/confirm-csam. Server-gated regardless.
+          Two routes, one component: /review is the author-facing home (Publish pillar), /admin/review
+          the admin entry — the component self-adjusts on me.admin. */}
+      <Route path="/review" element={<Review />} />
       <Route path="/admin/review" element={<Review />} />
       <Route path="/projects" element={<Projects />} />
       <Route path="/projects/:id" element={<ProjectHub />} />
       <Route path="/run" element={<Run />} />
       <Route path="/canvas" element={lazyEl(<Canvas />)} />
       <Route path="/space" element={lazyEl(<Space />)} />
-      <Route path="/trace" element={<Trace />} />
       <Route path="/keyring" element={<Keyring />} />
       <Route path="/vault" element={<Vault />} />
       <Route path="/profile" element={<Profile />} />
@@ -97,16 +96,11 @@ export function App() {
       <Route path="/funding" element={<Funding />} />
       <Route path="/studio" element={<Studio />} />
       <Route path="/tee" element={<Tee />} />
-      <Route path="/map" element={<Map />} />
       <Route path="/onboard" element={<Onboard />} />
       <Route path="/landing" element={<Landing />} />
       <Route path="/ceremony" element={<Ceremony />} />
-      {/* Fiat auth — sign-in / create lives inline in Door A (/onboard). These are the
-          standalone token handlers; the two token paths are FIXED by the backend's emailed
-          links (AUTH_APP_BASE_URL/verify-email?token / /reset-password?token). */}
-      <Route path="/verify-email" element={<VerifyEmail />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/reset-password" element={<ResetPassword />} />
+      {/* Fiat auth — sign-in / create lives inline in Door A (/onboard). No email, so
+          no verify/reset token pages; recovery is via backup channels bound in the profile. */}
       <Route path="/about" element={<Doc md={aboutMd} />} />
       <Route path="/features" element={<Doc md={featuresMd} />} />
       <Route path="/pricing" element={<Doc md={pricingMd} />} />

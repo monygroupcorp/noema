@@ -399,6 +399,7 @@ const GeneratioSchema: JsonSchema = {
     outputFormat: { type: 'string', description: 'Preferred output encoding (stored; runner-applied where supported).' },
     telegramDeliverAs: { type: 'string', enum: ['album', 'individual'], description: 'Telegram delivery shape (consumed by the Telegram adapter).' },
     autoApplyModels: { type: 'array', items: { type: 'string' }, description: 'Models (intellaId) to auto-apply as pinnedModels. Stored; cast-time application pending model resolution.' },
+    defaultProjectId: { type: 'string', description: 'Default project (Provincia id) new work files into. Stored; cast-time auto-filing pending.' },
   },
 }
 
@@ -746,6 +747,81 @@ const OkSchema: JsonSchema = {
   type: 'object',
   properties: { ok: { type: 'boolean' } },
   required: ['ok'],
+}
+
+// ── Projects (Provincia) ────────────────────────────────────────────────────────
+
+/** The public `Project` projection (mirrors `types.ts#Project`). */
+const ProjectSchema: JsonSchema = {
+  type: 'object',
+  description: 'A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.',
+  properties: {
+    id: { type: 'string' },
+    owner: { type: 'string', description: "The owning Anima id (the project's hard ownership boundary)." },
+    name: { type: 'string', description: 'The project display name.' },
+    desc: { type: 'string', description: 'Optional description.' },
+    glyph: { type: 'string', description: 'Presentation glyph.' },
+    color: { type: 'string', description: 'Presentation color.' },
+    datasetIds: { type: 'array', items: { type: 'string' }, description: 'Filed dataset ids.' },
+    modelIds: { type: 'array', items: { type: 'string' }, description: 'Filed model (Intella) ids.' },
+    collectionIds: { type: 'array', items: { type: 'string' }, description: 'Filed collection ids.' },
+    teamId: { type: 'string', description: 'Optional referenced Team (Sodalitas) id — the shared member set.' },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+  required: ['id', 'owner', 'name', 'datasetIds', 'modelIds', 'collectionIds', 'createdAt', 'updatedAt'],
+}
+
+/** The `{ project }` envelope returned by the single-project operations. */
+const ProjectEnvelopeSchema: JsonSchema = {
+  type: 'object',
+  properties: { project: ProjectSchema },
+  required: ['project'],
+}
+
+/** The `{ projects }` envelope returned by `GET /v1/me/projects`. */
+const ProjectsListSchema: JsonSchema = {
+  type: 'object',
+  properties: { projects: { type: 'array', items: ProjectSchema } },
+  required: ['projects'],
+}
+
+/** The request body for `POST /v1/me/projects`. */
+const CreateProjectRequestSchema: JsonSchema = {
+  type: 'object',
+  description: 'Create a project owned by the caller.',
+  properties: {
+    name: { type: 'string', description: 'The project display name.' },
+    desc: { type: 'string', description: 'Optional description.' },
+    glyph: { type: 'string', description: 'Presentation glyph.' },
+    color: { type: 'string', description: 'Presentation color.' },
+    teamId: { type: 'string', description: 'Optional Team (Sodalitas) to reference for the shared member set.' },
+  },
+  required: ['name'],
+}
+
+/** The request body for `PATCH /v1/me/projects/:id`. */
+const UpdateProjectRequestSchema: JsonSchema = {
+  type: 'object',
+  description: 'Patch project metadata. Omitted fields are left unchanged; teamId null clears the reference.',
+  properties: {
+    name: { type: 'string' },
+    desc: { type: 'string' },
+    glyph: { type: 'string' },
+    color: { type: 'string' },
+    teamId: { type: 'string', description: 'Set/clear the referenced Team (Sodalitas).' },
+  },
+}
+
+/** The request body for `POST /v1/me/projects/:id/holdings`. */
+const FileAssetRequestSchema: JsonSchema = {
+  type: 'object',
+  description: 'File an asset reference into the project (idempotent).',
+  properties: {
+    kind: { type: 'string', enum: ['dataset', 'model', 'collection'], description: 'Which holding list.' },
+    assetId: { type: 'string', description: "The asset's id." },
+  },
+  required: ['kind', 'assetId'],
 }
 
 // ── Publishing (Editio) ───────────────────────────────────────────────────────
@@ -1325,6 +1401,57 @@ export const API_CONTRACT: ApiContract = {
       auth: true,
       response: TeamEnvelopeSchema,
     },
+    {
+      method: 'GET',
+      path: '/me/projects',
+      summary: "List the caller's projects (Provincia) — account-owned workspace lenses. Identified callers only.",
+      auth: true,
+      response: ProjectsListSchema,
+    },
+    {
+      method: 'POST',
+      path: '/me/projects',
+      summary: 'Create a project owned by the caller. Holdings start empty; assets are filed in by reference.',
+      auth: true,
+      request: CreateProjectRequestSchema,
+      response: ProjectEnvelopeSchema,
+    },
+    {
+      method: 'GET',
+      path: '/me/projects/:id',
+      summary: 'Fetch one owned project by id (404 if not the owner).',
+      auth: true,
+      response: ProjectEnvelopeSchema,
+    },
+    {
+      method: 'PATCH',
+      path: '/me/projects/:id',
+      summary: 'Patch project metadata (name/desc/glyph/color/teamId). Owner-only.',
+      auth: true,
+      request: UpdateProjectRequestSchema,
+      response: ProjectEnvelopeSchema,
+    },
+    {
+      method: 'DELETE',
+      path: '/me/projects/:id',
+      summary: 'Delete a project. Owner-only. Filed assets are untouched (holdings are references).',
+      auth: true,
+    },
+    {
+      method: 'POST',
+      path: '/me/projects/:id/holdings',
+      summary: 'File an asset reference (dataset|model|collection) into the project. Owner-only; idempotent.',
+      auth: true,
+      request: FileAssetRequestSchema,
+      response: ProjectEnvelopeSchema,
+    },
+    {
+      method: 'DELETE',
+      path: '/me/projects/:id/holdings/:kind/:assetId',
+      summary: 'Unfile an asset reference from the project. Owner-only; idempotent.',
+      auth: true,
+      response: ProjectEnvelopeSchema,
+    },
   ],
   // Mirrors the request-error taxonomy in `errors.ts`. Append-only.
   errorCodes: [
@@ -1338,6 +1465,7 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.studio', httpStatus: 404 },
     { code: 'not_found.collection', httpStatus: 404 },
     { code: 'not_found.team', httpStatus: 404 },
+    { code: 'not_found.project', httpStatus: 404 },
     { code: 'not_found.edition', httpStatus: 404 },
     { code: 'not_found.model', httpStatus: 404 },
     { code: 'not_found.adapter', httpStatus: 404 },

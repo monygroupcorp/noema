@@ -26,6 +26,7 @@ export function Sponsorships() {
 
   useEffect(() => {
     if (!ready) return;
+    if (!session) { setList([]); return; }  // gated — the sign-in prompt covers it, skip the 403
     let live = true;
     api.listSponsorships()
       .then((r) => { if (live) setList(r.sponsorships); })

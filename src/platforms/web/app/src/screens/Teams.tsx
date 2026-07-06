@@ -20,6 +20,7 @@ export function Teams() {
 
   useEffect(() => {
     if (!ready) return;
+    if (!session) { setTeams([]); return; }  // gated — the sign-in prompt covers it, skip the 403
     let live = true;
     api.listTeams()
       .then((r) => { if (live) setTeams(r.teams); })

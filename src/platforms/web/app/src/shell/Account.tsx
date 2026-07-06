@@ -20,8 +20,8 @@ function computeLabel(exec: string): { glyph: 'lit' | 'ring' | 'dashed'; text: s
 }
 
 export function Account() {
-  const { ident, execution } = useIdentity();
-  const { session, logout } = useSession();
+  const { ident, idents, execution, setIdentity } = useIdentity();
+  const { session, signOutActive, signOutAll, accounts } = useSession();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<CSSProperties>({});
@@ -51,7 +51,7 @@ export function Account() {
   const signedIn = !!session;
   const anon = ident.funding === 'bearer';
   // The real fiat session takes precedence over the cosmetic identity skin for the name/reach readout.
-  const name = signedIn ? (session!.email ?? 'your account') : anon ? 'anonymous' : ident.name;
+  const name = signedIn ? (session!.username ?? 'your account') : anon ? 'anonymous' : ident.name;
   const credits = liveCredits ?? (ident.bal.match(/(\d[\d,]*)\s*credits?/)?.[1] ?? '—');
   const compute = useMemo(() => computeLabel(execution), [execution]);
   const reach = signedIn || !anon ? 'signed in · web · Telegram · API' : 'bearer purse';
@@ -62,25 +62,22 @@ export function Account() {
     if (r) setPos({ right: Math.max(12, window.innerWidth - r.right), top: r.bottom + 8 });
     setOpen((o) => !o);
   }
-  // Switch who you are here — a real act now, not a cosmetic toggle: identified ⇄ anonymous
-  // IS sign in / sign out. Signed in → sign out drops the fiat session onto the anon
-  // commitment path; anonymous → the onboarding door to bring an identity.
-  const switchIdentity = () => {
-    setOpen(false);
-    if (signedIn) { logout(); clearOnboarded(); navigate('/'); }
-    else navigate('/onboard');
-  };
-  // Real sign out: drop the fiat session (falls back to the anon commitment path), then
-  // clear the local onboarded flag and return home. Also used for the cosmetic-only case.
-  const signOut = () => { if (signedIn) logout(); clearOnboarded(); setOpen(false); navigate('/'); };
+  // Switch among held logins (or the anon slot) — a real act via the account list below.
+  const switchTo = (id: string) => { setIdentity(id); setOpen(false); };
+  // Additive sign-in: bring another account without dropping the current one.
+  const addAccount = () => { setOpen(false); navigate('/onboard?add=1'); };
+  // Sign out of the ACTIVE account — drops to the next held login, or the anon path.
+  const signOut = () => { signOutActive(); setOpen(false); };
+  // Drop every held login, clear the local onboarded flag, and return to the front door.
+  const signOutEverything = () => { signOutAll(); clearOnboarded(); setOpen(false); navigate('/'); };
   const signIn = () => { setOpen(false); navigate('/onboard'); };
 
   return (
     <div className="posture">
       {/* credits — gold economy colour */}
       <Link to="/funding" className="pc-pill credits" title="credits"><span className="gem">◈</span> {credits} <span className="u">cr</span></Link>
-      {/* active compute — the hemisphere device */}
-      <span className="pc-pill compute" title="active compute"><span className={`hemi2 ${compute.glyph}`} /> {compute.text}</span>
+      {/* active compute — the hemisphere device; links to the sealed-session (private compute) view */}
+      <Link to="/tee" className="pc-pill compute" title="active compute · sealed session"><span className={`hemi2 ${compute.glyph}`} /> {compute.text}</Link>
       {/* identity chip — opens the account dropdown */}
       <button className="pc-pill id-chip" ref={btnRef} onClick={toggle}>
         <Chip d={ident} /><span className="nm">{anon ? 'anonymous' : 'you'}</span><span className="cv"><Ic name="chevron-down" /></span>
@@ -97,21 +94,37 @@ export function Account() {
             <div className="am-stat"><div className="l">credits</div><div className="v"><span className="gem">◈</span> {credits}</div></div>
             <div className="am-stat"><div className="l">compute</div><div className="v"><span className={`hemi2 ${compute.glyph}`} /> {compute.text}</div></div>
           </div>
-          <button className="am-switch" onClick={switchIdentity}>
-            <Ic name="shuffle" /> switch to {anon ? 'identified' : 'anonymous'}
-          </button>
+          {/* The held logins + the anon slot — switch freely (Keyring in miniature). */}
+          <div className="am-accounts">
+            {idents.map((d) => {
+              const active = d.id === ident.id;
+              const rowAnon = d.funding === 'bearer';
+              return (
+                <button key={d.id} className={`am-acct${active ? ' on' : ''}`} onClick={() => switchTo(d.id)}>
+                  <Chip d={d} />
+                  <span className="nm">{rowAnon ? 'anonymous' : d.name}</span>
+                  {active && <span className="chk">✓</span>}
+                </button>
+              );
+            })}
+            <button className="am-acct add" onClick={addAccount}><Ic name="plus" /> Add account</button>
+          </div>
+          {/* Account-only actions. Profile · Settings · Preferences · Funding · Activity now live on
+              the Rail (UX handoff 2, Decision 1) — this menu keeps only what's identity-scoped and
+              the collaboration surfaces that have no Rail home yet. */}
           <div className="am-links">
-            <Link to="/profile" onClick={() => setOpen(false)}><Ic name="palette" /> Profile <span className="meta">skins &amp; purses</span></Link>
-            <Link to="/account" onClick={() => setOpen(false)}><Ic name="settings-2" /> Account &amp; settings</Link>
-            <Link to="/preferences" onClick={() => setOpen(false)}><Ic name="sparkles" /> Preferences <span className="meta">your defaults</span></Link>
-            <Link to="/funding" onClick={() => setOpen(false)}><Ic name="wallet" /> Funding &amp; credits</Link>
             <Link to="/teams" onClick={() => setOpen(false)}><Ic name="users" /> Teams <span className="meta">co-own work</span></Link>
             <Link to="/sponsorships" onClick={() => setOpen(false)}><Ic name="hand-coins" /> Sponsorships <span className="meta">top up others</span></Link>
             {admin && <Link to="/admin/review" onClick={() => setOpen(false)}><Ic name="eye" /> Feed review <span className="meta">moderation</span></Link>}
           </div>
-          {signedIn
-            ? <button className="am-signout" onClick={signOut}><Ic name="arrow-right" /> Sign out</button>
-            : <button className="am-signout" onClick={signIn}><Ic name="circle-user" /> Sign in</button>}
+          {signedIn ? (
+            <>
+              <button className="am-signout" onClick={signOut}><Ic name="arrow-right" /> Sign out</button>
+              {accounts.length > 1 && <button className="am-signout" onClick={signOutEverything}><Ic name="arrow-right" /> Sign out of all</button>}
+            </>
+          ) : (
+            <button className="am-signout" onClick={signIn}><Ic name="circle-user" /> Sign in</button>
+          )}
         </div>
       )}
     </div>

@@ -460,7 +460,8 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 
 /* the registry table: column-header row + data rows */
 .reg-bar{display:flex;align-items:center;gap:7px;padding:14px 6px 9px;border-bottom:1px solid var(--hair);font-family:var(--font-mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint)}
-.reg-bar .c-name{flex:1} .reg-bar .c-mod{width:96px} .reg-bar .c-lic{width:140px} .reg-bar .c-size{width:64px;text-align:right} .reg-bar .c-run{width:150px;text-align:right}
+.reg-bar .c-name{flex:1} .reg-bar .c-mod{width:96px} .reg-bar .c-ver{width:96px;text-align:right}
+.reg-ver{width:96px;text-align:right;font-size:10.5px;color:var(--faint)}
 .reg-row{display:flex;align-items:center;gap:7px;padding:13px 6px;border-bottom:1px solid var(--hair-soft);text-decoration:none;color:inherit;transition:.12s var(--ease)}
 .reg-row:hover{background:var(--raised);border-radius:8px;border-bottom-color:transparent}
 .reg-name{flex:1;min-width:0;display:flex;align-items:baseline;gap:11px}
@@ -792,6 +793,15 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .am-stat .v{font-size:13.5px;margin-top:3px;display:flex;align-items:center;gap:6px}
 .am-switch{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--hair);background:var(--bg);color:var(--text);font:inherit;font-size:12.5px;padding:9px;border-radius:9px;cursor:pointer;margin-bottom:8px}
 .am-switch:hover{border-color:color-mix(in srgb,var(--accent) 35%,var(--hair))} .am-switch svg.lucide{width:14px;height:14px;color:var(--muted)}
+/* multi-account switcher — the held logins + anon slot + add-account */
+.am-accounts{display:flex;flex-direction:column;gap:2px;margin-bottom:8px;border-top:1px solid var(--hair-soft);padding-top:6px}
+.am-acct{width:100%;display:flex;align-items:center;gap:10px;border:0;background:none;color:var(--text);font:inherit;font-size:13px;padding:8px;border-radius:8px;cursor:pointer;text-align:left}
+.am-acct:hover{background:var(--raised)}
+.am-acct.on{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.am-acct .chip{width:24px;height:24px;font-size:11px}
+.am-acct .nm{font-weight:500}
+.am-acct .chk{margin-left:auto;color:var(--accent);font-size:13px}
+.am-acct.add{color:var(--muted)} .am-acct.add svg.lucide{width:15px;height:15px;color:var(--faint)}
 .am-links{display:flex;flex-direction:column;border-top:1px solid var(--hair-soft);padding-top:6px}
 .am-links a{display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:8px;color:var(--text);text-decoration:none;font-size:13px}
 .am-links a:hover{background:var(--raised)} .am-links a svg.lucide{width:15px;height:15px;color:var(--faint)}
@@ -869,6 +879,29 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .ph-ev .ev-t{font-size:13px;color:var(--text)} .ph-ev b{font-weight:600}
 .ph-ev .ev-meta{display:block;margin-top:3px;font-size:11px;color:var(--faint)} .ph-ev .ev-meta .hemi2{margin-right:5px}
 .ph-scoped{text-align:left}
+.ph-scoped-list{display:flex;flex-direction:column;gap:6px;padding:14px 0;text-align:left}
+.ph-team{display:inline-flex;align-items:center;gap:6px}
+.ph-team select{min-width:150px}
+
+/* ── file-into-project toggle (Projects · Decision 3) ──────────────────────── */
+.holding-toggle{display:inline-flex;align-items:center;gap:5px;
+  padding:5px 10px;border-radius:6px;font-size:11px;line-height:1;cursor:pointer;
+  background:transparent;border:1px solid var(--line,rgba(255,255,255,.14));color:var(--faint)}
+.holding-toggle:hover{border-color:var(--accent,#5b8cff);color:var(--text)}
+.holding-toggle.on{border-color:var(--accent,#5b8cff);color:var(--accent,#5b8cff);
+  background:color-mix(in srgb, var(--accent,#5b8cff) 12%, transparent)}
+.ds-file{margin-top:8px}
+
+/* ── scoped-surface banner (Projects · Decision 4) ─────────────────────────── */
+.scope-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 14px;margin-bottom:16px;border-radius:8px;
+  background:var(--panel,rgba(255,255,255,.03));border:1px solid var(--line,rgba(255,255,255,.08));
+  font-size:12px;color:var(--faint)}
+.scope-banner b{color:var(--text);font-weight:600}
+.scope-banner .scope-dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+.scope-banner .scope-actions{margin-left:auto;display:flex;gap:14px}
+.scope-banner .scope-actions a{color:var(--accent,#5b8cff);text-decoration:none}
+.scope-banner .scope-actions a:hover{text-decoration:underline}
 
 /* ── datasets library (train-datasets-library-spec.md) ─────────────────────── */
 .dsgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
