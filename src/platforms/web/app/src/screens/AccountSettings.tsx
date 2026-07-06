@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { useIdentity } from '../state/identity';
+import { useSession } from '../state/session';
 import { Ic } from '../lib/icons';
 import { api, type MeStatus, type StudioEntry } from '../lib/api';
 
@@ -33,7 +34,12 @@ const AVAIL: { key: Availability; glyph: string; t: string; s: string }[] = [
 export function AccountSettings() {
   const { section } = useParams();
   const { ident } = useIdentity();
+  const { goAnonymous } = useSession();
+  const navigate = useNavigate();
   const anon = ident.funding === 'bearer';
+  // Go anonymous = deactivate to the anon slot, keeping any held logins (real, reversible — switch
+  // back anytime). Export/Delete are legal (GDPR) but have no backend endpoint yet — honestly gated.
+  const leaveToAnon = () => { goAnonymous(); navigate('/'); };
   const [me, setMe] = useState<MeStatus | null>(null);
   useEffect(() => {
     let live = true;
@@ -70,11 +76,15 @@ export function AccountSettings() {
             </div>
           </div>
 
-          {/* sovereignty trio — a right, shown up front */}
+          {/* sovereignty trio — a right, shown up front. Go anonymous is real; Export/Delete are
+              legal (GDPR) obligations with no backend endpoint yet, so they're honestly gated. */}
           <div className="ac-sov">
-            <button className="btn ghost"><Ic name="arrow-up" /> Export everything</button>
-            <button className="btn ghost amber"><span className="hemi2 dashed" /> Go anonymous</button>
-            <button className="btn ghost bad"><Ic name="x" /> Delete account &amp; data</button>
+            <button className="btn ghost" disabled title="Coming soon — a full data export isn’t wired yet"><Ic name="arrow-up" /> Export everything — soon</button>
+            <button className="btn ghost amber" onClick={leaveToAnon}><span className="hemi2 dashed" /> Go anonymous</button>
+            <button className="btn ghost bad" disabled title="Coming soon — account deletion isn’t wired yet"><Ic name="x" /> Delete account &amp; data — soon</button>
+          </div>
+          <div className="ac-note mono" style={{ marginTop: 'var(--s3)' }}>
+            <span className="hemi2 dashed" /> Data export &amp; account deletion are your legal rights — the backend endpoints are in progress; they’ll be wired here when ready.
           </div>
 
           {/* section cards */}
