@@ -11,6 +11,24 @@ Companion docs: `docs/tee-runner.md` (runner architecture), `docs/tee-hardening-
 This document supersedes the gitignored `docs/plans/2026-07-02-tee-hardware-path.md` as the
 tracked source of truth; carried decisions are restated in §9 so nothing depends on that file.
 
+**This document IS the TEE todo.** No parallel list — one source of truth. The `[ ]`/`[x]`
+boxes in §4 (ladder), §7 (ops), §8 (Azure) are the live task state; check them as work lands.
+The block below is the only thing you read to know the next move; update it whenever the front
+of the work changes.
+
+### ▶ NEXT (as of 2026-07-06)
+
+Free work, no Azure needed — pick up here:
+1. **Rung 1 — reproducible guest image in QEMU** (§4 rung 1). The measured-boot image + a
+   determinism gate (build twice → identical measurement). Unblocks the golden-measurement
+   number the verifier's `Policy.GoldenMeasurement` will pin.
+2. **Wire `tee/attest` into the browser WASM build** (go.work / replace) so the verifier the
+   `wgConnect` path calls is the tested package — the gate wiring, ahead of real evidence.
+
+Blocked on you (do in parallel, off the critical path):
+- **Azure Founders Hub application** (§8) — unblocks rungs 2–3; can cover the whole ladder.
+- **Staging image pin** to `tee-runner:0703a` (§7) — flips token enforcement strict.
+
 ---
 
 ## 1. Where we are (done / verified)
