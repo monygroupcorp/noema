@@ -19,9 +19,12 @@ src/platforms/web/app/dist
 .claude
 research
 tests
-*.md
+**/*.md
 deploy.sh
 deploy-staging.sh
 docker-compose.yml
 docker-compose.prod.yml
 Caddyfile
+
+# Internal docs — never ship in the image
+docs

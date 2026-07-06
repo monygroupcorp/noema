@@ -8,7 +8,7 @@ manages the manager; the manager manages the work.
 **Mission.** Execute the consolidated close-out
 (`docs/handoff/2026-07-06-consolidation-handoff.md`, steps 1–7) to done-or-blocked-on-owner,
 then proceed into the forward queue (`docs/handoff/2026-07-06-backend-tickets-land-the-plane.md`,
-T1→T5 in the ticketed order). Context map: `docs/plans/2026-07-06-thread-consolidation.md`.
+T1→T5 in the ticketed order). Context map: `docs/handoff/2026-07-06-thread-consolidation.md`.
 
 ## Autonomy boundaries (decided by owner, 2026-07-06)
 
@@ -48,7 +48,20 @@ T1→T5 in the ticketed order). Context map: `docs/plans/2026-07-06-thread-conso
   concurrently — parallel mutation only in manager-issued worktrees.
 
 ## NEEDS OWNER (live queue — manager updates this)
-- (none yet)
+- **Task #4 — merge `chainengine-migration` → `staging` + image build.** Branch is pushed
+  (`d52e089f`), gates green from a clean worktree (tsc 0, 877/877 hermetic, app build clean).
+  Say "approve the staging merge" (or do it yourself) and the manager proceeds; the droplet
+  swap (#5) is a separate gate after the image builds.
 
 ## Log (manager appends one line per iteration)
 - 2026-07-06: charter authored; ledger seeded; loop started.
+- 2026-07-06 iter 1: worker committed strays (`3cab44d1` fix, `d52e089f` docs; docs/plans is
+  gitignored — plan files force-added, now tracked); clean-worktree gates green (tsc 0, 877/877
+  hermetic, app build ok); manager pushed branch (3731b088..d52e089f). Tasks #1–3 done; #4 queued
+  for owner. All downstream work is behind gates #4/#5 — loop idling on a long heartbeat.
+- 2026-07-06 iter 2: owner ran `deploy-staging.sh` BUT it swapped the OLD image ("Image is up to
+  date"; boot log shows email-auth NoopMailer warning; no credenta clean-swap line) — gate #4
+  (merge→staging→image build) is still the missing link. Manager's merge attempt was
+  permission-denied pending the owner's explicit word; merge worktree prepped at /tmp/stg-merge.
+- 2026-07-06 iter 3: rescued `verify-authed.sh` from a dead session's /tmp scratchpad →
+  `scripts/verify-authed.sh` (`3b738114`, pushed). Task #6 no longer depends on volatile state.

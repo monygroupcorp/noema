@@ -1,7 +1,7 @@
 # Handoff — consolidated close-out (auth · keyring · projects · UX)
 
 **For:** a fresh-context agent (or a continuing session) executing the aligned close-out of the
-four consolidated threads. **Read first:** `docs/plans/2026-07-06-thread-consolidation.md` — the
+four consolidated threads. **Read first:** `docs/handoff/2026-07-06-thread-consolidation.md` — the
 map of what the threads are, how they entangle, and which older docs are superseded. This doc is
 the *execution* sequence. Work `chainengine-migration` only.
 
