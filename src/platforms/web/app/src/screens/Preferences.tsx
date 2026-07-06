@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { api, type Generatio, type MeView } from '../lib/api';
+import { api, type Generatio, type MeView, type FlowSummary } from '../lib/api';
 import { useProject } from '../state/project';
 
 // Preferences — portable generation defaults that travel across web · Telegram · API.
@@ -12,8 +12,9 @@ import { useProject } from '../state/project';
 // (GET/PUT /v1/me/affines/:modusId, applied cast-time) — the inline per-command editor
 // is the marked next step. "land in (project)" is a live picker persisting
 // generatio.defaultProjectId (Provincia) — stored + portable; cast-time auto-filing is the
-// marked next step. MARKED gaps: /animate·/effect·/upscale aren't canon verbs yet; auto-apply
-// model needs a model picker + cast-time model resolution.
+// marked next step. The "default /make flow" picker is WIRED — it rebinds the `make` verb
+// (PUT /v1/me/bindings/make), resolved at cast time server-side. MARKED gap: /animate·/effect·
+// /upscale aren't canon verbs yet.
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -21,6 +22,8 @@ export function Preferences() {
   const { projects } = useProject();
   const [me, setMe] = useState<MeView | null>(null);
   const [gen, setGen] = useState<Generatio>({});
+  const [flows, setFlows] = useState<FlowSummary[]>([]);
+  const [makeModel, setMakeModel] = useState('flux-schnell');
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const genRef = useRef<Generatio>({});
@@ -29,7 +32,13 @@ export function Preferences() {
 
   useEffect(() => {
     let live = true;
-    api.getMe().then((m) => { if (live) { setMe(m); setGen(m.generatio ?? {}); } }).catch((e) => { if (live) setErr(msg(e)); });
+    api.getMe().then((m) => {
+      if (!live) return;
+      setMe(m); setGen(m.generatio ?? {});
+      setMakeModel(m.bindings.find((b) => b.verb === 'make')?.modusId ?? 'flux-schnell');
+    }).catch((e) => { if (live) setErr(msg(e)); });
+    // The picker's options — the flow catalogue. Falls back to just the current binding on failure.
+    api.listFlows().then((r) => { if (live) setFlows(r.flows); }).catch(() => { /* keep the current binding option */ });
     return () => { live = false; };
   }, []);
 
@@ -43,8 +52,14 @@ export function Preferences() {
   const editLocal = (patch: Partial<Generatio>) => setGen((cur) => ({ ...cur, ...patch }));
   const flush = () => commit(genRef.current);
 
-  // Resolve /make's current model from the caller's bindings (else the canon default).
-  const makeModel = me?.bindings.find((b) => b.verb === 'make')?.modusId ?? 'flux-schnell';
+  // Rebind /make to a chosen flow (PUT /v1/me/bindings/make) — optimistic, reverts on error.
+  function rebindMake(modusId: string) {
+    const prev = makeModel;
+    setMakeModel(modusId);
+    api.setBinding('make', modusId)
+      .then(() => { setSaved(true); setTimeout(() => setSaved(false), 1500); })
+      .catch((e) => { setMakeModel(prev); setErr(msg(e)); });
+  }
 
   const crumb = <span className="ph-crumb"><Link to="/account">Settings</Link> <span className="sep">/</span> <b>Preferences</b></span>;
   return (
@@ -69,8 +84,11 @@ export function Preferences() {
               <input className="cer-input" placeholder="e.g. cinematic, cold" value={gen.style ?? ''} onChange={(e) => editLocal({ style: e.target.value || undefined })} onBlur={flush} /></label>
             <label className="ac-row"><span className="ac-rk mono">negative prompt</span>
               <input className="cer-input" placeholder="blurry, text, watermark" value={gen.negativePrompt ?? ''} onChange={(e) => editLocal({ negativePrompt: e.target.value || undefined })} onBlur={flush} /></label>
-            <div className="ac-row"><span className="ac-rk mono">auto-apply a model</span>
-              <span className="ac-rv mono" style={{ color: 'var(--faint)' }}><span className="hemi2 dashed" /> needs a model picker — coming</span></div>
+            <label className="ac-row"><span className="ac-rk mono">default /make flow</span>
+              <select className="cer-input" value={makeModel} onChange={(e) => rebindMake(e.target.value)}>
+                {!flows.some((f) => f.id === makeModel) && <option value={makeModel}>{makeModel}</option>}
+                {flows.map((f) => <option key={f.id} value={f.id}>{f.nomen ?? f.id}</option>)}
+              </select></label>
           </div>
           <div className="pref-card">
             <div className="pref-card-h"><Ic name="send" /><b>Output &amp; delivery</b></div>
@@ -99,7 +117,7 @@ export function Preferences() {
           <div className="pref-card">
             <div className="pref-card-h"><span className="accent mono">/make</span><span className="pref-kind">image</span></div>
             <div className="pref-preview"><span className="pp-l mono">resolves to</span><span className="pp-v mono">{makeModel}</span></div>
-            <div className="pref-preview"><span className="pp-l mono">rebind</span><span className="pp-v mono">/bind make &lt;flow&gt; · or save a flow with baked defaults</span></div>
+            <div className="pref-preview"><span className="pp-l mono">rebind</span><span className="pp-v mono">the <b>default /make flow</b> picker above · or /bind make &lt;flow&gt;</span></div>
           </div>
           {['/animate', '/effect', '/upscale'].map((cmd) => (
             <div key={cmd} className="pref-card" style={{ opacity: 0.6 }}>

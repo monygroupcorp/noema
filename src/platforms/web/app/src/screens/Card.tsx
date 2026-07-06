@@ -329,6 +329,11 @@ export function Card() {
                 </button>
               ))}
             </div>
+            {compute === 'tee' && (
+              <Link to="/tee" className="mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 'var(--s2)', fontSize: 'var(--fs-xs)', color: 'var(--accent-soft)' }}>
+                <Ic name="eye-off" /> set up / view sealed session ▸
+              </Link>
+            )}
             <div className="run-row">
               <div className="quote">
                 <span className="q mono">{creditText}</span>

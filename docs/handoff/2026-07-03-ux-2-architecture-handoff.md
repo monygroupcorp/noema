@@ -27,16 +27,27 @@ gated behind two deferred specs so we don't half-build the vision.
   serves the **anonymous** bearer-credit case (Profile's security needs a named account), so it stays
   reachable from Funding + `/map` and travels with the deferred anonymous-credit/purse spec (D3).
   *Pass 1.*
-- **D3 Keyring** — **DEFERRED to its own spec.** Multi-account (Twitter-model: several identities per
-  browser, each with its own projects/config) *is* wanted, but nothing backs it today (singleton
-  identity/session). Keyring stays reachable via `/map` in the interim; not on the new Rail. Build it in
-  its own context so we don't betray the vision with a half-feature.
-- **D5 Projects** — **DEFERRED to its own context** (pairs with D3: per-account projects). Projects /
-  ProjectHub untouched this pass.
-- **D4** (default-flow picker), **D6** (publish cross-link), **D7** (Memory/Trace), **D8** (TEE) —
-  remaining; next pass, after D3/D5 specs land.
-- **`/map` removal** — held until Keyring/Tee/Studio/Trace all have real homes. Removing it now would
-  strand them. This is the explicit "don't move on until they're done" gate.
+- **D3 Keyring** — **DEFERRED to its own spec:**
+  [Keyring · Multi-account](./2026-07-03-keyring-multi-account-handoff.md). Multi-account (Twitter-model:
+  several identities per browser, each with its own projects/config) *is* wanted, but nothing backs it
+  today (singleton identity/session). Keyring stays reachable via `/map` in the interim; not on the new
+  Rail. Build it in its own context so we don't betray the vision with a half-feature.
+- **D5 Projects** — **DEFERRED to its own context:**
+  [Projects · Holdings](./2026-07-03-projects-holdings-handoff.md) (depends on D3 — per-account
+  projects). Projects / ProjectHub untouched this pass.
+- **D4 default-flow picker** — **DONE.** Preferences' dead "auto-apply a model" row is now a live
+  **"default /make flow"** picker writing `PUT /v1/me/bindings/make` (resolved at cast time).
+- **D6 publish cross-link** — **DONE.** The collection hub (EditioHub) gets a **"Post collection to
+  feed"** action (`publish` with a `collectio` artifact → moderated feed) — the collection author's
+  path into the single-result publish system, separate from Export's archive · hosting · noesis.
+- **D7 Memory** — **DONE.** Trace deleted (static mock, superseded by Space's in-page viewer). Space's
+  build-flag gate (`VITE_CORPUS_SPACE`) replaced with data-presence mounting + an honest empty state.
+- **D8 TEE/privacy** — **DONE.** `/tee` ("Private") now has a home on the Rail's Identity pillar; the
+  Account "sealed session" posture pill links to it; the Card's TEE selection deep-links to it (resolves
+  the open question in favour of deep-link, not fold). Studio got a home too (Settings → Compute).
+- **`/map` removal** — **DONE.** All previously map-only surfaces now have real homes (Trace deleted;
+  Tee/Keyring on Identity; Studio in Settings→Compute; Vault from Funding; Space on Memory). The `/map`
+  route + brand-glyph link are removed; `/map` now hits the honest 404.
 
 **Purse overload (D2):** sharpest in the mock Vault (retired). Deep purse-vocabulary unification
 (anonymous bearer purse vs shareable minted purse) travels with the D3 identity spec.

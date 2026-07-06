@@ -165,11 +165,11 @@ function ComputeDetail({ studios }: { studios: StudioEntry[] | null }) {
       </div>
 
       <div className="ac-panel">
-        <div className="ac-panel-l">active sessions · your studios</div>
+        <div className="ac-panel-l">active sessions · your studios <Link to="/studio" className="accent" style={{ float: 'right', fontWeight: 400 }}>open studio ▸</Link></div>
         {studios === null ? (
           <div className="ac-note mono">loading your sessions…</div>
         ) : studios.length === 0 ? (
-          <div className="ac-note mono">no live studios — lease one from the console to warm a GPU.</div>
+          <div className="ac-note mono">no live studios — <Link to="/studio" className="accent">lease one</Link> to warm a GPU.</div>
         ) : (
           studios.map((s) => (
             <SessionRow key={s.studioId} name={s.label} detail={`${s.status} · ${s.guestsToday} guest gens · net ≈ $${s.netUsd.toFixed(2)}`} state={fmtWarm(s.warmRemainingMs)} />
