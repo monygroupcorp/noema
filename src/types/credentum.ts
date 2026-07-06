@@ -1,99 +1,95 @@
 // =============================================================================
-// Credentum / CredentumStore — a fiat user's login credential (email + password).
+// Credentum / CredentumStore — a fiat user's login credential (username + password).
 // =============================================================================
 //
 // The IDENTITY is the `Anima`; the MASK is a `'password'` `Persona` (externusId =
-// the lowercased email). A `Credentum` is neither — it is the *secret material*
-// (password hash + single-use email-verify / password-reset tokens) that lets a
-// no-wallet fiat user prove they are that persona and recover access. It lives in
-// its OWN store so `Anima`/`Persona` stay non-sensitive (mirrors `Secretum`).
+// the normalized username). A `Credentum` is neither — it is the *secret material*
+// (the password hash) that lets a no-wallet fiat user prove they are that persona.
+// It lives in its OWN store so `Anima`/`Persona` stay non-sensitive (mirrors `Secretum`).
 //
-// SECURITY: the store never holds a plaintext password or a plaintext token.
+// NO EMAIL. Accounts are anonymous username+password — there is no verification step
+// and no email-based password reset. Account RECOVERY is done by binding backup
+// channels (a Telegram persona, a wallet `web` persona) to the same `animaId`; proving
+// one of those channels reaches the soul and mints a session. Those channels are
+// separate `Persona` rows, not fields here (see docs/spec/fiat-auth.md).
+//
+// SECURITY: the store never holds a plaintext password.
 //   • `passwordHash` is a self-describing scrypt envelope (see passwordHash.ts).
-//   • `verifyTokenHash` / `resetTokenHash` are the SHA-256 of the random token that
-//     was emailed — we look the row up by hashing the token the caller presents, so
-//     a store dump never yields a usable link. Tokens are single-use + short-TTL.
 //
 // The store is ASYMMETRIC like `Secretarium`: the auth router gets the full store;
 // nothing else should. There is no method that returns a password hash to a caller.
 // =============================================================================
 
 /**
- * One fiat account's credential, keyed by `email` (unique). `animaId` is the soul the
+ * One fiat account's credential, keyed by `username` (unique). `animaId` is the soul the
  * `'password'` persona resolved to — the join back into the rest of the crystal.
  */
 export interface Credentum {
   id: string
   /** Unique, normalized (trimmed + lowercased) — the login handle and persona externusId. */
-  email: string
+  username: string
   /** scrypt envelope `scrypt$N$r$p$saltB64$hashB64` (never a plaintext password). */
   passwordHash: string
   /** The resolved soul behind the `'password'` persona. */
   animaId: string
-  emailVerified: boolean
-  /** SHA-256 of the single-use email-verification token (plaintext only ever in the email). */
-  verifyTokenHash?: string
-  verifyTokenExp?: Date
-  /** SHA-256 of the single-use password-reset token. */
-  resetTokenHash?: string
-  resetTokenExp?: Date
   natum: Date
   mutatum: Date
 }
 
 /**
  * Owner-scoped credential store. Implemented by `MongoCredentum` (prod) +
- * `MemoryCredentum` (tests/dev). All lookups are by a value the caller already
- * proved they know (email at login, a token hash at verify/reset) — never a scan.
+ * `MemoryCredentum` (tests/dev). Lookups are by a value the caller already
+ * proved they know (username at login) — never a scan.
  */
 export interface CredentumStore {
   /**
-   * Create a credential for a brand-new email. Throws `EmailTakenError` if the email
-   * already exists (the router maps that to a generic 409 — no enumeration). The unique
-   * index is the authority; this method races-safe against it.
+   * Create a credential for a brand-new username. Throws `UsernameTakenError` if the
+   * username already exists (the router maps that to a generic 409 — no enumeration).
+   * The unique index is the authority; this method races-safe against it.
    */
   create(input: {
-    email: string
+    username: string
     passwordHash: string
     animaId: string
-    verifyTokenHash: string
-    verifyTokenExp: Date
   }): Promise<Credentum>
 
-  findByEmail(email: string): Promise<Credentum | null>
-  findByVerifyTokenHash(hash: string): Promise<Credentum | null>
-  findByResetTokenHash(hash: string): Promise<Credentum | null>
+  findByUsername(username: string): Promise<Credentum | null>
 
-  /** Mark verified + clear the verify token (single-use). Idempotent. */
-  markVerified(id: string): Promise<void>
-  /** Replace the verify token (resend). */
-  setVerifyToken(id: string, hash: string, exp: Date): Promise<void>
-  /** Issue a password-reset token. */
-  setResetToken(id: string, hash: string, exp: Date): Promise<void>
-  /** Set a new password hash + clear the reset token (single-use). */
+  /** Set a new password hash (used by in-app change-password + channel recovery). */
   setPassword(id: string, passwordHash: string): Promise<void>
 }
 
-/** Thrown by `create` when the email already has a credential — mapped to a generic 409. */
-export class EmailTakenError extends Error {
+/** Thrown by `create` when the username already has a credential — mapped to a generic 409. */
+export class UsernameTakenError extends Error {
   constructor() {
-    super('email already registered')
-    this.name = 'EmailTakenError'
+    super('username already registered')
+    this.name = 'UsernameTakenError'
   }
 }
 
-/** Trim + lowercase — the single normalization applied everywhere email is a key. */
-export function normalizeEmail(raw: unknown): string {
+/** Trim + lowercase — the single normalization applied everywhere username is a key. */
+export function normalizeUsername(raw: unknown): string {
   return String(raw ?? '').trim().toLowerCase()
 }
 
-// A deliberately conservative single-line email check — good enough to reject
-// obvious garbage without pretending to fully validate RFC 5322. Real validation
-// is "an email we sent arrived," i.e. the verification step.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+export const MIN_USERNAME_LENGTH = 3
+export const MAX_USERNAME_LENGTH = 32
 
-export function isValidEmail(email: string): boolean {
-  return email.length <= 254 && EMAIL_RE.test(email)
+// Normalized (already trimmed + lowercased): starts + ends with alphanumeric, inner
+// chars may include `_ . -`. No `@` (keeps usernames disjoint from any legacy email
+// `'password'` externusId) and no whitespace.
+const USERNAME_RE = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/
+
+/** Returns a human-readable reason a username is unacceptable, or `null` if it's fine. */
+export function usernameProblem(raw: string): string | null {
+  if (raw.length < MIN_USERNAME_LENGTH) return `username must be at least ${MIN_USERNAME_LENGTH} characters`
+  if (raw.length > MAX_USERNAME_LENGTH) return `username must be at most ${MAX_USERNAME_LENGTH} characters`
+  if (!USERNAME_RE.test(raw)) return 'username may use letters, numbers, and . _ - (not at the ends)'
+  return null
+}
+
+export function isValidUsername(username: string): boolean {
+  return usernameProblem(username) === null
 }
 
 export const MIN_PASSWORD_LENGTH = 8

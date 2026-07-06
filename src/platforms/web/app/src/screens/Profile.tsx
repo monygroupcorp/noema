@@ -274,15 +274,18 @@ function WalletRow() {
     return () => { live = false; };
   }, []);
 
+  const [note, setNote] = useState<string | null>(null);
+
   async function connect() {
     if (busy) return;
-    setBusy(true); setRowErr(null);
+    setBusy(true); setRowErr(null); setNote(null);
     try {
       const wallet = await connectWallet();
       const { token, statement } = await api.auth.walletChallenge(wallet.address);
       const signature = await wallet.signMessage(statement);
-      const { address } = await api.auth.walletLink(token, signature);
+      const { address, moved } = await api.auth.walletLink(token, signature);
       setWallets((w) => Array.from(new Set([...(w ?? []), address])));
+      if (moved) setNote('This wallet was linked to another account — its recovery now points here.');
     } catch (e) {
       setRowErr(msg(e));
     } finally { setBusy(false); }
@@ -303,6 +306,7 @@ function WalletRow() {
           {busy ? 'Waiting for wallet…' : linked ? 'Link another wallet' : 'Connect a wallet'}
         </button>
       </div>
+      {note && <div className="sub byo-note">{note}</div>}
       {rowErr && <div className="warn byo-warn">{rowErr}</div>}
     </div>
   );

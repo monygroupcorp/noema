@@ -1,16 +1,19 @@
 // =============================================================================
-// MongoCredentum — Mongo-backed fiat-credential store, sealed by the unique email.
+// MongoCredentum — Mongo-backed fiat-credential store, sealed by the unique username.
 // =============================================================================
 //
-// One doc per account, `email` unique (the index is the enumeration/dup authority —
-// a racing duplicate insert throws code 11000 → mapped to `EmailTakenError`). Token
-// lookups are by their SHA-256 hash (a store dump never yields a usable link). See
-// `src/types/credentum.ts` for the security contract.
+// One doc per account, `username` unique (the index is the enumeration/dup authority —
+// a racing duplicate insert throws code 11000 → mapped to `UsernameTakenError`). See
+// `src/types/credentum.ts` for the security contract. NO email/verification/reset — the
+// clean-swap from the email rail purges any legacy email-only docs on ensureIndexes.
 // =============================================================================
 
 import { Collection, MongoServerError } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
-import { type Credentum, type CredentumStore, EmailTakenError } from '../types/credentum.js'
+import { type Credentum, type CredentumStore, UsernameTakenError } from '../types/credentum.js'
+import { makeLogger } from '../lib/logger.js'
+
+const log = makeLogger('crystal:credentum')
 
 function fromDoc(doc: Record<string, unknown>): Credentum {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -24,76 +27,55 @@ export class MongoCredentum implements CredentumStore {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  /** Unique index on `email` — the dup guard. Idempotent; call once at wiring. */
+  /**
+   * Unique index on `username` — the dup guard. Idempotent; call once at wiring.
+   *
+   * One-time clean-swap from the retired email rail, and SELF-DISABLING: the destructive
+   * step runs ONLY while the legacy unique `email` index is still present (i.e. this DB
+   * predates username auth). It drops that index and purges the legacy email-only docs
+   * (they'd collide on a null `username` key and can't be logged in anyway), then never
+   * runs again — steady-state boots do no deleteMany, just the idempotent createIndex.
+   * Both steps are load-bearing until the cutover runs once, so this can't simply be removed.
+   */
   async ensureIndexes(): Promise<void> {
-    await this.col.createIndex({ email: 1 }, { unique: true })
-    // Token lookups (sparse — most rows carry no live token).
-    await this.col.createIndex({ verifyTokenHash: 1 }, { sparse: true })
-    await this.col.createIndex({ resetTokenHash: 1 }, { sparse: true })
+    const indexes = await this.col.indexes().catch(() => [] as { name?: string }[])
+    if (indexes.some(i => i.name === 'email_1')) {
+      await this.col.dropIndex('email_1')
+      const purged = await this.col.deleteMany({ username: { $exists: false } })
+      log.warn('credenta: migrated off the email rail', { purgedLegacyCredentials: purged.deletedCount })
+    }
+    await this.col.createIndex({ username: 1 }, { unique: true })
   }
 
   async create(input: {
-    email: string
+    username: string
     passwordHash: string
     animaId: string
-    verifyTokenHash: string
-    verifyTokenExp: Date
   }): Promise<Credentum> {
     const now = this.now()
     const cred: Credentum = {
       id: uuidv4(),
-      email: input.email,
+      username: input.username,
       passwordHash: input.passwordHash,
       animaId: input.animaId,
-      emailVerified: false,
-      verifyTokenHash: input.verifyTokenHash,
-      verifyTokenExp: input.verifyTokenExp,
       natum: now,
       mutatum: now,
     }
     try {
       await this.col.insertOne({ ...cred })
     } catch (err) {
-      if (err instanceof MongoServerError && err.code === 11000) throw new EmailTakenError()
+      if (err instanceof MongoServerError && err.code === 11000) throw new UsernameTakenError()
       throw err
     }
     return cred
   }
 
-  async findByEmail(email: string): Promise<Credentum | null> {
-    const doc = await this.col.findOne({ email })
+  async findByUsername(username: string): Promise<Credentum | null> {
+    const doc = await this.col.findOne({ username })
     return doc ? fromDoc(doc as Record<string, unknown>) : null
-  }
-
-  async findByVerifyTokenHash(hash: string): Promise<Credentum | null> {
-    const doc = await this.col.findOne({ verifyTokenHash: hash })
-    return doc ? fromDoc(doc as Record<string, unknown>) : null
-  }
-
-  async findByResetTokenHash(hash: string): Promise<Credentum | null> {
-    const doc = await this.col.findOne({ resetTokenHash: hash })
-    return doc ? fromDoc(doc as Record<string, unknown>) : null
-  }
-
-  async markVerified(id: string): Promise<void> {
-    await this.col.updateOne(
-      { id },
-      { $set: { emailVerified: true, mutatum: this.now() }, $unset: { verifyTokenHash: '', verifyTokenExp: '' } },
-    )
-  }
-
-  async setVerifyToken(id: string, hash: string, exp: Date): Promise<void> {
-    await this.col.updateOne({ id }, { $set: { verifyTokenHash: hash, verifyTokenExp: exp, mutatum: this.now() } })
-  }
-
-  async setResetToken(id: string, hash: string, exp: Date): Promise<void> {
-    await this.col.updateOne({ id }, { $set: { resetTokenHash: hash, resetTokenExp: exp, mutatum: this.now() } })
   }
 
   async setPassword(id: string, passwordHash: string): Promise<void> {
-    await this.col.updateOne(
-      { id },
-      { $set: { passwordHash, mutatum: this.now() }, $unset: { resetTokenHash: '', resetTokenExp: '' } },
-    )
+    await this.col.updateOne({ id }, { $set: { passwordHash, mutatum: this.now() } })
   }
 }
