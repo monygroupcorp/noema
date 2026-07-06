@@ -48,7 +48,9 @@ export class MongoProvinciarum implements Provinciarum {
   }
 
   async listByOwner(animaId: string): Promise<Provinciae> {
-    const docs = await this.col.find({ animaId }).toArray()
+    // Oldest-first (by creation) — a stable order so the project set doesn't reshuffle
+    // between loads (the client picks projects[0] as the default fallback).
+    const docs = await this.col.find({ animaId }).sort({ natum: 1 }).toArray()
     return docs.map(fromDoc)
   }
 }
