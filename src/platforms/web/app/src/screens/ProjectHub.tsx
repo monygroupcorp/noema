@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { useProject } from '../state/project';
 import { counts } from '../lib/projects';
+import { DATASETS } from '../lib/datasets';
 import { Ic } from '../lib/icons';
 import { api, type Team } from '../lib/api';
 
@@ -12,8 +13,9 @@ import { api, type Team } from '../lib/api';
 // (Decision 4 — one list surface, two entry modes). Lives in the shell; the top bar shows
 // the breadcrumb.
 //
-// Holdings are real now (Provincia.res): datasets/models/collections read the project's
-// filed id-reference lengths, not a hardcoded 0. Chats/canvases/favorites stay client-local
+// Holdings are real now: datasets/models/collections read the project's filed id-reference
+// lengths, not a hardcoded 0, and the Overview resolves those ids to friendly names (falling
+// back to the raw id for a dangling reference). Chats/canvases/favorites stay client-local
 // overlay (no backend store yet).
 
 const QUICK = [
@@ -34,11 +36,19 @@ export function ProjectHub() {
   // Teams the caller can reference for this project's shared member set (Decision 6 — a project
   // references a Team; it doesn't carry its own membership). Empty/failed → the picker hides.
   const [teams, setTeams] = useState<Team[]>([]);
+  // id→name maps so the Overview shows friendly holding names, not raw ids. Datasets come from
+  // the (mock) library; models + collections from the caller's canonical lists.
+  const [modelNames, setModelNames] = useState<Record<string, string>>({});
+  const [collNames, setCollNames] = useState<Record<string, string>>({});
   useEffect(() => {
     let live = true;
     api.listTeams().then((r) => { if (live) setTeams(r.teams); }).catch(() => { if (live) setTeams([]); });
+    api.listMyModels().then((r) => { if (live) setModelNames(Object.fromEntries(r.models.map((m) => [m.intellaId, m.nomen]))); }).catch(() => {});
+    api.listCollections().then((r) => { if (live) setCollNames(Object.fromEntries(r.collections.map((x) => [x.id, x.nomen || 'Untitled collection']))); }).catch(() => {});
     return () => { live = false; };
   }, []);
+  const dsNames = useMemo(() => Object.fromEntries(DATASETS.map((d) => [d.id, d.name])), []);
+  const nameOf = (map: Record<string, string>, id: string) => map[id] ?? id;
 
   const tabs: { key: string; n?: number }[] = [
     { key: 'Overview' }, { key: 'Chats', n: c.chats }, { key: 'Canvases', n: c.canvases },
@@ -109,17 +119,17 @@ export function ProjectHub() {
             <div className="ph-overview">
               <HoldingCard ico="database" name="Datasets" n={c.datasets} foot={c.datasets ? `${c.datasets} filed` : 'no datasets yet'} to={`/datasets?project=${p.id}`}>
                 {c.datasets
-                  ? p.datasetIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {x}</div>)
+                  ? p.datasetIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {nameOf(dsNames, x)}</div>)
                   : <div className="hc-empty">the core asset — start one to train from</div>}
               </HoldingCard>
               <HoldingCard ico="box" name="Models" n={c.models} foot={<span className="gold"><span className="gem">◈</span> — royalties</span>} to={`/models?project=${p.id}`}>
                 {c.models
-                  ? p.modelIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {x}</div>)
+                  ? p.modelIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {nameOf(modelNames, x)}</div>)
                   : <div className="hc-empty">trained LoRAs land on the shelf</div>}
               </HoldingCard>
               <HoldingCard ico="hexagon" name="Collections" n={c.collections} foot={c.collections ? `${c.collections} filed` : '0 minted · 0 draft'} to={`/collections?project=${p.id}`}>
                 {c.collections
-                  ? p.collectionIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {x}</div>)
+                  ? p.collectionIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {nameOf(collNames, x)}</div>)
                   : <div className="hc-empty">publishable drops → noesis</div>}
               </HoldingCard>
               <HoldingCard ico="message-square" name="Chats" n={c.chats} foot={`last ${p.updated}`} onTo={() => setTab('Chats')}>
