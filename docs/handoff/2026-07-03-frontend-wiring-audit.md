@@ -85,8 +85,22 @@
 > - Both new screens linked from the Account dropdown; routes added in `App.tsx`. Icons added:
 >   `download`, `users`, `hand-coins`, `pause`, `play`, `user-plus`.
 >
-> **All of Tier B (#1–8) is now wired.** Not yet done: staging live-verify with real accounts/gens,
-> and Tier C (endpoints that don't exist yet).
+> **All of Tier B (#1–8) is now wired.** Tier C (endpoints that don't exist yet) is next.
+>
+> **Staging verification status (2026-07-06):**
+> - **Anon-reachable paths VERIFIED live** against `staging.noema.art` (contract + browser via the
+>   dev-server proxy): #2 Funding (live pack credits 10,385/41,538/166,152 + real CreditVault address +
+>   live ETH→points quote), #3 Shelf (real empty state + import panel), #1 Run (empty state, real
+>   balance; stream endpoint wired + owner-scoped 404), #4 identity (real `0 cr`/`anonymous` from
+>   session+me/status), #8 Card (`save defaults`→setAffines round-trip), #5 import panel renders,
+>   #6/#7 render + 403-gate correctly for anon.
+> - **Authenticated close-out DEFERRED to the coordinated staging push.** Staging currently runs the
+>   OLD email-verify auth (`register → verification_sent`), so a session can't be minted headlessly.
+>   Once the pending threads land and the tree (incl. the username+password auth) deploys, run
+>   `scratchpad/verify-authed.sh` (registers 2 throwaway accounts → exercises #4 me, #7 teams CRUD,
+>   #6 sponsorships create/list/pause/resume, #5 real HF-LoRA import). **#1 full FLUX run** (owner's
+>   call) needs a FUNDED test account — the script quotes + prints the dispatch+stream commands, and
+>   auto-runs them when the account has balance.
 
 | # | Screen / gap | Backend (exists) | Current state | Notes for the wirer |
 |---|---|---|---|---|
