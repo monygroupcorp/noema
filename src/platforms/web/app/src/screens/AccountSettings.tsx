@@ -49,6 +49,8 @@ export function AccountSettings() {
   // Real balance (impetus credits) + live studio count from the account snapshot.
   const credits = me ? Number(me.balanceImpetus).toLocaleString() : '…';
   const liveStudios = me?.studios.filter((s) => s.status === 'idle' || s.status === 'running').length ?? 0;
+  // The availability preference is a real (local) setting — read it, don't invent it.
+  const availPref = (localStorage.getItem('noema-availability') as Availability) || 'balanced';
 
   // ── account home ──────────────────────────────────────────────────────────
   if (!section) {
@@ -87,27 +89,26 @@ export function AccountSettings() {
             <span className="hemi2 dashed" /> Data export &amp; account deletion are your legal rights — the backend endpoints are in progress; they’ll be wired here when ready.
           </div>
 
-          {/* section cards */}
+          {/* section cards — the honesty bar: rows with a real backend (credits via meStatus,
+              live studios) show real data; everything not wired yet (card billing, API keys,
+              devices, local runner) is gated "soon", same as Export/Delete above. */}
           <div className="ac-cards">
             <SectionCard to="/account/billing" ico="wallet" name="Billing &amp; credits">
-              <Row k="plan" v={<b>Subscription · $20/mo</b>} />
               <Row k="credits" v={<span className="gold"><span className="gem">◈</span> {credits}{me ? <> credits · ≈ ${me.balanceUsd.toFixed(2)}</> : ''}</span>} />
-              <Row k="payment" v={<><b>card</b> · ···· 4242</>} />
-              <div className="ac-note mono"><span className="hemi2 dashed" /> anonymous credit (Bursa note): <span className="gold">◈ 1,200</span> · bearer · fund from a shielded wallet</div>
+              <Row k="plan · card" v={<span className="muted">coming soon — no subscriptions or card billing yet</span>} />
+              <div className="ac-note mono"><span className="hemi2 dashed" /> credits fund on-chain today — <Link className="accent" to="/funding">deposit from a wallet ▸</Link></div>
             </SectionCard>
             <SectionCard to="/account/api" ico="key-round" name="API keys">
-              <Row k="sk-noema-···· a3f9" v={<><b>active</b> · 84k calls</>} />
-              <Row k="sk-noema-···· 0c12" v={<span className="muted">revoked</span>} />
-              <div className="ac-note mono">OpenAI-compatible endpoint · <span className="accent">+ new key</span></div>
+              <Row k="keys" v={<span className="muted">coming soon</span>} />
+              <div className="ac-note mono"><span className="hemi2 dashed" /> the /v1 API is live; personal key management isn’t wired here yet.</div>
             </SectionCard>
             <SectionCard to="/account/compute" ico="server" name="Compute &amp; sessions">
-              <Row k="availability" v={<><span className="fillg">◑</span> <b>balanced</b> · wait briefly for cheaper</>} />
+              <Row k="availability" v={<><span className="fillg">{AVAIL.find((a) => a.key === availPref)?.glyph}</span> <b>{availPref}</b> · cost vs speed</>} />
               <Row k="live sessions" v={<><span className="rdot good" /> {liveStudios} live</>} />
-              <Row k="local runner" v={<><b>RTX 4090</b> · connected</>} />
               <div className="ac-note mono">custody (local · TEE · remote) is chosen per run, not here.</div>
             </SectionCard>
             <SectionCard to="/account/security" ico="eye-off" name="Security &amp; privacy">
-              <Row k="devices" v={<><b>2</b> active</>} />
+              <Row k="devices" v={<span className="muted">coming soon — device management isn’t wired yet</span>} />
               <Row k="conditional anonymity" v={<span className="accent">learn the rule ▸</span>} />
             </SectionCard>
             <SectionCard to="/preferences" ico="sparkles" name="Preferences &amp; defaults">
@@ -189,11 +190,7 @@ function ComputeDetail({ studios }: { studios: StudioEntry[] | null }) {
 
       <div className="ac-panel">
         <div className="ac-panel-l">local runner · your machine</div>
-        <div className="ac-runner">
-          <span className="rdot good" />
-          <div className="ac-runner-main"><b>workstation · RTX 4090</b><span className="mono">connected · runs local workflows off-grid</span></div>
-          <span className="ac-runner-status mono">off-grid</span>
-        </div>
+        <div className="ac-note mono"><span className="hemi2 dashed" /> coming soon — connecting your own GPU as an off-grid runner isn’t wired yet.</div>
       </div>
     </>
   );
