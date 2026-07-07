@@ -30,7 +30,7 @@ There is no "free tier with degraded privacy." Privacy tiers are architectural, 
 - [N] text generations per day (standard API, base models)
 - [N] image generations per day
 - Access to open-source model catalog
-- Anonymous Bursa credits accepted
+- Anonymous purse credits accepted
 - API access
 
 *Converts to paid when daily limits are hit.*
@@ -46,7 +46,7 @@ There is no "free tier with degraded privacy." Privacy tiers are architectural, 
 - All catalog models
 - TEE private compute sessions available
 - API access at standard limits
-- Anonymous Bursa credits accepted
+- Anonymous purse credits accepted
 
 **[Get Pro]**
 
@@ -104,11 +104,11 @@ Sessions are billed from tunnel establishment to session end. Idle time inside t
 
 ---
 
-## Anonymous billing (Bursa)
+## Anonymous billing
 
 Don't want an account? Buy credits anonymously with crypto. Your spend is a zero-knowledge proof — we verify the math, dispatch your compute, and cannot link the transaction to you.
 
-**[How Bursa works →]**
+**[How purse works →]**
 
 ---
 
@@ -120,8 +120,8 @@ No. Credits purchased directly never expire.
 **Can I get a refund?**
 All credit purchases are final. Credits are a prepaid compute balance, not a subscription. If you have an issue, contact us and we'll work it out.
 
-**What's the difference between a Bursa credit and a regular credit?**
-Functionally identical — both buy the same compute. The difference is the billing layer: a regular credit is tied to your account; a Bursa credit is a ZK proof with no account association. Same GPU, same models, same privacy guarantee on the compute side.
+**What's the difference between a purse credit and a regular credit?**
+Functionally identical — both buy the same compute. The difference is the billing layer: a regular credit is tied to your account; a purse credit is a ZK proof with no account association. Same GPU, same models, same privacy guarantee on the compute side.
 
 **Do you offer a free trial?**
 The free tier is your trial. No time limit, no credit card.

@@ -69,8 +69,8 @@ export function Onboard() {
           </div>
           <p className="door-d">No account. Run on your own machine — nothing ever leaves — or fund a bearer purse to use our compute without a name.</p>
           <button className="door-cta slate" onClick={() => enter('local')}>Enter local · off-grid →</button>
-          <button className="door-opt" disabled title="Coming soon"><Ic name="venetian-mask" /> Set up a Bursa <span className="opt-meta">coming soon</span></button>
-          <p className="door-warn">* a Bursa is anonymous only if funded from a shielded wallet. A doxxed source links you to us at funding time — permanently.</p>
+          <button className="door-opt" disabled title="Coming soon"><Ic name="venetian-mask" /> Set up a purse <span className="opt-meta">coming soon</span></button>
+          <p className="door-warn">* a purse is anonymous only if funded from a shielded wallet. A doxxed source links you to us at funding time — permanently.</p>
           <div className="door-knows"><span className="hemi dashed sm" aria-hidden="true" /> noema knows: <b>nothing*</b></div>
         </section>
       </div>

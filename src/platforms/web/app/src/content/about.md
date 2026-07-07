@@ -54,7 +54,7 @@ We are a small team of engineers and researchers. We believe privacy is an engin
 
 ## Transparency
 
-Our tunnel runner is open source. When the hardware-sealed tier ships, the reproducible enclave measurement used for attestation will be published so anyone can recompute and verify it. The zero-knowledge circuit for Bursa credits is open source and has undergone a trusted setup ceremony.
+Our tunnel runner is open source. When the hardware-sealed tier ships, the reproducible enclave measurement used for attestation will be published so anyone can recompute and verify it. The zero-knowledge circuit for purse credits is open source and has undergone a trusted setup ceremony.
 
 If you find a discrepancy between what we say we do and what the code does, we want to know: [SECURITY EMAIL]
 
