@@ -6,6 +6,7 @@ import { api } from '../lib/api';
 import { clearOnboarded } from '../lib/entry';
 import { Ic } from '../lib/icons';
 import { Chip } from './Chip';
+import { BuyCreditsModal } from '../screens/BuyCreditsModal';
 
 // The top-bar POSTURE CLUSTER + account dropdown (dashboard-spec.md, render
 // noema-account-dropdown.png). The always-on honest readout that rides every surface:
@@ -27,6 +28,7 @@ export function Account() {
   const [pos, setPos] = useState<CSSProperties>({});
   const [liveCredits, setLiveCredits] = useState<string | null>(null);
   const [admin, setAdmin] = useState(false);
+  const [buyOpen, setBuyOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -74,8 +76,12 @@ export function Account() {
 
   return (
     <div className="posture">
-      {/* credits — gold economy colour */}
-      <Link to="/funding" className="pc-pill credits" title="credits"><span className="gem">◈</span> {credits} <span className="u">cr</span></Link>
+      {/* credits — gold economy colour; opens the buy-credits ledger directly (add credits
+          from anywhere, not just the Funding screen). */}
+      <button className="pc-pill credits" title="add credits" onClick={() => setBuyOpen(true)}>
+        <span className="gem">◈</span> {credits} <span className="u">cr</span>
+      </button>
+      <BuyCreditsModal open={buyOpen} onClose={() => setBuyOpen(false)} />
       {/* active compute — the hemisphere device; links to the sealed-session (private compute) view */}
       <Link to="/tee" className="pc-pill compute" title="active compute · sealed session"><span className={`hemi2 ${compute.glyph}`} /> {compute.text}</Link>
       {/* identity chip — opens the account dropdown */}
