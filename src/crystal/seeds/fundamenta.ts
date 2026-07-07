@@ -389,6 +389,32 @@ export const FUNDAMENTUM_AITOOLKIT_TRAINING: Fundamentum = {
   mutatum: new Date('2026-06-23'),
 }
 
+/**
+ * LTX 2.3 · ComfyUI — the LTX-2.3 22B distilled video (T2V + I2V) substrate. The all-in-one
+ * transformer+VAE bundle + its separate Gemma-3-12B text encoder (LTXAVTextEncoderLoader).
+ * Both T2V and I2V share this one fundament (image conditioning is a graph-level swap, not a
+ * substrate difference). No LoRA path in v1 (family 'ltx' derives from the checkpoint's `familia`,
+ * ready for a future LoRA). Targets a RunPod pod (32GB+), NOT the local 4090 — vramGb: 48
+ * (46GB bf16 checkpoint + Gemma headroom).
+ */
+export const FUNDAMENTUM_LTX_COMFYUI: Fundamentum = {
+  id: 'ltx-comfyui',
+  nomen: 'LTX 2.3 · ComfyUI',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'ComfyUI',
+  intellae: [
+    { id: 'intella.ltx-2.3-distilled', role: 'checkpoint' },
+    { id: 'intella.gemma-3-12b',       role: 'text_encoder' },
+  ],
+  vramGb: 48,
+  canonica: true,
+  natum: new Date('2026-07-07'),
+  mutatum: new Date('2026-07-07'),
+}
+
 /** All canonical fundamenta — seeded on boot (parity with CANONICAL_ESSENTIAE). */
 export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_FLUX_COMFYUI,
@@ -407,4 +433,5 @@ export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_HEARTMULA_PYTORCH,
   FUNDAMENTUM_HUNYUAN3D_PYTORCH,
   FUNDAMENTUM_AITOOLKIT_TRAINING,
+  FUNDAMENTUM_LTX_COMFYUI,
 ]
