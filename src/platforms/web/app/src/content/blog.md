@@ -19,8 +19,8 @@ Tags: privacy, architecture, TEE
 Target: engineers evaluating privacy AI compute
 
 **2. "What zero-knowledge credits actually mean for AI privacy"**
-Explains Bursa: what a Groth16 proof is in plain terms, why on-chain wallet sign-up is not private, how ZK billing differs. Directly undercuts Venice's crypto privacy angle.
-Tags: privacy, ZK, Bursa
+Explains purse: what a Groth16 proof is in plain terms, why on-chain wallet sign-up is not private, how ZK billing differs. Directly undercuts Venice's crypto privacy angle.
+Tags: privacy, ZK, purse
 Target: privacy-conscious users, crypto-native users
 
 **3. "The trust chain problem with most 'private AI' platforms"**
@@ -48,8 +48,8 @@ Tags: TEE, tutorial, BYO model
 Target: AI engineers, researchers
 
 **7. "Anonymous AI: how to generate without leaving a trace"**
-Full walkthrough: get Bursa credits, open a TEE session, verify attestation, generate. The complete anonymous path.
-Tags: privacy, tutorial, Bursa
+Full walkthrough: get purse credits, open a TEE session, verify attestation, generate. The complete anonymous path.
+Tags: privacy, tutorial, purse
 Target: privacy-conscious users, journalists, activists
 
 ---
