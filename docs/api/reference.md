@@ -1023,6 +1023,45 @@ Admin: company-wide trailing-12mo USD revenue vs the tightest active conditional
 }
 ```
 
+### GET /v1/admin/cogs
+
+Admin: trailing-window rollup of per-job costUsd off wide_events — the read-only pair to the revenue report. Platform-admin only.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "Admin COGS report: trailing-window rollup of per-job costUsd off wide_events — the read-only pair to the revenue report.",
+  "properties": {
+    "asOf": {
+      "type": "string",
+      "description": "ISO timestamp the trailing window was computed against."
+    },
+    "sinceIso": {
+      "type": "string",
+      "description": "ISO timestamp of the trailing window's cutoff (same window the revenue report uses)."
+    },
+    "costUsd": {
+      "type": "number",
+      "description": "Trailing-window COGS, whole USD (pod compute spend, per-job costUsd summed)."
+    },
+    "count": {
+      "type": "number",
+      "description": "Job count in the trailing window (includes jobs with no cost telemetry, counted at 0)."
+    }
+  },
+  "required": [
+    "asOf",
+    "sinceIso",
+    "costUsd",
+    "count"
+  ]
+}
+```
+
 ### POST /v1/flows
 
 Save a reusable owner-keyed flow derived from an owned run (fromRun) or a base flow (modusId).

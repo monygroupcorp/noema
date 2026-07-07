@@ -52,6 +52,7 @@ export interface ApiFacade {
   listMyModels(auctor: AuctorKey): Promise<ModelCard[]>
   setModelLicense(auctor: AuctorKey, id: string, opts: import('./CrystalApi.js').SetModelLicenseOpts): Promise<ModelCard>
   revenueReport(auctor: AuctorKey): Promise<import('./CrystalApi.js').RevenueReport>
+  cogsReport(auctor: AuctorKey): Promise<import('./CrystalApi.js').CogsReport>
   saveFlow(auctor: AuctorKey, opts: SaveFlowOpts): Promise<{ id: string }>
   bind(auctor: AuctorKey, verb: string, modusId: string): Promise<{ verb: string; modusId: string }>
   getMe(auctor: AuctorKey): Promise<import('./CrystalApi.js').MeView>
@@ -504,6 +505,12 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   // USD revenue vs the tightest active conditional-license cap (the tripwire, ADR-0012/0013 §5).
   router.get('/admin/revenue', wrap(async (req, res) => {
     res.json(await api.revenueReport(await auth(req)))
+  }))
+
+  // GET /v1/admin/cogs — ADMIN COGS report (platform-admin only): trailing-window rollup of
+  // per-job costUsd off wide_events — the read-only pair to /admin/revenue.
+  router.get('/admin/cogs', wrap(async (req, res) => {
+    res.json(await api.cogsReport(await auth(req)))
   }))
 
   // GET /v1/flows — public flow discovery (no auth).
