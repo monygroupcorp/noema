@@ -1061,6 +1061,10 @@ async function main(): Promise<void> {
   const cdpFacilitator = x402Enabled ? buildCdpX402Facilitator() : null
   if (x402Enabled && cdpFacilitator) log.info(`x402: CDP facilitator wired (${x402Config.network}, payTo ${x402Config.payTo})`)
   else if (x402Enabled) log.warn('x402: X402_ENABLED but CDP_API_KEY_ID/CDP_API_KEY_SECRET missing — payments fail closed (deny-stub)')
+  // The unauthenticated discover/quote GET is IP-rate-limited (express-rate-limit) — the POST
+  // run is not, since it's already gated by a stronger control (on-chain payment verification).
+  const { default: x402RateLimit } = await import('express-rate-limit')
+  const x402QuoteLimiter = x402RateLimit({ windowMs: 15 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false })
   app.use('/api/v1/x402', express.json(), createX402AgentRouter({
     legati: ring.legati,
     modorum: ring.modorum,
@@ -1068,6 +1072,7 @@ async function main(): Promise<void> {
     log: ring.x402Log,
     config: x402Config,
     enabled: x402Enabled,
+    rateLimiters: { quote: x402QuoteLimiter },
     quoteImpetus: async (modusId, aditus) => BigInt((await crystalApi.quote(SYSTEM_AUCTOR, { modusId }, aditus)).impetus),
     // Prepaid run: the verified x402 payment backs a mint of the quote's impetus onto
     // the agent's Anima, which the normal run path then spends. Payment funds the run.
