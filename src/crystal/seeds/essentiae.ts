@@ -524,6 +524,81 @@ export const ESSENTIA_UPSCALE: Essentia = {
   mutatum: new Date('2025-01-01'),
 }
 
+// Wan2.2 — text to video. Native ComfyUI nodes only (no custom node pack): the two-model MoE
+// unets (high-noise → low-noise, KSamplerAdvanced split at step 10) share the umt5 text encoder
+// + Wan2.1 VAE (FUNDAMENTUM_WAN22_T2V_COMFYUI). Render-proven graph (wan-artifacts/wan22-t2v.api.json
+// rendered a real mp4 on this box). categoria 'video'.
+export const ESSENTIA_WAN22_T2V: Essentia = {
+  id: 'wan22-t2v',
+  nomen: 'Wan2.2 — text to video',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'video',
+
+  fundamentumId: 'wan22-t2v-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:          { type: 'text', required: true,  description: 'Text prompt for video generation' },
+    negative_prompt: { type: 'text', required: false, description: 'Negative prompt — what to avoid' },
+    frames:          { type: 'int',  required: false, default: 33, description: 'Video length in frames (fps 16)' },
+    input_seed:      { type: 'int',  required: false,              description: 'Random seed — omit to shuffle' },
+  },
+
+  exitus: {
+    video: { type: 'video', description: 'Generated video (mp4/h264)' },
+  },
+
+  workflowTemplate: 'wan22-t2v',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 42, privateMode: false, vramGb: 48 },
+
+  natum: new Date('2026-07-07'),
+  mutatum: new Date('2026-07-07'),
+}
+
+// Wan2.2 — image to video. Same MoE shape as T2V, but the required `image` aditus rides the i2i
+// image-input primitive into `LoadImage` → `WanImageToVideo.start_image` (that node emits
+// [positive, negative, latent] feeding both samplers). Render-proven graph
+// (wan-artifacts/wan22-i2v.api.json rendered a real mp4 on this box). categoria 'video'.
+export const ESSENTIA_WAN22_I2V: Essentia = {
+  id: 'wan22-i2v',
+  nomen: 'Wan2.2 — image to video',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'video',
+
+  fundamentumId: 'wan22-i2v-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:          { type: 'text',  required: true,  description: 'Text prompt for video generation' },
+    image:           { type: 'image', required: true,  description: 'Start frame image' },
+    negative_prompt: { type: 'text',  required: false, description: 'Negative prompt — what to avoid' },
+    frames:          { type: 'int',   required: false, default: 33, description: 'Video length in frames (fps 16)' },
+    input_seed:      { type: 'int',   required: false,              description: 'Random seed — omit to shuffle' },
+  },
+
+  exitus: {
+    video: { type: 'video', description: 'Generated video (mp4/h264)' },
+  },
+
+  workflowTemplate: 'wan22-i2v',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 42, privateMode: false, vramGb: 48 },
+
+  natum: new Date('2026-07-07'),
+  mutatum: new Date('2026-07-07'),
+}
+
 // =============================================================================
 // Understanding-track Essentiae — "read a new medium → text" (ADR-0007).
 //
@@ -912,4 +987,6 @@ export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_HUNYUAN3D,
   ESSENTIA_LTX_T2V,
   ESSENTIA_LTX_I2V,
+  ESSENTIA_WAN22_T2V,
+  ESSENTIA_WAN22_I2V,
 ]
