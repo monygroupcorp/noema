@@ -83,7 +83,7 @@ Any exceptions require thorough documentation, performance testing, and architec
 While this North Star document focuses on architectural principles, the tactical implementation of the StationThis Web frontend is governed by the **Frontend Interface Specification** document located at:
 
 ```
-/src/platforms/web/FRONTEND_DESIGN_SPEC.md
+/docs/_archive/FRONTEND_DESIGN_SPEC.md
 ```
 
 This specification serves as the source of truth for:
