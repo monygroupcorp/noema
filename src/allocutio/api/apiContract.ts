@@ -995,6 +995,18 @@ const RevenueReportSchema: JsonSchema = {
   required: ['asOf', 'trailingUsdRevenue', 'band', 'activeConditionalLicenses'],
 }
 
+const CogsReportSchema: JsonSchema = {
+  type: 'object',
+  description: 'Admin COGS report: trailing-window rollup of per-job costUsd off wide_events — the read-only pair to the revenue report.',
+  properties: {
+    asOf: { type: 'string', description: 'ISO timestamp the trailing window was computed against.' },
+    sinceIso: { type: 'string', description: "ISO timestamp of the trailing window's cutoff (same window the revenue report uses)." },
+    costUsd: { type: 'number', description: 'Trailing-window COGS, whole USD (pod compute spend, per-job costUsd summed).' },
+    count: { type: 'number', description: 'Job count in the trailing window (includes jobs with no cost telemetry, counted at 0).' },
+  },
+  required: ['asOf', 'sinceIso', 'costUsd', 'count'],
+}
+
 export const API_CONTRACT: ApiContract = {
   version: 'v1',
   routes: [
@@ -1116,6 +1128,13 @@ export const API_CONTRACT: ApiContract = {
       summary: 'Admin: company-wide trailing-12mo USD revenue vs the tightest active conditional-license cap (the tripwire). Platform-admin only.',
       auth: true,
       response: RevenueReportSchema,
+    },
+    {
+      method: 'GET',
+      path: '/admin/cogs',
+      summary: 'Admin: trailing-window rollup of per-job costUsd off wide_events — the read-only pair to the revenue report. Platform-admin only.',
+      auth: true,
+      response: CogsReportSchema,
     },
     {
       method: 'POST',

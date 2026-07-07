@@ -850,6 +850,11 @@ async function main(): Promise<void> {
   // report was filed. Assembles + preserves; live NCMEC submission needs the ESP account.
   const csamReviewReporter = compliance?.configureCsamReviewReporter({ fetcher: httpMediaFetcher })
 
+  // Wide-event store (per-job telemetry incl. costUsd) — constructed here (ahead of its other
+  // consumers below) so the admin COGS report can read off the SAME instance analyticsListener
+  // writes through.
+  const wideStore = new WideEventStore(mongo.db(DB_NAME))
+
   const crystalApi = new CrystalApi({
     pricer,
     depositAddress: CREDIT_VAULT,
@@ -888,6 +893,9 @@ async function main(): Promise<void> {
     // + the last persisted band. Read-only; the scheduled evaluator (below) owns alerts/persistence.
     redituum: ring.redituum,
     tripwireBand: ring.tripwireBand,
+    // Admin COGS report (admin workspace, credits-only/read-only): trailing-window rollup of
+    // per-job costUsd off the same wide-event store the analytics listener writes through.
+    costReport: wideStore,
     modelImporter,
     // Only the write + presence slices — never the resolve-capable store (ASYMMETRY).
     ...(secretarium ? { secretWriter: secretarium, secretPresence: secretarium } : {}),
@@ -1181,7 +1189,6 @@ async function main(): Promise<void> {
   app.use('/v1/mcp', createMcpRouter({ api: crystalApi, identity: apiResolver }))
 
   const INTERNAL_SECRET = process.env.INTERNAL_SECRET
-  const wideStore = new WideEventStore(mongo.db(DB_NAME))
   startAnalyticsListener(wideStore)
 
   // Idle-pod reaper — terminate warm pods that sat idle past their warmUntil
