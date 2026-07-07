@@ -786,6 +786,60 @@ export const INTELLA_IMPRESSTATION_KLEIN: Intella = {
   natum: new Date('2026-06-30'),
 }
 
+// ── LTX 2.3 · video (T2V + I2V) ───────────────────────────────────────────────
+// The all-in-one bf16 transformer+VAE bundle (46.15GB) — CheckpointLoaderSimple loads it directly
+// (no separate VAE Intella needed, unlike the flux/sd15 split). familia 'ltx' set per the sd15/flux
+// pattern even though v1 has no LoRA path (INTELLA_LTX_23_DISTILLED_LORA is a future add) — keeps the
+// compat key ready for when a LoRA lands. License: LTX-2 Community (commercial free under $10M ARR).
+export const INTELLA_LTX_23_DISTILLED: Intella = {
+  id: 'intella.ltx-2.3-distilled',
+  nomen: 'LTX 2.3 22B distilled (bf16, transformer+VAE bundle)',
+  license: 'ltx-2-community',       // LTX-2 Community License — commercial use free under $10M ARR
+  commercialUse: 'conditional',
+  genus: 'model',
+  architectura: 'transformer',
+  familia: 'ltx',
+  parametri: 22_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-distilled.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Lightricks/LTX-2.3', branch: 'main', filename: 'ltx-2.3-22b-distilled.safetensors' },
+    },
+  ],
+  dest: 'checkpoints/ltx-2.3-22b-distilled.safetensors',
+  sizeGb: 46.15,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-07-07'),
+}
+
+// The Gemma-3-12B text encoder LTX-2.3 uses (LTXAVTextEncoderLoader, ComfyUI-native since 0.14).
+// A SEPARATE weight from the checkpoint bundle above — 2 Intellae total for the LTX fundament.
+export const INTELLA_GEMMA_3_12B: Intella = {
+  id: 'intella.gemma-3-12b',
+  nomen: 'Gemma 3 12B IT (bf16, LTX-2.3 text encoder)',
+  license: 'gemma',                 // Google Gemma license (permissive, some use restrictions)
+  commercialUse: 'yes',
+  genus: 'embedding',
+  architectura: 'transformer',
+  parametri: 12_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/ltx-2', branch: 'main', filename: 'split_files/text_encoders/gemma_3_12B_it.safetensors' },
+    },
+  ],
+  dest: 'text_encoders/gemma_3_12B_it.safetensors',
+  sizeGb: 24.4,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-07-07'),
+}
+
 export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_FLUX_SCHNELL,
   INTELLA_FLUX_VAE,
@@ -815,4 +869,6 @@ export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_HEARTMULA_GEN,
   INTELLA_HEARTMULA_3B,
   INTELLA_HEARTCODEC,
+  INTELLA_LTX_23_DISTILLED,
+  INTELLA_GEMMA_3_12B,
 ]
