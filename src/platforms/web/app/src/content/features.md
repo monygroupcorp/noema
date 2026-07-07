@@ -81,15 +81,15 @@ This isn't a chatbot wrapper. It's a production workspace for people who build w
 
 ---
 
-### 7. Anonymous Credits (Bursa)
+### 7. Anonymous Credits
 
 **Headline:** Pay without an identity.
 
-**Body:** Bursa credits are spent via Groth16 zero-knowledge proofs. You prove you have credits; we verify the math and dispatch your compute. We cannot link your spend to your account, your prior sessions, or any identity. The platform receives: a valid proof, a credit amount. Nothing else.
+**Body:** Purse credits are spent via Groth16 zero-knowledge proofs. You prove you have credits; we verify the math and dispatch your compute. We cannot link your spend to your account, your prior sessions, or any identity. The platform receives: a valid proof, a credit amount. Nothing else.
 
 No other AI platform has this. Venice's "crypto = private" angle does the opposite — a wallet address is a permanent, publicly traceable identity on-chain.
 
-**CTA:** How Bursa works →
+**CTA:** How purse works →
 
 ---
 
@@ -110,7 +110,7 @@ No other AI platform has this. Venice's "crypto = private" angle does the opposi
 | Prompts reach our servers | Yes | No | No |
 | We know which model you used | Yes | No | No |
 | Content logged | No | N/A — never received | N/A |
-| Credit trail anonymous | Optional (Bursa) | Optional (Bursa) | Optional (Bursa) |
+| Credit trail anonymous | Optional (purse) | Optional (purse) | Optional (purse) |
 | Compute provider in trust boundary | Yes | Yes | No — confidential compute |
 | Hardware-verifiable in browser | No | No | Yes — attestation |
 | Web search, memory | Yes | Yes | Yes |

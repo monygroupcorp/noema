@@ -11,7 +11,7 @@ We built the architecture so that private compute sessions are **technically imp
 
 - In a private (TEE) session, your prompts, outputs, and model selection never reach our servers. We see: a session opened, GPU-hours consumed, a session ended.
 - We do not run Google Analytics or any third-party tracking.
-- If you use Bursa anonymous credits, we cannot link your spend to an identity. The billing is a zero-knowledge proof.
+- If you use purse anonymous credits, we cannot link your spend to an identity. The billing is a zero-knowledge proof.
 - We do not train on your data.
 
 The long version follows.
@@ -37,7 +37,7 @@ For GDPR purposes, [ENTITY NAME] is the data controller for account and billing 
 | Account ID (animaId) | Session and billing association | Until account deletion + 30 days |
 | Wallet address (if crypto sign-up) | Payment rail association | Until account deletion + 30 days |
 
-You can use anonymous credits (Bursa) without an account. If you do, we hold none of the above.
+You can use anonymous credits without an account. If you do, we hold none of the above.
 
 ### 2b. Billing and payment data
 
@@ -45,7 +45,7 @@ We do not store payment card numbers. Credit card payments are processed by [PAY
 
 Crypto deposits: we screen incoming deposit addresses against OFAC sanctions lists. This is a legal obligation, not surveillance. We retain the deposit address and transaction ID for compliance record-keeping (see Section 6).
 
-Anonymous credit (Bursa): a Bursa token is a Groth16 zero-knowledge proof. We verify the proof and dispense compute; we cannot link the spend to your identity or prior transactions. We retain: that a proof was verified, the credit amount, the timestamp.
+Anonymous credit: a purse token is a Groth16 zero-knowledge proof. We verify the proof and dispense compute; we cannot link the spend to your identity or prior transactions. We retain: that a proof was verified, the credit amount, the timestamp.
 
 ### 2c. Session metadata (all session types)
 
@@ -157,7 +157,7 @@ We run content classifiers and hash-matching against known CSAM databases at the
 | Prompt / output content (non-TEE sessions) | Not retained after request |
 | OFAC screening records | 5 years (legal requirement) |
 | CSAM reporting records | As required by law |
-| Bursa ZK proof records | Proof verification timestamp + credit amount, 90 days |
+| Purse ZK proof records | Proof verification timestamp + credit amount, 90 days |
 
 ---
 
