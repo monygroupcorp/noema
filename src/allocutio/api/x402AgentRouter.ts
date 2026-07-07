@@ -15,6 +15,7 @@
 // catch-all 403); a run failure does NOT settle (the payer keeps their USDC).
 
 import express, { type Router, type Request, type Response } from 'express'
+import { z } from 'zod'
 import type { LegatusStore } from '../../types/legatus.js'
 import type { Modorum, Modus } from '../../types/modus.js'
 import type { X402Facilitator, X402LogStore } from '../../types/x402.js'
@@ -22,6 +23,13 @@ import type { Run } from './types.js'
 import type { RunEvent } from './runEvents.js'
 import { aditusToJsonSchema } from './aditusToJsonSchema.js'
 import { buildQuote, buildPaymentRequirements, acceptFor, type X402Config } from '../../crystal/x402Pricing.js'
+
+// Runtime validation for the untyped request inputs (§hardening). Narrow/additive: `modusId`
+// just needs to be a non-empty string when present; `inputs` just needs to be a plain object
+// (not an array/primitive) when present — its KEYS are dynamic per-Modus
+// (`aditusToJsonSchema`-driven) and validated downstream by the run itself, not here.
+const modusIdSchema = z.string().min(1)
+const inputsSchema = z.record(z.string(), z.unknown())
 
 export interface X402AgentDeps {
   legati: Pick<LegatusStore, 'findByAgentId'>
@@ -53,6 +61,12 @@ export interface X402AgentDeps {
   publicBase?: string
   /** `X402_ENABLED`. When false the endpoints 404 (feature-flagged like the legacy). */
   enabled?: boolean
+  /** Optional per-route rate-limit middleware (index.ts wires express-rate-limit; tests omit). */
+  rateLimiters?: {
+    /** Guards the unauthenticated discover/quote GET. The POST run is already gated by
+     *  on-chain payment verification — a stronger control — and is intentionally NOT limited. */
+    quote?: express.RequestHandler
+  }
 }
 
 function fail(res: Response, status: number, code: string, message: string): void {
@@ -62,6 +76,8 @@ function fail(res: Response, status: number, code: string, message: string): voi
 export function createX402AgentRouter(deps: X402AgentDeps): Router {
   const base = (deps.publicBase ?? 'https://noema.art').replace(/\/$/, '')
   const router = express.Router({ mergeParams: true })
+  const noop: express.RequestHandler = (_req, _res, next) => next()
+  const quoteLimiter = deps.rateLimiters?.quote ?? noop
 
   /** Resolve the agent + its spell modus, or write the appropriate error. */
   async function resolve(req: Request, res: Response): Promise<{ agentId: string; animaId: string; ownerAddress: string; payoutAddress: string; modus: Modus } | null> {
@@ -102,7 +118,11 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
   }
 
   // ── GET — discover: input schema + quote + payment requirements ───────────────
-  router.get('/agents/:agentId/spell/:name', async (req: Request, res: Response): Promise<void> => {
+  router.get('/agents/:agentId/spell/:name', quoteLimiter, async (req: Request, res: Response): Promise<void> => {
+    if (req.query.modusId !== undefined) {
+      const modusIdCheck = modusIdSchema.safeParse(req.query.modusId)
+      if (!modusIdCheck.success) { fail(res, 400, 'input.malformed', 'modusId must be a non-empty string'); return }
+    }
     const r = await resolve(req, res)
     if (!r) return
     const name = String(req.params.name)
@@ -121,6 +141,14 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
   // ── POST — run: x402-gated execution ──────────────────────────────────────────
   router.post('/agents/:agentId/spell/:name', async (req: Request, res: Response): Promise<void> => {
     try {
+      if (req.body?.modusId !== undefined) {
+        const modusIdCheck = modusIdSchema.safeParse(req.body.modusId)
+        if (!modusIdCheck.success) { fail(res, 400, 'input.malformed', 'modusId must be a non-empty string'); return }
+      }
+      if (req.body?.inputs !== undefined) {
+        const inputsCheck = inputsSchema.safeParse(req.body.inputs)
+        if (!inputsCheck.success) { fail(res, 400, 'input.malformed', 'inputs must be a plain object'); return }
+      }
       const r = await resolve(req, res)
       if (!r) return
       const name = String(req.params.name)
