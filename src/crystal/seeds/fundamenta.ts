@@ -415,6 +415,57 @@ export const FUNDAMENTUM_LTX_COMFYUI: Fundamentum = {
   mutatum: new Date('2026-07-07'),
 }
 
+/**
+ * Wan2.2 T2V · ComfyUI — the two-model MoE stack (high-noise + low-noise unets) plus the shared
+ * umt5 text encoder + Wan2.1 VAE. Render-proven at 480x480x33f under --lowvram (21.5GB); house-res
+ * 832x544x81 spills past that, hence vramGb:48 for the production pod.
+ */
+export const FUNDAMENTUM_WAN22_T2V_COMFYUI: Fundamentum = {
+  id: 'wan22-t2v-comfyui',
+  nomen: 'Wan2.2 T2V · ComfyUI',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'ComfyUI',
+  intellae: [
+    { id: 'intella.wan22-t2v-high', role: 'unet_high' },
+    { id: 'intella.wan22-t2v-low',  role: 'unet_low' },
+    { id: 'intella.umt5-xxl',       role: 'text_encoder' },
+    { id: 'intella.wan21-vae',      role: 'vae' },
+  ],
+  // Proven 21.5GB at 480x480x33f under --lowvram; house-res 832x544x81 will spill past that.
+  vramGb: 48,
+  canonica: true,
+  natum: new Date('2026-07-07'),
+  mutatum: new Date('2026-07-07'),
+}
+
+/**
+ * Wan2.2 I2V · ComfyUI — same two-model MoE shape as T2V, but the low-VRAM latent is seeded via
+ * `WanImageToVideo` from a `LoadImage` start frame instead of an empty latent.
+ */
+export const FUNDAMENTUM_WAN22_I2V_COMFYUI: Fundamentum = {
+  id: 'wan22-i2v-comfyui',
+  nomen: 'Wan2.2 I2V · ComfyUI',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'ComfyUI',
+  intellae: [
+    { id: 'intella.wan22-i2v-high', role: 'unet_high' },
+    { id: 'intella.wan22-i2v-low',  role: 'unet_low' },
+    { id: 'intella.umt5-xxl',       role: 'text_encoder' },
+    { id: 'intella.wan21-vae',      role: 'vae' },
+  ],
+  // Proven 21.5GB at 480x480x33f under --lowvram; house-res 832x544x81 will spill past that.
+  vramGb: 48,
+  canonica: true,
+  natum: new Date('2026-07-07'),
+  mutatum: new Date('2026-07-07'),
+}
+
 /** All canonical fundamenta — seeded on boot (parity with CANONICAL_ESSENTIAE). */
 export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_FLUX_COMFYUI,
@@ -434,4 +485,6 @@ export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_HUNYUAN3D_PYTORCH,
   FUNDAMENTUM_AITOOLKIT_TRAINING,
   FUNDAMENTUM_LTX_COMFYUI,
+  FUNDAMENTUM_WAN22_T2V_COMFYUI,
+  FUNDAMENTUM_WAN22_I2V_COMFYUI,
 ]
