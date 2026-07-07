@@ -13,7 +13,19 @@ import { MemoryLegatus } from '../../../../src/crystal/MemoryLegatus.js'
 import { MemorySignorum } from '../../../../src/ledger/MemorySignorum.js'
 import { MemoryModorum } from '../../../../src/execution/MemoryModorum.js'
 import { CAMEL_TEMPLATE_MODUS } from '../../../../src/crystal/seeds/camel.js'
+import { _clearCache } from '../../../../src/crystal/agentCardFetcher.js'
 import { makeKey, camelClaims, signES256, fakeJwksFetch, ISS, JWKS_URL } from './_jwksTestKit.js'
+
+/** A `globalThis.fetch`-shaped stub for the agent-card fetch (`GET .../agents/:tokenId/card`).
+ *  Defaults to a bare 404 (no card) so every test that doesn't care about the NFT-image
+ *  feature stays hermetic — no real network call ever leaves the process. */
+function stubCardFetch(card: unknown | null): typeof fetch {
+  return (async () => ({
+    ok: card !== null,
+    status: card !== null ? 200 : 404,
+    json: async () => card,
+  })) as unknown as typeof fetch
+}
 
 const TREASURY: TreasuryConfig = {
   treasuryId: 'camelcabal-1',
@@ -25,7 +37,10 @@ const TREASURY: TreasuryConfig = {
   status: 'active',
 }
 
-async function app() {
+async function app(opts: { card?: unknown | null } = {}) {
+  _clearCache()
+  globalThis.fetch = stubCardFetch(opts.card ?? null)
+
   const kit = makeKey()
   const issuers = new MemoryIssuer()
   await issuers.upsert({ issuerId: ISS, name: 'CAMEL', jwksUrl: JWKS_URL })
@@ -56,7 +71,7 @@ async function app() {
     balanceOf: (animaId) => signorum.balance({ animaId }),
     publicBase: 'https://noema.art',
   }))
-  return { server, kit, legati, signorum }
+  return { server, kit, legati, signorum, modorum }
 }
 
 test('AUTH-SHADOW PROBE (route): garbage-signature ES256 Bearer → 401 INVALID_ASSERTION, not 403', async () => {
@@ -153,4 +168,37 @@ test('revoke happy path (correct token) then idempotent second revoke', async ()
   // Second revoke is idempotent.
   const again = await request(server).post(`/api/v1/sessions/${id}/revoke`).query({ token: stored!.revokeToken }).send({})
   assert.equal(again.status, 200)
+})
+
+test('provision with tokenId + a resolvable agent card → bakes the real NFT image/name into the workspace', async () => {
+  const { server, kit, legati, modorum } = await app({
+    card: { profile: { name: 'Camel #42', description: 'A camel.', image: 'https://cards.example/camel42.png' } },
+  })
+  const res = await request(server)
+    .post('/api/v1/treasury/camelcabal-1/agents')
+    .set('authorization', `Bearer ${signES256(kit, camelClaims())}`)
+    .send({})
+  assert.equal(res.status, 202)
+
+  const legatus = await legati.findById(res.body.agentAccountId)
+  assert.ok(legatus)
+  const ws = await modorum.find(legatus!.workspaceModusId!)
+  assert.ok(ws)
+  assert.equal(ws!.aditus.input_second_image.default, 'https://cards.example/camel42.png')
+  assert.equal(ws!.nomen, 'Camel #42')
+})
+
+test('provision with tokenId + a missing/failed agent card → provisions cleanly with no image (unchanged)', async () => {
+  const { server, kit, legati, modorum } = await app({ card: null })
+  const res = await request(server)
+    .post('/api/v1/treasury/camelcabal-1/agents')
+    .set('authorization', `Bearer ${signES256(kit, camelClaims())}`)
+    .send({})
+  assert.equal(res.status, 202)
+
+  const legatus = await legati.findById(res.body.agentAccountId)
+  assert.ok(legatus)
+  const ws = await modorum.find(legatus!.workspaceModusId!)
+  assert.ok(ws)
+  assert.equal(ws!.aditus.input_second_image.default, '')
 })
