@@ -4,6 +4,8 @@ import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type DepositConfig } from '../lib/api';
 import { connectWallet } from '../lib/wallet';
+import { Hemisphere, Meter } from './IdentityMeter';
+import { BuyCreditsModal } from './BuyCreditsModal';
 
 // Credit packs — pay-as-you-go top-ups anchored on a USD price. The credit amount
 // is computed LIVE from the deposit config (pointsPerUsd × funding rate), so it's the
@@ -18,32 +20,6 @@ const PACK_USD = [
 const NATIVE_ETH = '0x0000000000000000000000000000000000000000';
 const fmt = (n: number) => n.toLocaleString('en-US');
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
-
-type Sees = 'nothing' | 'pseudonym' | 'you';
-
-// Identity-axis hemisphere — same glyph grammar as the canvas visibility meter,
-// but here it reads WHO we learn you are, not what we see of the work:
-//   nothing* = dashed ring (slate) · a pseudonym = plain ring (slate) · you = lit (gold).
-function Hemisphere({ sees }: { sees: Sees }) {
-  const lit = sees === 'you';
-  const stroke = lit ? '#d9be8f' : '#7d8aa6';
-  return (
-    <svg className="fund-hemi" viewBox="0 0 24 24" aria-hidden="true">
-      {lit && <path d="M12,2 A10 10 0 0 0 12,22 Z" fill="#d9be8f" />}
-      <circle cx="12" cy="12" r="10" fill="none" stroke={stroke} strokeWidth="1.4"
-        strokeDasharray={sees === 'nothing' ? '2.4 2.4' : undefined} />
-    </svg>
-  );
-}
-
-function Meter({ sees, label }: { sees: Sees; label: string }) {
-  return (
-    <div className={`fund-meter sees-${sees}`}>
-      <Hemisphere sees={sees} />
-      <span className="fm-val">sees: {label}</span>
-    </div>
-  );
-}
 
 // Inline alert glyph (kept local so we don't touch the shared icon registry).
 function WarnIc() {
@@ -63,12 +39,14 @@ export function Funding() {
   // Live ETH → points quote for the onchain rail.
   const [eth, setEth] = useState('');
   const [quote, setQuote] = useState<{ points?: string; usd?: string; err?: string; busy?: boolean }>({});
-  // Onchain rail: the connected wallet address (we see an address, not a person) + copy state
-  // for the deposit address, so the send-ETH path is completable in-app. We never send the
-  // transaction ourselves (no custody of keys) — the user sends from their own wallet.
+  // Onchain rail: the connected wallet address (we see an address, not a person). Build+send
+  // (BuyCreditsModal) is the primary path — it builds the CreditVault deposit tx and sends it
+  // via the user's own wallet in one signature, no custody change. Copy-the-address stays as
+  // a fallback for wallets/flows the modal can't prompt.
   const [wallet, setWallet] = useState<string | null>(null);
   const [walletErr, setWalletErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [buyOpen, setBuyOpen] = useState(false);
 
   async function connect() {
     setWalletErr(null);
@@ -216,42 +194,55 @@ export function Funding() {
               </div>
             </div>
 
-            {/* Live deposit — send ETH to the CreditVault; points credit on confirmation. */}
+            {/* Primary path — build+send the CreditVault deposit tx from the connected wallet
+                (one signature, no custody change). See BuyCreditsModal for the full ledger flow. */}
             <div className="fund-guide">
               <div className="fund-guide-h">
-                <Ic name="wallet" /> Send ETH to the CreditVault — points credit on confirmation
+                <Ic name="wallet" /> Buy credits — build and send the deposit yourself, one signature
               </div>
-              <div className="meta-line">
-                <span>deposit address</span>
-                <span className="v mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--s2)' }}>
-                  <span title={cfg?.depositAddress}>{cfg ? shortAddr(cfg.depositAddress) : '…'}</span>
-                  {cfg && <button className="btn-ghost sm" onClick={copyDepositAddr}>{copied ? 'copied ✓' : 'copy'}</button>}
-                </span>
+              <div style={{ marginTop: 'var(--s3)' }}>
+                <button className="btn" onClick={() => setBuyOpen(true)}>
+                  <Ic name="wallet" /> Buy with wallet <Ic name="arrow-right" />
+                </button>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s3)', marginTop: 'var(--s3)' }}>
-                <input
-                  className="inp mono"
-                  style={{ maxWidth: 120 }}
-                  placeholder="0.01"
-                  inputMode="decimal"
-                  value={eth}
-                  onChange={(e) => setEth(e.target.value)}
-                />
-                <span className="mono">ETH →</span>
-                <span className="mono">
-                  {quote.busy ? '…'
-                    : quote.err ? 'quote failed'
-                    : quote.points ? `${fmt(Number(quote.points))} credits`
-                    : '—'}
-                </span>
-              </div>
-              {quote.usd && (
-                <div className="fund-guide-h" style={{ marginTop: 'var(--s2)' }}>
-                  ≈ ${quote.usd} · {cfg?.defaultFundingRatePct}% funding rate · informational, the deposit re-prices at confirmation
+
+              {/* Fallback — hand-copy the deposit address for wallets the modal can't prompt. */}
+              <details className="fund-fallback" style={{ marginTop: 'var(--s4)' }}>
+                <summary className="fund-guide-h">prefer to send manually?</summary>
+                <div className="meta-line" style={{ marginTop: 'var(--s3)' }}>
+                  <span>deposit address</span>
+                  <span className="v mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--s2)' }}>
+                    <span title={cfg?.depositAddress}>{cfg ? shortAddr(cfg.depositAddress) : '…'}</span>
+                    {cfg && <button className="btn-ghost sm" onClick={copyDepositAddr}>{copied ? 'copied ✓' : 'copy'}</button>}
+                  </span>
                 </div>
-              )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s3)', marginTop: 'var(--s3)' }}>
+                  <input
+                    className="inp mono"
+                    style={{ maxWidth: 120 }}
+                    placeholder="0.01"
+                    inputMode="decimal"
+                    value={eth}
+                    onChange={(e) => setEth(e.target.value)}
+                  />
+                  <span className="mono">ETH →</span>
+                  <span className="mono">
+                    {quote.busy ? '…'
+                      : quote.err ? 'quote failed'
+                      : quote.points ? `${fmt(Number(quote.points))} credits`
+                      : '—'}
+                  </span>
+                </div>
+                {quote.usd && (
+                  <div className="fund-guide-h" style={{ marginTop: 'var(--s2)' }}>
+                    ≈ ${quote.usd} · {cfg?.defaultFundingRatePct}% funding rate · informational, the deposit re-prices at confirmation
+                  </div>
+                )}
+              </details>
             </div>
           </section>
+
+          <BuyCreditsModal open={buyOpen} onClose={() => setBuyOpen(false)} />
 
           {/* Row 3 · Card — the fastest path; it sees you. */}
           <section className="fund-row">
