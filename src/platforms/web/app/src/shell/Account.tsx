@@ -121,7 +121,7 @@ export function Account() {
           <div className="am-links">
             <Link to="/teams" onClick={() => setOpen(false)}><Ic name="users" /> Teams <span className="meta">co-own work</span></Link>
             <Link to="/sponsorships" onClick={() => setOpen(false)}><Ic name="hand-coins" /> Sponsorships <span className="meta">top up others</span></Link>
-            {admin && <Link to="/admin/review" onClick={() => setOpen(false)}><Ic name="eye" /> Feed review <span className="meta">moderation</span></Link>}
+            {admin && <Link to="/admin" onClick={() => setOpen(false)}><Ic name="layout-grid" /> Admin workspace <span className="meta">review · revenue · COGS</span></Link>}
           </div>
           {signedIn ? (
             <>

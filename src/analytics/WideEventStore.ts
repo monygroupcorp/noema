@@ -47,4 +47,16 @@ export class WideEventStore {
     }
     return { revenue, count: docs.length, failed }
   }
+
+  /** COGS rollup (admin workspace) — sums `costUsd` across jobs since the cutoff via a real
+   *  Mongo aggregation (costUsd is a plain number, unlike impetus's bigint-as-string). Docs
+   *  missing costUsd (no pod telemetry) contribute 0, not a skip, so `count` still reflects
+   *  the full windowed job volume. */
+  async sumCostUsd(since: Date): Promise<{ costUsd: number; count: number }> {
+    const [row] = await this.col.aggregate<{ costUsd: number; count: number }>([
+      { $match: { ts: { $gte: since.toISOString() } } },
+      { $group: { _id: null, costUsd: { $sum: { $ifNull: ['$costUsd', 0] } }, count: { $sum: 1 } } },
+    ]).toArray()
+    return { costUsd: row?.costUsd ?? 0, count: row?.count ?? 0 }
+  }
 }

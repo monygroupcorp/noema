@@ -40,6 +40,7 @@ import { Landing } from './screens/Landing';
 import { Ceremony } from './screens/Ceremony';
 import { Feed } from './screens/Feed';
 import { Review } from './screens/Review';
+import { AdminWorkspace } from './screens/AdminWorkspace';
 import { Doc } from './screens/Doc';
 import { Stub } from './screens/Stub';
 import aboutMd from './content/about.md?raw';
@@ -81,6 +82,9 @@ export function App() {
           the admin entry — the component self-adjusts on me.admin. */}
       <Route path="/review" element={<Review />} />
       <Route path="/admin/review" element={<Review />} />
+      {/* Admin workspace hub (noema-011): links the review queue + read-only revenue/COGS
+          cards. me.admin-gated client-side; every report re-gates server-side regardless. */}
+      <Route path="/admin" element={<AdminWorkspace />} />
       <Route path="/projects" element={<Projects />} />
       <Route path="/projects/:id" element={<ProjectHub />} />
       <Route path="/run" element={<Run />} />

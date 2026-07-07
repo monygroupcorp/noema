@@ -75,6 +75,9 @@ export function Rail() {
         {admin && (
           <Fragment key="admin">
             <div className="lbl">Admin</div>
+            <NavLink to="/admin" end className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+              <span className="ico"><Ic name="layout-grid" /></span> Workspace
+            </NavLink>
             <NavLink to="/admin/review" className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
               <span className="ico"><Ic name="eye" /></span> Feed review
             </NavLink>

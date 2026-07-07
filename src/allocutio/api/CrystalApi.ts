@@ -71,6 +71,7 @@ import { ownerKeyOf } from '../../crystal/ownerKey.js'
 import { isCatalogEligible, classifyModelLicense, activeConditionalLicenses, bindingCapUsd, type CommercialVerdict } from '../../crystal/modelLicense.js'
 import { band, bindingCapMicroUsd, type ThresholdBand, type TripwireBandStore } from '../../crystal/licenseTripwire.js'
 import type { Redituum } from '../../types/reditus.js'
+import type { WideEventStore } from '../../analytics/WideEventStore.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 import { provenanceHash } from '../../crystal/provenance.js'
 import { rarityReport, type RarityReport } from '../../crystal/rarityReport.js'
@@ -168,6 +169,9 @@ export interface CrystalApiDeps {
   /** The license-tripwire's persisted band — surfaced in `revenueReport` so the admin sees the
    *  last edge-triggered band alongside the live figure. Absent → lastBand omitted. */
   tripwireBand?: Pick<TripwireBandStore, 'last'>
+  /** Wide-event COGS rollup — backs the admin `cogsReport` (trailing-window spend + job count,
+   *  the read-only pair to `revenueReport`). Absent → the report is unavailable. */
+  costReport?: Pick<WideEventStore, 'sumCostUsd'>
 }
 
 /** Inputs to start a Collection (a Collectio): a base modus expanded over a Tractus[] grid. */
@@ -1647,6 +1651,27 @@ export class CrystalApi {
     }
   }
 
+  /**
+   * ADMIN COGS report (platform-admin only) — the read-only pair to `revenueReport`: a
+   * trailing-window rollup of per-job `costUsd` off `wide_events` (admin workspace, credits-only
+   * scope — no payout/disbursement/tax). Uses the SAME trailing-12mo window as `revenueReport`
+   * for a like-for-like pairing. A single scalar + count in v1 — no per-gpuType/per-model split.
+   */
+  async cogsReport(auctor: AuctorKey, now: Date = new Date()): Promise<CogsReport> {
+    this._assertPlatformAdmin(auctor)
+    const costReport = this.deps.costReport
+    if (!costReport) throw Errors.reportUnavailable()
+    const since = new Date(now)
+    since.setFullYear(since.getFullYear() - 1)
+    const { costUsd, count } = await costReport.sumCostUsd(since)
+    return {
+      asOf: now.toISOString(),
+      sinceIso: since.toISOString(),
+      costUsd,
+      count,
+    }
+  }
+
   /** Platform-admin gate: only the platform identity (PLATFORM_ANIMA_ID) may perform the op. */
   private _assertPlatformAdmin(auctor: AuctorKey): void {
     if (!('animaId' in auctor) || auctor.animaId !== PLATFORM_ANIMA_ID) {
@@ -2340,6 +2365,21 @@ export interface RevenueReport {
   activeConditionalLicenses: string[]
   /** The last band the scheduled evaluator alerted/persisted, or null before its first run. */
   lastAlertedBand: ThresholdBand | null
+}
+
+/**
+ * Admin COGS report (`GET /v1/admin/cogs`) — the read-only pair to `RevenueReport`: a
+ * trailing-window rollup of per-job `costUsd` off `wide_events`. Single scalar + count in v1.
+ */
+export interface CogsReport {
+  /** ISO timestamp the trailing window was computed against. */
+  asOf: string
+  /** ISO timestamp the trailing window's cutoff (same window `revenueReport` uses). */
+  sinceIso: string
+  /** Trailing-window COGS, whole USD (pod compute spend, per-job `costUsd` summed). */
+  costUsd: number
+  /** Job count in the trailing window (includes jobs with no cost telemetry, counted at 0). */
+  count: number
 }
 
 export interface MeView {
