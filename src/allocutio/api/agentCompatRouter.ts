@@ -22,6 +22,7 @@ import type { AgentProvisioner, TreasuryConfig, ProvisionInput } from '../../cry
 import type { LegatusStore } from '../../types/legatus.js'
 import { ApiError } from './errors.js'
 import { IMPETUS_USD_RATE } from '../../ledger/rates.js'
+import { fetchAgentCard } from '../../crystal/agentCardFetcher.js'
 
 /** impetus points → a USD string (2dp), matching the legacy `pointsToUsd`. */
 function pointsToUsd(points: bigint): string {
@@ -116,6 +117,20 @@ export function createAgentCompatRouter(deps: AgentCompatDeps): Router {
         scope,
         ...(sessionExpiresAt ? { sessionExpiresAt } : {}),
       }
+
+      // 7b. Best-effort NFT presentation: fetch the issuer's agent card and bake its
+      //     image/name/description into the workspace. Never blocks provisioning —
+      //     `fetchAgentCard` swallows all failures and resolves `null`.
+      if (input.tokenId) {
+        const issuerDomain = treasury.issuerId.replace(/^https?:\/\//, '')
+        const card = await fetchAgentCard(issuerDomain, input.tokenId)
+        if (card) {
+          if (card.profile.image) input.nftImageUrl = card.profile.image
+          if (card.profile.name) input.nftName = card.profile.name
+          if (card.profile.description) input.nftDescription = card.profile.description
+        }
+      }
+
       const outcome = await deps.provisioner.provision(treasuryId, input)
       if (!outcome.ok) return fail(res, outcome.httpStatus, outcome.code, outcome.message)
 
