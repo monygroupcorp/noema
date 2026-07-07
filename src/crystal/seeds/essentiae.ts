@@ -806,6 +806,90 @@ export const ESSENTIA_HUNYUAN3D: Essentia = {
   mutatum: new Date('2026-06-12'),
 }
 
+// LTX 2.3 — text to video. categoria 'video': the video seam is warm end-to-end (SaveVideo
+// collection, <video> delivery already shipped). Shares the ltx-comfyui fundament with the I2V
+// essentia below. House resolution 832x544, 81 frames, 16fps baked into the template.
+export const ESSENTIA_LTX_T2V: Essentia = {
+  id: 'ltx-t2v',
+  nomen: 'LTX 2.3 — text to video',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'video',
+
+  fundamentumId: 'ltx-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:     { type: 'text',  required: true,  description: 'Text prompt for video generation' },
+    negative:   { type: 'text',  required: false, description: 'Negative prompt' },
+    frames:     { type: 'int',   required: false, default: 81, description: 'Number of frames' },
+    input_seed: { type: 'int',   required: false,              description: 'Random seed — omit to shuffle' },
+  },
+
+  exitus: {
+    video: { type: 'video', description: 'Generated video' },
+  },
+
+  workflowTemplate: 'ltx-t2v',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: {
+    batchSize: 1,
+    seedStrategy: 'shuffle',
+    seedPlaceholder: 88888888,
+    privateMode: false,
+    vramGb: 48,
+  },
+
+  natum: new Date('2026-07-07'),
+  mutatum: new Date('2026-07-07'),
+}
+
+// LTX 2.3 — image to video. Same fundament + templates family as T2V; the graph swaps in
+// LoadImage -> LTXVImgToVideoConditionOnly to condition the first frames on the source image.
+export const ESSENTIA_LTX_I2V: Essentia = {
+  id: 'ltx-i2v',
+  nomen: 'LTX 2.3 — image to video',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'video',
+
+  fundamentumId: 'ltx-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:     { type: 'text',  required: true,  description: 'Text prompt for video generation' },
+    image:      { type: 'image', required: true,  description: 'Source image to animate' },
+    negative:   { type: 'text',  required: false, description: 'Negative prompt' },
+    frames:     { type: 'int',   required: false, default: 81, description: 'Number of frames' },
+    input_seed: { type: 'int',   required: false,              description: 'Random seed — omit to shuffle' },
+  },
+
+  exitus: {
+    video: { type: 'video', description: 'Generated video' },
+  },
+
+  workflowTemplate: 'ltx-i2v',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: {
+    batchSize: 1,
+    seedStrategy: 'shuffle',
+    seedPlaceholder: 88888888,
+    privateMode: false,
+    vramGb: 48,
+  },
+
+  natum: new Date('2026-07-07'),
+  mutatum: new Date('2026-07-07'),
+}
+
 export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_RUNMAKE_FLUX_SCHNELL,
   ESSENTIA_RUNMAKE_SD15,
@@ -826,4 +910,6 @@ export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_SHOTVL,
   ESSENTIA_HEARTMULA,
   ESSENTIA_HUNYUAN3D,
+  ESSENTIA_LTX_T2V,
+  ESSENTIA_LTX_I2V,
 ]
