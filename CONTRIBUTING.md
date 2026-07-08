@@ -1,6 +1,8 @@
 # Contributing Guide
 
-Welcome!  We use **Docs-as-Code** to keep architecture, roadmap, and code in sync.
+Welcome! Before diving into code, read **[`AGENTS.md`](AGENTS.md)** — it's the authoritative
+onboarding and workflow doc (domain model, module boundaries, the hermetic verify loop, how to
+pick up a task).
 
 ## Contributor License Agreement (required)
 
@@ -12,32 +14,22 @@ a CLA check on your PR will prompt you to confirm.
 
 ## Quick Start
 1. Fork & clone the repo
-2. Create a branch: `git checkout -b feature/your-change`
-3. Commit using conventional commits (`feat:`, `fix:`, etc.)
-4. Open a PR with the roadmap tag in the title (see below)
+2. Read `AGENTS.md` for the domain model and module boundaries
+3. Create a branch: `git checkout -b feature/your-change`
+4. Commit using conventional commits (`feat:`, `fix:`, etc.)
+5. Open a PR
 
-## Roadmap Tag Convention
-Every PR title **must** start with a roadmap tag:
+## Code Style & Verify
+* Language: TypeScript, with semicolons.
+* CSS: BEM-ish class naming, 2-space indent.
+
+Run the hermetic gate before pushing — this is what CI's `verify` job runs, no live DB required:
 ```
-[roadmap:<epic>/<module>] Your descriptive title
+npm run typecheck && npm run test:hermetic
 ```
-Examples:
-* `[roadmap:api/route-refactor] feat: support JWT auth headers`
-* `[roadmap:telegram-bot/delivery-menu] fix: incorrect rate limit`
-
-If your change doesn’t correspond to an existing module, add a row to the appropriate table in `roadmap/master-outline.md` *before* opening the PR.
-
-## Keeping Docs in Sync
-* After coding, update the **Status** column for the affected module (e.g., `In Progress` → `Completed`).
-* If you made a design decision, append notes to the **Implementation Log** section of the relevant ADR (or create a new ADR using the template).
-
-CI will warn you if the roadmap tag is missing or incorrect.
-
-## Code Style & Lint
-* JavaScript: StandardJS (no semicolons)
-* CSS: BEM-ish class naming, 2-space indent
-
-Run `npm run lint && npm test` before pushing.
+`npm run test:crystal` needs a real MongoDB via `.env` (see `AGENTS.md`); CI runs it separately
+against a Mongo service. Run it locally with a real `.env` when your change touches the crystal
+or ledger layers.
 
 ## Thank You!
 Your contributions help StationThis stay open, transparent, and fun. ❤️
