@@ -21,6 +21,10 @@ const doc = {
   forma: 'arcanum',
   testis: commitment,
   valor,
+  // Numeric sort-mirror of valor (ledger-hardening Debt #1) — MongoSignorum.reserve selects via
+  // .sort({ valorNum: 1 }); a direct insert must write it too, else this seeded coin sorts as null
+  // (below all numbers) and gets mis-picked ahead of smaller coins. Mirrors toDoc's Number(v).
+  valorNum: Number(BigInt(valor)),
   auctor: 'test:api-live-verification',
   natum: new Date(),
   status: 'valid',
