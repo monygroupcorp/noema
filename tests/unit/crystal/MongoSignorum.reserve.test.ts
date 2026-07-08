@@ -29,7 +29,7 @@ before(async () => {
   // an index-backed server-side sort (ledger-hardening Debt #1).
   await col.createIndex({ animaId: 1, status: 1, valorNum: 1 })
   await col.createIndex({ actumId: 1 })
-  store = new MongoSignorum(col)
+  store = new MongoSignorum(col, client)
 })
 
 afterEach(async () => { await col.deleteMany({}) })
