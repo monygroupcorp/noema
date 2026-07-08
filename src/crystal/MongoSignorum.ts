@@ -5,12 +5,19 @@ import { transferVia } from '../ledger/transfer.js'
 
 function toDoc(s: Partial<Signum>): Record<string, unknown> {
   const { valor, ...rest } = s
-  return { ...rest, valor: valor !== undefined ? valor.toString() : '0' }
+  const v = valor !== undefined ? valor : 0n
+  // `valor` stays the authoritative bigint, serialized as a string (Mongo can't store bigint).
+  // `valorNum` is a lossless numeric sort-mirror written alongside it (ledger-hardening Debt #1):
+  // it exists ONLY to let `reserve` do an index-backed server-side `sort({ valorNum: 1 }).limit(k)`
+  // instead of loading the whole pool and sorting in JS (string sort is lexicographic — "9" > "10").
+  // valor is always impetus-scale (never wei), so Number() is exact well below 2^53 (~$3T of impetus).
+  return { ...rest, valor: v.toString(), valorNum: Number(v) }
 }
 
 function fromDoc(doc: Record<string, unknown>): Signum {
+  // valorNum is an internal sort-mirror — strip it so the domain Signum stays clean (valor is truth).
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { _id, valor, ...rest } = doc as Record<string, unknown> & { _id: unknown; valor: string }
+  const { _id, valor, valorNum, ...rest } = doc as Record<string, unknown> & { _id: unknown; valor: string; valorNum: unknown }
   return { ...rest, valor: BigInt(valor) } as Signum
 }
 
@@ -73,17 +80,26 @@ export class MongoSignorum implements Signorum {
       const remaining = amount - lockedTotal
       if (remaining <= 0n) break
 
-      // Fresh read of still-valid candidates; sort smallest-first in JS (valor is stored as a
-      // string, so a Mongo sort would order lexicographically) to minimise greedy overshoot.
-      const candidates = (await this.col.find({ ...idq, status: 'valid' }).toArray())
-        .sort((a, b) => (BigInt(a.valor as string) < BigInt(b.valor as string) ? -1 : 1))
+      // Fresh read of still-valid candidates, smallest-first. Ordering is pushed into Mongo via the
+      // `valorNum` sort-mirror (index-backed sort on { ...idq, status:'valid', valorNum:1 }), so we
+      // stream candidates in true numeric order instead of full-loading + sorting in JS. Iterating
+      // the cursor and breaking once `remaining` is covered pulls only the ~k coins actually needed
+      // (k tiny + bounded), turning the old O(n)-in-pool-size read into ~O(k). Same greedy smallest-
+      // first SELECTION as before — just server-side ordering + early termination.
+      const cursor = this.col
+        .find({ ...idq, status: 'valid' })
+        .sort({ valorNum: 1 })
 
       const pick: string[] = []
       let pickSum = 0n
-      for (const d of candidates) {
-        if (pickSum >= remaining) break
-        pick.push(d.id as string)
-        pickSum += BigInt(d.valor as string)
+      try {
+        for await (const d of cursor) {
+          if (pickSum >= remaining) break
+          pick.push(d.id as string)
+          pickSum += BigInt(d.valor as string)
+        }
+      } finally {
+        await cursor.close()
       }
       if (pick.length === 0) break   // nothing valid left to grab → uncoverable
 
