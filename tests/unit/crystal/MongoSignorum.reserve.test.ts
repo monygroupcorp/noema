@@ -25,6 +25,9 @@ before(async () => {
   await col.deleteMany({})
   await col.createIndex({ id: 1 }, { unique: true })
   await col.createIndex({ animaId: 1, status: 1 })
+  // Mirror ensureIndexes: the valorNum sort-mirror index that makes reserve's selection
+  // an index-backed server-side sort (ledger-hardening Debt #1).
+  await col.createIndex({ animaId: 1, status: 1, valorNum: 1 })
   await col.createIndex({ actumId: 1 })
   store = new MongoSignorum(col)
 })
@@ -171,4 +174,110 @@ test('transfer: insufficient sender moves nothing', async () => {
   assert.equal(t.ok, false)
   assert.equal(await store.balance({ animaId: 'sender' }), 100n)
   assert.equal(await store.balance({ animaId: 'recipient' }), 0n)
+})
+
+// ── ledger-hardening Debt #1: O(n) → ~O(k) reserve selection ─────────────────
+//
+// The fix pushes smallest-first ordering into Mongo via the `valorNum` sort-mirror, so reserve
+// streams an index-backed ascending scan and stops once `amount` is covered — instead of loading
+// the whole valid pool and sorting in JS. These tests prove the SELECTION is unchanged (still
+// numeric smallest-first, NOT the lexicographic order string storage would give) and that the
+// read is bounded (the full pool is no longer materialised).
+
+// Maps the returned reservation's signaIds back to their valor via the ledger, so a test can
+// assert exactly WHICH coins were selected.
+async function selectedValors(signaIds: string[]): Promise<bigint[]> {
+  const docs = await col.find({ id: { $in: signaIds } }).toArray()
+  return docs.map(d => BigInt(d.valor as string)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+}
+
+test('SELECTION: greedy smallest-first uses NUMERIC order, not string order', async () => {
+  // Values chosen so lexicographic string order ("10" < "100" < "2" < "30" < "9") diverges hard
+  // from numeric order (2 < 9 < 10 < 30 < 100). A correct numeric greedy for amount=12 picks
+  // 2 + 9 + 10 = 21 (stops once ≥ 12). A string-sorted greedy would instead pick 10 + 100 = 110.
+  for (const v of [10n, 9n, 2n, 100n, 30n]) await issue('ord', v)
+
+  const r = await store.reserve({ animaId: 'ord' }, 12n, 'act-ord')
+  assert.ok(r.ok, 'reserve should cover 12 from a 151 pool')
+
+  // Exact selection: the three smallest coins, in numeric terms.
+  assert.deepEqual(await selectedValors(r.signaIds), [2n, 9n, 10n])
+  assert.equal(r.locked, 21n)
+  // Sanity: a lexicographic pick (10,100) would have locked 110 and NOT contained the 2-coin.
+  assert.ok(r.locked < 110n, 'string-order selection would have overshot to 110')
+})
+
+test('SELECTION: parity with the reference greedy across mixed magnitudes', async () => {
+  // A pool spanning magnitudes where string vs numeric order differ throughout.
+  const pool = [1n, 5n, 8n, 12n, 40n, 99n, 100n, 250n, 1000n, 3n]
+  for (const v of pool) await issue('mix', v)
+
+  // Reference: exactly what the old full-load + JS numeric sort would have selected.
+  const ascending = [...pool].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  const amount = 30n
+  const expected: bigint[] = []
+  let covered = 0n
+  for (const v of ascending) { if (covered >= amount) break; expected.push(v); covered += v }
+  expected.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+
+  const r = await store.reserve({ animaId: 'mix' }, amount, 'act-mix')
+  assert.ok(r.ok)
+  assert.deepEqual(await selectedValors(r.signaIds), expected)
+  assert.equal(r.locked, covered)
+})
+
+test('BOUNDED READ: reserve does not materialise the whole pool (~O(k), not O(n))', async () => {
+  // Instrument the collection: count documents the algorithm actually pulls (async-iterated or
+  // toArray'd). The old impl `.toArray()`-loaded every valid signum, so this count would equal
+  // the pool size; the fixed impl streams an ordered cursor and breaks after the ~k coins needed.
+  const counter = { docs: 0 }
+  const counting = new Proxy(col, {
+    get(target, prop, recv) {
+      if (prop === 'find') {
+        return (...args: unknown[]) => {
+          // @ts-expect-error variadic passthrough to the real driver signature
+          const cursor = target.find(...args)
+          const origToArray = cursor.toArray.bind(cursor)
+          cursor.toArray = async () => { const arr = await origToArray(); counter.docs += arr.length; return arr }
+          const origAsyncIter = cursor[Symbol.asyncIterator].bind(cursor)
+          cursor[Symbol.asyncIterator] = function () {
+            const it = origAsyncIter()
+            const origNext = it.next.bind(it)
+            it.next = async () => { const res = await origNext(); if (!res.done) counter.docs++; return res }
+            return it
+          }
+          return cursor
+        }
+      }
+      return Reflect.get(target, prop, recv)
+    },
+  }) as Collection
+  const instrumented = new MongoSignorum(counting)
+
+  // Large pool of uniform 1-point coins so covering amount=5 needs exactly k=5 coins.
+  const POOL = 600
+  for (let i = 0; i < POOL; i++) await issue('big', 1n)
+
+  counter.docs = 0
+  const r = await instrumented.reserve({ animaId: 'big' }, 5n, 'act-big')
+  assert.ok(r.ok)
+  assert.equal(r.locked, 5n)
+  // The whole point: docs pulled is bounded by ~k (selection break + won re-read), NOT the pool.
+  // Old O(n) impl would have pulled ≥ POOL here. A generous ceiling well under POOL proves the fix.
+  assert.ok(counter.docs < POOL / 4, `pulled ${counter.docs} docs — expected ~O(k) ≪ ${POOL}`)
+})
+
+test('INDEX-BACKED: selection sort is served by an index, with no blocking in-memory sort', async () => {
+  for (const v of [7n, 3n, 15n, 2n]) await issue('plan', v)
+
+  // The exact shape reserve issues: valid pool for an identity, ordered smallest-first.
+  const plan = await col
+    .find({ animaId: 'plan', status: 'valid' })
+    .sort({ valorNum: 1 })
+    .explain('queryPlanner')
+
+  const winning = JSON.stringify((plan as { queryPlanner?: { winningPlan?: unknown } }).queryPlanner?.winningPlan ?? plan)
+  assert.ok(winning.includes('IXSCAN'), 'selection should be an index scan')
+  // A COLLSCAN + blocking SORT stage is exactly the full-pool-then-sort the fix removes.
+  assert.ok(!winning.includes('"stage":"SORT"') && !winning.includes('"SORT"'), 'must not use a blocking in-memory SORT')
 })

@@ -18,6 +18,11 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('signa').createIndex({ id: 1 }, { unique: true }),
     db.collection('signa').createIndex({ animaId: 1, status: 1 }),
     db.collection('signa').createIndex({ testis: 1, forma: 1 }, { sparse: true }),
+    // reserve selection (ledger-hardening Debt #1): index-backed smallest-first `sort({ valorNum:1 })`
+    // over an identity's valid pool, so `reserve` pulls ~O(k) coins instead of loading the whole pool.
+    // The identified path keys on animaId; the anonymous (arcanum) path keys on (testis,forma).
+    db.collection('signa').createIndex({ animaId: 1, status: 1, valorNum: 1 }),
+    db.collection('signa').createIndex({ testis: 1, forma: 1, status: 1, valorNum: 1 }, { sparse: true }),
 
     // animae — soul / identity
     db.collection('animae').createIndex({ id: 1 }, { unique: true }),
