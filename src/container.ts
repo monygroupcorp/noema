@@ -407,7 +407,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const fundamentorum = new MongoFundamentorum(db.collection('fundamenta'))
 
   const signaCol: Collection = db.collection(config.signaCollection ?? 'signa')
-  const signorum = new MongoSignorum(signaCol)
+  const signorum = new MongoSignorum(signaCol, mongo)
 
   // USD revenue book (ADR-0013) — the second ledger, distinct from signa (credits). Indexes
   // (incl. the unique partial index on depositumId that guarantees idempotent deposit booking)

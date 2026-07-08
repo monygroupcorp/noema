@@ -27,7 +27,7 @@ before(async () => {
   await client.connect()
   col = client.db(DB).collection(COL)
   await col.createIndex({ id: 1 }, { unique: true })
-  signorum = new MongoSignorum(col)
+  signorum = new MongoSignorum(col, client)
 })
 
 afterEach(async () => {

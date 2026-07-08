@@ -1,4 +1,4 @@
-import { Collection } from 'mongodb'
+import { Collection, MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import type { Signum, Signa, Signorum, Reservatio, Transferatio, SignumForma } from '../types/significandi.js'
 import { transferVia } from '../ledger/transfer.js'
@@ -27,7 +27,10 @@ function identityQuery(by: { animaId: string } | { commitment: string }): Record
 }
 
 export class MongoSignorum implements Signorum {
-  constructor(private col: Collection) {}
+  // `client` is required: settle spans two writes that must commit all-or-nothing, so it opens a
+  // Mongo transaction (see settle). There is deliberately no client-less fallback — a silent
+  // non-atomic settle path is the exact value-loss bug this class is being hardened against.
+  constructor(private col: Collection, private client: MongoClient) {}
 
   async issue(input: Omit<Signum, 'id' | 'natum' | 'status'>): Promise<Signum> {
     if ((input.forma === 'arcanum' || input.forma === 'tessera') && input.animaId !== undefined) {
@@ -178,20 +181,45 @@ export class MongoSignorum implements Signorum {
     }
 
     const expensum = new Date()
-    await this.col.updateMany(
-      { id: { $in: signaIds }, status: 'locked' },
-      { $set: { status: 'spent', expensum, actumId } }
-    )
-
     const delta = total - actualImpetus
-    if (delta <= 0n || docs.length === 0) return
 
-    // Refund the unspent delta to the same identity (mirrors MemorySignorum.settle).
-    const first = docs[0] as Record<string, unknown>
-    if (first.forma === 'arcanum' && first.testis) {
-      await this.issue({ forma: 'arcanum', valor: delta, auctor: 'settle:delta', testis: first.testis as string })
-    } else if (first.animaId) {
-      await this.issue({ forma: first.forma as SignumForma, valor: delta, auctor: 'settle:delta', animaId: first.animaId as string })
+    // Build the overshoot-refund signum up front (identity/forma selection mirrors
+    // MemorySignorum.settle). Constructing it — id included — OUTSIDE the transaction keeps the
+    // withTransaction callback idempotent: a transient retry re-runs against a rolled-back attempt
+    // (nothing persisted), so it re-inserts the SAME id, never a second refund.
+    let refundDoc: Record<string, unknown> | null = null
+    if (delta > 0n && docs.length > 0) {
+      const first = docs[0] as Record<string, unknown>
+      let refund: Omit<Signum, 'id' | 'natum' | 'status'> | null = null
+      if (first.forma === 'arcanum' && first.testis) {
+        refund = { forma: 'arcanum', valor: delta, auctor: 'settle:delta', testis: first.testis as string }
+      } else if (first.animaId) {
+        refund = { forma: first.forma as SignumForma, valor: delta, auctor: 'settle:delta', animaId: first.animaId as string }
+      }
+      if (refund) {
+        refundDoc = toDoc({ ...refund, id: uuidv4(), natum: new Date(), status: 'valid' } as Signum)
+      }
+    }
+
+    // Atomicity (ledger Debt #2): the spend and the overshoot-refund must commit all-or-nothing.
+    // Left as two separate writes, a crash between them spends `total` yet never issues the refund —
+    // the identity loses `amount + overshoot`. A single-identity Mongo transaction makes a crash/abort
+    // roll the spend back so the signa stay `locked` (recoverable), never half-applied. MemorySignorum
+    // is single-threaded/synchronous → already atomic, so it needs no equivalent.
+    const session = this.client.startSession()
+    try {
+      await session.withTransaction(async () => {
+        await this.col.updateMany(
+          { id: { $in: signaIds }, status: 'locked' },
+          { $set: { status: 'spent', expensum, actumId } },
+          { session },
+        )
+        if (refundDoc) {
+          await this.col.insertOne(refundDoc, { session })
+        }
+      })
+    } finally {
+      await session.endSession()
     }
   }
 }
