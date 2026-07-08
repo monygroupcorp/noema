@@ -94,6 +94,7 @@ import { terminatePod, listRunPodPods } from './crystal/terminatePod.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
 import { MongoHospitium } from './crystal/MongoHospitium.js'
 import { startIdleReaper } from './crystal/idleReaper.js'
+import { startExpiryReaper, recoverExpiredActa } from './crystal/expiryReaper.js'
 import { startCensus } from './crystal/Census.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
@@ -154,6 +155,7 @@ const RUNPOD_SSH_KEY_PATH = process.env.RUNPOD_SSH_KEY_PATH ?? `${process.env.HO
 const RUNPOD_CLOUD_TYPE = (process.env.RUNPOD_CLOUD_TYPE ?? 'SECURE') as 'SECURE' | 'COMMUNITY'
 const RUNPOD_KEEP_WARM = process.env.RUNPOD_KEEP_WARM !== 'false'  // default true
 const RUNPOD_WARM_TTL_MS = Number(process.env.RUNPOD_WARM_TTL_MS ?? 60_000)  // idle window before reaper kills a warm pod
+const EXPIRY_REAPER_INTERVAL_MS = Number(process.env.EXPIRY_REAPER_INTERVAL_MS ?? 60_000)  // sweep cadence for cold-start-timeout acta
 // Production: derive from public WEBHOOK_URL. Local dev: post back to ourselves.
 // SecurePodClient runs on our server (not on the pod), so localhost always works.
 const RUNPOD_WEBHOOK_URL = process.env.WEBHOOK_URL
@@ -517,19 +519,15 @@ async function main(): Promise<void> {
   await ring.collectioCursor.rehydrate()
   log.info('CollectioCursor rehydrated')
 
-  // 3c. Recover expired acta — release locked signa; fail() now also kills any live pod
-  const expired = await ring.actorum.findExpired()
-  if (expired.length) {
-    log.info(`Recovering ${expired.length} expired acta`)
-    await Promise.all(expired.map(async a => {
-      await ring.completor.fail(a, 'Actum expired — pod never reported back')
-      // A recovered compositus step must fail its parent run too — the sweep bypasses
-      // the webhook, so notify the engine directly (fails the parent + frees state).
-      if (a.compositum) {
-        await ring.compositusCursor.onStepComplete(a.compositum.parentId, a, false).catch(() => {})
-      }
-    }))
-  }
+  // 3c. Recover expired acta — release locked signa; fail() now also kills any live pod.
+  // Shares one code path with the periodic expiry reaper (startExpiryReaper) so boot
+  // recovery and the timer can never diverge.
+  const recovered = await recoverExpiredActa({
+    actorum: ring.actorum,
+    completor: ring.completor,
+    compositusCursor: ring.compositusCursor,
+  })
+  if (recovered) log.info(`Recovered ${recovered} expired acta`)
 
   // 3d. Reconcile against live RunPod pods — terminate any pod not tracked by the DB.
   // This is the catch-all invariant: even if a pod ID slipped through without being written
@@ -1203,6 +1201,18 @@ async function main(): Promise<void> {
     startIdleReaper(materiae, async () => {}, 10_000)
     log.warn('idle-pod reaper started (fake mode)', { warmTtlMs: RUNPOD_WARM_TTL_MS })
   }
+
+  // Expiry reaper — release the locked reserve of any cold-start-timeout actum. The
+  // boot sequence (step 3c) was the ONLY caller of findExpired, so on a long-lived
+  // server a timed-out actum's locked signa (up to the 30-min RunPod cap) stayed
+  // locked against the user's balance until the next restart. This runs the same
+  // recovery sweep on an interval (release-only, never a charge).
+  startExpiryReaper({
+    actorum: ring.actorum,
+    completor: ring.completor,
+    compositusCursor: ring.compositusCursor,
+  }, EXPIRY_REAPER_INTERVAL_MS)
+  log.info('expiry reaper started', { tickMs: EXPIRY_REAPER_INTERVAL_MS })
 
   // Census — the host's continuous per-time cost reckoning (studio billing tick).
   // Every 60s walks active Hospitia and debits the host secondsSinceLastTick ×
