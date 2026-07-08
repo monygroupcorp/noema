@@ -1,7 +1,7 @@
 # Vestigium Embedding — Design Spec
 
-**Status:** Specced, not implemented  
-**Last updated:** 2026-05-14  
+**Status:** Implemented (vestigium embedding stack shipped; see `src/api/vestigia/`, `src/execution/hooks/`, `src/crystal/`, `scripts/corpus-space/`)  
+**Last updated:** 2026-07-07  
 **Scope:** Self-hosted CLIP embedding service + search API + smart migration
 
 ---
