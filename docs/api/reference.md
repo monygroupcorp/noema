@@ -1478,11 +1478,7 @@ GDPR self-export — assemble the caller's OWN account data into a downloadable 
   "properties": {
     "url": {
       "type": "string",
-      "description": "Short-lived, unguessable signed GET URL to the hosted export bundle."
-    },
-    "key": {
-      "type": "string",
-      "description": "Owner-scoped object key (namespaced by a hash of the owner key)."
+      "description": "Short-lived, unguessable signed GET URL to the hosted export bundle — the only handle returned (the raw object key is withheld so the response cannot be turned into a stable path)."
     },
     "expiresIn": {
       "type": "number",
@@ -1495,7 +1491,6 @@ GDPR self-export — assemble the caller's OWN account data into a downloadable 
   },
   "required": [
     "url",
-    "key",
     "expiresIn",
     "bytes"
   ]

@@ -122,10 +122,10 @@ export interface ExportBundle {
 }
 
 export interface ExportResult {
-  /** Short-lived, unguessable signed GET URL to the hosted bundle. */
+  /** Short-lived, unguessable signed GET URL to the hosted bundle. The ONLY handle the
+   *  caller ever receives — the raw object key is deliberately NOT returned, so the response
+   *  cannot be turned into a stable/reconstructable path to the PII bundle. */
   url: string
-  /** Owner-scoped object key (namespaced by a hash of the owner key). */
-  key: string
   /** Seconds until the signed URL expires. */
   expiresIn: number
   /** Size of the serialized JSON bundle in bytes. */
@@ -235,8 +235,9 @@ export class MeExporter {
 
   /**
    * Assemble → host the bundle in R2 under an owner-scoped, unguessable key → return a
-   * short-lived signed GET URL. The bucket stays private; the URL is the only handle and
-   * it expires. Requires a store that can presign downloads (wired only when R2 is set).
+   * short-lived signed GET URL. The store MUST be a dedicated PRIVATE bucket with no public
+   * domain (wired from EXPORTS_R2, not the public outputs bucket) — then the signed URL is the
+   * only handle and the expiry is a real control. The raw key is never returned to the caller.
    */
   async exportForCaller(auctor: AuctorKey, opts?: { expiresIn?: number }): Promise<ExportResult> {
     if (!this.deps.store.getSignedDownloadUrl) {
@@ -254,7 +255,7 @@ export class MeExporter {
     const expiresIn = opts?.expiresIn ?? DEFAULT_EXPIRES_IN
     const url = await this.deps.store.getSignedDownloadUrl(key, { expiresIn })
     log.info('assembled account export', { scopedBy: bundle.manifest.scopedBy, bytes: body.byteLength })
-    return { url, key, expiresIn, bytes: body.byteLength }
+    return { url, expiresIn, bytes: body.byteLength }
   }
 }
 
