@@ -88,6 +88,8 @@ export const Errors = {
   studioUnavailable: () => new ApiError('internal.unavailable', 'Studio provisioning is not available on this deployment', 503, { retryable: true }),
   depositUnavailable: () => new ApiError('internal.unavailable', 'Deposit pricing is not available on this deployment (no price oracle configured)', 503, { retryable: true }),
   reportUnavailable: () => new ApiError('internal.unavailable', 'The revenue report is not available on this deployment (no revenue book configured)', 503, { retryable: true }),
+  /** The fiat (Stripe) funding rail is not configured on this deployment (missing keys / stores). */
+  paymentsUnavailable: () => new ApiError('internal.unavailable', 'Fiat payments are not available on this deployment (Stripe is not configured)', 503, { retryable: true }),
   priceUnavailable: (message = 'Could not price this asset — it is not supported or has no available price') => new ApiError('deposit.price_unavailable', message, 422),
   internal: (message = 'Internal error') => new ApiError('internal.error', message, 500, { retryable: true }),
 } as const
