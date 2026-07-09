@@ -1464,6 +1464,44 @@ The caller's owner-keyed account settings — presentation skin (Profile), cross
 }
 ```
 
+### POST /v1/me/export
+
+GDPR self-export — assemble the caller's OWN account data into a downloadable JSON bundle (strictly self-scoped to the caller) and return a short-lived, unguessable signed GET URL to it. Returns 503 when object storage is not configured.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "url": {
+      "type": "string",
+      "description": "Short-lived, unguessable signed GET URL to the hosted export bundle."
+    },
+    "key": {
+      "type": "string",
+      "description": "Owner-scoped object key (namespaced by a hash of the owner key)."
+    },
+    "expiresIn": {
+      "type": "number",
+      "description": "Seconds until the signed URL expires."
+    },
+    "bytes": {
+      "type": "number",
+      "description": "Size of the serialized JSON bundle in bytes."
+    }
+  },
+  "required": [
+    "url",
+    "key",
+    "expiresIn",
+    "bytes"
+  ]
+}
+```
+
 ### PUT /v1/me/appearance
 
 Replace the caller's presentation skin (avatar/banner/background/accent/look).

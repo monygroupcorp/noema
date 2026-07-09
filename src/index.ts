@@ -98,6 +98,7 @@ import { startExpiryReaper, recoverExpiredActa } from './crystal/expiryReaper.js
 import { startCensus } from './crystal/Census.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
+import { MeExporter } from './crystal/MeExporter.js'
 import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { makeTrainingFinalizer, urlLoraReader, makeTrainingExitusResolver } from './crystal/trainingFinalizer.js'
 import { MongoConsuetudinum } from './crystal/MongoConsuetudinum.js'
@@ -1041,7 +1042,31 @@ async function main(): Promise<void> {
     log.warn('R2 unconfigured — storage upload front door DISABLED (/storage/uploads/sign will 404)')
   }
 
-  app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub }))
+  // GDPR self-export assembler (T1) — the single auditable home for the caller's own PII
+  // egress. Constructed with exactly the owner-scoped read stores it needs (all already on the
+  // ring, plus the locally-built consuetudinum/credenta/intellae). Only wired when R2 is
+  // configured (it hosts the bundle behind a signed GET URL); otherwise POST /v1/me/export 503s.
+  const meExporter = RUNPOD_R2
+    ? new MeExporter({
+        store: new R2Uploader(RUNPOD_R2),
+        consuetudinum,
+        personae: ring.personae,
+        credenta,
+        provinciae: ring.provinciae,
+        actumIndex: ring.actumIndex,
+        intellae,
+        editiones: ring.editiones,
+        memoriae: ring.memoriae,
+        colloquia: ring.colloquia,
+        dicta: ring.dicta,
+        vestigiorum: ring.vestigiorum,
+        bursarium: ring.bursarium,
+        signorum: ring.signorum,
+        deposita: ring.deposita,
+      })
+    : undefined
+
+  app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub, ...(meExporter ? { exporter: meExporter } : {}) }))
 
   // CAMEL agent compat surface (ADR-0011 §8) — the exact `/api/v1/...` paths the
   // deployed camel404 client bakes (on-chain-referenced). No catch-all in front,
