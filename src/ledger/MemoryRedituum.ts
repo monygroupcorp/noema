@@ -28,6 +28,14 @@ export class MemoryRedituum implements Redituum {
         if (existing.depositumId === draft.depositumId) return existing
       }
     }
+    // Idempotent on chargeRef (fiat): a redelivered Stripe payment (or the two events that share
+    // one payment_intent) must not double-book revenue. Mirrors the depositumId guard; in Mongo
+    // this is enforced by a unique partial index, here by a scan (single-writer, no race).
+    if (draft.chargeRef !== undefined) {
+      for (const existing of this.store.values()) {
+        if (existing.chargeRef === draft.chargeRef) return existing
+      }
+    }
     const record: Reditus = {
       id: randomUUID(),
       natum: draft.natum ?? new Date(),
@@ -35,6 +43,7 @@ export class MemoryRedituum implements Redituum {
       fmvSource: draft.fmvSource,
       origo: draft.origo,
       ...(draft.depositumId !== undefined ? { depositumId: draft.depositumId } : {}),
+      ...(draft.chargeRef !== undefined ? { chargeRef: draft.chargeRef } : {}),
     }
     this.store.set(record.id, record)
     return record

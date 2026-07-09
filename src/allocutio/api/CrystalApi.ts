@@ -40,7 +40,7 @@ import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModu
 import { dispatchInceptio, type DispatchDeps } from '../../execution/dispatchInceptio.js'
 import { toRun, toCollection, toTeam, toEdition, toProject } from './runProjection.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
-import { Errors } from './errors.js'
+import { Errors, ApiError } from './errors.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { computeRecipient } from '../../arcanum/prover.js'
 import { impetusForPodMs, usdMicroToImpetus } from '../../ledger/rates.js'
@@ -71,6 +71,8 @@ import { ownerKeyOf } from '../../crystal/ownerKey.js'
 import { isCatalogEligible, classifyModelLicense, activeConditionalLicenses, bindingCapUsd, type CommercialVerdict } from '../../crystal/modelLicense.js'
 import { band, bindingCapMicroUsd, type ThresholdBand, type TripwireBandStore } from '../../crystal/licenseTripwire.js'
 import type { Redituum } from '../../types/reditus.js'
+import { handleStripeCheckout, handleStripeWebhook, type StripeGateway, type StripeWebhookResult } from '../../api/webhooks/stripeWebhook.js'
+import { stripeConfigFromEnv, makeStripeGateway } from '../../api/webhooks/stripeGateway.js'
 import type { WideEventStore } from '../../analytics/WideEventStore.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 import { provenanceHash } from '../../crystal/provenance.js'
@@ -163,15 +165,21 @@ export interface CrystalApiDeps {
   pricer?: AssetPricer
   /** The CreditVault deposit address, echoed in the quote/config so the UI knows where to send. */
   depositAddress?: string
-  /** USD revenue book — backs the admin `revenueReport` (the trailing-12mo rollup + license tripwire).
-   *  Absent → the report is unavailable. */
-  redituum?: Pick<Redituum, 'trailingUsdRevenue'>
+  /** USD revenue book — backs the admin `revenueReport` (the trailing-12mo rollup + license tripwire)
+   *  AND the fiat funding rail (`handleStripeWebhook` books a peer fiat `Reditus` via `record`).
+   *  Absent → the report + fiat rail are unavailable. */
+  redituum?: Pick<Redituum, 'trailingUsdRevenue' | 'record'>
   /** The license-tripwire's persisted band — surfaced in `revenueReport` so the admin sees the
    *  last edge-triggered band alongside the live figure. Absent → lastBand omitted. */
   tripwireBand?: Pick<TripwireBandStore, 'last'>
   /** Wide-event COGS rollup — backs the admin `cogsReport` (trailing-window spend + job count,
    *  the read-only pair to `revenueReport`). Absent → the report is unavailable. */
   costReport?: Pick<WideEventStore, 'sumCostUsd'>
+  /** Fiat rail (Stripe) gateway override — tests inject a fake. Absent → built from env
+   *  (`STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`); unconfigured env → the rail reports 503.
+   *  Idempotency needs no injected store: it is the DURABLE unique partial indexes on
+   *  `Signum.testis` (auctor:'stripe:purchase') + `Reditus.chargeRef` (origo:'fiat'). */
+  stripe?: StripeGateway
 }
 
 /** Inputs to start a Collection (a Collectio): a base modus expanded over a Tractus[] grid. */
@@ -1452,6 +1460,69 @@ export class CrystalApi {
       pointsQuoted: points.toString(),
       depositAddress: this.deps.depositAddress ?? '',
     }
+  }
+
+  // ── Fiat funding rail (Stripe) ──────────────────────────────────────────────
+
+  private _stripeGateway: StripeGateway | null | undefined
+
+  /** The live Stripe gateway: the injected dep, else built from env, else `null` (unconfigured). */
+  private resolveStripeGateway(): StripeGateway | null {
+    if (this._stripeGateway === undefined) {
+      if (this.deps.stripe) {
+        this._stripeGateway = this.deps.stripe
+      } else {
+        const config = stripeConfigFromEnv()
+        this._stripeGateway = config ? makeStripeGateway(config) : null
+      }
+    }
+    return this._stripeGateway
+  }
+
+  /**
+   * Create a Stripe Checkout Session for a credit pack. IDENTIFIED-ONLY — a fiat pack cannot
+   * fund an anonymous purse (a card de-anonymizes by construction). Returns the hosted-checkout
+   * URL. The pack's USD price + packId are server-set, so crediting is server-authoritative
+   * regardless of anything the client sends (the webhook credits `PACKS[packId].impetus`).
+   */
+  async createCheckout(
+    auctor: AuctorKey,
+    opts: { packId: string; successUrl?: string; cancelUrl?: string },
+  ): Promise<{ url: string; sessionId: string }> {
+    const gateway = this.resolveStripeGateway()
+    if (!gateway) throw Errors.paymentsUnavailable()
+    const animaId = 'animaId' in auctor ? auctor.animaId : undefined
+    const result = await handleStripeCheckout(
+      {
+        packId: opts.packId,
+        animaId,
+        ...(opts.successUrl ? { successUrl: opts.successUrl } : {}),
+        ...(opts.cancelUrl ? { cancelUrl: opts.cancelUrl } : {}),
+      },
+      { gateway },
+    )
+    if (!result.ok) throw new ApiError(result.code, result.message, result.status)
+    return { url: result.url, sessionId: result.sessionId }
+  }
+
+  /**
+   * Handle a Stripe webhook delivery — signature-gated + idempotent per payment. Returns the
+   * HTTP status + body for the router. A bad signature or a non-completed/malformed event is a
+   * 400 (never a credit); a redelivery of an already-credited payment is a no-op that replays
+   * the original outcome. Throws only for a deployment that has no fiat rail configured (503).
+   */
+  async handleStripeWebhook(input: { rawBody: string; signature?: string }): Promise<StripeWebhookResult> {
+    const gateway = this.resolveStripeGateway()
+    if (!gateway || !this.deps.redituum || !this.deps.animae) throw Errors.paymentsUnavailable()
+    return handleStripeWebhook(
+      { rawBody: input.rawBody, ...(input.signature ? { signature: input.signature } : {}) },
+      {
+        signorum: this.deps.signorum,
+        redituum: this.deps.redituum,
+        animae: this.deps.animae,
+        gateway,
+      },
+    )
   }
 
   /**
