@@ -1199,6 +1199,21 @@ export const API_CONTRACT: ApiContract = {
       response: MeViewSchema,
     },
     {
+      method: 'POST',
+      path: '/me/export',
+      summary: "GDPR self-export — assemble the caller's OWN account data into a downloadable JSON bundle (strictly self-scoped to the caller) and return a short-lived, unguessable signed GET URL to it. Returns 503 when object storage is not configured.",
+      auth: true,
+      response: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Short-lived, unguessable signed GET URL to the hosted export bundle — the only handle returned (the raw object key is withheld so the response cannot be turned into a stable path).' },
+          expiresIn: { type: 'number', description: 'Seconds until the signed URL expires.' },
+          bytes: { type: 'number', description: 'Size of the serialized JSON bundle in bytes.' },
+        },
+        required: ['url', 'expiresIn', 'bytes'],
+      },
+    },
+    {
       method: 'PUT',
       path: '/me/appearance',
       summary: "Replace the caller's presentation skin (avatar/banner/background/accent/look).",

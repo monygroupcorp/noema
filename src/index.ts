@@ -98,6 +98,7 @@ import { startExpiryReaper, recoverExpiredActa } from './crystal/expiryReaper.js
 import { startCensus } from './crystal/Census.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
+import { MeExporter } from './crystal/MeExporter.js'
 import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { makeTrainingFinalizer, urlLoraReader, makeTrainingExitusResolver } from './crystal/trainingFinalizer.js'
 import { MongoConsuetudinum } from './crystal/MongoConsuetudinum.js'
@@ -255,6 +256,19 @@ import type { HospitiumStore } from './types/hospitium.js'
 const RUNPOD_R2: R2Config | undefined =
   R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_OUTPUTS_BUCKET
     ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_OUTPUTS_BUCKET!, publicUrl: R2_PUBLIC_URL }
+    : undefined
+
+// Dedicated PRIVATE bucket for GDPR self-exports (spec/publishing.md §3). This bundle is the
+// caller's whole PII (credit ledger, deposits, personae, chat messages, …) — it MUST NOT land
+// in R2_OUTPUTS_BUCKET, which is the PUBLIC bucket (bound to R2_PUBLIC_URL) that serves the
+// unauthenticated feed/editions. Deliberately NO `publicUrl`: the object is never publicly
+// reachable, so the short-lived presigned GET URL is the ONLY handle to it and the 15-min
+// expiry is a real control, not an illusion. Distinct bucket, same R2 account/credentials.
+// The bucket itself must NOT be bound to a public domain (infra/R2 config, off-repo).
+const R2_EXPORTS_BUCKET = process.env.R2_EXPORTS_BUCKET
+const EXPORTS_R2: R2Config | undefined =
+  R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_EXPORTS_BUCKET
+    ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_EXPORTS_BUCKET! }
     : undefined
 
 /**
@@ -1041,7 +1055,37 @@ async function main(): Promise<void> {
     log.warn('R2 unconfigured — storage upload front door DISABLED (/storage/uploads/sign will 404)')
   }
 
-  app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub }))
+  // GDPR self-export assembler (T1) — the single auditable home for the caller's own PII
+  // egress. Constructed with exactly the owner-scoped read stores it needs (all already on the
+  // ring, plus the locally-built consuetudinum/credenta/intellae). The bundle is hosted in the
+  // DEDICATED PRIVATE exports bucket (EXPORTS_R2, no publicUrl) — NEVER the public outputs
+  // bucket — so the signed GET URL is the only handle and its expiry is real. Only wired when
+  // that private bucket is configured; otherwise POST /v1/me/export 503s (never falls back to a
+  // public bucket).
+  if (RUNPOD_R2 && !EXPORTS_R2) {
+    log.warn('R2_EXPORTS_BUCKET unset — GDPR self-export DISABLED (POST /v1/me/export will 503). Refusing to host PII bundles in the public outputs bucket.')
+  }
+  const meExporter = EXPORTS_R2
+    ? new MeExporter({
+        store: new R2Uploader(EXPORTS_R2),
+        consuetudinum,
+        personae: ring.personae,
+        credenta,
+        provinciae: ring.provinciae,
+        actumIndex: ring.actumIndex,
+        intellae,
+        editiones: ring.editiones,
+        memoriae: ring.memoriae,
+        colloquia: ring.colloquia,
+        dicta: ring.dicta,
+        vestigiorum: ring.vestigiorum,
+        bursarium: ring.bursarium,
+        signorum: ring.signorum,
+        deposita: ring.deposita,
+      })
+    : undefined
+
+  app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub, ...(meExporter ? { exporter: meExporter } : {}) }))
 
   // CAMEL agent compat surface (ADR-0011 §8) — the exact `/api/v1/...` paths the
   // deployed camel404 client bakes (on-chain-referenced). No catch-all in front,

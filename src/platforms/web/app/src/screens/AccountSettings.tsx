@@ -4,7 +4,7 @@ import { AppShell } from '../shell/AppShell';
 import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
 import { Ic } from '../lib/icons';
-import { api, type MeStatus, type StudioEntry } from '../lib/api';
+import { api, getSession, commitment, type MeStatus, type StudioEntry } from '../lib/api';
 
 // Account / settings (account-spec.md, renders noema-account.png + noema-account-compute.png).
 // The control panel for the privacy machine — posture + sovereignty up front, then a card per
@@ -38,9 +38,34 @@ export function AccountSettings() {
   const navigate = useNavigate();
   const anon = ident.funding === 'bearer';
   // Go anonymous = deactivate to the anon slot, keeping any held logins (real, reversible — switch
-  // back anytime). Export/Delete are legal (GDPR) but have no backend endpoint yet — honestly gated.
+  // back anytime). Export is now real (POST /v1/me/export → signed download); Delete is still gated.
   const leaveToAnon = () => { goAnonymous(); navigate('/'); };
   const [me, setMe] = useState<MeStatus | null>(null);
+
+  // GDPR "Export everything" — POST /v1/me/export assembles the caller's OWN data server-side and
+  // returns a short-lived signed URL; we surface it as a download link. Auth mirrors the api client:
+  // a bearer session when signed in, else the anon commitment header.
+  const [exporting, setExporting] = useState(false);
+  const [exportUrl, setExportUrl] = useState<string | null>(null);
+  const [exportErr, setExportErr] = useState<string | null>(null);
+  const exportEverything = async () => {
+    setExporting(true); setExportErr(null); setExportUrl(null);
+    try {
+      const s = getSession();
+      const headers: Record<string, string> = {
+        'content-type': 'application/json',
+        ...(s ? { authorization: `Bearer ${s}` } : { 'x-commitment': commitment() }),
+      };
+      const res = await fetch('/v1/me/export', { method: 'POST', headers });
+      if (!res.ok) throw new Error(`export failed (${res.status})`);
+      const body = (await res.json()) as { url: string };
+      setExportUrl(body.url);
+    } catch {
+      setExportErr('Export failed — please try again in a moment.');
+    } finally {
+      setExporting(false);
+    }
+  };
   useEffect(() => {
     let live = true;
     api.meStatus().then((s) => { if (live) setMe(s); }).catch(() => {});
@@ -78,15 +103,25 @@ export function AccountSettings() {
             </div>
           </div>
 
-          {/* sovereignty trio — a right, shown up front. Go anonymous is real; Export/Delete are
-              legal (GDPR) obligations with no backend endpoint yet, so they're honestly gated. */}
+          {/* sovereignty trio — a right, shown up front. Go anonymous + Export are real; Delete
+              still has no backend endpoint yet, so it stays honestly gated. */}
           <div className="ac-sov">
-            <button className="btn ghost" disabled title="Coming soon — a full data export isn’t wired yet"><Ic name="arrow-up" /> Export everything — soon</button>
+            <button className="btn ghost" onClick={exportEverything} disabled={exporting} title="Download a complete JSON export of your account data"><Ic name="arrow-up" /> {exporting ? 'Preparing export…' : 'Export everything'}</button>
             <button className="btn ghost amber" onClick={leaveToAnon}><span className="hemi2 dashed" /> Go anonymous</button>
             <button className="btn ghost bad" disabled title="Coming soon — account deletion isn’t wired yet"><Ic name="x" /> Delete account &amp; data — soon</button>
           </div>
+          {exportUrl && (
+            <div className="ac-note mono" style={{ marginTop: 'var(--s3)' }}>
+              <span className="hemi2 lit" /> Your export is ready — <a className="accent" href={exportUrl} target="_blank" rel="noreferrer" download>download it ▸</a> (link expires shortly).
+            </div>
+          )}
+          {exportErr && (
+            <div className="ac-note mono" style={{ marginTop: 'var(--s3)' }}>
+              <span className="hemi2 dashed" /> {exportErr}
+            </div>
+          )}
           <div className="ac-note mono" style={{ marginTop: 'var(--s3)' }}>
-            <span className="hemi2 dashed" /> Data export &amp; account deletion are your legal rights — the backend endpoints are in progress; they’ll be wired here when ready.
+            <span className="hemi2 dashed" /> Data export &amp; account deletion are your legal rights — export is live; account deletion is in progress and will be wired here when ready.
           </div>
 
           {/* section cards — the honesty bar: rows with a real backend (credits via meStatus,
