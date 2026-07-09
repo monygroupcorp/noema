@@ -21,19 +21,25 @@
 //   · No credit from a non-completed payment — the event must actually be paid.
 //   · The credited amount is the SERVER-SIDE pack constant keyed by the server-set packId,
 //     never a client-supplied figure.
-//   · At-most-one credit per payment under redelivery — the atomic `StripeEventStore` claim
-//     (fast, in-process) plus the durable `Signum.testis` ledger check (survives restart /
-//     another instance) together prevent a double-credit and a double-`Reditus`.
+//   · At-most-one credit per payment under redelivery/concurrency — a DURABLE, CROSS-INSTANCE
+//     guard, not an in-process claim. Two indexes carry it: a unique PARTIAL index on
+//     `Signum.testis` (scoped to auctor:'stripe:purchase') and a unique PARTIAL index on
+//     `Reditus.chargeRef` (scoped to origo:'fiat'). The idempotency key is the Stripe
+//     payment_intent id — SHARED by a purchase's two events (checkout.session.completed +
+//     payment_intent.succeeded), so keying on it collapses both (and any redelivery, from any
+//     instance) to ONE credit + ONE Reditus. When two instances race, the second `issue`/`record`
+//     hits the unique index → dup-key error → the helper replays the original outcome (no second
+//     credit, no second revenue row). A pre-read of the ledger is only an optimization; the
+//     unique index is the real guard (a read-then-write alone is a race).
 //
 // The Stripe SDK is behind the `StripeGateway` port — the real impl wraps `stripe`; tests
 // inject a fake, so no live key is needed to verify (real keys are go-live config).
 // =============================================================================
 
-import type { Signorum } from '../../types/significandi.js'
+import type { Signorum, Signum } from '../../types/significandi.js'
 import type { Redituum } from '../../types/reditus.js'
 import type { AnimaStore } from '../../types/anima.js'
 import { resolvePack, type CreditPack } from '../../ledger/stripePacks.js'
-import type { StripeEventStore, StripeEventOutcome } from '../../ledger/StripeEventStore.js'
 import { makeLogger } from '../../lib/logger.js'
 
 const log = makeLogger('stripe-webhook')
@@ -164,13 +170,19 @@ export interface StripeWebhookResult {
 }
 
 export interface StripeWebhookDeps {
-  signorum: Signorum
-  /** The USD revenue book — a peer fiat `Reditus` is booked at the charge amount. */
+  /** The credit ledger. `issue` must SURFACE its dup-key error (the durable idempotency guard). */
+  signorum: Pick<Signorum, 'issue' | 'history'>
+  /** The USD revenue book — a peer fiat `Reditus` is booked at the pack's charge amount. */
   redituum: Pick<Redituum, 'record'>
   animae: Pick<AnimaStore, 'find'>
-  /** The idempotency claim store (keyed on the payment key). */
-  stripeEvents: StripeEventStore
   gateway: StripeGateway
+}
+
+/** The result of crediting one completed payment (fresh or replayed on redelivery). */
+interface CreditOutcome {
+  credited: bigint
+  signumId: string
+  packId: string
 }
 
 /** A structurally-bad or non-creditable event — carries the HTTP status to return. */
@@ -215,29 +227,13 @@ export async function handleStripeWebhook(
     const pack = resolvePack(packId)
     if (!pack) throw new StripeEventError(400, `Unknown pack '${packId}'`)
 
-    // 4. Atomic in-process claim (fast dedup gate for concurrent redeliveries).
-    const claim = await deps.stripeEvents.claim(paymentKey)
-    if (claim === 'in_flight') {
-      // Another delivery is crediting this same payment right now — do not double-credit.
-      return { status: 200, body: { received: true } }
-    }
-    if (typeof claim === 'object') {
-      // Already fully processed — replay the original outcome (no new credit, no new Reditus).
-      return { status: 200, body: { received: true, credited: claim.done.credited.toString() } }
-    }
-
-    // claim === 'claimed' → first delivery for this payment.
-    try {
-      const outcome = await creditPayment({ animaId, pack, paymentKey }, deps)
-      await deps.stripeEvents.finish(paymentKey, outcome)
-      log.info('stripe payment credited', { paymentKey, animaId, packId: pack.id, credited: outcome.credited.toString(), signumId: outcome.signumId })
-      return { status: 200, body: { received: true, credited: outcome.credited.toString() } }
-    } catch (err) {
-      // Release the claim so a redelivery retries. The durable `Signum.testis` check inside
-      // creditPayment ensures a partial-then-retried delivery can't double-credit.
-      await deps.stripeEvents.abort(paymentKey)
-      throw err
-    }
+    // 4. Credit the pack's impetus + book the peer fiat Reditus. Idempotent per payment via the
+    //    durable unique indexes (see creditPayment) — a redelivery/concurrent instance replays the
+    //    original credit rather than minting a second. A DB failure propagates (→ 500 at the
+    //    router) so Stripe retries the delivery; the retry is idempotent.
+    const outcome = await creditPayment({ animaId, pack, paymentKey }, deps)
+    log.info('stripe payment credited', { paymentKey, animaId, packId: pack.id, credited: outcome.credited.toString(), signumId: outcome.signumId })
+    return { status: 200, body: { received: true, credited: outcome.credited.toString() } }
   } catch (err) {
     if (err instanceof StripeEventError) {
       log.warn('stripe webhook rejected', { paymentKey, type: event.type, message: err.message })
@@ -267,47 +263,86 @@ function requireField(value: string | null | undefined, name: string): string {
   return value
 }
 
+/** The auctor stamped on every fiat credit — also the scope of the unique-partial testis index. */
+const STRIPE_AUCTOR = 'stripe:purchase'
+
+/**
+ * A Mongo duplicate-key (E11000) error, detected structurally so this handler stays decoupled
+ * from the driver (the Memory stores never throw it — their single-writer dedup is the pre-read).
+ */
+function isDuplicateKeyError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 11000
+}
+
+/** Find this payment's already-struck fiat credit (the replay source), or null. */
+async function findStripeCredit(
+  signorum: Pick<Signorum, 'history'>,
+  animaId: string,
+  testis: string,
+): Promise<Signum | null> {
+  const history = await signorum.history({ animaId })
+  return history.find(s => s.auctor === STRIPE_AUCTOR && s.testis === testis) ?? null
+}
+
 /**
  * Credit one completed payment: the pack's impetus to the anima + a peer fiat `Reditus`.
- * DURABLE IDEMPOTENCY: before issuing, the ledger is checked for an existing
- * `stripe:<paymentKey>` credit — so a partial-then-retried delivery (or another instance)
- * returns the original credit instead of minting a second. The signum is issued BEFORE the
- * Reditus so a crash between them can only UNDER-count revenue (safe), never double-credit.
+ *
+ * DURABLE, CROSS-INSTANCE IDEMPOTENCY. The credit's `testis` is `stripe:<paymentKey>` and a
+ * unique PARTIAL index on (testis where auctor:'stripe:purchase') makes a second `issue` for the
+ * same payment throw a dup-key error — so a concurrent second instance (or a redelivery, or the
+ * purchase's other event type sharing the same payment_intent) does NOT double-mint: we catch the
+ * dup-key and REPLAY the winner's credit. The pre-read below is only an optimization (and the
+ * dedup path for the single-writer Memory store); the unique index is the actual guard.
+ *
+ * The peer `Reditus` is booked with `chargeRef = paymentKey`, deduped by its own unique partial
+ * index (origo:'fiat') — so revenue can't double-book either. `record()` is always called (even on
+ * a replayed credit) so the peer revenue row is present exactly once even if a prior delivery
+ * crashed between the issue and the record; it is idempotent on chargeRef.
  */
 async function creditPayment(
   args: { animaId: string; pack: CreditPack; paymentKey: string },
   deps: StripeWebhookDeps,
-): Promise<StripeEventOutcome> {
+): Promise<CreditOutcome> {
   const { animaId, pack, paymentKey } = args
   const testis = `stripe:${paymentKey}`
 
-  // Durable dedup backstop: has this exact payment already been credited on the ledger?
-  const prior = (await deps.signorum.history({ animaId }))
-    .find(s => s.auctor === 'stripe:purchase' && s.testis === testis)
-  if (prior) {
-    return { credited: pack.impetus, signumId: prior.id, packId: pack.id }
+  // Resolve the credit signum: replay a prior one if present, else mint it.
+  let signum = await findStripeCredit(deps.signorum, animaId, testis)   // optimization + Memory dedup
+  if (!signum) {
+    // Identified-only invariant: the target anima must exist (checked only on the mint path).
+    const anima = await deps.animae.find(animaId)
+    if (!anima) throw new StripeEventError(400, `anima '${animaId}' not found`)
+
+    // Mint the credit — forma:'minted' (a platform-issued, fiat-funded credit; NOT 'eth' — no ETH
+    // is involved), auctor 'stripe:purchase', testis = the per-payment key. valor is the
+    // SERVER-SIDE pack constant (full amount, NO haircut).
+    try {
+      signum = await deps.signorum.issue({
+        forma: 'minted',
+        animaId,
+        valor: pack.impetus,
+        auctor: STRIPE_AUCTOR,
+        testis,
+      })
+    } catch (err) {
+      // The durable guard fired: another instance won the race for this payment. Replay its credit.
+      if (isDuplicateKeyError(err)) {
+        signum = await findStripeCredit(deps.signorum, animaId, testis)
+        if (!signum) throw err   // dup-key but the winner's row isn't visible — surface (unexpected)
+      } else {
+        throw err
+      }
+    }
   }
 
-  // Identified-only invariant: the target anima must exist.
-  const anima = await deps.animae.find(animaId)
-  if (!anima) throw new StripeEventError(400, `anima '${animaId}' not found`)
-
-  // Issue the credit — forma reuses the deposit path ('eth'), auctor 'stripe:purchase', testis
-  // = the per-payment key. valor is the SERVER-SIDE pack constant (full amount, NO haircut).
-  const signum = await deps.signorum.issue({
-    forma: 'eth',
-    animaId,
-    valor: pack.impetus,
-    auctor: 'stripe:purchase',
-    testis,
-  })
-
   // Book USD revenue at receipt (ADR-0013 §2/§4) — a peer of the credit. Fiat: origo:'fiat',
-  // usdFmv = the charge amount directly, fmvSource = the Stripe payment id, NO depositumId.
+  // usdFmv = the pack's charge amount in micro-USD, fmvSource = the Stripe payment id (a free-form
+  // audit string), chargeRef = the payment key (the dedicated idempotency key), NO depositumId.
   await deps.redituum.record({
     usdFmv: pack.usdMicro,
     fmvSource: testis,
     origo: 'fiat',
+    chargeRef: paymentKey,
   })
 
   return { credited: pack.impetus, signumId: signum.id, packId: pack.id }

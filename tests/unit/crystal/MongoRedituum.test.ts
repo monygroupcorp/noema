@@ -63,6 +63,33 @@ test('record: fiat rows (no depositumId) always append despite the partial index
   assert.equal(await redituum.trailingUsdRevenue(now), 20n * USD)
 })
 
+test('record: idempotent on chargeRef (fiat) via the unique partial index — no double-book', async () => {
+  const now = new Date('2026-07-01T00:00:00Z')
+  const first = await redituum.record({ usdFmv: 25n * USD, fmvSource: 'stripe:pi_x', origo: 'fiat', chargeRef: 'pi_x', natum: now })
+  const again = await redituum.record({ usdFmv: 25n * USD, fmvSource: 'stripe:pi_x', origo: 'fiat', chargeRef: 'pi_x', natum: now })
+  assert.equal(again.id, first.id)                                              // replayed, not appended
+  assert.equal(await col.countDocuments({ chargeRef: 'pi_x' }), 1)
+  assert.equal(await redituum.trailingUsdRevenue(now), 25n * USD)               // revenue booked once
+})
+
+test('record: CONCURRENT same-chargeRef fiat rows collapse to ONE (the durable cross-instance guard)', async () => {
+  const now = new Date('2026-07-01T00:00:00Z')
+  const draft = { usdFmv: 50n * USD, fmvSource: 'stripe:pi_race', origo: 'fiat' as const, chargeRef: 'pi_race', natum: now }
+  const rows = await Promise.all(Array.from({ length: 6 }, () => redituum.record({ ...draft })))
+  const ids = new Set(rows.map(r => r.id))
+  assert.equal(ids.size, 1, 'all concurrent records must resolve to the SAME single row')
+  assert.equal(await col.countDocuments({ chargeRef: 'pi_race' }), 1)
+  assert.equal(await redituum.trailingUsdRevenue(now), 50n * USD)               // booked exactly once
+})
+
+test('record: fiat chargeRef does NOT collide with a crypto depositumId of the same string', async () => {
+  const now = new Date('2026-07-01T00:00:00Z')
+  await redituum.record({ usdFmv: 5n * USD, fmvSource: 'o', origo: 'crypto', depositumId: 'shared_key', natum: now })
+  await redituum.record({ usdFmv: 7n * USD, fmvSource: 'stripe:shared_key', origo: 'fiat', chargeRef: 'shared_key', natum: now })
+  assert.equal(await col.countDocuments({}), 2)                                 // distinct keyspaces
+  assert.equal(await redituum.trailingUsdRevenue(now), 12n * USD)
+})
+
 test('trailingUsdRevenue: window (now-12mo, now] excludes stale + future receipts', async () => {
   const now = new Date('2026-07-01T00:00:00Z')
   await redituum.record({ usdFmv: 500n * USD, fmvSource: 'o', origo: 'crypto', depositumId: 'd1', natum: new Date('2025-06-01T00:00:00Z') }) // >12mo → out
