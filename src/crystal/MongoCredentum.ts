@@ -75,6 +75,16 @@ export class MongoCredentum implements CredentumStore {
     return doc ? fromDoc(doc as Record<string, unknown>) : null
   }
 
+  /**
+   * The caller's OWN credential row by `animaId` — for the GDPR self-export. Returns the
+   * username + timestamps but NEVER the `passwordHash` (projected out at the DB, so the
+   * secret never even leaves Mongo). `animaId` owns exactly one row, so this is unambiguous.
+   */
+  async findByAnimaId(animaId: string): Promise<Omit<Credentum, 'passwordHash'> | null> {
+    const doc = await this.col.findOne({ animaId }, { projection: { passwordHash: 0, _id: 0 } })
+    return doc ? (doc as unknown as Omit<Credentum, 'passwordHash'>) : null
+  }
+
   async setPassword(id: string, passwordHash: string): Promise<void> {
     await this.col.updateOne({ id }, { $set: { passwordHash, mutatum: this.now() } })
   }

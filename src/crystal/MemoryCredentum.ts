@@ -42,6 +42,16 @@ export class MemoryCredentum implements CredentumStore {
     return c ? { ...c } : null
   }
 
+  /** The caller's OWN row by animaId — username + timestamps, NEVER the passwordHash
+   *  (stripped here so the export path can't leak it). Mirrors MongoCredentum.findByAnimaId. */
+  async findByAnimaId(animaId: string): Promise<Omit<Credentum, 'passwordHash'> | null> {
+    const c = this.find(c => c.animaId === animaId)
+    if (!c) return null
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { passwordHash: _omit, ...rest } = c
+    return { ...rest }
+  }
+
   async setPassword(id: string, passwordHash: string): Promise<void> {
     const c = this.byId.get(id)
     if (!c) return

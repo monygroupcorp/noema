@@ -25,6 +25,7 @@ import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
 import { API_CONTRACT } from './apiContract.js'
 import { generateOpenApi } from './docgen.js'
 import type { RunEventHub } from './RunEventHub.js'
+import type { MeExporter } from '../../crystal/MeExporter.js'
 
 const log = makeLogger('api:router')
 
@@ -113,7 +114,7 @@ export interface Identity {
   resolve(creds: Credentials): Promise<AuctorKey>
 }
 
-export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?: RunEventHub }): Router {
+export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?: RunEventHub; exporter?: MeExporter }): Router {
   const { api, identity } = deps
   const router = express.Router()
 
@@ -598,6 +599,18 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   // GET /v1/me — the caller's account settings: appearance + generation defaults + bindings.
   router.get('/me', wrap(async (req, res) => {
     res.json(await api.getMe(await auth(req)))
+  }))
+
+  // POST /v1/me/export — GDPR self-export: assemble the CALLER'S OWN data into a downloadable
+  // JSON bundle and return a short-lived, unguessable signed GET URL to it. Strictly self-scoped
+  // (the assembler only ever queries the caller's own owner key). 503 when R2 isn't configured.
+  router.post('/me/export', wrap(async (req, res) => {
+    if (!deps.exporter) {
+      res.status(503).json({ error: { code: 'internal.error', message: 'account export unavailable' } })
+      return
+    }
+    const auctor = await auth(req)
+    res.status(200).json(await deps.exporter.exportForCaller(auctor))
   }))
 
   // PUT /v1/me/appearance — replace the caller's presentation skin (Profile).
