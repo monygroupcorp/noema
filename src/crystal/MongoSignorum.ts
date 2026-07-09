@@ -37,6 +37,10 @@ export class MongoSignorum implements Signorum {
       throw new Error(`privacy invariant: ${input.forma} forma must not have animaId`)
     }
     const signum: Signum = { ...input, id: uuidv4(), natum: new Date(), status: 'valid' }
+    // insertOne surfaces a duplicate-key (E11000) error unswallowed — that is deliberate: the
+    // fiat funding rail's unique PARTIAL index on (testis where auctor:'stripe:purchase') makes a
+    // concurrent/redelivered Stripe credit collide here, and the credit helper catches the dup-key
+    // to replay the original credit instead of double-minting. Do NOT swallow it.
     await this.col.insertOne(toDoc(signum))
     return signum
   }

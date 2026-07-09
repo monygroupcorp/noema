@@ -21,7 +21,6 @@ import {
   type StripeWebhookEvent,
   type StripeCheckoutInput,
 } from '../../../../src/api/webhooks/stripeWebhook.js'
-import { MemoryStripeEventStore } from '../../../../src/ledger/StripeEventStore.js'
 import { MemorySignorum } from '../../../../src/ledger/MemorySignorum.js'
 import { MemoryRedituum } from '../../../../src/ledger/MemoryRedituum.js'
 import { PACKS } from '../../../../src/ledger/stripePacks.js'
@@ -55,13 +54,11 @@ function fakeGateway(): StripeGateway & { checkouts: StripeCheckoutInput[] } {
 function makeDeps(over: { known?: Set<string> } = {}) {
   const signorum = new MemorySignorum()
   const redituum = new MemoryRedituum()
-  const stripeEvents = new MemoryStripeEventStore()
   const gateway = fakeGateway()
   return {
     signorum,
     redituum,
     animae: animae(over.known),
-    stripeEvents,
     gateway,
   }
 }
@@ -141,7 +138,7 @@ test('each pack credits its EXACT impetus + books a fiat Reditus at the charge a
   assert.equal(PACKS.studio_100.impetus, 390000n)
 })
 
-test('the credit signum is stripe:purchase / testis stripe:<paymentKey> / forma eth', async () => {
+test('the credit signum is stripe:purchase / testis stripe:<paymentKey> / forma minted', async () => {
   const deps = makeDeps()
   await deliver(deps, completedSession({ packId: 'plus_50', paymentIntent: 'pi_x' }))
   const history = await deps.signorum.history({ animaId: KNOWN_ANIMA })
@@ -149,7 +146,8 @@ test('the credit signum is stripe:purchase / testis stripe:<paymentKey> / forma 
   const s = history[0]!
   assert.equal(s.auctor, 'stripe:purchase')
   assert.equal(s.testis, 'stripe:pi_x')
-  assert.equal(s.forma, 'eth')
+  // forma:'minted' — a platform-issued, fiat-funded credit (NOT 'eth'; no ETH is involved).
+  assert.equal(s.forma, 'minted')
   assert.equal(s.valor, 180000n)
 })
 
@@ -190,18 +188,19 @@ test('both event types for ONE payment (checkout.session.completed + payment_int
   assert.equal(await deps.redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), PACKS.standard_25.usdMicro)
 })
 
-test('idempotency survives an aborted claim (durable Signum.testis backstop) — retry after a released claim credits once', async () => {
+test('a delivery that crashed AFTER the credit but BEFORE the Reditus is repaired on redelivery (revenue booked once)', async () => {
+  // The credit (Signum) is minted, then the process dies before the peer Reditus is booked. Stripe
+  // redelivers: the credit is replayed (not double-minted) AND the missing Reditus is now booked —
+  // so revenue lands exactly once, never zero. Simulates the crash by minting the signum directly.
   const deps = makeDeps()
-  const event = completedSession({ packId: 'plus_50', paymentIntent: 'pi_retry' })
-  // First delivery credits + finishes normally.
-  await deliver(deps, event)
-  // Simulate a released/expired claim (as `abort` does on a mid-credit failure), then redeliver:
-  // the ledger's stripe:<paymentKey> signum must still dedupe it to a single credit.
-  await deps.stripeEvents.abort('pi_retry')
-  const again = await deliver(deps, event)
+  await deps.signorum.issue({ forma: 'minted', animaId: KNOWN_ANIMA, valor: PACKS.plus_50.impetus, auctor: 'stripe:purchase', testis: 'stripe:pi_crash' })
+  // No Reditus yet (the crash). Redeliver:
+  const again = await deliver(deps, completedSession({ packId: 'plus_50', paymentIntent: 'pi_crash' }))
   assert.equal(again.status, 200)
+  // Credited exactly once (the pre-existing signum is replayed, not re-minted).
   assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 180000n)
   assert.equal((await deps.signorum.history({ animaId: KNOWN_ANIMA })).length, 1)
+  // The peer Reditus, missing after the crash, is now present — booked exactly once.
   assert.equal(await deps.redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), PACKS.plus_50.usdMicro)
 })
 

@@ -73,7 +73,6 @@ import { band, bindingCapMicroUsd, type ThresholdBand, type TripwireBandStore } 
 import type { Redituum } from '../../types/reditus.js'
 import { handleStripeCheckout, handleStripeWebhook, type StripeGateway, type StripeWebhookResult } from '../../api/webhooks/stripeWebhook.js'
 import { stripeConfigFromEnv, makeStripeGateway } from '../../api/webhooks/stripeGateway.js'
-import { MemoryStripeEventStore, type StripeEventStore } from '../../ledger/StripeEventStore.js'
 import type { WideEventStore } from '../../analytics/WideEventStore.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 import { provenanceHash } from '../../crystal/provenance.js'
@@ -177,11 +176,10 @@ export interface CrystalApiDeps {
    *  the read-only pair to `revenueReport`). Absent → the report is unavailable. */
   costReport?: Pick<WideEventStore, 'sumCostUsd'>
   /** Fiat rail (Stripe) gateway override — tests inject a fake. Absent → built from env
-   *  (`STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`); unconfigured env → the rail reports 503. */
+   *  (`STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`); unconfigured env → the rail reports 503.
+   *  Idempotency needs no injected store: it is the DURABLE unique partial indexes on
+   *  `Signum.testis` (auctor:'stripe:purchase') + `Reditus.chargeRef` (origo:'fiat'). */
   stripe?: StripeGateway
-  /** Fiat rail idempotency store override — tests inject one. Absent → an in-process
-   *  `MemoryStripeEventStore` (the durable cross-instance backstop is the `Signum.testis` ledger). */
-  stripeEvents?: StripeEventStore
 }
 
 /** Inputs to start a Collection (a Collectio): a base modus expanded over a Tractus[] grid. */
@@ -1467,7 +1465,6 @@ export class CrystalApi {
   // ── Fiat funding rail (Stripe) ──────────────────────────────────────────────
 
   private _stripeGateway: StripeGateway | null | undefined
-  private _stripeEvents: StripeEventStore | undefined
 
   /** The live Stripe gateway: the injected dep, else built from env, else `null` (unconfigured). */
   private resolveStripeGateway(): StripeGateway | null {
@@ -1480,11 +1477,6 @@ export class CrystalApi {
       }
     }
     return this._stripeGateway
-  }
-
-  /** The idempotency claim store — the injected dep, else a process-local memory store. */
-  private stripeEventStore(): StripeEventStore {
-    return (this._stripeEvents ??= this.deps.stripeEvents ?? new MemoryStripeEventStore())
   }
 
   /**
@@ -1528,7 +1520,6 @@ export class CrystalApi {
         signorum: this.deps.signorum,
         redituum: this.deps.redituum,
         animae: this.deps.animae,
-        stripeEvents: this.stripeEventStore(),
         gateway,
       },
     )
