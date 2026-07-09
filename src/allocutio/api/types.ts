@@ -34,6 +34,40 @@ export interface Run {
   resumeCheckpoint?: { url: string; step: number }
 }
 
+/**
+ * SettledRun — one row of the owner's settled spend history (`GET /v1/me/runs`).
+ * The public projection of a retained-on-settle ActumIndex entry. JSON-safe.
+ * `costUsd` is DERIVED-at-display (`cost × IMPETUS_USD_RATE`) — never a persisted
+ * FMV-at-spend column.
+ */
+export interface SettledRun {
+  /** The run (Actum) identifier. */
+  id: string
+  /** The flow (modus) this run executed. */
+  modusId: string
+  /** Human label of the modus at settle (`Modus.nomen`), falling back to `modusId`. */
+  modusLabel: string
+  /** Always `'settled'` — this surface returns completus runs only. */
+  status: 'settled'
+  /** Impetus cost, serialised as a string. */
+  cost: string
+  /** Derived USD cost at the platform reference rate — computed on read, not stored. */
+  costUsd: number
+  /** When the run settled, as an ISO-8601 string. */
+  settledAt?: string
+  /** When the run started, as an ISO-8601 string. */
+  createdAt?: string
+}
+
+/** A page of settled runs plus the owner's lifetime running total. */
+export interface RunsPage {
+  runs: SettledRun[]
+  /** Opaque cursor for the next page; absent on the last page. */
+  nextCursor?: string
+  /** Lifetime spend total for the owner (all settled runs, not just this page). */
+  runningTotal: { impetus: string; usd: number }
+}
+
 /** Public collection status — the externalised projection of CollectioStatus.
  *  `draft` = authored but not yet fired (tractus still editable). */
 export type CollectionStatus = 'draft' | 'pending' | 'running' | 'complete' | 'cancelled'

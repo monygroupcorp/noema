@@ -61,8 +61,9 @@ export interface ExecutionWebhookDeps {
   /** Optional: studio store — merges `executio.modelsInstalled` reports into
    *  `Materia.installedModels` so the bulletin Mod • → View loadout reflects reality. */
   materiae?: MateriaStore
-  /** Optional: per-anima dispatch index — entry is removed on terminal status
-   *  so `/status` YOUR GENS only shows in-flight work. */
+  /** Optional: per-anima dispatch index. On `completus` the entry is RETAINED and stamped
+   *  settled (spend history for `GET /v1/me/runs`); on `fractus` it is removed. Either way
+   *  `/status` YOUR GENS shows only in-flight work (buildGens filters to nascens|agens). */
   actumIndex?: ActumIndexStore
   /** Optional: routes collection actum completions back to CollectioCursor. */
   collectioRouter?: {
@@ -269,8 +270,23 @@ export async function handleExecutionWebhook(
         }
       }
 
-      // Drop the actumIndex entry — terminal status, no longer "in flight".
-      if (deps.actumIndex) await deps.actumIndex.remove(actum.id).catch(() => {})
+      // Retain-on-settle (noema-026): the run terminated as `completus`, so instead of
+      // pruning the index row we STAMP it settled — it becomes durable, owner-queryable
+      // spend history (`GET /v1/me/runs`). `/status`'s buildGens still filters to
+      // nascens|agens, so the retained row never re-appears in the active view. `modus`
+      // was resolved above; impetus is the settled cost. Idempotent (webhook at-least-once).
+      // Stores without `settle` (in-memory/dev doubles) keep the old prune behaviour.
+      if (deps.actumIndex?.settle) {
+        await deps.actumIndex
+          .settle(actum.id, {
+            settledAt: completed.completum ?? new Date(),
+            impetus: completed.impetus.toString(),
+            modusLabel: modus?.nomen ?? actum.modusId,
+          })
+          .catch(() => {})
+      } else if (deps.actumIndex) {
+        await deps.actumIndex.remove(actum.id).catch(() => {})
+      }
 
       return { status: 200, body: { success: true } }
     }
@@ -290,7 +306,8 @@ export async function handleExecutionWebhook(
         await deps.compositusRouter.onStepComplete(actum.compositum.parentId, actum, false)
       }
 
-      // Drop the actumIndex entry — terminal status, no longer "in flight".
+      // A `fractus` run is a failure (signa released, no charge) — NOT spend — so it is
+      // pruned, never retained as settled history (noema-026: spend view is completus-only).
       if (deps.actumIndex) await deps.actumIndex.remove(actum.id).catch(() => {})
 
       return { status: 200, body: { success: true } }

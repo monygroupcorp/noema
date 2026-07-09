@@ -208,6 +208,15 @@ export const api = {
   streamRun: (id: string) => new EventSource(`/v1/runs/${id}/stream`),
   meStatus: () => fetch('/v1/me/status', { headers: readHeaders() }).then(j<MeStatus>),
 
+  // GET /v1/me/runs — the caller's settled spend history (owner-scoped, paginated, newest
+  // first) + lifetime running total. Anon-capable (commitment-keyed). costUsd is derived.
+  listRuns: (opts: { cursor?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams({ status: 'settled' });
+    if (opts.cursor) q.set('cursor', opts.cursor);
+    if (opts.limit) q.set('limit', String(opts.limit));
+    return fetch(`/v1/me/runs?${q.toString()}`, { headers: readHeaders() }).then(j<RunsPage>);
+  },
+
   // ── Deposit / buy-points (Funding) — public, no auth ─────────────────────────
   // GET /v1/deposit/config — the CreditVault address + canonical points-per-USD +
   // default funding rate + supported chains. Static; drives the buy-credits UI.
@@ -660,6 +669,24 @@ export interface MeStatus {
   studios: StudioEntry[];
   joinable: JoinableEntry[];
   takenAt: string;
+}
+
+// A settled run in spend history (GET /v1/me/runs) — mirrors the backend SettledRun.
+export interface SettledRun {
+  id: string;
+  modusId: string;
+  modusLabel: string;
+  status: 'settled';
+  cost: string;       // impetus, stringified
+  costUsd: number;    // derived on read
+  settledAt?: string;
+  createdAt?: string;
+}
+// A page of settled runs + lifetime running total (GET /v1/me/runs).
+export interface RunsPage {
+  runs: SettledRun[];
+  nextCursor?: string;
+  runningTotal: { impetus: string; usd: number };
 }
 
 // Deposit / buy-points config (GET /v1/deposit/config) — mirrors the backend DepositConfig.
