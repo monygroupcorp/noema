@@ -46,7 +46,9 @@ export class MemoryActumIndex implements ActumIndexStore {
     const out: ActumIndex[] = []
     for (const id of ids) {
       const e = this.byActum.get(id)
-      if (e) out.push(e)
+      // IN-FLIGHT ONLY — mirror MongoActumIndex: never surface settled rows via findFor
+      // (the /status + GDPR-export surface). Settled history is listSettled-only.
+      if (e && !e.settledAt) out.push(e)
     }
     return out
   }

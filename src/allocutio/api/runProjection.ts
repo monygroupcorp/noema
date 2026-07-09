@@ -12,7 +12,9 @@ import type { Collectio, CollectioStatus } from '../../types/collectio.js'
 import type { Editio } from '../../types/editio.js'
 import type { Sodalitas } from '../../types/sodalitas.js'
 import type { Provincia } from '../../types/provincia.js'
-import type { Run, RunStatus, Collection, CollectionStatus, Team, Edition, Project } from './types.js'
+import type { ActumIndex } from '../../types/actumIndex.js'
+import { IMPETUS_USD_RATE } from '../../ledger/rates.js'
+import type { Run, RunStatus, Collection, CollectionStatus, Team, Edition, Project, SettledRun } from './types.js'
 
 /** Map the Latin ActumStatus onto the public English RunStatus. */
 const STATUS_MAP: Record<ActumStatus, RunStatus> = {
@@ -52,6 +54,28 @@ export function toRun(actum: Actum): Run {
   if (actum.resumeCheckpoint?.url) run.resumeCheckpoint = actum.resumeCheckpoint
 
   return run
+}
+
+/**
+ * Project a retained-on-settle ActumIndex entry onto its public SettledRun shape.
+ *   cost     the stamped impetus string (already JSON-safe)
+ *   costUsd  DERIVED on read: Number(cost) × IMPETUS_USD_RATE — never persisted
+ *   settledAt / createdAt  serialised to ISO-8601
+ * Pure. `impetus`/`modusLabel` fall back defensively for a row stamped by an older writer.
+ */
+export function toSettledRun(entry: ActumIndex): SettledRun {
+  const cost = entry.impetus ?? '0'
+  const out: SettledRun = {
+    id: entry.actumId,
+    modusId: entry.modusId,
+    modusLabel: entry.modusLabel ?? entry.modusId,
+    status: 'settled',
+    cost,
+    costUsd: Number(cost) * IMPETUS_USD_RATE,
+  }
+  if (entry.settledAt !== undefined) out.settledAt = new Date(entry.settledAt).toISOString()
+  if (entry.createdAt !== undefined) out.createdAt = new Date(entry.createdAt).toISOString()
+  return out
 }
 
 const COLLECTION_STATUS_MAP: Record<CollectioStatus, CollectionStatus> = {

@@ -22,7 +22,13 @@
 // anonymous `/make`.
 //
 // `/status` consults the index via `findFor(key)` for whichever AuctorKey it
-// holds. The webhook removes entries on terminal status (completus/fractus).
+// holds. `findFor` is IN-FLIGHT ONLY: on terminal SUCCESS (`completus`) the webhook
+// RETAINS the row and stamps it settled (`settle`), but `findFor` filters settled
+// rows OUT, so it keeps returning only the small in-flight (`nascens|agens`) set it
+// always did. That keeps `/status`'s per-row `actorum.findById` fan-out bounded and
+// leaves the GDPR export payload unchanged. Settled rows are queryable spend history
+// (noema-026) EXCLUSIVELY through `listSettled` / `sumSettledImpetus`. A `fractus`
+// (failed/refunded) run is NOT spend, so that branch still prunes (`remove`).
 
 import type { AuctorKey } from '../flow/types.js'
 
@@ -40,6 +46,22 @@ export interface ActumIndex {
   modusId: string
   /** When the entry was recorded — typically actum.inceptum. */
   createdAt: Date
+
+  // ─ Settled stamp (noema-026) — set only once the run terminates as `completus` ─
+  // These make the row a durable spend-history record queryable by its owner. They
+  // add NO new owner↔anonymous-half linkage: the row already keys on animaId|commitment
+  // and already carries actumId + modusId; these are attributes of that same, already
+  // owner-linked actum (the owner's own spend), not a join to any foreign anonymous row.
+  /** When the run settled (from `actum.completum`). Presence discriminates a settled row
+   *  from an in-flight one; the settled listing filters + paginates on it. */
+  settledAt?: Date
+  /** Impetus (points) the run cost, serialised as a string — JSON-safe and consistent with
+   *  the public `Run.cost` convention (a bigint would break JSON serialisation of the row,
+   *  e.g. in the GDPR export). Stamped from `actum.impetus`. */
+  impetus?: string
+  /** The modus label (`Modus.nomen`) at settle, so the spend list renders without a second
+   *  join. Falls back to `modusId` when the modus can't be resolved. */
+  modusLabel?: string
 }
 
 /**
@@ -52,9 +74,34 @@ export interface ActumIndex {
 export interface ActumIndexStore {
   /** Record a new dispatched actum for this AuctorKey. Idempotent on actumId. */
   record(entry: ActumIndex): Promise<void>
-  /** All entries for an AuctorKey — caller filters by Actum status if needed.
-   *  Looks up by `animaId` OR `commitment` depending on the union discriminant. */
+  /** In-flight entries for an AuctorKey (settled rows excluded). Looks up by `animaId`
+   *  OR `commitment` depending on the union discriminant. Bounded to the owner's active
+   *  runs — settled spend history lives behind `listSettled`/`sumSettledImpetus`, never
+   *  here (both `/status` and the GDPR export depend on this staying in-flight-only). */
   findFor(key: AuctorKey): Promise<ActumIndex[]>
   /** Drop the entry for a finished/failed actum. Idempotent. */
   remove(actumId: string): Promise<void>
+
+  // ─ Settled spend-history (noema-026) — optional so in-memory/dev doubles that ─
+  // don't retain simply keep pruning via `remove`. Production (MongoActumIndex)
+  // implements all three; `CrystalApi.listRuns` degrades to an empty page when a
+  // wired store lacks them.
+  /**
+   * Retain-on-settle: stamp the EXISTING row terminal (settledAt + cost + label) in place,
+   * instead of removing it. Keyed by `actumId`, so it needs no AuctorKey and preserves the
+   * original owner key untouched. Idempotent (the completion webhook is at-least-once — a
+   * repeat call re-stamps the same values). No-op if the row is already gone.
+   */
+  settle?(actumId: string, patch: { settledAt: Date; impetus: string; modusLabel: string }): Promise<void>
+  /**
+   * Owner-scoped, cursor-paginated, settled-only listing (newest settled first). Paginated
+   * at the DB — never loads the whole history into memory. `cursor` is the opaque token a
+   * prior page returned; omit for the first page. Returns `[]` for a bursaToken key (those
+   * runs are never indexed). Owner-scoping is the index key itself — foreign owners' rows
+   * are unreachable, mirroring how `/status` lists in-flight gens via `findFor`.
+   */
+  listSettled?(key: AuctorKey, opts: { limit: number; cursor?: string }): Promise<{ entries: ActumIndex[]; nextCursor?: string }>
+  /** Lifetime sum of settled impetus for the owner, serialised as a string — the running
+   *  total. Owner-scoped by the index key; `'0'` when there is no settled history. */
+  sumSettledImpetus?(key: AuctorKey): Promise<string>
 }
