@@ -22,11 +22,13 @@
 // anonymous `/make`.
 //
 // `/status` consults the index via `findFor(key)` for whichever AuctorKey it
-// holds. On terminal SUCCESS (`completus`) the webhook RETAINS the row and
-// stamps it settled (`settle`), so it becomes queryable spend history for the
-// owner (noema-026) — `/status`'s `buildGens` filters back to `nascens|agens`,
-// so a retained row never shows in the active view. A `fractus` (failed/refunded)
-// run is NOT spend, so that branch still prunes (`remove`).
+// holds. `findFor` is IN-FLIGHT ONLY: on terminal SUCCESS (`completus`) the webhook
+// RETAINS the row and stamps it settled (`settle`), but `findFor` filters settled
+// rows OUT, so it keeps returning only the small in-flight (`nascens|agens`) set it
+// always did. That keeps `/status`'s per-row `actorum.findById` fan-out bounded and
+// leaves the GDPR export payload unchanged. Settled rows are queryable spend history
+// (noema-026) EXCLUSIVELY through `listSettled` / `sumSettledImpetus`. A `fractus`
+// (failed/refunded) run is NOT spend, so that branch still prunes (`remove`).
 
 import type { AuctorKey } from '../flow/types.js'
 
@@ -72,8 +74,10 @@ export interface ActumIndex {
 export interface ActumIndexStore {
   /** Record a new dispatched actum for this AuctorKey. Idempotent on actumId. */
   record(entry: ActumIndex): Promise<void>
-  /** All entries for an AuctorKey — caller filters by Actum status if needed.
-   *  Looks up by `animaId` OR `commitment` depending on the union discriminant. */
+  /** In-flight entries for an AuctorKey (settled rows excluded). Looks up by `animaId`
+   *  OR `commitment` depending on the union discriminant. Bounded to the owner's active
+   *  runs — settled spend history lives behind `listSettled`/`sumSettledImpetus`, never
+   *  here (both `/status` and the GDPR export depend on this staying in-flight-only). */
   findFor(key: AuctorKey): Promise<ActumIndex[]>
   /** Drop the entry for a finished/failed actum. Idempotent. */
   remove(actumId: string): Promise<void>

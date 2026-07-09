@@ -47,18 +47,20 @@ async function seedSettled(entry: ActumIndex, settledAt: Date, impetus: string, 
 test('settle RETAINS the row (does not prune) and stamps settledAt + impetus + label', async () => {
   await seedSettled(inFlight({ actumId: 'a1' }), new Date('2026-07-02T00:00:00Z'), '900', 'Portrait')
 
-  // Still present for /status findFor (retained, not removed).
+  // findFor is IN-FLIGHT ONLY: a settled row is retained in the collection but must
+  // NOT come back through findFor (the /status + GDPR-export surface). Otherwise
+  // /status would fan out one actorum.findById per lifetime run and the export would
+  // silently gain all settled runs.
   const forStatus = await store.findFor({ animaId: 'anima-A' })
-  assert.equal(forStatus.length, 1)
-  assert.equal(forStatus[0].actumId, 'a1')
-  assert.equal(forStatus[0].impetus, '900')
-  assert.ok(forStatus[0].settledAt instanceof Date)
-  assert.equal(forStatus[0].modusLabel, 'Portrait')
+  assert.equal(forStatus.length, 0)
 
-  // And listed as settled.
+  // The row is retained and stamped — reachable only as settled history.
   const page = await store.listSettled({ animaId: 'anima-A' }, { limit: 10 })
   assert.equal(page.entries.length, 1)
   assert.equal(page.entries[0].actumId, 'a1')
+  assert.equal(page.entries[0].impetus, '900')
+  assert.ok(page.entries[0].settledAt instanceof Date)
+  assert.equal(page.entries[0].modusLabel, 'Portrait')
 })
 
 test('settle is idempotent (webhook at-least-once) and a no-op for an unknown/pruned row', async () => {
@@ -67,9 +69,11 @@ test('settle is idempotent (webhook at-least-once) and a no-op for an unknown/pr
   const page = await store.listSettled({ animaId: 'anima-A' }, { limit: 10 })
   assert.equal(page.entries.length, 1, 'no duplicate row from a repeat settle')
 
-  // No-op when the row was never indexed.
+  // No-op when the row was never indexed: the real settled row survives, the ghost
+  // creates nothing. (Checked via listSettled — findFor is in-flight-only and a1 is settled.)
   await store.settle('ghost', { settledAt: new Date(), impetus: '1', modusLabel: 'x' })
-  assert.equal((await store.findFor({ animaId: 'anima-A' })).length, 1)
+  const stillThere = await store.listSettled({ animaId: 'anima-A' }, { limit: 10 })
+  assert.deepEqual(stillThere.entries.map(e => e.actumId), ['a1'])
 })
 
 test('listSettled is owner-scoped — a second owner (identified AND anon commitment) never leaks', async () => {

@@ -47,9 +47,16 @@ export class MongoActumIndex implements ActumIndexStore {
     // bursaToken runs are not indexed — dispatchInceptio skips the record() call for them.
     // The index exists for identified (animaId) and arcanum commitment runs only.
     if ('bursaToken' in key) return []
-    const filter = 'animaId' in key
+    // IN-FLIGHT ONLY: exclude settled rows. Retain-on-settle (noema-026) keeps terminal
+    // rows in the collection for the settled-history listing (`listSettled`), but `findFor`
+    // is the in-flight surface — `/status` fans out one actorum.findById per returned row,
+    // and the GDPR export ships them, so returning a user's entire lifetime history here
+    // would be an unbounded /status fan-out and an export-payload change. Settled rows are
+    // reachable only through `listSettled`/`sumSettledImpetus`.
+    const owner = 'animaId' in key
       ? { animaId: key.animaId }
       : { commitment: key.commitment }
+    const filter = { ...owner, settledAt: { $exists: false } }
     const docs = await this.col.find(filter).toArray()
     return docs.map(d => {
       const { _id: _omit, ...rest } = d as ActumIndex & { _id: unknown }
