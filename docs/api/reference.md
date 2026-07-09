@@ -675,6 +675,67 @@ Quote how many impetus points a deposit of a given asset+amount would buy (infor
 }
 ```
 
+### POST /v1/payments/checkout
+
+Buy a fixed credit pack with fiat: create a Stripe Checkout session for the chosen pack and return the hosted-checkout URL. Requires an identified account; the impetus credited is the server-side pack constant, applied later by the signature-verified webhook on payment completion.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Buy a fixed credit pack with fiat via Stripe Checkout. The pack is server-authoritative: the impetus credited is the pack constant, never a client-supplied figure. Requires an identified account (a card de-anonymizes; an anon purse is rejected).",
+  "properties": {
+    "packId": {
+      "type": "string",
+      "enum": [
+        "starter_10",
+        "standard_25",
+        "plus_50",
+        "studio_100"
+      ],
+      "description": "The credit pack SKU to purchase. Fixed USD price → fixed impetus (starter_10 $10→30,000; standard_25 $25→82,500; plus_50 $50→180,000; studio_100 $100→390,000). No funding haircut."
+    },
+    "successUrl": {
+      "type": "string",
+      "description": "Optional redirect URL on completed payment; falls back to the server default."
+    },
+    "cancelUrl": {
+      "type": "string",
+      "description": "Optional redirect URL on abandoned checkout; falls back to the server default."
+    }
+  },
+  "required": [
+    "packId"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The hosted Stripe Checkout session to redirect the caller to. Credit is applied only later, by the signature-verified webhook, when the payment completes.",
+  "properties": {
+    "url": {
+      "type": "string",
+      "description": "The Stripe-hosted checkout URL to redirect the caller to."
+    },
+    "sessionId": {
+      "type": "string",
+      "description": "The Stripe Checkout Session id."
+    }
+  },
+  "required": [
+    "url",
+    "sessionId"
+  ]
+}
+```
+
 ### POST /v1/models/import
 
 Import a model/LoRA by URL (Civitai/HuggingFace/direct) as a private, owner-scoped model — usable in your flows immediately; promoting it to the public catalogue is a separate publish.
