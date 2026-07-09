@@ -4,17 +4,40 @@ import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type DepositConfig } from '../lib/api';
 import { connectWallet } from '../lib/wallet';
+import { useSession } from '../state/session';
 import { Hemisphere, Meter } from './IdentityMeter';
 import { BuyCreditsModal } from './BuyCreditsModal';
 
-// Credit packs — pay-as-you-go top-ups anchored on a USD price. The credit amount
-// is computed LIVE from the deposit config (pointsPerUsd × funding rate), so it's the
-// real number the deposit webhook would credit, not a hardcoded guess.
-const PACK_USD = [
-  { id: 'starter', usd: 5 },
-  { id: 'plus', usd: 20 },
-  { id: 'pro', usd: 80 },
+// Ratified fixed credit packs (go-live step 3B, Stripe scout 2026-07-08). The shared
+// USD/point anchor across the page: the fiat/card rail's Stripe checkout is priced
+// EXACTLY off this table (server-authoritative — /v1/payments/checkout credits the
+// backend impetus constant, never a client computation); the anon-rail chips reuse the
+// same denominations as an informational preview (that rail's actual crediting is a live
+// crypto-deposit quote, priced at mint time). Display points = backend impetus / 10.
+export const FIAT_PACKS: Array<{ id: string; usd: number; points: number }> = [
+  { id: 'starter_10', usd: 10, points: 3_000 },
+  { id: 'standard_25', usd: 25, points: 8_250 },
+  { id: 'plus_50', usd: 50, points: 18_000 },
+  { id: 'studio_100', usd: 100, points: 39_000 },
 ];
+
+// Identified-account gate for the fiat rail: a card purchase requires a signed-in anima
+// (client_reference_id = animaId) — an anon/purse-only caller is 401'd server-side, so we
+// prompt sign-in instead of ever starting checkout for one.
+export function canCheckout(session: unknown): boolean {
+  return session != null;
+}
+
+// The checkout request shape sent to POST /v1/payments/checkout. successUrl/cancelUrl
+// point back at this page with a `checkout` query flag so we know to poll on return
+// (Stripe's webhook credits async — the redirect itself carries no proof of payment).
+export function buildCheckoutRequest(packId: string, origin: string): { packId: string; successUrl: string; cancelUrl: string } {
+  return {
+    packId,
+    successUrl: `${origin}/funding?checkout=success`,
+    cancelUrl: `${origin}/funding?checkout=cancel`,
+  };
+}
 
 // Native ETH sentinel for the deposit pricer (0x000…000 = the chain's native coin).
 const NATIVE_ETH = '0x0000000000000000000000000000000000000000';
@@ -34,7 +57,8 @@ function WarnIc() {
 }
 
 export function Funding() {
-  const [pack, setPack] = useState('plus');
+  const { session } = useSession();
+  const [pack, setPack] = useState('plus_50');
   const [cfg, setCfg] = useState<DepositConfig | null>(null);
   // Live ETH → points quote for the onchain rail.
   const [eth, setEth] = useState('');
@@ -48,6 +72,11 @@ export function Funding() {
   const [copied, setCopied] = useState(false);
   const [buyOpen, setBuyOpen] = useState(false);
 
+  // Fiat/card rail — Stripe Checkout redirect + post-return credit poll.
+  const [checkoutBusy, setCheckoutBusy] = useState<string | null>(null);
+  const [checkoutErr, setCheckoutErr] = useState<string | null>(null);
+  const [checkoutStatus, setCheckoutStatus] = useState<'idle' | 'polling' | 'settled' | 'timeout'>('idle');
+
   async function connect() {
     setWalletErr(null);
     try { const w = await connectWallet(); setWallet(w.address); }
@@ -59,15 +88,51 @@ export function Funding() {
     catch { /* clipboard blocked — the address is still shown in full via the title tooltip */ }
   }
 
+  // Card pack purchase. Anon/purse callers never reach the API call — canCheckout() gates
+  // it client-side (the inline sign-in prompt below covers that case); the server would
+  // 401 payments.identity_required anyway, this just avoids a doomed round-trip.
+  function buyPack(packId: string) {
+    setCheckoutErr(null);
+    if (!canCheckout(session)) return;
+    setCheckoutBusy(packId);
+    api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin))
+      .then((s) => { window.location.href = s.url; })
+      .catch((e) => { setCheckoutErr(e instanceof Error ? e.message : String(e)); setCheckoutBusy(null); });
+  }
+
   useEffect(() => {
     let live = true;
     api.getDepositConfig().then((c) => { if (live) setCfg(c); }).catch(() => {});
     return () => { live = false; };
   }, []);
 
-  // Credits a USD price buys, from the live config (gross points × funding rate).
-  const packCredits = (usd: number): number | null =>
-    cfg ? Math.round(usd * cfg.pointsPerUsd * (cfg.defaultFundingRatePct / 100)) : null;
+  // On return from Stripe (success_url carries ?checkout=success), poll /v1/me/status
+  // until the balance moves — the webhook credits asynchronously, so the redirect itself
+  // is not proof of a landed credit. Strip the flag so a refresh doesn't re-poll.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('checkout') !== 'success') return;
+    window.history.replaceState({}, '', window.location.pathname);
+    let live = true;
+    setCheckoutStatus('polling');
+    const start = Date.now();
+    const timeoutMs = 5 * 60_000;
+    let baseline: number | null = null;
+    const poll = () => {
+      api.meStatus().then((s) => {
+        if (!live) return;
+        const bal = Number(s.balanceImpetus);
+        if (baseline == null) { baseline = bal; }
+        else if (bal > baseline) { setCheckoutStatus('settled'); return; }
+        if (Date.now() - start < timeoutMs) setTimeout(poll, 3000);
+        else setCheckoutStatus('timeout');
+      }).catch(() => {
+        if (live && Date.now() - start < timeoutMs) setTimeout(poll, 3000);
+      });
+    };
+    poll();
+    return () => { live = false; };
+  }, []);
 
   // Debounced live deposit quote as the user types an ETH amount.
   useEffect(() => {
@@ -152,19 +217,16 @@ export function Funding() {
 
             <div className="fund-actions">
               <div className="filters">
-                {PACK_USD.map((p) => {
-                  const cr = packCredits(p.usd);
-                  return (
-                    <button
-                      key={p.id}
-                      className={`fchip${pack === p.id ? ' on' : ''}`}
-                      onClick={() => setPack(p.id)}
-                    >
-                      <span className="fc-cr">{cr != null ? fmt(cr) : '…'}</span>
-                      <span className="fc-pr">${p.usd}</span>
-                    </button>
-                  );
-                })}
+                {FIAT_PACKS.map((p) => (
+                  <button
+                    key={p.id}
+                    className={`fchip${pack === p.id ? ' on' : ''}`}
+                    onClick={() => setPack(p.id)}
+                  >
+                    <span className="fc-cr">{fmt(p.points)}</span>
+                    <span className="fc-pr">${p.usd}</span>
+                  </button>
+                ))}
               </div>
               <Link className="btn-ghost" to="/vault">
                 <Ic name="venetian-mask" /> Mint a purse <Ic name="arrow-right" />
@@ -254,15 +316,54 @@ export function Funding() {
                 </div>
                 <p className="fund-desc">
                   Pay by card via Stripe. The fastest path. We see your name and card.
-                  Subscription or pay-as-you-go.
+                  Fixed packs — the price and the credit are locked in.
                 </p>
               </div>
               <div className="fund-aside">
                 <Meter sees="you" label="you" />
-                <button className="btn" disabled title="Card payments aren’t available yet">
-                  Pay with card — coming soon
-                </button>
               </div>
+            </div>
+
+            <div className="fund-guide">
+              <div className="fund-guide-h">
+                <Ic name="credit-card" /> Buy a pack — redirects to Stripe Checkout
+              </div>
+              <div className="fund-actions" style={{ marginTop: 'var(--s3)' }}>
+                <div className="filters">
+                  {FIAT_PACKS.map((p) => (
+                    <button
+                      key={p.id}
+                      className="fchip"
+                      disabled={checkoutBusy != null}
+                      onClick={() => buyPack(p.id)}
+                    >
+                      <span className="fc-cr">{fmt(p.points)}</span>
+                      <span className="fc-pr">${p.usd}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {!session && (
+                <div className="warn fund-warn" style={{ marginTop: 'var(--s3)' }}>
+                  <WarnIc />
+                  <span>
+                    A card purchase requires an identified account — <Link to="/onboard">sign in</Link> first
+                    (fiat can't fund an anonymous purse).
+                  </span>
+                </div>
+              )}
+              {checkoutErr && <div className="warn" style={{ marginTop: 'var(--s3)' }}>{checkoutErr}</div>}
+              {checkoutStatus === 'polling' && (
+                <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
+                  Payment received — waiting for the credit to land…
+                </div>
+              )}
+              {checkoutStatus === 'settled' && (
+                <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
+                  Credited — your balance is updated.
+                </div>
+              )}
             </div>
           </section>
 

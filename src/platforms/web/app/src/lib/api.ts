@@ -220,6 +220,16 @@ export const api = {
     fetch('/v1/deposit/quote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       .then(j<DepositQuote>),
 
+  // ── Fiat pack checkout (Stripe) — identified accounts only ───────────────────
+  // POST /v1/payments/checkout — create a hosted Stripe Checkout session for one of the
+  // fixed credit packs (starter_10/standard_25/plus_50/studio_100). Server-authoritative:
+  // the impetus credited is the pack constant, applied later by the signature-verified
+  // webhook on payment completion — never computed client-side. 401
+  // payments.identity_required for an anon/purse caller (a fiat pack can't fund a purse).
+  createCheckoutSession: (body: { packId: string; successUrl?: string; cancelUrl?: string }) =>
+    fetch('/v1/payments/checkout', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(j<CheckoutSession>),
+
   // ── Collections (Collectio) — a batch-gen over a Tractus grid ────────────────
   // Owner-scoped by the caller commitment. Create LAUNCHES generation of `total`
   // pieces (real compute) — always a deliberate, confirmed action.
@@ -661,6 +671,13 @@ export interface DepositConfig {
   defaultFundingRatePct: number;
   chains: Array<{ chainId: number; name: string }>;
 }
+// The hosted Stripe Checkout session (POST /v1/payments/checkout) — mirrors the backend
+// CheckoutResponseSchema. `url` is the hosted-checkout URL to redirect the caller to.
+export interface CheckoutSession {
+  url: string;
+  sessionId: string;
+}
+
 // A deposit quote (POST /v1/deposit/quote) — informational; the webhook credit is authoritative.
 export interface DepositQuote {
   chainId: number | string;
