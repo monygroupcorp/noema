@@ -1206,12 +1206,11 @@ export const API_CONTRACT: ApiContract = {
       response: {
         type: 'object',
         properties: {
-          url: { type: 'string', description: 'Short-lived, unguessable signed GET URL to the hosted export bundle.' },
-          key: { type: 'string', description: 'Owner-scoped object key (namespaced by a hash of the owner key).' },
+          url: { type: 'string', description: 'Short-lived, unguessable signed GET URL to the hosted export bundle — the only handle returned (the raw object key is withheld so the response cannot be turned into a stable path).' },
           expiresIn: { type: 'number', description: 'Seconds until the signed URL expires.' },
           bytes: { type: 'number', description: 'Size of the serialized JSON bundle in bytes.' },
         },
-        required: ['url', 'key', 'expiresIn', 'bytes'],
+        required: ['url', 'expiresIn', 'bytes'],
       },
     },
     {

@@ -258,6 +258,19 @@ const RUNPOD_R2: R2Config | undefined =
     ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_OUTPUTS_BUCKET!, publicUrl: R2_PUBLIC_URL }
     : undefined
 
+// Dedicated PRIVATE bucket for GDPR self-exports (spec/publishing.md §3). This bundle is the
+// caller's whole PII (credit ledger, deposits, personae, chat messages, …) — it MUST NOT land
+// in R2_OUTPUTS_BUCKET, which is the PUBLIC bucket (bound to R2_PUBLIC_URL) that serves the
+// unauthenticated feed/editions. Deliberately NO `publicUrl`: the object is never publicly
+// reachable, so the short-lived presigned GET URL is the ONLY handle to it and the 15-min
+// expiry is a real control, not an illusion. Distinct bucket, same R2 account/credentials.
+// The bucket itself must NOT be bound to a public domain (infra/R2 config, off-repo).
+const R2_EXPORTS_BUCKET = process.env.R2_EXPORTS_BUCKET
+const EXPORTS_R2: R2Config | undefined =
+  R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_EXPORTS_BUCKET
+    ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_EXPORTS_BUCKET! }
+    : undefined
+
 /**
  * Durably materialise the RunPod SSH key (incident 2026-06-19). The key MUST survive a
  * container *recreate* — so we write it from the `RUNPOD_SSH_KEY` (base64) secret on boot
@@ -1044,11 +1057,17 @@ async function main(): Promise<void> {
 
   // GDPR self-export assembler (T1) — the single auditable home for the caller's own PII
   // egress. Constructed with exactly the owner-scoped read stores it needs (all already on the
-  // ring, plus the locally-built consuetudinum/credenta/intellae). Only wired when R2 is
-  // configured (it hosts the bundle behind a signed GET URL); otherwise POST /v1/me/export 503s.
-  const meExporter = RUNPOD_R2
+  // ring, plus the locally-built consuetudinum/credenta/intellae). The bundle is hosted in the
+  // DEDICATED PRIVATE exports bucket (EXPORTS_R2, no publicUrl) — NEVER the public outputs
+  // bucket — so the signed GET URL is the only handle and its expiry is real. Only wired when
+  // that private bucket is configured; otherwise POST /v1/me/export 503s (never falls back to a
+  // public bucket).
+  if (RUNPOD_R2 && !EXPORTS_R2) {
+    log.warn('R2_EXPORTS_BUCKET unset — GDPR self-export DISABLED (POST /v1/me/export will 503). Refusing to host PII bundles in the public outputs bucket.')
+  }
+  const meExporter = EXPORTS_R2
     ? new MeExporter({
-        store: new R2Uploader(RUNPOD_R2),
+        store: new R2Uploader(EXPORTS_R2),
         consuetudinum,
         personae: ring.personae,
         credenta,
