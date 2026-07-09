@@ -103,6 +103,9 @@ export interface ApiFacade {
   deleteProject(auctor: AuctorKey, id: string): Promise<void>
   fileAsset(auctor: AuctorKey, id: string, kind: string, assetId: string): Promise<Project>
   unfileAsset(auctor: AuctorKey, id: string, kind: string, assetId: string): Promise<Project>
+  // --- Fiat funding rail (Stripe) ---
+  createCheckout(auctor: AuctorKey, opts: { packId: string; successUrl?: string; cancelUrl?: string }): Promise<{ url: string; sessionId: string }>
+  handleStripeWebhook(input: { rawBody: string; signature?: string }): Promise<{ status: number; body: { received: boolean; credited?: string; message?: string } }>
 }
 
 /** The slice of IdentityResolver this router needs. */
@@ -163,6 +166,42 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
       res.status(200).json({ run })
     }),
   )
+
+  // POST /v1/payments/checkout — an IDENTIFIED caller buys a credit pack (Stripe Checkout).
+  // Returns the hosted-checkout URL to redirect to. A fiat pack can only fund an identified
+  // account (a card de-anonymizes) — an anon/bursa caller is rejected by the facade.
+  router.post(
+    '/payments/checkout',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      const { packId, successUrl, cancelUrl } = req.body ?? {}
+      const out = await api.createCheckout(auctor, {
+        packId,
+        ...(typeof successUrl === 'string' ? { successUrl } : {}),
+        ...(typeof cancelUrl === 'string' ? { cancelUrl } : {}),
+      })
+      res.status(200).json(out)
+    }),
+  )
+
+  // POST /v1/payments/stripe/webhook — Stripe → server. NO client auth: it is gated by the
+  // `stripe-signature` HMAC (verified in the facade). Uses the raw body captured by the global
+  // express.json `verify` hook — a re-serialized body would break signature verification.
+  router.post('/payments/stripe/webhook', async (req, res): Promise<void> => {
+    const rawBody = (req as { rawBody?: string }).rawBody ?? JSON.stringify(req.body ?? {})
+    const signature = req.headers['stripe-signature'] as string | undefined
+    try {
+      const result = await api.handleStripeWebhook({ rawBody, ...(signature ? { signature } : {}) })
+      res.status(result.status).json(result.body)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        res.status(err.httpStatus).json({ error: err.toBody() })
+      } else {
+        log.error('unhandled stripe webhook error', { error: String((err as Error)?.stack ?? err) })
+        res.status(500).json({ error: Errors.internal().toBody() })
+      }
+    }
+  })
 
   // GET /v1/runs/:id/stream — SSE stream of run events.
   router.get('/runs/:id/stream', async (req, res): Promise<void> => {
