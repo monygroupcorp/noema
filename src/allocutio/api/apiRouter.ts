@@ -14,7 +14,7 @@
 
 import express, { type Request, type Response, type Router } from 'express'
 
-import type { Run, Collection, Team, Edition, FeedItem, Project } from './types.js'
+import type { Run, Collection, Team, Edition, FeedItem, Project, RunsPage } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { FeedFilter } from '../../types/editio.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote } from './CrystalApi.js'
@@ -38,6 +38,7 @@ export interface ApiFacade {
     opts?: InvokeOpts,
   ): Promise<Run>
   getRun(auctor: AuctorKey, id: string): Promise<Run>
+  listRuns(auctor: AuctorKey, opts: import('./CrystalApi.js').ListRunsOpts): Promise<RunsPage>
   listFlows(): Promise<unknown[]>
   describeFlow(id: string): Promise<unknown>
   quote(
@@ -595,6 +596,18 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
       res.json(await api.status(auctor))
     }),
   )
+
+  // GET /v1/me/runs — the caller's SETTLED spend history: per-run cost (+ derived USD),
+  // settledAt, and a lifetime running total. Owner-scoped, cursor-paginated, newest first.
+  // `?status=settled` is the only supported filter (completus-only — a refunded failed run
+  // is not spend); `?cursor=` pages, `?limit=` sizes (1..100, default 20).
+  router.get('/me/runs', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined
+    const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
+    const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined
+    res.json(await api.listRuns(auctor, { ...(cursor ? { cursor } : {}), ...(limit !== undefined ? { limit } : {}) }))
+  }))
 
   // GET /v1/me — the caller's account settings: appearance + generation defaults + bindings.
   router.get('/me', wrap(async (req, res) => {
