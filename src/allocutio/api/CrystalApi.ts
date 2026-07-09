@@ -38,15 +38,23 @@ import { aggregateStatus, materiaStudioStatus } from '../lexicon/status/aggregat
 import type { ModoStore } from '../../types/modo.js'
 import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModus.js'
 import { dispatchInceptio, type DispatchDeps } from '../../execution/dispatchInceptio.js'
-import { toRun, toCollection, toTeam, toEdition, toProject } from './runProjection.js'
+import { toRun, toSettledRun, toCollection, toTeam, toEdition, toProject } from './runProjection.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
 import { Errors, ApiError } from './errors.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { computeRecipient } from '../../arcanum/prover.js'
-import { impetusForPodMs, usdMicroToImpetus } from '../../ledger/rates.js'
+import { impetusForPodMs, usdMicroToImpetus, IMPETUS_USD_RATE } from '../../ledger/rates.js'
 import { fundingBps, applyFundingBps, DEFAULT_FUNDING_BPS } from '../../ledger/depositFunding.js'
 import type { AssetPricer } from '../../crystal/AssetPricer.js'
-import type { Run, Collection, CollectionPiece, Team, Edition, FeedItem, Project } from './types.js'
+import type { Run, Collection, CollectionPiece, Team, Edition, FeedItem, Project, RunsPage } from './types.js'
+
+/** Options for the owner's settled spend-history listing (`listRuns`). */
+export interface ListRunsOpts {
+  /** Opaque page cursor from a prior page; omit for the first page. */
+  cursor?: string
+  /** Page size (clamped 1..100; default 20). */
+  limit?: number
+}
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
 import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
 import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
@@ -407,6 +415,38 @@ export class CrystalApi {
     const a = await this.deps.actorum.findById(id)
     if (!a || !(await this._owns(auctor, a))) throw Errors.notFoundRun(id)
     return toRun(a)
+  }
+
+  /**
+   * List the caller's SETTLED spend history — owner-scoped, cursor-paginated, newest first,
+   * plus a lifetime running total (`GET /v1/me/runs`).
+   *
+   * OWNERSHIP: the settled index is keyed by the owner (`animaId` OR anon `commitment`), so
+   * the store's `listSettled(auctor, …)` is inherently owner-scoped — the SAME identity-blind
+   * primitive `/status` uses to list in-flight gens (`findFor(auctorKey)`). There is no
+   * list-by-`_owns` (Actum carries no identity column — the whole reason this index exists);
+   * `_owns` is for single-run fetch (`getRun`), not listing. A bursaToken caller gets an empty
+   * page (those runs are never indexed). SETTLED = `completus` only — a refunded `fractus` run
+   * is not spend and was pruned at settlement.
+   *
+   * Degrades to an empty page when the wired index lacks the settled-history methods (dev/in-
+   * memory doubles that don't retain).
+   */
+  async listRuns(auctor: AuctorKey, opts: ListRunsOpts = {}): Promise<RunsPage> {
+    const index = this.deps.actumIndex
+    if (!index?.listSettled || !index.sumSettledImpetus) {
+      return { runs: [], runningTotal: { impetus: '0', usd: 0 } }
+    }
+    const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 20) || 20, 1), 100)
+    const [page, totalImpetus] = await Promise.all([
+      index.listSettled(auctor, { limit, ...(opts.cursor ? { cursor: opts.cursor } : {}) }),
+      index.sumSettledImpetus(auctor),
+    ])
+    return {
+      runs: page.entries.map(toSettledRun),
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+      runningTotal: { impetus: totalImpetus, usd: Number(totalImpetus) * IMPETUS_USD_RATE },
+    }
   }
 
   /** A run is owned by an auctor iff:

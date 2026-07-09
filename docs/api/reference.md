@@ -1322,6 +1322,104 @@ Return the authenticated caller's account snapshot — balance, in-flight gens, 
 }
 ```
 
+### GET /v1/me/runs
+
+The caller's SETTLED spend history — per-run impetus cost (+ derived USD), settledAt, and a lifetime running total. Owner-scoped (identified or anon-commitment), cursor-paginated, newest first. Only completus runs (a refunded failed run is not spend). Query: status=settled (only supported filter), cursor, limit (1..100, default 20).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "A page of settled spend history plus the owner's lifetime running total.",
+  "properties": {
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "A settled run in the owner's spend history. JSON-safe.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The run (Actum) identifier."
+          },
+          "modusId": {
+            "type": "string",
+            "description": "The flow (modus) this run executed."
+          },
+          "modusLabel": {
+            "type": "string",
+            "description": "Human label of the modus at settle (falls back to modusId)."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "settled"
+            ],
+            "description": "Always \"settled\" — completus runs only."
+          },
+          "cost": {
+            "type": "string",
+            "description": "Impetus cost, serialised as a string."
+          },
+          "costUsd": {
+            "type": "number",
+            "description": "USD cost DERIVED on read (cost × IMPETUS_USD_RATE) — never a persisted FMV."
+          },
+          "settledAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the run settled, ISO-8601."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the run started, ISO-8601."
+          }
+        },
+        "required": [
+          "id",
+          "modusId",
+          "modusLabel",
+          "status",
+          "cost",
+          "costUsd"
+        ]
+      },
+      "description": "Settled runs, newest first."
+    },
+    "nextCursor": {
+      "type": "string",
+      "description": "Opaque cursor for the next page; absent on the last page."
+    },
+    "runningTotal": {
+      "type": "object",
+      "description": "Lifetime spend across ALL settled runs (not just this page).",
+      "properties": {
+        "impetus": {
+          "type": "string",
+          "description": "Total impetus spent, serialised as a string."
+        },
+        "usd": {
+          "type": "number",
+          "description": "Total USD, derived at the platform reference rate."
+        }
+      },
+      "required": [
+        "impetus",
+        "usd"
+      ]
+    }
+  },
+  "required": [
+    "runs",
+    "runningTotal"
+  ]
+}
+```
+
 ### GET /v1/me
 
 The caller's owner-keyed account settings — presentation skin (Profile), cross-cutting generation defaults (Preferences), and verb→flow bindings. Anon-capable (keyed by AuctorKey).
