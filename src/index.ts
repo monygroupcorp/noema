@@ -892,6 +892,7 @@ async function main(): Promise<void> {
     collectioCursor: ring.collectioCursor,
     sodalitatum: ring.sodalitates,
     provinciarum: ring.provinciae,
+    tabulae: ring.tabulae,
     // Publishing spine (Editio): the feed adapter + the store + prefs source.
     // moderationGate fails closed (deny) unless MODERATION_ALLOW_UNSCANNED=1 — the
     // async →public gate path always runs; only its verdict changes.
