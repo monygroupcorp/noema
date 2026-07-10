@@ -491,6 +491,21 @@ async function handlePaymentLog(
   // Unpriceable → parked confirmatum (no revenue, no credit — already warned in priceDeposit).
   if (usdFmv === null) return true
 
+  // FREEZE-ON-FIRST-PRICE (noema-027 v5 gauntlet finding). A row first parked UNpriceable (created with
+  // `token` but no `usdFmv`) that prices on THIS re-delivery must PERSIST that basis now — exactly as
+  // the create path freezes it — so book, credit, and every later delivery share ONE basis. Without it
+  // the reuse branch re-prices at fresh spot on each delivery: if this delivery books revenue (locked
+  // permanently on depositumId) but its credit then throws, a later re-delivery would credit at a
+  // DIFFERENT spot than the booked revenue — minted impetus diverging from recognized revenue
+  // (value-conservation break; Captain amendment B). It also lets the sweep heal the row (it skips
+  // usdFmv===undefined rows as legacy). Only a reused, never-priced-at-receipt row reaches here with
+  // usdFmv undefined: a fresh create was priced (usdFmv set on the row) or returned above (unpriceable).
+  if (depositum.usdFmv === undefined) {
+    await deps.deposita.update(depositum.id, { usdFmv, token })
+    depositum.usdFmv = usdFmv
+    depositum.token = token
+  }
+
   // Book USD revenue at RECEIPT (ADR-0013 §2/§4) — a peer of the credit, before the processatum
   // transition, so a store failure leaves the deposit retryable. Recognized regardless of whether
   // the funder's Anima is linked yet; idempotent on depositum.id so re-delivery cannot double-count.
@@ -515,13 +530,13 @@ async function handlePaymentLog(
   }
 
   // Linked payer → credit now (idempotency-guarded; the shared helper the sweep also calls).
-  // Credit from the PERSISTED receipt-time basis, never the fresh price: on a re-delivery of an
-  // already-parked deposit, revenue was booked at receipt-time FMV and bookRevenue is idempotent on
-  // depositumId, so re-pricing here would mint impetus against a basis that diverges from the booked
-  // revenue whenever ETH moved since receipt (value-conservation break; Captain amendment B). The
-  // `?? usdFmv` covers the lone case where the persisted basis is legitimately absent — a row that
-  // was UNpriceable at receipt (no revenue booked then) and prices now, so this delivery is the first
-  // to book revenue and the fresh FMV IS the correct basis.
+  // Credit from the PERSISTED receipt-time basis, never the fresh price: revenue was booked at that
+  // basis and bookRevenue is idempotent on depositumId, so re-pricing here would mint impetus against a
+  // basis that diverges from the booked revenue whenever ETH moved since receipt (value-conservation
+  // break; Captain amendment B). `depositum.usdFmv` is ALWAYS set by now — a fresh create priced it, a
+  // reused priced-at-receipt row carries it, and a reused unpriceable-at-receipt row was just frozen
+  // above (FREEZE-ON-FIRST-PRICE) before this same delivery's book — so `?? usdFmv` is an unreachable
+  // type-level fallback, never the live basis. (Same for `depositum.token ?? token`.)
   await creditConfirmedDeposit(deps, {
     depositum,
     usdFmv: depositum.usdFmv ?? usdFmv,

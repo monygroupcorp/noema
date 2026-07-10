@@ -48,10 +48,12 @@ export class MongoDepositum implements Depositorum {
     return docs.map(d => fromDoc(d as Record<string, unknown>))
   }
 
-  async update(id: string, patch: Partial<Pick<Depositum, 'status' | 'confirmationes' | 'animaId' | 'signumId' | 'petitioId' | 'processatum'>>): Promise<Depositum> {
+  async update(id: string, patch: Partial<Pick<Depositum, 'status' | 'confirmationes' | 'animaId' | 'signumId' | 'petitioId' | 'processatum' | 'usdFmv' | 'token'>>): Promise<Depositum> {
+    // Route the patch through toDoc so a patched `usdFmv` (bigint — Mongo can't store it) is serialized
+    // to its decimal string, exactly as create does. Non-bigint fields pass through untouched.
     const result = await this.col.findOneAndUpdate(
       { id },
-      { $set: patch },
+      { $set: toDoc(patch) },
       { returnDocument: 'after' }
     )
     if (!result) throw new Error(`Depositum not found: ${id}`)
