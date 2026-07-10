@@ -214,13 +214,19 @@ export const api = {
   quote: (body: Pick<RunRequest, 'modusId' | 'verb' | 'aditus'>) =>
     fetch('/v1/runs/quote', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ impetus: string; recipient?: string }>),
-  // The ONLY route that spends an anonymous purse: when a Vault purse is active, its
-  // bearer token rides as `x-bursa-token` on the run request (and only this request —
-  // authHeaders() is untouched, so every other route keeps its identity/anon-commitment
-  // path). The server reads the header and drains that purse instead of an identified balance.
+  // The ONLY route that spends an anonymous purse: when a Vault purse is active, the run
+  // request carries ONLY the bursa token — `{ content-type, x-bursa-token }` — and NO
+  // identity header (no `authorization`, no `x-commitment`). The server short-circuits on
+  // the bursa token and ignores identity anyway (widgetRouter.ts:310 — token-only is the
+  // house anonymous contract); attaching a session bearer or the stable anon commitment
+  // would let logs/proxies correlate an anonymous spend back to a session or pseudonym.
+  // No active purse → the normal identity/anon-commitment path (authHeaders), untouched;
+  // every other route keeps authHeaders() regardless.
   createRun: (body: RunRequest) => {
     const purse = getActivePurse();
-    const headers = { ...authHeaders(), ...(purse ? { 'x-bursa-token': purse } : {}) };
+    const headers = purse
+      ? { 'content-type': 'application/json', 'x-bursa-token': purse }
+      : authHeaders();
     return fetch('/v1/runs', { method: 'POST', headers, body: JSON.stringify(body) }).then(j<{ run: Run }>);
   },
   getRun: (id: string) => fetch(`/v1/runs/${id}`).then(j<{ run: Run }>),
