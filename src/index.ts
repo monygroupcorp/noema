@@ -751,6 +751,7 @@ async function main(): Promise<void> {
 
   // 8. Express + webhook router
   const app = express()
+  app.set('trust proxy', 1)
   app.use(express.json({
     verify: (req: import('express').Request & { rawBody?: string }, _res, buf: Buffer) => {
       req.rawBody = buf.toString()
