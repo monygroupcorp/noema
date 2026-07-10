@@ -24,7 +24,7 @@ after(async () => {
 
 const base = {
   nomen: 'My Canvas',
-  auctor: 'anima-a',
+  auctor: { animaId: 'anima-a' },
   status: 'draft' as const,
   visibilitas: 'privata' as const,
 }
@@ -49,9 +49,16 @@ test('find returns the tabula', async () => {
 })
 
 test('list filters by auctor', async () => {
-  await store.create({ ...base, auctor: 'anima-a' })
-  await store.create({ ...base, auctor: 'anima-b' })
-  const mine = await store.list({ auctor: 'anima-a' })
+  await store.create({ ...base, auctor: { animaId: 'anima-a' } })
+  await store.create({ ...base, auctor: { animaId: 'anima-b' } })
+  const mine = await store.list({ auctor: { animaId: 'anima-a' } })
+  assert.equal(mine.length, 1)
+})
+
+test('list filters by commitment auctor', async () => {
+  await store.create({ ...base, auctor: { commitment: 'c-a' } })
+  await store.create({ ...base, auctor: { commitment: 'c-b' } })
+  const mine = await store.list({ auctor: { commitment: 'c-a' } })
   assert.equal(mine.length, 1)
 })
 
@@ -80,18 +87,28 @@ test('update sets nodi and vincula', async () => {
 
 test('fork creates new draft with fonteId pointing to original', async () => {
   const original = await store.create(base)
-  const forked = await store.fork(original.id, 'anima-b')
+  const forked = await store.fork(original.id, { animaId: 'anima-b' })
   assert.notEqual(forked.id, original.id)
   assert.equal(forked.fonteId, original.id)
-  assert.equal(forked.auctor, 'anima-b')
+  assert.deepEqual(forked.auctor, { animaId: 'anima-b' })
   assert.equal(forked.status, 'draft')
+})
+
+test('remove deletes the tabula', async () => {
+  const t = await store.create(base)
+  await store.remove(t.id)
+  assert.equal(await store.find(t.id), null)
+})
+
+test('remove is idempotent for an unknown id', async () => {
+  await store.remove('nope')
 })
 
 test('listDerived returns tabulae with matching templateId', async () => {
   const master = await store.create(base)
-  await store.create({ ...base, auctor: 'anima-b', templateId: master.id })
-  await store.create({ ...base, auctor: 'anima-c', templateId: master.id })
-  await store.create({ ...base, auctor: 'anima-d' }) // no templateId
+  await store.create({ ...base, auctor: { animaId: 'anima-b' }, templateId: master.id })
+  await store.create({ ...base, auctor: { animaId: 'anima-c' }, templateId: master.id })
+  await store.create({ ...base, auctor: { animaId: 'anima-d' } }) // no templateId
   const derived = await store.listDerived(master.id)
   assert.equal(derived.length, 2)
   assert.ok(derived.every(t => t.templateId === master.id))
