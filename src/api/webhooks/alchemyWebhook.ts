@@ -155,8 +155,10 @@ export type DepositCreditDeps = Pick<AlchemyWebhookDeps, 'deposita' | 'signorum'
  * and idempotently completes the processatum transition — never a second signum, never re-credit.
  * (`bookRevenue` is independently idempotent on depositumId, so revenue can't double either.)
  *
- * `usdFmv`/`token` are passed in — the webhook prices fresh; the sweep reads the PERSISTED
- * receipt-time basis — so this NEVER re-prices: the credit basis always equals the booked revenue.
+ * `usdFmv`/`token` are passed in — and BOTH callers pass the PERSISTED receipt-time basis
+ * (`depositum.usdFmv`/`token`): the sweep reads it directly, and the webhook prefers it over the
+ * fresh price (`?? freshPrice` only for the never-priced-at-receipt row). This NEVER re-prices an
+ * already-booked deposit, so the credit basis always equals the booked revenue.
  */
 async function creditConfirmedDeposit(
   deps: DepositCreditDeps,
@@ -493,7 +495,21 @@ async function handlePaymentLog(
   }
 
   // Linked payer → credit now (idempotency-guarded; the shared helper the sweep also calls).
-  await creditConfirmedDeposit(deps, { depositum, usdFmv, token, animaId, valor, txHash })
+  // Credit from the PERSISTED receipt-time basis, never the fresh price: on a re-delivery of an
+  // already-parked deposit, revenue was booked at receipt-time FMV and bookRevenue is idempotent on
+  // depositumId, so re-pricing here would mint impetus against a basis that diverges from the booked
+  // revenue whenever ETH moved since receipt (value-conservation break; Captain amendment B). The
+  // `?? usdFmv` covers the lone case where the persisted basis is legitimately absent — a row that
+  // was UNpriceable at receipt (no revenue booked then) and prices now, so this delivery is the first
+  // to book revenue and the fresh FMV IS the correct basis.
+  await creditConfirmedDeposit(deps, {
+    depositum,
+    usdFmv: depositum.usdFmv ?? usdFmv,
+    token: depositum.token ?? token,
+    animaId,
+    valor,
+    txHash,
+  })
 
   return true
 }

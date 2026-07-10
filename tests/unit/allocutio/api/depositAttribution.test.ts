@@ -133,7 +133,7 @@ function makeDeps(personae: Pick<PersonaStore, 'findByExternus'>, over: Partial<
     sanctions: permissiveSanctionsScreen,
     signingKeys: {},
     vaultAddresses: { [CHAIN_ID]: VAULT },
-    pricer: fixedPricer(3000, 18),
+    pricer: (over.pricer as AlchemyWebhookDeps['pricer']) ?? fixedPricer(3000, 18),
   }
   return { deps, deposita, signorum, redituum, petitiones, testimonia }
 }
@@ -186,6 +186,35 @@ test('re-delivery after linking: credits EXACTLY once (no double signum, no doub
   assert.equal((await signorum.history({ animaId: ANIMA })).length, 1)         // exactly one signum
   assert.equal(await signorum.balance({ animaId: ANIMA }), EXPECTED_IMPETUS)
   assert.equal(await redituum.trailingUsdRevenue(new Date()), EXPECTED_GROSS)  // revenue once
+})
+
+test('re-delivery at a CHANGED price credits at the receipt-time (booked) FMV, not the re-delivery FMV', async () => {
+  // Value-conservation guard (Captain amendment B): revenue is booked once, at receipt-time FMV, and
+  // bookRevenue is idempotent on depositumId — so the credit must use the PERSISTED receipt basis. If
+  // the webhook re-priced on re-delivery, a price move would mint impetus that diverges from the
+  // already-booked revenue (excess/unbacked mint when the price rose).
+  let spot = 3000                                             // receipt-time price
+  const mutablePricer = { async usdFmv(_c: unknown, _t: unknown, amountRaw: bigint) {
+    const micro = (amountRaw * BigInt(Math.round(spot * 1_000_000))) / 10n ** 18n
+    return micro > 0n ? micro : null
+  } }
+  const { personae, link } = makePersonae()
+  const { deps, deposita, signorum, redituum } = makeDeps(personae, { pricer: mutablePricer as unknown as AlchemyWebhookDeps['pricer'] })
+
+  await handleAlchemyWebhook(req([paymentLog()]), deps)       // unlinked → parked at $3000 FMV
+  const parked = [...deposita.store.values()][0]
+  assert.equal(parked.status, 'confirmatum')
+  assert.equal(parked.usdFmv, EXPECTED_GROSS)                 // receipt basis frozen
+
+  link(PAYER, ANIMA)
+  spot = 6000                                                 // ETH doubles before the re-delivery
+  await handleAlchemyWebhook(req([paymentLog()]), deps)       // re-delivery → credits
+
+  // Credit basis = receipt-time FMV ($3000), NOT the re-delivery FMV ($6000). Impetus and revenue
+  // both stay at the receipt-time figures.
+  assert.equal(await signorum.balance({ animaId: ANIMA }), EXPECTED_IMPETUS)
+  assert.equal(await redituum.trailingUsdRevenue(new Date()), EXPECTED_GROSS)
+  assert.equal([...deposita.store.values()][0].usdFmv, EXPECTED_GROSS)
 })
 
 test('sweep heals a parked deposit after linking, EXACTLY once', async () => {
