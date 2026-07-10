@@ -380,3 +380,30 @@ test('provisionStudio terminates the pod and returns null when bootstrap fails',
   assert.equal(store.createCalls.length, 0, 'nothing parked')
   assert.ok(terminateSpy.calls.length > 0, 'the half-provisioned pod is terminated')
 })
+
+// ── ComfyUI clone pin (2026-07-10 P0 regression guard) ─────────────────────────
+// Unpinned `git clone` of ComfyUI HEAD drifted onto a torch-2.5+-only code path while every
+// fundament's image pinned torch 2.4.0 — every ComfyUI pod broke. This guard fails loudly if
+// the clone ever goes unpinned again: the bootstrap command MUST carry `--branch`.
+
+test('ComfyUI bootstrap: clone is pinned to a ref (never unpinned HEAD)', async () => {
+  const { fetch } = makeFetchMock()
+  const ssh = makeSshTransport()
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 50))
+  const cloneCmd = ssh.execCalls.find(c => c.includes('git clone') && c.includes('ComfyUI.git'))
+  assert.ok(cloneCmd, 'expected a ComfyUI clone command')
+  assert.match(cloneCmd!, /--branch/, 'clone must pin a ref via --branch (never unpinned HEAD)')
+})
+
+test("ComfyUI bootstrap: provisionStudio's clone is also pinned via --branch", async () => {
+  const { fetch } = makeFetchMock('pod-studio-pin')
+  const ssh = makeSshTransport()
+  const store = makeWarmMateriaStore()
+  const client = makeClient(makeConfig({ keepWarm: true }), () => ssh, fetch, store as never)
+  await client.provisionStudio({ runtime: 'ComfyUI' })
+  const cloneCmd = ssh.execCalls.find(c => c.includes('git clone') && c.includes('ComfyUI.git'))
+  assert.ok(cloneCmd, 'expected a ComfyUI clone command')
+  assert.match(cloneCmd!, /--branch/, 'clone must pin a ref via --branch (never unpinned HEAD)')
+})
