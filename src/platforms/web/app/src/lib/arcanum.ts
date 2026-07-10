@@ -1,9 +1,18 @@
 // Browser port of the server-side Arcanum prover (src/arcanum/poseidon.ts + prover.ts).
 //
-// These functions run ENTIRELY in the browser. The nullifier and secret NEVER leave
-// this tab — only the commitment (at issuance) and the Groth16 proof + public signals
-// (at spend) are transmitted. This is the whole point of anonymous credit: the platform
-// stores commitments, not identities, and cannot link what you spend to who you are.
+// These functions run ENTIRELY in the browser. The SECRET never leaves this tab.
+//
+// PRIVACY CAVEAT — the nullifier is NOT fully client-confined today: the signed-in
+// issuance path (POST /arcanum/issue) sends the raw nullifier alongside the commitment,
+// because the server route requires them together. The server can therefore compute
+// nullifierHash = poseidon(nullifier) linked to the authenticated funder, and nullifierHash
+// is the public signal revealed at spend — so a determined operator CAN link a spend back
+// to the identified funder of that note. This is stronger than the timing/valor residual
+// risk the ArcanumIssuer docstring discloses, and defeating it requires a commitment-only
+// (blind) issuance contract — a server-side money-code change routed through the spec gate,
+// NOT something this browser module can fix. Until then, do not represent the signed-in
+// funding path as fully unlinkable. Everything else transmitted is only the commitment (at
+// issuance) and the Groth16 proof + public signals (at spend).
 //
 // PARITY IS LOAD-BEARING. Every value produced here must be byte-for-byte identical to the
 // server implementation it mirrors — a single mismatched decimal string makes a real proof

@@ -14,6 +14,8 @@ import {
   readVault,
   addNote,
   markNoteSpent,
+  setNoteLeafIndex,
+  removeNote,
   addPurse,
   setPurseCredits,
   exportVault,
@@ -96,6 +98,32 @@ export function Vault() {
     return () => { live = false; };
   }, [purseKeys, reload]);
 
+  // Recover leafIndex for any note persisted before its /issue response landed (leafIndex
+  // -1). If the debit settled server-side, the leaf is in the tree keyed by commitment; a
+  // 404 means issuance never committed (the note stays pending, harmless). This is what
+  // turns a dropped-response note back into a spendable one instead of lost value.
+  const pendingCommitments = notes.filter((n) => n.leafIndex < 0 && !n.spent).map((n) => n.commitment).join(',');
+  useEffect(() => {
+    if (!pendingCommitments) return;
+    let live = true;
+    (async () => {
+      let changed = false;
+      for (const n of readVault().notes) {
+        if (n.leafIndex >= 0 || n.spent) continue;
+        try {
+          const { leaf } = await api.arcanum.getLeaf(n.commitment);
+          if (!live) return;
+          if (leaf && typeof leaf.leafIndex === 'number' && leaf.leafIndex >= 0) {
+            setNoteLeafIndex(n.nullifier, leaf.leafIndex);
+            changed = true;
+          }
+        } catch { /* 404 = not in tree yet; leave pending */ }
+      }
+      if (live && changed) reload();
+    })();
+    return () => { live = false; };
+  }, [pendingCommitments, reload]);
+
   const unspent = useMemo(() => notes.filter((n) => !n.spent), [notes]);
   const canMint = !!config?.ready;
   const totalPurseCredits = useMemo(
@@ -103,8 +131,14 @@ export function Vault() {
     [purses],
   );
 
-  // ── Fund a note: signed-in path (POST /arcanum/issue). Client generates the secret;
-  // only the commitment is sent. The debit converts identified balance → an anon note. ──
+  // ── Fund a note: signed-in path (POST /arcanum/issue). Client generates the secret; the
+  // server settles the debit and inserts the Merkle leaf BEFORE it responds (ArcanumIssuer:
+  // settle → tree.insert → return). So the secret MUST be persisted BEFORE issuing: if the
+  // response is lost (timeout, blip, 5xx-after-settle) the credits are already gone and the
+  // leaf already exists — the only copy of the secret needed to ever spend it must be on
+  // disk, or the value is permanently unrecoverable. We store leafIndex -1 ("issued but
+  // unconfirmed") first, then land the real index on success; a dropped response leaves the
+  // note held, and the recovery effect below backfills its leafIndex from the commitment. ──
   async function fundNote() {
     setErr(null); setNotice(null);
     let valor: bigint;
@@ -120,21 +154,41 @@ export function Vault() {
       const note = generateNote(valor);
       const commitment = await computeCommitment(note.nullifier, note.secret);
       const nullifierHash = await computeNullifierHash(note.nullifier);
-      const resp = await api.arcanum.issue({ valor: valor.toString(), commitment, nullifier: note.nullifier });
-      const stored: VaultNote = {
+      // Persist BEFORE the network call — this is the whole fix. leafIndex -1 = unconfirmed.
+      addNote({
         nullifier: note.nullifier,
         secret: note.secret,
         commitment,
         nullifierHash,
         valor: valor.toString(),
-        leafIndex: resp.note.leafIndex,
+        leafIndex: -1,
         spent: false,
         createdAt: Date.now(),
-      };
-      addNote(stored);
+      });
       reload();
-      setNotice('Note funded. Export your vault before minting — these secrets exist only in this browser.');
+      try {
+        const resp = await api.arcanum.issue({ valor: valor.toString(), commitment, nullifier: note.nullifier });
+        setNoteLeafIndex(note.nullifier, resp.note.leafIndex);
+        reload();
+        setNotice('Note funded. Export your vault before minting — these secrets exist only in this browser.');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // A clean 4xx reject (400 bad input, 401 auth, 402 insufficient) is thrown BEFORE
+        // the server settles anything, so no debit happened — discard the placeholder note.
+        // Anything else (network drop, timeout, 5xx after settle) MAY have committed the
+        // debit: KEEP the note (its secret is the only recovery) and let the recovery effect
+        // backfill leafIndex once the leaf confirms.
+        if (/^(400|401|402)\b/.test(msg)) {
+          removeNote(note.nullifier);
+          reload();
+          setErr(msg);
+        } else {
+          reload();
+          setErr(`${msg} — your note secret is saved. If credits were debited it will finish confirming shortly; do not re-fund.`);
+        }
+      }
     } catch (e) {
+      // Crypto/compute failure before anything was persisted or sent — no debit, no note.
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy({ kind: 'idle' });
@@ -143,8 +197,16 @@ export function Vault() {
 
   // ── Mint a purse: refresh the Merkle proof (root moves as the tree grows) → prove →
   // POST /arcanum/purse → store the token, THEN mark the note spent. Storing the purse
-  // first means a crash after mint can't lose the token; a 409 means the note was already
-  // consumed, so we mark it spent locally (the double-spend guard). ──
+  // first means a crash after the response can't lose the token.
+  //
+  // A 409 is NOT safely resolvable client-side. POST /arcanum/purse burns the nullifier and
+  // creates the bursa, then returns {token} exactly once and is non-idempotent: if THIS
+  // mint's response was lost after that commit, the token was never captured here — the
+  // credit lives under a token nobody holds. A bare 409 can't distinguish that from a note
+  // legitimately minted elsewhere, so we must NOT mark it spent as if resolved and must NOT
+  // claim a recoverable purse. (The real fix — return the existing bursa token on a
+  // duplicate-nullifier 409 — is a server idempotency contract change for the money-code
+  // spec gate, not something this screen can improvise.) ──
   async function mintPurse(note: VaultNote) {
     if (!config?.ready || !config.zkeyUrl) {
       setErr('The proving ceremony is not finalized yet — minting is unavailable.');
@@ -168,9 +230,14 @@ export function Vault() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (/409|already spent/i.test(msg)) {
-        markNoteSpent(note.nullifier);
-        reload();
-        setErr('This note was already spent. Marked it spent locally — check your purses.');
+        // Do NOT mark spent and do NOT claim it's in your purses — see the docstring above.
+        // Leave the note visible (unresolved) so the value isn't silently hidden.
+        setErr(
+          'This note was already consumed on the server, but no purse token was captured in ' +
+          'this browser. If you minted it on another device, check there. Otherwise the purse ' +
+          'exists under an uncaptured token — export your vault and contact support to recover ' +
+          'it. Do not re-fund; the credit is not lost.',
+        );
       } else {
         setErr(msg);
       }
@@ -218,8 +285,8 @@ export function Vault() {
       <div className="csec">
         <div className="ctitle">What you hold vs what we store</div>
         <div className="meta-line"><span>you hold</span><span className="v">nullifier · secret · purse token</span></div>
-        <div className="meta-line"><span>we store</span><span className="v">commitment · spent-nullifier</span></div>
-        <div className="meta-line"><span>link between</span><span className="v">none</span></div>
+        <div className="meta-line"><span>we receive</span><span className="v">commitment · nullifier (signed-in funding)</span></div>
+        <div className="meta-line"><span>spend ↔ funder</span><span className="v">linkable until blind issuance</span></div>
       </div>
       <div className="csec">
         <div className="ctitle">Purse</div>
@@ -313,18 +380,22 @@ export function Vault() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)', marginTop: 'var(--s3)' }}>
             {unspent.map((n) => {
               const minting = busy.kind === 'minting' && busy.nullifier === n.nullifier;
+              // leafIndex -1 = issuance not yet confirmed (persisted before /issue landed, or
+              // a dropped response still recovering). It can't be proven, so minting waits.
+              const pending = n.leafIndex < 0;
               return (
                 <div key={n.nullifier} className="csec">
                   <div className="meta-line">
                     <span className="mono">{short(n.commitment)}</span>
                     <span className="v mono">{n.valor} credits</span>
                   </div>
-                  <div className="meta-line"><span>leaf</span><span className="v mono">{n.leafIndex}</span></div>
+                  <div className="meta-line"><span>leaf</span><span className="v mono">{pending ? 'confirming…' : n.leafIndex}</span></div>
                   <div style={{ marginTop: 'var(--s2)' }}>
-                    <button className="btn" onClick={() => mintPurse(n)} disabled={!canMint || busy.kind !== 'idle'}>
+                    <button className="btn" onClick={() => mintPurse(n)} disabled={!canMint || pending || busy.kind !== 'idle'}>
                       <Ic name="coins" /> {minting ? 'Proving… (takes a few seconds)' : 'Mint purse'}
                     </button>
                     {!canMint && <span className="mono" style={{ marginLeft: 'var(--s2)', opacity: 0.7 }}>ceremony not finalized</span>}
+                    {canMint && pending && <span className="mono" style={{ marginLeft: 'var(--s2)', opacity: 0.7 }}>confirming issuance — hold your export</span>}
                   </div>
                 </div>
               );
