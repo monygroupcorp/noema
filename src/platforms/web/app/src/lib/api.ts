@@ -406,6 +406,11 @@ export const api = {
   provisionStudio: (body: { fundamentumId?: string; models?: string[]; warmMs?: number; maxImpetus?: string; runtime?: string }) =>
     fetch('/v1/studios', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ studio: StudioView }>),
+  // End the lease deliberately — owner-scoped, idempotent (double-release returns the
+  // same terminal view, 200).
+  releaseStudio: (id: string) =>
+    fetch(`/v1/studios/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() })
+      .then(j<{ studio: StudioView }>),
 
   // ── TEE private sessions — sealed compute over the caller's own tunnel ───────
   // The browser generates the WireGuard keypair; only the PUBLIC key goes up. Poll

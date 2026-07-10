@@ -26,6 +26,7 @@ export function Studio() {
   const [fundamentumId, setFundamentumId] = useState('');
   const [budget, setBudget] = useState('');
   const [arming, setArming] = useState(false);
+  const [releasing, setReleasing] = useState(false);
   // Local 1s tick for the warm countdown between polls.
   const [now, setNow] = useState(() => Date.now());
   const pollRef = useRef<number | undefined>(undefined);
@@ -77,6 +78,20 @@ export function Studio() {
       setError(String(e));
     } finally {
       setArming(false);
+    }
+  }
+
+  async function release() {
+    if (!studio) return;
+    setReleasing(true);
+    setError(null);
+    try {
+      const { studio: s } = await api.releaseStudio(studio.studioId);
+      setStudio(s.status === 'terminated' ? null : s);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setReleasing(false);
     }
   }
 
@@ -208,6 +223,9 @@ export function Studio() {
             <div className="sectionhead"><span className="ttdot" /> Controls</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)' }}>
               <Link className="btn" to={`/card?studio=${encodeURIComponent(studio.studioId)}`}>Run here</Link>
+              <button className="btn" disabled={releasing} onClick={release}>
+                {releasing ? 'releasing…' : 'Release studio'}
+              </button>
             </div>
             <div className="mono" style={{ color: 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 'var(--s3)' }}>
               warm reuse cuts cost per gen · the lease releases itself at the warm-window end or the budget cap

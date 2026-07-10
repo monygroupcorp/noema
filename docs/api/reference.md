@@ -2213,6 +2213,78 @@ Fetch one of the caller's studios by id (owner-scoped) — poll its status (prov
 }
 ```
 
+### DELETE /v1/studios/:id
+
+End the lease deliberately (owner-scoped, idempotent): terminate the pod, close the session. Double-DELETE returns the same terminal view, 200; a stranger gets not_found.studio.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "A newly leased studio.",
+  "properties": {
+    "studio": {
+      "type": "object",
+      "description": "A hosted studio. `studioId` is what POST /v1/runs { studioId } targets.",
+      "properties": {
+        "studioId": {
+          "type": "string",
+          "description": "The studio id (a Modo session) — pass as run.studioId."
+        },
+        "podId": {
+          "type": "string",
+          "description": "The underlying pod id."
+        },
+        "status": {
+          "type": "string",
+          "description": "Pod-derived liveness: idle | running | provisioning | draining | terminated."
+        },
+        "gpu": {
+          "type": "string",
+          "description": "GPU model the studio runs on."
+        },
+        "runtime": {
+          "type": "string",
+          "description": "On-pod runtime (ComfyUI / llama.cpp / …)."
+        },
+        "imageRef": {
+          "type": "string",
+          "description": "The pod image reference."
+        },
+        "warmUntil": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the warm window expires."
+        },
+        "budgetImpetus": {
+          "type": "string",
+          "description": "The authorized session budget (the maxImpetus cap), as a string."
+        },
+        "costPerHr": {
+          "type": "number",
+          "description": "The pod's real hourly USD cost — the source of truth for warm-time billing."
+        },
+        "impetusPerSecond": {
+          "type": "string",
+          "description": "Coarse burn-rate hint (impetus/sec); billing is per-window from costPerHr. Prefer costPerHr for an accurate rate."
+        }
+      },
+      "required": [
+        "studioId",
+        "status",
+        "budgetImpetus"
+      ]
+    }
+  },
+  "required": [
+    "studio"
+  ]
+}
+```
+
 ### POST /v1/collectiones
 
 Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). With `draft:true` it is created but NOT fired (author tractus, then POST /:id/fire). Returns a Collection handle (poll GET /v1/collectiones/:id).

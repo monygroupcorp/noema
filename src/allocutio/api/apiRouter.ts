@@ -68,6 +68,7 @@ export interface ApiFacade {
   provisionStudio(auctor: AuctorKey, opts: ProvisionStudioOpts): Promise<StudioView>
   getStudio(auctor: AuctorKey, studioId: string): Promise<StudioView>
   listStudios(auctor: AuctorKey): Promise<StudioView[]>
+  releaseStudio(auctor: AuctorKey, studioId: string): Promise<StudioView>
   provisionTeeSession(auctor: AuctorKey, opts: ProvisionTeeSessionOpts): Promise<TeeSessionView>
   getTeeSession(auctor: AuctorKey, sessionId: string): Promise<TeeSessionView>
   endTeeSession(auctor: AuctorKey, sessionId: string): Promise<void>
@@ -694,6 +695,17 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     wrap(async (req, res) => {
       const auctor = await auth(req)
       res.json({ studio: await api.getStudio(auctor, String(req.params.id)) })
+    }),
+  )
+
+  // DELETE /v1/studios/:id — end the lease deliberately (owner-scoped, idempotent):
+  // terminate the pod, close the session. Double-DELETE returns the same terminal
+  // view, 200; a stranger's DELETE gets not_found.studio.
+  router.delete(
+    '/studios/:id',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      res.json({ studio: await api.releaseStudio(auctor, String(req.params.id)) })
     }),
   )
 

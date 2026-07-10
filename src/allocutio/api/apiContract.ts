@@ -1327,6 +1327,13 @@ export const API_CONTRACT: ApiContract = {
       response: StudioEnvelopeSchema,
     },
     {
+      method: 'DELETE',
+      path: '/studios/:id',
+      summary: 'End the lease deliberately (owner-scoped, idempotent): terminate the pod, close the session. Double-DELETE returns the same terminal view, 200; a stranger gets not_found.studio.',
+      auth: true,
+      response: StudioEnvelopeSchema,
+    },
+    {
       method: 'POST',
       path: '/collectiones',
       summary: 'Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). With `draft:true` it is created but NOT fired (author tractus, then POST /:id/fire). Returns a Collection handle (poll GET /v1/collectiones/:id).',

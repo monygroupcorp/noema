@@ -2028,6 +2028,22 @@ export class CrystalApi {
       toStudioView(h, await this.deps.signorum.sessionBudget(h.studioId).catch(() => 0n))))
   }
 
+  /**
+   * End a lease deliberately — the owner says "I'm done, stop the meter." Owner-scoped
+   * + idempotent: wires `Conductor.claudere` (terminate pod, close session/materia/
+   * hospitium — already covers cancel-in-flight too). A stranger's DELETE never leaks
+   * existence (`not_found.studio`); releasing an already-terminated studio returns the
+   * same terminal view, 200 (double-click safe) — `claudere`'s own guard makes this
+   * safe to call twice, no second settle path invoked.
+   */
+  async releaseStudio(auctor: AuctorKey, studioId: string): Promise<StudioView> {
+    if (!this.deps.conductor) throw Errors.notFoundStudio(studioId)
+    const ok = await this.deps.conductor.claudere(studioId, auctor)
+    if (!ok) throw Errors.notFoundStudio(studioId)
+    const budget = await this.deps.signorum.sessionBudget(studioId).catch(() => 0n)
+    return { studioId, status: 'terminated', budgetImpetus: budget.toString() }
+  }
+
   // ── TEE private compute sessions ─────────────────────────────────────────────
 
   private readonly teeSessions = new Map<string, TeeSession>()
