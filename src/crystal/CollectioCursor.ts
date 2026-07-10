@@ -93,7 +93,9 @@ export class CollectioCursor {
     return {
       nextIndex: collectio.acta.length,
       running,
-      paused: false,
+      // Re-hydrate the pause: a persisted `pausatum` means dispatching stays
+      // held after restart (a paused collection must not silently resume).
+      paused: collectio.pausatum !== undefined,
       pendingReview,
       usedDna,
     }
@@ -253,14 +255,20 @@ export class CollectioCursor {
     return null
   }
 
-  /** Pause dispatching new pieces (in-flight pieces continue). */
+  /**
+   * Pause dispatching new pieces (in-flight pieces continue). Persisted on the
+   * Collectio record (`pausatum`) so the pause survives a restart — see
+   * `_reconstructState`.
+   */
   async pause(collectioId: string): Promise<void> {
     const state = this.states.get(collectioId)
     if (state) state.paused = true
+    await this.collectiones.update(collectioId, { pausatum: new Date() })
   }
 
-  /** Resume dispatching after a pause. */
+  /** Resume dispatching after a pause. Clears the persisted `pausatum`. */
   async resume(collectioId: string): Promise<void> {
+    await this.collectiones.update(collectioId, { pausatum: undefined })
     const state = this.states.get(collectioId)
     if (!state) return
     state.paused = false

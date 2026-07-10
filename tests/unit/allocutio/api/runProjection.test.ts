@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { toRun } from '../../../../src/allocutio/api/runProjection.js'
+import { toRun, toCollection } from '../../../../src/allocutio/api/runProjection.js'
 import type { Actum, ActumStatus } from '../../../../src/types/actum.js'
+import type { Collectio } from '../../../../src/types/collectio.js'
 
 function makeActum(over: Partial<Actum>): Actum {
   return {
@@ -64,4 +65,35 @@ test('completus actum surfaces exitus', () => {
 test('no failure on non-fractus runs', () => {
   const run = toRun(makeActum({ status: 'completus' }))
   assert.equal(run.failure, undefined)
+})
+
+function makeCollectio(over: Partial<Collectio> = {}): Collectio {
+  return {
+    id: 'col-1',
+    modusId: 'modus-1',
+    aditusBase: {},
+    tractus: [],
+    numerus: 3,
+    provenanceHash: 'sha256:test',
+    by: { animaId: 'anima-1' },
+    acta: [],
+    completae: 0,
+    fractae: 0,
+    reiectae: 0,
+    concurrentia: 2,
+    impetusTotal: 0n,
+    status: 'agens',
+    natum: new Date('2026-06-09T00:00:00.000Z'),
+    ...over,
+  }
+}
+
+test('toCollection: paused is absent when pausatum is unset (running normally)', () => {
+  const col = toCollection(makeCollectio())
+  assert.equal(col.paused, undefined)
+})
+
+test('toCollection: paused is true when pausatum is set', () => {
+  const col = toCollection(makeCollectio({ pausatum: new Date('2026-07-10T00:00:00.000Z') }))
+  assert.equal(col.paused, true)
 })

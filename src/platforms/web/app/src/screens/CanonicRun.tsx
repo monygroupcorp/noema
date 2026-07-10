@@ -19,9 +19,6 @@ export function CanonicRun() {
   const [reload, setReload] = useState(0);
   const [extendN, setExtendN] = useState(50);
   const [busy, setBusy] = useState(false);
-  // Pause acts on the dispatch cursor — the collection stays `running` server-side, so
-  // this is the client's view of which way the toggle last went (resets on reload).
-  const [paused, setPaused] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -58,6 +55,7 @@ export function CanonicRun() {
   if (!c) return <AppShell title="Canonic run"><div className="page"><div className="pw wide"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
 
   const active = c.status === 'pending' || c.status === 'running';
+  const paused = !!c.paused;
   const done = c.status === 'complete';
   const settled = c.completed + c.failed + c.rejected;
   const pct = c.total ? Math.min(100, (c.completed / c.total) * 100) : 0;
@@ -83,8 +81,8 @@ export function CanonicRun() {
             </div>
           </div>
           <div className="cr-controls">
-            {active && !paused && <button className="btn ghost" disabled={busy} onClick={() => { void control(() => api.pauseCollection(id!)).then((ok) => ok && setPaused(true)); }}>Pause</button>}
-            {active && paused && <button className="btn ghost" disabled={busy} onClick={() => { void control(() => api.resumeCollection(id!)).then((ok) => ok && setPaused(false)); }}>Resume</button>}
+            {active && !paused && <button className="btn ghost" disabled={busy} onClick={() => control(() => api.pauseCollection(id!))}>Pause</button>}
+            {active && paused && <button className="btn ghost" disabled={busy} onClick={() => control(() => api.resumeCollection(id!))}>Resume</button>}
             {active && <button className="btn ghost" disabled={busy} onClick={() => control(() => api.cancelCollection(id!))}>Cancel run</button>}
             {done && (
               <>
