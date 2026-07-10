@@ -233,6 +233,33 @@ test('sweep heals a parked deposit after linking, EXACTLY once', async () => {
   assert.equal(await signorum.balance({ animaId: ANIMA }), EXPECTED_IMPETUS)
 })
 
+test('sweep RE-BOOKS a create-succeeded-but-book-failed row, then credits EXACTLY once', async () => {
+  // v4 gauntlet finding: a Depositum's usdFmv is persisted at `create` BEFORE bookRevenue runs (two
+  // writes, no transaction). If record() threw transiently and the process restarted, the sweep would
+  // see a PRICED row with NO revenue booked. Crediting it without re-booking leaves revenue permanently
+  // zero (re-delivery short-circuits on processatum). The sweep must re-book idempotently first.
+  const { personae, link } = makePersonae()
+  link(PAYER, ANIMA)
+  const deposita = makeDeposita()
+  // The row exists WITH its receipt-time basis persisted (create succeeded) but revenue was never
+  // booked (redituum is empty — the book write failed before the restart).
+  await deposita.create({ chainId: CHAIN_ID, transactioHash: TX_HASH, ab: PAYER.toLowerCase(), ad: VAULT, valor: AMOUNT, confirmationes: 1, status: 'confirmatum', token: TOKEN, usdFmv: EXPECTED_GROSS })
+  const { deps, signorum, redituum } = makeDeps(personae, { deposita })
+  assert.equal(await redituum.trailingUsdRevenue(new Date()), 0n)   // precondition: no revenue booked
+
+  assert.deepEqual(await sweepConfirmatumDeposita(deps), { swept: 1, skipped: 0 })   // books AND credits
+  assert.equal(await redituum.trailingUsdRevenue(new Date()), EXPECTED_GROSS)        // revenue now booked
+  assert.equal(await signorum.balance({ animaId: ANIMA }), EXPECTED_IMPETUS)         // credited exactly once
+  assert.equal((await signorum.history({ animaId: ANIMA })).length, 1)
+
+  // A subsequent sweep + a webhook re-delivery must NOT double revenue or signum (idempotent on both).
+  assert.deepEqual(await sweepConfirmatumDeposita(deps), { swept: 0, skipped: 0 })
+  await handleAlchemyWebhook(req([paymentLog()]), deps)                              // re-delivery → short-circuit
+  assert.equal(await redituum.trailingUsdRevenue(new Date()), EXPECTED_GROSS)        // revenue still once
+  assert.equal((await signorum.history({ animaId: ANIMA })).length, 1)              // signum still once
+  assert.equal([...deposita.store.values()].length, 1)
+})
+
 test('magic-amount petitio confirmed on a linked-payer deposit', async () => {
   const { personae, link } = makePersonae()
   link(PAYER, ANIMA)
