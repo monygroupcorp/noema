@@ -887,6 +887,94 @@ test('after rehydrate, onActumCompleta() dispatches the next piece correctly', a
   assert.equal(dispatched.aditus._pieceIndex, 2, 'should dispatch piece at nextIndex=2, not restart from 0')
 })
 
+// ── Pause persistence: survives a simulated restart ──────────────────────────
+
+test('pause() persists pausatum on the Collectio record', async () => {
+  const collectio = makeCollectio({ numerus: 5, concurrentia: 2 })
+  const collectiones = makeCollectionum(collectio)
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(inceptor.dispatch, collectiones, inceptor.actorum, {})
+
+  await cursor.start(collectio)
+  await cursor.pause('col-1')
+
+  const stored = await collectiones.find('col-1')
+  assert.ok(stored?.pausatum instanceof Date, 'pausatum should be persisted as a Date')
+})
+
+test('resume() clears the persisted pausatum', async () => {
+  const collectio = makeCollectio({ numerus: 5, concurrentia: 2 })
+  const collectiones = makeCollectionum(collectio)
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(inceptor.dispatch, collectiones, inceptor.actorum, {})
+
+  await cursor.start(collectio)
+  await cursor.pause('col-1')
+  await cursor.resume('col-1')
+
+  const stored = await collectiones.find('col-1')
+  assert.equal(stored?.pausatum, undefined, 'pausatum should be cleared on resume')
+})
+
+test('pause -> simulated restart (fresh cursor over same store) -> no dispatch until resume', async () => {
+  // Shared, persistent stores that survive the "restart" (only the CollectioCursor's
+  // in-memory state map is lost — the real failure mode this test guards against).
+  const collectio = makeCollectio({
+    id: 'col-restart-pause',
+    status: 'agens',
+    numerus: 5,
+    concurrentia: 2,
+  })
+  const collectiones = makeCollectionum(collectio)
+  const actorum = makeActorum()
+
+  let counter = 0
+  const calls: Inceptio[] = []
+  // Dispatch writes into the SAME shared actorum — mirrors a real async pod
+  // creating a persisted Actum row, not an isolated per-cursor stub.
+  async function dispatch(inceptio: Inceptio): Promise<{ actum: Actum }> {
+    calls.push(inceptio)
+    const id = `actum-${counter++}`
+    const actum: Actum = {
+      id,
+      modusId: inceptio.modusId,
+      modusVersiono: '1',
+      aditus: inceptio.aditus,
+      status: 'nascens' as ActumStatus,
+      impetus: 0n,
+      signaConsumed: [],
+      inceptum: new Date(),
+      expirat: new Date(Date.now() + 60_000),
+    }
+    actorum.store.set(id, actum)
+    return { actum }
+  }
+
+  // First cursor: start a collection, pause it (persists pausatum), then "die"
+  // (no more calls on this instance — simulating a process restart).
+  const cursor1 = new CollectioCursor(dispatch, collectiones, actorum, {})
+  await cursor1.start(collectio)
+  assert.equal(calls.length, 2, 'dispatched 2 pieces before pause')
+  await cursor1.pause('col-restart-pause')
+
+  const stored = await collectiones.find('col-restart-pause')
+  assert.ok(stored?.pausatum, 'pause was persisted before the "restart"')
+
+  // Fresh CollectioCursor instance — the "restart". Same underlying stores, so it
+  // reads the persisted pausatum and the persisted acta.
+  const cursor2 = new CollectioCursor(dispatch, collectiones, actorum, {})
+  await cursor2.rehydrate()
+
+  // In-flight acta completing must NOT trigger a new dispatch while paused.
+  const callsBeforeResume = calls.length
+  await cursor2.onActumCompleta('col-restart-pause', 'actum-0', true)
+  assert.equal(calls.length, callsBeforeResume, 'no dispatch after restart while still paused')
+
+  // Resume — now dispatching continues.
+  await cursor2.resume('col-restart-pause')
+  assert.ok(calls.length > callsBeforeResume, 'dispatch resumes once unpaused')
+})
+
 // ── Test 22: Idempotency on onActumCompleta ───────────────────────────────────
 
 test('onActumCompleta called twice for same actumId is no-op on second call', async () => {

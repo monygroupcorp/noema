@@ -675,18 +675,18 @@ export class CrystalApi {
     return false
   }
 
-  /** Pause dispatching new pieces (in-flight finish). Owner-scoped. */
+  /** Pause dispatching new pieces (in-flight finish). Persisted — survives a restart. Owner-scoped. */
   async pauseCollection(auctor: AuctorKey, id: string): Promise<Collection> {
     const c = await this._ownedCollection(auctor, id)
     await this.deps.collectioCursor?.pause(id)
-    return toCollection(c)
+    return toCollection((await this.deps.collectiones!.find(id)) ?? c)
   }
 
   /** Resume dispatching after a pause. Owner-scoped. */
   async resumeCollection(auctor: AuctorKey, id: string): Promise<Collection> {
     const c = await this._ownedCollection(auctor, id)
     await this.deps.collectioCursor?.resume(id)
-    return toCollection(c)
+    return toCollection((await this.deps.collectiones!.find(id)) ?? c)
   }
 
   /** Cancel a Collection — stop dispatching + mark cancellata. Owner-scoped. */

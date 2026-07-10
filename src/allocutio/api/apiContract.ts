@@ -675,6 +675,7 @@ const CollectionSchema: JsonSchema = {
     provenanceHash: { type: 'string', description: 'Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash.' },
     tractus: { type: 'array', items: TractusSchema, description: 'The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired.' },
     reviewEnabled: { type: 'boolean', description: 'Whether each piece is held for review before it counts.' },
+    paused: { type: 'boolean', description: 'Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart.' },
     owners: {
       type: 'array',
       description: 'Per-artifact ownership split (team-owned collections only) — weights sum to 1.',

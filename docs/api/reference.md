@@ -2444,6 +2444,10 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
           "type": "boolean",
           "description": "Whether each piece is held for review before it counts."
         },
+        "paused": {
+          "type": "boolean",
+          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+        },
         "owners": {
           "type": "array",
           "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -2700,6 +2704,10 @@ Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authorin
           "type": "boolean",
           "description": "Whether each piece is held for review before it counts."
         },
+        "paused": {
+          "type": "boolean",
+          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+        },
         "owners": {
           "type": "array",
           "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -2877,6 +2885,10 @@ Freeze a DRAFT Collection’s tractus and start the run — pins provenance to t
         "reviewEnabled": {
           "type": "boolean",
           "description": "Whether each piece is held for review before it counts."
+        },
+        "paused": {
+          "type": "boolean",
+          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
         },
         "owners": {
           "type": "array",
@@ -3058,6 +3070,10 @@ List the authenticated caller's Collections (owner-scoped).
             "type": "boolean",
             "description": "Whether each piece is held for review before it counts."
           },
+          "paused": {
+            "type": "boolean",
+            "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+          },
           "owners": {
             "type": "array",
             "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -3236,6 +3252,10 @@ Fetch one Collection by id — progress (completed/failed/total), status, cost. 
         "reviewEnabled": {
           "type": "boolean",
           "description": "Whether each piece is held for review before it counts."
+        },
+        "paused": {
+          "type": "boolean",
+          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
         },
         "owners": {
           "type": "array",
@@ -3583,6 +3603,10 @@ Extend a Collection — raise the target by `count` and dispatch the new pieces 
           "type": "boolean",
           "description": "Whether each piece is held for review before it counts."
         },
+        "paused": {
+          "type": "boolean",
+          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+        },
         "owners": {
           "type": "array",
           "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -3760,6 +3784,10 @@ Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Own
         "reviewEnabled": {
           "type": "boolean",
           "description": "Whether each piece is held for review before it counts."
+        },
+        "paused": {
+          "type": "boolean",
+          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
         },
         "owners": {
           "type": "array",
@@ -3939,6 +3967,10 @@ Resume a paused Collection — continue dispatching toward the target. Owner-sco
           "type": "boolean",
           "description": "Whether each piece is held for review before it counts."
         },
+        "paused": {
+          "type": "boolean",
+          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+        },
         "owners": {
           "type": "array",
           "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -4116,6 +4148,10 @@ Cancel a Collection — stop dispatching and mark it cancelled. Owner-scoped.
         "reviewEnabled": {
           "type": "boolean",
           "description": "Whether each piece is held for review before it counts."
+        },
+        "paused": {
+          "type": "boolean",
+          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
         },
         "owners": {
           "type": "array",
