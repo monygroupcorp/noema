@@ -71,6 +71,10 @@ const fakeApi: ApiFacade = {
   async listStudios(_auctor: AuctorKey): Promise<StudioView[]> {
     return [{ studioId: 'modo-1', status: 'idle', budgetImpetus: '100' }]
   },
+  async releaseStudio(_auctor: AuctorKey, studioId: string): Promise<StudioView> {
+    if (studioId === 'ghost') throw Errors.notFoundStudio(studioId)
+    return { studioId, status: 'terminated', budgetImpetus: '100' }
+  },
 }
 
 // Records the opts the router forwarded to provisionStudio.
@@ -384,6 +388,22 @@ test('GET /v1/studios/:id returns the studio; 404 not_found.studio for an unknow
     assert.equal(ok.body.studio.studioId, 'modo-7')
 
     const missing = await request(`${url}/v1/studios/ghost`, { headers: { 'x-api-key': 'k' } })
+    assert.equal(missing.status, 404)
+    assert.equal(missing.body.error.code, 'not_found.studio')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('DELETE /v1/studios/:id returns the terminal view; 404 not_found.studio for an unknown id', async () => {
+  const { server, url } = await createServer()
+  try {
+    const ok = await request(`${url}/v1/studios/modo-7`, { method: 'DELETE', headers: { 'x-api-key': 'k' } })
+    assert.equal(ok.status, 200)
+    assert.equal(ok.body.studio.studioId, 'modo-7')
+    assert.equal(ok.body.studio.status, 'terminated')
+
+    const missing = await request(`${url}/v1/studios/ghost`, { method: 'DELETE', headers: { 'x-api-key': 'k' } })
     assert.equal(missing.status, 404)
     assert.equal(missing.body.error.code, 'not_found.studio')
   } finally {
