@@ -395,6 +395,31 @@ export const api = {
   resumeSponsorship: (id: string) =>
     fetch(`/v1/sponsorships/${encodeURIComponent(id)}/resume`, { method: 'POST', headers: authHeaders() }).then(j<{ sponsorship: Sponsorship }>),
 
+  // ── Studios — a leased warm pod, metered from your balance ───────────────────
+  // POST returns a `provisioning` handle immediately; poll GET /v1/studios/:id until
+  // status leaves `provisioning`. maxImpetus IS the session budget — the studio
+  // drain-terminates at the cap. Runs target it via POST /v1/runs { studioId }.
+  listFundamenta: () => fetch('/v1/fundamenta').then(j<{ fundamenta: Fundamentum[] }>),
+  listStudios: () => fetch('/v1/studios', { headers: readHeaders() }).then(j<{ studios: StudioView[] }>),
+  getStudio: (id: string) =>
+    fetch(`/v1/studios/${encodeURIComponent(id)}`, { headers: readHeaders() }).then(j<{ studio: StudioView }>),
+  provisionStudio: (body: { fundamentumId?: string; models?: string[]; warmMs?: number; maxImpetus?: string; runtime?: string }) =>
+    fetch('/v1/studios', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(j<{ studio: StudioView }>),
+
+  // ── TEE private sessions — sealed compute over the caller's own tunnel ───────
+  // The browser generates the WireGuard keypair; only the PUBLIC key goes up. Poll
+  // GET until status='ready' (phase carries the live cold-start progress), then the
+  // /tee WASM client drives the tunnel with the private key. DELETE ends the pod.
+  provisionTee: (body: { wgClientPublicKey: string; gpuClass?: string; maxImpetus?: string }) =>
+    fetch('/v1/sessions/tee', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(j<{ session: TeeSessionView }>),
+  getTeeSession: (id: string) =>
+    fetch(`/v1/sessions/tee/${encodeURIComponent(id)}`, { headers: readHeaders() }).then(j<{ session: TeeSessionView }>),
+  endTeeSession: (id: string) =>
+    fetch(`/v1/sessions/tee/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() })
+      .then((r) => { if (!r.ok && r.status !== 404) throw new Error(`end session failed: ${r.status}`); }),
+
   // ── Account settings (Consuetudinum, owner-keyed / anon-capable) ─────────────
   // GET /v1/me — appearance (Profile) + generation defaults (Preferences) + bindings.
   getMe: () => fetch('/v1/me', { headers: readHeaders() }).then(j<MeView>),
@@ -639,6 +664,50 @@ export interface CollectionPiece {
   review: 'pending' | 'approved' | 'rejected' | 'none';
   output?: Record<string, unknown>;
   attributes?: Array<{ trait_type: string; value: string }>;
+}
+
+// A compute substrate (GET /v1/fundamenta) — what a studio arms on.
+export interface Fundamentum {
+  id: string;
+  nomen?: string;
+  versio: string;
+  runtime?: string;
+  imageId: string;
+  imageVersion: string;
+  vramGb?: number;
+}
+
+// A hosted studio (GET/POST /v1/studios) — mirrors the backend StudioView.
+// `studioId` is what POST /v1/runs { studioId } targets.
+export interface StudioView {
+  studioId: string;
+  status: 'idle' | 'running' | 'provisioning' | 'draining' | 'terminated';
+  budgetImpetus: string;
+  podId?: string;
+  gpu?: string;
+  runtime?: string;
+  imageRef?: string;
+  warmUntil?: string;
+  costPerHr?: number;
+  impetusPerSecond?: string;
+}
+
+// A TEE private session (POST/GET /v1/sessions/tee) — mirrors the backend TeeSessionView.
+// `phase` is the live cold-start progress (Phasis taxonomy) while status='provisioning'.
+export type TeePhase =
+  | 'queued' | 'provisioning' | 'pulling' | 'attesting' | 'downloading' | 'installing'
+  | 'loading' | 'warming' | 'executing' | 'uploading' | 'finalizing' | 'cancelling'
+  | 'done' | 'failed';
+export interface TeeSessionView {
+  sessionId: string;
+  status: 'provisioning' | 'ready' | 'ended';
+  phase?: TeePhase;
+  error?: string;
+  serverPublicKey?: string;
+  endpoint?: string;
+  proxyUrl?: string;
+  tunnelIp?: string;
+  gpuHours?: number;
 }
 
 // The account snapshot (GET /v1/me/status) — mirrors the backend StatusView.

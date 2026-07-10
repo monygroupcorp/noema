@@ -99,6 +99,9 @@ export function App() {
       <Route path="/preferences" element={<Preferences />} />
       <Route path="/funding" element={<Funding />} />
       <Route path="/studio" element={<Studio />} />
+      {/* /tee is the WASM tunnel client (served by the backend, shadows the SPA in prod) —
+          the React surface lives at /private. Keep /tee matching for dev-server deep links. */}
+      <Route path="/private" element={<Tee />} />
       <Route path="/tee" element={<Tee />} />
       <Route path="/onboard" element={<Onboard />} />
       <Route path="/landing" element={<Landing />} />

@@ -17,7 +17,7 @@ type Kind = 'download' | 'hosting';
 type Job =
   | { s: 'idle' }
   | { s: 'busy'; editionId: string; kind: Kind }
-  | { s: 'ready'; url: string; kind: Kind }
+  | { s: 'ready'; url: string; kind: Kind; editionId: string }
   | { s: 'rejected' }
   | { s: 'err'; msg: string };
 
@@ -60,7 +60,7 @@ export function EditioExport() {
       try {
         const { edition } = await api.getEdition((job as { editionId: string }).editionId);
         if (!live) return;
-        if (edition.status === 'published' && edition.externalRef) { setJob({ s: 'ready', url: edition.externalRef, kind }); return; }
+        if (edition.status === 'published' && edition.externalRef) { setJob({ s: 'ready', url: edition.externalRef, kind, editionId: edition.id }); return; }
         if (edition.status === 'rejected') { setJob({ s: 'rejected' }); return; }
         if (edition.status === 'failed') { setJob({ s: 'err', msg: 'The publish failed. Approve some pieces in curation, then try again.' }); return; }
         t = setTimeout(tick, 2500);
@@ -90,7 +90,7 @@ export function EditioExport() {
     setJob({ s: 'busy', editionId: '', kind });
     try {
       const { edition } = await api.publish(body);
-      if (edition.status === 'published' && edition.externalRef) setJob({ s: 'ready', url: edition.externalRef, kind });
+      if (edition.status === 'published' && edition.externalRef) setJob({ s: 'ready', url: edition.externalRef, kind, editionId: edition.id });
       else if (edition.status === 'rejected') setJob({ s: 'rejected' });
       else setJob({ s: 'busy', editionId: edition.id, kind });
     } catch (e) { setJob({ s: 'err', msg: msg(e) }); }
@@ -162,6 +162,10 @@ export function EditioExport() {
                   <div className="ex-foot-note mono">✓ hosted — set your contract’s <b>baseURI</b> to:</div>
                   <code className="ex-baseuri">{job.url}/</code>
                   <div className="ex-foot-note mono" style={{ marginTop: 6 }}>tokenURI resolves at <code>{job.url}/&lt;tokenId&gt;.json</code> · <span className="lnk">migrate to Arweave →</span> (coming soon) before you rely on it</div>
+                  <button className="btn ghost" style={{ marginTop: 8 }}
+                    onClick={() => { void api.retract(job.editionId).then(() => setJob({ s: 'idle' })).catch((e) => setJob({ s: 'err', msg: msg(e) })); }}>
+                    Retract hosting <span className="ex-btn-sub">unpublish — the URIs stop resolving</span>
+                  </button>
                 </div>
               ) : job.s === 'rejected' ? (
                 <div className="warn">Hosting is held for content-safety review — public destinations open once scanning is live. (Your export-to-you download works now.)</div>

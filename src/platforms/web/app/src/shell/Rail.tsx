@@ -41,7 +41,7 @@ const NAV: NavSection[] = [
   { sec: 'Identity', items: [
     { to: '/profile', ico: 'circle-user', label: 'Profile' },
     { to: '/keyring', ico: 'key-round', label: 'Keyring' },
-    { to: '/tee', ico: 'eye-off', label: 'Private' },
+    { to: '/private', ico: 'eye-off', label: 'Private' },
   ] },
 ];
 
