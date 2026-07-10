@@ -260,6 +260,47 @@ test('sweep RE-BOOKS a create-succeeded-but-book-failed row, then credits EXACTL
   assert.equal([...deposita.store.values()].length, 1)
 })
 
+test('webhook re-delivery of a book-failed row books from the receipt basis, not the drifted spot', async () => {
+  // v4 gauntlet finding (webhook retry path, sibling of the sweep case above): AssetPricer prices at
+  // SPOT, so re-pricing on a re-delivery yields the retry-window price, not the receipt price. For the
+  // create-succeeded-but-book-failed row (Depositum persisted at receipt FMV, no Reditus — the book
+  // write threw transiently), the Alchemy retry reuses the row and re-prices at the drifted spot. If
+  // the webhook booked from that fresh price it would recognize revenue at the DRIFTED figure while
+  // crediting impetus from the PERSISTED receipt basis — recognized USD diverging from the credit
+  // basis by the spot drift (value-conservation break; Captain amendment B). The webhook must book
+  // from the same persisted basis the credit uses, mirroring the sweep's re-book.
+  const { personae, link } = makePersonae()
+  link(PAYER, ANIMA)
+
+  // Spot drifts UP over the retry window — the re-delivery prices at $6000, twice the receipt $3000.
+  let spot = 6000
+  const mutablePricer = { async usdFmv(_c: unknown, _t: unknown, amountRaw: bigint) {
+    const micro = (amountRaw * BigInt(Math.round(spot * 1_000_000))) / 10n ** 18n
+    return micro > 0n ? micro : null
+  } }
+
+  // The book-failed row: create succeeded (receipt basis $3000 frozen on the row) but revenue was
+  // never booked (redituum empty — the book write failed before a restart).
+  const deposita = makeDeposita()
+  await deposita.create({ chainId: CHAIN_ID, transactioHash: TX_HASH, ab: PAYER.toLowerCase(), ad: VAULT, valor: AMOUNT, confirmationes: 1, status: 'confirmatum', token: TOKEN, usdFmv: EXPECTED_GROSS })
+  const { deps, signorum, redituum } = makeDeps(personae, { deposita, pricer: mutablePricer as unknown as AlchemyWebhookDeps['pricer'] })
+  assert.equal(await redituum.trailingUsdRevenue(new Date()), 0n)   // precondition: no revenue booked
+
+  await handleAlchemyWebhook(req([paymentLog()]), deps)             // retry at the drifted spot → books + credits
+
+  // The invariant: recognized revenue == the credit basis, BOTH the receipt FMV ($3000) — NOT the
+  // drifted spot ($6000). Old code booked 6_000_000n here while crediting from 3_000_000n.
+  assert.equal(await redituum.trailingUsdRevenue(new Date()), EXPECTED_GROSS)   // receipt, not spot
+  assert.equal(await signorum.balance({ animaId: ANIMA }), EXPECTED_IMPETUS)    // credit from the same basis
+  assert.equal((await signorum.history({ animaId: ANIMA })).length, 1)
+  assert.equal([...deposita.store.values()][0].status, 'processatum')
+
+  // Re-delivery again short-circuits (processatum) — no double revenue, no double signum.
+  await handleAlchemyWebhook(req([paymentLog()]), deps)
+  assert.equal(await redituum.trailingUsdRevenue(new Date()), EXPECTED_GROSS)
+  assert.equal((await signorum.history({ animaId: ANIMA })).length, 1)
+})
+
 test('magic-amount petitio confirmed on a linked-payer deposit', async () => {
   const { personae, link } = makePersonae()
   link(PAYER, ANIMA)

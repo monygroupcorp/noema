@@ -494,7 +494,16 @@ async function handlePaymentLog(
   // Book USD revenue at RECEIPT (ADR-0013 §2/§4) — a peer of the credit, before the processatum
   // transition, so a store failure leaves the deposit retryable. Recognized regardless of whether
   // the funder's Anima is linked yet; idempotent on depositum.id so re-delivery cannot double-count.
-  await bookRevenue(deps, { usdFmv, origo: 'crypto', depositumId: depositum.id, token })
+  // Book from the SAME persisted receipt-time basis the credit uses (`depositum.usdFmv ?? usdFmv`),
+  // never the fresh spot price: AssetPricer.usdFmv prices at SPOT, so on a re-delivery of the
+  // create-succeeded-but-book-failed row (Depositum exists at X1 but no Reditus — record() threw
+  // transiently), re-pricing here would insert a fresh Reditus at the drifted spot X2 while the
+  // credit mints impetus from the persisted X1 — recognized revenue diverging from the credit basis
+  // by the spot drift over the retry window (value-conservation break; Captain amendment B). Booking
+  // from the persisted basis is a no-op for fresh rows (depositum.usdFmv was just set to usdFmv) and
+  // for already-booked rows (dup-key on depositumId), and heals the book-failed row at X1 to match
+  // the credit — mirroring the sweep's re-book (which books from depositum.usdFmv).
+  await bookRevenue(deps, { usdFmv: depositum.usdFmv ?? usdFmv, origo: 'crypto', depositumId: depositum.id, token: depositum.token ?? token })
 
   // Resolve the payer wallet to its account via the auth rail's Persona seam (custos fallback).
   const animaId = await deps.resolveWalletAnima(payer)
