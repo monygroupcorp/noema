@@ -3,13 +3,13 @@ import crypto from 'node:crypto'
 import { makeLogger } from '../../lib/logger.js'
 
 const log = makeLogger('alchemy-webhook')
-import type { Depositorum, Petitionum, Testimoniorum } from '../../types/catena.js'
+import type { Depositum, Depositorum, Petitionum, Testimoniorum } from '../../types/catena.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Redituum, RevenueOrigo } from '../../types/reditus.js'
 import type { AssetPricer } from '../../crystal/AssetPricer.js'
 import { usdMicroToImpetus } from '../../ledger/rates.js'
 import { fundingBps, applyFundingBps } from '../../ledger/depositFunding.js'
-import type { AnimaStore } from '../../types/anima.js'
+import type { ResolveWalletAnima } from '../../crystal/resolveWalletAnima.js'
 import type { ArcanumTreeStore } from '../../arcanum/ArcanumTree.js'
 import type { SanctionsScreen } from '../../compliance/SanctionsScreen.js'
 
@@ -40,7 +40,13 @@ export interface AlchemyWebhookDeps {
   redituum: Redituum
   petitiones: Petitionum
   testimonia: Testimoniorum
-  animae: AnimaStore
+  /**
+   * The wallet↔account seam for deposit attribution (noema-027). Resolves a payer/sender wallet to
+   * the owning animaId via the auth rail's `web` Persona binding (custos fallback), or `null` when
+   * no account is linked. Replaces the dead `animae.findByCustos` read that parked every linked
+   * deposit `confirmatum`. Used by BOTH the payment path and the NFT-received path.
+   */
+  resolveWalletAnima: ResolveWalletAnima
   /** Arcanum Merkle tree — receives anonymous deposits (no animaId). */
   arcanumTree: ArcanumTreeStore
   /**
@@ -95,7 +101,7 @@ async function priceDeposit(
  * idempotently rather than losing the row.
  */
 async function bookRevenue(
-  deps: AlchemyWebhookDeps,
+  deps: Pick<AlchemyWebhookDeps, 'redituum'>,
   args: { usdFmv: bigint; origo: RevenueOrigo; depositumId?: string; token: string },
 ): Promise<void> {
   await deps.redituum.record({
@@ -120,6 +126,152 @@ async function bookRevenue(
  */
 function creditImpetus(grossUsdFmv: bigint, token: string): bigint {
   return usdMicroToImpetus(applyFundingBps(grossUsdFmv, fundingBps(token)))
+}
+
+/** The auctor stamped on every on-chain deposit credit — also the scope of the unique-partial testis index. */
+const DEPOSIT_AUCTOR = 'alchemy-webhook'
+
+/**
+ * A Mongo duplicate-key (E11000) error, detected structurally so this handler stays decoupled from
+ * the driver (the Memory stores never throw it — their single-writer path is deduped by the
+ * processatum short-circuit + this sweep only touching `confirmatum` rows).
+ */
+function isDuplicateKeyError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 11000
+}
+
+/** The store surface `creditConfirmedDeposit` needs — shared by the webhook payment path and the sweep. */
+export type DepositCreditDeps = Pick<AlchemyWebhookDeps, 'deposita' | 'signorum' | 'petitiones'>
+
+/**
+ * Convert ONE resolved + priced `confirmatum` deposit into a credit: issue the eth Signum, mark the
+ * Depositum `processatum`, and confirm any open magic-amount Petitio. Shared by the webhook payment
+ * path (fresh receipt) and the retry sweep (re-attribution after a wallet links).
+ *
+ * DURABLE, CROSS-INSTANCE IDEMPOTENCY — mirrors the Stripe rail (stripeWebhook.ts). The Signum's
+ * `testis` is the deposit txHash and a unique PARTIAL index on (testis where auctor:'alchemy-webhook')
+ * makes a SECOND issue for the same deposit throw a dup-key — so a sweep tick racing an Alchemy
+ * re-delivery mints impetus EXACTLY ONCE. The loser catches the dup-key, finds the winner's signum,
+ * and idempotently completes the processatum transition — never a second signum, never re-credit.
+ * (`bookRevenue` is independently idempotent on depositumId, so revenue can't double either.)
+ *
+ * `usdFmv`/`token` are passed in — and BOTH callers pass the PERSISTED receipt-time basis
+ * (`depositum.usdFmv`/`token`): the sweep reads it directly, and the webhook prefers it over the
+ * fresh price (`?? freshPrice` only for the never-priced-at-receipt row). This NEVER re-prices an
+ * already-booked deposit, so the credit basis always equals the booked revenue.
+ */
+async function creditConfirmedDeposit(
+  deps: DepositCreditDeps,
+  args: { depositum: Depositum; usdFmv: bigint; token: string; animaId: string; valor: bigint; txHash: string },
+): Promise<void> {
+  const { depositum, usdFmv, token, animaId, valor, txHash } = args
+
+  // Credit spendable impetus = the NET buy amount (gross FMV × per-asset funding rate). Sub-point
+  // dust → parked (not a zero-value credit); revenue was already booked at receipt.
+  const impetus = creditImpetus(usdFmv, token)
+  if (impetus <= 0n) {
+    log.warn('deposit priced but below one impetus — parked uncredited', { txHash, token, usdFmv: usdFmv.toString() })
+    return
+  }
+
+  let signumId: string
+  try {
+    const signum = await deps.signorum.issue({
+      forma: 'eth',            // "on-chain CreditVault deposit" — reused across assets; valor is impetus
+      animaId,
+      valor: impetus,
+      auctor: DEPOSIT_AUCTOR,
+      testis: txHash,
+    })
+    signumId = signum.id
+  } catch (err) {
+    if (!isDuplicateKeyError(err)) throw err
+    // The durable guard fired: a concurrent sweep/re-delivery already credited this deposit. Replay
+    // the winner's signum and idempotently finish the processatum transition it may not have
+    // committed yet — never a second mint.
+    const history = await deps.signorum.history({ animaId })
+    const winner = history.find(s => s.auctor === DEPOSIT_AUCTOR && s.testis === txHash)
+    if (!winner) throw err   // dup-key but the winner's row isn't visible — surface (unexpected)
+    signumId = winner.id
+    log.info('deposit credit lost the race — replaying the concurrent winner', { txHash, animaId, signumId })
+  }
+
+  // Mark Depositum processatum (idempotent — a replay just re-asserts the same terminal state).
+  await deps.deposita.update(depositum.id, {
+    status: 'processatum',
+    animaId,
+    signumId,
+    processatum: new Date(),
+  })
+
+  // Check for an open magic-amount Petitio — matched on the on-chain amount (wei), not credits.
+  const petitio = await deps.petitiones.findExpectans(animaId)
+  if (petitio && petitio.valuta === valor) {
+    await deps.petitiones.update(petitio.id, {
+      status: 'confirmata',
+      depositumId: depositum.id,
+      walletAddress: depositum.ab,
+      confirmata: new Date(),
+    })
+  }
+}
+
+/** The store surface the retry sweep needs. `redituum` is here so the sweep can RE-BOOK idempotently
+ *  before crediting (guards the create-succeeded-but-book-failed row — see sweepConfirmatumDeposita). */
+export type DepositSweepDeps = Pick<AlchemyWebhookDeps, 'deposita' | 'signorum' | 'petitiones' | 'resolveWalletAnima' | 'redituum'>
+
+/**
+ * Retry sweep (noema-027 decision 3): re-attribute every parked `confirmatum` deposit whose payer
+ * NOW resolves to an account, and credit it. Runs on boot + every DEPOSIT_SWEEP_INTERVAL_MS. No new
+ * admin surface, no Alchemy dashboard. Revenue was already booked at receipt; this only issues the
+ * idempotency-guarded credit from the PERSISTED receipt-time basis — it never re-prices.
+ *
+ * Legacy parked rows predating the token/usdFmv persistence are SKIPPED with a loud warn naming the
+ * missing fields (their heal path is a fresh Alchemy re-delivery whose payload carries the token —
+ * NOT a backfill migration). A still-unlinked payer is left parked silently: the loud "unattributed"
+ * warn already fired once at receipt, so the sweep must not spam it every tick.
+ *
+ * RE-BOOK BEFORE CREDIT (v4 gauntlet finding): the Depositum's usdFmv is persisted at `create` BEFORE
+ * bookRevenue runs (separate write, no transaction). If record() threw transiently and the process
+ * restarted, this sweep would see a priced row with NO revenue booked — crediting it then would leave
+ * revenue permanently zero (re-delivery short-circuits on `processatum`). So the sweep re-books
+ * idempotently (no-op if already booked, on the depositumId partial-unique index) IMMEDIATELY before
+ * crediting — the credit basis (persisted receipt-time FMV) always equals the booked Reditus.
+ */
+export async function sweepConfirmatumDeposita(deps: DepositSweepDeps): Promise<{ swept: number; skipped: number }> {
+  const parked = await deps.deposita.list({ status: 'confirmatum' })
+  let swept = 0
+  let skipped = 0
+  for (const depositum of parked) {
+    if (depositum.token === undefined || depositum.usdFmv === undefined) {
+      log.warn('deposit sweep: skipping legacy parked deposit missing receipt-time basis — heal via Alchemy re-delivery', {
+        depositumId: depositum.id,
+        txHash: depositum.transactioHash,
+        missing: [
+          depositum.token === undefined ? 'token' : null,
+          depositum.usdFmv === undefined ? 'usdFmv' : null,
+        ].filter((f): f is string => f !== null),
+      })
+      skipped++
+      continue
+    }
+    const animaId = await deps.resolveWalletAnima(depositum.ab)
+    if (!animaId) { skipped++; continue }   // still unlinked — stay parked, no warn spam
+    // Re-book idempotently before crediting: heals a create-succeeded-but-book-failed row so we never
+    // credit a deposit whose revenue was never recognized. No-op if already booked (depositumId guard).
+    await bookRevenue(deps, { usdFmv: depositum.usdFmv, origo: 'crypto', depositumId: depositum.id, token: depositum.token })
+    await creditConfirmedDeposit(deps, {
+      depositum,
+      usdFmv: depositum.usdFmv,
+      token: depositum.token,
+      animaId,
+      valor: depositum.valor,
+      txHash: depositum.transactioHash,
+    })
+    swept++
+  }
+  if (swept > 0 || skipped > 0) log.info('deposit sweep complete', { swept, skipped, scanned: parked.length })
+  return { swept, skipped }
 }
 
 export interface AlchemyWebhookRequest {
@@ -304,16 +456,24 @@ async function handlePaymentLog(
       ab: payer,
       ad: vaultAddress,
       valor,
+      token,        // persist the asset for audit; no usdFmv — quarantined funds recognize no FMV
       confirmationes: 1,
       status: 'fractum',
     })
     return true  // processed (quarantined), not credited
   }
 
+  // Price the deposit ONCE → gross USD FMV. Feeds both the revenue book (gross) and the credit
+  // (net). Priced BEFORE the create so the receipt-time basis (token + usdFmv) can be FROZEN onto
+  // the Depositum — the retry sweep credits from that persisted basis and never re-prices.
+  // Unpriceable → skip both, loudly; the deposit is parked confirmatum for a later retry.
+  const usdFmv = await priceDeposit(deps, chainId, token, valor, txHash)
+
   // Reuse the existing on-chain deposit record if this webhook is a re-delivery of an already-
   // seen (but not-yet-credited) deposit — otherwise a retry would mint a second Depositum (and a
   // second revenue row). `existing` is only 'confirmatum' or 'fractum' here (a 'processatum' one
-  // short-circuited above); a stale 'fractum' that now clears OFAC gets a fresh record.
+  // short-circuited above); a stale 'fractum' that now clears OFAC gets a fresh record. A freshly
+  // created record freezes the receipt-time basis (token always; usdFmv when priced).
   const depositum = existing?.status === 'confirmatum'
     ? existing
     : await deps.deposita.create({
@@ -322,61 +482,69 @@ async function handlePaymentLog(
         ab: payer,
         ad: vaultAddress,
         valor,
+        token,
+        ...(usdFmv !== null ? { usdFmv } : {}),
         confirmationes: 1,
         status: 'confirmatum',
       })
 
-  // Price the deposit ONCE → gross USD FMV. Feeds both the revenue book (gross) and the credit
-  // (net). Unpriceable → skip both, loudly; the deposit is parked confirmatum for a later retry
-  // (never credited at a bogus/zero value).
-  const usdFmv = await priceDeposit(deps, chainId, token, valor, txHash)
+  // Unpriceable → parked confirmatum (no revenue, no credit — already warned in priceDeposit).
+  if (usdFmv === null) return true
+
+  // FREEZE-ON-FIRST-PRICE (noema-027 v5 gauntlet finding). A row first parked UNpriceable (created with
+  // `token` but no `usdFmv`) that prices on THIS re-delivery must PERSIST that basis now — exactly as
+  // the create path freezes it — so book, credit, and every later delivery share ONE basis. Without it
+  // the reuse branch re-prices at fresh spot on each delivery: if this delivery books revenue (locked
+  // permanently on depositumId) but its credit then throws, a later re-delivery would credit at a
+  // DIFFERENT spot than the booked revenue — minted impetus diverging from recognized revenue
+  // (value-conservation break; Captain amendment B). It also lets the sweep heal the row (it skips
+  // usdFmv===undefined rows as legacy). Only a reused, never-priced-at-receipt row reaches here with
+  // usdFmv undefined: a fresh create was priced (usdFmv set on the row) or returned above (unpriceable).
+  if (depositum.usdFmv === undefined) {
+    await deps.deposita.update(depositum.id, { usdFmv, token })
+    depositum.usdFmv = usdFmv
+    depositum.token = token
+  }
 
   // Book USD revenue at RECEIPT (ADR-0013 §2/§4) — a peer of the credit, before the processatum
   // transition, so a store failure leaves the deposit retryable. Recognized regardless of whether
   // the funder's Anima is linked yet; idempotent on depositum.id so re-delivery cannot double-count.
-  if (usdFmv !== null) {
-    await bookRevenue(deps, { usdFmv, origo: 'crypto', depositumId: depositum.id, token })
+  // Book from the SAME persisted receipt-time basis the credit uses (`depositum.usdFmv ?? usdFmv`),
+  // never the fresh spot price: AssetPricer.usdFmv prices at SPOT, so on a re-delivery of the
+  // create-succeeded-but-book-failed row (Depositum exists at X1 but no Reditus — record() threw
+  // transiently), re-pricing here would insert a fresh Reditus at the drifted spot X2 while the
+  // credit mints impetus from the persisted X1 — recognized revenue diverging from the credit basis
+  // by the spot drift over the retry window (value-conservation break; Captain amendment B). Booking
+  // from the persisted basis is a no-op for fresh rows (depositum.usdFmv was just set to usdFmv) and
+  // for already-booked rows (dup-key on depositumId), and heals the book-failed row at X1 to match
+  // the credit — mirroring the sweep's re-book (which books from depositum.usdFmv).
+  await bookRevenue(deps, { usdFmv: depositum.usdFmv ?? usdFmv, origo: 'crypto', depositumId: depositum.id, token: depositum.token ?? token })
+
+  // Resolve the payer wallet to its account via the auth rail's Persona seam (custos fallback).
+  const animaId = await deps.resolveWalletAnima(payer)
+  if (!animaId) {
+    // NEVER SILENT (noema-027 Fix 2): the deposit is confirmed + revenue-booked but no account owns
+    // this wallet yet. Park it loudly — the sweep credits it once the wallet links.
+    log.warn('deposit confirmed but unattributed — no account linked to payer wallet', { payer, txHash, valor: valor.toString() })
+    return true
   }
 
-  // Look up anima by payer wallet
-  const anima = await deps.animae.findByCustos(payer)
-
-  if (anima && usdFmv !== null) {
-    // Credit spendable impetus = the NET buy amount (gross FMV × per-asset funding rate, at the
-    // canonical $0.000337). NOT the raw wei. Sub-point dust → skip (parked, not a zero-value credit).
-    const impetus = creditImpetus(usdFmv, token)
-    if (impetus <= 0n) {
-      log.warn('deposit priced but below one impetus — parked uncredited', { txHash, token, usdFmv: usdFmv.toString() })
-    } else {
-      const signum = await deps.signorum.issue({
-        forma: 'eth',            // "on-chain CreditVault deposit" — reused across assets; valor is impetus
-        animaId: anima.id,
-        valor: impetus,
-        auctor: 'alchemy-webhook',
-        testis: txHash,
-      })
-
-      // Mark Depositum as processatum
-      await deps.deposita.update(depositum.id, {
-        status: 'processatum',
-        animaId: anima.id,
-        signumId: signum.id,
-        processatum: new Date(),
-      })
-
-      // Check for open magic-amount Petitio — matched on the on-chain amount (wei), not credits
-      const petitio = await deps.petitiones.findExpectans(anima.id)
-      if (petitio && petitio.valuta === valor) {
-        await deps.petitiones.update(petitio.id, {
-          status: 'confirmata',
-          depositumId: depositum.id,
-          walletAddress: payer,
-          confirmata: new Date(),
-        })
-      }
-    }
-  }
-  // If no anima (or unpriced): Depositum stays 'confirmatum' — credit issued on wallet link / retry
+  // Linked payer → credit now (idempotency-guarded; the shared helper the sweep also calls).
+  // Credit from the PERSISTED receipt-time basis, never the fresh price: revenue was booked at that
+  // basis and bookRevenue is idempotent on depositumId, so re-pricing here would mint impetus against a
+  // basis that diverges from the booked revenue whenever ETH moved since receipt (value-conservation
+  // break; Captain amendment B). `depositum.usdFmv` is ALWAYS set by now — a fresh create priced it, a
+  // reused priced-at-receipt row carries it, and a reused unpriceable-at-receipt row was just frozen
+  // above (FREEZE-ON-FIRST-PRICE) before this same delivery's book — so `?? usdFmv` is an unreachable
+  // type-level fallback, never the live basis. (Same for `depositum.token ?? token`.)
+  await creditConfirmedDeposit(deps, {
+    depositum,
+    usdFmv: depositum.usdFmv ?? usdFmv,
+    token: depositum.token ?? token,
+    animaId,
+    valor,
+    txHash,
+  })
 
   return true
 }
@@ -479,9 +647,11 @@ async function handleNftLog(
     return false
   }
 
-  // Look up anima by sender wallet
-  const anima = await deps.animae.findByCustos(from)
-  if (!anima) {
+  // Resolve the sender wallet to its account via the same Persona seam the payment path uses
+  // (custos fallback). Nothing writes animae.custos for users anymore, so the old findByCustos read
+  // skipped every NFT from a linked wallet (noema-027).
+  const animaId = await deps.resolveWalletAnima(from)
+  if (!animaId) {
     return false  // no linked identity — skip
   }
 
@@ -490,7 +660,7 @@ async function handleNftLog(
     contractus: token,
     tokenId: tokenId.toString(),
     possessor: from,
-    animaId: anima.id,
+    animaId,
     genus: 'balanceOf',
     testis: txHash,
     status: 'confirmatum',
