@@ -151,7 +151,10 @@ export interface Depositorum {
   create(depositum: Omit<Depositum, 'id' | 'natum'>): Promise<Depositum>
   update(
     id: string,
-    patch: Partial<Pick<Depositum, 'status' | 'confirmationes' | 'animaId' | 'signumId' | 'petitioId' | 'processatum'>>
+    // `usdFmv`/`token` are patchable so the webhook can FREEZE the receipt-time basis onto a row that
+    // was first parked UNpriceable and prices on a later re-delivery (noema-027 v5) — every subsequent
+    // delivery then reads one persisted basis instead of re-pricing at fresh spot.
+    patch: Partial<Pick<Depositum, 'status' | 'confirmationes' | 'animaId' | 'signumId' | 'petitioId' | 'processatum' | 'usdFmv' | 'token'>>
   ): Promise<Depositum>
 }
 

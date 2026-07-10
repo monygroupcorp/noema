@@ -301,6 +301,66 @@ test('webhook re-delivery of a book-failed row books from the receipt basis, not
   assert.equal((await signorum.history({ animaId: ANIMA })).length, 1)
 })
 
+test('unpriceable-at-receipt row: freezes the FIRST-priced basis; a later credit-throw retry credits from THAT, not fresh spot', async () => {
+  // v5 gauntlet finding. A row first parked UNpriceable (created with `token`, no `usdFmv`) prices on a
+  // later re-delivery. That delivery books revenue (locked on depositumId) but its credit then throws.
+  // The NEXT retry — at a DRIFTED spot — must credit from the FIRST-priced (now persisted) basis, equal
+  // to the booked revenue, never the drifted spot. Old code left the reuse row's usdFmv undefined, so
+  // every re-delivery re-priced at fresh spot: book at X2 (locked), credit at X3 → minted impetus
+  // diverging from recognized revenue.
+  const { personae, link } = makePersonae()
+  link(PAYER, ANIMA)
+
+  // Receipt = unpriceable (null); then the first price X2 = $3000; then a drifted spot X3 = $6000.
+  let spot: number | null = null
+  const stagePricer = { async usdFmv(_c: unknown, _t: unknown, amountRaw: bigint) {
+    if (spot === null) return null
+    const micro = (amountRaw * BigInt(Math.round(spot * 1_000_000))) / 10n ** 18n
+    return micro > 0n ? micro : null
+  } }
+
+  // Wrap the signum store so the SECOND (X2) delivery's credit throws AFTER revenue is booked, exactly
+  // reproducing a transient credit-write failure on the book-then-credit path.
+  const signorum = new MemorySignorum()
+  let throwOnIssue = false
+  const origIssue = signorum.issue.bind(signorum)
+  ;(signorum as { issue: typeof signorum.issue }).issue = (async (arg: Parameters<typeof origIssue>[0]) => {
+    if (throwOnIssue) { throwOnIssue = false; throw new Error('credit write failed (transient)') }
+    return origIssue(arg)
+  }) as typeof signorum.issue
+
+  const { deps, deposita, redituum } = makeDeps(personae, { signorum, pricer: stagePricer as unknown as AlchemyWebhookDeps['pricer'] })
+
+  // Delivery 1 — unpriceable at receipt: parked confirmatum with token but NO usdFmv, no revenue.
+  await handleAlchemyWebhook(req([paymentLog()]), deps)
+  const parked = [...deposita.store.values()][0]
+  assert.equal(parked.status, 'confirmatum')
+  assert.equal(parked.token, TOKEN)
+  assert.equal(parked.usdFmv, undefined)                                  // never priced yet
+  assert.equal(await redituum.trailingUsdRevenue(new Date()), 0n)
+
+  // Delivery 2 — first priceable ($3000). Books revenue at X2, FREEZES usdFmv=X2 on the row, then the
+  // credit throws (→ 500). Revenue is recognized; no signum minted; row stays confirmatum but now priced.
+  spot = 3000
+  throwOnIssue = true
+  const r2 = await handleAlchemyWebhook(req([paymentLog()]), deps)
+  assert.equal(r2.status, 500)
+  assert.equal(await redituum.trailingUsdRevenue(new Date()), EXPECTED_GROSS)   // booked at X2
+  assert.equal(await signorum.balance({ animaId: ANIMA }), 0n)                  // credit threw
+  assert.equal([...deposita.store.values()][0].usdFmv, EXPECTED_GROSS)          // basis FROZEN at X2
+  assert.equal([...deposita.store.values()][0].status, 'confirmatum')
+
+  // Delivery 3 — retry at the DRIFTED spot ($6000). Must credit from the frozen X2 basis (== booked
+  // revenue), never X3. Revenue stays booked once (dup on depositumId).
+  spot = 6000
+  await handleAlchemyWebhook(req([paymentLog()]), deps)
+  assert.equal(await signorum.balance({ animaId: ANIMA }), EXPECTED_IMPETUS)    // from X2, NOT the X3 double
+  assert.equal(await redituum.trailingUsdRevenue(new Date()), EXPECTED_GROSS)   // revenue still once, at X2
+  assert.equal((await signorum.history({ animaId: ANIMA })).length, 1)          // exactly one signum
+  assert.equal([...deposita.store.values()][0].status, 'processatum')
+  assert.equal([...deposita.store.values()].length, 1)
+})
+
 test('magic-amount petitio confirmed on a linked-payer deposit', async () => {
   const { personae, link } = makePersonae()
   link(PAYER, ANIMA)
