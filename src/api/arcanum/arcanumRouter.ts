@@ -1,5 +1,5 @@
 import { Router, type Request } from 'express'
-import { createReadStream, existsSync } from 'node:fs'
+import { createReadStream, existsSync, statSync } from 'node:fs'
 import path from 'node:path'
 import type { ArcanumIssuer } from '../../ledger/ArcanumIssuer.js'
 import type { ArcanumTreeStore } from '../../arcanum/ArcanumTree.js'
@@ -14,6 +14,16 @@ declare const __dirname: string
 const ARTIFACTS_DIR = path.join(__dirname, '..', '..', 'arcanum', 'circuit', 'artifacts')
 const WASM_PATH     = path.join(ARTIFACTS_DIR, 'arcanum.wasm')
 const WASM_READY    = existsSync(WASM_PATH)
+const ZKEY_PATH     = path.join(ARTIFACTS_DIR, 'arcanum_final.zkey')
+const ZKEY_ON_DISK  = existsSync(ZKEY_PATH)
+
+// Normalize a bare-domain serverUrl (e.g. "staging.noema.art") to an absolute
+// https:// URL so /config never emits relative-looking absolute URLs. Env vars
+// like WEBHOOK_URL are sometimes set without a scheme.
+function normalizeServerUrl(serverUrl?: string): string | undefined {
+  if (!serverUrl) return serverUrl
+  return /:\/\//.test(serverUrl) ? serverUrl : `https://${serverUrl}`
+}
 
 export interface ArcanumRouterConfig {
   /** Public URL where the proving key (.zkey) can be fetched by clients. */
@@ -278,10 +288,15 @@ export function createArcanumRouter(
   //   ready    boolean — false when wasm or zkey is not yet configured
 
   router.get('/config', (_req, res) => {
-    const wasmUrl = config.serverUrl
-      ? `${config.serverUrl.replace(/\/$/, '')}/arcanum/circuit/wasm`
+    const serverUrl = normalizeServerUrl(config.serverUrl)
+    const wasmUrl = serverUrl
+      ? `${serverUrl.replace(/\/$/, '')}/arcanum/circuit/wasm`
       : '/arcanum/circuit/wasm'
-    const zkeyUrl = config.zkeyUrl ?? null
+    const zkeyUrl = config.zkeyUrl ?? (ZKEY_ON_DISK
+      ? (serverUrl
+          ? `${serverUrl.replace(/\/$/, '')}/arcanum/circuit/zkey`
+          : '/arcanum/circuit/zkey')
+      : null)
     return res.json({
       wasmUrl,
       zkeyUrl,
@@ -304,6 +319,28 @@ export function createArcanumRouter(
     const stream = createReadStream(WASM_PATH)
     stream.on('error', (err) => {
       log.error('wasm stream error', { error: String(err) })
+      if (!res.headersSent) res.status(500).json({ error: 'internal error' })
+      else res.destroy()
+    })
+    stream.pipe(res)
+  })
+
+  // ── GET /circuit/zkey ─────────────────────────────────────────────────────────
+  //
+  // Serve the Groth16 proving key for client-side proof generation. The dev-ceremony
+  // key (~5MB) is small enough to serve from the API; the prod ceremony key (~300MB)
+  // is expected to be hosted on R2/CDN instead (config.zkeyUrl overrides this route).
+
+  router.get('/circuit/zkey', (req, res) => {
+    if (!ZKEY_ON_DISK) {
+      return res.status(404).json({ error: 'zkey not found — run arcanum-trusted-setup.sh' })
+    }
+    res.setHeader('Content-Type', 'application/octet-stream')
+    res.setHeader('Content-Length', statSync(ZKEY_PATH).size)
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    const stream = createReadStream(ZKEY_PATH)
+    stream.on('error', (err) => {
+      log.error('zkey stream error', { error: String(err) })
       if (!res.headersSent) res.status(500).json({ error: 'internal error' })
       else res.destroy()
     })
