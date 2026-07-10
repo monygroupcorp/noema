@@ -7,6 +7,8 @@ import type { AlchemyWebhookDeps, AlchemyWebhookRequest } from '../../../src/api
 import { permissiveSanctionsScreen } from '../../../src/compliance/SanctionsScreen.js'
 import type { SanctionsScreen } from '../../../src/compliance/SanctionsScreen.js'
 import { fixedPricer, nullPricer, type AssetPricer } from '../../../src/crystal/AssetPricer.js'
+import { makeResolveWalletAnima } from '../../../src/crystal/resolveWalletAnima.js'
+import type { PersonaStore } from '../../../src/types/persona.js'
 import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/CrystalApi.js'
 import type { Depositum, Depositorum, Petitio, Petitionum, Testimonium, Testimoniorum } from '../../../src/types/catena.js'
 
@@ -322,7 +324,12 @@ function sign(secret: string, rawBody: string): string {
   return crypto.createHmac('sha256', secret).update(rawBody).digest('hex')
 }
 
-function makeDeps(overrides: Partial<AlchemyWebhookDeps> = {}): AlchemyWebhookDeps & {
+// No web personae in these fakes — the resolver falls back to the legacy custos seam (`makeAnimae`),
+// which is how every case here binds a wallet to an anima. The Persona-first path is covered by the
+// hermetic depositAttribution suite + the Mongo depositSweepConcurrent suite.
+const emptyPersonae: Pick<PersonaStore, 'findByExternus'> = { async findByExternus() { return null } }
+
+function makeDeps(overrides: Partial<AlchemyWebhookDeps> & { animae?: AnimaStore } = {}): AlchemyWebhookDeps & {
   deposita: ReturnType<typeof makeDeposita>
   signorum: ReturnType<typeof makeSignorum>
   testimonia: ReturnType<typeof makeTestimonia>
@@ -332,13 +339,15 @@ function makeDeps(overrides: Partial<AlchemyWebhookDeps> = {}): AlchemyWebhookDe
   const signorum = overrides.signorum as ReturnType<typeof makeSignorum> ?? makeSignorum()
   const testimonia = overrides.testimonia as ReturnType<typeof makeTestimonia> ?? makeTestimonia()
   const redituum = overrides.redituum as ReturnType<typeof makeRedituum> ?? makeRedituum()
+  const resolveWalletAnima = overrides.resolveWalletAnima
+    ?? makeResolveWalletAnima({ personae: emptyPersonae, animae: overrides.animae ?? makeAnimae() })
   return {
     deposita,
     signorum,
     redituum,
     petitiones: overrides.petitiones ?? makePetitiones(),
     testimonia,
-    animae: overrides.animae ?? makeAnimae(),
+    resolveWalletAnima,
     arcanumTree: overrides.arcanumTree ?? makeArcanumTree(),
     sanctions: overrides.sanctions ?? permissiveSanctionsScreen,
     signingKeys: overrides.signingKeys ?? {},

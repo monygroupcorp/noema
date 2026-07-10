@@ -102,6 +102,22 @@ export interface Depositum {
   ad: string
   /** Amount in base units (wei for ETH, token decimals for ERC-20) */
   valor: bigint
+  /**
+   * The deposited asset's token address as the webhook decoded it — the ERC-20 contract, with
+   * ETH carried as the webhook's existing sentinel. Persisted at receipt so a later retry sweep
+   * can re-derive the per-asset funding-rate haircut WITHOUT re-decoding the on-chain log.
+   * Absent on legacy rows that predate this field (their heal path is a fresh webhook re-delivery,
+   * whose payload carries the token). Money-record field — see noema-027.
+   */
+  token?: string
+  /**
+   * Receipt-time gross USD fair-market value in MICRO-USD (bigint; $1 = 1_000_000n) — the SAME
+   * number booked to the peer `Reditus` at receipt (ADR-0013 §2). Persisted so the retry sweep
+   * credits from this frozen basis and NEVER re-prices (credit basis therefore always equals the
+   * already-booked revenue). Absent on OFAC-quarantined (`fractum`) rows — no FMV is stamped on
+   * funds we refuse — and on legacy rows predating this field. Money-record field — see noema-027.
+   */
+  usdFmv?: bigint
   /** Number of block confirmations at last check */
   confirmationes: number
 
