@@ -7,6 +7,8 @@ import type { AlchemyWebhookDeps, AlchemyWebhookRequest } from '../../../src/api
 import { permissiveSanctionsScreen } from '../../../src/compliance/SanctionsScreen.js'
 import type { SanctionsScreen } from '../../../src/compliance/SanctionsScreen.js'
 import { fixedPricer, nullPricer, type AssetPricer } from '../../../src/crystal/AssetPricer.js'
+import { makeResolveWalletAnima } from '../../../src/crystal/resolveWalletAnima.js'
+import type { PersonaStore } from '../../../src/types/persona.js'
 import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/CrystalApi.js'
 import type { Depositum, Depositorum, Petitio, Petitionum, Testimonium, Testimoniorum } from '../../../src/types/catena.js'
 
@@ -322,7 +324,12 @@ function sign(secret: string, rawBody: string): string {
   return crypto.createHmac('sha256', secret).update(rawBody).digest('hex')
 }
 
-function makeDeps(overrides: Partial<AlchemyWebhookDeps> = {}): AlchemyWebhookDeps & {
+// No web personae in these fakes — the resolver falls back to the legacy custos seam (`makeAnimae`),
+// which is how every case here binds a wallet to an anima. The Persona-first path is covered by the
+// hermetic depositAttribution suite + the Mongo depositSweepConcurrent suite.
+const emptyPersonae: Pick<PersonaStore, 'findByExternus'> = { async findByExternus() { return null } }
+
+function makeDeps(overrides: Partial<AlchemyWebhookDeps> & { animae?: AnimaStore } = {}): AlchemyWebhookDeps & {
   deposita: ReturnType<typeof makeDeposita>
   signorum: ReturnType<typeof makeSignorum>
   testimonia: ReturnType<typeof makeTestimonia>
@@ -332,13 +339,15 @@ function makeDeps(overrides: Partial<AlchemyWebhookDeps> = {}): AlchemyWebhookDe
   const signorum = overrides.signorum as ReturnType<typeof makeSignorum> ?? makeSignorum()
   const testimonia = overrides.testimonia as ReturnType<typeof makeTestimonia> ?? makeTestimonia()
   const redituum = overrides.redituum as ReturnType<typeof makeRedituum> ?? makeRedituum()
+  const resolveWalletAnima = overrides.resolveWalletAnima
+    ?? makeResolveWalletAnima({ personae: emptyPersonae, animae: overrides.animae ?? makeAnimae() })
   return {
     deposita,
     signorum,
     redituum,
     petitiones: overrides.petitiones ?? makePetitiones(),
     testimonia,
-    animae: overrides.animae ?? makeAnimae(),
+    resolveWalletAnima,
     arcanumTree: overrides.arcanumTree ?? makeArcanumTree(),
     sanctions: overrides.sanctions ?? permissiveSanctionsScreen,
     signingKeys: overrides.signingKeys ?? {},
@@ -828,6 +837,65 @@ test('quote == credit: depositQuote.pointsQuoted equals the webhook-credited imp
 
   assert.equal(q.pointsQuoted, credited)   // if these ever diverge, users get a different number than promised
   assert.equal(q.pointsQuoted, '6231')
+})
+
+// 30. VALUE CONSERVATION (gauntlet v4, webhook retry path): the create-succeeded-but-book-failed
+// row must, on Alchemy re-delivery at a DRIFTED spot price, book revenue from the SAME persisted
+// receipt basis the credit uses — never re-priced at spot. AssetPricer prices at SPOT, so if the
+// webhook booked from the fresh price it would recognize revenue at the retry-window spot (X2) while
+// the credit mints impetus from the persisted receipt FMV (X1): recognized USD diverging from the
+// credit basis by the drift. Mirrors the sweep's re-book (which books from depositum.usdFmv).
+test('revenue+credit: book-failed row re-delivered at a drifted spot books from the receipt basis, matching the credit', async () => {
+  // Payer IS linked → the retry credits. Depositum is created BEFORE bookRevenue (no transaction),
+  // so a transient redituum failure on the first delivery leaves a priced Depositum with no Reditus.
+  const anima = makeAnima(PAYER)
+  const animae = makeAnimae(new Map([[PAYER.toLowerCase(), anima]]))
+
+  // Spot drifts UP over the retry window: receipt-time $3000/ETH, retry-time $4000/ETH.
+  let priceCalls = 0
+  const receiptP = fixedPricer(3000, 18)
+  const retryP = fixedPricer(4000, 18)
+  const driftPricer: AssetPricer = {
+    async usdFmv(chainId, token, amountRaw) {
+      priceCalls += 1
+      return (priceCalls === 1 ? receiptP : retryP).usdFmv(chainId, token, amountRaw)
+    },
+  }
+
+  // Redituum store fails transiently on the FIRST record() call (the book-failed row), then heals.
+  const redituum = makeRedituum()
+  const realRecord = redituum.record
+  let recordCalls = 0
+  redituum.record = async (draft) => {
+    recordCalls += 1
+    if (recordCalls === 1) throw new Error('redituum store transient failure')
+    return realRecord(draft)
+  }
+
+  const deps = makeDeps({ animae, pricer: driftPricer, redituum })
+  const body = makeWebhookBody([makePaymentLog()])
+
+  // Delivery 1: Depositum created at receipt FMV ($3), bookRevenue throws → 500. Priced row, no Reditus.
+  const first = await handleAlchemyWebhook(makeReq(body), deps)
+  assert.equal(first.status, 500)
+  const parked = [...deps.deposita.store.values()]
+  assert.equal(parked.length, 1)
+  assert.equal(parked[0].status, 'confirmatum')
+  assert.equal(parked[0].usdFmv, 3_000_000n)   // receipt basis frozen on the row
+  assert.equal(deps.redituum.rows.length, 0)   // book failed — no revenue row yet
+  assert.equal(deps.signorum.issued.length, 0) // not credited (book runs before credit)
+
+  // Delivery 2: Alchemy retries at the drifted spot ($4). Books + credits.
+  const second = await handleAlchemyWebhook(makeReq(body), deps)
+  assert.equal(second.status, 200)
+
+  // The invariant: recognized revenue == the credit basis, BOTH the receipt FMV ($3) — NOT the
+  // drifted spot ($4). Old code booked 4_000_000n here while crediting from 3_000_000n.
+  assert.equal([...deps.deposita.store.values()].length, 1)  // reused the parked row
+  assert.equal(deps.redituum.rows.length, 1)
+  assert.equal(deps.redituum.rows[0].usdFmv, EXPECTED_GROSS_USD_FMV)  // 3_000_000n — receipt, not spot
+  assert.equal(deps.signorum.issued.length, 1)
+  assert.equal(deps.signorum.issued[0].valor, EXPECTED_CREDIT_IMPETUS)  // credit from the same $3 basis
 })
 
 // 15. Throws internally → returns 500
