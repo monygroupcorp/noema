@@ -101,7 +101,7 @@ async function priceDeposit(
  * idempotently rather than losing the row.
  */
 async function bookRevenue(
-  deps: AlchemyWebhookDeps,
+  deps: Pick<AlchemyWebhookDeps, 'redituum'>,
   args: { usdFmv: bigint; origo: RevenueOrigo; depositumId?: string; token: string },
 ): Promise<void> {
   await deps.redituum.record({
@@ -216,8 +216,9 @@ async function creditConfirmedDeposit(
   }
 }
 
-/** The store surface the retry sweep needs. */
-export type DepositSweepDeps = Pick<AlchemyWebhookDeps, 'deposita' | 'signorum' | 'petitiones' | 'resolveWalletAnima'>
+/** The store surface the retry sweep needs. `redituum` is here so the sweep can RE-BOOK idempotently
+ *  before crediting (guards the create-succeeded-but-book-failed row — see sweepConfirmatumDeposita). */
+export type DepositSweepDeps = Pick<AlchemyWebhookDeps, 'deposita' | 'signorum' | 'petitiones' | 'resolveWalletAnima' | 'redituum'>
 
 /**
  * Retry sweep (noema-027 decision 3): re-attribute every parked `confirmatum` deposit whose payer
@@ -229,6 +230,13 @@ export type DepositSweepDeps = Pick<AlchemyWebhookDeps, 'deposita' | 'signorum' 
  * missing fields (their heal path is a fresh Alchemy re-delivery whose payload carries the token —
  * NOT a backfill migration). A still-unlinked payer is left parked silently: the loud "unattributed"
  * warn already fired once at receipt, so the sweep must not spam it every tick.
+ *
+ * RE-BOOK BEFORE CREDIT (v4 gauntlet finding): the Depositum's usdFmv is persisted at `create` BEFORE
+ * bookRevenue runs (separate write, no transaction). If record() threw transiently and the process
+ * restarted, this sweep would see a priced row with NO revenue booked — crediting it then would leave
+ * revenue permanently zero (re-delivery short-circuits on `processatum`). So the sweep re-books
+ * idempotently (no-op if already booked, on the depositumId partial-unique index) IMMEDIATELY before
+ * crediting — the credit basis (persisted receipt-time FMV) always equals the booked Reditus.
  */
 export async function sweepConfirmatumDeposita(deps: DepositSweepDeps): Promise<{ swept: number; skipped: number }> {
   const parked = await deps.deposita.list({ status: 'confirmatum' })
@@ -249,6 +257,9 @@ export async function sweepConfirmatumDeposita(deps: DepositSweepDeps): Promise<
     }
     const animaId = await deps.resolveWalletAnima(depositum.ab)
     if (!animaId) { skipped++; continue }   // still unlinked — stay parked, no warn spam
+    // Re-book idempotently before crediting: heals a create-succeeded-but-book-failed row so we never
+    // credit a deposit whose revenue was never recognized. No-op if already booked (depositumId guard).
+    await bookRevenue(deps, { usdFmv: depositum.usdFmv, origo: 'crypto', depositumId: depositum.id, token: depositum.token })
     await creditConfirmedDeposit(deps, {
       depositum,
       usdFmv: depositum.usdFmv,
