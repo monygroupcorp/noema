@@ -208,6 +208,15 @@ export const api = {
   streamRun: (id: string) => new EventSource(`/v1/runs/${id}/stream`),
   meStatus: () => fetch('/v1/me/status', { headers: readHeaders() }).then(j<MeStatus>),
 
+  // GET /v1/me/runs — the caller's settled spend history (owner-scoped, paginated, newest
+  // first) + lifetime running total. Anon-capable (commitment-keyed). costUsd is derived.
+  listRuns: (opts: { cursor?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams({ status: 'settled' });
+    if (opts.cursor) q.set('cursor', opts.cursor);
+    if (opts.limit) q.set('limit', String(opts.limit));
+    return fetch(`/v1/me/runs?${q.toString()}`, { headers: readHeaders() }).then(j<RunsPage>);
+  },
+
   // ── Deposit / buy-points (Funding) — public, no auth ─────────────────────────
   // GET /v1/deposit/config — the CreditVault address + canonical points-per-USD +
   // default funding rate + supported chains. Static; drives the buy-credits UI.
@@ -219,6 +228,16 @@ export const api = {
   depositQuote: (body: { chainId: number | string; token: string; amount: string }) =>
     fetch('/v1/deposit/quote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       .then(j<DepositQuote>),
+
+  // ── Fiat pack checkout (Stripe) — identified accounts only ───────────────────
+  // POST /v1/payments/checkout — create a hosted Stripe Checkout session for one of the
+  // fixed credit packs (starter_10/standard_25/plus_50/studio_100). Server-authoritative:
+  // the impetus credited is the pack constant, applied later by the signature-verified
+  // webhook on payment completion — never computed client-side. 401
+  // payments.identity_required for an anon/purse caller (a fiat pack can't fund a purse).
+  createCheckoutSession: (body: { packId: string; successUrl?: string; cancelUrl?: string }) =>
+    fetch('/v1/payments/checkout', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(j<CheckoutSession>),
 
   // ── Collections (Collectio) — a batch-gen over a Tractus grid ────────────────
   // Owner-scoped by the caller commitment. Create LAUNCHES generation of `total`
@@ -290,6 +309,13 @@ export const api = {
   // review action that reports; a legal duty on human confirmation (18 U.S.C. §2258A).
   confirmCsam: (id: string) =>
     fetch(`/v1/editiones/${id}/confirm-csam`, { method: 'POST', headers: authHeaders() }).then(j<{ edition: Editio }>),
+
+  // ── Admin workspace (credits-only, read-only observability) ──────────────────
+  // GET /v1/admin/revenue — already-live platform-admin report; no client method existed
+  // until the admin workspace hub. GET /v1/admin/cogs — the new read-only COGS pair.
+  // Both server-gated regardless of the me.admin UI reveal.
+  getRevenueReport: () => fetch('/v1/admin/revenue', { headers: readHeaders() }).then(j<RevenueReport>),
+  getCogsReport: () => fetch('/v1/admin/cogs', { headers: readHeaders() }).then(j<CogsReport>),
 
   // ── Owned Bursa purses (delegation, §7) — identified accounts only ───────────
   // A purse converts part of your Signum balance into a shareable bearer token; runs
@@ -368,6 +394,31 @@ export const api = {
     fetch(`/v1/sponsorships/${encodeURIComponent(id)}/pause`, { method: 'POST', headers: authHeaders() }).then(j<{ sponsorship: Sponsorship }>),
   resumeSponsorship: (id: string) =>
     fetch(`/v1/sponsorships/${encodeURIComponent(id)}/resume`, { method: 'POST', headers: authHeaders() }).then(j<{ sponsorship: Sponsorship }>),
+
+  // ── Studios — a leased warm pod, metered from your balance ───────────────────
+  // POST returns a `provisioning` handle immediately; poll GET /v1/studios/:id until
+  // status leaves `provisioning`. maxImpetus IS the session budget — the studio
+  // drain-terminates at the cap. Runs target it via POST /v1/runs { studioId }.
+  listFundamenta: () => fetch('/v1/fundamenta').then(j<{ fundamenta: Fundamentum[] }>),
+  listStudios: () => fetch('/v1/studios', { headers: readHeaders() }).then(j<{ studios: StudioView[] }>),
+  getStudio: (id: string) =>
+    fetch(`/v1/studios/${encodeURIComponent(id)}`, { headers: readHeaders() }).then(j<{ studio: StudioView }>),
+  provisionStudio: (body: { fundamentumId?: string; models?: string[]; warmMs?: number; maxImpetus?: string; runtime?: string }) =>
+    fetch('/v1/studios', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(j<{ studio: StudioView }>),
+
+  // ── TEE private sessions — sealed compute over the caller's own tunnel ───────
+  // The browser generates the WireGuard keypair; only the PUBLIC key goes up. Poll
+  // GET until status='ready' (phase carries the live cold-start progress), then the
+  // /tee WASM client drives the tunnel with the private key. DELETE ends the pod.
+  provisionTee: (body: { wgClientPublicKey: string; gpuClass?: string; maxImpetus?: string }) =>
+    fetch('/v1/sessions/tee', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(j<{ session: TeeSessionView }>),
+  getTeeSession: (id: string) =>
+    fetch(`/v1/sessions/tee/${encodeURIComponent(id)}`, { headers: readHeaders() }).then(j<{ session: TeeSessionView }>),
+  endTeeSession: (id: string) =>
+    fetch(`/v1/sessions/tee/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() })
+      .then((r) => { if (!r.ok && r.status !== 404) throw new Error(`end session failed: ${r.status}`); }),
 
   // ── Account settings (Consuetudinum, owner-keyed / anon-capable) ─────────────
   // GET /v1/me — appearance (Profile) + generation defaults (Preferences) + bindings.
@@ -469,6 +520,27 @@ export interface MeView {
   // feed-review surface + its approve/reject controls. Server-authoritative; `true` only on
   // the platform session. Older servers omit it (undefined) → treated as not-admin.
   admin?: boolean;
+}
+
+// Admin revenue report (`GET /v1/admin/revenue`) — company-wide trailing-12mo USD revenue vs
+// the tightest active conditional-license cap (the tripwire, ADR-0012/0013 §5). Read-only.
+export interface RevenueReport {
+  asOf: string;
+  trailingUsdRevenueMicro: string;
+  trailingUsdRevenue: string;
+  band: 'clear' | 'watch' | 'warn' | 'breach';
+  bindingCapUsd: number | null;
+  activeConditionalLicenses: string[];
+  lastAlertedBand: 'clear' | 'watch' | 'warn' | 'breach' | null;
+}
+
+// Admin COGS report (`GET /v1/admin/cogs`) — the read-only pair to RevenueReport: a
+// trailing-window rollup of per-job costUsd off wide_events.
+export interface CogsReport {
+  asOf: string;
+  sinceIso: string;
+  costUsd: number;
+  count: number;
 }
 
 // An owned Bursa purse (delegation, §7) — a shareable bearer token funded from your balance.
@@ -594,6 +666,50 @@ export interface CollectionPiece {
   attributes?: Array<{ trait_type: string; value: string }>;
 }
 
+// A compute substrate (GET /v1/fundamenta) — what a studio arms on.
+export interface Fundamentum {
+  id: string;
+  nomen?: string;
+  versio: string;
+  runtime?: string;
+  imageId: string;
+  imageVersion: string;
+  vramGb?: number;
+}
+
+// A hosted studio (GET/POST /v1/studios) — mirrors the backend StudioView.
+// `studioId` is what POST /v1/runs { studioId } targets.
+export interface StudioView {
+  studioId: string;
+  status: 'idle' | 'running' | 'provisioning' | 'draining' | 'terminated';
+  budgetImpetus: string;
+  podId?: string;
+  gpu?: string;
+  runtime?: string;
+  imageRef?: string;
+  warmUntil?: string;
+  costPerHr?: number;
+  impetusPerSecond?: string;
+}
+
+// A TEE private session (POST/GET /v1/sessions/tee) — mirrors the backend TeeSessionView.
+// `phase` is the live cold-start progress (Phasis taxonomy) while status='provisioning'.
+export type TeePhase =
+  | 'queued' | 'provisioning' | 'pulling' | 'attesting' | 'downloading' | 'installing'
+  | 'loading' | 'warming' | 'executing' | 'uploading' | 'finalizing' | 'cancelling'
+  | 'done' | 'failed';
+export interface TeeSessionView {
+  sessionId: string;
+  status: 'provisioning' | 'ready' | 'ended';
+  phase?: TeePhase;
+  error?: string;
+  serverPublicKey?: string;
+  endpoint?: string;
+  proxyUrl?: string;
+  tunnelIp?: string;
+  gpuHours?: number;
+}
+
 // The account snapshot (GET /v1/me/status) — mirrors the backend StatusView.
 // gens = ACTIVE gens (queued + running), not all-time history.
 export interface GenEntry {
@@ -624,6 +740,24 @@ export interface MeStatus {
   takenAt: string;
 }
 
+// A settled run in spend history (GET /v1/me/runs) — mirrors the backend SettledRun.
+export interface SettledRun {
+  id: string;
+  modusId: string;
+  modusLabel: string;
+  status: 'settled';
+  cost: string;       // impetus, stringified
+  costUsd: number;    // derived on read
+  settledAt?: string;
+  createdAt?: string;
+}
+// A page of settled runs + lifetime running total (GET /v1/me/runs).
+export interface RunsPage {
+  runs: SettledRun[];
+  nextCursor?: string;
+  runningTotal: { impetus: string; usd: number };
+}
+
 // Deposit / buy-points config (GET /v1/deposit/config) — mirrors the backend DepositConfig.
 export interface DepositConfig {
   depositAddress: string;
@@ -633,6 +767,13 @@ export interface DepositConfig {
   defaultFundingRatePct: number;
   chains: Array<{ chainId: number; name: string }>;
 }
+// The hosted Stripe Checkout session (POST /v1/payments/checkout) — mirrors the backend
+// CheckoutResponseSchema. `url` is the hosted-checkout URL to redirect the caller to.
+export interface CheckoutSession {
+  url: string;
+  sessionId: string;
+}
+
 // A deposit quote (POST /v1/deposit/quote) — informational; the webhook credit is authoritative.
 export interface DepositQuote {
   chainId: number | string;

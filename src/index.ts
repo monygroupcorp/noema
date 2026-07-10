@@ -94,9 +94,11 @@ import { terminatePod, listRunPodPods } from './crystal/terminatePod.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
 import { MongoHospitium } from './crystal/MongoHospitium.js'
 import { startIdleReaper } from './crystal/idleReaper.js'
+import { startExpiryReaper, recoverExpiredActa } from './crystal/expiryReaper.js'
 import { startCensus } from './crystal/Census.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
+import { MeExporter } from './crystal/MeExporter.js'
 import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { makeTrainingFinalizer, urlLoraReader, makeTrainingExitusResolver } from './crystal/trainingFinalizer.js'
 import { MongoConsuetudinum } from './crystal/MongoConsuetudinum.js'
@@ -154,6 +156,7 @@ const RUNPOD_SSH_KEY_PATH = process.env.RUNPOD_SSH_KEY_PATH ?? `${process.env.HO
 const RUNPOD_CLOUD_TYPE = (process.env.RUNPOD_CLOUD_TYPE ?? 'SECURE') as 'SECURE' | 'COMMUNITY'
 const RUNPOD_KEEP_WARM = process.env.RUNPOD_KEEP_WARM !== 'false'  // default true
 const RUNPOD_WARM_TTL_MS = Number(process.env.RUNPOD_WARM_TTL_MS ?? 60_000)  // idle window before reaper kills a warm pod
+const EXPIRY_REAPER_INTERVAL_MS = Number(process.env.EXPIRY_REAPER_INTERVAL_MS ?? 60_000)  // sweep cadence for cold-start-timeout acta
 // Production: derive from public WEBHOOK_URL. Local dev: post back to ourselves.
 // SecurePodClient runs on our server (not on the pod), so localhost always works.
 const RUNPOD_WEBHOOK_URL = process.env.WEBHOOK_URL
@@ -253,6 +256,19 @@ import type { HospitiumStore } from './types/hospitium.js'
 const RUNPOD_R2: R2Config | undefined =
   R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_OUTPUTS_BUCKET
     ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_OUTPUTS_BUCKET!, publicUrl: R2_PUBLIC_URL }
+    : undefined
+
+// Dedicated PRIVATE bucket for GDPR self-exports (spec/publishing.md §3). This bundle is the
+// caller's whole PII (credit ledger, deposits, personae, chat messages, …) — it MUST NOT land
+// in R2_OUTPUTS_BUCKET, which is the PUBLIC bucket (bound to R2_PUBLIC_URL) that serves the
+// unauthenticated feed/editions. Deliberately NO `publicUrl`: the object is never publicly
+// reachable, so the short-lived presigned GET URL is the ONLY handle to it and the 15-min
+// expiry is a real control, not an illusion. Distinct bucket, same R2 account/credentials.
+// The bucket itself must NOT be bound to a public domain (infra/R2 config, off-repo).
+const R2_EXPORTS_BUCKET = process.env.R2_EXPORTS_BUCKET
+const EXPORTS_R2: R2Config | undefined =
+  R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_EXPORTS_BUCKET
+    ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_EXPORTS_BUCKET! }
     : undefined
 
 /**
@@ -517,19 +533,15 @@ async function main(): Promise<void> {
   await ring.collectioCursor.rehydrate()
   log.info('CollectioCursor rehydrated')
 
-  // 3c. Recover expired acta — release locked signa; fail() now also kills any live pod
-  const expired = await ring.actorum.findExpired()
-  if (expired.length) {
-    log.info(`Recovering ${expired.length} expired acta`)
-    await Promise.all(expired.map(async a => {
-      await ring.completor.fail(a, 'Actum expired — pod never reported back')
-      // A recovered compositus step must fail its parent run too — the sweep bypasses
-      // the webhook, so notify the engine directly (fails the parent + frees state).
-      if (a.compositum) {
-        await ring.compositusCursor.onStepComplete(a.compositum.parentId, a, false).catch(() => {})
-      }
-    }))
-  }
+  // 3c. Recover expired acta — release locked signa; fail() now also kills any live pod.
+  // Shares one code path with the periodic expiry reaper (startExpiryReaper) so boot
+  // recovery and the timer can never diverge.
+  const recovered = await recoverExpiredActa({
+    actorum: ring.actorum,
+    completor: ring.completor,
+    compositusCursor: ring.compositusCursor,
+  })
+  if (recovered) log.info(`Recovered ${recovered} expired acta`)
 
   // 3d. Reconcile against live RunPod pods — terminate any pod not tracked by the DB.
   // This is the catch-all invariant: even if a pod ID slipped through without being written
@@ -850,6 +862,11 @@ async function main(): Promise<void> {
   // report was filed. Assembles + preserves; live NCMEC submission needs the ESP account.
   const csamReviewReporter = compliance?.configureCsamReviewReporter({ fetcher: httpMediaFetcher })
 
+  // Wide-event store (per-job telemetry incl. costUsd) — constructed here (ahead of its other
+  // consumers below) so the admin COGS report can read off the SAME instance analyticsListener
+  // writes through.
+  const wideStore = new WideEventStore(mongo.db(DB_NAME))
+
   const crystalApi = new CrystalApi({
     pricer,
     depositAddress: CREDIT_VAULT,
@@ -888,6 +905,9 @@ async function main(): Promise<void> {
     // + the last persisted band. Read-only; the scheduled evaluator (below) owns alerts/persistence.
     redituum: ring.redituum,
     tripwireBand: ring.tripwireBand,
+    // Admin COGS report (admin workspace, credits-only/read-only): trailing-window rollup of
+    // per-job costUsd off the same wide-event store the analytics listener writes through.
+    costReport: wideStore,
     modelImporter,
     // Only the write + presence slices — never the resolve-capable store (ASYMMETRY).
     ...(secretarium ? { secretWriter: secretarium, secretPresence: secretarium } : {}),
@@ -1035,7 +1055,37 @@ async function main(): Promise<void> {
     log.warn('R2 unconfigured — storage upload front door DISABLED (/storage/uploads/sign will 404)')
   }
 
-  app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub }))
+  // GDPR self-export assembler (T1) — the single auditable home for the caller's own PII
+  // egress. Constructed with exactly the owner-scoped read stores it needs (all already on the
+  // ring, plus the locally-built consuetudinum/credenta/intellae). The bundle is hosted in the
+  // DEDICATED PRIVATE exports bucket (EXPORTS_R2, no publicUrl) — NEVER the public outputs
+  // bucket — so the signed GET URL is the only handle and its expiry is real. Only wired when
+  // that private bucket is configured; otherwise POST /v1/me/export 503s (never falls back to a
+  // public bucket).
+  if (RUNPOD_R2 && !EXPORTS_R2) {
+    log.warn('R2_EXPORTS_BUCKET unset — GDPR self-export DISABLED (POST /v1/me/export will 503). Refusing to host PII bundles in the public outputs bucket.')
+  }
+  const meExporter = EXPORTS_R2
+    ? new MeExporter({
+        store: new R2Uploader(EXPORTS_R2),
+        consuetudinum,
+        personae: ring.personae,
+        credenta,
+        provinciae: ring.provinciae,
+        actumIndex: ring.actumIndex,
+        intellae,
+        editiones: ring.editiones,
+        memoriae: ring.memoriae,
+        colloquia: ring.colloquia,
+        dicta: ring.dicta,
+        vestigiorum: ring.vestigiorum,
+        bursarium: ring.bursarium,
+        signorum: ring.signorum,
+        deposita: ring.deposita,
+      })
+    : undefined
+
+  app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub, ...(meExporter ? { exporter: meExporter } : {}) }))
 
   // CAMEL agent compat surface (ADR-0011 §8) — the exact `/api/v1/...` paths the
   // deployed camel404 client bakes (on-chain-referenced). No catch-all in front,
@@ -1061,6 +1111,10 @@ async function main(): Promise<void> {
   const cdpFacilitator = x402Enabled ? buildCdpX402Facilitator() : null
   if (x402Enabled && cdpFacilitator) log.info(`x402: CDP facilitator wired (${x402Config.network}, payTo ${x402Config.payTo})`)
   else if (x402Enabled) log.warn('x402: X402_ENABLED but CDP_API_KEY_ID/CDP_API_KEY_SECRET missing — payments fail closed (deny-stub)')
+  // The unauthenticated discover/quote GET is IP-rate-limited (express-rate-limit) — the POST
+  // run is not, since it's already gated by a stronger control (on-chain payment verification).
+  const { default: x402RateLimit } = await import('express-rate-limit')
+  const x402QuoteLimiter = x402RateLimit({ windowMs: 15 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false })
   app.use('/api/v1/x402', express.json(), createX402AgentRouter({
     legati: ring.legati,
     modorum: ring.modorum,
@@ -1068,6 +1122,7 @@ async function main(): Promise<void> {
     log: ring.x402Log,
     config: x402Config,
     enabled: x402Enabled,
+    rateLimiters: { quote: x402QuoteLimiter },
     quoteImpetus: async (modusId, aditus) => BigInt((await crystalApi.quote(SYSTEM_AUCTOR, { modusId }, aditus)).impetus),
     // Prepaid run: the verified x402 payment backs a mint of the quote's impetus onto
     // the agent's Anima, which the normal run path then spends. Payment funds the run.
@@ -1176,7 +1231,6 @@ async function main(): Promise<void> {
   app.use('/v1/mcp', createMcpRouter({ api: crystalApi, identity: apiResolver }))
 
   const INTERNAL_SECRET = process.env.INTERNAL_SECRET
-  const wideStore = new WideEventStore(mongo.db(DB_NAME))
   startAnalyticsListener(wideStore)
 
   // Idle-pod reaper — terminate warm pods that sat idle past their warmUntil
@@ -1191,6 +1245,18 @@ async function main(): Promise<void> {
     startIdleReaper(materiae, async () => {}, 10_000)
     log.warn('idle-pod reaper started (fake mode)', { warmTtlMs: RUNPOD_WARM_TTL_MS })
   }
+
+  // Expiry reaper — release the locked reserve of any cold-start-timeout actum. The
+  // boot sequence (step 3c) was the ONLY caller of findExpired, so on a long-lived
+  // server a timed-out actum's locked signa (up to the 30-min RunPod cap) stayed
+  // locked against the user's balance until the next restart. This runs the same
+  // recovery sweep on an interval (release-only, never a charge).
+  startExpiryReaper({
+    actorum: ring.actorum,
+    completor: ring.completor,
+    compositusCursor: ring.compositusCursor,
+  }, EXPIRY_REAPER_INTERVAL_MS)
+  log.info('expiry reaper started', { tickMs: EXPIRY_REAPER_INTERVAL_MS })
 
   // Census — the host's continuous per-time cost reckoning (studio billing tick).
   // Every 60s walks active Hospitia and debits the host secondsSinceLastTick ×

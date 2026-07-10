@@ -14,7 +14,7 @@
 
 import express, { type Request, type Response, type Router } from 'express'
 
-import type { Run, Collection, Team, Edition, FeedItem, Project } from './types.js'
+import type { Run, Collection, Team, Edition, FeedItem, Project, RunsPage } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { FeedFilter } from '../../types/editio.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote } from './CrystalApi.js'
@@ -25,6 +25,7 @@ import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
 import { API_CONTRACT } from './apiContract.js'
 import { generateOpenApi } from './docgen.js'
 import type { RunEventHub } from './RunEventHub.js'
+import type { MeExporter } from '../../crystal/MeExporter.js'
 
 const log = makeLogger('api:router')
 
@@ -37,6 +38,7 @@ export interface ApiFacade {
     opts?: InvokeOpts,
   ): Promise<Run>
   getRun(auctor: AuctorKey, id: string): Promise<Run>
+  listRuns(auctor: AuctorKey, opts: import('./CrystalApi.js').ListRunsOpts): Promise<RunsPage>
   listFlows(): Promise<unknown[]>
   describeFlow(id: string): Promise<unknown>
   quote(
@@ -52,6 +54,7 @@ export interface ApiFacade {
   listMyModels(auctor: AuctorKey): Promise<ModelCard[]>
   setModelLicense(auctor: AuctorKey, id: string, opts: import('./CrystalApi.js').SetModelLicenseOpts): Promise<ModelCard>
   revenueReport(auctor: AuctorKey): Promise<import('./CrystalApi.js').RevenueReport>
+  cogsReport(auctor: AuctorKey): Promise<import('./CrystalApi.js').CogsReport>
   saveFlow(auctor: AuctorKey, opts: SaveFlowOpts): Promise<{ id: string }>
   bind(auctor: AuctorKey, verb: string, modusId: string): Promise<{ verb: string; modusId: string }>
   getMe(auctor: AuctorKey): Promise<import('./CrystalApi.js').MeView>
@@ -102,6 +105,9 @@ export interface ApiFacade {
   deleteProject(auctor: AuctorKey, id: string): Promise<void>
   fileAsset(auctor: AuctorKey, id: string, kind: string, assetId: string): Promise<Project>
   unfileAsset(auctor: AuctorKey, id: string, kind: string, assetId: string): Promise<Project>
+  // --- Fiat funding rail (Stripe) ---
+  createCheckout(auctor: AuctorKey, opts: { packId: string; successUrl?: string; cancelUrl?: string }): Promise<{ url: string; sessionId: string }>
+  handleStripeWebhook(input: { rawBody: string; signature?: string }): Promise<{ status: number; body: { received: boolean; credited?: string; message?: string } }>
 }
 
 /** The slice of IdentityResolver this router needs. */
@@ -109,7 +115,7 @@ export interface Identity {
   resolve(creds: Credentials): Promise<AuctorKey>
 }
 
-export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?: RunEventHub }): Router {
+export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?: RunEventHub; exporter?: MeExporter }): Router {
   const { api, identity } = deps
   const router = express.Router()
 
@@ -162,6 +168,42 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
       res.status(200).json({ run })
     }),
   )
+
+  // POST /v1/payments/checkout — an IDENTIFIED caller buys a credit pack (Stripe Checkout).
+  // Returns the hosted-checkout URL to redirect to. A fiat pack can only fund an identified
+  // account (a card de-anonymizes) — an anon/bursa caller is rejected by the facade.
+  router.post(
+    '/payments/checkout',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      const { packId, successUrl, cancelUrl } = req.body ?? {}
+      const out = await api.createCheckout(auctor, {
+        packId,
+        ...(typeof successUrl === 'string' ? { successUrl } : {}),
+        ...(typeof cancelUrl === 'string' ? { cancelUrl } : {}),
+      })
+      res.status(200).json(out)
+    }),
+  )
+
+  // POST /v1/payments/stripe/webhook — Stripe → server. NO client auth: it is gated by the
+  // `stripe-signature` HMAC (verified in the facade). Uses the raw body captured by the global
+  // express.json `verify` hook — a re-serialized body would break signature verification.
+  router.post('/payments/stripe/webhook', async (req, res): Promise<void> => {
+    const rawBody = (req as { rawBody?: string }).rawBody ?? JSON.stringify(req.body ?? {})
+    const signature = req.headers['stripe-signature'] as string | undefined
+    try {
+      const result = await api.handleStripeWebhook({ rawBody, ...(signature ? { signature } : {}) })
+      res.status(result.status).json(result.body)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        res.status(err.httpStatus).json({ error: err.toBody() })
+      } else {
+        log.error('unhandled stripe webhook error', { error: String((err as Error)?.stack ?? err) })
+        res.status(500).json({ error: Errors.internal().toBody() })
+      }
+    }
+  })
 
   // GET /v1/runs/:id/stream — SSE stream of run events.
   router.get('/runs/:id/stream', async (req, res): Promise<void> => {
@@ -506,6 +548,12 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     res.json(await api.revenueReport(await auth(req)))
   }))
 
+  // GET /v1/admin/cogs — ADMIN COGS report (platform-admin only): trailing-window rollup of
+  // per-job costUsd off wide_events — the read-only pair to /admin/revenue.
+  router.get('/admin/cogs', wrap(async (req, res) => {
+    res.json(await api.cogsReport(await auth(req)))
+  }))
+
   // GET /v1/flows — public flow discovery (no auth).
   router.get(
     '/flows',
@@ -549,9 +597,33 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     }),
   )
 
+  // GET /v1/me/runs — the caller's SETTLED spend history: per-run cost (+ derived USD),
+  // settledAt, and a lifetime running total. Owner-scoped, cursor-paginated, newest first.
+  // `?status=settled` is the only supported filter (completus-only — a refunded failed run
+  // is not spend); `?cursor=` pages, `?limit=` sizes (1..100, default 20).
+  router.get('/me/runs', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined
+    const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
+    const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined
+    res.json(await api.listRuns(auctor, { ...(cursor ? { cursor } : {}), ...(limit !== undefined ? { limit } : {}) }))
+  }))
+
   // GET /v1/me — the caller's account settings: appearance + generation defaults + bindings.
   router.get('/me', wrap(async (req, res) => {
     res.json(await api.getMe(await auth(req)))
+  }))
+
+  // POST /v1/me/export — GDPR self-export: assemble the CALLER'S OWN data into a downloadable
+  // JSON bundle and return a short-lived, unguessable signed GET URL to it. Strictly self-scoped
+  // (the assembler only ever queries the caller's own owner key). 503 when R2 isn't configured.
+  router.post('/me/export', wrap(async (req, res) => {
+    if (!deps.exporter) {
+      res.status(503).json({ error: { code: 'internal.error', message: 'account export unavailable' } })
+      return
+    }
+    const auctor = await auth(req)
+    res.status(200).json(await deps.exporter.exportForCaller(auctor))
   }))
 
   // PUT /v1/me/appearance — replace the caller's presentation skin (Profile).

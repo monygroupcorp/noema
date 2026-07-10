@@ -18,10 +18,11 @@ function fromDoc(doc: Record<string, unknown>): Reditus {
 
 /**
  * Mongo USD revenue book. The fail-closed FMV invariant (ADR-0013 §2) lives in record(), and
- * idempotency-on-depositumId is enforced by a UNIQUE PARTIAL INDEX on depositumId (created via
- * ensureIndexes) — so two concurrent webhook re-deliveries cannot both insert. The loser catches
- * the duplicate-key error and returns the row the winner wrote. Fiat rows carry no depositumId
- * and are excluded from the index (partialFilterExpression), so they always append.
+ * idempotency is enforced by UNIQUE PARTIAL INDEXES — on `depositumId` (crypto) and on
+ * `chargeRef` where origo:'fiat' (fiat, e.g. a Stripe payment_intent id) — so two concurrent
+ * webhook re-deliveries cannot both insert. The loser catches the duplicate-key error and returns
+ * the row the winner wrote. Rows carrying neither key are excluded from both partial indexes and
+ * always append.
  *
  * See src/types/reditus.ts + docs/spec/conditional-license-revenue.md.
  */
@@ -29,15 +30,24 @@ export class MongoRedituum implements Redituum {
   constructor(private col: Collection) {}
 
   /**
-   * Create the id + depositumId indexes. Idempotent; call once at startup (mirrors how the
-   * webhook wiring creates its collection indexes). The depositumId index is UNIQUE + PARTIAL
-   * (only over docs that HAVE a depositumId) — that is what makes record() concurrency-safe.
+   * Create the id + depositumId + chargeRef + natum indexes. Idempotent; call once at startup
+   * (mirrors how the webhook wiring creates its collection indexes). The depositumId (crypto) and
+   * chargeRef (fiat) indexes are UNIQUE + PARTIAL (only over docs that HAVE that key) — that is
+   * what makes record() concurrency-safe.
    */
   async ensureIndexes(): Promise<void> {
     await this.col.createIndex({ id: 1 }, { unique: true })
     await this.col.createIndex(
       { depositumId: 1 },
       { unique: true, partialFilterExpression: { depositumId: { $exists: true } } },
+    )
+    // Fiat idempotency: unique + partial on chargeRef over FIAT rows that carry one — the
+    // atomic cross-instance guard that a redelivered Stripe payment books revenue exactly once.
+    // Scoped to origo:'fiat' AND chargeRef existing, so crypto rows and legacy fiat rows without
+    // a chargeRef are excluded (they still append freely).
+    await this.col.createIndex(
+      { chargeRef: 1 },
+      { unique: true, partialFilterExpression: { origo: 'fiat', chargeRef: { $exists: true } } },
     )
     await this.col.createIndex({ natum: 1 })   // the trailing-window range scan
   }
@@ -57,17 +67,25 @@ export class MongoRedituum implements Redituum {
       fmvSource: draft.fmvSource,
       origo: draft.origo,
       ...(draft.depositumId !== undefined ? { depositumId: draft.depositumId } : {}),
+      ...(draft.chargeRef !== undefined ? { chargeRef: draft.chargeRef } : {}),
     }
     try {
       await this.col.insertOne(toDoc(record))
       return record
     } catch (err) {
-      // Idempotent on depositumId: a concurrent re-delivery already inserted this deposit's row.
-      // Return the existing row unchanged so revenue is counted exactly once. Only the depositumId
-      // unique index can collide here (id is a fresh uuid); anything else is a real error.
-      if (draft.depositumId !== undefined && err instanceof MongoServerError && err.code === 11000) {
-        const existing = await this.col.findOne({ depositumId: draft.depositumId })
-        if (existing) return fromDoc(existing as Record<string, unknown>)
+      // Idempotent on depositumId (crypto) / chargeRef (fiat): a concurrent re-delivery already
+      // inserted this payment's row. Return the existing row unchanged so revenue is counted
+      // exactly once. Only a depositumId/chargeRef partial-unique index can collide here (id is a
+      // fresh uuid); anything else is a real error and re-thrown.
+      if (err instanceof MongoServerError && err.code === 11000) {
+        if (draft.depositumId !== undefined) {
+          const existing = await this.col.findOne({ depositumId: draft.depositumId })
+          if (existing) return fromDoc(existing as Record<string, unknown>)
+        }
+        if (draft.chargeRef !== undefined) {
+          const existing = await this.col.findOne({ chargeRef: draft.chargeRef, origo: 'fiat' })
+          if (existing) return fromDoc(existing as Record<string, unknown>)
+        }
       }
       throw err
     }

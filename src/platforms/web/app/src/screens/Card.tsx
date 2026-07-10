@@ -55,6 +55,8 @@ export function Card() {
   const { ident } = useIdentity();
   const [params] = useSearchParams();
   const id = params.get('id') || 'flux-schnell';
+  // A leased warm studio to run on (from /studio's "Run here") — rides the dispatch as-is.
+  const studioId = params.get('studio') || undefined;
 
   const [flow, setFlow] = useState<FlowDescription | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -145,7 +147,7 @@ export function Card() {
       // TODO(backend): RunRequest has no locality/compute field yet. When the
       // dispatch API gains one, pass `compute` here so remote/TEE/local actually
       // route differently. For now the posture is presentational (quote + frost).
-      const { run: r } = await api.createRun({ modusId: id, aditus: cleanAditus(aditus) });
+      const { run: r } = await api.createRun({ modusId: id, aditus: cleanAditus(aditus), ...(studioId ? { studioId } : {}) });
       setRun({ status: r.status, id: r.id, exitus: r.exitus });
       // light polling for terminal status (SSE streaming is the next bite)
       poll(r.id, 0);
@@ -191,6 +193,7 @@ export function Card() {
         <div className="meta-line"><span>version</span><span className="v mono">{flow?.versio ?? '—'}</span></div>
         <div className="meta-line"><span>base model</span><span className="v mono">{String((flow as { fundamentumId?: unknown })?.fundamentumId ?? '—')}</span></div>
         <div className="meta-line"><span>category</span><span className="v mono">{String((flow as { categoria?: unknown })?.categoria ?? '—')}</span></div>
+        {studioId && <div className="meta-line"><span>studio</span><span className="v mono">{studioId.slice(0, 8)} · warm</span></div>}
       </div>
       <div className="csec">
         <div className="ctitle">Account</div>

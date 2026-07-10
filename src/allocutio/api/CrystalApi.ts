@@ -38,15 +38,23 @@ import { aggregateStatus, materiaStudioStatus } from '../lexicon/status/aggregat
 import type { ModoStore } from '../../types/modo.js'
 import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModus.js'
 import { dispatchInceptio, type DispatchDeps } from '../../execution/dispatchInceptio.js'
-import { toRun, toCollection, toTeam, toEdition, toProject } from './runProjection.js'
+import { toRun, toSettledRun, toCollection, toTeam, toEdition, toProject } from './runProjection.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
-import { Errors } from './errors.js'
+import { Errors, ApiError } from './errors.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { computeRecipient } from '../../arcanum/prover.js'
-import { impetusForPodMs, usdMicroToImpetus } from '../../ledger/rates.js'
+import { impetusForPodMs, usdMicroToImpetus, IMPETUS_USD_RATE } from '../../ledger/rates.js'
 import { fundingBps, applyFundingBps, DEFAULT_FUNDING_BPS } from '../../ledger/depositFunding.js'
 import type { AssetPricer } from '../../crystal/AssetPricer.js'
-import type { Run, Collection, CollectionPiece, Team, Edition, FeedItem, Project } from './types.js'
+import type { Run, Collection, CollectionPiece, Team, Edition, FeedItem, Project, RunsPage } from './types.js'
+
+/** Options for the owner's settled spend-history listing (`listRuns`). */
+export interface ListRunsOpts {
+  /** Opaque page cursor from a prior page; omit for the first page. */
+  cursor?: string
+  /** Page size (clamped 1..100; default 20). */
+  limit?: number
+}
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
 import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
 import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
@@ -71,6 +79,9 @@ import { ownerKeyOf } from '../../crystal/ownerKey.js'
 import { isCatalogEligible, classifyModelLicense, activeConditionalLicenses, bindingCapUsd, type CommercialVerdict } from '../../crystal/modelLicense.js'
 import { band, bindingCapMicroUsd, type ThresholdBand, type TripwireBandStore } from '../../crystal/licenseTripwire.js'
 import type { Redituum } from '../../types/reditus.js'
+import { handleStripeCheckout, handleStripeWebhook, type StripeGateway, type StripeWebhookResult } from '../../api/webhooks/stripeWebhook.js'
+import { stripeConfigFromEnv, makeStripeGateway } from '../../api/webhooks/stripeGateway.js'
+import type { WideEventStore } from '../../analytics/WideEventStore.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 import { provenanceHash } from '../../crystal/provenance.js'
 import { rarityReport, type RarityReport } from '../../crystal/rarityReport.js'
@@ -162,12 +173,21 @@ export interface CrystalApiDeps {
   pricer?: AssetPricer
   /** The CreditVault deposit address, echoed in the quote/config so the UI knows where to send. */
   depositAddress?: string
-  /** USD revenue book — backs the admin `revenueReport` (the trailing-12mo rollup + license tripwire).
-   *  Absent → the report is unavailable. */
-  redituum?: Pick<Redituum, 'trailingUsdRevenue'>
+  /** USD revenue book — backs the admin `revenueReport` (the trailing-12mo rollup + license tripwire)
+   *  AND the fiat funding rail (`handleStripeWebhook` books a peer fiat `Reditus` via `record`).
+   *  Absent → the report + fiat rail are unavailable. */
+  redituum?: Pick<Redituum, 'trailingUsdRevenue' | 'record'>
   /** The license-tripwire's persisted band — surfaced in `revenueReport` so the admin sees the
    *  last edge-triggered band alongside the live figure. Absent → lastBand omitted. */
   tripwireBand?: Pick<TripwireBandStore, 'last'>
+  /** Wide-event COGS rollup — backs the admin `cogsReport` (trailing-window spend + job count,
+   *  the read-only pair to `revenueReport`). Absent → the report is unavailable. */
+  costReport?: Pick<WideEventStore, 'sumCostUsd'>
+  /** Fiat rail (Stripe) gateway override — tests inject a fake. Absent → built from env
+   *  (`STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`); unconfigured env → the rail reports 503.
+   *  Idempotency needs no injected store: it is the DURABLE unique partial indexes on
+   *  `Signum.testis` (auctor:'stripe:purchase') + `Reditus.chargeRef` (origo:'fiat'). */
+  stripe?: StripeGateway
 }
 
 /** Inputs to start a Collection (a Collectio): a base modus expanded over a Tractus[] grid. */
@@ -395,6 +415,38 @@ export class CrystalApi {
     const a = await this.deps.actorum.findById(id)
     if (!a || !(await this._owns(auctor, a))) throw Errors.notFoundRun(id)
     return toRun(a)
+  }
+
+  /**
+   * List the caller's SETTLED spend history — owner-scoped, cursor-paginated, newest first,
+   * plus a lifetime running total (`GET /v1/me/runs`).
+   *
+   * OWNERSHIP: the settled index is keyed by the owner (`animaId` OR anon `commitment`), so
+   * the store's `listSettled(auctor, …)` is inherently owner-scoped — the SAME identity-blind
+   * primitive `/status` uses to list in-flight gens (`findFor(auctorKey)`). There is no
+   * list-by-`_owns` (Actum carries no identity column — the whole reason this index exists);
+   * `_owns` is for single-run fetch (`getRun`), not listing. A bursaToken caller gets an empty
+   * page (those runs are never indexed). SETTLED = `completus` only — a refunded `fractus` run
+   * is not spend and was pruned at settlement.
+   *
+   * Degrades to an empty page when the wired index lacks the settled-history methods (dev/in-
+   * memory doubles that don't retain).
+   */
+  async listRuns(auctor: AuctorKey, opts: ListRunsOpts = {}): Promise<RunsPage> {
+    const index = this.deps.actumIndex
+    if (!index?.listSettled || !index.sumSettledImpetus) {
+      return { runs: [], runningTotal: { impetus: '0', usd: 0 } }
+    }
+    const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 20) || 20, 1), 100)
+    const [page, totalImpetus] = await Promise.all([
+      index.listSettled(auctor, { limit, ...(opts.cursor ? { cursor: opts.cursor } : {}) }),
+      index.sumSettledImpetus(auctor),
+    ])
+    return {
+      runs: page.entries.map(toSettledRun),
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+      runningTotal: { impetus: totalImpetus, usd: Number(totalImpetus) * IMPETUS_USD_RATE },
+    }
   }
 
   /** A run is owned by an auctor iff:
@@ -1450,6 +1502,69 @@ export class CrystalApi {
     }
   }
 
+  // ── Fiat funding rail (Stripe) ──────────────────────────────────────────────
+
+  private _stripeGateway: StripeGateway | null | undefined
+
+  /** The live Stripe gateway: the injected dep, else built from env, else `null` (unconfigured). */
+  private resolveStripeGateway(): StripeGateway | null {
+    if (this._stripeGateway === undefined) {
+      if (this.deps.stripe) {
+        this._stripeGateway = this.deps.stripe
+      } else {
+        const config = stripeConfigFromEnv()
+        this._stripeGateway = config ? makeStripeGateway(config) : null
+      }
+    }
+    return this._stripeGateway
+  }
+
+  /**
+   * Create a Stripe Checkout Session for a credit pack. IDENTIFIED-ONLY — a fiat pack cannot
+   * fund an anonymous purse (a card de-anonymizes by construction). Returns the hosted-checkout
+   * URL. The pack's USD price + packId are server-set, so crediting is server-authoritative
+   * regardless of anything the client sends (the webhook credits `PACKS[packId].impetus`).
+   */
+  async createCheckout(
+    auctor: AuctorKey,
+    opts: { packId: string; successUrl?: string; cancelUrl?: string },
+  ): Promise<{ url: string; sessionId: string }> {
+    const gateway = this.resolveStripeGateway()
+    if (!gateway) throw Errors.paymentsUnavailable()
+    const animaId = 'animaId' in auctor ? auctor.animaId : undefined
+    const result = await handleStripeCheckout(
+      {
+        packId: opts.packId,
+        animaId,
+        ...(opts.successUrl ? { successUrl: opts.successUrl } : {}),
+        ...(opts.cancelUrl ? { cancelUrl: opts.cancelUrl } : {}),
+      },
+      { gateway },
+    )
+    if (!result.ok) throw new ApiError(result.code, result.message, result.status)
+    return { url: result.url, sessionId: result.sessionId }
+  }
+
+  /**
+   * Handle a Stripe webhook delivery — signature-gated + idempotent per payment. Returns the
+   * HTTP status + body for the router. A bad signature or a non-completed/malformed event is a
+   * 400 (never a credit); a redelivery of an already-credited payment is a no-op that replays
+   * the original outcome. Throws only for a deployment that has no fiat rail configured (503).
+   */
+  async handleStripeWebhook(input: { rawBody: string; signature?: string }): Promise<StripeWebhookResult> {
+    const gateway = this.resolveStripeGateway()
+    if (!gateway || !this.deps.redituum || !this.deps.animae) throw Errors.paymentsUnavailable()
+    return handleStripeWebhook(
+      { rawBody: input.rawBody, ...(input.signature ? { signature: input.signature } : {}) },
+      {
+        signorum: this.deps.signorum,
+        redituum: this.deps.redituum,
+        animae: this.deps.animae,
+        gateway,
+      },
+    )
+  }
+
   /**
    * The cursor's read-only upper-bound reservation for a modus + aditus.
    *
@@ -1644,6 +1759,27 @@ export class CrystalApi {
       bindingCapUsd: capUsd,
       activeConditionalLicenses: licenses,
       lastAlertedBand: last?.band ?? null,
+    }
+  }
+
+  /**
+   * ADMIN COGS report (platform-admin only) — the read-only pair to `revenueReport`: a
+   * trailing-window rollup of per-job `costUsd` off `wide_events` (admin workspace, credits-only
+   * scope — no payout/disbursement/tax). Uses the SAME trailing-12mo window as `revenueReport`
+   * for a like-for-like pairing. A single scalar + count in v1 — no per-gpuType/per-model split.
+   */
+  async cogsReport(auctor: AuctorKey, now: Date = new Date()): Promise<CogsReport> {
+    this._assertPlatformAdmin(auctor)
+    const costReport = this.deps.costReport
+    if (!costReport) throw Errors.reportUnavailable()
+    const since = new Date(now)
+    since.setFullYear(since.getFullYear() - 1)
+    const { costUsd, count } = await costReport.sumCostUsd(since)
+    return {
+      asOf: now.toISOString(),
+      sinceIso: since.toISOString(),
+      costUsd,
+      count,
     }
   }
 
@@ -2340,6 +2476,21 @@ export interface RevenueReport {
   activeConditionalLicenses: string[]
   /** The last band the scheduled evaluator alerted/persisted, or null before its first run. */
   lastAlertedBand: ThresholdBand | null
+}
+
+/**
+ * Admin COGS report (`GET /v1/admin/cogs`) — the read-only pair to `RevenueReport`: a
+ * trailing-window rollup of per-job `costUsd` off `wide_events`. Single scalar + count in v1.
+ */
+export interface CogsReport {
+  /** ISO timestamp the trailing window was computed against. */
+  asOf: string
+  /** ISO timestamp the trailing window's cutoff (same window `revenueReport` uses). */
+  sinceIso: string
+  /** Trailing-window COGS, whole USD (pod compute spend, per-job `costUsd` summed). */
+  costUsd: number
+  /** Job count in the trailing window (includes jobs with no cost telemetry, counted at 0). */
+  count: number
 }
 
 export interface MeView {

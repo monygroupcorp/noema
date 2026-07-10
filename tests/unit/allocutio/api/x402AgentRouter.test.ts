@@ -32,6 +32,7 @@ async function harness(opts: {
   modi?: Array<{ id: string; nomen: string; auctor?: { animaId: string } }>
   hub?: X402AgentDeps['hub']
   getRun?: X402AgentDeps['getRun']
+  rateLimiters?: X402AgentDeps['rateLimiters']
 } = {}) {
   const legati = new MemoryLegatus()
   const modorum = new MemoryModorum()
@@ -54,6 +55,7 @@ async function harness(opts: {
     accrueAgentCut: async (input) => { cuts.push(input); return { status: 'accrued' } },
     ...(opts.hub ? { hub: opts.hub } : {}),
     ...(opts.getRun ? { getRun: opts.getRun } : {}),
+    ...(opts.rateLimiters ? { rateLimiters: opts.rateLimiters } : {}),
     publicBase: 'https://noema.art',
   }
   const server = express()
@@ -219,4 +221,59 @@ test('unknown agent → 404', async () => {
   const res = await request(server).get('/api/v1/x402/agents/ghost/spell/memeify')
   assert.equal(res.status, 404)
   assert.equal(res.body.error.code, 'AGENT_NOT_FOUND')
+})
+
+// ── request-body/query validation (hardening) ──────────────────────────────────
+
+test('GET discover with a valid modusId query → 200', async () => {
+  const { server } = await harness({ modi: [{ id: 'owned', nomen: 'extra', auctor: { animaId: 'anima-agent' } }] })
+  const res = await request(server).get('/api/v1/x402/agents/camel42/spell/extra').query({ modusId: 'owned' })
+  assert.equal(res.status, 200)
+  assert.equal(res.body.agentId, 'camel42')
+})
+
+test('GET discover with a non-string modusId query → 400 input.malformed', async () => {
+  const { server } = await harness()
+  const res = await request(server).get('/api/v1/x402/agents/camel42/spell/memeify?modusId[]=a&modusId[]=b')
+  assert.equal(res.status, 400)
+  assert.equal(res.body.error.code, 'input.malformed')
+})
+
+test('POST run with inputs as an array → 400 input.malformed', async () => {
+  const { server } = await harness()
+  const res = await request(server).post('/api/v1/x402/agents/camel42/spell/memeify').send({ inputs: ['a', 'b'] })
+  assert.equal(res.status, 400)
+  assert.equal(res.body.error.code, 'input.malformed')
+})
+
+test('POST run with inputs as a string → 400 input.malformed', async () => {
+  const { server } = await harness()
+  const res = await request(server).post('/api/v1/x402/agents/camel42/spell/memeify').send({ inputs: 'not-an-object' })
+  assert.equal(res.status, 400)
+  assert.equal(res.body.error.code, 'input.malformed')
+})
+
+test('POST run with a valid object inputs → unaffected (still 402 without payment)', async () => {
+  const { server } = await harness()
+  const res = await request(server).post('/api/v1/x402/agents/camel42/spell/memeify').send({ inputs: { prompt: 'a cat' } })
+  assert.equal(res.status, 402)
+  assert.equal(res.body.error, 'PAYMENT_REQUIRED')
+})
+
+test('POST run with a non-string modusId body → 400 input.malformed', async () => {
+  const { server } = await harness()
+  const res = await request(server).post('/api/v1/x402/agents/camel42/spell/memeify').send({ inputs: {}, modusId: 123 })
+  assert.equal(res.status, 400)
+  assert.equal(res.body.error.code, 'input.malformed')
+})
+
+test('rate limiter dep: mounted for GET discover, NOT for POST run', async () => {
+  let getHits = 0
+  let postHits = 0
+  const countingGet: express.RequestHandler = (_req, _res, next) => { getHits++; next() }
+  const { server } = await harness({ rateLimiters: { quote: countingGet } })
+  await request(server).get('/api/v1/x402/agents/camel42/spell/memeify')
+  await request(server).post('/api/v1/x402/agents/camel42/spell/memeify').send({ inputs: {} })
+  assert.equal(getHits, 1, 'the injected limiter ran for the GET discover route')
+  assert.equal(postHits, 0, 'the injected limiter is never mounted on the POST run route')
 })

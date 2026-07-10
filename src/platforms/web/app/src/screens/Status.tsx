@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { useIdentity } from '../state/identity';
 import { Ic } from '../lib/icons';
-import { api, type MeStatus } from '../lib/api';
+import { api, type MeStatus, type SettledRun } from '../lib/api';
 
 const IMPETUS_USD = 0.000337;
 
@@ -12,17 +12,53 @@ export function Status() {
   const [me, setMe] = useState<MeStatus | null>(null);
   const [err, setErr] = useState(false);
 
+  // Spend history (GET /v1/me/runs) — paginated, newest first, + lifetime running total.
+  const [spend, setSpend] = useState<SettledRun[]>([]);
+  const [spendTotal, setSpendTotal] = useState<{ impetus: string; usd: number } | null>(null);
+  const [spendCursor, setSpendCursor] = useState<string | undefined>(undefined);
+  const [spendLoaded, setSpendLoaded] = useState(false);
+  const [spendLoading, setSpendLoading] = useState(false);
+
   useEffect(() => {
     let live = true;
     api.meStatus().then((s) => { if (live) setMe(s); }).catch(() => { if (live) setErr(true); });
     return () => { live = false; };
   }, []);
 
+  useEffect(() => {
+    let live = true;
+    setSpendLoading(true);
+    api.listRuns({ limit: 10 })
+      .then((p) => {
+        if (!live) return;
+        setSpend(p.runs);
+        setSpendTotal(p.runningTotal);
+        setSpendCursor(p.nextCursor);
+      })
+      .catch(() => { /* leave empty state */ })
+      .finally(() => { if (live) { setSpendLoaded(true); setSpendLoading(false); } });
+    return () => { live = false; };
+  }, []);
+
+  const loadMoreSpend = () => {
+    if (!spendCursor || spendLoading) return;
+    setSpendLoading(true);
+    api.listRuns({ cursor: spendCursor, limit: 10 })
+      .then((p) => {
+        setSpend((prev) => [...prev, ...p.runs]);
+        setSpendTotal(p.runningTotal);
+        setSpendCursor(p.nextCursor);
+      })
+      .catch(() => { /* keep what we have */ })
+      .finally(() => setSpendLoading(false));
+  };
+
   const credits = me ? Number(me.balanceImpetus) : 0;
   const usd = me ? (me.balanceUsd || credits * IMPETUS_USD) : 0;
   const runs = me?.gens.length ?? 0;
   const studios = me?.studios.length ?? 0;
   const fmtElapsed = (ms?: number) => (ms == null ? '' : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60000)}m`);
+  const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
 
   return (
     <AppShell crumb="activity">
@@ -62,15 +98,44 @@ export function Status() {
           </div>
         )}
 
-        <div className="sectionhead">Spend</div>
-        <div className="empty">
-          <div className="ico"><Ic name="receipt-text" /></div>
-          <div className="t">
-            <span className="hemi2 dashed" /> A per-run credit ledger — what each generation cost, over time — lands here
-            once the backend exposes spend history. For now your live balance is above and finished work lives in your{' '}
-            <Link to="/space" style={{ color: 'var(--accent-soft)' }}>space</Link>.
-          </div>
+        <div className="sectionhead">
+          Spend
+          {spendTotal && spend.length > 0 && (
+            <span className="sub" style={{ marginLeft: 'var(--s3)', color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
+              {Number(spendTotal.impetus).toLocaleString()} credits all time · ≈ ${spendTotal.usd.toFixed(2)}
+            </span>
+          )}
         </div>
+        {!spendLoaded ? (
+          <div className="empty"><div className="t">Loading your spend history…</div></div>
+        ) : spend.length === 0 ? (
+          <div className="empty">
+            <div className="ico"><Ic name="receipt-text" /></div>
+            <div className="t">
+              No settled runs yet — once a generation finishes, what it cost shows here. Finished work lives in your{' '}
+              <Link to="/space" style={{ color: 'var(--accent-soft)' }}>space</Link>.
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="list">
+              {spend.map((r) => (
+                <div className="lrow" key={r.id}>
+                  <div className="li-main">
+                    <div className="t">{r.modusLabel}</div>
+                    <div className="s">{fmtDate(r.settledAt)}</div>
+                  </div>
+                  <div className="li-right">{Number(r.cost).toLocaleString()} cr · ${r.costUsd.toFixed(2)}</div>
+                </div>
+              ))}
+            </div>
+            {spendCursor && (
+              <button className="btn" onClick={loadMoreSpend} disabled={spendLoading} style={{ marginTop: 'var(--s3)' }}>
+                {spendLoading ? 'Loading…' : 'Load more'}
+              </button>
+            )}
+          </>
+        )}
 
         <div className="sub" style={{ marginTop: 'var(--s5)', color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
           Live from staging · {ident.funding === 'named' ? 'signed-in account' : 'anonymous session'}.

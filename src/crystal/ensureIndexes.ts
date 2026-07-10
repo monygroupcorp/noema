@@ -18,6 +18,19 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('signa').createIndex({ id: 1 }, { unique: true }),
     db.collection('signa').createIndex({ animaId: 1, status: 1 }),
     db.collection('signa').createIndex({ testis: 1, forma: 1 }, { sparse: true }),
+    // reserve selection (ledger-hardening Debt #1): index-backed smallest-first `sort({ valorNum:1 })`
+    // over an identity's valid pool, so `reserve` pulls ~O(k) coins instead of loading the whole pool.
+    // The identified path keys on animaId; the anonymous (arcanum) path keys on (testis,forma).
+    db.collection('signa').createIndex({ animaId: 1, status: 1, valorNum: 1 }),
+    db.collection('signa').createIndex({ testis: 1, forma: 1, status: 1, valorNum: 1 }, { sparse: true }),
+    // Fiat funding rail (Stripe) idempotency: UNIQUE + PARTIAL on `testis` over stripe-purchase
+    // signa ONLY. `testis` = the Stripe payment_intent id shared by a purchase's two webhook events
+    // (checkout.session.completed + payment_intent.succeeded). This is the DURABLE cross-instance
+    // guard that a redelivered/concurrent Stripe payment mints impetus exactly once: the second
+    // issue() throws a dup-key error → the credit helper catches it → replays the original credit.
+    // Scoped to auctor:'stripe:purchase' so no other signa (whose testis is a tx hash / commitment /
+    // empty, not globally unique) are constrained.
+    db.collection('signa').createIndex({ testis: 1 }, { unique: true, partialFilterExpression: { auctor: 'stripe:purchase' } }),
 
     // animae — soul / identity
     db.collection('animae').createIndex({ id: 1 }, { unique: true }),
@@ -62,6 +75,10 @@ export async function ensureIndexes(db: Db): Promise<void> {
     // natum index bounds the trailing-12mo revenue range-scan. Mirrors MongoRedituum.ensureIndexes().
     db.collection('reditus').createIndex({ id: 1 }, { unique: true }),
     db.collection('reditus').createIndex({ depositumId: 1 }, { unique: true, partialFilterExpression: { depositumId: { $exists: true } } }),
+    // Fiat idempotency (peer of the signa stripe-purchase guard): UNIQUE PARTIAL on chargeRef over
+    // FIAT rows so a redelivered/concurrent Stripe payment books revenue exactly once. Mirrors
+    // MongoRedituum.ensureIndexes().
+    db.collection('reditus').createIndex({ chargeRef: 1 }, { unique: true, partialFilterExpression: { origo: 'fiat', chargeRef: { $exists: true } } }),
     db.collection('reditus').createIndex({ natum: 1 }),
 
     // solutiones — payment settlements

@@ -675,6 +675,67 @@ Quote how many impetus points a deposit of a given asset+amount would buy (infor
 }
 ```
 
+### POST /v1/payments/checkout
+
+Buy a fixed credit pack with fiat: create a Stripe Checkout session for the chosen pack and return the hosted-checkout URL. Requires an identified account; the impetus credited is the server-side pack constant, applied later by the signature-verified webhook on payment completion.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Buy a fixed credit pack with fiat via Stripe Checkout. The pack is server-authoritative: the impetus credited is the pack constant, never a client-supplied figure. Requires an identified account (a card de-anonymizes; an anon purse is rejected).",
+  "properties": {
+    "packId": {
+      "type": "string",
+      "enum": [
+        "starter_10",
+        "standard_25",
+        "plus_50",
+        "studio_100"
+      ],
+      "description": "The credit pack SKU to purchase. Fixed USD price → fixed impetus (starter_10 $10→30,000; standard_25 $25→82,500; plus_50 $50→180,000; studio_100 $100→390,000). No funding haircut."
+    },
+    "successUrl": {
+      "type": "string",
+      "description": "Optional redirect URL on completed payment; falls back to the server default."
+    },
+    "cancelUrl": {
+      "type": "string",
+      "description": "Optional redirect URL on abandoned checkout; falls back to the server default."
+    }
+  },
+  "required": [
+    "packId"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The hosted Stripe Checkout session to redirect the caller to. Credit is applied only later, by the signature-verified webhook, when the payment completes.",
+  "properties": {
+    "url": {
+      "type": "string",
+      "description": "The Stripe-hosted checkout URL to redirect the caller to."
+    },
+    "sessionId": {
+      "type": "string",
+      "description": "The Stripe Checkout Session id."
+    }
+  },
+  "required": [
+    "url",
+    "sessionId"
+  ]
+}
+```
+
 ### POST /v1/models/import
 
 Import a model/LoRA by URL (Civitai/HuggingFace/direct) as a private, owner-scoped model — usable in your flows immediately; promoting it to the public catalogue is a separate publish.
@@ -1023,6 +1084,45 @@ Admin: company-wide trailing-12mo USD revenue vs the tightest active conditional
 }
 ```
 
+### GET /v1/admin/cogs
+
+Admin: trailing-window rollup of per-job costUsd off wide_events — the read-only pair to the revenue report. Platform-admin only.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "Admin COGS report: trailing-window rollup of per-job costUsd off wide_events — the read-only pair to the revenue report.",
+  "properties": {
+    "asOf": {
+      "type": "string",
+      "description": "ISO timestamp the trailing window was computed against."
+    },
+    "sinceIso": {
+      "type": "string",
+      "description": "ISO timestamp of the trailing window's cutoff (same window the revenue report uses)."
+    },
+    "costUsd": {
+      "type": "number",
+      "description": "Trailing-window COGS, whole USD (pod compute spend, per-job costUsd summed)."
+    },
+    "count": {
+      "type": "number",
+      "description": "Job count in the trailing window (includes jobs with no cost telemetry, counted at 0)."
+    }
+  },
+  "required": [
+    "asOf",
+    "sinceIso",
+    "costUsd",
+    "count"
+  ]
+}
+```
+
 ### POST /v1/flows
 
 Save a reusable owner-keyed flow derived from an owned run (fromRun) or a base flow (modusId).
@@ -1222,6 +1322,104 @@ Return the authenticated caller's account snapshot — balance, in-flight gens, 
 }
 ```
 
+### GET /v1/me/runs
+
+The caller's SETTLED spend history — per-run impetus cost (+ derived USD), settledAt, and a lifetime running total. Owner-scoped (identified or anon-commitment), cursor-paginated, newest first. Only completus runs (a refunded failed run is not spend). Query: status=settled (only supported filter), cursor, limit (1..100, default 20).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "A page of settled spend history plus the owner's lifetime running total.",
+  "properties": {
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "A settled run in the owner's spend history. JSON-safe.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The run (Actum) identifier."
+          },
+          "modusId": {
+            "type": "string",
+            "description": "The flow (modus) this run executed."
+          },
+          "modusLabel": {
+            "type": "string",
+            "description": "Human label of the modus at settle (falls back to modusId)."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "settled"
+            ],
+            "description": "Always \"settled\" — completus runs only."
+          },
+          "cost": {
+            "type": "string",
+            "description": "Impetus cost, serialised as a string."
+          },
+          "costUsd": {
+            "type": "number",
+            "description": "USD cost DERIVED on read (cost × IMPETUS_USD_RATE) — never a persisted FMV."
+          },
+          "settledAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the run settled, ISO-8601."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the run started, ISO-8601."
+          }
+        },
+        "required": [
+          "id",
+          "modusId",
+          "modusLabel",
+          "status",
+          "cost",
+          "costUsd"
+        ]
+      },
+      "description": "Settled runs, newest first."
+    },
+    "nextCursor": {
+      "type": "string",
+      "description": "Opaque cursor for the next page; absent on the last page."
+    },
+    "runningTotal": {
+      "type": "object",
+      "description": "Lifetime spend across ALL settled runs (not just this page).",
+      "properties": {
+        "impetus": {
+          "type": "string",
+          "description": "Total impetus spent, serialised as a string."
+        },
+        "usd": {
+          "type": "number",
+          "description": "Total USD, derived at the platform reference rate."
+        }
+      },
+      "required": [
+        "impetus",
+        "usd"
+      ]
+    }
+  },
+  "required": [
+    "runs",
+    "runningTotal"
+  ]
+}
+```
+
 ### GET /v1/me
 
 The caller's owner-keyed account settings — presentation skin (Profile), cross-cutting generation defaults (Preferences), and verb→flow bindings. Anon-capable (keyed by AuctorKey).
@@ -1360,6 +1558,39 @@ The caller's owner-keyed account settings — presentation skin (Profile), cross
     "secrets",
     "secretsAvailable",
     "admin"
+  ]
+}
+```
+
+### POST /v1/me/export
+
+GDPR self-export — assemble the caller's OWN account data into a downloadable JSON bundle (strictly self-scoped to the caller) and return a short-lived, unguessable signed GET URL to it. Returns 503 when object storage is not configured.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "url": {
+      "type": "string",
+      "description": "Short-lived, unguessable signed GET URL to the hosted export bundle — the only handle returned (the raw object key is withheld so the response cannot be turned into a stable path)."
+    },
+    "expiresIn": {
+      "type": "number",
+      "description": "Seconds until the signed URL expires."
+    },
+    "bytes": {
+      "type": "number",
+      "description": "Size of the serialized JSON bundle in bytes."
+    }
+  },
+  "required": [
+    "url",
+    "expiresIn",
+    "bytes"
   ]
 }
 ```

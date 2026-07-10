@@ -786,6 +786,208 @@ export const INTELLA_IMPRESSTATION_KLEIN: Intella = {
   natum: new Date('2026-06-30'),
 }
 
+// ── LTX 2.3 · video (T2V + I2V) ───────────────────────────────────────────────
+// The all-in-one bf16 transformer+VAE bundle (46.15GB) — CheckpointLoaderSimple loads it directly
+// (no separate VAE Intella needed, unlike the flux/sd15 split). familia 'ltx' set per the sd15/flux
+// pattern even though v1 has no LoRA path (INTELLA_LTX_23_DISTILLED_LORA is a future add) — keeps the
+// compat key ready for when a LoRA lands. License: LTX-2 Community (commercial free under $10M ARR).
+export const INTELLA_LTX_23_DISTILLED: Intella = {
+  id: 'intella.ltx-2.3-distilled',
+  nomen: 'LTX 2.3 22B distilled (bf16, transformer+VAE bundle)',
+  license: 'ltx-2-community',       // LTX-2 Community License — commercial use free under $10M ARR
+  commercialUse: 'conditional',
+  genus: 'model',
+  architectura: 'transformer',
+  familia: 'ltx',
+  parametri: 22_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-distilled.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Lightricks/LTX-2.3', branch: 'main', filename: 'ltx-2.3-22b-distilled.safetensors' },
+    },
+  ],
+  dest: 'checkpoints/ltx-2.3-22b-distilled.safetensors',
+  sizeGb: 46.15,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-07-07'),
+}
+
+// The Gemma-3-12B text encoder LTX-2.3 uses (LTXAVTextEncoderLoader, ComfyUI-native since 0.14).
+// A SEPARATE weight from the checkpoint bundle above — 2 Intellae total for the LTX fundament.
+export const INTELLA_GEMMA_3_12B: Intella = {
+  id: 'intella.gemma-3-12b',
+  nomen: 'Gemma 3 12B IT (bf16, LTX-2.3 text encoder)',
+  license: 'gemma',                 // Google Gemma license (permissive, some use restrictions)
+  commercialUse: 'yes',
+  genus: 'embedding',
+  architectura: 'transformer',
+  parametri: 12_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/ltx-2', branch: 'main', filename: 'split_files/text_encoders/gemma_3_12B_it.safetensors' },
+    },
+  ],
+  dest: 'text_encoders/gemma_3_12B_it.safetensors',
+  sizeGb: 24.4,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-07-07'),
+}
+
+// Wan2.2 · video (T2V + I2V) — MoE pair of diffusion unets per direction (high-noise steers the
+// first half of the denoise trajectory, low-noise finishes it — KSamplerAdvanced split at step 10).
+// Both directions share the umt5 text encoder + the Wan2.1 VAE (Wan2.2 14B reuses it). Render-proven
+// on this box (both t2v and i2v produced real mp4s) — see wan-artifacts/*.api.json for the graphs.
+export const INTELLA_WAN22_T2V_HIGH: Intella = {
+  id: 'intella.wan22-t2v-high',
+  nomen: 'Wan2.2 T2V — high-noise unet (14B, fp8 scaled)',
+  license: 'apache-2.0',
+  commercialUse: 'yes',
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'wan22-t2v',
+  parametri: 14_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B/resolve/main/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Wan-AI/Wan2.2-T2V-A14B', branch: 'main', filename: 'wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors' },
+    },
+  ],
+  dest: 'unet/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors',
+  sizeGb: 15,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-07-07'),
+}
+
+export const INTELLA_WAN22_T2V_LOW: Intella = {
+  id: 'intella.wan22-t2v-low',
+  nomen: 'Wan2.2 T2V — low-noise unet (14B, fp8 scaled)',
+  license: 'apache-2.0',
+  commercialUse: 'yes',
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'wan22-t2v',
+  parametri: 14_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B/resolve/main/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Wan-AI/Wan2.2-T2V-A14B', branch: 'main', filename: 'wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors' },
+    },
+  ],
+  dest: 'unet/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors',
+  sizeGb: 15,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-07-07'),
+}
+
+export const INTELLA_WAN22_I2V_HIGH: Intella = {
+  id: 'intella.wan22-i2v-high',
+  nomen: 'Wan2.2 I2V — high-noise unet (14B, fp8 scaled)',
+  license: 'apache-2.0',
+  commercialUse: 'yes',
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'wan22-i2v',
+  parametri: 14_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B/resolve/main/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Wan-AI/Wan2.2-I2V-A14B', branch: 'main', filename: 'wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors' },
+    },
+  ],
+  dest: 'unet/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors',
+  sizeGb: 15,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-07-07'),
+}
+
+export const INTELLA_WAN22_I2V_LOW: Intella = {
+  id: 'intella.wan22-i2v-low',
+  nomen: 'Wan2.2 I2V — low-noise unet (14B, fp8 scaled)',
+  license: 'apache-2.0',
+  commercialUse: 'yes',
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'wan22-i2v',
+  parametri: 14_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B/resolve/main/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Wan-AI/Wan2.2-I2V-A14B', branch: 'main', filename: 'wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors' },
+    },
+  ],
+  dest: 'unet/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors',
+  sizeGb: 15,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-07-07'),
+}
+
+export const INTELLA_UMT5_XXL: Intella = {
+  id: 'intella.umt5-xxl',
+  nomen: 'umT5-XXL text encoder (fp8 scaled) — shared Wan2.2 encoder',
+  license: 'apache-2.0',
+  commercialUse: 'yes',
+  genus: 'embedding',
+  architectura: 'transformer',
+  familia: 'wan22',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/Wan_2.1_ComfyUI_repackaged', branch: 'main', filename: 'split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors' },
+    },
+  ],
+  dest: 'clip/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+  sizeGb: 6,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-07-07'),
+}
+
+export const INTELLA_WAN21_VAE: Intella = {
+  id: 'intella.wan21-vae',
+  nomen: 'Wan2.1 VAE — shared Wan2.2 14B VAE',
+  license: 'apache-2.0',
+  commercialUse: 'yes',
+  genus: 'embedding',
+  architectura: 'vae',
+  familia: 'wan22',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/Wan_2.1_ComfyUI_repackaged', branch: 'main', filename: 'split_files/vae/wan_2.1_vae.safetensors' },
+    },
+  ],
+  dest: 'vae/wan_2.1_vae.safetensors',
+  sizeGb: 1,
+  versio: '1.0.0',
+  canonica: true,
+  natum: new Date('2026-07-07'),
+}
+
 export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_FLUX_SCHNELL,
   INTELLA_FLUX_VAE,
@@ -815,4 +1017,12 @@ export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_HEARTMULA_GEN,
   INTELLA_HEARTMULA_3B,
   INTELLA_HEARTCODEC,
+  INTELLA_LTX_23_DISTILLED,
+  INTELLA_GEMMA_3_12B,
+  INTELLA_WAN22_T2V_HIGH,
+  INTELLA_WAN22_T2V_LOW,
+  INTELLA_WAN22_I2V_HIGH,
+  INTELLA_WAN22_I2V_LOW,
+  INTELLA_UMT5_XXL,
+  INTELLA_WAN21_VAE,
 ]

@@ -92,9 +92,21 @@ export interface Reditus {
    * FK → Depositum. Present on crypto rows — links this recognized-revenue row back to its
    * on-chain deposit record for reconciliation, and is the IDEMPOTENCY key: at-most-one
    * Reditus per Depositum, so a re-delivered webhook does not double-count revenue. Absent
-   * on fiat rows (which have no Depositum; use their own provider charge id in fmvSource).
+   * on fiat rows (which have no Depositum; use `chargeRef` as their dedicated idempotency key).
    */
   depositumId?: string
+
+  /**
+   * The fiat provider's payment/charge id (e.g. a Stripe payment_intent id) — the FIAT
+   * IDEMPOTENCY key, symmetric with crypto's `depositumId`. Present on fiat rows that carry
+   * one; a UNIQUE PARTIAL index on `chargeRef` where `origo:'fiat'` makes revenue booking
+   * atomic across instances (Stripe redelivers, and one purchase emits two events sharing a
+   * payment_intent — both collapse to a single Reditus). Absent on crypto rows (which use
+   * `depositumId`) and on any fiat row without a provider key (those still append, excluded
+   * from the partial index). This is a DEDICATED typed key — do NOT overload `fmvSource`,
+   * which stays a pure free-form audit string (ADR-0013 §2, §consequences item 5).
+   */
+  chargeRef?: string
 }
 
 /** The fields a caller supplies to record a Reditus; id is struck by the store. natum defaults to now. */
@@ -110,9 +122,10 @@ export interface Redituum {
    * Strike one revenue row for a confirmed inbound payment. FAIL-CLOSED: throws if usdFmv
    * is not a positive priced amount or fmvSource is empty — no deposit is recorded without
    * both (ADR-0013 §2). Anonymous deposits are recorded normally (no identity is carried).
-   * IDEMPOTENT on `depositumId`: if a row already exists for that Depositum, the existing row
-   * is returned unchanged (webhook re-delivery must not double-count). Draws with no
-   * depositumId (fiat) are always appended.
+   * IDEMPOTENT on `depositumId` (crypto) AND on `chargeRef` (fiat): if a row already exists for
+   * that key, the existing row is returned unchanged (webhook re-delivery — Stripe redelivers,
+   * and one purchase emits two events sharing a payment_intent — must not double-count). Draws
+   * with neither key are always appended.
    */
   record(draft: ReditusDraft): Promise<Reditus>
 

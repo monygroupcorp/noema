@@ -163,3 +163,15 @@ Then Tier B #5–8 (net-new client+UI over live endpoints), then decide which Ti
 
 Full route surface and per-screen caller/mock breakdown were produced by two Explore sweeps on
 2026-07-03; this doc is the cross-referenced synthesis. Re-run the sweeps if the app has moved on.
+
+> **Wiring status (2026-07-10, re-swept):** Tier C shrank. Newly WIRED (commit `4448fda7`,
+> hermetic-green, not GPU-verified): **Studio** → `/v1/studios` (lease/poll/warm-countdown/real
+> meter; Card takes `?studio=` and dispatches on it), **Private session** → `/v1/sessions/tee`
+> (in-browser x25519 keypair, Phasis stepline, end-session; React route moved to **/private** —
+> prod `/tee` is the WASM tunnel client and shadows the SPA), **CanonicRun** pause/resume,
+> **EditioExport** retract-hosting. Ceremony was already wired (`lib/ceremony.ts` hits
+> `/v1/ceremony` with an honest `announced` fallback — the old Tier C entry was wrong).
+> Remaining mock, all backend-first: Datasets/Dataset/CaptionJob/Derive/TrainRun (T4/T5),
+> Chat (Concierge), Canvas (no spells HTTP), Vault (arcanum snarkjs thread), Space (needs the
+> embedding→3D projection pipeline). Dead client methods now: `getTeam`, `listDatasets`,
+> `trainingCost` only.

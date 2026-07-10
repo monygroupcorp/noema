@@ -1,16 +1,23 @@
-import { Collection } from 'mongodb'
+import { Collection, MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import type { Signum, Signa, Signorum, Reservatio, Transferatio, SignumForma } from '../types/significandi.js'
 import { transferVia } from '../ledger/transfer.js'
 
 function toDoc(s: Partial<Signum>): Record<string, unknown> {
   const { valor, ...rest } = s
-  return { ...rest, valor: valor !== undefined ? valor.toString() : '0' }
+  const v = valor !== undefined ? valor : 0n
+  // `valor` stays the authoritative bigint, serialized as a string (Mongo can't store bigint).
+  // `valorNum` is a lossless numeric sort-mirror written alongside it (ledger-hardening Debt #1):
+  // it exists ONLY to let `reserve` do an index-backed server-side `sort({ valorNum: 1 }).limit(k)`
+  // instead of loading the whole pool and sorting in JS (string sort is lexicographic — "9" > "10").
+  // valor is always impetus-scale (never wei), so Number() is exact well below 2^53 (~$3T of impetus).
+  return { ...rest, valor: v.toString(), valorNum: Number(v) }
 }
 
 function fromDoc(doc: Record<string, unknown>): Signum {
+  // valorNum is an internal sort-mirror — strip it so the domain Signum stays clean (valor is truth).
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { _id, valor, ...rest } = doc as Record<string, unknown> & { _id: unknown; valor: string }
+  const { _id, valor, valorNum, ...rest } = doc as Record<string, unknown> & { _id: unknown; valor: string; valorNum: unknown }
   return { ...rest, valor: BigInt(valor) } as Signum
 }
 
@@ -20,13 +27,20 @@ function identityQuery(by: { animaId: string } | { commitment: string }): Record
 }
 
 export class MongoSignorum implements Signorum {
-  constructor(private col: Collection) {}
+  // `client` is required: settle spans two writes that must commit all-or-nothing, so it opens a
+  // Mongo transaction (see settle). There is deliberately no client-less fallback — a silent
+  // non-atomic settle path is the exact value-loss bug this class is being hardened against.
+  constructor(private col: Collection, private client: MongoClient) {}
 
   async issue(input: Omit<Signum, 'id' | 'natum' | 'status'>): Promise<Signum> {
     if ((input.forma === 'arcanum' || input.forma === 'tessera') && input.animaId !== undefined) {
       throw new Error(`privacy invariant: ${input.forma} forma must not have animaId`)
     }
     const signum: Signum = { ...input, id: uuidv4(), natum: new Date(), status: 'valid' }
+    // insertOne surfaces a duplicate-key (E11000) error unswallowed — that is deliberate: the
+    // fiat funding rail's unique PARTIAL index on (testis where auctor:'stripe:purchase') makes a
+    // concurrent/redelivered Stripe credit collide here, and the credit helper catches the dup-key
+    // to replay the original credit instead of double-minting. Do NOT swallow it.
     await this.col.insertOne(toDoc(signum))
     return signum
   }
@@ -73,17 +87,26 @@ export class MongoSignorum implements Signorum {
       const remaining = amount - lockedTotal
       if (remaining <= 0n) break
 
-      // Fresh read of still-valid candidates; sort smallest-first in JS (valor is stored as a
-      // string, so a Mongo sort would order lexicographically) to minimise greedy overshoot.
-      const candidates = (await this.col.find({ ...idq, status: 'valid' }).toArray())
-        .sort((a, b) => (BigInt(a.valor as string) < BigInt(b.valor as string) ? -1 : 1))
+      // Fresh read of still-valid candidates, smallest-first. Ordering is pushed into Mongo via the
+      // `valorNum` sort-mirror (index-backed sort on { ...idq, status:'valid', valorNum:1 }), so we
+      // stream candidates in true numeric order instead of full-loading + sorting in JS. Iterating
+      // the cursor and breaking once `remaining` is covered pulls only the ~k coins actually needed
+      // (k tiny + bounded), turning the old O(n)-in-pool-size read into ~O(k). Same greedy smallest-
+      // first SELECTION as before — just server-side ordering + early termination.
+      const cursor = this.col
+        .find({ ...idq, status: 'valid' })
+        .sort({ valorNum: 1 })
 
       const pick: string[] = []
       let pickSum = 0n
-      for (const d of candidates) {
-        if (pickSum >= remaining) break
-        pick.push(d.id as string)
-        pickSum += BigInt(d.valor as string)
+      try {
+        for await (const d of cursor) {
+          if (pickSum >= remaining) break
+          pick.push(d.id as string)
+          pickSum += BigInt(d.valor as string)
+        }
+      } finally {
+        await cursor.close()
       }
       if (pick.length === 0) break   // nothing valid left to grab → uncoverable
 
@@ -162,20 +185,45 @@ export class MongoSignorum implements Signorum {
     }
 
     const expensum = new Date()
-    await this.col.updateMany(
-      { id: { $in: signaIds }, status: 'locked' },
-      { $set: { status: 'spent', expensum, actumId } }
-    )
-
     const delta = total - actualImpetus
-    if (delta <= 0n || docs.length === 0) return
 
-    // Refund the unspent delta to the same identity (mirrors MemorySignorum.settle).
-    const first = docs[0] as Record<string, unknown>
-    if (first.forma === 'arcanum' && first.testis) {
-      await this.issue({ forma: 'arcanum', valor: delta, auctor: 'settle:delta', testis: first.testis as string })
-    } else if (first.animaId) {
-      await this.issue({ forma: first.forma as SignumForma, valor: delta, auctor: 'settle:delta', animaId: first.animaId as string })
+    // Build the overshoot-refund signum up front (identity/forma selection mirrors
+    // MemorySignorum.settle). Constructing it — id included — OUTSIDE the transaction keeps the
+    // withTransaction callback idempotent: a transient retry re-runs against a rolled-back attempt
+    // (nothing persisted), so it re-inserts the SAME id, never a second refund.
+    let refundDoc: Record<string, unknown> | null = null
+    if (delta > 0n && docs.length > 0) {
+      const first = docs[0] as Record<string, unknown>
+      let refund: Omit<Signum, 'id' | 'natum' | 'status'> | null = null
+      if (first.forma === 'arcanum' && first.testis) {
+        refund = { forma: 'arcanum', valor: delta, auctor: 'settle:delta', testis: first.testis as string }
+      } else if (first.animaId) {
+        refund = { forma: first.forma as SignumForma, valor: delta, auctor: 'settle:delta', animaId: first.animaId as string }
+      }
+      if (refund) {
+        refundDoc = toDoc({ ...refund, id: uuidv4(), natum: new Date(), status: 'valid' } as Signum)
+      }
+    }
+
+    // Atomicity (ledger Debt #2): the spend and the overshoot-refund must commit all-or-nothing.
+    // Left as two separate writes, a crash between them spends `total` yet never issues the refund —
+    // the identity loses `amount + overshoot`. A single-identity Mongo transaction makes a crash/abort
+    // roll the spend back so the signa stay `locked` (recoverable), never half-applied. MemorySignorum
+    // is single-threaded/synchronous → already atomic, so it needs no equivalent.
+    const session = this.client.startSession()
+    try {
+      await session.withTransaction(async () => {
+        await this.col.updateMany(
+          { id: { $in: signaIds }, status: 'locked' },
+          { $set: { status: 'spent', expensum, actumId } },
+          { session },
+        )
+        if (refundDoc) {
+          await this.col.insertOne(refundDoc, { session })
+        }
+      })
+    } finally {
+      await session.endSession()
     }
   }
 }
