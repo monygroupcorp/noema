@@ -64,6 +64,20 @@ export function commitment(): string {
   return c;
 }
 
+// ── Active Arcanum purse — the anonymous bearer token runs spend from ────────
+// A Vault-minted purse the user has chosen to pay with. Distinct from every other
+// identity path: when set, createRun() sends it as `x-bursa-token`. Single active
+// pointer (localStorage `noema-active-purse`); Vault's "use this purse" sets it, and
+// the Card run surface shows a "paying with purse …" indicator + a clear affordance.
+const ACTIVE_PURSE_KEY = 'noema-active-purse';
+export function setActivePurse(token: string | null): void {
+  if (token) localStorage.setItem(ACTIVE_PURSE_KEY, token);
+  else localStorage.removeItem(ACTIVE_PURSE_KEY);
+}
+export function getActivePurse(): string | null {
+  return localStorage.getItem(ACTIVE_PURSE_KEY);
+}
+
 // ── Multi-session store (JWT) — layered OVER the anon commitment ─────────────
 // The Twitter model: one browser holds several named logins at once, keyed by
 // animaId, with a single ACTIVE pointer. When an account is active its token is
@@ -200,9 +214,15 @@ export const api = {
   quote: (body: Pick<RunRequest, 'modusId' | 'verb' | 'aditus'>) =>
     fetch('/v1/runs/quote', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ impetus: string; recipient?: string }>),
-  createRun: (body: RunRequest) =>
-    fetch('/v1/runs', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
-      .then(j<{ run: Run }>),
+  // The ONLY route that spends an anonymous purse: when a Vault purse is active, its
+  // bearer token rides as `x-bursa-token` on the run request (and only this request —
+  // authHeaders() is untouched, so every other route keeps its identity/anon-commitment
+  // path). The server reads the header and drains that purse instead of an identified balance.
+  createRun: (body: RunRequest) => {
+    const purse = getActivePurse();
+    const headers = { ...authHeaders(), ...(purse ? { 'x-bursa-token': purse } : {}) };
+    return fetch('/v1/runs', { method: 'POST', headers, body: JSON.stringify(body) }).then(j<{ run: Run }>);
+  },
   getRun: (id: string) => fetch(`/v1/runs/${id}`).then(j<{ run: Run }>),
   // SSE — returns an EventSource the caller subscribes to.
   streamRun: (id: string) => new EventSource(`/v1/runs/${id}/stream`),
@@ -445,6 +465,34 @@ export const api = {
   removeSecret: (provider: string) =>
     fetch(`/v1/me/secrets/${provider}`, { method: 'DELETE', headers: authHeaders() }).then(jSecret),
 
+  // ── Arcanum (anonymous ZK credit rail) — mounted at /arcanum, NOT /v1 ────────
+  // The client holds the note secrets; these calls only ever carry the commitment,
+  // a Groth16 proof, or a bearer token — never the nullifier/secret. See lib/arcanum.ts.
+  arcanum: {
+    // Prover discovery: where to fetch wasm/zkey + whether the ceremony is finalized.
+    // ready:false → the whole mint path stays disabled (no fiction), link to /ceremony.
+    config: () => fetch('/arcanum/config').then(j<ArcanumConfig>),
+    // Convert identified balance → anonymous note. Signed-in path only (authHeaders →
+    // Bearer). Client generates (nullifier, secret) and sends ONLY the commitment; the
+    // server inserts the leaf and returns the Merkle path. 501 if the server can't resolve
+    // an identity (anon caller). valor is a decimal-bigint string.
+    issue: (body: { valor: string; commitment: string; nullifier: string }) =>
+      fetch('/arcanum/issue', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+        .then(j<ArcanumIssuance>),
+    // Fresh Merkle inclusion proof for a leaf (root moves as the tree grows — re-fetch
+    // right before proving so the proof's root matches the current tree root).
+    treeProof: (leafIndex: number) =>
+      fetch(`/arcanum/tree/proof/${leafIndex}`).then(j<{ proof: ArcanumMerkleProofView }>),
+    // Redeem a spend proof once → mint an anonymous bearer purse. The note's nullifier is
+    // burned server-side; 409 if it was already spent (idempotent — treat as already-minted).
+    mintPurse: (arcanumProof: unknown) =>
+      fetch('/arcanum/purse', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ arcanumProof }) })
+        .then(j<{ token: string; credits: string }>),
+    // Live balance for a purse token. 404 once it doesn't exist / was never minted.
+    getPurse: (token: string) =>
+      fetch(`/arcanum/purse/${encodeURIComponent(token)}`).then(j<{ token: string; credits: string; createdAt?: string }>),
+  },
+
   // ── Fiat auth (username/password rail) ───────────────────────────────────────
   // Anonymous username+password — NO email. Register logs you in immediately (mints a
   // session). These deliberately do NOT send a commitment (a named account is a different
@@ -562,6 +610,26 @@ export interface SecretView {
   status: 'connected' | 'absent';
   expiresAt?: string;
   warning?: string;
+}
+
+// ── Arcanum wire shapes (GET /arcanum/config, POST /arcanum/issue, /tree/proof) ──
+// Prover discovery. ready=false when wasm or zkey isn't configured server-side — the
+// Vault mint path stays disabled and links to the ceremony rather than faking readiness.
+export interface ArcanumConfig { wasmUrl: string; zkeyUrl: string | null; depth: number; ready: boolean }
+// What POST /arcanum/issue returns (mirror src/arcanum/types.ts ArcanumIssuance). We
+// already hold valor locally; the load-bearing fields here are leafIndex + the Merkle path.
+export interface ArcanumIssuance {
+  note: { nullifierHash: string; commitment: string; leafIndex: number; valor: string; spent: boolean };
+  merkleRoot: string;
+  merklePathElements: string[];
+  merklePathIndices: number[];
+}
+// A fresh Merkle inclusion proof (mirror src/arcanum/ArcanumTree.ts ArcanumMerkleProof).
+export interface ArcanumMerkleProofView {
+  root: string;
+  leafIndex: number;
+  pathElements: string[];
+  pathIndices: number[];
 }
 
 export interface DatasetSummary { id: string; name: string; images?: number; updatedAt?: string }
