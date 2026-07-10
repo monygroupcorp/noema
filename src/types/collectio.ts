@@ -165,6 +165,14 @@ export interface Collectio {
 
   status: CollectioStatus
 
+  /**
+   * When set, dispatching new pieces is held — orthogonal to `status` (a
+   * `CollectioStatus` is NOT added for this; `agens` stays `agens` while
+   * paused). A `Date` (not a boolean) for auditability: when the pause took
+   * effect. Absent = not paused. Cleared (unset) on resume.
+   */
+  pausatum?: Date
+
   /** Total impetus consumed across all completed acta */
   impetusTotal: bigint
 
@@ -186,5 +194,5 @@ export interface Collectionum {
   list(filter?: Partial<Pick<Collectio, 'status'>>): Promise<Collectiones>
   listByStatus(status: CollectioStatus): Promise<Collectiones>
   create(collectio: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal'>): Promise<Collectio>
-  update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'numerus' | 'tractus' | 'provenanceHash'>>): Promise<Collectio>
+  update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'numerus' | 'tractus' | 'provenanceHash' | 'pausatum'>>): Promise<Collectio>
 }

@@ -3104,6 +3104,10 @@
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
                         },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+                        },
                         "owners": {
                           "type": "array",
                           "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -3422,6 +3426,10 @@
                             "type": "boolean",
                             "description": "Whether each piece is held for review before it counts."
                           },
+                          "paused": {
+                            "type": "boolean",
+                            "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+                          },
                           "owners": {
                             "type": "array",
                             "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -3621,6 +3629,10 @@
                         "reviewEnabled": {
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
+                        },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
                         },
                         "owners": {
                           "type": "array",
@@ -3911,6 +3923,10 @@
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
                         },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+                        },
                         "owners": {
                           "type": "array",
                           "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -4119,6 +4135,10 @@
                         "reviewEnabled": {
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
+                        },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
                         },
                         "owners": {
                           "type": "array",
@@ -4541,6 +4561,10 @@
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
                         },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+                        },
                         "owners": {
                           "type": "array",
                           "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -4770,6 +4794,10 @@
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
                         },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+                        },
                         "owners": {
                           "type": "array",
                           "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -4979,6 +5007,10 @@
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
                         },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+                        },
                         "owners": {
                           "type": "array",
                           "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -5187,6 +5219,10 @@
                         "reviewEnabled": {
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
+                        },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
                         },
                         "owners": {
                           "type": "array",
