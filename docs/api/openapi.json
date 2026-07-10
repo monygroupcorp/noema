@@ -2981,6 +2981,107 @@
             }
           }
         ]
+      },
+      "delete": {
+        "summary": "End the lease deliberately (owner-scoped, idempotent): terminate the pod, close the session. Double-DELETE returns the same terminal view, 200; a stranger gets not_found.studio.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A newly leased studio.",
+                  "properties": {
+                    "studio": {
+                      "type": "object",
+                      "description": "A hosted studio. `studioId` is what POST /v1/runs { studioId } targets.",
+                      "properties": {
+                        "studioId": {
+                          "type": "string",
+                          "description": "The studio id (a Modo session) — pass as run.studioId."
+                        },
+                        "podId": {
+                          "type": "string",
+                          "description": "The underlying pod id."
+                        },
+                        "status": {
+                          "type": "string",
+                          "description": "Pod-derived liveness: idle | running | provisioning | draining | terminated."
+                        },
+                        "gpu": {
+                          "type": "string",
+                          "description": "GPU model the studio runs on."
+                        },
+                        "runtime": {
+                          "type": "string",
+                          "description": "On-pod runtime (ComfyUI / llama.cpp / …)."
+                        },
+                        "imageRef": {
+                          "type": "string",
+                          "description": "The pod image reference."
+                        },
+                        "warmUntil": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When the warm window expires."
+                        },
+                        "budgetImpetus": {
+                          "type": "string",
+                          "description": "The authorized session budget (the maxImpetus cap), as a string."
+                        },
+                        "costPerHr": {
+                          "type": "number",
+                          "description": "The pod's real hourly USD cost — the source of truth for warm-time billing."
+                        },
+                        "impetusPerSecond": {
+                          "type": "string",
+                          "description": "Coarse burn-rate hint (impetus/sec); billing is per-window from costPerHr. Prefer costPerHr for an accurate rate."
+                        }
+                      },
+                      "required": [
+                        "studioId",
+                        "status",
+                        "budgetImpetus"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "studio"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/collectiones": {
@@ -3103,6 +3204,10 @@
                         "reviewEnabled": {
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
+                        },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
                         },
                         "owners": {
                           "type": "array",
@@ -3422,6 +3527,10 @@
                             "type": "boolean",
                             "description": "Whether each piece is held for review before it counts."
                           },
+                          "paused": {
+                            "type": "boolean",
+                            "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+                          },
                           "owners": {
                             "type": "array",
                             "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -3621,6 +3730,10 @@
                         "reviewEnabled": {
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
+                        },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
                         },
                         "owners": {
                           "type": "array",
@@ -3911,6 +4024,10 @@
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
                         },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+                        },
                         "owners": {
                           "type": "array",
                           "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -4119,6 +4236,10 @@
                         "reviewEnabled": {
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
+                        },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
                         },
                         "owners": {
                           "type": "array",
@@ -4541,6 +4662,10 @@
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
                         },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+                        },
                         "owners": {
                           "type": "array",
                           "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -4770,6 +4895,10 @@
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
                         },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+                        },
                         "owners": {
                           "type": "array",
                           "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -4979,6 +5108,10 @@
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
                         },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+                        },
                         "owners": {
                           "type": "array",
                           "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
@@ -5187,6 +5320,10 @@
                         "reviewEnabled": {
                           "type": "boolean",
                           "description": "Whether each piece is held for review before it counts."
+                        },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
                         },
                         "owners": {
                           "type": "array",
@@ -7873,6 +8010,1065 @@
           }
         ]
       }
+    },
+    "/tabulae": {
+      "get": {
+        "summary": "List the caller's own canvas workspaces (Tabulae). Owner-scoped.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tabulae": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "A canvas workspace — the authoring layer above a published Modus.",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "nomen": {
+                            "type": "string",
+                            "description": "The workspace's title."
+                          },
+                          "descriptio": {
+                            "type": "string",
+                            "description": "Optional description for the marketplace listing."
+                          },
+                          "auctor": {
+                            "type": "object",
+                            "description": "The owning identity — { animaId } | { commitment } | { bursaToken }."
+                          },
+                          "nodi": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "description": "A node placed on the canvas — references the Modus/Essentia it represents.",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "description": "Unique within this Tabula's nodi."
+                                },
+                                "modusId": {
+                                  "type": "string",
+                                  "description": "FK → Modus or Essentia this node represents."
+                                },
+                                "x": {
+                                  "type": "number",
+                                  "description": "Canvas x position."
+                                },
+                                "y": {
+                                  "type": "number",
+                                  "description": "Canvas y position."
+                                },
+                                "aditus": {
+                                  "type": "object",
+                                  "description": "Per-node input overrides — become the published Modus's Porta.default values."
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "modusId",
+                                "x",
+                                "y",
+                                "aditus"
+                              ]
+                            }
+                          },
+                          "vincula": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "description": "A wire between two nodes — fonte (source) port → scopus (target) port.",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "fonteNodusId": {
+                                  "type": "string",
+                                  "description": "FK → TabulaNodus.id (source)."
+                                },
+                                "fontePorta": {
+                                  "type": "string",
+                                  "description": "Output port name on the source node."
+                                },
+                                "scopusNodusId": {
+                                  "type": "string",
+                                  "description": "FK → TabulaNodus.id (target)."
+                                },
+                                "scopusPorta": {
+                                  "type": "string",
+                                  "description": "Input port name on the target node."
+                                },
+                                "discordantia": {
+                                  "type": "boolean",
+                                  "description": "True when the source/target port types don't match (flagged in the UI; publish rejects it)."
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "fonteNodusId",
+                                "fontePorta",
+                                "scopusNodusId",
+                                "scopusPorta",
+                                "discordantia"
+                              ]
+                            }
+                          },
+                          "modusId": {
+                            "type": "string",
+                            "description": "FK → Modus. Set once this Tabula has been published."
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "published",
+                              "archivata"
+                            ]
+                          },
+                          "visibilitas": {
+                            "type": "string",
+                            "enum": [
+                              "privata",
+                              "communis",
+                              "publica"
+                            ]
+                          },
+                          "fonteId": {
+                            "type": "string",
+                            "description": "FK → Tabula this workspace was forked from, if any."
+                          },
+                          "templateId": {
+                            "type": "string",
+                            "description": "FK → the master Tabula this workspace derives from, if any."
+                          },
+                          "followTemplate": {
+                            "type": "boolean"
+                          },
+                          "natum": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "mutatum": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "nomen",
+                          "auctor",
+                          "nodi",
+                          "vincula",
+                          "status",
+                          "visibilitas",
+                          "natum",
+                          "mutatum"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "tabulae"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a draft Tabula owned by the caller.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tabula": {
+                      "type": "object",
+                      "description": "A canvas workspace — the authoring layer above a published Modus.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "nomen": {
+                          "type": "string",
+                          "description": "The workspace's title."
+                        },
+                        "descriptio": {
+                          "type": "string",
+                          "description": "Optional description for the marketplace listing."
+                        },
+                        "auctor": {
+                          "type": "object",
+                          "description": "The owning identity — { animaId } | { commitment } | { bursaToken }."
+                        },
+                        "nodi": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "A node placed on the canvas — references the Modus/Essentia it represents.",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "description": "Unique within this Tabula's nodi."
+                              },
+                              "modusId": {
+                                "type": "string",
+                                "description": "FK → Modus or Essentia this node represents."
+                              },
+                              "x": {
+                                "type": "number",
+                                "description": "Canvas x position."
+                              },
+                              "y": {
+                                "type": "number",
+                                "description": "Canvas y position."
+                              },
+                              "aditus": {
+                                "type": "object",
+                                "description": "Per-node input overrides — become the published Modus's Porta.default values."
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "modusId",
+                              "x",
+                              "y",
+                              "aditus"
+                            ]
+                          }
+                        },
+                        "vincula": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "A wire between two nodes — fonte (source) port → scopus (target) port.",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "fonteNodusId": {
+                                "type": "string",
+                                "description": "FK → TabulaNodus.id (source)."
+                              },
+                              "fontePorta": {
+                                "type": "string",
+                                "description": "Output port name on the source node."
+                              },
+                              "scopusNodusId": {
+                                "type": "string",
+                                "description": "FK → TabulaNodus.id (target)."
+                              },
+                              "scopusPorta": {
+                                "type": "string",
+                                "description": "Input port name on the target node."
+                              },
+                              "discordantia": {
+                                "type": "boolean",
+                                "description": "True when the source/target port types don't match (flagged in the UI; publish rejects it)."
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "fonteNodusId",
+                              "fontePorta",
+                              "scopusNodusId",
+                              "scopusPorta",
+                              "discordantia"
+                            ]
+                          }
+                        },
+                        "modusId": {
+                          "type": "string",
+                          "description": "FK → Modus. Set once this Tabula has been published."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "published",
+                            "archivata"
+                          ]
+                        },
+                        "visibilitas": {
+                          "type": "string",
+                          "enum": [
+                            "privata",
+                            "communis",
+                            "publica"
+                          ]
+                        },
+                        "fonteId": {
+                          "type": "string",
+                          "description": "FK → Tabula this workspace was forked from, if any."
+                        },
+                        "templateId": {
+                          "type": "string",
+                          "description": "FK → the master Tabula this workspace derives from, if any."
+                        },
+                        "followTemplate": {
+                          "type": "boolean"
+                        },
+                        "natum": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "mutatum": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "nomen",
+                        "auctor",
+                        "nodi",
+                        "vincula",
+                        "status",
+                        "visibilitas",
+                        "natum",
+                        "mutatum"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tabula"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Create a draft Tabula owned by the caller.",
+                "properties": {
+                  "nomen": {
+                    "type": "string",
+                    "description": "The workspace's title."
+                  },
+                  "descriptio": {
+                    "type": "string"
+                  },
+                  "visibilitas": {
+                    "type": "string",
+                    "enum": [
+                      "privata",
+                      "communis",
+                      "publica"
+                    ],
+                    "description": "Defaults to 'privata'."
+                  }
+                },
+                "required": [
+                  "nomen"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tabulae/{id}": {
+      "get": {
+        "summary": "Fetch one owned Tabula by id (404 if not the owner).",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tabula": {
+                      "type": "object",
+                      "description": "A canvas workspace — the authoring layer above a published Modus.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "nomen": {
+                          "type": "string",
+                          "description": "The workspace's title."
+                        },
+                        "descriptio": {
+                          "type": "string",
+                          "description": "Optional description for the marketplace listing."
+                        },
+                        "auctor": {
+                          "type": "object",
+                          "description": "The owning identity — { animaId } | { commitment } | { bursaToken }."
+                        },
+                        "nodi": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "A node placed on the canvas — references the Modus/Essentia it represents.",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "description": "Unique within this Tabula's nodi."
+                              },
+                              "modusId": {
+                                "type": "string",
+                                "description": "FK → Modus or Essentia this node represents."
+                              },
+                              "x": {
+                                "type": "number",
+                                "description": "Canvas x position."
+                              },
+                              "y": {
+                                "type": "number",
+                                "description": "Canvas y position."
+                              },
+                              "aditus": {
+                                "type": "object",
+                                "description": "Per-node input overrides — become the published Modus's Porta.default values."
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "modusId",
+                              "x",
+                              "y",
+                              "aditus"
+                            ]
+                          }
+                        },
+                        "vincula": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "A wire between two nodes — fonte (source) port → scopus (target) port.",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "fonteNodusId": {
+                                "type": "string",
+                                "description": "FK → TabulaNodus.id (source)."
+                              },
+                              "fontePorta": {
+                                "type": "string",
+                                "description": "Output port name on the source node."
+                              },
+                              "scopusNodusId": {
+                                "type": "string",
+                                "description": "FK → TabulaNodus.id (target)."
+                              },
+                              "scopusPorta": {
+                                "type": "string",
+                                "description": "Input port name on the target node."
+                              },
+                              "discordantia": {
+                                "type": "boolean",
+                                "description": "True when the source/target port types don't match (flagged in the UI; publish rejects it)."
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "fonteNodusId",
+                              "fontePorta",
+                              "scopusNodusId",
+                              "scopusPorta",
+                              "discordantia"
+                            ]
+                          }
+                        },
+                        "modusId": {
+                          "type": "string",
+                          "description": "FK → Modus. Set once this Tabula has been published."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "published",
+                            "archivata"
+                          ]
+                        },
+                        "visibilitas": {
+                          "type": "string",
+                          "enum": [
+                            "privata",
+                            "communis",
+                            "publica"
+                          ]
+                        },
+                        "fonteId": {
+                          "type": "string",
+                          "description": "FK → Tabula this workspace was forked from, if any."
+                        },
+                        "templateId": {
+                          "type": "string",
+                          "description": "FK → the master Tabula this workspace derives from, if any."
+                        },
+                        "followTemplate": {
+                          "type": "boolean"
+                        },
+                        "natum": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "mutatum": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "nomen",
+                        "auctor",
+                        "nodi",
+                        "vincula",
+                        "status",
+                        "visibilitas",
+                        "natum",
+                        "mutatum"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tabula"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "summary": "Patch a Tabula's graph/metadata (nomen/descriptio/nodi/vincula/visibilitas). Owner-only.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tabula": {
+                      "type": "object",
+                      "description": "A canvas workspace — the authoring layer above a published Modus.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "nomen": {
+                          "type": "string",
+                          "description": "The workspace's title."
+                        },
+                        "descriptio": {
+                          "type": "string",
+                          "description": "Optional description for the marketplace listing."
+                        },
+                        "auctor": {
+                          "type": "object",
+                          "description": "The owning identity — { animaId } | { commitment } | { bursaToken }."
+                        },
+                        "nodi": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "A node placed on the canvas — references the Modus/Essentia it represents.",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "description": "Unique within this Tabula's nodi."
+                              },
+                              "modusId": {
+                                "type": "string",
+                                "description": "FK → Modus or Essentia this node represents."
+                              },
+                              "x": {
+                                "type": "number",
+                                "description": "Canvas x position."
+                              },
+                              "y": {
+                                "type": "number",
+                                "description": "Canvas y position."
+                              },
+                              "aditus": {
+                                "type": "object",
+                                "description": "Per-node input overrides — become the published Modus's Porta.default values."
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "modusId",
+                              "x",
+                              "y",
+                              "aditus"
+                            ]
+                          }
+                        },
+                        "vincula": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "A wire between two nodes — fonte (source) port → scopus (target) port.",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "fonteNodusId": {
+                                "type": "string",
+                                "description": "FK → TabulaNodus.id (source)."
+                              },
+                              "fontePorta": {
+                                "type": "string",
+                                "description": "Output port name on the source node."
+                              },
+                              "scopusNodusId": {
+                                "type": "string",
+                                "description": "FK → TabulaNodus.id (target)."
+                              },
+                              "scopusPorta": {
+                                "type": "string",
+                                "description": "Input port name on the target node."
+                              },
+                              "discordantia": {
+                                "type": "boolean",
+                                "description": "True when the source/target port types don't match (flagged in the UI; publish rejects it)."
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "fonteNodusId",
+                              "fontePorta",
+                              "scopusNodusId",
+                              "scopusPorta",
+                              "discordantia"
+                            ]
+                          }
+                        },
+                        "modusId": {
+                          "type": "string",
+                          "description": "FK → Modus. Set once this Tabula has been published."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "published",
+                            "archivata"
+                          ]
+                        },
+                        "visibilitas": {
+                          "type": "string",
+                          "enum": [
+                            "privata",
+                            "communis",
+                            "publica"
+                          ]
+                        },
+                        "fonteId": {
+                          "type": "string",
+                          "description": "FK → Tabula this workspace was forked from, if any."
+                        },
+                        "templateId": {
+                          "type": "string",
+                          "description": "FK → the master Tabula this workspace derives from, if any."
+                        },
+                        "followTemplate": {
+                          "type": "boolean"
+                        },
+                        "natum": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "mutatum": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "nomen",
+                        "auctor",
+                        "nodi",
+                        "vincula",
+                        "status",
+                        "visibilitas",
+                        "natum",
+                        "mutatum"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tabula"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Patch the Tabula's graph/metadata. Omitted fields are left unchanged.",
+                "properties": {
+                  "nomen": {
+                    "type": "string"
+                  },
+                  "descriptio": {
+                    "type": "string"
+                  },
+                  "nodi": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "description": "A node placed on the canvas — references the Modus/Essentia it represents.",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "Unique within this Tabula's nodi."
+                        },
+                        "modusId": {
+                          "type": "string",
+                          "description": "FK → Modus or Essentia this node represents."
+                        },
+                        "x": {
+                          "type": "number",
+                          "description": "Canvas x position."
+                        },
+                        "y": {
+                          "type": "number",
+                          "description": "Canvas y position."
+                        },
+                        "aditus": {
+                          "type": "object",
+                          "description": "Per-node input overrides — become the published Modus's Porta.default values."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "modusId",
+                        "x",
+                        "y",
+                        "aditus"
+                      ]
+                    }
+                  },
+                  "vincula": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "description": "A wire between two nodes — fonte (source) port → scopus (target) port.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "fonteNodusId": {
+                          "type": "string",
+                          "description": "FK → TabulaNodus.id (source)."
+                        },
+                        "fontePorta": {
+                          "type": "string",
+                          "description": "Output port name on the source node."
+                        },
+                        "scopusNodusId": {
+                          "type": "string",
+                          "description": "FK → TabulaNodus.id (target)."
+                        },
+                        "scopusPorta": {
+                          "type": "string",
+                          "description": "Input port name on the target node."
+                        },
+                        "discordantia": {
+                          "type": "boolean",
+                          "description": "True when the source/target port types don't match (flagged in the UI; publish rejects it)."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "fonteNodusId",
+                        "fontePorta",
+                        "scopusNodusId",
+                        "scopusPorta",
+                        "discordantia"
+                      ]
+                    }
+                  },
+                  "visibilitas": {
+                    "type": "string",
+                    "enum": [
+                      "privata",
+                      "communis",
+                      "publica"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a Tabula outright. Owner-only.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success."
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/tabulae/{id}/publish": {
+      "post": {
+        "summary": "Compile the canvas graph into a compositus Modus and register it — immediately runnable via POST /v1/runs. 400 with the offending vinculum on a cycle or a port-type mismatch.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "modusId": {
+                      "type": "string",
+                      "description": "The registered compositus Modus id — immediately runnable via POST /v1/runs."
+                    }
+                  },
+                  "required": [
+                    "modusId"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/me/flows": {
+      "get": {
+        "summary": "List the caller's own registered flows (owner-scoped discovery for the canvas node picker) — the public catalog's owner-filtered twin.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "flows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "nomen": {
+                            "type": "string",
+                            "description": "The flow display name."
+                          },
+                          "versio": {
+                            "type": "string",
+                            "description": "The flow version."
+                          },
+                          "categoria": {
+                            "description": "An optional catalog tag."
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "nomen",
+                          "versio"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "flows"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8009,7 +9205,15 @@
       "httpStatus": 422
     },
     {
+      "code": "input.invalid_graph",
+      "httpStatus": 400
+    },
+    {
       "code": "not_found.flow",
+      "httpStatus": 404
+    },
+    {
+      "code": "not_found.tabula",
       "httpStatus": 404
     },
     {

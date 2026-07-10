@@ -37,10 +37,20 @@ export class MongoCollectio implements Collectionum {
     return this.list({ status })
   }
 
-  async update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'numerus' | 'tractus' | 'provenanceHash'>>): Promise<Collectio> {
+  async update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'numerus' | 'tractus' | 'provenanceHash' | 'pausatum'>>): Promise<Collectio> {
+    // `pausatum: undefined` means "clear the pause" (resume) — $unset it rather
+    // than $set-ing an undefined value (which Mongo would otherwise reject/drop).
+    const { pausatum, ...rest } = patch
+    const update: Record<string, unknown> = {}
+    const setDoc = toDoc(rest)
+    if (Object.keys(setDoc).length) update.$set = setDoc
+    if ('pausatum' in patch) {
+      if (pausatum === undefined) update.$unset = { pausatum: '' }
+      else update.$set = { ...(update.$set as Record<string, unknown> | undefined), pausatum }
+    }
     const result = await this.col.findOneAndUpdate(
       { id },
-      { $set: toDoc(patch) },
+      update,
       { returnDocument: 'after' }
     )
     if (!result) throw new Error(`Collectio not found: ${id}`)

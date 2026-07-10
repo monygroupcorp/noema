@@ -66,6 +66,12 @@ export const Errors = {
   notFoundProject: (id: string) => new ApiError('not_found.project', `Project '${id}' not found`, 404),
   notFoundEdition: (id: string) => new ApiError('not_found.edition', `Edition '${id}' not found`, 404),
   notFoundModel: (id: string) => new ApiError('not_found.model', `Model '${id}' not found`, 404),
+  notFoundTabula: (id: string) => new ApiError('not_found.tabula', `Tabula '${id}' not found`, 404),
+  /** A Tabula's graph can't compile to a Modus — a cycle, a mismatched port wire, a node
+   *  pointing at an unknown modus, or an empty graph. `details.vinculumId` names the
+   *  offending wire when the failure is wire-specific (cycle/mismatch). */
+  tabulaGraphInvalid: (message: string, details?: { code: string; vinculumId?: string }) =>
+    new ApiError('input.invalid_graph', message, 400, { ...(details ? { details } : {}) }),
   /** A model can't be promoted to the public (commercial) catalog under its license. Private use is
    *  unaffected. 403 — a policy refusal, not a malformed request. */
   licenseRestricted: (message: string) => new ApiError('license.restricted', message, 403),

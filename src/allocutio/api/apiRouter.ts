@@ -26,6 +26,7 @@ import { API_CONTRACT } from './apiContract.js'
 import { generateOpenApi } from './docgen.js'
 import type { RunEventHub } from './RunEventHub.js'
 import type { MeExporter } from '../../crystal/MeExporter.js'
+import type { Tabula } from '../../types/tabula.js'
 
 const log = makeLogger('api:router')
 
@@ -68,6 +69,7 @@ export interface ApiFacade {
   provisionStudio(auctor: AuctorKey, opts: ProvisionStudioOpts): Promise<StudioView>
   getStudio(auctor: AuctorKey, studioId: string): Promise<StudioView>
   listStudios(auctor: AuctorKey): Promise<StudioView[]>
+  releaseStudio(auctor: AuctorKey, studioId: string): Promise<StudioView>
   provisionTeeSession(auctor: AuctorKey, opts: ProvisionTeeSessionOpts): Promise<TeeSessionView>
   getTeeSession(auctor: AuctorKey, sessionId: string): Promise<TeeSessionView>
   endTeeSession(auctor: AuctorKey, sessionId: string): Promise<void>
@@ -105,6 +107,14 @@ export interface ApiFacade {
   deleteProject(auctor: AuctorKey, id: string): Promise<void>
   fileAsset(auctor: AuctorKey, id: string, kind: string, assetId: string): Promise<Project>
   unfileAsset(auctor: AuctorKey, id: string, kind: string, assetId: string): Promise<Project>
+  // --- Tabulae (canvas workspaces) ---
+  listTabulae(auctor: AuctorKey): Promise<Tabula[]>
+  createTabula(auctor: AuctorKey, opts: { nomen: string; descriptio?: string; visibilitas?: Tabula['visibilitas'] }): Promise<Tabula>
+  getTabula(auctor: AuctorKey, id: string): Promise<Tabula>
+  updateTabula(auctor: AuctorKey, id: string, patch: { nomen?: string; descriptio?: string; nodi?: Tabula['nodi']; vincula?: Tabula['vincula']; visibilitas?: Tabula['visibilitas'] }): Promise<Tabula>
+  deleteTabula(auctor: AuctorKey, id: string): Promise<void>
+  publishTabula(auctor: AuctorKey, id: string): Promise<{ modusId: string }>
+  listMyFlows(auctor: AuctorKey): Promise<unknown[]>
   // --- Fiat funding rail (Stripe) ---
   createCheckout(auctor: AuctorKey, opts: { packId: string; successUrl?: string; cancelUrl?: string }): Promise<{ url: string; sessionId: string }>
   handleStripeWebhook(input: { rawBody: string; signature?: string }): Promise<{ status: number; body: { received: boolean; credited?: string; message?: string } }>
@@ -481,6 +491,55 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     res.json({ project: await api.unfileAsset(await auth(req), String(req.params.id), String(req.params.kind), String(req.params.assetId)) })
   }))
 
+  // GET /v1/tabulae — list the caller's own canvas workspaces. Owner-scoped (auth required;
+  // anon commitment/purse callers own their own drafts too).
+  router.get('/tabulae', wrap(async (req, res) => {
+    res.json({ tabulae: await api.listTabulae(await auth(req)) })
+  }))
+
+  // POST /v1/tabulae — create a new draft Tabula owned by the caller.
+  router.post('/tabulae', wrap(async (req, res) => {
+    const { nomen, descriptio, visibilitas } = req.body ?? {}
+    const tabula = await api.createTabula(await auth(req), { nomen, ...(descriptio !== undefined ? { descriptio } : {}), ...(visibilitas !== undefined ? { visibilitas } : {}) })
+    res.status(201).json({ tabula })
+  }))
+
+  // GET /v1/tabulae/:id — fetch one owned Tabula (404 for a stranger, same as unknown id).
+  router.get('/tabulae/:id', wrap(async (req, res) => {
+    res.json({ tabula: await api.getTabula(await auth(req), String(req.params.id)) })
+  }))
+
+  // PUT /v1/tabulae/:id — patch a Tabula's graph/metadata. Owner-only.
+  router.put('/tabulae/:id', wrap(async (req, res) => {
+    const { nomen, descriptio, nodi, vincula, visibilitas } = req.body ?? {}
+    const patch: Record<string, unknown> = {}
+    if (nomen !== undefined) patch.nomen = nomen
+    if (descriptio !== undefined) patch.descriptio = descriptio
+    if (nodi !== undefined) patch.nodi = nodi
+    if (vincula !== undefined) patch.vincula = vincula
+    if (visibilitas !== undefined) patch.visibilitas = visibilitas
+    res.json({ tabula: await api.updateTabula(await auth(req), String(req.params.id), patch) })
+  }))
+
+  // DELETE /v1/tabulae/:id — delete a Tabula outright. Owner-only.
+  router.delete('/tabulae/:id', wrap(async (req, res) => {
+    await api.deleteTabula(await auth(req), String(req.params.id))
+    res.status(200).json({ ok: true })
+  }))
+
+  // POST /v1/tabulae/:id/publish — compile the canvas graph into a compositus Modus and
+  // register it, immediately runnable via POST /v1/runs.
+  router.post('/tabulae/:id/publish', wrap(async (req, res) => {
+    res.status(200).json(await api.publishTabula(await auth(req), String(req.params.id)))
+  }))
+
+  // GET /v1/me/flows — the caller's own registered flows (owner-scoped discovery for the
+  // canvas node picker), the public catalog's `?mine` twin (`GET /v1/flows` stays canonical-
+  // only; smaller diff than making that route auth-aware).
+  router.get('/me/flows', wrap(async (req, res) => {
+    res.json({ flows: await api.listMyFlows(await auth(req)) })
+  }))
+
   // GET /v1/fundamenta — list compute substrates (public).
   router.get(
     '/fundamenta',
@@ -694,6 +753,17 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     wrap(async (req, res) => {
       const auctor = await auth(req)
       res.json({ studio: await api.getStudio(auctor, String(req.params.id)) })
+    }),
+  )
+
+  // DELETE /v1/studios/:id — end the lease deliberately (owner-scoped, idempotent):
+  // terminate the pod, close the session. Double-DELETE returns the same terminal
+  // view, 200; a stranger's DELETE gets not_found.studio.
+  router.delete(
+    '/studios/:id',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      res.json({ studio: await api.releaseStudio(auctor, String(req.params.id)) })
     }),
   )
 
