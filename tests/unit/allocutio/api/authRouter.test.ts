@@ -300,3 +300,14 @@ test('an invalid link code does not bind anything', async () => {
   const { personae, linkTokens } = harness()
   assert.equal(await linkTelegramToAccount({ personae, linkTokens }, '999', 'not-a-real-code'), 'invalid')
 })
+
+// ── Trust proxy setting for rate-limiter behind caddy ───────────────────────────────
+
+test('express app can set trust proxy for caddy reverse proxy', () => {
+  // The real src/index.ts calls app.set('trust proxy', 1) after express() creation
+  // to handle X-Forwarded-For headers from caddy. This allows express-rate-limit
+  // to correctly extract the client IP instead of treating the caddy IP as the client.
+  const testApp = express()
+  testApp.set('trust proxy', 1)
+  assert.equal(testApp.get('trust proxy'), 1, 'trust proxy should be 1 for single-hop caddy proxy')
+})
