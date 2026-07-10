@@ -89,6 +89,28 @@ export function markNoteSpent(nullifier: string): VaultState {
   return writeVault({ ...s, notes })
 }
 
+/**
+ * Backfill a note's Merkle leafIndex. A note is persisted with leafIndex -1 BEFORE
+ * /arcanum/issue is called (so a lost response can't discard the secret); this lands the
+ * real index once issuance is confirmed — either from the /issue response or, after a
+ * dropped response, from GET /arcanum/tree/leaf/:commitment.
+ */
+export function setNoteLeafIndex(nullifier: string, leafIndex: number): VaultState {
+  const s = readVault()
+  const notes = s.notes.map((n) => (n.nullifier === nullifier ? { ...n, leafIndex } : n))
+  return writeVault({ ...s, notes })
+}
+
+/**
+ * Drop a persisted note by nullifier. ONLY safe when the server cleanly rejected issuance
+ * BEFORE settling (a 4xx that guarantees no debit) — otherwise the note may back real,
+ * already-debited credit and must be kept for recovery.
+ */
+export function removeNote(nullifier: string): VaultState {
+  const s = readVault()
+  return writeVault({ ...s, notes: s.notes.filter((n) => n.nullifier !== nullifier) })
+}
+
 /** Persist a minted purse (idempotent on token). */
 export function addPurse(purse: VaultPurse): VaultState {
   const s = readVault()

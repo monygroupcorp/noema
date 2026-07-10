@@ -466,16 +466,21 @@ export const api = {
     fetch(`/v1/me/secrets/${provider}`, { method: 'DELETE', headers: authHeaders() }).then(jSecret),
 
   // ── Arcanum (anonymous ZK credit rail) — mounted at /arcanum, NOT /v1 ────────
-  // The client holds the note secrets; these calls only ever carry the commitment,
-  // a Groth16 proof, or a bearer token — never the nullifier/secret. See lib/arcanum.ts.
+  // The client holds the note SECRET (never transmitted). NOTE: the signed-in issue path
+  // below currently also sends the raw nullifier — see its comment. The bearer token and
+  // Groth16 proof are the only other things these calls carry. See lib/arcanum.ts.
   arcanum: {
     // Prover discovery: where to fetch wasm/zkey + whether the ceremony is finalized.
     // ready:false → the whole mint path stays disabled (no fiction), link to /ceremony.
     config: () => fetch('/arcanum/config').then(j<ArcanumConfig>),
     // Convert identified balance → anonymous note. Signed-in path only (authHeaders →
-    // Bearer). Client generates (nullifier, secret) and sends ONLY the commitment; the
-    // server inserts the leaf and returns the Merkle path. 501 if the server can't resolve
-    // an identity (anon caller). valor is a decimal-bigint string.
+    // Bearer). Client generates (nullifier, secret); the SECRET stays local, but the
+    // server route requires commitment+nullifier TOGETHER, so the raw nullifier IS sent
+    // here. That lets the server compute nullifierHash and link this authenticated funder
+    // to the note's eventual spend — a known privacy limitation of the signed-in path,
+    // tracked for a commitment-only (blind) issuance change (money-code spec gate). The
+    // server inserts the leaf and returns the Merkle path. 501 if it can't resolve an
+    // identity (anon caller). valor is a decimal-bigint string.
     issue: (body: { valor: string; commitment: string; nullifier: string }) =>
       fetch('/arcanum/issue', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
         .then(j<ArcanumIssuance>),
@@ -483,6 +488,13 @@ export const api = {
     // right before proving so the proof's root matches the current tree root).
     treeProof: (leafIndex: number) =>
       fetch(`/arcanum/tree/proof/${leafIndex}`).then(j<{ proof: ArcanumMerkleProofView }>),
+    // Look up a leaf by its commitment. Used to RECOVER a note's leafIndex when the /issue
+    // response was lost after the server already settled the debit and inserted the leaf —
+    // without this the note (secret held locally) would be stuck at leafIndex -1. 404 until
+    // the commitment is in the tree (e.g. issuance actually failed before settling).
+    getLeaf: (commitment: string) =>
+      fetch(`/arcanum/tree/leaf/${encodeURIComponent(commitment)}`)
+        .then(j<{ leaf: { commitment: string; leafIndex: number; valor: string; insertedAt?: string } }>),
     // Redeem a spend proof once → mint an anonymous bearer purse. The note's nullifier is
     // burned server-side; 409 if it was already spent (idempotent — treat as already-minted).
     mintPurse: (arcanumProof: unknown) =>
