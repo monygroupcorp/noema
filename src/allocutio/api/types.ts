@@ -135,6 +135,9 @@ export interface Collection {
   tractus?: import('../../types/collectio.js').Tractus[]
   /** Whether each piece is held for review before it counts (see Collectio.reviewEnabled). */
   reviewEnabled?: boolean
+  /** Dispatching new pieces is held (in-flight pieces still finish). Present + `true`
+   *  only while paused — absent means running normally. Survives a restart. */
+  paused?: boolean
   /** Pieces completed so far (approved, when review is on). */
   completed: number
   /** Pieces that failed to generate so far. */

@@ -102,6 +102,7 @@ export function toCollection(c: Collectio): Collection {
   if (c.owners !== undefined) out.owners = c.owners
   if (c.tractus !== undefined) out.tractus = c.tractus
   if (c.reviewEnabled !== undefined) out.reviewEnabled = c.reviewEnabled
+  if (c.pausatum !== undefined) out.paused = true
   if (c.impetusTotal !== undefined) out.cost = c.impetusTotal.toString()
   if (c.natum !== undefined) out.createdAt = c.natum.toISOString()
   if (c.completum !== undefined) out.completedAt = c.completum.toISOString()

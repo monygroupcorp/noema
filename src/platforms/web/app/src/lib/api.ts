@@ -633,6 +633,9 @@ export interface Collection {
   owners?: Array<{ animaId: string; weight: number }>;
   tractus?: Tractus[];
   reviewEnabled?: boolean;
+  // Dispatching new pieces is held (in-flight pieces still finish). Present + true only
+  // while paused — absent means running normally. Survives a server restart.
+  paused?: boolean;
   completed: number;
   failed: number;
   rejected: number;
