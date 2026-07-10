@@ -645,6 +645,7 @@ function makeConductor(
     conducereAsync?: (auctor: AuctorKey, opts: { budget: bigint }) => Promise<StudioHandle>
     find?: (auctor: AuctorKey) => Promise<StudioHandle[]>
     getStudio?: (studioId: string, auctor: AuctorKey) => Promise<StudioHandle | null>
+    claudere?: (studioId: string, auctor: AuctorKey) => Promise<boolean>
   } = {},
 ): { conductor: CrystalApiDeps['conductor']; received: { budget?: bigint } } {
   const received: { budget?: bigint } = {}
@@ -655,6 +656,7 @@ function makeConductor(
     }),
     find: over.find ?? (async () => []),
     getStudio: over.getStudio ?? (async () => null),
+    claudere: over.claudere ?? (async () => false),
   } as unknown) as CrystalApiDeps['conductor']
   return { conductor, received }
 }
@@ -755,4 +757,57 @@ test('listStudios maps conductor.find handles with per-studio sessionBudget', as
   assert.equal(studios.length, 2)
   assert.deepEqual(studios.map((s) => s.studioId).sort(), ['modo-1', 'modo-2'])
   assert.equal(studios[0].budgetImpetus, '77', 'budget comes from signorum.sessionBudget')
+})
+
+// ── releaseStudio ──────────────────────────────────────────────────────────────
+
+test('releaseStudio terminates the lease and returns a terminal view, 200', async () => {
+  const claims: Array<{ studioId: string }> = []
+  const { conductor } = makeConductor({
+    claudere: async (studioId) => { claims.push({ studioId }); return true },
+  })
+  const { deps } = makeDeps({ conductor, signorum: studioSignorum({ sessionBudget: 30n }) })
+  const api = new CrystalApi(deps)
+
+  const view = await api.releaseStudio(auctor, 'modo-x')
+  assert.equal(view.studioId, 'modo-x')
+  assert.equal(view.status, 'terminated')
+  assert.equal(view.budgetImpetus, '30')
+  assert.deepEqual(claims, [{ studioId: 'modo-x' }])
+})
+
+test('releaseStudio is idempotent — a second DELETE returns the same terminal view, 200, no double-settle', async () => {
+  let calls = 0
+  const { conductor } = makeConductor({
+    claudere: async () => { calls++; return true },
+  })
+  const { deps } = makeDeps({ conductor, signorum: studioSignorum({ sessionBudget: 30n }) })
+  const api = new CrystalApi(deps)
+
+  const first = await api.releaseStudio(auctor, 'modo-x')
+  const second = await api.releaseStudio(auctor, 'modo-x')
+  assert.equal(first.status, 'terminated')
+  assert.equal(second.status, 'terminated')
+  assert.equal(calls, 2, 'claudere itself is the idempotency guard — safe to call twice')
+})
+
+test('releaseStudio refuses a stranger — not_found.studio, no existence leak', async () => {
+  const { conductor } = makeConductor({ claudere: async () => false })
+  const { deps } = makeDeps({ conductor, signorum: studioSignorum() })
+  const api = new CrystalApi(deps)
+
+  await assert.rejects(
+    () => api.releaseStudio(auctor, 'modo-x'),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.studio',
+  )
+})
+
+test('releaseStudio without a conductor throws not_found.studio', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  await assert.rejects(
+    () => api.releaseStudio(auctor, 'modo-x'),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.studio',
+  )
 })
