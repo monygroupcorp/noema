@@ -759,7 +759,6 @@ async function main(): Promise<void> {
   }))
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, v: process.env.BUILD_VERSION ?? 'dev' }))
-  app.use('/api/vestigia', createVestigiaRouter(ring.vestigiorum))
 
   // PRIVATE compliance module (ADR-0012 §49 — abuse surface, not published): the real
   // CSAM/NCMEC gate AND the OFAC sanctions screen live in the gitignored
@@ -963,6 +962,10 @@ async function main(): Promise<void> {
     issuers: ring.issuers,
     jwksOverride: parseJwksOverride(process.env.AGENT_JWKS_OVERRIDE),
   }))
+  // Vestigia (traces) — GET / + /search + /projection. Mounted here (not at its
+  // original spot above) because / and /projection resolve the CALLER's identity
+  // via apiResolver, mirroring createSponsioRouter below.
+  app.use('/api/vestigia', createVestigiaRouter({ vestigiorum: ring.vestigiorum, identity: apiResolver }))
 
   // ── CAMEL agent onboarding (ADR-0011 phase 3) ─────────────────────────────────
   // Treasury config is injected (not a stored noun): prod has exactly one treasury.
