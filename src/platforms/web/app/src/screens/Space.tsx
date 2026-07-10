@@ -7,12 +7,16 @@ import { AppShell } from '../shell/AppShell';
 import { ErrorBoundary } from '../shell/ErrorBoundary';
 import { Ic } from '../lib/icons';
 import { sampleImages, launchTraining } from '../lib/training';
+import { api } from '../lib/api';
 
-// The 3D Vestigium space — the real StationThis corpus, embedded with the platform's
-// canon OpenCLIP ViT-B/32. Two layers share one set of points & metadata:
-//   prompt → UMAP of the prompt-text embedding   ("what people asked for")
-//   image  → UMAP of the output-image embedding  ("what it looked like")
-// Both live in the same CLIP space. Data = precomputed artifact in /public/space*.
+// The 3D Vestigium space. Two data sources:
+//   real    — a signed-in/commitment caller's OWN vestigia, PCA-projected on demand
+//             by GET /api/vestigia/projection (docs/handoff/2026-07-10-space-real-data.md).
+//   static  — the precomputed 163k-gen ComfyDeploy corpus under /public/space* (the
+//             "public exhibit"), shown to anon/no-history callers.
+// Both share one set of layers — text ("what people asked for") / image ("what it
+// looked like") — and the same Corpus/PtMeta shapes so the rendering below (Cloud,
+// gallery, search, selection) doesn't care which source fed it.
 
 type Layer = 'text' | 'image';
 interface Manifest { n: number; k: number; projection: string }
@@ -44,6 +48,47 @@ async function loadCorpus(layer: Layer): Promise<Corpus> {
     fetch(`${b}/attrs.bin`).then(r => r.arrayBuffer()),
   ]);
   return { manifest, clusterInfo, positions: new Float32Array(pointsBuf), clusters: new Uint16Array(attrsBuf) };
+}
+
+// Real-data source: PCA-projected vestigia for the CALLER, adapted to the Corpus/PtMeta
+// shapes above. `clusters[i]` (from the endpoint) describes cluster id `i` positionally —
+// see VestigiaProjection.ts. Throws 'no layer' (same signal loadCorpus uses) when the
+// caller has no vestigia embedded on this dimension yet, so the layer-switch fallback
+// (image → text, text → static/empty) reuses the same catch path.
+async function loadRealCorpus(layer: Layer): Promise<{ corpus: Corpus; meta: PtMeta[] }> {
+  const embedding = layer === 'image' ? 'imago' : 'promptum';
+  const [projection, vestigiaResp] = await Promise.all([
+    api.vestigiaProjection(embedding),
+    api.listVestigia(5000),
+  ]);
+  if (projection.n === 0) throw new Error('no layer');
+
+  const byId = new Map(vestigiaResp.vestigia.map(v => [v.id, v]));
+  const n = projection.points.length;
+  const positions = new Float32Array(n * 3);
+  const clusters = new Uint16Array(n);
+  const meta: PtMeta[] = [];
+  projection.points.forEach((pt, i) => {
+    positions[i * 3] = pt.p[0]; positions[i * 3 + 1] = pt.p[1]; positions[i * 3 + 2] = pt.p[2];
+    clusters[i] = pt.cluster;
+    const v = byId.get(pt.id);
+    meta.push({
+      p: (v?.promptum ?? '').slice(0, 160),
+      m: v?.intellaIds?.join(', ') || '?',
+      c: 'your space',
+      u: '',
+      d: v?.natum ? v.natum.slice(0, 10) : '',
+      s: v?.imagoUrl,
+      l: [],
+    });
+  });
+
+  const clusterInfo: Record<string, Cluster> = {};
+  projection.clusters.forEach((cl, id) => {
+    clusterInfo[String(id)] = { label: cl.label, terms: [], color: cl.color, count: cl.count };
+  });
+  const manifest: Manifest = { n, k: projection.clusters.length, projection: 'PCA' };
+  return { corpus: { positions, clusters, manifest, clusterInfo }, meta };
 }
 
 function Axes() {
@@ -176,6 +221,10 @@ function CorpusSpace() {
   const glOk = useMemo(webglAvailable, []);
   const [layer, setLayer] = useState<Layer>('text');
   const [imageLayerOk, setImageLayerOk] = useState(true);
+  // Data source switch (docs/handoff/2026-07-10-space-real-data.md §3): null while the
+  // caller's own history is being checked; true = real vestigia (their own space), false
+  // = fall back to the static "public exhibit" corpus (anon or no history yet).
+  const [hasReal, setHasReal] = useState<boolean | null>(null);
   const [corpus, setCorpus] = useState<Corpus | null>(null);
   const [meta, setMeta] = useState<PtMeta[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -214,13 +263,26 @@ function CorpusSpace() {
     setFocus({ x: cx, y: cy, z: cz, dist: Math.min(Math.max(s * 2.4, 1.6), 8), key: focusKey.current });
   };
 
-  useEffect(() => { fetch('/space/meta.json').then(r => r.json()).then(setMeta).catch(() => {}); }, []);
+  // Source check: does the caller (signed-in or anon-commitment) have any vestigia at
+  // all? Runs once — decides real-vs-static for every subsequent layer load below.
   useEffect(() => {
+    api.listVestigia(1).then(r => setHasReal(r.count > 0)).catch(() => setHasReal(false));
+  }, []);
+
+  useEffect(() => {
+    if (hasReal === null) return;   // wait for the source check above
     setCorpus(null); setErr(null); setActiveCluster(null); setPicked(null); setGalleryOpen(false);
-    loadCorpus(layer).then(setCorpus).catch(e => {
-      if (layer === 'image') { setImageLayerOk(false); setLayer('text'); } else setErr(String(e));
-    });
-  }, [layer]);
+    if (hasReal) {
+      loadRealCorpus(layer).then(({ corpus, meta }) => { setCorpus(corpus); setMeta(meta); }).catch(e => {
+        if (layer === 'image') { setImageLayerOk(false); setLayer('text'); } else setErr(String(e));
+      });
+    } else {
+      fetch('/space/meta.json').then(r => r.json()).then(setMeta).catch(() => {});
+      loadCorpus(layer).then(setCorpus).catch(e => {
+        if (layer === 'image') { setImageLayerOk(false); setLayer('text'); } else setErr(String(e));
+      });
+    }
+  }, [layer, hasReal]);
 
   const baseColors = useMemo(() => {
     if (!corpus) return new Float32Array(0);
@@ -418,8 +480,8 @@ function CorpusSpace() {
                 <Ic name="search" />
                 <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={meta ? 'Search the prompt space…' : 'loading prompts…'} disabled={!meta} />
               </div>
-              <div className="mono" style={{ textAlign: 'center', color: 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 'var(--s2)' }}>
-                {corpus.manifest.n.toLocaleString()} creations · {shown.toLocaleString()} shown · {sortedClusters.length} clusters · CLIP ViT-B/32 · {corpus.manifest.projection}
+              <div className="mono" style={{ textAlign: 'center', color: hasReal ? 'var(--accent-soft)' : 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 'var(--s2)' }}>
+                {hasReal ? 'your space' : 'the public exhibit'} · {corpus.manifest.n.toLocaleString()} creations · {shown.toLocaleString()} shown · {sortedClusters.length} clusters · CLIP ViT-B/32 · {corpus.manifest.projection}
               </div>
               <div className="mono" style={{ textAlign: 'center', color: 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 2, opacity: .8 }}>
                 drag rotate · mid/right-drag pan · scroll = zoom-to-cursor · dbl-click point or cluster = fly there
