@@ -3,12 +3,13 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
-import { api, type FlowDescription, type Run } from '../lib/api';
+import { api, type FlowDescription } from '../lib/api';
 import { mediaFromOutput } from '../lib/media';
 import { isPinned, togglePin } from '../lib/pins';
 import { usePromptAssist, useAssistField } from '../state/promptAssist';
 import { fieldExample } from '../lib/promptExamples';
 import { humanizeKey } from '../lib/labels';
+import { STAGE_LABELS, measure, useRunStream } from '../lib/runStream';
 
 type Aditus = Record<string, unknown>;
 
@@ -63,7 +64,12 @@ export function Card() {
   const [aditus, setAditus] = useState<Aditus>({});
   const [quote, setQuote] = useState<{ impetus?: string; error?: string } | null>(null);
   const [quoting, setQuoting] = useState(false);
-  const [run, setRun] = useState<{ status: string; id?: string; error?: string; exitus?: Record<string, unknown> } | null>(null);
+  // The run being watched — set once createRun succeeds; the actual live status
+  // (phases, elapsed, terminal honesty) rides `useRunStream`, not local polling.
+  const [runId, setRunId] = useState<string | undefined>();
+  const [dispatching, setDispatching] = useState(false);
+  const [dispatchErr, setDispatchErr] = useState<string | undefined>();
+  const runStream = useRunStream(runId);
   const [pinned, setPinned] = useState(false);
   // Publish-to-feed state for the current result.
   const [pub, setPub] = useState<{ s: 'idle' | 'busy' | 'done' | 'err'; msg?: string }>({ s: 'idle' });
@@ -84,7 +90,7 @@ export function Card() {
   // fetch the real flow schema + seed the form from defaults, then overlay saved affines
   useEffect(() => {
     let live = true;
-    setFlow(null); setLoadErr(null); setRun(null); setQuote(null); setAffSave({ s: 'idle' });
+    setFlow(null); setLoadErr(null); setRunId(undefined); setDispatching(false); setDispatchErr(undefined); setQuote(null); setAffSave({ s: 'idle' });
     api.getFlow(id).then((f) => {
       if (!live) return;
       setFlow(f);
@@ -142,27 +148,21 @@ export function Card() {
 
   async function doRun() {
     setPub({ s: 'idle' });
-    setRun({ status: 'dispatching…' });
+    setDispatchErr(undefined);
+    setRunId(undefined);
+    setDispatching(true);
     try {
       // TODO(backend): RunRequest has no locality/compute field yet. When the
       // dispatch API gains one, pass `compute` here so remote/TEE/local actually
       // route differently. For now the posture is presentational (quote + frost).
       const { run: r } = await api.createRun({ modusId: id, aditus: cleanAditus(aditus), ...(studioId ? { studioId } : {}) });
-      setRun({ status: r.status, id: r.id, exitus: r.exitus });
-      // light polling for terminal status (SSE streaming is the next bite)
-      poll(r.id, 0);
+      // Live status (phases, elapsed, terminal honesty) streams via useRunStream(runId).
+      setRunId(r.id);
     } catch (e) {
-      setRun({ status: 'failed', error: String(e) });
+      setDispatchErr(String(e));
+    } finally {
+      setDispatching(false);
     }
-  }
-  function poll(runId: string, n: number) {
-    if (n > 40) return;
-    setTimeout(() => {
-      api.getRun(runId).then(({ run: r }) => {
-        setRun({ status: r.status, id: r.id, exitus: r.exitus, error: r.failure?.message });
-        if (r.status !== 'complete' && r.status !== 'failed') poll(runId, n + 1);
-      }).catch(() => {});
-    }, 1500);
   }
 
   // Credit model (credits only — never a $/hr market rate). The live quote's
@@ -184,6 +184,16 @@ export function Card() {
     : quote?.error ? 'fill required fields'
     : COMPUTE_SUB[compute];
   const name = (flow?.nomen || id).split('—')[0].trim();
+
+  // Live run status, derived (SSE with polling fallback — see useRunStream).
+  const runStatus =
+    dispatchErr ? 'failed'
+    : dispatching ? 'dispatching…'
+    : !runId ? undefined
+    : runStream.terminal === 'complete' ? 'complete'
+    : runStream.terminal === 'failed' ? 'failed'
+    : 'running';
+  const runElapsedLabel = runId && !runStream.terminal ? ` · ${runStream.elapsedSec}s elapsed` : '';
 
   const context = (
     <>
@@ -271,14 +281,43 @@ export function Card() {
             );
           })}
 
-          {run && (
+          {runStatus && (
             <div className="result show">
-              <h2><span className="ttdot" /> {run.status === 'complete' ? 'output' : 'run'}</h2>
+              <h2><span className="ttdot" /> {runStatus === 'complete' ? 'output' : 'run'}</h2>
+
+              {runStatus === 'failed' && (
+                <div className="warn">
+                  {dispatchErr ?? runStream.error ?? 'run failed'}
+                  {runId && <> — charged {runStream.charged ?? '0'} credits.</>}
+                  {' '}
+                  <button className="btn-ghost" onClick={doRun}>Retry</button>
+                </div>
+              )}
+
+              {runId && runStatus !== 'failed' && (
+                <div className="stepline">
+                  {STAGE_LABELS.map((label, i) => {
+                    const st = runStatus === 'complete' ? 'done' : i < runStream.stageIdx ? 'done' : i === runStream.stageIdx ? 'active' : 'pending';
+                    return (
+                      <div key={i} className={`step ${st}`}>
+                        <span className="pip">{st === 'done' && <Ic name="check" />}</span>
+                        <div className="st-main">
+                          <div className="t">{label}</div>
+                          <div className="s">{st === 'active' ? measure(runStream.progressus) : ''}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className="out">
                 {/* Frost graft: the result answers the posture, reusing the
                     canvas sealing language (clean / frost / desaturate). */}
-                <div className={`rimg vis-${compute}${run.exitus ? ' done' : ''}`}>
-                  {!run.exitus && <><div className="ph" /><div className="stage"><span className="dots"><span /><span /><span /></span> {run.status}</div></>}
+                <div className={`rimg vis-${compute}${runStream.exitus ? ' done' : ''}`}>
+                  {!runStream.exitus && (
+                    <><div className="ph" /><div className="stage"><span className="dots"><span /><span /><span /></span> {runStatus}{runElapsedLabel}</div></>
+                  )}
                   {compute === 'tee' && (
                     <div className="seal-mark"><Hemisphere vis="tee" /><span>sealed</span></div>
                   )}
@@ -287,22 +326,21 @@ export function Card() {
                   )}
                 </div>
                 <div className="exitus">
-                  <div className="er"><span>run</span><span className="v">{run.id ?? '—'}</span></div>
-                  <div className="er"><span>status</span><span className="v">{run.status}</span></div>
-                  {run.id && <div className="er"><span>detail</span><span className="v"><Link to={`/run?id=${run.id}`}>open run view →</Link></span></div>}
+                  <div className="er"><span>run</span><span className="v">{runId ?? '—'}</span></div>
+                  <div className="er"><span>status</span><span className="v">{runStatus}{runElapsedLabel}</span></div>
+                  {runId && <div className="er"><span>detail</span><span className="v"><Link to={`/run?id=${runId}`}>open run view →</Link></span></div>}
                   {compute === 'tee' && <div className="er"><span>sealed</span><span className="v" style={{ color: 'var(--slate)' }}>we see nothing but the meter</span></div>}
-                  {run.error && <div className="er"><span>error</span><span className="v" style={{ color: 'var(--text)' }}>{run.error}</span></div>}
-                  {run.exitus && Object.entries(run.exitus).map(([k, v]) => (
+                  {runStream.exitus && Object.entries(runStream.exitus).map(([k, v]) => (
                     <div className="er" key={k}><span>{k}</span><span className="v" style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{String(v)}</span></div>
                   ))}
                   {/* Publish-to-feed — only when the result carries shareable media. */}
-                  {run.id && mediaFromOutput(run.exitus) && (
+                  {runId && mediaFromOutput(runStream.exitus) && (
                     <div className="pub-row">
                       {pub.s === 'done' ? (
                         <span className="pub-done"><Ic name="check" /> In review — track it in <Link to="/review">your review queue</Link>; it appears in the <Link to="/feed">feed</Link> once approved.</span>
                       ) : (
                         <>
-                          <button className="btn ghost" disabled={pub.s === 'busy'} onClick={() => publishToFeed(run.id!)}>
+                          <button className="btn ghost" disabled={pub.s === 'busy'} onClick={() => publishToFeed(runId!)}>
                             <Ic name="rss" /> {pub.s === 'busy' ? 'Publishing…' : 'Publish to feed'}
                           </button>
                           {pub.s === 'err' && <span className="pub-err">{pub.msg}</span>}
