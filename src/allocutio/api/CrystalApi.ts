@@ -85,6 +85,9 @@ import type { WideEventStore } from '../../analytics/WideEventStore.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 import { provenanceHash } from '../../crystal/provenance.js'
 import { rarityReport, type RarityReport } from '../../crystal/rarityReport.js'
+import type { Tabula, Tabulae, Tabularum } from '../../types/tabula.js'
+import { compileTabula, TabulaCompileError } from '../../crystal/compileTabula.js'
+import { hashModus } from '../../crystal/hashModus.js'
 
 const log = makeLogger('crystal-api')
 const PLATFORM_ANIMA_ID = process.env.PLATFORM_ANIMA_ID ?? 'platform'
@@ -134,6 +137,9 @@ export interface CrystalApiDeps {
   sodalitatum?: Sodalitatum
   /** Project store (Provincia) — backs the account-scoped project CRUD + holdings. Absent → project ops unavailable. */
   provinciarum?: Provinciarum
+  /** Workspace store (Tabula, ADR-0008 follow-up) — backs the canvas CRUD + publish-to-Modus
+   *  compile. Absent → tabula ops unavailable. */
+  tabulae?: Tabularum
   /** Publication store (Editio) — backs `publish`/`feed`/`retract`. Absent → publishing unavailable. */
   editiones?: Editionum
   /** Registered publication adapters, resolved by `destination` key (FeedAdapter, …). */
@@ -1366,6 +1372,125 @@ export class CrystalApi {
     const project = await this._ownedProject(auctor, id)
     if (!project[field].includes(assetId)) return toProject(project)
     return toProject(await this._projectStore().update(id, { [field]: project[field].filter((x) => x !== assetId) }))
+  }
+
+  // ── Tabulae (canvas workspaces, ADR-0008 follow-up) ──────────────────────────
+
+  /** List the caller's own Tabulae (drafts + published), newest-saved first. */
+  async listTabulae(auctor: AuctorKey): Promise<Tabulae> {
+    const all = await this._tabulaeStore().list({ auctor })
+    return all.slice().sort((a, b) => b.mutatum.getTime() - a.mutatum.getTime())
+  }
+
+  /** Create a new draft Tabula owned by the caller. */
+  async createTabula(auctor: AuctorKey, opts: { nomen: string; descriptio?: string; visibilitas?: Tabula['visibilitas'] }): Promise<Tabula> {
+    if (!opts.nomen?.trim()) throw Errors.inputMalformed('nomen is required')
+    return this._tabulaeStore().create({
+      nomen: opts.nomen,
+      ...(opts.descriptio !== undefined ? { descriptio: opts.descriptio } : {}),
+      auctor,
+      status: 'draft',
+      visibilitas: opts.visibilitas ?? 'privata',
+    })
+  }
+
+  /** Fetch one owned Tabula, or 404 (a stranger gets the same 404 as a nonexistent id). */
+  async getTabula(auctor: AuctorKey, id: string): Promise<Tabula> {
+    return this._ownedTabula(auctor, id)
+  }
+
+  /** Patch a Tabula's graph/metadata. Owner-only. */
+  async updateTabula(
+    auctor: AuctorKey,
+    id: string,
+    patch: { nomen?: string; descriptio?: string; nodi?: Tabula['nodi']; vincula?: Tabula['vincula']; visibilitas?: Tabula['visibilitas'] },
+  ): Promise<Tabula> {
+    await this._ownedTabula(auctor, id)
+    return this._tabulaeStore().update(id, patch)
+  }
+
+  /** Delete a Tabula outright. Owner-only. */
+  async deleteTabula(auctor: AuctorKey, id: string): Promise<void> {
+    await this._ownedTabula(auctor, id)
+    await this._tabulaeStore().remove(id)
+  }
+
+  /**
+   * Publish a Tabula: compile its canvas graph into a compositus Modus and register it
+   * (Modorum), owner-keyed, `canonica: false`. Republishing the same Tabula bumps `versio`
+   * on the SAME modus id (the Tabula's published identity is stable across edits).
+   */
+  async publishTabula(auctor: AuctorKey, id: string): Promise<{ modusId: string }> {
+    const tabula = await this._ownedTabula(auctor, id)
+    let compiled
+    try {
+      compiled = await compileTabula(tabula, (modusId) => this.deps.modorum.find(modusId))
+    } catch (err) {
+      if (err instanceof TabulaCompileError) {
+        throw Errors.tabulaGraphInvalid(err.message, { code: err.code, ...(err.vinculumId ? { vinculumId: err.vinculumId } : {}) })
+      }
+      throw err
+    }
+
+    const modusId = tabula.modusId ?? tabula.id
+    const previous = await this.deps.modorum.find(modusId)
+    const versio = previous ? this._bumpVersio(previous.versio) : '1.0.0'
+    const now = new Date()
+    const modus: Modus = {
+      id: modusId,
+      nomen: tabula.nomen,
+      genus: 'compositus',
+      versio,
+      contentHash: '',
+      aditus: compiled.aditus,
+      exitus: compiled.exitus,
+      gradus: compiled.gradus,
+      auctor,
+      canonica: false,
+      natum: previous?.natum ?? now,
+      mutatum: now,
+    }
+    modus.contentHash = hashModus(modus)
+    await this.deps.modorum.register(modus)
+    await this._tabulaeStore().update(id, { modusId, status: 'published' })
+    return { modusId }
+  }
+
+  /** List the flows (atomic + compositus) the caller owns — the picker's "mine" filter, the
+   *  smaller-diff twin of `GET /v1/flows` (spec: "either extend with ?mine=1 or filter the
+   *  registry list" — this is the filter route, owner-scoped like `/me/models`). */
+  async listMyFlows(auctor: AuctorKey): Promise<FlowSummary[]> {
+    const modi = await this.deps.modorum.list({ auctor })
+    return modi.map((m) => {
+      const categoria = (m as { categoria?: unknown }).categoria
+      return {
+        id: m.id,
+        nomen: m.nomen,
+        versio: m.versio,
+        ...(categoria !== undefined ? { categoria } : {}),
+        ...(m.genus === 'compositus' ? { steps: m.gradus?.length ?? 0 } : {}),
+      }
+    })
+  }
+
+  private _tabulaeStore(): Tabularum {
+    const store = this.deps.tabulae
+    if (!store) throw Errors.notFoundTabula('tabulae')
+    return store
+  }
+
+  /** Resolve a Tabula the caller owns, or 404 (stranger gets not_found, not forbidden). */
+  private async _ownedTabula(auctor: AuctorKey, id: string): Promise<Tabula> {
+    const tabula = await this._tabulaeStore().find(id)
+    if (!tabula || ownerKeyOf(tabula.auctor) !== ownerKeyOf(auctor)) throw Errors.notFoundTabula(id)
+    return tabula
+  }
+
+  /** Bump the patch component of a semver-ish `x.y.z` string. Falls back to '1.0.0' if unparseable. */
+  private _bumpVersio(v: string): string {
+    const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(v)
+    if (!m) return '1.0.0'
+    return `${m[1]}.${m[2]}.${Number(m[3]) + 1}`
   }
 
   private _projectStore(): Provinciarum {
