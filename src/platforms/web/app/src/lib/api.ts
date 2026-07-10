@@ -33,6 +33,26 @@ export interface RunRequest {
   bursaToken?: string;
 }
 
+// A vestigium (trace) — the indexed record of a completed generation. Mirrors the
+// backend's Vestigium shape (src/types/vestigium.ts), web-relevant fields only.
+export interface Vestigium {
+  id: string;
+  promptum: string;
+  imagoUrl?: string;
+  intellaIds?: string[];
+  natum: string;
+  genus: string;
+}
+
+// GET /api/vestigia/projection response — feeds Space.tsx's real-data mode.
+export interface VestigiaProjectionPoint { id: string; p: [number, number, number]; cluster: number }
+export interface VestigiaProjectionCluster { label: string; color: string; count: number }
+export interface VestigiaProjection {
+  points: VestigiaProjectionPoint[];
+  clusters: VestigiaProjectionCluster[];
+  n: number;
+}
+
 async function j<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => res.statusText)}`);
   return res.json() as Promise<T>;
@@ -207,6 +227,16 @@ export const api = {
   // SSE — returns an EventSource the caller subscribes to.
   streamRun: (id: string) => new EventSource(`/v1/runs/${id}/stream`),
   meStatus: () => fetch('/v1/me/status', { headers: readHeaders() }).then(j<MeStatus>),
+
+  // GET /api/vestigia — the caller's own recent vestigia (traces), newest first.
+  listVestigia: (limit?: number) => {
+    const q = limit ? `?limit=${limit}` : '';
+    return fetch(`/api/vestigia${q}`, { headers: readHeaders() }).then(j<{ vestigia: Vestigium[]; count: number }>);
+  },
+  // GET /api/vestigia/projection — PCA-to-3D + k-means projection of the caller's
+  // own vestigia, feeding Space.tsx's real-data mode.
+  vestigiaProjection: (embedding: 'promptum' | 'imago' = 'promptum') =>
+    fetch(`/api/vestigia/projection?embedding=${embedding}`, { headers: readHeaders() }).then(j<VestigiaProjection>),
 
   // GET /v1/me/runs — the caller's settled spend history (owner-scoped, paginated, newest
   // first) + lifetime running total. Anon-capable (commitment-keyed). costUsd is derived.
