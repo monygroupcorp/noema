@@ -88,6 +88,9 @@ import { rarityReport, type RarityReport } from '../../crystal/rarityReport.js'
 import type { Tabula, Tabulae, Tabularum } from '../../types/tabula.js'
 import { compileTabula, TabulaCompileError } from '../../crystal/compileTabula.js'
 import { hashModus } from '../../crystal/hashModus.js'
+import type { Depositorum, DepositumStatus } from '../../types/catena.js'
+import type { PersonaStore } from '../../types/persona.js'
+import { normalizeAddress } from '../../crystal/walletAuth.js'
 
 const log = makeLogger('crystal-api')
 const PLATFORM_ANIMA_ID = process.env.PLATFORM_ANIMA_ID ?? 'platform'
@@ -179,6 +182,12 @@ export interface CrystalApiDeps {
   pricer?: AssetPricer
   /** The CreditVault deposit address, echoed in the quote/config so the UI knows where to send. */
   depositAddress?: string
+  /** The deposit store — backs `myDeposits` (owner-scoped: filtered to the caller's linked
+   *  wallets). Absent → `myDeposits` returns []. */
+  deposita?: Pick<Depositorum, 'list'>
+  /** Persona store — resolves the caller's linked `'web'` wallet addresses for `myDeposits`.
+   *  Absent → `myDeposits` returns []. */
+  personae?: Pick<PersonaStore, 'findByAnimaId'>
   /** USD revenue book — backs the admin `revenueReport` (the trailing-12mo rollup + license tripwire)
    *  AND the fiat funding rail (`handleStripeWebhook` books a peer fiat `Reditus` via `record`).
    *  Absent → the report + fiat rail are unavailable. */
@@ -1627,6 +1636,45 @@ export class CrystalApi {
     }
   }
 
+  /**
+   * The caller's OWN on-chain deposits — scoped to their linked (`'web'`-genus, active) wallet
+   * addresses. Powers the settle-watch UI (real depositum status instead of hoping the balance
+   * moves). Owner-scoped by construction: a stranger's `animaId` resolves a disjoint wallet set,
+   * so this NEVER returns another account's rows (spec `docs/handoff/2026-07-10-deposit-attribution-seam.md`
+   * §Fix 4). An anon/purse `AuctorKey` ({commitment}/{bursaToken}) has no personae → always [].
+   *
+   * `Depositorum.list()` has no payer/wallet filter (its interface is out of this item's scope) —
+   * so we filter in-process by `ab` (the sending address, lowercased) against the caller's linked
+   * set. This ALSO surfaces deposits that predate the wallet link (parked `confirmatum`, never
+   * animaId-attributed at receipt time), which a filter on `Depositum.animaId` alone would miss.
+   */
+  async myDeposits(auctor: AuctorKey): Promise<MyDeposit[]> {
+    if (!('animaId' in auctor)) return []
+    if (!this.deps.deposita || !this.deps.personae) return []
+
+    const personae = await this.deps.personae.findByAnimaId(auctor.animaId)
+    const wallets = new Set(
+      personae
+        .filter(p => p.genus === 'web' && p.activeAnimaId === auctor.animaId)
+        .map(p => normalizeAddress(p.externusId))
+        .filter((a): a is string => a !== null),
+    )
+    if (wallets.size === 0) return []
+
+    const all = await this.deps.deposita.list()
+    return all
+      .filter(d => wallets.has(d.ab.toLowerCase()))
+      .sort((a, b) => b.natum.getTime() - a.natum.getTime())
+      .map(d => ({
+        id: d.id,
+        chainId: d.chainId,
+        txHash: d.transactioHash,
+        valor: d.valor.toString(),
+        status: d.status,
+        natum: d.natum.toISOString(),
+      }))
+  }
+
   // ── Fiat funding rail (Stripe) ──────────────────────────────────────────────
 
   private _stripeGateway: StripeGateway | null | undefined
@@ -2596,6 +2644,21 @@ export interface DepositQuote {
   /** Impetus points the user would be credited — EQUALS what the webhook credits for this input. */
   pointsQuoted: string
   depositAddress: string
+}
+
+/** One of the caller's own deposits (`GET /v1/deposit/mine`) — owner-scoped, real status. */
+export interface MyDeposit {
+  id: string
+  chainId: number | string
+  /** On-chain transaction hash. */
+  txHash: string
+  /** Amount in base units (wei for ETH, token-decimals for ERC-20), as a string. */
+  valor: string
+  /** `detectum` (seen, not yet confirmed) · `confirmatum` (confirmed, awaiting/parked credit) ·
+   *  `processatum` (credited — a Signum was issued) · `fractum` (processing failed). */
+  status: DepositumStatus
+  /** ISO timestamp the deposit was first detected. */
+  natum: string
 }
 
 /**

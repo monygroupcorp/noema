@@ -8,7 +8,7 @@ import { Errors } from '../../../../src/allocutio/api/errors.js'
 import type { Run } from '../../../../src/allocutio/api/types.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
-import type { ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView } from '../../../../src/allocutio/api/CrystalApi.js'
+import type { ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, MyDeposit } from '../../../../src/allocutio/api/CrystalApi.js'
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -74,6 +74,11 @@ const fakeApi: ApiFacade = {
   async releaseStudio(_auctor: AuctorKey, studioId: string): Promise<StudioView> {
     if (studioId === 'ghost') throw Errors.notFoundStudio(studioId)
     return { studioId, status: 'terminated', budgetImpetus: '100' }
+  },
+  async myDeposits(auctor: AuctorKey): Promise<MyDeposit[]> {
+    // Mirrors the real owner-scoping: only 'a1' (the fake identity's resolved animaId) has rows.
+    if (!('animaId' in auctor) || auctor.animaId !== 'a1') return []
+    return [{ id: 'dep-1', chainId: 1, txHash: '0xhash1', valor: '1000000000000000', status: 'confirmatum', natum: '2026-07-01T00:00:00.000Z' }]
   },
 }
 
@@ -421,6 +426,29 @@ test('POST /v1/studios maps an ApiError to its httpStatus + { error }', async ()
     })
     assert.equal(res.status, 503)
     assert.equal(res.body.error.code, 'capacity.no_pods')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /v1/deposit/mine requires auth — 401 for an anon caller (no api key)', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/deposit/mine`)
+    assert.equal(res.status, 401)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /v1/deposit/mine returns the authenticated caller\'s own deposits, envelope-wrapped', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/deposit/mine`, { headers: { 'x-api-key': 'k' } })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.deposits.length, 1)
+    assert.equal(res.body.deposits[0].id, 'dep-1')
+    assert.equal(res.body.deposits[0].status, 'confirmatum')
   } finally {
     await closeServer(server)
   }

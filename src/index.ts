@@ -871,6 +871,8 @@ async function main(): Promise<void> {
   const crystalApi = new CrystalApi({
     pricer,
     depositAddress: CREDIT_VAULT,
+    deposita: ring.deposita,
+    personae: ring.personae,
     verdictCache,
     scanFeeCharger,
     ...(csamReviewReporter ? { csamReviewReporter } : {}),
