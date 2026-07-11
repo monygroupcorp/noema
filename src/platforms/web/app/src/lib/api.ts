@@ -228,6 +228,53 @@ async function jAuth<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Generic `/v1` request errors — the wire shape every non-auth route throws on 4xx/5xx
+// (`{ error: { code, message, details? } }`, see allocutio/api/errors.ts ApiError). Carries
+// `details` (e.g. Tabula publish's `{ code, vinculumId }`) so screens can branch on the
+// specific failure, not just the HTTP status.
+export class ApiRequestError extends Error {
+  code: string;
+  status: number;
+  details?: Record<string, unknown>;
+  constructor(code: string, message: string, status: number, details?: Record<string, unknown>) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.code = code;
+    this.status = status;
+    this.details = details;
+  }
+}
+async function jApi<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string; details?: Record<string, unknown> } } | null;
+    throw new ApiRequestError(body?.error?.code ?? `http.${res.status}`, body?.error?.message ?? res.statusText, res.status, body?.error?.details);
+  }
+  return res.json() as Promise<T>;
+}
+
+// ── Tabula (canvas workspace, ADR-0008 follow-up) — mirrors types/tabula.ts ──────
+export interface TabulaNodus { id: string; modusId: string; x: number; y: number; aditus: Record<string, unknown> }
+export interface TabulaVinculum {
+  id: string; fonteNodusId: string; fontePorta: string; scopusNodusId: string; scopusPorta: string; discordantia: boolean;
+}
+export type TabulaVisibility = 'privata' | 'communis' | 'publica';
+export type TabulaStatus = 'draft' | 'published' | 'archivata';
+export interface Tabula {
+  id: string;
+  nomen: string;
+  descriptio?: string;
+  nodi: TabulaNodus[];
+  vincula: TabulaVinculum[];
+  modusId?: string;
+  status: TabulaStatus;
+  visibilitas: TabulaVisibility;
+  fonteId?: string;
+  templateId?: string;
+  followTemplate?: boolean;
+  natum: string;
+  mutatum: string;
+}
+
 export const api = {
   listFlows: () => fetch('/v1/flows').then(j<{ flows: FlowSummary[] }>),
   getFlow: (id: string) => fetch(`/v1/flows/${id}`).then(j<FlowDescription>),
@@ -589,6 +636,28 @@ export const api = {
       fetch('/v1/auth/telegram/recover', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) })
         .then(jAuth<AuthResult>),
   },
+
+  // ── Tabulae (canvas workspaces) — owner-scoped CRUD + publish-to-Modus ───────
+  // Anon-capable throughout (commitment-keyed, same as the rest of authoring) —
+  // no sign-in required to author or publish a spell.
+  listTabulae: () => fetch('/v1/tabulae', { headers: readHeaders() }).then(jApi<{ tabulae: Tabula[] }>),
+  createTabula: (body: { nomen: string; descriptio?: string; visibilitas?: TabulaVisibility }) =>
+    fetch('/v1/tabulae', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(jApi<{ tabula: Tabula }>),
+  getTabula: (id: string) => fetch(`/v1/tabulae/${id}`, { headers: readHeaders() }).then(jApi<{ tabula: Tabula }>),
+  updateTabula: (id: string, patch: Partial<Pick<Tabula, 'nomen' | 'descriptio' | 'nodi' | 'vincula' | 'visibilitas'>>) =>
+    fetch(`/v1/tabulae/${id}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(patch) })
+      .then(jApi<{ tabula: Tabula }>),
+  deleteTabula: (id: string) =>
+    fetch(`/v1/tabulae/${id}`, { method: 'DELETE', headers: authHeaders() }).then(jApi<{ ok: true }>),
+  // Compile the canvas graph into a compositus Modus, immediately runnable via
+  // POST /v1/runs. A cycle / port-type-mismatch graph 400s `input.invalid_graph`
+  // with `details.{code,vinculumId}` naming the offending wire (errors.ts).
+  publishTabula: (id: string) =>
+    fetch(`/v1/tabulae/${id}/publish`, { method: 'POST', headers: authHeaders() }).then(jApi<{ modusId: string }>),
+  // GET /v1/me/flows — the caller's own registered flows (owner-scoped), the canvas
+  // node picker's "mine" twin of the canonical GET /v1/flows list above.
+  listMyFlows: () => fetch('/v1/me/flows', { headers: readHeaders() }).then(jApi<{ flows: FlowSummary[] }>),
 };
 
 // Account settings (mirror the backend Consuetudo shapes).

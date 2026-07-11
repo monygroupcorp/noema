@@ -26,55 +26,39 @@
 .cn-row .port { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
 .react-flow__handle.cn-handle { width: 9px; height: 9px; border: 2px solid var(--bg); }
 
-/* visibility meter — the per-node "honest readout" (the signature) */
-.cnode-meter {
-  display: flex; align-items: center; gap: 7px;
-  padding: 7px 12px; border-top: 1px solid var(--hair-soft);
-  font-family: var(--font-mono); font-size: 9.5px;
-  letter-spacing: .08em; text-transform: uppercase; color: var(--faint);
-}
-.cnode-meter .cm-val { flex: 1; letter-spacing: .04em; color: var(--muted); }
-.cnode-hemi { width: 13px; height: 13px; flex: none; }
-
-/* remote = full strength (default node, nothing to add but the meter colour) */
-.cnode.vis-remote .cm-val { color: var(--accent-soft); }
-
-/* tee = sealed: frost the body, keep labels legible, dash the border */
-.cnode.vis-tee { border-color: #343c46; border-style: dashed; }
-.cnode.vis-tee .cnode-body { position: relative; }
-.cnode.vis-tee .cnode-body::after {
-  content: ''; position: absolute; inset: 0;
-  backdrop-filter: blur(1.6px); background: rgba(10,12,14,.22);
-}
-.cnode.vis-tee .cn-row { color: #7e8794; }      /* dimmed, still readable */
-.cnode.vis-tee .cm-val { color: #7d8aa6; }       /* --slate */
-
-/* local = off-grid: desaturate the whole node */
-.cnode.vis-local { opacity: .78; }
-.cnode.vis-local .cn-fav { filter: saturate(.32) brightness(.92); }
-.cnode.vis-local .cn-row { color: #6a727d; }
-.cnode.vis-local .cm-val { color: #6a7079; }      /* --grey */
-
-/* active (running) node — the one allowed glow + instrument corner ticks */
-.cnode.running {
-  position: relative;
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--hair));
-  box-shadow: 0 0 0 1px var(--accent-bg), 0 0 34px rgba(91,140,255,.16);
-}
-.cnode.running::before, .cnode.running::after {
-  content: ''; position: absolute; width: 8px; height: 8px;
-  border: 1.5px solid var(--accent); pointer-events: none;
-}
-.cnode.running::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
-.cnode.running::after  { bottom: -1px; right: -1px; border-left: none; border-top: none; }
-
-/* edge degradation — wire into a sealed (TEE) node becomes a slate dashed trail */
-.react-flow__edge.to-sealed .react-flow__edge-path {
-  stroke: #5b6470; stroke-width: 1.5; stroke-dasharray: 1.5 5; stroke-linecap: round;
-}
-
 /* the compile bar */
 .canvas-bar { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 5;
   display: flex; align-items: center; gap: var(--s4); background: var(--panel); border: 1px solid var(--hair);
   border-radius: var(--r-pill); padding: 8px 8px 8px 16px; box-shadow: 0 8px 30px rgba(0,0,0,.4); }
 .canvas-bar .hint { color: var(--faint); font-size: var(--fs-xs); font-family: var(--font-mono); white-space: nowrap; }
+
+/* loading state */
+.canvas-loading { display: flex; align-items: center; justify-content: center; color: var(--muted); font-family: var(--font-mono); font-size: var(--fs-xs); }
+
+/* the node palette — real flows, click to place */
+.canvas-palette {
+  position: absolute; top: 16px; left: 16px; z-index: 5; width: 176px; max-height: calc(100% - 32px);
+  overflow-y: auto; background: var(--panel); border: 1px solid var(--hair); border-radius: var(--r-lg);
+  box-shadow: 0 8px 30px rgba(0,0,0,.4); padding: 10px;
+}
+.canvas-palette .cp-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); padding: 2px 4px 8px; }
+.canvas-palette .cp-item {
+  display: flex; align-items: center; gap: var(--s2); width: 100%; text-align: left;
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius);
+  padding: 7px 8px; font-size: 12.5px; color: var(--text); cursor: pointer;
+}
+.canvas-palette .cp-item:hover { background: var(--raised); border-color: var(--hair-soft); }
+.canvas-palette .cp-item svg { width: 14px; height: 14px; color: var(--muted); flex: none; }
+.canvas-palette .cp-empty { padding: 4px; color: var(--faint); font-size: 12px; }
+
+/* the publish-error banner (AMENDMENT v2 — dismissible, no design flourish beyond this) */
+.canvas-error-banner {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 6;
+  display: flex; align-items: center; gap: var(--s3); max-width: 70%;
+  background: color-mix(in srgb, #e0554f 14%, var(--panel)); border: 1px solid color-mix(in srgb, #e0554f 45%, var(--hair));
+  border-radius: var(--radius); padding: 8px 10px 8px 14px; font-size: 12.5px; color: var(--text);
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
+.canvas-error-banner .cb-dismiss { background: transparent; border: none; cursor: pointer; color: var(--muted); display: flex; padding: 4px; }
+.canvas-error-banner .cb-dismiss:hover { color: var(--text); }
+.canvas-error-banner .cb-dismiss svg { width: 14px; height: 14px; }
