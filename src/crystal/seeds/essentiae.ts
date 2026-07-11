@@ -26,7 +26,7 @@ export const ESSENTIA_RUNMAKE_FLUX_SCHNELL: Essentia = {
   // Substrate: the FLUX·ComfyUI fundament carries image + runtime + base weights.
   // Family ('flux') derives from the fundament's weights' `Intella.familia`.
   fundamentumId: 'flux-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation' },
@@ -69,7 +69,7 @@ export const ESSENTIA_RUNMAKE_SD15: Essentia = {
   // Substrate: the SD1.5·ComfyUI fundament (self-contained checkpoint).
   // Family ('sd15') derives from the fundament's weight's `Intella.familia`.
   fundamentumId: 'sd15-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation' },
@@ -113,7 +113,7 @@ export const ESSENTIA_RUNMAKE_SDXL: Essentia = {
   // Substrate: the SDXL·ComfyUI fundament (self-contained checkpoint).
   // Family ('sdxl') derives from the fundament's weight's `Intella.familia`.
   fundamentumId: 'sdxl-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation' },
@@ -156,7 +156,7 @@ export const ESSENTIA_RUNMAKE_CHROMA: Essentia = {
   // Substrate: the Chroma·ComfyUI fundament (Chroma unet + shared FLUX T5/VAE).
   // Family ('chroma') derives from the unet weight's `Intella.familia`.
   fundamentumId: 'chroma-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation' },
@@ -201,7 +201,7 @@ export const ESSENTIA_RUNMAKE_ZIMAGE_TURBO: Essentia = {
   categoria: 'image',
 
   fundamentumId: 'z-image-turbo-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation' },
@@ -246,7 +246,7 @@ export const ESSENTIA_RUNMAKE_KREA_TURBO: Essentia = {
   categoria: 'image',
 
   fundamentumId: 'krea-turbo-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation' },
@@ -291,7 +291,7 @@ export const ESSENTIA_FLUXI2I: Essentia = {
   categoria: 'image',
 
   fundamentumId: 'flux-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'How to restyle the image' },
@@ -327,7 +327,7 @@ export const ESSENTIA_KONTEXTEDIT: Essentia = {
   categoria: 'image',
 
   fundamentumId: 'flux-kontext-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Edit instruction (e.g. "add a red hat", "make it winter")' },
@@ -363,7 +363,7 @@ export const ESSENTIA_KLEINEDIT: Essentia = {
   categoria: 'image',
 
   fundamentumId: 'flux2-klein-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Edit instruction (e.g. "replace the background with a coastal cliff at sunset")' },
@@ -397,7 +397,7 @@ export const ESSENTIA_KLEINEDIT_4B: Essentia = {
   categoria: 'image',
 
   fundamentumId: 'flux2-klein-4b-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Edit instruction. A `<lora:slug:weight>` tag or a LoRA trigger word stacks adapters.' },
@@ -435,7 +435,7 @@ export const ESSENTIA_KLEIN: Essentia = {
   categoria: 'image',
 
   fundamentumId: 'flux2-klein-4b-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation. A `<lora:slug:weight>` tag or a LoRA trigger word stacks adapters.' },
@@ -470,7 +470,7 @@ export const ESSENTIA_RMBG: Essentia = {
   categoria: 'image',
 
   fundamentumId: 'comfyui-base',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     image: { type: 'image', required: true, description: 'Image to remove the background from' },
@@ -502,7 +502,7 @@ export const ESSENTIA_UPSCALE: Essentia = {
   categoria: 'image',
 
   fundamentumId: 'upscale-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     image: { type: 'image', required: true, description: 'Image to upscale 4x' },
@@ -539,7 +539,7 @@ export const ESSENTIA_WAN22_T2V: Essentia = {
   categoria: 'video',
 
   fundamentumId: 'wan22-t2v-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:          { type: 'text', required: true,  description: 'Text prompt for video generation' },
@@ -576,7 +576,7 @@ export const ESSENTIA_WAN22_I2V: Essentia = {
   categoria: 'video',
 
   fundamentumId: 'wan22-i2v-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:          { type: 'text',  required: true,  description: 'Text prompt for video generation' },
@@ -895,7 +895,7 @@ export const ESSENTIA_LTX_T2V: Essentia = {
   categoria: 'video',
 
   fundamentumId: 'ltx-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Text prompt for video generation' },
@@ -936,7 +936,7 @@ export const ESSENTIA_LTX_I2V: Essentia = {
   categoria: 'video',
 
   fundamentumId: 'ltx-comfyui',
-  fundamentumVersio: '1.0.0',
+  fundamentumVersio: '1.1.0',
 
   aditus: {
     prompt:     { type: 'text',  required: true,  description: 'Text prompt for video generation' },
