@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ethForCredits, lineMode } from './BuyCreditsModal';
+import { ethForCredits, lineMode, walletGateState } from './BuyCreditsModal';
 import type { DepositQuote } from '../lib/api';
 
 // No jsdom/@testing-library/react in this app's toolchain today (see package.json) — so
@@ -59,5 +59,32 @@ describe('lineMode — 4-line ledger grammar', () => {
     expect(lineMode(4, 'settle')).toBe('active');
     expect(lineMode(3, 'settle')).toBe('settled');
     expect(lineMode(4, 'settled')).toBe('settled');
+  });
+
+  it('settles 01 ASSET but ghosts 02 AMOUNT during gate-link (locked pending the link step)', () => {
+    expect(lineMode(1, 'gate-link')).toBe('settled');
+    expect(lineMode(2, 'gate-link')).toBe('ghost');
+    expect(lineMode(3, 'gate-link')).toBe('ghost');
+  });
+});
+
+// Wallet-link guardrail (spec docs/handoff/2026-07-10-deposit-attribution-seam.md §Fix 4,
+// Groom decisions #2) — the three gate states a connected wallet can land in.
+describe('walletGateState — the three wallet-link gate states', () => {
+  const wallet = '0xAbCd000000000000000000000000000000dead';
+
+  it('anon — no session at all, regardless of any linked-wallets list', () => {
+    expect(walletGateState(false, wallet, [])).toBe('anon');
+    expect(walletGateState(false, wallet, [wallet.toLowerCase()])).toBe('anon');
+  });
+
+  it('unlinked — signed in, but the connected wallet is not among the caller\'s linked wallets', () => {
+    expect(walletGateState(true, wallet, [])).toBe('unlinked');
+    expect(walletGateState(true, wallet, ['0x000000000000000000000000000000000000aa'])).toBe('unlinked');
+  });
+
+  it('linked — signed in and the connected wallet IS linked (case-insensitive match)', () => {
+    expect(walletGateState(true, wallet, [wallet.toLowerCase()])).toBe('linked');
+    expect(walletGateState(true, wallet, [wallet.toUpperCase()])).toBe('linked');
   });
 });
