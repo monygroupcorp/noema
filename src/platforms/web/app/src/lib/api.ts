@@ -284,6 +284,10 @@ export const api = {
   depositQuote: (body: { chainId: number | string; token: string; amount: string }) =>
     fetch('/v1/deposit/quote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       .then(j<DepositQuote>),
+  // GET /v1/deposit/mine — the caller's OWN deposits, scoped to their linked wallets (auth
+  // required). Real depositum status (confirmatum/processatum) — the settle-watch UI polls
+  // this instead of hoping the balance moves.
+  myDeposits: () => fetch('/v1/deposit/mine', { headers: readHeaders() }).then(j<{ deposits: MyDeposit[] }>),
 
   // ── Fiat pack checkout (Stripe) — identified accounts only ───────────────────
   // POST /v1/payments/checkout — create a hosted Stripe Checkout session for one of the
@@ -908,4 +912,15 @@ export interface DepositQuote {
   fundingRatePct: number;
   pointsQuoted: string;
   depositAddress: string;
+}
+
+// One of the caller's own deposits (GET /v1/deposit/mine) — owner-scoped, real status.
+// Mirrors the backend MyDeposit — powers the settle-watch UI instead of hoping the balance moves.
+export interface MyDeposit {
+  id: string;
+  chainId: number | string;
+  txHash: string;
+  valor: string;
+  status: 'detectum' | 'confirmatum' | 'processatum' | 'fractum';
+  natum: string;
 }

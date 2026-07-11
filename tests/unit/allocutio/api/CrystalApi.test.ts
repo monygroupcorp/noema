@@ -21,6 +21,8 @@ import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Fundamentum } from '../../../../src/types/fundamentum.js'
 import type { Intelligens } from '../../../../src/types/intelligendi.js'
 import type { StudioHandle } from '../../../../src/crystal/Conductor.js'
+import type { Depositum } from '../../../../src/types/catena.js'
+import type { Persona } from '../../../../src/types/persona.js'
 
 const auctor: AuctorKey = { animaId: 'anima-1' }
 
@@ -810,4 +812,98 @@ test('releaseStudio without a conductor throws not_found.studio', async () => {
     () => api.releaseStudio(auctor, 'modo-x'),
     (e: unknown) => e instanceof ApiError && e.code === 'not_found.studio',
   )
+})
+
+// ── myDeposits (GET /v1/deposit/mine — spec docs/handoff/2026-07-10-deposit-attribution-seam.md §Fix 4) ──
+
+function makePersona(over: Partial<Persona> = {}): Persona {
+  return {
+    id: over.id ?? 'persona-1',
+    activeAnimaId: over.activeAnimaId ?? 'anima-1',
+    animaIds: over.animaIds ?? [over.activeAnimaId ?? 'anima-1'],
+    genus: over.genus ?? 'web',
+    externusId: over.externusId ?? '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    status: over.status ?? 'active',
+    natum: over.natum ?? new Date('2026-01-01T00:00:00Z'),
+    visum: over.visum ?? new Date('2026-01-01T00:00:00Z'),
+  }
+}
+
+function makeDepositum(over: Partial<Depositum> = {}): Depositum {
+  return {
+    id: over.id ?? 'dep-1',
+    chainId: over.chainId ?? 1,
+    transactioHash: over.transactioHash ?? '0xhash1',
+    ab: over.ab ?? '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    ad: over.ad ?? '0xvault',
+    valor: over.valor ?? 1000000000000000n,
+    confirmationes: over.confirmationes ?? 12,
+    status: over.status ?? 'confirmatum',
+    natum: over.natum ?? new Date('2026-07-01T00:00:00Z'),
+    ...(over.animaId !== undefined ? { animaId: over.animaId } : {}),
+  }
+}
+
+test('myDeposits returns [] for a commitment/purse auctor — no personae possible for an anon caller', async () => {
+  const { deps } = makeDeps({
+    personae: { findByAnimaId: async () => { throw new Error('must not be called for a non-animaId auctor') } },
+    deposita: { list: async () => { throw new Error('must not be called for a non-animaId auctor') } },
+  })
+  const api = new CrystalApi(deps)
+
+  assert.deepEqual(await api.myDeposits({ commitment: 'c1' }), [])
+})
+
+test('myDeposits returns [] when deposita/personae are not wired', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  assert.deepEqual(await api.myDeposits(auctor), [])
+})
+
+test('myDeposits is owner-scoped — a stranger with no linked wallets sees nothing, even though deposits exist', async () => {
+  const { deps } = makeDeps({
+    personae: { findByAnimaId: async (animaId) => (animaId === 'anima-1' ? [makePersona()] : []) },
+    deposita: { list: async () => [makeDepositum({ id: 'dep-1', ab: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' })] },
+  })
+  const api = new CrystalApi(deps)
+
+  const stranger = await api.myDeposits({ animaId: 'anima-2' })
+  assert.deepEqual(stranger, [])
+
+  const owner = await api.myDeposits(auctor)
+  assert.equal(owner.length, 1)
+  assert.equal(owner[0].id, 'dep-1')
+})
+
+test('myDeposits filters by the caller\'s linked wallet address (case-insensitive), not by animaId alone — surfaces a pre-link parked deposit too', async () => {
+  const { deps } = makeDeps({
+    personae: { findByAnimaId: async () => [makePersona({ externusId: '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' })] },
+    deposita: {
+      list: async () => [
+        // Mine — uppercase on-chain casing, no animaId yet (parked before the wallet was linked).
+        makeDepositum({ id: 'mine-parked', ab: '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', natum: new Date('2026-07-01T00:00:00Z') }),
+        // Mine — already attributed + newer.
+        makeDepositum({ id: 'mine-credited', ab: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', animaId: 'anima-1', status: 'processatum', natum: new Date('2026-07-05T00:00:00Z') }),
+        // A stranger's deposit — must never appear.
+        makeDepositum({ id: 'not-mine', ab: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' }),
+      ],
+    },
+  })
+  const api = new CrystalApi(deps)
+
+  const result = await api.myDeposits(auctor)
+  assert.deepEqual(result.map(d => d.id), ['mine-credited', 'mine-parked'], 'newest first; excludes the stranger row')
+  assert.equal(result[0].status, 'processatum')
+  assert.equal(result[1].status, 'confirmatum')
+})
+
+test('myDeposits ignores a persona whose active anima has since moved elsewhere', async () => {
+  const { deps } = makeDeps({
+    personae: { findByAnimaId: async () => [makePersona({ activeAnimaId: 'anima-9' })] }, // moved away
+    deposita: { list: async () => [makeDepositum({ ab: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' })] },
+  })
+  const api = new CrystalApi(deps)
+
+  assert.deepEqual(await api.myDeposits(auctor), [])
 })

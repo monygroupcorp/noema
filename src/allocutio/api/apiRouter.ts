@@ -17,7 +17,7 @@ import express, { type Request, type Response, type Router } from 'express'
 import type { Run, Collection, Team, Edition, FeedItem, Project, RunsPage } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { FeedFilter } from '../../types/editio.js'
-import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote } from './CrystalApi.js'
+import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote, MyDeposit } from './CrystalApi.js'
 import type { RarityReport } from '../../crystal/rarityReport.js'
 import { ApiError, Errors } from './errors.js'
 import { makeLogger } from '../../lib/logger.js'
@@ -51,6 +51,7 @@ export interface ApiFacade {
   listModels(filter?: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number }): Promise<ModelCard[]>
   depositConfig(): DepositConfig
   depositQuote(input: { chainId: number | string; token: string; amount: string }): Promise<DepositQuote>
+  myDeposits(auctor: AuctorKey): Promise<MyDeposit[]>
   importModel(auctor: AuctorKey, opts: import('./CrystalApi.js').ImportModelOpts): Promise<ModelCard>
   listMyModels(auctor: AuctorKey): Promise<ModelCard[]>
   setModelLicense(auctor: AuctorKey, id: string, opts: import('./CrystalApi.js').SetModelLicenseOpts): Promise<ModelCard>
@@ -576,6 +577,14 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   router.post('/deposit/quote', wrap(async (req, res) => {
     const { chainId, token, amount } = req.body ?? {}
     res.json(await api.depositQuote({ chainId, token: String(token ?? ''), amount: String(amount ?? '') }))
+  }))
+
+  // GET /v1/deposit/mine — the caller's OWN deposits, scoped to their linked wallets (auth
+  // required). Powers the settle-watch UI's real depositum status. Owner-scoped by construction
+  // in CrystalApi.myDeposits — a stranger's animaId never resolves another caller's wallets.
+  router.get('/deposit/mine', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    res.json({ deposits: await api.myDeposits(auctor) })
   }))
 
   // POST /v1/models/import — import a model/LoRA by URL as a PRIVATE, owner-scoped model
