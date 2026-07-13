@@ -6,7 +6,7 @@
 // `failed`. Terminal events carry NO exitus — we fetch the run for its outputs
 // on completion, mirroring the backend's own agent relay.
 import { useEffect, useRef, useState } from 'react';
-import { api, type Run as RunT } from './api';
+import { api, type Run as RunT, type SseHandle } from './api';
 
 export type Phasis =
   | 'queued' | 'provisioning' | 'pulling' | 'attesting' | 'downloading'
@@ -125,9 +125,10 @@ export function useRunStream(id: string | undefined): RunStreamState {
     }
 
     let usingPoll = false;
-    const es = api.streamRun(runId);
+    let retriedOnce = false;
+    let es: SseHandle;
 
-    es.onmessage = (e) => {
+    function onMessage(e: { data: string }) {
       if (!live) return;
       let msg: RunEvent;
       try { msg = JSON.parse(e.data) as RunEvent; } catch { return; }
@@ -154,18 +155,30 @@ export function useRunStream(id: string | undefined): RunStreamState {
         es.close();
         return;
       }
-    };
-    es.onerror = () => {
+    }
+
+    // Reconnect story at parity with EventSource's implicit browser-level retry:
+    // on a stream error before a terminal event, retry the fetch-based reader
+    // once after 2s, then fall back to polling `getRun` until terminal.
+    function onError() {
       if (!live || usingPoll) return;
-      // The browser retries transient drops itself; if it can't recover the
-      // connection stays in a failed readyState — fall back to polling so a
-      // watched run never just goes silent.
-      if (es.readyState === EventSource.CLOSED) {
-        usingPoll = true;
-        es.close();
-        startPoll();
+      if (!retriedOnce) {
+        retriedOnce = true;
+        setTimeout(() => {
+          if (!live || usingPoll) return;
+          es = api.streamRun(runId);
+          es.onmessage = onMessage;
+          es.onerror = onError;
+        }, 2000);
+        return;
       }
-    };
+      usingPoll = true;
+      startPoll();
+    }
+
+    es = api.streamRun(runId);
+    es.onmessage = onMessage;
+    es.onerror = onError;
 
     return () => { live = false; es.close(); };
   }, [id]);

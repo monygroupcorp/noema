@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { SecurePodClient } from '../../../src/crystal/SecurePodClient.js'
 import type { SecurePodConfig, SshTransportLike } from '../../../src/crystal/SecurePodClient.js'
 import { impetusPerSecondFromHourly } from '../../../src/ledger/rates.js'
+import { withTrace, makeTraceContext } from '../../../src/lib/trace.js'
 
 // ── terminatePod spy ──────────────────────────────────────────────────────────
 // SecurePodClient takes terminatePodFn as a constructor dep; we pass a spy
@@ -133,8 +134,9 @@ function makeClient(
   ssh: () => SshTransportLike,
   fetch: typeof fetch,
   materiae?: ConstructorParameters<typeof SecurePodClient>[3],
+  isActumLive?: ConstructorParameters<typeof SecurePodClient>[6],
 ): SecurePodClient {
-  return new SecurePodClient(config, ssh, fetch, materiae, undefined, terminateSpy.fn)
+  return new SecurePodClient(config, ssh, fetch, materiae, undefined, terminateSpy.fn, isActumLive)
 }
 
 // ── provisioning ──────────────────────────────────────────────────────────────
@@ -335,6 +337,58 @@ test('keepWarm: terminates pod (no Materia registered) when bootstrap SSH throws
   assert.equal(store.createCalls.length, 0)
 })
 
+// ── zombie-retry guard (noema-043) ─────────────────────────────────────────────
+// The retry loop (attempt 1's `_runBackground` failing via a broken SSH transport, before
+// comfyrunner ever accepts the job) is a safe, deterministic way to force entry into the
+// attempt>=2 branch without tripping the "comfyrunner owns the webhook" / permanent-error
+// short-circuits, matching the existing bootstrap-failure tests above.
+
+function makeBrokenSsh(): SshTransportLike {
+  return makeSshTransport({ async exec(cmd) { if (cmd === 'true') return ''; throw new Error('ECONNREFUSED') } })
+}
+
+/** SSH factory that fails bootstrap on the first pod, then succeeds on every retry pod. */
+function makeFlakySshFactory(): () => SshTransportLike {
+  let calls = 0
+  return () => (++calls === 1 ? makeBrokenSsh() : makeSshTransport())
+}
+
+test('zombie guard: aborts before provisioning a retry pod when the actum is already terminal', async () => {
+  const { fetch, calls } = makeFetchMock('pod-zombie')
+  const client = makeClient(makeConfig(), () => makeBrokenSsh(), fetch, undefined, async () => false)
+  await withTrace(makeTraceContext({ actumId: 'act-dead' }), () => client.submit({ input: {} }))
+  await new Promise(r => setTimeout(r, 300))
+
+  const provisionCalls = calls.filter(c => c.method === 'POST' && c.url.includes('rest.runpod.io') && c.url.includes('/pods'))
+  assert.equal(provisionCalls.length, 1, 'no retry provision for an actum already terminal')
+  assert.equal(terminateSpy.calls.length, 1, 'only the attempt-1 pod was terminated — no retry pod was ever spun up')
+})
+
+test('zombie guard: terminates a freshly-provisioned retry pod when the actum goes terminal before job submit', async () => {
+  const { fetch, calls } = makeFetchMock('pod-zombie2')
+  let liveChecks = 0
+  const isActumLive = async (): Promise<boolean> => (++liveChecks === 1)   // live for the pre-provision check, terminal by submit-time
+  const client = makeClient(makeConfig(), () => makeBrokenSsh(), fetch, undefined, isActumLive)
+  await withTrace(makeTraceContext({ actumId: 'act-dies-mid-retry' }), () => client.submit({ input: {} }))
+  await new Promise(r => setTimeout(r, 300))
+
+  const provisionCalls = calls.filter(c => c.method === 'POST' && c.url.includes('rest.runpod.io') && c.url.includes('/pods'))
+  assert.equal(provisionCalls.length, 2, 'the retry pod WAS provisioned (actum still live at that check)')
+  const jobPosts = calls.filter(c => c.method === 'POST' && c.url.endsWith('/job'))
+  assert.equal(jobPosts.length, 0, 'the job was never submitted for the now-terminal actum')
+  assert.equal(terminateSpy.calls.length, 2, 'attempt-1 pod (bootstrap failure) + the aborted retry pod, both terminated')
+})
+
+test('zombie guard: live actum lets retries proceed unchanged (regression guard)', async () => {
+  const { fetch, calls } = makeFetchMock('pod-live-retry')
+  const client = makeClient(makeConfig(), makeFlakySshFactory(), fetch, undefined, async () => true)
+  await withTrace(makeTraceContext({ actumId: 'act-live' }), () => client.submit({ input: {} }))
+  await new Promise(r => setTimeout(r, 300))
+
+  const jobPosts = calls.filter(c => c.method === 'POST' && c.url.endsWith('/job'))
+  assert.equal(jobPosts.length, 1, 'the retry pod still submits the job when the actum stays live')
+})
+
 // ── provisionStudio (/arm Start, Part A) ───────────────────────────────────────
 
 test('provisionStudio provisions + parks a warm Materia WITHOUT submitting a job', async () => {
@@ -379,4 +433,31 @@ test('provisionStudio terminates the pod and returns null when bootstrap fails',
   assert.equal(res, null, 'returns null on failure')
   assert.equal(store.createCalls.length, 0, 'nothing parked')
   assert.ok(terminateSpy.calls.length > 0, 'the half-provisioned pod is terminated')
+})
+
+// ── ComfyUI clone pin (2026-07-10 P0 regression guard) ─────────────────────────
+// Unpinned `git clone` of ComfyUI HEAD drifted onto a torch-2.5+-only code path while every
+// fundament's image pinned torch 2.4.0 — every ComfyUI pod broke. This guard fails loudly if
+// the clone ever goes unpinned again: the bootstrap command MUST carry `--branch`.
+
+test('ComfyUI bootstrap: clone is pinned to a ref (never unpinned HEAD)', async () => {
+  const { fetch } = makeFetchMock()
+  const ssh = makeSshTransport()
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 50))
+  const cloneCmd = ssh.execCalls.find(c => c.includes('git clone') && c.includes('ComfyUI.git'))
+  assert.ok(cloneCmd, 'expected a ComfyUI clone command')
+  assert.match(cloneCmd!, /--branch/, 'clone must pin a ref via --branch (never unpinned HEAD)')
+})
+
+test("ComfyUI bootstrap: provisionStudio's clone is also pinned via --branch", async () => {
+  const { fetch } = makeFetchMock('pod-studio-pin')
+  const ssh = makeSshTransport()
+  const store = makeWarmMateriaStore()
+  const client = makeClient(makeConfig({ keepWarm: true }), () => ssh, fetch, store as never)
+  await client.provisionStudio({ runtime: 'ComfyUI' })
+  const cloneCmd = ssh.execCalls.find(c => c.includes('git clone') && c.includes('ComfyUI.git'))
+  assert.ok(cloneCmd, 'expected a ComfyUI clone command')
+  assert.match(cloneCmd!, /--branch/, 'clone must pin a ref via --branch (never unpinned HEAD)')
 })

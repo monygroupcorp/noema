@@ -94,6 +94,7 @@ import { InstallCoordinator } from './crystal/InstallCoordinator.js'
 import { terminatePod, listRunPodPods } from './crystal/terminatePod.js'
 import { MongoMateria } from './crystal/MongoMateria.js'
 import { MongoHospitium } from './crystal/MongoHospitium.js'
+import { MongoActorum } from './crystal/MongoActorum.js'
 import { startIdleReaper } from './crystal/idleReaper.js'
 import { startExpiryReaper, recoverExpiredActa } from './crystal/expiryReaper.js'
 import { startCensus } from './crystal/Census.js'
@@ -300,7 +301,7 @@ function ensureRunpodSshKey(): void {
   }
 }
 
-function makeSecureRunPodClient(materiae?: MateriaStore, hospitia?: HospitiumStore): SecurePodClient {
+function makeSecureRunPodClient(materiae?: MateriaStore, hospitia?: HospitiumStore, isActumLive?: (actumId: string) => Promise<boolean>): SecurePodClient {
   const r2 = RUNPOD_R2
   ensureRunpodSshKey()
 
@@ -317,6 +318,8 @@ function makeSecureRunPodClient(materiae?: MateriaStore, hospitia?: HospitiumSto
     globalThis.fetch,
     materiae,
     hospitia,
+    undefined,
+    isActumLive,
   )
 }
 
@@ -447,9 +450,18 @@ async function main(): Promise<void> {
 
   // DEV_FAKE_POD: simulate the whole pod lifecycle locally (no real GPU, $0) so the
   // Telegram UX can be iterated for free. Falls back to the real SECURE cursor otherwise.
+  // Zombie-retry guard (noema-043): the retry loop only ever holds an actumId (via trace),
+  // not a store — hand it the smallest read surface instead of a whole Actorum dependency.
+  // Built off the same `acta` collection/default createContainer uses so both readers agree.
+  const actumLivenessActorum = new MongoActorum(mongo.db(DB_NAME).collection('acta'))
+  const isActumLive = async (actumId: string): Promise<boolean> => {
+    const actum = await actumLivenessActorum.findById(actumId)
+    return !actum || (actum.status !== 'completus' && actum.status !== 'fractus')
+  }
+
   const runpodClient = process.env.DEV_FAKE_POD
     ? new FakeRunPodClient(undefined, { warmTtlMs: RUNPOD_WARM_TTL_MS }, materiae, hospitia)
-    : (RUNPOD_API_KEY ? makeSecureRunPodClient(materiae, hospitia) : undefined)
+    : (RUNPOD_API_KEY ? makeSecureRunPodClient(materiae, hospitia, isActumLive) : undefined)
   if (process.env.DEV_FAKE_POD) log.warn('DEV_FAKE_POD active — pods are simulated, no real GPU will be provisioned')
 
   // In fake mode, warm reuse must NOT build a real WarmPodClient (it would SSH).
