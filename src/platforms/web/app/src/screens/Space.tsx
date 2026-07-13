@@ -8,6 +8,7 @@ import { ErrorBoundary } from '../shell/ErrorBoundary';
 import { Ic } from '../lib/icons';
 import { sampleImages, launchTraining } from '../lib/training';
 import { api } from '../lib/api';
+import type { Vestigium as ApiVestigium } from '../lib/api';
 
 // The 3D Vestigium space. Two data sources:
 //   real    — a signed-in/commitment caller's OWN vestigia, PCA-projected on demand
@@ -17,6 +18,32 @@ import { api } from '../lib/api';
 // Both share one set of layers — text ("what people asked for") / image ("what it
 // looked like") — and the same Corpus/PtMeta shapes so the rendering below (Cloud,
 // gallery, search, selection) doesn't care which source fed it.
+//
+// A THIRD source — the flat fallback grid (product ruling 2026-07-13) — kicks in when
+// the caller HAS vestigia but the 3D projection isn't available (no CLIP configured,
+// too few embedded items, or a 503). The space is a full history, not a projection-gated
+// view: it falls back to a plain chronological list/grid of the same vestigia, never an
+// empty screen. See buildFallbackItems() + SpaceFallbackGrid below.
+
+// Pure formatting helpers (exported for component-level testing — this app's toolchain
+// has no jsdom/@testing-library/react, see Canvas.test.ts, so logic is kept pure and
+// tested without a DOM render).
+export function vestigiumSnippet(promptum: string, len = 160): string {
+  const p = promptum ?? '';
+  return p.length > len ? `${p.slice(0, len)}…` : p;
+}
+export function formatVestigiumDate(natum: string): string {
+  if (!natum) return '';
+  const d = new Date(natum);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+}
+// buildFallbackItems: the flat-grid data shape, newest first — the CALLER's full
+// vestigia history as returned by GET /api/vestigia (already sorted newest-first
+// server-side; this just narrows/normalizes for the grid).
+export interface FallbackItem { id: string; promptum: string; imagoUrl?: string; natum: string }
+export function buildFallbackItems(vestigia: ApiVestigium[]): FallbackItem[] {
+  return vestigia.map(v => ({ id: v.id, promptum: v.promptum, imagoUrl: v.imagoUrl, natum: v.natum }));
+}
 
 type Layer = 'text' | 'image';
 interface Manifest { n: number; k: number; projection: string }
@@ -213,6 +240,58 @@ function NoWebGL() {
   );
 }
 
+// The flat-grid fallback (product ruling 2026-07-13): a plain, always-available
+// chronological view of the caller's full vestigia history — remove-from-space and
+// feedback controls live here since they're independent of whether the 3D projection
+// is up. Newest first (buildFallbackItems preserves the server's order).
+const IMPRESSIO_GLYPH: Record<'amor' | 'risus' | 'maeror', string> = { amor: '♡', risus: '☺', maeror: '☹' };
+function SpaceFallbackGrid({ items, onRemove, onImpressio }: {
+  items: ApiVestigium[];
+  onRemove: (id: string) => void;
+  onImpressio: (id: string, impressio: 'amor' | 'risus' | 'maeror') => void;
+}) {
+  const rows = buildFallbackItems(items);
+  return (
+    <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: 'var(--s6)' }} onClick={(e) => e.stopPropagation()}>
+      <div className="mono" style={{ textAlign: 'center', color: 'var(--accent-soft)', fontSize: 'var(--fs-xs)', marginBottom: 'var(--s4)' }}>
+        your space · {rows.length.toLocaleString()} creations · list view (projection unavailable)
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, maxWidth: 1100, margin: '0 auto' }}>
+        {rows.map((it) => {
+          const src = items.find(v => v.id === it.id);
+          const impressio = src?.impressio;
+          return (
+            <div key={it.id} style={{ border: '1px solid var(--hair)', borderRadius: 10, overflow: 'hidden', background: 'var(--panel)' }}>
+              <div style={{ aspectRatio: '1 / 1', background: '#0c1116' }}>
+                {it.imagoUrl && <img src={it.imagoUrl} loading="lazy" alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />}
+              </div>
+              <div style={{ padding: 8 }}>
+                <div style={{ fontSize: 11.5, color: 'var(--text)', lineHeight: 1.4, marginBottom: 6, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {vestigiumSnippet(it.promptum) || '(no prompt)'}
+                </div>
+                <div className="mono" style={{ fontSize: 10.5, color: 'var(--faint)', marginBottom: 6 }}>{formatVestigiumDate(it.natum)}</div>
+                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  {(['amor', 'risus', 'maeror'] as const).map(k => (
+                    <button key={k} onClick={() => onImpressio(it.id, k)} title={k}
+                      style={{
+                        flex: 1, padding: '3px 0', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                        border: '1px solid var(--hair)',
+                        background: impressio?.auctorImpressio === k ? 'var(--accent-bg)' : 'var(--raised)',
+                        color: impressio?.auctorImpressio === k ? 'var(--accent-soft)' : 'var(--muted)',
+                      }}>{IMPRESSIO_GLYPH[k]}</button>
+                  ))}
+                  <button onClick={() => onRemove(it.id)} title="remove from space"
+                    style={{ padding: '3px 8px', borderRadius: 6, border: '1px solid var(--hair)', background: 'var(--raised)', color: 'var(--faint)', fontSize: 12, cursor: 'pointer' }}>✕</button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function Space() {
   return <CorpusSpace />;
 }
@@ -228,6 +307,10 @@ function CorpusSpace() {
   const [corpus, setCorpus] = useState<Corpus | null>(null);
   const [meta, setMeta] = useState<PtMeta[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Flat chronological fallback (product ruling 2026-07-13): populated when the caller
+  // HAS vestigia but the 3D projection can't build (no CLIP, too few embedded, 503) — the
+  // primary data (GET /api/vestigia) always works, so this is never an empty screen.
+  const [fallbackVestigia, setFallbackVestigia] = useState<ApiVestigium[] | null>(null);
   const [query, setQuery] = useState('');
   const [activeCluster, setActiveCluster] = useState<number | null>(null);
   const [picked, setPicked] = useState<number | null>(null);   // hovered/clicked point → highlight + small peek
@@ -271,10 +354,14 @@ function CorpusSpace() {
 
   useEffect(() => {
     if (hasReal === null) return;   // wait for the source check above
-    setCorpus(null); setErr(null); setActiveCluster(null); setPicked(null); setGalleryOpen(false);
+    setCorpus(null); setErr(null); setActiveCluster(null); setPicked(null); setGalleryOpen(false); setFallbackVestigia(null);
     if (hasReal) {
       loadRealCorpus(layer).then(({ corpus, meta }) => { setCorpus(corpus); setMeta(meta); }).catch(e => {
-        if (layer === 'image') { setImageLayerOk(false); setLayer('text'); } else setErr(String(e));
+        if (layer === 'image') { setImageLayerOk(false); setLayer('text'); return; }
+        // Projection unavailable (no CLIP, too few embedded, 503) but the caller DOES
+        // have vestigia — fall back to their full chronological history, never an
+        // empty screen (product ruling 2026-07-13).
+        api.listVestigia(500).then(r => setFallbackVestigia(r.vestigia)).catch(() => setErr(String(e)));
       });
     } else {
       fetch('/space/meta.json').then(r => r.json()).then(setMeta).catch(() => {});
@@ -283,6 +370,15 @@ function CorpusSpace() {
       });
     }
   }, [layer, hasReal]);
+
+  const removeFallbackItem = (id: string) => {
+    api.removeVestigium(id).then(() => setFallbackVestigia(v => v ? v.filter(x => x.id !== id) : v)).catch(() => {});
+  };
+  const setFallbackImpressio = (id: string, impressio: 'amor' | 'risus' | 'maeror') => {
+    api.setVestigiumImpressio(id, impressio).then(({ vestigium }) => {
+      setFallbackVestigia(v => v ? v.map(x => x.id === id ? vestigium : x) : v);
+    }).catch(() => {});
+  };
 
   const baseColors = useMemo(() => {
     if (!corpus) return new Float32Array(0);
@@ -426,7 +522,9 @@ function CorpusSpace() {
   return (
     <AppShell crumb="space">
       <div className="space" onClick={() => { setPicked(null); }}>
-        {!glOk ? <NoWebGL /> : err ? (
+        {fallbackVestigia ? (
+          <SpaceFallbackGrid items={fallbackVestigia} onRemove={removeFallbackItem} onImpressio={setFallbackImpressio} />
+        ) : !glOk ? <NoWebGL /> : err ? (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 13, padding: 24, textAlign: 'center', maxWidth: 460, margin: '0 auto' }}>
             <div>
               <div style={{ fontSize: 22, color: 'var(--accent-soft)', opacity: .7, marginBottom: 12 }}><Ic name="footprints" /></div>
