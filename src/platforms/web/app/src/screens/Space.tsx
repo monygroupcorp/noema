@@ -45,6 +45,69 @@ export function buildFallbackItems(vestigia: ApiVestigium[]): FallbackItem[] {
   return vestigia.map(v => ({ id: v.id, promptum: v.promptum, imagoUrl: v.imagoUrl, natum: v.natum }));
 }
 
+// ---- Unit-scale normalization (noema-050) -------------------------------------------
+// A projected cloud's raw extent tracks dataset variance: a 4-vestigium caller space's
+// PCA output lands orders of magnitude smaller than the 163k-gen demo corpus's, so a
+// scene/camera tuned for the big corpus makes a small real space collapse to a few
+// sub-pixel dots (captain live-check 2026-07-13). Normalize every cloud — real AND
+// static demo, same code path, no exemption — to a fixed unit bounding volume before it
+// reaches Cloud/camera framing: center on the centroid, uniform-scale (never per-axis;
+// that would distort the PCA layout's relative distances) so the overall max extent
+// maps to SCENE_EXTENT. Target matches this app's own build-time convention for the
+// demo corpus (scripts/corpus-space/project.py: "normalize to a centered cube ~[-2.5,
+// 2.5]") — so re-normalizing an already-normalized demo cloud is a no-op-ish rescale,
+// not a fork.
+export const SCENE_EXTENT = 5; // full-width target (±2.5) of the normalized bounding cube
+
+export interface Bounds { center: [number, number, number]; maxExtent: number }
+
+export function computeBounds(positions: Float32Array): Bounds {
+  const n = positions.length / 3;
+  if (n === 0) return { center: [0, 0, 0], maxExtent: 0 };
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const x = positions[i * 3], y = positions[i * 3 + 1], z = positions[i * 3 + 2];
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+  }
+  return {
+    center: [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2],
+    maxExtent: Math.max(maxX - minX, maxY - minY, maxZ - minZ, 0),
+  };
+}
+
+// Center on the centroid, then uniform-scale so maxExtent -> SCENE_EXTENT. Degenerate
+// clouds (n=1, or every point coincident -> maxExtent 0) skip the scale (divide-by-zero
+// guard) and just center — a single point still lands at the origin, visible and framed.
+export function normalizeToUnitScale(positions: Float32Array): Float32Array {
+  const n = positions.length / 3;
+  const out = new Float32Array(positions.length);
+  if (n === 0) return out;
+  const { center, maxExtent } = computeBounds(positions);
+  const scale = maxExtent > 1e-6 ? SCENE_EXTENT / maxExtent : 1;
+  for (let i = 0; i < n; i++) {
+    out[i * 3] = (positions[i * 3] - center[0]) * scale;
+    out[i * 3 + 1] = (positions[i * 3 + 1] - center[1]) * scale;
+    out[i * 3 + 2] = (positions[i * 3 + 2] - center[2]) * scale;
+  }
+  return out;
+}
+
+// Camera framing (noema-050 decision 2): position/fov derived from the fixed
+// SCENE_EXTENT envelope, not hardcoded for the big corpus. Every normalized cloud lands
+// inside the identical envelope regardless of point count, so one derived framing fits
+// 2 points and 2000 alike. Direction + distance/extent ratio preserve the app's prior
+// (pre-noema-050) view angle, which was tuned against the demo corpus's own ~[-2.5,2.5]
+// scale — so this is the same shot, just derived from the envelope instead of pinned to it.
+export function frameCameraToBounds(): { position: [number, number, number]; fov: number } {
+  const half = SCENE_EXTENT / 2;
+  const dir: [number, number, number] = [0.5433, 0.3951, 0.7408]; // unit vector, prior view angle
+  const dist = half * 3.2397;                                     // prior distance/half-extent ratio
+  return { position: [dir[0] * dist, dir[1] * dist, dir[2] * dist], fov: 42 };
+}
+
 type Layer = 'text' | 'image';
 interface Manifest { n: number; k: number; projection: string }
 interface Cluster { label: string; terms: string[]; color: string; count: number }
@@ -64,6 +127,12 @@ function webglAvailable(): boolean {
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');
   return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255];
+}
+
+// Shared normalization pass (noema-050) — applied to every Corpus regardless of source,
+// so the demo-corpus path isn't forked/exempted (decision 4). See normalizeToUnitScale.
+function normalizeCorpus(corpus: Corpus): Corpus {
+  return { ...corpus, positions: normalizeToUnitScale(corpus.positions) };
 }
 
 async function loadCorpus(layer: Layer): Promise<Corpus> {
@@ -305,6 +374,7 @@ function CorpusSpace() {
   // = fall back to the static "public exhibit" corpus (anon or no history yet).
   const [hasReal, setHasReal] = useState<boolean | null>(null);
   const [corpus, setCorpus] = useState<Corpus | null>(null);
+  const cameraFrame = useMemo(() => frameCameraToBounds(), []);
   const [meta, setMeta] = useState<PtMeta[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // Flat chronological fallback (product ruling 2026-07-13): populated when the caller
@@ -356,7 +426,7 @@ function CorpusSpace() {
     if (hasReal === null) return;   // wait for the source check above
     setCorpus(null); setErr(null); setActiveCluster(null); setPicked(null); setGalleryOpen(false); setFallbackVestigia(null);
     if (hasReal) {
-      loadRealCorpus(layer).then(({ corpus, meta }) => { setCorpus(corpus); setMeta(meta); }).catch(e => {
+      loadRealCorpus(layer).then(({ corpus, meta }) => { setCorpus(normalizeCorpus(corpus)); setMeta(meta); }).catch(e => {
         if (layer === 'image') { setImageLayerOk(false); setLayer('text'); return; }
         // Projection unavailable (no CLIP, too few embedded, 503) but the caller DOES
         // have vestigia — fall back to their full chronological history, never an
@@ -365,7 +435,7 @@ function CorpusSpace() {
       });
     } else {
       fetch('/space/meta.json').then(r => r.json()).then(setMeta).catch(() => {});
-      loadCorpus(layer).then(setCorpus).catch(e => {
+      loadCorpus(layer).then(normalizeCorpus).then(setCorpus).catch(e => {
         if (layer === 'image') { setImageLayerOk(false); setLayer('text'); } else setErr(String(e));
       });
     }
@@ -536,7 +606,7 @@ function CorpusSpace() {
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 13 }}>loading the {layer} space…</div>
         ) : (
           <ErrorBoundary fallback={<NoWebGL />}>
-            <Canvas dpr={[1, 2]} camera={{ position: [4.4, 3.2, 6], fov: 42 }} style={{ position: 'absolute', inset: 0 }}>
+            <Canvas dpr={[1, 2]} camera={{ position: cameraFrame.position, fov: cameraFrame.fov }} style={{ position: 'absolute', inset: 0 }}>
               <color attach="background" args={[BG]} />
               <fog attach="fog" args={[BG, 11, 22]} />
               <Axes />
