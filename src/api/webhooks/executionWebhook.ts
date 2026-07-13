@@ -168,10 +168,26 @@ export async function handleExecutionWebhook(
       // vestigium indexing (single choke point) instead of a second webhook-only write
       // site. No data dependency on `completed`: handleActumComplete only needs the
       // actum id + the exitus payload we already built above.
-      const identity = await deps.flowRouter?.handleActumComplete(actum.id, {
+      const flowIdentity = await deps.flowRouter?.handleActumComplete(actum.id, {
         kind: 'complete',
         exitus: exitus.exitus as Record<string, unknown>,
       })
+      // Fallback: runs fired directly (e.g. `POST /v1/runs`) never create a FlowContext,
+      // so flowRouter has nothing to resolve. ActumIndex is the sanctioned identity
+      // source for that case — ExecuteFlow records it on dispatch for both identified
+      // and anonymous (commitment) runs; bursaToken runs are never indexed there, so
+      // reading it back adds no new owner↔anonymous linkage.
+      const indexEntry = !flowIdentity
+        ? await deps.actumIndex?.findByActumId?.(actum.id)
+        : null
+      const indexIdentity: AuctorKey | null = indexEntry
+        ? indexEntry.animaId
+          ? { animaId: indexEntry.animaId }
+          : indexEntry.commitment
+            ? { commitment: indexEntry.commitment }
+            : null
+        : null
+      const identity = flowIdentity ?? indexIdentity
       const auctor = identity && !('bursaToken' in identity) ? identity : undefined
 
       const completed = await deps.completor.complete(actum, exitus, auctor)
