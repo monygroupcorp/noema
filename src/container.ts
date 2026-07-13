@@ -672,7 +672,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     }))
   }
 
-  const completor = new ActumCompletor({ acta: actorum, signorum, terminatePod: config.terminatePod })
+  const completor = new ActumCompletor({ acta: actorum, signorum, terminatePod: config.terminatePod, vestigiorum })
   const arcanumLeafCol = db.collection(config.arcanumLeavesCollection ?? 'arcanum_leaves')
   const arcanumNullifiersCol = db.collection(config.arcanumNullifiersCollection ?? 'arcanum_nullifiers')
   const arcanumTree = new MongoArcanumTree(arcanumLeafCol)

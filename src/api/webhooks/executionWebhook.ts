@@ -10,7 +10,6 @@ import type { ModoStore } from '../../types/modo.js'
 import type { HospitiumStore } from '../../types/hospitium.js'
 import type { MateriaStore } from '../../types/materia.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
-import { createVestigiumFromActum } from '../../execution/hooks/vestigiumHook.js'
 import { projectExitus } from '../../execution/projectExitus.js'
 import { modoHostFor } from '../../ledger/rates.js'
 import { resolveModelRoyaltyPayees } from '../../ledger/resolveModelPayees.js'
@@ -165,7 +164,17 @@ export async function handleExecutionWebhook(
         impetus: BigInt(Math.ceil(executionTime / 1000)),
         duratio: executionTime,
       }
-      const completed = await deps.completor.complete(actum, exitus)
+      // Resolve identity ahead of completion — the completor threads it straight into
+      // vestigium indexing (single choke point) instead of a second webhook-only write
+      // site. No data dependency on `completed`: handleActumComplete only needs the
+      // actum id + the exitus payload we already built above.
+      const identity = await deps.flowRouter?.handleActumComplete(actum.id, {
+        kind: 'complete',
+        exitus: exitus.exitus as Record<string, unknown>,
+      })
+      const auctor = identity && !('bursaToken' in identity) ? identity : undefined
+
+      const completed = await deps.completor.complete(actum, exitus, auctor)
 
       // Update session spend — async jobs can't update impetusAccrued at dispatch
       // time since the actual cost is unknown until the webhook fires.
@@ -233,11 +242,6 @@ export async function handleExecutionWebhook(
         if (allSigna.length) await deps.signorum.createMany(allSigna)
       }
 
-      const identity = await deps.flowRouter?.handleActumComplete(actum.id, {
-        kind: 'complete',
-        exitus: exitus.exitus as Record<string, unknown>,
-      })
-
       // Route collection acta to CollectioCursor
       if (deps.collectioRouter) {
         const collectioId = deps.collectioRouter.findCollectioIdForActum(actum.id)
@@ -248,10 +252,6 @@ export async function handleExecutionWebhook(
       // its own parent link, so it advances the chain (next step) or completes the parent.
       if (deps.compositusRouter && completed.compositum) {
         await deps.compositusRouter.onStepComplete(completed.compositum.parentId, completed, true)
-      }
-
-      if (identity && deps.vestigiorum && !('bursaToken' in identity)) {
-        createVestigiumFromActum(completed, identity, deps.vestigiorum).catch(() => {})
       }
 
       // Studio inventory merge: comfyrunner reports the post-run installed model
