@@ -119,8 +119,13 @@ export async function dispatchInceptio(
   )
 
   if (cursorResult.kind === 'sync') {
-    // 4a. Sync: complete immediately.
-    const completed = await completor.complete(actum, cursorResult.exitus)
+    // 4a. Sync: complete immediately. Thread the same identified-owner branch used for
+    // the trace context above — vestigium indexing (inside complete()) skips when neither
+    // is set (arcanum-proof/bursaToken rails stay unlinkable).
+    const auctor = animaId !== undefined ? { animaId }
+      : commitment !== undefined ? { commitment }
+      : undefined
+    const completed = await completor.complete(actum, cursorResult.exitus, auctor)
     return { actum: completed, exitus: completed.exitus ?? {} }
   }
 
