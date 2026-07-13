@@ -16,11 +16,12 @@ import type { Fundamentum } from '../../types/fundamentum.js'
 export const FUNDAMENTUM_FLUX_COMFYUI: Fundamentum = {
   id: 'flux-comfyui',
   nomen: 'FLUX · ComfyUI',
-  versio: '1.0.0',
+  versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
   imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
+  comfyRef: 'v0.26.0',
   // The shared base/support weights every flux flow sits on. Family ('flux') derives
   // from these weights' `Intella.familia` (the unet base carries it).
   intellae: [
@@ -32,43 +33,45 @@ export const FUNDAMENTUM_FLUX_COMFYUI: Fundamentum = {
   vramGb: 24,
   canonica: true,
   natum: new Date('2025-01-01'),
-  mutatum: new Date('2025-01-01'),
+  mutatum: new Date('2026-07-10'),
 }
 
 /** SD1.5 · ComfyUI — the self-contained Stable Diffusion 1.5 checkpoint. */
 export const FUNDAMENTUM_SD15_COMFYUI: Fundamentum = {
   id: 'sd15-comfyui',
   nomen: 'SD1.5 · ComfyUI',
-  versio: '1.0.0',
+  versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
   imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
+  comfyRef: 'v0.26.0',
   intellae: [
     { id: 'intella.sd15-v1-5', role: 'checkpoint' },
   ],
   vramGb: 8,
   canonica: true,
   natum: new Date('2025-01-01'),
-  mutatum: new Date('2025-01-01'),
+  mutatum: new Date('2026-07-10'),
 }
 
 /** SDXL · ComfyUI — the self-contained SDXL base checkpoint (model + CLIP + VAE in one file). */
 export const FUNDAMENTUM_SDXL_COMFYUI: Fundamentum = {
   id: 'sdxl-comfyui',
   nomen: 'SDXL · ComfyUI',
-  versio: '1.0.0',
+  versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
   imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
+  comfyRef: 'v0.26.0',
   intellae: [
     { id: 'intella.sdxl-base-1-0', role: 'checkpoint' },
   ],
   vramGb: 12,
   canonica: true,
   natum: new Date('2025-01-01'),
-  mutatum: new Date('2025-01-01'),
+  mutatum: new Date('2026-07-10'),
 }
 
 /**
@@ -79,11 +82,12 @@ export const FUNDAMENTUM_SDXL_COMFYUI: Fundamentum = {
 export const FUNDAMENTUM_CHROMA_COMFYUI: Fundamentum = {
   id: 'chroma-comfyui',
   nomen: 'Chroma · ComfyUI',
-  versio: '1.0.0',
+  versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
   imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
+  comfyRef: 'v0.26.0',
   intellae: [
     { id: 'intella.chroma-unlocked-v35', role: 'unet' },
     { id: 'intella.t5xxl-fp16',          role: 'clip' },
@@ -92,7 +96,7 @@ export const FUNDAMENTUM_CHROMA_COMFYUI: Fundamentum = {
   vramGb: 24,
   canonica: true,
   natum: new Date('2025-01-01'),
-  mutatum: new Date('2025-01-01'),
+  mutatum: new Date('2026-07-10'),
 }
 
 /**
@@ -104,11 +108,12 @@ export const FUNDAMENTUM_CHROMA_COMFYUI: Fundamentum = {
 export const FUNDAMENTUM_FLUX_KONTEXT_COMFYUI: Fundamentum = {
   id: 'flux-kontext-comfyui',
   nomen: 'FLUX Kontext · ComfyUI',
-  versio: '1.0.0',
+  versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
   imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
+  comfyRef: 'v0.26.0',
   intellae: [
     { id: 'intella.flux-kontext-dev', role: 'unet' },
     { id: 'intella.t5xxl-fp16',       role: 'clip' },
@@ -118,7 +123,7 @@ export const FUNDAMENTUM_FLUX_KONTEXT_COMFYUI: Fundamentum = {
   vramGb: 24,
   canonica: true,
   natum: new Date('2025-01-01'),
-  mutatum: new Date('2025-01-01'),
+  mutatum: new Date('2026-07-10'),
 }
 
 /**
@@ -129,11 +134,12 @@ export const FUNDAMENTUM_FLUX_KONTEXT_COMFYUI: Fundamentum = {
 export const FUNDAMENTUM_ZIMAGE_TURBO_COMFYUI: Fundamentum = {
   id: 'z-image-turbo-comfyui',
   nomen: 'Z-Image Turbo · ComfyUI',
-  versio: '1.0.0',
+  versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
   imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
+  comfyRef: 'v0.26.0',
   intellae: [
     { id: 'intella.z-image-turbo', role: 'unet' },
     { id: 'intella.qwen3-4b',      role: 'clip' },
@@ -142,7 +148,7 @@ export const FUNDAMENTUM_ZIMAGE_TURBO_COMFYUI: Fundamentum = {
   vramGb: 24,
   canonica: true,
   natum: new Date('2026-06-26'),
-  mutatum: new Date('2026-06-26'),
+  mutatum: new Date('2026-07-10'),
 }
 
 /**
@@ -154,11 +160,12 @@ export const FUNDAMENTUM_ZIMAGE_TURBO_COMFYUI: Fundamentum = {
 export const FUNDAMENTUM_KREA2_TURBO_COMFYUI: Fundamentum = {
   id: 'krea-turbo-comfyui',
   nomen: 'Krea 2 Turbo · ComfyUI',
-  versio: '1.0.0',
+  versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
   imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
+  comfyRef: 'v0.26.0',
   intellae: [
     { id: 'intella.krea-2-turbo',  role: 'unet' },
     { id: 'intella.qwen3-vl-4b',   role: 'clip' },
@@ -167,7 +174,7 @@ export const FUNDAMENTUM_KREA2_TURBO_COMFYUI: Fundamentum = {
   vramGb: 24,
   canonica: true,
   natum: new Date('2026-06-26'),
-  mutatum: new Date('2026-06-26'),
+  mutatum: new Date('2026-07-10'),
 }
 
 /**
@@ -178,16 +185,17 @@ export const FUNDAMENTUM_KREA2_TURBO_COMFYUI: Fundamentum = {
 export const FUNDAMENTUM_COMFYUI_BASE: Fundamentum = {
   id: 'comfyui-base',
   nomen: 'ComfyUI base (weightless)',
-  versio: '1.0.0',
+  versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
   imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
+  comfyRef: 'v0.26.0',
   intellae: [],
   vramGb: 8,
   canonica: true,
   natum: new Date('2025-01-01'),
-  mutatum: new Date('2025-01-01'),
+  mutatum: new Date('2026-07-10'),
 }
 
 /**
@@ -198,11 +206,12 @@ export const FUNDAMENTUM_COMFYUI_BASE: Fundamentum = {
 export const FUNDAMENTUM_FLUX2_KLEIN_COMFYUI: Fundamentum = {
   id: 'flux2-klein-comfyui',
   nomen: 'FLUX.2 Klein · ComfyUI',
-  versio: '1.0.0',
+  versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
   imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
+  comfyRef: 'v0.26.0',
   intellae: [
     { id: 'intella.flux2-klein-9b',          role: 'unet' },
     { id: 'intella.qwen3-8b-flux2',          role: 'clip' },
@@ -211,7 +220,7 @@ export const FUNDAMENTUM_FLUX2_KLEIN_COMFYUI: Fundamentum = {
   vramGb: 24,
   canonica: true,
   natum: new Date('2025-01-01'),
-  mutatum: new Date('2025-01-01'),
+  mutatum: new Date('2026-07-10'),
 }
 
 /**
@@ -223,11 +232,12 @@ export const FUNDAMENTUM_FLUX2_KLEIN_COMFYUI: Fundamentum = {
 export const FUNDAMENTUM_FLUX2_KLEIN_4B_COMFYUI: Fundamentum = {
   id: 'flux2-klein-4b-comfyui',
   nomen: 'FLUX.2 Klein 4B · ComfyUI',
-  versio: '1.0.0',
+  versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
   imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
+  comfyRef: 'v0.26.0',
   intellae: [
     { id: 'intella.flux2-klein-4b',          role: 'unet' },
     { id: 'intella.qwen3-4b-flux2',          role: 'clip' },
@@ -236,7 +246,7 @@ export const FUNDAMENTUM_FLUX2_KLEIN_4B_COMFYUI: Fundamentum = {
   vramGb: 24,
   canonica: true,
   natum: new Date('2026-06-30'),
-  mutatum: new Date('2026-06-30'),
+  mutatum: new Date('2026-07-10'),
 }
 
 /**
@@ -247,18 +257,19 @@ export const FUNDAMENTUM_FLUX2_KLEIN_4B_COMFYUI: Fundamentum = {
 export const FUNDAMENTUM_UPSCALE_COMFYUI: Fundamentum = {
   id: 'upscale-comfyui',
   nomen: 'Upscale · ComfyUI',
-  versio: '1.0.0',
+  versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
   imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
+  comfyRef: 'v0.26.0',
   intellae: [
     { id: 'intella.upscale-4x-ultrasharp', role: 'upscale_model' },
   ],
   vramGb: 6,
   canonica: true,
   natum: new Date('2025-01-01'),
-  mutatum: new Date('2025-01-01'),
+  mutatum: new Date('2026-07-10'),
 }
 
 /**
@@ -400,11 +411,12 @@ export const FUNDAMENTUM_AITOOLKIT_TRAINING: Fundamentum = {
 export const FUNDAMENTUM_LTX_COMFYUI: Fundamentum = {
   id: 'ltx-comfyui',
   nomen: 'LTX 2.3 · ComfyUI',
-  versio: '1.0.0',
+  versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
   imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
+  comfyRef: 'v0.26.0',
   intellae: [
     { id: 'intella.ltx-2.3-distilled', role: 'checkpoint' },
     { id: 'intella.gemma-3-12b',       role: 'text_encoder' },
@@ -412,7 +424,7 @@ export const FUNDAMENTUM_LTX_COMFYUI: Fundamentum = {
   vramGb: 48,
   canonica: true,
   natum: new Date('2026-07-07'),
-  mutatum: new Date('2026-07-07'),
+  mutatum: new Date('2026-07-10'),
 }
 
 /**
@@ -423,11 +435,12 @@ export const FUNDAMENTUM_LTX_COMFYUI: Fundamentum = {
 export const FUNDAMENTUM_WAN22_T2V_COMFYUI: Fundamentum = {
   id: 'wan22-t2v-comfyui',
   nomen: 'Wan2.2 T2V · ComfyUI',
-  versio: '1.0.0',
+  versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
   imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
+  comfyRef: 'v0.26.0',
   intellae: [
     { id: 'intella.wan22-t2v-high', role: 'unet_high' },
     { id: 'intella.wan22-t2v-low',  role: 'unet_low' },
@@ -438,7 +451,7 @@ export const FUNDAMENTUM_WAN22_T2V_COMFYUI: Fundamentum = {
   vramGb: 48,
   canonica: true,
   natum: new Date('2026-07-07'),
-  mutatum: new Date('2026-07-07'),
+  mutatum: new Date('2026-07-10'),
 }
 
 /**
@@ -448,11 +461,12 @@ export const FUNDAMENTUM_WAN22_T2V_COMFYUI: Fundamentum = {
 export const FUNDAMENTUM_WAN22_I2V_COMFYUI: Fundamentum = {
   id: 'wan22-i2v-comfyui',
   nomen: 'Wan2.2 I2V · ComfyUI',
-  versio: '1.0.0',
+  versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
   imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
+  comfyRef: 'v0.26.0',
   intellae: [
     { id: 'intella.wan22-i2v-high', role: 'unet_high' },
     { id: 'intella.wan22-i2v-low',  role: 'unet_low' },
@@ -463,7 +477,7 @@ export const FUNDAMENTUM_WAN22_I2V_COMFYUI: Fundamentum = {
   vramGb: 48,
   canonica: true,
   natum: new Date('2026-07-07'),
-  mutatum: new Date('2026-07-07'),
+  mutatum: new Date('2026-07-10'),
 }
 
 /** All canonical fundamenta — seeded on boot (parity with CANONICAL_ESSENTIAE). */

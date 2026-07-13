@@ -25,6 +25,14 @@ const AITKTRAINER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/aitkt
 
 const log = makeLogger('cursor:runpod:secure')
 
+// Pinned ComfyUI ref (2026-07-10 P0): bootstrap used to clone unpinned HEAD, which drifted onto a
+// torch-2.5+-only code path (`enable_gqa` kwarg) while every fundament's image pins torch 2.4.0 —
+// every ComfyUI pod broke. `Fundamentum.comfyRef` is the per-substrate source of truth (ADR-0005);
+// this constant is the fallback when a caller doesn't have one to pass (submit()'s CompiledSpec
+// doesn't yet carry comfyRef — a Compiler-side follow-up, out of this fix's scope). Bump both this
+// and every Fundamentum.comfyRef together; never let the clone go unpinned again.
+const DEFAULT_COMFYUI_REF = 'v0.26.0'
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -139,7 +147,31 @@ export class SecurePodClient implements RunPodClient, Procurator {
     /** Injectable pod-terminate function — defaults to the RunPod REST call. The
      *  seam exists so tests can swap a spy without module-mocking gymnastics. */
     private readonly terminatePodFn: (apiKey: string, podId: string) => Promise<void> = _terminatePodUtil,
+    /**
+     * Liveness check for the actum a retry is about to spend a pod on — reads the actum's
+     * current status and returns false once it's terminal (`completus`/`fractus`, which also
+     * covers the expiry watchdog's fail path). Optional: absent means "can't check" and retries
+     * proceed as before (back-compat for callers with no store wired). Bounded to the smallest
+     * read surface the retry loop needs — not a full Actorum dependency.
+     */
+    private readonly isActumLive?: (actumId: string) => Promise<boolean>,
   ) {}
+
+  /**
+   * Zombie-retry guard (2026-07-13): re-checks the in-flight actum's liveness before spending
+   * another pod on it. Fails OPEN (returns true) when there's no actumId in trace or no
+   * `isActumLive` callback wired, and on a callback error — a liveness-check hiccup must never
+   * block a legitimate retry; the guard only ever narrows the retry loop, never widens it.
+   */
+  private async _actumStillLive(): Promise<boolean> {
+    const actumId = getTrace()?.actumId
+    if (!actumId || !this.isActumLive) return true
+    try {
+      return await this.isActumLive(actumId)
+    } catch {
+      return true
+    }
+  }
 
   async submit(params: {
     input: unknown
@@ -207,6 +239,14 @@ export class SecurePodClient implements RunPodClient, Procurator {
         }
         log.warn(`pod run attempt 1/${maxAttempts} failed`, { podId, error: (firstErr as Error).message })
         for (let attempt = 2; attempt <= maxAttempts; attempt++) {
+          // Liveness gate — before spending a NEW pod on a retry, confirm the actum this
+          // job belongs to hasn't already gone terminal (e.g. the expiry watchdog fired
+          // mid-retry and refunded it). Without this, a slow retry cascade keeps
+          // provisioning pods for a run nobody is paying for anymore (2026-07-13 incident).
+          if (!(await this._actumStillLive())) {
+            log.warn('retry aborted — actum already terminal', { actumId: getTrace()?.actumId, attempt })
+            return
+          }
           log.info('retrying on new pod', { attempt })
           let retryPodId: string
           try {
@@ -217,6 +257,14 @@ export class SecurePodClient implements RunPodClient, Procurator {
             continue
           }
           activePodId = retryPodId
+          // Second gate — the actum could have gone terminal during provisioning itself;
+          // check again before submitting the job so we don't hand comfyrunner work for a
+          // dead run, and terminate the pod we just spun up instead of leaking it.
+          if (!(await this._actumStillLive())) {
+            log.warn('retry aborted — actum already terminal', { actumId: getTrace()?.actumId, attempt })
+            await this._terminatePod(retryPodId).catch(() => {})
+            return
+          }
           // Update DB so the retry pod is tracked; webhook will fire with retryPodId
           await params.onPodActive?.(retryPodId).catch(() => {})
           try {
@@ -263,13 +311,13 @@ export class SecurePodClient implements RunPodClient, Procurator {
    * failure (the pod is terminated). Models are applied afterward via the live-install path.
    */
   async provisionStudio(
-    opts: { runtime?: string; warmMs?: number; provisioningContext?: ProvisioningContext } = {},
+    opts: { runtime?: string; comfyRef?: string; warmMs?: number; provisioningContext?: ProvisioningContext } = {},
     onStage?: StudioStageCb,
   ): Promise<StudioProvision | null> {
     const imageName = this.config.imageName ?? 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
     let prov: { podId: string; sshInfo: SshInfo; provisionMs: number }
     try {
-      prov = await this._provisionAndBootstrap(imageName, onStage, opts.runtime)
+      prov = await this._provisionAndBootstrap(imageName, onStage, opts.runtime, opts.comfyRef)
     } catch (err) {
       log.warn('studio provision failed', { error: (err as Error).message })
       return null
@@ -361,6 +409,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     imageName: string,
     onStage?: StudioStageCb,
     runtime?: string,
+    comfyRef?: string,
   ): Promise<{ podId: string; sshInfo: SshInfo; provisionMs: number }> {
     const startMs = Date.now()
     const signal = (stage: string, info?: import('../lib/bus.js').StageInfo) => {
@@ -398,7 +447,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
       signal('pod-locked', { gpuType: sshInfo.gpuType, region: sshInfo.region, costPerHr: sshInfo.costPerHr, podId })
       ssh = await this._waitForSshd(sshInfo)
       signal('bootstrapping')
-      await this._bootstrap(ssh, podId, runtime)
+      await this._bootstrap(ssh, podId, runtime, comfyRef)
       await ssh.close()
       ssh = null
       await this._waitForRunner(SecurePodClient.runnerBase(podId))
@@ -577,7 +626,10 @@ export class SecurePodClient implements RunPodClient, Procurator {
       executio.sshReadyMs = Date.now() - startMs
       reportMetrics()  // persist provision/ssh/podId/costPerHr — survives even if download fails
       signal('bootstrapping')
-      await this._bootstrap(ssh, podId, isCompiledSpec(input) ? input.runtime : undefined)
+      // `comfyRef` isn't on CompiledSpecLike yet (Compiler-side follow-up); read it defensively so a
+      // future compiled spec that does carry it is honored without another SecurePodClient change.
+      const specComfyRef = isCompiledSpec(input) ? (input as { comfyRef?: string }).comfyRef : undefined
+      await this._bootstrap(ssh, podId, isCompiledSpec(input) ? input.runtime : undefined, specComfyRef)
 
       // SSH only needed for bootstrap — close before HTTP phase
       await ssh.close()
@@ -722,7 +774,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
 
   /** Bootstrap dispatches on the pod's runtime (ADR-0007). ComfyUI keeps the proven comfyrunner.py
    *  path byte-for-byte; vLLM/llm pods get the multi-runtime runner.py. */
-  private async _bootstrap(ssh: SshTransportLike, podId: string, runtime?: string): Promise<void> {
+  private async _bootstrap(ssh: SshTransportLike, podId: string, runtime?: string, comfyRef?: string): Promise<void> {
     if (runtime === 'vLLM' || runtime === 'llm') {
       return this._bootstrapRunner(ssh, podId, 'vLLM', 'vllm huggingface_hub boto3')
     }
@@ -740,15 +792,17 @@ export class SecurePodClient implements RunPodClient, Procurator {
       // just needs the download + R2 tooling. git is ensured inside _bootstrapRunner.
       return this._bootstrapRunner(ssh, podId, 'python-modelcard', 'huggingface_hub boto3')
     }
-    return this._bootstrapComfyUI(ssh, podId)
+    return this._bootstrapComfyUI(ssh, podId, comfyRef)
   }
 
-  private async _bootstrapComfyUI(ssh: SshTransportLike, podId: string): Promise<void> {
-    log.info('bootstrapping pod', { podId, runtime: 'ComfyUI' })
+  private async _bootstrapComfyUI(ssh: SshTransportLike, podId: string, comfyRef?: string): Promise<void> {
+    const ref = comfyRef ?? DEFAULT_COMFYUI_REF
+    log.info('bootstrapping pod', { podId, runtime: 'ComfyUI', comfyRef: ref })
 
-    // Install deps, clone ComfyUI, install Python packages (comfyrunner deps included)
+    // Install deps, clone a PINNED ComfyUI ref — never HEAD (2026-07-10 P0: unpinned HEAD drifted
+    // torch-incompatible and broke every ComfyUI pod). `--branch` works for both tags and branches.
     await ssh.exec('which git || (apt-get update -qq && apt-get install -y -qq git)', { timeout: 120_000 })
-    await ssh.exec('cd /root && rm -rf ComfyUI && git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git', { timeout: 120_000 })
+    await ssh.exec(`cd /root && rm -rf ComfyUI && git clone --depth 1 --branch ${shellQuote(ref)} https://github.com/comfyanonymous/ComfyUI.git`, { timeout: 120_000 })
     await ssh.exec('cd /root/ComfyUI && pip install -r requirements.txt websocket-client boto3 -q', { timeout: 600_000 })
 
     // Upload comfyrunner.py and start it — comfyrunner owns ComfyUI startup internally
