@@ -68,6 +68,15 @@ export class MongoActumIndex implements ActumIndexStore {
     await this.col.deleteOne({ actumId })
   }
 
+  /** Identity fallback (noema-044) — `settle` already upserts/updates keyed by actumId,
+   *  so the entry is trivially findable by that same key regardless of settled state. */
+  async findByActumId(actumId: string): Promise<ActumIndex | null> {
+    const doc = await this.col.findOne({ actumId })
+    if (!doc) return null
+    const { _id: _omit, ...rest } = doc as ActumIndex & { _id: unknown }
+    return rest as ActumIndex
+  }
+
   /** Retain-on-settle: stamp the existing row in place, keyed by actumId (preserves
    *  the owner key). Idempotent — a repeated at-least-once webhook re-stamps the same
    *  values. No upsert: if the row is gone (never indexed / already pruned) it's a no-op. */
