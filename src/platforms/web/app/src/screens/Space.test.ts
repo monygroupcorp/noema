@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildFallbackItems, formatVestigiumDate, vestigiumSnippet } from './Space';
+import {
+  buildFallbackItems, formatVestigiumDate, vestigiumSnippet,
+  computeBounds, normalizeToUnitScale, frameCameraToBounds, SCENE_EXTENT,
+} from './Space';
 import type { Vestigium } from '../lib/api';
 
 // No jsdom/@testing-library/react in this app's toolchain (see BuyCreditsModal.test.ts,
@@ -51,5 +54,67 @@ describe('buildFallbackItems — the full-history flat-grid shape', () => {
   });
   it('empty history in -> empty grid out (no crash)', () => {
     expect(buildFallbackItems([])).toEqual([]);
+  });
+});
+
+// noema-050: a small real space's PCA output can be orders of magnitude smaller than the
+// demo corpus's — normalize every cloud to a fixed envelope so 2 points and 2000 both fill
+// the view legibly, framed, with no per-axis distortion of the projection's layout.
+describe('computeBounds', () => {
+  it('finds the centroid and the largest single-axis range', () => {
+    // x spans 4 (-2..2), y spans 2 (-1..1), z spans 0 (always 3) -> maxExtent is the x span
+    const positions = new Float32Array([-2, 1, 3, 2, -1, 3]);
+    const { center, maxExtent } = computeBounds(positions);
+    expect(center).toEqual([0, 0, 3]);
+    expect(maxExtent).toBe(4);
+  });
+  it('a single point has zero extent, centered on itself', () => {
+    const { center, maxExtent } = computeBounds(new Float32Array([5, -5, 2]));
+    expect(center).toEqual([5, -5, 2]);
+    expect(maxExtent).toBe(0);
+  });
+  it('empty input -> zero bounds, no crash', () => {
+    expect(computeBounds(new Float32Array([]))).toEqual({ center: [0, 0, 0], maxExtent: 0 });
+  });
+});
+
+describe('normalizeToUnitScale', () => {
+  it('centers on the centroid and scales the max extent to SCENE_EXTENT', () => {
+    const positions = new Float32Array([0, 0, 0, 10, 0, 0]);   // extent 10 on x, centroid (5,0,0)
+    const out = normalizeToUnitScale(positions);
+    const { maxExtent, center } = computeBounds(out);
+    expect(maxExtent).toBeCloseTo(SCENE_EXTENT, 5);
+    expect(center).toEqual([0, 0, 0]);
+  });
+  it('uniform scale only — a stretched cloud keeps its axis proportions (no per-axis distortion)', () => {
+    // x spans 20, y spans 10: y must stay exactly half of x post-normalize
+    const positions = new Float32Array([-10, -5, 0, 10, 5, 0]);
+    const out = normalizeToUnitScale(positions);
+    const xSpan = out[3] - out[0];
+    const ySpan = out[4] - out[1];
+    expect(xSpan).toBeCloseTo(SCENE_EXTENT, 5);
+    expect(ySpan).toBeCloseTo(SCENE_EXTENT / 2, 5);
+  });
+  it('n=1: a single point normalizes to the origin, visible and framed (no divide-by-zero)', () => {
+    const out = normalizeToUnitScale(new Float32Array([42, -7, 3]));
+    expect(Array.from(out)).toEqual([0, 0, 0]);
+  });
+  it('all-coincident points (zero extent, n>1): skip scale, just center — no NaN/Infinity', () => {
+    const out = normalizeToUnitScale(new Float32Array([3, 3, 3, 3, 3, 3, 3, 3, 3]));
+    expect(Array.from(out)).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  });
+  it('empty cloud in -> empty array out (no crash)', () => {
+    expect(normalizeToUnitScale(new Float32Array([]))).toEqual(new Float32Array([]));
+  });
+});
+
+describe('frameCameraToBounds', () => {
+  it('derives a camera position/fov from the fixed SCENE_EXTENT envelope (not per-corpus)', () => {
+    const a = frameCameraToBounds();
+    const b = frameCameraToBounds();
+    expect(a).toEqual(b);               // deterministic — same envelope every time
+    expect(a.fov).toBe(42);
+    const dist = Math.hypot(...a.position);
+    expect(dist).toBeGreaterThan(SCENE_EXTENT / 2);   // sits outside the normalized cloud
   });
 });
