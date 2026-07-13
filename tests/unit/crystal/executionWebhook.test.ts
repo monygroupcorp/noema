@@ -18,6 +18,7 @@ import { platformSkimHook } from '../../../src/ledger/hooks/platformSkim.js'
 import { makeTrainingFinalizer, urlLoraReader, makeTrainingExitusResolver } from '../../../src/crystal/trainingFinalizer.js'
 import type { Modorum } from '../../../src/types/modus.js'
 import type { Intella } from '../../../src/types/intelligendi.js'
+import type { ActumIndex } from '../../../src/types/actumIndex.js'
 
 function makeModorum(modus: Modus): Modorum {
   return {
@@ -50,10 +51,12 @@ function makeActum(overrides: Partial<Actum> = {}): Actum {
   }
 }
 
+type TestAuctorKey = { animaId: string } | { commitment: string } | { bursaToken: string }
+
 interface CompletorMock {
-  completed: Array<{ actumId: string; exitus: Exitus }>
+  completed: Array<{ actumId: string; exitus: Exitus; auctor?: TestAuctorKey }>
   failed: Array<{ actumId: string; error: string }>
-  complete(actum: Actum, exitus: Exitus): Promise<Actum>
+  complete(actum: Actum, exitus: Exitus, auctor?: TestAuctorKey): Promise<Actum>
   fail(actum: Actum, error: string): Promise<Actum>
 }
 
@@ -61,8 +64,8 @@ function makeCompletor(): CompletorMock {
   const mock: CompletorMock = {
     completed: [],
     failed: [],
-    async complete(actum, exitus) {
-      mock.completed.push({ actumId: actum.id, exitus })
+    async complete(actum, exitus, auctor) {
+      mock.completed.push({ actumId: actum.id, exitus, auctor })
       // Mirror the real ActumCompletor: settles actum.impetus to the
       // dispatch-stamped finalImpetus when present, else the reported impetus,
       // capped at the reservation. Hooks downstream read `completed.impetus`
@@ -723,4 +726,114 @@ test('COMPLETED for actum without modoId does not update any modo', async () => 
 
   const unchanged = await modos.findById(modo.id)
   assert.equal(unchanged?.impetusAccrued, 50n)
+})
+
+// ── ActumIndex identity fallback (noema-044) ──────────────────────────────────
+//
+// Direct-fired runs (e.g. `POST /v1/runs`) never create a FlowContext, so
+// flowRouter has nothing to resolve. These tests cover the fallback to
+// deps.actumIndex.findByActumId when flowRouter is absent or yields no identity.
+
+function makeActumIndexStub(entry: ActumIndex | null) {
+  const calls: string[] = []
+  return {
+    calls,
+    async record() {},
+    async findFor() { return [] },
+    async remove() {},
+    async findByActumId(actumId: string) {
+      calls.push(actumId)
+      return entry
+    },
+  }
+}
+
+// 26. No flowRouter, actumIndex has an animaId entry → completor.complete gets that auctor
+test('actumIndex fallback resolves animaId identity when flowRouter is absent', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const actumIndex = makeActumIndexStub({
+    actumId: 'actum-test-1',
+    modusId: 'flux-schnell',
+    createdAt: new Date(),
+    animaId: 'anima-42',
+  })
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    actumIndex,
+  }
+  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 1000 }
+  const result = await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.deepEqual(actumIndex.calls, ['actum-test-1'])
+  assert.deepEqual(completor.completed[0].auctor, { animaId: 'anima-42' })
+})
+
+// 27. No flowRouter, actumIndex has a commitment entry → completor.complete gets that auctor
+test('actumIndex fallback resolves commitment identity when flowRouter is absent', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const actumIndex = makeActumIndexStub({
+    actumId: 'actum-test-1',
+    modusId: 'flux-schnell',
+    createdAt: new Date(),
+    commitment: 'commit-abc',
+  })
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    actumIndex,
+  }
+  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 1000 }
+  const result = await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.deepEqual(completor.completed[0].auctor, { commitment: 'commit-abc' })
+})
+
+// 28. No flowRouter, no actumIndex entry anywhere → no throw, auctor stays undefined (unindexed)
+test('actumIndex fallback with no entry leaves the run unindexed without throwing', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const actumIndex = makeActumIndexStub(null)
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    actumIndex,
+  }
+  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 1000 }
+  const result = await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.deepEqual(actumIndex.calls, ['actum-test-1'])
+  assert.equal(completor.completed[0].auctor, undefined)
+})
+
+// 29. flowRouter identity present wins — actumIndex fallback is not consulted
+test('flowRouter identity takes precedence over actumIndex fallback', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const flowRouter = {
+    async handleActumComplete() { return { animaId: 'anima-from-flow' } },
+  }
+  const actumIndex = makeActumIndexStub({
+    actumId: 'actum-test-1',
+    modusId: 'flux-schnell',
+    createdAt: new Date(),
+    animaId: 'anima-from-index',
+  })
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    flowRouter,
+    actumIndex,
+  }
+  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 1000 }
+  const result = await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(result.status, 200)
+  assert.deepEqual(completor.completed[0].auctor, { animaId: 'anima-from-flow' })
+  assert.equal(actumIndex.calls.length, 0)
 })
