@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, Html } from '@react-three/drei';
+import { OrbitControls, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import { AppShell } from '../shell/AppShell';
 import { ErrorBoundary } from '../shell/ErrorBoundary';
@@ -108,6 +108,18 @@ export function frameCameraToBounds(): { position: [number, number, number]; fov
   return { position: [dir[0] * dist, dir[1] * dist, dir[2] * dist], fov: 42 };
 }
 
+// ---- Reference grid/axes (noema-051) ------------------------------------------------
+// Captain live-check of #137 (2026-07-13): unit scale fixed the collapse-to-dots problem,
+// but the space still reads as disorienting with no fixed reference frame ("where did my
+// axis go!"). Restores the wireframe-cube + labeled-axis reference (dropped in the
+// noema-033 real-data rewrite) sized off the CURRENT SCENE_EXTENT envelope, not the old
+// hardcoded 5.4 — same visual margin-past-the-envelope ratio the original had (box a hair
+// past the ±2.5 cube, axis lines a hair past that), so it still fits both a 2-point real
+// space and the 2000-point demo corpus post-normalization.
+export function axesGridSize(extent: number): { boxSize: number; axisLength: number } {
+  return { boxSize: extent + 0.4, axisLength: extent / 2 + 0.1 };
+}
+
 type Layer = 'text' | 'image';
 interface Manifest { n: number; k: number; projection: string }
 interface Cluster { label: string; terms: string[]; color: string; count: number }
@@ -188,8 +200,20 @@ async function loadRealCorpus(layer: Layer): Promise<{ corpus: Corpus; meta: PtM
 }
 
 function Axes() {
-  const box = useMemo(() => new THREE.EdgesGeometry(new THREE.BoxGeometry(5.8, 5.8, 5.8)), []);
-  return <lineSegments geometry={box}><lineBasicMaterial color="#161b21" /></lineSegments>;
+  const { boxSize, axisLength: L } = axesGridSize(SCENE_EXTENT);
+  const box = useMemo(() => new THREE.EdgesGeometry(new THREE.BoxGeometry(boxSize, boxSize, boxSize)), [boxSize]);
+  const lbl = { fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--faint)', whiteSpace: 'nowrap' as const, letterSpacing: '.06em' };
+  return (
+    <group>
+      <lineSegments geometry={box}><lineBasicMaterial color="#1b2127" /></lineSegments>
+      <Line points={[[-L, 0, 0], [L, 0, 0]]} color="#33404f" lineWidth={1} />
+      <Line points={[[0, -L, 0], [0, L, 0]]} color="#33404f" lineWidth={1} />
+      <Line points={[[0, 0, -L], [0, 0, L]]} color="#33404f" lineWidth={1} />
+      <Html position={[L + 0.15, 0, 0]} style={lbl} center>dim 1</Html>
+      <Html position={[0, L + 0.15, 0]} style={lbl} center>dim 2</Html>
+      <Html position={[0, 0, L + 0.15]} style={lbl} center>dim 3</Html>
+    </group>
+  );
 }
 
 function Cloud({ corpus, baseColors, dimMask, onPick, onFocusPoint }: {
@@ -375,6 +399,12 @@ function CorpusSpace() {
   const [hasReal, setHasReal] = useState<boolean | null>(null);
   const [corpus, setCorpus] = useState<Corpus | null>(null);
   const cameraFrame = useMemo(() => frameCameraToBounds(), []);
+  // OrbitControls captures its construction-time camera/target as its own reset baseline
+  // (three.js OrbitControls.reset()) — since the Canvas below is mounted with `camera=
+  // {{ position: cameraFrame.position }}`, .reset() re-applies exactly the #137 framed
+  // view (position + target), no separate stored target needed.
+  const controlsRef = useRef<any>(null);
+  const resetView = () => controlsRef.current?.reset();
   const [meta, setMeta] = useState<PtMeta[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // Flat chronological fallback (product ruling 2026-07-13): populated when the caller
@@ -625,10 +655,21 @@ function CorpusSpace() {
                 </mesh>
               )}
               <CameraRig focus={focus} />
-              <OrbitControls makeDefault enableDamping dampingFactor={0.08} minDistance={0.4} maxDistance={22}
+              <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} minDistance={0.4} maxDistance={22}
                 zoomToCursor screenSpacePanning panSpeed={1.1} zoomSpeed={1.1}
                 mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN }} />
             </Canvas>
+
+            {/* orientation cluster (noema-051): reset-view (camera) and home (navigation)
+                are deliberately two distinct affordances, not merged into one button. */}
+            <div className="orient-cluster" onClick={(e) => e.stopPropagation()}>
+              <button onClick={resetView} title="reset view — reframe the camera">
+                <Ic name="rotate-cw" /> reset view
+              </button>
+              <Link to="/app" title="back to app home">
+                <Ic name="home" /> home
+              </Link>
+            </div>
 
             {/* top bar: layer toggle + search */}
             <div className="spacebar" onClick={(e) => e.stopPropagation()}>
