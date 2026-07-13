@@ -4,7 +4,9 @@ import type { Actum } from '../../../src/types/actum.js'
 import type { Signum } from '../../../src/types/significandi.js'
 import type { Exitus, Actorum } from '../../../src/types/cursus.js'
 import type { Nexus } from '../../../src/types/nexus.js'
+import type { Vestigiorum } from '../../../src/types/vestigium.js'
 import { ActumCompletor } from '../../../src/execution/ActumCompletor.js'
+import { MemoryVestigiorum } from '../../../src/rag/MemoryVestigiorum.js'
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -219,4 +221,121 @@ test('does not emit to nexus on failure', async () => {
   await completor.fail(actum, 'timeout')
 
   assert.equal(nexus._emitted.length, 0)
+})
+
+// ---------------------------------------------------------------------------
+// Vestigium indexing (single choke point — moved from executionWebhook)
+// ---------------------------------------------------------------------------
+
+function makeThrowingVestigiorum(): Vestigiorum {
+  return {
+    create: async () => { throw new Error('mongo write failed') },
+    indexPromptum: async () => {},
+    indexImago: async () => {},
+    indexIntella: async () => {},
+    search: async () => [],
+  } as unknown as Vestigiorum
+
+}
+
+/** Wraps a real MemoryVestigiorum, spying on create() while delegating every other
+ *  method to the underlying instance (a plain object spread would lose the prototype
+ *  methods — MemoryVestigiorum's index-family and search methods live on its prototype,
+ *  not as own properties). */
+function spyOnCreate(inner: MemoryVestigiorum): { spy: Vestigiorum; created: () => unknown } {
+  let created: unknown
+  const spy = {
+    create: async (v: Parameters<Vestigiorum['create']>[0]) => { created = v; return inner.create(v) },
+    indexPromptum: inner.indexPromptum.bind(inner),
+    indexImago: inner.indexImago.bind(inner),
+    indexIntella: inner.indexIntella.bind(inner),
+    search: inner.search.bind(inner),
+    findById: inner.findById.bind(inner),
+    forIdentity: inner.forIdentity.bind(inner),
+    setAuctorImpressio: inner.setAuctorImpressio.bind(inner),
+    rate: inner.rate.bind(inner),
+    update: inner.update.bind(inner),
+  } as unknown as Vestigiorum
+  return { spy, created: () => created }
+}
+
+test('writes a vestigium for an animaId auctor on completion', async () => {
+  const actum = makeActum({ aditus: { prompt: 'a cat in space' } })
+  const acta = makeActa(actum)
+  const { spy, created } = spyOnCreate(new MemoryVestigiorum())
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum(), nexus: makeNexus(), vestigiorum: spy })
+
+  await completor.complete(actum, makeRunResult({ exitus: { imageUrl: 'https://x.com/out.png' } }), { animaId: 'anima-abc' })
+
+  assert.deepEqual((created() as { auctorKey: unknown }).auctorKey, { animaId: 'anima-abc' })
+  assert.equal((created() as { actumId: string }).actumId, actum.id)
+})
+
+test('writes a vestigium for a commitment auctor on completion', async () => {
+  const actum = makeActum({ aditus: { prompt: 'anon run' } })
+  const acta = makeActa(actum)
+  const { spy, created } = spyOnCreate(new MemoryVestigiorum())
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum(), nexus: makeNexus(), vestigiorum: spy })
+
+  await completor.complete(actum, makeRunResult(), { commitment: 'deadbeef' })
+
+  assert.deepEqual((created() as { auctorKey: unknown }).auctorKey, { commitment: 'deadbeef' })
+})
+
+test('skips indexing when no auctor is threaded (ownerless/system acta)', async () => {
+  const actum = makeActum()
+  const acta = makeActa(actum)
+  let createCalls = 0
+  const vestigiorum = {
+    create: async (v: unknown) => { createCalls += 1; return v as never },
+    indexPromptum: async () => {}, indexImago: async () => {}, indexIntella: async () => {},
+    search: async () => [],
+  } as unknown as Vestigiorum
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum(), nexus: makeNexus(), vestigiorum })
+
+  await completor.complete(actum, makeRunResult())   // no auctor
+
+  assert.equal(createCalls, 0)
+})
+
+test('vestigiorum absent → completion still succeeds, no throw', async () => {
+  const actum = makeActum()
+  const acta = makeActa(actum)
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum(), nexus: makeNexus() })
+
+  const completed = await completor.complete(actum, makeRunResult(), { animaId: 'anima-abc' })
+
+  assert.equal(completed.status, 'completus')
+})
+
+test('vestigiorum.create failure logs a warning and completion still succeeds', async () => {
+  const actum = makeActum()
+  const acta = makeActa(actum)
+  const completor = new ActumCompletor({
+    acta, signorum: makeSignorum(), nexus: makeNexus(),
+    vestigiorum: makeThrowingVestigiorum(),
+  })
+
+  const completed = await completor.complete(actum, makeRunResult(), { animaId: 'anima-abc' })
+
+  assert.equal(completed.status, 'completus')
+})
+
+test('double-completion is rejected before any index write', async () => {
+  const actum = makeActum({ status: 'completus' })
+  const acta = makeActa(actum)
+  let createCalls = 0
+  const vestigiorum = {
+    create: async (v: unknown) => { createCalls += 1; return v as never },
+    indexPromptum: async () => {}, indexImago: async () => {}, indexIntella: async () => {},
+    search: async () => [],
+  } as unknown as Vestigiorum
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum(), nexus: makeNexus(), vestigiorum })
+
+  await assert.rejects(
+    () => completor.complete(actum, makeRunResult(), { animaId: 'anima-abc' }),
+    /already completus/,
+  )
+
+  assert.equal(createCalls, 0)
 })
