@@ -4,6 +4,7 @@ import type {
   VestigiumSearchDimension,
   VestigiumVisibility,
   VestigiumGenus,
+  ImpressioKind,
 } from '../../types/vestigium.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { Credentials } from '../../allocutio/api/IdentityResolver.js'
@@ -195,6 +196,70 @@ export function createVestigiaRouter(deps: VestigiaRouterDeps): Router {
       return res.json({ vestigium: v })
     } catch (err) {
       log.error('findById error', { error: String(err) })
+      return res.status(500).json({ error: 'internal error' })
+    }
+  })
+
+  // ── DELETE /:id ──────────────────────────────────────────────────────────────
+  //
+  // Remove-from-space (product ruling 2026-07-13): the space is a full history
+  // until the OWNER removes an entry. Owner-scoped — a stranger or an absent id
+  // both 404 (no existence leak). Hard-deletes the vestigium record only; the
+  // underlying Actum/spend history is untouched.
+
+  router.delete('/:id', async (req, res) => {
+    let auctor: VestigiaAuctorKey
+    try {
+      auctor = await resolveCaller(req)
+    } catch {
+      return res.status(401).json({ error: { code: 'auth.invalid', message: 'Authentication required' } })
+    }
+
+    try {
+      const v = await vestigiorum.findById(req.params.id)
+      if (!v || auctorToken(v.auctorKey as VestigiaAuctorKey) !== auctorToken(auctor)) {
+        return res.status(404).json({ error: 'not found' })
+      }
+      await vestigiorum.delete(v.id)
+      return res.json({ ok: true })
+    } catch (err) {
+      log.error('delete error', { error: String(err) })
+      return res.status(500).json({ error: 'internal error' })
+    }
+  })
+
+  // ── POST /:id/impressio ──────────────────────────────────────────────────────
+  //
+  // Set (or clear, with `impressio: null`) the CALLER's own reaction on their own
+  // vestigium — wires the existing Impressio.auctorImpressio shape used for
+  // personal filtering. Owner-scoped, same 404-on-foreign-or-absent contract as
+  // DELETE above.
+  //
+  // Body: { impressio: 'amor' | 'risus' | 'maeror' | null }
+
+  router.post('/:id/impressio', async (req, res) => {
+    let auctor: VestigiaAuctorKey
+    try {
+      auctor = await resolveCaller(req)
+    } catch {
+      return res.status(401).json({ error: { code: 'auth.invalid', message: 'Authentication required' } })
+    }
+
+    const raw = (req.body as { impressio?: unknown } | undefined)?.impressio
+    const impressio: ImpressioKind | null = raw === null ? null : (raw as ImpressioKind)
+    if (impressio !== null && !['amor', 'risus', 'maeror'].includes(impressio)) {
+      return res.status(400).json({ error: 'impressio must be amor | risus | maeror | null' })
+    }
+
+    try {
+      const v = await vestigiorum.findById(req.params.id)
+      if (!v || auctorToken(v.auctorKey as VestigiaAuctorKey) !== auctorToken(auctor)) {
+        return res.status(404).json({ error: 'not found' })
+      }
+      const updated = await vestigiorum.setAuctorImpressio(v.id, auctor, impressio)
+      return res.json({ vestigium: updated })
+    } catch (err) {
+      log.error('setAuctorImpressio error', { error: String(err) })
       return res.status(500).json({ error: 'internal error' })
     }
   })

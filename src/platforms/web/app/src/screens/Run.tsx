@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
 import { mediaFromOutput, textFromOutput } from '../lib/media';
 import { STAGE_LABELS, measure, useRunStream } from '../lib/runStream';
+import { Lightbox } from '../components/Lightbox';
 
 type StepState = 'done' | 'active' | 'pending';
 
@@ -11,6 +13,7 @@ export function Run() {
   const { ident } = useIdentity();
   const [params] = useSearchParams();
   const id = params.get('id');
+  const [lightbox, setLightbox] = useState(false);
 
   const {
     stageIdx, progressus, terminal, exitus, error, modusId,
@@ -110,7 +113,14 @@ export function Run() {
         <div className="result show">
           <div className="out">
             <div className={`rimg${imgDone ? ' done' : ''}`}>
-              {media?.kind === 'image' && <img src={media.url} alt="" />}
+              {media?.kind === 'image' && (
+                <img
+                  src={media.url}
+                  alt=""
+                  className="rimg-clickable"
+                  onClick={() => setLightbox(true)}
+                />
+              )}
               {media?.kind === 'video' && <video src={media.url} controls muted loop playsInline />}
               {media?.kind === 'audio' && <audio src={media.url} controls />}
               {!imgDone && (
@@ -131,7 +141,9 @@ export function Run() {
                 <div className="er" key={k}><span>{k}</span><span className="v" style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{String(v)}</span></div>
               ))}
               <div className="acts">
-                <Link className="btn-ghost" to="/space"><Ic name="sparkles" /> Save to Space</Link>
+                {/* Work is auto-saved to Space on completion — this is a truthful link, not
+                    a save action (product ruling 2026-07-13: the space is the full history). */}
+                <Link className="btn-ghost" to="/space"><Ic name="sparkles" /> View in Space</Link>
                 <Link className="btn-ghost" to="/canvas"><Ic name="workflow" /> Send to Canvas</Link>
                 <Link className="btn-ghost" to="/catalog"><Ic name="rotate-cw" /> New run</Link>
               </div>
@@ -140,6 +152,9 @@ export function Run() {
         </div>
 
       </div></div>
+      {lightbox && media?.kind === 'image' && (
+        <Lightbox src={media.url} onClose={() => setLightbox(false)} />
+      )}
     </AppShell>
   );
 }
