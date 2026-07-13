@@ -210,7 +210,14 @@ export interface ActumCompletor {
    * Mark an actum completus and settle its locked signa.
    * Calls Signorum.settle(actual) — user is charged exactly exitus.impetus.
    */
-  complete(actum: Actum, exitus: Exitus): Promise<Actum>
+  complete(
+    actum: Actum,
+    exitus: Exitus,
+    /** Optional identified owner, threaded by callers who already resolved it (webhook
+     *  rail, dispatchInceptio sync path). Absent for anonymous/system acta — indexing
+     *  is skipped, not an error. */
+    auctor?: { animaId: string } | { commitment: string },
+  ): Promise<Actum>
   /**
    * Mark an actum fractus and release its locked signa.
    * Calls Signorum.release() — user is charged nothing.
