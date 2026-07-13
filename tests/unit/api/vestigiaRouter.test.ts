@@ -1,6 +1,8 @@
 // vestigiaRouter — auth scoping (GET / + GET /projection resolve the CALLER; a
 // stranger sees nothing of another account's vestigia) + the projection endpoint's
-// shape/caching. GET /search is unchanged and not re-tested here.
+// shape/caching, plus DELETE /:id (remove-from-space) and POST /:id/impressio
+// (feedback) — both owner-scoped, 404 for foreign/absent (noema-046, product ruling
+// 2026-07-13). GET /search is unchanged and not re-tested here.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
@@ -75,6 +77,30 @@ function get(url: string, headers: Record<string, string> = {}): Promise<{ statu
     }).on('error', reject)
   })
 }
+
+function request(method: string, url: string, headers: Record<string, string> = {}, body?: unknown): Promise<{ status: number; body: any }> {
+  return new Promise((resolve, reject) => {
+    const payload = body !== undefined ? JSON.stringify(body) : undefined
+    const u = new URL(url)
+    const req = http.request(
+      { method, hostname: u.hostname, port: u.port, path: u.pathname + u.search, headers: { ...headers, ...(payload ? { 'content-type': 'application/json' } : {}) } },
+      res => {
+        const chunks: Buffer[] = []
+        res.on('data', c => chunks.push(c))
+        res.on('end', () => {
+          const raw = Buffer.concat(chunks).toString('utf8')
+          resolve({ status: res.statusCode ?? 0, body: raw ? JSON.parse(raw) : null })
+        })
+        res.on('error', reject)
+      },
+    )
+    req.on('error', reject)
+    if (payload) req.write(payload)
+    req.end()
+  })
+}
+const del = (url: string, headers: Record<string, string> = {}) => request('DELETE', url, headers)
+const post = (url: string, headers: Record<string, string> = {}, body?: unknown) => request('POST', url, headers, body)
 
 test('GET /api/vestigia without credentials -> 401 (auth.missing)', async () => {
   const vestigiorum = new MemoryVestigiorum(fakeEmbed)
@@ -153,6 +179,125 @@ test('GET /api/vestigia/projection: anon commitment caller with no vestigia -> n
     assert.equal(res.body.n, 0)
     assert.deepEqual(res.body.points, [])
     assert.deepEqual(res.body.clusters, [])
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── DELETE /:id — remove-from-space (noema-046) ────────────────────────────────
+
+test('DELETE /api/vestigia/:id without credentials -> 401', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const v = await seed(vestigiorum, 'anima-a', 'a red dragon breathing fire')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await del(`${url}/api/vestigia/${v.id}`)
+    assert.equal(res.status, 401)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('DELETE /api/vestigia/:id: owner can remove their own vestigium — gone after', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const v = await seed(vestigiorum, 'anima-a', 'a red dragon breathing fire')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await del(`${url}/api/vestigia/${v.id}`, { authorization: 'Bearer anima-a' })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.ok, true)
+    assert.equal(await vestigiorum.findById(v.id), null)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('DELETE /api/vestigia/:id: a stranger gets 404, and the vestigium is untouched', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const v = await seed(vestigiorum, 'anima-a', 'a red dragon breathing fire')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await del(`${url}/api/vestigia/${v.id}`, { authorization: 'Bearer anima-b' })
+    assert.equal(res.status, 404)
+    assert.ok(await vestigiorum.findById(v.id), 'vestigium must still exist — a stranger cannot delete it')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('DELETE /api/vestigia/:id: absent id -> 404 (same shape as foreign, no existence leak)', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await del(`${url}/api/vestigia/does-not-exist`, { authorization: 'Bearer anima-a' })
+    assert.equal(res.status, 404)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── POST /:id/impressio — feedback (noema-046) ──────────────────────────────────
+
+test('POST /api/vestigia/:id/impressio without credentials -> 401', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const v = await seed(vestigiorum, 'anima-a', 'a red dragon breathing fire')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await post(`${url}/api/vestigia/${v.id}/impressio`, {}, { impressio: 'amor' })
+    assert.equal(res.status, 401)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /api/vestigia/:id/impressio: owner sets their own reaction', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const v = await seed(vestigiorum, 'anima-a', 'a red dragon breathing fire')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await post(`${url}/api/vestigia/${v.id}/impressio`, { authorization: 'Bearer anima-a' }, { impressio: 'amor' })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.vestigium.impressio.auctorImpressio, 'amor')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /api/vestigia/:id/impressio: impressio: null clears the reaction', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const v = await seed(vestigiorum, 'anima-a', 'a red dragon breathing fire')
+  await vestigiorum.setAuctorImpressio(v.id, { animaId: 'anima-a' }, 'risus')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await post(`${url}/api/vestigia/${v.id}/impressio`, { authorization: 'Bearer anima-a' }, { impressio: null })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.vestigium.impressio.auctorImpressio, undefined)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /api/vestigia/:id/impressio: a stranger gets 404, and the reaction is untouched', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const v = await seed(vestigiorum, 'anima-a', 'a red dragon breathing fire')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await post(`${url}/api/vestigia/${v.id}/impressio`, { authorization: 'Bearer anima-b' }, { impressio: 'amor' })
+    assert.equal(res.status, 404)
+    const after = await vestigiorum.findById(v.id)
+    assert.equal(after?.impressio.auctorImpressio, undefined)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /api/vestigia/:id/impressio: invalid impressio value -> 400', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const v = await seed(vestigiorum, 'anima-a', 'a red dragon breathing fire')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await post(`${url}/api/vestigia/${v.id}/impressio`, { authorization: 'Bearer anima-a' }, { impressio: 'nonsense' })
+    assert.equal(res.status, 400)
   } finally {
     await closeServer(server)
   }

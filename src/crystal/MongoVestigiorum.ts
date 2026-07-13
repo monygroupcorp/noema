@@ -235,4 +235,8 @@ export class MongoVestigiorum implements Vestigiorum {
     if (!result) throw new Error(`Vestigium '${id}' not found`)
     return fromDoc(result as Record<string, unknown>)
   }
+
+  async delete(id: string): Promise<void> {
+    await this.col.deleteOne({ id })
+  }
 }

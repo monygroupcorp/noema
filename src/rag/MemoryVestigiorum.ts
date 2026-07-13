@@ -191,4 +191,10 @@ export class MemoryVestigiorum implements Vestigiorum {
     this.store.set(id, updated)
     return updated
   }
+
+  async delete(id: string): Promise<void> {
+    this.store.delete(id)
+    this.raters.delete(id)
+    this.insertionSeq.delete(id)
+  }
 }

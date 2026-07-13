@@ -131,7 +131,9 @@ export function Run() {
                 <div className="er" key={k}><span>{k}</span><span className="v" style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{String(v)}</span></div>
               ))}
               <div className="acts">
-                <Link className="btn-ghost" to="/space"><Ic name="sparkles" /> Save to Space</Link>
+                {/* Work is auto-saved to Space on completion — this is a truthful link, not
+                    a save action (product ruling 2026-07-13: the space is the full history). */}
+                <Link className="btn-ghost" to="/space"><Ic name="sparkles" /> View in Space</Link>
                 <Link className="btn-ghost" to="/canvas"><Ic name="workflow" /> Send to Canvas</Link>
                 <Link className="btn-ghost" to="/catalog"><Ic name="rotate-cw" /> New run</Link>
               </div>
