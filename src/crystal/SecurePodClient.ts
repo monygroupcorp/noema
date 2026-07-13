@@ -159,7 +159,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
   }): Promise<{ id: string }> {
     // Derive image from spec if available, else fall back to config
     const specOciRef = isCompiledSpec(params.input) ? params.input.image?.ociRef : undefined
-    const imageName = specOciRef ?? this.config.imageName ?? 'runpod/pytorch:1.0.7-rc.138-cu1281-torch280-ubuntu2204'
+    const imageName = specOciRef ?? this.config.imageName ?? 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
 
     const maxAttempts = this.config.podRetries ?? 3
 
@@ -274,7 +274,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     opts: { runtime?: string; comfyRef?: string; warmMs?: number; provisioningContext?: ProvisioningContext } = {},
     onStage?: StudioStageCb,
   ): Promise<StudioProvision | null> {
-    const imageName = this.config.imageName ?? 'runpod/pytorch:1.0.7-rc.138-cu1281-torch280-ubuntu2204'
+    const imageName = this.config.imageName ?? 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
     let prov: { podId: string; sshInfo: SshInfo; provisionMs: number }
     try {
       prov = await this._provisionAndBootstrap(imageName, onStage, opts.runtime, opts.comfyRef)

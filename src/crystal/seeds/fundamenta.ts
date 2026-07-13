@@ -19,7 +19,7 @@ export const FUNDAMENTUM_FLUX_COMFYUI: Fundamentum = {
   versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
-  imageVersion: '1.0.7-rc.138-cu1281-torch280-ubuntu2204',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
   comfyRef: 'v0.26.0',
   // The shared base/support weights every flux flow sits on. Family ('flux') derives
@@ -43,7 +43,7 @@ export const FUNDAMENTUM_SD15_COMFYUI: Fundamentum = {
   versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
-  imageVersion: '1.0.7-rc.138-cu1281-torch280-ubuntu2204',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
   comfyRef: 'v0.26.0',
   intellae: [
@@ -62,7 +62,7 @@ export const FUNDAMENTUM_SDXL_COMFYUI: Fundamentum = {
   versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
-  imageVersion: '1.0.7-rc.138-cu1281-torch280-ubuntu2204',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
   comfyRef: 'v0.26.0',
   intellae: [
@@ -85,7 +85,7 @@ export const FUNDAMENTUM_CHROMA_COMFYUI: Fundamentum = {
   versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
-  imageVersion: '1.0.7-rc.138-cu1281-torch280-ubuntu2204',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
   comfyRef: 'v0.26.0',
   intellae: [
@@ -111,7 +111,7 @@ export const FUNDAMENTUM_FLUX_KONTEXT_COMFYUI: Fundamentum = {
   versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
-  imageVersion: '1.0.7-rc.138-cu1281-torch280-ubuntu2204',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
   comfyRef: 'v0.26.0',
   intellae: [
@@ -137,7 +137,7 @@ export const FUNDAMENTUM_ZIMAGE_TURBO_COMFYUI: Fundamentum = {
   versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
-  imageVersion: '1.0.7-rc.138-cu1281-torch280-ubuntu2204',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
   comfyRef: 'v0.26.0',
   intellae: [
@@ -163,7 +163,7 @@ export const FUNDAMENTUM_KREA2_TURBO_COMFYUI: Fundamentum = {
   versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
-  imageVersion: '1.0.7-rc.138-cu1281-torch280-ubuntu2204',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
   comfyRef: 'v0.26.0',
   intellae: [
@@ -188,7 +188,7 @@ export const FUNDAMENTUM_COMFYUI_BASE: Fundamentum = {
   versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
-  imageVersion: '1.0.7-rc.138-cu1281-torch280-ubuntu2204',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
   comfyRef: 'v0.26.0',
   intellae: [],
@@ -209,7 +209,7 @@ export const FUNDAMENTUM_FLUX2_KLEIN_COMFYUI: Fundamentum = {
   versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
-  imageVersion: '1.0.7-rc.138-cu1281-torch280-ubuntu2204',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
   comfyRef: 'v0.26.0',
   intellae: [
@@ -235,7 +235,7 @@ export const FUNDAMENTUM_FLUX2_KLEIN_4B_COMFYUI: Fundamentum = {
   versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
-  imageVersion: '1.0.7-rc.138-cu1281-torch280-ubuntu2204',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
   comfyRef: 'v0.26.0',
   intellae: [
@@ -260,7 +260,7 @@ export const FUNDAMENTUM_UPSCALE_COMFYUI: Fundamentum = {
   versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
-  imageVersion: '1.0.7-rc.138-cu1281-torch280-ubuntu2204',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
   comfyRef: 'v0.26.0',
   intellae: [
@@ -414,7 +414,7 @@ export const FUNDAMENTUM_LTX_COMFYUI: Fundamentum = {
   versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
-  imageVersion: '1.0.7-rc.138-cu1281-torch280-ubuntu2204',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
   comfyRef: 'v0.26.0',
   intellae: [
@@ -438,7 +438,7 @@ export const FUNDAMENTUM_WAN22_T2V_COMFYUI: Fundamentum = {
   versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
-  imageVersion: '1.0.7-rc.138-cu1281-torch280-ubuntu2204',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
   comfyRef: 'v0.26.0',
   intellae: [
@@ -464,7 +464,7 @@ export const FUNDAMENTUM_WAN22_I2V_COMFYUI: Fundamentum = {
   versio: '1.1.0',
   contentHash: '',
   imageId: 'runpod/pytorch',
-  imageVersion: '1.0.7-rc.138-cu1281-torch280-ubuntu2204',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
   runtime: 'ComfyUI',
   comfyRef: 'v0.26.0',
   intellae: [
