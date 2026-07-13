@@ -2,25 +2,39 @@ import type { Actum } from '../types/actum.js'
 import type { Signorum } from '../types/significandi.js'
 import type { Exitus, Actorum } from '../types/cursus.js'
 import type { Nexus } from '../types/nexus.js'
+import type { Vestigiorum } from '../types/vestigium.js'
 import { makeLogger } from '../lib/logger.js'
 import { getTrace } from '../lib/trace.js'
 import { buildWideEvent, emitWideEvent } from '../lib/wide.js'
 import { shouldFlush, flushBuffer } from '../lib/buffer.js'
+import { createVestigiumFromActum } from './hooks/vestigiumHook.js'
 
 const log = makeLogger('execution:completor')
+
+// Identified-owner union threaded in by callers who already resolved it (webhook rail,
+// dispatchInceptio sync path). Deliberately narrower than Inceptio.by/AuctorKey elsewhere —
+// bursaToken/arcanumProof (anonymous rails) never reach here; callers filter those out
+// before threading (vestigia are identity-linked records; the anonymous half stays
+// unlinkable — gauntlet-locked invariant).
+type Auctor = { animaId: string } | { commitment: string }
 
 interface Deps {
   acta: Actorum
   signorum: Signorum
   nexus?: Nexus
   terminatePod?: (podId: string) => Promise<void>
+  /** Optional: vestigium store — indexes a generation trace after each completion.
+   *  Absent → indexing skipped (one-time warn so slim deployments/tests notice). */
+  vestigiorum?: Vestigiorum
 }
+
+let warnedMissingVestigiorum = false
 
 export class ActumCompletor {
   constructor(private readonly deps: Deps) {}
 
-  async complete(actum: Actum, result: Exitus): Promise<Actum> {
-    const { acta, signorum, nexus, terminatePod } = this.deps
+  async complete(actum: Actum, result: Exitus, auctor?: Auctor): Promise<Actum> {
+    const { acta, signorum, nexus, terminatePod, vestigiorum } = this.deps
     const { exitus, impetus: reportedImpetus, duratio, materiamId } = result
     const now = new Date()
 
@@ -59,6 +73,22 @@ export class ActumCompletor {
       completum: now,
       ...(materiamId ? { materiamId } : {}),
     })
+
+    // Vestigium indexing (single choke point — every rail funnels through complete()).
+    // Fire-and-forget: indexing must never fail or delay a completion. Identity resolution
+    // stays at the edges that already own it (webhook rail, dispatchInceptio sync path);
+    // the completor only writes what it's handed.
+    if (auctor) {
+      if (vestigiorum) {
+        createVestigiumFromActum(completed, auctor, vestigiorum).catch((e) =>
+          log.warn('vestigium index failed', { actumId: actum.id, error: String(e) }))
+      } else if (!warnedMissingVestigiorum) {
+        warnedMissingVestigiorum = true
+        log.warn('vestigium indexing skipped — no vestigiorum store configured', { actumId: actum.id })
+      }
+    } else {
+      log.debug('vestigium indexing skipped — no auctor', { actumId: actum.id })
+    }
 
     // Reap a dedicated one-shot pod (e.g. training) on success — warm/pooled pods
     // (oneshotPod unset) are left alive for reuse and swept by the idle reaper. Mirrors

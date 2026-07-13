@@ -204,6 +204,61 @@ const authHeaders = (): Record<string, string> => {
 const readHeaders = (): Record<string, string> =>
   getSession() ? { authorization: `Bearer ${getSession()}` } : { 'x-commitment': commitment() };
 
+// ── Fetch-based SSE reader ─────────────────────────────────────────────────
+// EventSource can't send auth headers, so authed SSE routes need a hand-rolled
+// reader over `fetch` + a `ReadableStream`. Surfaces the minimal shape callers
+// (useRunStream) need: a message callback and a way to close. The server emits
+// plain `data: <json>\n\n` frames (no `event:` field) — see RunEventHub.
+export interface SseHandle {
+  onmessage: ((ev: { data: string }) => void) | null;
+  onerror: ((err: unknown) => void) | null;
+  close: () => void;
+}
+
+export function sseStream(url: string, headers: Record<string, string>): SseHandle {
+  const handle: SseHandle = { onmessage: null, onerror: null, close: () => {} };
+  const controller = new AbortController();
+  let closed = false;
+  handle.close = () => {
+    if (closed) return;
+    closed = true;
+    controller.abort();
+  };
+
+  (async () => {
+    try {
+      const res = await fetch(url, { headers, signal: controller.signal });
+      if (!res.ok || !res.body) throw new Error(`sse http ${res.status}`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx: number;
+        // eslint-disable-next-line no-cond-assign
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const data = frame
+            .split('\n')
+            .filter((l) => l.startsWith('data:'))
+            .map((l) => l.slice(5).replace(/^ /, ''))
+            .join('\n');
+          if (data) handle.onmessage?.({ data });
+        }
+      }
+      if (!closed) throw new Error('sse stream ended');
+    } catch (err) {
+      if (closed) return; // intentional close (e.g. AbortError) — not a failure
+      handle.onerror?.(err);
+    }
+  })();
+
+  return handle;
+}
+
 // Session envelope returned by verify-email/login/refresh.
 export interface Session { token: string; tokenType: 'Bearer'; expiresIn: number }
 export interface AuthResult { session: Session; animaId: string }
@@ -296,9 +351,13 @@ export const api = {
       : authHeaders();
     return fetch('/v1/runs', { method: 'POST', headers, body: JSON.stringify(body) }).then(j<{ run: Run }>);
   },
-  getRun: (id: string) => fetch(`/v1/runs/${id}`).then(j<{ run: Run }>),
-  // SSE — returns an EventSource the caller subscribes to.
-  streamRun: (id: string) => new EventSource(`/v1/runs/${id}/stream`),
+  getRun: (id: string) => fetch(`/v1/runs/${id}`, { headers: readHeaders() }).then(j<{ run: Run }>),
+  // SSE — a fetch-based reader, NOT an EventSource. EventSource cannot send headers, and
+  // the server route is owner-scoped auth (bearer/x-commitment header only) — a plain
+  // EventSource is a structural 401 for every caller. `readHeaders()` covers both a
+  // signed-in bearer and the anon commitment. Token stays in a header, never a query
+  // param (query params leak into access logs/history).
+  streamRun: (id: string) => sseStream(`/v1/runs/${id}/stream`, readHeaders()),
   meStatus: () => fetch('/v1/me/status', { headers: readHeaders() }).then(j<MeStatus>),
 
   // GET /api/vestigia — the caller's own recent vestigia (traces), newest first.

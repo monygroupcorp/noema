@@ -147,7 +147,31 @@ export class SecurePodClient implements RunPodClient, Procurator {
     /** Injectable pod-terminate function — defaults to the RunPod REST call. The
      *  seam exists so tests can swap a spy without module-mocking gymnastics. */
     private readonly terminatePodFn: (apiKey: string, podId: string) => Promise<void> = _terminatePodUtil,
+    /**
+     * Liveness check for the actum a retry is about to spend a pod on — reads the actum's
+     * current status and returns false once it's terminal (`completus`/`fractus`, which also
+     * covers the expiry watchdog's fail path). Optional: absent means "can't check" and retries
+     * proceed as before (back-compat for callers with no store wired). Bounded to the smallest
+     * read surface the retry loop needs — not a full Actorum dependency.
+     */
+    private readonly isActumLive?: (actumId: string) => Promise<boolean>,
   ) {}
+
+  /**
+   * Zombie-retry guard (2026-07-13): re-checks the in-flight actum's liveness before spending
+   * another pod on it. Fails OPEN (returns true) when there's no actumId in trace or no
+   * `isActumLive` callback wired, and on a callback error — a liveness-check hiccup must never
+   * block a legitimate retry; the guard only ever narrows the retry loop, never widens it.
+   */
+  private async _actumStillLive(): Promise<boolean> {
+    const actumId = getTrace()?.actumId
+    if (!actumId || !this.isActumLive) return true
+    try {
+      return await this.isActumLive(actumId)
+    } catch {
+      return true
+    }
+  }
 
   async submit(params: {
     input: unknown
@@ -159,7 +183,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
   }): Promise<{ id: string }> {
     // Derive image from spec if available, else fall back to config
     const specOciRef = isCompiledSpec(params.input) ? params.input.image?.ociRef : undefined
-    const imageName = specOciRef ?? this.config.imageName ?? 'runpod/pytorch:1.0.7-rc.138-cu1281-torch280-ubuntu2204'
+    const imageName = specOciRef ?? this.config.imageName ?? 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
 
     const maxAttempts = this.config.podRetries ?? 3
 
@@ -215,6 +239,14 @@ export class SecurePodClient implements RunPodClient, Procurator {
         }
         log.warn(`pod run attempt 1/${maxAttempts} failed`, { podId, error: (firstErr as Error).message })
         for (let attempt = 2; attempt <= maxAttempts; attempt++) {
+          // Liveness gate — before spending a NEW pod on a retry, confirm the actum this
+          // job belongs to hasn't already gone terminal (e.g. the expiry watchdog fired
+          // mid-retry and refunded it). Without this, a slow retry cascade keeps
+          // provisioning pods for a run nobody is paying for anymore (2026-07-13 incident).
+          if (!(await this._actumStillLive())) {
+            log.warn('retry aborted — actum already terminal', { actumId: getTrace()?.actumId, attempt })
+            return
+          }
           log.info('retrying on new pod', { attempt })
           let retryPodId: string
           try {
@@ -225,6 +257,14 @@ export class SecurePodClient implements RunPodClient, Procurator {
             continue
           }
           activePodId = retryPodId
+          // Second gate — the actum could have gone terminal during provisioning itself;
+          // check again before submitting the job so we don't hand comfyrunner work for a
+          // dead run, and terminate the pod we just spun up instead of leaking it.
+          if (!(await this._actumStillLive())) {
+            log.warn('retry aborted — actum already terminal', { actumId: getTrace()?.actumId, attempt })
+            await this._terminatePod(retryPodId).catch(() => {})
+            return
+          }
           // Update DB so the retry pod is tracked; webhook will fire with retryPodId
           await params.onPodActive?.(retryPodId).catch(() => {})
           try {
@@ -274,7 +314,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     opts: { runtime?: string; comfyRef?: string; warmMs?: number; provisioningContext?: ProvisioningContext } = {},
     onStage?: StudioStageCb,
   ): Promise<StudioProvision | null> {
-    const imageName = this.config.imageName ?? 'runpod/pytorch:1.0.7-rc.138-cu1281-torch280-ubuntu2204'
+    const imageName = this.config.imageName ?? 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
     let prov: { podId: string; sshInfo: SshInfo; provisionMs: number }
     try {
       prov = await this._provisionAndBootstrap(imageName, onStage, opts.runtime, opts.comfyRef)
