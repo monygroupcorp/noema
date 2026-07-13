@@ -48,6 +48,14 @@ export interface Fundamentum {
   imageVersion: string
 
   /**
+   * Pinned upstream ComfyUI ref (tag or branch) for `runtime: 'ComfyUI'` substrates — e.g.
+   * "v0.26.0". Bootstrap clones this ref (`git clone --depth 1 --branch <comfyRef>`), never
+   * unpinned HEAD (2026-07-10 P0: an ambient HEAD clone drifted torch-incompatible and broke
+   * every ComfyUI pod). SecurePodClient falls back to a single default constant when absent.
+   */
+  comfyRef?: string
+
+  /**
    * The on-pod runtime this substrate serves — 'ComfyUI' (default) | 'llama.cpp' | 'vLLM' | ….
    * Canonical home for `runtime` (ADR-0001 single-source); Materia stamps a copy at provision.
    */
