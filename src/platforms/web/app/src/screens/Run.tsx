@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
 import { mediaFromOutput, textFromOutput } from '../lib/media';
 import { STAGE_LABELS, measure, useRunStream } from '../lib/runStream';
+import { Lightbox } from '../components/Lightbox';
 
 type StepState = 'done' | 'active' | 'pending';
 
@@ -11,6 +13,7 @@ export function Run() {
   const { ident } = useIdentity();
   const [params] = useSearchParams();
   const id = params.get('id');
+  const [lightbox, setLightbox] = useState(false);
 
   const {
     stageIdx, progressus, terminal, exitus, error, modusId,
@@ -110,7 +113,14 @@ export function Run() {
         <div className="result show">
           <div className="out">
             <div className={`rimg${imgDone ? ' done' : ''}`}>
-              {media?.kind === 'image' && <img src={media.url} alt="" />}
+              {media?.kind === 'image' && (
+                <img
+                  src={media.url}
+                  alt=""
+                  className="rimg-clickable"
+                  onClick={() => setLightbox(true)}
+                />
+              )}
               {media?.kind === 'video' && <video src={media.url} controls muted loop playsInline />}
               {media?.kind === 'audio' && <audio src={media.url} controls />}
               {!imgDone && (
@@ -142,6 +152,9 @@ export function Run() {
         </div>
 
       </div></div>
+      {lightbox && media?.kind === 'image' && (
+        <Lightbox src={media.url} onClose={() => setLightbox(false)} />
+      )}
     </AppShell>
   );
 }
