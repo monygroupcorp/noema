@@ -10,6 +10,7 @@ import { usePromptAssist, useAssistField } from '../state/promptAssist';
 import { fieldExample } from '../lib/promptExamples';
 import { humanizeKey } from '../lib/labels';
 import { STAGE_LABELS, measure, useRunStream } from '../lib/runStream';
+import { Lightbox } from '../components/Lightbox';
 
 type Aditus = Record<string, unknown>;
 
@@ -71,6 +72,7 @@ export function Card() {
   const [dispatchErr, setDispatchErr] = useState<string | undefined>();
   const runStream = useRunStream(runId);
   const [pinned, setPinned] = useState(false);
+  const [lightbox, setLightbox] = useState(false);
   // Publish-to-feed state for the current result.
   const [pub, setPub] = useState<{ s: 'idle' | 'busy' | 'done' | 'err'; msg?: string }>({ s: 'idle' });
   // Selected compute posture — drives the quote, the subline, and the result frost.
@@ -319,7 +321,14 @@ export function Card() {
                 {/* Frost graft: the result answers the posture, reusing the
                     canvas sealing language (clean / frost / desaturate). */}
                 <div className={`rimg vis-${compute}${runStream.exitus ? ' done' : ''}`}>
-                  {media?.kind === 'image' && <img src={media.url} alt="" />}
+                  {media?.kind === 'image' && (
+                    <img
+                      src={media.url}
+                      alt=""
+                      className="rimg-clickable"
+                      onClick={() => setLightbox(true)}
+                    />
+                  )}
                   {media?.kind === 'video' && <video src={media.url} controls muted loop playsInline />}
                   {media?.kind === 'audio' && <audio src={media.url} controls />}
                   {!runStream.exitus && (
@@ -357,6 +366,9 @@ export function Card() {
                   )}
                 </div>
               </div>
+              {lightbox && media?.kind === 'image' && (
+                <Lightbox src={media.url} onClose={() => setLightbox(false)} />
+              )}
             </div>
           )}
 

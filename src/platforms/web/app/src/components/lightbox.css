@@ -1,0 +1,5 @@
+/* Lightbox — full-viewport result-image viewer (noema-048) */
+.lb-back{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.82);
+  display:flex;align-items:center;justify-content:center;padding:24px;cursor:zoom-out}
+.lb-img{max-width:92vw;max-height:92vh;object-fit:contain;cursor:default;
+  border-radius:var(--radius);box-shadow:0 20px 60px rgba(0,0,0,.5)}
