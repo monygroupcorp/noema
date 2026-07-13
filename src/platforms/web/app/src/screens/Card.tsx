@@ -197,6 +197,7 @@ export function Card() {
     : runStream.terminal === 'failed' ? 'failed'
     : 'running';
   const runElapsedLabel = runId && !runStream.terminal ? ` · ${runStream.elapsedSec}s elapsed` : '';
+  const media = mediaFromOutput(runStream.exitus);
 
   const context = (
     <>
@@ -318,6 +319,9 @@ export function Card() {
                 {/* Frost graft: the result answers the posture, reusing the
                     canvas sealing language (clean / frost / desaturate). */}
                 <div className={`rimg vis-${compute}${runStream.exitus ? ' done' : ''}`}>
+                  {media?.kind === 'image' && <img src={media.url} alt="" />}
+                  {media?.kind === 'video' && <video src={media.url} controls muted loop playsInline />}
+                  {media?.kind === 'audio' && <audio src={media.url} controls />}
                   {!runStream.exitus && (
                     <><div className="ph" /><div className="stage"><span className="dots"><span /><span /><span /></span> {runStatus}{runElapsedLabel}</div></>
                   )}
