@@ -82,6 +82,17 @@ export interface ActumIndexStore {
   /** Drop the entry for a finished/failed actum. Idempotent. */
   remove(actumId: string): Promise<void>
 
+  /**
+   * Identity fallback (noema-044): look up the AuctorKey-bearing entry for a single
+   * actumId, independent of the caller already knowing the AuctorKey. The completion
+   * webhook uses this when `flowRouter` has no FlowContext for the actum (e.g. a run
+   * fired directly via `POST /v1/runs`, which never creates one) — ActumIndex is the
+   * sanctioned identity source for that case (see file doc). Optional so stores/doubles
+   * that don't need the fallback (or predate it) aren't forced to implement it; the
+   * webhook degrades to its pre-existing unindexed behavior when absent or null.
+   */
+  findByActumId?(actumId: string): Promise<ActumIndex | null>
+
   // ─ Settled spend-history (noema-026) — optional so in-memory/dev doubles that ─
   // don't retain simply keep pruning via `remove`. Production (MongoActumIndex)
   // implements all three; `CrystalApi.listRuns` degrades to an empty page when a
