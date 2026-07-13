@@ -14,7 +14,8 @@ import type { RouterDeps, IdentityResolver } from './allocutio/telegram/Telegram
 import { makeTelegramSender } from './allocutio/telegram/TelegramSenderAdapter.js'
 import type { AuctorKey } from './flow/types.js'
 import { createWebhookRouter } from './api/webhooks/webhookRouter.js'
-import { handleAlchemyWebhook } from './api/webhooks/alchemyWebhook.js'
+import { handleAlchemyWebhook, sweepConfirmatumDeposita } from './api/webhooks/alchemyWebhook.js'
+import { makeResolveWalletAnima } from './crystal/resolveWalletAnima.js'
 import { AlchemyPricer, nullPricer } from './crystal/AssetPricer.js'
 import { permissiveSanctionsScreen, type SanctionsScreen } from './compliance/SanctionsScreen.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
@@ -870,6 +871,8 @@ async function main(): Promise<void> {
   const crystalApi = new CrystalApi({
     pricer,
     depositAddress: CREDIT_VAULT,
+    deposita: ring.deposita,
+    personae: ring.personae,
     verdictCache,
     scanFeeCharger,
     ...(csamReviewReporter ? { csamReviewReporter } : {}),
@@ -1338,13 +1341,17 @@ async function main(): Promise<void> {
   if (!privateScreen) {
     log.warn('OFAC sanctions screening inactive (private compliance module absent or OFAC_BLOCKLIST_PATH unset) — deposit screening is a NO-OP. Configure before real deposits.')
   }
+  // Deposit attribution seam (noema-027): resolve payer wallet → account via the auth rail's `web`
+  // Persona binding (custos fallback), NOT the dead `animae.custos` read that parked every linked
+  // deposit. Shared by the webhook payment + NFT paths and the retry sweep.
+  const resolveWalletAnima = makeResolveWalletAnima({ personae: ring.personae, animae: ring.animae })
   const alchemyDeps = {
     deposita:     ring.deposita,
     signorum:     ring.signorum,
     redituum:     ring.redituum,
     petitiones:   ring.petitiones,
     testimonia:   ring.testimonia,
-    animae:       ring.animae,
+    resolveWalletAnima,
     arcanumTree:  ring.arcanumTree,
     sanctions,
     signingKeys:  ALCHEMY_SIGNING_KEYS,
@@ -1361,6 +1368,18 @@ async function main(): Promise<void> {
     log.info('alchemy webhook', { chainId: req.params.chainId, status: result.status, body: result.body })
     res.status(result.status).json(result.body)
   })
+
+  // Retry sweep (noema-027 decision 3): on boot + every DEPOSIT_SWEEP_INTERVAL_MS, re-attribute and
+  // credit parked `confirmatum` deposita whose payer wallet now resolves to an account (e.g. the
+  // wallet was linked after the deposit landed). No new admin surface. Credits from the persisted
+  // receipt-time basis; the unique-partial testis index makes a sweep tick racing an Alchemy
+  // re-delivery credit exactly once. Legacy rows without a persisted basis are skipped + warned.
+  const DEPOSIT_SWEEP_INTERVAL_MS = Number(process.env.DEPOSIT_SWEEP_INTERVAL_MS ?? 5 * 60 * 1000)
+  const runDepositSweep = () =>
+    void sweepConfirmatumDeposita(alchemyDeps).catch(err => log.warn('deposit sweep failed', { error: String(err) }))
+  runDepositSweep()
+  const depositSweepTimer = setInterval(runDepositSweep, DEPOSIT_SWEEP_INTERVAL_MS)
+  depositSweepTimer.unref?.()
 
   // Training finality at the completion webhook (Slice E): a remote (pod) training run
   // completes here — host the pod-uploaded LoRA in R2 + register it as an Intella. Gated on

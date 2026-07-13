@@ -31,6 +31,18 @@ export async function ensureIndexes(db: Db): Promise<void> {
     // Scoped to auctor:'stripe:purchase' so no other signa (whose testis is a tx hash / commitment /
     // empty, not globally unique) are constrained.
     db.collection('signa').createIndex({ testis: 1 }, { unique: true, partialFilterExpression: { auctor: 'stripe:purchase' } }),
+    // On-chain deposit rail (noema-027) idempotency: UNIQUE + PARTIAL on `testis` over
+    // alchemy-webhook signa ONLY. `testis` = the deposit tx hash. This is the DURABLE cross-instance
+    // guard that a retry sweep tick racing an Alchemy webhook re-delivery credits the same deposit
+    // EXACTLY ONCE: the second issue() throws a dup-key → creditConfirmedDeposit catches it → replays
+    // the winner's credit instead of double-minting. Scoped to auctor:'alchemy-webhook' (peer of the
+    // stripe-purchase guard above) so no other signa are constrained.
+    // Explicit name: a second unique-partial index on the SAME key { testis:1 } as the
+    // stripe-purchase guard above would otherwise auto-name to the same `testis_1` and collide.
+    db.collection('signa').createIndex(
+      { testis: 1 },
+      { name: 'testis_alchemy_deposit', unique: true, partialFilterExpression: { auctor: 'alchemy-webhook' } },
+    ),
 
     // animae — soul / identity
     db.collection('animae').createIndex({ id: 1 }, { unique: true }),
@@ -69,6 +81,8 @@ export async function ensureIndexes(db: Db): Promise<void> {
     // deposita — onchain deposits
     db.collection('deposita').createIndex({ id: 1 }, { unique: true }),
     db.collection('deposita').createIndex({ transactioHash: 1, chainId: 1 }, { sparse: true }),
+    // The retry sweep (noema-027) scans parked deposits by status every DEPOSIT_SWEEP_INTERVAL_MS.
+    db.collection('deposita').createIndex({ status: 1 }),
 
     // reditus — USD revenue book (ADR-0013). The UNIQUE PARTIAL index on depositumId is the
     // deposit-booking idempotency guard (only over rows that have one; fiat rows omit it). The

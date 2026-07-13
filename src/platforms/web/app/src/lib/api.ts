@@ -84,6 +84,20 @@ export function commitment(): string {
   return c;
 }
 
+// ── Active Arcanum purse — the anonymous bearer token runs spend from ────────
+// A Vault-minted purse the user has chosen to pay with. Distinct from every other
+// identity path: when set, createRun() sends it as `x-bursa-token`. Single active
+// pointer (localStorage `noema-active-purse`); Vault's "use this purse" sets it, and
+// the Card run surface shows a "paying with purse …" indicator + a clear affordance.
+const ACTIVE_PURSE_KEY = 'noema-active-purse';
+export function setActivePurse(token: string | null): void {
+  if (token) localStorage.setItem(ACTIVE_PURSE_KEY, token);
+  else localStorage.removeItem(ACTIVE_PURSE_KEY);
+}
+export function getActivePurse(): string | null {
+  return localStorage.getItem(ACTIVE_PURSE_KEY);
+}
+
 // ── Multi-session store (JWT) — layered OVER the anon commitment ─────────────
 // The Twitter model: one browser holds several named logins at once, keyed by
 // animaId, with a single ACTIVE pointer. When an account is active its token is
@@ -214,15 +228,74 @@ async function jAuth<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Generic `/v1` request errors — the wire shape every non-auth route throws on 4xx/5xx
+// (`{ error: { code, message, details? } }`, see allocutio/api/errors.ts ApiError). Carries
+// `details` (e.g. Tabula publish's `{ code, vinculumId }`) so screens can branch on the
+// specific failure, not just the HTTP status.
+export class ApiRequestError extends Error {
+  code: string;
+  status: number;
+  details?: Record<string, unknown>;
+  constructor(code: string, message: string, status: number, details?: Record<string, unknown>) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.code = code;
+    this.status = status;
+    this.details = details;
+  }
+}
+async function jApi<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string; details?: Record<string, unknown> } } | null;
+    throw new ApiRequestError(body?.error?.code ?? `http.${res.status}`, body?.error?.message ?? res.statusText, res.status, body?.error?.details);
+  }
+  return res.json() as Promise<T>;
+}
+
+// ── Tabula (canvas workspace, ADR-0008 follow-up) — mirrors types/tabula.ts ──────
+export interface TabulaNodus { id: string; modusId: string; x: number; y: number; aditus: Record<string, unknown> }
+export interface TabulaVinculum {
+  id: string; fonteNodusId: string; fontePorta: string; scopusNodusId: string; scopusPorta: string; discordantia: boolean;
+}
+export type TabulaVisibility = 'privata' | 'communis' | 'publica';
+export type TabulaStatus = 'draft' | 'published' | 'archivata';
+export interface Tabula {
+  id: string;
+  nomen: string;
+  descriptio?: string;
+  nodi: TabulaNodus[];
+  vincula: TabulaVinculum[];
+  modusId?: string;
+  status: TabulaStatus;
+  visibilitas: TabulaVisibility;
+  fonteId?: string;
+  templateId?: string;
+  followTemplate?: boolean;
+  natum: string;
+  mutatum: string;
+}
+
 export const api = {
   listFlows: () => fetch('/v1/flows').then(j<{ flows: FlowSummary[] }>),
   getFlow: (id: string) => fetch(`/v1/flows/${id}`).then(j<FlowDescription>),
   quote: (body: Pick<RunRequest, 'modusId' | 'verb' | 'aditus'>) =>
     fetch('/v1/runs/quote', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ impetus: string; recipient?: string }>),
-  createRun: (body: RunRequest) =>
-    fetch('/v1/runs', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
-      .then(j<{ run: Run }>),
+  // The ONLY route that spends an anonymous purse: when a Vault purse is active, the run
+  // request carries ONLY the bursa token — `{ content-type, x-bursa-token }` — and NO
+  // identity header (no `authorization`, no `x-commitment`). The server short-circuits on
+  // the bursa token and ignores identity anyway (widgetRouter.ts:310 — token-only is the
+  // house anonymous contract); attaching a session bearer or the stable anon commitment
+  // would let logs/proxies correlate an anonymous spend back to a session or pseudonym.
+  // No active purse → the normal identity/anon-commitment path (authHeaders), untouched;
+  // every other route keeps authHeaders() regardless.
+  createRun: (body: RunRequest) => {
+    const purse = getActivePurse();
+    const headers = purse
+      ? { 'content-type': 'application/json', 'x-bursa-token': purse }
+      : authHeaders();
+    return fetch('/v1/runs', { method: 'POST', headers, body: JSON.stringify(body) }).then(j<{ run: Run }>);
+  },
   getRun: (id: string) => fetch(`/v1/runs/${id}`).then(j<{ run: Run }>),
   // SSE — returns an EventSource the caller subscribes to.
   streamRun: (id: string) => new EventSource(`/v1/runs/${id}/stream`),
@@ -258,6 +331,10 @@ export const api = {
   depositQuote: (body: { chainId: number | string; token: string; amount: string }) =>
     fetch('/v1/deposit/quote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       .then(j<DepositQuote>),
+  // GET /v1/deposit/mine — the caller's OWN deposits, scoped to their linked wallets (auth
+  // required). Real depositum status (confirmatum/processatum) — the settle-watch UI polls
+  // this instead of hoping the balance moves.
+  myDeposits: () => fetch('/v1/deposit/mine', { headers: readHeaders() }).then(j<{ deposits: MyDeposit[] }>),
 
   // ── Fiat pack checkout (Stripe) — identified accounts only ───────────────────
   // POST /v1/payments/checkout — create a hosted Stripe Checkout session for one of the
@@ -480,6 +557,46 @@ export const api = {
   removeSecret: (provider: string) =>
     fetch(`/v1/me/secrets/${provider}`, { method: 'DELETE', headers: authHeaders() }).then(jSecret),
 
+  // ── Arcanum (anonymous ZK credit rail) — mounted at /arcanum, NOT /v1 ────────
+  // The client holds the note SECRET (never transmitted). NOTE: the signed-in issue path
+  // below currently also sends the raw nullifier — see its comment. The bearer token and
+  // Groth16 proof are the only other things these calls carry. See lib/arcanum.ts.
+  arcanum: {
+    // Prover discovery: where to fetch wasm/zkey + whether the ceremony is finalized.
+    // ready:false → the whole mint path stays disabled (no fiction), link to /ceremony.
+    config: () => fetch('/arcanum/config').then(j<ArcanumConfig>),
+    // Convert identified balance → anonymous note. Signed-in path only (authHeaders →
+    // Bearer). Client generates (nullifier, secret); the SECRET stays local, but the
+    // server route requires commitment+nullifier TOGETHER, so the raw nullifier IS sent
+    // here. That lets the server compute nullifierHash and link this authenticated funder
+    // to the note's eventual spend — a known privacy limitation of the signed-in path,
+    // tracked for a commitment-only (blind) issuance change (money-code spec gate). The
+    // server inserts the leaf and returns the Merkle path. 501 if it can't resolve an
+    // identity (anon caller). valor is a decimal-bigint string.
+    issue: (body: { valor: string; commitment: string; nullifier: string }) =>
+      fetch('/arcanum/issue', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+        .then(j<ArcanumIssuance>),
+    // Fresh Merkle inclusion proof for a leaf (root moves as the tree grows — re-fetch
+    // right before proving so the proof's root matches the current tree root).
+    treeProof: (leafIndex: number) =>
+      fetch(`/arcanum/tree/proof/${leafIndex}`).then(j<{ proof: ArcanumMerkleProofView }>),
+    // Look up a leaf by its commitment. Used to RECOVER a note's leafIndex when the /issue
+    // response was lost after the server already settled the debit and inserted the leaf —
+    // without this the note (secret held locally) would be stuck at leafIndex -1. 404 until
+    // the commitment is in the tree (e.g. issuance actually failed before settling).
+    getLeaf: (commitment: string) =>
+      fetch(`/arcanum/tree/leaf/${encodeURIComponent(commitment)}`)
+        .then(j<{ leaf: { commitment: string; leafIndex: number; valor: string; insertedAt?: string } }>),
+    // Redeem a spend proof once → mint an anonymous bearer purse. The note's nullifier is
+    // burned server-side; 409 if it was already spent (idempotent — treat as already-minted).
+    mintPurse: (arcanumProof: unknown) =>
+      fetch('/arcanum/purse', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ arcanumProof }) })
+        .then(j<{ token: string; credits: string }>),
+    // Live balance for a purse token. 404 once it doesn't exist / was never minted.
+    getPurse: (token: string) =>
+      fetch(`/arcanum/purse/${encodeURIComponent(token)}`).then(j<{ token: string; credits: string; createdAt?: string }>),
+  },
+
   // ── Fiat auth (username/password rail) ───────────────────────────────────────
   // Anonymous username+password — NO email. Register logs you in immediately (mints a
   // session). These deliberately do NOT send a commitment (a named account is a different
@@ -523,6 +640,28 @@ export const api = {
       fetch('/v1/auth/telegram/recover', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) })
         .then(jAuth<AuthResult>),
   },
+
+  // ── Tabulae (canvas workspaces) — owner-scoped CRUD + publish-to-Modus ───────
+  // Anon-capable throughout (commitment-keyed, same as the rest of authoring) —
+  // no sign-in required to author or publish a spell.
+  listTabulae: () => fetch('/v1/tabulae', { headers: readHeaders() }).then(jApi<{ tabulae: Tabula[] }>),
+  createTabula: (body: { nomen: string; descriptio?: string; visibilitas?: TabulaVisibility }) =>
+    fetch('/v1/tabulae', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(jApi<{ tabula: Tabula }>),
+  getTabula: (id: string) => fetch(`/v1/tabulae/${id}`, { headers: readHeaders() }).then(jApi<{ tabula: Tabula }>),
+  updateTabula: (id: string, patch: Partial<Pick<Tabula, 'nomen' | 'descriptio' | 'nodi' | 'vincula' | 'visibilitas'>>) =>
+    fetch(`/v1/tabulae/${id}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(patch) })
+      .then(jApi<{ tabula: Tabula }>),
+  deleteTabula: (id: string) =>
+    fetch(`/v1/tabulae/${id}`, { method: 'DELETE', headers: authHeaders() }).then(jApi<{ ok: true }>),
+  // Compile the canvas graph into a compositus Modus, immediately runnable via
+  // POST /v1/runs. A cycle / port-type-mismatch graph 400s `input.invalid_graph`
+  // with `details.{code,vinculumId}` naming the offending wire (errors.ts).
+  publishTabula: (id: string) =>
+    fetch(`/v1/tabulae/${id}/publish`, { method: 'POST', headers: authHeaders() }).then(jApi<{ modusId: string }>),
+  // GET /v1/me/flows — the caller's own registered flows (owner-scoped), the canvas
+  // node picker's "mine" twin of the canonical GET /v1/flows list above.
+  listMyFlows: () => fetch('/v1/me/flows', { headers: readHeaders() }).then(jApi<{ flows: FlowSummary[] }>),
 };
 
 // Account settings (mirror the backend Consuetudo shapes).
@@ -597,6 +736,26 @@ export interface SecretView {
   status: 'connected' | 'absent';
   expiresAt?: string;
   warning?: string;
+}
+
+// ── Arcanum wire shapes (GET /arcanum/config, POST /arcanum/issue, /tree/proof) ──
+// Prover discovery. ready=false when wasm or zkey isn't configured server-side — the
+// Vault mint path stays disabled and links to the ceremony rather than faking readiness.
+export interface ArcanumConfig { wasmUrl: string; zkeyUrl: string | null; depth: number; ready: boolean }
+// What POST /arcanum/issue returns (mirror src/arcanum/types.ts ArcanumIssuance). We
+// already hold valor locally; the load-bearing fields here are leafIndex + the Merkle path.
+export interface ArcanumIssuance {
+  note: { nullifierHash: string; commitment: string; leafIndex: number; valor: string; spent: boolean };
+  merkleRoot: string;
+  merklePathElements: string[];
+  merklePathIndices: number[];
+}
+// A fresh Merkle inclusion proof (mirror src/arcanum/ArcanumTree.ts ArcanumMerkleProof).
+export interface ArcanumMerkleProofView {
+  root: string;
+  leafIndex: number;
+  pathElements: string[];
+  pathIndices: number[];
 }
 
 export interface DatasetSummary { id: string; name: string; images?: number; updatedAt?: string }
@@ -822,4 +981,15 @@ export interface DepositQuote {
   fundingRatePct: number;
   pointsQuoted: string;
   depositAddress: string;
+}
+
+// One of the caller's own deposits (GET /v1/deposit/mine) — owner-scoped, real status.
+// Mirrors the backend MyDeposit — powers the settle-watch UI instead of hoping the balance moves.
+export interface MyDeposit {
+  id: string;
+  chainId: number | string;
+  txHash: string;
+  valor: string;
+  status: 'detectum' | 'confirmatum' | 'processatum' | 'fractum';
+  natum: string;
 }
