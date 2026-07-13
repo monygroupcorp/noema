@@ -251,4 +251,11 @@ export interface Vestigiorum {
     id: string,
     patch: Partial<Pick<Vestigium, 'visibilitas' | 'signacula' | 'mutatum'>>
   ): Promise<Vestigium>
+
+  /**
+   * Hard-delete the vestigium record (the exploration-surface entry only — the
+   * underlying Actum/spend history is untouched). Owner-scoping happens at the
+   * router/API layer, not here; this is a plain delete-by-id.
+   */
+  delete(id: string): Promise<void>
 }
