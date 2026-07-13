@@ -4,8 +4,11 @@ WORKDIR /app
 
 # CPU-only PyTorch first — the CUDA wheel is 2GB, CPU is ~200MB.
 # Must happen before open-clip-torch so it doesn't pull the CUDA wheel.
+# torchvision must come from the SAME index in the SAME install: open-clip-torch
+# imports it, and a PyPI torchvision is compiled against a different torch —
+# `RuntimeError: operator torchvision::nms does not exist` at model load.
 RUN pip install --no-cache-dir \
-    torch \
+    torch torchvision \
     --index-url https://download.pytorch.org/whl/cpu
 
 # Application dependencies
