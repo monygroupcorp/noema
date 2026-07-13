@@ -110,6 +110,7 @@ __pycache__/
 # Arcanum ceremony artifacts (large binary files — host on R2/CDN)
 src/arcanum/circuit/artifacts/*.ptau
 src/arcanum/circuit/artifacts/*.zkey
+!src/arcanum/circuit/artifacts/arcanum_final.zkey
 src/arcanum/circuit/artifacts/arcanum.r1cs
 src/arcanum/circuit/artifacts/arcanum.sym
 src/arcanum/circuit/artifacts/arcanum_js/

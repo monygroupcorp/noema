@@ -3,7 +3,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
-import { api, type FlowDescription } from '../lib/api';
+import { api, getActivePurse, setActivePurse, type FlowDescription } from '../lib/api';
 import { mediaFromOutput } from '../lib/media';
 import { isPinned, togglePin } from '../lib/pins';
 import { usePromptAssist, useAssistField } from '../state/promptAssist';
@@ -76,6 +76,9 @@ export function Card() {
   // Selected compute posture — drives the quote, the subline, and the result frost.
   // Default to remote (the standard, lowest-credit posture).
   const [compute, setCompute] = useState<Compute>('remote');
+  // The active anonymous purse (Vault "use this purse") this run will spend from, if any.
+  // createRun() sends it as x-bursa-token; here we only surface it + offer a clear affordance.
+  const [activePurse, setActivePurseState] = useState<string | null>(getActivePurse());
   useEffect(() => { setPinned(isPinned(id)); }, [id]);
 
   // Prompt augmentation: register prompt fields with the Concierge on focus,
@@ -374,6 +377,18 @@ export function Card() {
               <Link to="/tee" className="mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 'var(--s2)', fontSize: 'var(--fs-xs)', color: 'var(--accent-soft)' }}>
                 <Ic name="eye-off" /> set up / view sealed session ▸
               </Link>
+            )}
+            {activePurse && (
+              <div className="meta-line" style={{ marginTop: 'var(--s2)', fontSize: 'var(--fs-xs)' }}>
+                <span className="mono"><Ic name="wallet" /> paying with purse {activePurse.slice(0, 6)}…{activePurse.slice(-4)}</span>
+                <button
+                  className="btn-ghost"
+                  onClick={() => { setActivePurse(null); setActivePurseState(null); }}
+                  title="Stop paying from this purse"
+                >
+                  <Ic name="x" /> use balance
+                </button>
+              </div>
             )}
             <div className="run-row">
               <div className="quote">

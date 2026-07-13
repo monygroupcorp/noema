@@ -1125,6 +1125,30 @@ const DepositQuoteResponseSchema: JsonSchema = {
   required: ['pointsQuoted', 'grossUsd', 'fundingRatePct', 'depositAddress'],
 }
 
+const MyDepositsResponseSchema: JsonSchema = {
+  type: 'object',
+  description: "The authenticated caller's own on-chain deposits, scoped to their linked wallets — real depositum status for the settle-watch UI.",
+  properties: {
+    deposits: {
+      type: 'array',
+      description: 'Newest-first.',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          chainId: { type: 'string' },
+          txHash: { type: 'string', description: 'On-chain transaction hash.' },
+          valor: { type: 'string', description: 'Amount in base units (wei / token-decimals), as a string.' },
+          status: { type: 'string', enum: ['detectum', 'confirmatum', 'processatum', 'fractum'], description: 'detectum (seen) · confirmatum (confirmed, awaiting/parked credit) · processatum (credited) · fractum (failed).' },
+          natum: { type: 'string', format: 'date-time', description: 'When the deposit was first detected.' },
+        },
+        required: ['id', 'chainId', 'txHash', 'valor', 'status', 'natum'],
+      },
+    },
+  },
+  required: ['deposits'],
+}
+
 const CheckoutRequestSchema: JsonSchema = {
   type: 'object',
   description: 'Buy a fixed credit pack with fiat via Stripe Checkout. The pack is server-authoritative: the impetus credited is the pack constant, never a client-supplied figure. Requires an identified account (a card de-anonymizes; an anon purse is rejected).',
@@ -1267,6 +1291,13 @@ export const API_CONTRACT: ApiContract = {
       auth: false,
       request: DepositQuoteRequestSchema,
       response: DepositQuoteResponseSchema,
+    },
+    {
+      method: 'GET',
+      path: '/deposit/mine',
+      summary: "The authenticated caller's own deposits, scoped to their linked wallets — real depositum status (confirmatum/processatum) for the settle-watch UI.",
+      auth: true,
+      response: MyDepositsResponseSchema,
     },
     {
       method: 'POST',

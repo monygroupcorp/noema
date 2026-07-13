@@ -7,11 +7,12 @@ import { Status } from './screens/Status';
 import { Keyring } from './screens/Keyring';
 import { Profile } from './screens/Profile';
 import { Funding } from './screens/Funding';
-// Space (three.js) and Canvas (React Flow) are heavy — lazy-load so they only ship on open.
+// Space (three.js), Canvas (React Flow) and Vault (circomlibjs/snarkjs ZK) are heavy —
+// lazy-load so they only ship on open.
 const Space = lazy(() => import('./screens/Space').then((m) => ({ default: m.Space })));
 const Canvas = lazy(() => import('./screens/Canvas').then((m) => ({ default: m.Canvas })));
+const Vault = lazy(() => import('./screens/Vault').then((m) => ({ default: m.Vault })));
 const lazyEl = (node: ReactNode) => <Suspense fallback={<div className="page"><div className="pw"><div className="empty"><div className="t">Loading…</div></div></div></div>}>{node}</Suspense>;
-import { Vault } from './screens/Vault';
 import { Projects } from './screens/Projects';
 import { Dashboard } from './screens/Dashboard';
 import { ProjectHub } from './screens/ProjectHub';
@@ -91,7 +92,7 @@ export function App() {
       <Route path="/canvas" element={lazyEl(<Canvas />)} />
       <Route path="/space" element={lazyEl(<Space />)} />
       <Route path="/keyring" element={<Keyring />} />
-      <Route path="/vault" element={<Vault />} />
+      <Route path="/vault" element={lazyEl(<Vault />)} />
       <Route path="/profile" element={<Profile />} />
       <Route path="/status" element={<Status />} />
       <Route path="/account" element={<AccountSettings />} />
