@@ -59,6 +59,12 @@ export function Card() {
   const id = params.get('id') || 'flux-schnell';
   // A leased warm studio to run on (from /studio's "Run here") — rides the dispatch as-is.
   const studioId = params.get('studio') || undefined;
+  // Carried from Shelf's "Use in a flow" (noema-062): an imported model's trigger word,
+  // pre-included in the prompt so the LoRA is easy to use immediately (server-side
+  // src/crystal/loraResolver.ts resolves the trigger word into the adapter at run time —
+  // unmodified here). `loraName` only drives the concierge note below.
+  const preloadPrompt = params.get('prompt') || undefined;
+  const loraName = params.get('loraName') || undefined;
 
   const [flow, setFlow] = useState<FlowDescription | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -102,7 +108,7 @@ export function Card() {
       const init: Aditus = {};
       for (const [k, p] of Object.entries(f.input?.properties ?? {})) {
         if (p.default !== undefined) init[k] = p.default;
-        else if (k === 'prompt') init[k] = 'a low-poly n64-style dragon perched on a neon temple, dusk';
+        else if (k === 'prompt') init[k] = preloadPrompt || 'a low-poly n64-style dragon perched on a neon temple, dusk';
         else init[k] = '';
       }
       // Overlay the caller's saved defaults for this flow (best-effort — anon-capable).
@@ -230,6 +236,11 @@ export function Card() {
             <div>
               <h1>{name} <span className="verbtag">{String((flow as { categoria?: unknown }).categoria ?? 'flow')}</span></h1>
               <div className="desc">{(flow.nomen || '').includes('—') ? flow.nomen.split('—').slice(1).join('—').trim() : 'Live flow from staging.'}</div>
+              {loraName && (
+                <div className="sub">
+                  Using your <b>{loraName}</b> LoRA — trigger word <span className="mono accent">{preloadPrompt}</span> is included in the prompt below.
+                </div>
+              )}
               <div className="ports">
                 {Object.entries(flow.input?.properties ?? {}).slice(0, 4).map(([k, p]) => <span key={k} className="p">{p.title || humanizeKey(k)}</span>)}
                 {' → '}
