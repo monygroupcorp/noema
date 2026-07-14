@@ -296,12 +296,34 @@ List the runnable flows (discovery).
           },
           "categoria": {
             "description": "An optional catalog tag."
+          },
+          "modusGenus": {
+            "type": "string",
+            "description": "The flow's canon verb, derived at query time from its aditus/exitus ports (see `resolveCanonVerb`, noema-054).",
+            "enum": [
+              "make",
+              "effect",
+              "animate",
+              "direct",
+              "render",
+              "chat",
+              "describe",
+              "transcribe",
+              "speak",
+              "compose",
+              "foley",
+              "sculpt",
+              "lift",
+              "scan",
+              "enhance"
+            ]
           }
         },
         "required": [
           "id",
           "nomen",
-          "versio"
+          "versio",
+          "modusGenus"
         ]
       }
     }
@@ -7191,12 +7213,34 @@ List the caller's own registered flows (owner-scoped discovery for the canvas no
           },
           "categoria": {
             "description": "An optional catalog tag."
+          },
+          "modusGenus": {
+            "type": "string",
+            "description": "The flow's canon verb, derived at query time from its aditus/exitus ports (see `resolveCanonVerb`, noema-054).",
+            "enum": [
+              "make",
+              "effect",
+              "animate",
+              "direct",
+              "render",
+              "chat",
+              "describe",
+              "transcribe",
+              "speak",
+              "compose",
+              "foley",
+              "sculpt",
+              "lift",
+              "scan",
+              "enhance"
+            ]
           }
         },
         "required": [
           "id",
           "nomen",
-          "versio"
+          "versio",
+          "modusGenus"
         ]
       }
     }
