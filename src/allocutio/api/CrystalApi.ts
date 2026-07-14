@@ -1569,7 +1569,22 @@ export class CrystalApi {
     if (!m) throw Errors.notFoundFlow(id)
     // Modus carries every field describeFlow reads; the cast supplies the
     // index-signature DescribableModus declares for its passthrough meta.
-    return describeFlow(m as unknown as DescribableModus)
+    const description = describeFlow(m as unknown as DescribableModus)
+    // `familia` — read-only, additive: derive the flow's model family from its own
+    // weight manifest (`Modus.intellae`), the same source Compiler.ts's family
+    // derivation reads (Compiler.ts:319-323), without touching Compiler.ts or any
+    // trigger-resolution logic. First non-empty distinct `familia` across the flow's
+    // weights wins (atomic → one; composite → already unioned onto `intellae` at
+    // registration). No weights, no registry, or no family on any weight → leave
+    // `familia` undefined (safe default: no highlight for that flow).
+    const intellae = (m as { intellae?: Array<{ id: string; role: string }> }).intellae
+    if (intellae && intellae.length > 0 && this.deps.intellarum) {
+      for (const w of intellae) {
+        const intella = await this.deps.intellarum.find(w.id).catch(() => null)
+        if (intella?.familia) { description.familia = intella.familia; break }
+      }
+    }
+    return description
   }
 
   /**
