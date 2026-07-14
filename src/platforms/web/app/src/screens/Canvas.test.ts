@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  applyPublishError, buildPalette, clearPublishError, dedupeFlows, edgesToTabula,
-  nodesToTabula, portType, publishErrorState, schemaToPorts, tabulaToEdges, tabulaToNodes,
+  applyPublishError, buildPalette, clearPublishError, connectedEdges, dedupeFlows, edgesToTabula,
+  FlowNode, nodesToTabula, portType, publishErrorState, restoreEdges, restoreNode,
+  schemaToPorts, tabulaToEdges, tabulaToNodes,
 } from './Canvas';
 import type { ApiRequestError } from '../lib/api';
 import type { Node, Edge } from '@xyflow/react';
@@ -125,5 +128,64 @@ describe('publish-error-on-edge (AMENDMENT v2)', () => {
   it('clears every edge\'s highlight/label on graph edit or successful publish', () => {
     const edges: Edge[] = [{ id: 'e1', source: 'a', target: 'b', style: { stroke: 'red' }, label: 'cycle' }];
     expect(clearPublishError(edges)).toEqual([{ id: 'e1', source: 'a', target: 'b', style: undefined, label: undefined }]);
+  });
+});
+
+describe('node delete affordance — trash-2 control renders in the node header', () => {
+  // No jsdom/@testing-library/react in this app's toolchain (see the file-top note) — so
+  // presence is exercised via a static server render (no click simulation available either
+  // way; the cascade/undo behavior below is covered as pure state transitions instead).
+  it('renders a trash-2 delete button in the header, wired to onDelete(id)', () => {
+    const onDelete = vi.fn();
+    const data = { modusId: 'make-upscale', name: 'FLUX Schnell', badge: '1.0.0', color: '#000', inputs: [], outputs: [], aditus: {} };
+    const props = { id: 'n1', data, onDelete } as unknown as Parameters<typeof FlowNode>[0];
+    const html = renderToStaticMarkup(createElement(FlowNode, props));
+    expect(html).toContain('cn-delete');
+    expect(html).toContain('Delete FLUX Schnell');
+  });
+});
+
+describe('connectedEdges — edges touching a given node (either end)', () => {
+  it('matches edges where the node is source or target, ignores the rest', () => {
+    const edges: Edge[] = [
+      { id: 'e1', source: 'n1', target: 'n2' },
+      { id: 'e2', source: 'n3', target: 'n1' },
+      { id: 'e3', source: 'n2', target: 'n3' },
+    ];
+    expect(connectedEdges(edges, 'n1').map((e) => e.id)).toEqual(['e1', 'e2']);
+  });
+  it('empty for a node with no edges', () => {
+    expect(connectedEdges([{ id: 'e1', source: 'n2', target: 'n3' }], 'n1')).toEqual([]);
+  });
+});
+
+describe('delete cascade + undo restore — pure state transitions', () => {
+  const flowData = { modusId: 'make-upscale', name: 'FLUX Schnell', badge: '1.0.0', color: '#000', inputs: [], outputs: [], aditus: {} };
+  const node: Node<typeof flowData> = { id: 'n1', type: 'flow', position: { x: 0, y: 0 }, data: flowData };
+  const deletedEdges: Edge[] = [{ id: 'e1', source: 'n1', target: 'n2' }];
+
+  it('restoreNode re-adds a previously-deleted node to state', () => {
+    expect(restoreNode([], node)).toEqual([node]);
+  });
+  it('restoreNode is a no-op if the node id is already present (no dupes)', () => {
+    expect(restoreNode([node], node)).toEqual([node]);
+  });
+  it('restoreEdges re-adds the node\'s previously-connected edges', () => {
+    expect(restoreEdges([], deletedEdges)).toEqual(deletedEdges);
+  });
+  it('restoreEdges skips edges already present (no dupes)', () => {
+    expect(restoreEdges(deletedEdges, deletedEdges)).toEqual(deletedEdges);
+  });
+  it('undo (restoreNode + restoreEdges) reconstructs exactly the pre-delete graph', () => {
+    const nodesBefore: Node<typeof flowData>[] = [{ id: 'n0', type: 'flow', position: { x: 0, y: 0 }, data: flowData }, node];
+    const edgesBefore: Edge[] = [...deletedEdges];
+    // simulate the cascade delete: node + its edges removed from state
+    const nodesAfterDelete = nodesBefore.filter((n) => n.id !== 'n1');
+    const edgesAfterDelete = edgesBefore.filter((e) => e.id !== 'e1');
+    // undo re-adds both
+    const restoredNodes = restoreNode(nodesAfterDelete, node);
+    const restoredEdges = restoreEdges(edgesAfterDelete, connectedEdges(edgesBefore, 'n1'));
+    expect(restoredNodes).toEqual(nodesBefore);
+    expect(restoredEdges).toEqual(edgesBefore);
   });
 });

@@ -19,6 +19,9 @@
 .cnode-head { display: flex; align-items: center; gap: var(--s2); padding: 10px 12px; border-bottom: 1px solid var(--hair-soft); }
 .cnode-head .cn-fav { width: 20px; height: 20px; border-radius: 6px; flex: 0 0 auto; }
 .cnode-head b { font-size: 13px; font-weight: 600; flex: 1; letter-spacing: -.01em; }
+.cnode-head .cn-delete { padding: 3px 5px; border-radius: 6px; opacity: .55; }
+.cnode-head .cn-delete:hover { opacity: 1; }
+.cnode-head .cn-delete svg { width: 13px; height: 13px; }
 .cnode-body { display: flex; justify-content: space-between; padding: 8px 0 10px; min-height: 28px; }
 .cn-col { display: flex; flex-direction: column; }
 .cn-row { height: 26px; display: flex; align-items: center; padding: 0 13px; }
@@ -62,3 +65,12 @@
 .canvas-error-banner .cb-dismiss { background: transparent; border: none; cursor: pointer; color: var(--muted); display: flex; padding: 4px; }
 .canvas-error-banner .cb-dismiss:hover { color: var(--text); }
 .canvas-error-banner .cb-dismiss svg { width: 14px; height: 14px; }
+
+/* the undo toast — brief, dismisses itself; restores a deleted node + its edges */
+.canvas-undo-toast {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 6;
+  display: flex; align-items: center; gap: var(--s3);
+  background: var(--panel); border: 1px solid var(--hair);
+  border-radius: var(--radius); padding: 8px 8px 8px 14px; font-size: 12.5px; color: var(--text);
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
