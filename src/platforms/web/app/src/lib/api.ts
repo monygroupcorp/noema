@@ -10,7 +10,7 @@ export interface JsonSchema {
   properties?: Record<string, { type: string; format?: string; default?: unknown; description?: string; title?: string }>;
   required?: string[];
 }
-export interface FlowDescription { id: string; nomen: string; versio: string; input: JsonSchema; output?: JsonSchema }
+export interface FlowDescription { id: string; nomen: string; versio: string; input: JsonSchema; output?: JsonSchema; familia?: string }
 
 export type RunStatus = 'pending' | 'running' | 'complete' | 'failed';
 export interface Run {
@@ -522,6 +522,12 @@ export const api = {
     fetch('/api/v1/storage/uploads/sign', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ signedUrl: string; permanentUrl: string; key?: string }>),
 
+  // GET /v1/models?basis=<basis> — the public, filterable model catalog (apiRouter.ts:552-565),
+  // scoped to one base-model family. Backs the composer's live LoRA trigger-word highlight:
+  // called once per flow load with `flow.familia`, the result cached client-side into a
+  // trigger→ModelCard lookup (no backend change needed — the endpoint already exists).
+  listModelsByBasis: (basis: string) =>
+    fetch(`/v1/models?basis=${encodeURIComponent(basis)}`, { headers: readHeaders() }).then(j<{ models: ModelCard[] }>),
   // ── Owned models (Model shelf) — the caller's private imports + trained LoRAs ─
   // GET /v1/me/models — owner-scoped, newest first. Anon-capable (commitment-keyed).
   listMyModels: () => fetch('/v1/me/models', { headers: readHeaders() }).then(j<{ models: ModelCard[] }>),
