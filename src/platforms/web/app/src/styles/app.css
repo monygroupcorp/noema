@@ -71,6 +71,7 @@ body{margin:0; background:var(--bg); color:var(--text); font-family:var(--font-s
 .brand small{color:var(--faint); font-size:11px; margin-left:auto}
 .nav{padding:10px 10px 4px; display:flex; flex-direction:column; gap:2px}
 .nav .lbl{color:var(--faint); font-size:10.5px; text-transform:uppercase; letter-spacing:.12em; padding:8px 8px 4px}
+.mobilenav{display:none}   /* grouped 7-tile bottom bar — mobile-only, shown in the <=760px block below */
 .navitem{display:flex; align-items:center; gap:10px; padding:7px 9px; border-radius:8px; color:var(--muted); cursor:pointer; transition:.14s var(--ease); text-decoration:none}
 button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .navitem:hover{background:var(--raised); color:var(--text)}
@@ -733,10 +734,15 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .rail{position:fixed;left:0;right:0;bottom:0;top:auto;height:58px;flex-direction:row;align-items:stretch;
         border-right:0;border-top:1px solid var(--hair);z-index:var(--z-nav);padding:0;overflow:hidden;background:var(--panel)}
   .rail .brand,.rail .keyring,.rail .railpriv,.projwrap{display:none}   /* identity + project + privacy live in the topbar / rail-desktop only */
-  .rail .nav{flex-direction:row;flex:1;gap:0;padding:0;overflow-x:auto}
-  .rail .nav .lbl{display:none}
+  .rail .nav{display:none}                                   /* flat 13-leaf row replaced by the grouped mobilenav below */
+  .rail .mobilenav{display:flex;flex-direction:row;flex:1;gap:0;padding:0}
   .rail .navitem{flex:1;flex-direction:column;justify-content:center;gap:3px;font-size:var(--fs-xs);padding:0 6px;border-radius:0;white-space:nowrap}
   .rail .navitem .k{display:none}
+  .railgroup{position:relative;display:flex;flex:1;min-width:0}
+  .railgroup-btn{flex:1;background:none;border:0;font:inherit;cursor:pointer}
+  .railgroup-backdrop{position:fixed;inset:0;z-index:var(--z-nav)}
+  .railgroup-pop{position:absolute;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%);width:200px;max-width:60vw;background:var(--panel);border:1px solid var(--hair);border-radius:12px;box-shadow:0 18px 44px rgba(0,0,0,.5);overflow:hidden;z-index:var(--z-nav);display:flex;flex-direction:column;padding:6px}
+  .railgroup-pop .navitem{flex-direction:row;justify-content:flex-start;padding:8px 10px;font-size:var(--fs-sm)}
   .main{padding-bottom:58px}                                 /* clear the bottom bar */
   .topbar{padding:var(--s3) var(--s4);min-height:54px;gap:var(--s2)}
   .crumb{display:none}                                       /* identity + webring carry it */
