@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { api } from '../lib/api';
 import { useIdentity } from '../state/identity';
@@ -45,9 +45,39 @@ const NAV: NavSection[] = [
   ] },
 ];
 
+// Mobile (<=760px) bottom bar: 7 tiles, distinct from NAV above. Desktop reads NAV unchanged.
+type MobileTile =
+  | { to: string; ico: string; label: string }
+  | { group: string; ico: string; label: string; items: NavLeaf[] };
+
+const MOBILE_PROJECTS: NavLeaf[] = [
+  { to: '/datasets', ico: 'database', label: 'Datasets' },
+  { to: '/models', ico: 'box', label: 'Models' },
+  { to: '/collections', ico: 'hexagon', label: 'Collections' },
+];
+const MOBILE_PROFILE: NavLeaf[] = [
+  { to: '/profile', ico: 'circle-user', label: 'Profile' },
+  { to: '/keyring', ico: 'key-round', label: 'Keyring' },
+  { to: '/private', ico: 'eye-off', label: 'Private' },
+];
+const MOBILE_FEED_ADMIN: NavLeaf[] = [
+  { to: '/feed', ico: 'rss', label: 'Feed' },
+  { to: '/admin', ico: 'layout-grid', label: 'Workspace' },
+  { to: '/admin/review', ico: 'eye', label: 'Feed review' },
+];
+
+const MOBILE_TILES_BASE: MobileTile[] = [
+  { to: '/app', ico: 'home', label: 'Home' },
+  { to: '/chat', ico: 'message-square', label: 'Chat' },
+  { to: '/catalog', ico: 'layout-grid', label: 'Catalogue' },
+  { to: '/space', ico: 'footprints', label: 'Space' },
+  { group: 'projects', ico: 'folder', label: 'Projects', items: MOBILE_PROJECTS },
+];
+
 export function Rail() {
   const { ident } = useIdentity();
   const who = IDENTITY_PRIV[ident.funding];
+  const location = useLocation();
   // Moderation nav appears only for the platform reviewer (server-authoritative me.admin).
   const [admin, setAdmin] = useState(false);
   useEffect(() => {
@@ -55,6 +85,19 @@ export function Rail() {
     api.getMe().then((me) => { if (live) setAdmin(!!me.admin); }).catch(() => { /* not admin */ });
     return () => { live = false; };
   }, []);
+
+  // Mobile group dropup state — closes on any navigation (including back/forward).
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  useEffect(() => { setOpenGroup(null); }, [location.pathname]);
+
+  const mobileTiles: MobileTile[] = [
+    ...MOBILE_TILES_BASE,
+    admin
+      ? { group: 'feed', ico: 'rss', label: 'Feed', items: MOBILE_FEED_ADMIN }
+      : { to: '/feed', ico: 'rss', label: 'Feed' },
+    { group: 'profile', ico: 'circle-user', label: 'Profile', items: MOBILE_PROFILE },
+  ];
+
   return (
     <aside className="rail">
       <div className="brand">
@@ -83,6 +126,38 @@ export function Rail() {
             </NavLink>
           </Fragment>
         )}
+      </nav>
+
+      {/* Mobile-only (<=760px) grouped bottom bar — 7 tiles; CSS does the breakpoint swap with .nav above. */}
+      <nav className="mobilenav">
+        {mobileTiles.map((t) => 'to' in t ? (
+          <NavLink key={t.to} to={t.to} end className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+            <span className="ico"><Ic name={t.ico} /></span> {t.label}
+          </NavLink>
+        ) : (
+          <div className="railgroup" key={t.group}>
+            <button
+              type="button"
+              className={`railgroup-btn navitem${t.items.some((it) => location.pathname === it.to || location.pathname.startsWith(it.to + '/')) ? ' active' : ''}`}
+              aria-expanded={openGroup === t.group}
+              onClick={() => setOpenGroup((g) => (g === t.group ? null : t.group))}
+            >
+              <span className="ico"><Ic name={t.ico} /></span> {t.label}
+            </button>
+            {openGroup === t.group && (
+              <>
+                <div className="railgroup-backdrop" onClick={() => setOpenGroup(null)} />
+                <div className="railgroup-pop">
+                  {t.items.map((it) => (
+                    <NavLink key={it.to} to={it.to} end className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+                      <span className="ico"><Ic name={it.ico} /></span> {it.label}
+                    </NavLink>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        ))}
       </nav>
 
       {/* pinned bottom — the Account pillar: funding · activity · settings · the identity avatar */}
