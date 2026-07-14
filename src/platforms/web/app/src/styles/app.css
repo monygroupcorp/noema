@@ -280,6 +280,13 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .flow-head .pin svg{width:15px;height:15px}
 .flow-head .pin.on svg{fill:currentColor}
 
+.reg-row .pin{flex:0 0 auto;display:grid;place-items:center;width:26px;height:26px;border-radius:7px;border:1px solid var(--hair);background:transparent;color:var(--faint);cursor:pointer;transition:.14s var(--ease);margin-left:8px}
+.reg-row .pin:hover{color:var(--muted);border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
+.reg-row .pin:active{transform:scale(.94)}
+.reg-row .pin.on{color:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 45%,var(--hair));background:var(--accent-bg)}
+.reg-row .pin svg{width:13px;height:13px}
+.reg-row .pin.on svg{fill:currentColor}
+
 .field{margin-bottom:24px}
 .field > label{display:flex;align-items:baseline;gap:8px;margin-bottom:7px;font-size:13px;font-weight:500}
 .field .req{color:var(--accent-soft);font-size:11px}
