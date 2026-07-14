@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildFallbackItems, formatVestigiumDate, vestigiumSnippet,
   computeBounds, normalizeToUnitScale, frameCameraToBounds, SCENE_EXTENT,
+  axesGridSize,
 } from './Space';
 import type { Vestigium } from '../lib/api';
 
@@ -116,5 +117,22 @@ describe('frameCameraToBounds', () => {
     expect(a.fov).toBe(42);
     const dist = Math.hypot(...a.position);
     expect(dist).toBeGreaterThan(SCENE_EXTENT / 2);   // sits outside the normalized cloud
+  });
+});
+
+// noema-051: the reference grid/axes (regression fix — restores the wireframe cube +
+// labeled axes dropped in the noema-033 real-data rewrite) must scale off the CURRENT
+// SCENE_EXTENT envelope, not the old hardcoded 5.4, so it fits both a 2-point real space
+// and the 2000-point demo corpus post-normalization.
+describe('axesGridSize', () => {
+  it('sizes the box/axis a fixed margin past the given extent', () => {
+    expect(axesGridSize(5)).toEqual({ boxSize: 5.4, axisLength: 2.6 });
+  });
+  it('scales with extent — not pinned to the old hardcoded 5.4', () => {
+    expect(axesGridSize(10)).toEqual({ boxSize: 10.4, axisLength: 5.1 });
+  });
+  it('the box always encloses the labeled axis length', () => {
+    const { boxSize, axisLength } = axesGridSize(SCENE_EXTENT);
+    expect(boxSize / 2).toBeGreaterThan(axisLength - 0.2);
   });
 });
