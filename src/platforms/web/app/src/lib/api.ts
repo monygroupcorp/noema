@@ -4,7 +4,21 @@
 
 import type { Editio, FeedFilter, FeedItem, PublishRequest } from './editio';
 
-export interface FlowSummary { id: string; nomen?: string; versio?: string; categoria?: unknown }
+// The flow's canon verb, derived server-side at query time (`resolveCanonVerb`, noema-054).
+// Mirrors the backend's `CanonVerb` union (src/crystal/verbResolver.ts) and the
+// `FlowSummarySchema.modusGenus` enum (apiContract.ts) as a local literal type — the web
+// app doesn't import backend source, so this list is kept in step with it by hand.
+export type CanonVerb =
+  | 'make' | 'effect' | 'animate' | 'direct' | 'render'
+  | 'chat' | 'describe' | 'transcribe' | 'speak' | 'compose' | 'foley'
+  | 'sculpt' | 'lift' | 'scan'
+  | 'enhance';
+
+// Optional here (unlike the server's required `modusGenus`) to match this file's existing
+// convention of loosening required-on-the-wire fields to optional client-side (see `nomen`/
+// `versio` above) — callers that construct a partial FlowSummary (e.g. Canvas.test.ts's
+// dedupeFlows fixtures) shouldn't have to supply every field just to typecheck.
+export interface FlowSummary { id: string; nomen?: string; versio?: string; categoria?: unknown; modusGenus?: CanonVerb }
 export interface JsonSchema {
   type: string;
   properties?: Record<string, { type: string; format?: string; default?: unknown; description?: string; title?: string }>;

@@ -8,7 +8,9 @@ import { isPinned, togglePin, usePins } from '../lib/pins';
 // Only the fields the live /v1/flows payload actually carries. License / size / run-locality
 // are NOT in FlowSummary, so we don't show them at all rather than invent them (P0-4,
 // compliance-sensitive: license especially must never be fabricated).
-interface UIFlow { id: string; name: string; media: string; version: string }
+// `verb` is the canon-verb axis (make/effect/animate/... , noema-054's resolver via
+// `modusGenus`) — parallel to `media` (the categoria/modality axis), not a replacement.
+interface UIFlow { id: string; name: string; media: string; version: string; verb: string }
 
 // Modality swatch colour — the same five tokens the canvas ports use, promoted
 // to shared --m-* tokens in noema-theme.css (one palette, two surfaces).
@@ -33,7 +35,10 @@ const FILTERS: { key: string; label: string }[] = [
 // per-model values from the id hash purely for presentation. Swap these for real
 // fields once the API carries them. (Reported back to the user.)
 // "FLUX Schnell — text to image" → "FLUX Schnell"
-function toUI(f: FlowSummary): UIFlow {
+// Exported (rather than kept module-private) so the filter logic below can be exercised by
+// a plain vitest unit test — this app has no jsdom/@testing-library/react (see
+// BuyCreditsModal.test.ts), so screen tests exercise exported pure logic, not a DOM render.
+export function toUI(f: FlowSummary): UIFlow {
   const nomen = (typeof f.nomen === 'string' && f.nomen) || f.id;
   const name = nomen.split('—')[0].trim();
   const media = (typeof f.categoria === 'string' && f.categoria) || 'other';
@@ -42,7 +47,26 @@ function toUI(f: FlowSummary): UIFlow {
     name,
     media,
     version: (typeof f.versio === 'string' && f.versio) || '',
+    verb: (typeof f.modusGenus === 'string' && f.modusGenus) || 'other',
   };
+}
+
+// The distinct canon verbs present in the fetched flow list, sorted — no hardcoded
+// allowlist, so a new verb noema-054's resolver starts emitting shows up automatically.
+export function distinctVerbs(flows: UIFlow[]): string[] {
+  return Array.from(new Set(flows.map((f) => f.verb))).sort();
+}
+
+// Shared filter predicate for the registry list: text search + the modality chip row +
+// the verb chip row, each independently "All"-clearable.
+export function applyFilters(flows: UIFlow[], query: string, mediaFilter: string, verbFilter: string): UIFlow[] {
+  const ql = query.trim().toLowerCase();
+  return flows.filter(
+    (f) =>
+      (!ql || (f.name + ' ' + f.id + ' ' + f.media).toLowerCase().includes(ql)) &&
+      (mediaFilter === 'All' || f.media === mediaFilter) &&
+      (verbFilter === 'All' || f.verb === verbFilter)
+  );
 }
 
 export function Catalog() {
@@ -50,6 +74,7 @@ export function Catalog() {
   const [err, setErr] = useState(false);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('All');
+  const [verbFilter, setVerbFilter] = useState('All');
   // Subscribe so the list re-renders whenever any pin is toggled anywhere in the app
   // (this row's own star, Card.tsx's pin button, or another tab).
   usePins();
@@ -62,12 +87,9 @@ export function Catalog() {
     return () => { live = false; };
   }, []);
 
-  const shown = useMemo(() => {
-    const ql = q.trim().toLowerCase();
-    return (flows || []).filter(
-      (f) => (!ql || (f.name + ' ' + f.id + ' ' + f.media).toLowerCase().includes(ql)) && (filter === 'All' || f.media === filter)
-    );
-  }, [flows, q, filter]);
+  const verbs = useMemo(() => distinctVerbs(flows || []), [flows]);
+
+  const shown = useMemo(() => applyFilters(flows || [], q, filter, verbFilter), [flows, q, filter, verbFilter]);
 
   const models = flows?.length ?? 0;
 
@@ -107,6 +129,21 @@ export function Catalog() {
             </div>
             <div className="cat-sort">sort <b>popular ▾</b></div>
           </div>
+
+          {verbs.length > 0 && (
+            <div className="cat-toolbar cat-verbs">
+              <div className="cat-filters">
+                <button className={`cat-chip${verbFilter === 'All' ? ' on' : ''}`} onClick={() => setVerbFilter('All')}>
+                  All
+                </button>
+                {verbs.map((v) => (
+                  <button key={v} className={`cat-chip${verbFilter === v ? ' on' : ''}`} onClick={() => setVerbFilter(v)}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="reg-bar">
             <span className="c-name">Model</span>
