@@ -42,6 +42,7 @@ import { toRun, toSettledRun, toCollection, toTeam, toEdition, toProject } from 
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
 import { Errors, ApiError } from './errors.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
+import { resolveCanonVerb, type CanonVerb } from '../../crystal/verbResolver.js'
 import { computeRecipient } from '../../arcanum/prover.js'
 import { impetusForPodMs, usdMicroToImpetus, IMPETUS_USD_RATE } from '../../ledger/rates.js'
 import { fundingBps, applyFundingBps, DEFAULT_FUNDING_BPS } from '../../ledger/depositFunding.js'
@@ -303,6 +304,10 @@ export interface FlowSummary {
   /** Number of steps — present only for a compositus (spell). Absent = an atomic flow.
    *  Lets an agent tell a one-shot tool from a multi-step spell at the catalog level. */
   steps?: number
+  /** The flow's canon verb, derived at query time from its aditus/exitus ports via
+   *  `resolveCanonVerb` (noema-054) — lets a future concierge/classifier read what
+   *  kind of modus each flow is without a stored/hashed taxonomy field. */
+  modusGenus: CanonVerb
 }
 
 /** Port keys a flow may use for its negative prompt (first present one is filled). */
@@ -1478,6 +1483,7 @@ export class CrystalApi {
         versio: m.versio,
         ...(categoria !== undefined ? { categoria } : {}),
         ...(m.genus === 'compositus' ? { steps: m.gradus?.length ?? 0 } : {}),
+        modusGenus: resolveCanonVerb(m),
       }
     })
   }
@@ -1559,6 +1565,7 @@ export class CrystalApi {
         versio: m.versio,
         ...(categoria !== undefined ? { categoria } : {}),
         ...(m.genus === 'compositus' ? { steps: m.gradus?.length ?? 0 } : {}),
+        modusGenus: resolveCanonVerb(m),
       }
     })
   }
@@ -1569,7 +1576,22 @@ export class CrystalApi {
     if (!m) throw Errors.notFoundFlow(id)
     // Modus carries every field describeFlow reads; the cast supplies the
     // index-signature DescribableModus declares for its passthrough meta.
-    return describeFlow(m as unknown as DescribableModus)
+    const description = describeFlow(m as unknown as DescribableModus)
+    // `familia` — read-only, additive: derive the flow's model family from its own
+    // weight manifest (`Modus.intellae`), the same source Compiler.ts's family
+    // derivation reads (Compiler.ts:319-323), without touching Compiler.ts or any
+    // trigger-resolution logic. First non-empty distinct `familia` across the flow's
+    // weights wins (atomic → one; composite → already unioned onto `intellae` at
+    // registration). No weights, no registry, or no family on any weight → leave
+    // `familia` undefined (safe default: no highlight for that flow).
+    const intellae = (m as { intellae?: Array<{ id: string; role: string }> }).intellae
+    if (intellae && intellae.length > 0 && this.deps.intellarum) {
+      for (const w of intellae) {
+        const intella = await this.deps.intellarum.find(w.id).catch(() => null)
+        if (intella?.familia) { description.familia = intella.familia; break }
+      }
+    }
+    return description
   }
 
   /**

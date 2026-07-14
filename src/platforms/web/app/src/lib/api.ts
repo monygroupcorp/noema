@@ -4,13 +4,27 @@
 
 import type { Editio, FeedFilter, FeedItem, PublishRequest } from './editio';
 
-export interface FlowSummary { id: string; nomen?: string; versio?: string; categoria?: unknown }
+// The flow's canon verb, derived server-side at query time (`resolveCanonVerb`, noema-054).
+// Mirrors the backend's `CanonVerb` union (src/crystal/verbResolver.ts) and the
+// `FlowSummarySchema.modusGenus` enum (apiContract.ts) as a local literal type — the web
+// app doesn't import backend source, so this list is kept in step with it by hand.
+export type CanonVerb =
+  | 'make' | 'effect' | 'animate' | 'direct' | 'render'
+  | 'chat' | 'describe' | 'transcribe' | 'speak' | 'compose' | 'foley'
+  | 'sculpt' | 'lift' | 'scan'
+  | 'enhance';
+
+// Optional here (unlike the server's required `modusGenus`) to match this file's existing
+// convention of loosening required-on-the-wire fields to optional client-side (see `nomen`/
+// `versio` above) — callers that construct a partial FlowSummary (e.g. Canvas.test.ts's
+// dedupeFlows fixtures) shouldn't have to supply every field just to typecheck.
+export interface FlowSummary { id: string; nomen?: string; versio?: string; categoria?: unknown; modusGenus?: CanonVerb }
 export interface JsonSchema {
   type: string;
   properties?: Record<string, { type: string; format?: string; default?: unknown; description?: string; title?: string }>;
   required?: string[];
 }
-export interface FlowDescription { id: string; nomen: string; versio: string; input: JsonSchema; output?: JsonSchema }
+export interface FlowDescription { id: string; nomen: string; versio: string; input: JsonSchema; output?: JsonSchema; familia?: string }
 
 export type RunStatus = 'pending' | 'running' | 'complete' | 'failed';
 export interface Run {
@@ -522,6 +536,12 @@ export const api = {
     fetch('/api/v1/storage/uploads/sign', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ signedUrl: string; permanentUrl: string; key?: string }>),
 
+  // GET /v1/models?basis=<basis> — the public, filterable model catalog (apiRouter.ts:552-565),
+  // scoped to one base-model family. Backs the composer's live LoRA trigger-word highlight:
+  // called once per flow load with `flow.familia`, the result cached client-side into a
+  // trigger→ModelCard lookup (no backend change needed — the endpoint already exists).
+  listModelsByBasis: (basis: string) =>
+    fetch(`/v1/models?basis=${encodeURIComponent(basis)}`, { headers: readHeaders() }).then(j<{ models: ModelCard[] }>),
   // ── Owned models (Model shelf) — the caller's private imports + trained LoRAs ─
   // GET /v1/me/models — owner-scoped, newest first. Anon-capable (commitment-keyed).
   listMyModels: () => fetch('/v1/me/models', { headers: readHeaders() }).then(j<{ models: ModelCard[] }>),

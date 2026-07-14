@@ -3,7 +3,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
-import { api, getActivePurse, setActivePurse, type FlowDescription } from '../lib/api';
+import { api, getActivePurse, setActivePurse, type FlowDescription, type ModelCard } from '../lib/api';
 import { mediaFromOutput } from '../lib/media';
 import { isPinned, togglePin } from '../lib/pins';
 import { usePromptAssist, useAssistField } from '../state/promptAssist';
@@ -18,6 +18,88 @@ function cleanAditus(a: Aditus): Aditus {
   const out: Aditus = {};
   for (const [k, v] of Object.entries(a)) if (v !== '' && v !== undefined && v !== null) out[k] = v;
   return out;
+}
+
+// ── Live LoRA trigger-word highlight (composer courtesy — see noema-061) ────────
+// The concierge's prompt string can carry `<lora:name:weight>` syntax, but nobody
+// asks the USER to type that — they just type the trigger word, and the serving
+// path (loraResolver.ts) resolves it for them. This is the read-only, client-side
+// courtesy half: highlight a recognized trigger AS THEY TYPE and let them hover it
+// for the model card, so they know a LoRA activated. No serving-path change, no
+// post-generation UI change — display only.
+
+/** A minimal whole-word, case-insensitive alternation over the known trigger
+ *  strings, longest-first so a longer trigger wins over a shorter one it contains.
+ *  Deliberately NOT loraResolver.ts's `_substringScan`/`_specialTokenScan` (out of
+ *  scope) — this only needs to decide "does this look like a match", not resolve. */
+function buildTriggerRegex(triggers: string[]): RegExp | null {
+  if (triggers.length === 0) return null;
+  const escaped = triggers
+    .slice()
+    .sort((a, b) => b.length - a.length)
+    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return new RegExp(`\\b(?:${escaped.join('|')})\\b`, 'gi');
+}
+
+type HitSeg = { text: string; hit?: ModelCard };
+
+/** Split `text` into plain/hit segments against `loraMap` (lowercased trigger →
+ *  ModelCard). Pure — used to render the highlight overlay from the live value. */
+function splitTriggerHits(text: string, loraMap: Map<string, ModelCard>, re: RegExp | null): HitSeg[] {
+  if (!re || !text) return [{ text }];
+  const segs: HitSeg[] = [];
+  let last = 0;
+  re.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) segs.push({ text: text.slice(last, m.index) });
+    segs.push({ text: m[0], hit: loraMap.get(m[0].toLowerCase()) });
+    last = m.index + m[0].length;
+    if (m[0].length === 0) re.lastIndex += 1;
+  }
+  if (last < text.length) segs.push({ text: text.slice(last) });
+  return segs;
+}
+
+/** The prompt/lyric/story textarea + a mirrored highlight overlay behind it. The
+ *  overlay's own text is transparent (glyphs still come from the real textarea on
+ *  top); only a matched trigger's `<span className="lora-trigger-hit">` paints a
+ *  visible background, and re-enables pointer events (hover/focus) just for itself
+ *  so the rest of the overlay stays click-through to the real textarea beneath. */
+function HighlightedPromptField(props: {
+  value: string;
+  placeholder?: string;
+  onChange: (v: string) => void;
+  loraMap: Map<string, ModelCard>;
+  triggerRe: RegExp | null;
+  assistProps: Record<string, unknown>;
+}) {
+  const { value, placeholder, onChange, loraMap, triggerRe, assistProps } = props;
+  const segs = useMemo(() => splitTriggerHits(value, loraMap, triggerRe), [value, loraMap, triggerRe]);
+  return (
+    <div className="lora-trigger-wrap">
+      <div className="lora-trigger-overlay" aria-hidden="true">
+        {segs.map((s, i) =>
+          s.hit ? (
+            <span className="lora-trigger-hit" tabIndex={0} key={i}>
+              {s.text}
+              <span className="lora-trigger-card" role="tooltip">
+                <strong>{s.hit.nomen}</strong>
+                {s.hit.trigger && <span className="ltc-trigger">{s.hit.trigger}</span>}
+                {s.hit.description && <p>{s.hit.description}</p>}
+                <span className="ltc-meta">{s.hit.access ?? 'public'} · {s.hit.license ?? 'unknown license'}</span>
+              </span>
+            </span>
+          ) : (
+            <span key={i}>{s.text}</span>
+          ),
+        )}
+        {/* trailing marker so a trailing newline still contributes overlay height */}
+        {'​'}
+      </div>
+      <textarea className="ta2 lora-trigger-ta" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} {...assistProps} />
+    </div>
+  );
 }
 
 // ── The work axis: where this run executes / what we can see of it ──────────────
@@ -59,6 +141,12 @@ export function Card() {
   const id = params.get('id') || 'flux-schnell';
   // A leased warm studio to run on (from /studio's "Run here") — rides the dispatch as-is.
   const studioId = params.get('studio') || undefined;
+  // Carried from Shelf's "Use in a flow" (noema-062): an imported model's trigger word,
+  // pre-included in the prompt so the LoRA is easy to use immediately (server-side
+  // src/crystal/loraResolver.ts resolves the trigger word into the adapter at run time —
+  // unmodified here). `loraName` only drives the concierge note below.
+  const preloadPrompt = params.get('prompt') || undefined;
+  const loraName = params.get('loraName') || undefined;
 
   const [flow, setFlow] = useState<FlowDescription | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -83,6 +171,29 @@ export function Card() {
   const [activePurse, setActivePurseState] = useState<string | null>(getActivePurse());
   useEffect(() => { setPinned(isPinned(id)); }, [id]);
 
+  // Whether this flow is the current cross-platform `/make` default (web + Telegram share
+  // the same binding, keyed by owner identity — see Preferences.tsx's rebindMake()).
+  const [makeDefault, setMakeDefault] = useState(false);
+  const [bindBusy, setBindBusy] = useState(false);
+  const [bindErr, setBindErr] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.getMe().then((m) => { if (live) setMakeDefault(m.bindings.find((b) => b.verb === 'make')?.modusId === id); }).catch(() => { /* best-effort */ });
+    return () => { live = false; };
+  }, [id]);
+
+  // Rebind /make to this flow (PUT /v1/me/bindings/make) — optimistic, reverts on error.
+  // Same pattern as Preferences.tsx's rebindMake().
+  function setAsMakeDefault() {
+    const prev = makeDefault;
+    setMakeDefault(true);
+    setBindBusy(true);
+    setBindErr(null);
+    api.setBinding('make', id)
+      .then(() => setBindBusy(false))
+      .catch((e) => { setMakeDefault(prev); setBindBusy(false); setBindErr(e instanceof Error ? e.message : String(e)); });
+  }
+
   // Prompt augmentation: register prompt fields with the Concierge on focus,
   // and release the assist target when this card unmounts.
   const { clear } = usePromptAssist();
@@ -91,6 +202,25 @@ export function Card() {
 
   // Per-flow saved input defaults (affines). Loaded over the schema defaults, saved on demand.
   const [affSave, setAffSave] = useState<{ s: 'idle' | 'busy' | 'done' | 'err'; msg?: string }>({ s: 'idle' });
+
+  // Live LoRA trigger-word highlight — the composer courtesy (noema-061). Fetched once
+  // per flow load (keyed on flow.familia, the base-model compatibility family the
+  // backend derives read-only in describeFlow()); cached, not refetched per keystroke.
+  const [loraMap, setLoraMap] = useState<Map<string, ModelCard>>(new Map());
+  useEffect(() => {
+    if (!flow?.familia) { setLoraMap(new Map()); return; }
+    let live = true;
+    api.listModelsByBasis(flow.familia)
+      .then((r) => {
+        if (!live) return;
+        const map = new Map<string, ModelCard>();
+        for (const m of r.models ?? []) if (m.trigger) map.set(m.trigger.toLowerCase(), m);
+        setLoraMap(map);
+      })
+      .catch(() => { if (live) setLoraMap(new Map()); });
+    return () => { live = false; };
+  }, [flow?.familia]);
+  const triggerRe = useMemo(() => buildTriggerRegex(Array.from(loraMap.keys())), [loraMap]);
 
   // fetch the real flow schema + seed the form from defaults, then overlay saved affines
   useEffect(() => {
@@ -102,7 +232,7 @@ export function Card() {
       const init: Aditus = {};
       for (const [k, p] of Object.entries(f.input?.properties ?? {})) {
         if (p.default !== undefined) init[k] = p.default;
-        else if (k === 'prompt') init[k] = 'a low-poly n64-style dragon perched on a neon temple, dusk';
+        else if (k === 'prompt') init[k] = preloadPrompt || 'a low-poly n64-style dragon perched on a neon temple, dusk';
         else init[k] = '';
       }
       // Overlay the caller's saved defaults for this flow (best-effort — anon-capable).
@@ -220,6 +350,30 @@ export function Card() {
 
   return (
     <AppShell crumb={<>Catalogue <span className="sep">/</span> {id}</>} context={context}>
+      {/* Live LoRA trigger-word highlight — kept local to Card.tsx (no app.css edit).
+          The overlay mirrors the "ta2" textarea's box exactly (see .lora-trigger-wrap
+          sizing the box, .lora-trigger-ta made transparent-background to sit on top
+          of it): its own glyphs are transparent, only a hit span paints a highlight
+          background + re-enables pointer events for hover/focus. */}
+      <style>{`
+        .lora-trigger-wrap{position:relative}
+        .lora-trigger-overlay{position:absolute;inset:0;padding:9px 11px;border:1px solid transparent;
+          font:inherit;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;overflow:hidden;
+          color:transparent;pointer-events:none;z-index:1}
+        .lora-trigger-ta.ta2{position:relative;background:transparent;z-index:0}
+        .lora-trigger-hit{position:relative;background:color-mix(in srgb,var(--accent) 35%,transparent);
+          border-radius:3px;pointer-events:auto;cursor:help}
+        .lora-trigger-card{display:none;position:absolute;bottom:calc(100% + 6px);left:0;z-index:20;
+          width:240px;max-width:60vw;background:var(--raised);border:1px solid var(--hair);
+          border-radius:9px;padding:10px 12px;box-shadow:0 8px 24px rgba(0,0,0,.35);color:var(--text);
+          font-size:12.5px;line-height:1.45;white-space:normal}
+        .lora-trigger-hit:hover .lora-trigger-card,.lora-trigger-hit:focus .lora-trigger-card,
+        .lora-trigger-hit:focus-visible .lora-trigger-card{display:block}
+        .lora-trigger-card strong{display:block;margin-bottom:2px}
+        .lora-trigger-card .ltc-trigger{display:inline-block;font-family:monospace;opacity:.75;margin-bottom:4px}
+        .lora-trigger-card p{margin:4px 0;opacity:.85}
+        .lora-trigger-card .ltc-meta{display:block;margin-top:4px;opacity:.6;text-transform:capitalize}
+      `}</style>
       <div className="cardscroll"><div className="card">
         {loadErr && <div className="warn">Couldn’t load this flow from staging — {loadErr}</div>}
         {!flow && !loadErr && <div className="empty"><div className="t">Loading flow…</div></div>}
@@ -230,6 +384,11 @@ export function Card() {
             <div>
               <h1>{name} <span className="verbtag">{String((flow as { categoria?: unknown }).categoria ?? 'flow')}</span></h1>
               <div className="desc">{(flow.nomen || '').includes('—') ? flow.nomen.split('—').slice(1).join('—').trim() : 'Live flow from staging.'}</div>
+              {loraName && (
+                <div className="sub">
+                  Using your <b>{loraName}</b> LoRA — trigger word <span className="mono accent">{preloadPrompt}</span> is included in the prompt below.
+                </div>
+              )}
               <div className="ports">
                 {Object.entries(flow.input?.properties ?? {}).slice(0, 4).map(([k, p]) => <span key={k} className="p">{p.title || humanizeKey(k)}</span>)}
                 {' → '}
@@ -237,6 +396,15 @@ export function Card() {
               </div>
             </div>
             <span className="ver mono">v{flow.versio}</span>
+            <button
+              className={`make-default${makeDefault ? ' on' : ''}`}
+              onClick={setAsMakeDefault}
+              disabled={bindBusy || makeDefault}
+              title={makeDefault ? 'This is your /make default (web + Telegram)' : 'Set as /make default'}
+              aria-pressed={makeDefault}
+            >
+              <Ic name="wand-sparkles" /> {makeDefault ? '/make default' : 'set as /make default'}
+            </button>
             <button
               className={`pin${pinned ? ' on' : ''}`}
               onClick={() => setPinned(togglePin({ id, name }))}
@@ -246,6 +414,7 @@ export function Card() {
               <Ic name="star" />
             </button>
           </div>
+          {bindErr && <div className="pub-err">{bindErr}</div>}
 
           {/* auto-generated from the live input JSON-Schema */}
           {Object.entries(flow.input?.properties ?? {}).map(([k, p]) => {
@@ -279,7 +448,14 @@ export function Card() {
                 ) : isNum ? (
                   <input className="inp mono" type="number" value={aditus[k] === '' || aditus[k] === undefined ? '' : Number(aditus[k])} placeholder={p.description} onChange={(e) => set(k, e.target.value === '' ? '' : Number(e.target.value))} />
                 ) : isLong ? (
-                  <textarea className="ta2" value={String(aditus[k] ?? '')} placeholder={p.description} onChange={(e) => set(k, e.target.value)} {...assistProps} />
+                  <HighlightedPromptField
+                    value={String(aditus[k] ?? '')}
+                    placeholder={p.description}
+                    onChange={(v) => set(k, v)}
+                    loraMap={loraMap}
+                    triggerRe={triggerRe}
+                    assistProps={assistProps}
+                  />
                 ) : (
                   <input className="inp" value={String(aditus[k] ?? '')} placeholder={p.description} onChange={(e) => set(k, e.target.value)} {...assistProps} />
                 )}

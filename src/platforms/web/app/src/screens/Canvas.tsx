@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ReactFlow, Background, BackgroundVariant, Controls, Handle, Position,
-  addEdge, useNodesState, useEdgesState, type Node, type Edge, type Connection,
+  addEdge, useNodesState, useEdgesState,
+  type Node, type Edge, type Connection, type NodeProps, type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { AppShell } from '../shell/AppShell';
@@ -147,16 +148,43 @@ export function clearPublishError(edges: Edge[]): Edge[] {
 
 const AUTOSAVE_DEBOUNCE_MS = 1500;
 
+// ── Node delete + undo (pure — capture/restore, cascade itself is xyflow's own) ──
+// The app's test toolchain has no jsdom/@testing-library/react (see BuyCreditsModal.test.ts's
+// own note) — so delete/cascade/undo are covered here as pure state transitions on
+// nodes/edges, with the trash-2 button's presence covered via react-dom/server static
+// markup (no DOM event simulation available either way).
+export function connectedEdges(edges: Edge[], nodeId: string): Edge[] {
+  return edges.filter((e) => e.source === nodeId || e.target === nodeId);
+}
+
+export function restoreNode(nodes: Node<FlowData>[], node: Node<FlowData>): Node<FlowData>[] {
+  if (nodes.some((n) => n.id === node.id)) return nodes;
+  return [...nodes, node];
+}
+
+export function restoreEdges(edges: Edge[], toRestore: Edge[]): Edge[] {
+  const existing = new Set(edges.map((e) => e.id));
+  return [...edges, ...toRestore.filter((e) => !existing.has(e.id))];
+}
+
 const ROW = 26, HEAD = 41, PAD = 8;
 const handleTop = (i: number) => HEAD + PAD + i * ROW + 13;
 
-function FlowNode({ data }: { data: FlowData }) {
+export function FlowNode({ id, data, onDelete }: NodeProps<Node<FlowData>> & { onDelete: (nodeId: string) => void }) {
   return (
     <div className="cnode">
       <div className="cnode-head">
         <span className="cn-fav" style={{ background: data.color }} />
         <b>{data.name}</b>
         {data.badge && <span className="badge accent">{data.badge}</span>}
+        <button
+          type="button"
+          className="btn ghost bad sm nodrag cn-delete"
+          onClick={() => onDelete(id)}
+          aria-label={`Delete ${data.name}`}
+        >
+          <Ic name="trash-2" />
+        </button>
       </div>
       <div className="cnode-body">
         <div className="cn-col">
@@ -180,8 +208,6 @@ function FlowNode({ data }: { data: FlowData }) {
   );
 }
 
-const nodeTypes = { flow: FlowNode };
-
 export function Canvas() {
   const navigate = useNavigate();
   const [tabula, setTabula] = useState<Tabula | null>(null);
@@ -192,8 +218,16 @@ export function Canvas() {
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<PublishErrorState | null>(null);
+  const [undoToast, setUndoToast] = useState<{ nodeName: string } | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextSave = useRef(true);
+  const rfInstance = useRef<ReactFlowInstance<Node<FlowData>, Edge> | null>(null);
+  const nodesRef = useRef<Node<FlowData>[]>(nodes);
+  nodesRef.current = nodes;
+  const edgesRef = useRef<Edge[]>(edges);
+  edgesRef.current = edges;
+  const pendingUndo = useRef<{ node: Node<FlowData>; edges: Edge[] } | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load the palette (canonical + owner's own flows, real ports) and the caller's
   // current Tabula — the most recently saved one, or a fresh draft if they have none.
@@ -266,6 +300,33 @@ export function Canvas() {
     setNodes((ns) => [...ns, node]);
   }, [nodes.length, setNodes]);
 
+  // Delete a placed node: capture it + its connected edges for undo, then let xyflow's
+  // own deleteElements drive the cascade (same onNodesChange/onEdgesChange path as any
+  // other graph edit) — no hand-rolled edge filtering on the removal side.
+  const deleteNode = useCallback((nodeId: string) => {
+    const target = nodesRef.current.find((n) => n.id === nodeId);
+    if (!target) return;
+    pendingUndo.current = { node: target, edges: connectedEdges(edgesRef.current, nodeId) };
+    rfInstance.current?.deleteElements({ nodes: [{ id: nodeId }] });
+    setUndoToast({ nodeName: target.data.name });
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = setTimeout(() => { setUndoToast(null); pendingUndo.current = null; }, 5000);
+  }, []);
+
+  const undoDelete = useCallback(() => {
+    const pending = pendingUndo.current;
+    if (!pending) return;
+    setNodes((ns) => restoreNode(ns, pending.node));
+    setEdges((eds) => restoreEdges(eds, pending.edges));
+    pendingUndo.current = null;
+    setUndoToast(null);
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+  }, [setNodes, setEdges]);
+
+  const nodeTypes = useMemo(() => ({
+    flow: (props: NodeProps<Node<FlowData>>) => <FlowNode {...props} onDelete={deleteNode} />,
+  }), [deleteNode]);
+
   const publish = useCallback(async () => {
     if (!tabula) return;
     setPublishing(true);
@@ -305,9 +366,16 @@ export function Canvas() {
             </button>
           </div>
         )}
+        {undoToast && (
+          <div className="canvas-undo-toast">
+            <span>Deleted "{undoToast.nodeName}"</span>
+            <button className="btn ghost sm" onClick={undoDelete}>Undo</button>
+          </div>
+        )}
         <ReactFlow
           nodes={nodes} edges={edges}
           onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
+          onInit={(instance) => { rfInstance.current = instance; }}
           nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.3 }}
           proOptions={{ hideAttribution: true }}
           defaultEdgeOptions={{ style: { strokeWidth: 1.5 } }}
@@ -326,7 +394,7 @@ export function Canvas() {
         </div>
         <div className="canvas-bar">
           <span className="hint">
-            {nodes.length} tools{saveState !== 'idle' ? ` · ${saveState === 'saving' ? 'saving…' : 'saved'}` : ''} · drag a handle to wire
+            {nodes.length} tools{saveState !== 'idle' ? ` · ${saveState === 'saving' ? 'saving…' : 'saved'}` : ''} · drag a handle to wire · trash icon deletes a node · select + Backspace removes nodes or edges
           </span>
           <button className="btn" onClick={publish} disabled={publishing || nodes.length === 0}>
             <Ic name="sparkles" /> {publishing ? 'Compiling…' : 'Compile to spell'}

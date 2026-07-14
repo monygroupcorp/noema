@@ -71,6 +71,7 @@ body{margin:0; background:var(--bg); color:var(--text); font-family:var(--font-s
 .brand small{color:var(--faint); font-size:11px; margin-left:auto}
 .nav{padding:10px 10px 4px; display:flex; flex-direction:column; gap:2px}
 .nav .lbl{color:var(--faint); font-size:10.5px; text-transform:uppercase; letter-spacing:.12em; padding:8px 8px 4px}
+.mobilenav{display:none}   /* grouped 7-tile bottom bar — mobile-only, shown in the <=760px block below */
 .navitem{display:flex; align-items:center; gap:10px; padding:7px 9px; border-radius:8px; color:var(--muted); cursor:pointer; transition:.14s var(--ease); text-decoration:none}
 button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .navitem:hover{background:var(--raised); color:var(--text)}
@@ -194,8 +195,12 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 
 /* ---------- chat ---------- */
 .thread{flex:1; overflow:auto; padding:30px 0 14px}
-.wrap{max-width:720px; margin:0 auto; padding:0 32px}
+.wrap{max-width:720px; margin:0 auto; padding:0 32px; position:relative}
 .thread{padding:40px 0 18px}
+/* example conversation: marked (pill + dim), never mistaken for real history */
+.msg.chat-example .msg-col{opacity:.6}
+.chat-example-badge{margin-left:7px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); border-color:var(--hair)}
+.chat-example-clear{position:absolute; top:0; right:32px; font-size:14px}
 .msg{display:flex; gap:14px; margin-bottom:32px}
 .msg .av{width:24px;height:24px;border-radius:6px;flex:0 0 auto;margin-top:1px}
 .msg.user .av{background:var(--raised); box-shadow:inset 0 0 0 1px var(--hair)}
@@ -278,6 +283,18 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .flow-head .pin.on{color:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 45%,var(--hair));background:var(--accent-bg)}
 .flow-head .pin svg{width:15px;height:15px}
 .flow-head .pin.on svg{fill:currentColor}
+
+.flow-head .make-default{flex:0 0 auto;display:flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:8px;border:1px solid var(--hair);background:transparent;color:var(--faint);font-size:12px;cursor:pointer;transition:.14s var(--ease)}
+.flow-head .make-default:hover:not(:disabled){color:var(--muted);border-color:color-mix(in srgb,var(--good) 40%,var(--hair))}
+.flow-head .make-default.on{color:var(--good);border-color:color-mix(in srgb,var(--good) 45%,var(--hair));background:color-mix(in srgb,var(--good) 10%,transparent);cursor:default}
+.flow-head .make-default svg{width:14px;height:14px}
+.flow-head .make-default:disabled{opacity:.85}
+.reg-row .pin{flex:0 0 auto;display:grid;place-items:center;width:26px;height:26px;border-radius:7px;border:1px solid var(--hair);background:transparent;color:var(--faint);cursor:pointer;transition:.14s var(--ease);margin-left:8px}
+.reg-row .pin:hover{color:var(--muted);border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
+.reg-row .pin:active{transform:scale(.94)}
+.reg-row .pin.on{color:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 45%,var(--hair));background:var(--accent-bg)}
+.reg-row .pin svg{width:13px;height:13px}
+.reg-row .pin.on svg{fill:currentColor}
 
 .field{margin-bottom:24px}
 .field > label{display:flex;align-items:baseline;gap:8px;margin-bottom:7px;font-size:13px;font-weight:500}
@@ -733,10 +750,15 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .rail{position:fixed;left:0;right:0;bottom:0;top:auto;height:58px;flex-direction:row;align-items:stretch;
         border-right:0;border-top:1px solid var(--hair);z-index:var(--z-nav);padding:0;overflow:hidden;background:var(--panel)}
   .rail .brand,.rail .keyring,.rail .railpriv,.projwrap{display:none}   /* identity + project + privacy live in the topbar / rail-desktop only */
-  .rail .nav{flex-direction:row;flex:1;gap:0;padding:0;overflow-x:auto}
-  .rail .nav .lbl{display:none}
+  .rail .nav{display:none}                                   /* flat 13-leaf row replaced by the grouped mobilenav below */
+  .rail .mobilenav{display:flex;flex-direction:row;flex:1;gap:0;padding:0}
   .rail .navitem{flex:1;flex-direction:column;justify-content:center;gap:3px;font-size:var(--fs-xs);padding:0 6px;border-radius:0;white-space:nowrap}
   .rail .navitem .k{display:none}
+  .railgroup{position:relative;display:flex;flex:1;min-width:0}
+  .railgroup-btn{flex:1;background:none;border:0;font:inherit;cursor:pointer}
+  .railgroup-backdrop{position:fixed;inset:0;z-index:var(--z-nav)}
+  .railgroup-pop{position:absolute;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%);width:200px;max-width:60vw;background:var(--panel);border:1px solid var(--hair);border-radius:12px;box-shadow:0 18px 44px rgba(0,0,0,.5);overflow:hidden;z-index:var(--z-nav);display:flex;flex-direction:column;padding:6px}
+  .railgroup-pop .navitem{flex-direction:row;justify-content:flex-start;padding:8px 10px;font-size:var(--fs-sm)}
   .main{padding-bottom:58px}                                 /* clear the bottom bar */
   .topbar{padding:var(--s3) var(--s4);min-height:54px;gap:var(--s2)}
   .crumb{display:none}                                       /* identity + webring carry it */

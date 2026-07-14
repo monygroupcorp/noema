@@ -201,8 +201,19 @@ const FlowSummarySchema: JsonSchema = {
     nomen: { type: 'string', description: 'The flow display name.' },
     versio: { type: 'string', description: 'The flow version.' },
     categoria: { description: 'An optional catalog tag.' },
+    modusGenus: {
+      type: 'string',
+      description: "The flow's canon verb, derived at query time from its aditus/exitus ports (see `resolveCanonVerb`, noema-054).",
+      // Mirrors verbResolver.ts's `CanonVerb` union — the capability-map's 14 verbs plus `enhance`.
+      enum: [
+        'make', 'effect', 'animate', 'direct', 'render',
+        'chat', 'describe', 'transcribe', 'speak', 'compose', 'foley',
+        'sculpt', 'lift', 'scan',
+        'enhance',
+      ],
+    },
   },
-  required: ['id', 'nomen', 'versio'],
+  required: ['id', 'nomen', 'versio', 'modusGenus'],
 }
 
 /** The `{ flows }` envelope returned by `GET /v1/flows`. */

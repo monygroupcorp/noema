@@ -104,6 +104,12 @@ export interface FlowDescription {
   output?: JsonSchema
   categoria?: unknown
   fundamentumId?: unknown
+  /** The flow's model-family compatibility key (e.g. 'flux', 'sdxl', 'sd15'), derived
+   *  read-only from the flow's weight manifest by the `describeFlow()` call site in
+   *  CrystalApi.ts — absent when no family could be determined. Lets the web client
+   *  filter the model catalog (`GET /v1/models?basis=`) to the LoRAs compatible with
+   *  this flow, for the live trigger-word highlight in the composer. */
+  familia?: string
 }
 
 /** Useful meta keys passed through from the modus when present. */
