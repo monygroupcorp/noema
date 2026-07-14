@@ -39,6 +39,7 @@ verbs.
 | **sculpt** | t2m | text → 3D | planned |
 | **lift** | i2m | image → 3D | planned |
 | **scan** | v2m | video → 3D (photogrammetry / NeRF / splat) | planned |
+| **enhance** | i2i *(image-only aditus, no text input — distinct from `effect`'s prompt-driven i2i)* | image transform with no prompt (background removal, upscale) | planned |
 
 ## Reachable via `/run` for now (promote to a verb later if traffic warrants)
 
