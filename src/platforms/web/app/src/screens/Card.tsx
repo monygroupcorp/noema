@@ -83,6 +83,29 @@ export function Card() {
   const [activePurse, setActivePurseState] = useState<string | null>(getActivePurse());
   useEffect(() => { setPinned(isPinned(id)); }, [id]);
 
+  // Whether this flow is the current cross-platform `/make` default (web + Telegram share
+  // the same binding, keyed by owner identity — see Preferences.tsx's rebindMake()).
+  const [makeDefault, setMakeDefault] = useState(false);
+  const [bindBusy, setBindBusy] = useState(false);
+  const [bindErr, setBindErr] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.getMe().then((m) => { if (live) setMakeDefault(m.bindings.find((b) => b.verb === 'make')?.modusId === id); }).catch(() => { /* best-effort */ });
+    return () => { live = false; };
+  }, [id]);
+
+  // Rebind /make to this flow (PUT /v1/me/bindings/make) — optimistic, reverts on error.
+  // Same pattern as Preferences.tsx's rebindMake().
+  function setAsMakeDefault() {
+    const prev = makeDefault;
+    setMakeDefault(true);
+    setBindBusy(true);
+    setBindErr(null);
+    api.setBinding('make', id)
+      .then(() => setBindBusy(false))
+      .catch((e) => { setMakeDefault(prev); setBindBusy(false); setBindErr(e instanceof Error ? e.message : String(e)); });
+  }
+
   // Prompt augmentation: register prompt fields with the Concierge on focus,
   // and release the assist target when this card unmounts.
   const { clear } = usePromptAssist();
@@ -238,6 +261,15 @@ export function Card() {
             </div>
             <span className="ver mono">v{flow.versio}</span>
             <button
+              className={`make-default${makeDefault ? ' on' : ''}`}
+              onClick={setAsMakeDefault}
+              disabled={bindBusy || makeDefault}
+              title={makeDefault ? 'This is your /make default (web + Telegram)' : 'Set as /make default'}
+              aria-pressed={makeDefault}
+            >
+              <Ic name="wand-sparkles" /> {makeDefault ? '/make default' : 'set as /make default'}
+            </button>
+            <button
               className={`pin${pinned ? ' on' : ''}`}
               onClick={() => setPinned(togglePin({ id, name }))}
               title={pinned ? 'Unpin from rail' : 'Pin to rail'}
@@ -246,6 +278,7 @@ export function Card() {
               <Ic name="star" />
             </button>
           </div>
+          {bindErr && <div className="pub-err">{bindErr}</div>}
 
           {/* auto-generated from the live input JSON-Schema */}
           {Object.entries(flow.input?.properties ?? {}).map(([k, p]) => {
