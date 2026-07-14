@@ -29,6 +29,38 @@ const COMMERCIAL_LABEL: Record<NonNullable<ModelCard['commercialUse']>, string> 
   unknown: 'license unknown',
 };
 
+// "Use in a flow" (noema-062) used to hand the model's own Intella id straight to the
+// flow-run screen — but no flow document exists for an imported model, so it always 404'd
+// (`import-<hash>` was never a real flow id). Per the operator's redefinition, the button
+// now navigates to the SIMPLEST existing text-to-image card for the model's base family
+// (`m.basis`, aka `familia`), with the model's trigger word pre-included in the prompt via
+// a query param Card.tsx reads on load. Table sourced from src/crystal/seeds/essentiae.ts —
+// every familia value `classifyBaseModel` (src/crystal/modelLicense.ts) can actually
+// produce, mapped to its canonical plain-text2img essentia id.
+export const BASE_CARD_ID_BY_FAMILIA: Record<string, string> = {
+  flux2: 'klein',
+  flux: 'flux-schnell',
+  sdxl: 'sdxl',
+  sd15: 'sd1-5',
+  chroma: 'chroma',
+  krea2: 'krea-turbo',
+  zimage: 'z-image-turbo',
+};
+
+// Resolve the "Use in a flow" link target for a model card. Falls back to the plain
+// flux-schnell card (no prompt/loraName params) when the model's `basis` doesn't match a
+// known familia — keeps the button functional without ever sending the user back into the
+// dead `import-<hash>` flow-id 404.
+export function resolveUseInFlowTarget(m: Pick<ModelCard, 'basis' | 'trigger' | 'nomen'>): string {
+  const baseCardId = (m.basis && BASE_CARD_ID_BY_FAMILIA[m.basis]) || 'flux-schnell';
+  if (!m.basis || !BASE_CARD_ID_BY_FAMILIA[m.basis]) return `/card?id=${baseCardId}`;
+  const q = new URLSearchParams();
+  if (m.trigger) q.set('prompt', m.trigger);
+  if (m.nomen) q.set('loraName', m.nomen);
+  const qs = q.toString();
+  return qs ? `/card?id=${baseCardId}&${qs}` : `/card?id=${baseCardId}`;
+}
+
 export function Shelf() {
   const { project: active, fileAsset } = useProject();
   const [models, setModels] = useState<ModelCard[] | null>(null);
@@ -158,7 +190,7 @@ export function Shelf() {
                     )}
                     {m.description && <div className="mc-meta">{m.description}</div>}
                     <div className="mc-actions">
-                      <Link className="btn ghost" to={`/card?id=${m.intellaId}`}>Use in a flow</Link>
+                      <Link className="btn ghost" to={resolveUseInFlowTarget(m)}>Use in a flow</Link>
                       <Link className="btn accent" to="/collections"><Ic name="hexagon" /> Collection</Link>
                       <HoldingToggle kind="model" assetId={m.intellaId} projectId={target} />
                       {admin && (
