@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type FlowSummary } from '../lib/api';
+import { isPinned, togglePin, usePins } from '../lib/pins';
 
 // Only the fields the live /v1/flows payload actually carries. License / size / run-locality
 // are NOT in FlowSummary, so we don't show them at all rather than invent them (P0-4,
@@ -49,6 +50,9 @@ export function Catalog() {
   const [err, setErr] = useState(false);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('All');
+  // Subscribe so the list re-renders whenever any pin is toggled anywhere in the app
+  // (this row's own star, Card.tsx's pin button, or another tab).
+  usePins();
 
   useEffect(() => {
     let live = true;
@@ -110,19 +114,30 @@ export function Catalog() {
             <span className="c-ver">Version</span>
           </div>
 
-          {shown.map((f) => (
-            <Link key={f.id} className="reg-row" to={`/card?id=${encodeURIComponent(f.id)}`}>
-              <div className="reg-name">
-                <span className="nm">{f.name}</span>
-                <span className="id">{f.id}</span>
-              </div>
-              <div className="reg-mod">
-                <span className="mg" style={{ background: MOD_TOKEN[f.media] || 'var(--muted)' }} />
-                {f.media}
-              </div>
-              <div className="reg-ver mono">{f.version || '—'}</div>
-            </Link>
-          ))}
+          {shown.map((f) => {
+            const pinned = isPinned(f.id);
+            return (
+              <Link key={f.id} className="reg-row" to={`/card?id=${encodeURIComponent(f.id)}`}>
+                <div className="reg-name">
+                  <span className="nm">{f.name}</span>
+                  <span className="id">{f.id}</span>
+                </div>
+                <div className="reg-mod">
+                  <span className="mg" style={{ background: MOD_TOKEN[f.media] || 'var(--muted)' }} />
+                  {f.media}
+                </div>
+                <div className="reg-ver mono">{f.version || '—'}</div>
+                <button
+                  className={`pin${pinned ? ' on' : ''}`}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); togglePin({ id: f.id, name: f.name }); }}
+                  title={pinned ? 'Unpin from rail' : 'Pin to rail'}
+                  aria-pressed={pinned}
+                >
+                  <Ic name="star" />
+                </button>
+              </Link>
+            );
+          })}
 
           {flows === null && <div className="empty"><div className="t">Loading the registry…</div></div>}
           {flows && !err && shown.length === 0 && <div className="empty"><div className="t">No models match.</div></div>}
