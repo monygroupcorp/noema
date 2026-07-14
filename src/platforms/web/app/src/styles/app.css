@@ -620,6 +620,10 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .peek{position:absolute;right:18px;bottom:18px;z-index:5;width:230px;background:color-mix(in srgb,var(--panel) 88%,transparent);backdrop-filter:blur(8px);border:1px solid var(--hair);border-radius:12px;overflow:hidden;display:none}
 .peek.show{display:block} .peek .pimg{height:150px;background:linear-gradient(150deg,#1a1340,#0c1a1c 70%)}
 .peek .pmeta{padding:11px 13px;font-size:12px;color:var(--muted)} .peek .pmeta b{color:var(--text);display:block;font-size:13px;margin-bottom:3px;font-weight:500}
+/* orientation cluster (noema-051): reset-view + home, always-on-canvas, distinct affordances */
+.orient-cluster{position:absolute;right:18px;top:18px;z-index:6;display:flex;gap:8px}
+.orient-cluster button,.orient-cluster a{display:flex;align-items:center;gap:6px;padding:6px 11px;border-radius:9px;font-size:12px;line-height:1;cursor:pointer;border:1px solid var(--hair);background:color-mix(in srgb,var(--raised) 90%,transparent);color:var(--accent-soft);text-decoration:none;backdrop-filter:blur(6px)}
+.orient-cluster button:hover,.orient-cluster a:hover{background:var(--accent-bg)}
 
 /* onboarding / centered flows */
 .center{flex:1;display:grid;place-items:center;padding:28px}
