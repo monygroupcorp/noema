@@ -424,12 +424,34 @@
                           },
                           "categoria": {
                             "description": "An optional catalog tag."
+                          },
+                          "modusGenus": {
+                            "type": "string",
+                            "description": "The flow's canon verb, derived at query time from its aditus/exitus ports (see `resolveCanonVerb`, noema-054).",
+                            "enum": [
+                              "make",
+                              "effect",
+                              "animate",
+                              "direct",
+                              "render",
+                              "chat",
+                              "describe",
+                              "transcribe",
+                              "speak",
+                              "compose",
+                              "foley",
+                              "sculpt",
+                              "lift",
+                              "scan",
+                              "enhance"
+                            ]
                           }
                         },
                         "required": [
                           "id",
                           "nomen",
-                          "versio"
+                          "versio",
+                          "modusGenus"
                         ]
                       }
                     }
@@ -9127,12 +9149,34 @@
                           },
                           "categoria": {
                             "description": "An optional catalog tag."
+                          },
+                          "modusGenus": {
+                            "type": "string",
+                            "description": "The flow's canon verb, derived at query time from its aditus/exitus ports (see `resolveCanonVerb`, noema-054).",
+                            "enum": [
+                              "make",
+                              "effect",
+                              "animate",
+                              "direct",
+                              "render",
+                              "chat",
+                              "describe",
+                              "transcribe",
+                              "speak",
+                              "compose",
+                              "foley",
+                              "sculpt",
+                              "lift",
+                              "scan",
+                              "enhance"
+                            ]
                           }
                         },
                         "required": [
                           "id",
                           "nomen",
-                          "versio"
+                          "versio",
+                          "modusGenus"
                         ]
                       }
                     }

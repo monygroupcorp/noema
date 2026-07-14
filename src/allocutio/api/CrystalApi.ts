@@ -42,6 +42,7 @@ import { toRun, toSettledRun, toCollection, toTeam, toEdition, toProject } from 
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
 import { Errors, ApiError } from './errors.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
+import { resolveCanonVerb, type CanonVerb } from '../../crystal/verbResolver.js'
 import { computeRecipient } from '../../arcanum/prover.js'
 import { impetusForPodMs, usdMicroToImpetus, IMPETUS_USD_RATE } from '../../ledger/rates.js'
 import { fundingBps, applyFundingBps, DEFAULT_FUNDING_BPS } from '../../ledger/depositFunding.js'
@@ -303,6 +304,10 @@ export interface FlowSummary {
   /** Number of steps — present only for a compositus (spell). Absent = an atomic flow.
    *  Lets an agent tell a one-shot tool from a multi-step spell at the catalog level. */
   steps?: number
+  /** The flow's canon verb, derived at query time from its aditus/exitus ports via
+   *  `resolveCanonVerb` (noema-054) — lets a future concierge/classifier read what
+   *  kind of modus each flow is without a stored/hashed taxonomy field. */
+  modusGenus: CanonVerb
 }
 
 /** Port keys a flow may use for its negative prompt (first present one is filled). */
@@ -1478,6 +1483,7 @@ export class CrystalApi {
         versio: m.versio,
         ...(categoria !== undefined ? { categoria } : {}),
         ...(m.genus === 'compositus' ? { steps: m.gradus?.length ?? 0 } : {}),
+        modusGenus: resolveCanonVerb(m),
       }
     })
   }
@@ -1559,6 +1565,7 @@ export class CrystalApi {
         versio: m.versio,
         ...(categoria !== undefined ? { categoria } : {}),
         ...(m.genus === 'compositus' ? { steps: m.gradus?.length ?? 0 } : {}),
+        modusGenus: resolveCanonVerb(m),
       }
     })
   }
