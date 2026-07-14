@@ -400,7 +400,7 @@ export const ESSENTIA_KLEINEDIT_4B: Essentia = {
   fundamentumVersio: '1.1.0',
 
   aditus: {
-    prompt:     { type: 'text',  required: true,  description: 'Edit instruction. A `<lora:slug:weight>` tag or a LoRA trigger word stacks adapters.' },
+    prompt:     { type: 'text',  required: true,  description: 'Edit instruction. Include a LoRA trigger word to stack that adapter.' },
     image:      { type: 'image', required: true,  description: 'Image to edit' },
     steps:      { type: 'int',   required: false, default: 9,  description: 'Sampling steps' },
     guidance:   { type: 'float', required: false, default: 3,  description: 'CFGGuider guidance — how strongly the edit follows the instruction/style. FLUX.2 klein uses this (not a FluxGuidance node); higher = stronger restyle.' },
@@ -438,7 +438,7 @@ export const ESSENTIA_KLEIN: Essentia = {
   fundamentumVersio: '1.1.0',
 
   aditus: {
-    prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation. A `<lora:slug:weight>` tag or a LoRA trigger word stacks adapters.' },
+    prompt:     { type: 'text',  required: true,  description: 'Text prompt for image generation. Include a LoRA trigger word to stack that adapter.' },
     width:      { type: 'int',   required: false, default: 1024, description: 'Output width in pixels' },
     height:     { type: 'int',   required: false, default: 1024, description: 'Output height in pixels' },
     steps:      { type: 'int',   required: false, default: 9,   description: 'Sampling steps' },
