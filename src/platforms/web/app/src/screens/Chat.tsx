@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
+import { isExampleCleared, clearExample } from '../lib/chatExample';
 
 // ── Two honest signals (see identity/noema/chat-spec.md) ──────────────────────
 // hemisphere = what NOEMA can SEE (lit remote · ring TEE/your-server · dashed local)
@@ -11,7 +12,7 @@ import { Ic } from '../lib/icons';
 type Vis = 'remote' | 'tee' | 'local';
 type Egress = { left: true; to: string } | { left: false; note: string };
 interface Prov { modality: string; route: string; vis: Vis; egress: Egress; canvas?: boolean }
-interface Msg { who: 'concierge' | 'you'; body: ReactNode; prov?: Prov[] }
+interface Msg { who: 'concierge' | 'you'; body: ReactNode; prov?: Prov[]; isExample?: boolean }
 
 // The hemisphere glyph — shared grammar with Canvas/Funding/Card:
 // remote = lit (filled half-disc + ring, accent); tee = ring only (slate);
@@ -56,7 +57,7 @@ function provFor(r: Route, modality: string): Prov {
 }
 
 const SEED: Msg[] = [
-  { who: 'you', body: 'draft a tight logline for a glass-cathedral-from-circuitry short, then make the key frame' },
+  { who: 'you', body: 'draft a tight logline for a glass-cathedral-from-circuitry short, then make the key frame', isExample: true },
   { who: 'concierge', body: (
     <>“In a city that prays in fiber-optic light, an architect grows a cathedral from living circuitry — and it starts to dream back.” Here’s the key frame:
       <div className="gen-media" /></>
@@ -65,7 +66,7 @@ const SEED: Msg[] = [
     { modality: 'image', route: 'local · llama-ed', vis: 'local', egress: { left: false, note: 'nothing left your machine' }, canvas: true },
     // the logline text came from the provider API — lit (we see) AND it left NOEMA
     { modality: 'text', route: 'routed via anthropic api', vis: 'remote', egress: { left: true, to: 'anthropic' } },
-  ] },
+  ], isExample: true },
 ];
 
 function ProvMeter({ p, onCanvas }: { p: Prov; onCanvas: (p: Prov) => void }) {
@@ -85,7 +86,7 @@ function ProvMeter({ p, onCanvas }: { p: Prov; onCanvas: (p: Prov) => void }) {
 }
 
 export function Chat() {
-  const [msgs, setMsgs] = useState<Msg[]>(SEED);
+  const [msgs, setMsgs] = useState<Msg[]>(() => (isExampleCleared() ? [] : SEED));
   const [route, setRoute] = useState<RouteId>('noema');   // default selection per spec
   const [pickOpen, setPickOpen] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -99,27 +100,40 @@ export function Chat() {
     navigate('/canvas');
   }
 
+  function dismissExample() {
+    clearExample();
+    setMsgs((prev) => prev.filter((m) => !m.isExample));
+  }
+
   function send() {
     const v = taRef.current?.value.trim();
     if (!v) return;
-    setMsgs((m) => [
-      ...m,
-      { who: 'you', body: v },
-      { who: 'concierge',
-        body: <>Reading that as <span className="verb">make</span> — quoting… <span className="dots"><span /><span /><span /></span></>,
-        prov: [provFor(sel, 'text')] },
-    ]);
+    setMsgs((m) => {
+      const hadExample = m.some((x) => x.isExample);
+      const base = hadExample ? m.filter((x) => !x.isExample) : m;
+      if (hadExample) clearExample();
+      return [
+        ...base,
+        { who: 'you', body: v },
+        { who: 'concierge',
+          body: <>Reading that as <span className="verb">make</span> — quoting… <span className="dots"><span /><span /><span /></span></>,
+          prov: [provFor(sel, 'text')] },
+      ];
+    });
     if (taRef.current) { taRef.current.value = ''; taRef.current.style.height = 'auto'; }
   }
 
   return (
     <AppShell crumb="chat" concierge={false}>
       <div className="thread"><div className="wrap">
+        {msgs.some((m) => m.isExample) && (
+          <button className="byo-dismiss chat-example-clear" onClick={dismissExample} title="Clear example conversation" aria-label="Clear example conversation">✕</button>
+        )}
         {msgs.map((m, i) => (
-          <div key={i} className={`msg ${m.who === 'you' ? 'user' : 'bot'}`}>
+          <div key={i} className={`msg ${m.who === 'you' ? 'user' : 'bot'}${m.isExample ? ' chat-example' : ''}`}>
             <div className="av" />
             <div className="msg-col">
-              <div className="who">{m.who === 'concierge' ? 'noema' : 'you'}</div>
+              <div className="who">{m.who === 'concierge' ? 'noema' : 'you'}{m.isExample && <span className="badge chat-example-badge">Example</span>}</div>
               <div className="body">{m.body}</div>
               {m.prov?.map((p, j) => <ProvMeter key={j} p={p} onCanvas={toCanvas} />)}
             </div>
