@@ -1375,4 +1375,14 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .flow-head{flex-wrap:wrap}
   .flow-head .ports{flex-wrap:wrap}
   .seg-compute{flex-direction:column}
+
+  /* form fields: raise computed font-size to >=16px so iOS Safari doesn't
+     auto-zoom the viewport on focus (it never zooms back out on blur). */
+  .projnew input{font-size:16px}
+  .coll-create .cer-input{font-size:16px}
+  .search input{font-size:16px}
+  .cat-search input{font-size:16px}
+  .byo-input{font-size:16px}
+  .cpanel .cinput input{font-size:16px}
+  .composer textarea{font-size:16px}
 }
