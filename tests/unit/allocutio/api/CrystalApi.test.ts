@@ -19,7 +19,7 @@ import type { Modus } from '../../../../src/types/modus.js'
 import type { Inceptio, Cursor } from '../../../../src/types/cursus.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Fundamentum } from '../../../../src/types/fundamentum.js'
-import type { Intelligens } from '../../../../src/types/intelligendi.js'
+import type { Intelligens, Intella } from '../../../../src/types/intelligendi.js'
 import type { StudioHandle } from '../../../../src/crystal/Conductor.js'
 import type { Depositum } from '../../../../src/types/catena.js'
 import type { Persona } from '../../../../src/types/persona.js'
@@ -107,6 +107,51 @@ const fakeIntelligentia: Intelligens[] = [
   makeIntelligens({ id: 'sd15-base', nomen: 'SD 1.5 Base', genus: 'checkpoint', basis: 'sd15' }),
   makeIntelligens({ id: 'flux-lora-1', nomen: 'Flux LoRA 1', genus: 'lora', basis: 'flux', verba: ['flux-portrait'] }),
 ]
+
+// ── Klein-shaped fixtures — a Fundamentum carrying the family-bearing base
+// weight, and a synthetic Modus (klein-shaped: no own intellae, fundamentumId
+// FK to the Fundamentum) for the describeFlow familia-union tests below. ────
+const fundFlux2Klein: Fundamentum = {
+  id: 'flux2-klein-4b-comfyui',
+  nomen: 'FLUX.2 Klein 4B · ComfyUI',
+  versio: '1.1.0',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.1.0',
+  runtime: 'ComfyUI',
+  vramGb: 24,
+  canonica: true,
+  intellae: [{ id: 'flux2-klein-base', role: 'unet' }],
+  natum: new Date('2026-01-01'),
+  mutatum: new Date('2026-01-01'),
+}
+
+const fundWeightless: Fundamentum = {
+  id: 'weightless-fund',
+  nomen: 'Weightless substrate',
+  versio: '1.0.0',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.1.0',
+  canonica: true,
+  natum: new Date('2026-01-01'),
+  mutatum: new Date('2026-01-01'),
+}
+
+function makeIntella(over: Partial<Intella> = {}): Intella {
+  return {
+    id: 'flux2-klein-base',
+    nomen: 'FLUX.2 Klein base',
+    genus: 'model',
+    architectura: 'dit',
+    parametri: 4_000_000_000,
+    sources: [],
+    dest: 'unet/flux2-klein.safetensors',
+    sizeGb: 8,
+    versio: '1.0.0',
+    canonica: true,
+    familia: 'flux2',
+    ...over,
+  }
+}
 
 // ── Build the deps ring. Records the last modusId that was dispatched. ───────
 function makeDeps(over: Partial<CrystalApiDeps> = {}): {
@@ -386,6 +431,54 @@ test('describeFlow returns a schema with an input', async () => {
     () => api.describeFlow('ghost'),
     (e: unknown) => e instanceof ApiError && e.code === 'not_found.flow',
   )
+})
+
+test('describeFlow derives familia from the linked Fundamentum when the Modus declares no own intellae (klein-shaped)', async () => {
+  const { deps, modi } = makeDeps({
+    fundamentorum: ({
+      find: async (id: string) => [fundFlux2Klein, fundWeightless].find((f) => f.id === id) ?? null,
+      register: async () => {},
+      list: async () => [fundFlux2Klein, fundWeightless],
+    } as unknown) as CrystalApiDeps['fundamentorum'],
+    intellarum: ({
+      find: async (id: string) => (id === 'flux2-klein-base' ? makeIntella() : null),
+    } as unknown) as CrystalApiDeps['intellarum'],
+  })
+  // Klein-shaped: no own `intellae` (undefined), fundamentumId FK to a Fundamentum
+  // that DOES carry the family-bearing base weight. `fundamentumId` rides on the
+  // record beyond the Modus type the same way Essentia (which extends Modus) does
+  // in production — describeFlow reads it via a runtime cast, not the Modus type.
+  modi['klein-shaped'] = {
+    ...makeModus('klein-shaped'),
+    intellae: undefined,
+    fundamentumId: 'flux2-klein-4b-comfyui',
+  } as unknown as Modus
+  const api = new CrystalApi(deps)
+
+  const desc = await api.describeFlow('klein-shaped')
+  assert.equal(desc.familia, 'flux2')
+})
+
+test('describeFlow leaves familia undefined when neither the Modus nor its linked Fundamentum carry intellae', async () => {
+  const { deps, modi } = makeDeps({
+    fundamentorum: ({
+      find: async (id: string) => (id === 'weightless-fund' ? fundWeightless : null),
+      register: async () => {},
+      list: async () => [fundWeightless],
+    } as unknown) as CrystalApiDeps['fundamentorum'],
+    intellarum: ({
+      find: async () => null,
+    } as unknown) as CrystalApiDeps['intellarum'],
+  })
+  modi['no-family'] = {
+    ...makeModus('no-family'),
+    intellae: undefined,
+    fundamentumId: 'weightless-fund',
+  } as unknown as Modus
+  const api = new CrystalApi(deps)
+
+  const desc = await api.describeFlow('no-family')
+  assert.equal(desc.familia, undefined)
 })
 
 // ── quote ────────────────────────────────────────────────────────────────────
