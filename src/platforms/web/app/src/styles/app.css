@@ -200,7 +200,7 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 /* example conversation: marked (pill + dim), never mistaken for real history */
 .msg.chat-example .msg-col{opacity:.6}
 .chat-example-badge{margin-left:7px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); border-color:var(--hair)}
-.chat-example-clear{position:absolute; top:0; right:32px; font-size:14px}
+.chat-example-clear{position:absolute; top:-40px; right:32px; font-size:14px}
 .msg{display:flex; gap:14px; margin-bottom:32px}
 .msg .av{width:24px;height:24px;border-radius:6px;flex:0 0 auto;margin-top:1px}
 .msg.user .av{background:var(--raised); box-shadow:inset 0 0 0 1px var(--hair)}
@@ -565,7 +565,7 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .byo-input:focus{outline:none;border-color:color-mix(in srgb,var(--accent) 45%,var(--hair))}
 .byo-note{margin-top:9px}
 .byo-warn{margin-top:10px;align-items:flex-start}
-.byo-dismiss{margin-left:auto;flex:0 0 auto;background:none;border:0;color:inherit;opacity:.6;cursor:pointer;font-size:12px;line-height:1;padding:2px}
+.byo-dismiss{margin-left:auto;flex:0 0 auto;background:none;border:0;color:inherit;opacity:.6;cursor:pointer;font-size:12px;line-height:1;padding:2px;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center}
 .byo-dismiss:hover{opacity:1}
 
 /* ───────── Funding · "Honest ledger" (identity-axis disclosure, not a price table) ─────────
@@ -764,6 +764,7 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .crumb{display:none}                                       /* identity + webring carry it */
   .fonttoggle{display:none}                                  /* dev-only */
   .pw,.card,.wrap{padding-left:var(--s4);padding-right:var(--s4)}                           /* stacked form fields */
+  .chat-example-clear{right:var(--s4)}                       /* match .wrap's shrunk mobile padding so the dismiss target stays flush with content edge, not buried under it */
   .twocol{grid-template-columns:1fr}     /* wide tables scroll */
   .concierge{bottom:70px}                                    /* sit above the bottom bar */
   #trustpop{width:calc(100vw - 24px)}
