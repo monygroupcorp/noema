@@ -200,7 +200,7 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 /* example conversation: marked (pill + dim), never mistaken for real history */
 .msg.chat-example .msg-col{opacity:.6}
 .chat-example-badge{margin-left:7px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); border-color:var(--hair)}
-.chat-example-clear{position:absolute; top:0; right:32px; font-size:14px}
+.chat-example-clear{position:absolute; top:-40px; right:32px; font-size:14px}
 .msg{display:flex; gap:14px; margin-bottom:32px}
 .msg .av{width:24px;height:24px;border-radius:6px;flex:0 0 auto;margin-top:1px}
 .msg.user .av{background:var(--raised); box-shadow:inset 0 0 0 1px var(--hair)}
@@ -565,7 +565,7 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .byo-input:focus{outline:none;border-color:color-mix(in srgb,var(--accent) 45%,var(--hair))}
 .byo-note{margin-top:9px}
 .byo-warn{margin-top:10px;align-items:flex-start}
-.byo-dismiss{margin-left:auto;flex:0 0 auto;background:none;border:0;color:inherit;opacity:.6;cursor:pointer;font-size:12px;line-height:1;padding:2px}
+.byo-dismiss{margin-left:auto;flex:0 0 auto;background:none;border:0;color:inherit;opacity:.6;cursor:pointer;font-size:12px;line-height:1;padding:2px;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center}
 .byo-dismiss:hover{opacity:1}
 
 /* ───────── Funding · "Honest ledger" (identity-axis disclosure, not a price table) ─────────
@@ -748,7 +748,7 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   /* shell → single column; left rail becomes a fixed bottom icon bar */
   .app,.app.two{grid-template-columns:1fr}
   .rail{position:fixed;left:0;right:0;bottom:0;top:auto;height:58px;flex-direction:row;align-items:stretch;
-        border-right:0;border-top:1px solid var(--hair);z-index:var(--z-nav);padding:0;overflow:hidden;background:var(--panel)}
+        border-right:0;border-top:1px solid var(--hair);z-index:var(--z-nav);padding:0;overflow:visible;background:var(--panel)}
   .rail .brand,.rail .keyring,.rail .railpriv,.projwrap{display:none}   /* identity + project + privacy live in the topbar / rail-desktop only */
   .rail .nav{display:none}                                   /* flat 13-leaf row replaced by the grouped mobilenav below */
   .rail .mobilenav{display:flex;flex-direction:row;flex:1;gap:0;padding:0}
@@ -764,6 +764,7 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .crumb{display:none}                                       /* identity + webring carry it */
   .fonttoggle{display:none}                                  /* dev-only */
   .pw,.card,.wrap{padding-left:var(--s4);padding-right:var(--s4)}                           /* stacked form fields */
+  .chat-example-clear{right:var(--s4)}                       /* match .wrap's shrunk mobile padding so the dismiss target stays flush with content edge, not buried under it */
   .twocol{grid-template-columns:1fr}     /* wide tables scroll */
   .concierge{bottom:70px}                                    /* sit above the bottom bar */
   #trustpop{width:calc(100vw - 24px)}
@@ -1375,4 +1376,38 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .flow-head{flex-wrap:wrap}
   .flow-head .ports{flex-wrap:wrap}
   .seg-compute{flex-direction:column}
+
+  /* form fields: raise computed font-size to >=16px so iOS Safari doesn't
+     auto-zoom the viewport on focus (it never zooms back out on blur). */
+  .projnew input{font-size:16px}
+  .coll-create .cer-input{font-size:16px}
+  .search input{font-size:16px}
+  .cat-search input{font-size:16px}
+  .byo-input{font-size:16px}
+  .cpanel .cinput input{font-size:16px}
+  .composer textarea{font-size:16px}
+
+  /* catalog toolbars: search/filters/sort wrap onto their own lines instead of
+     squeezing the modality + verb chip rows into whatever space is left. */
+  .cat-toolbar{flex-wrap:wrap; row-gap:8px}
+  .cat-search{flex:1 1 100%; max-width:none; order:1}
+  .cat-filters{order:2}
+  .cat-sort{margin-left:0; order:3}
+  .cat-toolbar.cat-verbs .cat-filters{order:initial}
+
+  /* registry column header: labels track the stacked 2-line data row below
+     (name+pin on line 1, modality+version as a smaller line 2). */
+  .reg-bar{flex-wrap:wrap; row-gap:2px}
+  .reg-bar .c-name{flex:1 1 100%}
+  .reg-bar .c-mod{width:auto; flex:1; font-size:8.5px}
+  .reg-bar .c-ver{width:auto; flex:1; font-size:8.5px}
+
+  /* registry row: stack into two lines — name/id + pin on line 1, modality +
+     version as a smaller line 2 — instead of crushing everything onto one row. */
+  .reg-row{flex-wrap:wrap; row-gap:4px}
+  .reg-name{flex:1 1 auto; min-width:0}
+  .reg-mod{width:auto; flex:1; order:3; font-size:10px}
+  .reg-ver{width:auto; flex:1; order:4; font-size:10px}
+  .reg-row .pin{order:2; width:44px; height:44px}
+  .reg-row .pin svg{width:16px; height:16px}
 }

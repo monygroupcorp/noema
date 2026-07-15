@@ -1577,15 +1577,25 @@ export class CrystalApi {
     // Modus carries every field describeFlow reads; the cast supplies the
     // index-signature DescribableModus declares for its passthrough meta.
     const description = describeFlow(m as unknown as DescribableModus)
-    // `familia` — read-only, additive: derive the flow's model family from its own
-    // weight manifest (`Modus.intellae`), the same source Compiler.ts's family
-    // derivation reads (Compiler.ts:319-323), without touching Compiler.ts or any
-    // trigger-resolution logic. First non-empty distinct `familia` across the flow's
-    // weights wins (atomic → one; composite → already unioned onto `intellae` at
-    // registration). No weights, no registry, or no family on any weight → leave
-    // `familia` undefined (safe default: no highlight for that flow).
-    const intellae = (m as { intellae?: Array<{ id: string; role: string }> }).intellae
-    if (intellae && intellae.length > 0 && this.deps.intellarum) {
+    // `familia` — read-only, additive: derive the flow's model family from its FULL
+    // weight manifest — the linked Fundamentum's base weights UNION the flow's own
+    // extra weights (`Modus.intellae`) — mirroring Compiler.ts's `_manifestRefs`
+    // union (Compiler.ts:446-453) without touching Compiler.ts or any trigger-
+    // resolution logic. Atomic image-gen essentiae (e.g. klein) declare no `intellae`
+    // of their own; their family-bearing base weights live entirely on the Fundamentum,
+    // so reading `Modus.intellae` alone silently under-reports for most flows. First
+    // non-empty distinct `familia` across the unioned weights wins (base-first, same
+    // precedence as `_manifestRefs`). No weights, no registry, or no family on any
+    // weight → leave `familia` undefined (safe default: no highlight for that flow).
+    const fundamentumId = (m as { fundamentumId?: string }).fundamentumId
+    const fundamentumVersio = (m as { fundamentumVersio?: string }).fundamentumVersio
+    const fundamentum = fundamentumId
+      ? await this.deps.fundamentorum.find(fundamentumId, fundamentumVersio).catch(() => null)
+      : null
+    const ownIntellae = (m as { intellae?: Array<{ id: string; role: string }> }).intellae ?? []
+    const intellae = [...(fundamentum?.intellae ?? []), ...ownIntellae]
+      .filter((w, i, all) => all.findIndex(o => o.id === w.id) === i)
+    if (intellae.length > 0 && this.deps.intellarum) {
       for (const w of intellae) {
         const intella = await this.deps.intellarum.find(w.id).catch(() => null)
         if (intella?.familia) { description.familia = intella.familia; break }
