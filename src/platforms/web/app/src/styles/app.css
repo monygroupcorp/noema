@@ -1376,6 +1376,16 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .flow-head .ports{flex-wrap:wrap}
   .seg-compute{flex-direction:column}
 
+  /* form fields: raise computed font-size to >=16px so iOS Safari doesn't
+     auto-zoom the viewport on focus (it never zooms back out on blur). */
+  .projnew input{font-size:16px}
+  .coll-create .cer-input{font-size:16px}
+  .search input{font-size:16px}
+  .cat-search input{font-size:16px}
+  .byo-input{font-size:16px}
+  .cpanel .cinput input{font-size:16px}
+  .composer textarea{font-size:16px}
+
   /* catalog toolbars: search/filters/sort wrap onto their own lines instead of
      squeezing the modality + verb chip rows into whatever space is left. */
   .cat-toolbar{flex-wrap:wrap; row-gap:8px}
