@@ -748,7 +748,7 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   /* shell → single column; left rail becomes a fixed bottom icon bar */
   .app,.app.two{grid-template-columns:1fr}
   .rail{position:fixed;left:0;right:0;bottom:0;top:auto;height:58px;flex-direction:row;align-items:stretch;
-        border-right:0;border-top:1px solid var(--hair);z-index:var(--z-nav);padding:0;overflow:hidden;background:var(--panel)}
+        border-right:0;border-top:1px solid var(--hair);z-index:var(--z-nav);padding:0;overflow:visible;background:var(--panel)}
   .rail .brand,.rail .keyring,.rail .railpriv,.projwrap{display:none}   /* identity + project + privacy live in the topbar / rail-desktop only */
   .rail .nav{display:none}                                   /* flat 13-leaf row replaced by the grouped mobilenav below */
   .rail .mobilenav{display:flex;flex-direction:row;flex:1;gap:0;padding:0}
