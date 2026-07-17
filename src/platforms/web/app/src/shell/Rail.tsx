@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { api } from '../lib/api';
@@ -90,6 +91,25 @@ export function Rail() {
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   useEffect(() => { setOpenGroup(null); }, [location.pathname]);
 
+  // noema-069: the open dropup is portaled to document.body (out of .rail's stacking context, so it
+  // paints above .concierge). It's no longer a positioned descendant of its triggering tile, so we
+  // track the tile's ref and recompute its viewport rect to anchor the portaled pop — mirrors what
+  // the old `position:absolute` (relative to the tile's group) did automatically via layout.
+  const groupBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [anchor, setAnchor] = useState<{ left: number; bottom: number } | null>(null);
+  useEffect(() => {
+    if (!openGroup) { setAnchor(null); return; }
+    const measure = () => {
+      const btn = groupBtnRefs.current[openGroup];
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setAnchor({ left: r.left + r.width / 2, bottom: window.innerHeight - r.top + 10 });
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [openGroup]);
+
   const mobileTiles: MobileTile[] = [
     ...MOBILE_TILES_BASE,
     admin
@@ -138,23 +158,25 @@ export function Rail() {
           <div className="railgroup" key={t.group}>
             <button
               type="button"
+              ref={(el) => { groupBtnRefs.current[t.group] = el; }}
               className={`railgroup-btn navitem${t.items.some((it) => location.pathname === it.to || location.pathname.startsWith(it.to + '/')) ? ' active' : ''}`}
               aria-expanded={openGroup === t.group}
               onClick={() => setOpenGroup((g) => (g === t.group ? null : t.group))}
             >
               <span className="ico"><Ic name={t.ico} /></span> {t.label}
             </button>
-            {openGroup === t.group && (
+            {openGroup === t.group && anchor && createPortal(
               <>
                 <div className="railgroup-backdrop" onClick={() => setOpenGroup(null)} />
-                <div className="railgroup-pop">
+                <div className="railgroup-pop" style={{ left: anchor.left, bottom: anchor.bottom }}>
                   {t.items.map((it) => (
                     <NavLink key={it.to} to={it.to} end className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
                       <span className="ico"><Ic name={it.ico} /></span> {it.label}
                     </NavLink>
                   ))}
                 </div>
-              </>
+              </>,
+              document.body,
             )}
           </div>
         ))}
