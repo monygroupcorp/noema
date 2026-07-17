@@ -23,8 +23,10 @@ export function promptTemplate(flowId: string): PromptTemplate {
 }
 
 // Per-field examples beat per-flow ones — keyed by `flowId:fieldKey`, then by the
-// bare field name (covers the same field across flows). Until essentiae carry rich
-// per-input hints of their own, this is where the Concierge's field-level teeth live.
+// bare field name (covers the same field across flows), then by the bare flow id
+// (covers a flow whose only jargon-prone field is the prompt itself). Until essentiae
+// carry rich per-input hints of their own, this is where the Concierge's field-level
+// teeth live.
 const FIELD_EXAMPLES: Record<string, string> = {
   'heartmula-3b:lyrics': '[Verse]\nneon rain on an empty street\n___\n[Chorus]\n___',
   'heartmula-3b:tags': 'piano, lo-fi, dreamy, 90bpm',
@@ -32,11 +34,13 @@ const FIELD_EXAMPLES: Record<string, string> = {
   tags: 'cinematic, warm, analog',
   negative_prompt: 'blurry, low quality, extra limbs, watermark',
   'profile-kit:vibe': 'vaporwave chrome, neon magenta + cyan, retro-future, soft glow…',
+  'klein': 'a foggy harbor at dawn, cargo ships silhouetted against amber light, cinematic wide shot',
+  'klein-edit-4b': 'turn the sky into a stormy sunset and add rain streaks on the window',
 };
 
-/** The best example for a specific field: curated per-field → flow medium → description. */
+/** The best example for a specific field: curated per-field → curated per-flow → flow medium → description. */
 export function fieldExample(flowId: string, fieldKey: string, description?: string): string {
-  const curated = FIELD_EXAMPLES[`${flowId}:${fieldKey}`] ?? FIELD_EXAMPLES[fieldKey];
+  const curated = FIELD_EXAMPLES[`${flowId}:${fieldKey}`] ?? FIELD_EXAMPLES[fieldKey] ?? FIELD_EXAMPLES[flowId];
   if (curated) return curated;
   const t = promptTemplate(flowId);
   if (t === GENERIC && description) return description; // schema hint is richer than a generic blank
