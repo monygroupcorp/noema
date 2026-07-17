@@ -72,6 +72,7 @@ body{margin:0; background:var(--bg); color:var(--text); font-family:var(--font-s
 .nav{padding:10px 10px 4px; display:flex; flex-direction:column; gap:2px}
 .nav .lbl{color:var(--faint); font-size:10.5px; text-transform:uppercase; letter-spacing:.12em; padding:8px 8px 4px}
 .mobilenav{display:none}   /* grouped 7-tile bottom bar — mobile-only, shown in the <=760px block below */
+.railgroup-backdrop,.railgroup-pop{display:none}   /* portaled to document.body (noema-069) — hidden by default; shown only in the <=760px block below since they escape .mobilenav's ancestor display:none once portaled */
 .navitem{display:flex; align-items:center; gap:10px; padding:7px 9px; border-radius:8px; color:var(--muted); cursor:pointer; transition:.14s var(--ease); text-decoration:none}
 button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .navitem:hover{background:var(--raised); color:var(--text)}
@@ -756,8 +757,14 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .rail .navitem .k{display:none}
   .railgroup{position:relative;display:flex;flex:1;min-width:0}
   .railgroup-btn{flex:1;background:none;border:0;font:inherit;cursor:pointer}
-  .railgroup-backdrop{position:fixed;inset:0;z-index:var(--z-nav)}
-  .railgroup-pop{position:absolute;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%);width:200px;max-width:60vw;background:var(--panel);border:1px solid var(--hair);border-radius:12px;box-shadow:0 18px 44px rgba(0,0,0,.5);overflow:hidden;z-index:var(--z-nav);display:flex;flex-direction:column;padding:6px}
+  /* Portaled to document.body (noema-069) so they escape .rail's stacking context and paint above
+     .concierge (hardcoded z-index:48) instead of losing to it. .railgroup-pop is anchored via inline
+     left/bottom computed from the triggering tile's getBoundingClientRect() (Rail.tsx), since it's no
+     longer a positioned descendant of .railgroup; transform keeps it horizontally centered on the tile
+     exactly as the old position:absolute;left:50% did. z-index bumped from --z-nav(40) to --z-pop(60) —
+     same tier as #trustpop/.acctmenu, both already above .concierge; ordering among that trio unaffected. */
+  .railgroup-backdrop{display:block;position:fixed;inset:0;z-index:var(--z-pop)}
+  .railgroup-pop{display:flex;position:fixed;transform:translateX(-50%);width:200px;max-width:60vw;background:var(--panel);border:1px solid var(--hair);border-radius:12px;box-shadow:0 18px 44px rgba(0,0,0,.5);overflow:hidden;z-index:var(--z-pop);flex-direction:column;padding:6px}
   .railgroup-pop .navitem{flex-direction:row;justify-content:flex-start;padding:8px 10px;font-size:var(--fs-sm)}
   .main{padding-bottom:58px}                                 /* clear the bottom bar */
   .topbar{padding:var(--s3) var(--s4);min-height:54px;gap:var(--s2)}
