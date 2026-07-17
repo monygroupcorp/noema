@@ -1815,36 +1815,47 @@ export class CrystalApi {
   /**
    * The filterable model catalog (the agent twin of the bot's picker): by `genus`
    * (lora/checkpoint/…), `basis` (the base family a weight is for), `fundamentumId`
-   * (resolved to the substrate's base family), `trigger` (a LoRA trigger word, matched
-   * against `verba`), and `q` (free text via the store's search). Each result is a
-   * card so the agent can decide, not just enumerate.
+   * (resolved to the substrate's base family), `trigger` (a LoRA trigger word), and
+   * `q` (free text, matched in-memory against nomen/description). Sourced from the
+   * populated `intellarum` registry's `canonical()` set — the public catalog
+   * projection (no `access`/`license`/`commercialUse`). Each result is a card so the
+   * agent can decide, not just enumerate.
    */
   async listModels(filter: { genus?: IntelligensGenus; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number } = {}): Promise<ModelCard[]> {
+    if (!this.deps.intellarum) return []
+    const registry = this.deps.intellarum
     let basis = filter.basis
     if (!basis && filter.fundamentumId) {
       const f = await this.deps.fundamentorum.find(filter.fundamentumId).catch(() => null)
       if (f) {
         for (const w of f.intellae ?? []) {
-          const wi = await this.deps.intelligendi.find(w.id).catch(() => null)
-          if (wi?.basis) { basis = wi.basis; break }
+          const wi = await registry.find(w.id).catch(() => null)
+          if (wi?.familia) { basis = wi.familia; break }
         }
       }
     }
     const q = filter.q?.trim()
-    // Free-text → the store's search; otherwise the structured filter. Apply the
-    // remaining constraints in-memory (search isn't field-filtered).
+    // `Intellarum` has no free-text search — filter the canonical set in-memory for `q`
+    // (nomen/description substring match), same as `IntelligentiumStore.search()` did.
+    const canonical = await registry.canonical()
     const base = q
-      ? await this.deps.intelligendi.search(q)
-      : await this.deps.intelligendi.list({ canonica: true, ...(filter.genus ? { genus: filter.genus } : {}), ...(basis ? { basis } : {}) })
+      ? canonical.filter((i) =>
+          i.nomen.toLowerCase().includes(q.toLowerCase()) ||
+          (i.description ?? '').toLowerCase().includes(q.toLowerCase()),
+        )
+      : canonical
     const trig = filter.trigger?.trim().toLowerCase()
     const hits = base.filter((i) => {
       if (filter.genus && i.genus !== filter.genus) return false
-      if (basis && i.basis !== basis) return false
-      if (trig && !(i.verba ?? []).some((v) => v.toLowerCase() === trig)) return false
+      if (basis && i.familia !== basis) return false
+      if (trig && i.trigger?.toLowerCase() !== trig) return false
       return true
     })
     const limited = filter.limit ? hits.slice(0, filter.limit) : hits
-    return limited.map(toModelCard)
+    return limited.map((i) => {
+      const { access: _access, license: _license, commercialUse: _commercialUse, ...card } = toModelCardFromIntella(i)
+      return card
+    })
   }
 
   /**

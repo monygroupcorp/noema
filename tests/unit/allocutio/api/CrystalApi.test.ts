@@ -153,6 +153,21 @@ function makeIntella(over: Partial<Intella> = {}): Intella {
   }
 }
 
+// ── Fake intellarum (the store `listModels`/`listMyModels` read) ─────────────
+const fakeIntellae: Intella[] = [
+  makeIntella({ id: 'flux-dev', nomen: 'FLUX Dev', genus: 'model', familia: 'flux', canonica: true }),
+  makeIntella({ id: 'sd15-base', nomen: 'SD 1.5 Base', genus: 'model', familia: 'sd15', canonica: true }),
+  makeIntella({ id: 'flux-lora-1', nomen: 'Flux LoRA 1', genus: 'lora', familia: 'flux', trigger: 'flux-portrait', canonica: true }),
+]
+
+function makeFakeIntellarum(fixtures: Intella[] = fakeIntellae): CrystalApiDeps['intellarum'] {
+  return ({
+    find: async (id: string) => fixtures.find((i) => i.id === id) ?? null,
+    list: async () => fixtures,
+    canonical: async () => fixtures.filter((i) => i.canonica),
+  } as unknown) as CrystalApiDeps['intellarum']
+}
+
 // ── Build the deps ring. Records the last modusId that was dispatched. ───────
 function makeDeps(over: Partial<CrystalApiDeps> = {}): {
   deps: CrystalApiDeps
@@ -250,6 +265,7 @@ function makeDeps(over: Partial<CrystalApiDeps> = {}): {
       create: async () => { throw new Error('unused') },
       update: async () => { throw new Error('unused') },
     } as unknown) as CrystalApiDeps['intelligendi'],
+    intellarum: makeFakeIntellarum(),
     hospitia: ({
       findActive: async () => [],
       findByMateriaId: async () => null,
@@ -569,7 +585,7 @@ test('listModels filters by trigger word', async () => {
   const models = await api.listModels({ trigger: 'flux-portrait' } as never)
   assert.equal(models.length, 1)
   assert.equal(models[0].intellaId, 'flux-lora-1')
-  assert.ok(models[0].trigger?.includes('flux-portrait'))
+  assert.equal(models[0].trigger, 'flux-portrait')
 })
 
 test('listModels free-text search via q', async () => {
@@ -579,6 +595,36 @@ test('listModels free-text search via q', async () => {
   const models = await api.listModels({ q: 'FLUX Dev' } as never)
   assert.equal(models.length, 1)
   assert.equal(models[0].intellaId, 'flux-dev')
+})
+
+test('listModels never returns access/license/commercialUse (public catalog projection)', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  const models = await api.listModels()
+  for (const m of models) {
+    assert.equal('access' in m, false)
+    assert.equal('license' in m, false)
+    assert.equal('commercialUse' in m, false)
+  }
+})
+
+test('listModels surfaces a canonical public flux2 model by basis (klein-highlight regression)', async () => {
+  const impresstation = makeIntella({
+    id: 'impresstation',
+    nomen: 'impresstation',
+    genus: 'lora',
+    familia: 'flux2',
+    trigger: 'stationthis',
+    canonica: true,
+  })
+  const { deps } = makeDeps({ intellarum: makeFakeIntellarum([...fakeIntellae, impresstation]) })
+  const api = new CrystalApi(deps)
+
+  const models = await api.listModels({ basis: 'flux2' } as never)
+  assert.equal(models.length, 1)
+  assert.equal(models[0].basis, 'flux2')
+  assert.equal(models[0].trigger, 'stationthis')
 })
 
 // ── invokeFlow maxImpetus cap ─────────────────────────────────────────────────
