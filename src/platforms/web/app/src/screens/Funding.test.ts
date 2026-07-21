@@ -7,10 +7,10 @@ import { FIAT_PACKS, buildCheckoutRequest, canCheckout } from './Funding';
 describe('FIAT_PACKS — the ratified 4 frozen packs', () => {
   it('has exactly the 4 ratified SKUs with the correct display point amounts', () => {
     expect(FIAT_PACKS).toEqual([
-      { id: 'starter_10', usd: 10, points: 3_000 },
-      { id: 'standard_25', usd: 25, points: 8_250 },
-      { id: 'plus_50', usd: 50, points: 18_000 },
-      { id: 'studio_100', usd: 100, points: 39_000 },
+      { id: 'starter_10', usd: 10, points: 2_080 },
+      { id: 'standard_25', usd: 25, points: 5_720 },
+      { id: 'plus_50', usd: 50, points: 12_480 },
+      { id: 'studio_100', usd: 100, points: 27_040 },
     ]);
   });
 });

@@ -131,11 +131,18 @@ test('each pack credits its EXACT impetus + books a fiat Reditus at the charge a
     // Revenue booked at the FULL charge amount in micro-USD (origo:'fiat').
     assert.equal(await deps.redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), pack.usdMicro)
   }
-  // Sanity: the ratified constants are exactly the locked numbers.
-  assert.equal(PACKS.starter_10.impetus, 30000n)
-  assert.equal(PACKS.standard_25.impetus, 82500n)
-  assert.equal(PACKS.plus_50.impetus, 180000n)
-  assert.equal(PACKS.studio_100.impetus, 390000n)
+  // Sanity: the ratified constants are exactly the locked numbers (2026-07-21 R-1 ruling).
+  assert.equal(PACKS.starter_10.impetus, 20800n)
+  assert.equal(PACKS.standard_25.impetus, 57200n)
+  assert.equal(PACKS.plus_50.impetus, 124800n)
+  assert.equal(PACKS.studio_100.impetus, 270400n)
+  // Anti-drift: the impetus constant must stay tied to the ruling's DISPLAY-POINT figure
+  // (points = impetus / 10). A future re-ruling must change both together — this catches
+  // silent drift between the code constant and the ruled points.
+  assert.equal(PACKS.starter_10.impetus / 10n, 2080n)
+  assert.equal(PACKS.standard_25.impetus / 10n, 5720n)
+  assert.equal(PACKS.plus_50.impetus / 10n, 12480n)
+  assert.equal(PACKS.studio_100.impetus / 10n, 27040n)
 })
 
 test('the credit signum is stripe:purchase / testis stripe:<paymentKey> / forma minted', async () => {
@@ -148,7 +155,7 @@ test('the credit signum is stripe:purchase / testis stripe:<paymentKey> / forma 
   assert.equal(s.testis, 'stripe:pi_x')
   // forma:'minted' — a platform-issued, fiat-funded credit (NOT 'eth'; no ETH is involved).
   assert.equal(s.forma, 'minted')
-  assert.equal(s.valor, 180000n)
+  assert.equal(s.valor, 124800n)
 })
 
 // ── idempotency (the point) ──────────────────────────────────────────────────
@@ -162,10 +169,10 @@ test('redelivery of the SAME event credits impetus EXACTLY ONCE (no double-credi
 
   assert.equal(first.status, 200)
   assert.equal(second.status, 200)
-  assert.equal(first.body.credited, '30000')
-  assert.equal(second.body.credited, '30000')  // the replay reports the original outcome
+  assert.equal(first.body.credited, '20800')
+  assert.equal(second.body.credited, '20800')  // the replay reports the original outcome
   // Credited ONCE.
-  assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 30000n)
+  assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 20800n)
   assert.equal((await deps.signorum.history({ animaId: KNOWN_ANIMA })).length, 1)
   // Revenue booked ONCE.
   assert.equal(await deps.redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), PACKS.starter_10.usdMicro)
@@ -183,7 +190,7 @@ test('both event types for ONE payment (checkout.session.completed + payment_int
   await deliver(deps, sessionEvt)
   await deliver(deps, piEvt)   // same payment_intent id → same idempotency key
 
-  assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 82500n)
+  assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 57200n)
   assert.equal((await deps.signorum.history({ animaId: KNOWN_ANIMA })).length, 1)
   assert.equal(await deps.redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), PACKS.standard_25.usdMicro)
 })
@@ -198,7 +205,7 @@ test('a delivery that crashed AFTER the credit but BEFORE the Reditus is repaire
   const again = await deliver(deps, completedSession({ packId: 'plus_50', paymentIntent: 'pi_crash' }))
   assert.equal(again.status, 200)
   // Credited exactly once (the pre-existing signum is replayed, not re-minted).
-  assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 180000n)
+  assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 124800n)
   assert.equal((await deps.signorum.history({ animaId: KNOWN_ANIMA })).length, 1)
   // The peer Reditus, missing after the crash, is now present — booked exactly once.
   assert.equal(await deps.redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), PACKS.plus_50.usdMicro)
