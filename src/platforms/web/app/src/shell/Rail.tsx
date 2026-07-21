@@ -37,7 +37,6 @@ const NAV: NavSection[] = [
   ] },
   { sec: 'Publish', items: [
     { to: '/feed', ico: 'rss', label: 'Feed' },
-    { to: '/review', ico: 'eye', label: 'In review' },
   ] },
   { sec: 'Identity', items: [
     { to: '/profile', ico: 'circle-user', label: 'Profile' },
