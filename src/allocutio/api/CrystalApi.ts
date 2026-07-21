@@ -25,7 +25,7 @@ import type { ActumIndexStore } from '../../types/actumIndex.js'
 import type { Consuetudinum, Appearance, Generatio } from '../../types/consuetudo.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Fundamentorum } from '../../types/fundamentum.js'
-import type { Intelligens, IntelligentiumStore, IntelligensGenus, Intellarum, Intella } from '../../types/intelligendi.js'
+import type { Intelligens, IntelligensGenus, Intellarum, Intella } from '../../types/intelligendi.js'
 import type { HospitiumStore } from '../../types/hospitium.js'
 import type { MateriaStore } from '../../types/materia.js'
 import type { Conductor, StudioHandle, ConduceOpts } from '../../crystal/Conductor.js'
@@ -112,8 +112,6 @@ export interface CrystalApiDeps {
   signorum: Signorum
   /** Compute-substrate registry — backs `listFundamenta` discovery. */
   fundamentorum: Fundamentorum
-  /** Weight catalog — backs `listModels` discovery. */
-  intelligendi: IntelligentiumStore
   /** Hosting + live-pod registries — back the `status` aggregation. */
   hospitia: HospitiumStore
   materiae: MateriaStore
@@ -1836,7 +1834,7 @@ export class CrystalApi {
     }
     const q = filter.q?.trim()
     // `Intellarum` has no free-text search — filter the canonical set in-memory for `q`
-    // (nomen/description substring match), same as `IntelligentiumStore.search()` did.
+    // (nomen/description substring match), same as the old intelligendi store's search() did.
     const canonical = await registry.canonical()
     const base = q
       ? canonical.filter((i) =>
@@ -2897,18 +2895,6 @@ export interface ModelCard {
   license?: string
   /** Commercial-catalog verdict — whether this model may be promoted publicly. Owner/admin views. */
   commercialUse?: 'yes' | 'no' | 'conditional' | 'unknown'
-}
-
-function toModelCard(i: Intelligens): ModelCard {
-  const trigger = i.verba && i.verba.length ? i.verba.join(', ') : undefined
-  return {
-    intellaId: i.id,
-    nomen: i.nomen || i.id,
-    genus: i.genus,
-    ...(i.basis ? { basis: i.basis } : {}),
-    ...(trigger ? { trigger } : {}),
-    ...(i.descriptio ? { description: i.descriptio } : {}),
-  }
 }
 
 /** Project an `Intella` (the load/resolve registry record) to a `ModelCard` — the owner-scoped
