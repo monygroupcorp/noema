@@ -146,7 +146,7 @@ export function Studio() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)', maxWidth: 480 }}>
               <label className="mono" style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>
                 substrate
-                <select value={fundamentumId} onChange={(e) => setFundamentumId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 4 }}>
+                <select className="mobile-zoom-safe" value={fundamentumId} onChange={(e) => setFundamentumId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 4 }}>
                   {fundamenta.length === 0 && <option value="">loading substrates…</option>}
                   {fundamenta.map((f) => (
                     <option key={f.id} value={f.id}>
@@ -157,7 +157,7 @@ export function Studio() {
               </label>
               <label className="mono" style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>
                 session budget (credits, optional — defaults to your full balance)
-                <input value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="e.g. 5000" inputMode="numeric" style={{ display: 'block', width: '100%', marginTop: 4 }} />
+                <input className="mobile-zoom-safe" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="e.g. 5000" inputMode="numeric" style={{ display: 'block', width: '100%', marginTop: 4 }} />
               </label>
               <div>
                 <button className="btn" disabled={arming || !fundamentumId} onClick={arm}>
