@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Ic } from '../lib/icons';
-import { useAssistTarget } from '../state/promptAssist';
+import { useAssistTarget, usePromptAssist } from '../state/promptAssist';
 import { buildPrompt } from '../lib/promptExamples';
 
 // Chat collapses into this on every screen except full chat (utilitarian co-pilot).
@@ -8,15 +8,21 @@ import { buildPrompt } from '../lib/promptExamples';
 // a copyable example, and a "write it for me" draft from the user's brief.
 export function Concierge({ hasContext }: { hasContext: boolean }) {
   const target = useAssistTarget();
+  const { clear } = usePromptAssist();
   const [open, setOpen] = useState(false);
   const [brief, setBrief] = useState('');
   const [draft, setDraft] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   // A fresh target (new object on each field focus) slides the panel open and resets.
+  // On mobile (<=760px) the panel must not auto-open — it collides with the OS keyboard —
+  // so `.cbtn` remains the sole open trigger there. Checked live (not cached at mount)
+  // since the viewport can rotate or resize mid-session.
   useEffect(() => {
     setBrief(''); setDraft(null); setCopied(false);
-    if (target) setOpen(true);
+    if (!target) return;
+    const mq = window.matchMedia('(max-width:760px)');
+    if (!mq.matches) setOpen(true);
   }, [target]);
 
   function gen() {
@@ -34,7 +40,7 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
         <div className="chead">
           <span className="orb" /><b>Concierge</b>
           {target && <span className="ctxtag">{target.flowName} · {target.fieldLabel}</span>}
-          <span className="x" onClick={() => setOpen(false)}><Ic name="x" /></span>
+          <span className="x" onClick={() => { setOpen(false); clear(); }}><Ic name="x" /></span>
         </div>
 
         {target ? (
