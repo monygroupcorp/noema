@@ -3,9 +3,13 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api } from '../lib/api';
-import type { FeedItem } from '../lib/editio';
+import { useSession } from '../state/session';
+import type { Editio, FeedItem } from '../lib/editio';
 import { mediaFromOutput, textFromOutput } from '../lib/media';
+import { ReviewQueueSection } from './Review';
 import './feed.css';
+
+const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 // Relative "3m ago" without pulling a date library.
 function ago(iso: string): string {
@@ -87,8 +91,11 @@ function Lightbox({ item, onClose }: { item: FeedItem; onClose: () => void }) {
 }
 
 export function Feed() {
+  const { session, ready } = useSession();
   const [items, setItems] = useState<FeedItem[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [pending, setPending] = useState<Editio[]>([]);
+  const [pendingErr, setPendingErr] = useState<string | null>(null);
   const [params, setParams] = useSearchParams();
   const activeId = params.get('item');
 
@@ -99,6 +106,17 @@ export function Feed() {
       .catch((e) => { if (live) setErr(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
   }, []);
+
+  // "Yours, in review" — a caller's own held publications, surfaced above the public grid only
+  // when there's something pending. Invisible for anonymous visitors and callers with none held.
+  useEffect(() => {
+    if (!ready || !session) return;
+    let live = true;
+    Promise.all([api.getMe().catch(() => null), api.listReviewQueue()])
+      .then(([, q]) => { if (live) setPending(q.editions.filter((e) => e.reviewOutcome === 'pending')); })
+      .catch((e) => { if (live) setPendingErr(msg(e)); });
+    return () => { live = false; };
+  }, [ready, session]);
 
   const open = (id: string) => setParams((p) => { p.set('item', id); return p; }, { replace: false });
   const close = () => setParams((p) => { p.delete('item'); return p; }, { replace: false });
@@ -115,6 +133,9 @@ export function Feed() {
           </div>
           <Link className="btn" to="/card"><Ic name="plus" /> Make something</Link>
         </div>
+
+        {pendingErr && <div className="warn">{pendingErr}</div>}
+        {pending.length > 0 && <ReviewQueueSection editions={pending} onError={setPendingErr} />}
 
         {err && <div className="warn">Couldn’t load the feed: {err}</div>}
 
