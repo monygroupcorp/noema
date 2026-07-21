@@ -565,7 +565,7 @@ export function Card() {
                   {runId && mediaFromOutput(runStream.exitus) && (
                     <div className="pub-row">
                       {pub.s === 'done' ? (
-                        <span className="pub-done"><Ic name="check" /> In review — track it in <Link to="/review">your review queue</Link>; it appears in the <Link to="/feed">feed</Link> once approved.</span>
+                        <span className="pub-done"><Ic name="check" /> In review — track it in the <Link to="/feed">feed</Link>, where it appears once approved.</span>
                       ) : (
                         <>
                           <button className="btn ghost" disabled={pub.s === 'busy'} onClick={() => publishToFeed(runId!)}>

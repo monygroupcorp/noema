@@ -1,3 +1,8 @@
+/* "Yours, in review" — the caller's own held publications, shown above the public grid only
+   when there's something pending (noema-075: absorbed from the standalone /review page). */
+.page-section{ margin-bottom:28px }
+.page-section .byo-row{ margin-bottom:10px }
+
 /* public feed — a masonry-ish media grid */
 .feed-grid{
   columns:4 240px;         /* responsive masonry via CSS columns */
