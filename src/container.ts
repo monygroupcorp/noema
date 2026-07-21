@@ -22,7 +22,6 @@ import type { Testimoniorum, Depositorum, Solutionum, Petitionum } from './types
 import type { Scholiorum } from './types/scholium.js'
 import type { ColloquiumStore, DictumStore } from './types/colloquium.js'
 import type { MemoriaStore } from './types/anima.js'
-import type { IntelligentiumStore } from './types/intelligendi.js'
 import type { Materia, MateriaStore } from './types/materia.js'
 import type { HospitiumStore } from './types/hospitium.js'
 import type { DeploymentumStore } from './types/deploymentum.js'
@@ -110,7 +109,6 @@ import { MongoScholium } from './crystal/MongoScholium.js'
 import { MongoColloquium } from './crystal/MongoColloquium.js'
 import { MongoDictum } from './crystal/MongoDictum.js'
 import { MongoMemoria } from './crystal/MongoMemoria.js'
-import { MongoIntelligendi } from './crystal/MongoIntelligendi.js'
 import { CollectioCursor } from './crystal/CollectioCursor.js'
 import { CompositusCursor } from './crystal/CompositusCursor.js'
 import { ArcanumIssuer } from './ledger/ArcanumIssuer.js'
@@ -160,7 +158,6 @@ export interface Ring {
   colloquia: ColloquiumStore
   dicta: DictumStore
   memoriae: MemoriaStore
-  intelligendi: IntelligentiumStore
   fundamentorum: import('./types/fundamentum.js').Fundamentorum
   cursorum: Cursorum
   completor: IActumCompletor
@@ -327,8 +324,6 @@ export interface ContainerConfig {
   colloquiaCollection?: string
   dictaCollection?: string
   memoriaeCollection?: string
-  /** Collection name for intelligendi — default 'intelligendi' */
-  intelligentiaeCollection?: string
   /** Collection name for materiae — default 'materiae' */
   materiaCollection?: string
   /** Collection name for hospitia (identity-bearing hosting metadata) — default 'hospitia' */
@@ -461,7 +456,6 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const colloquia = new MongoColloquium(db.collection(config.colloquiaCollection ?? 'colloquia'))
   const dicta = new MongoDictum(db.collection(config.dictaCollection ?? 'dicta'))
   const memoriae = new MongoMemoria(db.collection(config.memoriaeCollection ?? 'memoriae'))
-  const intelligendi = new MongoIntelligendi(db.collection(config.intelligentiaeCollection ?? 'intelligendi'))
 
   const materiaCol: Collection = db.collection(config.materiaCollection ?? 'materiae')
   const materiae = config.materiae ?? new MongoMateria(materiaCol)
@@ -712,7 +706,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     actorum, modorum, signorum, redituum, mercedum, tripwireBand, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,
     mandatores, corpora, collectiones, editiones, publicationAdapters, sodalitates, provinciae, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
-    colloquia, dicta, memoriae, intelligendi,
+    colloquia, dicta, memoriae,
     cursorum, completor, inceptor, arcanumIssuer,
     arcanumTree, arcanumVerifier, bursarium, ceremonia,
     materiae, hospitia, actumIndex, deployments,

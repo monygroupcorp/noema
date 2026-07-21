@@ -117,9 +117,6 @@ export async function ensureIndexes(db: Db): Promise<void> {
     // memoriae — distilled agent memory (one per anima)
     db.collection('memoriae').createIndex({ animaId: 1 }, { unique: true }),
 
-    // intelligendi — user-facing model catalog
-    db.collection('intelligendi').createIndex({ id: 1 }, { unique: true }),
-
     // materiae — GPU pod records
     db.collection('materiae').createIndex({ id: 1 }, { unique: true }),
     db.collection('materiae').createIndex({ status: 1, imageRef: 1 }),
