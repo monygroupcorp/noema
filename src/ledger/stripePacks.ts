@@ -48,14 +48,15 @@ function pack(id: string, usd: number, impetus: bigint, label: string): CreditPa
 }
 
 /**
- * The ratified pack → impetus constant map (LOCKED 2026-07-08). Credit the FULL amount;
- * fiat is USD with NO funding haircut. Keyed by packId.
+ * The ratified pack → impetus constant map (LOCKED 2026-07-21 — R-1 ruling, supersedes the
+ * 2026-07-08 map; see `infra/helm/BRIDGE.md`). Credit the FULL amount; fiat is USD with NO
+ * funding haircut. Keyed by packId.
  */
 export const PACKS: Record<string, CreditPack> = {
-  starter_10:  pack('starter_10',  10,  30000n,  'Starter — 30,000 impetus'),
-  standard_25: pack('standard_25', 25,  82500n,  'Standard — 82,500 impetus'),
-  plus_50:     pack('plus_50',     50,  180000n, 'Plus — 180,000 impetus'),
-  studio_100:  pack('studio_100',  100, 390000n, 'Studio — 390,000 impetus'),
+  starter_10:  pack('starter_10',  10,  20800n,  'Starter — 20,800 impetus'),
+  standard_25: pack('standard_25', 25,  57200n,  'Standard — 57,200 impetus'),
+  plus_50:     pack('plus_50',     50,  124800n, 'Plus — 124,800 impetus'),
+  studio_100:  pack('studio_100',  100, 270400n, 'Studio — 270,400 impetus'),
 }
 
 /** Resolve a pack by id, or `undefined` for an unknown SKU (the caller rejects it). */
