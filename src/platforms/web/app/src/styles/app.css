@@ -1393,6 +1393,9 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .byo-input{font-size:16px}
   .cpanel .cinput input{font-size:16px}
   .composer textarea{font-size:16px}
+  .inp,.ta2{font-size:16px}
+  .cr-extend-n{font-size:16px}
+  .mobile-zoom-safe{font-size:16px}
 
   /* catalog toolbars: search/filters/sort wrap onto their own lines instead of
      squeezing the modality + verb chip rows into whatever space is left. */
