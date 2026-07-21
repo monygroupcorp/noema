@@ -15,10 +15,10 @@ import { BuyCreditsModal } from './BuyCreditsModal';
 // same denominations as an informational preview (that rail's actual crediting is a live
 // crypto-deposit quote, priced at mint time). Display points = backend impetus / 10.
 export const FIAT_PACKS: Array<{ id: string; usd: number; points: number }> = [
-  { id: 'starter_10', usd: 10, points: 3_000 },
-  { id: 'standard_25', usd: 25, points: 8_250 },
-  { id: 'plus_50', usd: 50, points: 18_000 },
-  { id: 'studio_100', usd: 100, points: 39_000 },
+  { id: 'starter_10', usd: 10, points: 2_080 },
+  { id: 'standard_25', usd: 25, points: 5_720 },
+  { id: 'plus_50', usd: 50, points: 12_480 },
+  { id: 'studio_100', usd: 100, points: 27_040 },
 ];
 
 // Identified-account gate for the fiat rail: a card purchase requires a signed-in anima
