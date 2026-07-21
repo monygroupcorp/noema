@@ -29,6 +29,25 @@ function ago(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+// Shared "Yours, in review" section — the non-admin reveal-gated row rendering, reused by the
+// Feed page (noema-075: /review collapsed into Feed as a conditional section shown only when
+// the caller has pending publications). Admin-only approve/reject/confirm-CSAM controls are NOT
+// part of this piece; they stay exclusive to ReviewRow's admin branch below, unchanged on
+// /admin/review.
+export function ReviewQueueSection({ editions, onError }: { editions: Editio[]; onError: (e: string) => void }) {
+  const [items, setItems] = useState(editions);
+  const remove = (id: string) => setItems((cur) => cur.filter((e) => e.id !== id));
+  if (items.length === 0) return null;
+  return (
+    <div className="page-section">
+      <div className="sectionhead">yours, in review</div>
+      {items.map((e) => (
+        <ReviewRow key={e.id} editio={e} admin={false} onDone={() => remove(e.id)} onError={onError} />
+      ))}
+    </div>
+  );
+}
+
 export function Review() {
   const { session, ready } = useSession();
   const [admin, setAdmin] = useState(false);

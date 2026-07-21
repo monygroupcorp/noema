@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { Chat } from './screens/Chat';
 import { Card } from './screens/Card';
 import { Catalog } from './screens/Catalog';
@@ -77,11 +77,11 @@ export function App() {
       <Route path="/card" element={<Card />} />
       <Route path="/catalog" element={<Catalog />} />
       <Route path="/feed" element={<Feed />} />
-      {/* Moderation held-queue (publishing spec §4). Author sees own held items; the platform
-          admin (me.admin) sees all + gets approve/reject/confirm-csam. Server-gated regardless.
-          Two routes, one component: /review is the author-facing home (Publish pillar), /admin/review
-          the admin entry — the component self-adjusts on me.admin. */}
-      <Route path="/review" element={<Review />} />
+      {/* Moderation held-queue (publishing spec §4). /review was the author-facing home; its
+          pending-items UI is now a conditional section on Feed itself (noema-075), so /review is
+          just a redirect. /admin/review (the moderation queue: approve/reject/confirm-csam,
+          me.admin-gated, server-enforced regardless) is unaffected. */}
+      <Route path="/review" element={<Navigate to="/feed" replace />} />
       <Route path="/admin/review" element={<Review />} />
       {/* Admin workspace hub (noema-011): links the review queue + read-only revenue/COGS
           cards. me.admin-gated client-side; every report re-gates server-side regardless. */}
