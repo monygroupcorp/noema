@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams, Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
@@ -61,6 +62,49 @@ function splitTriggerHits(text: string, loraMap: Map<string, ModelCard>, re: Reg
   return segs;
 }
 
+/** A single highlighted trigger-word hit. The `.lora-trigger-card` model-card
+ *  popover is `createPortal`ed to `document.body` (noema-071) so it escapes both
+ *  `.lora-trigger-overlay{overflow:hidden}` (this span's immediate ancestor, load-
+ *  bearing for the transparent-text-mirroring illusion — see HighlightedPromptField)
+ *  and the farther-out `.cardscroll{overflow:auto}` — same bug class/fix shape as
+ *  noema-069's Rail.tsx dropup portal. Since the popover is no longer a DOM
+ *  descendant of the hit span, CSS `:hover`/`:focus` can't reach it any more, so
+ *  show/hide moves to JS state mirroring the same trigger conditions. Anchored ONCE
+ *  on open via `getBoundingClientRect()` — no resize/scroll re-anchoring (deliberately
+ *  narrower than noema-069's live-tracked version; this trigger word is static text). */
+function TriggerHitSpan({ text, hit }: { text: string; hit: ModelCard }) {
+  const [anchor, setAnchor] = useState<{ left: number; bottom: number } | null>(null);
+  const ref = useRef<HTMLSpanElement>(null);
+  const open = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (r) setAnchor({ left: r.left, bottom: window.innerHeight - r.top + 6 });
+  };
+  const close = () => setAnchor(null);
+  return (
+    <span
+      className="lora-trigger-hit"
+      tabIndex={0}
+      ref={ref}
+      onMouseEnter={open}
+      onMouseLeave={close}
+      onFocus={open}
+      onBlur={close}
+    >
+      {text}
+      {anchor &&
+        createPortal(
+          <span className="lora-trigger-card" role="tooltip" style={{ left: anchor.left, bottom: anchor.bottom }}>
+            <strong>{hit.nomen}</strong>
+            {hit.trigger && <span className="ltc-trigger">{hit.trigger}</span>}
+            {hit.description && <p>{hit.description}</p>}
+            <span className="ltc-meta">{hit.access ?? 'public'} · {hit.license ?? 'unknown license'}</span>
+          </span>,
+          document.body,
+        )}
+    </span>
+  );
+}
+
 /** The prompt/lyric/story textarea + a mirrored highlight overlay behind it. The
  *  overlay's own text is transparent (glyphs still come from the real textarea on
  *  top); only a matched trigger's `<span className="lora-trigger-hit">` paints a
@@ -80,19 +124,7 @@ function HighlightedPromptField(props: {
     <div className="lora-trigger-wrap">
       <div className="lora-trigger-overlay" aria-hidden="true">
         {segs.map((s, i) =>
-          s.hit ? (
-            <span className="lora-trigger-hit" tabIndex={0} key={i}>
-              {s.text}
-              <span className="lora-trigger-card" role="tooltip">
-                <strong>{s.hit.nomen}</strong>
-                {s.hit.trigger && <span className="ltc-trigger">{s.hit.trigger}</span>}
-                {s.hit.description && <p>{s.hit.description}</p>}
-                <span className="ltc-meta">{s.hit.access ?? 'public'} · {s.hit.license ?? 'unknown license'}</span>
-              </span>
-            </span>
-          ) : (
-            <span key={i}>{s.text}</span>
-          ),
+          s.hit ? <TriggerHitSpan key={i} text={s.text} hit={s.hit} /> : <span key={i}>{s.text}</span>,
         )}
         {/* trailing marker so a trailing newline still contributes overlay height */}
         {'​'}
@@ -363,12 +395,16 @@ export function Card() {
         .lora-trigger-ta.ta2{position:relative;background:transparent;z-index:0}
         .lora-trigger-hit{position:relative;background:color-mix(in srgb,var(--accent) 35%,transparent);
           border-radius:3px;pointer-events:auto;cursor:help}
-        .lora-trigger-card{display:none;position:absolute;bottom:calc(100% + 6px);left:0;z-index:20;
+        /* noema-071: portaled to document.body (out of .lora-trigger-overlay's overflow:hidden and
+           .cardscroll's overflow:auto — same fix shape as noema-069's Rail.tsx dropup), so position
+           is fixed + anchored via inline left/bottom from TriggerHitSpan's getBoundingClientRect()
+           instead of position:absolute relative to the (no-longer-ancestor) hit span. Shown/hidden by
+           JS state now (see TriggerHitSpan), not the :hover/:focus rules that used to gate display.
+           z-index matches --z-pop (same tier as .railgroup-pop/.acctmenu) so it clears the app chrome. */
+        .lora-trigger-card{position:fixed;z-index:var(--z-pop,60);
           width:240px;max-width:60vw;background:var(--raised);border:1px solid var(--hair);
           border-radius:9px;padding:10px 12px;box-shadow:0 8px 24px rgba(0,0,0,.35);color:var(--text);
           font-size:12.5px;line-height:1.45;white-space:normal}
-        .lora-trigger-hit:hover .lora-trigger-card,.lora-trigger-hit:focus .lora-trigger-card,
-        .lora-trigger-hit:focus-visible .lora-trigger-card{display:block}
         .lora-trigger-card strong{display:block;margin-bottom:2px}
         .lora-trigger-card .ltc-trigger{display:inline-block;font-family:monospace;opacity:.75;margin-bottom:4px}
         .lora-trigger-card p{margin:4px 0;opacity:.85}
