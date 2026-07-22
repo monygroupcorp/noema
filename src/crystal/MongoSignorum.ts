@@ -93,8 +93,15 @@ export class MongoSignorum implements Signorum {
       // the cursor and breaking once `remaining` is covered pulls only the ~k coins actually needed
       // (k tiny + bounded), turning the old O(n)-in-pool-size read into ~O(k). Same greedy smallest-
       // first SELECTION as before — just server-side ordering + early termination.
+      // `valorNum: { $gt: 0 }` — only strictly-positive valor is spendable. The ledger holds
+      // negative-valor debit signa (nexus:studioSpend / tee:spend / publish:scanFee mint
+      // `valor: -impetus, status:'valid'` rows that balance() correctly NETS); those are
+      // liabilities, never spend candidates — locking one into a reservation would corrupt the
+      // cover arithmetic. The filter is on the numeric sort-mirror `valorNum` (the field this
+      // selection actually reads/sorts on), NOT the string `valor`, so it stays a range on the
+      // same { animaId, status, valorNum } index — no blocking sort, no collscan.
       const cursor = this.col
-        .find({ ...idq, status: 'valid' })
+        .find({ ...idq, status: 'valid', valorNum: { $gt: 0 } })
         .sort({ valorNum: 1 })
 
       const pick: string[] = []
