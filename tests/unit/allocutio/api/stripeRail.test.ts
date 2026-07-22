@@ -492,3 +492,36 @@ test("a frozen anima is BLOCKED (auth.forbidden) at every Collections chokepoint
   )
   assert.equal((await animae.find(KNOWN_ANIMA))?.disputeFrozen, true)
 })
+
+test("a frozen anima is BLOCKED (auth.forbidden) at provisionStudio / provisionTeeSession / publish — compute-budget + scanFee outflow chokepoints (freeze-boundary v2)", async () => {
+  // Gauntlet finding: provisionStudio and provisionTeeSession are user-initiated, read the anima's
+  // balance and commit it as a compute budget, then boot a pod that debits it over time
+  // (studioSpendHook mints `nexus:studioSpend`; the TEE path spends `tee:spend`). Left ungated, a
+  // disputing fraudster drains the disputed balance on GPU compute before the chargeback resolves.
+  // publish() incurs a `publish:scanFee` debit (burns rather than extracts — the lesser case) and is
+  // gated for completeness. Each method gates the freeze at its TOP, before any billing dep is
+  // touched, so a minimal CrystalApi (only `animae` wired) exercises exactly the added spend-gate.
+  const { store: animae } = makeAnimae({ known: new Set([KNOWN_ANIMA, 'anima_ok']), frozen: new Set([KNOWN_ANIMA]) })
+  const api = new CrystalApi({ animae } as unknown as CrystalApiDeps)
+  const frozen: AuctorKey = { animaId: KNOWN_ANIMA }
+  const isForbidden = (err: unknown) => (err as { code?: string }).code === 'auth.forbidden'
+
+  await assert.rejects(() => api.provisionStudio(frozen, {}), isForbidden)
+  await assert.rejects(() => api.provisionTeeSession(frozen, {} as Parameters<CrystalApi['provisionTeeSession']>[1]), isForbidden)
+  await assert.rejects(() => api.publish(frozen, {} as Parameters<CrystalApi['publish']>[1]), isForbidden)
+
+  // A non-frozen anima passes the freeze gate and fails LATER on absent billing/provisioning deps —
+  // proving the block is freeze-conditional, not a blanket denial. (provisionStudio →
+  // internal.unavailable when conductor is unwired; publish → not_found.edition when editiones is
+  // unwired.) Login/identity reads are never routed through this gate.
+  const ok: AuctorKey = { animaId: 'anima_ok' }
+  await assert.rejects(
+    () => api.provisionStudio(ok, {}),
+    (err: unknown) => (err as { code?: string }).code === 'internal.unavailable',
+  )
+  await assert.rejects(
+    () => api.publish(ok, {} as Parameters<CrystalApi['publish']>[1]),
+    (err: unknown) => (err as { code?: string }).code === 'not_found.edition',
+  )
+  assert.equal((await animae.find(KNOWN_ANIMA))?.disputeFrozen, true)
+})

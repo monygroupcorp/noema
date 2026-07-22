@@ -780,6 +780,12 @@ export class CrystalApi {
    * the public Edition (pending for a public surface; settled otherwise).
    */
   async publish(auctor: AuctorKey, opts: PublishOpts): Promise<Edition> {
+    // Dispute freeze (noema-082, freeze-boundary v2): publishing incurs a `publish:scanFee` debit —
+    // a user-initiated outflow. It burns rather than extracts the disputed balance (the lesser case),
+    // but the freeze principle is total, so gate it too while the anima is frozen. Checked first,
+    // before any other work, mirroring invokeFlow's top-of-method freeze gate.
+    await this._assertNotDisputeFrozen(auctor)
+
     const editiones = this.deps.editiones
     if (!editiones) throw Errors.notFoundEdition('publishing')
 
@@ -2340,6 +2346,14 @@ export class CrystalApi {
    */
   async provisionStudio(auctor: AuctorKey, opts: ProvisionStudioOpts = {}): Promise<StudioView> {
     if ('bursaToken' in auctor) throw Errors.authForbidden('Bursa tokens cannot provision studios')
+
+    // Dispute freeze (noema-082, freeze-boundary v2): provisioning a studio commits the anima's
+    // balance as a compute budget and boots a pod that debits it over time (studioSpendHook mints
+    // negative-valor `nexus:studioSpend` signa on the caller). That is a user-initiated credit
+    // outflow, so it must be blocked while the anima is frozen by a pending chargeback — otherwise a
+    // disputing fraudster drains the disputed balance on GPU compute before the chargeback resolves.
+    await this._assertNotDisputeFrozen(auctor)
+
     if (!this.deps.conductor) throw Errors.studioUnavailable()
 
     // A fundamentum (when given) supplies the runtime + must resolve (no opaque ids).
@@ -2411,6 +2425,13 @@ export class CrystalApi {
 
   async provisionTeeSession(auctor: AuctorKey, opts: ProvisionTeeSessionOpts): Promise<TeeSessionView> {
     if ('bursaToken' in auctor) throw Errors.authForbidden('Bursa tokens cannot provision TEE sessions')
+
+    // Dispute freeze (noema-082, freeze-boundary v2): a TEE session commits the anima's balance as a
+    // compute budget and boots a pod that debits it over time (the `tee:spend` path). Same
+    // user-initiated outflow as provisionStudio — gate it while frozen so a disputed balance can't be
+    // consumed on private-compute GPU time before the chargeback resolves.
+    await this._assertNotDisputeFrozen(auctor)
+
     const balance = await this.deps.signorum.balance(auctor)
     const budget = opts.maxImpetus !== undefined ? BigInt(opts.maxImpetus) : balance
     if (budget <= 0n) throw Errors.insufficientSigna({ available: balance.toString() })
