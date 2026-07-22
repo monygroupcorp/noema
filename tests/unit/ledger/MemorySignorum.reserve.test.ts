@@ -97,6 +97,66 @@ test('reserve: two reservations on one pool never overlap or overdraw', async ()
   assert.equal(r3.ok, false)
 })
 
+// ── negative-valor debit exclusion (noema-083) ───────────────────────────────
+//
+// The ledger holds negative-valor debit signa (nexus:studioSpend / tee:spend / publish:scanFee
+// mint `valor: -impetus, status:'valid'` rows). balance() NETS them; reserve() must never treat
+// one as a spend candidate, or it could be locked and fed to settle(), corrupting cover arithmetic.
+
+// A studioSpend-shaped host debit: negative valor, status becomes 'valid' on issue.
+async function issueDebit(s: MemorySignorum, animaId: string, valor: bigint) {
+  return s.issue({ animaId, forma: 'integer', valor, auctor: 'nexus:studioSpend', testis: 'materia-1' })
+}
+
+test('reserve: never selects a negative-valor debit signum, and leaves it untouched', async () => {
+  const s = new MemorySignorum()
+  const p1 = await issue(s, 'a', 100n)
+  const p2 = await issue(s, 'a', 300n)
+  const neg = await issueDebit(s, 'a', -50n)
+  assert.equal(await s.balance({ animaId: 'a' }), 350n)   // balance nets the debit
+
+  const r = await s.reserve({ animaId: 'a' }, 120n, 'act-1')
+  assert.ok(r.ok)
+  // the debit is never a spend candidate…
+  assert.ok(!r.signaIds.includes(neg.id), 'negative debit must never be reserved')
+  assert.ok(r.signaIds.every(id => id === p1.id || id === p2.id), 'only positives selected')
+  // …and it is left byte-identical: still valid, still nets in balance/history.
+  const negRow = (await s.history({ animaId: 'a' })).find(x => x.id === neg.id)
+  assert.ok(negRow)
+  assert.equal(negRow.status, 'valid')
+  assert.equal(negRow.valor, -50n)
+})
+
+test('reserve+settle: spends only positives; the debit still nets to the expected balance', async () => {
+  const s = new MemorySignorum()
+  await issue(s, 'a', 500n)              // one positive coin
+  await issueDebit(s, 'a', -200n)        // studioSpend-shaped host debit
+  assert.equal(await s.balance({ animaId: 'a' }), 300n)   // netted spendable
+
+  // Reserve the full netted balance — succeeds by locking positives only (overshoot allowed).
+  const r = await s.reserve({ animaId: 'a' }, 300n, 'act-1')
+  assert.ok(r.ok)
+  assert.equal(r.locked, 500n)
+  assert.equal(r.signaIds.length, 1)
+
+  await s.settle(r.signaIds, 300n, 'act-1')   // charge exactly 300, refund 200
+  // Spent 300 of the netted 300 → balance nets to 0 (200 refund − 200 debit).
+  assert.equal(await s.balance({ animaId: 'a' }), 0n)
+})
+
+test('reserve: positive-only identity — selection byte-identical to pre-fix (regression guard)', async () => {
+  const s = new MemorySignorum()
+  const c50 = await issue(s, 'a', 50n)
+  const c100 = await issue(s, 'a', 100n)
+  await issue(s, 'a', 900n)
+
+  const r = await s.reserve({ animaId: 'a' }, 120n, 'act-1')
+  assert.ok(r.ok)
+  // greedy smallest-first, stops once covered: exactly [50, 100], the 900 untouched.
+  assert.deepEqual(r.signaIds, [c50.id, c100.id])
+  assert.equal(r.locked, 150n)
+})
+
 // ── transfer ───────────────────────────────────────────────────────────────
 
 test('transfer: moves exactly amount from sender to recipient', async () => {
