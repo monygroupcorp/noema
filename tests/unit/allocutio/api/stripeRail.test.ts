@@ -290,12 +290,18 @@ test('a completed event for a non-existent anima never credits (400)', async () 
 
 // ── refund clawback (Part B: charge.refunded → claw back unspent + reverse revenue) ───────────
 
-function refundEvent(args: { paymentIntent: string; animaId?: string; eventId?: string; createdMsAgo?: number }): StripeWebhookEvent {
+// A real Stripe `charge.refunded` event's `data.object` is a CHARGE — it carries `payment_intent`
+// and `created`, but NEVER `client_reference_id` and NOT a propagated `metadata.animaId` (only the
+// Checkout Session carries the animaId). The fixture omits them deliberately: the anima MUST be
+// resolved from our own ledger (findByTestis on 'stripe:<payment_intent>'), regression-locking the
+// round-10 fix — if the handler ever regresses to reading the anima off the event, these refund
+// tests go inert (no clawback) and fail.
+function refundEvent(args: { paymentIntent: string; eventId?: string; createdMsAgo?: number }): StripeWebhookEvent {
   const createdMs = args.createdMsAgo !== undefined ? Date.now() - args.createdMsAgo : Date.now()
   return {
     id: args.eventId ?? `evt_refund_${Math.random().toString(36).slice(2)}`,
     type: 'charge.refunded',
-    data: { object: { payment_intent: args.paymentIntent, metadata: { animaId: args.animaId ?? KNOWN_ANIMA }, created: Math.floor(createdMs / 1000) } },
+    data: { object: { payment_intent: args.paymentIntent, created: Math.floor(createdMs / 1000) } },
   }
 }
 
@@ -405,11 +411,16 @@ test('trailingUsdRevenue nets a reversal so the Krea/Stability cap reads the pos
 
 // ── dispute freeze (Part B: charge.dispute.created → freeze spend + alert) ────────────────────
 
-function disputeEvent(args: { paymentIntent: string; animaId?: string; eventId?: string }): StripeWebhookEvent {
+// A real Stripe `charge.dispute.created` event's `data.object` is a DISPUTE — it references the
+// charge/payment_intent but carries NO `client_reference_id` and NO propagated `metadata.animaId`.
+// The fixture omits them: the frozen anima MUST be resolved from our own ledger (findByTestis),
+// regression-locking the round-10 fix — a regression to event-object resolution makes the freeze
+// inert (no anima found) and this test fails.
+function disputeEvent(args: { paymentIntent: string; eventId?: string }): StripeWebhookEvent {
   return {
     id: args.eventId ?? `evt_dispute_${Math.random().toString(36).slice(2)}`,
     type: 'charge.dispute.created',
-    data: { object: { payment_intent: args.paymentIntent, metadata: { animaId: args.animaId ?? KNOWN_ANIMA } } },
+    data: { object: { payment_intent: args.paymentIntent } },
   }
 }
 

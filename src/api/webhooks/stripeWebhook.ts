@@ -203,8 +203,10 @@ export interface StripeWebhookResult {
 export interface StripeWebhookDeps {
   /** The credit ledger. `issue` must SURFACE its dup-key error (the durable idempotency guard, used
    *  by BOTH the purchase credit and the refund clawback debit). `balance` reads the anima's current
-   *  net spendable (the refund policy claws back the REMAINING balance, capped at the pack). */
-  signorum: Pick<Signorum, 'issue' | 'history' | 'balance'>
+   *  net spendable (the refund policy claws back the REMAINING balance, capped at the pack).
+   *  `findByTestis` resolves the disputing/refunded anima FROM OUR OWN credit row (a real Stripe
+   *  Charge/Dispute object carries no client_reference_id/metadata.animaId — round-10). */
+  signorum: Pick<Signorum, 'issue' | 'history' | 'balance' | 'findByTestis'>
   /** The USD revenue book — a peer fiat `Reditus` is booked on purchase; on refund the recognized
    *  revenue is un-booked via `reverse()` (found via `findByChargeRef`), Q5/Q-B rulings. */
   redituum: Pick<Redituum, 'record' | 'reverse' | 'findByChargeRef'>
@@ -285,7 +287,7 @@ export async function handleStripeWebhook(
 
   // 3c. Dispute events freeze the anima's user-initiated value-outflow pending manual review.
   if (DISPUTE_EVENT_TYPES.has(event.type)) {
-    return handleDispute(event, obj, paymentKey, deps)
+    return handleDispute(event, paymentKey, deps)
   }
 
   // 4. Any other event type is acked + ignored (unchanged behavior).
@@ -298,20 +300,20 @@ function ack(): StripeWebhookResult {
 }
 
 /**
- * Resolve the original `stripe:purchase` credit for a refund/dispute event. The event carries only
- * the payment key + (server-set) animaId; the credit is the row stamped
- * auctor:'stripe:purchase' / testis:'stripe:<paymentKey>'. Returns null when the animaId can't be
- * resolved or no matching credit exists (a refund on a pre-feature/non-credit charge) — the caller
- * then no-op-200s (nothing to claw back / freeze).
+ * Resolve the original `stripe:purchase` credit for a refund/dispute event. Resolves the anima FROM
+ * OUR OWN LEDGER, NOT the event object: a real Stripe Charge/Dispute object carries neither
+ * `client_reference_id` nor a propagated `metadata.animaId` (only the Checkout Session does, and
+ * metadata does not propagate to the Charge/Dispute) — so reading the anima off the event is inert
+ * in production (round-10 blocker). The original purchase credit was stamped
+ * testis:'stripe:<paymentKey>' under a unique partial index, so we recover it (and its `animaId`) by
+ * that key. Returns null when no matching credit exists (a refund/dispute on a pre-feature or
+ * non-credit charge) — the caller then no-op-200s (nothing to claw back / freeze).
  */
 async function findPurchaseCredit(
   deps: StripeWebhookDeps,
-  obj: StripeEventObject,
   paymentKey: string,
 ): Promise<Signum | null> {
-  const animaId = obj.client_reference_id ?? obj.metadata?.animaId
-  if (!animaId) return null
-  return findStripeCredit(deps.signorum, animaId, `stripe:${paymentKey}`)
+  return deps.signorum.findByTestis(`stripe:${paymentKey}`)
 }
 
 /** Find this refund event's already-struck clawback debit (the replay source), or null. */
@@ -337,7 +339,7 @@ async function handleRefund(
   paymentKey: string,
   deps: StripeWebhookDeps,
 ): Promise<StripeWebhookResult> {
-  const credit = await findPurchaseCredit(deps, obj, paymentKey)
+  const credit = await findPurchaseCredit(deps, paymentKey)
   if (!credit || !credit.animaId) {
     log.warn('stripe refund: no matching stripe:purchase credit — nothing to claw back', { paymentKey })
     return ack()
@@ -418,11 +420,10 @@ async function handleRefund(
  */
 async function handleDispute(
   event: StripeWebhookEvent,
-  obj: StripeEventObject,
   paymentKey: string,
   deps: StripeWebhookDeps,
 ): Promise<StripeWebhookResult> {
-  const credit = await findPurchaseCredit(deps, obj, paymentKey)
+  const credit = await findPurchaseCredit(deps, paymentKey)
   if (!credit || !credit.animaId) {
     log.warn('stripe dispute: no matching credit — cannot resolve the anima to freeze', { paymentKey })
     return ack()

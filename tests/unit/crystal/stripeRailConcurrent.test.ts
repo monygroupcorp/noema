@@ -96,11 +96,15 @@ afterEach(async () => {
   frozenAnimae.clear()
 })
 
+// Real Stripe `charge.refunded` shape: the CHARGE carries `payment_intent` + `created` but NO
+// `metadata.animaId`/`client_reference_id`. Omitted deliberately so this Mongo-backed test exercises
+// the round-10 anima resolution through the REAL unique-partial index (findByTestis on
+// 'stripe:<payment_intent>') — the index-backed ledger lookup, not the event object.
 function refundEvent(pi: string, eventId: string): StripeWebhookEvent {
   return {
     id: eventId,
     type: 'charge.refunded',
-    data: { object: { payment_intent: pi, metadata: { animaId: ANIMA }, created: Math.floor(Date.now() / 1000) } },
+    data: { object: { payment_intent: pi, created: Math.floor(Date.now() / 1000) } },
   }
 }
 
