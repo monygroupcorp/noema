@@ -2,12 +2,16 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { DATASETS, custodyGlyph } from '../lib/datasets';
+import { custodyGlyph } from '../lib/datasets';
+import { api, type Dataset } from '../lib/api';
 
 // Training run monitor (train-run-spec.md, render noema-train-run.png) — "watch it learn":
 // checkpoint emergence (noise→crisp) is the hero, with the loss line and the "what we see —
 // the meter" rail (the brand's privacy line as a literal device; under TEE/local the samples
 // render in the user's enclave and are NOT egress to NOEMA).
+//
+// The source dataset is real (`GET /v1/data/datasets/full`); the run/loss simulation below stays
+// presentational — noema-079 shipped no training-runs backend, and the footer already says so.
 const TOTAL = 1200;
 const CHECKPOINTS = [0, 200, 400, 600, 740];
 
@@ -16,7 +20,13 @@ const LOSS_PTS = [0.31, 0.27, 0.24, 0.235, 0.205, 0.19, 0.17, 0.165, 0.14, 0.125
 
 export function TrainRun() {
   const { id } = useParams();
-  const d = DATASETS.find((x) => x.id === id) ?? DATASETS[0];
+  const [datasets, setDatasets] = useState<Dataset[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.listDatasetsFull().then(({ datasets: ds }) => { if (live) setDatasets(ds); }).catch(() => { if (live) setDatasets([]); });
+    return () => { live = false; };
+  }, []);
+  const d = (datasets ?? []).find((x) => x.id === id);
   const [step, setStep] = useState(740);
 
   // a little life — nudge the step upward toward the total (purely presentational)
@@ -24,6 +34,17 @@ export function TrainRun() {
     const t = setInterval(() => setStep((s) => (s >= TOTAL ? s : Math.min(TOTAL, s + 4))), 600);
     return () => clearInterval(t);
   }, []);
+
+  if (datasets === null) {
+    return <AppShell title="Training run"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
+  }
+  if (!d) {
+    return (
+      <AppShell title="Training run">
+        <div className="page"><div className="pw wide"><div className="sub mono">dataset not found. <Link to="/datasets">back to datasets</Link></div></div></div>
+      </AppShell>
+    );
+  }
   const pct = Math.round((step / TOTAL) * 100);
   const glyph = custodyGlyph(d.custody);
   const sealed = d.custody !== 'remote';
