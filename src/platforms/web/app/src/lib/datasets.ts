@@ -1,7 +1,10 @@
 // Training data model (train-overview.md): the DATASET is the primitive — media + versions +
 // captionsets; trainings derive from it; models land on the shelf. The backend now carries real
-// Dataset records (`GET /v1/data/datasets/full`, `types/dataset.ts`) — `Datasets.tsx` fetches
-// live data. `DATASETS`/`READINESS` below are FIXTURES ONLY (Storybook/tests), not live data.
+// Dataset records (`GET /v1/data/datasets/full`, `types/dataset.ts`) — the whole Datasets library
+// (`Datasets.tsx`, `Dataset.tsx`, `CaptionJob.tsx`, `Derive.tsx`, `TrainRun.tsx`) fetches live
+// data and no longer imports `DATASETS` below. It remains exported for `ProjectHub.tsx`'s
+// dataset-name lookup (a separate, not-yet-migrated consumer — out of this item's scope_dirs)
+// and for Storybook/tests; not live data for the library screens above.
 
 export type Modality = 'image' | 'video' | 'audio' | '3d';
 export type Custody = 'sealed' | 'local' | 'remote';   // hemisphere: ring · dashed · lit
