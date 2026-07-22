@@ -1,7 +1,7 @@
 // Training data model (train-overview.md): the DATASET is the primitive — media + versions +
-// captionsets; trainings derive from it; models land on the shelf. No backend for dataset
-// records yet, so the library/detail run on this mock until /v1 carries dataset records.
-// TODO(backend: dataset records — media items, versions, multiple captionsets, feeds-N-trainings).
+// captionsets; trainings derive from it; models land on the shelf. The backend now carries real
+// Dataset records (`GET /v1/data/datasets/full`, `types/dataset.ts`) — `Datasets.tsx` fetches
+// live data. `DATASETS`/`READINESS` below are FIXTURES ONLY (Storybook/tests), not live data.
 
 export type Modality = 'image' | 'video' | 'audio' | '3d';
 export type Custody = 'sealed' | 'local' | 'remote';   // hemisphere: ring · dashed · lit
