@@ -466,3 +466,29 @@ test("a SYSTEM transfer (signorum.reserve) for a frozen anima still settles — 
   await deps.signorum.settle(r.signaIds, 5000n, 'system_transfer')
   assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 15800n)  // freeze did not block it
 })
+
+test("a frozen anima is BLOCKED (auth.forbidden) at every Collections chokepoint — collect / fireCollection / resumeCollection (freeze-boundary v2)", async () => {
+  // Freeze-boundary v2 (2026-07-22, "freeze all money lines"): the dispute freeze gates the ENTIRE
+  // Collections path — collect() (dispatches unless drafted), fireCollection() (dispatches the run),
+  // and resumeCollection() (resume triggers new spends) — not just invokeFlow + owned-purse mint.
+  // Each method gates the freeze at its TOP, before any other dep is touched, so a minimal CrystalApi
+  // (only `animae` wired) exercises exactly the spend-gate this item adds.
+  const { store: animae } = makeAnimae({ known: new Set([KNOWN_ANIMA, 'anima_ok']), frozen: new Set([KNOWN_ANIMA]) })
+  const api = new CrystalApi({ animae } as unknown as CrystalApiDeps)
+  const frozen: AuctorKey = { animaId: KNOWN_ANIMA }
+  const isForbidden = (err: unknown) => (err as { code?: string }).code === 'auth.forbidden'
+
+  await assert.rejects(() => api.collect(frozen, {} as Parameters<CrystalApi['collect']>[1]), isForbidden)
+  await assert.rejects(() => api.fireCollection(frozen, 'col_1'), isForbidden)
+  await assert.rejects(() => api.resumeCollection(frozen, 'col_1'), isForbidden)
+
+  // A non-frozen anima passes the freeze gate and fails LATER (collections deps absent →
+  // not_found.collection), proving the block is freeze-conditional, not a blanket denial. Login and
+  // identity reads are never routed through this gate.
+  const ok: AuctorKey = { animaId: 'anima_ok' }
+  await assert.rejects(
+    () => api.collect(ok, {} as Parameters<CrystalApi['collect']>[1]),
+    (err: unknown) => (err as { code?: string }).code === 'not_found.collection',
+  )
+  assert.equal((await animae.find(KNOWN_ANIMA))?.disputeFrozen, true)
+})
