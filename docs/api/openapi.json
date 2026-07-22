@@ -2014,6 +2014,498 @@
         }
       }
     },
+    "/data/datasets": {
+      "get": {
+        "summary": "The caller's datasets as the thin summary projection (the training-run picker's contract). Owner-scoped, cursor-paginated (?cursor=, ?limit=, 1..100 default 20), newest first.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "datasets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "images": {
+                            "type": "number"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name"
+                        ]
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "description": "Opaque cursor for the next page; absent on the last page."
+                    }
+                  },
+                  "required": [
+                    "datasets"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a Dataset from either v1 ingestion path: 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media seeded from the caller's own completed Acta). Rejects a body matching neither shape with 400.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "dataset": {
+                      "type": "object",
+                      "description": "A training dataset: media + captionsets + versions. The training-data primitive.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "owner": {
+                          "type": "string",
+                          "description": "FK -> Anima, the owning identity."
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "modality": {
+                          "type": "string",
+                          "enum": [
+                            "image",
+                            "video",
+                            "audio",
+                            "3d"
+                          ]
+                        },
+                        "custody": {
+                          "type": "string",
+                          "enum": [
+                            "sealed",
+                            "local",
+                            "remote"
+                          ]
+                        },
+                        "media": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              },
+                              "source": {
+                                "type": "string",
+                                "enum": [
+                                  "upload",
+                                  "generation"
+                                ]
+                              },
+                              "actumId": {
+                                "type": "string",
+                                "description": "FK -> Actum. Present iff source === 'generation'."
+                              },
+                              "addedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "url",
+                              "source",
+                              "addedAt"
+                            ]
+                          }
+                        },
+                        "captionsets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "method": {
+                                "type": "string",
+                                "description": "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'."
+                              },
+                              "coverage": {
+                                "type": "string",
+                                "description": "How much of the media this pass covers, e.g. \"12/12\"."
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name",
+                              "method",
+                              "coverage"
+                            ]
+                          }
+                        },
+                        "versions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "v": {
+                                "type": "string"
+                              },
+                              "count": {
+                                "type": "number"
+                              },
+                              "when": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "v",
+                              "count",
+                              "when"
+                            ]
+                          }
+                        },
+                        "natum": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "mutatum": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "owner",
+                        "name",
+                        "modality",
+                        "custody",
+                        "media",
+                        "captionsets",
+                        "versions",
+                        "natum",
+                        "mutatum"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "dataset"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Create a Dataset. `source: 'upload'` ingests media already dropped via `POST /storage/uploads/sign` (mediaUrls); `source: 'generation'` seeds media from the caller's own completed Acta (actumIds). Exactly one shape; the discriminant is required.",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "upload",
+                      "generation"
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "modality": {
+                    "type": "string",
+                    "enum": [
+                      "image",
+                      "video",
+                      "audio",
+                      "3d"
+                    ]
+                  },
+                  "custody": {
+                    "type": "string",
+                    "enum": [
+                      "sealed",
+                      "local",
+                      "remote"
+                    ],
+                    "description": "Defaults to local."
+                  },
+                  "mediaUrls": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Required when source === 'upload'."
+                  },
+                  "actumIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Required when source === 'generation'."
+                  }
+                },
+                "required": [
+                  "source",
+                  "name",
+                  "modality"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/data/datasets/full": {
+      "get": {
+        "summary": "The caller's datasets as the full rich shape (custody, modality, captionsets, versions) — Datasets.tsx's live listing. Owner-scoped, cursor-paginated identically to the summary route.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "datasets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "A training dataset: media + captionsets + versions. The training-data primitive.",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "owner": {
+                            "type": "string",
+                            "description": "FK -> Anima, the owning identity."
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "modality": {
+                            "type": "string",
+                            "enum": [
+                              "image",
+                              "video",
+                              "audio",
+                              "3d"
+                            ]
+                          },
+                          "custody": {
+                            "type": "string",
+                            "enum": [
+                              "sealed",
+                              "local",
+                              "remote"
+                            ]
+                          },
+                          "media": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "url": {
+                                  "type": "string"
+                                },
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "upload",
+                                    "generation"
+                                  ]
+                                },
+                                "actumId": {
+                                  "type": "string",
+                                  "description": "FK -> Actum. Present iff source === 'generation'."
+                                },
+                                "addedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "url",
+                                "source",
+                                "addedAt"
+                              ]
+                            }
+                          },
+                          "captionsets": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "method": {
+                                  "type": "string",
+                                  "description": "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'."
+                                },
+                                "coverage": {
+                                  "type": "string",
+                                  "description": "How much of the media this pass covers, e.g. \"12/12\"."
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name",
+                                "method",
+                                "coverage"
+                              ]
+                            }
+                          },
+                          "versions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "v": {
+                                  "type": "string"
+                                },
+                                "count": {
+                                  "type": "number"
+                                },
+                                "when": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              },
+                              "required": [
+                                "v",
+                                "count",
+                                "when"
+                              ]
+                            }
+                          },
+                          "natum": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "mutatum": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "owner",
+                          "name",
+                          "modality",
+                          "custody",
+                          "media",
+                          "captionsets",
+                          "versions",
+                          "natum",
+                          "mutatum"
+                        ]
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "description": "Opaque cursor for the next page; absent on the last page."
+                    }
+                  },
+                  "required": [
+                    "datasets"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/me": {
       "get": {
         "summary": "The caller's owner-keyed account settings — presentation skin (Profile), cross-cutting generation defaults (Preferences), and verb→flow bindings. Anon-capable (keyed by AuctorKey).",

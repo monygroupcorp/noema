@@ -41,6 +41,7 @@ import { dispatchInceptio, type DispatchDeps } from '../../execution/dispatchInc
 import { toRun, toSettledRun, toCollection, toTeam, toEdition, toProject } from './runProjection.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
 import { Errors, ApiError } from './errors.js'
+import { v4 as uuidv4 } from 'uuid'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { resolveCanonVerb, type CanonVerb } from '../../crystal/verbResolver.js'
 import { computeRecipient } from '../../arcanum/prover.js'
@@ -57,6 +58,7 @@ export interface ListRunsOpts {
   limit?: number
 }
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
+import type { CreateDatasetInput, Dataset, DatasetSummary, Datasets } from '../../types/dataset.js'
 import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
 import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
 import type { Provincia, ProvinciaResKind, Provinciarum } from '../../types/provincia.js'
@@ -135,6 +137,9 @@ export interface CrystalApiDeps {
    *  Absent → collection ops unavailable. */
   collectiones?: Collectionum
   collectioCursor?: Pick<CollectioCursor, 'start' | 'extend' | 'approveActum' | 'rejectAndRevive' | 'pause' | 'resume'>
+  /** Dataset store — backs `listDatasets`/`listDatasetSummaries`/`getDataset`/`createDataset`.
+   *  Absent → dataset ops unavailable. */
+  datasets?: Datasets
   /** Team store — backs the team CRUD + team-owned collections. Absent → team ops unavailable. */
   sodalitatum?: Sodalitatum
   /** Project store (Provincia) — backs the account-scoped project CRUD + holdings. Absent → project ops unavailable. */
@@ -1483,6 +1488,113 @@ export class CrystalApi {
         ...(m.genus === 'compositus' ? { steps: m.gradus?.length ?? 0 } : {}),
         modusGenus: resolveCanonVerb(m),
       }
+    })
+  }
+
+  // ── Datasets (T4) ────────────────────────────────────────────────────────
+
+  private _datasetsStore(): Datasets {
+    const store = this.deps.datasets
+    if (!store) throw new ApiError('not_found.dataset', 'datasets unavailable', 404)
+    return store
+  }
+
+  /** Datasets are animaId-keyed like Provincia — anonymous (commitment/bursa) callers
+   *  cannot own one (mirrors `_projectAnimaId`). */
+  private _datasetOwner(auctor: AuctorKey): string {
+    if ('animaId' in auctor) return auctor.animaId
+    throw Errors.authForbidden('datasets require an identified account')
+  }
+
+  /** Pull every http(s) URL value out of an Actum's opaque `exitus` — the generic v1
+   *  heuristic for "the media this run produced" (exitus has no fixed cross-modus
+   *  schema; `additionalProperties: true` in apiContract.ts's RunSchema). */
+  private _urlsFromExitus(exitus: Record<string, unknown> | undefined): string[] {
+    const urls: string[] = []
+    const visit = (v: unknown): void => {
+      if (typeof v === 'string' && /^https?:\/\//.test(v)) urls.push(v)
+      else if (Array.isArray(v)) v.forEach(visit)
+      else if (v && typeof v === 'object') Object.values(v).forEach(visit)
+    }
+    visit(exitus)
+    return urls
+  }
+
+  /** List the full `Dataset[]` for the caller — owner-scoped, cursor-paginated
+   *  (mirrors `GET /v1/me/runs`'s `?cursor=`/`?limit=` precedent). */
+  async listDatasets(auctor: AuctorKey, opts: { cursor?: string; limit?: number } = {}): Promise<{ datasets: Dataset[]; nextCursor?: string }> {
+    const owner = this._datasetOwner(auctor)
+    const { entries, nextCursor } = await this._datasetsStore().list({ owner, ...opts })
+    return { datasets: entries, ...(nextCursor ? { nextCursor } : {}) }
+  }
+
+  /** List the thin `DatasetSummary[]` projection for the caller — the training-run
+   *  picker's consumer. Same store, same owner-scoping, projected down. */
+  async listDatasetSummaries(auctor: AuctorKey, opts: { cursor?: string; limit?: number } = {}): Promise<{ datasets: DatasetSummary[]; nextCursor?: string }> {
+    const owner = this._datasetOwner(auctor)
+    const { entries, nextCursor } = await this._datasetsStore().listSummaries({ owner, ...opts })
+    return { datasets: entries, ...(nextCursor ? { nextCursor } : {}) }
+  }
+
+  /** Resolve a Dataset the caller owns, or 404 (stranger gets not_found, not forbidden —
+   *  mirrors `_ownedTabula`/`_ownedProject`). */
+  async getDataset(auctor: AuctorKey, id: string): Promise<Dataset> {
+    const owner = this._datasetOwner(auctor)
+    const d = await this._datasetsStore().find(id)
+    if (!d || d.owner !== owner) throw new ApiError('not_found.dataset', `Dataset '${id}' not found`, 404)
+    return d
+  }
+
+  /** Create a Dataset from either v1 ingestion path (Q2): `upload` (already-signed R2
+   *  media URLs from `POST /storage/uploads/sign`) or `generation` (media resolved from
+   *  the caller's own completed Acta). Rejects a body matching neither shape. */
+  async createDataset(auctor: AuctorKey, input: CreateDatasetInput): Promise<Dataset> {
+    const owner = this._datasetOwner(auctor)
+    const store = this._datasetsStore()
+    const now = new Date()
+
+    if (!input || (input.source !== 'upload' && input.source !== 'generation')) {
+      throw Errors.inputMalformed("source must be 'upload' or 'generation'")
+    }
+    if (typeof input.name !== 'string' || !input.name.trim()) {
+      throw Errors.inputMalformed('name is required')
+    }
+    const modality = input.modality
+    if (!modality || !['image', 'video', 'audio', '3d'].includes(modality)) {
+      throw Errors.inputMalformed("modality must be one of 'image' | 'video' | 'audio' | '3d'")
+    }
+
+    let media: Dataset['media']
+    if (input.source === 'upload') {
+      if (!Array.isArray(input.mediaUrls) || input.mediaUrls.length === 0) {
+        throw Errors.inputMalformed('mediaUrls is required and must be non-empty for an upload dataset')
+      }
+      media = input.mediaUrls.map((url) => ({ id: uuidv4(), url, source: 'upload' as const, addedAt: now }))
+    } else {
+      if (!Array.isArray(input.actumIds) || input.actumIds.length === 0) {
+        throw Errors.inputMalformed('actumIds is required and must be non-empty for a generation-seeded dataset')
+      }
+      const acta = await Promise.all(input.actumIds.map((id) => this.deps.actorum.findById(id)))
+      media = []
+      for (let i = 0; i < acta.length; i++) {
+        const actum = acta[i]
+        const actumId = input.actumIds[i]
+        if (!actum || !(await this._owns(auctor, actum))) throw Errors.notFoundRun(actumId)
+        if (actum.status !== 'completus') throw Errors.inputMalformed(`Actum '${actumId}' has not completed`)
+        const urls = this._urlsFromExitus(actum.exitus)
+        for (const url of urls) media.push({ id: uuidv4(), url, source: 'generation' as const, actumId, addedAt: now })
+      }
+      if (media.length === 0) throw Errors.inputMalformed('none of the referenced Acta produced usable media')
+    }
+
+    return store.create({
+      owner,
+      name: input.name,
+      modality,
+      custody: input.custody ?? 'local',
+      media,
+      captionsets: [],
+      versions: [{ v: '1.0.0', count: media.length, when: now }],
     })
   }
 

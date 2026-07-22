@@ -902,6 +902,7 @@ async function main(): Promise<void> {
     consuetudinum,
     compositusCursor: ring.compositusCursor,
     collectiones: ring.collectiones,
+    datasets: ring.datasets,
     collectioCursor: ring.collectioCursor,
     sodalitatum: ring.sodalitates,
     provinciarum: ring.provinciae,

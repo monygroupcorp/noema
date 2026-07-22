@@ -528,6 +528,12 @@ export const api = {
   // the builder launches a training as a normal run, these only feed the picker/cost.
   listDatasets: () => fetch('/v1/data/datasets', { headers: readHeaders() })
     .then(j<{ datasets: DatasetSummary[] }>),
+  // Full rich shape (custody, modality, captionsets, versions) — Datasets.tsx's live listing.
+  listDatasetsFull: () => fetch('/v1/data/datasets/full', { headers: readHeaders() })
+    .then(j<{ datasets: Dataset[] }>),
+  createDataset: (body: CreateDatasetRequest) =>
+    fetch('/v1/data/datasets', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(j<{ dataset: Dataset }>),
   trainingCost: (body: { steps: number; baseModel?: string; images?: number }) =>
     fetch('/v1/data/trainings/calculate-cost', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ impetus?: string; usd?: number }>),
@@ -850,6 +856,28 @@ export interface ArcanumMerkleProofView {
 }
 
 export interface DatasetSummary { id: string; name: string; images?: number; updatedAt?: string }
+
+// Full dataset shape (GET /v1/data/datasets/full) — mirrors backend `types/dataset.ts#Dataset`.
+export type DatasetModality = 'image' | 'video' | 'audio' | '3d';
+export type DatasetCustody = 'sealed' | 'local' | 'remote';
+export interface DatasetCaptionset { id: string; name: string; method: string; coverage: string }
+export interface DatasetMediaItem { id: string; url: string; source: 'upload' | 'generation'; actumId?: string; addedAt: string }
+export interface DatasetVersionView { v: string; count: number; when: string }
+export interface Dataset {
+  id: string;
+  owner: string;
+  name: string;
+  modality: DatasetModality;
+  custody: DatasetCustody;
+  media: DatasetMediaItem[];
+  captionsets: DatasetCaptionset[];
+  versions: DatasetVersionView[];
+  natum: string;
+  mutatum: string;
+}
+export type CreateDatasetRequest =
+  | { source: 'upload'; name: string; modality: DatasetModality; custody?: DatasetCustody; mediaUrls: string[] }
+  | { source: 'generation'; name: string; modality: DatasetModality; custody?: DatasetCustody; actumIds: string[] };
 
 // An owned model (GET /v1/me/models) — mirrors the backend ModelCard. Imports + trained
 // LoRAs, owner-scoped. No royalty/run economics exist server-side yet.
