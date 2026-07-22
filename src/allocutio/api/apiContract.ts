@@ -1199,6 +1199,119 @@ const RevenueReportSchema: JsonSchema = {
   required: ['asOf', 'trailingUsdRevenue', 'band', 'activeConditionalLicenses'],
 }
 
+/** One caption pass over (some or all of) a dataset's media (mirrors `types/dataset.ts#Captionset`). */
+const CaptionsetSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    name: { type: 'string' },
+    method: { type: 'string', description: "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'." },
+    coverage: { type: 'string', description: 'How much of the media this pass covers, e.g. "12/12".' },
+  },
+  required: ['id', 'name', 'method', 'coverage'],
+}
+
+/** One media item in a dataset (mirrors `types/dataset.ts#DatasetMediaItem`). */
+const DatasetMediaItemSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    url: { type: 'string' },
+    source: { type: 'string', enum: ['upload', 'generation'] },
+    actumId: { type: 'string', description: "FK -> Actum. Present iff source === 'generation'." },
+    addedAt: { type: 'string', format: 'date-time' },
+  },
+  required: ['id', 'url', 'source', 'addedAt'],
+}
+
+/** One media-set snapshot (mirrors `types/dataset.ts#DatasetVersion`). */
+const DatasetVersionSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    v: { type: 'string' },
+    count: { type: 'number' },
+    when: { type: 'string', format: 'date-time' },
+  },
+  required: ['v', 'count', 'when'],
+}
+
+/** The FULL rich Dataset shape (mirrors `types/dataset.ts#Dataset`). */
+const DatasetSchema: JsonSchema = {
+  type: 'object',
+  description: 'A training dataset: media + captionsets + versions. The training-data primitive.',
+  properties: {
+    id: { type: 'string' },
+    owner: { type: 'string', description: 'FK -> Anima, the owning identity.' },
+    name: { type: 'string' },
+    modality: { type: 'string', enum: ['image', 'video', 'audio', '3d'] },
+    custody: { type: 'string', enum: ['sealed', 'local', 'remote'] },
+    media: { type: 'array', items: DatasetMediaItemSchema },
+    captionsets: { type: 'array', items: CaptionsetSchema },
+    versions: { type: 'array', items: DatasetVersionSchema },
+    natum: { type: 'string', format: 'date-time' },
+    mutatum: { type: 'string', format: 'date-time' },
+  },
+  required: ['id', 'owner', 'name', 'modality', 'custody', 'media', 'captionsets', 'versions', 'natum', 'mutatum'],
+}
+
+/** The thin DatasetSummary projection (mirrors `types/dataset.ts#DatasetSummary` /
+ *  `lib/api.ts`'s existing client-side `DatasetSummary`). */
+const DatasetSummarySchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    name: { type: 'string' },
+    images: { type: 'number' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+  required: ['id', 'name'],
+}
+
+/** The `{ datasets, nextCursor? }` envelope returned by both dataset list operations. */
+const DatasetsListSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    datasets: { type: 'array', items: DatasetSchema },
+    nextCursor: { type: 'string', description: 'Opaque cursor for the next page; absent on the last page.' },
+  },
+  required: ['datasets'],
+}
+
+const DatasetSummariesListSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    datasets: { type: 'array', items: DatasetSummarySchema },
+    nextCursor: { type: 'string', description: 'Opaque cursor for the next page; absent on the last page.' },
+  },
+  required: ['datasets'],
+}
+
+/** The request body for `POST /v1/data/datasets` — a discriminated union of the two v1
+ *  ingestion paths (Q2). */
+const CreateDatasetRequestSchema: JsonSchema = {
+  type: 'object',
+  description:
+    "Create a Dataset. `source: 'upload'` ingests media already dropped via " +
+    "`POST /storage/uploads/sign` (mediaUrls); `source: 'generation'` seeds media from the " +
+    "caller's own completed Acta (actumIds). Exactly one shape; the discriminant is required.",
+  properties: {
+    source: { type: 'string', enum: ['upload', 'generation'] },
+    name: { type: 'string' },
+    modality: { type: 'string', enum: ['image', 'video', 'audio', '3d'] },
+    custody: { type: 'string', enum: ['sealed', 'local', 'remote'], description: 'Defaults to local.' },
+    mediaUrls: { type: 'array', items: { type: 'string' }, description: "Required when source === 'upload'." },
+    actumIds: { type: 'array', items: { type: 'string' }, description: "Required when source === 'generation'." },
+  },
+  required: ['source', 'name', 'modality'],
+}
+
+/** The `{ dataset }` envelope returned by `POST /v1/data/datasets`. */
+const DatasetEnvelopeSchema: JsonSchema = {
+  type: 'object',
+  properties: { dataset: DatasetSchema },
+  required: ['dataset'],
+}
+
 const CogsReportSchema: JsonSchema = {
   type: 'object',
   description: 'Admin COGS report: trailing-window rollup of per-job costUsd off wide_events — the read-only pair to the revenue report.',
@@ -1384,6 +1497,28 @@ export const API_CONTRACT: ApiContract = {
       summary: "The caller's SETTLED spend history — per-run impetus cost (+ derived USD), settledAt, and a lifetime running total. Owner-scoped (identified or anon-commitment), cursor-paginated, newest first. Only completus runs (a refunded failed run is not spend). Query: status=settled (only supported filter), cursor, limit (1..100, default 20).",
       auth: true,
       response: RunsPageSchema,
+    },
+    {
+      method: 'GET',
+      path: '/data/datasets',
+      summary: "The caller's datasets as the thin summary projection (the training-run picker's contract). Owner-scoped, cursor-paginated (?cursor=, ?limit=, 1..100 default 20), newest first.",
+      auth: true,
+      response: DatasetSummariesListSchema,
+    },
+    {
+      method: 'GET',
+      path: '/data/datasets/full',
+      summary: "The caller's datasets as the full rich shape (custody, modality, captionsets, versions) — Datasets.tsx's live listing. Owner-scoped, cursor-paginated identically to the summary route.",
+      auth: true,
+      response: DatasetsListSchema,
+    },
+    {
+      method: 'POST',
+      path: '/data/datasets',
+      summary: "Create a Dataset from either v1 ingestion path: 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media seeded from the caller's own completed Acta). Rejects a body matching neither shape with 400.",
+      auth: true,
+      request: CreateDatasetRequestSchema,
+      response: DatasetEnvelopeSchema,
     },
     {
       method: 'GET',
