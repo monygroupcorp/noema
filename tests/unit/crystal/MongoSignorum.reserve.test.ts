@@ -65,6 +65,65 @@ test('reserve insufficient fails closed and locks nothing', async () => {
   assert.equal(locked, 0)
 })
 
+// ── negative-valor debit exclusion (noema-083), Mongo parity ─────────────────
+//
+// Real-Mongo proof that reserve's server-side selection query filters out negative-valor debit
+// signa (nexus:studioSpend / tee:spend / publish:scanFee mint `valor: -impetus, status:'valid'`
+// rows). balance() still NETS them (it must not change); reserve must never lock one. The filter
+// rides the numeric sort-mirror `valorNum` so it stays on the { animaId, status, valorNum } index.
+
+// A studioSpend-shaped host debit: negative valor, valid on issue.
+async function issueDebit(animaId: string, valor: bigint) {
+  return store.issue({ animaId, forma: 'integer', valor, auctor: 'nexus:studioSpend', testis: 'materia-1' })
+}
+
+test('reserve: never selects a negative-valor debit signum, and leaves it untouched', async () => {
+  await issue('a', 100n)
+  await issue('a', 300n)
+  const neg = await issueDebit('a', -50n)
+  assert.equal(await store.balance({ animaId: 'a' }), 350n)   // balance nets the debit
+
+  const r = await store.reserve({ animaId: 'a' }, 120n, 'act-1')
+  assert.ok(r.ok)
+  assert.ok(!r.signaIds.includes(neg.id), 'negative debit must never be reserved')
+  // the debit row is untouched — still valid, never locked.
+  const negDoc = await col.findOne({ id: neg.id })
+  assert.ok(negDoc)
+  assert.equal(negDoc.status, 'valid')
+  assert.equal(negDoc.valor, '-50')
+  const lockedDebits = await col.countDocuments({ valorNum: { $lte: 0 }, status: 'locked' })
+  assert.equal(lockedDebits, 0)
+})
+
+test('reserve+settle: spends only positives; the debit still nets to the expected balance', async () => {
+  await issue('a', 500n)          // one positive coin
+  await issueDebit('a', -200n)    // studioSpend-shaped host debit
+  assert.equal(await store.balance({ animaId: 'a' }), 300n)   // netted spendable
+
+  const r = await store.reserve({ animaId: 'a' }, 300n, 'act-1')
+  assert.ok(r.ok)
+  assert.equal(r.locked, 500n)
+  assert.equal(r.signaIds.length, 1)
+
+  await store.settle(r.signaIds, 300n, 'act-1')   // charge exactly 300, refund 200
+  // Spent 300 of the netted 300 → balance nets to 0 (200 refund − 200 debit).
+  assert.equal(await store.balance({ animaId: 'a' }), 0n)
+})
+
+test('reserve: positive-only identity — numeric smallest-first selection unchanged (regression guard)', async () => {
+  const c50 = await issue('a', 50n)
+  const c100 = await issue('a', 100n)
+  await issue('a', 900n)
+
+  const r = await store.reserve({ animaId: 'a' }, 120n, 'act-1')
+  assert.ok(r.ok)
+  // greedy numeric smallest-first, stops once covered: exactly {50,100}, the 900 untouched.
+  const selected = new Set(r.signaIds)
+  assert.equal(selected.size, 2)
+  assert.ok(selected.has(c50.id) && selected.has(c100.id))
+  assert.equal(r.locked, 150n)
+})
+
 // ── the load-bearing concurrency proof ───────────────────────────────────────
 
 test('CONCURRENCY: parallel reservations on one pool never overdraw', async () => {

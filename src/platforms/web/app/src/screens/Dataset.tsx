@@ -1,28 +1,59 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { Ic } from '../lib/icons';
-import { DATASETS, custodyGlyph, CUSTODY_LABEL, type Custody } from '../lib/datasets';
+import { custodyGlyph, type Custody } from '../lib/datasets';
+import { api, type Dataset as DatasetT } from '../lib/api';
 
 // Dataset detail (train-dataset-spec.md, render noema-train-dataset.png) — the core asset:
 // media (king) + versions + captionsets, with a media-custody dial. Captionsets are a separate
 // versioned layer (the lesson); you pick one when you derive a training. Custody is the
 // hemisphere everywhere data is read.
+//
+// Reads the real `GET /v1/data/datasets/full` list and finds this id client-side — noema-079's
+// landed contract has no per-id detail route, only list/listFull/create (apiContract.ts:1503-
+// 1521), so listFull + find is the real detail lookup (same pattern Datasets.tsx uses for the
+// library grid).
 const CUSTODY_OPTS: { c: Custody; label: string }[] = [
   { c: 'local', label: 'Local' }, { c: 'sealed', label: 'TEE' }, { c: 'remote', label: 'Remote' },
 ];
-// representative captions per tile (placeholder for real per-item captions)
-const CAPS = ['frostknight, full plate, snow field, front', 'frostknight, helmet off, blue cloak, 3/4 L',
-  'frostknight, raising frost sword, profile', 'frostknight, seated, campfire, dusk',
-  'frostknight, frosted visor closeup, ice', 'frostknight, running, snowstorm, motion'];
 
 export function Dataset() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const d = DATASETS.find((x) => x.id === id) ?? DATASETS[0];
-  const [custody, setCustody] = useState<Custody>(d.custody);
-  const [activeSet, setActiveSet] = useState(d.captionsets[0]?.id ?? '');
-  const tiles = Array.from({ length: Math.min(d.count, 9) }, (_, i) => d.tiles[i % d.tiles.length]);
+  const [datasets, setDatasets] = useState<DatasetT[] | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    api.listDatasetsFull()
+      .then(({ datasets: ds }) => { if (live) setDatasets(ds); })
+      .catch(() => { if (live) setDatasets([]); });
+    return () => { live = false; };
+  }, []);
+
+  const d = (datasets ?? []).find((x) => x.id === id);
+  const [custody, setCustody] = useState<Custody | null>(null);
+  const [activeSet, setActiveSet] = useState<string | null>(null);
+  // Custody UI state initializes from the loaded record the first time it resolves
+  // (this dial is presentational-only — noema-079 shipped no custody-mutation route).
+  useEffect(() => {
+    if (d && custody === null) { setCustody(d.custody); setActiveSet(d.captionsets[0]?.id ?? ''); }
+  }, [d, custody]);
+
+  if (datasets === null) {
+    return <AppShell title="Dataset"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
+  }
+  if (!d) {
+    return (
+      <AppShell title="Dataset">
+        <div className="page"><div className="pw wide">
+          <div className="sub mono">dataset not found. <Link to="/datasets">back to datasets</Link></div>
+        </div></div>
+      </AppShell>
+    );
+  }
+  const c = custody ?? d.custody;
+  const active = activeSet ?? (d.captionsets[0]?.id ?? '');
+  const version = d.versions[d.versions.length - 1]?.v ?? '—';
 
   const crumb = (
     <span className="ph-crumb"><Link to="/datasets">datasets</Link> <span className="sep">/</span> <b>{d.name}</b></span>
@@ -35,7 +66,7 @@ export function Dataset() {
           <div>
             <div className="noema-kicker" style={{ marginBottom: 8 }}>dataset · the core asset</div>
             <h1 className="ds-d-name">{d.name} <span className="ds-badge" style={{ color: 'var(--m-image)' }}><span className="dot" style={{ background: 'var(--m-image)' }} /> {d.modality}</span></h1>
-            <div className="sub mono">{d.count} {d.modality === 'video' ? 'clips' : 'images'} · {d.version} · {d.captionsets.length} captionsets · updated {d.updated}</div>
+            <div className="sub mono">{d.media.length} {d.modality === 'video' ? 'clips' : 'images'} · {version} · {d.captionsets.length} captionsets · updated {d.mutatum}</div>
           </div>
         </div>
 
@@ -43,16 +74,20 @@ export function Dataset() {
           {/* the media — king */}
           <div className="ds-images">
             <div className="ds-imgs-head"><span className="noema-kicker">the images · what noema learns from</span>
-              <span className="mono ds-showing">showing {d.captionsets.find((c) => c.id === activeSet)?.name ?? '—'} · {d.version}</span>
+              <span className="mono ds-showing">showing {d.captionsets.find((cs) => cs.id === active)?.name ?? '—'} · {version}</span>
             </div>
-            <div className="ds-imgrid">
-              {tiles.map((t, i) => (
-                <figure key={i} className="ds-img">
-                  <span className="ds-img-tile" style={{ background: t }} />
-                  <figcaption className="mono">{CAPS[i % CAPS.length]}</figcaption>
-                </figure>
-              ))}
-            </div>
+            {d.media.length === 0 ? (
+              <p className="ds-panel-note">no media in this dataset yet.</p>
+            ) : (
+              <div className="ds-imgrid">
+                {d.media.map((m) => (
+                  <figure key={m.id} className="ds-img">
+                    <span className="ds-img-tile" style={{ backgroundImage: `url(${m.url})`, backgroundSize: 'cover' }} />
+                    <figcaption className="mono">{m.source === 'upload' ? 'uploaded' : 'from a generation'}</figcaption>
+                  </figure>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* the panels */}
@@ -61,23 +96,23 @@ export function Dataset() {
               <div className="ds-panel-l">media custody · what we see</div>
               <div className="seg custody-seg">
                 {CUSTODY_OPTS.map((o) => (
-                  <button key={o.c} className={custody === o.c ? 'on' : ''} onClick={() => setCustody(o.c)}>
+                  <button key={o.c} className={c === o.c ? 'on' : ''} onClick={() => setCustody(o.c)}>
                     <span className={`hemi2 ${custodyGlyph(o.c)}`} /> {o.label}
                   </button>
                 ))}
               </div>
-              <p className="ds-panel-note">{custody === 'sealed' ? 'sealed — your images live in your enclave; we hold them, we can’t read them.'
-                : custody === 'local' ? 'local — the media never leaves your machine.' : 'remote — we host the media on our compute.'}</p>
+              <p className="ds-panel-note">{c === 'sealed' ? 'sealed — your images live in your enclave; we hold them, we can’t read them.'
+                : c === 'local' ? 'local — the media never leaves your machine.' : 'remote — we host the media on our compute.'}</p>
             </div>
 
             <div className="ds-panel">
               <div className="ds-panel-l">captionsets · {d.captionsets.length} · pick to train</div>
               {d.captionsets.length === 0 ? (
                 <p className="ds-panel-note">no captionset yet — a model learns from a caption layer. Run a caption job to make one.</p>
-              ) : d.captionsets.map((c) => (
-                <button key={c.id} className={`capset${activeSet === c.id ? ' on' : ''}`} onClick={() => setActiveSet(c.id)}>
-                  <span className={`radio${activeSet === c.id ? ' on' : ''}`} />
-                  <span className="cs-main"><span className="nm">{c.name}</span><span className="cs-sub mono"><span className={`hemi2 ${custodyGlyph(c.custody)}`} /> {c.method} · {c.coverage}</span></span>
+              ) : d.captionsets.map((cs) => (
+                <button key={cs.id} className={`capset${active === cs.id ? ' on' : ''}`} onClick={() => setActiveSet(cs.id)}>
+                  <span className={`radio${active === cs.id ? ' on' : ''}`} />
+                  <span className="cs-main"><span className="nm">{cs.name}</span><span className="cs-sub mono"><span className={`hemi2 ${custodyGlyph(c)}`} /> {cs.method} · {cs.coverage}</span></span>
                 </button>
               ))}
               <div className="capset-actions"><Link className="lnk" to={`/datasets/${d.id}/caption`}>+ new captionset</Link> · <Link className="lnk" to={`/datasets/${d.id}/caption`}>run a caption job</Link></div>
@@ -86,7 +121,7 @@ export function Dataset() {
             <div className="ds-panel">
               <div className="ds-panel-l">versions</div>
               {d.versions.map((v) => (
-                <div key={v.v} className={`verrow${v.v === d.version ? ' on' : ''}`}>
+                <div key={v.v} className={`verrow${v.v === version ? ' on' : ''}`}>
                   <span className="dot" /> <b>{v.v}</b> · {v.count} {d.modality === 'video' ? 'clips' : 'images'}<span className="when mono">{v.when}</span>
                 </div>
               ))}

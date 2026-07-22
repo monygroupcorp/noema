@@ -52,6 +52,9 @@ export interface RunRequest {
 export interface VestigiumImpressio { auctorImpressio?: 'amor' | 'risus' | 'maeror'; amor: number; risus: number; maeror: number }
 export interface Vestigium {
   id: string;
+  /** FK -> Actum (types/vestigium.ts#Vestigium.actumId), present when the trace resolved
+   * from a completed generation — the id a dataset's `source: 'generation'` create body needs. */
+  actumId?: string;
   promptum: string;
   imagoUrl?: string;
   intellaIds?: string[];
