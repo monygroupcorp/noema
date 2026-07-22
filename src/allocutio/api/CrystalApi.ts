@@ -526,6 +526,10 @@ export class CrystalApi {
    * the public Collection. The base modus may be atomic OR a compositus pipeline.
    */
   async collect(auctor: AuctorKey, opts: CollectOpts): Promise<Collection> {
+    // Dispute freeze (noema-082, freeze-boundary v2 2026-07-22): the ENTIRE Collections path is a
+    // user-initiated credit outflow — a non-draft collect dispatches (spends) immediately, and a
+    // draft is fired later. Gated at the top alongside invokeFlow (run spend) and owned-purse mint.
+    await this._assertNotDisputeFrozen(auctor)
     const { collectiones, collectioCursor } = this.deps
     if (!collectiones || !collectioCursor) throw Errors.notFoundCollection('collections')
 
@@ -583,6 +587,8 @@ export class CrystalApi {
    * Idempotent-guarded: only a `draft` may be fired.
    */
   async fireCollection(auctor: AuctorKey, id: string): Promise<Collection> {
+    // Dispute freeze (noema-082, freeze-boundary v2): firing a draft dispatches the run — a spend.
+    await this._assertNotDisputeFrozen(auctor)
     const { collectiones, collectioCursor } = this.deps
     if (!collectiones || !collectioCursor) throw Errors.notFoundCollection('collections')
     const c = await this._ownedCollection(auctor, id)
@@ -700,6 +706,11 @@ export class CrystalApi {
    * larger goal over time). Re-opens a completed Collection. Owner-scoped.
    */
   async extendCollection(auctor: AuctorKey, id: string, addCount: number): Promise<Collection> {
+    // Dispute freeze (noema-082, freeze-boundary v2): extend raises a collection's funded piece
+    // count (numerus + addCount) and dispatches those NEW pieces — new user-initiated outflow, the
+    // same collectioCursor-dispatch mechanism resume/fire use. Gated per the ruling's "principle is
+    // total" standing instruction for any FURTHER discovered outflow chokepoint (noted for review).
+    await this._assertNotDisputeFrozen(auctor)
     const c = await this._ownedCollection(auctor, id)
     // Extending dispatches new pieces funded by the collection's `by` (the
     // creator). Only that funder may extend — otherwise a team member could
@@ -728,6 +739,9 @@ export class CrystalApi {
 
   /** Resume dispatching after a pause. Owner-scoped. */
   async resumeCollection(auctor: AuctorKey, id: string): Promise<Collection> {
+    // Dispute freeze (noema-082, freeze-boundary v2): resume triggers new spends. After a dispute
+    // resolves the operator lifts the flag first, then resume works.
+    await this._assertNotDisputeFrozen(auctor)
     const c = await this._ownedCollection(auctor, id)
     await this.deps.collectioCursor?.resume(id)
     return toCollection((await this.deps.collectiones!.find(id)) ?? c)
