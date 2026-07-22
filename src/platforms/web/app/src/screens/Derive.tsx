@@ -1,11 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { DATASETS, custodyGlyph, type Custody } from '../lib/datasets';
+import { custodyGlyph, type Custody } from '../lib/datasets';
+import { api, type Dataset } from '../lib/api';
 
 // Derive a training (train-derive-spec.md, render noema-train-derive.png) — the recipe:
 // pick captionset (the lesson) + version + base + method + training custody → fire. One
 // dataset, many models. Custody here IS a per-run choice (training custody, chosen at derive).
+//
+// Source dataset/captionset are real (`GET /v1/data/datasets/full`); base model/method/
+// training-custody remain the pre-launch recipe picker (no training-run backend exists yet —
+// same constraint TrainRun.tsx's monitor already labels honestly).
 const CUSTODY: { c: Custody; t: string; s: string }[] = [
   { c: 'local', t: 'Local', s: 'Your GPU. Nothing leaves.' },
   { c: 'sealed', t: 'Remote · TEE', s: 'Sealed enclave — we run it, we can’t read your data.' },
@@ -15,9 +20,27 @@ const CUSTODY: { c: Custody; t: string; s: string }[] = [
 export function Derive() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const d = DATASETS.find((x) => x.id === id) ?? DATASETS[0];
+  const [datasets, setDatasets] = useState<Dataset[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.listDatasetsFull().then(({ datasets: ds }) => { if (live) setDatasets(ds); }).catch(() => { if (live) setDatasets([]); });
+    return () => { live = false; };
+  }, []);
+  const d = (datasets ?? []).find((x) => x.id === id);
   const [custody, setCustody] = useState<Custody>('sealed');
+
+  if (datasets === null) {
+    return <AppShell title="Derive"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
+  }
+  if (!d) {
+    return (
+      <AppShell title="Derive">
+        <div className="page"><div className="pw wide"><div className="sub mono">dataset not found. <Link to="/datasets">back to datasets</Link></div></div></div>
+      </AppShell>
+    );
+  }
   const cap = d.captionsets[0];
+  const version = d.versions[d.versions.length - 1]?.v ?? '—';
 
   const crumb = <span className="ph-crumb"><Link to="/datasets">datasets</Link> <span className="sep">/</span> <Link to={`/datasets/${d.id}`}>{d.name}</Link> <span className="sep">/</span> <b>train</b></span>;
 
@@ -33,12 +56,12 @@ export function Derive() {
         <div className="dv-source">
           <div className="dv-srow">
             <span className="dv-sl">dataset</span>
-            <span className="dv-sv"><b>{d.name}</b> <span className="ds-badge" style={{ color: 'var(--m-image)' }}><span className="dot" style={{ background: 'var(--m-image)' }} /> {d.modality}</span> · {d.version} · {d.count} images</span>
+            <span className="dv-sv"><b>{d.name}</b> <span className="ds-badge" style={{ color: 'var(--m-image)' }}><span className="dot" style={{ background: 'var(--m-image)' }} /> {d.modality}</span> · {version} · {d.media.length} images</span>
             <button className="lnk">version ▾</button>
           </div>
           <div className="dv-srow">
             <span className="dv-sl">captionset</span>
-            <span className="dv-sv"><span className={`hemi2 ${custodyGlyph(cap?.custody ?? 'sealed')}`} /> <b>{cap?.name ?? 'natural language'}</b> · {cap?.coverage ?? '11/12'} · trigger “frostknight”</span>
+            <span className="dv-sv"><span className={`hemi2 ${custodyGlyph(d.custody)}`} /> <b>{cap?.name ?? 'natural language'}</b> · {cap?.coverage ?? '11/12'} · trigger “frostknight”</span>
             <button className="lnk">change ▾</button>
           </div>
         </div>
