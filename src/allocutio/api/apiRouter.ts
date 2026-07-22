@@ -88,6 +88,10 @@ export interface ApiFacade {
   approveCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
   rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
   listCollectionPieces(auctor: AuctorKey, id: string, review?: 'pending' | 'approved' | 'rejected' | 'all'): Promise<import('./types.js').CollectionPiece[]>
+  listDatasets(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ datasets: import('../../types/dataset.js').Dataset[]; nextCursor?: string }>
+  listDatasetSummaries(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ datasets: import('../../types/dataset.js').DatasetSummary[]; nextCursor?: string }>
+  getDataset(auctor: AuctorKey, id: string): Promise<import('../../types/dataset.js').Dataset>
+  createDataset(auctor: AuctorKey, input: import('../../types/dataset.js').CreateDatasetInput): Promise<import('../../types/dataset.js').Dataset>
   publish(auctor: AuctorKey, opts: PublishOpts): Promise<Edition>
   getEdition(auctor: AuctorKey, id: string): Promise<Edition>
   feed(filter?: FeedFilter): Promise<FeedItem[]>
@@ -675,6 +679,40 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
     const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined
     res.json(await api.listRuns(auctor, { ...(cursor ? { cursor } : {}), ...(limit !== undefined ? { limit } : {}) }))
+  }))
+
+  // GET /v1/data/datasets — the caller's datasets as the THIN `DatasetSummary[]` projection
+  // (the training-run picker's contract — matches this route's pre-existing client call in
+  // `lib/api.ts:listDatasets()`, unchanged: `{ datasets: DatasetSummary[] }`). Owner-scoped,
+  // cursor-paginated like `GET /v1/me/runs`.
+  router.get('/data/datasets', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined
+    const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
+    const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined
+    res.json(await api.listDatasetSummaries(auctor, { ...(cursor ? { cursor } : {}), ...(limit !== undefined ? { limit } : {}) }))
+  }))
+
+  // GET /v1/data/datasets/full — the caller's datasets as the FULL rich `Dataset[]` shape
+  // (custody, modality, captionsets, versions) — `Datasets.tsx`'s live listing. Kept as a
+  // separate route from the summary above so the existing `listDatasets()` client contract
+  // stays untouched; owner-scoped, cursor-paginated identically.
+  router.get('/data/datasets/full', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined
+    const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
+    const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined
+    res.json(await api.listDatasets(auctor, { ...(cursor ? { cursor } : {}), ...(limit !== undefined ? { limit } : {}) }))
+  }))
+
+  // POST /v1/data/datasets — create a Dataset via either v1 ingestion path (Q2): a
+  // `source: 'upload'` body (media already dropped via `POST /storage/uploads/sign`) or a
+  // `source: 'generation'` body (media seeded from the caller's own completed Acta). The
+  // discriminant is validated server-side (CrystalApi.createDataset); a body matching
+  // neither shape 400s.
+  router.post('/data/datasets', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    res.status(201).json({ dataset: await api.createDataset(auctor, req.body ?? {}) })
   }))
 
   // GET /v1/me — the caller's account settings: appearance + generation defaults + bindings.
