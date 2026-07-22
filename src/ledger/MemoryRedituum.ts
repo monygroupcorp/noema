@@ -49,14 +49,59 @@ export class MemoryRedituum implements Redituum {
     return record
   }
 
+  async findByChargeRef(chargeRef: string): Promise<Reditus | null> {
+    for (const r of this.store.values()) {
+      if (r.origo === 'fiat' && r.chargeRef === chargeRef) return r
+    }
+    return null
+  }
+
+  async reverse(originalReditusId: string, amountMicro: bigint, reason: string): Promise<Reditus> {
+    // Idempotent on reversalOf: one contra-row per original (a redelivered charge.refunded must not
+    // double-reverse). First writer wins; a later call returns the existing contra-row unchanged.
+    for (const existing of this.store.values()) {
+      if (existing.reversalOf === originalReditusId) return existing
+    }
+    const original = this.store.get(originalReditusId)
+    if (!original) throw new Error(`Reditus reverse: original '${originalReditusId}' not found`)
+    if (typeof amountMicro !== 'bigint' || amountMicro <= 0n) {
+      throw new Error(`Reditus reverse: amountMicro must be a positive micro-USD amount (got ${String(amountMicro)})`)
+    }
+    if (amountMicro > original.usdFmv) {
+      throw new Error(`Reditus reverse: amountMicro ${amountMicro} exceeds the original recognized ${original.usdFmv}`)
+    }
+    // The contra-row: NEGATIVE usdFmv (offsetting), reversalOf → original. Exempt from record()'s
+    // fail-closed positivity check by construction (it does not go through record()).
+    const contra: Reditus = {
+      id: randomUUID(),
+      natum: new Date(),
+      usdFmv: -amountMicro,
+      fmvSource: reason,
+      origo: original.origo,
+      reversalOf: originalReditusId,
+    }
+    this.store.set(contra.id, contra)
+    return contra
+  }
+
   async trailingUsdRevenue(now: Date): Promise<bigint> {
     const cutoff = new Date(now)
     cutoff.setFullYear(cutoff.getFullYear() - 1)   // 12 months before `now`
+    const inWindow = (d: Date): boolean => d > cutoff && d <= now
     let sum = 0n
     for (const r of this.store.values()) {
-      // window (cutoff, now]: a receipt exactly 12 months old has rolled off; a future-
-      // dated receipt (clock skew) is excluded from the trailing figure.
-      if (r.natum > cutoff && r.natum <= now) sum += r.usdFmv
+      // Gross side: only true inbound rows (NOT reversal contra-rows), keyed by their own natum.
+      // window (cutoff, now]: a receipt exactly 12 months old has rolled off; a future-dated
+      // receipt (clock skew) is excluded from the trailing figure.
+      if (r.reversalOf === undefined && inWindow(r.natum)) sum += r.usdFmv
+    }
+    // Netting side (noema-082): a refund contra-row un-recognizes revenue in the window the ORIGINAL
+    // was recognized in — subtract it only when the row it points at falls inside this window (not
+    // by the contra-row's own natum). Its usdFmv is already negative, so we add it.
+    for (const r of this.store.values()) {
+      if (r.reversalOf === undefined) continue
+      const original = this.store.get(r.reversalOf)
+      if (original && inWindow(original.natum)) sum += r.usdFmv
     }
     return sum
   }

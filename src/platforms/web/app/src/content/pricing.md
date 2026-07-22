@@ -118,7 +118,7 @@ Don't want an account? Buy credits anonymously with crypto. Your spend is a zero
 No. Credits purchased directly never expire.
 
 **Can I get a refund?**
-All credit purchases are final. Credits are a prepaid compute balance, not a subscription. If you have an issue, contact us and we'll work it out.
+Yes, within limits. Unused credits are refundable within 14 days of purchase. Once credits have been spent, in whole or in part, the spent portion is non-refundable — they're a prepaid compute balance, not a subscription. If you have an issue, contact us and we'll work it out.
 
 **What's the difference between a purse credit and a regular credit?**
 Functionally identical — both buy the same compute. The difference is the billing layer: a regular credit is tied to your account; a purse credit is a ZK proof with no account association. Same GPU, same models, same privacy guarantee on the compute side.

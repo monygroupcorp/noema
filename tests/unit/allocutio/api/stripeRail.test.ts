@@ -20,18 +20,37 @@ import {
   type StripeGateway,
   type StripeWebhookEvent,
   type StripeCheckoutInput,
+  type OnDisputeFrozen,
 } from '../../../../src/api/webhooks/stripeWebhook.js'
 import { MemorySignorum } from '../../../../src/ledger/MemorySignorum.js'
 import { MemoryRedituum } from '../../../../src/ledger/MemoryRedituum.js'
 import { PACKS } from '../../../../src/ledger/stripePacks.js'
+import { CrystalApi, type CrystalApiDeps } from '../../../../src/allocutio/api/CrystalApi.js'
+import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { AnimaStore, Anima } from '../../../../src/types/anima.js'
 
 // ── fakes ────────────────────────────────────────────────────────────────────
 
 const KNOWN_ANIMA = 'anima_1'
 
-function animae(known: Set<string> = new Set([KNOWN_ANIMA])): Pick<AnimaStore, 'find'> {
-  return { find: async (id: string) => (known.has(id) ? ({ id } as unknown as Anima) : null) }
+/** A mutable AnimaStore double: `find` returns the soul (with its live `disputeFrozen`), `update`
+ *  applies a patch. Backed by a Map so a dispute-freeze set via `update` is visible to a later
+ *  `find` (the freeze test asserts the flag flipped). */
+function makeAnimae(opts: { known?: Set<string>; frozen?: Set<string> } = {}) {
+  const known = opts.known ?? new Set([KNOWN_ANIMA])
+  const souls = new Map<string, Anima>()
+  for (const id of known) souls.set(id, { id, disputeFrozen: opts.frozen?.has(id) ?? false } as unknown as Anima)
+  const store: Pick<AnimaStore, 'find' | 'update'> = {
+    find: async (id: string) => souls.get(id) ?? null,
+    update: async (id, patch) => {
+      const cur = souls.get(id)
+      if (!cur) throw new Error(`Anima not found: ${id}`)
+      const next = { ...cur, ...patch } as Anima
+      souls.set(id, next)
+      return next
+    },
+  }
+  return { store, souls }
 }
 
 /** Fake gateway: `constructWebhookEvent` accepts ONLY signature 'good' (else throws — an invalid
@@ -51,15 +70,22 @@ function fakeGateway(): StripeGateway & { checkouts: StripeCheckoutInput[] } {
   }
 }
 
-function makeDeps(over: { known?: Set<string> } = {}) {
+function makeDeps(over: { known?: Set<string>; frozen?: Set<string> } = {}) {
   const signorum = new MemorySignorum()
   const redituum = new MemoryRedituum()
   const gateway = fakeGateway()
+  const { store: animae, souls } = makeAnimae({ ...(over.known ? { known: over.known } : {}), ...(over.frozen ? { frozen: over.frozen } : {}) })
+  const disputeAlerts: Array<{ animaId: string; disputeEventId: string; paymentKey: string }> = []
+  const onDisputeFrozen: OnDisputeFrozen = (ev) => { disputeAlerts.push(ev) }
   return {
     signorum,
     redituum,
-    animae: animae(over.known),
+    animae,
     gateway,
+    onDisputeFrozen,
+    // test-only handles (not part of StripeWebhookDeps)
+    souls,
+    disputeAlerts,
   }
 }
 
@@ -260,4 +286,167 @@ test('a completed event for a non-existent anima never credits (400)', async () 
   const res = await deliver(deps, completedSession({ packId: 'starter_10', paymentIntent: 'pi_ghost' }))
   assert.equal(res.status, 400)
   assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 0n)
+})
+
+// ── refund clawback (Part B: charge.refunded → claw back unspent + reverse revenue) ───────────
+
+function refundEvent(args: { paymentIntent: string; animaId?: string; eventId?: string; createdMsAgo?: number }): StripeWebhookEvent {
+  const createdMs = args.createdMsAgo !== undefined ? Date.now() - args.createdMsAgo : Date.now()
+  return {
+    id: args.eventId ?? `evt_refund_${Math.random().toString(36).slice(2)}`,
+    type: 'charge.refunded',
+    data: { object: { payment_intent: args.paymentIntent, metadata: { animaId: args.animaId ?? KNOWN_ANIMA }, created: Math.floor(createdMs / 1000) } },
+  }
+}
+
+function refundDebits(signorum: MemorySignorum, animaId = KNOWN_ANIMA) {
+  return signorum.history({ animaId }).then(h => h.filter(s => s.auctor === 'stripe:refund'))
+}
+
+test('charge.refunded within 14 days, full balance → clawback = full pack, recognized revenue reversed to net zero', async () => {
+  const deps = makeDeps()
+  const pi = 'pi_refund_full'
+  await deliver(deps, completedSession({ packId: 'starter_10', paymentIntent: pi }))
+  assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 20800n)
+
+  const res = await deliver(deps, refundEvent({ paymentIntent: pi }))
+  assert.equal(res.status, 200)
+  // The full unspent pack is clawed back (a single -20800 debit nets the balance to zero).
+  assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 0n)
+  const debits = await refundDebits(deps.signorum)
+  assert.equal(debits.length, 1)
+  assert.equal(debits[0]!.valor, -20800n)
+  // Recognized revenue reversed → the trailing figure nets to zero over the window.
+  assert.equal(await deps.redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), 0n)
+})
+
+test('charge.refunded with a PARTIAL balance → clawback = remaining only; revenue reversal is proportional (Q1)', async () => {
+  const deps = makeDeps()
+  const pi = 'pi_refund_partial'
+  await deliver(deps, completedSession({ packId: 'starter_10', paymentIntent: pi }))  // 20800 impetus / $10
+  // Spend exactly half (10400) via reserve→settle so 10400 remains unspent.
+  const r = await deps.signorum.reserve({ animaId: KNOWN_ANIMA }, 10400n, 'spend_half')
+  assert.equal(r.ok, true); if (!r.ok) return
+  await deps.signorum.settle(r.signaIds, 10400n, 'spend_half')
+  assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 10400n)
+
+  const res = await deliver(deps, refundEvent({ paymentIntent: pi }))
+  assert.equal(res.status, 200)
+  // Only the remaining 10400 is clawed back (the spent portion is non-refundable).
+  assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 0n)
+  const debits = await refundDebits(deps.signorum)
+  assert.equal(debits.length, 1)
+  assert.equal(debits[0]!.valor, -10400n)
+  // Revenue reversed proportionally: 10_000_000 × 10400/20800 = 5_000_000 → net 5_000_000 remains.
+  assert.equal(await deps.redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), 5_000_000n)
+})
+
+test('charge.refunded with a ZERO balance remaining → no-op-200 (fully spent, nothing to claw back)', async () => {
+  const deps = makeDeps()
+  const pi = 'pi_refund_spent'
+  await deliver(deps, completedSession({ packId: 'starter_10', paymentIntent: pi }))
+  const r = await deps.signorum.reserve({ animaId: KNOWN_ANIMA }, 20800n, 'spend_all')
+  assert.equal(r.ok, true); if (!r.ok) return
+  await deps.signorum.settle(r.signaIds, 20800n, 'spend_all')
+  assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 0n)
+
+  const res = await deliver(deps, refundEvent({ paymentIntent: pi }))
+  assert.equal(res.status, 200)
+  // No clawback debit; recognized revenue is NOT reversed (spent credits are non-refundable).
+  assert.equal((await refundDebits(deps.signorum)).length, 0)
+  assert.equal(await deps.redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), 10_000_000n)
+})
+
+test('a redelivered charge.refunded (same event.id) is idempotent — one debit, one reversal, no double-claw', async () => {
+  const deps = makeDeps()
+  const pi = 'pi_refund_dup'
+  await deliver(deps, completedSession({ packId: 'standard_25', paymentIntent: pi }))
+  const evt = refundEvent({ paymentIntent: pi, eventId: 'evt_refund_same' })
+
+  await deliver(deps, evt)
+  await deliver(deps, evt)   // Stripe redelivers the identical refund event
+
+  assert.equal((await refundDebits(deps.signorum)).length, 1)   // clawed back exactly once
+  assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 0n)
+  // Revenue reversed exactly once → net zero (no double-reversal into positive/negative drift).
+  assert.equal(await deps.redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), 0n)
+})
+
+test('charge.refunded OUTSIDE the 14-day window (anchored to charge.created) → no-op-200, no clawback', async () => {
+  const deps = makeDeps()
+  const pi = 'pi_refund_late'
+  await deliver(deps, completedSession({ packId: 'plus_50', paymentIntent: pi }))
+  const before = await deps.signorum.balance({ animaId: KNOWN_ANIMA })
+
+  const res = await deliver(deps, refundEvent({ paymentIntent: pi, createdMsAgo: 15 * 24 * 60 * 60 * 1000 }))
+  assert.equal(res.status, 200)   // terminal no-op, NOT a 4xx (Stripe would retry a non-2xx)
+  assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), before)
+  assert.equal((await refundDebits(deps.signorum)).length, 0)
+})
+
+test('charge.refunded with no matching prior credit → 200 no-op (nothing to claw back)', async () => {
+  const deps = makeDeps()
+  const res = await deliver(deps, refundEvent({ paymentIntent: 'pi_never_credited' }))
+  assert.equal(res.status, 200)
+  assert.equal((await refundDebits(deps.signorum)).length, 0)
+})
+
+test('trailingUsdRevenue nets a reversal so the Krea/Stability cap reads the post-refund figure (Q5)', async () => {
+  const deps = makeDeps()
+  await deliver(deps, completedSession({ packId: 'starter_10', paymentIntent: 'pi_keep' }))     // $10
+  await deliver(deps, completedSession({ packId: 'standard_25', paymentIntent: 'pi_gone' }))    // $25
+  const gross = await deps.redituum.trailingUsdRevenue(new Date(Date.now() + 60_000))
+  assert.equal(gross, PACKS.starter_10.usdMicro + PACKS.standard_25.usdMicro)   // 35_000_000
+
+  await deliver(deps, refundEvent({ paymentIntent: 'pi_gone' }))   // full refund of the $25
+  const net = await deps.redituum.trailingUsdRevenue(new Date(Date.now() + 60_000))
+  assert.equal(net, PACKS.starter_10.usdMicro)   // only the un-refunded $10 is recognized
+})
+
+// ── dispute freeze (Part B: charge.dispute.created → freeze spend + alert) ────────────────────
+
+function disputeEvent(args: { paymentIntent: string; animaId?: string; eventId?: string }): StripeWebhookEvent {
+  return {
+    id: args.eventId ?? `evt_dispute_${Math.random().toString(36).slice(2)}`,
+    type: 'charge.dispute.created',
+    data: { object: { payment_intent: args.paymentIntent, metadata: { animaId: args.animaId ?? KNOWN_ANIMA } } },
+  }
+}
+
+test('charge.dispute.created → sets disputeFrozen on the anima + invokes the injected alert seam (200)', async () => {
+  const deps = makeDeps()
+  const pi = 'pi_dispute'
+  await deliver(deps, completedSession({ packId: 'starter_10', paymentIntent: pi }))
+  assert.equal((await deps.animae.find(KNOWN_ANIMA))?.disputeFrozen ?? false, false)
+
+  const res = await deliver(deps, disputeEvent({ paymentIntent: pi, eventId: 'evt_dispute_1' }))
+  assert.equal(res.status, 200)
+  // The soul is now frozen.
+  assert.equal((await deps.animae.find(KNOWN_ANIMA))?.disputeFrozen, true)
+  // The alert seam FIRED (we assert it was called + its payload, NOT any real delivery).
+  assert.equal(deps.disputeAlerts.length, 1)
+  assert.equal(deps.disputeAlerts[0]?.animaId, KNOWN_ANIMA)
+  assert.equal(deps.disputeAlerts[0]?.disputeEventId, 'evt_dispute_1')
+})
+
+test("a frozen anima's SPEND is rejected (auth.forbidden) while a non-frozen anima passes the freeze gate (login is never gated)", async () => {
+  const { store: animae } = makeAnimae({ known: new Set([KNOWN_ANIMA, 'anima_ok']), frozen: new Set([KNOWN_ANIMA]) })
+  // The freeze guard runs at the TOP of invokeFlow, BEFORE any other dep is used — so a minimal
+  // CrystalApi (only `animae` wired) exercises exactly the spend-gate this item adds.
+  const api = new CrystalApi({ animae } as unknown as CrystalApiDeps)
+
+  const frozen: AuctorKey = { animaId: KNOWN_ANIMA }
+  await assert.rejects(
+    () => api.invokeFlow(frozen, { verb: 'make' }, { prompt: 'hi' }),
+    (err: unknown) => (err as { code?: string }).code === 'auth.forbidden',
+  )
+  // A non-frozen anima passes the freeze gate and fails LATER (unresolvable verb) — proving the
+  // block is freeze-conditional, not a blanket denial. Login/identity reads are never gated here.
+  const ok: AuctorKey = { animaId: 'anima_ok' }
+  await assert.rejects(
+    () => api.invokeFlow(ok, { verb: 'definitely-not-a-canon-verb' }, {}),
+    (err: unknown) => (err as { code?: string }).code === 'not_found.flow',
+  )
+  // The frozen soul is still readable (its identity/login surface is untouched by the freeze).
+  assert.equal((await animae.find(KNOWN_ANIMA))?.disputeFrozen, true)
 })

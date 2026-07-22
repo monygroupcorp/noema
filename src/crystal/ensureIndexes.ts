@@ -43,6 +43,17 @@ export async function ensureIndexes(db: Db): Promise<void> {
       { testis: 1 },
       { name: 'testis_alchemy_deposit', unique: true, partialFilterExpression: { auctor: 'alchemy-webhook' } },
     ),
+    // Stripe refund clawback (noema-082) idempotency: UNIQUE + PARTIAL on `testis` over
+    // stripe-REFUND debit signa ONLY. `testis` = the Stripe refund event id. This is the DURABLE
+    // cross-instance guard that a redelivered `charge.refunded` claws back (mints ONE negative-valor
+    // debit signum) EXACTLY ONCE: the second issue() throws a dup-key → the refund helper catches it
+    // → replays the winner's debit instead of double-clawing. Scoped to auctor:'stripe:refund' (peer
+    // of the stripe-purchase + alchemy-deposit guards above). Explicit name: a THIRD unique-partial
+    // index on the SAME key { testis:1 } would otherwise auto-name to `testis_1` and collide.
+    db.collection('signa').createIndex(
+      { testis: 1 },
+      { name: 'testis_stripe_refund', unique: true, partialFilterExpression: { auctor: 'stripe:refund' } },
+    ),
 
     // animae — soul / identity
     db.collection('animae').createIndex({ id: 1 }, { unique: true }),
@@ -93,6 +104,10 @@ export async function ensureIndexes(db: Db): Promise<void> {
     // FIAT rows so a redelivered/concurrent Stripe payment books revenue exactly once. Mirrors
     // MongoRedituum.ensureIndexes().
     db.collection('reditus').createIndex({ chargeRef: 1 }, { unique: true, partialFilterExpression: { origo: 'fiat', chargeRef: { $exists: true } } }),
+    // Refund clawback (noema-082): UNIQUE PARTIAL on `reversalOf` over contra-rows so a redelivered
+    // charge.refunded un-recognizes revenue exactly once (one contra-row per original reditus).
+    // Mirrors MongoRedituum.ensureIndexes().
+    db.collection('reditus').createIndex({ reversalOf: 1 }, { unique: true, partialFilterExpression: { reversalOf: { $exists: true } } }),
     db.collection('reditus').createIndex({ natum: 1 }),
 
     // solutiones — payment settlements

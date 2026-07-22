@@ -107,6 +107,19 @@ export interface Reditus {
    * which stays a pure free-form audit string (ADR-0013 §2, §consequences item 5).
    */
   chargeRef?: string
+
+  /**
+   * FK → Reditus. Present ONLY on a REVERSAL contra-row struck by `reverse()` (a Stripe refund
+   * clawback, noema-082). It points at the ORIGINAL revenue row this row offsets. Its `usdFmv` is
+   * the NEGATIVE (offsetting) amount, and it is written through the dedicated `reverse()` path,
+   * which is exempt from `record()`'s fail-closed positivity check — a contra-row is not an inbound
+   * payment. A UNIQUE PARTIAL index on `reversalOf` (over rows that HAVE it) makes reversal
+   * idempotent: at-most-one contra-row per original reditus, so a redelivered `charge.refunded`
+   * does not double-reverse revenue. `trailingUsdRevenue` nets a contra-row against the window ONLY
+   * when the row it points at falls inside that window (revenue is un-recognized in the window it
+   * was recognized in).
+   */
+  reversalOf?: string
 }
 
 /** The fields a caller supplies to record a Reditus; id is struck by the store. natum defaults to now. */
@@ -130,9 +143,36 @@ export interface Redituum {
   record(draft: ReditusDraft): Promise<Reditus>
 
   /**
-   * Total USD revenue (micro-USD) over the trailing twelve months ending at `now` — the
+   * Look up a fiat revenue row by its provider charge key (`chargeRef`), or null. The Stripe refund
+   * clawback path (noema-082) holds only the `paymentKey`; this read-only lookup resolves it to the
+   * original `Reditus` (its id → `reverse()`'s `originalReditusId`, its `usdFmv` → the pre-refund
+   * recognized amount). Scoped to fiat rows (the only ones that carry a `chargeRef`).
+   */
+  findByChargeRef(chargeRef: string): Promise<Reditus | null>
+
+  /**
+   * Reverse (un-recognize) `amountMicro` of a previously-recorded revenue row — a Stripe refund
+   * clawback (noema-082, ADR-0013). Writes a CONTRA-ROW: a `Reditus` with a NEGATIVE `usdFmv`
+   * (`-amountMicro`) and `reversalOf = originalReditusId`. This write path is DELIBERATELY exempt
+   * from `record()`'s fail-closed positivity invariant — a contra-row un-books revenue, it is not
+   * an inbound payment — and `record()`'s own invariant is untouched.
+   *
+   * IDEMPOTENT on `reversalOf` (one reversal per original reditus — the refund policy computes
+   * exactly one clawback per charge): reversing an already-reversed reditus returns the EXISTING
+   * contra-row instead of writing a second, so the whole webhook refund path is replay-safe under
+   * Stripe redelivery. `amountMicro` must be > 0n and ≤ the original's `usdFmv`.
+   */
+  reverse(originalReditusId: string, amountMicro: bigint, reason: string): Promise<Reditus>
+
+  /**
+   * Total NET USD revenue (micro-USD) over the trailing twelve months ending at `now` — the
    * window (now − 12 months, now]. The Krea-cap tripwire and a tax primitive (ADR-0013 §5).
    * A real range-sum, not a manual reconstruction.
+   *
+   * NETS REVERSALS (noema-082): a refund contra-row (`reversalOf` set, negative `usdFmv`) is
+   * subtracted from the total ONLY when the row it reverses falls inside this window — revenue is
+   * un-recognized in the window it was originally recognized in, so a refund of a charge that has
+   * already rolled off the trailing window does not spuriously reduce the current figure.
    */
   trailingUsdRevenue(now: Date): Promise<bigint>
 }
