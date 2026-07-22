@@ -32,6 +32,16 @@ export class MemorySignorum implements Signorum {
     return this.forIdentity(by)
   }
 
+  async findByTestis(testis: string): Promise<Signum | null> {
+    // Memory parity for the Mongo unique-partial lookup: scan for the stripe:purchase credit stamped
+    // with this testis. The single-writer Map has no index, so this linear scan IS the lookup (as
+    // history() is). testis is unique within the stripe:purchase scope (the payment_intent id).
+    for (const s of this.store.values()) {
+      if (s.auctor === 'stripe:purchase' && s.testis === testis) return s
+    }
+    return null
+  }
+
   async sessionBudget(modoId: string): Promise<bigint> {
     return Array.from(this.store.values())
       .filter(s => s.forma === 'tessera' && s.modoId === modoId && s.status === 'valid')
