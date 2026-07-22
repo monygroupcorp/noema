@@ -195,7 +195,7 @@ export interface CrystalApiDeps {
   /** USD revenue book — backs the admin `revenueReport` (the trailing-12mo rollup + license tripwire)
    *  AND the fiat funding rail (`handleStripeWebhook` books a peer fiat `Reditus` via `record`).
    *  Absent → the report + fiat rail are unavailable. */
-  redituum?: Pick<Redituum, 'trailingUsdRevenue' | 'record'>
+  redituum?: Pick<Redituum, 'trailingUsdRevenue' | 'record' | 'reverse' | 'findByChargeRef'>
   /** The license-tripwire's persisted band — surfaced in `revenueReport` so the admin sees the
    *  last edge-triggered band alongside the live figure. Absent → lastBand omitted. */
   tripwireBand?: Pick<TripwireBandStore, 'last'>
@@ -351,6 +351,20 @@ export class CrystalApi {
   constructor(private readonly deps: CrystalApiDeps) {}
 
   /**
+   * Dispute-freeze spend guard (noema-082, Q3). Rejects a user-initiated SPEND when the caller's
+   * anima is frozen by a pending chargeback. Only identified callers carry the flag — anonymous
+   * (commitment) and bearer (bursaToken) auctors are freeze-blind (there is no anima to freeze), and
+   * a deployment without an `animae` store simply skips the check. LOGIN never routes through here.
+   */
+  private async _assertNotDisputeFrozen(auctor: AuctorKey): Promise<void> {
+    if (!('animaId' in auctor) || !this.deps.animae) return
+    const anima = await this.deps.animae.find(auctor.animaId)
+    if (anima?.disputeFrozen) {
+      throw Errors.authForbidden('This account is frozen pending review of a payment dispute. Spending is paused until the dispute is resolved.')
+    }
+  }
+
+  /**
    * Invoke a flow for an auctor and return its public Run projection.
    *
    * Target resolution: an explicit `modusId` wins; otherwise the `verb` is
@@ -364,6 +378,13 @@ export class CrystalApi {
     opts: InvokeOpts = {},
   ): Promise<Run> {
     const { inceptor, modorum, cursorum, completor, actumIndex, consuetudinum, compositusCursor } = this.deps
+
+    // Dispute freeze (noema-082, Q3): an anima frozen by a chargeback (`charge.dispute.created`)
+    // cannot initiate a generation SPEND (value outflow) while the dispute is held for review. This
+    // is the run-spend chokepoint (the peer chokepoint is owned-purse mint in purseRouter). LOGIN and
+    // value-inflow are untouched; only identified callers carry the flag (anon/bursa paths are freeze
+    // -blind, and `reserve` stays freeze-blind by design so system paths are unaffected).
+    await this._assertNotDisputeFrozen(auctor)
 
     let modusId: string | undefined
     if (target.modusId) {

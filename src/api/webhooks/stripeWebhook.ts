@@ -87,6 +87,12 @@ export interface StripeEventObject {
   payment_status?: string | null
   /** payment_intent: 'succeeded' once captured. */
   status?: string | null
+  /**
+   * charge/dispute: the Stripe object's own creation time (SECONDS-epoch). On a `charge.refunded`
+   * event this is the CHARGE's `created` — the externally-auditable, retry-immune anchor the 14-day
+   * refund window is measured against (Q4 ruling, noema-082), NOT any internal Signum/Reditus natum.
+   */
+  created?: number
 }
 
 /**
@@ -157,6 +163,31 @@ export async function handleStripeCheckout(
 /** Event types that credit a pack. Both share a payment_intent for one purchase (deduped to one credit). */
 const CREDITING_EVENT_TYPES = new Set(['checkout.session.completed', 'payment_intent.succeeded'])
 
+/** Refund events → claw back previously-minted impetus + reverse recognized revenue (noema-082). */
+const REFUND_EVENT_TYPES = new Set(['charge.refunded'])
+
+/** Dispute events → freeze the anima's user-initiated value-outflow pending manual review (noema-082). */
+const DISPUTE_EVENT_TYPES = new Set(['charge.dispute.created'])
+
+/** The refund window (Q4): 14 days from the CHARGE's `created`. A later refund is a terminal no-op. */
+const REFUND_WINDOW_MS = 14 * 24 * 60 * 60 * 1000
+
+/** The auctor stamped on a refund clawback DEBIT — also the scope of its unique-partial testis index. */
+const STRIPE_REFUND_AUCTOR = 'stripe:refund'
+
+/**
+ * The dispute-freeze alert seam — fired when a `charge.dispute.created` freezes an anima. Mirrors
+ * licenseTripwire's `onThresholdBand`: the default wiring LOGS (loud), and a later consumer can wire
+ * real delivery. Q-C ruling (2026-07-21): no ntfy client exists in the repo and none is built here —
+ * real delivery is a follow-up. May be async.
+ */
+export type OnDisputeFrozen = (ev: { animaId: string; disputeEventId: string; paymentKey: string }) => void | Promise<void>
+
+/** The default alert seam: a LOUD structured log (a chargeback is a live financial event). */
+export const logDisputeFrozen: OnDisputeFrozen = (ev) => {
+  log.warn('STRIPE DISPUTE — anima FROZEN (spend + purse-mint blocked) pending manual review. Wire to alerting later (no ntfy client yet, Q-C).', ev)
+}
+
 export interface StripeWebhookRequest {
   /** The exact raw request body (bytes as received) — required for signature verification. */
   rawBody: string
@@ -170,12 +201,18 @@ export interface StripeWebhookResult {
 }
 
 export interface StripeWebhookDeps {
-  /** The credit ledger. `issue` must SURFACE its dup-key error (the durable idempotency guard). */
-  signorum: Pick<Signorum, 'issue' | 'history'>
-  /** The USD revenue book — a peer fiat `Reditus` is booked at the pack's charge amount. */
-  redituum: Pick<Redituum, 'record'>
-  animae: Pick<AnimaStore, 'find'>
+  /** The credit ledger. `issue` must SURFACE its dup-key error (the durable idempotency guard, used
+   *  by BOTH the purchase credit and the refund clawback debit). `balance` reads the anima's current
+   *  net spendable (the refund policy claws back the REMAINING balance, capped at the pack). */
+  signorum: Pick<Signorum, 'issue' | 'history' | 'balance'>
+  /** The USD revenue book — a peer fiat `Reditus` is booked on purchase; on refund the recognized
+   *  revenue is un-booked via `reverse()` (found via `findByChargeRef`), Q5/Q-B rulings. */
+  redituum: Pick<Redituum, 'record' | 'reverse' | 'findByChargeRef'>
+  /** Identity store — `find` gates the credit mint; `update` sets the dispute freeze flag. */
+  animae: Pick<AnimaStore, 'find' | 'update'>
   gateway: StripeGateway
+  /** Log-only injectable alert seam fired when a dispute freeze is SET. Unset → `logDisputeFrozen`. */
+  onDisputeFrozen?: OnDisputeFrozen
 }
 
 /** The result of crediting one completed payment (fresh or replayed on redelivery). */
@@ -209,38 +246,193 @@ export async function handleStripeWebhook(
     return { status: 400, body: { received: false, message: 'Invalid signature' } }
   }
 
-  // 2. Only completed-payment events credit; everything else is acked + ignored.
-  if (!CREDITING_EVENT_TYPES.has(event.type)) {
-    return { status: 200, body: { received: true } }
-  }
-
-  // 3. Resolve the per-purchase idempotency key (payment_intent id, then the object id).
+  // 2. Resolve the per-payment idempotency key (payment_intent id, then the object id). Shared by
+  //    the credit, refund, and dispute paths — all three key on the SAME Stripe payment_intent.
   const obj = event.data?.object ?? {}
   const paymentKey = obj.payment_intent ?? obj.id ?? event.id
 
-  try {
-    validateCompleted(event.type, obj)
-    // animaId: a checkout.session carries it as client_reference_id; a payment_intent carries it
-    // only in metadata (both are server-set at checkout). packId is in metadata on both objects.
-    const animaId = requireField(obj.client_reference_id ?? obj.metadata?.animaId, 'client_reference_id / metadata.animaId')
-    const packId = requireField(obj.metadata?.packId, 'metadata.packId')
-    const pack = resolvePack(packId)
-    if (!pack) throw new StripeEventError(400, `Unknown pack '${packId}'`)
+  // 3a. Completed-payment events credit a pack.
+  if (CREDITING_EVENT_TYPES.has(event.type)) {
+    try {
+      validateCompleted(event.type, obj)
+      // animaId: a checkout.session carries it as client_reference_id; a payment_intent carries it
+      // only in metadata (both are server-set at checkout). packId is in metadata on both objects.
+      const animaId = requireField(obj.client_reference_id ?? obj.metadata?.animaId, 'client_reference_id / metadata.animaId')
+      const packId = requireField(obj.metadata?.packId, 'metadata.packId')
+      const pack = resolvePack(packId)
+      if (!pack) throw new StripeEventError(400, `Unknown pack '${packId}'`)
 
-    // 4. Credit the pack's impetus + book the peer fiat Reditus. Idempotent per payment via the
-    //    durable unique indexes (see creditPayment) — a redelivery/concurrent instance replays the
-    //    original credit rather than minting a second. A DB failure propagates (→ 500 at the
-    //    router) so Stripe retries the delivery; the retry is idempotent.
-    const outcome = await creditPayment({ animaId, pack, paymentKey }, deps)
-    log.info('stripe payment credited', { paymentKey, animaId, packId: pack.id, credited: outcome.credited.toString(), signumId: outcome.signumId })
-    return { status: 200, body: { received: true, credited: outcome.credited.toString() } }
-  } catch (err) {
-    if (err instanceof StripeEventError) {
-      log.warn('stripe webhook rejected', { paymentKey, type: event.type, message: err.message })
-      return { status: err.httpStatus, body: { received: false, message: err.message } }
+      // Credit the pack's impetus + book the peer fiat Reditus. Idempotent per payment via the
+      // durable unique indexes (see creditPayment) — a redelivery/concurrent instance replays the
+      // original credit rather than minting a second. A DB failure propagates (→ 500 at the
+      // router) so Stripe retries the delivery; the retry is idempotent.
+      const outcome = await creditPayment({ animaId, pack, paymentKey }, deps)
+      log.info('stripe payment credited', { paymentKey, animaId, packId: pack.id, credited: outcome.credited.toString(), signumId: outcome.signumId })
+      return { status: 200, body: { received: true, credited: outcome.credited.toString() } }
+    } catch (err) {
+      if (err instanceof StripeEventError) {
+        log.warn('stripe webhook rejected', { paymentKey, type: event.type, message: err.message })
+        return { status: err.httpStatus, body: { received: false, message: err.message } }
+      }
+      throw err
     }
-    throw err
   }
+
+  // 3b. Refund events claw back the unspent balance + reverse the recognized revenue.
+  if (REFUND_EVENT_TYPES.has(event.type)) {
+    return handleRefund(event, obj, paymentKey, deps)
+  }
+
+  // 3c. Dispute events freeze the anima's user-initiated value-outflow pending manual review.
+  if (DISPUTE_EVENT_TYPES.has(event.type)) {
+    return handleDispute(event, obj, paymentKey, deps)
+  }
+
+  // 4. Any other event type is acked + ignored (unchanged behavior).
+  return { status: 200, body: { received: true } }
+}
+
+/** A terminal, non-error ack — a legitimate no-op (do NOT 4xx; Stripe would retry a non-2xx). */
+function ack(): StripeWebhookResult {
+  return { status: 200, body: { received: true } }
+}
+
+/**
+ * Resolve the original `stripe:purchase` credit for a refund/dispute event. The event carries only
+ * the payment key + (server-set) animaId; the credit is the row stamped
+ * auctor:'stripe:purchase' / testis:'stripe:<paymentKey>'. Returns null when the animaId can't be
+ * resolved or no matching credit exists (a refund on a pre-feature/non-credit charge) — the caller
+ * then no-op-200s (nothing to claw back / freeze).
+ */
+async function findPurchaseCredit(
+  deps: StripeWebhookDeps,
+  obj: StripeEventObject,
+  paymentKey: string,
+): Promise<Signum | null> {
+  const animaId = obj.client_reference_id ?? obj.metadata?.animaId
+  if (!animaId) return null
+  return findStripeCredit(deps.signorum, animaId, `stripe:${paymentKey}`)
+}
+
+/** Find this refund event's already-struck clawback debit (the replay source), or null. */
+async function findRefundDebit(
+  signorum: Pick<Signorum, 'history'>,
+  animaId: string,
+  testis: string,
+): Promise<Signum | null> {
+  const history = await signorum.history({ animaId })
+  return history.find(s => s.auctor === STRIPE_REFUND_AUCTOR && s.testis === testis) ?? null
+}
+
+/**
+ * Handle a `charge.refunded`. Claws back the UNSPENT balance (capped at the original pack amount,
+ * Q1) via a SINGLE negative-valor debit signum, then reverses the proportional recognized revenue
+ * (Q5). Idempotent end-to-end: the debit dedups on the unique testis@stripe:refund index and the
+ * revenue reversal dedups on the unique reversalOf index, so a redelivered event self-heals without
+ * double-clawing or double-reversing. Every terminal state is a 200 (a 4xx would make Stripe retry).
+ */
+async function handleRefund(
+  event: StripeWebhookEvent,
+  obj: StripeEventObject,
+  paymentKey: string,
+  deps: StripeWebhookDeps,
+): Promise<StripeWebhookResult> {
+  const credit = await findPurchaseCredit(deps, obj, paymentKey)
+  if (!credit || !credit.animaId) {
+    log.warn('stripe refund: no matching stripe:purchase credit — nothing to claw back', { paymentKey })
+    return ack()
+  }
+  const animaId = credit.animaId
+  const packImpetus = credit.valor   // the full pack amount credited on purchase (no haircut)
+  const debitTestis = event.id       // the refund event id is the clawback's idempotency key
+
+  // Q4 window: anchor to the CHARGE's own `created` (Stripe seconds-epoch). A refund past 14 days is
+  // a legitimate terminal no-op (log + 200), never a 4xx. Only reject when expiry is PROVABLE — an
+  // event without `created` is treated as in-window (we cannot prove otherwise).
+  const createdMs = typeof obj.created === 'number' ? obj.created * 1000 : undefined
+  if (createdMs !== undefined && Date.now() - createdMs > REFUND_WINDOW_MS) {
+    log.warn('stripe refund: outside the 14-day window (anchored to charge.created) — no clawback', { paymentKey, animaId })
+    return ack()
+  }
+
+  // Determine the clawback amount. On a REDELIVERY the debit already exists — recover the amount
+  // from it (NOT from the now-reduced live balance) so the proportional revenue reversal stays
+  // consistent. On a fresh delivery, claw back the remaining balance capped at the pack (Q1).
+  let debit = await findRefundDebit(deps.signorum, animaId, debitTestis)
+  let refundAmount: bigint
+  if (debit) {
+    refundAmount = -debit.valor   // the debit carries the negative of what was clawed
+  } else {
+    const balance = await deps.signorum.balance({ animaId })
+    refundAmount = balance < packImpetus ? balance : packImpetus
+    if (refundAmount <= 0n) {
+      log.info('stripe refund: balance fully spent — nothing to claw back (spent credits are non-refundable, Q1)', { paymentKey, animaId })
+      return ack()
+    }
+    // SINGLE negative-valor debit (Q-A/v4): the value-change IS the dedup row, guarded by the unique
+    // partial index on testis@auctor:'stripe:refund'. A concurrent/redelivered event collides →
+    // catch the dup-key → replay the winner's debit (never double-claw). forma:'minted' matches the
+    // purchase credit; reserve() excludes negative-valor rows, balance() nets them.
+    try {
+      debit = await deps.signorum.issue({
+        forma: 'minted',
+        animaId,
+        valor: -refundAmount,
+        auctor: STRIPE_REFUND_AUCTOR,
+        testis: debitTestis,
+      })
+    } catch (err) {
+      if (isDuplicateKeyError(err)) {
+        debit = await findRefundDebit(deps.signorum, animaId, debitTestis)
+        if (!debit) throw err
+        refundAmount = -debit.valor
+      } else {
+        throw err
+      }
+    }
+    log.info('stripe refund clawed back', { paymentKey, animaId, refundAmount: refundAmount.toString(), signumId: debit.id })
+  }
+
+  // Reverse the recognized revenue (Q5), proportional to refundAmount / packImpetus of the original
+  // reditus's usdFmv. Order is debit-FIRST (above), then reverse() — each half dedups independently
+  // (testis index / reversalOf index), so a crash between them self-heals on redelivery.
+  const originalReditus = await deps.redituum.findByChargeRef(paymentKey)
+  if (originalReditus) {
+    const amountMicro = (originalReditus.usdFmv * refundAmount) / packImpetus
+    if (amountMicro > 0n) {
+      await deps.redituum.reverse(originalReditus.id, amountMicro, `stripe-refund:${paymentKey}`)
+      log.info('stripe refund: recognized revenue reversed', { paymentKey, animaId, amountMicro: amountMicro.toString(), reversalOf: originalReditus.id })
+    }
+  } else {
+    log.warn('stripe refund: no peer Reditus found for chargeRef — revenue not reversed (pre-feature charge?)', { paymentKey, animaId })
+  }
+
+  return ack()
+}
+
+/**
+ * Handle a `charge.dispute.created`. Sets the Q3 SPEND-only freeze flag on the disputing anima
+ * (blocks generation spend + owned-purse mint; login + value-inflow untouched) and fires the
+ * injected alert seam. Held pending manual operator review — no auto-lift. Idempotent: a redelivered
+ * dispute just re-sets the flag. No matching credit → no anima to freeze → no-op-200.
+ */
+async function handleDispute(
+  event: StripeWebhookEvent,
+  obj: StripeEventObject,
+  paymentKey: string,
+  deps: StripeWebhookDeps,
+): Promise<StripeWebhookResult> {
+  const credit = await findPurchaseCredit(deps, obj, paymentKey)
+  if (!credit || !credit.animaId) {
+    log.warn('stripe dispute: no matching credit — cannot resolve the anima to freeze', { paymentKey })
+    return ack()
+  }
+  const animaId = credit.animaId
+  await deps.animae.update(animaId, { disputeFrozen: true })
+  const alert = deps.onDisputeFrozen ?? logDisputeFrozen
+  await alert({ animaId, disputeEventId: event.id, paymentKey })
+  log.info('stripe dispute: anima frozen pending review', { paymentKey, animaId, disputeEventId: event.id })
+  return ack()
 }
 
 /** Throw unless the event represents a genuinely-completed (paid) payment. */

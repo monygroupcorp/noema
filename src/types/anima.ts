@@ -79,6 +79,16 @@ export interface Anima {
    */
   custos?: string
 
+  /**
+   * Dispute freeze (noema-082, Stripe `charge.dispute.created`, ADR-0013). When true, this soul's
+   * user-initiated VALUE-OUTFLOW paths are blocked — generation spend (`CrystalApi.invokeFlow`) and
+   * owned-purse minting (`purseRouter` → `mintOwnedPurse`) — while a chargeback is pending review.
+   * LOGIN and value-INFLOW (purse reclaim, system transfers) are untouched. Set on a dispute, held
+   * pending review; only an operator lifts it (no auto-un-freeze). Optional, defaults to unfrozen —
+   * follows the type's `?`-optional-flag convention (like `custos`/`memoriaRef`).
+   */
+  disputeFrozen?: boolean
+
   /** "natum" = born — when this soul was created */
   natum: Date
   /** "mutatum" = changed — when this soul was last modified */
@@ -93,7 +103,7 @@ export interface AnimaStore {
   create(input: Omit<Anima, 'id' | 'natum' | 'mutatum'>): Promise<Anima>
   find(id: string): Promise<Anima | null>
   findByCustos(custos: string): Promise<Anima | null>
-  update(id: string, patch: Partial<Pick<Anima, 'nomen' | 'memoriaRef' | 'custos' | 'publicatio'>>): Promise<Anima>
+  update(id: string, patch: Partial<Pick<Anima, 'nomen' | 'memoriaRef' | 'custos' | 'publicatio' | 'disputeFrozen'>>): Promise<Anima>
 }
 
 /**
