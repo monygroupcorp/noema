@@ -60,6 +60,32 @@ export async function dispatchInceptio(
   deps: DispatchDeps,
   inceptio: Inceptio,
 ): Promise<{ actum: Actum; exitus?: Record<string, unknown> }> {
+  // Idempotent trace establishment (noema-078). `POST /v1/runs` and MCP dispatch
+  // both funnel through here (via CrystalApi.invokeFlow) with NO outer withTrace
+  // scope, so for a sync cursor the trailing `completor.complete()` ran outside
+  // any AsyncLocalStorage trace and its getTrace()-gated `emitWideEvent` silently
+  // no-op'd — the main production channel emitted no wide_events row at all.
+  //
+  // Establish ONE outer trace spanning the whole lifecycle (cursor.run AND
+  // completor.complete) when — and only when — none exists yet. Telegram
+  // (index.ts) and the RunPod webhook (webhookRouter.ts) already open their own
+  // outer trace before reaching this code, so getTrace() is defined for them and
+  // we no-op, leaving both currently-working channels provably unchanged. The
+  // inner withTrace around cursor.run below composes on top (it spreads
+  // getTrace()), so its self-hosted-cursor timing fields are unaffected either
+  // way. Mirrors the api-channel wrap the webhook already uses (platform:'api').
+  if (getTrace()) {
+    return runDispatch(deps, inceptio)
+  }
+  return withTrace(makeTraceContext({ platform: 'api' }), () =>
+    runDispatch(deps, inceptio),
+  )
+}
+
+async function runDispatch(
+  deps: DispatchDeps,
+  inceptio: Inceptio,
+): Promise<{ actum: Actum; exitus?: Record<string, unknown> }> {
   const { inceptor, modorum, cursorum, completor } = deps
 
   // 0. Compositus branch (ADR-0008) — a modus made of modi has no ministerium and
