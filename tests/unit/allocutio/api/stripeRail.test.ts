@@ -450,3 +450,19 @@ test("a frozen anima's SPEND is rejected (auth.forbidden) while a non-frozen ani
   // The frozen soul is still readable (its identity/login surface is untouched by the freeze).
   assert.equal((await animae.find(KNOWN_ANIMA))?.disputeFrozen, true)
 })
+
+test("a SYSTEM transfer (signorum.reserve) for a frozen anima still settles — reserve is freeze-blind by design", async () => {
+  // Freeze-boundary ruling 2026-07-22: the freeze gates USER-initiated outflow only, checked at the
+  // named chokepoints — NEVER inside signorum.reserve, which serves system paths (SubsidySweeper,
+  // AgentProvisioner, treasuryAdmin). This regression-guards that: if anyone ever adds a freeze check
+  // INSIDE reserve, this system-path settle would start failing for a frozen anima.
+  const deps = makeDeps({ frozen: new Set([KNOWN_ANIMA]) })
+  await deliver(deps, completedSession({ packId: 'starter_10', paymentIntent: 'pi_sys' }))  // fund 20800
+  assert.equal((await deps.animae.find(KNOWN_ANIMA))?.disputeFrozen, true)
+
+  // A system/SubsidySweeper transfer reserves + settles against the frozen anima — must succeed.
+  const r = await deps.signorum.reserve({ animaId: KNOWN_ANIMA }, 5000n, 'system_transfer')
+  assert.equal(r.ok, true); if (!r.ok) return
+  await deps.signorum.settle(r.signaIds, 5000n, 'system_transfer')
+  assert.equal(await deps.signorum.balance({ animaId: KNOWN_ANIMA }), 15800n)  // freeze did not block it
+})
