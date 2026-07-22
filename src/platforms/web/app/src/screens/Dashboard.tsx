@@ -18,16 +18,17 @@ function computeRow(exec: string): { glyph: string; text: string } {
 }
 
 // the full project holdings row (spec): chats · canvases · datasets · models · collections · favorites.
-// The mock Project carries chats/canvases/cards/gens; datasets/models/collections seed at 0
-// until the project backend carries them. TODO(backend: project holdings).
+// Holdings are real now: datasets/models/collections read the project's filed id-reference
+// lengths, not a hardcoded 0. Chats/canvases/favorites stay client-local overlay (no backend
+// store yet).
 function holdings(p: Project) {
   const c = counts(p);
   return [
     { ico: 'message-square', n: c.chats },
     { ico: 'workflow', n: c.canvases },
-    { ico: 'database', n: 0 },
-    { ico: 'box', n: 0 },
-    { ico: 'hexagon', n: 0 },
+    { ico: 'database', n: c.datasets },
+    { ico: 'box', n: c.models },
+    { ico: 'hexagon', n: c.collections },
     { ico: 'star', n: c.cards },
   ];
 }
