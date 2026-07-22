@@ -63,8 +63,13 @@ export class MemorySignorum implements Signorum {
     if (amount <= 0n) return { ok: true, signaIds: [], locked: 0n }
 
     // Greedy, smallest-first — matches the historical selection order in ActumInceptor.
+    // Only strictly-positive valor is spendable: the ledger holds negative-valor debit signa
+    // (e.g. nexus:studioSpend / tee:spend / publish:scanFee mint `valor: -impetus, status:'valid'`
+    // rows that balance() correctly NETS). Those are liabilities, never spend candidates — locking
+    // one into a reservation and feeding it to settle() would corrupt the cover arithmetic. Zero
+    // carries no value, so exclude it too (valor <= 0n).
     const candidates = this.forIdentity(by)
-      .filter(s => s.status === 'valid')
+      .filter(s => s.status === 'valid' && s.valor > 0n)
       .sort((a, b) => (a.valor < b.valor ? -1 : 1))
 
     const selected: string[] = []
