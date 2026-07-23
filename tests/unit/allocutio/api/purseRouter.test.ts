@@ -33,18 +33,23 @@ function fakeSignorum(bal: { v: bigint }) {
   }
 }
 
-function app(opts: { auctor?: AuctorKey; balance?: bigint; ownsAgent?: boolean } = {}) {
+function app(opts: { auctor?: AuctorKey; balance?: bigint; ownsAgent?: boolean; frozen?: boolean } = {}) {
   const bur = fakeBursarium()
   const bal = { v: opts.balance ?? 5000n }
+  // Mutable dispute-freeze state so a test can mint a purse UNFROZEN, then flip the caller frozen and
+  // assert reclaim (value-inflow) still works — noema-082 Q3 freeze-boundary: MINT is gated, RECLAIM never is.
+  const frozen = { v: opts.frozen ?? false }
+  const animae = { find: async (id: string) => ({ id, disputeFrozen: frozen.v }) } as unknown as PurseRouterDeps['animae']
   const deps: PurseRouterDeps = {
     identity: { resolve: async () => (opts.auctor ?? { animaId: 'u1' }) },
     signorum: fakeSignorum(bal) as unknown as PurseRouterDeps['signorum'],
     bursarium: bur.store as unknown as PurseRouterDeps['bursarium'],
     fundFromAgent: async () => (opts.ownsAgent ? { animaId: 'agentAnima' } : null),
+    animae,
     publicBase: 'https://noema.art',
   }
   const a = express(); a.use('/v1/purses', express.json(), createPurseRouter(deps))
-  return { app: a, bur, bal }
+  return { app: a, bur, bal, frozen }
 }
 
 test('mint a purse → token + credits; it appears in the dashboard', async () => {
@@ -91,5 +96,33 @@ test('reclaim drains a purse back to the owner', async () => {
   await bur.store.debit(token, 400n)                    // simulate a run spending 400
   const rec = await request(a).post(`/v1/purses/${token}/reclaim`).send({})
   assert.equal(rec.status, 200)
+  assert.equal(rec.body.refunded, '600')
+})
+
+// ── dispute freeze (noema-082 Q3 freeze-boundary ruling 2026-07-22) ──────────────────────────────
+// The freeze-boundary ruling mandates: a frozen anima is blocked on purse MINT (the bearer-value
+// extraction route a disputing fraudster uses), but its purse RECLAIM (value returning IN) still works.
+// These two cases pair with stripeRail.test.ts's run-spend-blocked + reserve-freeze-blind coverage to
+// complete the ruling's mandated matrix (run spend blocked, purse mint blocked, reclaim works, system
+// transfer works).
+
+test('frozen anima is BLOCKED from minting a purse → 403 auth.forbidden (bearer-value extraction is gated)', async () => {
+  const { app: a } = app({ frozen: true, balance: 5000n })
+  const res = await request(a).post('/v1/purses').send({ credits: 1200, label: 'friends' })
+  assert.equal(res.status, 403)
+  assert.equal(res.body.error.code, 'auth.forbidden')
+  // Balance was NOT touched — the guard runs before any funding.
+  assert.match(res.body.error.message, /dispute/i)
+})
+
+test("frozen anima's purse RECLAIM still works — value-inflow is deliberately NOT gated", async () => {
+  const { app: a, bur, frozen } = app({ frozen: false })
+  // Mint while unfrozen (mint requires an unfrozen anima), then simulate a dispute freeze.
+  const created = await request(a).post('/v1/purses').send({ credits: 1000 })
+  const token = created.body.token
+  await bur.store.debit(token, 400n)                    // simulate a run spending 400
+  frozen.v = true                                        // charge.dispute.created froze the caller
+  const rec = await request(a).post(`/v1/purses/${token}/reclaim`).send({})
+  assert.equal(rec.status, 200)                          // reclaim is freeze-blind (value returning in)
   assert.equal(rec.body.refunded, '600')
 })

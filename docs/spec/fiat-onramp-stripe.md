@@ -88,10 +88,17 @@ recurring-billing + consent complexity; defer.
   standard. **OFAC/sanctions:** Stripe screens; we additionally block sanctioned regions.
 - **SCA / 3DS:** handled by Checkout. **Tax/VAT:** enable **Stripe Tax** (digital goods —
   VAT/GST by customer location). **Receipts:** Stripe emails them (Customer object).
-- **Refunds:** closed-loop credits are non-cash-refundable once spent; **unused** balances
-  may be refundable within a stated window per consumer law — write the policy in
-  `docs/legal/` (refunds section) and wire `charge.refunded` → claw back unspent.
-- **Chargebacks:** dispute → freeze the account's unspent credits + flag; respond via Stripe.
+- **Refunds (RATIFIED 2026-07-07, reconfirmed 2026-07-21 R-1; BUILT noema-082):** the policy is
+  **14 days, unused-balance-only**. Unused credits are refundable within **14 days of purchase**;
+  consumed credits are **non-refundable** for the spent portion; a partial-spend refund returns the
+  **remaining (unspent) balance**, capped at the pack amount (operator Q1 ruling — never a negative
+  balance). The 14-day clock is anchored to the Stripe charge's own `created` timestamp (Q4). This
+  is now live in the legal/pricing copy (`docs/legal/terms-and-conditions.md`,
+  `src/platforms/web/app/src/content/{terms,pricing}.md`, `docs/site/pricing.md`) and wired as
+  `charge.refunded` → single negative-valor clawback debit + proportional `Redituum.reverse()`.
+- **Chargebacks (BUILT noema-082):** `charge.dispute.created` → freeze the account's user-initiated
+  value-outflow (generation spend + owned-purse mint; login + value-inflow untouched), held pending
+  manual operator review (no auto-lift), alert fired; respond via Stripe.
 - **Fraud:** Stripe Radar; velocity limits on new accounts; first-purchase caps.
 - **Securities/MSB:** closed-loop, non-transferable, compute-only → stays out of MSB/securities
   territory (counsel to confirm). Do **not** allow credit→cash or credit→credit transfer.
@@ -110,7 +117,6 @@ recurring-billing + consent complexity; defer.
 
 - Pricing of the credit packs (and the $/credit curve).
 - The legal entity / Stripe account, and merchant-of-record posture.
-- Refund-window policy (write into `docs/legal/`).
 - Auto-reload (recurring) — in v1 or later?
 - Endpoint home: under `/v1` (agent API) vs a dedicated `/payments` router.
 
@@ -120,5 +126,7 @@ recurring-billing + consent complexity; defer.
 2. `POST /v1/payments/checkout` + `POST /v1/payments/stripe/webhook` (signature-verified,
    idempotent) → credit grant to `anima`.
 3. Frontend **Funding screen** (the three rungs) + the fiat → Checkout → return → balance-refresh.
-4. Legal: refunds/credits policy in `docs/legal/`.
+4. Legal: refunds/credits policy — **DONE (noema-082)**: the ratified 14-day-unused-only policy is
+   in `docs/legal/terms-and-conditions.md` + `src/platforms/web/app/src/content/{terms,pricing}.md`
+   + `docs/site/pricing.md`, and the `charge.refunded`/`charge.dispute.created` mechanism is built.
 5. Live keys + go-live checklist (tax, Radar, region blocks).
