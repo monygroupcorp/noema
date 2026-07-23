@@ -48,8 +48,14 @@ const gateway: StripeGateway = {
   },
 }
 
-const animae: Pick<AnimaStore, 'find'> = {
-  find: async (id: string) => (id === ANIMA ? ({ id } as unknown as Anima) : null),
+const frozenAnimae = new Set<string>()
+const animae: Pick<AnimaStore, 'find' | 'update'> = {
+  find: async (id: string) => (id === ANIMA ? ({ id, disputeFrozen: frozenAnimae.has(id) } as unknown as Anima) : null),
+  update: async (id, patch) => {
+    if (patch.disputeFrozen === true) frozenAnimae.add(id)
+    if (patch.disputeFrozen === false) frozenAnimae.delete(id)
+    return { id, disputeFrozen: frozenAnimae.has(id) } as unknown as Anima
+  },
 }
 
 function deliver(event: StripeWebhookEvent) {
@@ -87,7 +93,20 @@ before(async () => {
 afterEach(async () => {
   await db.collection('signa').deleteMany({})
   await db.collection('reditus').deleteMany({})
+  frozenAnimae.clear()
 })
+
+// Real Stripe `charge.refunded` shape: the CHARGE carries `payment_intent` + `created` but NO
+// `metadata.animaId`/`client_reference_id`. Omitted deliberately so this Mongo-backed test exercises
+// the round-10 anima resolution through the REAL unique-partial index (findByTestis on
+// 'stripe:<payment_intent>') — the index-backed ledger lookup, not the event object.
+function refundEvent(pi: string, eventId: string): StripeWebhookEvent {
+  return {
+    id: eventId,
+    type: 'charge.refunded',
+    data: { object: { payment_intent: pi, created: Math.floor(Date.now() / 1000) } },
+  }
+}
 
 after(async () => {
   await db.dropDatabase().catch(() => {})
@@ -149,4 +168,50 @@ test('two DIFFERENT payments each credit once (the guard is per-payment, not glo
   assert.equal(credits.length, 2)
   assert.equal(await signorum.balance({ animaId: ANIMA }), PACKS.starter_10.impetus * 2n)
   assert.equal(await redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), PACKS.starter_10.usdMicro * 2n)
+})
+
+// ── refund clawback: DURABLE cross-instance idempotency on real Mongo ─────────────────────────
+
+test('CONCURRENT: N redeliveries of the SAME charge.refunded claw back EXACTLY once (unique testis@stripe:refund)', async () => {
+  const pi = 'pi_refund_race'
+  await deliver(sessionEvent('standard_25', pi))
+  assert.equal(await signorum.balance({ animaId: ANIMA }), PACKS.standard_25.impetus)
+
+  // Fire N simultaneous redeliveries of the identical refund event — the unique partial index on
+  // testis@auctor:'stripe:refund' is the durable guard that only ONE negative-valor debit lands.
+  const evt = refundEvent(pi, 'evt_refund_race')
+  const results = await Promise.all(Array.from({ length: 6 }, () => deliver(evt)))
+  for (const r of results) assert.equal(r.status, 200)
+
+  const debits = await db.collection('signa').find({ auctor: 'stripe:refund', testis: 'evt_refund_race' }).toArray()
+  assert.equal(debits.length, 1, 'expected exactly one clawback debit (no double-claw under the race)')
+  assert.equal(debits[0]!.valor, (-PACKS.standard_25.impetus).toString())
+  assert.equal(await signorum.balance({ animaId: ANIMA }), 0n)
+  // Revenue reversed exactly once (unique reversalOf index) → net zero over the window.
+  const reversals = await db.collection('reditus').find({ reversalOf: { $exists: true } }).toArray()
+  assert.equal(reversals.length, 1, 'expected exactly one revenue contra-row (no double-reversal)')
+  assert.equal(await redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), 0n)
+})
+
+test('MongoRedituum.reverse(): nets the Mongo-backed rollup and is idempotent on reversalOf', async () => {
+  // Book a fiat revenue row, then reverse HALF of it. The trailing rollup must read the net figure.
+  const original = await redituum.record({ usdFmv: PACKS.plus_50.usdMicro, fmvSource: 'stripe:pi_rev', origo: 'fiat', chargeRef: 'pi_rev' })
+  assert.equal(await redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), PACKS.plus_50.usdMicro)
+
+  const half = PACKS.plus_50.usdMicro / 2n
+  const contra = await redituum.reverse(original.id, half, 'stripe-refund:pi_rev')
+  assert.equal(contra.reversalOf, original.id)
+  assert.equal(contra.usdFmv, -half)
+  assert.equal(await redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), PACKS.plus_50.usdMicro - half)
+
+  // Idempotent: a second reverse (redelivery) returns the SAME contra-row and does not net twice.
+  const again = await redituum.reverse(original.id, half, 'stripe-refund:pi_rev')
+  assert.equal(again.id, contra.id)
+  const reversalRows = await db.collection('reditus').find({ reversalOf: original.id }).toArray()
+  assert.equal(reversalRows.length, 1)
+  assert.equal(await redituum.trailingUsdRevenue(new Date(Date.now() + 60_000)), PACKS.plus_50.usdMicro - half)
+
+  // findByChargeRef resolves the original (the webhook's paymentKey → originalReditusId lookup).
+  const found = await redituum.findByChargeRef('pi_rev')
+  assert.equal(found?.id, original.id)
 })

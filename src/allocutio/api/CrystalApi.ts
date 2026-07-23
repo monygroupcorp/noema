@@ -195,7 +195,7 @@ export interface CrystalApiDeps {
   /** USD revenue book — backs the admin `revenueReport` (the trailing-12mo rollup + license tripwire)
    *  AND the fiat funding rail (`handleStripeWebhook` books a peer fiat `Reditus` via `record`).
    *  Absent → the report + fiat rail are unavailable. */
-  redituum?: Pick<Redituum, 'trailingUsdRevenue' | 'record'>
+  redituum?: Pick<Redituum, 'trailingUsdRevenue' | 'record' | 'reverse' | 'findByChargeRef'>
   /** The license-tripwire's persisted band — surfaced in `revenueReport` so the admin sees the
    *  last edge-triggered band alongside the live figure. Absent → lastBand omitted. */
   tripwireBand?: Pick<TripwireBandStore, 'last'>
@@ -351,6 +351,20 @@ export class CrystalApi {
   constructor(private readonly deps: CrystalApiDeps) {}
 
   /**
+   * Dispute-freeze spend guard (noema-082, Q3). Rejects a user-initiated SPEND when the caller's
+   * anima is frozen by a pending chargeback. Only identified callers carry the flag — anonymous
+   * (commitment) and bearer (bursaToken) auctors are freeze-blind (there is no anima to freeze), and
+   * a deployment without an `animae` store simply skips the check. LOGIN never routes through here.
+   */
+  private async _assertNotDisputeFrozen(auctor: AuctorKey): Promise<void> {
+    if (!('animaId' in auctor) || !this.deps.animae) return
+    const anima = await this.deps.animae.find(auctor.animaId)
+    if (anima?.disputeFrozen) {
+      throw Errors.authForbidden('This account is frozen pending review of a payment dispute. Spending is paused until the dispute is resolved.')
+    }
+  }
+
+  /**
    * Invoke a flow for an auctor and return its public Run projection.
    *
    * Target resolution: an explicit `modusId` wins; otherwise the `verb` is
@@ -364,6 +378,13 @@ export class CrystalApi {
     opts: InvokeOpts = {},
   ): Promise<Run> {
     const { inceptor, modorum, cursorum, completor, actumIndex, consuetudinum, compositusCursor } = this.deps
+
+    // Dispute freeze (noema-082, Q3): an anima frozen by a chargeback (`charge.dispute.created`)
+    // cannot initiate a generation SPEND (value outflow) while the dispute is held for review. This
+    // is the run-spend chokepoint (the peer chokepoint is owned-purse mint in purseRouter). LOGIN and
+    // value-inflow are untouched; only identified callers carry the flag (anon/bursa paths are freeze
+    // -blind, and `reserve` stays freeze-blind by design so system paths are unaffected).
+    await this._assertNotDisputeFrozen(auctor)
 
     let modusId: string | undefined
     if (target.modusId) {
@@ -505,6 +526,10 @@ export class CrystalApi {
    * the public Collection. The base modus may be atomic OR a compositus pipeline.
    */
   async collect(auctor: AuctorKey, opts: CollectOpts): Promise<Collection> {
+    // Dispute freeze (noema-082, freeze-boundary v2 2026-07-22): the ENTIRE Collections path is a
+    // user-initiated credit outflow — a non-draft collect dispatches (spends) immediately, and a
+    // draft is fired later. Gated at the top alongside invokeFlow (run spend) and owned-purse mint.
+    await this._assertNotDisputeFrozen(auctor)
     const { collectiones, collectioCursor } = this.deps
     if (!collectiones || !collectioCursor) throw Errors.notFoundCollection('collections')
 
@@ -562,6 +587,8 @@ export class CrystalApi {
    * Idempotent-guarded: only a `draft` may be fired.
    */
   async fireCollection(auctor: AuctorKey, id: string): Promise<Collection> {
+    // Dispute freeze (noema-082, freeze-boundary v2): firing a draft dispatches the run — a spend.
+    await this._assertNotDisputeFrozen(auctor)
     const { collectiones, collectioCursor } = this.deps
     if (!collectiones || !collectioCursor) throw Errors.notFoundCollection('collections')
     const c = await this._ownedCollection(auctor, id)
@@ -679,6 +706,11 @@ export class CrystalApi {
    * larger goal over time). Re-opens a completed Collection. Owner-scoped.
    */
   async extendCollection(auctor: AuctorKey, id: string, addCount: number): Promise<Collection> {
+    // Dispute freeze (noema-082, freeze-boundary v2): extend raises a collection's funded piece
+    // count (numerus + addCount) and dispatches those NEW pieces — new user-initiated outflow, the
+    // same collectioCursor-dispatch mechanism resume/fire use. Gated per the ruling's "principle is
+    // total" standing instruction for any FURTHER discovered outflow chokepoint (noted for review).
+    await this._assertNotDisputeFrozen(auctor)
     const c = await this._ownedCollection(auctor, id)
     // Extending dispatches new pieces funded by the collection's `by` (the
     // creator). Only that funder may extend — otherwise a team member could
@@ -707,6 +739,9 @@ export class CrystalApi {
 
   /** Resume dispatching after a pause. Owner-scoped. */
   async resumeCollection(auctor: AuctorKey, id: string): Promise<Collection> {
+    // Dispute freeze (noema-082, freeze-boundary v2): resume triggers new spends. After a dispute
+    // resolves the operator lifts the flag first, then resume works.
+    await this._assertNotDisputeFrozen(auctor)
     const c = await this._ownedCollection(auctor, id)
     await this.deps.collectioCursor?.resume(id)
     return toCollection((await this.deps.collectiones!.find(id)) ?? c)
@@ -745,6 +780,12 @@ export class CrystalApi {
    * the public Edition (pending for a public surface; settled otherwise).
    */
   async publish(auctor: AuctorKey, opts: PublishOpts): Promise<Edition> {
+    // Dispute freeze (noema-082, freeze-boundary v2): publishing incurs a `publish:scanFee` debit —
+    // a user-initiated outflow. It burns rather than extracts the disputed balance (the lesser case),
+    // but the freeze principle is total, so gate it too while the anima is frozen. Checked first,
+    // before any other work, mirroring invokeFlow's top-of-method freeze gate.
+    await this._assertNotDisputeFrozen(auctor)
+
     const editiones = this.deps.editiones
     if (!editiones) throw Errors.notFoundEdition('publishing')
 
@@ -2305,6 +2346,14 @@ export class CrystalApi {
    */
   async provisionStudio(auctor: AuctorKey, opts: ProvisionStudioOpts = {}): Promise<StudioView> {
     if ('bursaToken' in auctor) throw Errors.authForbidden('Bursa tokens cannot provision studios')
+
+    // Dispute freeze (noema-082, freeze-boundary v2): provisioning a studio commits the anima's
+    // balance as a compute budget and boots a pod that debits it over time (studioSpendHook mints
+    // negative-valor `nexus:studioSpend` signa on the caller). That is a user-initiated credit
+    // outflow, so it must be blocked while the anima is frozen by a pending chargeback — otherwise a
+    // disputing fraudster drains the disputed balance on GPU compute before the chargeback resolves.
+    await this._assertNotDisputeFrozen(auctor)
+
     if (!this.deps.conductor) throw Errors.studioUnavailable()
 
     // A fundamentum (when given) supplies the runtime + must resolve (no opaque ids).
@@ -2376,6 +2425,13 @@ export class CrystalApi {
 
   async provisionTeeSession(auctor: AuctorKey, opts: ProvisionTeeSessionOpts): Promise<TeeSessionView> {
     if ('bursaToken' in auctor) throw Errors.authForbidden('Bursa tokens cannot provision TEE sessions')
+
+    // Dispute freeze (noema-082, freeze-boundary v2): a TEE session commits the anima's balance as a
+    // compute budget and boots a pod that debits it over time (the `tee:spend` path). Same
+    // user-initiated outflow as provisionStudio — gate it while frozen so a disputed balance can't be
+    // consumed on private-compute GPU time before the chargeback resolves.
+    await this._assertNotDisputeFrozen(auctor)
+
     const balance = await this.deps.signorum.balance(auctor)
     const budget = opts.maxImpetus !== undefined ? BigInt(opts.maxImpetus) : balance
     if (budget <= 0n) throw Errors.insufficientSigna({ available: balance.toString() })

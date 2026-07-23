@@ -189,6 +189,19 @@ export interface Signorum {
   /** Full ledger history for an identity — all signa ever issued */
   history(by: { animaId: string } | { commitment: string }): Promise<Signa>
   /**
+   * Resolve the Stripe fiat-PURCHASE credit signum by its `testis` receipt (the
+   * `stripe:<payment_intent>` key), scoped to auctor:'stripe:purchase' — the one auctor whose
+   * testis is GLOBALLY unique (guarded by the unique partial index on
+   * `testis` where auctor:'stripe:purchase'). Returns that credit Signum (which carries `animaId`)
+   * or null when no such credit exists.
+   *
+   * This is the LEDGER-side anima resolver the refund/dispute webhook path depends on: a real Stripe
+   * Charge/Dispute object carries neither `client_reference_id` nor a propagated `metadata.animaId`
+   * (only the Checkout Session does), so the disputing/refunded anima is recovered from OUR OWN
+   * credit row keyed by the payment_intent instead of from the event (noema-082 round-10).
+   */
+  findByTestis(testis: string): Promise<Signum | null>
+  /**
    * Does this identity own ANY of the given signa? A targeted membership check
    * (`id ∈ signumIds AND owned-by`) — the cheap ownership oracle the API uses to
    * owner-scope a run without loading the identity's whole history. Empty ids → false.

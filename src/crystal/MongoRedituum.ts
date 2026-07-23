@@ -49,6 +49,14 @@ export class MongoRedituum implements Redituum {
       { chargeRef: 1 },
       { unique: true, partialFilterExpression: { origo: 'fiat', chargeRef: { $exists: true } } },
     )
+    // Refund clawback (noema-082): UNIQUE + PARTIAL on `reversalOf` over contra-rows that carry one
+    // — the atomic guard that a redelivered `charge.refunded` reverses a reditus EXACTLY ONCE (one
+    // contra-row per original). The loser of a concurrent race catches the dup-key and returns the
+    // winner's contra-row. Non-reversal rows (no `reversalOf`) are excluded, so they append freely.
+    await this.col.createIndex(
+      { reversalOf: 1 },
+      { unique: true, partialFilterExpression: { reversalOf: { $exists: true } } },
+    )
     await this.col.createIndex({ natum: 1 })   // the trailing-window range scan
   }
 
@@ -91,13 +99,77 @@ export class MongoRedituum implements Redituum {
     }
   }
 
+  async findByChargeRef(chargeRef: string): Promise<Reditus | null> {
+    const doc = await this.col.findOne({ chargeRef, origo: 'fiat' })
+    return doc ? fromDoc(doc as Record<string, unknown>) : null
+  }
+
+  async reverse(originalReditusId: string, amountMicro: bigint, reason: string): Promise<Reditus> {
+    // Idempotent on reversalOf (the unique partial index): a redelivered charge.refunded must not
+    // double-reverse. A pre-existing contra-row is replayed rather than a second written.
+    const existing = await this.col.findOne({ reversalOf: originalReditusId })
+    if (existing) return fromDoc(existing as Record<string, unknown>)
+
+    const originalDoc = await this.col.findOne({ id: originalReditusId })
+    if (!originalDoc) throw new Error(`Reditus reverse: original '${originalReditusId}' not found`)
+    const original = fromDoc(originalDoc as Record<string, unknown>)
+    if (typeof amountMicro !== 'bigint' || amountMicro <= 0n) {
+      throw new Error(`Reditus reverse: amountMicro must be a positive micro-USD amount (got ${String(amountMicro)})`)
+    }
+    if (amountMicro > original.usdFmv) {
+      throw new Error(`Reditus reverse: amountMicro ${amountMicro} exceeds the original recognized ${original.usdFmv}`)
+    }
+    // The contra-row: NEGATIVE usdFmv (offsetting), reversalOf → original. Written through THIS
+    // dedicated path (not record()), so it is exempt from record()'s fail-closed positivity check.
+    const contra: Reditus = {
+      id: uuidv4(),
+      natum: new Date(),
+      usdFmv: -amountMicro,
+      fmvSource: reason,
+      origo: original.origo,
+      reversalOf: originalReditusId,
+    }
+    try {
+      await this.col.insertOne(toDoc(contra))
+      return contra
+    } catch (err) {
+      // The unique partial index on reversalOf fired: a concurrent redelivery already reversed this
+      // reditus. Return the winner's contra-row so revenue is un-recognized exactly once.
+      if (err instanceof MongoServerError && err.code === 11000) {
+        const dup = await this.col.findOne({ reversalOf: originalReditusId })
+        if (dup) return fromDoc(dup as Record<string, unknown>)
+      }
+      throw err
+    }
+  }
+
   async trailingUsdRevenue(now: Date): Promise<bigint> {
     const cutoff = new Date(now)
     cutoff.setFullYear(cutoff.getFullYear() - 1)   // window (cutoff, now]
     // usdFmv is stored as a string, so it cannot be $sum'd in the pipeline; fetch the windowed
     // rows and reduce in bigint (the same approach MongoSignorum.balance takes). The natum index
     // bounds the scan to the window. Scale is deferred, identical to balance's posture.
-    const docs = await this.col.find({ natum: { $gt: cutoff, $lte: now } }).toArray()
-    return docs.reduce((sum, d) => sum + BigInt((d as Record<string, unknown>).usdFmv as string), 0n)
+    //
+    // Gross side: true inbound rows only (exclude reversal contra-rows), keyed by their own natum.
+    const grossDocs = await this.col.find({ natum: { $gt: cutoff, $lte: now }, reversalOf: { $exists: false } }).toArray()
+    let sum = grossDocs.reduce((s, d) => s + BigInt((d as Record<string, unknown>).usdFmv as string), 0n)
+
+    // Netting side (noema-082): a refund contra-row un-recognizes revenue in the window the ORIGINAL
+    // was recognized in — subtract it (its usdFmv is negative) ONLY when the reditus it points at
+    // falls inside this window, NOT by the contra-row's own natum. So a refund of a charge that has
+    // already rolled off the trailing window does not spuriously reduce the current figure.
+    const reversalDocs = await this.col.find({ reversalOf: { $exists: true } }).toArray()
+    if (reversalDocs.length > 0) {
+      const originalIds = reversalDocs.map(d => (d as Record<string, unknown>).reversalOf as string)
+      const originalsInWindow = await this.col
+        .find({ id: { $in: originalIds }, natum: { $gt: cutoff, $lte: now } }, { projection: { id: 1 } })
+        .toArray()
+      const windowed = new Set(originalsInWindow.map(o => (o as Record<string, unknown>).id as string))
+      for (const r of reversalDocs) {
+        const rec = r as Record<string, unknown>
+        if (windowed.has(rec.reversalOf as string)) sum += BigInt(rec.usdFmv as string)
+      }
+    }
+    return sum
   }
 }

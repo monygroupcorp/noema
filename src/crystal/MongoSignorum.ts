@@ -159,6 +159,15 @@ export class MongoSignorum implements Signorum {
     return docs.map(d => fromDoc(d as Record<string, unknown>))
   }
 
+  async findByTestis(testis: string): Promise<Signum | null> {
+    // Scoped to auctor:'stripe:purchase' so the query rides the unique PARTIAL index on
+    // { testis } (partialFilterExpression auctor:'stripe:purchase', ensureIndexes.ts) — a partial
+    // index is only chosen when the query carries its filter predicate. `testis` is globally unique
+    // within that scope (the Stripe payment_intent id), so findOne returns the single credit or null.
+    const doc = await this.col.findOne({ auctor: 'stripe:purchase', testis })
+    return doc ? fromDoc(doc as Record<string, unknown>) : null
+  }
+
   async ownsAny(by: { animaId: string } | { commitment: string }, signumIds: string[]): Promise<boolean> {
     if (signumIds.length === 0) return false
     const doc = await this.col.findOne({ id: { $in: signumIds }, ...identityQuery(by) }, { projection: { _id: 1 } })

@@ -15,6 +15,7 @@
 
 import express, { type Router, type Request, type Response } from 'express'
 import type { Signorum } from '../../types/significandi.js'
+import type { AnimaStore } from '../../types/anima.js'
 import type { Bursarum, Bursa } from '../../types/bursa.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { Credentials } from './IdentityResolver.js'
@@ -27,6 +28,10 @@ export interface PurseRouterDeps {
   bursarium: Pick<Bursarum, 'create' | 'findByToken' | 'debit' | 'setStatus' | 'listByOwner'>
   /** For an agent-funded purse: the funding anima if `callerAnimaId` owns `agentId`, else null. */
   fundFromAgent?: (agentId: string, callerAnimaId: string) => Promise<{ animaId: string } | null>
+  /** Identity store — reads the caller's `disputeFrozen` flag to block purse MINT (a value-outflow /
+   *  bearer-value-extraction path) while a chargeback is pending (noema-082, Q3 freeze boundary).
+   *  Absent → the freeze check is skipped (dev/in-memory). RECLAIM (value inflow) is never blocked. */
+  animae?: Pick<AnimaStore, 'find'>
   publicBase?: string
 }
 
@@ -62,6 +67,15 @@ export function createPurseRouter(deps: PurseRouterDeps): Router {
   router.post('/', async (req: Request, res: Response): Promise<void> => {
     const animaId = await requireAnima(req, res)
     if (!animaId) return
+    // Dispute freeze (noema-082, Q3): minting an owned purse extracts bearer value from the caller's
+    // balance — the exact outflow a disputing fraudster would use — so it is blocked while frozen.
+    // (Purse RECLAIM, value returning IN, is deliberately NOT gated.)
+    if (deps.animae) {
+      const anima = await deps.animae.find(animaId)
+      if (anima?.disputeFrozen) {
+        fail(res, 403, 'auth.forbidden', 'This account is frozen pending review of a payment dispute. Minting purses is paused until the dispute is resolved.'); return
+      }
+    }
     const rawCredits = req.body?.credits
     const credits = typeof rawCredits === 'number' && Number.isInteger(rawCredits) && rawCredits > 0 ? BigInt(rawCredits)
       : typeof rawCredits === 'string' && /^[1-9][0-9]*$/.test(rawCredits) ? BigInt(rawCredits) : null
