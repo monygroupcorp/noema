@@ -1195,6 +1195,9 @@ async function main(): Promise<void> {
     identity: apiResolver,
     signorum: ring.signorum,
     bursarium: ring.bursarium,
+    // noema-082 (Q3 freeze boundary): the purse-mint freeze check needs the AnimaStore to read the
+    // caller's disputeFrozen flag (mint is a bearer-value-extraction outflow; reclaim is not gated).
+    animae: ring.animae,
     // fund-from-agent: the caller's linked wallet (Anima.custos) must equal the agent owner.
     fundFromAgent: async (agentId, callerAnimaId) => {
       const legatus = await ring.legati.findByAgentId(agentId)

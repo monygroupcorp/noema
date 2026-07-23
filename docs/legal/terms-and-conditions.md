@@ -18,9 +18,10 @@ This template encodes the protections the compliance landscape demands. Brackete
 - **Bring-your-own (BYO) mode** — you supply your own model weights to a compute instance.
 
 We are a **compute provider and merchant of our own services**. Credits are a **closed-loop,
-non-transferable, non-refundable prepaid balance** redeemable solely for Service usage. They
-are not money, not a security, not a deposit, confer no ownership or profit expectation, and
-cannot be cashed out or transferred to other users.
+non-transferable prepaid balance** redeemable solely for Service usage. **Unused credits are
+refundable within 14 days of purchase; credits that have been spent, in whole or in part, are
+non-refundable for the spent portion.** They are not money, not a security, not a deposit, confer
+no ownership or profit expectation, and cannot be cashed out or transferred to other users.
 
 ## 2. Eligibility & sanctions
 
@@ -77,7 +78,8 @@ not log private-session content beyond what these controls require.
 ## 6. Payment
 
 Credits are purchased via supported crypto and/or fiat on-ramps and convert to a single
-closed-loop balance. All sales are final. We may suspend access for suspected abuse,
+closed-loop balance. **Unused credits are refundable within 14 days of purchase; once credits
+have been spent, the spent portion is non-refundable.** We may suspend access for suspected abuse,
 sanctions match, or chargeback.
 
 ## 7. Disclaimers & limitation of liability
