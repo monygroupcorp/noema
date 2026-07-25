@@ -5,6 +5,8 @@ import type { Signum } from '../../../src/types/significandi.js'
 import type { Exitus, Actorum } from '../../../src/types/cursus.js'
 import type { Nexus } from '../../../src/types/nexus.js'
 import type { Vestigiorum } from '../../../src/types/vestigium.js'
+import type { DeploymentumStore } from '../../../src/types/deploymentum.js'
+import type { Intella, Intellarum } from '../../../src/types/intelligendi.js'
 import { ActumCompletor } from '../../../src/execution/ActumCompletor.js'
 import { MemoryVestigiorum } from '../../../src/rag/MemoryVestigiorum.js'
 
@@ -269,6 +271,61 @@ test('writes a vestigium for an animaId auctor on completion', async () => {
 
   assert.deepEqual((created() as { auctorKey: unknown }).auctorKey, { animaId: 'anima-abc' })
   assert.equal((created() as { actumId: string }).actumId, actum.id)
+})
+
+function makeDeployments(hash: string, models: Array<{ id: string; role: string }>): Pick<DeploymentumStore, 'find'> {
+  return {
+    find: async (h: string) => h === hash
+      ? { hash, spec: { models }, natum: new Date() }
+      : null,
+  }
+}
+
+function makeIntellarum(byId: Record<string, string>): Pick<Intellarum, 'find'> {
+  return {
+    find: async (id: string) => byId[id]
+      ? ({ id, nomen: byId[id] } as unknown as Intella)
+      : null,
+  }
+}
+
+test('populates intellaIds/intellaDescription from the deployment bundle (base + lora, human names)', async () => {
+  const actum = makeActum({ aditus: { prompt: 'a cat in space' }, deploymentHash: 'dep-1' })
+  const acta = makeActa(actum)
+  const { spy, created } = spyOnCreate(new MemoryVestigiorum())
+  const deployments = makeDeployments('dep-1', [
+    { id: 'intella-x', role: 'lora' },
+    { id: 'intella-base', role: 'checkpoint' },
+  ])
+  const intellarum = makeIntellarum({ 'intella-x': 'stationthis lora', 'intella-base': 'FLUX.2 Klein' })
+  const completor = new ActumCompletor({
+    acta, signorum: makeSignorum(), nexus: makeNexus(), vestigiorum: spy, deployments, intellarum,
+  })
+
+  await completor.complete(actum, makeRunResult(), { animaId: 'anima-abc' })
+  await new Promise((resolve) => setImmediate(resolve)) // flush the fire-and-forget index write
+
+  const options = created() as { intellaIds?: string[]; intellaDescription?: string }
+  assert.deepEqual(new Set(options.intellaIds), new Set(['intella-x', 'intella-base']))
+  assert.equal(options.intellaDescription, 'stationthis lora + FLUX.2 Klein')
+})
+
+test('falls back to the raw id when a model has no resolvable Intella record', async () => {
+  const actum = makeActum({ deploymentHash: 'dep-2' })
+  const acta = makeActa(actum)
+  const { spy, created } = spyOnCreate(new MemoryVestigiorum())
+  const deployments = makeDeployments('dep-2', [{ id: 'intella-unregistered', role: 'checkpoint' }])
+  const intellarum = makeIntellarum({})
+  const completor = new ActumCompletor({
+    acta, signorum: makeSignorum(), nexus: makeNexus(), vestigiorum: spy, deployments, intellarum,
+  })
+
+  await completor.complete(actum, makeRunResult(), { animaId: 'anima-abc' })
+  await new Promise((resolve) => setImmediate(resolve))
+
+  const options = created() as { intellaIds?: string[]; intellaDescription?: string }
+  assert.deepEqual(options.intellaIds, ['intella-unregistered'])
+  assert.equal(options.intellaDescription, 'intella-unregistered')
 })
 
 test('writes a vestigium for a commitment auctor on completion', async () => {
