@@ -311,6 +311,10 @@ const ModelCardSchema: JsonSchema = {
     access: { type: 'string', enum: ['public', 'private'], description: "Resolvability of the caller's own model (GET /me/models only)." },
     license: { type: 'string', description: "License id, e.g. 'apache-2.0' (owner/admin views)." },
     commercialUse: { type: 'string', enum: ['yes', 'no', 'conditional', 'unknown'], description: 'Whether this model may be promoted to the public (commercial) catalog (owner/admin views).' },
+    slug: { type: 'string', description: 'ComfyUI LoRA filename token for explicit <lora:slug:weight> syntax (LoRA only).' },
+    defaultWeight: { type: 'number', description: 'Recommended application weight when the caller does not specify one (LoRA only).' },
+    samples: { type: 'array', items: { type: 'object', properties: { url: { type: 'string' }, prompt: { type: 'string' } }, required: ['url'] }, description: 'Preview samples: image URL + the prompt it was rendered from.' },
+    tags: { type: 'array', items: { type: 'object', properties: { tag: { type: 'string' }, source: { type: 'string' } }, required: ['tag'] }, description: 'Discovery/classification tags.' },
   },
   required: ['intellaId', 'nomen', 'genus'],
 }

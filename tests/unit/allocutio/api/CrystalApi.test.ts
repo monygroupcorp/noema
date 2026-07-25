@@ -627,6 +627,51 @@ test('listModels surfaces a canonical public flux2 model by basis (klein-highlig
   assert.equal(models[0].trigger, 'stationthis')
 })
 
+test('listModels round-trips slug/defaultWeight/samples/tags', async () => {
+  const widened = makeIntella({
+    id: 'widened-lora',
+    nomen: 'Widened LoRA',
+    genus: 'lora',
+    familia: 'flux',
+    trigger: 'widened-trigger',
+    canonica: true,
+    slug: 'widened-lora',
+    defaultWeight: 0.8,
+    samples: [{ url: 'https://example.com/sample.png', prompt: 'a widened lora sample' }],
+    tags: [{ tag: 'flux', source: 'catalog' }],
+  })
+  const { deps } = makeDeps({ intellarum: makeFakeIntellarum([...fakeIntellae, widened]) })
+  const api = new CrystalApi(deps)
+
+  const models = await api.listModels({ basis: 'flux' } as never)
+  const m = models.find((x) => x.intellaId === 'widened-lora')!
+  assert.ok(m, 'widened-lora present')
+  assert.equal(m.slug, 'widened-lora')
+  assert.equal(m.defaultWeight, 0.8)
+  assert.deepEqual(m.samples, [{ url: 'https://example.com/sample.png', prompt: 'a widened lora sample' }])
+  assert.deepEqual(m.tags, [{ tag: 'flux', source: 'catalog' }])
+})
+
+test('listModels trigger filter matches a single alias in a comma-joined trigger field', async () => {
+  const multiAlias = makeIntella({
+    id: 'multi-alias-lora',
+    nomen: 'Multi Alias LoRA',
+    genus: 'lora',
+    familia: 'flux',
+    trigger: 'milady,mld',
+    canonica: true,
+  })
+  const { deps } = makeDeps({ intellarum: makeFakeIntellarum([...fakeIntellae, multiAlias]) })
+  const api = new CrystalApi(deps)
+
+  const hits = await api.listModels({ trigger: 'mld' } as never)
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].intellaId, 'multi-alias-lora')
+
+  const misses = await api.listModels({ trigger: 'notanalias' } as never)
+  assert.equal(misses.find((m) => m.intellaId === 'multi-alias-lora'), undefined)
+})
+
 // ── invokeFlow maxImpetus cap ─────────────────────────────────────────────────
 
 test('invokeFlow with maxImpetus BELOW the reservation throws economy.cap_too_low', async () => {

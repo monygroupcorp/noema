@@ -1999,7 +1999,10 @@ export class CrystalApi {
     const hits = base.filter((i) => {
       if (filter.genus && i.genus !== filter.genus) return false
       if (basis && i.familia !== basis) return false
-      if (trig && i.trigger?.toLowerCase() !== trig) return false
+      if (trig) {
+        const aliases = (i.trigger ?? '').split(',').map((t) => t.trim().toLowerCase()).filter(Boolean)
+        if (!aliases.includes(trig)) return false
+      }
       return true
     })
     const limited = filter.limit ? hits.slice(0, filter.limit) : hits
@@ -3063,6 +3066,14 @@ export interface ModelCard {
   license?: string
   /** Commercial-catalog verdict — whether this model may be promoted publicly. Owner/admin views. */
   commercialUse?: 'yes' | 'no' | 'conditional' | 'unknown'
+  /** The ComfyUI LoRA filename token for explicit `<lora:slug:weight>` syntax (LoRA only). */
+  slug?: string
+  /** Recommended application weight when the caller does not specify one (LoRA only). */
+  defaultWeight?: number
+  /** Preview samples: image URL + the prompt it was rendered from. */
+  samples?: Array<{ url: string; prompt?: string }>
+  /** Discovery/classification tags. */
+  tags?: Array<{ tag: string; source?: string }>
 }
 
 /** Project an `Intella` (the load/resolve registry record) to a `ModelCard` — the owner-scoped
@@ -3078,6 +3089,10 @@ function toModelCardFromIntella(i: Intella): ModelCard {
     access: i.access ?? (i.canonica ? 'public' : 'private'),
     ...(i.license ? { license: i.license } : {}),
     ...(i.commercialUse ? { commercialUse: i.commercialUse } : {}),
+    ...(i.slug ? { slug: i.slug } : {}),
+    ...(i.defaultWeight !== undefined ? { defaultWeight: i.defaultWeight } : {}),
+    ...(i.samples?.length ? { samples: i.samples } : {}),
+    ...(i.tags?.length ? { tags: i.tags } : {}),
   }
 }
 

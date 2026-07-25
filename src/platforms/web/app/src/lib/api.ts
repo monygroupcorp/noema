@@ -894,6 +894,10 @@ export interface ModelCard {
   access?: 'public' | 'private';
   license?: string;
   commercialUse?: 'yes' | 'no' | 'conditional' | 'unknown';
+  slug?: string;
+  defaultWeight?: number;
+  samples?: Array<{ url: string; prompt?: string }>;
+  tags?: Array<{ tag: string; source?: string }>;
 }
 
 // A team (Sodalitas) — GET/POST /v1/teams. Members co-own work; founder is the first member.

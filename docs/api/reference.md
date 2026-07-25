@@ -551,6 +551,50 @@ Browse the model weight catalog, optionally filtered by genus, basis, fundamentu
               "unknown"
             ],
             "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+          },
+          "slug": {
+            "type": "string",
+            "description": "ComfyUI LoRA filename token for explicit <lora:slug:weight> syntax (LoRA only)."
+          },
+          "defaultWeight": {
+            "type": "number",
+            "description": "Recommended application weight when the caller does not specify one (LoRA only)."
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "prompt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ]
+            },
+            "description": "Preview samples: image URL + the prompt it was rendered from."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tag": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tag"
+              ]
+            },
+            "description": "Discovery/classification tags."
           }
         },
         "required": [
@@ -909,6 +953,50 @@ Import a model/LoRA by URL (Civitai/HuggingFace/direct) as a private, owner-scop
             "unknown"
           ],
           "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+        },
+        "slug": {
+          "type": "string",
+          "description": "ComfyUI LoRA filename token for explicit <lora:slug:weight> syntax (LoRA only)."
+        },
+        "defaultWeight": {
+          "type": "number",
+          "description": "Recommended application weight when the caller does not specify one (LoRA only)."
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "prompt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url"
+            ]
+          },
+          "description": "Preview samples: image URL + the prompt it was rendered from."
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tag": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "tag"
+            ]
+          },
+          "description": "Discovery/classification tags."
         }
       },
       "required": [
@@ -985,6 +1073,50 @@ List the caller's own privately-held models (imports + trained LoRAs), newest fi
               "unknown"
             ],
             "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+          },
+          "slug": {
+            "type": "string",
+            "description": "ComfyUI LoRA filename token for explicit <lora:slug:weight> syntax (LoRA only)."
+          },
+          "defaultWeight": {
+            "type": "number",
+            "description": "Recommended application weight when the caller does not specify one (LoRA only)."
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "prompt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ]
+            },
+            "description": "Preview samples: image URL + the prompt it was rendered from."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tag": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tag"
+              ]
+            },
+            "description": "Discovery/classification tags."
           }
         },
         "required": [
@@ -1089,6 +1221,50 @@ Admin: clear or backfill a model's license so the public-catalog gate treats it 
             "unknown"
           ],
           "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+        },
+        "slug": {
+          "type": "string",
+          "description": "ComfyUI LoRA filename token for explicit <lora:slug:weight> syntax (LoRA only)."
+        },
+        "defaultWeight": {
+          "type": "number",
+          "description": "Recommended application weight when the caller does not specify one (LoRA only)."
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "prompt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url"
+            ]
+          },
+          "description": "Preview samples: image URL + the prompt it was rendered from."
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tag": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "tag"
+            ]
+          },
+          "description": "Discovery/classification tags."
         }
       },
       "required": [
