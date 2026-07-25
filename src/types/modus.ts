@@ -25,6 +25,7 @@
 import type { ComputeStrategy, GpuClass } from './actum.js'
 import type { PodPolicy } from './materia.js'
 import type { AuctorKey } from '../flow/types.js'
+import type { CanonVerb } from '../crystal/verbResolver.js'
 export type { ComputeStrategy, GpuClass, PodPolicy }
 export type { AuctorKey }
 
@@ -136,6 +137,16 @@ export interface Modus {
   aditus: Forma
   /** Output schema — "exitus" = exit in Latin */
   exitus: Forma
+
+  /**
+   * "verbum" = word in Latin — an explicit canon-verb override for this seed.
+   * When set, `resolveCanonVerb` (crystal/verbResolver.ts) returns it directly,
+   * bypassing the 3-rule structural cascade entirely (operator decision,
+   * 2026-07-14: fixes derivation blind spots for a handful of named flows
+   * without rewriting the cascade). Absent (the default) → the cascade derives
+   * the verb from `aditus`/`exitus` as before, unaffected.
+   */
+  verbum?: CanonVerb
 
   /** Ordered steps — present only when genus is 'compositus' */
   gradus?: Gradus[]
