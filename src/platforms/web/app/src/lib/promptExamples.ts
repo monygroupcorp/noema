@@ -4,7 +4,18 @@
 export interface PromptTemplate { example: string; hint: string }
 
 const BY_ID: Record<string, PromptTemplate> = {
-  heartmula: { example: 'make me a ___ song with the style like ___, about ___', hint: 'genre · reference · theme' },
+  'heartmula-3b': { example: 'make me a ___ song with the style like ___, about ___', hint: 'genre · reference · theme' },
+  sdxl: { example: 'a ___ of ___, ___ lighting, ___ style, highly detailed', hint: 'subject · scene · light · style' },
+  chroma: { example: 'a ___ of ___, ___ lighting, ___ style, highly detailed', hint: 'subject · scene · light · style' },
+  'krea-turbo': { example: 'a ___ of ___, ___ lighting, ___ style', hint: 'subject · scene · light · style' },
+  'kontext-edit': { example: 'add a ___ to the image, make it ___', hint: 'what to add · what to change' },
+  'klein-edit': { example: 'replace the ___ with ___, keep the rest the same', hint: 'what to replace · what to swap in' },
+  rmbg: { example: 'upload a photo with a clear subject — the background comes off automatically', hint: 'no prompt needed · just an image' },
+  upscale: { example: 'upload an image to sharpen and blow up 4x — no prompt needed', hint: 'no prompt needed · just an image' },
+  'qwen3-vl-8b': { example: 'what\'s happening in this image? describe the ___', hint: 'question · what to focus on' },
+  'shotvl-7b': { example: 'describe the shot: framing, camera angle, and lighting', hint: 'shot size · framing · lighting' },
+  'qwen3-vl-caption': { example: 'describe this image in one dense, comma-separated caption', hint: 'subject · attributes · style · composition' },
+  'make-upscale': { example: 'a ___ of ___, ___ lighting, ___ style — generated then upscaled 4x', hint: 'subject · scene · light · style' },
 };
 
 const BY_KEYWORD: [RegExp, PromptTemplate][] = [
@@ -33,7 +44,8 @@ const FIELD_EXAMPLES: Record<string, string> = {
   lyrics: '[Verse]\n___\n[Chorus]\n___',
   tags: 'cinematic, warm, analog',
   negative_prompt: 'blurry, low quality, extra limbs, watermark',
-  'profile-kit:vibe': 'vaporwave chrome, neon magenta + cyan, retro-future, soft glow…',
+  'ltx-t2v:negative': 'blurry, low quality, extra limbs, watermark',
+  'ltx-i2v:negative': 'blurry, low quality, extra limbs, watermark',
   'klein': 'a foggy harbor at dawn, cargo ships silhouetted against amber light, cinematic wide shot',
   'klein-edit-4b': 'turn the sky into a stormy sunset and add rain streaks on the window',
 };
