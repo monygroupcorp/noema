@@ -57,6 +57,28 @@ export function toRun(actum: Actum): Run {
 }
 
 /**
+ * Project an Actum onto its OWNER-SCOPED Run detail shape — everything `toRun` exposes,
+ * plus the stored effective input so an owner can read back what actually produced a run
+ * and adjust it directly.
+ *   aditus       echoed verbatim (no transformation, including an unresolved "shuffle"
+ *                seed sentinel if that's what was stored) — present only when populated.
+ *   pinnedModels the models pinned at cast time — present only when populated.
+ *   modusVersion the cast-time modus version (Actum's internal `modusVersiono`), plain-named.
+ * `toRun()` itself is unchanged by this function's existence — this is a separate,
+ * structurally owner-only projection, not a flag on `toRun`.
+ * Pure.
+ */
+export function toRunDetail(actum: Actum): Run {
+  const run = toRun(actum)
+
+  if (actum.aditus !== undefined) run.aditus = actum.aditus
+  if (actum.pinnedModels !== undefined) run.pinnedModels = actum.pinnedModels
+  if (actum.modusVersiono !== undefined) run.modusVersion = actum.modusVersiono
+
+  return run
+}
+
+/**
  * Project a retained-on-settle ActumIndex entry onto its public SettledRun shape.
  *   cost     the stamped impetus string (already JSON-safe)
  *   costUsd  DERIVED on read: Number(cost) × IMPETUS_USD_RATE — never persisted

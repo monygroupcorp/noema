@@ -155,6 +155,23 @@ Invoke a flow and return its run handle.
           "type": "string",
           "format": "date-time",
           "description": "When the run started, as an ISO-8601 string."
+        },
+        "aditus": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "OWNER-SCOPED: the stored effective input the run was cast with, echoed verbatim (including an unresolved \"shuffle\" seed sentinel if that's what was stored). Present only when populated."
+        },
+        "pinnedModels": {
+          "type": "array",
+          "description": "OWNER-SCOPED: the models pinned at cast time. Present only when populated.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "modusVersion": {
+          "type": "string",
+          "description": "OWNER-SCOPED: the cast-time modus version. Present only when populated."
         }
       },
       "required": [
@@ -233,6 +250,23 @@ Fetch a run by id (poll for completion).
           "type": "string",
           "format": "date-time",
           "description": "When the run started, as an ISO-8601 string."
+        },
+        "aditus": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "OWNER-SCOPED: the stored effective input the run was cast with, echoed verbatim (including an unresolved \"shuffle\" seed sentinel if that's what was stored). Present only when populated."
+        },
+        "pinnedModels": {
+          "type": "array",
+          "description": "OWNER-SCOPED: the models pinned at cast time. Present only when populated.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "modusVersion": {
+          "type": "string",
+          "description": "OWNER-SCOPED: the cast-time modus version. Present only when populated."
         }
       },
       "required": [
