@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { toRun, toCollection } from '../../../../src/allocutio/api/runProjection.js'
+import { toRun, toRunDetail, toCollection } from '../../../../src/allocutio/api/runProjection.js'
 import type { Actum, ActumStatus } from '../../../../src/types/actum.js'
 import type { Collectio } from '../../../../src/types/collectio.js'
 
@@ -65,6 +65,46 @@ test('completus actum surfaces exitus', () => {
 test('no failure on non-fractus runs', () => {
   const run = toRun(makeActum({ status: 'completus' }))
   assert.equal(run.failure, undefined)
+})
+
+test('toRun does not surface aditus, pinnedModels, or modusVersion', () => {
+  const run = toRun(makeActum({
+    aditus: { prompt: 'a cat' },
+    pinnedModels: [{ role: 'checkpoint', modelId: 'sd15' } as any],
+  }))
+  assert.equal((run as any).aditus, undefined)
+  assert.equal((run as any).pinnedModels, undefined)
+  assert.equal((run as any).modusVersion, undefined)
+})
+
+test('toRunDetail includes everything toRun does', () => {
+  const detail = toRunDetail(makeActum({ status: 'completus', impetus: 12345n }))
+  const run = toRun(makeActum({ status: 'completus', impetus: 12345n }))
+  assert.equal(detail.id, run.id)
+  assert.equal(detail.status, run.status)
+  assert.equal(detail.modusId, run.modusId)
+  assert.equal(detail.cost, run.cost)
+})
+
+test('toRunDetail echoes aditus verbatim, including an unresolved shuffle sentinel', () => {
+  const detail = toRunDetail(makeActum({ aditus: { prompt: 'a cat', seed: 'shuffle' } }))
+  assert.deepEqual(detail.aditus, { prompt: 'a cat', seed: 'shuffle' })
+})
+
+test('toRunDetail surfaces pinnedModels when present', () => {
+  const pinnedModels = [{ role: 'checkpoint', modelId: 'sd15' } as any]
+  const detail = toRunDetail(makeActum({ pinnedModels }))
+  assert.deepEqual(detail.pinnedModels, pinnedModels)
+})
+
+test('toRunDetail is absent pinnedModels when the Actum has none', () => {
+  const detail = toRunDetail(makeActum({}))
+  assert.equal(detail.pinnedModels, undefined)
+})
+
+test('toRunDetail surfaces the cast-time modus version under the plain name', () => {
+  const detail = toRunDetail(makeActum({ modusVersiono: '2.3.1' }))
+  assert.equal(detail.modusVersion, '2.3.1')
 })
 
 function makeCollectio(over: Partial<Collectio> = {}): Collectio {

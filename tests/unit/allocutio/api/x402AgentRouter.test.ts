@@ -107,6 +107,24 @@ test('happy path: verify → run → settle → 200 with X-PAYMENT-RESPONSE + ag
   assert.equal(cuts[0].sourceRef, 'sig-123')          // the settlement's replay/idempotency key
 })
 
+test('anonymous agent-spell response does not leak owner-only run detail fields', async () => {
+  const { server } = await harness({
+    runSpell: async ({ modusId }): Promise<Run> => ({
+      id: 'run-1', status: 'complete', modusId, exitus: { image: 'https://out/img.png' },
+      aditus: { prompt: 'a cat', seed: 42 },
+      pinnedModels: [{ role: 'checkpoint', modelId: 'flux-dev' } as any],
+      modusVersion: '1.0.0',
+    }),
+  })
+  const res = await request(server).post('/api/v1/x402/agents/camel42/spell/memeify').set('x-payment', 'paid').send({ inputs: { prompt: 'a cat' } })
+  assert.equal(res.status, 200)
+  assert.equal(res.body.runId, 'run-1')
+  assert.equal(res.body.aditus, undefined)
+  assert.equal(res.body.pinnedModels, undefined)
+  assert.equal(res.body.modusVersion, undefined)
+  assert.deepEqual(Object.keys(res.body).sort(), ['agentId', 'outputs', 'runId', 'spell', 'status', 'x402'])
+})
+
 test('replay: the same signatureHash is refused with 409, run not repeated', async () => {
   let runs = 0
   const { server } = await harness({ runSpell: async ({ modusId }): Promise<Run> => { runs++; return { id: `run-${runs}`, status: 'complete', modusId } } })
