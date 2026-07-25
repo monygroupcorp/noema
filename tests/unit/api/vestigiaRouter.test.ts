@@ -302,3 +302,97 @@ test('POST /api/vestigia/:id/impressio: invalid impressio value -> 400', async (
     await closeServer(server)
   }
 })
+
+// ── GET /:id — visibilitas + ownership gate (noema-084) ─────────────────────────
+//
+// privata is owner-only: a foreign or unauthenticated caller 404s (same shape as an
+// absent id — no existence leak). communis/publica stay open-by-id by design.
+
+test('GET /api/vestigia/:id: absent id -> 404', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await get(`${url}/api/vestigia/does-not-exist`)
+    assert.equal(res.status, 404)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /api/vestigia/:id: a privata vestigium with no credentials -> 404 (not 401, no existence leak)', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const v = await seed(vestigiorum, 'anima-a', 'a red dragon breathing fire')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await get(`${url}/api/vestigia/${v.id}`)
+    assert.equal(res.status, 404)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /api/vestigia/:id: a stranger gets 404, and the full record does not leak', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const v = await seed(vestigiorum, 'anima-a', 'a red dragon breathing fire')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await get(`${url}/api/vestigia/${v.id}`, { authorization: 'Bearer anima-b' })
+    assert.equal(res.status, 404)
+    assert.equal(res.body.vestigium, undefined, 'no vestigium record may leak in the 404 body')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /api/vestigia/:id: the owner reads their own privata vestigium -> 200 with the full record', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const v = await seed(vestigiorum, 'anima-a', 'a red dragon breathing fire')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await get(`${url}/api/vestigia/${v.id}`, { authorization: 'Bearer anima-a' })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.vestigium.promptum, 'a red dragon breathing fire')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /api/vestigia/:id: a communis vestigium is readable by anyone with the link (no credentials) -> 200', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const v = await vestigiorum.create({
+    modusId: 'modus.test',
+    auctorKey: { animaId: 'anima-a' },
+    promptum: 'a shared communis trace',
+    summarium: 'a shared communis trace',
+    genus: 'image',
+    visibilitas: 'communis',
+  })
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await get(`${url}/api/vestigia/${v.id}`)
+    assert.equal(res.status, 200)
+    assert.equal(res.body.vestigium.promptum, 'a shared communis trace')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /api/vestigia/:id: a publica vestigium is readable by anyone (no credentials) -> 200', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const v = await vestigiorum.create({
+    modusId: 'modus.test',
+    auctorKey: { animaId: 'anima-a' },
+    promptum: 'a public gallery trace',
+    summarium: 'a public gallery trace',
+    genus: 'image',
+    visibilitas: 'publica',
+  })
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await get(`${url}/api/vestigia/${v.id}`)
+    assert.equal(res.status, 200)
+    assert.equal(res.body.vestigium.promptum, 'a public gallery trace')
+  } finally {
+    await closeServer(server)
+  }
+})
