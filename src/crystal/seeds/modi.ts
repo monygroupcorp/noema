@@ -132,6 +132,13 @@ export const MODUS_LAYER_COMPOSITE: Modus = make({
   canonica: true,
   // Host-side deterministic processing — no GPU, no per-second pod cost.
 
+  // Explicit override (noema-087): the URL-array `layers` port is typed 'text' (a
+  // validateAditus smuggling workaround), making this structurally invisible to the
+  // cascade — it resolves off `exitus` alone instead of its true image->image shape.
+  // Best-fit existing verb: `effect` (i2i — image transform; z-order compositing is
+  // a same-modality image transform, the closest of the 14 canon verbs).
+  verbum: 'effect',
+
   aditus: {
     // Declared `text` so an array of URLs passes validateAditus intact (arrays
     // pass through for text ports). Bottom→top z-order.
@@ -157,6 +164,13 @@ export const MODUS_FRAMES_TO_VIDEO: Modus = make({
   deliveryMode: 'sync',
   canonica: true,
   // Host-side deterministic processing — no GPU, no per-second pod cost.
+
+  // Explicit override (noema-087): the URL-array `frames` port is typed 'text' (a
+  // validateAditus smuggling workaround), making this structurally invisible to the
+  // cascade — it resolves off `exitus` alone instead of its true image(s)->video
+  // shape. Best-fit existing verb: `animate` (i2v — video from a still; assembling
+  // frames into an animation is the same image-to-video family).
+  verbum: 'animate',
 
   aditus: {
     // `text` so an array of frame URLs passes validateAditus intact. Playback order.
@@ -184,6 +198,15 @@ export const MODUS_AITOOLKIT_TRAINING: Modus = make({
   // No impetusFixum: cost is runtime-duration based (the Modus convention for pod tools). The
   // LOCAL cursor still charges `impetusFixum ?? 0n` = 0n (self-hosted); the REMOTE cursor (Slice E)
   // reserves a pod-seconds cap, settled to the actual run length at the completion webhook.
+
+  // Explicit override (noema-087): all aditus ports are typed 'text'/'int' (no media
+  // port at all — `dataset` is a folder path string), so the cascade's text rule
+  // fires and falls to `chat` on the (text-typed) `trained` exitus. No canon verb for
+  // "trains a LoRA" exists in the 14-verb list; least-wrong fallback: `compose`
+  // (t2a·music's generic "assemble/create a new artifact from inputs" sense is the
+  // closest existing intent to synthesizing a trained weights artifact from a
+  // dataset). FLAGGED for operator review — this is a fallback, not an exact fit.
+  verbum: 'compose',
 
   // The user-facing contract: a DATASET + a few knobs. The modus SYNTHESISES the
   // ai-toolkit training yaml from these (buildAitkConfig, per base-model preset) — users

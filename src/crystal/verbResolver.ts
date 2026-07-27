@@ -31,8 +31,11 @@ export const ENHANCE: CanonVerb = 'enhance'
 
 type Modality = 'text' | 'image' | 'video' | 'audio' | '3d'
 
-/** Any object carrying `aditus`/`exitus` port schemas — a `Modus` or an `Essentia` (which extends it). */
-export type PortShaped = Pick<Modus, 'aditus' | 'exitus'>
+/**
+ * Any object carrying `aditus`/`exitus` port schemas — a `Modus` or an `Essentia`
+ * (which extends it) — plus the optional `verbum` override (see `resolveCanonVerb`).
+ */
+export type PortShaped = Pick<Modus, 'aditus' | 'exitus' | 'verbum'>
 
 /**
  * The capability-map signature table, encoded as data: required-input-modality-set →
@@ -108,6 +111,14 @@ function outputModality(exitus: Forma): Modality | undefined {
  * Resolve the canon verb for a modus (or essentia) from its aditus/exitus port
  * shapes. Pure function — no I/O, no registry lookups.
  *
+ * `verbum` override (operator decision, 2026-07-14, noema-087): if the seed
+ * declares an explicit `verbum`, it wins outright and none of the 3 rules below
+ * run — this is how `hunyuan3d-21`, `image-caption`, `qwen3-vl-8b`, `shotvl-7b`,
+ * `modus.layer-composite`, `modus.frames-to-video`, and `modus.aitoolkit-training`
+ * resolve to their correct verb despite structural blind spots in the cascade.
+ * Every other seed leaves `verbum` unset and falls through to the cascade,
+ * unchanged.
+ *
  * Classification rule (operator decision, 2026-07-14) — checked in this order:
  *
  * 1. If aditus contains **only media input(s) (image/video/audio/3d) and no text
@@ -132,6 +143,8 @@ function outputModality(exitus: Forma): Modality | undefined {
  *    ControlNet-conditioned t2i flow).
  */
 export function resolveCanonVerb(modus: PortShaped): CanonVerb {
+  if (modus.verbum) return modus.verbum
+
   const required = requiredPortTypes(modus.aditus)
   const anyTypes = anyPortTypes(modus.aditus)
   const outModality = outputModality(modus.exitus)
