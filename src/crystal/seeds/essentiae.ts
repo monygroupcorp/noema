@@ -630,6 +630,11 @@ export const ESSENTIA_QWEN3_VL: Essentia = {
   fundamentumVersio: '1.0.0',
   intellae: [{ id: 'intella.qwen3-vl-8b', role: 'lm' }],
 
+  // Explicit override (noema-087): optional (not required) image input means rule 2
+  // never fires, so the cascade falls through to the text rule's `chat` default; the
+  // real intent (image + text -> text) is `describe`.
+  verbum: 'describe',
+
   aditus: {
     prompt:      { type: 'text',  required: true,  description: 'The question or instruction' },
     image:       { type: 'image', required: false, description: 'Image to reason over (optional)' },
@@ -693,6 +698,11 @@ export const ESSENTIA_SHOTVL: Essentia = {
   fundamentumId: 'qwen-vl-vllm',
   fundamentumVersio: '1.0.0',
   intellae: [{ id: 'intella.shotvl-7b', role: 'lm' }],
+
+  // Explicit override (noema-087): both media inputs are optional, so rule 2 never
+  // fires and the cascade falls through to the text rule's `chat` default; the real
+  // intent (video/image + text -> text) is `describe`.
+  verbum: 'describe',
 
   aditus: {
     prompt:      { type: 'text',  required: true,  description: 'What to analyze (shot size, framing, lighting...)' },
@@ -851,6 +861,10 @@ export const ESSENTIA_HUNYUAN3D: Essentia = {
 
   fundamentumId: 'hunyuan3d-pytorch',
   fundamentumVersio: '1.0.0',
+
+  // Explicit override (noema-087): image-only aditus (no text port) would otherwise
+  // hit rule 1 and misclassify as `enhance`; this is really i2m — `lift`.
+  verbum: 'lift',
 
   aditus: {
     image: { type: 'image', required: true, description: 'Reference image — a clean, front-facing subject works best' },

@@ -69,6 +69,10 @@ export const COMPOSITUS_IMAGE_CAPTION: Modus = {
   contentHash: '',
   canonica: true,
 
+  // Explicit override (noema-087): image-only aditus (no text port) hits rule 1 and
+  // misclassifies as `enhance`; this is really i2t — `describe`.
+  verbum: 'describe',
+
   aditus: {
     image: { type: 'image', required: true, description: 'Image to caption' },
   },
