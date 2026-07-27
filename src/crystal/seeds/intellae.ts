@@ -34,6 +34,7 @@ export const INTELLA_FLUX_SCHNELL: Intella = {
   sizeGb: 17,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2025-01-01'),
 }
 
@@ -62,6 +63,7 @@ export const INTELLA_FLUX_VAE: Intella = {
   sizeGb: 0.34,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2025-01-01'),
 }
 
@@ -90,6 +92,7 @@ export const INTELLA_T5XXL: Intella = {
   sizeGb: 9.8,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2025-01-01'),
 }
 
@@ -118,6 +121,7 @@ export const INTELLA_CLIP_L: Intella = {
   sizeGb: 0.24,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2025-01-01'),
 }
 
@@ -146,6 +150,7 @@ export const INTELLA_SMOLLM2_135M: Intella = {
   sizeGb: 0.145,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2025-01-01'),
 }
 
@@ -176,6 +181,7 @@ export const INTELLA_SD15: Intella = {
   sizeGb: 4.27,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2025-01-01'),
 }
 
@@ -218,6 +224,7 @@ export const INTELLA_LORA_ARMORED_DRESS: Intella = {
   baseIntellaId: 'intella.sd15-v1-5',
   tags: [{ tag: 'sd15', source: 'curator' }, { tag: 'lora', source: 'curator' }],
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2025-01-01'),
 }
 
@@ -246,6 +253,7 @@ export const INTELLA_SDXL_BASE: Intella = {
   sizeGb: 6.94,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2025-01-01'),
 }
 
@@ -273,6 +281,7 @@ export const INTELLA_CHROMA: Intella = {
   sizeGb: 17.8,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2025-01-01'),
 }
 
@@ -300,6 +309,7 @@ export const INTELLA_FLUX_KONTEXT_DEV: Intella = {
   sizeGb: 11.9,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2025-01-01'),
 }
 
@@ -334,6 +344,7 @@ export const INTELLA_FLUX2_KLEIN_9B: Intella = {
   sizeGb: 9.5,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2025-01-01'),
 }
 
@@ -357,6 +368,7 @@ export const INTELLA_QWEN3_8B_FLUX2: Intella = {
   sizeGb: 9.0,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2025-01-01'),
 }
 
@@ -384,6 +396,7 @@ export const INTELLA_QWEN3_4B_FLUX2: Intella = {
   sizeGb: 8.0,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-06-30'),
 }
 
@@ -407,6 +420,7 @@ export const INTELLA_FLUX2_VAE_FULL: Intella = {
   sizeGb: 0.4,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2025-01-01'),
 }
 
@@ -447,6 +461,7 @@ export const INTELLA_ZIMAGE_TURBO: Intella = {
   sizeGb: 12.3,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-06-26'),
 }
 
@@ -475,6 +490,7 @@ export const INTELLA_QWEN3_4B_ZIMAGE: Intella = {
   sizeGb: 8,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-06-26'),
 }
 
@@ -513,6 +529,7 @@ export const INTELLA_KREA2_TURBO: Intella = {
   sizeGb: 13.1,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-06-26'),
 }
 
@@ -541,6 +558,7 @@ export const INTELLA_QWEN3_VL_4B_KREA: Intella = {
   sizeGb: 5.2,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-06-26'),
 }
 
@@ -569,6 +587,7 @@ export const INTELLA_QWEN_IMAGE_VAE: Intella = {
   sizeGb: 0.25,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-06-26'),
 }
 
@@ -595,6 +614,7 @@ export const INTELLA_UPSCALE_ULTRASHARP: Intella = {
   sizeGb: 0.067,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2025-01-01'),
 }
 
@@ -624,6 +644,7 @@ export const INTELLA_QWEN3_VL_8B: Intella = {
   sizeGb: 18,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-06-11'),
 }
 
@@ -646,6 +667,7 @@ export const INTELLA_MOSS_MUSIC_8B: Intella = {
   sizeGb: 18,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-06-11'),
 }
 
@@ -668,6 +690,7 @@ export const INTELLA_SHOTVL_7B: Intella = {
   sizeGb: 16,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-06-11'),
 }
 
@@ -689,6 +712,7 @@ export const INTELLA_HEARTMULA_GEN: Intella = {
   sizeGb: 0.1,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-06-12'),
 }
 
@@ -706,6 +730,7 @@ export const INTELLA_HEARTMULA_3B: Intella = {
   sizeGb: 8,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-06-12'),
 }
 
@@ -723,6 +748,7 @@ export const INTELLA_HEARTCODEC: Intella = {
   sizeGb: 2,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-06-12'),
 }
 
@@ -750,6 +776,7 @@ export const INTELLA_FLUX2_KLEIN_4B: Intella = {
   sizeGb: 4.5,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-06-30'),
 }
 
@@ -783,6 +810,7 @@ export const INTELLA_IMPRESSTATION_KLEIN: Intella = {
   versio: '1.0.0',
   tags: [{ tag: 'flux2', source: 'curator' }, { tag: 'lora', source: 'curator' }],
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-06-30'),
 }
 
@@ -812,6 +840,7 @@ export const INTELLA_LTX_23_DISTILLED: Intella = {
   sizeGb: 46.15,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-07-07'),
 }
 
@@ -837,6 +866,7 @@ export const INTELLA_GEMMA_3_12B: Intella = {
   sizeGb: 24.4,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-07-07'),
 }
 
@@ -865,6 +895,7 @@ export const INTELLA_WAN22_T2V_HIGH: Intella = {
   sizeGb: 15,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-07-07'),
 }
 
@@ -889,6 +920,7 @@ export const INTELLA_WAN22_T2V_LOW: Intella = {
   sizeGb: 15,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-07-07'),
 }
 
@@ -913,6 +945,7 @@ export const INTELLA_WAN22_I2V_HIGH: Intella = {
   sizeGb: 15,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-07-07'),
 }
 
@@ -937,6 +970,7 @@ export const INTELLA_WAN22_I2V_LOW: Intella = {
   sizeGb: 15,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-07-07'),
 }
 
@@ -961,6 +995,7 @@ export const INTELLA_UMT5_XXL: Intella = {
   sizeGb: 6,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-07-07'),
 }
 
@@ -985,6 +1020,7 @@ export const INTELLA_WAN21_VAE: Intella = {
   sizeGb: 1,
   versio: '1.0.0',
   canonica: true,
+  contentRating: 'sfw',
   natum: new Date('2026-07-07'),
 }
 

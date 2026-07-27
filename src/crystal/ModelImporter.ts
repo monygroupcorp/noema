@@ -133,6 +133,7 @@ export class ModelImporter {
       sizeGb: (resolved.sizeBytes ?? 0) / 1e9,
       versio: '1.0.0',
       canonica: false,            // NOT on the public catalogue
+      contentRating: 'untriaged', // every import starts unreviewed (spec §9)
       access: 'private',          // owner-scoped resolution (buildAccessOrClauses)
       ownerKey: input.ownerKey,   // generic owner (Bursa-capable) — the resolution gate
       // Legacy display/resolution field — only when the owner is an anima.
