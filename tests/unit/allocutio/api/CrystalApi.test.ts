@@ -609,6 +609,44 @@ test('listModels never returns access/license/commercialUse (public catalog proj
   }
 })
 
+test('listModels DOES return contentRating (catalog-visible, not stripped from the public projection)', async () => {
+  const rated = makeIntella({
+    id: 'rated-flux',
+    nomen: 'Rated Flux',
+    genus: 'model',
+    familia: 'flux',
+    canonica: true,
+    contentRating: 'sfw',
+  })
+  const { deps } = makeDeps({ intellarum: makeFakeIntellarum([...fakeIntellae, rated]) })
+  const api = new CrystalApi(deps)
+
+  const models = await api.listModels()
+  const m = models.find((x) => x.intellaId === 'rated-flux')!
+  assert.ok(m, 'rated-flux present')
+  assert.equal('contentRating' in m, true)
+  assert.equal(m.contentRating, 'sfw')
+})
+
+test('listMyModels surfaces contentRating: untriaged on an imported (non-canonical) model', async () => {
+  const imported = makeIntella({
+    id: 'imported-lora',
+    nomen: 'Imported LoRA',
+    genus: 'lora',
+    familia: 'flux',
+    canonica: false,
+    ownerAnimaId: 'anima-1',
+    contentRating: 'untriaged',
+  })
+  const { deps } = makeDeps({ intellarum: makeFakeIntellarum([...fakeIntellae, imported]) })
+  const api = new CrystalApi(deps)
+
+  const models = await api.listMyModels(auctor)
+  const m = models.find((x) => x.intellaId === 'imported-lora')!
+  assert.ok(m, 'imported-lora present')
+  assert.equal(m.contentRating, 'untriaged')
+})
+
 test('listModels surfaces a canonical public flux2 model by basis (klein-highlight regression)', async () => {
   const impresstation = makeIntella({
     id: 'impresstation',

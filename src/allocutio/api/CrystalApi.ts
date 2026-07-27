@@ -25,7 +25,7 @@ import type { ActumIndexStore } from '../../types/actumIndex.js'
 import type { Consuetudinum, Appearance, Generatio } from '../../types/consuetudo.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Fundamentorum } from '../../types/fundamentum.js'
-import type { Intelligens, IntelligensGenus, Intellarum, Intella } from '../../types/intelligendi.js'
+import type { Intelligens, IntelligensGenus, Intellarum, Intella, IntellaContentRating } from '../../types/intelligendi.js'
 import type { HospitiumStore } from '../../types/hospitium.js'
 import type { MateriaStore } from '../../types/materia.js'
 import type { Conductor, StudioHandle, ConduceOpts } from '../../crystal/Conductor.js'
@@ -3066,6 +3066,9 @@ export interface ModelCard {
   license?: string
   /** Commercial-catalog verdict — whether this model may be promoted publicly. Owner/admin views. */
   commercialUse?: 'yes' | 'no' | 'conditional' | 'unknown'
+  /** Adult-content classification (spec: docs/spec/intella-schema.md §9). Catalog-visible —
+   *  NOT stripped from the public projection (unlike `access`/`license`/`commercialUse`). */
+  contentRating?: IntellaContentRating
   /** The ComfyUI LoRA filename token for explicit `<lora:slug:weight>` syntax (LoRA only). */
   slug?: string
   /** Recommended application weight when the caller does not specify one (LoRA only). */
@@ -3089,6 +3092,7 @@ function toModelCardFromIntella(i: Intella): ModelCard {
     access: i.access ?? (i.canonica ? 'public' : 'private'),
     ...(i.license ? { license: i.license } : {}),
     ...(i.commercialUse ? { commercialUse: i.commercialUse } : {}),
+    ...(i.contentRating ? { contentRating: i.contentRating } : {}),
     ...(i.slug ? { slug: i.slug } : {}),
     ...(i.defaultWeight !== undefined ? { defaultWeight: i.defaultWeight } : {}),
     ...(i.samples?.length ? { samples: i.samples } : {}),

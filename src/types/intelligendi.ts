@@ -38,6 +38,13 @@ export type IntellaGenus =
   | 'embedding'   // a text or image embedding model (CLIP, T5, VAE...)
   | 'pod'         // a compute pod configuration (GPU type, RAM, vRAM)
 
+/**
+ * Adult-content classification axis (spec: docs/spec/intella-schema.md §9, "locked shape").
+ * 'untriaged' = not yet reviewed; 'sfw' = safe; 'suggestive'/'explicit' are admin-assigned
+ * during review.
+ */
+export type IntellaContentRating = 'untriaged' | 'sfw' | 'suggestive' | 'explicit'
+
 export type IntellaProvenance =
   | 'miladystation'   // models.miladystation2.net R2 bucket — our primary mirror
   | 'huggingface'     // huggingface.co — the public model hub
@@ -252,6 +259,13 @@ export interface Intella {
    * from the base license register + the origin's stated permission (see modelLicense.ts).
    */
   commercialUse?: 'yes' | 'no' | 'conditional' | 'unknown'
+  /**
+   * Adult-content classification (spec: docs/spec/intella-schema.md §9). 'untriaged' = not yet
+   * reviewed (default for every new import); 'sfw' = safe (default for canonical/seed models);
+   * 'suggestive'/'explicit' are admin-assigned during review. Optional for backward-compat with
+   * existing persisted records that predate this field.
+   */
+  contentRating?: IntellaContentRating
 
   /** Discovery/classification tags (e.g. base family 'flux'/'sd15', 'trained'). The catalog derives
    *  a model's base family from these (the import sets them; canonical seeds set them directly). */
