@@ -38,7 +38,7 @@ import { aggregateStatus, materiaStudioStatus } from '../lexicon/status/aggregat
 import type { ModoStore } from '../../types/modo.js'
 import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModus.js'
 import { dispatchInceptio, type DispatchDeps } from '../../execution/dispatchInceptio.js'
-import { toRun, toSettledRun, toCollection, toTeam, toEdition, toProject } from './runProjection.js'
+import { toRun, toRunDetail, toSettledRun, toCollection, toTeam, toEdition, toProject } from './runProjection.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
 import { Errors, ApiError } from './errors.js'
 import { v4 as uuidv4 } from 'uuid'
@@ -444,7 +444,7 @@ export class CrystalApi {
       { inceptor, modorum, cursorum, completor, actumIndex, compositusCursor },
       inceptio,
     )
-    return toRun(actum)
+    return toRunDetail(actum)
   }
 
   /**
@@ -458,7 +458,7 @@ export class CrystalApi {
   async getRun(auctor: AuctorKey, id: string): Promise<Run> {
     const a = await this.deps.actorum.findById(id)
     if (!a || !(await this._owns(auctor, a))) throw Errors.notFoundRun(id)
-    return toRun(a)
+    return toRunDetail(a)
   }
 
   /**
