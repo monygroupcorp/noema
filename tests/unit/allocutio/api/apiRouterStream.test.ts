@@ -15,7 +15,12 @@ import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver
 // Helpers
 // ---------------------------------------------------------------------------
 
-const fakeRun: Run = { id: 'r1', status: 'running', modusId: 'flux-schnell' }
+const fakeRun: Run = {
+  id: 'r1', status: 'running', modusId: 'flux-schnell',
+  aditus: { prompt: 'a cat', seed: 42 },
+  pinnedModels: [{ role: 'checkpoint', modelId: 'flux-dev' } as any],
+  modusVersion: '1.0.0',
+}
 
 function makeFakeApi(): ApiFacade {
   return {
@@ -135,6 +140,24 @@ test('GET /v1/runs/r1/stream returns 200 text/event-stream with snapshot frame',
     const snap = frames[0] as any
     assert.equal(snap.kind, 'snapshot')
     assert.equal(snap.run.id, 'r1')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('SSE snapshot stays lean/progress-only: no aditus/pinnedModels/modusVersion even though getRun returns them', async () => {
+  const { server, url } = await makeServer(true)
+  try {
+    const { frames } = await collectSseFrames(
+      `${url}/v1/runs/r1/stream`,
+      { 'x-api-key': 'k' },
+      fs => fs.length >= 1,
+    )
+    const snap = frames[0] as any
+    assert.equal(snap.kind, 'snapshot')
+    assert.equal(snap.run.aditus, undefined)
+    assert.equal(snap.run.pinnedModels, undefined)
+    assert.equal(snap.run.modusVersion, undefined)
   } finally {
     await closeServer(server)
   }

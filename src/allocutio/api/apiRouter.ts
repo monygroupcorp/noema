@@ -258,8 +258,20 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     res.setHeader('Connection', 'keep-alive')
     if (typeof (res as any).flushHeaders === 'function') (res as any).flushHeaders()
 
-    // Initial snapshot frame.
-    res.write('data: ' + JSON.stringify({ kind: 'snapshot', run }) + '\n\n')
+    // Initial snapshot frame. `getRun` now returns the owner-detail Run shape (aditus,
+    // pinnedModels, modusVersion) — the stream stays lean/progress-only, so explicitly
+    // pick only the pre-existing fields rather than forwarding the full detailed object.
+    const snapshot: Run = {
+      id: run.id,
+      status: run.status,
+      modusId: run.modusId,
+      ...(run.exitus !== undefined ? { exitus: run.exitus } : {}),
+      ...(run.failure !== undefined ? { failure: run.failure } : {}),
+      ...(run.cost !== undefined ? { cost: run.cost } : {}),
+      ...(run.createdAt !== undefined ? { createdAt: run.createdAt } : {}),
+      ...(run.resumeCheckpoint !== undefined ? { resumeCheckpoint: run.resumeCheckpoint } : {}),
+    }
+    res.write('data: ' + JSON.stringify({ kind: 'snapshot', run: snapshot }) + '\n\n')
 
     // Replay buffered events.
     for (const ev of deps.hub.recentFor(id)) {
