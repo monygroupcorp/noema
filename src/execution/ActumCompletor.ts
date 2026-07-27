@@ -3,6 +3,8 @@ import type { Signorum } from '../types/significandi.js'
 import type { Exitus, Actorum } from '../types/cursus.js'
 import type { Nexus } from '../types/nexus.js'
 import type { Vestigiorum } from '../types/vestigium.js'
+import type { DeploymentumStore } from '../types/deploymentum.js'
+import type { Intellarum } from '../types/intelligendi.js'
 import { makeLogger } from '../lib/logger.js'
 import { getTrace } from '../lib/trace.js'
 import { buildWideEvent, emitWideEvent } from '../lib/wide.js'
@@ -26,15 +28,59 @@ interface Deps {
   /** Optional: vestigium store — indexes a generation trace after each completion.
    *  Absent → indexing skipped (one-time warn so slim deployments/tests notice). */
   vestigiorum?: Vestigiorum
+  /** Optional: compiled-bundle store — resolves `actum.deploymentHash` → `spec.models`
+   *  (the models the gen actually used, base + LoRAs) for Vestigium provenance
+   *  (`intellaIds`/`intellaDescription`). Absent → provenance fields left unset,
+   *  same shape `resolveModelPayees.ts`'s `modelsUsed()` already reads for royalties. */
+  deployments?: Pick<DeploymentumStore, 'find'>
+  /** Optional: model registry — resolves each model id to its human-readable `nomen`
+   *  for `intellaDescription`. Absent (or id unresolved) → falls back to the raw id. */
+  intellarum?: Pick<Intellarum, 'find'>
 }
 
 let warnedMissingVestigiorum = false
+
+/** Distinct model ids the actum used: ALL of the resolved deployment bundle's
+ *  `spec.models` (base checkpoint + LoRAs + pinned — no role filtering), mirroring
+ *  `resolveModelPayees.ts`'s `modelsUsed()` bundle-reading shape. */
+async function resolveIntellaIds(
+  actum: Actum,
+  deployments?: Pick<DeploymentumStore, 'find'>
+): Promise<string[]> {
+  const ids = new Set<string>()
+  if (actum.deploymentHash && deployments) {
+    const bundle = await deployments.find(actum.deploymentHash)
+    const models = (bundle?.spec as { models?: unknown })?.models
+    if (Array.isArray(models)) {
+      for (const m of models) {
+        const id = (m as { id?: unknown })?.id
+        if (typeof id === 'string' && id) ids.add(id)
+      }
+    }
+  }
+  return [...ids]
+}
+
+/** Human-readable, semantic-search-friendly description of the models used —
+ *  each id's `Intella.nomen` (falling back to the raw id when unresolved/absent),
+ *  joined with " + " so it reads as prose, not `slug@weight` tags. */
+async function resolveIntellaDescription(
+  ids: string[],
+  intellarum?: Pick<Intellarum, 'find'>
+): Promise<string | undefined> {
+  if (!ids.length) return undefined
+  const names = await Promise.all(ids.map(async (id) => {
+    const intella = await intellarum?.find(id).catch(() => null)
+    return intella?.nomen || id
+  }))
+  return names.join(' + ')
+}
 
 export class ActumCompletor {
   constructor(private readonly deps: Deps) {}
 
   async complete(actum: Actum, result: Exitus, auctor?: Auctor): Promise<Actum> {
-    const { acta, signorum, nexus, terminatePod, vestigiorum } = this.deps
+    const { acta, signorum, nexus, terminatePod, vestigiorum, deployments, intellarum } = this.deps
     const { exitus, impetus: reportedImpetus, duratio, materiamId } = result
     const now = new Date()
 
@@ -80,7 +126,15 @@ export class ActumCompletor {
     // the completor only writes what it's handed.
     if (auctor) {
       if (vestigiorum) {
-        createVestigiumFromActum(completed, auctor, vestigiorum).catch((e) =>
+        // Resolve off `current` (the fresh findById at the top of complete()), not the
+        // `actum` parameter — `current.deploymentHash` is reliable regardless of which
+        // rail called complete() (written mid-run by the cursor before either rail gets
+        // here); the parameter can be rail-stale.
+        resolveIntellaIds(current ?? actum, deployments).then(async (intellaIds) => {
+          const intellaDescription = await resolveIntellaDescription(intellaIds, intellarum)
+          const options = intellaIds.length ? { intellaIds, intellaDescription } : undefined
+          return createVestigiumFromActum(completed, auctor, vestigiorum, options)
+        }).catch((e) =>
           log.warn('vestigium index failed', { actumId: actum.id, error: String(e) }))
       } else if (!warnedMissingVestigiorum) {
         warnedMissingVestigiorum = true
