@@ -188,11 +188,29 @@ export function createVestigiaRouter(deps: VestigiaRouterDeps): Router {
   })
 
   // ── GET /:id ─────────────────────────────────────────────────────────────────
+  //
+  // Read a single vestigium by id. `communis`/`publica` are open-by-id by design
+  // (link-shareable / public gallery — see VestigiumVisibility doc comments). A
+  // `privata` vestigium is owner-only: a foreign or unauthenticated caller gets the
+  // same 404 as an absent id (no existence leak), matching the owner-scoped
+  // 404-on-foreign-or-absent contract DELETE /:id and POST /:id/impressio establish
+  // below (noema-046, product ruling 2026-07-13).
 
   router.get('/:id', async (req, res) => {
     try {
       const v = await vestigiorum.findById(req.params.id)
       if (!v) return res.status(404).json({ error: 'not found' })
+      if (v.visibilitas === 'privata') {
+        let auctor: VestigiaAuctorKey
+        try {
+          auctor = await resolveCaller(req)
+        } catch {
+          return res.status(404).json({ error: 'not found' })
+        }
+        if (auctorToken(v.auctorKey as VestigiaAuctorKey) !== auctorToken(auctor)) {
+          return res.status(404).json({ error: 'not found' })
+        }
+      }
       return res.json({ vestigium: v })
     } catch (err) {
       log.error('findById error', { error: String(err) })
