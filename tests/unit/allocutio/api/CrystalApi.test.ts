@@ -598,6 +598,40 @@ test('listModels free-text search via q', async () => {
   assert.equal(models[0].intellaId, 'flux-dev')
 })
 
+test('listModels free-text search via q matches a tag when nomen/description do not', async () => {
+  const animeLora = makeIntella({
+    id: 'anime-lora',
+    nomen: 'Widened Style LoRA',
+    genus: 'lora',
+    familia: 'flux',
+    canonica: true,
+    tags: [{ tag: 'anime', source: 'curator' }],
+  })
+  const { deps } = makeDeps({ intellarum: makeFakeIntellarum([...fakeIntellae, animeLora]) })
+  const api = new CrystalApi(deps)
+
+  const models = await api.listModels({ q: 'anime' } as never)
+  assert.equal(models.length, 1)
+  assert.equal(models[0].intellaId, 'anime-lora')
+})
+
+test('listModels free-text search via q matches a sample prompt when nomen/description/tags do not', async () => {
+  const sampledLora = makeIntella({
+    id: 'sampled-lora',
+    nomen: 'Sampled Style LoRA',
+    genus: 'lora',
+    familia: 'flux',
+    canonica: true,
+    samples: [{ url: 'https://example.com/sample.png', prompt: 'a low-poly retro game screenshot' }],
+  })
+  const { deps } = makeDeps({ intellarum: makeFakeIntellarum([...fakeIntellae, sampledLora]) })
+  const api = new CrystalApi(deps)
+
+  const models = await api.listModels({ q: 'low-poly retro' } as never)
+  assert.equal(models.length, 1)
+  assert.equal(models[0].intellaId, 'sampled-lora')
+})
+
 test('listModels never returns access/license/commercialUse (public catalog projection)', async () => {
   const { deps } = makeDeps()
   const api = new CrystalApi(deps)
