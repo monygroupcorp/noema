@@ -11,7 +11,11 @@ import type { Modus } from '../types/modus.js'
  * from a numeric string of the same value.
  */
 export function hashModus(modus: Modus): string {
-  const { contentHash: _ch, natum: _n, mutatum: _m, impetusFixum, ...rest } = modus
+  // `descriptio` is inert flow-level display/routing metadata (the concierge's "when to
+  // pick this" line) — excluded so a copy edit never re-hashes a modus and breaks
+  // deployment identity/caching. Same "not part of the workflow definition" reasoning as
+  // the computeStrategy/gpuClass/podPolicy execution preferences (modus.ts).
+  const { contentHash: _ch, natum: _n, mutatum: _m, impetusFixum, descriptio: _d, ...rest } = modus
 
   const payload: Record<string, unknown> = { ...rest }
   if (impetusFixum !== undefined) payload.impetusFixum = `bigint:${impetusFixum}`

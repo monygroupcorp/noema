@@ -41,6 +41,7 @@ export const CAMEL_TREASURY: TreasuryConfig = {
 export const CAMEL_TEMPLATE_MODUS: Modus = {
   id: '918b546f',
   nomen: 'CamelMemify',
+  descriptio: 'CamelMemify starter spell — edits an agent NFT image from a prompt via FLUX Kontext, the CamelCabal starter-workspace template. Pick it as the meme-the-mascot flow provisioned for each agent.',
   genus: 'compositus',
   versio: '1.0.0',
   contentHash: '', // set on registration via hashModus()
