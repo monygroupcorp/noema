@@ -14,6 +14,7 @@ import assert from 'node:assert/strict'
 import { CrystalApi, type CrystalApiDeps } from '../../../../src/allocutio/api/CrystalApi.js'
 import { ApiError } from '../../../../src/allocutio/api/errors.js'
 import { MemoryConsuetudinum } from '../../../../src/crystal/MemoryConsuetudinum.js'
+import { spicyModelFor, SPICY_MODEL_OVERRIDES } from '../../../../src/crystal/spicyRouting.js'
 import type { Actum } from '../../../../src/types/actum.js'
 import type { Modus } from '../../../../src/types/modus.js'
 import type { Inceptio, Cursor } from '../../../../src/types/cursus.js'
@@ -1128,4 +1129,138 @@ test('myDeposits ignores a persona whose active anima has since moved elsewhere'
   const api = new CrystalApi(deps)
 
   assert.deepEqual(await api.myDeposits(auctor), [])
+})
+
+// =============================================================================
+// Spicy mode (noema-091) — attestation gate, adult-model filter, alt-model seam,
+// and the unconditional PromptGuard invariant. All at the CrystalApi facade layer
+// (the gate/filters live here, not in the raw MemoryConsuetudinum store).
+// =============================================================================
+
+const anonAuctor: AuctorKey = { commitment: 'anon-1' }
+
+test('setGeneratio REJECTS spicyMode:true with no attestation on file (named + anon), auth.forbidden', async () => {
+  for (const who of [auctor, anonAuctor]) {
+    const consuetudinum = new MemoryConsuetudinum()
+    const { deps } = makeDeps({ consuetudinum })
+    const api = new CrystalApi(deps)
+    await assert.rejects(
+      () => api.setGeneratio(who, { spicyMode: true }),
+      (err: unknown) => err instanceof ApiError && err.code === 'auth.forbidden',
+      `no attestation ⇒ spicy cannot enable for ${JSON.stringify(who)}`,
+    )
+    // Nothing spicy was persisted.
+    assert.notEqual((await consuetudinum.resolveGeneratio(who))?.spicyMode, true)
+  }
+})
+
+test('recordAttestation then setGeneratio(spicyMode:true) SUCCEEDS (named + anon)', async () => {
+  for (const who of [auctor, anonAuctor]) {
+    const consuetudinum = new MemoryConsuetudinum()
+    const { deps } = makeDeps({ consuetudinum })
+    const api = new CrystalApi(deps)
+    const att = await api.recordAttestation(who)
+    assert.equal(typeof att.attestedAt, 'number')
+    assert.ok(att.attestedAt > 0)
+    const g = await api.setGeneratio(who, { spicyMode: true })
+    assert.equal(g.spicyMode, true, `attested ⇒ spicy enables for ${JSON.stringify(who)}`)
+    assert.deepEqual((await consuetudinum.resolveGeneratio(who))?.ageAttestation, att)
+  }
+})
+
+test('setGeneratio preserves a recorded attestation across a Preferences replace that omits it', async () => {
+  const consuetudinum = new MemoryConsuetudinum()
+  const { deps } = makeDeps({ consuetudinum })
+  const api = new CrystalApi(deps)
+  await api.recordAttestation(auctor)
+  // A later Preferences PUT with only style must NOT erase the attestation, and spicy must still enable.
+  const g1 = await api.setGeneratio(auctor, { style: 'cinematic' })
+  assert.ok(g1.ageAttestation, 'attestation preserved across a wholesale replace')
+  const g2 = await api.setGeneratio(auctor, { spicyMode: true })
+  assert.equal(g2.spicyMode, true, 'preserved attestation still satisfies the enable gate')
+})
+
+test('recordAttestation preserves other Generatio fields', async () => {
+  const consuetudinum = new MemoryConsuetudinum()
+  const { deps } = makeDeps({ consuetudinum })
+  const api = new CrystalApi(deps)
+  await consuetudinum.setGeneratio(auctor, { style: 'cinematic', negativePrompt: 'blurry' })
+  await api.recordAttestation(auctor)
+  const g = await consuetudinum.resolveGeneratio(auctor)
+  assert.equal(g?.style, 'cinematic')
+  assert.equal(g?.negativePrompt, 'blurry')
+  assert.ok(g?.ageAttestation)
+})
+
+// ── Lever (a): adult-model catalog filter ──────────────────────────────────────
+const ratedIntellae: Intella[] = [
+  makeIntella({ id: 'm-untriaged', nomen: 'Untriaged', genus: 'model', familia: 'flux', canonica: true, contentRating: 'untriaged' }),
+  makeIntella({ id: 'm-sfw', nomen: 'SFW', genus: 'model', familia: 'flux', canonica: true, contentRating: 'sfw' }),
+  makeIntella({ id: 'm-suggestive', nomen: 'Suggestive', genus: 'model', familia: 'flux', canonica: true, contentRating: 'suggestive' }),
+  makeIntella({ id: 'm-explicit', nomen: 'Explicit', genus: 'model', familia: 'flux', canonica: true, contentRating: 'explicit' }),
+  makeIntella({ id: 'm-unrated', nomen: 'Unrated', genus: 'model', familia: 'flux', canonica: true }),
+]
+
+test('listModels OFF (default) EXCLUDES {suggestive, explicit}; includes {untriaged, sfw, unrated}', async () => {
+  const { deps } = makeDeps({ intellarum: makeFakeIntellarum(ratedIntellae) })
+  const api = new CrystalApi(deps)
+  const ids = (await api.listModels({})).map((m) => m.intellaId).sort()
+  assert.deepEqual(ids, ['m-sfw', 'm-unrated', 'm-untriaged'])
+})
+
+test('listModels ON (includeAdult) INCLUDES all four rating buckets', async () => {
+  const { deps } = makeDeps({ intellarum: makeFakeIntellarum(ratedIntellae) })
+  const api = new CrystalApi(deps)
+  const ids = (await api.listModels({ includeAdult: true })).map((m) => m.intellaId).sort()
+  assert.deepEqual(ids, ['m-explicit', 'm-sfw', 'm-suggestive', 'm-unrated', 'm-untriaged'])
+})
+
+// ── Lever (b): alt-model routing seam ships EMPTY (a strict no-op) ──────────────
+test('spicyRouting ships an EMPTY map — every verb resolves to no override (OFF and empty-map no-op)', () => {
+  assert.equal(Object.keys(SPICY_MODEL_OVERRIDES).length, 0, 'shipped empty, per operator Q3')
+  for (const id of ['modus.openrouter-chat', 'modus.chatgpt', 'flux-schnell', 'sd1-5', 'verb-bound']) {
+    assert.equal(spicyModelFor(id), undefined, `${id} has no override ⇒ normal routing`)
+  }
+})
+
+test('invokeFlow leaves aditus.model UNTOUCHED when spicyMode is on but the map is empty', async () => {
+  const consuetudinum = new MemoryConsuetudinum()
+  await consuetudinum.setGeneratio(auctor, { spicyMode: true, ageAttestation: { attestedAt: 1 } })
+  const captured: Record<string, unknown>[] = []
+  const { deps } = makeDeps({
+    consuetudinum,
+    inceptor: {
+      initiate: async (inceptio: Inceptio) => {
+        captured.push(inceptio.aditus)
+        return nascens(inceptio)
+      },
+    },
+  })
+  const api = new CrystalApi(deps)
+  await api.invokeFlow(auctor, { modusId: 'sd1-5' }, { prompt: 'hi', model: 'caller-model' })
+  assert.equal(captured.length, 1)
+  // Empty map ⇒ our lever-(b) block never fires ⇒ the caller's model passes through unchanged.
+  assert.equal(captured[0].model, 'caller-model')
+})
+
+// ── Hard invariant: PromptGuard runs UNCONDITIONALLY, spicy or not ─────────────
+test('PromptGuard.check is invoked on every invokeFlow regardless of spicyMode', async () => {
+  // spicy OFF
+  {
+    let calls = 0
+    const { deps } = makeDeps({ promptGuard: { async check() { calls++; return { ok: true } } } })
+    const api = new CrystalApi(deps)
+    await api.invokeFlow(auctor, { modusId: 'sd1-5' }, { prompt: 'hi' })
+    assert.equal(calls, 1, 'guard runs when spicy is OFF')
+  }
+  // spicy ON (attested)
+  {
+    let calls = 0
+    const consuetudinum = new MemoryConsuetudinum()
+    await consuetudinum.setGeneratio(auctor, { spicyMode: true, ageAttestation: { attestedAt: 1 } })
+    const { deps } = makeDeps({ consuetudinum, promptGuard: { async check() { calls++; return { ok: true } } } })
+    const api = new CrystalApi(deps)
+    await api.invokeFlow(auctor, { modusId: 'sd1-5' }, { prompt: 'hi' })
+    assert.equal(calls, 1, 'guard still runs when spicy is ON — no spicyMode gate on the moderation path')
+  }
 })

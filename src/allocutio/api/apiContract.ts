@@ -469,7 +469,28 @@ const GeneratioSchema: JsonSchema = {
     telegramDeliverAs: { type: 'string', enum: ['album', 'individual'], description: 'Telegram delivery shape (consumed by the Telegram adapter).' },
     autoApplyModels: { type: 'array', items: { type: 'string' }, description: 'Models (intellaId) to auto-apply as pinnedModels. Stored; cast-time application pending model resolution.' },
     defaultProjectId: { type: 'string', description: 'Default project (Provincia id) new work files into. Stored; cast-time auto-filing pending.' },
+    spicyMode: { type: 'boolean', description: 'Adult ("spicy") mode. When ON — and an 18+ attestation is on file — permits adult-rated models, routes concierge chat to willing OpenRouter models, and relaxes SFW-forcing default negatives. Default-absent = OFF. Enabling requires a recorded 18+ attestation (POST /v1/me/attestation) — this PUT rejects with auth.forbidden otherwise.' },
+    ageAttestation: {
+      type: 'object',
+      description: 'One-time self-declared 18+ attestation (a click-through fact, NOT KYC/ID verification). Required on file before spicyMode may be enabled. Recorded via POST /v1/me/attestation; preserved across a Preferences replace.',
+      properties: { attestedAt: { type: 'number', description: 'Epoch-ms timestamp of the attestation.' } },
+      required: ['attestedAt'],
+    },
   },
+}
+
+/** The `{ attestation }` response for `POST /v1/me/attestation` — the recorded 18+ self-attestation. */
+const AttestationResponseSchema: JsonSchema = {
+  type: 'object',
+  description: "The caller's recorded 18+ self-attestation (a click-through fact, not KYC).",
+  properties: {
+    attestation: {
+      type: 'object',
+      properties: { attestedAt: { type: 'number', description: 'Epoch-ms timestamp of the attestation.' } },
+      required: ['attestedAt'],
+    },
+  },
+  required: ['attestation'],
 }
 
 /** The response body for `GET /v1/me` — the caller's account settings. */
@@ -1574,10 +1595,17 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'PUT',
       path: '/me/generatio',
-      summary: "Replace the caller's cross-cutting generation defaults (style, negative prompt, output format, telegram delivery, auto-apply models). Applied at cast time under the affines precedence chain.",
+      summary: "Replace the caller's cross-cutting generation defaults (style, negative prompt, output format, telegram delivery, auto-apply models, spicy mode). Applied at cast time under the affines precedence chain. Enabling spicyMode requires a recorded 18+ attestation on file (else auth.forbidden); a recorded attestation is preserved across a replace.",
       auth: true,
       request: GeneratioSchema,
       response: { type: 'object', properties: { generatio: GeneratioSchema }, required: ['generatio'] },
+    },
+    {
+      method: 'POST',
+      path: '/me/attestation',
+      summary: "Record the caller's one-time 18+ self-attestation (a click-through fact, NOT KYC/ID verification). Required on file before spicy mode may be enabled. Anon-capable (keyed by AuctorKey — anonymous Bursa/commitment and named Anima callers both).",
+      auth: true,
+      response: AttestationResponseSchema,
     },
     {
       method: 'PUT',
