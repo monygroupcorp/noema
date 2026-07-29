@@ -2016,12 +2016,15 @@ export class CrystalApi {
     }
     const q = filter.q?.trim()
     // `Intellarum` has no free-text search — filter the canonical set in-memory for `q`
-    // (nomen/description substring match), same as the old intelligendi store's search() did.
+    // (nomen/description/tags/sample-prompt substring match), same as the old intelligendi
+    // store's search() did, widened to also reach style signal carried in tags and samples.
     const canonical = await registry.canonical()
     const base = q
       ? canonical.filter((i) =>
           i.nomen.toLowerCase().includes(q.toLowerCase()) ||
-          (i.description ?? '').toLowerCase().includes(q.toLowerCase()),
+          (i.description ?? '').toLowerCase().includes(q.toLowerCase()) ||
+          (i.tags ?? []).some((t) => t.tag.toLowerCase().includes(q.toLowerCase())) ||
+          (i.samples ?? []).some((s) => (s.prompt ?? '').toLowerCase().includes(q.toLowerCase())),
         )
       : canonical
     const trig = filter.trigger?.trim().toLowerCase()
