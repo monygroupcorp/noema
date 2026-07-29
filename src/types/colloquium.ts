@@ -19,21 +19,23 @@
 //   dicta       — the said things / the turns (nominative plural, from dicere)
 //   dictum      — one thing said / one turn (nominative singular)
 //
-// PRIVACY: A Colloquium is identified-side only. animaId is required —
-// there are no anonymous conversations. This mirrors the privacy boundary:
-// who spoke is always known; what was said persists under that identity.
+// PRIVACY: A Colloquium is owned by an opaque `ownerKey` (see `src/crystal/ownerKey.ts`),
+// derived from whichever identity the caller presented — an identified anima, or an anon
+// commitment/bursaToken. This mirrors the rest of the anon-capable stores (Secretarium,
+// Intella): ownership is structural, not identity-kind-specific, so anon callers can hold
+// conversation threads too.
 // =============================================================================
 
 /**
  * Colloquium — a conversation thread.
  *
- * Binds a sequence of Dicta (turns) to an anima over time.
+ * Binds a sequence of Dicta (turns) to an owner over time.
  * Optionally associated with a canvas workspace (tabulaId) or session (modoId).
  */
 export interface Colloquium {
   id: string
-  /** FK → Anima. The owner of this conversation. Required — no anonymous conversations. */
-  animaId: string
+  /** Opaque owner id (`ownerKeyOf(AuctorKey)`) — the owner of this conversation. */
+  ownerKey: string
   /** "active" = ongoing; "archived" = concluded, kept for memory */
   status: 'active' | 'archived'
   /** FK → Tabula. Optional canvas workspace this conversation is bound to. */
@@ -88,10 +90,10 @@ export interface ColloquiumStore {
   create(input: Omit<Colloquium, 'id' | 'natum' | 'mutatum'>): Promise<Colloquium>
   find(id: string): Promise<Colloquium | null>
   /**
-   * Return all colloquia owned by the given anima.
+   * Return all colloquia owned by the given owner key.
    * Optionally filter by status.
    */
-  findByAnima(animaId: string, status?: 'active' | 'archived'): Promise<Colloquium[]>
+  findByOwner(ownerKey: string, status?: 'active' | 'archived'): Promise<Colloquium[]>
   update(id: string, patch: Partial<Pick<Colloquium, 'status' | 'modoId' | 'titulus'>>): Promise<Colloquium>
   /** Convenience: sets status to 'archived'. */
   archive(id: string): Promise<Colloquium>

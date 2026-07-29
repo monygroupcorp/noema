@@ -23,8 +23,8 @@ export class MongoColloquium implements ColloquiumStore {
     return doc ? fromDoc(doc as Record<string, unknown>) : null
   }
 
-  async findByAnima(animaId: string, status?: 'active' | 'archived'): Promise<Colloquium[]> {
-    const filter: Record<string, unknown> = { animaId }
+  async findByOwner(ownerKey: string, status?: 'active' | 'archived'): Promise<Colloquium[]> {
+    const filter: Record<string, unknown> = { ownerKey }
     if (status !== undefined) filter.status = status
     const docs = await this.col.find(filter).toArray()
     return docs.map(d => fromDoc(d as Record<string, unknown>))
