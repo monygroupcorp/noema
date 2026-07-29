@@ -74,6 +74,7 @@ import { allMediaUrls } from '../../crystal/BucketAdapter.js'
 import { makeLogger } from '../../lib/logger.js'
 import type { PromptGuard, PromptVerdict } from '../../crystal/PromptGuard.js'
 import { permissivePromptGuard } from '../../crystal/PromptGuard.js'
+import { spicyModelFor } from '../../crystal/spicyRouting.js'
 import type { ModelImporter } from '../../crystal/ModelImporter.js'
 import { ModelImportError, SecretRequiredError } from '../../crystal/modelImportResolver.js'
 import type { SecretWriter, SecretPresence, SecretProvider } from '../../types/secretum.js'
@@ -316,6 +317,10 @@ export interface FlowSummary {
 /** Port keys a flow may use for its negative prompt (first present one is filled). */
 const NEGATIVE_PORT_KEYS = ['negative_prompt', 'negativePrompt', 'negative']
 
+/** The gated ADULT `contentRating` set (noema-091). {suggestive, explicit} are hidden from the model
+ *  catalog unless the caller has spicyMode on; {untriaged, sfw} (and unrated) are always visible. */
+const ADULT_CONTENT_RATINGS: ReadonlySet<IntellaContentRating> = new Set<IntellaContentRating>(['suggestive', 'explicit'])
+
 /**
  * Layer the owner's account-level defaults under the cast-time aditus:
  * cast-time input > affines (per-modus) > generatio (cross-cutting) > modus defaults.
@@ -337,6 +342,16 @@ export function applyAccountDefaults(
   // affines override generatio within the account tier — declared ports only.
   if (affines) {
     for (const [k, v] of Object.entries(affines)) if (k in ports) account[k] = v
+  }
+  // ── Lever (c): spicy-aware default-negative seam (noema-091) ────────────────
+  // A future PLATFORM-injected SFW-forcing default negative (distinct from the user's OWN
+  // `generatio.negativePrompt` handled above) would be assembled HERE, and MUST be relaxed/skipped
+  // when spicy mode is on. Tracked `src/` has NO such platform default today, so this is a present-day
+  // NO-OP against tracked code — a platform SFW default, if any, lives in the gitignored
+  // `src/private/compliance/` layer this item cannot see or verify. The gate is structured now so any
+  // future default is born spicy-aware; nothing is invented here to then "relax".
+  if (generatio?.spicyMode !== true) {
+    // (no tracked platform SFW-forcing default negative to inject yet — see the noema-091 PR notes)
   }
   // Cast-time input wins over every account default.
   const out = { ...account, ...aditus }
@@ -398,15 +413,29 @@ export class CrystalApi {
     //   cast-time input > affines (per-modus) > generatio (cross-cutting) > modus defaults.
     // Only DECLARED ports are filled, so a stale default can never inject an unknown input.
     let effectiveAditus = aditus
+    let generatio: Generatio | undefined
     if (consuetudinum) {
-      const [affines, generatio] = await Promise.all([
+      const [affines, resolvedGeneratio] = await Promise.all([
         consuetudinum.resolveAffines(auctor, modusId),
         consuetudinum.resolveGeneratio(auctor),
       ])
+      generatio = resolvedGeneratio
       if (affines || generatio) {
         const ports = (await modorum.find(modusId))?.aditus ?? {}
         effectiveAditus = applyAccountDefaults(ports, aditus, affines, generatio)
       }
+    }
+
+    // ── Lever (b): spicy alt-model routing (noema-091) ──────────────────────────
+    // When spicyMode is ON and the resolved modus has a mapped willing/uncensored OpenRouter model,
+    // repoint `aditus.model` BEFORE it reaches ApiCursor's `aditus.model ?? spec.defaultModel` seam.
+    // SHIPPED with an EMPTY map (`crystal/spicyRouting`): no modus resolves to an override, so this is
+    // a strict no-op until the operator populates it. Keyed on modusId AND gated on `spicyMode === true`
+    // (which itself required a recorded 18+ attestation to persist). This NEVER touches the moderation
+    // path: the PromptGuard below runs on the effective aditus UNCONDITIONALLY, spicy or not.
+    if (generatio?.spicyMode === true) {
+      const spicyModel = spicyModelFor(modusId)
+      if (spicyModel !== undefined) effectiveAditus = { ...effectiveAditus, model: spicyModel }
     }
 
     // Input CSAM guard — refuse a prompt that solicits CSAM before we spend anything.
@@ -1972,7 +2001,7 @@ export class CrystalApi {
    * projection (no `access`/`license`/`commercialUse`). Each result is a card so the
    * agent can decide, not just enumerate.
    */
-  async listModels(filter: { genus?: IntelligensGenus; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number } = {}): Promise<ModelCard[]> {
+  async listModels(filter: { genus?: IntelligensGenus; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number; includeAdult?: boolean } = {}): Promise<ModelCard[]> {
     if (!this.deps.intellarum) return []
     const registry = this.deps.intellarum
     let basis = filter.basis
@@ -2003,6 +2032,13 @@ export class CrystalApi {
         const aliases = (i.trigger ?? '').split(',').map((t) => t.trim().toLowerCase()).filter(Boolean)
         if (!aliases.includes(trig)) return false
       }
+      // Adult-content partition (noema-091, on noema-090's `contentRating`). The gated adult set is
+      // {suggestive, explicit} (R-and-above, Civitai-analogous) — hidden from the catalog UNLESS the
+      // caller has spicyMode on (`includeAdult`, which itself required a recorded 18+ attestation).
+      // {untriaged, sfw} (and unrated) are ALWAYS visible, to everyone incl. anon. OFF (the default,
+      // `includeAdult` falsy) EXCLUDES the adult set everywhere `listModels` feeds selection — the safe
+      // default. Harmless today (0 seeds rated adult); the correct gate for when models get rated.
+      if (!filter.includeAdult && i.contentRating !== undefined && ADULT_CONTENT_RATINGS.has(i.contentRating)) return false
       return true
     })
     const limited = filter.limit ? hits.slice(0, filter.limit) : hits
@@ -2294,11 +2330,41 @@ export class CrystalApi {
     return appearance
   }
 
-  /** Replace the caller's cross-cutting generation defaults (Preferences). */
+  /** Replace the caller's cross-cutting generation defaults (Preferences).
+   *
+   *  Spicy gate (noema-091): enabling `spicyMode` requires a one-time 18+ attestation ON FILE for this
+   *  identity (anon or named alike) — no attestation ⇒ `spicyMode: true` cannot be persisted. The
+   *  attestation is a durable, write-once fact recorded via `recordAttestation` (POST /v1/me/attestation);
+   *  because this PUT replaces the whole Generatio, a recorded attestation is PRESERVED across a
+   *  Preferences save that omits it, so the gate reads the persisted attestation and a later save can't
+   *  silently erase it. */
   async setGeneratio(auctor: AuctorKey, generatio: Generatio): Promise<Generatio> {
     if (!this.deps.consuetudinum) throw Errors.internal('account settings not configured')
-    await this.deps.consuetudinum.setGeneratio(auctor, generatio)
-    return generatio
+    const existing = await this.deps.consuetudinum.resolveGeneratio(auctor)
+    const merged: Generatio = { ...generatio }
+    // Preserve a durable, previously-recorded 18+ attestation across a wholesale Preferences replace.
+    if (merged.ageAttestation === undefined && existing?.ageAttestation) {
+      merged.ageAttestation = existing.ageAttestation
+    }
+    // No attestation on file ⇒ spicyMode cannot be enabled (for anon or named callers alike).
+    if (merged.spicyMode === true && !merged.ageAttestation) {
+      throw Errors.authForbidden('Enabling spicy mode requires a recorded 18+ age attestation.')
+    }
+    await this.deps.consuetudinum.setGeneratio(auctor, merged)
+    return merged
+  }
+
+  /** Record the caller's one-time 18+ self-attestation (noema-091) — a self-declared click-through
+   *  fact, NOT KYC/ID verification. Written onto the anon-capable Generatio record keyed by the caller's
+   *  AuctorKey (so it works for anon Bursa/commitment and named Anima callers alike), preserving every
+   *  other Generatio field. Required on file before `spicyMode` may be enabled (see `setGeneratio`).
+   *  Re-attesting simply refreshes the timestamp. */
+  async recordAttestation(auctor: AuctorKey): Promise<{ attestedAt: number }> {
+    if (!this.deps.consuetudinum) throw Errors.internal('account settings not configured')
+    const existing = (await this.deps.consuetudinum.resolveGeneratio(auctor)) ?? {}
+    const ageAttestation = { attestedAt: Date.now() }
+    await this.deps.consuetudinum.setGeneratio(auctor, { ...existing, ageAttestation })
+    return ageAttestation
   }
 
   /** The caller's per-modus input defaults (affines) for one flow. */

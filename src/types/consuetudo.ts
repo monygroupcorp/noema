@@ -75,6 +75,19 @@ export interface Generatio {
    *  Stored here so the choice travels across web · Telegram · API; cast-time auto-filing is
    *  the marked next step (like the other applied-where-supported fields above). */
   defaultProjectId?: string
+  /** Adult ("spicy") mode toggle (noema-091). When ON — and a one-time 18+ attestation is on file
+   *  (`ageAttestation`) — the platform permits `contentRating`-adult models in selection, routes the
+   *  concierge's chat/LLM reasoning to willing OpenRouter models (`crystal/spicyRouting`), and relaxes
+   *  SFW-forcing default negatives. Default-absent reads as OFF everywhere (the safe default). Anon-
+   *  capable (keyed by AuctorKey). NEVER read by any CSAM/moderation gate — enforced mechanically by
+   *  `tests/unit/architecture/spicyModeBoundary.test.ts`. */
+  spicyMode?: boolean
+  /** One-time 18+ self-attestation (noema-091) — a self-declared click-through fact, NOT KYC/ID
+   *  verification (Civitai/industry standard). Required on file before `spicyMode` may be enabled
+   *  (`CrystalApi.setGeneratio` rejects `spicyMode: true` with no attestation). Keyed by the same
+   *  anon-capable AuctorKey that owns `spicyMode`, so it works for anon (Bursa/commitment) and named
+   *  (Anima) callers alike. */
+  ageAttestation?: { attestedAt: number }
 }
 
 /** One verb→modus binding row (for the read side — `listBindings`). */

@@ -639,6 +639,10 @@ export const api = {
     fetch('/v1/me/appearance', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(appearance) }).then(j<{ appearance: Appearance }>),
   setGeneratio: (generatio: Generatio) =>
     fetch('/v1/me/generatio', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(generatio) }).then(j<{ generatio: Generatio }>),
+  // POST /v1/me/attestation — record the one-time 18+ self-attestation (a click-through fact, not
+  // KYC). Required on file before spicyMode may be enabled. Anon-capable.
+  recordAttestation: () =>
+    fetch('/v1/me/attestation', { method: 'POST', headers: authHeaders() }).then(j<{ attestation: { attestedAt: number } }>),
   // PUT /v1/me/bindings/:verb — rebind a canon verb (e.g. `make`) to a chosen flow. Auth
   // required (bearer purses can't rebind). Powers the Preferences default-flow picker.
   setBinding: (verb: string, modusId: string) =>
@@ -773,6 +777,13 @@ export interface Generatio {
   telegramDeliverAs?: 'album' | 'individual';
   autoApplyModels?: string[];
   defaultProjectId?: string;
+  // Adult ("spicy") mode (noema-091). When ON — and an 18+ attestation is on file — permits
+  // adult-rated models, routes concierge chat to willing OpenRouter models, relaxes SFW default
+  // negatives. Default-absent = OFF. Enabling requires a recorded attestation (see recordAttestation).
+  spicyMode?: boolean;
+  // One-time self-declared 18+ attestation (a click-through fact, NOT KYC). Required on file before
+  // spicyMode may be enabled. Recorded via POST /v1/me/attestation.
+  ageAttestation?: { attestedAt: number };
 }
 // BYO gated-origin credential providers (mirror the server `SecretProvider` union).
 export type SecretProvider = 'civitai' | 'huggingface';
