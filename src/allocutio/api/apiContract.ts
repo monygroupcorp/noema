@@ -217,6 +217,7 @@ const FlowSummarySchema: JsonSchema = {
     id: { type: 'string' },
     nomen: { type: 'string', description: 'The flow display name.' },
     versio: { type: 'string', description: 'The flow version.' },
+    descriptio: { type: 'string', description: 'A flow-level routing line — what this flow is for and when to pick it over its siblings.' },
     categoria: { description: 'An optional catalog tag.' },
     modusGenus: {
       type: 'string',
@@ -260,6 +261,7 @@ const FlowDescriptionSchema: JsonSchema = {
       description: "The flow's output JSON-Schema — present when the flow declares one.",
       additionalProperties: true,
     },
+    descriptio: { type: 'string', description: 'A flow-level routing line — what this flow is for and when to pick it over its siblings.' },
     categoria: { description: 'An optional catalog tag.' },
     fundamentumId: { description: 'An optional substrate reference.' },
   },

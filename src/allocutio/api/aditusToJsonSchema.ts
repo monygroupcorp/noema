@@ -102,6 +102,9 @@ export interface FlowDescription {
   versio: string
   input: JsonSchema
   output?: JsonSchema
+  /** Flow-level routing line — what this flow is for and when to pick it over its
+   *  siblings. Passed through read-only from `Modus.descriptio`; absent when unset. */
+  descriptio?: unknown
   categoria?: unknown
   fundamentumId?: unknown
   /** The flow's model-family compatibility key (e.g. 'flux', 'sdxl', 'sd15'), derived
@@ -113,7 +116,7 @@ export interface FlowDescription {
 }
 
 /** Useful meta keys passed through from the modus when present. */
-const PASSTHROUGH_META = ['categoria', 'fundamentumId'] as const
+const PASSTHROUGH_META = ['descriptio', 'categoria', 'fundamentumId'] as const
 
 /**
  * Describe a flow for the HTTP API: id/nomen/versio + JSON-Schema input

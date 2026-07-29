@@ -456,6 +456,10 @@
                             "type": "string",
                             "description": "The flow version."
                           },
+                          "descriptio": {
+                            "type": "string",
+                            "description": "A flow-level routing line — what this flow is for and when to pick it over its siblings."
+                          },
                           "categoria": {
                             "description": "An optional catalog tag."
                           },
@@ -652,6 +656,10 @@
                       "type": "object",
                       "description": "The flow's output JSON-Schema — present when the flow declares one.",
                       "additionalProperties": true
+                    },
+                    "descriptio": {
+                      "type": "string",
+                      "description": "A flow-level routing line — what this flow is for and when to pick it over its siblings."
                     },
                     "categoria": {
                       "description": "An optional catalog tag."
@@ -9952,6 +9960,10 @@
                           "versio": {
                             "type": "string",
                             "description": "The flow version."
+                          },
+                          "descriptio": {
+                            "type": "string",
+                            "description": "A flow-level routing line — what this flow is for and when to pick it over its siblings."
                           },
                           "categoria": {
                             "description": "An optional catalog tag."
