@@ -52,6 +52,24 @@ export function Preferences() {
   const editLocal = (patch: Partial<Generatio>) => setGen((cur) => ({ ...cur, ...patch }));
   const flush = () => commit(genRef.current);
 
+  // Spicy mode (18+). Enabling requires a one-time 18+ self-attestation on file; if none is recorded,
+  // run a click-through confirmation and POST it (POST /v1/me/attestation) BEFORE persisting the toggle.
+  // The server independently rejects spicyMode:true without an attestation (auth.forbidden), surfaced via
+  // commit()'s catch. Disabling never needs attestation. Moderation/CSAM scanning runs regardless.
+  async function toggleSpicy(on: boolean) {
+    if (!on) { commit({ ...genRef.current, spicyMode: false }); return; }
+    let attestation = genRef.current.ageAttestation;
+    if (!attestation) {
+      const ok = window.confirm(
+        'Spicy mode unlocks adult-rated (18+) models and relaxes safe-content defaults. Content moderation and CSAM scanning always run regardless. By continuing you attest that you are 18 years of age or older. Continue?',
+      );
+      if (!ok) return;
+      try { attestation = (await api.recordAttestation()).attestation; }
+      catch (e) { setErr(msg(e)); return; }
+    }
+    commit({ ...genRef.current, spicyMode: true, ageAttestation: attestation });
+  }
+
   // Rebind /make to a chosen flow (PUT /v1/me/bindings/make) — optimistic, reverts on error.
   function rebindMake(modusId: string) {
     const prev = makeModel;
@@ -105,6 +123,14 @@ export function Preferences() {
                 <option value="">— none (unfiled) —</option>
                 {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select></label>
+          </div>
+          <div className="pref-card">
+            <div className="pref-card-h"><Ic name="sparkles" /><b>Spicy mode (18+)</b></div>
+            <label className="ac-row"><span className="ac-rk mono">adult content</span>
+              <input type="checkbox" checked={gen.spicyMode ?? false} onChange={(e) => toggleSpicy(e.target.checked)} /></label>
+            <div className="pref-note mono" style={{ color: 'var(--faint)' }}>
+              <span className="hemi2 dashed" /> Unlocks adult-rated models, willing-model chat routing, and relaxed safe-content defaults. Requires a one-time 18+ attestation. Content moderation &amp; CSAM scanning always run regardless.
+            </div>
           </div>
         </div>
 

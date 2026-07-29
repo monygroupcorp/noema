@@ -2220,6 +2220,23 @@ The caller's owner-keyed account settings — presentation skin (Profile), cross
         "defaultProjectId": {
           "type": "string",
           "description": "Default project (Provincia id) new work files into. Stored; cast-time auto-filing pending."
+        },
+        "spicyMode": {
+          "type": "boolean",
+          "description": "Adult (\"spicy\") mode. When ON — and an 18+ attestation is on file — permits adult-rated models, routes concierge chat to willing OpenRouter models, and relaxes SFW-forcing default negatives. Default-absent = OFF. Enabling requires a recorded 18+ attestation (POST /v1/me/attestation) — this PUT rejects with auth.forbidden otherwise."
+        },
+        "ageAttestation": {
+          "type": "object",
+          "description": "One-time self-declared 18+ attestation (a click-through fact, NOT KYC/ID verification). Required on file before spicyMode may be enabled. Recorded via POST /v1/me/attestation; preserved across a Preferences replace.",
+          "properties": {
+            "attestedAt": {
+              "type": "number",
+              "description": "Epoch-ms timestamp of the attestation."
+            }
+          },
+          "required": [
+            "attestedAt"
+          ]
         }
       }
     },
@@ -2400,7 +2417,7 @@ Replace the caller's presentation skin (avatar/banner/background/accent/look).
 
 ### PUT /v1/me/generatio
 
-Replace the caller's cross-cutting generation defaults (style, negative prompt, output format, telegram delivery, auto-apply models). Applied at cast time under the affines precedence chain.
+Replace the caller's cross-cutting generation defaults (style, negative prompt, output format, telegram delivery, auto-apply models, spicy mode). Applied at cast time under the affines precedence chain. Enabling spicyMode requires a recorded 18+ attestation on file (else auth.forbidden); a recorded attestation is preserved across a replace.
 
 - **Auth:** required
 
@@ -2441,6 +2458,23 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
     "defaultProjectId": {
       "type": "string",
       "description": "Default project (Provincia id) new work files into. Stored; cast-time auto-filing pending."
+    },
+    "spicyMode": {
+      "type": "boolean",
+      "description": "Adult (\"spicy\") mode. When ON — and an 18+ attestation is on file — permits adult-rated models, routes concierge chat to willing OpenRouter models, and relaxes SFW-forcing default negatives. Default-absent = OFF. Enabling requires a recorded 18+ attestation (POST /v1/me/attestation) — this PUT rejects with auth.forbidden otherwise."
+    },
+    "ageAttestation": {
+      "type": "object",
+      "description": "One-time self-declared 18+ attestation (a click-through fact, NOT KYC/ID verification). Required on file before spicyMode may be enabled. Recorded via POST /v1/me/attestation; preserved across a Preferences replace.",
+      "properties": {
+        "attestedAt": {
+          "type": "number",
+          "description": "Epoch-ms timestamp of the attestation."
+        }
+      },
+      "required": [
+        "attestedAt"
+      ]
     }
   }
 }
@@ -2486,12 +2520,61 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
         "defaultProjectId": {
           "type": "string",
           "description": "Default project (Provincia id) new work files into. Stored; cast-time auto-filing pending."
+        },
+        "spicyMode": {
+          "type": "boolean",
+          "description": "Adult (\"spicy\") mode. When ON — and an 18+ attestation is on file — permits adult-rated models, routes concierge chat to willing OpenRouter models, and relaxes SFW-forcing default negatives. Default-absent = OFF. Enabling requires a recorded 18+ attestation (POST /v1/me/attestation) — this PUT rejects with auth.forbidden otherwise."
+        },
+        "ageAttestation": {
+          "type": "object",
+          "description": "One-time self-declared 18+ attestation (a click-through fact, NOT KYC/ID verification). Required on file before spicyMode may be enabled. Recorded via POST /v1/me/attestation; preserved across a Preferences replace.",
+          "properties": {
+            "attestedAt": {
+              "type": "number",
+              "description": "Epoch-ms timestamp of the attestation."
+            }
+          },
+          "required": [
+            "attestedAt"
+          ]
         }
       }
     }
   },
   "required": [
     "generatio"
+  ]
+}
+```
+
+### POST /v1/me/attestation
+
+Record the caller's one-time 18+ self-attestation (a click-through fact, NOT KYC/ID verification). Required on file before spicy mode may be enabled. Anon-capable (keyed by AuctorKey — anonymous Bursa/commitment and named Anima callers both).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The caller's recorded 18+ self-attestation (a click-through fact, not KYC).",
+  "properties": {
+    "attestation": {
+      "type": "object",
+      "properties": {
+        "attestedAt": {
+          "type": "number",
+          "description": "Epoch-ms timestamp of the attestation."
+        }
+      },
+      "required": [
+        "attestedAt"
+      ]
+    }
+  },
+  "required": [
+    "attestation"
   ]
 }
 ```
