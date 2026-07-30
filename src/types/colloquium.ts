@@ -74,6 +74,15 @@ export interface Dictum {
   actumId?: string
   /** FK[] → Signum. Credit events tied to this turn (e.g. tokens consumed). */
   signaIds: string[]
+  /**
+   * Caller-supplied idempotency key for the turn that produced this Dictum (noema-095).
+   * A concierge dicta POST carries a client-chosen `turnKey`; both the user and the agent
+   * Dictum of that turn are stamped with it, so a retried POST with the SAME key is a no-op
+   * (the persisted agent Dictum is returned instead of re-running the agent or re-charging).
+   * Mirrors the R5 Stripe-event-id idempotency discipline. Absent on turns created before
+   * the concierge endpoint (and on any non-concierge Dictum). Immutable once set.
+   */
+  turnKey?: string
   /** "natum" = born — when this turn was recorded */
   natum: Date
 }
@@ -112,5 +121,13 @@ export interface DictumStore {
   findById(id: string): Promise<Dictum | null>
   /** Return all turns in a colloquium, ordered by natum ascending. */
   listByColloquium(colloquiumId: string): Promise<Dictum[]>
+  /**
+   * Return the Dicta of one colloquium stamped with a given caller-supplied `turnKey`,
+   * ordered by natum ascending (noema-095 per-turn idempotency). A completed concierge
+   * turn yields a user + an agent Dictum sharing the key; the endpoint keys idempotent
+   * replay on the AGENT Dictum's presence (the turn settled only once its agent Dictum
+   * was persisted). Empty when no turn has used the key in this colloquium.
+   */
+  findByTurnKey(colloquiumId: string, turnKey: string): Promise<Dictum[]>
   update(id: string, patch: Partial<Pick<Dictum, 'actumId' | 'signaIds'>>): Promise<Dictum>
 }
