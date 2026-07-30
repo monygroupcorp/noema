@@ -4,6 +4,7 @@ import type { Modo } from '../types/modo.js'
 import type { Cursor, CursorResult } from '../types/cursus.js'
 import type { MediaFetcher } from './MediaFetcher.js'
 import type { ApiProvider, ApiCapability, ApiCapabilitySpec } from './apiProviders.js'
+import { chatImpetus } from './apiProviders.js'
 
 // =============================================================================
 // ApiCursor — ONE cursor, driven by a provider descriptor (data)
@@ -19,11 +20,19 @@ import type { ApiProvider, ApiCapability, ApiCapabilitySpec } from './apiProvide
 // existing `__spaceUrl` routing-key convention and reaches run() through the
 // Actum (which does not carry the Modus). Absent → defaults to 'chat'.
 //
-// STREAMING DECISION (Concierge-critical): option (a) — the cursor stays SYNC.
-// It returns the full completion plus real usage-metered impetus. The Concierge
-// owns its own token-streaming chat session directly against the provider for
-// the interactive path, and only SETTLES through a run when it commits work.
-// This keeps the ledger clean and the run rail simple. Documented in the handoff.
+// STREAMING DECISION: option (a) — the cursor stays SYNC. It returns the full
+// completion plus real usage-metered impetus.
+//
+// CONCIERGE METERING (noema-095, supersedes the pre-095 note here): every concierge
+// TURN settles DIRECTLY, per-turn, at the exact OpenRouter chat cost — independent of
+// `createRun`/GO. The concierge does NOT "only settle through a run when it commits
+// work"; a turn is a chat turn, not a generation, and is charged the moment it runs.
+// The concierge endpoint (`src/allocutio/api/colloquiaRouter.ts`) reserves a per-turn
+// cap, runs the read-only ConciergeAgent, then settles the summed token cost via the
+// SAME `chatImpetus(...)` formula this cursor's `meterChat` uses (a shared helper in
+// apiProviders.ts) — no Actum/run record is created per turn. `createRun`/GO remains
+// the separate commit path that DOES spawn a run. The cursor's own `/chat` + `/runs`
+// metering below is unchanged by that endpoint.
 // =============================================================================
 
 /**
@@ -164,10 +173,10 @@ export class ApiCursor implements Cursor {
   }
 
   private meterChat(tokens: number): bigint {
-    const per1k = this.provider.pricing.chatImpetusPer1kTokens ?? 0n
-    if (per1k === 0n || tokens <= 0) return 0n
-    // ceil(tokens × per1k / 1000) — never under-charge on the sub-unit remainder.
-    return (BigInt(tokens) * per1k + 999n) / 1000n
+    // Delegates to the shared `chatImpetus` helper (apiProviders.ts) so this run rail and
+    // the concierge per-turn direct-settle path (noema-095) charge by identical arithmetic.
+    // Output is byte-for-byte the pre-095 formula: ceil(tokens × per1k / 1000).
+    return chatImpetus(tokens, this.provider.pricing.chatImpetusPer1kTokens)
   }
 
   private meterImages(n: number): bigint {

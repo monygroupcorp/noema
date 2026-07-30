@@ -27,6 +27,11 @@ export class MongoDictum implements DictumStore {
     return docs.map(d => fromDoc(d as Record<string, unknown>))
   }
 
+  async findByTurnKey(colloquiumId: string, turnKey: string): Promise<Dictum[]> {
+    const docs = await this.col.find({ colloquiumId, turnKey }).sort({ natum: 1 }).toArray()
+    return docs.map(d => fromDoc(d as Record<string, unknown>))
+  }
+
   async update(id: string, patch: Partial<Pick<Dictum, 'actumId' | 'signaIds'>>): Promise<Dictum> {
     const result = await this.col.findOneAndUpdate(
       { id },
