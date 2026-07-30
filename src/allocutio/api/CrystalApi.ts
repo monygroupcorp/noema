@@ -304,6 +304,10 @@ export interface FlowSummary {
   id: string
   nomen: string
   versio: string
+  /** Flow-level routing line — what this flow is for and when to pick it over its
+   *  siblings (`Modus.descriptio`). Lets the concierge/router disambiguate flows that
+   *  share a categoria (e.g. the text-to-image family). Absent when the flow sets none. */
+  descriptio?: string
   categoria?: unknown
   /** Number of steps — present only for a compositus (spell). Absent = an atomic flow.
    *  Lets an agent tell a one-shot tool from a multi-step spell at the catalog level. */
@@ -1554,6 +1558,7 @@ export class CrystalApi {
         id: m.id,
         nomen: m.nomen,
         versio: m.versio,
+        ...(m.descriptio !== undefined ? { descriptio: m.descriptio } : {}),
         ...(categoria !== undefined ? { categoria } : {}),
         ...(m.genus === 'compositus' ? { steps: m.gradus?.length ?? 0 } : {}),
         modusGenus: resolveCanonVerb(m),
@@ -1743,6 +1748,7 @@ export class CrystalApi {
         id: m.id,
         nomen: m.nomen,
         versio: m.versio,
+        ...(m.descriptio !== undefined ? { descriptio: m.descriptio } : {}),
         ...(categoria !== undefined ? { categoria } : {}),
         ...(m.genus === 'compositus' ? { steps: m.gradus?.length ?? 0 } : {}),
         modusGenus: resolveCanonVerb(m),

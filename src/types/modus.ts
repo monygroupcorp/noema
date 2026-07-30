@@ -123,6 +123,15 @@ export interface Modus {
   id: string
   /** "nomen" = name in Latin */
   nomen: string
+  /**
+   * "descriptio" = a written description in Latin — a flow-LEVEL routing line: what
+   * this flow is for and when to pick it over its siblings, in one sentence. Distinct
+   * from the per-Porta `Porta.description` (input-field tooltip). Read by the
+   * concierge/router to disambiguate flows that share a category (e.g. the text-to-image
+   * family). Inert display/routing metadata — NOT part of the contentHash (a copy edit
+   * must never re-hash a modus); see hashModus.ts. Absent → the flow carries no routing line.
+   */
+  descriptio?: string
   genus: ModusGenus
   /** Semantic version string e.g. "1.0.0" */
   versio: string
