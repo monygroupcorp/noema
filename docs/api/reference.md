@@ -328,6 +328,10 @@ List the runnable flows (discovery).
             "type": "string",
             "description": "The flow version."
           },
+          "descriptio": {
+            "type": "string",
+            "description": "A flow-level routing line — what this flow is for and when to pick it over its siblings."
+          },
           "categoria": {
             "description": "An optional catalog tag."
           },
@@ -399,6 +403,10 @@ Describe one flow's input/output JSON-Schema (discovery).
       "type": "object",
       "description": "The flow's output JSON-Schema — present when the flow declares one.",
       "additionalProperties": true
+    },
+    "descriptio": {
+      "type": "string",
+      "description": "A flow-level routing line — what this flow is for and when to pick it over its siblings."
     },
     "categoria": {
       "description": "An optional catalog tag."
@@ -7932,6 +7940,10 @@ List the caller's own registered flows (owner-scoped discovery for the canvas no
           "versio": {
             "type": "string",
             "description": "The flow version."
+          },
+          "descriptio": {
+            "type": "string",
+            "description": "A flow-level routing line — what this flow is for and when to pick it over its siblings."
           },
           "categoria": {
             "description": "An optional catalog tag."

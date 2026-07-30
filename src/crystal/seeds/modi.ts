@@ -19,6 +19,7 @@ function make(def: Omit<Modus, 'contentHash'>): Modus {
 export const MODUS_CHATGPT: Modus = make({
   id: 'modus.chatgpt',
   nomen: 'ChatGPT — text generation',
+  descriptio: 'ChatGPT text generation via OpenAI — a prompt in, a text response out. Pick it for OpenAI-hosted chat/completion; use OpenRouter to reach non-OpenAI models through one endpoint.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'openai',
@@ -45,6 +46,7 @@ export const MODUS_CHATGPT: Modus = make({
 export const MODUS_DALLE_III: Modus = make({
   id: 'modus.dalle-iii',
   nomen: 'DALL·E 3 — image generation',
+  descriptio: 'DALL·E 3 text-to-image via OpenAI — a hosted API image generator (no GPU, fixed cost). Pick it for quick OpenAI image gen; use the pod flows (FLUX/SDXL) for LoRAs and local control.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'openai',
@@ -72,6 +74,7 @@ export const MODUS_DALLE_III: Modus = make({
 export const MODUS_GPT_IMAGE_EDIT: Modus = make({
   id: 'modus.gpt-image-edit',
   nomen: 'GPT Image — image editing',
+  descriptio: 'GPT Image editing via OpenAI — edits a source image from a text instruction, with an optional mask for local edits. Pick it for hosted OpenAI edits; use FLUX Kontext/Klein for pod-side, LoRA-capable edits.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'openai',
@@ -100,6 +103,7 @@ export const MODUS_GPT_IMAGE_EDIT: Modus = make({
 export const MODUS_OPENROUTER_CHAT: Modus = make({
   id: 'modus.openrouter-chat',
   nomen: 'OpenRouter — text generation',
+  descriptio: 'OpenRouter text generation — one endpoint that routes to many providers/models (provider/model id). Pick it to reach non-OpenAI LLMs; use the ChatGPT flow when you specifically want OpenAI.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'openrouter',
@@ -125,6 +129,7 @@ export const MODUS_OPENROUTER_CHAT: Modus = make({
 export const MODUS_LAYER_COMPOSITE: Modus = make({
   id: 'modus.layer-composite',
   nomen: 'Layer Composite — z-order image compositing',
+  descriptio: 'Layer Composite — flattens ordered image layers (bottom→top) into one PNG, host-side and deterministic (no GPU). Pick it to stack/merge images; use Remove Background first to cut out subjects.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'composite',
@@ -158,6 +163,7 @@ export const MODUS_LAYER_COMPOSITE: Modus = make({
 export const MODUS_FRAMES_TO_VIDEO: Modus = make({
   id: 'modus.frames-to-video',
   nomen: 'Frames → Video — assemble frames into an animation',
+  descriptio: 'Frames → Video — stitches ordered frame images into an mp4/webm at a chosen fps, host-side (no GPU). Pick it to assemble existing frames; use a t2v/i2v flow (Wan2.2, LTX) to generate motion.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'ffmpeg',
@@ -190,6 +196,7 @@ export const MODUS_FRAMES_TO_VIDEO: Modus = make({
 export const MODUS_AITOOLKIT_TRAINING: Modus = make({
   id: 'modus.aitoolkit-training',
   nomen: 'LoRA Training — ai-toolkit',
+  descriptio: 'LoRA Training (ai-toolkit) — trains a custom LoRA from an image dataset + trigger word on a chosen base model. Pick it to create a new LoRA; then run the LoRA-capable make/edit flows to use it.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'aitoolkit',

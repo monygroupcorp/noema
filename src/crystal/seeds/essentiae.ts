@@ -16,6 +16,7 @@ import type { Essentia } from '../../types/essendi.js'
 export const ESSENTIA_RUNMAKE_FLUX_SCHNELL: Essentia = {
   id: 'flux-schnell',
   nomen: 'FLUX Schnell — text to image',
+  descriptio: 'Fast 4-step FLUX text-to-image — the quick general-purpose default. Pick it for speed and clean prompt adherence over the slower, higher-fidelity SDXL/Chroma/Krea siblings.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',        // set on registration via hashModus()
@@ -59,6 +60,7 @@ export const ESSENTIA_RUNMAKE_FLUX_SCHNELL: Essentia = {
 export const ESSENTIA_RUNMAKE_SD15: Essentia = {
   id: 'sd1-5',
   nomen: 'Stable Diffusion 1.5 — text to image',
+  descriptio: 'Lightweight SD1.5 text-to-image (8GB, fast and cheap) with the widest LoRA ecosystem. Pick it for quick drafts and heavy LoRA use; step up to SDXL or FLUX when you need higher fidelity.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',        // set on registration via hashModus()
@@ -103,6 +105,7 @@ export const ESSENTIA_RUNMAKE_SD15: Essentia = {
 export const ESSENTIA_RUNMAKE_SDXL: Essentia = {
   id: 'sdxl',
   nomen: 'Stable Diffusion XL — text to image',
+  descriptio: 'Stable Diffusion XL text-to-image at 1024px — balanced quality with a broad LoRA ecosystem. Pick it over SD1.5 for detail, and over FLUX/Krea when you want classic Stable Diffusion styles.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',        // set on registration via hashModus()
@@ -146,6 +149,7 @@ export const ESSENTIA_RUNMAKE_SDXL: Essentia = {
 export const ESSENTIA_RUNMAKE_CHROMA: Essentia = {
   id: 'chroma',
   nomen: 'Chroma — text to image',
+  descriptio: 'Chroma text-to-image (FLUX-family, 1024px) with a distinct stylized, illustrative aesthetic. Pick it for artistic/non-photoreal looks; choose FLUX or Krea when you want photorealism.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',        // set on registration via hashModus()
@@ -193,6 +197,7 @@ export const ESSENTIA_RUNMAKE_CHROMA: Essentia = {
 export const ESSENTIA_RUNMAKE_ZIMAGE_TURBO: Essentia = {
   id: 'z-image-turbo',
   nomen: 'Z-Image Turbo — text to image',
+  descriptio: 'Z-Image Turbo — 8-step distilled 6B text-to-image: fast, high quality, and LoRA-capable (familia \'zimage\'). Pick it for quick gens, especially when applying a trained Z-Image LoRA.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',        // set on registration via hashModus()
@@ -238,6 +243,7 @@ export const ESSENTIA_RUNMAKE_ZIMAGE_TURBO: Essentia = {
 export const ESSENTIA_RUNMAKE_KREA_TURBO: Essentia = {
   id: 'krea-turbo',
   nomen: 'Krea 2 Turbo — text to image',
+  descriptio: 'Krea 2 Turbo — 8-step distilled text-to-image tuned for photoreal output, LoRA-capable (train on RAW, run on Turbo). Pick it for realism; choose Chroma for stylized, FLUX Schnell for raw speed.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',        // set on registration via hashModus()
@@ -283,6 +289,7 @@ export const ESSENTIA_RUNMAKE_KREA_TURBO: Essentia = {
 export const ESSENTIA_FLUXI2I: Essentia = {
   id: 'flux-i2i',
   nomen: 'FLUX — image to image (restyle)',
+  descriptio: 'FLUX image-to-image restyle — keeps the source composition and repaints it per your prompt (strength controls how far it drifts). Pick it to restyle an existing image, not to follow edit instructions.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -319,6 +326,7 @@ export const ESSENTIA_FLUXI2I: Essentia = {
 export const ESSENTIA_KONTEXTEDIT: Essentia = {
   id: 'kontext-edit',
   nomen: 'FLUX.1 Kontext — instruction edit',
+  descriptio: 'FLUX.1 Kontext instruction edit — follows plain-language edits ("add a hat", "make it night") and works with flux.1 LoRAs. Pick it for targeted edits; use FLUX.2 Klein for stronger, newer edits.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -355,6 +363,7 @@ export const ESSENTIA_KONTEXTEDIT: Essentia = {
 export const ESSENTIA_KLEINEDIT: Essentia = {
   id: 'klein-edit',
   nomen: 'FLUX.2 Klein — instruction edit',
+  descriptio: 'FLUX.2 Klein 9B instruction edit — more capable than Kontext (FLUX.2 architecture). Pick it for high-quality edits when you do not need a LoRA (it is not flux.1-LoRA compatible); use Klein 4B for LoRA edits.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -389,6 +398,7 @@ export const ESSENTIA_KLEINEDIT: Essentia = {
 export const ESSENTIA_KLEINEDIT_4B: Essentia = {
   id: 'klein-edit-4b',
   nomen: 'FLUX.2 Klein 4B — instruction edit',
+  descriptio: 'FLUX.2 Klein 4B instruction edit, LoRA-capable (familia \'flux2\') — pick when your edit needs a flux2 LoRA or trigger word. This is the canonical base the STATIONTHIS flagship flow forks from.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -427,6 +437,7 @@ export const ESSENTIA_KLEINEDIT_4B: Essentia = {
 export const ESSENTIA_KLEIN: Essentia = {
   id: 'klein',
   nomen: 'FLUX.2 Klein 4B — text to image',
+  descriptio: 'FLUX.2 Klein 4B text-to-image, LoRA-capable (familia \'flux2\') with strong prompt adherence. Pick it when you need a flux2 LoRA/trigger or the newest FLUX.2 quality over the FLUX Schnell / SDXL siblings.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -462,6 +473,7 @@ export const ESSENTIA_KLEIN: Essentia = {
 export const ESSENTIA_RMBG: Essentia = {
   id: 'rmbg',
   nomen: 'Remove background',
+  descriptio: 'Remove background — cuts the subject out onto transparency (RGBA PNG). Pick it to isolate a subject for compositing or layering; it changes only the background, not the subject.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -494,6 +506,7 @@ export const ESSENTIA_RMBG: Essentia = {
 export const ESSENTIA_UPSCALE: Essentia = {
   id: 'upscale',
   nomen: 'Image upscale — 4x-UltraSharp',
+  descriptio: 'Image upscale (4x-UltraSharp) — enlarges and sharpens an existing image 4x without changing its content. Pick it to increase resolution; use a restyle/edit flow to actually change the picture.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',        // set on registration via hashModus()
@@ -531,6 +544,7 @@ export const ESSENTIA_UPSCALE: Essentia = {
 export const ESSENTIA_WAN22_T2V: Essentia = {
   id: 'wan22-t2v',
   nomen: 'Wan2.2 — text to video',
+  descriptio: 'Wan2.2 text-to-video (MoE) — turns a prompt into a short mp4, higher quality but heavier than LTX. Pick it for text-only video; use wan22-i2v to animate an existing image.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -568,6 +582,7 @@ export const ESSENTIA_WAN22_T2V: Essentia = {
 export const ESSENTIA_WAN22_I2V: Essentia = {
   id: 'wan22-i2v',
   nomen: 'Wan2.2 — image to video',
+  descriptio: 'Wan2.2 image-to-video (MoE) — animates a start-frame image into a short mp4. Pick it to bring a still to life at higher quality; use ltx-i2v for a faster, lighter alternative.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -619,6 +634,7 @@ export const ESSENTIA_WAN22_I2V: Essentia = {
 export const ESSENTIA_QWEN3_VL: Essentia = {
   id: 'qwen3-vl-8b',
   nomen: 'Qwen3-VL — image + text to text',
+  descriptio: 'Qwen3-VL vision-language — answers questions about an image (or runs text-only). Pick it as the general "look at this and tell me" flow; use the captioner for dataset captions or ShotVL for cinematography.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -659,6 +675,7 @@ export const ESSENTIA_QWEN3_VL: Essentia = {
 export const ESSENTIA_MOSS_MUSIC: Essentia = {
   id: 'moss-music-8b',
   nomen: 'MOSS-Music — audio to text (music understanding)',
+  descriptio: 'MOSS-Music audio understanding — transcribes, describes, or analyzes a music clip (chords, structure) to text. Pick it to read a piece of audio; it does not generate audio.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -688,6 +705,7 @@ export const ESSENTIA_MOSS_MUSIC: Essentia = {
 export const ESSENTIA_SHOTVL: Essentia = {
   id: 'shotvl-7b',
   nomen: 'ShotVL — video/image to text (cinematography)',
+  descriptio: 'ShotVL cinematography analysis — reads shot size, framing, and lighting from a video or still frame. Pick it for film/shot analysis; use Qwen3-VL for general image Q&A.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -734,6 +752,7 @@ export const ESSENTIA_SHOTVL: Essentia = {
 export const ESSENTIA_QWEN3_VL_CAPTION: Essentia = {
   id: 'qwen3-vl-caption',
   nomen: 'Qwen3-VL — image captioner (training datasets)',
+  descriptio: 'Qwen3-VL captioner — produces one dense, comma-separated caption per image, tuned for LoRA training datasets. Pick it to auto-caption images; use the general Qwen3-VL flow for open-ended questions.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -775,6 +794,7 @@ export const ESSENTIA_QWEN3_VL_CAPTION: Essentia = {
 export const ESSENTIA_HEARTMULA: Essentia = {
   id: 'heartmula-3b',
   nomen: 'HeartMuLa — text to music',
+  descriptio: 'HeartMuLa text-to-music — turns lyrics plus style tags into a generated track (.mp3). Pick it to compose music from words; use MOSS-Music to analyze existing audio instead.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -852,6 +872,7 @@ print('exported', a.output)
 export const ESSENTIA_HUNYUAN3D: Essentia = {
   id: 'hunyuan3d-21',
   nomen: 'Hunyuan3D — image to 3D (shape)',
+  descriptio: 'Hunyuan3D image-to-3D — turns a clean, front-facing reference image into an untextured 3D mesh (.glb). Pick it to lift a picture into 3D geometry; texturing is a separate/deferred step.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -901,6 +922,7 @@ export const ESSENTIA_HUNYUAN3D: Essentia = {
 export const ESSENTIA_LTX_T2V: Essentia = {
   id: 'ltx-t2v',
   nomen: 'LTX 2.3 — text to video',
+  descriptio: 'LTX 2.3 text-to-video (832x544, 81 frames) — faster and lighter than Wan2.2 for short clips. Pick it for quick text-to-video; choose Wan2.2 when you want higher quality.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -942,6 +964,7 @@ export const ESSENTIA_LTX_T2V: Essentia = {
 export const ESSENTIA_LTX_I2V: Essentia = {
   id: 'ltx-i2v',
   nomen: 'LTX 2.3 — image to video',
+  descriptio: 'LTX 2.3 image-to-video — animates a source image into a short clip, the fast/light counterpart to wan22-i2v. Pick it for quick image-to-video; choose Wan2.2 i2v for higher quality.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
