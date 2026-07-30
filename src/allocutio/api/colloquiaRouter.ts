@@ -23,9 +23,14 @@
 //     Bursa rail is deliberately NOT extended with refund machinery.
 //
 // INVARIANTS the gauntlet reviews (value conservation is the whole risk surface):
-//   (1) A turn is charged AT MOST ONCE. Idempotency keys on the caller-supplied `turnKey`:
-//       once the AGENT Dictum for a turn is persisted, a retried POST with the same key is a
-//       pure no-op that returns the persisted turn — no re-run, no re-charge (Decision Q2).
+//   (1) A turn is charged AT MOST ONCE. Idempotency keys on the caller-supplied `turnKey`, enforced
+//       ATOMICALLY at the store: a UNIQUE PARTIAL index on (colloquiumId, turnKey) over AGENT dicta
+//       (src/crystal/ensureIndexes.ts) makes the agent-Dictum insert the per-turn CHARGE GATE. A
+//       sequential retry returns the persisted turn before running (no re-run). A CONCURRENT retry
+//       racing the still-in-flight original may re-run the READ-ONLY agent, but the second
+//       agent-Dictum insert loses on E11000 → its reservation is released and the winner's turn is
+//       returned, so the settle/debit fires exactly once — no double-charge even under the TOCTOU
+//       read-check-then-act window (Decision Q2).
 //   (2) Affordability is checked BEFORE the agent runs. Insufficient balance/purse → 402 with
 //       NO Dictum persisted, NO provider call, NO partial debit (Decision Q1/Q2).
 //   (3) The charge (settle / debit) happens only AFTER the agent Dictum is durable, and the
@@ -93,6 +98,13 @@ export interface ColloquiaRouterDeps {
 
 function fail(res: Response, status: number, code: string, message: string): void {
   res.status(status).json({ error: { code, message } })
+}
+
+/** A Mongo duplicate-key (E11000) error — the per-turn CHARGE-GATE collision (noema-095): a
+ *  concurrent dicta POST with the same turnKey already persisted this turn's agent Dictum. Duck-typed
+ *  on `.code` so it also recognizes the in-memory DictumStore fake's simulated dup-key in tests. */
+function isDuplicateTurnClaim(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 11000
 }
 
 /** The Signorum identity for a caller, or null for a bursaToken (which has no ledger identity —
@@ -312,14 +324,38 @@ export function createColloquiaRouter(deps: ColloquiaRouterDeps): Router {
         }
         const result: ConciergeResult = await runTurn(agentDeps, ctx, message)
 
-        // (h) Persist the AGENT Dictum (tagged with the turn key); signaIds stamped after settle.
-        const agentDictum = await deps.dicta.create({
-          colloquiumId,
-          genus: 'agent',
-          corpus: dictumCorpus(result),
-          signaIds: [],
-          turnKey,
-        })
+        // (h) Persist the AGENT Dictum (tagged with the turn key) — the ATOMIC per-turn CHARGE GATE.
+        //     A unique partial index on (colloquiumId, turnKey) over AGENT dicta makes this insert the
+        //     single point at which a turn commits to being charged (the settle/debit below runs ONLY
+        //     if it succeeds). If a concurrent POST with the SAME turnKey — a client-timeout retry
+        //     racing the still-in-flight original — already persisted the agent Dictum, THIS insert
+        //     throws E11000: we must NOT settle/debit a second time (invariant (1)).
+        let agentDictum: Dictum
+        try {
+          agentDictum = await deps.dicta.create({
+            colloquiumId,
+            genus: 'agent',
+            corpus: dictumCorpus(result),
+            signaIds: [],
+            turnKey,
+          })
+        } catch (err) {
+          if (!isDuplicateTurnClaim(err)) throw err
+          // A concurrent turn won the charge gate. Release our still-live reservation so no funds are
+          // stranded (the Bursa rail has debited nothing yet at this point) and return the winner's
+          // turn rather than charging twice.
+          if (reservationSignaIds && !settled) await deps.signorum.release(reservationSignaIds)
+          const raced = await deps.dicta.findByTurnKey(colloquiumId, turnKey)
+          const winner = raced.find((d) => d.genus === 'agent')
+          if (winner) {
+            res.status(200).json({ dictum: serializeDictum(winner), idempotentReplay: true })
+          } else {
+            // Winner's agent Dictum not yet visible (mid-commit) — signal an idempotent retry rather
+            // than charge. A subsequent POST with the same turnKey lands on the replay path above.
+            fail(res, 409, 'turn.in_progress', 'A concurrent turn with this turnKey is being charged; retry the idempotent POST')
+          }
+          return
+        }
 
         // (i) Settle at the EXACT OpenRouter chat cost for the summed token usage.
         const actual = chatImpetus(result.tokenUsage.totalTokens, OPENROUTER_PROVIDER.pricing.chatImpetusPer1kTokens)
