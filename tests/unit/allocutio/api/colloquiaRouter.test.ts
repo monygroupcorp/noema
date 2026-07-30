@@ -52,12 +52,30 @@ function fakeColloquia() {
   }
 }
 
+// Duplicate-key error shaped like Mongo's E11000 (the router duck-types on `.code === 11000`).
+class FakeDupKeyError extends Error {
+  code = 11000
+  constructor() {
+    super('E11000 duplicate key error: turnkey_agent_charge_gate')
+  }
+}
+
 function fakeDicta() {
   const store: Dictum[] = []
   let n = 0
   return {
     store,
     async create(input: Omit<Dictum, 'id' | 'natum'>): Promise<Dictum> {
+      // Enforce the production unique partial index `turnkey_agent_charge_gate`: at most ONE agent
+      // Dictum per (colloquiumId, turnKey). This is the atomic per-turn charge gate — a concurrent
+      // second agent insert for the same turn throws E11000 (see the concurrency test below).
+      if (
+        input.genus === 'agent' &&
+        input.turnKey !== undefined &&
+        store.some((d) => d.genus === 'agent' && d.colloquiumId === input.colloquiumId && d.turnKey === input.turnKey)
+      ) {
+        throw new FakeDupKeyError()
+      }
       const d: Dictum = { ...input, id: `d-${++n}`, natum: new Date() }
       store.push(d)
       return d
@@ -297,6 +315,78 @@ test('retrying a dicta POST with the same turnKey is a no-op — no re-run, no d
   assert.equal(h.bal.v, balAfterFirst)
   assert.equal(h.dicta.store.filter((d) => d.genus === 'agent').length, agentCountAfterFirst)
   assert.equal(h.captured.tools.length, toolCallsAfterFirst)
+})
+
+// ── 3b. CONCURRENCY — the TOCTOU charge gate (gauntlet blocker) ───────────────
+// Two concurrent POSTs with the SAME turnKey (a client-timeout retry racing the still-in-flight
+// original — a normal operating condition for a multi-second agent turn) must charge the caller
+// EXACTLY ONCE. The unique partial index on (colloquiumId, turnKey) over AGENT dicta is the atomic
+// charge gate: both may run the read-only agent, but only one persists the agent Dictum and settles;
+// the other loses on E11000 and returns the winner's turn without a second reserve→settle.
+
+test('two concurrent POSTs with the SAME turnKey charge the caller exactly once (no double-charge)', async () => {
+  const colloquia = fakeColloquia()
+  const dicta = fakeDicta()
+  const bal = { v: 100_000n }
+  const signorum = fakeSignorum(bal)
+  const bursarium = fakeBursarium({ v: 100_000n })
+  const tokens = 2000
+  const expected = chatImpetus(tokens, 3n) // 6n
+
+  // A gate the agent LLM awaits so both requests are held in their in-flight window simultaneously;
+  // `bothInFlight` resolves once BOTH have reserved + entered the agent, guaranteeing a true race.
+  let releaseLLM!: () => void
+  const llmGate = new Promise<void>((r) => { releaseLLM = r })
+  let entered = 0
+  let markBothInFlight!: () => void
+  const bothInFlight = new Promise<void>((r) => { markBothInFlight = r })
+  const runToolChat = async (
+    _deps: OpenRouterToolClientDeps,
+    opts: OpenRouterToolChatOpts,
+  ): Promise<OpenRouterChatResult> => {
+    void opts
+    if (++entered === 2) markBothInFlight()
+    await llmGate
+    return reply(tokens)
+  }
+
+  const deps: ColloquiaRouterDeps = {
+    identity: { resolve: async () => ({ animaId: 'A' }) },
+    colloquia: colloquia as unknown as ColloquiaRouterDeps['colloquia'],
+    dicta: dicta as unknown as ColloquiaRouterDeps['dicta'],
+    signorum: signorum as unknown as ColloquiaRouterDeps['signorum'],
+    bursarium: bursarium as unknown as ColloquiaRouterDeps['bursarium'],
+    api: fakeApi(),
+    agent: {
+      runToolChat: runToolChat as unknown as ColloquiaRouterDeps['agent']['runToolChat'],
+      toolClient: { http: {} as never, apiKey: 'k' },
+    },
+  }
+  const app = express()
+  app.use('/v1/colloquia', express.json(), createColloquiaRouter(deps))
+
+  const id = await createThread(app)
+  const before = bal.v
+
+  // Fire both turns with the SAME turnKey; the `.then` forces supertest to dispatch immediately
+  // (it starts the request lazily otherwise) so both are in flight before we await the barrier.
+  const p1 = request(app).post(`/v1/colloquia/${id}/dicta`).send({ turnKey: 'race', message: 'hi' }).then((r) => r)
+  const p2 = request(app).post(`/v1/colloquia/${id}/dicta`).send({ turnKey: 'race', message: 'hi' }).then((r) => r)
+  await bothInFlight
+  releaseLLM()
+  const [r1, r2] = await Promise.all([p1, p2])
+
+  // Both succeed, but exactly ONE is the settling turn and the other is the idempotent no-op.
+  assert.equal(r1.status, 200)
+  assert.equal(r2.status, 200)
+  const replays = [r1.body, r2.body].filter((b) => b.idempotentReplay === true)
+  assert.equal(replays.length, 1, 'exactly one concurrent turn must be the idempotent no-op')
+
+  // ONE agent Dictum, charged EXACTLY the single metered actual (not twice, not the cap).
+  assert.equal(dicta.store.filter((d) => d.genus === 'agent').length, 1)
+  assert.equal(before - bal.v, expected)
+  // No stranded funds: the winner settled and the loser's reservation was released.
+  assert.ok(signorum.locks.every((l) => !l.active), 'every Signorum lock must be resolved')
 })
 
 // ── 4. reject-before-run on insufficient balance ──────────────────────────────
