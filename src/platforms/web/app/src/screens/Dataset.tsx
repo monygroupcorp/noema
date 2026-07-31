@@ -101,7 +101,7 @@ export function Dataset() {
                   </button>
                 ))}
               </div>
-              <p className="ds-panel-note">{c === 'sealed' ? 'sealed — your images live in your enclave; we hold them, we can’t read them.'
+              <p className="ds-panel-note">{c === 'sealed' ? 'private tunnel — a single-tenant pod holds your images; hardware-sealed compute is in development.'
                 : c === 'local' ? 'local — the media never leaves your machine.' : 'remote — we host the media on our compute.'}</p>
             </div>
 

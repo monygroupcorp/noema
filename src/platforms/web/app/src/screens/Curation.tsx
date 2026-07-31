@@ -120,7 +120,7 @@ export function Curation() {
         )}
 
         <div className="cu-foot">
-          <span className="mono"><span className="hemi2 dashed" /> Reviewed locally · nothing leaves your machine until you export</span>
+          <span className="mono"><span className="hemi2 dashed" /> Reviewed in this session · nothing is published until you export</span>
           <div className="right" style={{ display: 'flex', gap: 'var(--s3)' }}>
             <Link className="btn ghost" to={`/collections/${id}/run`}>← run</Link>
             <Link className="btn accent" to={`/collections/${id}/export`}>Export →</Link>

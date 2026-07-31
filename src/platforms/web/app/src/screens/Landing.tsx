@@ -38,29 +38,6 @@ const FRONT_HALF_NODES = [
   },
 ];
 
-const BACK_HALF_NODES = [
-  {
-    id: 'device',
-    icon: 'laptop',
-    title: 'Your device',
-    items: [
-      { text: 'WireGuard keypair generated in-browser' },
-      { text: 'private key never leaves the device' },
-      { text: 'prompts & results live only here' },
-    ],
-  },
-  {
-    id: 'pod',
-    icon: 'server',
-    title: 'Private GPU pod',
-    items: [
-      { text: 'single-tenant GPU — your session only' },
-      { text: 'tunnel ends at the pod — we stay outside' },
-      { text: 'pod terminates · nothing persisted', mono: true },
-    ],
-  },
-];
-
 const FEATURES = [
   {
     id: 'intent',
@@ -69,16 +46,22 @@ const FEATURES = [
     desc: 'Describe what you want. A concierge picks the tools and runs them. Open the controls only when you care to.',
   },
   {
+    id: 'models',
+    icon: 'sparkles',
+    title: 'Curated models, open and closed',
+    desc: 'A hand-picked set of open- and closed-source models — or bring your own endpoint. Swap between them without swapping tools.',
+  },
+  {
     id: 'place',
     icon: 'sparkles',
     title: 'Your work becomes a place',
     desc: 'Every creation lands in a space you fly through, search, and return to. A world you own — not a feed you scroll.',
   },
   {
-    id: 'privacy',
+    id: 'anon',
     icon: 'eye-off',
-    title: 'Privacy you can verify',
-    desc: 'Run sealed in private compute and we receive only the bill. The interface shows you, plainly, what we can\'t see.',
+    title: 'Anonymous to fund and make',
+    desc: 'No email. Fund with a zero-knowledge proof — we never learn your wallet, and there is no account trail behind your work.',
   },
 ];
 
@@ -97,43 +80,44 @@ export function Landing() {
 
       <div className="hero">
         <span className="noema-glow hero-glow" aria-hidden="true" />
-        <div className="noema-kicker hero-kicker">Privacy-by-construction · Generative studio</div>
-        <h1 className="hero-display">A complete studio.<br /><span className="accent">Completely private.</span></h1>
+        <div className="noema-kicker hero-kicker">Boutique generative AI · Studio + concierge</div>
+        <h1 className="hero-display">A complete studio.<br /><span className="accent">A concierge that builds with you.</span></h1>
         <hr className="noema-rule hero-rule" />
-        <p className="lead">Run our models or your own — anonymous to fund, anonymous to make.</p>
+        <p className="lead">Curated open- and closed-source models. Describe what you want — a concierge picks the tools and makes it.</p>
         <div className="cta">
           <Link className="btn lg" to="/onboard">Start free <Ic name="arrow-right" /></Link>
           <Link className="btn-ghost" to={entryPath()}>See it work</Link>
         </div>
-        <div className="proof">no email · pay anonymously · provably private</div>
+        <div className="proof">no email · pay anonymously · your models or ours</div>
       </div>
 
       <div className="stance">
         <div className="in">
           <h2>
-            Every other AI studio can read everything you make.<br />
-            <span className="dim">We built one that can prove it doesn't.</span>
+            Most AI tools hand you a blank box and a wall of settings.<br />
+            <span className="dim">We built one that just makes the thing.</span>
           </h2>
           <div className="sub">
-            Go private and only the meter reaches us — never your prompts, never your results.
-            We show you exactly what we receive: nothing.
+            Tell the concierge what you want. It picks from a curated set of open- and
+            closed-source models, runs them, and hands back the work. The controls are
+            there when you want them — never in your way when you don't.
           </div>
         </div>
       </div>
 
       <section className="arch">
-        <div className="lab">How private compute works</div>
-        <h2>The architecture is the guarantee.</h2>
+        <div className="lab">How anonymous funding works</div>
+        <h2>Anonymous by construction.</h2>
         <p className="ah-sub">
-          Two halves of one promise — fund anonymously, compute privately. Not a policy you
-          trust; a path we're built not to take. The whole mechanism, in the open.
+          We don't need to know who you are. Deposit, join the anonymity set, and spend with a
+          zero-knowledge proof — we never learn your wallet. This is about <em>who</em> you are,
+          not a claim that a compute provider can't see your work.
         </p>
 
         <div className="lane">
           <div className="lanehead">
-            <span className="n">front half</span>
-            {' '}Anonymous credit{' '}
-            <span className="lt">— pay without being identified</span>
+            <span className="n">anonymous credit</span>
+            {' '}Pay without being identified
           </div>
           <div className="diagram three">
             {FRONT_HALF_NODES.map((node, i) => (
@@ -160,46 +144,18 @@ export function Landing() {
           </div>
         </div>
 
-        <div className="lane">
-          <div className="lanehead">
-            <span className="n">back half</span>
-            {' '}Private compute{' '}
-            <span className="lt">— work without being seen</span>
-          </div>
-          <div className="diagram">
-            {BACK_HALF_NODES.map((node, i) => (
-              <>
-                <div key={node.id} className="dnode">
-                  <div className="dt">
-                    <span className="li"><Ic name={node.icon} /></span>
-                    {node.title}
-                  </div>
-                  <ul>
-                    {node.items.map((item, j) => (
-                      <li key={j} className={item.mono ? 'm' : undefined}>{item.text}</li>
-                    ))}
-                  </ul>
-                </div>
-                {i < BACK_HALF_NODES.length - 1 && (
-                  <div key={`arrow-${i}`} className="darrow">
-                    <Ic name="arrow-right" />
-                    <span className="m">encrypted tunnel</span>
-                  </div>
-                )}
-              </>
-            ))}
-          </div>
-        </div>
-
         <div className="meter">
-          <div className="ml">what reaches noema</div>
+          <div className="ml">what we learn about you</div>
           <div className="redact mono">
             <div className="row"><span className="k">who</span><span className="v block">▮▮▮▮▮▮</span></div>
-            <div className="row"><span className="k">prompt</span><span className="v block">▮▮▮▮▮▮▮▮▮▮</span></div>
-            <div className="row"><span className="k">result</span><span className="v block">▮▮▮▮▮▮</span></div>
-            <div className="row"><span className="k">cost</span><span className="v">$0.043 · 12 GPU-min</span></div>
+            <div className="row"><span className="k">wallet</span><span className="v block">▮▮▮▮▮▮▮▮▮▮</span></div>
+            <div className="row"><span className="k">account</span><span className="v">none — no email, no login</span></div>
           </div>
-          <div className="mn">Session opened, minutes metered, session closed. That is the entire record.</div>
+          <div className="mn">
+            Your identity and funding are severed from your work. Generation and concierge
+            reasoning run on external providers (RunPod GPUs, an LLM provider) — we don't
+            claim they can't see session content. Hardware-isolated private compute is in development.
+          </div>
         </div>
 
         <div className="docs">
@@ -220,7 +176,7 @@ export function Landing() {
       </div>
 
       <div className="endcta">
-        <h2>Make something only you will ever see.</h2>
+        <h2>Make something worth keeping.</h2>
         <Link className="btn lg" to="/onboard">Start free <Ic name="arrow-right" /></Link>
       </div>
 

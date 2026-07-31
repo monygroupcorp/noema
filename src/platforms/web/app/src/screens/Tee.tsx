@@ -140,8 +140,8 @@ export function Tee() {
 
         <div className="pagehead">
           <div>
-            <h1>Private session</h1>
-            <div className="sub">Sealed compute over your own tunnel. We provision and meter — we never see the work.</div>
+            <h1>Private session <span className="mono" style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>· in development</span></h1>
+            <div className="sub">A single-tenant pod over your own WireGuard tunnel — network isolation, not hardware-sealed private compute. Hardware-sealed compute and browser-verified attestation are in development; until they ship, treat the pod host as inside the trust boundary.</div>
           </div>
           <div className="right">{badge}</div>
         </div>
@@ -158,7 +158,7 @@ export function Tee() {
             <div className="sectionhead">Start</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)', maxWidth: 520 }}>
               <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)', lineHeight: 1.5 }}>
-                Provisioning generates a WireGuard keypair in this tab, leases a sealed pod, and hands
+                Provisioning generates a WireGuard keypair in this tab, leases a single-tenant pod, and hands
                 you a tunnel only your browser holds the key to. Metered from your balance while it lives.
               </div>
               <div>
@@ -209,7 +209,7 @@ export function Tee() {
               </div>
             </div>
 
-            <div className="sectionhead"><span className="ttdot" /> What reaches noema</div>
+            <div className="sectionhead"><span className="ttdot" /> What reaches noema <span className="mono" style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>· target design (in development)</span></div>
             <div style={{
               border: '1px solid color-mix(in srgb, var(--accent) 30%, var(--hair))',
               borderRadius: 'var(--radius)',
@@ -224,7 +224,8 @@ export function Tee() {
                 <div className="row"><span className="k">cost</span><span className="v">{session?.gpuHours != null ? `${session.gpuHours.toFixed(2)} GPU-h` : 'metered per GPU-minute'}</span></div>
               </div>
               <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 'var(--s3)', lineHeight: 1.5 }}>
-                Everything but the meter stays inside your tunnel.
+                This is the design target for the sealed tier. It is not yet in force: without attestation
+                the pod host can still read session content. Do not rely on it until this tier ships.
               </div>
             </div>
 

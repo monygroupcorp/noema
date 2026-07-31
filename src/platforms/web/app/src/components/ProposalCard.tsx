@@ -2,7 +2,9 @@ import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type ConciergeProposal, type FlowDescription, type ModelCard } from '../lib/api';
-import { useRunStream } from '../lib/runStream';
+import { STAGE_LABELS, measure, useRunStream } from '../lib/runStream';
+import { mediaFromOutput } from '../lib/media';
+import { Lightbox } from './Lightbox';
 
 // ── ProposalCard — renders one concierge `ConciergeProposal` (noema-099) ──────
 // The chosen flow + editable embellished prompt (trigger-word-highlighted, same
@@ -107,6 +109,7 @@ export function ProposalCard({ proposal, onAdjust }: {
   const [runId, setRunId] = useState<string | undefined>();
   const [dispatching, setDispatching] = useState(false);
   const [dispatchErr, setDispatchErr] = useState<string | undefined>();
+  const [lightbox, setLightbox] = useState(false);
   const runStream = useRunStream(runId);
 
   function setPrompt(v: string) {
@@ -162,6 +165,7 @@ export function ProposalCard({ proposal, onAdjust }: {
   }
 
   const flowLabel = proposal.modusId ?? proposal.verb ?? '—';
+  const media = mediaFromOutput(runStream.exitus);
 
   return (
     <div className="proposal-card">
@@ -192,11 +196,28 @@ export function ProposalCard({ proposal, onAdjust }: {
       {runId && (
         <div className="pc-run">
           <span>{runStream.terminal ?? 'running…'}</span>
+          {runStream.terminal !== 'complete' && (
+            <span>
+              {' '}· {STAGE_LABELS[runStream.stageIdx]} {measure(runStream.progressus)}
+              {!runStream.terminal && ` · ${runStream.elapsedSec}s elapsed`}
+            </span>
+          )}
           <Link to={`/run?id=${runId}`}>open run view →</Link>
           {runStream.terminal === 'failed' && runStream.charged !== undefined && (
             <span> · charged {runStream.charged} credits</span>
           )}
+          {runStream.terminal === 'complete' && media?.kind === 'image' && (
+            <img
+              src={media.url}
+              alt=""
+              className="rimg-clickable"
+              onClick={() => setLightbox(true)}
+            />
+          )}
         </div>
+      )}
+      {lightbox && media?.kind === 'image' && (
+        <Lightbox src={media.url} onClose={() => setLightbox(false)} />
       )}
 
       <style>{`

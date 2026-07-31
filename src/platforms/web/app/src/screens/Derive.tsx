@@ -13,7 +13,7 @@ import { api, type Dataset } from '../lib/api';
 // same constraint TrainRun.tsx's monitor already labels honestly).
 const CUSTODY: { c: Custody; t: string; s: string }[] = [
   { c: 'local', t: 'Local', s: 'Your GPU. Nothing leaves.' },
-  { c: 'sealed', t: 'Remote · TEE', s: 'Sealed enclave — we run it, we can’t read your data.' },
+  { c: 'sealed', t: 'Remote · TEE', s: 'Private tunnel to a single-tenant pod. Hardware-sealed compute is in development.' },
   { c: 'remote', t: 'Remote', s: 'Our GPUs. Fastest, we can see it.' },
 ];
 
@@ -48,7 +48,7 @@ export function Derive() {
     <AppShell title={crumb}>
       <div className="page"><div className="pw wide">
         <div className="pagehead">
-          <div><div className="noema-kicker" style={{ marginBottom: 8 }}>derive a training · from {d.name.toLowerCase()}</div><h1 className="dv-name">{d.name} · LoRA v1<span className="cj-cursor" /></h1></div>
+          <div><div className="noema-kicker" style={{ marginBottom: 8 }}>derive a training · from {d.name.toLowerCase()}</div><h1 className="dv-name">{d.name} · LoRA v1</h1></div>
         </div>
 
         {/* source */}

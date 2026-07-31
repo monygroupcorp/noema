@@ -42,7 +42,15 @@ export type { R2Config } from './comfyrunnerClient.js'
 // Ordered by preference: 24GB VRAM SECURE-tier GPUs first, then fallbacks
 // All GPUs with ≥24 GB VRAM — needed for the full BF16 FLUX model.
 // Ordered roughly by expected speed (fastest/most available first).
-const DEFAULT_GPU_TYPE_IDS = [
+//
+// Every entry MUST be present in ACCEPTED_GPU_TYPE_IDS below (RunPod's current
+// gpuTypeIds enum). RunPod's REST API rejects an unknown gpuTypeId with a 400 on
+// POST rest.runpod.io/v1/pods — a stale/renamed SKU here silently degrades the
+// SECURE tier (both SECURE attempts 400 and the run falls back to COMMUNITY, losing
+// the private/TEE guarantee). `assertGpuTypeIdsAccepted` enforces this at construct
+// time so a future enum drift fails loud and early instead of as a mid-provision 400.
+// (noema-103, 2026-07-14: pruned the A30 SKU — absent from RunPod's accepted enum.)
+export const DEFAULT_GPU_TYPE_IDS = [
   'NVIDIA GeForce RTX 4090',
   'NVIDIA GeForce RTX 3090',
   'NVIDIA GeForce RTX 3090 Ti',
@@ -55,13 +63,86 @@ const DEFAULT_GPU_TYPE_IDS = [
   'NVIDIA RTX 6000 Ada Generation',
   'NVIDIA A100 80GB PCIe',
   'NVIDIA A100-SXM4-80GB',
-  'NVIDIA A30',
   'NVIDIA H100 PCIe',
   'NVIDIA H100 NVL',
   'NVIDIA H100 80GB HBM3',
   'NVIDIA RTX A4500',
   'NVIDIA RTX 4000 Ada Generation',
 ]
+
+// RunPod's accepted `gpuTypeIds` enum, snapshotted verbatim from the staging 400 body
+// (2026-07-31). This is the authoritative allow-list DEFAULT_GPU_TYPE_IDS is validated
+// against at construct time. When RunPod changes its catalogue the construct-time guard
+// throws naming the offending SKU — refresh this snapshot (and prune DEFAULT_GPU_TYPE_IDS
+// to match) rather than suppressing the error.
+export const ACCEPTED_GPU_TYPE_IDS = [
+  'AMD Instinct MI300X OAM',
+  'NVIDIA A100 80GB PCIe',
+  'NVIDIA A100-SXM4-40GB',
+  'NVIDIA A100-SXM4-80GB',
+  'NVIDIA A40',
+  'NVIDIA B200',
+  'NVIDIA B300 SXM6 AC',
+  'NVIDIA B300 SXM6 AC MIG 1g.34gb',
+  'NVIDIA GeForce RTX 3070',
+  'NVIDIA GeForce RTX 3080',
+  'NVIDIA GeForce RTX 3080 Ti',
+  'NVIDIA GeForce RTX 3090',
+  'NVIDIA GeForce RTX 3090 Ti',
+  'NVIDIA GeForce RTX 4070 Ti',
+  'NVIDIA GeForce RTX 4080',
+  'NVIDIA GeForce RTX 4080 SUPER',
+  'NVIDIA GeForce RTX 4090',
+  'NVIDIA GeForce RTX 5080',
+  'NVIDIA GeForce RTX 5090',
+  'NVIDIA H100 80GB HBM3',
+  'NVIDIA H100 NVL',
+  'NVIDIA H100 PCIe',
+  'NVIDIA H200',
+  'NVIDIA H200 NVL',
+  'NVIDIA L4',
+  'NVIDIA L40',
+  'NVIDIA L40S',
+  'NVIDIA RTX 2000 Ada Generation',
+  'NVIDIA RTX 4000 Ada Generation',
+  'NVIDIA RTX 4000 SFF Ada Generation',
+  'NVIDIA RTX 5000 Ada Generation',
+  'NVIDIA RTX 6000 Ada Generation',
+  'NVIDIA RTX A2000',
+  'NVIDIA RTX A4000',
+  'NVIDIA RTX A4500',
+  'NVIDIA RTX A5000',
+  'NVIDIA RTX A6000',
+  'NVIDIA RTX PRO 4000 Blackwell',
+  'NVIDIA RTX PRO 4500 Blackwell',
+  'NVIDIA RTX PRO 5000 Blackwell',
+  'NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition',
+  'NVIDIA RTX PRO 6000 Blackwell Server Edition',
+  'NVIDIA RTX PRO 6000 Blackwell Workstation Edition',
+  'Tesla V100-PCIE-16GB',
+  'Tesla V100-SXM2-16GB',
+]
+
+/**
+ * Construct-time guard (noema-103): assert every id in `ids` is present in RunPod's
+ * accepted `gpuTypeIds` enum (`accepted`, default ACCEPTED_GPU_TYPE_IDS). Throws an Error
+ * naming the specific offending SKU(s) so a RunPod enum drift fails loud and early —
+ * before ever reaching a live provision POST — instead of surfacing as an opaque 400.
+ */
+export function assertGpuTypeIdsAccepted(
+  ids: readonly string[],
+  accepted: readonly string[] = ACCEPTED_GPU_TYPE_IDS,
+): void {
+  const offending = ids.filter(id => !accepted.includes(id))
+  if (offending.length > 0) {
+    throw new Error(
+      `SecurePodClient: DEFAULT_GPU_TYPE_IDS contains GPU type id(s) not in RunPod's ` +
+      `accepted gpuTypeIds enum: ${offending.map(s => `'${s}'`).join(', ')}. RunPod ` +
+      `rejects unknown gpuTypeIds with a 400 on pod provision. Update DEFAULT_GPU_TYPE_IDS ` +
+      `and/or the ACCEPTED_GPU_TYPE_IDS snapshot to match RunPod's current enum.`,
+    )
+  }
+}
 
 export interface SecurePodConfig {
   apiKey: string
@@ -155,7 +236,12 @@ export class SecurePodClient implements RunPodClient, Procurator {
      * read surface the retry loop needs — not a full Actorum dependency.
      */
     private readonly isActumLive?: (actumId: string) => Promise<boolean>,
-  ) {}
+  ) {
+    // Fail loud and early if the hardcoded SECURE-tier GPU preference list has drifted
+    // out of RunPod's accepted gpuTypeIds enum — surfaces the offending SKU here rather
+    // than as an opaque 400 mid-provision (noema-103).
+    assertGpuTypeIdsAccepted(DEFAULT_GPU_TYPE_IDS)
+  }
 
   /**
    * Zombie-retry guard (2026-07-13): re-checks the in-flight actum's liveness before spending

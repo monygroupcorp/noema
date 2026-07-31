@@ -62,9 +62,13 @@ not log private-session content beyond what these controls require.
 
 ## 5. Privacy & confidentiality
 
-- In **private (Full Case)** sessions, traffic is end-to-end encrypted through a tunnel to a
-  TEE-isolated instance; we cannot read session content. We retain only metadata necessary to
-  bill and operate (that a session occurred, its cost, its duration).
+- **Private (Full Case)** sessions route through an encrypted WireGuard tunnel whose keys are
+  generated on your device, terminating at a single-tenant compute instance. This is network
+  isolation, not hardware-sealed private compute: the infrastructure provider hosting the instance can
+  technically access its memory. A hardware-sealed tier that would remove the provider from the
+  trust boundary is **in development and not yet available** — until it ships, do not treat a
+  session as sealed from the compute provider. We retain only metadata necessary to bill and
+  operate (that a session occurred, its cost, its duration).
 - In **bot-mediated (Simple Case)** sessions, we act as your client and necessarily process
   your prompts, outputs, and identity to deliver the Service.
 - For regulated workloads (e.g., healthcare PHI), additional terms apply; contact us for a
