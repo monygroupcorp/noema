@@ -41,8 +41,8 @@ const ROUTES: Route[] = [
     desc: <>Routed to a top provider’s API. <b>Fastest, most capable, cheapest per token</b> — but your words leave our app to that provider. <b>We always name who.</b></> },
   { id: 'remote', name: 'Your remote LLM', vis: 'tee', tag: '↗ to your server', tagKind: 'egress', egress: true,
     desc: <>An endpoint <b>you provision</b>; conversation goes to your infrastructure.</> },
-  { id: 'tee', name: 'TEE · sealed', vis: 'tee', tag: '~40s warm-up', tagKind: 'wait', egress: false,
-    desc: <>Model loads <b>into a sealed enclave</b> — we see nothing but the meter. Takes a moment to warm up.</> },
+  { id: 'tee', name: 'TEE · in development', vis: 'tee', tag: 'in development', tagKind: 'wait', egress: false,
+    desc: <>Hardware-isolated private sessions are <b>in development — not yet available</b>. This route is a placeholder for that tier.</> },
   { id: 'local', name: 'Local', vis: 'local', tag: 'nothing leaves', tagKind: 'safe', egress: false,
     desc: <>llama.cpp on <b>your machine</b>. Private by construction; capability bounded by your hardware.</> },
 ];
@@ -52,9 +52,9 @@ const ROUTES: Route[] = [
 // the picker selection so the honest signals are always shown.
 function provFor(r: Route, modality: string): Prov {
   switch (r.id) {
-    case 'noema':  return { modality, route: 'routed via anthropic api', vis: 'remote', egress: { left: true, to: 'anthropic' } };
+    case 'noema':  return { modality, route: 'routed via openrouter', vis: 'remote', egress: { left: true, to: 'openrouter' } };
     case 'remote': return { modality, route: 'your remote endpoint', vis: 'tee', egress: { left: true, to: 'your server' } };
-    case 'tee':    return { modality, route: 'sealed enclave', vis: 'tee', egress: { left: false, note: 'sealed · we see only the meter' } };
+    case 'tee':    return { modality, route: 'TEE · in development', vis: 'tee', egress: { left: false, note: 'in development — not yet available' } };
     default:       return { modality, route: 'local · llama-ed', vis: 'local', egress: { left: false, note: 'nothing left your machine' } };
   }
 }
@@ -65,10 +65,10 @@ const SEED: Msg[] = [
     <>“In a city that prays in fiber-optic light, an architect grows a cathedral from living circuitry — and it starts to dream back.” Here’s the key frame:
       <div className="gen-media" /></>
   ), prov: [
-    // image was generated locally — dashed (we see nothing), nothing left the machine
-    { modality: 'image', route: 'local · llama-ed', vis: 'local', egress: { left: false, note: 'nothing left your machine' }, canvas: true },
-    // the logline text came from the provider API — lit (we see) AND it left NOEMA
-    { modality: 'text', route: 'routed via anthropic api', vis: 'remote', egress: { left: true, to: 'anthropic' } },
+    // image was generated on a RunPod GPU — lit (we see), and it left NOEMA to the provider
+    { modality: 'image', route: 'generated on runpod', vis: 'remote', egress: { left: true, to: 'runpod' }, canvas: true },
+    // the logline text came from the concierge's provider — lit (we see) AND it left NOEMA
+    { modality: 'text', route: 'routed via openrouter', vis: 'remote', egress: { left: true, to: 'openrouter' } },
   ], isExample: true },
 ];
 

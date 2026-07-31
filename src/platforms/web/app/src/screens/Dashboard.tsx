@@ -12,7 +12,7 @@ import { Ic } from '../lib/icons';
 // recent. The instrument band is the one framed element (.noema-frame, corner ticks earned).
 
 function computeRow(exec: string): { glyph: string; text: string } {
-  if (exec === 'tee') return { glyph: 'ring', text: 'TEE · sealed — your work stays in the enclave' };
+  if (exec === 'tee') return { glyph: 'ring', text: 'TEE · private tunnel — hardware-sealed compute is in development' };
   if (exec === 'local') return { glyph: 'dashed', text: 'local · off-grid — nothing leaves your machine' };
   return { glyph: 'lit', text: 'shared — running on our compute' };
 }
