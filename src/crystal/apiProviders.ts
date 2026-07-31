@@ -83,3 +83,18 @@ export const OPENROUTER_PROVIDER: ApiProvider = {
 
 /** All known provider descriptors. The container registers those whose key is set. */
 export const API_PROVIDERS: ApiProvider[] = [OPENAI_PROVIDER, OPENROUTER_PROVIDER]
+
+/**
+ * The exact chat-token → impetus metering formula: `ceil(tokens × per1k / 1000)`.
+ *
+ * Extracted as a pure function so BOTH the run rail (`ApiCursor.meterChat`, serving
+ * `/chat` and `/runs`) and the concierge per-turn direct-settle path (noema-095) charge
+ * IDENTICALLY off the same arithmetic — a single source of truth for the price of a chat
+ * turn. Never under-charges on the sub-unit remainder (ceil). `per1k` unset / `0n`, or
+ * `tokens <= 0`, → `0n`.
+ */
+export function chatImpetus(tokens: number, per1k: bigint | undefined): bigint {
+  const rate = per1k ?? 0n
+  if (rate === 0n || tokens <= 0) return 0n
+  return (BigInt(tokens) * rate + 999n) / 1000n
+}
