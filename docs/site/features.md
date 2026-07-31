@@ -5,23 +5,23 @@
 
 ## Hero
 
-**Headline:** Every modality. Fully private.
+**Headline:** Every modality. One studio.
 
-**Subhead:** Text, image, video, audio — all through the same privacy-preserving infrastructure. No compromise between capability and confidentiality.
+**Subhead:** Text, image, video, audio — through one API and one concierge. Curated open- and closed-source models, in a workspace built to compose them.
 
 ---
 
 ## Feature sections
 
-### 1. Private Compute
+### 1. Private Compute (in development)
 
-**Headline:** Transit-private compute. We're out of the data path.
+**Headline:** Private compute — in development.
 
-**Body:** A private session tunnels directly from your browser to a single-tenant GPU pod, over WireGuard keys generated on your device. Our servers never receive your prompts, your model choice, or your outputs. We see a session opened, GPU-hours metered, and a session ended. That's it — not because we promise not to look, but because the architecture doesn't give us a path to look.
+**Body:** A private session tunnels directly from your browser to a single-tenant GPU pod, over WireGuard keys generated on your device. Today this is network isolation, not hardware-sealed private compute: the compute provider hosting the pod is inside the trust boundary and can technically access session content. We do not claim otherwise.
 
-A hardware-sealed tier is in development: confidential-compute GPUs whose attestation your browser verifies — a hardware-signed report proving the published, unmodified runner is what's executing, with the tunnel key bound to the enclave — so that neither we nor the compute provider can inspect your session. Until it ships, the compute provider hosting the pod is inside the trust boundary; we are not.
+A hardware-sealed tier is in development: confidential-compute GPUs whose attestation your browser verifies — a hardware-signed report proving the published, unmodified runner is what's executing, with the tunnel key bound to the enclave — so that neither we nor the compute provider could inspect your session. **It is not yet available.** Until it ships, treat every session as visible to the compute provider.
 
-**CTA:** Learn how private sessions work →
+**CTA:** See the private-session roadmap →
 
 ---
 
@@ -29,7 +29,7 @@ A hardware-sealed tier is in development: confidential-compute GPUs whose attest
 
 **Headline:** Every leading model. Zero logging.
 
-**Body:** Access the best open-source and frontier language models — Llama, Qwen, Mistral, and more — through a private session or the standard API. Chat, reason, write, code. With a private session, we don't know what you asked or what the model said.
+**Body:** Access the best open-source and frontier language models — Llama, Qwen, Mistral, and more — through the standard API or your own endpoint. Chat, reason, write, code. We do not retain your prompts or outputs after the request, and we never train on them.
 
 **Supported:** vLLM, llama.cpp runtimes. OpenAI-compatible API.
 
@@ -41,7 +41,7 @@ A hardware-sealed tier is in development: confidential-compute GPUs whose attest
 
 **Headline:** Generate without a record.
 
-**Body:** FLUX Schnell and other leading image models, through the same privacy-preserving infrastructure. Your prompt, your output, your session — architecturally isolated from our servers in a private session.
+**Body:** FLUX Schnell and other leading image models. We don't retain your prompt or output after the request completes, and we never train on them.
 
 **Supported:** FLUX.1 Schnell, SDXL, and others via ComfyUI workflows.
 
@@ -95,22 +95,24 @@ No other AI platform has this. Venice's "crypto = private" angle does the opposi
 
 ### 8. API
 
-**Headline:** One OpenAI-compatible API. Full privacy options.
+**Headline:** One OpenAI-compatible API.
 
-**Body:** Every modality through a single API: text, image, video, audio, embeddings. Swap out your OpenAI base URL and your existing stack works. Add a `x-bursa-token` header for anonymous billing, or use a session key. Private sessions available via `/v1/sessions/tee`.
+**Body:** Every modality through a single API: text, image, video, audio, embeddings. Swap out your OpenAI base URL and your existing stack works. Add a `x-bursa-token` header for anonymous billing, or use a session key. A private-session endpoint (`/v1/sessions/tee`) is in development.
 
 **CTA:** API docs →
 
 ---
 
-## Privacy tier comparison (inline table for features page)
+## Compute tier comparison (inline table for features page)
 
-| | Standard API | Private Session (transit-private) | Hardware-sealed (coming) |
+*The private tiers below are in development and not yet available; "planned" marks the target behavior once they ship.*
+
+| | Standard API | Private session (in development) | Hardware-sealed (in development) |
 |---|---|---|---|
-| Prompts reach our servers | Yes | No | No |
-| We know which model you used | Yes | No | No |
-| Content logged | No | N/A — never received | N/A |
+| Prompt/output content retained | No | No | No |
+| We train on your content | No | No | No |
+| Compute provider can access content | Yes | Yes | Planned: no |
+| Content routed through our servers | Yes | Planned: no | Planned: no |
+| Hardware-verifiable in browser | No | No | Planned: attestation |
 | Credit trail anonymous | Optional (Bursa) | Optional (Bursa) | Optional (Bursa) |
-| Compute provider in trust boundary | Yes | Yes | No — confidential compute |
-| Hardware-verifiable in browser | No | No | Yes — attestation |
 | Web search, memory | Yes | Yes | Yes |

@@ -33,7 +33,7 @@ export interface Ident {
 // ── Static labels & per-axis privacy indicators ───────────────────────────────
 export const FUNDING_LABEL: Record<Funding, string> = { named: 'identified', bearer: 'anonymous' };
 export const EXECUTION_LABEL: Record<Execution, string> = {
-  rented: 'shared compute', tee: 'private tunnel', local: 'your machine',
+  rented: 'shared compute', tee: 'private tunnel (in development)', local: 'your machine',
 };
 // privacy mini-indicator: [lucide icon name, label]
 // IDENTITY_PRIV — "can noema see WHO you are?" (funding).  WORK_PRIV — "…WHAT you make?" (execution).
@@ -43,11 +43,11 @@ export const IDENTITY_PRIV: Record<Funding, [string, string]> = {
 };
 export const WORK_PRIV: Record<Execution, [string, string]> = {
   rented: ['server', 'on our compute'],
-  tee: ['eye-off', 'sealed · meter only'],
+  tee: ['eye-off', 'private tunnel · in development'],
   local: ['laptop', 'on your machine'],
 };
-// short labels for the execution-mode switcher (the exclusive Shared/Sealed/Local toggle)
-export const EXECUTION_SHORT: Record<Execution, string> = { rented: 'Shared', tee: 'Sealed', local: 'Local' };
+// short labels for the execution-mode switcher (the exclusive Shared/Private/Local toggle)
+export const EXECUTION_SHORT: Record<Execution, string> = { rented: 'Shared', tee: 'Private', local: 'Local' };
 export const EXECUTIONS: Execution[] = ['rented', 'tee', 'local'];
 
 export const isPrivateExec = (e: Execution): boolean => e !== 'rented';
@@ -63,7 +63,7 @@ export function canSee(funding: Funding, execution: Execution): { can: string[];
   if (funding === 'named') can.push('identity'); else cant.push('identity');
   if (execution === 'rented') can.push('prompts', 'outputs');
   else cant.push('prompts', 'outputs');
-  if (execution === 'tee') can.push('the meter');       // sealed: we still bill, never read
+  if (execution === 'tee') can.push('the meter');       // private tier is in development
   // local: nothing of the work reaches us at all — not even a meter (no charge)
   return { can, cant };
 }
@@ -88,7 +88,7 @@ export function destFor(ident: Ident, execution: Execution): string {
     return ident.funding === 'named' ? `posting ${who}` : 'posting <b>anonymously</b> — no identity attached';
   }
   const where = execution === 'tee'
-    ? '<b>sealed</b> to your private tunnel — we can’t read this'
+    ? 'in a <b>private tunnel</b> (single-tenant pod) — hardware-sealed compute is in development'
     : 'running <b>on your machine</b> — nothing leaves the device';
   return `${who} — ${where}`;
 }

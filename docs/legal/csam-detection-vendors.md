@@ -40,12 +40,15 @@ are served **behind APIs that return a score, not weights or gradients**. The AP
 the safety mechanism. → **Decision: hosted, score-only API. Never self-host open weights for
 anything CSAM-adjacent.**
 
-**Privacy note (important for our TEE model):** the output classifier only ever sees content
-that is *already headed to a public surface* (the feed/marketplace). Scanning public-bound
-content is not a privacy violation — it's going public anyway. The **private** generation path
-(TEE) is deliberately **not** scanned; the gate fires only at the trust boundary. So using a
-third-party classifier API at the publish boundary is fully compatible with "we don't see your
-private content." The prompt guard runs **locally** (no third party) at generation time.
+**Privacy note:** the output classifier only ever sees content that is *already headed to a
+public surface* (the feed/marketplace). Scanning public-bound content is not a privacy
+violation — it's going public anyway. Generation itself is **not** scanned by the third-party
+classifier; the gate fires only at the publish boundary. So using a third-party classifier API
+at the publish boundary is compatible with our data-minimization posture (we don't retain
+prompt/output content after a request). Note: the hardware-sealed TEE tier that would make
+generation *technically* unseeable by the compute provider is **in development, not yet
+delivered** — do not predicate this note on it. The prompt guard runs **locally** (no third
+party) at generation time.
 
 ---
 

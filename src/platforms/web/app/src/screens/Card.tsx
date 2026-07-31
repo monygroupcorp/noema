@@ -141,14 +141,14 @@ type Compute = 'remote' | 'tee' | 'local';
 
 const COMPUTE_OPTS: { id: Compute; label: string }[] = [
   { id: 'remote', label: 'remote · we see' },
-  { id: 'tee', label: 'TEE · sealed' },
+  { id: 'tee', label: 'TEE · in dev' },
   { id: 'local', label: 'local · off' },
 ];
 
 // Honest subline stating the consequence in words (one per posture).
 const COMPUTE_SUB: Record<Compute, string> = {
   remote: 'est · remote · we see the work',
-  tee: 'premium · enclave · we see nothing',
+  tee: 'private tunnel · in development',
   local: 'your GPU · nothing leaves',
 };
 
@@ -547,7 +547,7 @@ export function Card() {
                     <><div className="ph" /><div className="stage"><span className="dots"><span /><span /><span /></span> {runStatus}{runElapsedLabel}</div></>
                   )}
                   {compute === 'tee' && (
-                    <div className="seal-mark"><Hemisphere vis="tee" /><span>sealed</span></div>
+                    <div className="seal-mark"><Hemisphere vis="tee" /><span>private · in dev</span></div>
                   )}
                   {compute === 'local' && (
                     <div className="seal-mark"><Hemisphere vis="local" /><span>on your machine</span></div>
@@ -557,7 +557,7 @@ export function Card() {
                   <div className="er"><span>run</span><span className="v">{runId ?? '—'}</span></div>
                   <div className="er"><span>status</span><span className="v">{runStatus}{runElapsedLabel}</span></div>
                   {runId && <div className="er"><span>detail</span><span className="v"><Link to={`/run?id=${runId}`}>open run view →</Link></span></div>}
-                  {compute === 'tee' && <div className="er"><span>sealed</span><span className="v" style={{ color: 'var(--slate)' }}>we see nothing but the meter</span></div>}
+                  {compute === 'tee' && <div className="er"><span>private</span><span className="v" style={{ color: 'var(--slate)' }}>hardware-sealed compute is in development</span></div>}
                   {runStream.exitus && Object.entries(runStream.exitus).map(([k, v]) => (
                     <div className="er" key={k}><span>{k}</span><span className="v" style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{String(v)}</span></div>
                   ))}
@@ -603,7 +603,7 @@ export function Card() {
             </div>
             {compute === 'tee' && (
               <Link to="/tee" className="mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 'var(--s2)', fontSize: 'var(--fs-xs)', color: 'var(--accent-soft)' }}>
-                <Ic name="eye-off" /> set up / view sealed session ▸
+                <Ic name="eye-off" /> preview the private-session tier (in development) ▸
               </Link>
             )}
             {activePurse && (

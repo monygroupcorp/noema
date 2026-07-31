@@ -195,7 +195,7 @@ function ComputeDetail({ studios }: { studios: StudioEntry[] | null }) {
   return (
     <>
       <h1>Compute</h1>
-      <div className="sub">Your cost-vs-speed preference, your sealed sessions, and your own machine.</div>
+      <div className="sub">Your cost-vs-speed preference, private-tunnel sessions, and your own machine.</div>
 
       <div className="ac-panel">
         <div className="ac-panel-l">availability · cost vs speed for remote runs</div>
