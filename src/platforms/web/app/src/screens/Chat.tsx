@@ -177,6 +177,9 @@ export function Chat() {
             </div>
           </div>
         ))}
+        {sending && (
+          <div className="stage"><span className="dots"><span /><span /><span /></span> noema is thinking…</div>
+        )}
       </div></div>
       <div className="composer">
         <div className="box">
@@ -185,7 +188,7 @@ export function Chat() {
             onInput={(e) => { const t = e.currentTarget; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 160) + 'px'; }}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
           />
-          <button className="send" onClick={send}><Ic name="arrow-up" /></button>
+          <button className="send" disabled={sending} onClick={send}><Ic name="arrow-up" /></button>
         </div>
         <div className="hint">
           {/* Route picker — replaces the old destination indicator. Mirrors the
