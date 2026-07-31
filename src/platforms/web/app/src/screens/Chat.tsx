@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { isExampleCleared, clearExample } from '../lib/chatExample';
+import { api, newTurnKey, type ConciergeProposal } from '../lib/api';
+import { ProposalCard } from '../components/ProposalCard';
 
 // ── Two honest signals (see identity/noema/chat-spec.md) ──────────────────────
 // hemisphere = what NOEMA can SEE (lit remote · ring TEE/your-server · dashed local)
@@ -13,6 +15,7 @@ type Vis = 'remote' | 'tee' | 'local';
 type Egress = { left: true; to: string } | { left: false; note: string };
 interface Prov { modality: string; route: string; vis: Vis; egress: Egress; canvas?: boolean }
 interface Msg { who: 'concierge' | 'you'; body: ReactNode; prov?: Prov[]; isExample?: boolean }
+
 
 // The hemisphere glyph — shared grammar with Canvas/Funding/Card:
 // remote = lit (filled half-disc + ring, accent); tee = ring only (slate);
@@ -93,6 +96,13 @@ export function Chat() {
   const navigate = useNavigate();
   const sel = ROUTES.find((r) => r.id === route)!;
 
+  // The concierge thread (noema-095) — lazily created on the first send() in this
+  // screen instance. `critiqueOf` is set by a ProposalCard's "adjust" affordance
+  // (Decision record Q3) and consumed by the NEXT send() as `priorRunId`, then cleared.
+  const [colloquiumId, setColloquiumId] = useState<string | undefined>();
+  const [sending, setSending] = useState(false);
+  const [critiqueOf, setCritiqueOf] = useState<string | undefined>();
+
   function toCanvas(_p: Prov) {
     // TODO(canvas-handoff): seed a canvas node from this generation (modality +
     // this turn's output) once a node-creation entry is callable from chat. No
@@ -105,22 +115,50 @@ export function Chat() {
     setMsgs((prev) => prev.filter((m) => !m.isExample));
   }
 
-  function send() {
+  // ProposalCard's inline "adjust" affordance (Q3/Step 6): pre-focus the composer
+  // and tag the next send() as a critique turn referencing this proposal's run.
+  function adjust(priorRunId: string | undefined) {
+    setCritiqueOf(priorRunId);
+    taRef.current?.focus();
+  }
+
+  async function send() {
     const v = taRef.current?.value.trim();
-    if (!v) return;
+    if (!v || sending) return;
     setMsgs((m) => {
       const hadExample = m.some((x) => x.isExample);
       const base = hadExample ? m.filter((x) => !x.isExample) : m;
       if (hadExample) clearExample();
-      return [
-        ...base,
-        { who: 'you', body: v },
-        { who: 'concierge',
-          body: <>Reading that as <span className="verb">make</span> — quoting… <span className="dots"><span /><span /><span /></span></>,
-          prov: [provFor(sel, 'text')] },
-      ];
+      return [...base, { who: 'you', body: v }];
     });
     if (taRef.current) { taRef.current.value = ''; taRef.current.style.height = 'auto'; }
+    const priorRunId = critiqueOf;
+    setCritiqueOf(undefined);
+
+    setSending(true);
+    try {
+      let cid = colloquiumId;
+      if (!cid) {
+        const { colloquium } = await api.createColloquium();
+        cid = colloquium.id;
+        setColloquiumId(cid);
+      }
+      const { result } = await api.postDictum(cid, {
+        turnKey: newTurnKey(),
+        message: v,
+        ...(priorRunId ? { priorRunId } : {}),
+      });
+      setMsgs((m) => [
+        ...m,
+        result.kind === 'proposal'
+          ? { who: 'concierge', body: <ProposalCard proposal={result as ConciergeProposal} onAdjust={adjust} /> }
+          : { who: 'concierge', body: result.text, prov: [provFor(sel, 'text')] },
+      ]);
+    } catch (e) {
+      setMsgs((m) => [...m, { who: 'concierge', body: e instanceof Error ? e.message : String(e) }]);
+    } finally {
+      setSending(false);
+    }
   }
 
   return (

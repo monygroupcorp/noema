@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Ic } from '../lib/icons';
 import { useAssistTarget, usePromptAssist } from '../state/promptAssist';
 import { buildPrompt } from '../lib/promptExamples';
+import { api, newTurnKey, type ConciergeResult } from '../lib/api';
+import { ProposalCard } from '../components/ProposalCard';
 
 // Chat collapses into this on every screen except full chat (utilitarian co-pilot).
 // When a form's prompt field is focused it slides open with tailored augmentation:
@@ -13,6 +15,17 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
   const [brief, setBrief] = useState('');
   const [draft, setDraft] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Idle-branch colloquia wiring (noema-099, Step 7): the same client methods and
+  // local-state-plus-handler shape as `brief`/`setBrief`/`gen()` above, mirrored
+  // for the compact idle panel. Per Decision record Q4, identity is unchanged
+  // (authHeaders()/getActivePurse() inside api.createColloquium/postDictum).
+  const idleRef = useRef<HTMLInputElement>(null);
+  const [idleMsg, setIdleMsg] = useState('');
+  const [idleSending, setIdleSending] = useState(false);
+  const [idleColloquiumId, setIdleColloquiumId] = useState<string | undefined>();
+  const [idleResult, setIdleResult] = useState<ConciergeResult | null>(null);
+  const [idleCritiqueOf, setIdleCritiqueOf] = useState<string | undefined>();
 
   // A fresh target (new object on each field focus) slides the panel open and resets.
   // On mobile (<=760px) the panel must not auto-open — it collides with the OS keyboard —
@@ -32,6 +45,40 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
   }
   function copy(text: string) {
     navigator.clipboard?.writeText(text).then(() => setCopied(true)).catch(() => {});
+  }
+
+  // The idle branch's round trip through the real colloquia endpoint (Step 7).
+  async function idleSend() {
+    const v = idleMsg.trim();
+    if (!v || idleSending) return;
+    const priorRunId = idleCritiqueOf;
+    setIdleCritiqueOf(undefined);
+    setIdleSending(true);
+    try {
+      let cid = idleColloquiumId;
+      if (!cid) {
+        const { colloquium } = await api.createColloquium();
+        cid = colloquium.id;
+        setIdleColloquiumId(cid);
+      }
+      const { result } = await api.postDictum(cid, {
+        turnKey: newTurnKey(),
+        message: v,
+        ...(priorRunId ? { priorRunId } : {}),
+      });
+      setIdleResult(result);
+      setIdleMsg('');
+    } catch (e) {
+      setIdleResult({ kind: 'reply', text: e instanceof Error ? e.message : String(e), tokenUsage: { totalTokens: 0 } });
+    } finally {
+      setIdleSending(false);
+    }
+  }
+  // ProposalCard's "adjust" affordance: pre-focus this panel's input and tag the
+  // next idleSend() as a critique turn referencing the proposal's run (Q3/Step 6).
+  function idleAdjust(priorRunId: string | undefined) {
+    setIdleCritiqueOf(priorRunId);
+    idleRef.current?.focus();
   }
 
   return (
@@ -76,9 +123,22 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
         ) : (
           <>
             <div className="cbody">Tell me what to make or change. I’ll pick the tool and run it.</div>
+
+            {idleResult && (
+              idleResult.kind === 'proposal'
+                ? <ProposalCard proposal={idleResult} onAdjust={idleAdjust} />
+                : <div className="ex"><div className="extext">{idleResult.text}</div></div>
+            )}
+
             <div className="cinput">
-              <input placeholder="make · adjust · explain…" />
-              <button><Ic name="arrow-up" /></button>
+              <input
+                ref={idleRef}
+                value={idleMsg}
+                placeholder="make · adjust · explain…"
+                onChange={(e) => setIdleMsg(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void idleSend(); }}
+              />
+              <button disabled={idleSending} onClick={() => void idleSend()}><Ic name="arrow-up" /></button>
             </div>
           </>
         )}
