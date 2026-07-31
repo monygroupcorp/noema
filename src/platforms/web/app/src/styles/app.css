@@ -999,7 +999,7 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 /* ── training run monitor (train-run-spec.md) ──────────────────────────────── */
 .tr-status{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:12px;color:var(--text);border:1px solid var(--hair);border-radius:999px;padding:6px 13px;background:var(--panel)}
 .tr-progress{height:3px;border-radius:2px;background:var(--hair);overflow:hidden;margin:6px 0 22px}
-.tr-progress span{display:block;height:100%;background:var(--accent);transition:width .5s var(--ease)}
+.tr-progress span{display:block;height:100%;width:100%;background:var(--accent);transform-origin:left;transition:transform .5s var(--ease)}
 .tr-watch-l{display:block;margin-bottom:14px} .tr-prompt{color:var(--muted);text-transform:none;letter-spacing:0;margin-left:8px}
 .tr-strip{display:flex;align-items:stretch;gap:0;margin-bottom:14px}
 .tr-cp-wrap{display:flex;align-items:center;flex:1;min-width:0}
@@ -1177,7 +1177,7 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .cj-run{border:1px solid color-mix(in srgb,var(--accent) 30%,var(--hair));border-radius:10px;background:var(--accent-bg);padding:16px 20px;display:flex;align-items:center;gap:18px;margin-bottom:14px}
 .cj-count{font-size:14px;color:var(--muted);white-space:nowrap} .cj-count b{font-size:20px;color:var(--text);font-weight:600}
 .cj-bar{flex:1;height:4px;border-radius:3px;background:color-mix(in srgb,var(--accent) 20%,var(--hair));overflow:hidden}
-.cj-bar span{display:block;height:100%;background:var(--accent);transition:width .4s var(--ease)}
+.cj-bar span{display:block;height:100%;width:100%;background:var(--accent);transform-origin:left;transition:transform .4s var(--ease)}
 .cj-flight{font-size:12px;color:var(--accent-soft);white-space:nowrap}
 .cj-seam{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--faint);margin-bottom:18px}
 .cj-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}

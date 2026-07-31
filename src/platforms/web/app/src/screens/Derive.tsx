@@ -48,7 +48,7 @@ export function Derive() {
     <AppShell title={crumb}>
       <div className="page"><div className="pw wide">
         <div className="pagehead">
-          <div><div className="noema-kicker" style={{ marginBottom: 8 }}>derive a training · from {d.name.toLowerCase()}</div><h1 className="dv-name">{d.name} · LoRA v1<span className="cj-cursor" /></h1></div>
+          <div><div className="noema-kicker" style={{ marginBottom: 8 }}>derive a training · from {d.name.toLowerCase()}</div><h1 className="dv-name">{d.name} · LoRA v1</h1></div>
         </div>
 
         {/* source */}
