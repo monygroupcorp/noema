@@ -2,6 +2,7 @@ import { type ReactNode } from 'react';
 import { Rail } from './Rail';
 import { Account } from './Account';
 import { Concierge } from './Concierge';
+import { ReportModal } from './ReportModal';
 
 // The persistent frame (dashboard-spec.md §A): left rail (global nav) + a top bar carrying
 // the current surface TITLE (left) and the always-on POSTURE CLUSTER (right). Screens compose
@@ -28,6 +29,7 @@ export function AppShell({
       </section>
       {context && <aside className="context">{context}</aside>}
       {concierge && <Concierge hasContext={!!context} />}
+      <ReportModal />
     </div>
   );
 }
