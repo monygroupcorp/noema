@@ -11,21 +11,21 @@ export function SiteFooter() {
           <div className="tag">Make anything. We never have to see it. Open-source, privacy-by-construction generative media.</div>
         </div>
         <div className="col">
-          <h4>Product</h4>
+          <h3>Product</h3>
           <Link to="/features">Features</Link>
           <Link to="/pricing">Pricing</Link>
           <Link to="/catalog">Catalog</Link>
           <Link to={entryPath()}>Open app</Link>
         </div>
         <div className="col">
-          <h4>Company</h4>
+          <h3>Company</h3>
           <Link to="/about">About</Link>
           <Link to="/ceremony">Ceremony</Link>
           <Link to="/blog">Blog</Link>
           <a href="#">Source · VPL</a>
         </div>
         <div className="col">
-          <h4>Legal</h4>
+          <h3>Legal</h3>
           <Link to="/legal/privacy">Privacy</Link>
           <Link to="/legal/cookies">Cookies</Link>
           <Link to="/legal/terms">Terms</Link>
