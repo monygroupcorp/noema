@@ -468,10 +468,21 @@ export async function runConcierge(
       // then answer EVERY tool_call_id — including a parse failure, which becomes a
       // tool-role error message so the model can retry within the bound (DOCTRINE §2:
       // never silently guess unparseable arguments, never let a parse error throw the loop).
+      // The client's `result.toolCalls` is the FRIENDLY parsed shape
+      // ({id, name, arguments} — OpenRouterToolClient.ts) it hands back for the
+      // agent's convenience. The next request's assistant message must instead
+      // carry the OpenAI/OpenRouter WIRE shape ({id, type: 'function', function:
+      // {name, arguments}}) — the same shape `tools[]` already sends on the
+      // request. Echoing the friendly shape back verbatim is what 400s every
+      // real turn (`messages[].tool_calls[].type` missing); convert here.
       messages.push({
         role: 'assistant',
         content: result.content ?? '',
-        tool_calls: result.toolCalls,
+        tool_calls: result.toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function' as const,
+          function: { name: tc.name, arguments: tc.arguments },
+        })) as unknown as OpenRouterChatMessage['tool_calls'],
       })
       for (const tc of result.toolCalls) {
         let parsedArgs: Record<string, unknown>
