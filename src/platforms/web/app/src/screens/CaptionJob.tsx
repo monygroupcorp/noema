@@ -70,7 +70,7 @@ export function CaptionJob() {
           <span className="cj-seg"><span className="cj-l">method</span> <b>Natural language</b> · Florence-2</span>
           <span className="cj-seg"><span className="cj-l">trigger</span> <b className="accent">{trigger}</b></span>
           <span className="cj-seg"><span className="cj-l">length</span> <b>medium</b></span>
-          <span className="cj-seg"><span className="cj-l">runs in</span> <span className={`hemi2 ${custodyGlyph(d.custody)}`} /> <b>{d.custody === 'sealed' ? 'TEE · sealed' : d.custody}</b></span>
+          <span className="cj-seg"><span className="cj-l">runs in</span> <span className={`hemi2 ${custodyGlyph(d.custody)}`} /> <b>{d.custody === 'sealed' ? 'TEE · in dev' : d.custody}</b></span>
           <button className="lnk cj-adjust">adjust setup ▸</button>
         </div>
 
@@ -82,7 +82,7 @@ export function CaptionJob() {
         </div>
 
         {/* honesty seam */}
-        <div className="cj-seam mono"><span className={`hemi2 ${custodyGlyph(d.custody)}`} /> captioning in TEE — the model reads your images inside the enclave; nothing leaves, we never see them.</div>
+        <div className="cj-seam mono"><span className={`hemi2 ${custodyGlyph(d.custody)}`} /> captioning runs in a private tunnel to a single-tenant pod — hardware-sealed compute is in development.</div>
 
         {/* grid: run + review in one */}
         <div className="cj-grid">

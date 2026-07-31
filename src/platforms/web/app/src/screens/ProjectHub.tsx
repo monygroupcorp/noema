@@ -186,7 +186,7 @@ export function ProjectHub() {
               <div className="ph-activity">
                 <div className="ph-l">activity</div>
                 <div className="ph-ev"><span className="av" style={{ background: p.color }} /><span className="ev-t"><b>you</b> started a chat <span className="mono ev-meta"><span className="hemi2 lit" /> shared · {p.updated}</span></span></div>
-                {p.shared ? <div className="ph-ev"><span className="av" /><span className="ev-t"><b>a teammate</b> added work <span className="mono ev-meta"><span className="hemi2 ring" /> sealed · 1d</span></span></div> : null}
+                {p.shared ? <div className="ph-ev"><span className="av" /><span className="ev-t"><b>a teammate</b> added work <span className="mono ev-meta"><span className="hemi2 ring" /> private · 1d</span></span></div> : null}
               </div>
             </div>
 

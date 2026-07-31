@@ -110,7 +110,7 @@ export function Catalog() {
             <div className="corpus-meta">
               {err
                 ? 'couldn’t reach the live catalog — the staging cluster may be unreachable from here'
-                : 'every weight open-source · run remote, sealed, or local · nothing proprietary, nothing locked'}
+                : 'every weight open-source · run remote or local · nothing proprietary, nothing locked'}
             </div>
           </div>
 
