@@ -1,0 +1,507 @@
+// =============================================================================
+// ConciergeAgent — the bounded, read-only tool-use "brain"
+// =============================================================================
+//
+// Given a user message + conversation history + the caller's context (spicyMode,
+// generatio, bindings, an optional prior run for the critique/adjusted case), this
+// module runs a BOUNDED (<= maxToolIterations) LLM tool-use loop over EXACTLY the
+// four READ-ONLY discovery handlers (`list_flows`, `describe_flow`,
+// `search_models`/`list_models`, `quote`) and emits a discriminated result:
+//   - `{ kind: 'proposal', ... }` — a chosen flow + filled/embellished aditus +
+//     chosen loras/pinnedModels + an authoritative quote; the critique/ADJUSTED
+//     case is the SAME `proposal` kind, distinguished only by an optional
+//     `priorRunId` + `delta` note (NOT a third kind), OR
+//   - `{ kind: 'reply', text }` — a plain conversational reply (also the loop's
+//     non-convergence fallback when the iteration cap is hit).
+//
+// It is a pure-logic, dependency-injected LEAF: it receives `runToolChat`
+// (noema-093 / OpenRouterToolClient) + its transport deps, a `CrystalApi`
+// instance, and the caller's context. It has NO runtime caller yet — the HTTP
+// `/dicta` endpoint, per-turn metering, and persistence are noema-095 (money-code)
+// and out of scope here.
+//
+// HARD INVARIANTS (the entire risk surface of this module):
+//   (a) It NEVER exposes a spend handler to the LLM and never calls a spend method
+//       — the tool surface is the four read-only handlers only; `run_flow`,
+//       `provision_studio`, and `collect` are never registered, and this module
+//       never calls `invokeFlow`/`runFlow`/`provisionStudio`/`collect`/`createRun`.
+//       (Mechanically enforced by the item's `verify` grep.) It proposes; the user
+//       confirms (GO) separately, elsewhere.
+//   (b) It NEVER double-applies `generatio.style`: `CrystalApi.applyAccountDefaults`
+//       already prepends `style` as `` `${style}, ${prompt}` `` on the dispatch
+//       path, so `embellishedPrompt` here is the user's CORE prompt enriched only —
+//       the style is never prepended here.
+//   (c) It NEVER runs the loop unbounded: `maxToolIterations` is a finite,
+//       non-optional cap; hitting it terminates with a `reply`, never a spin.
+// =============================================================================
+
+import type {
+  OpenRouterToolClientDeps,
+  OpenRouterToolChatOpts,
+  OpenRouterChatResult,
+  OpenRouterChatMessage,
+  OpenRouterToolSpec,
+} from './OpenRouterToolClient.js'
+import type { CrystalApi } from './CrystalApi.js'
+import type { Run } from './types.js'
+import type { AuctorKey } from '../../flow/types.js'
+import type { Generatio } from '../../types/consuetudo.js'
+import type { IntelligensGenus } from '../../types/intelligendi.js'
+import { listFlowsTool, describeFlowTool, quoteTool, type McpResult } from './mcp/tools.js'
+
+// ---------------------------------------------------------------------------
+// Loop bound (invariant (c)) — finite and non-optional. Six full round-trips is
+// enough for a discover -> describe -> narrow-models -> quote -> propose arc with
+// slack for one retry; the cap is the safety net, not the expected path.
+// ---------------------------------------------------------------------------
+export const maxToolIterations = 6
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+/** Summed per-turn token usage across every `runToolChat` call in the loop. This is
+ *  the exact number noema-095's per-turn metering debits. `promptTokens`/
+ *  `completionTokens` are present only if at least one call reported them. */
+export interface ConciergeTokenUsage {
+  totalTokens: number
+  promptTokens?: number
+  completionTokens?: number
+}
+
+/** The `quote` shape mirrors `CrystalApi.quote` exactly (read-only price estimate). */
+export type ConciergeQuote = Awaited<ReturnType<CrystalApi['quote']>>
+
+export interface ConciergeProposal {
+  kind: 'proposal'
+  /** Explicit flow id, when the agent chose one directly (grounded in `list_flows`). */
+  modusId?: string
+  /** ...or the resolved verb, when routing by the caller's bindings. One of the two is set. */
+  verb?: string
+  /** The filled inputs for the chosen flow (post-embellishment; NOT style-prepended). */
+  aditus: Record<string, unknown>
+  /** Chosen loras / models (intellaId or slug), grounded in `search_models`. */
+  pinnedModels: string[]
+  /** Authoritative read-only price estimate for THIS proposal's modusId/verb + aditus. */
+  quote: ConciergeQuote
+  /** The user's CORE prompt enriched with trigger words / detail — style is NOT prepended
+   *  here (see invariant (b)). Visible/editable (Fooocus-style transparency), never a silent
+   *  DALL-E rewrite. */
+  embellishedPrompt: string
+  /** Short human-readable justification of the routing/model/embellishment choices. */
+  rationale: string
+  tokenUsage: ConciergeTokenUsage
+  /** Set ONLY on the critique/ADJUSTED case: the prior run being adjusted (from ctx). */
+  priorRunId?: string
+  /** Set ONLY on the critique/ADJUSTED case: what changed vs the prior run. */
+  delta?: string
+}
+
+export interface ConciergeReply {
+  kind: 'reply'
+  text: string
+  tokenUsage: ConciergeTokenUsage
+}
+
+export type ConciergeResult = ConciergeProposal | ConciergeReply
+
+/** The caller's context for one turn. `spicyMode` is the adult-content gate the model
+ *  catalog respects (Q2 seam). `generatio` is informational (style is NOT applied here).
+ *  `priorRun` is set only for the critique/adjusted case (owner-scoped, from
+ *  `CrystalApi.getRun` -> `toRunDetail`); the agent reasons over its inputs. */
+export interface ConciergeContext {
+  auctor: AuctorKey
+  spicyMode: boolean
+  generatio?: Generatio
+  /** Owner's verb -> modusId bindings, informational grounding for the model. */
+  bindings?: Record<string, string>
+  /** Prior turns (already in OpenRouter wire shape); prepended after the system prompt. */
+  history?: OpenRouterChatMessage[]
+  /** The prior run being critiqued/adjusted, if any. */
+  priorRun?: Run
+}
+
+/** Injected dependencies. `runToolChat` + `toolClient` are the noema-093 seam; `api`
+ *  is the read-only handler backend; `model` overrides the OpenRouter default. */
+export interface ConciergeDeps {
+  runToolChat: (
+    deps: OpenRouterToolClientDeps,
+    opts: OpenRouterToolChatOpts,
+  ) => Promise<OpenRouterChatResult>
+  toolClient: OpenRouterToolClientDeps
+  api: CrystalApi
+  model?: string
+}
+
+// ---------------------------------------------------------------------------
+// Tool surface (invariant (a)) — EXACTLY the four read-only discovery handlers,
+// wrapped as OpenRouterToolSpec[]. `run_flow`/`provision_studio`/`collect` (and any
+// other spend method) are DELIBERATELY absent; adding one here would breach the
+// item's `verify` grep and the propose-never-spend house rule.
+// ---------------------------------------------------------------------------
+const TOOL_SPECS: OpenRouterToolSpec[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'list_flows',
+      description:
+        'List the runnable flow catalog (id, name, version, verb-genus, step count). Call this to ' +
+        'ground any flow choice in a REAL id — never invent a flow id.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'describe_flow',
+      description:
+        "Describe one flow's JSON-Schema inputs/outputs (so you can fill its aditus correctly). " +
+        'Pass the flow id from list_flows.',
+      parameters: {
+        type: 'object',
+        properties: { id: { type: 'string', description: 'flow id from list_flows' } },
+        required: ['id'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      // Exposed under one name; the executor also accepts `list_models` as an alias.
+      name: 'search_models',
+      description:
+        'Search the model/LoRA catalog (filter by genus, base family, fundamentum, trigger word, or free ' +
+        'text). Use this to pick loras/pinnedModels and to read their trigger words before weaving them ' +
+        'into the core prompt. The adult-content gate is applied server-side per the turn spicyMode.',
+      parameters: {
+        type: 'object',
+        properties: {
+          genus: { type: 'string', description: 'model kind, e.g. lora / checkpoint' },
+          basis: { type: 'string', description: 'base model family (compat), e.g. sd15 / flux' },
+          fundamentumId: { type: 'string' },
+          trigger: { type: 'string', description: 'exact trigger word to match' },
+          q: { type: 'string', description: 'free-text search over name/description/tags' },
+          limit: { type: 'integer' },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quote',
+      description:
+        'Read-only upper-bound price estimate (impetus) for a flow + aditus. Side-effect-free; this ' +
+        'NEVER spends. Use it to show the user a cost before they confirm.',
+      parameters: {
+        type: 'object',
+        properties: {
+          modusId: { type: 'string' },
+          verb: { type: 'string' },
+          aditus: { type: 'object', additionalProperties: true },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+]
+
+// ---------------------------------------------------------------------------
+// System prompt (Q3 first draft — the exact text is the operator-reserved PR-review
+// carve-out, DOCTRINE §4). Encodes the house rules; refine at PR.
+//
+// PRELOAD-vs-DISCOVER posture (flagged for PR review): this draft does NOT preload
+// the flow catalog into the prompt — it instructs the model to DISCOVER via
+// `list_flows` in-loop. Rationale: the catalog is small-to-moderate and changes over
+// time; keeping discovery in-loop avoids a stale/oversized system prompt and forces
+// every flow choice to be grounded in a live tool call (no invented ids). If turn
+// latency proves to matter more than freshness, the reviewer may flip this to a
+// preloaded catalog block appended below.
+// ---------------------------------------------------------------------------
+export function buildSystemPrompt(ctx: ConciergeContext): string {
+  const spicy = ctx.spicyMode
+    ? 'Spicy mode is ON for this caller (adult models/content are permitted where the catalog allows).'
+    : 'Spicy mode is OFF: keep to safe-for-work models and content.'
+  const style = ctx.generatio?.style
+    ? `The caller has a saved default style ("${ctx.generatio.style}"). Do NOT prepend it to the prompt — ` +
+      'the run pipeline applies it automatically. Embellish the CORE prompt only.'
+    : 'Embellish the CORE prompt only; never prepend a saved style — the run pipeline applies that.'
+  const bindings = ctx.bindings && Object.keys(ctx.bindings).length > 0
+    ? `The caller has these verb->flow bindings you may route through: ${JSON.stringify(ctx.bindings)}.`
+    : 'The caller has no custom verb bindings; route by an explicit flow id from list_flows.'
+  const prior = ctx.priorRun
+    ? `This is a CRITIQUE/ADJUSTMENT of prior run ${ctx.priorRun.id}. Its stored inputs were ` +
+      `${JSON.stringify(ctx.priorRun.aditus ?? {})}` +
+      (ctx.priorRun.pinnedModels ? ` with pinnedModels ${JSON.stringify(ctx.priorRun.pinnedModels)}` : '') +
+      '. Reason over them and propose an ADJUSTED result, describing what changed in the "delta" field.'
+    : ''
+
+  return [
+    'You are the concierge for an image/video generation studio. Your job for each turn is to either:',
+    '  (1) route the user to ONE typed flow, fill/embellish its inputs, and pick loras/models — emitting a',
+    '      structured PROPOSAL, or',
+    '  (2) answer conversationally with a plain REPLY when no generation is being requested yet.',
+    '',
+    'HOUSE RULES:',
+    '- You PROPOSE, you never SPEND. You have read-only discovery tools only (list_flows, describe_flow,',
+    '  search_models, quote). There is NO run/collect/provision tool and you must never claim to have run',
+    '  anything — the user confirms (GO) separately, elsewhere.',
+    '- Ground EVERY flow and model choice in a tool call. Never invent a flow id or a model id/trigger word;',
+    '  read them from list_flows / describe_flow / search_models first.',
+    '- Embellishment is VISIBLE and EDITABLE (Fooocus-style transparency), never a silent DALL-E-style rewrite.',
+    '  Put your enriched prompt in "embellishedPrompt" so the user can see and edit exactly what changed.',
+    `- ${style}`,
+    '- When you choose a lora/model, weave its trigger word(s) (from search_models) into embellishedPrompt so',
+    '  it actually activates.',
+    `- ${spicy}`,
+    `- ${bindings}`,
+    prior,
+    '',
+    'OUTPUT CONTRACT — your FINAL message (the one with no tool calls) MUST be a single JSON object, no prose',
+    'around it, one of:',
+    '  {"kind":"proposal","modusId":"<flow id>"|null,"verb":"<verb>"|null,"aditus":{...filled inputs...},',
+    '   "pinnedModels":["<intellaId or slug>",...],"embellishedPrompt":"<core prompt enriched, NO style prefix>",',
+    '   "rationale":"<why this flow/models/embellishment>","delta":"<what changed vs prior run, only when adjusting>"}',
+    '  {"kind":"reply","text":"<plain conversational answer>"}',
+    'Set exactly one of modusId / verb on a proposal. Do NOT include a "quote" field — the system computes the',
+    'authoritative quote for your chosen flow + aditus and attaches it. Do NOT include a "priorRunId" field —',
+    'the system sets it from context on the adjust case.',
+  ].filter((l) => l !== '').join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Tool execution — dispatch a named tool call to its read-only handler.
+// The `search_models`/`list_models` executor implements the Q2 spicy seam: it calls
+// `api.listModels({ ...args, includeAdult: ctx.spicyMode })` DIRECTLY, bypassing
+// `listModelsTool`'s wrapper (whose arg type omits `includeAdult`). We do not widen
+// the wrapper; the direct call is the chosen seam.
+// ---------------------------------------------------------------------------
+function textOf(r: McpResult): string {
+  const body = r.content.map((c) => c.text).join('\n')
+  return r.isError ? `ERROR ${body}` : body
+}
+
+async function executeTool(
+  name: string,
+  args: Record<string, unknown>,
+  deps: ConciergeDeps,
+  ctx: ConciergeContext,
+): Promise<string> {
+  switch (name) {
+    case 'list_flows':
+      return textOf(await listFlowsTool(deps.api))
+    case 'describe_flow':
+      return textOf(await describeFlowTool(deps.api, { id: String(args.id ?? '') }))
+    case 'search_models':
+    case 'list_models': {
+      const models = await deps.api.listModels({
+        genus: args.genus as IntelligensGenus | undefined,
+        basis: args.basis as string | undefined,
+        fundamentumId: args.fundamentumId as string | undefined,
+        trigger: args.trigger as string | undefined,
+        q: args.q as string | undefined,
+        limit: args.limit as number | undefined,
+        includeAdult: ctx.spicyMode, // Q2 seam
+      })
+      return JSON.stringify({ models }, null, 2)
+    }
+    case 'quote':
+      return textOf(
+        await quoteTool(deps.api, ctx.auctor, {
+          modusId: args.modusId as string | undefined,
+          verb: args.verb as string | undefined,
+          aditus: args.aditus as Record<string, unknown> | undefined,
+        }),
+      )
+    default:
+      return `ERROR unknown.tool: ${name} is not an available tool`
+  }
+}
+
+// ---------------------------------------------------------------------------
+// tokenUsage accumulation (sum across every runToolChat call this turn).
+// ---------------------------------------------------------------------------
+interface UsageAcc {
+  totalTokens: number
+  promptTokens: number
+  completionTokens: number
+  hasPrompt: boolean
+  hasCompletion: boolean
+}
+
+function accumulate(acc: UsageAcc, u: OpenRouterChatResult['tokenUsage']): void {
+  acc.totalTokens += u.totalTokens
+  if (u.promptTokens !== undefined) {
+    acc.promptTokens += u.promptTokens
+    acc.hasPrompt = true
+  }
+  if (u.completionTokens !== undefined) {
+    acc.completionTokens += u.completionTokens
+    acc.hasCompletion = true
+  }
+}
+
+function finalizeUsage(acc: UsageAcc): ConciergeTokenUsage {
+  return {
+    totalTokens: acc.totalTokens,
+    ...(acc.hasPrompt ? { promptTokens: acc.promptTokens } : {}),
+    ...(acc.hasCompletion ? { completionTokens: acc.completionTokens } : {}),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Parse the model's final message into a result. Tolerant of a ```json fence.
+// ---------------------------------------------------------------------------
+function stripFence(s: string): string {
+  const t = s.trim()
+  const fenced = t.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/)
+  return (fenced ? fenced[1] : t).trim()
+}
+
+async function finalize(
+  content: string,
+  usage: UsageAcc,
+  deps: ConciergeDeps,
+  ctx: ConciergeContext,
+): Promise<ConciergeResult> {
+  const tokenUsage = finalizeUsage(usage)
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stripFence(content))
+  } catch {
+    // Not JSON — treat as a plain conversational reply.
+    return { kind: 'reply', text: content, tokenUsage }
+  }
+
+  if (typeof parsed !== 'object' || parsed === null) {
+    return { kind: 'reply', text: content, tokenUsage }
+  }
+  const obj = parsed as Record<string, unknown>
+
+  if (obj.kind === 'proposal') {
+    const modusId = typeof obj.modusId === 'string' ? obj.modusId : undefined
+    const verb = typeof obj.verb === 'string' ? obj.verb : undefined
+    const aditus =
+      typeof obj.aditus === 'object' && obj.aditus !== null
+        ? (obj.aditus as Record<string, unknown>)
+        : {}
+    // A proposal with no target can't be priced or run — degrade to a reply rather
+    // than emitting an unpriceable proposal.
+    if (!modusId && !verb) {
+      const text = typeof obj.rationale === 'string' ? obj.rationale : content
+      return { kind: 'reply', text, tokenUsage }
+    }
+    // Authoritative quote for the FINAL chosen target + aditus (read-only; direct
+    // api.quote call, mirroring the Q2 direct-seam philosophy). If pricing fails, we
+    // cannot honestly present a proposal — fall back to a reply.
+    let quote: ConciergeQuote
+    try {
+      quote = await deps.api.quote(ctx.auctor, { modusId, verb }, aditus)
+    } catch (e) {
+      return {
+        kind: 'reply',
+        text: `I found a flow for that but couldn't price it: ${String(e)}`,
+        tokenUsage,
+      }
+    }
+    const pinnedModels = Array.isArray(obj.pinnedModels)
+      ? obj.pinnedModels.filter((m): m is string => typeof m === 'string')
+      : []
+    return {
+      kind: 'proposal',
+      ...(modusId ? { modusId } : {}),
+      ...(verb ? { verb } : {}),
+      aditus,
+      pinnedModels,
+      quote,
+      embellishedPrompt: typeof obj.embellishedPrompt === 'string' ? obj.embellishedPrompt : '',
+      rationale: typeof obj.rationale === 'string' ? obj.rationale : '',
+      tokenUsage,
+      // priorRunId comes from CONTEXT (the real prior run), never the model.
+      ...(ctx.priorRun ? { priorRunId: ctx.priorRun.id } : {}),
+      ...(typeof obj.delta === 'string' ? { delta: obj.delta } : {}),
+    }
+  }
+
+  if (obj.kind === 'reply' && typeof obj.text === 'string') {
+    return { kind: 'reply', text: obj.text, tokenUsage }
+  }
+
+  // Recognized JSON but not our contract — surface it as a reply verbatim.
+  return { kind: 'reply', text: content, tokenUsage }
+}
+
+// ---------------------------------------------------------------------------
+// The bounded tool-use loop (invariant (c)).
+// ---------------------------------------------------------------------------
+export async function runConcierge(
+  deps: ConciergeDeps,
+  ctx: ConciergeContext,
+  userMessage: string,
+): Promise<ConciergeResult> {
+  const messages: OpenRouterChatMessage[] = [
+    { role: 'system', content: buildSystemPrompt(ctx) },
+    ...(ctx.history ?? []),
+    { role: 'user', content: userMessage },
+  ]
+
+  const usage: UsageAcc = {
+    totalTokens: 0,
+    promptTokens: 0,
+    completionTokens: 0,
+    hasPrompt: false,
+    hasCompletion: false,
+  }
+
+  for (let iteration = 0; iteration < maxToolIterations; iteration++) {
+    const result = await deps.runToolChat(deps.toolClient, {
+      ...(deps.model !== undefined ? { model: deps.model } : {}),
+      messages,
+      tools: TOOL_SPECS,
+    })
+    accumulate(usage, result.tokenUsage)
+
+    if (result.toolCalls?.length) {
+      // Record the assistant turn that requested the tools (multi-turn history shape),
+      // then answer EVERY tool_call_id — including a parse failure, which becomes a
+      // tool-role error message so the model can retry within the bound (DOCTRINE §2:
+      // never silently guess unparseable arguments, never let a parse error throw the loop).
+      messages.push({
+        role: 'assistant',
+        content: result.content ?? '',
+        tool_calls: result.toolCalls,
+      })
+      for (const tc of result.toolCalls) {
+        let parsedArgs: Record<string, unknown>
+        try {
+          parsedArgs = tc.arguments ? (JSON.parse(tc.arguments) as Record<string, unknown>) : {}
+        } catch {
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: `ERROR arguments.unparseable: the arguments you sent for "${tc.name}" were not valid JSON; resend valid JSON.`,
+          })
+          continue
+        }
+        const out = await executeTool(tc.name, parsedArgs, deps, ctx)
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: out })
+      }
+      continue
+    }
+
+    // No tool calls → this is the model's final answer.
+    return finalize(result.content ?? '', usage, deps, ctx)
+  }
+
+  // Iteration cap reached without convergence (invariant (c)): terminate with a reply,
+  // never an unbounded loop.
+  return {
+    kind: 'reply',
+    text:
+      "I wasn't able to settle on a concrete proposal for that in the allotted steps. Could you give me a " +
+      'bit more detail about what you want to make?',
+    tokenUsage: finalizeUsage(usage),
+  }
+}

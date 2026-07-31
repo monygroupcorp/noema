@@ -65,7 +65,7 @@ interface ActumIndexRead { findFor(key: AuctorKey): Promise<ActumIndex[]> }
 interface IntellaeRead { listByOwner(ownerKey: string): Promise<Intellae> }
 interface EditionesRead { listByAuthor(by: Editio['by']): Promise<Editiones> }
 interface MemoriaeRead { findByAnima(animaId: string): Promise<Memoria | null> }
-interface ColloquiaRead { findByAnima(animaId: string): Promise<Colloquium[]> }
+interface ColloquiaRead { findByOwner(ownerKey: string): Promise<Colloquium[]> }
 interface DictaRead { listByColloquium(colloquiumId: string): Promise<Dictum[]> }
 interface VestigiaRead { forIdentity(auctorKey: AuctorKey, limit?: number): Promise<Vestigia> }
 interface BursariumRead {
@@ -194,7 +194,7 @@ export class MeExporter {
         d.credenta.findByAnimaId(animaId),
         d.provinciae.listByOwner(animaId),
         d.memoriae.findByAnima(animaId),
-        d.colloquia.findByAnima(animaId),
+        d.colloquia.findByOwner(ownerKeyOf({ animaId })),
         // MUST be list({animaId}) — the unfiltered list() returns EVERY user's deposits.
         d.deposita.list({ animaId }),
         d.bursarium.listByOwner(animaId),

@@ -155,6 +155,23 @@ Invoke a flow and return its run handle.
           "type": "string",
           "format": "date-time",
           "description": "When the run started, as an ISO-8601 string."
+        },
+        "aditus": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "OWNER-SCOPED: the stored effective input the run was cast with, echoed verbatim (including an unresolved \"shuffle\" seed sentinel if that's what was stored). Present only when populated."
+        },
+        "pinnedModels": {
+          "type": "array",
+          "description": "OWNER-SCOPED: the models pinned at cast time. Present only when populated.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "modusVersion": {
+          "type": "string",
+          "description": "OWNER-SCOPED: the cast-time modus version. Present only when populated."
         }
       },
       "required": [
@@ -233,6 +250,23 @@ Fetch a run by id (poll for completion).
           "type": "string",
           "format": "date-time",
           "description": "When the run started, as an ISO-8601 string."
+        },
+        "aditus": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "OWNER-SCOPED: the stored effective input the run was cast with, echoed verbatim (including an unresolved \"shuffle\" seed sentinel if that's what was stored). Present only when populated."
+        },
+        "pinnedModels": {
+          "type": "array",
+          "description": "OWNER-SCOPED: the models pinned at cast time. Present only when populated.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "modusVersion": {
+          "type": "string",
+          "description": "OWNER-SCOPED: the cast-time modus version. Present only when populated."
         }
       },
       "required": [
@@ -293,6 +327,10 @@ List the runnable flows (discovery).
           "versio": {
             "type": "string",
             "description": "The flow version."
+          },
+          "descriptio": {
+            "type": "string",
+            "description": "A flow-level routing line — what this flow is for and when to pick it over its siblings."
           },
           "categoria": {
             "description": "An optional catalog tag."
@@ -365,6 +403,10 @@ Describe one flow's input/output JSON-Schema (discovery).
       "type": "object",
       "description": "The flow's output JSON-Schema — present when the flow declares one.",
       "additionalProperties": true
+    },
+    "descriptio": {
+      "type": "string",
+      "description": "A flow-level routing line — what this flow is for and when to pick it over its siblings."
     },
     "categoria": {
       "description": "An optional catalog tag."
@@ -551,6 +593,50 @@ Browse the model weight catalog, optionally filtered by genus, basis, fundamentu
               "unknown"
             ],
             "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+          },
+          "slug": {
+            "type": "string",
+            "description": "ComfyUI LoRA filename token for explicit <lora:slug:weight> syntax (LoRA only)."
+          },
+          "defaultWeight": {
+            "type": "number",
+            "description": "Recommended application weight when the caller does not specify one (LoRA only)."
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "prompt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ]
+            },
+            "description": "Preview samples: image URL + the prompt it was rendered from."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tag": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tag"
+              ]
+            },
+            "description": "Discovery/classification tags."
           }
         },
         "required": [
@@ -909,6 +995,50 @@ Import a model/LoRA by URL (Civitai/HuggingFace/direct) as a private, owner-scop
             "unknown"
           ],
           "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+        },
+        "slug": {
+          "type": "string",
+          "description": "ComfyUI LoRA filename token for explicit <lora:slug:weight> syntax (LoRA only)."
+        },
+        "defaultWeight": {
+          "type": "number",
+          "description": "Recommended application weight when the caller does not specify one (LoRA only)."
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "prompt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url"
+            ]
+          },
+          "description": "Preview samples: image URL + the prompt it was rendered from."
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tag": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "tag"
+            ]
+          },
+          "description": "Discovery/classification tags."
         }
       },
       "required": [
@@ -985,6 +1115,50 @@ List the caller's own privately-held models (imports + trained LoRAs), newest fi
               "unknown"
             ],
             "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+          },
+          "slug": {
+            "type": "string",
+            "description": "ComfyUI LoRA filename token for explicit <lora:slug:weight> syntax (LoRA only)."
+          },
+          "defaultWeight": {
+            "type": "number",
+            "description": "Recommended application weight when the caller does not specify one (LoRA only)."
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "prompt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ]
+            },
+            "description": "Preview samples: image URL + the prompt it was rendered from."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tag": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tag"
+              ]
+            },
+            "description": "Discovery/classification tags."
           }
         },
         "required": [
@@ -1089,6 +1263,50 @@ Admin: clear or backfill a model's license so the public-catalog gate treats it 
             "unknown"
           ],
           "description": "Whether this model may be promoted to the public (commercial) catalog (owner/admin views)."
+        },
+        "slug": {
+          "type": "string",
+          "description": "ComfyUI LoRA filename token for explicit <lora:slug:weight> syntax (LoRA only)."
+        },
+        "defaultWeight": {
+          "type": "number",
+          "description": "Recommended application weight when the caller does not specify one (LoRA only)."
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "prompt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url"
+            ]
+          },
+          "description": "Preview samples: image URL + the prompt it was rendered from."
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tag": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "tag"
+            ]
+          },
+          "description": "Discovery/classification tags."
         }
       },
       "required": [
@@ -2010,6 +2228,23 @@ The caller's owner-keyed account settings — presentation skin (Profile), cross
         "defaultProjectId": {
           "type": "string",
           "description": "Default project (Provincia id) new work files into. Stored; cast-time auto-filing pending."
+        },
+        "spicyMode": {
+          "type": "boolean",
+          "description": "Adult (\"spicy\") mode. When ON — and an 18+ attestation is on file — permits adult-rated models, routes concierge chat to willing OpenRouter models, and relaxes SFW-forcing default negatives. Default-absent = OFF. Enabling requires a recorded 18+ attestation (POST /v1/me/attestation) — this PUT rejects with auth.forbidden otherwise."
+        },
+        "ageAttestation": {
+          "type": "object",
+          "description": "One-time self-declared 18+ attestation (a click-through fact, NOT KYC/ID verification). Required on file before spicyMode may be enabled. Recorded via POST /v1/me/attestation; preserved across a Preferences replace.",
+          "properties": {
+            "attestedAt": {
+              "type": "number",
+              "description": "Epoch-ms timestamp of the attestation."
+            }
+          },
+          "required": [
+            "attestedAt"
+          ]
         }
       }
     },
@@ -2190,7 +2425,7 @@ Replace the caller's presentation skin (avatar/banner/background/accent/look).
 
 ### PUT /v1/me/generatio
 
-Replace the caller's cross-cutting generation defaults (style, negative prompt, output format, telegram delivery, auto-apply models). Applied at cast time under the affines precedence chain.
+Replace the caller's cross-cutting generation defaults (style, negative prompt, output format, telegram delivery, auto-apply models, spicy mode). Applied at cast time under the affines precedence chain. Enabling spicyMode requires a recorded 18+ attestation on file (else auth.forbidden); a recorded attestation is preserved across a replace.
 
 - **Auth:** required
 
@@ -2231,6 +2466,23 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
     "defaultProjectId": {
       "type": "string",
       "description": "Default project (Provincia id) new work files into. Stored; cast-time auto-filing pending."
+    },
+    "spicyMode": {
+      "type": "boolean",
+      "description": "Adult (\"spicy\") mode. When ON — and an 18+ attestation is on file — permits adult-rated models, routes concierge chat to willing OpenRouter models, and relaxes SFW-forcing default negatives. Default-absent = OFF. Enabling requires a recorded 18+ attestation (POST /v1/me/attestation) — this PUT rejects with auth.forbidden otherwise."
+    },
+    "ageAttestation": {
+      "type": "object",
+      "description": "One-time self-declared 18+ attestation (a click-through fact, NOT KYC/ID verification). Required on file before spicyMode may be enabled. Recorded via POST /v1/me/attestation; preserved across a Preferences replace.",
+      "properties": {
+        "attestedAt": {
+          "type": "number",
+          "description": "Epoch-ms timestamp of the attestation."
+        }
+      },
+      "required": [
+        "attestedAt"
+      ]
     }
   }
 }
@@ -2276,12 +2528,61 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
         "defaultProjectId": {
           "type": "string",
           "description": "Default project (Provincia id) new work files into. Stored; cast-time auto-filing pending."
+        },
+        "spicyMode": {
+          "type": "boolean",
+          "description": "Adult (\"spicy\") mode. When ON — and an 18+ attestation is on file — permits adult-rated models, routes concierge chat to willing OpenRouter models, and relaxes SFW-forcing default negatives. Default-absent = OFF. Enabling requires a recorded 18+ attestation (POST /v1/me/attestation) — this PUT rejects with auth.forbidden otherwise."
+        },
+        "ageAttestation": {
+          "type": "object",
+          "description": "One-time self-declared 18+ attestation (a click-through fact, NOT KYC/ID verification). Required on file before spicyMode may be enabled. Recorded via POST /v1/me/attestation; preserved across a Preferences replace.",
+          "properties": {
+            "attestedAt": {
+              "type": "number",
+              "description": "Epoch-ms timestamp of the attestation."
+            }
+          },
+          "required": [
+            "attestedAt"
+          ]
         }
       }
     }
   },
   "required": [
     "generatio"
+  ]
+}
+```
+
+### POST /v1/me/attestation
+
+Record the caller's one-time 18+ self-attestation (a click-through fact, NOT KYC/ID verification). Required on file before spicy mode may be enabled. Anon-capable (keyed by AuctorKey — anonymous Bursa/commitment and named Anima callers both).
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The caller's recorded 18+ self-attestation (a click-through fact, not KYC).",
+  "properties": {
+    "attestation": {
+      "type": "object",
+      "properties": {
+        "attestedAt": {
+          "type": "number",
+          "description": "Epoch-ms timestamp of the attestation."
+        }
+      },
+      "required": [
+        "attestedAt"
+      ]
+    }
+  },
+  "required": [
+    "attestation"
   ]
 }
 ```
@@ -7639,6 +7940,10 @@ List the caller's own registered flows (owner-scoped discovery for the canvas no
           "versio": {
             "type": "string",
             "description": "The flow version."
+          },
+          "descriptio": {
+            "type": "string",
+            "description": "A flow-level routing line — what this flow is for and when to pick it over its siblings."
           },
           "categoria": {
             "description": "An optional catalog tag."

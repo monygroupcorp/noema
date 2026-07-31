@@ -8,6 +8,8 @@
 // stable. Pure data — no behaviour lives here.
 // =============================================================================
 
+import type { ModelRef } from '../../types/actum.js'
+
 /** Public run status — the externalised projection of ActumStatus. */
 export type RunStatus = 'pending' | 'running' | 'complete' | 'failed'
 
@@ -32,6 +34,14 @@ export interface Run {
   /** For a long run (training) that rescued checkpoints: the latest one. On a failed run this is
    *  the resume anchor — fire a new run with `resumeFrom: url` and the remaining steps. */
   resumeCheckpoint?: { url: string; step: number }
+  /** OWNER-SCOPED: the stored effective input the run was cast with, echoed verbatim
+   *  (including an unresolved "shuffle" seed sentinel if that's what was stored).
+   *  Present only when populated. */
+  aditus?: Record<string, unknown>
+  /** OWNER-SCOPED: the models pinned at cast time. Present only when populated. */
+  pinnedModels?: ModelRef[]
+  /** OWNER-SCOPED: the cast-time modus version (plain-named). Present only when populated. */
+  modusVersion?: string
 }
 
 /**

@@ -96,6 +96,23 @@ const RunSchema: JsonSchema = {
       format: 'date-time',
       description: 'When the run started, as an ISO-8601 string.',
     },
+    aditus: {
+      type: 'object',
+      additionalProperties: true,
+      description:
+        'OWNER-SCOPED: the stored effective input the run was cast with, echoed verbatim ' +
+        '(including an unresolved "shuffle" seed sentinel if that\'s what was stored). ' +
+        'Present only when populated.',
+    },
+    pinnedModels: {
+      type: 'array',
+      description: 'OWNER-SCOPED: the models pinned at cast time. Present only when populated.',
+      items: { type: 'object', additionalProperties: true },
+    },
+    modusVersion: {
+      type: 'string',
+      description: 'OWNER-SCOPED: the cast-time modus version. Present only when populated.',
+    },
   },
   required: ['id', 'status', 'modusId'],
 }
@@ -200,6 +217,7 @@ const FlowSummarySchema: JsonSchema = {
     id: { type: 'string' },
     nomen: { type: 'string', description: 'The flow display name.' },
     versio: { type: 'string', description: 'The flow version.' },
+    descriptio: { type: 'string', description: 'A flow-level routing line — what this flow is for and when to pick it over its siblings.' },
     categoria: { description: 'An optional catalog tag.' },
     modusGenus: {
       type: 'string',
@@ -243,6 +261,7 @@ const FlowDescriptionSchema: JsonSchema = {
       description: "The flow's output JSON-Schema — present when the flow declares one.",
       additionalProperties: true,
     },
+    descriptio: { type: 'string', description: 'A flow-level routing line — what this flow is for and when to pick it over its siblings.' },
     categoria: { description: 'An optional catalog tag.' },
     fundamentumId: { description: 'An optional substrate reference.' },
   },
@@ -311,6 +330,10 @@ const ModelCardSchema: JsonSchema = {
     access: { type: 'string', enum: ['public', 'private'], description: "Resolvability of the caller's own model (GET /me/models only)." },
     license: { type: 'string', description: "License id, e.g. 'apache-2.0' (owner/admin views)." },
     commercialUse: { type: 'string', enum: ['yes', 'no', 'conditional', 'unknown'], description: 'Whether this model may be promoted to the public (commercial) catalog (owner/admin views).' },
+    slug: { type: 'string', description: 'ComfyUI LoRA filename token for explicit <lora:slug:weight> syntax (LoRA only).' },
+    defaultWeight: { type: 'number', description: 'Recommended application weight when the caller does not specify one (LoRA only).' },
+    samples: { type: 'array', items: { type: 'object', properties: { url: { type: 'string' }, prompt: { type: 'string' } }, required: ['url'] }, description: 'Preview samples: image URL + the prompt it was rendered from.' },
+    tags: { type: 'array', items: { type: 'object', properties: { tag: { type: 'string' }, source: { type: 'string' } }, required: ['tag'] }, description: 'Discovery/classification tags.' },
   },
   required: ['intellaId', 'nomen', 'genus'],
 }
@@ -448,7 +471,28 @@ const GeneratioSchema: JsonSchema = {
     telegramDeliverAs: { type: 'string', enum: ['album', 'individual'], description: 'Telegram delivery shape (consumed by the Telegram adapter).' },
     autoApplyModels: { type: 'array', items: { type: 'string' }, description: 'Models (intellaId) to auto-apply as pinnedModels. Stored; cast-time application pending model resolution.' },
     defaultProjectId: { type: 'string', description: 'Default project (Provincia id) new work files into. Stored; cast-time auto-filing pending.' },
+    spicyMode: { type: 'boolean', description: 'Adult ("spicy") mode. When ON — and an 18+ attestation is on file — permits adult-rated models, routes concierge chat to willing OpenRouter models, and relaxes SFW-forcing default negatives. Default-absent = OFF. Enabling requires a recorded 18+ attestation (POST /v1/me/attestation) — this PUT rejects with auth.forbidden otherwise.' },
+    ageAttestation: {
+      type: 'object',
+      description: 'One-time self-declared 18+ attestation (a click-through fact, NOT KYC/ID verification). Required on file before spicyMode may be enabled. Recorded via POST /v1/me/attestation; preserved across a Preferences replace.',
+      properties: { attestedAt: { type: 'number', description: 'Epoch-ms timestamp of the attestation.' } },
+      required: ['attestedAt'],
+    },
   },
+}
+
+/** The `{ attestation }` response for `POST /v1/me/attestation` — the recorded 18+ self-attestation. */
+const AttestationResponseSchema: JsonSchema = {
+  type: 'object',
+  description: "The caller's recorded 18+ self-attestation (a click-through fact, not KYC).",
+  properties: {
+    attestation: {
+      type: 'object',
+      properties: { attestedAt: { type: 'number', description: 'Epoch-ms timestamp of the attestation.' } },
+      required: ['attestedAt'],
+    },
+  },
+  required: ['attestation'],
 }
 
 /** The response body for `GET /v1/me` — the caller's account settings. */
@@ -1553,10 +1597,17 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'PUT',
       path: '/me/generatio',
-      summary: "Replace the caller's cross-cutting generation defaults (style, negative prompt, output format, telegram delivery, auto-apply models). Applied at cast time under the affines precedence chain.",
+      summary: "Replace the caller's cross-cutting generation defaults (style, negative prompt, output format, telegram delivery, auto-apply models, spicy mode). Applied at cast time under the affines precedence chain. Enabling spicyMode requires a recorded 18+ attestation on file (else auth.forbidden); a recorded attestation is preserved across a replace.",
       auth: true,
       request: GeneratioSchema,
       response: { type: 'object', properties: { generatio: GeneratioSchema }, required: ['generatio'] },
+    },
+    {
+      method: 'POST',
+      path: '/me/attestation',
+      summary: "Record the caller's one-time 18+ self-attestation (a click-through fact, NOT KYC/ID verification). Required on file before spicy mode may be enabled. Anon-capable (keyed by AuctorKey — anonymous Bursa/commitment and named Anima callers both).",
+      auth: true,
+      response: AttestationResponseSchema,
     },
     {
       method: 'PUT',

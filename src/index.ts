@@ -19,6 +19,7 @@ import { makeResolveWalletAnima } from './crystal/resolveWalletAnima.js'
 import { AlchemyPricer, nullPricer } from './crystal/AssetPricer.js'
 import { permissiveSanctionsScreen, type SanctionsScreen } from './compliance/SanctionsScreen.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
+import { createQuerelaRouter } from './api/querela/querelaRouter.js'
 import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
 import { mountCeremony } from './api/arcanum/mountCeremony.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
@@ -43,6 +44,8 @@ import { MongoLinkToken } from './crystal/MongoLinkToken.js'
 import { linkTelegramToAccount, issueTelegramRecoveryCode } from './allocutio/telegram/telegramRecovery.js'
 import { createWidgetRouter } from './allocutio/api/widgetRouter.js'
 import { createPurseRouter } from './allocutio/api/purseRouter.js'
+import { createColloquiaRouter } from './allocutio/api/colloquiaRouter.js'
+import { runToolChat, httpApiTransport } from './allocutio/api/OpenRouterToolClient.js'
 import { createAgentCardRouter } from './allocutio/api/agentCardRouter.js'
 import { startSubsidySweeper } from './crystal/SubsidySweeper.js'
 import { startLicenseTripwire } from './crystal/licenseTripwire.js'
@@ -982,6 +985,10 @@ async function main(): Promise<void> {
   // original spot above) because / and /projection resolve the CALLER's identity
   // via apiResolver, mirroring createSponsioRouter below.
   app.use('/api/vestigia', createVestigiaRouter({ vestigiorum: ring.vestigiorum, identity: apiResolver }))
+  // Querela reports (bug/feature/feedback, plans/noema-100.md) — anon-capable (animaId,
+  // commitment, AND bursaToken), so mounted here (not via apiResolver-only vestigia-style
+  // resolveCaller) with its own bursa-permitting auth seam, mirroring createSponsioRouter below.
+  app.use('/v1/reports', express.json(), createQuerelaRouter({ querelae: ring.querelae, identity: apiResolver }))
 
   // ── CAMEL agent onboarding (ADR-0011 phase 3) ─────────────────────────────────
   // Treasury config is injected (not a stored noun): prod has exactly one treasury.
@@ -1208,6 +1215,34 @@ async function main(): Promise<void> {
     },
     ...(process.env.PUBLIC_BASE ? { publicBase: process.env.PUBLIC_BASE } : {}),
   }))
+
+  // Concierge conversational surface (noema-095, MONEY CODE): POST /v1/colloquia (create a
+  // thread) + POST /v1/colloquia/:id/dicta (run one metered turn). A turn persists the user +
+  // agent Dicta, runs the read-only ConciergeAgent (noema-094), and settles DIRECTLY at the
+  // exact OpenRouter chat cost per turn (Decision Q1) — Signorum exact-cost for animaId/commitment
+  // callers, Bursa flat-cap for bursaToken (Gauntlet #1 ruling Q3). Only wired when an OpenRouter
+  // key is configured — without it the tool-use agent cannot run, so the endpoints stay unmounted
+  // (404) rather than 401-ing every turn.
+  const openRouterKey = process.env.OPENROUTER_API_KEY
+  if (openRouterKey) {
+    const conciergeTurnCap = process.env.CONCIERGE_TURN_CAP_IMPETUS
+    app.use('/v1/colloquia', express.json(), createColloquiaRouter({
+      identity: apiResolver,
+      colloquia: ring.colloquia,
+      dicta: ring.dicta,
+      signorum: ring.signorum,
+      bursarium: ring.bursarium,
+      api: crystalApi,
+      agent: {
+        runToolChat,
+        toolClient: { http: httpApiTransport, apiKey: openRouterKey },
+        ...(process.env.CONCIERGE_MODEL ? { model: process.env.CONCIERGE_MODEL } : {}),
+      },
+      ...(conciergeTurnCap && /^[1-9][0-9]*$/.test(conciergeTurnCap) ? { turnCapImpetus: BigInt(conciergeTurnCap) } : {}),
+    }))
+  } else {
+    log.warn('OPENROUTER_API_KEY unset — concierge endpoints (/v1/colloquia) DISABLED (the read-only tool-use agent cannot run without it).')
+  }
 
   // ERC-8004 agent cards (ADR-0011 §7/§8): the platform card + per-agent capability
   // cards that advertise an agent's x402-callable Modus — the discoverable "agent link"

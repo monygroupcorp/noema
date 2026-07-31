@@ -6,7 +6,7 @@ import {
   Eye, EyeOff, VenetianMask, UserRound, Search, RotateCw, ImagePlus,
   Heart, Smile, Star, Wallet, Shuffle, Coins, Laptop, Server, FileText,
   CreditCard, GraduationCap, Rss, Send, Globe, Trash2, WandSparkles,
-  House, Database, Box, Hexagon, Download, Users, HandCoins, Pause, Play, UserPlus, Folder,
+  House, Database, Box, Hexagon, Download, Users, HandCoins, Pause, Play, UserPlus, Folder, Flag,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -65,6 +65,7 @@ export const ICONS: Record<string, LucideIcon> = {
   'play': Play,
   'user-plus': UserPlus,
   'folder': Folder,
+  'flag': Flag,
 };
 
 // lucide-react already renders <svg class="lucide lucide-...">, which our CSS targets.

@@ -24,6 +24,13 @@ const fakeRun: Run = {
   exitus: { image: 'https://example.com/img.png' },
 }
 
+const fakeRunDetail: Run = {
+  ...fakeRun,
+  aditus: { prompt: 'a cat', seed: 42 },
+  pinnedModels: [{ role: 'checkpoint', modelId: 'flux-dev' } as any],
+  modusVersion: '1.0.0',
+}
+
 const fakeFlows = [
   { id: 'flux-schnell', nomen: 'FLUX Schnell', versio: '1.0.0' },
   { id: 'chatgpt', nomen: 'ChatGPT', versio: '1.0.0' },
@@ -139,6 +146,16 @@ test('getRunTool with unknown id returns not_found.run', async () => {
   const result = await getRunTool(api, auctor, { id: 'ghost' })
   assert.equal(result.isError, true)
   assert.ok(result.content[0].text.includes('not_found.run'))
+})
+
+test('getRunTool surfaces aditus, pinnedModels, and modusVersion for parity with the HTTP path', async () => {
+  const api = makeFakeApi({ getRun: async () => fakeRunDetail })
+  const result = await getRunTool(api, auctor, { id: 'run-1' })
+  assert.equal(result.isError, undefined)
+  const parsed = JSON.parse(result.content[0].text)
+  assert.deepEqual(parsed.run.aditus, { prompt: 'a cat', seed: 42 })
+  assert.deepEqual(parsed.run.pinnedModels, [{ role: 'checkpoint', modelId: 'flux-dev' }])
+  assert.equal(parsed.run.modusVersion, '1.0.0')
 })
 
 // ---------------------------------------------------------------------------

@@ -48,7 +48,7 @@ export interface ApiFacade {
     aditus: Record<string, unknown>,
   ): Promise<{ impetus: string }>
   listFundamenta(): Promise<Array<{ id: string; nomen?: string; versio: string; runtime?: string; imageId: string; imageVersion: string; vramGb?: number }>>
-  listModels(filter?: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number }): Promise<ModelCard[]>
+  listModels(filter?: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number; includeAdult?: boolean }): Promise<ModelCard[]>
   depositConfig(): DepositConfig
   depositQuote(input: { chainId: number | string; token: string; amount: string }): Promise<DepositQuote>
   myDeposits(auctor: AuctorKey): Promise<MyDeposit[]>
@@ -60,6 +60,7 @@ export interface ApiFacade {
   saveFlow(auctor: AuctorKey, opts: SaveFlowOpts): Promise<{ id: string }>
   bind(auctor: AuctorKey, verb: string, modusId: string): Promise<{ verb: string; modusId: string }>
   getMe(auctor: AuctorKey): Promise<import('./CrystalApi.js').MeView>
+  recordAttestation(auctor: AuctorKey): Promise<{ attestedAt: number }>
   putSecret(auctor: AuctorKey, provider: string, token: string, idleDays?: number): Promise<import('./CrystalApi.js').SecretView>
   removeSecret(auctor: AuctorKey, provider: string): Promise<import('./CrystalApi.js').SecretView>
   setAppearance(auctor: AuctorKey, appearance: import('../../types/consuetudo.js').Appearance): Promise<import('../../types/consuetudo.js').Appearance>
@@ -163,6 +164,19 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     )
   }
 
+  /** Best-effort spicyMode read for the PUBLIC catalog (noema-091): an authenticated caller with
+   *  spicyMode on (which required a recorded 18+ attestation to persist) may see `contentRating`-adult
+   *  models; an anonymous/unauthenticated browse stays SFW — the safe default. NEVER throws — a
+   *  missing/invalid credential resolves to `false`, so `/v1/models` remains a working no-auth route. */
+  const callerSpicyMode = async (req: Request): Promise<boolean> => {
+    try {
+      const me = await api.getMe(await auth(req))
+      return me.generatio?.spicyMode === true
+    } catch {
+      return false
+    }
+  }
+
   // POST /v1/runs — invoke a flow.
   router.post(
     '/runs',
@@ -258,8 +272,20 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     res.setHeader('Connection', 'keep-alive')
     if (typeof (res as any).flushHeaders === 'function') (res as any).flushHeaders()
 
-    // Initial snapshot frame.
-    res.write('data: ' + JSON.stringify({ kind: 'snapshot', run }) + '\n\n')
+    // Initial snapshot frame. `getRun` now returns the owner-detail Run shape (aditus,
+    // pinnedModels, modusVersion) — the stream stays lean/progress-only, so explicitly
+    // pick only the pre-existing fields rather than forwarding the full detailed object.
+    const snapshot: Run = {
+      id: run.id,
+      status: run.status,
+      modusId: run.modusId,
+      ...(run.exitus !== undefined ? { exitus: run.exitus } : {}),
+      ...(run.failure !== undefined ? { failure: run.failure } : {}),
+      ...(run.cost !== undefined ? { cost: run.cost } : {}),
+      ...(run.createdAt !== undefined ? { createdAt: run.createdAt } : {}),
+      ...(run.resumeCheckpoint !== undefined ? { resumeCheckpoint: run.resumeCheckpoint } : {}),
+    }
+    res.write('data: ' + JSON.stringify({ kind: 'snapshot', run: snapshot }) + '\n\n')
 
     // Replay buffered events.
     for (const ev of deps.hub.recentFor(id)) {
@@ -558,13 +584,17 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     '/models',
     wrap(async (req, res) => {
       const { genus, basis, fundamentumId, trigger, q, limit } = req.query as Record<string, string | undefined>
-      const filter: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number } = {}
+      const filter: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number; includeAdult?: boolean } = {}
       if (genus !== undefined) filter.genus = genus
       if (basis !== undefined) filter.basis = basis
       if (fundamentumId !== undefined) filter.fundamentumId = fundamentumId
       if (trigger !== undefined) filter.trigger = trigger
       if (q !== undefined) filter.q = q
       if (limit !== undefined) filter.limit = Number(limit)
+      // Adult-rated ({suggestive, explicit}) models are catalog-hidden unless the caller has spicyMode
+      // on (noema-091). Derived from the caller's persisted toggle — NOT a client-supplied query param —
+      // so it can't be spoofed; anonymous browse stays SFW.
+      if (await callerSpicyMode(req)) filter.includeAdult = true
       res.json({ models: await api.listModels(filter) })
     }),
   )
@@ -740,6 +770,13 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   // PUT /v1/me/generatio — replace the caller's cross-cutting generation defaults (Preferences).
   router.put('/me/generatio', wrap(async (req, res) => {
     res.json({ generatio: await api.setGeneratio(await auth(req), req.body ?? {}) })
+  }))
+
+  // POST /v1/me/attestation — record the caller's one-time 18+ self-attestation (noema-091). A
+  // self-declared click-through fact (NOT KYC/ID verification); required on file before spicyMode may
+  // be enabled. Anon-capable (keyed by AuctorKey — anon Bursa/commitment and named Anima both work).
+  router.post('/me/attestation', wrap(async (req, res) => {
+    res.status(200).json({ attestation: await api.recordAttestation(await auth(req)) })
   }))
 
   // PUT/DELETE /v1/me/secrets/:provider — connect/disconnect a BYO gated-origin credential

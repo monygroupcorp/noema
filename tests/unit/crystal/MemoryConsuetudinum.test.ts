@@ -85,6 +85,41 @@ test('MemoryConsuetudinum — appearance + generatio round-trip, replace, owner-
   assert.equal(await store.resolveGeneratio({ commitment: 'c-2' }), undefined, 'owner isolation')
 })
 
+// ── spicyMode + 18+ attestation persistence (noema-091) ────────────────────────
+// Store-level round-trip only. The ENABLE GATE ("spicyMode:true needs an attestation on file") lives
+// in `CrystalApi.setGeneratio`, not the raw store — it is tested at the facade level in
+// tests/unit/allocutio/api/spicyMode.test.ts. Here we prove the two new Generatio fields persist for
+// BOTH an anon (commitment) and a named (animaId) owner, and that absent reads as the OFF default.
+
+test('MemoryConsuetudinum — spicyMode + ageAttestation round-trip (named animaId owner)', async () => {
+  const store = new MemoryConsuetudinum()
+  const owner = { animaId: 'anima-1' }
+  assert.equal(await store.resolveGeneratio(owner), undefined, 'absent by default')
+  await store.setGeneratio(owner, { spicyMode: true, ageAttestation: { attestedAt: 1234 } })
+  const g = await store.resolveGeneratio(owner)
+  assert.equal(g?.spicyMode, true)
+  assert.deepEqual(g?.ageAttestation, { attestedAt: 1234 })
+})
+
+test('MemoryConsuetudinum — spicyMode + ageAttestation round-trip (anon commitment owner)', async () => {
+  const store = new MemoryConsuetudinum()
+  const owner = { commitment: 'c-1' }
+  await store.setGeneratio(owner, { spicyMode: true, ageAttestation: { attestedAt: 42 } })
+  const g = await store.resolveGeneratio(owner)
+  assert.equal(g?.spicyMode, true, 'anon (commitment) callers get spicyMode too — not named-only')
+  assert.deepEqual(g?.ageAttestation, { attestedAt: 42 })
+  assert.equal(await store.resolveGeneratio({ commitment: 'c-2' }), undefined, 'owner isolation')
+})
+
+test('MemoryConsuetudinum — absent spicyMode reads as OFF (undefined, not a stored false)', async () => {
+  const store = new MemoryConsuetudinum()
+  const owner = { animaId: 'anima-1' }
+  await store.setGeneratio(owner, { style: 'cinematic' })
+  const g = await store.resolveGeneratio(owner)
+  assert.equal(g?.spicyMode, undefined, 'default-absent = OFF')
+  assert.equal(g?.ageAttestation, undefined)
+})
+
 test('MemoryConsuetudinum — listBindings returns every verb override, that owner only', async () => {
   const store = new MemoryConsuetudinum()
   const owner = { animaId: 'anima-1' }

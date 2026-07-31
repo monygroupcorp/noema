@@ -129,6 +129,26 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('dicta').createIndex({ id: 1 }, { unique: true }),
     db.collection('dicta').createIndex({ colloquiumId: 1, natum: 1 }),
 
+    // querelae — bug/feature/feedback reports
+    db.collection('querelae').createIndex({ id: 1 }, { unique: true }),
+    db.collection('querelae').createIndex({ ownerKey: 1, natum: -1 }),
+    db.collection('querelae').createIndex({ ownerKey: 1, contentHash: 1 }),
+    // Per-turn idempotency (noema-095, MONEY CODE): the AGENT Dictum is the atomic per-turn CHARGE
+    // GATE. UNIQUE PARTIAL on (colloquiumId, turnKey) over AGENT dicta ONLY — the settle/debit runs
+    // only AFTER this insert succeeds, so two concurrent `POST /dicta` sharing a caller-supplied
+    // turnKey (e.g. a client-timeout retry racing the still-in-flight original) may BOTH run the
+    // read-only agent but only ONE can persist the agent Dictum and therefore only ONE can charge:
+    // the loser's insert throws a dup-key error → the router releases its reservation and returns the
+    // winner's turn instead of a SECOND reserve→settle (Signorum rail) / Bursa debit. The `turnKey`
+    // is shared by the turn's USER Dictum too, so the guard MUST be genus-scoped to 'agent' (else a
+    // normal turn's agent-Dictum insert would collide with its own user Dictum). This is the DURABLE
+    // cross-instance guard mirroring the mercedes `sourceRef` / reditus `depositumId` discipline —
+    // MongoDictum.ensureIndexes() declares the same index for parity.
+    db.collection('dicta').createIndex(
+      { colloquiumId: 1, turnKey: 1 },
+      { name: 'turnkey_agent_charge_gate', unique: true, partialFilterExpression: { genus: 'agent', turnKey: { $exists: true } } },
+    ),
+
     // memoriae — distilled agent memory (one per anima)
     db.collection('memoriae').createIndex({ animaId: 1 }, { unique: true }),
 

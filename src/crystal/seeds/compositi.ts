@@ -25,6 +25,7 @@ import type { Modus } from '../../types/modus.js'
 export const COMPOSITUS_MAKE_UPSCALE: Modus = {
   id: 'make-upscale',
   nomen: 'Make → Upscale',
+  descriptio: 'Make → Upscale spell — generates an image from a prompt with SD1.5, then 4x-upscales it in one pass. Pick it for a print-ready result from text in a single step, without wiring two flows yourself.',
   genus: 'compositus',
   versio: '1.0.0',
   contentHash: '',        // set on registration via hashModus()
@@ -64,10 +65,15 @@ export const COMPOSITUS_MAKE_UPSCALE: Modus = {
 export const COMPOSITUS_IMAGE_CAPTION: Modus = {
   id: 'image-caption',
   nomen: 'Image → Caption',
+  descriptio: 'Image → Caption spell — captions an image with the Qwen3-VL captioner, image in and one dense caption out. Pick it as the ready-made captioning entry point that feeds the LoRA dataset-prep loop.',
   genus: 'compositus',
   versio: '1.0.0',
   contentHash: '',
   canonica: true,
+
+  // Explicit override (noema-087): image-only aditus (no text port) hits rule 1 and
+  // misclassifies as `enhance`; this is really i2t — `describe`.
+  verbum: 'describe',
 
   aditus: {
     image: { type: 'image', required: true, description: 'Image to caption' },

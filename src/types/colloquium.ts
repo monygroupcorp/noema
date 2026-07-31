@@ -19,21 +19,23 @@
 //   dicta       — the said things / the turns (nominative plural, from dicere)
 //   dictum      — one thing said / one turn (nominative singular)
 //
-// PRIVACY: A Colloquium is identified-side only. animaId is required —
-// there are no anonymous conversations. This mirrors the privacy boundary:
-// who spoke is always known; what was said persists under that identity.
+// PRIVACY: A Colloquium is owned by an opaque `ownerKey` (see `src/crystal/ownerKey.ts`),
+// derived from whichever identity the caller presented — an identified anima, or an anon
+// commitment/bursaToken. This mirrors the rest of the anon-capable stores (Secretarium,
+// Intella): ownership is structural, not identity-kind-specific, so anon callers can hold
+// conversation threads too.
 // =============================================================================
 
 /**
  * Colloquium — a conversation thread.
  *
- * Binds a sequence of Dicta (turns) to an anima over time.
+ * Binds a sequence of Dicta (turns) to an owner over time.
  * Optionally associated with a canvas workspace (tabulaId) or session (modoId).
  */
 export interface Colloquium {
   id: string
-  /** FK → Anima. The owner of this conversation. Required — no anonymous conversations. */
-  animaId: string
+  /** Opaque owner id (`ownerKeyOf(AuctorKey)`) — the owner of this conversation. */
+  ownerKey: string
   /** "active" = ongoing; "archived" = concluded, kept for memory */
   status: 'active' | 'archived'
   /** FK → Tabula. Optional canvas workspace this conversation is bound to. */
@@ -72,6 +74,15 @@ export interface Dictum {
   actumId?: string
   /** FK[] → Signum. Credit events tied to this turn (e.g. tokens consumed). */
   signaIds: string[]
+  /**
+   * Caller-supplied idempotency key for the turn that produced this Dictum (noema-095).
+   * A concierge dicta POST carries a client-chosen `turnKey`; both the user and the agent
+   * Dictum of that turn are stamped with it, so a retried POST with the SAME key is a no-op
+   * (the persisted agent Dictum is returned instead of re-running the agent or re-charging).
+   * Mirrors the R5 Stripe-event-id idempotency discipline. Absent on turns created before
+   * the concierge endpoint (and on any non-concierge Dictum). Immutable once set.
+   */
+  turnKey?: string
   /** "natum" = born — when this turn was recorded */
   natum: Date
 }
@@ -88,10 +99,10 @@ export interface ColloquiumStore {
   create(input: Omit<Colloquium, 'id' | 'natum' | 'mutatum'>): Promise<Colloquium>
   find(id: string): Promise<Colloquium | null>
   /**
-   * Return all colloquia owned by the given anima.
+   * Return all colloquia owned by the given owner key.
    * Optionally filter by status.
    */
-  findByAnima(animaId: string, status?: 'active' | 'archived'): Promise<Colloquium[]>
+  findByOwner(ownerKey: string, status?: 'active' | 'archived'): Promise<Colloquium[]>
   update(id: string, patch: Partial<Pick<Colloquium, 'status' | 'modoId' | 'titulus'>>): Promise<Colloquium>
   /** Convenience: sets status to 'archived'. */
   archive(id: string): Promise<Colloquium>
@@ -110,5 +121,13 @@ export interface DictumStore {
   findById(id: string): Promise<Dictum | null>
   /** Return all turns in a colloquium, ordered by natum ascending. */
   listByColloquium(colloquiumId: string): Promise<Dictum[]>
+  /**
+   * Return the Dicta of one colloquium stamped with a given caller-supplied `turnKey`,
+   * ordered by natum ascending (noema-095 per-turn idempotency). A completed concierge
+   * turn yields a user + an agent Dictum sharing the key; the endpoint keys idempotent
+   * replay on the AGENT Dictum's presence (the turn settled only once its agent Dictum
+   * was persisted). Empty when no turn has used the key in this colloquium.
+   */
+  findByTurnKey(colloquiumId: string, turnKey: string): Promise<Dictum[]>
   update(id: string, patch: Partial<Pick<Dictum, 'actumId' | 'signaIds'>>): Promise<Dictum>
 }

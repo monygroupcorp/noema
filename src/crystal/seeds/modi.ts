@@ -19,6 +19,7 @@ function make(def: Omit<Modus, 'contentHash'>): Modus {
 export const MODUS_CHATGPT: Modus = make({
   id: 'modus.chatgpt',
   nomen: 'ChatGPT — text generation',
+  descriptio: 'ChatGPT text generation via OpenAI — a prompt in, a text response out. Pick it for OpenAI-hosted chat/completion; use OpenRouter to reach non-OpenAI models through one endpoint.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'openai',
@@ -45,6 +46,7 @@ export const MODUS_CHATGPT: Modus = make({
 export const MODUS_DALLE_III: Modus = make({
   id: 'modus.dalle-iii',
   nomen: 'DALL·E 3 — image generation',
+  descriptio: 'DALL·E 3 text-to-image via OpenAI — a hosted API image generator (no GPU, fixed cost). Pick it for quick OpenAI image gen; use the pod flows (FLUX/SDXL) for LoRAs and local control.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'openai',
@@ -72,6 +74,7 @@ export const MODUS_DALLE_III: Modus = make({
 export const MODUS_GPT_IMAGE_EDIT: Modus = make({
   id: 'modus.gpt-image-edit',
   nomen: 'GPT Image — image editing',
+  descriptio: 'GPT Image editing via OpenAI — edits a source image from a text instruction, with an optional mask for local edits. Pick it for hosted OpenAI edits; use FLUX Kontext/Klein for pod-side, LoRA-capable edits.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'openai',
@@ -100,6 +103,7 @@ export const MODUS_GPT_IMAGE_EDIT: Modus = make({
 export const MODUS_OPENROUTER_CHAT: Modus = make({
   id: 'modus.openrouter-chat',
   nomen: 'OpenRouter — text generation',
+  descriptio: 'OpenRouter text generation — one endpoint that routes to many providers/models (provider/model id). Pick it to reach non-OpenAI LLMs; use the ChatGPT flow when you specifically want OpenAI.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'openrouter',
@@ -125,12 +129,20 @@ export const MODUS_OPENROUTER_CHAT: Modus = make({
 export const MODUS_LAYER_COMPOSITE: Modus = make({
   id: 'modus.layer-composite',
   nomen: 'Layer Composite — z-order image compositing',
+  descriptio: 'Layer Composite — flattens ordered image layers (bottom→top) into one PNG, host-side and deterministic (no GPU). Pick it to stack/merge images; use Remove Background first to cut out subjects.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'composite',
   deliveryMode: 'sync',
   canonica: true,
   // Host-side deterministic processing — no GPU, no per-second pod cost.
+
+  // Explicit override (noema-087): the URL-array `layers` port is typed 'text' (a
+  // validateAditus smuggling workaround), making this structurally invisible to the
+  // cascade — it resolves off `exitus` alone instead of its true image->image shape.
+  // Best-fit existing verb: `effect` (i2i — image transform; z-order compositing is
+  // a same-modality image transform, the closest of the 14 canon verbs).
+  verbum: 'effect',
 
   aditus: {
     // Declared `text` so an array of URLs passes validateAditus intact (arrays
@@ -151,12 +163,20 @@ export const MODUS_LAYER_COMPOSITE: Modus = make({
 export const MODUS_FRAMES_TO_VIDEO: Modus = make({
   id: 'modus.frames-to-video',
   nomen: 'Frames → Video — assemble frames into an animation',
+  descriptio: 'Frames → Video — stitches ordered frame images into an mp4/webm at a chosen fps, host-side (no GPU). Pick it to assemble existing frames; use a t2v/i2v flow (Wan2.2, LTX) to generate motion.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'ffmpeg',
   deliveryMode: 'sync',
   canonica: true,
   // Host-side deterministic processing — no GPU, no per-second pod cost.
+
+  // Explicit override (noema-087): the URL-array `frames` port is typed 'text' (a
+  // validateAditus smuggling workaround), making this structurally invisible to the
+  // cascade — it resolves off `exitus` alone instead of its true image(s)->video
+  // shape. Best-fit existing verb: `animate` (i2v — video from a still; assembling
+  // frames into an animation is the same image-to-video family).
+  verbum: 'animate',
 
   aditus: {
     // `text` so an array of frame URLs passes validateAditus intact. Playback order.
@@ -176,6 +196,7 @@ export const MODUS_FRAMES_TO_VIDEO: Modus = make({
 export const MODUS_AITOOLKIT_TRAINING: Modus = make({
   id: 'modus.aitoolkit-training',
   nomen: 'LoRA Training — ai-toolkit',
+  descriptio: 'LoRA Training (ai-toolkit) — trains a custom LoRA from an image dataset + trigger word on a chosen base model. Pick it to create a new LoRA; then run the LoRA-capable make/edit flows to use it.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'aitoolkit',
@@ -184,6 +205,15 @@ export const MODUS_AITOOLKIT_TRAINING: Modus = make({
   // No impetusFixum: cost is runtime-duration based (the Modus convention for pod tools). The
   // LOCAL cursor still charges `impetusFixum ?? 0n` = 0n (self-hosted); the REMOTE cursor (Slice E)
   // reserves a pod-seconds cap, settled to the actual run length at the completion webhook.
+
+  // Explicit override (noema-087): all aditus ports are typed 'text'/'int' (no media
+  // port at all — `dataset` is a folder path string), so the cascade's text rule
+  // fires and falls to `chat` on the (text-typed) `trained` exitus. No canon verb for
+  // "trains a LoRA" exists in the 14-verb list; least-wrong fallback: `compose`
+  // (t2a·music's generic "assemble/create a new artifact from inputs" sense is the
+  // closest existing intent to synthesizing a trained weights artifact from a
+  // dataset). FLAGGED for operator review — this is a fallback, not an exact fit.
+  verbum: 'compose',
 
   // The user-facing contract: a DATASET + a few knobs. The modus SYNTHESISES the
   // ai-toolkit training yaml from these (buildAitkConfig, per base-model preset) — users

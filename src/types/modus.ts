@@ -25,6 +25,7 @@
 import type { ComputeStrategy, GpuClass } from './actum.js'
 import type { PodPolicy } from './materia.js'
 import type { AuctorKey } from '../flow/types.js'
+import type { CanonVerb } from '../crystal/verbResolver.js'
 export type { ComputeStrategy, GpuClass, PodPolicy }
 export type { AuctorKey }
 
@@ -122,6 +123,15 @@ export interface Modus {
   id: string
   /** "nomen" = name in Latin */
   nomen: string
+  /**
+   * "descriptio" = a written description in Latin — a flow-LEVEL routing line: what
+   * this flow is for and when to pick it over its siblings, in one sentence. Distinct
+   * from the per-Porta `Porta.description` (input-field tooltip). Read by the
+   * concierge/router to disambiguate flows that share a category (e.g. the text-to-image
+   * family). Inert display/routing metadata — NOT part of the contentHash (a copy edit
+   * must never re-hash a modus); see hashModus.ts. Absent → the flow carries no routing line.
+   */
+  descriptio?: string
   genus: ModusGenus
   /** Semantic version string e.g. "1.0.0" */
   versio: string
@@ -136,6 +146,16 @@ export interface Modus {
   aditus: Forma
   /** Output schema — "exitus" = exit in Latin */
   exitus: Forma
+
+  /**
+   * "verbum" = word in Latin — an explicit canon-verb override for this seed.
+   * When set, `resolveCanonVerb` (crystal/verbResolver.ts) returns it directly,
+   * bypassing the 3-rule structural cascade entirely (operator decision,
+   * 2026-07-14: fixes derivation blind spots for a handful of named flows
+   * without rewriting the cascade). Absent (the default) → the cascade derives
+   * the verb from `aditus`/`exitus` as before, unaffected.
+   */
+  verbum?: CanonVerb
 
   /** Ordered steps — present only when genus is 'compositus' */
   gradus?: Gradus[]
