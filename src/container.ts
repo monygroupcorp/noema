@@ -22,6 +22,7 @@ import type { Tabularum } from './types/tabula.js'
 import type { Testimoniorum, Depositorum, Solutionum, Petitionum } from './types/catena.js'
 import type { Scholiorum } from './types/scholium.js'
 import type { ColloquiumStore, DictumStore } from './types/colloquium.js'
+import type { QuerelaStore } from './types/Querela.js'
 import type { MemoriaStore } from './types/anima.js'
 import type { Materia, MateriaStore } from './types/materia.js'
 import type { HospitiumStore } from './types/hospitium.js'
@@ -110,6 +111,7 @@ import { MongoPetitio } from './crystal/MongoPetitio.js'
 import { MongoScholium } from './crystal/MongoScholium.js'
 import { MongoColloquium } from './crystal/MongoColloquium.js'
 import { MongoDictum } from './crystal/MongoDictum.js'
+import { MongoQuerela } from './crystal/MongoQuerela.js'
 import { MongoMemoria } from './crystal/MongoMemoria.js'
 import { CollectioCursor } from './crystal/CollectioCursor.js'
 import { CompositusCursor } from './crystal/CompositusCursor.js'
@@ -160,6 +162,7 @@ export interface Ring {
   scholia: Scholiorum
   colloquia: ColloquiumStore
   dicta: DictumStore
+  querelae: QuerelaStore
   memoriae: MemoriaStore
   fundamentorum: import('./types/fundamentum.js').Fundamentorum
   cursorum: Cursorum
@@ -328,6 +331,7 @@ export interface ContainerConfig {
   scholiaCollection?: string
   colloquiaCollection?: string
   dictaCollection?: string
+  querelaCollection?: string
   memoriaeCollection?: string
   /** Collection name for materiae — default 'materiae' */
   materiaCollection?: string
@@ -461,6 +465,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const scholia = new MongoScholium(db.collection(config.scholiaCollection ?? 'scholia'))
   const colloquia = new MongoColloquium(db.collection(config.colloquiaCollection ?? 'colloquia'))
   const dicta = new MongoDictum(db.collection(config.dictaCollection ?? 'dicta'))
+  const querelae = new MongoQuerela(db.collection(config.querelaCollection ?? 'querelae'))
   const memoriae = new MongoMemoria(db.collection(config.memoriaeCollection ?? 'memoriae'))
 
   const materiaCol: Collection = db.collection(config.materiaCollection ?? 'materiae')
@@ -719,7 +724,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     actorum, modorum, signorum, redituum, mercedum, tripwireBand, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,
     mandatores, corpora, collectiones, datasets, editiones, publicationAdapters, sodalitates, provinciae, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
-    colloquia, dicta, memoriae,
+    colloquia, dicta, querelae, memoriae,
     cursorum, completor, inceptor, arcanumIssuer,
     arcanumTree, arcanumVerifier, bursarium, ceremonia,
     materiae, hospitia, actumIndex, deployments,

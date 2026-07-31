@@ -128,6 +128,11 @@ export async function ensureIndexes(db: Db): Promise<void> {
     // dicta — conversation turns
     db.collection('dicta').createIndex({ id: 1 }, { unique: true }),
     db.collection('dicta').createIndex({ colloquiumId: 1, natum: 1 }),
+
+    // querelae — bug/feature/feedback reports
+    db.collection('querelae').createIndex({ id: 1 }, { unique: true }),
+    db.collection('querelae').createIndex({ ownerKey: 1, natum: -1 }),
+    db.collection('querelae').createIndex({ ownerKey: 1, contentHash: 1 }),
     // Per-turn idempotency (noema-095, MONEY CODE): the AGENT Dictum is the atomic per-turn CHARGE
     // GATE. UNIQUE PARTIAL on (colloquiumId, turnKey) over AGENT dicta ONLY — the settle/debit runs
     // only AFTER this insert succeeds, so two concurrent `POST /dicta` sharing a caller-supplied
