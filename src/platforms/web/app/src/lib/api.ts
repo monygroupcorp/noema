@@ -45,6 +45,61 @@ export interface RunRequest {
   studioId?: string;
   commitment?: string;
   bursaToken?: string;
+  // Chosen loras/models (intellaId or slug) — accepted top-level by apiRouter.ts's
+  // POST /v1/runs (not nested in aditus). Wired from a concierge ProposalCard's
+  // pinnedModels onto the GO run request (noema-099).
+  pinnedModels?: string[];
+}
+
+// ── Concierge (colloquia) — noema-095's HTTP surface ──────────────────────────
+// Mirrors src/allocutio/api/colloquiaRouter.ts + ConciergeAgent.ts's wire shapes
+// (the web app doesn't import backend source — kept in step by hand, same
+// convention as CanonVerb above).
+export interface Colloquium {
+  id: string;
+  status: string;
+  titulus?: string;
+  tabulaId?: string;
+  modoId?: string;
+  natum: string;
+  mutatum: string;
+}
+export interface ConciergeTokenUsage { totalTokens: number; promptTokens?: number; completionTokens?: number }
+export interface ConciergeQuote { impetus: string; recipient: string }
+export interface ConciergeProposal {
+  kind: 'proposal';
+  modusId?: string;
+  verb?: string;
+  aditus: Record<string, unknown>;
+  pinnedModels: string[];
+  quote: ConciergeQuote;
+  embellishedPrompt: string;
+  rationale: string;
+  tokenUsage: ConciergeTokenUsage;
+  priorRunId?: string;
+  delta?: string;
+}
+export interface ConciergeReply { kind: 'reply'; text: string; tokenUsage: ConciergeTokenUsage }
+export type ConciergeResult = ConciergeProposal | ConciergeReply;
+export interface Dictum {
+  id: string;
+  colloquiumId: string;
+  genus: 'user' | 'agent' | 'systema';
+  corpus: string;
+  signaIds: string[];
+  turnKey?: string;
+  natum: string;
+}
+
+// A turnKey — the caller-supplied idempotency key required by POST /v1/colloquia/:id/dicta
+// (colloquiaRouter.ts). One per dicta call; a resend of the exact same failed call would
+// reuse it (not implemented by callers here — each call mints a fresh one, matching the
+// "an accepted free turn, never a double" invariant on the crashed-before-charge path).
+// Shared by Chat.tsx and shell/Concierge.tsx — kept here (not in either screen file) to
+// avoid a Chat.tsx <-> AppShell <-> Concierge.tsx import cycle (Concierge is mounted by
+// every AppShell page, including Chat's own).
+export function newTurnKey(): string {
+  return (globalThis.crypto?.randomUUID?.() ?? `t-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 }
 
 // A vestigium (trace) — the indexed record of a completed generation. Mirrors the
@@ -378,6 +433,28 @@ export const api = {
   // param (query params leak into access logs/history).
   streamRun: (id: string) => sseStream(`/v1/runs/${id}/stream`, readHeaders()),
   meStatus: () => fetch('/v1/me/status', { headers: readHeaders() }).then(j<MeStatus>),
+
+  // ── Concierge (colloquia, noema-095) ──────────────────────────────────────
+  // Same auth pattern as createRun (Decision record Q4, noema-099): an active
+  // Vault purse sends ONLY the bursa token, no identity header; otherwise the
+  // normal authHeaders() bearer/anon-commitment path.
+  // POST /v1/colloquia — start a conversation thread.
+  createColloquium: (body: { titulus?: string; tabulaId?: string; modoId?: string; bursaToken?: string } = {}) => {
+    const purse = getActivePurse();
+    const headers = purse ? { 'content-type': 'application/json', 'x-bursa-token': purse } : authHeaders();
+    return fetch('/v1/colloquia', { method: 'POST', headers, body: JSON.stringify(body) }).then(j<{ colloquium: Colloquium }>);
+  },
+  // POST /v1/colloquia/:id/dicta — run one metered turn. `turnKey` is the caller-supplied
+  // idempotency key (required server-side); `priorRunId` sets the critique/adjust context.
+  postDictum: (
+    colloquiumId: string,
+    body: { turnKey: string; message: string; priorRunId?: string; bursaToken?: string },
+  ) => {
+    const purse = getActivePurse();
+    const headers = purse ? { 'content-type': 'application/json', 'x-bursa-token': purse } : authHeaders();
+    return fetch(`/v1/colloquia/${encodeURIComponent(colloquiumId)}/dicta`, { method: 'POST', headers, body: JSON.stringify(body) })
+      .then(j<{ dictum: Dictum; result: ConciergeResult; charged: string; idempotentReplay?: boolean }>);
+  },
 
   // GET /api/vestigia — the caller's own recent vestigia (traces), newest first.
   listVestigia: (limit?: number) => {
