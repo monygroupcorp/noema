@@ -130,6 +130,10 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
                 : <div className="ex"><div className="extext">{idleResult.text}</div></div>
             )}
 
+            {idleSending && (
+              <div className="stage"><span className="dots"><span /><span /><span /></span> thinking…</div>
+            )}
+
             <div className="cinput">
               <input
                 ref={idleRef}
