@@ -13,7 +13,7 @@ import { api, type Dataset } from '../lib/api';
 // same constraint TrainRun.tsx's monitor already labels honestly).
 const CUSTODY: { c: Custody; t: string; s: string }[] = [
   { c: 'local', t: 'Local', s: 'Your GPU. Nothing leaves.' },
-  { c: 'sealed', t: 'Remote · TEE', s: 'Sealed enclave — we run it, we can’t read your data.' },
+  { c: 'sealed', t: 'Remote · TEE', s: 'Private tunnel to a single-tenant pod. Hardware-sealed compute is in development.' },
   { c: 'remote', t: 'Remote', s: 'Our GPUs. Fastest, we can see it.' },
 ];
 

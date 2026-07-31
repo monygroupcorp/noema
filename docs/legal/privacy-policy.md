@@ -7,12 +7,12 @@
 
 ## The short version
 
-We built the architecture so that private compute sessions **do not route through our servers** — being out of the data path is an architectural fact, not just a promise we make. Here is what that means in practice:
+We collect as little as we can and we do not track you. Here is what that means in practice:
 
-- In a private session, your prompts, outputs, and model selection never reach our servers. We see: a session opened, GPU-hours consumed, a session ended.
+- We do not retain your prompts or outputs after a request completes, and we do not use them to train models.
 - We do not run Google Analytics or any third-party tracking.
 - If you use Bursa anonymous credits, we cannot link your spend to an identity. The billing is a zero-knowledge proof.
-- We do not train on your data.
+- A hardware-sealed private-compute tier (TEE), in which session content would be technically inaccessible to us, is **in development** and not yet available. We do not currently claim that the compute provider cannot see your session content.
 
 The long version follows.
 
@@ -20,9 +20,9 @@ The long version follows.
 
 ## 1. Who we are
 
-[ENTITY NAME] operates the Noema Crystal platform, a private AI compute service. References to "we," "us," or "our" mean [ENTITY NAME]. Our registered address is [ADDRESS].
+[ENTITY NAME] operates the Noema Crystal platform, an AI compute service. References to "we," "us," or "our" mean [ENTITY NAME]. Our registered address is [ADDRESS].
 
-For GDPR purposes, [ENTITY NAME] is the data controller for account and billing data. For private sessions, we are not a controller of session content — we never receive it.
+For GDPR purposes, [ENTITY NAME] is the data controller for account and billing data, and processes session content transiently to deliver the service (see Section 2d).
 
 ---
 
@@ -59,25 +59,19 @@ Anonymous credit (Bursa): a Bursa token is a Groth16 zero-knowledge proof. We ve
 
 We do not retain IP addresses beyond 24 hours. We do not correlate IPs with account identities.
 
-### 2d. Session content — private sessions
+### 2d. Session content — how we process prompts and outputs
 
-**We do not receive, store, or have access to:**
-- Your prompts or inputs
-- Model outputs
-- Which AI model you selected
-- Any content exchanged through the WireGuard tunnel
+To generate your results, your prompts and outputs are processed on external GPU compute (RunPod) and, for concierge/chat, an external LLM provider (via OpenRouter). These providers are inside the trust boundary: we and they can technically access session content in order to run it.
 
-The WireGuard tunnel is established directly between your browser and the GPU pod. After tunnel establishment, our servers are architecturally excluded from the data path. The pod receives only what you send through the tunnel.
+- We do not retain prompt or output content after the request completes.
+- We do not use prompt or output content to train models.
+- We retain session metadata as described in 2c.
 
-The pod runs on single-tenant infrastructure from our compute provider. Until the confidential-compute hardware tier ships, the provider hosting the pod is technically positioned to access the pod's memory (see Section 5); we are not.
+We do not claim your session content is unseen by the compute provider. That guarantee requires the hardware-sealed tier described in 2e, which is not yet available.
 
-The platform receives exactly three signals from a private session, all content-free: session started, heartbeat (GPU-hours), session ended.
+### 2e. Private compute (TEE) — in development
 
-### 2e. Session content — non-private sessions (API, bot)
-
-In non-private sessions (Telegram bot, direct API without a private session), we process your prompts and outputs to deliver the service. We do not retain prompt or output content after the request completes. We do not use prompt or output content to train models.
-
-We retain session metadata as described in 2c.
+We are building a hardware-sealed private-compute tier in which a WireGuard tunnel is established directly between your browser and a single-tenant GPU pod, with browser-verified attestation, so that session content would be technically inaccessible to us. **This tier is in development and not yet available.** Until it ships, do not treat any session as sealed from the compute provider. This policy will be updated when the tier launches.
 
 ### 2f. Usage and error logs
 
@@ -127,7 +121,7 @@ We do not:
 
 We share data only in these limited circumstances:
 
-**Infrastructure providers:** We use RunPod for GPU compute. Session metadata is shared as necessary to provision and bill for compute. Session content in private sessions is never transmitted to us; it reaches the provider's GPU pod only through your encrypted tunnel. Because the pod runs on the provider's hardware, the provider is technically positioned to access pod memory until the confidential-compute tier ships; we do not share content with them, and NOEMA has no access path of its own.
+**Infrastructure providers:** We use RunPod for GPU compute and, for concierge/chat, an external LLM provider (via OpenRouter). Session content is transmitted to these providers as necessary to run your request; it is not retained after the request completes.
 
 **Payment processors:** [PROCESSOR NAME] handles payment card processing. We share only what's necessary to process your payment.
 
@@ -155,8 +149,7 @@ We run content classifiers and hash-matching against known CSAM databases at the
 | Session metadata (billing) | 90 days |
 | IP addresses | 24 hours |
 | Error logs | 30 days |
-| Prompt / output content (private sessions) | Never received |
-| Prompt / output content (non-private sessions) | Not retained after request |
+| Prompt / output content | Not retained after request |
 | OFAC screening records | 5 years (legal requirement) |
 | CSAM reporting records | As required by law |
 | Bursa ZK proof records | Proof verification timestamp + credit amount, 90 days |
@@ -175,7 +168,7 @@ Depending on your jurisdiction, you may have the right to:
 
 To exercise these rights: [CONTACT EMAIL]
 
-Because we hold minimal data by architecture, most requests can be fulfilled immediately. Private-session content is not held by us and cannot be retrieved or deleted — it was never received.
+Because we hold minimal data by design, most requests can be fulfilled immediately. We do not retain prompt or output content after a request completes, so there is no session content for us to retrieve or delete.
 
 ---
 

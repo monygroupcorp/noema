@@ -12,14 +12,17 @@ trust-and-safety/child-safety advisor) before we rely on it.
 
 We refuse to *know who* performs lawful work. We do **not** facilitate specific crimes
 (CSAM, NCII of real people, sanctioned actors). Both are achievable simultaneously by
-scanning at the **trust boundary** — hashes and classifiers, runnable inside the TEE —
-rather than surveilling user identity. This is how legitimate privacy tech operates and it
-is the posture that lets us exist.
+scanning at the **publish boundary** — hashes and classifiers — rather than surveilling user
+identity. This is how legitimate privacy tech operates and it is the posture that lets us exist.
 
-Our architecture (see `docs/north-star.md`) already embodies the privacy moat: TEE-capable
-pods, WireGuard tunnel, ZK spend proofs. The "Simple Case" (Telegram bot as trusted client)
-sees content because the user elected to skip the privacy machinery; the "Full Case" is
-cryptographically blind. Compliance controls must work in **both** cases.
+Our delivered posture is data minimization (no retention of prompt/output content), anonymous
+rails (ZK spend proofs), and single-tenant WireGuard-tunneled pods. The **confidential-compute
+TEE tier** (hardware-sealed, browser-attested, provider-out-of-trust-boundary) is **in
+development and not yet delivered** — do not predicate the compliance strategy on it as if it
+shipped. Today the "Full Case" is network-isolated, not cryptographically blind; the compute
+provider is still inside the trust boundary. The "Simple Case" (Telegram bot as trusted client)
+sees content because the user elected to skip the privacy machinery. Compliance controls must
+work in **both** cases and must not assume the TEE tier exists yet.
 
 ---
 
@@ -94,14 +97,16 @@ This is where anonymity collides hardest with law. Structure determines exposure
 
 ## 6. Data protection — where the principle becomes an advantage
 
-- GDPR / CCPA exposure scales with personal data held. We hold almost none by architecture
-  (no logging, TEE, anonymous rails) → unusually **small** compliance surface.
-- Document "we don't collect data" as a formal posture — it's a selling point to enterprise
+- GDPR / CCPA exposure scales with personal data held. We hold almost none by design
+  (no content retention, anonymous rails) → unusually **small** compliance surface. (The TEE
+  tier would further reduce it, but it is in development — do not count it yet.)
+- Document "we don't retain content" as a formal posture — it's a selling point to enterprise
   privacy buyers (medical/legal), not just a principle.
-- **Healthcare:** serving PHI makes us a HIPAA **Business Associate** → sign **BAAs**. TEE +
-  no-log is the technical safeguard; the BAA is the legal instrument we cannot skip.
-- **Legal vertical:** confidentiality / privilege expectations — the no-log/TEE posture maps
-  cleanly, but contracts must reflect it.
+- **Healthcare:** serving PHI makes us a HIPAA **Business Associate** → sign **BAAs**. No-retention
+  is today's technical safeguard (the sealed TEE tier is pending); the BAA is the legal
+  instrument we cannot skip.
+- **Legal vertical:** confidentiality / privilege expectations — the no-retention posture maps
+  reasonably, but contracts must reflect it and must not promise the undelivered sealed tier.
 
 ---
 
