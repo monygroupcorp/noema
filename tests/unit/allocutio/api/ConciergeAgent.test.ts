@@ -253,3 +253,38 @@ test('critique case yields a proposal carrying priorRunId and delta, not a new k
   assert.equal(result.priorRunId, 'run_prior_1')
   assert.equal(result.delta, 'increased steps 20 -> 35 for more detail')
 })
+
+// ---------------------------------------------------------------------------
+// (h) REGRESSION (noema-102): the echoed assistant tool_calls on the NEXT
+// request must carry the OpenAI/OpenRouter WIRE shape ({id, type: 'function',
+// function: {name, arguments}}), not the client's friendly parsed shape
+// ({id, name, arguments}) — echoing the friendly shape verbatim is what 400s
+// every real staging turn (`messages[].tool_calls[].type` missing). The
+// following `tool` result message must carry a matching `tool_call_id`.
+// ---------------------------------------------------------------------------
+test('the outgoing assistant tool_calls on the next request carry the wire shape', async () => {
+  const { api } = makeApi()
+  const client = scriptedClient([
+    chatResult({ ...listFlowsCall, tokenUsage: { totalTokens: 1 } }),
+    chatResult({ content: 'ok', tokenUsage: { totalTokens: 1 } }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'make me a fox')
+
+  // client.calls[1] is what the SECOND runToolChat call received — the request
+  // that carries the echoed history from the first tool-call turn.
+  const secondCallMessages = client.calls[1].messages
+  const assistantMsg = secondCallMessages.find((m) => m.role === 'assistant' && m.tool_calls?.length)
+  assert.ok(assistantMsg, 'expected an assistant message carrying tool_calls in the echoed history')
+  const toolCalls = assistantMsg!.tool_calls as unknown as Array<{
+    id: string
+    type: string
+    function: { name: string; arguments: string }
+  }>
+  assert.equal(toolCalls[0].id, 'c1')
+  assert.equal(toolCalls[0].type, 'function')
+  assert.deepEqual(toolCalls[0].function, { name: 'list_flows', arguments: '{}' })
+
+  const toolResultMsg = secondCallMessages.find((m) => m.role === 'tool' && m.tool_call_id === 'c1')
+  assert.ok(toolResultMsg, 'expected a tool-role result message with matching tool_call_id')
+})
