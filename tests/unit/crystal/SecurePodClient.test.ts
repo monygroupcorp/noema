@@ -1,6 +1,11 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { SecurePodClient } from '../../../src/crystal/SecurePodClient.js'
+import {
+  SecurePodClient,
+  DEFAULT_GPU_TYPE_IDS,
+  ACCEPTED_GPU_TYPE_IDS,
+  assertGpuTypeIdsAccepted,
+} from '../../../src/crystal/SecurePodClient.js'
 import type { SecurePodConfig, SshTransportLike } from '../../../src/crystal/SecurePodClient.js'
 import { impetusPerSecondFromHourly } from '../../../src/ledger/rates.js'
 import { withTrace, makeTraceContext } from '../../../src/lib/trace.js'
@@ -460,4 +465,67 @@ test("ComfyUI bootstrap: provisionStudio's clone is also pinned via --branch", a
   const cloneCmd = ssh.execCalls.find(c => c.includes('git clone') && c.includes('ComfyUI.git'))
   assert.ok(cloneCmd, 'expected a ComfyUI clone command')
   assert.match(cloneCmd!, /--branch/, 'clone must pin a ref via --branch (never unpinned HEAD)')
+})
+
+// ── RunPod gpuTypeIds enum (noema-103) ─────────────────────────────────────────
+// SECURE-tier provisioning (attempts 1-2) sends DEFAULT_GPU_TYPE_IDS as the pod's
+// `gpuTypeIds`. RunPod 400s an unknown id, degrading SECURE to a COMMUNITY fallback
+// (loses the private/TEE guarantee). These pin the sent list to RunPod's accepted enum
+// and prove the construct-time drift guard fails loud (naming the SKU) before any POST.
+
+test('default-path provision sends DEFAULT_GPU_TYPE_IDS as gpuTypeIds when config omits it', async () => {
+  const { fetch, calls } = makeFetchMock('pod-default-gpus')
+  // No gpuTypeIds in config → resolves to DEFAULT_GPU_TYPE_IDS, mirroring the real
+  // wiring at src/index.ts:308-323 (SecurePodClient built with no gpuTypeIds).
+  const client = makeClient(makeConfig({ gpuTypeIds: undefined }), () => makeSshTransport(), fetch)
+  await client.submit({ input: {} })
+  const provision = calls.find(c =>
+    c.method === 'POST' && c.url.includes('rest.runpod.io') && c.url.includes('/pods'),
+  )
+  assert.ok(provision, 'expected a provision POST')
+  const body = JSON.parse(provision!.body ?? '{}') as { gpuTypeIds?: string[] }
+  assert.deepEqual(body.gpuTypeIds, DEFAULT_GPU_TYPE_IDS,
+    'default provision must send exactly the pruned DEFAULT_GPU_TYPE_IDS')
+})
+
+test('DEFAULT_GPU_TYPE_IDS is a subset of RunPod\'s accepted enum (no stale SKUs)', () => {
+  const offending = DEFAULT_GPU_TYPE_IDS.filter(id => !ACCEPTED_GPU_TYPE_IDS.includes(id))
+  assert.deepEqual(offending, [], `stale gpuTypeIds present: ${offending.join(', ')}`)
+  // Regression pin for the specific pruned SKU (noema-103).
+  assert.ok(!DEFAULT_GPU_TYPE_IDS.includes('NVIDIA A30'), "'NVIDIA A30' must stay pruned")
+  // Over-pruning guard: the primary SECURE GPU must remain.
+  assert.ok(DEFAULT_GPU_TYPE_IDS.includes('NVIDIA GeForce RTX 4090'),
+    'primary SECURE GPU must be retained')
+})
+
+test('construct-time guard: constructing SecurePodClient with the real DEFAULT list does not throw', () => {
+  assert.doesNotThrow(() => makeClient(makeConfig(), () => makeSshTransport(), makeFetchMock().fetch))
+})
+
+test('assertGpuTypeIdsAccepted: does not throw for the real DEFAULT_GPU_TYPE_IDS', () => {
+  assert.doesNotThrow(() => assertGpuTypeIdsAccepted(DEFAULT_GPU_TYPE_IDS))
+})
+
+test('assertGpuTypeIdsAccepted: throws naming the offending SKU on a synthetic drifted list', () => {
+  const drifted = [...DEFAULT_GPU_TYPE_IDS, 'NVIDIA A30']
+  assert.throws(
+    () => assertGpuTypeIdsAccepted(drifted),
+    (err: unknown) => {
+      assert.ok(err instanceof Error)
+      assert.match(err.message, /NVIDIA A30/, 'error must name the offending SKU explicitly')
+      return true
+    },
+  )
+})
+
+test('assertGpuTypeIdsAccepted: names every offending SKU when multiple have drifted', () => {
+  assert.throws(
+    () => assertGpuTypeIdsAccepted(['NVIDIA A30', 'NVIDIA GeForce RTX 4090', 'NVIDIA MADE-UP-GPU']),
+    (err: unknown) => {
+      assert.ok(err instanceof Error)
+      assert.match(err.message, /NVIDIA A30/)
+      assert.match(err.message, /NVIDIA MADE-UP-GPU/)
+      return true
+    },
+  )
 })
