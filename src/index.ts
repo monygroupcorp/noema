@@ -19,6 +19,7 @@ import { makeResolveWalletAnima } from './crystal/resolveWalletAnima.js'
 import { AlchemyPricer, nullPricer } from './crystal/AssetPricer.js'
 import { permissiveSanctionsScreen, type SanctionsScreen } from './compliance/SanctionsScreen.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
+import { createQuerelaRouter } from './api/querela/querelaRouter.js'
 import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
 import { mountCeremony } from './api/arcanum/mountCeremony.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
@@ -984,6 +985,10 @@ async function main(): Promise<void> {
   // original spot above) because / and /projection resolve the CALLER's identity
   // via apiResolver, mirroring createSponsioRouter below.
   app.use('/api/vestigia', createVestigiaRouter({ vestigiorum: ring.vestigiorum, identity: apiResolver }))
+  // Querela reports (bug/feature/feedback, plans/noema-100.md) — anon-capable (animaId,
+  // commitment, AND bursaToken), so mounted here (not via apiResolver-only vestigia-style
+  // resolveCaller) with its own bursa-permitting auth seam, mirroring createSponsioRouter below.
+  app.use('/v1/reports', express.json(), createQuerelaRouter({ querelae: ring.querelae, identity: apiResolver }))
 
   // ── CAMEL agent onboarding (ADR-0011 phase 3) ─────────────────────────────────
   // Treasury config is injected (not a stored noun): prod has exactly one treasury.
