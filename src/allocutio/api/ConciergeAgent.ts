@@ -409,6 +409,23 @@ async function finalize(
     const pinnedModels = Array.isArray(obj.pinnedModels)
       ? obj.pinnedModels.filter((m): m is string => typeof m === 'string')
       : []
+    // Pre-GO resolvability check (noema-113): the price/quote path never receives pinnedModels, so
+    // nothing else verifies the concierge's picks compile. Run each through the SAME normalizer the
+    // run path uses; if any is unresolvable/forbidden, do NOT emit a GO-able proposal — degrade to a
+    // reply so the pick becomes a caught, re-proposable error instead of a paid 500 on GO.
+    if (pinnedModels.length > 0) {
+      try {
+        await deps.api.resolvePinnedModels(ctx.auctor, pinnedModels)
+      } catch (e) {
+        return {
+          kind: 'reply',
+          text:
+            `I lined up a model for that, but it isn't available to run (${String(e)}). ` +
+            'Tell me a bit more about the look you want and I\'ll pick a different one.',
+          tokenUsage,
+        }
+      }
+    }
     return {
       kind: 'proposal',
       ...(modusId ? { modusId } : {}),
