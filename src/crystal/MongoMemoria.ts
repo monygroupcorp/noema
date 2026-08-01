@@ -38,4 +38,14 @@ export class MongoMemoria implements MemoriaStore {
     const doc = await this.col.findOne({ animaId })
     return doc ? fromDoc(doc as Record<string, unknown>) : null
   }
+
+  /**
+   * GDPR erasure (noema-025) — hard-delete this soul's distilled long-term memory. One doc per
+   * `animaId`; `deleteMany` keeps it idempotent (a re-run returns 0). This is private identity
+   * content with no retention duty — removed outright.
+   */
+  async deleteByAnima(animaId: string): Promise<number> {
+    const r = await this.col.deleteMany({ animaId })
+    return r.deletedCount ?? 0
+  }
 }

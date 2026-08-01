@@ -87,4 +87,14 @@ export class MongoConsuetudinum implements Consuetudinum {
       { upsert: true },
     )
   }
+
+  /**
+   * GDPR erasure (noema-025) — hard-delete ALL of this soul's established defaults (verb rebinds,
+   * per-modus affines, appearance, generatio) in one sweep. Every doc kind carries the flattened
+   * `auctorKey.animaId`, so a single filter clears them. Idempotent — a re-run returns 0.
+   */
+  async deleteByAnima(animaId: string): Promise<number> {
+    const r = await this.col.deleteMany({ 'auctorKey.animaId': animaId })
+    return r.deletedCount ?? 0
+  }
 }

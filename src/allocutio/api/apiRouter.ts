@@ -60,6 +60,7 @@ export interface ApiFacade {
   saveFlow(auctor: AuctorKey, opts: SaveFlowOpts): Promise<{ id: string }>
   bind(auctor: AuctorKey, verb: string, modusId: string): Promise<{ verb: string; modusId: string }>
   getMe(auctor: AuctorKey): Promise<import('./CrystalApi.js').MeView>
+  eraseMe(auctor: AuctorKey): Promise<import('../../types/erasure.js').ErasureReceipt>
   recordAttestation(auctor: AuctorKey): Promise<{ attestedAt: number }>
   putSecret(auctor: AuctorKey, provider: string, token: string, idleDays?: number): Promise<import('./CrystalApi.js').SecretView>
   removeSecret(auctor: AuctorKey, provider: string): Promise<import('./CrystalApi.js').SecretView>
@@ -131,7 +132,7 @@ export interface Identity {
   resolve(creds: Credentials): Promise<AuctorKey>
 }
 
-export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?: RunEventHub; exporter?: MeExporter }): Router {
+export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?: RunEventHub; exporter?: MeExporter; erasureEnabled?: boolean }): Router {
   const { api, identity } = deps
   const router = express.Router()
 
@@ -760,6 +761,21 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     }
     const auctor = await auth(req)
     res.status(200).json(await deps.exporter.exportForCaller(auctor))
+  }))
+
+  // DELETE /v1/me — GDPR Art. 17 right-to-erasure (noema-025). Pseudonymize-and-tombstones the
+  // CALLER'S OWN account (self-only: auth = the caller's key, so a caller can never erase another
+  // owner). Behind the `ERASURE_ENABLED` flag (default OFF, counsel-gated in production): when the
+  // flag is off the endpoint 404s and does not even reveal itself. Returns a TRUTHFUL receipt — it
+  // reports the retained-anonymized financial ledger, never "everything deleted". Destructive +
+  // irreversible: the frontend fronts it with a typed-confirmation gate.
+  router.delete('/me', wrap(async (req, res) => {
+    if (!deps.erasureEnabled) {
+      res.status(404).json({ error: { code: 'not_found', message: 'account erasure is not enabled' } })
+      return
+    }
+    const auctor = await auth(req)
+    res.status(200).json(await api.eraseMe(auctor))
   }))
 
   // PUT /v1/me/appearance — replace the caller's presentation skin (Profile).

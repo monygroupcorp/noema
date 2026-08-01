@@ -49,4 +49,14 @@ export class MongoPetitio implements Petitionum {
     )
     return result.modifiedCount
   }
+
+  /**
+   * GDPR erasure (noema-025) — hard-delete this soul's deposit-intent requests (Petitiones). A
+   * Petitio is a pre-deposit ask (the wallet/amount the user intends to fund), NOT a settled
+   * financial row — the immutable `Depositum`/`Signum`/`reditus` ledger is untouched. Idempotent.
+   */
+  async deleteByAnima(animaId: string): Promise<number> {
+    const r = await this.col.deleteMany({ animaId })
+    return r.deletedCount ?? 0
+  }
 }
