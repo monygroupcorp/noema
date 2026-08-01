@@ -42,6 +42,13 @@ export interface Colloquium {
   tabulaId?: string
   /** FK → Modo. Optional session this conversation runs within. */
   modoId?: string
+  /**
+   * FK → Project (Provincia). Optional project this conversation is filed under —
+   * the ACTIVE project at create time (noema-111). Absent → uncategorized (existing
+   * rows are `undefined`, so no migration is needed). Purely a grouping tag for the
+   * thread-list UI; ownership stays ownerKey-scoped.
+   */
+  projectId?: string
   /** "titulus" = title in Latin — optional user-given display name for this thread */
   titulus?: string
   /** "natum" = born — when this thread was created */
