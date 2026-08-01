@@ -15,6 +15,10 @@ import { Lightbox } from '../components/Lightbox';
 
 type Aditus = Record<string, unknown>;
 
+// Autosave debounce for the Card form's affines writes — same timing as Canvas's
+// tabula autosave (Canvas.tsx AUTOSAVE_DEBOUNCE_MS) so the app is consistent.
+const AUTOSAVE_DEBOUNCE_MS = 1500;
+
 function cleanAditus(a: Aditus): Aditus {
   const out: Aditus = {};
   for (const [k, v] of Object.entries(a)) if (v !== '' && v !== undefined && v !== null) out[k] = v;
@@ -232,8 +236,13 @@ export function Card() {
   const assist = useAssistField();
   useEffect(() => () => clear(), [clear]);
 
-  // Per-flow saved input defaults (affines). Loaded over the schema defaults, saved on demand.
+  // Per-flow saved input defaults (affines). Loaded on mount (hydrates in-progress inputs),
+  // autosaved debounced on change, and savable-as-defaults on demand via the explicit button.
   const [affSave, setAffSave] = useState<{ s: 'idle' | 'busy' | 'done' | 'err'; msg?: string }>({ s: 'idle' });
+  const affSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Skip the autosave triggered by the load effect's own setAditus (Canvas.tsx pattern) —
+  // only user edits should schedule a write.
+  const skipNextAffSave = useRef(true);
 
   // Live LoRA trigger-word highlight — the composer courtesy (noema-061). Fetched once
   // per flow load (keyed on flow.familia, the base-model compatibility family the
@@ -258,6 +267,8 @@ export function Card() {
   useEffect(() => {
     let live = true;
     setFlow(null); setLoadErr(null); setRunId(undefined); setDispatching(false); setDispatchErr(undefined); setQuote(null); setAffSave({ s: 'idle' });
+    skipNextAffSave.current = true;
+    if (affSaveTimer.current) clearTimeout(affSaveTimer.current);
     api.getFlow(id).then((f) => {
       if (!live) return;
       setFlow(f);
@@ -267,7 +278,9 @@ export function Card() {
         else if (k === 'prompt') init[k] = preloadPrompt || 'a low-poly n64-style dragon perched on a neon temple, dusk';
         else init[k] = '';
       }
-      // Overlay the caller's saved defaults for this flow (best-effort — anon-capable).
+      // Overlay the caller's saved defaults for this flow — the autosaved in-progress
+      // inputs if any (getAffines returns the same key autosave writes to), else the
+      // last explicit "save defaults" (best-effort — anon-capable).
       api.getAffines(id)
         .then((r) => { if (live) setAditus({ ...init, ...(r.affines ?? {}) }); })
         .catch(() => { if (live) setAditus(init); });
@@ -275,7 +288,28 @@ export function Card() {
     return () => { live = false; };
   }, [id]);
 
+  // Debounced autosave of the in-progress inputs, keyed to this flow's affines (same
+  // key/endpoint the manual "save defaults" button and the hydrate-on-mount read use —
+  // Card.tsx:271-273) so navigating away or refreshing restores the same card's typed
+  // inputs, not just the last explicit save. Mirrors Canvas.tsx's tabula autosave
+  // (debounce after change, skip the load-triggered initial value, last-write-wins on
+  // the debounced value since each change clears and reschedules the pending timer).
+  useEffect(() => {
+    if (!flow) return;
+    if (skipNextAffSave.current) { skipNextAffSave.current = false; return; }
+    setAffSave({ s: 'busy' });
+    if (affSaveTimer.current) clearTimeout(affSaveTimer.current);
+    affSaveTimer.current = setTimeout(() => {
+      api.setAffines(id, cleanAditus(aditus))
+        .then(() => setAffSave({ s: 'done' }))
+        .catch((e) => setAffSave({ s: 'err', msg: e instanceof Error ? e.message : String(e) }));
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => { if (affSaveTimer.current) clearTimeout(affSaveTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aditus, flow, id]);
+
   async function saveDefaults() {
+    if (affSaveTimer.current) clearTimeout(affSaveTimer.current);
     setAffSave({ s: 'busy' });
     try {
       await api.setAffines(id, cleanAditus(aditus));

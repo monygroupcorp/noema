@@ -1,9 +1,10 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { isExampleCleared, clearExample } from '../lib/chatExample';
-import { api, newTurnKey, type ConciergeProposal } from '../lib/api';
+import { api, newTurnKey, type ConciergeProposal, type ColloquiumSummary } from '../lib/api';
+import { useProject } from '../state/project';
 import { ProposalCard } from '../components/ProposalCard';
 
 // ── Two honest signals (see identity/noema/chat-spec.md) ──────────────────────
@@ -88,6 +89,68 @@ function ProvMeter({ p, onCanvas }: { p: Prov; onCanvas: (p: Prov) => void }) {
   );
 }
 
+// ── Thread history (noema-111) — group the caller's threads by project ────────
+// Threads arrive newest-first from GET /v1/colloquia. A thread with no projectId
+// (or whose project isn't in the current workspace) falls into "Uncategorized",
+// which is always sorted last.
+const UNCATEGORIZED = '__uncategorized__';
+interface ThreadGroup { key: string; name: string; threads: ColloquiumSummary[] }
+function groupThreads(threads: ColloquiumSummary[], nameOf: (id?: string) => string | undefined): ThreadGroup[] {
+  const buckets = new Map<string, ThreadGroup>();
+  for (const t of threads) {
+    const resolved = t.projectId ? nameOf(t.projectId) : undefined;
+    const key = resolved ? t.projectId! : UNCATEGORIZED;
+    const name = resolved ?? 'Uncategorized';
+    let g = buckets.get(key);
+    if (!g) { g = { key, name, threads: [] }; buckets.set(key, g); }
+    g.threads.push(t);
+  }
+  return [...buckets.values()].sort((a, b) =>
+    a.key === UNCATEGORIZED ? 1 : b.key === UNCATEGORIZED ? -1 : 0,
+  );
+}
+function threadTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+// One agent Dictum's corpus → a rendered body: a serialized proposal (JSON with kind:'proposal',
+// see colloquiaRouter.dictumCorpus) round-trips to a ProposalCard; anything else is a plain reply.
+function hydrateAgentBody(corpus: string, onAdjust: (priorRunId: string | undefined) => void): ReactNode {
+  try {
+    const parsed = JSON.parse(corpus) as { kind?: string } & Record<string, unknown>;
+    if (parsed && parsed.kind === 'proposal') {
+      const proposal = { ...parsed, tokenUsage: (parsed.tokenUsage as ConciergeProposal['tokenUsage']) ?? { totalTokens: 0 } } as unknown as ConciergeProposal;
+      return <ProposalCard proposal={proposal} onAdjust={onAdjust} />;
+    }
+  } catch { /* not JSON — a plain text reply */ }
+  return corpus;
+}
+
+// Inline styles for the history drawer (noema-111). The chat stylesheet (styles/app.css)
+// owns the surrounding chrome; the drawer ships its own layout inline so it is self-contained
+// and theme-variable driven (var(--*) match the rest of the app's tokens).
+const H = {
+  backdrop: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 40 } as const,
+  drawer: {
+    position: 'fixed', top: 0, left: 0, bottom: 0, width: 'min(320px, 85vw)', zIndex: 41,
+    background: 'var(--panel, #14161c)', borderRight: '1px solid var(--line, #2a2f3a)',
+    display: 'flex', flexDirection: 'column', boxShadow: '2px 0 16px rgba(0,0,0,0.3)',
+  } as const,
+  head: { display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 14px', borderBottom: '1px solid var(--line, #2a2f3a)' } as const,
+  newBtn: { marginLeft: 'auto', fontSize: '12px', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--line, #2a2f3a)', background: 'transparent', color: 'inherit', cursor: 'pointer' } as const,
+  xBtn: { display: 'flex', padding: '4px', background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer' } as const,
+  body: { overflowY: 'auto', padding: '8px 6px', flex: 1 } as const,
+  empty: { opacity: 0.6, fontSize: '13px', padding: '16px 12px' } as const,
+  groupName: { fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', opacity: 0.55, padding: '10px 10px 4px' } as const,
+  item: { display: 'flex', flexDirection: 'column', gap: '2px', width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: '8px', border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer' } as const,
+  itemActive: { background: 'var(--hover, rgba(255,255,255,0.06))' } as const,
+  itemTitle: { fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as const,
+  itemPreview: { fontSize: '12px', opacity: 0.6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as const,
+  itemTime: { fontSize: '11px', opacity: 0.45 } as const,
+  bar: { display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' } as const,
+  toggle: { fontSize: '12px', padding: '5px 12px', borderRadius: '6px', border: '1px solid var(--line, #2a2f3a)', background: 'transparent', color: 'inherit', cursor: 'pointer' } as const,
+};
+
 export function Chat() {
   const [msgs, setMsgs] = useState<Msg[]>(() => (isExampleCleared() ? [] : SEED));
   const [route, setRoute] = useState<RouteId>('noema');   // default selection per spec
@@ -102,6 +165,56 @@ export function Chat() {
   const [colloquiumId, setColloquiumId] = useState<string | undefined>();
   const [sending, setSending] = useState(false);
   const [critiqueOf, setCritiqueOf] = useState<string | undefined>();
+
+  // Thread history (noema-111): the caller's own past threads, grouped by project.
+  // The active project stamps new threads; the whole set groups the list. A thread is
+  // created lazily on first send() — mounting this screen never creates a throwaway one.
+  const { project, projects } = useProject();
+  const [threads, setThreads] = useState<ColloquiumSummary[]>([]);
+  const [listOpen, setListOpen] = useState(false);
+  const projectNameOf = (id?: string): string | undefined =>
+    id ? projects.find((p) => p.id === id)?.name : undefined;
+
+  async function refreshThreads() {
+    try {
+      const { colloquia } = await api.listColloquia();
+      setThreads(colloquia);
+    } catch { /* offline / not-yet-authed — keep whatever we have */ }
+  }
+  // Load the thread list once on mount (no auto-resume, no auto-create — the list is the
+  // landing state; a click resumes, a send starts fresh).
+  useEffect(() => { void refreshThreads(); }, []);
+
+  // Resume a past thread: hydrate the message list from its dicta and make it the active
+  // colloquium so the next send() continues it (not a new thread).
+  async function resume(id: string) {
+    try {
+      const { dicta } = await api.getColloquium(id);
+      const hydrated: Msg[] = dicta
+        .filter((d) => d.genus !== 'systema')
+        .map((d) =>
+          d.genus === 'user'
+            ? { who: 'you', body: d.corpus }
+            : { who: 'concierge', body: hydrateAgentBody(d.corpus, adjust) },
+        );
+      clearExample();
+      setMsgs(hydrated);
+      setColloquiumId(id);
+      setListOpen(false);
+    } catch (e) {
+      setMsgs((m) => [...m, { who: 'concierge', body: e instanceof Error ? e.message : String(e) }]);
+      setListOpen(false);
+    }
+  }
+
+  // Start a fresh thread: drop the active colloquium + message list. The next send() creates
+  // a new thread (stamped with the active project).
+  function startNew() {
+    setColloquiumId(undefined);
+    setMsgs([]);
+    clearExample();
+    setListOpen(false);
+  }
 
   function toCanvas(_p: Prov) {
     // TODO(canvas-handoff): seed a canvas node from this generation (modality +
@@ -136,12 +249,15 @@ export function Chat() {
     setCritiqueOf(undefined);
 
     setSending(true);
+    let createdThread = false;
     try {
       let cid = colloquiumId;
       if (!cid) {
-        const { colloquium } = await api.createColloquium();
+        // Stamp the active project (noema-111) so the thread groups correctly in history.
+        const { colloquium } = await api.createColloquium(project ? { projectId: project.id } : {});
         cid = colloquium.id;
         setColloquiumId(cid);
+        createdThread = true;
       }
       const { result } = await api.postDictum(cid, {
         turnKey: newTurnKey(),
@@ -154,6 +270,8 @@ export function Chat() {
           ? { who: 'concierge', body: <ProposalCard proposal={result as ConciergeProposal} onAdjust={adjust} /> }
           : { who: 'concierge', body: result.text, prov: [provFor(sel, 'text')] },
       ]);
+      // A new thread now exists (or an existing one advanced) — refresh history so it lists.
+      if (createdThread) void refreshThreads();
     } catch (e) {
       setMsgs((m) => [...m, { who: 'concierge', body: e instanceof Error ? e.message : String(e) }]);
     } finally {
@@ -161,9 +279,46 @@ export function Chat() {
     }
   }
 
+  const groups = groupThreads(threads, projectNameOf);
+
   return (
     <AppShell crumb="chat" concierge={false}>
+      {/* Thread history (noema-111) — a project-grouped drawer of the caller's past threads. */}
+      {listOpen && <div style={H.backdrop} onClick={() => setListOpen(false)} />}
+      {listOpen && (
+        <aside style={H.drawer} aria-label="Conversation history">
+          <div style={H.head}>
+            <b>Conversations</b>
+            <button style={H.newBtn} onClick={startNew}>+ New</button>
+            <button style={H.xBtn} onClick={() => setListOpen(false)} aria-label="Close history"><Ic name="x" /></button>
+          </div>
+          <div style={H.body}>
+            {groups.length === 0 && <div style={H.empty}>No conversations yet.</div>}
+            {groups.map((g) => (
+              <div key={g.key}>
+                <div style={H.groupName}>{g.name}</div>
+                {g.threads.map((t) => (
+                  <button
+                    key={t.id}
+                    style={{ ...H.item, ...(t.id === colloquiumId ? H.itemActive : {}) }}
+                    onClick={() => resume(t.id)}
+                  >
+                    <span style={H.itemTitle}>{t.titulus || t.preview || 'Untitled'}</span>
+                    {t.titulus && t.preview && <span style={H.itemPreview}>{t.preview}</span>}
+                    <span style={H.itemTime}>{threadTime(t.mutatum)}</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        </aside>
+      )}
       <div className="thread"><div className="wrap">
+        <div style={H.bar}>
+          <button style={H.toggle} onClick={() => { setListOpen(true); void refreshThreads(); }} aria-label="Conversation history">
+            ☰ History
+          </button>
+        </div>
         {msgs.some((m) => m.isExample) && (
           <button className="byo-dismiss chat-example-clear" onClick={dismissExample} title="Clear example conversation" aria-label="Clear example conversation">✕</button>
         )}
