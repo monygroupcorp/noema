@@ -70,8 +70,7 @@ export function TraitsGarden() {
     <AppShell title={crumb}>
       <div className="page"><div className="pw wide">
         <div className="garden-head">
-          <div><div className="noema-kicker" style={{ marginBottom: 6 }}>traits · the garden{editable ? '' : ' · frozen'}</div>
-            <h1>{c.nomen || 'Untitled collection'}</h1></div>
+          <div><h1>{c.nomen || 'Untitled collection'}</h1></div>
           <div className="garden-nudge">
             <span className="gn-count mono">{axes.length} {axes.length === 1 ? 'axis' : 'axes'} · <b className="accent">{combos(axes).toLocaleString()}</b> combinations · {c.total} pieces</span>
             {!editable && <span className="gn-ai"><span className="hemi2 lit" /> This collection is fired — traits are locked.</span>}

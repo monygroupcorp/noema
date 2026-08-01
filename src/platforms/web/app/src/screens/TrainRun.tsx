@@ -64,7 +64,6 @@ export function TrainRun() {
       <div className="page"><div className="pw wide">
         <div className="pagehead tr-head">
           <div>
-            <div className="noema-kicker" style={{ marginBottom: 8 }}>training run</div>
             <h1>{d.name} · LoRA v1</h1>
             <div className="sub mono">natural language · v2 &nbsp; Flux.1 dev &nbsp; LoRA r16 &nbsp; trigger <span className="accent">frostknight</span></div>
           </div>
@@ -74,7 +73,6 @@ export function TrainRun() {
         <div className="tr-progress"><span style={{ width: `${pct}%` }} /></div>
 
         {/* watch it learn — the emergence row */}
-        <div className="tr-watch-l noema-kicker">watch it learn · the same prompt every checkpoint <span className="tr-prompt">“frostknight, full armor, snow”</span></div>
         <div className="tr-strip">
           {CHECKPOINTS.map((cp, i) => {
             const crisp = i / (CHECKPOINTS.length - 1);           // 0 = noisy, 1 = crisp
@@ -96,7 +94,7 @@ export function TrainRun() {
         {/* loss + meter */}
         <div className="tr-bottom">
           <div className="tr-loss">
-            <div className="tr-loss-head"><span className="noema-kicker">training loss</span><span className="mono">LOSS <b className="accent">0.071</b> ↓ · smoothed</span></div>
+            <div className="tr-loss-head"><span className="mono">LOSS <b className="accent">0.071</b> ↓ · smoothed</span></div>
             <svg className="tr-loss-svg" viewBox="0 0 560 150" preserveAspectRatio="none">
               <path d={path} fill="none" stroke="var(--accent)" strokeWidth="1.6" />
               <circle cx="550" cy={yOf(0.071)} r="3.5" fill="var(--accent)" />

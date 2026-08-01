@@ -236,7 +236,6 @@ export function Ceremony() {
 
       <div className="hero">
         <span className="noema-glow hero-glow" aria-hidden="true" />
-        <div className="noema-kicker hero-kicker">Arcanum trusted setup · the ceremony</div>
         <h1 className="hero-display">Anonymous credits.<br /><span className="accent">Trustless by ceremony.</span></h1>
         <hr className="noema-rule hero-rule" />
         <p className="lead">

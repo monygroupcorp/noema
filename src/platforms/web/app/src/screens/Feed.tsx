@@ -127,7 +127,6 @@ export function Feed() {
       <div className="page"><div className="pw wide">
         <div className="pagehead">
           <div>
-            <div className="noema-kicker" style={{ marginBottom: 8 }}>public feed · newest first</div>
             <h1>Feed</h1>
             <div className="sub">What people are making and choosing to share. Publish your own from any result.</div>
           </div>

@@ -33,15 +33,6 @@
     linear-gradient(var(--color-accent), var(--color-accent)) right bottom / 1px 9px no-repeat;
 }
 
-/* Kicker — mono, tracked, reserved. Sits above a headline. */
-[data-brand="noema"] .noema-kicker {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--color-text-subtle);
-}
-
 /* Hairline rule — a short icy underline. Punctuation, not decoration. */
 [data-brand="noema"] .noema-rule {
   width: 64px;

@@ -94,7 +94,6 @@ export function Preferences() {
         {err && <div className="warn" style={{ marginBottom: 'var(--s4)' }}>{err}</div>}
 
         {/* cross-cutting defaults — WIRED to generatio */}
-        <div className="pref-l noema-kicker">across all commands</div>
         <div className="pref-grid">
           <div className="pref-card">
             <div className="pref-card-h"><Ic name="sparkles" /><b>Style &amp; prompt</b></div>
@@ -135,7 +134,6 @@ export function Preferences() {
         </div>
 
         {/* per-command defaults — backend ready (affines); inline editor is next */}
-        <div className="pref-l noema-kicker">per command</div>
         <div className="pref-note mono" style={{ color: 'var(--faint)', marginBottom: 'var(--s3)' }}>
           <span className="hemi2 ring" /> Per-command param defaults (model · size · steps · cfg · count) persist as <b>affines</b> and apply at cast time — the inline editor lands next. <b>/animate · /effect · /upscale</b> aren't canon verbs yet.
         </div>
