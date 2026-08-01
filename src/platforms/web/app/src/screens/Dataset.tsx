@@ -64,7 +64,6 @@ export function Dataset() {
       <div className="page"><div className="pw wide">
         <div className="pagehead ds-detail-head">
           <div>
-            <div className="noema-kicker" style={{ marginBottom: 8 }}>dataset · the core asset</div>
             <h1 className="ds-d-name">{d.name} <span className="ds-badge" style={{ color: 'var(--m-image)' }}><span className="dot" style={{ background: 'var(--m-image)' }} /> {d.modality}</span></h1>
             <div className="sub mono">{d.media.length} {d.modality === 'video' ? 'clips' : 'images'} · {version} · {d.captionsets.length} captionsets · updated {d.mutatum}</div>
           </div>
@@ -73,8 +72,7 @@ export function Dataset() {
         <div className="ds-detail">
           {/* the media — king */}
           <div className="ds-images">
-            <div className="ds-imgs-head"><span className="noema-kicker">the images · what noema learns from</span>
-              <span className="mono ds-showing">showing {d.captionsets.find((cs) => cs.id === active)?.name ?? '—'} · {version}</span>
+            <div className="ds-imgs-head"><span className="mono ds-showing">showing {d.captionsets.find((cs) => cs.id === active)?.name ?? '—'} · {version}</span>
             </div>
             {d.media.length === 0 ? (
               <p className="ds-panel-note">no media in this dataset yet.</p>

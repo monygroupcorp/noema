@@ -77,7 +77,7 @@ export function TraitRules() {
         </div>
 
         {err && <div className="warn" style={{ marginBottom: 12 }}>{err}</div>}
-        <div className="rl-sec"><span className="noema-kicker">rules per value</span><span className="rl-hint mono"><b>excludes</b> = labels in other axes this value can’t appear with · <b>tags</b> = motif groups that repel each other</span></div>
+        <div className="rl-sec"><span className="rl-hint mono"><b>excludes</b> = labels in other axes this value can’t appear with · <b>tags</b> = motif groups that repel each other</span></div>
 
         {empty ? (
           <div className="empty"><div className="t">No trait values yet</div><div className="s">Add values in the <Link to={`/collections/${id}/garden`}>traits garden</Link> first, then set their rules here.</div></div>

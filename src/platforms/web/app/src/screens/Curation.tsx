@@ -95,7 +95,6 @@ export function Curation() {
                   <div className="cu-meta mono">{current.actumId.slice(0, 12)}…</div>
                 </div>
                 <div className="cu-side">
-                  <div className="noema-kicker">traits on this piece</div>
                   <div className="cu-traits">
                     {(current.attributes ?? []).map((t) => (
                       <div key={t.trait_type} className="cu-trow"><span className="cu-axis">{t.trait_type}</span><span className="cu-tv"><b>{t.value}</b></span></div>

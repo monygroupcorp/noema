@@ -127,7 +127,6 @@ export function Datasets() {
       <div className="page"><div className="pw wide">
         <div className="pagehead">
           <div>
-            <div className="noema-kicker" style={{ marginBottom: 8 }}>your datasets · {list.length}</div>
             <h1>Datasets</h1>
             <div className="sub">Your raw material — the core every model is trained from. Reusable, versioned, captioned many ways.</div>
           </div>
@@ -183,7 +182,6 @@ export function Datasets() {
                 padding: 20, width: 'min(520px, 100%)', maxHeight: '86vh', overflowY: 'auto',
               }}
             >
-              <div className="noema-kicker" style={{ marginBottom: 8 }}>new dataset</div>
 
               <input
                 className="train-data" style={{ resize: 'none', marginBottom: 10 }}
