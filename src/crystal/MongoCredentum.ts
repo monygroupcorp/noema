@@ -88,4 +88,14 @@ export class MongoCredentum implements CredentumStore {
   async setPassword(id: string, passwordHash: string): Promise<void> {
     await this.col.updateOne({ id }, { $set: { passwordHash, mutatum: this.now() } })
   }
+
+  /**
+   * GDPR erasure (noema-025) — hard-delete this soul's fiat credential row(s) (username +
+   * password hash). `animaId` owns exactly one row, but `deleteMany` keeps it idempotent and
+   * defensive. Removing the credential is part of severing the login path. Re-run returns 0.
+   */
+  async deleteByAnima(animaId: string): Promise<number> {
+    const r = await this.col.deleteMany({ animaId })
+    return r.deletedCount ?? 0
+  }
 }
