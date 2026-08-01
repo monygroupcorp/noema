@@ -94,7 +94,6 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
           <div className="cassist">
             {target.hint && <div className="chint">{target.hint}</div>}
             <div className="ex">
-              <div className="exlbl">try something like</div>
               <div className="extext">{target.example}</div>
               <div className="exact">
                 <button onClick={() => target.apply(target.example)}>Use this</button>
@@ -104,7 +103,6 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
 
             {draft && (
               <div className="ex draft">
-                <div className="exlbl">Concierge draft</div>
                 <div className="extext">{draft}</div>
                 <div className="exact"><button onClick={() => target.apply(draft)}>Insert</button></div>
               </div>

@@ -114,7 +114,6 @@ export function EditioExport() {
         </div>
 
         <div className="ex-dest-head">
-          <span className="noema-kicker">destination</span>
           <span className="ex-legend mono">private <span className="hemi2 dashed" /> — <span className="hemi2 ring" /> — <span className="hemi2 lit" /> public</span>
         </div>
         <div className="ex-options">

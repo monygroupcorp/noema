@@ -91,7 +91,6 @@ export function ProjectHub() {
         {/* header */}
         <div className="ph-head">
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="ph-kick noema-kicker">project</div>
             {editing ? (
               <div className="projnew" style={{ marginTop: 'var(--s2, 8px)' }}>
                 <input autoFocus value={eName} onChange={(e) => setEName(e.target.value)} placeholder="Project name"

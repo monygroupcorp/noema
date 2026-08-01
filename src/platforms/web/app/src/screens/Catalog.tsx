@@ -99,7 +99,6 @@ export function Catalog() {
         <div className="registry">
 
           <div className="corpus">
-            <div className="corpus-kick">The corpus</div>
             <h1 className="corpus-big">
               {flows === null
                 ? <span style={{ color: 'var(--faint)' }}>loading the corpus…</span>

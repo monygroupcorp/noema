@@ -154,7 +154,6 @@ export function Funding() {
       <div className="page"><div className="pw narrow fund">
 
         <div className="fund-head">
-          <div className="fund-kicker">Add credits</div>
           <h1>Every way to pay — and what each one reveals.</h1>
           <div className="sub">
             We tell you exactly what we learn about you on each path. Privacy on the

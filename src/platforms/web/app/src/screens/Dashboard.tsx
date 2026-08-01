@@ -55,7 +55,6 @@ export function Dashboard() {
 
         {/* instrument band — the one framed element */}
         <div className="noema-frame instband">
-          <div className="ib-kick noema-kicker">your studio · right now</div>
           <div className="ib-line">What NOEMA can see: <span className="accent">the meter, nothing more.</span></div>
           <div className="ib-grid">
             <div className="ib-cell">

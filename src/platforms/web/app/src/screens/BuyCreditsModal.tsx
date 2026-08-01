@@ -274,7 +274,6 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
       <div className="bcm-modal">
         <div className="bcm-head">
           <div>
-            <div className="bcm-kicker">ADD CREDITS · WALLET RAIL</div>
             <h2 className="bcm-title">{phase === 'settled' ? 'Settled' : 'Buying credits'}</h2>
           </div>
           <button className="bcm-x" onClick={onClose} aria-label="Close"><Ic name="x" /></button>
@@ -286,7 +285,7 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
           {/* 01 ASSET */}
           <div className={`bcm-line l-${lineMode(1, phase)}`}>
             <span className="bcm-num">01</span>
-            <span className="bcm-key">ASSET</span>
+            <span className="bcm-key">Asset</span>
             <span className="bcm-val">
               {wallet ? <>ETH · {shortAddr(wallet.address)}</> : 'connect a wallet to choose'}
             </span>
@@ -299,7 +298,7 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
           {phase === 'gate-link' && (
             <div className="bcm-line l-active bcm-sign-block">
               <span className="bcm-num">—</span>
-              <span className="bcm-key">LINK</span>
+              <span className="bcm-key">Link</span>
               <div className="bcm-sign-body">
                 <div className="bcm-sigrow amber">
                   <span aria-hidden="true">△</span> wallet not linked to your account
@@ -322,7 +321,7 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
           {lineMode(2, phase) === 'active' ? (
             <div className="bcm-line l-active bcm-amount-block">
               <span className="bcm-num">02</span>
-              <span className="bcm-key">AMOUNT</span>
+              <span className="bcm-key">Amount</span>
               <div className="bcm-amount-body">
                 <div className="bcm-quick">
                   {QUICK_TARGETS.map((t, i) => {
@@ -335,7 +334,7 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
                     );
                   })}
                 </div>
-                <label className="bcm-paylabel">YOU PAY</label>
+                <label className="bcm-paylabel">You pay</label>
                 <input
                   className="bcm-payinput"
                   inputMode="decimal"
@@ -368,7 +367,7 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
           ) : (
             <div className={`bcm-line l-${lineMode(2, phase)}`}>
               <span className="bcm-num">02</span>
-              <span className="bcm-key">AMOUNT</span>
+              <span className="bcm-key">Amount</span>
               <span className="bcm-val">
                 {lineMode(2, phase) === 'settled'
                   ? `${ethAmount} ETH → ◈ ${willCredit != null ? fmtInt(willCredit) : '…'} cr`
@@ -382,7 +381,7 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
           {phase === 'sign' || phase === 'sign-rejected' ? (
             <div className="bcm-line l-active bcm-sign-block">
               <span className="bcm-num">03</span>
-              <span className="bcm-key">SIGN</span>
+              <span className="bcm-key">Sign</span>
               <div className="bcm-sign-body">
                 {phase === 'sign-rejected' ? (
                   <>
@@ -419,7 +418,7 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
           ) : (
             <div className={`bcm-line l-${lineMode(3, phase)}`}>
               <span className="bcm-num">03</span>
-              <span className="bcm-key">SIGN</span>
+              <span className="bcm-key">Sign</span>
               <span className="bcm-val">
                 {phase === 'settle' || phase === 'settled'
                   ? `deposit ✓${confirmed ? ' · confirmed' : ''}`
@@ -432,7 +431,7 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
           {/* 04 SETTLE */}
           <div className={`bcm-line l-${phase === 'settled' ? 'settled' : phase === 'settle' ? 'active' : 'ghost'}`}>
             <span className="bcm-num">04</span>
-            <span className="bcm-key">SETTLE</span>
+            <span className="bcm-key">Settle</span>
             <span className="bcm-val">
               {phase === 'settled'
                 ? `confirmed · ${settledAt ?? ''}`

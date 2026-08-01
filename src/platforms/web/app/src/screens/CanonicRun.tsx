@@ -101,7 +101,7 @@ export function CanonicRun() {
         </div>
 
         <div className="cr-dist">
-          <div className="cr-dist-head"><span className="noema-kicker">rarity · realized vs target</span>
+          <div className="cr-dist-head">
             {rarity && <span className="cr-ok mono">{rarity.totalPieces.toLocaleString()} pieces measured</span>}</div>
           {!rarity && <div className="empty"><div className="s">Rarity fills in as pieces settle.</div></div>}
           {rarity?.axes.map((ax) => (

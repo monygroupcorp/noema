@@ -80,7 +80,6 @@ export function Landing() {
 
       <div className="hero">
         <span className="noema-glow hero-glow" aria-hidden="true" />
-        <div className="noema-kicker hero-kicker">Boutique generative AI · Studio + concierge</div>
         <h1 className="hero-display">A complete studio.<br /><span className="accent">A concierge that builds with you.</span></h1>
         <hr className="noema-rule hero-rule" />
         <p className="lead">Curated open- and closed-source models. Describe what you want — a concierge picks the tools and makes it.</p>
@@ -106,7 +105,6 @@ export function Landing() {
       </div>
 
       <section className="arch">
-        <div className="lab">How anonymous funding works</div>
         <h2>Anonymous by construction.</h2>
         <p className="ah-sub">
           We don't need to know who you are. Deposit, join the anonymity set, and spend with a
