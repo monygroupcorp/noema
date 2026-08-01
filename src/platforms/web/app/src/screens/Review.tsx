@@ -74,9 +74,6 @@ export function Review() {
       <div className="page"><div className="pw">
         <div className="pagehead">
           <div>
-            <div className="noema-kicker" style={{ marginBottom: 8 }}>
-              {admin ? 'moderation queue · held for human review' : 'held for review'}
-            </div>
             <h1>{admin ? 'Feed review' : 'In review'}</h1>
             <div className="sub">
               {admin

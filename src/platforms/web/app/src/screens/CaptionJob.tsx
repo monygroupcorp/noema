@@ -62,7 +62,7 @@ export function CaptionJob() {
     <AppShell title={crumb}>
       <div className="page"><div className="pw wide">
         <div className="pagehead">
-          <div><div className="noema-kicker" style={{ marginBottom: 8 }}>caption job</div><h1>Captioning · natural language · v3</h1></div>
+          <div><h1>Captioning · natural language · v3</h1></div>
         </div>
 
         {/* setup bar (docked) */}

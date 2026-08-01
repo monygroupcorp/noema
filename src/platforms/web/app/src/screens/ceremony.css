@@ -65,7 +65,7 @@
 /* transcript / hash chain — the public record, empty until the ceremony opens */
 .cer-chain{border:1px solid var(--hair);border-radius:14px;background:var(--panel);padding:16px 18px}
 .cer-chain-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;
-  font-family:var(--font-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+  font-family:var(--font-mono);font-size:11px;font-weight:500;color:var(--muted)}
 .cer-empty{color:var(--muted);font-size:12px;line-height:1.6}
 .cer-link{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--hair);font-size:12.5px}
 .cer-link:first-of-type{border-top:none}

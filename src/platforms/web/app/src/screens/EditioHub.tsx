@@ -58,7 +58,7 @@ export function EditioHub() {
       <div className="page"><div className="pw wide">
         <div className="ph-head">
           <div>
-            <div className="ph-kick noema-kicker">collection · <span className={`hemi2 ${collGlyph()}`} /> {COLL_STATUS_LABEL[c.status]}</div>
+            <div className="ph-kick">collection · <span className={`hemi2 ${collGlyph()}`} /> {COLL_STATUS_LABEL[c.status]}</div>
             <h1 className="ph-name">{name}</h1>
             <p className="ph-desc">{c.modusId} · {c.completed.toLocaleString()} / {c.total.toLocaleString()} pieces{c.rejected ? ` · ${c.rejected} rejected` : ''}{c.failed ? ` · ${c.failed} failed` : ''}</p>
           </div>

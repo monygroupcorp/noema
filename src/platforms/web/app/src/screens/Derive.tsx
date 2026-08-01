@@ -48,11 +48,10 @@ export function Derive() {
     <AppShell title={crumb}>
       <div className="page"><div className="pw wide">
         <div className="pagehead">
-          <div><div className="noema-kicker" style={{ marginBottom: 8 }}>derive a training · from {d.name.toLowerCase()}</div><h1 className="dv-name">{d.name} · LoRA v1</h1></div>
+          <div><h1 className="dv-name">{d.name} · LoRA v1</h1></div>
         </div>
 
         {/* source */}
-        <div className="dv-l noema-kicker">source · what it learns from</div>
         <div className="dv-source">
           <div className="dv-srow">
             <span className="dv-sl">dataset</span>
@@ -70,11 +69,9 @@ export function Derive() {
         {/* base + method */}
         <div className="dv-two">
           <div className="dv-panel">
-            <div className="dv-l noema-kicker">base model · train on top of</div>
             <div className="dv-pick"><div><b>Flux.1 dev</b><div className="dv-ps mono">open · 12B · best for LoRA subjects</div></div><button className="lnk">change ▸</button></div>
           </div>
           <div className="dv-panel">
-            <div className="dv-l noema-kicker">method</div>
             <div className="dv-pick"><div><b>LoRA</b><div className="dv-ps mono">lightweight adapter</div></div><button className="lnk">change ▸</button></div>
             <div className="dv-params mono">rank <b>16</b> &nbsp; steps <b>1,200</b> &nbsp; lr <b>1e-4</b></div>
             <button className="lnk">· advanced parameters</button>
@@ -82,7 +79,6 @@ export function Derive() {
         </div>
 
         {/* custody */}
-        <div className="dv-l noema-kicker">where it trains · custody</div>
         <div className="dv-custody">
           {CUSTODY.map((o) => (
             <button key={o.c} className={`dv-cust${custody === o.c ? ' on' : ''}`} onClick={() => setCustody(o.c)}>
