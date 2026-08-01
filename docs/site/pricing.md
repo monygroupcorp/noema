@@ -1,6 +1,7 @@
+<!-- PUBLISH GATE: counsel sign-off required (price-cap claim, T&C) before this page goes live -->
+
 # Pricing — Page Content Draft
 *For web/marketing use. Internal working draft.*
-*Pricing numbers are placeholders — need business decision before publishing.*
 
 ---
 
@@ -8,59 +9,67 @@
 
 **Headline:** Simple pricing. Spend credits anywhere.
 
-**Subhead:** Credits are your compute currency. Spend them on any modality. No subscription required to start.
+**Subhead:** Credits are your compute currency. Spend them on any modality. No subscription — buy a pack, spend it whenever.
 
 ---
 
 ## Credit system explainer
 
-**100 credits = $1.00**
+**Buy a credit pack. No subscription.**
 
-Credits work across every modality — text generation, image generation, video, and audio. You buy once, spend anywhere. Credits don't expire.
+Credits work across every modality — text generation, image generation, video, and audio. You buy once, spend anywhere. Credits don't expire. Bigger packs give you a better rate — roughly 208 to 270 credits per dollar depending on the pack you choose, cheapest pack to biggest.
 
 There is no account required to start, and no email. You can buy and spend credits anonymously (see below).
 
 ---
 
-## Tiers (placeholder — needs pricing decision)
+## Packs
 
-### Free
-**$0 — no credit card required**
+### Starter
+**$10 — 2,080 credits**
 
-- [N] text generations per day (standard API, base models)
-- [N] image generations per day
-- Access to open-source model catalog
-- Anonymous Bursa credits accepted
-- API access
+- Never expire
+- No subscription, no recurring charge
+- Anonymous Bursa purchase accepted
+- Spend across every modality
 
-*Converts to paid when daily limits are hit.*
-
----
-
-### Pro
-**$[X]/month**
-
-- Unlimited standard API text generation
-- [N] image generations per day
-- $[Y] credits included monthly ([$Y/100] worth of compute)
-- All catalog models
-- API access at standard limits
-- Anonymous Bursa credits accepted
-
-**[Get Pro]**
+**[Buy Starter]**
 
 ---
 
-### Max *(Most popular for power users)*
-**$[X]/month**
+### Standard
+**$25 — 5,720 credits**
 
-- Everything in Pro
-- $[Y] credits included monthly
-- [N]-month credit rollover
-- Higher API rate limits
-- Priority support
+- Never expire
+- No subscription, no recurring charge
+- Anonymous Bursa purchase accepted
+- Spend across every modality
 
-**[Get Max]**
+**[Buy Standard]**
+
+---
+
+### Plus
+**$50 — 12,480 credits**
+
+- Never expire
+- No subscription, no recurring charge
+- Anonymous Bursa purchase accepted
+- Spend across every modality
+
+**[Buy Plus]**
+
+---
+
+### Studio *(best rate per credit)*
+**$100 — 27,040 credits**
+
+- Never expire
+- No subscription, no recurring charge
+- Anonymous Bursa purchase accepted
+- Spend across every modality
+
+**[Buy Studio]**
 
 ---
 
@@ -73,16 +82,6 @@ For healthcare (PHI / HIPAA BAA), legal (privilege-sensitive), and high-volume w
 - Custom credit volumes
 
 **[Contact us]**
-
----
-
-## What credits cost (examples)
-
-| Action | Approx. credits |
-|---|---|
-| 1 text generation (standard, ~500 tokens) | [N] credits |
-| 1 image (FLUX Schnell, 1024×1024) | [N] credits |
-| 1 short video (~5 seconds) | [N] credits |
 
 ---
 
@@ -106,7 +105,7 @@ Yes, within limits. Unused credits are refundable within 14 days of purchase. On
 Functionally identical — both buy the same compute. The difference is the billing layer: a regular credit is tied to your account; a Bursa credit is a ZK proof with no account association. Same GPU, same models — the difference is only whether the transaction links back to you.
 
 **Do you offer a free trial?**
-The free tier is your trial. No time limit, no credit card.
+There's no free tier. The Starter pack ($10) is the low-cost way to try it, and the credits never expire, so there's no clock running against you.
 
 **Can I use the API anonymously?**
 Yes. Pass a `x-bursa-token` header instead of a session key. The API docs explain how to generate one.
