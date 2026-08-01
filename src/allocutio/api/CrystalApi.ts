@@ -44,6 +44,7 @@ import { Errors, ApiError } from './errors.js'
 import { v4 as uuidv4 } from 'uuid'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { resolveCanonVerb, type CanonVerb } from '../../crystal/verbResolver.js'
+import { resolvePinnedModel, type PinnedInput } from '../../crystal/pinnedModelResolver.js'
 import { computeRecipient } from '../../arcanum/prover.js'
 import { impetusForPodMs, usdMicroToImpetus, IMPETUS_USD_RATE } from '../../ledger/rates.js'
 import { fundingBps, applyFundingBps, DEFAULT_FUNDING_BPS } from '../../ledger/depositFunding.js'
@@ -390,6 +391,37 @@ export class CrystalApi {
    * resolved through the owner's Consuetudinum rebinds, falling back to the
    * platform CANON_VERBS table. Nothing resolved → `not_found.flow`.
    */
+  /**
+   * Normalize pinned-model tokens (id | slug | trigger, or already-shaped `ModelRef`s) into
+   * canonical `ModelRef`s the Compiler can resolve, enforcing access. The single chokepoint for
+   * BOTH the run path (`invokeFlow`, below) and the concierge's pre-GO resolvability check
+   * (ConciergeAgent) — "the concierge never offers GO on a config that can't compile". An
+   * unresolvable token → `Errors.modelNotResolved` (422, not a 500); a private model the caller
+   * doesn't own → `Errors.modelForbidden` (403). (noema-113)
+   */
+  async resolvePinnedModels(auctor: AuctorKey, pinned: readonly PinnedInput[]): Promise<ModelRef[]> {
+    if (pinned.length === 0) return []
+    const store = this.deps.intellarum
+    if (!store) {
+      // No registry wired (minimal deployment / dev double): can only accept already-shaped refs;
+      // a bare string can't be resolved here (and must not reach the Compiler as `{id: undefined}`).
+      return pinned.map((p) => {
+        if (typeof p !== 'string' && p && p.id) return p
+        throw Errors.modelNotResolved(typeof p === 'string' ? p : String((p as ModelRef)?.id))
+      })
+    }
+    const ownerKey = ownerKeyOf(auctor)
+    const out: ModelRef[] = []
+    for (const input of pinned) {
+      const res = await resolvePinnedModel(store, input, ownerKey)
+      if (!res.ok) {
+        throw res.reason === 'forbidden' ? Errors.modelForbidden(res.token) : Errors.modelNotResolved(res.token)
+      }
+      out.push(res.ref)
+    }
+    return out
+  }
+
   async invokeFlow(
     auctor: AuctorKey,
     target: InvokeTarget,
@@ -463,12 +495,21 @@ export class CrystalApi {
       }
     }
 
+    // Normalize pinned models (noema-113): the concierge proposes bare id|slug|trigger strings; the
+    // run path threads them as typed `ModelRef[]` straight into the Compiler, which resolves by `id`.
+    // Coerce each to a canonical `ModelRef{id}` HERE — the single run chokepoint every caller passes
+    // through — so an unregistered/forbidden pin fails fast with a clear non-500 error instead of the
+    // Compiler's misleading `No URL for model 'undefined'` on a paid dispatch.
+    const pinnedModels = opts.pinnedModels?.length
+      ? await this.resolvePinnedModels(auctor, opts.pinnedModels)
+      : undefined
+
     const inceptio: Inceptio = {
       modusId,
       aditus: effectiveAditus,
       by: opts.by ?? auctor,
       ...(opts.studioId ? { modoId: opts.studioId } : {}),
-      ...(opts.pinnedModels?.length ? { pinnedModels: opts.pinnedModels } : {}),
+      ...(pinnedModels?.length ? { pinnedModels } : {}),
       ...(opts.computeStrategy ? { computeStrategy: opts.computeStrategy } : {}),
       ...(opts.gpuClass ? { gpuClass: opts.gpuClass } : {}),
     }

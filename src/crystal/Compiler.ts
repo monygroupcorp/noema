@@ -385,6 +385,7 @@ export class Compiler {
     // models the host pinned onto the session via `Mod • → Add`. LoRA + pinned
     // refs go through the same Intellarum.find() resolution path.
     const loraRefs = await this._loraIntellaeToRefs(appliedLoras)
+    this._assertPinnedRefIds(opts.pinnedModels ?? [])
     const seen = new Set([...weightRefs.map(r => r.id), ...loraRefs.map(r => r.id)])
     const pinnedRefs = (opts.pinnedModels ?? []).filter(r => !seen.has(r.id))
     const extraModels = await this._resolveModels([...loraRefs, ...pinnedRefs], ownerKey)
@@ -418,6 +419,23 @@ export class Compiler {
   }
 
   // ── private ──────────────────────────────────────────────────────────────
+
+  /**
+   * Guard (noema-113): reject any pinned ref with a falsy `id` BEFORE the filter/resolve.
+   * A bare string (or an `{id: undefined}` shape) that slips past the run-boundary normalizer
+   * would otherwise survive `seen.has(undefined)` and reach `_resolveModels` as `find(undefined)`,
+   * which throws the MISLEADING `No URL for model 'undefined'`. Fail loud + specific here so a
+   * future pinnedModels shape regression is diagnosable instead of masquerading as an unregistered id.
+   */
+  private _assertPinnedRefIds(pinned: ModelRef[]): void {
+    for (let i = 0; i < pinned.length; i++) {
+      const ref = pinned[i] as ModelRef | string | undefined | null
+      if (ref === undefined || ref === null || typeof ref === 'string' || !ref.id) {
+        const got = ref !== null && typeof ref === 'object' ? `id ${typeof ref.id}` : typeof ref
+        throw new CompilerError('MODEL_REF_INVALID', `pinnedModels[${i}] missing id (got ${got})`)
+      }
+    }
+  }
 
   /**
    * Convert resolver output into model refs that `_resolveModels` can consume.
@@ -539,6 +557,7 @@ export class Compiler {
     })
 
     // Host-pinned models (the studio loadout) union in, same as the ComfyUI path.
+    this._assertPinnedRefIds(opts.pinnedModels ?? [])
     const seen = new Set(weightRefs.map(r => r.id))
     const pinnedRefs = (opts.pinnedModels ?? []).filter(r => !seen.has(r.id))
     const extraModels = await this._resolveModels(pinnedRefs, ownerKey)
