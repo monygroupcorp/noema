@@ -43,4 +43,29 @@ export class MongoAnima implements AnimaStore {
     if (!result) throw new Error(`Anima not found: ${id}`)
     return fromDoc(result as Record<string, unknown>)
   }
+
+  /**
+   * Tombstone the Anima — the GDPR pseudonymization act (noema-025). SEVERS the identifying
+   * PII (`$unset` `custos`/`memoriaRef`, blank the `nomen`) and marks the soul erased with a
+   * 7-year `retentionUntil` stamp. The opaque `id` is deliberately KEPT so the immutable
+   * financial ledger + Stripe dispute resolver keep resolving against a non-identifying anchor.
+   * Idempotent: re-tombstoning an already-erased soul re-applies the same $set/$unset cleanly
+   * (never errors, never double-deletes). Dedicated concrete method (NOT the whitelisted
+   * `update`) so the erased fields never widen the general patch surface.
+   */
+  async tombstone(id: string, stamp: { erasedAt: Date; retentionUntil: Date }): Promise<void> {
+    await this.col.updateOne(
+      { id },
+      {
+        $set: {
+          nomen: '',
+          erased: true,
+          erasedAt: stamp.erasedAt,
+          retentionUntil: stamp.retentionUntil,
+          mutatum: new Date(),
+        },
+        $unset: { custos: '', memoriaRef: '' },
+      },
+    )
+  }
 }

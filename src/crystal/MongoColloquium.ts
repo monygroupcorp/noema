@@ -43,4 +43,24 @@ export class MongoColloquium implements ColloquiumStore {
   async archive(id: string): Promise<Colloquium> {
     return this.update(id, { status: 'archived' })
   }
+
+  /**
+   * GDPR erasure (noema-025) — the caller's OWN colloquium ids (by `ownerKey`), gathered BEFORE
+   * deletion so the eraser can cascade-delete their `Dictum` messages (keyed by `colloquiumId`)
+   * first, then delete the colloquia. Read-only; safe to call on an already-erased soul (→ []).
+   */
+  async listIdsByOwner(ownerKey: string): Promise<string[]> {
+    const docs = await this.col.find({ ownerKey }, { projection: { id: 1, _id: 0 } }).toArray()
+    return docs.map(d => String((d as Record<string, unknown>).id))
+  }
+
+  /**
+   * GDPR erasure (noema-025) — hard-delete every conversation (Colloquium) owned by `ownerKey`.
+   * Delete the child `Dictum` rows via `MongoDictum.deleteByColloquia(listIdsByOwner(...))` FIRST,
+   * then call this. Idempotent — a re-run deletes nothing and returns 0.
+   */
+  async deleteByOwner(ownerKey: string): Promise<number> {
+    const r = await this.col.deleteMany({ ownerKey })
+    return r.deletedCount ?? 0
+  }
 }

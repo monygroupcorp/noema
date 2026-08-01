@@ -17,6 +17,7 @@ import jwt, { type JwtPayload } from 'jsonwebtoken'
 import type { AnimaStore } from '../../types/anima.js'
 import type { PersonaStore, PersonaGenus } from '../../types/persona.js'
 import type { IssuerStore } from '../../types/issuer.js'
+import type { ErasedDenylistStore } from '../../types/erasure.js'
 import type { CredentialAcceptors } from './IdentityResolver.js'
 import { AgentJwtVerifier, type JwksFetch } from './AgentJwtVerifier.js'
 
@@ -35,6 +36,13 @@ export interface AcceptorDeps {
   jwksFetch?: JwksFetch
   /** Parsed `AGENT_JWKS_OVERRIDE` (host → base-url) for the JWKS acceptor. */
   jwksOverride?: Record<string, string>
+  /**
+   * Erased-account (session-revocation) denylist (noema-025). Consulted by `verifyJwt` — a
+   * session whose resolved `animaId` is on it is REJECTED (returns null → 401/invalid), which is
+   * how a GDPR-erased soul's still-signature-valid JWT is revoked (sessions are otherwise
+   * stateless). Absent → no revocation layer (the pre-noema-025 behaviour).
+   */
+  denylist?: ErasedDenylistStore
 }
 
 /** The federated persona externusId for a verified `(iss, sub)` — issuer-namespaced
@@ -59,7 +67,7 @@ export async function resolveOrCreateAnima(
 }
 
 export function makeCredentialAcceptors(deps: AcceptorDeps): CredentialAcceptors {
-  const { personae, animae, jwtSecret, verifyApiKeyToAccountId, verifyWeb3ToAddress, issuers } = deps
+  const { personae, animae, jwtSecret, verifyApiKeyToAccountId, verifyWeb3ToAddress, issuers, denylist } = deps
 
   // Federated SSO acceptor — built only when a trusted-issuer registry is wired.
   // A verified assertion lands as a `'federated'` persona keyed by `<iss>::<sub>`
@@ -96,15 +104,22 @@ export function makeCredentialAcceptors(deps: AcceptorDeps): CredentialAcceptors
           }
           if (typeof payload === 'string') return null
           // Fiat-auth session tokens (authRouter) carry the resolved `animaId` DIRECTLY in
-          // `sub` under `typ:'session'`. Return it as-is — the `'password'` persona already
+          // `sub` under `typ:'session'`. Use it as-is — the `'password'` persona already
           // established this anima at register/verify, so re-resolving under `'web'` would
           // split the account in two (docs/spec/fiat-auth.md §trap).
+          let resolved: string | null
           if (payload.typ === 'session') {
-            return typeof payload.sub === 'string' ? payload.sub : null
+            resolved = typeof payload.sub === 'string' ? payload.sub : null
+          } else {
+            const ext = payload.userId ?? payload.sub ?? payload._id ?? payload.id
+            if (!ext) return null
+            resolved = await resolveOrCreateAnima(personae, animae, 'web', String(ext))
           }
-          const ext = payload.userId ?? payload.sub ?? payload._id ?? payload.id
-          if (!ext) return null
-          return resolveOrCreateAnima(personae, animae, 'web', String(ext))
+          if (!resolved) return null
+          // Session revocation (noema-025): a GDPR-erased soul's JWT is still SIGNATURE-valid
+          // (sessions are stateless), so reject it here if the resolved animaId is denylisted.
+          if (denylist && (await denylist.has(resolved))) return null
+          return resolved
         }
       : undefined,
 
