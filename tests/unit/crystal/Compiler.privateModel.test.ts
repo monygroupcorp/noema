@@ -97,3 +97,32 @@ test('a PUBLIC pinned model resolves for anyone (no owner needed)', async () => 
   const { spec } = await compiler.compile(ESSENTIA_RUNMAKE_SD15, { prompt: 'a cat' }, { pinnedModels: PIN })
   assert.ok(spec.models.find(m => m.id === 'intella.private-lora'))
 })
+
+// ── noema-113: pinnedModels falsy-id guard ───────────────────────────────────
+// A shape regression — a bare string, or a `{id: undefined}` ref — must fail LOUD and
+// SPECIFIC here, BEFORE it reaches `_resolveModels` as `find(undefined)` → the misleading
+// `No URL for model 'undefined'` (the paid 500 on GO this item fixes).
+
+test('a bare-string pinned ref is rejected with MODEL_REF_INVALID (got string)', async () => {
+  const compiler = compilerWith(intellarumWithPrivate({}))
+  await assert.rejects(
+    () => compiler.compile(ESSENTIA_RUNMAKE_SD15, { prompt: 'a cat' },
+      { pinnedModels: ['stationthis'] as unknown as ModelRef[] }),
+    (e: unknown) =>
+      e instanceof CompilerError &&
+      (e as CompilerError).code === 'MODEL_REF_INVALID' &&
+      /pinnedModels\[0\] missing id \(got string\)/.test((e as CompilerError).message),
+  )
+})
+
+test('a pinned ref with an undefined id is rejected with a specific message', async () => {
+  const compiler = compilerWith(intellarumWithPrivate({}))
+  await assert.rejects(
+    () => compiler.compile(ESSENTIA_RUNMAKE_SD15, { prompt: 'a cat' },
+      { pinnedModels: [{ role: 'lora', dest: 'models/loras/x.safetensors' } as unknown as ModelRef] }),
+    (e: unknown) =>
+      e instanceof CompilerError &&
+      (e as CompilerError).code === 'MODEL_REF_INVALID' &&
+      /pinnedModels\[0\] missing id \(got id undefined\)/.test((e as CompilerError).message),
+  )
+})
