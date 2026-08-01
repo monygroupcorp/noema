@@ -11,7 +11,7 @@
 // unauthenticated.
 // =============================================================================
 
-import type { CrystalApi, SaveFlowOpts, CollectOpts } from '../CrystalApi.js'
+import type { CrystalApi, SaveFlowOpts, CollectOpts, ListRunsOpts } from '../CrystalApi.js'
 import type { AuctorKey } from '../../../flow/types.js'
 import type { IntelligensGenus } from '../../../types/intelligendi.js'
 import { ApiError } from '../errors.js'
@@ -89,6 +89,22 @@ export async function getRunTool(
   if (!auctor) return errResult('auth.missing', 'authentication required')
   try {
     return ok({ run: await api.getRun(auctor, args.id) })
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}
+
+/** The owner's settled spend history — owner-scoped (see `CrystalApi.listRuns`), cursor-paginated,
+ *  newest first, plus a lifetime running total. Thin wrapper mirroring `getRunTool`/`statusTool`. */
+export async function listRunsTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+  args: ListRunsOpts = {},
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    return ok(await api.listRuns(auctor, args))
   } catch (e) {
     if (e instanceof ApiError) return errResult(e.code, e.message)
     return errResult('internal.error', String(e))

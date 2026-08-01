@@ -5,8 +5,9 @@
 // Given a user message + conversation history + the caller's context (spicyMode,
 // generatio, bindings, an optional prior run for the critique/adjusted case), this
 // module runs a BOUNDED (<= maxToolIterations) LLM tool-use loop over EXACTLY the
-// four READ-ONLY discovery handlers (`list_flows`, `describe_flow`,
-// `search_models`/`list_models`, `quote`) and emits a discriminated result:
+// seven READ-ONLY discovery handlers (`list_flows`, `describe_flow`,
+// `search_models`/`list_models`, `quote`, `get_run`, `list_runs`, `status`) and
+// emits a discriminated result:
 //   - `{ kind: 'proposal', ... }` — a chosen flow + filled/embellished aditus +
 //     chosen loras/pinnedModels + an authoritative quote; the critique/ADJUSTED
 //     case is the SAME `proposal` kind, distinguished only by an optional
@@ -22,7 +23,7 @@
 //
 // HARD INVARIANTS (the entire risk surface of this module):
 //   (a) It NEVER exposes a spend handler to the LLM and never calls a spend method
-//       — the tool surface is the four read-only handlers only; `run_flow`,
+//       — the tool surface is the seven read-only handlers only; `run_flow`,
 //       `provision_studio`, and `collect` are never registered, and this module
 //       never calls `invokeFlow`/`runFlow`/`provisionStudio`/`collect`/`createRun`.
 //       (Mechanically enforced by the item's `verify` grep.) It proposes; the user
@@ -47,7 +48,15 @@ import type { Run } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { Generatio } from '../../types/consuetudo.js'
 import type { IntelligensGenus } from '../../types/intelligendi.js'
-import { listFlowsTool, describeFlowTool, quoteTool, type McpResult } from './mcp/tools.js'
+import {
+  listFlowsTool,
+  describeFlowTool,
+  quoteTool,
+  getRunTool,
+  listRunsTool,
+  statusTool,
+  type McpResult,
+} from './mcp/tools.js'
 
 // ---------------------------------------------------------------------------
 // Loop bound (invariant (c)) — finite and non-optional. Six full round-trips is
@@ -134,7 +143,7 @@ export interface ConciergeDeps {
 }
 
 // ---------------------------------------------------------------------------
-// Tool surface (invariant (a)) — EXACTLY the four read-only discovery handlers,
+// Tool surface (invariant (a)) — EXACTLY the seven read-only discovery handlers,
 // wrapped as OpenRouterToolSpec[]. `run_flow`/`provision_studio`/`collect` (and any
 // other spend method) are DELIBERATELY absent; adding one here would breach the
 // item's `verify` grep and the propose-never-spend house rule.
@@ -206,6 +215,50 @@ const TOOL_SPECS: OpenRouterToolSpec[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'get_run',
+      description:
+        "Fetch one of the caller's own runs by id — status, outputs, cost, when it ran. Owner-scoped " +
+        '(never another owner\'s run). Use this to look up a run the user names or references.',
+      parameters: {
+        type: 'object',
+        properties: { id: { type: 'string', description: 'run id' } },
+        required: ['id'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_runs',
+      description:
+        "List the caller's own settled run history (spend history), newest first, plus their lifetime " +
+        'spend total. Owner-scoped. Use this to answer "what did I make recently" or to find a prior run ' +
+        'to reference/adjust when the user does not give an exact run id.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'integer', description: 'page size, default 20, max 100' },
+          cursor: { type: 'string', description: 'opaque page cursor from a prior list_runs call' },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'status',
+      description:
+        "The caller's own account snapshot — balance (impetus/usd), in-flight gens, and studios. Call " +
+        'this before proposing something the user may not be able to afford, or when asked about balance ' +
+        'or what is currently running.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -246,8 +299,8 @@ export function buildSystemPrompt(ctx: ConciergeContext): string {
     '',
     'HOUSE RULES:',
     '- You PROPOSE, you never SPEND. You have read-only discovery tools only (list_flows, describe_flow,',
-    '  search_models, quote). There is NO run/collect/provision tool and you must never claim to have run',
-    '  anything — the user confirms (GO) separately, elsewhere.',
+    '  search_models, quote, get_run, list_runs, status). There is NO run/collect/provision tool and you must',
+    '  never claim to have run anything — the user confirms (GO) separately, elsewhere.',
     '- Ground EVERY flow and model choice in a tool call. Never invent a flow id or a model id/trigger word;',
     '  read them from list_flows / describe_flow / search_models first.',
     '- Embellishment is VISIBLE and EDITABLE (Fooocus-style transparency), never a silent DALL-E-style rewrite.',
@@ -255,6 +308,12 @@ export function buildSystemPrompt(ctx: ConciergeContext): string {
     `- ${style}`,
     '- When you choose a lora/model, weave its trigger word(s) (from search_models) into embellishedPrompt so',
     '  it actually activates.',
+    '- You know the user\'s OWN history and balance — use it, don\'t claim to be blind to it. Call status',
+    '  before proposing something that might exceed the caller\'s balance, or when asked about balance or',
+    '  what is currently running. Call list_runs to answer "what did I make recently/yesterday" or to find a',
+    '  prior run the user references loosely; call get_run when they (or a prior list_runs result) give you',
+    '  a specific run id. Use a run you found this way as the basis for an ADJUSTED proposal exactly like the',
+    '  prior-run case below.',
     `- ${spicy}`,
     `- ${bindings}`,
     prior,
@@ -315,6 +374,17 @@ async function executeTool(
           aditus: args.aditus as Record<string, unknown> | undefined,
         }),
       )
+    case 'get_run':
+      return textOf(await getRunTool(deps.api, ctx.auctor, { id: String(args.id ?? '') }))
+    case 'list_runs':
+      return textOf(
+        await listRunsTool(deps.api, ctx.auctor, {
+          limit: args.limit as number | undefined,
+          cursor: args.cursor as string | undefined,
+        }),
+      )
+    case 'status':
+      return textOf(await statusTool(deps.api, ctx.auctor))
     default:
       return `ERROR unknown.tool: ${name} is not an available tool`
   }
