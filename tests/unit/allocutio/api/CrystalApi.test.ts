@@ -745,6 +745,82 @@ test('listModels trigger filter matches a single alias in a comma-joined trigger
   assert.equal(misses.find((m) => m.intellaId === 'multi-alias-lora'), undefined)
 })
 
+// ── listModels(auctor) — owner-inclusive union (noema-116) ──────────────────
+test('listModels with auctor finds the caller\'s own imported (non-canonical) model by trigger', async () => {
+  const owned = makeIntella({
+    id: 'valkyriesorder-lora',
+    nomen: 'Valkyries Order',
+    genus: 'lora',
+    familia: 'flux',
+    trigger: 'valkyriesorder',
+    canonica: false,
+    ownerAnimaId: 'anima-1',
+  })
+  const { deps } = makeDeps({ intellarum: makeFakeIntellarum([...fakeIntellae, owned]) })
+  const api = new CrystalApi(deps)
+
+  const byTrigger = await api.listModels({ trigger: 'valkyriesorder', auctor } as never)
+  assert.equal(byTrigger.length, 1)
+  assert.equal(byTrigger[0].intellaId, 'valkyriesorder-lora')
+
+  const byQ = await api.listModels({ q: 'Valkyries', auctor } as never)
+  assert.ok(byQ.some((m) => m.intellaId === 'valkyriesorder-lora'))
+})
+
+test('listModels with auctor does NOT surface a different owner\'s private import', async () => {
+  const owned = makeIntella({
+    id: 'valkyriesorder-lora',
+    nomen: 'Valkyries Order',
+    genus: 'lora',
+    familia: 'flux',
+    trigger: 'valkyriesorder',
+    canonica: false,
+    ownerAnimaId: 'anima-1',
+  })
+  const { deps } = makeDeps({ intellarum: makeFakeIntellarum([...fakeIntellae, owned]) })
+  const api = new CrystalApi(deps)
+
+  const otherAuctor: AuctorKey = { animaId: 'anima-2' }
+  const hits = await api.listModels({ trigger: 'valkyriesorder', auctor: otherAuctor } as never)
+  assert.equal(hits.find((m) => m.intellaId === 'valkyriesorder-lora'), undefined)
+})
+
+test('listModels with auctor leaves canonical results unchanged and does not duplicate an owned+canonical model', async () => {
+  const ownedCanonical = makeIntella({
+    id: 'flux-lora-1', // same id as an existing canonical fixture
+    nomen: 'Flux LoRA 1',
+    genus: 'lora',
+    familia: 'flux',
+    trigger: 'flux-portrait',
+    canonica: true,
+    ownerAnimaId: 'anima-1',
+  })
+  const { deps } = makeDeps({ intellarum: makeFakeIntellarum([...fakeIntellae.filter((i) => i.id !== 'flux-lora-1'), ownedCanonical]) })
+  const api = new CrystalApi(deps)
+
+  const hits = await api.listModels({ trigger: 'flux-portrait', auctor } as never)
+  assert.equal(hits.length, 1, 'no duplicate when a model is both canonical and owned by the caller')
+  assert.equal(hits[0].intellaId, 'flux-lora-1')
+})
+
+test('listModels without auctor is unchanged (public-only, canonical results identical)', async () => {
+  const owned = makeIntella({
+    id: 'valkyriesorder-lora',
+    nomen: 'Valkyries Order',
+    genus: 'lora',
+    familia: 'flux',
+    trigger: 'valkyriesorder',
+    canonica: false,
+    ownerAnimaId: 'anima-1',
+  })
+  const { deps } = makeDeps({ intellarum: makeFakeIntellarum([...fakeIntellae, owned]) })
+  const api = new CrystalApi(deps)
+
+  const models = await api.listModels()
+  assert.equal(models.find((m) => m.intellaId === 'valkyriesorder-lora'), undefined)
+  assert.equal(models.length, fakeIntellae.length)
+})
+
 // ── invokeFlow maxImpetus cap ─────────────────────────────────────────────────
 
 test('invokeFlow with maxImpetus BELOW the reservation throws economy.cap_too_low', async () => {
