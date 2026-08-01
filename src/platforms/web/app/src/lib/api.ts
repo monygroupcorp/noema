@@ -73,10 +73,22 @@ export interface Colloquium {
   id: string;
   status: string;
   titulus?: string;
+  /** The project this thread is filed under (noema-111). Absent → Uncategorized. */
+  projectId?: string;
   tabulaId?: string;
   modoId?: string;
   natum: string;
   mutatum: string;
+}
+// A thread as returned by GET /v1/colloquia (list) — a Colloquium plus a short preview
+// (the first user message, truncated) so the thread list is legible without hydrating it.
+export interface ColloquiumSummary extends Colloquium {
+  preview: string;
+}
+// The full thread as returned by GET /v1/colloquia/:id — the colloquium + its dicta, for resume.
+export interface ColloquiumThread {
+  colloquium: Colloquium;
+  dicta: Dictum[];
 }
 export interface ConciergeTokenUsage { totalTokens: number; promptTokens?: number; completionTokens?: number }
 export interface ConciergeQuote { impetus: string; recipient: string }
@@ -452,11 +464,27 @@ export const api = {
   // Same auth pattern as createRun (Decision record Q4, noema-099): an active
   // Vault purse sends ONLY the bursa token, no identity header; otherwise the
   // normal authHeaders() bearer/anon-commitment path.
-  // POST /v1/colloquia — start a conversation thread.
-  createColloquium: (body: { titulus?: string; tabulaId?: string; modoId?: string; bursaToken?: string } = {}) => {
+  // POST /v1/colloquia — start a conversation thread. `projectId` (noema-111) files the
+  // thread under the active project; omit it for the idle/uncategorized dock.
+  createColloquium: (body: { titulus?: string; projectId?: string; tabulaId?: string; modoId?: string; bursaToken?: string } = {}) => {
     const purse = getActivePurse();
     const headers = purse ? { 'content-type': 'application/json', 'x-bursa-token': purse } : authHeaders();
     return fetch('/v1/colloquia', { method: 'POST', headers, body: JSON.stringify(body) }).then(j<{ colloquium: Colloquium }>);
+  },
+  // GET /v1/colloquia — the caller's own threads (owner-scoped server-side), newest first,
+  // each with a short preview. Feeds the thread-list UI (noema-111). Purse-aware like
+  // createColloquium: an active Vault purse scopes to the bursaToken ownerKey (Decision Q4).
+  listColloquia: () => {
+    const purse = getActivePurse();
+    const headers = purse ? { 'x-bursa-token': purse } : readHeaders();
+    return fetch('/v1/colloquia', { headers }).then(j<{ colloquia: ColloquiumSummary[] }>);
+  },
+  // GET /v1/colloquia/:id — the full thread (colloquium + dicta) for resume; 404 if not the
+  // caller's (same authz as the dicta POST). noema-111.
+  getColloquium: (id: string) => {
+    const purse = getActivePurse();
+    const headers = purse ? { 'x-bursa-token': purse } : readHeaders();
+    return fetch(`/v1/colloquia/${encodeURIComponent(id)}`, { headers }).then(j<ColloquiumThread>);
   },
   // POST /v1/colloquia/:id/dicta — run one metered turn. `turnKey` is the caller-supplied
   // idempotency key (required server-side); `priorRunId` sets the critique/adjust context.
