@@ -235,6 +235,7 @@ export function ProposalCard({ proposal, onAdjust }: {
         .pc-go{padding:6px 16px;border-radius:8px;font-weight:600}
         .pc-err{color:var(--error,#c33);font-size:.85em}
         .pc-run{font-size:.85em;opacity:.85;display:flex;gap:8px;align-items:center}
+        .rimg-clickable{max-width:100%;max-height:280px;object-fit:contain;border-radius:var(--radius,10px);display:block;cursor:pointer}
 
         .lora-trigger-overlay{position:absolute;inset:0;padding:9px 11px;border:1px solid transparent;
           pointer-events:none;white-space:pre-wrap;word-wrap:break-word;overflow:hidden;color:transparent}
