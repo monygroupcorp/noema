@@ -43,7 +43,6 @@ export function AdminWorkspace() {
       <div className="page"><div className="pw">
         <div className="pagehead">
           <div>
-            <div className="noema-kicker" style={{ marginBottom: 8 }}>platform administration · read-only</div>
             <h1>Admin workspace</h1>
             <div className="sub">Moderation, revenue, and cost — one hub. Credits-only, read-only observability. No payouts, no disbursement, no tax.</div>
           </div>

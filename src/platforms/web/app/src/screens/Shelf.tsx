@@ -120,7 +120,6 @@ export function Shelf() {
       <div className="page"><div className="pw wide">
         <div className="pagehead shelf-head">
           <div>
-            <div className="noema-kicker" style={{ marginBottom: 8 }}>your models · {models ? `${count} trained` : 'loading…'}</div>
             <h1>Model shelf</h1>
             <div className="sub">What you’ve taught NOEMA — run them, turn them into collections, and publish them.</div>
           </div>

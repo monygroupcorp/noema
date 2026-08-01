@@ -75,14 +75,6 @@
   color: var(--color-text-muted);
   margin: 0;
 }
-.ds-overline {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-caps);
-  color: var(--color-text-subtle);
-  margin: 0;
-}
 .ds-mono {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
