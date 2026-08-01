@@ -74,7 +74,7 @@ export const HISTORY_TURN_LIMIT = 10
 
 export interface ColloquiaRouterDeps {
   identity: { resolve(creds: Credentials): Promise<AuctorKey> }
-  colloquia: Pick<ColloquiumStore, 'create' | 'find'>
+  colloquia: Pick<ColloquiumStore, 'create' | 'find' | 'findByOwner'>
   dicta: Pick<DictumStore, 'create' | 'update' | 'listByColloquium' | 'findByTurnKey'>
   /** The ledger — the Signorum-backed EXACT-cost rail (animaId / commitment callers). */
   signorum: Pick<Signorum, 'balance' | 'reserve' | 'settle' | 'release'>
@@ -136,11 +136,25 @@ function serializeColloquium(c: Colloquium): Record<string, unknown> {
     id: c.id,
     status: c.status,
     ...(c.titulus !== undefined ? { titulus: c.titulus } : {}),
+    ...(c.projectId !== undefined ? { projectId: c.projectId } : {}),
     ...(c.tabulaId !== undefined ? { tabulaId: c.tabulaId } : {}),
     ...(c.modoId !== undefined ? { modoId: c.modoId } : {}),
     natum: c.natum,
     mutatum: c.mutatum,
   }
+}
+
+/** Max length of the list-view preview (first user message, truncated) — legible without an N+1
+ *  full-thread fetch and small enough to keep the list payload bounded (noema-111). */
+const PREVIEW_MAX_CHARS = 140
+
+/** First user Dictum's corpus for a thread, truncated — the list preview (noema-111). Empty
+ *  string when the thread has no user turn yet (a thread created but never sent to). */
+function previewOf(dicta: Dictum[]): string {
+  const firstUser = dicta.find((d) => d.genus === 'user')
+  if (!firstUser) return ''
+  const text = firstUser.corpus.trim()
+  return text.length > PREVIEW_MAX_CHARS ? `${text.slice(0, PREVIEW_MAX_CHARS)}…` : text
 }
 
 function serializeDictum(d: Dictum): Record<string, unknown> {
@@ -201,14 +215,72 @@ export function createColloquiaRouter(deps: ColloquiaRouterDeps): Router {
       const titulus = typeof req.body?.titulus === 'string' ? req.body.titulus.slice(0, 200) : undefined
       const tabulaId = typeof req.body?.tabulaId === 'string' ? req.body.tabulaId : undefined
       const modoId = typeof req.body?.modoId === 'string' ? req.body.modoId : undefined
+      // The active project at create time (noema-111) — a grouping tag only. Absent → uncategorized.
+      const projectId = typeof req.body?.projectId === 'string' ? req.body.projectId : undefined
       const colloquium = await deps.colloquia.create({
         ownerKey,
         status: 'active',
         ...(titulus !== undefined ? { titulus } : {}),
+        ...(projectId !== undefined ? { projectId } : {}),
         ...(tabulaId !== undefined ? { tabulaId } : {}),
         ...(modoId !== undefined ? { modoId } : {}),
       })
       res.status(200).json({ colloquium: serializeColloquium(colloquium) })
+    }),
+  )
+
+  // GET /v1/colloquia — list the caller's own threads, newest-first, each with a short preview.
+  // READ-only (no metering/settle). STRICTLY ownerKey-scoped via findByOwner(ownerKeyOf(auctor)) —
+  // a caller can never see another owner's threads (noema-111).
+  router.get(
+    '/',
+    wrap(async (req, res) => {
+      let auctor: AuctorKey
+      try {
+        auctor = await auth(req)
+      } catch {
+        fail(res, 401, 'auth.invalid', 'Sign in or present a bursa token to list conversations')
+        return
+      }
+      const mine = await deps.colloquia.findByOwner(ownerKeyOf(auctor))
+      // Newest-activity first so the list reads like a recents pane.
+      mine.sort((a, b) => new Date(b.mutatum).getTime() - new Date(a.mutatum).getTime())
+      const colloquia = await Promise.all(
+        mine.map(async (c) => {
+          // Bounded per-thread first-message read for the legible preview (the thread's dicta are
+          // already small; this is not the full-thread hydrate the :id route does).
+          const dicta = await deps.dicta.listByColloquium(c.id)
+          return { ...serializeColloquium(c), preview: previewOf(dicta) }
+        }),
+      )
+      res.status(200).json({ colloquia })
+    }),
+  )
+
+  // GET /v1/colloquia/:id — the full thread (colloquium + its dicta), for resume. READ-only.
+  // SAME authz as the dicta POST: not-found OR not-owned → 404, so a cross-owner probe cannot
+  // distinguish "someone else's thread" from "no thread" (noema-111, pattern reused verbatim).
+  router.get(
+    '/:id',
+    wrap(async (req, res) => {
+      let auctor: AuctorKey
+      try {
+        auctor = await auth(req)
+      } catch {
+        fail(res, 401, 'auth.invalid', 'Sign in or present a bursa token')
+        return
+      }
+      const colloquiumId = String(req.params.id)
+      const colloquium = await deps.colloquia.find(colloquiumId)
+      if (!colloquium || colloquium.ownerKey !== ownerKeyOf(auctor)) {
+        fail(res, 404, 'not.found', 'Colloquium not found')
+        return
+      }
+      const dicta = await deps.dicta.listByColloquium(colloquiumId)
+      res.status(200).json({
+        colloquium: serializeColloquium(colloquium),
+        dicta: dicta.map(serializeDictum),
+      })
     }),
   )
 
