@@ -46,8 +46,12 @@ export class MongoAnima implements AnimaStore {
 
   /**
    * Tombstone the Anima — the GDPR pseudonymization act (noema-025). SEVERS the identifying
-   * PII (`$unset` `custos`/`memoriaRef`, blank the `nomen`) and marks the soul erased with a
-   * 7-year `retentionUntil` stamp. The opaque `id` is deliberately KEPT so the immutable
+   * PII (`$unset` `custos`/`memoriaRef`/`publicatio`, blank the `nomen`) and marks the soul
+   * erased with a 7-year `retentionUntil` stamp. `publicatio` is dropped whole because it
+   * carries identifying handles — `wallet` (on-chain custody address), `huggingFaceAccount`,
+   * `civitaiAccount`, `bucket` — whose retention would defeat the pseudonymization-sufficiency
+   * claim; its non-PII sub-fields (defaultVisibility, …) are moot on a dead account. The opaque
+   * `id` is deliberately KEPT so the immutable
    * financial ledger + Stripe dispute resolver keep resolving against a non-identifying anchor.
    * Idempotent: re-tombstoning an already-erased soul re-applies the same $set/$unset cleanly
    * (never errors, never double-deletes). Dedicated concrete method (NOT the whitelisted
@@ -64,7 +68,7 @@ export class MongoAnima implements AnimaStore {
           retentionUntil: stamp.retentionUntil,
           mutatum: new Date(),
         },
-        $unset: { custos: '', memoriaRef: '' },
+        $unset: { custos: '', memoriaRef: '', publicatio: '' },
       },
     )
   }
