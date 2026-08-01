@@ -46,10 +46,20 @@ interface ApiSpy {
   listModelsCalls: Array<Record<string, unknown>>
   quoteCalls: Array<{ target: unknown; aditus: unknown }>
   listFlowsCalls: number
+  getRunCalls: Array<{ auctor: unknown; id: string }>
+  listRunsCalls: Array<{ auctor: unknown; opts: unknown }>
+  statusCalls: Array<{ auctor: unknown }>
 }
 
 function makeApi(): { api: CrystalApi; spy: ApiSpy } {
-  const spy: ApiSpy = { listModelsCalls: [], quoteCalls: [], listFlowsCalls: 0 }
+  const spy: ApiSpy = {
+    listModelsCalls: [],
+    quoteCalls: [],
+    listFlowsCalls: 0,
+    getRunCalls: [],
+    listRunsCalls: [],
+    statusCalls: [],
+  }
   const mock = {
     listFlows: async () => {
       spy.listFlowsCalls++
@@ -73,6 +83,24 @@ function makeApi(): { api: CrystalApi; spy: ApiSpy } {
     // this chokepoint before emitting a GO-able proposal. The scripted picks all resolve here.
     resolvePinnedModels: async (_auctor: unknown, pinned: readonly (string | { id: string })[]) =>
       pinned.map((p) => ({ role: 'lora', id: typeof p === 'string' ? p : p.id, dest: `models/loras/${typeof p === 'string' ? p : p.id}.safetensors` })),
+    // noema-115: owner-scoped history + balance reads.
+    getRun: async (auctor: unknown, id: string) => {
+      spy.getRunCalls.push({ auctor, id })
+      return { id, status: 'complete', modusId: 'flux.txt2img' }
+    },
+    listRuns: async (auctor: unknown, opts: Record<string, unknown> = {}) => {
+      spy.listRunsCalls.push({ auctor, opts })
+      return {
+        runs: [
+          { id: 'run_1', modusId: 'flux.txt2img', modusLabel: 'Flux', status: 'settled', cost: '10', costUsd: 0.01 },
+        ],
+        runningTotal: { impetus: '10', usd: 0.01 },
+      }
+    },
+    status: async (auctor: unknown) => {
+      spy.statusCalls.push({ auctor })
+      return { balanceImpetus: '500', balanceUsd: 0.5, gens: [], studios: [], joinable: [], takenAt: 'now' }
+    },
   }
   return { api: mock as unknown as CrystalApi, spy }
 }
@@ -163,6 +191,27 @@ for (const spicyMode of [false, true]) {
 }
 
 // ---------------------------------------------------------------------------
+// (c2) search_models passes the turn's auctor through so listModels can union in
+// the caller's own imported models (noema-116).
+// ---------------------------------------------------------------------------
+test('search_models passes ctx.auctor through to listModels', async () => {
+  const { api, spy } = makeApi()
+  const client = scriptedClient([
+    chatResult({
+      toolCalls: [{ id: 'm1', name: 'search_models', arguments: JSON.stringify({ trigger: 'valkyriesorder' }) }],
+      finishReason: 'tool_calls',
+    }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'done' }) }),
+  ])
+
+  const ctx = baseCtx({ auctor: { animaId: 'anima-42' } })
+  await runConcierge(baseDeps(client.runToolChat, api), ctx, 'find my lora')
+
+  assert.equal(spy.listModelsCalls.length, 1)
+  assert.deepEqual(spy.listModelsCalls[0].auctor, { animaId: 'anima-42' })
+})
+
+// ---------------------------------------------------------------------------
 // (d) embellishedPrompt does NOT prepend generatio.style.
 // ---------------------------------------------------------------------------
 test('embellishedPrompt does not prepend generatio.style', async () => {
@@ -200,10 +249,81 @@ test('the tool surface contains no spend tools', async () => {
   await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'hello')
 
   const names = (client.calls[0].tools ?? []).map((t) => t.function.name)
-  assert.deepEqual(names.sort(), ['describe_flow', 'list_flows', 'quote', 'search_models'])
+  assert.deepEqual(
+    names.sort(),
+    ['describe_flow', 'get_run', 'list_flows', 'list_runs', 'quote', 'search_models', 'status'],
+  )
   for (const spend of ['run_flow', 'provision_studio', 'collect', 'runFlow', 'invokeFlow']) {
     assert.ok(!names.includes(spend), `spend tool ${spend} must not be exposed`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// (i) noema-115: get_run, list_runs, and status are wired into the tool loop,
+// forward the caller's auctor (owner-scoped), and their results reach the model.
+// ---------------------------------------------------------------------------
+test('get_run is wired, owner-scoped, and its result reaches the model', async () => {
+  const { api, spy } = makeApi()
+  const auctor = { animaId: 'anima_owner' }
+  const client = scriptedClient([
+    chatResult({
+      toolCalls: [{ id: 'g1', name: 'get_run', arguments: JSON.stringify({ id: 'run_1' }) }],
+      finishReason: 'tool_calls',
+    }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'that run made a fox' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx({ auctor }), 'what was run_1?')
+
+  assert.equal(spy.getRunCalls.length, 1)
+  assert.deepEqual(spy.getRunCalls[0], { auctor, id: 'run_1' })
+  const secondCallMessages = client.calls[1].messages
+  const toolResultMsg = secondCallMessages.find((m) => m.role === 'tool' && m.tool_call_id === 'g1')
+  assert.ok(toolResultMsg)
+  assert.ok(String(toolResultMsg!.content).includes('run_1'))
+})
+
+test('list_runs is wired, owner-scoped, forwards limit/cursor, and its result reaches the model', async () => {
+  const { api, spy } = makeApi()
+  const auctor = { animaId: 'anima_owner' }
+  const client = scriptedClient([
+    chatResult({
+      toolCalls: [{ id: 'l1', name: 'list_runs', arguments: JSON.stringify({ limit: 5, cursor: 'c0' }) }],
+      finishReason: 'tool_calls',
+    }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'you made a fox yesterday' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx({ auctor }), 'what did I make recently?')
+
+  assert.equal(spy.listRunsCalls.length, 1)
+  assert.equal(spy.listRunsCalls[0].auctor, auctor)
+  assert.deepEqual(spy.listRunsCalls[0].opts, { limit: 5, cursor: 'c0' })
+  const secondCallMessages = client.calls[1].messages
+  const toolResultMsg = secondCallMessages.find((m) => m.role === 'tool' && m.tool_call_id === 'l1')
+  assert.ok(toolResultMsg)
+  assert.ok(String(toolResultMsg!.content).includes('run_1'))
+})
+
+test('status is wired, owner-scoped, and its result reaches the model', async () => {
+  const { api, spy } = makeApi()
+  const auctor = { animaId: 'anima_owner' }
+  const client = scriptedClient([
+    chatResult({
+      toolCalls: [{ id: 's1', name: 'status', arguments: '{}' }],
+      finishReason: 'tool_calls',
+    }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'you have 500 impetus' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx({ auctor }), 'can I afford this?')
+
+  assert.equal(spy.statusCalls.length, 1)
+  assert.deepEqual(spy.statusCalls[0], { auctor })
+  const secondCallMessages = client.calls[1].messages
+  const toolResultMsg = secondCallMessages.find((m) => m.role === 'tool' && m.tool_call_id === 's1')
+  assert.ok(toolResultMsg)
+  assert.ok(String(toolResultMsg!.content).includes('500'))
 })
 
 // ---------------------------------------------------------------------------

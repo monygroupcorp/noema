@@ -2047,8 +2047,15 @@ export class CrystalApi {
    * populated `intellarum` registry's `canonical()` set — the public catalog
    * projection (no `access`/`license`/`commercialUse`). Each result is a card so the
    * agent can decide, not just enumerate.
+   *
+   * `auctor` (optional): when passed, the search base is the UNION of the public
+   * `canonical()` set and that caller's own privately-held models (the same owner
+   * scoping `listMyModels` uses), deduped by intella id, then filtered by the exact
+   * same q/genus/basis/trigger/includeAdult predicate below — so canonical and owned
+   * results are matched identically. Omitting `auctor` preserves today's public-only
+   * behavior for every existing caller (noema-116).
    */
-  async listModels(filter: { genus?: IntelligensGenus; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number; includeAdult?: boolean } = {}): Promise<ModelCard[]> {
+  async listModels(filter: { genus?: IntelligensGenus; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number; includeAdult?: boolean; auctor?: AuctorKey } = {}): Promise<ModelCard[]> {
     if (!this.deps.intellarum) return []
     const registry = this.deps.intellarum
     let basis = filter.basis
@@ -2061,19 +2068,28 @@ export class CrystalApi {
         }
       }
     }
+    const canonical = await registry.canonical()
+    let pool = canonical
+    if (filter.auctor) {
+      const ownerKey = ownerKeyOf(filter.auctor)
+      const owned = registry.listByOwner
+        ? await registry.listByOwner(ownerKey)
+        : (await registry.list()).filter((i) => i.ownerKey === ownerKey || `anima:${i.ownerAnimaId}` === ownerKey)
+      const seen = new Set(pool.map((i) => i.id))
+      pool = [...pool, ...owned.filter((i) => !seen.has(i.id))]
+    }
     const q = filter.q?.trim()
-    // `Intellarum` has no free-text search — filter the canonical set in-memory for `q`
+    // `Intellarum` has no free-text search — filter the pool in-memory for `q`
     // (nomen/description/tags/sample-prompt substring match), same as the old intelligendi
     // store's search() did, widened to also reach style signal carried in tags and samples.
-    const canonical = await registry.canonical()
     const base = q
-      ? canonical.filter((i) =>
+      ? pool.filter((i) =>
           i.nomen.toLowerCase().includes(q.toLowerCase()) ||
           (i.description ?? '').toLowerCase().includes(q.toLowerCase()) ||
           (i.tags ?? []).some((t) => t.tag.toLowerCase().includes(q.toLowerCase())) ||
           (i.samples ?? []).some((s) => (s.prompt ?? '').toLowerCase().includes(q.toLowerCase())),
         )
-      : canonical
+      : pool
     const trig = filter.trigger?.trim().toLowerCase()
     const hits = base.filter((i) => {
       if (filter.genus && i.genus !== filter.genus) return false

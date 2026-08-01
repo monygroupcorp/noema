@@ -31,7 +31,16 @@ import type {
   OpenRouterToolCall,
 } from '../../../../src/allocutio/api/OpenRouterToolClient.js'
 
-const READ_ONLY_TOOLS = new Set(['list_flows', 'describe_flow', 'search_models', 'list_models', 'quote'])
+const READ_ONLY_TOOLS = new Set([
+  'list_flows',
+  'describe_flow',
+  'search_models',
+  'list_models',
+  'quote',
+  'get_run',
+  'list_runs',
+  'status',
+])
 
 // ── fakes ────────────────────────────────────────────────────────────────────
 
