@@ -353,16 +353,29 @@ function SpaceFallbackGrid({ items, onRemove, onImpressio }: {
         {rows.map((it) => {
           const src = items.find(v => v.id === it.id);
           const impressio = src?.impressio;
+          // actumId (FK -> Actum) is the id /run?id= accepts — present when this trace
+          // resolved from a completed generation; some traces never resolve one, so the
+          // link is conditional (item noema-110: don't fabricate a target when absent).
+          const runHref = src?.actumId ? `/run?id=${src.actumId}` : null;
+          const linkStyle = { display: 'block', color: 'inherit', textDecoration: 'none' } as const;
+          const media = (
+            <div style={{ aspectRatio: '1 / 1', background: '#0c1116' }}>
+              {it.imagoUrl && <img src={it.imagoUrl} loading="lazy" alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />}
+            </div>
+          );
+          const text = (
+            <>
+              <div style={{ fontSize: 11.5, color: 'var(--text)', lineHeight: 1.4, marginBottom: 6, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                {vestigiumSnippet(it.promptum) || '(no prompt)'}
+              </div>
+              <div className="mono" style={{ fontSize: 10.5, color: 'var(--faint)', marginBottom: 6 }}>{formatVestigiumDate(it.natum)}</div>
+            </>
+          );
           return (
             <div key={it.id} style={{ border: '1px solid var(--hair)', borderRadius: 10, overflow: 'hidden', background: 'var(--panel)' }}>
-              <div style={{ aspectRatio: '1 / 1', background: '#0c1116' }}>
-                {it.imagoUrl && <img src={it.imagoUrl} loading="lazy" alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />}
-              </div>
+              {runHref ? <Link to={runHref} title="resume run" style={linkStyle}>{media}</Link> : media}
               <div style={{ padding: 8 }}>
-                <div style={{ fontSize: 11.5, color: 'var(--text)', lineHeight: 1.4, marginBottom: 6, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                  {vestigiumSnippet(it.promptum) || '(no prompt)'}
-                </div>
-                <div className="mono" style={{ fontSize: 10.5, color: 'var(--faint)', marginBottom: 6 }}>{formatVestigiumDate(it.natum)}</div>
+                {runHref ? <Link to={runHref} style={linkStyle}>{text}</Link> : text}
                 <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                   {(['amor', 'risus', 'maeror'] as const).map(k => (
                     <button key={k} onClick={() => onImpressio(it.id, k)} title={k}

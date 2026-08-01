@@ -87,13 +87,13 @@ export function Status() {
         ) : (
           <div className="list">
             {me.gens.slice(0, 8).map((gn) => (
-              <div className="lrow" key={gn.actumId}>
+              <Link className="lrow" to={`/run?id=${gn.actumId}`} key={gn.actumId}>
                 <div className="li-main">
                   <div className="t">{gn.modusLabel}</div>
                   <div className="s">{gn.status === 'agens' ? 'running' : 'queued'}{gn.studio ? ` · ${gn.studio.hostLabel}` : ''}</div>
                 </div>
                 <div className="li-right">{gn.status === 'agens' ? fmtElapsed(gn.elapsedMs) : gn.etaMs ? `~${fmtElapsed(gn.etaMs)}` : ''}</div>
-              </div>
+              </Link>
             ))}
           </div>
         )}
@@ -119,14 +119,15 @@ export function Status() {
         ) : (
           <>
             <div className="list">
+              {/* r.id is the settled run's actumId (runProjection.ts#toSettledRun: id = entry.actumId) — same id /run?id= reads. */}
               {spend.map((r) => (
-                <div className="lrow" key={r.id}>
+                <Link className="lrow" to={`/run?id=${r.id}`} key={r.id}>
                   <div className="li-main">
                     <div className="t">{r.modusLabel}</div>
                     <div className="s">{fmtDate(r.settledAt)}</div>
                   </div>
                   <div className="li-right">{Number(r.cost).toLocaleString()} cr · ${r.costUsd.toFixed(2)}</div>
-                </div>
+                </Link>
               ))}
             </div>
             {spendCursor && (
