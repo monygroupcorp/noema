@@ -81,3 +81,56 @@ export const denyModerationGate: ModerationGate = {
     return { ok: false, reason: 'public publishing is unavailable — content moderation is not yet configured' }
   },
 }
+
+/**
+ * INTERIM manual-review gate — HOLD every public publish for a human.
+ *
+ * The operator posture (2026-08-01) while the automated PRIVATE compliance module +
+ * NCMEC ESP are stood up: open the public feed/marketplace via HUMAN review rather
+ * than keep it fail-closed dark. Every public publish returns a HOLD verdict, so the
+ * settle path routes it to the existing admin review queue (`listHeldEditions` →
+ * `Review.tsx`, reveal-gated) where a reviewer explicitly approves / rejects /
+ * confirms-CSAM. Nothing is ever auto-approved and nothing is ever auto-rejected.
+ *
+ * This is a DETECTION posture, NOT a detector: it inspects nothing, matches no hashset,
+ * calls no classifier, and — critically — files NO NCMEC report on its own. A hold is
+ * never a CSAM verdict (§0-A); the NCMEC report/preserve stays the reviewer's explicit
+ * `confirmCsamAndReport` action. It is therefore NOT billable (no paid classifier ran).
+ *
+ * Selected ONLY under the explicit `MODERATION_MANUAL_REVIEW=1` opt-in (index.ts), and
+ * ranks BELOW the real private gate but ABOVE permissive/deny. Default with no flag stays
+ * the fail-closed `denyModerationGate`. Enabling it in production is the operator's
+ * counsel-gated call — it opens public publishing and REQUIRES the review queue be
+ * actively cleared; it does NOT replace the NCMEC ESP/report/preserve obligation.
+ */
+export const manualReviewGate: ModerationGate = {
+  async scan(): Promise<ModerationVerdict> {
+    return { ok: false, hold: true, reason: 'held for manual review' }
+  },
+}
+
+/**
+ * The →public gate SELECTION, as a pure function of what is configured — extracted from
+ * `index.ts` so the fail-closed precedence is directly unit-testable (the container maps
+ * the returned `mode` to its log line and injects `gate`). Precedence, all fail-closed:
+ *
+ *   1. the real PRIVATE gate            — present AND detection configured;
+ *   2. else `manualReviewGate`          — MODERATION_MANUAL_REVIEW=1 (interim human review);
+ *   3. else `permissiveModerationGate`  — MODERATION_ALLOW_UNSCANNED=1 (dev/staging only);
+ *   4. else `denyModerationGate`        — the safe default (public publishing off).
+ *
+ * The default (no private gate, neither flag) is ALWAYS `deny` — never approve unscanned
+ * content on a public surface.
+ */
+export type ModerationGateMode = 'private' | 'manual' | 'permissive' | 'deny'
+
+export function selectModerationGate(opts: {
+  privateGate: ModerationGate | null
+  manualReview: boolean
+  allowUnscanned: boolean
+}): { gate: ModerationGate; mode: ModerationGateMode } {
+  if (opts.privateGate) return { gate: opts.privateGate, mode: 'private' }
+  if (opts.manualReview) return { gate: manualReviewGate, mode: 'manual' }
+  if (opts.allowUnscanned) return { gate: permissiveModerationGate, mode: 'permissive' }
+  return { gate: denyModerationGate, mode: 'deny' }
+}
