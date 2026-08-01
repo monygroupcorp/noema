@@ -66,6 +66,43 @@ export function AccountSettings() {
       setExporting(false);
     }
   };
+  // GDPR "Delete account & data" — DELETE /v1/me (noema-025). Irreversible, so it's fronted by a
+  // TYPED-confirmation gate: the user must type the exact phrase before the confirm button arms.
+  // Truthful copy: identity/content is deleted, but financial records are RETAINED-ANONYMIZED for
+  // legal reasons — we never claim "everything is deleted" (the privacy-truthfulness bar). On
+  // success we drop to the anonymous slot and go home (the old session token is now revoked too).
+  const DELETE_PHRASE = 'delete my account';
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteText, setDeleteText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
+  const deleteArmed = deleteText.trim().toLowerCase() === DELETE_PHRASE;
+  const deleteAccount = async () => {
+    if (!deleteArmed || deleting) return;
+    setDeleting(true); setDeleteErr(null);
+    try {
+      const s = getSession();
+      const headers: Record<string, string> = {
+        'content-type': 'application/json',
+        ...(s ? { authorization: `Bearer ${s}` } : { 'x-commitment': commitment() }),
+      };
+      const res = await fetch('/v1/me', { method: 'DELETE', headers });
+      if (res.status === 404) throw new Error('not-enabled');
+      if (!res.ok) throw new Error(`delete failed (${res.status})`);
+      // Erased — the session token is now revoked server-side; drop to anonymous and leave.
+      goAnonymous();
+      navigate('/');
+    } catch (e) {
+      setDeleteErr(
+        (e as Error).message === 'not-enabled'
+          ? 'Account deletion isn’t enabled on this environment yet.'
+          : 'Deletion failed — please try again in a moment.',
+      );
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   useEffect(() => {
     let live = true;
     api.meStatus().then((s) => { if (live) setMe(s); }).catch(() => {});
@@ -103,13 +140,49 @@ export function AccountSettings() {
             </div>
           </div>
 
-          {/* sovereignty trio — a right, shown up front. Go anonymous + Export are real; Delete
-              still has no backend endpoint yet, so it stays honestly gated. */}
+          {/* sovereignty trio — a right, shown up front. Go anonymous + Export are real; Delete is
+              now wired (DELETE /v1/me), gated behind a typed irreversible-confirmation. */}
           <div className="ac-sov">
             <button className="btn ghost" onClick={exportEverything} disabled={exporting} title="Download a complete JSON export of your account data"><Ic name="arrow-up" /> {exporting ? 'Preparing export…' : 'Export everything'}</button>
             <button className="btn ghost amber" onClick={leaveToAnon}><span className="hemi2 dashed" /> Go anonymous</button>
-            <button className="btn ghost bad" disabled title="Coming soon — account deletion isn’t wired yet"><Ic name="x" /> Delete account &amp; data — soon</button>
+            {anon ? (
+              <button className="btn ghost bad" disabled title="Sign in to erase a named account — an anonymous slot holds no identified data to erase"><Ic name="x" /> Delete account &amp; data</button>
+            ) : (
+              <button className="btn ghost bad" onClick={() => { setDeleteOpen((o) => !o); setDeleteErr(null); setDeleteText(''); }} aria-expanded={deleteOpen} title="Permanently erase your identity & content"><Ic name="x" /> Delete account &amp; data</button>
+            )}
           </div>
+          {deleteOpen && !anon && (
+            <div className="ac-note mono" style={{ marginTop: 'var(--s3)', borderLeft: '2px solid var(--bad, #c0392b)', paddingLeft: 'var(--s3)' }}>
+              <div><b>This is permanent and cannot be undone.</b></div>
+              <div style={{ marginTop: 'var(--s2)' }}>
+                We will erase your identity and content — your profile, credentials, saved preferences,
+                projects, conversations and memory. For legal reasons we must <b>retain your financial
+                records</b> (deposits, credits and payouts); those are kept in <b>anonymized</b> form,
+                no longer linked to your name, and your published work stays live under an anonymous
+                author. You’ll be signed out immediately and this account can never sign in again.
+              </div>
+              <div style={{ marginTop: 'var(--s3)' }}>
+                Type <b>{DELETE_PHRASE}</b> to confirm:
+                <input
+                  className="input mono"
+                  style={{ marginTop: 'var(--s2)', width: '100%' }}
+                  value={deleteText}
+                  onChange={(e) => setDeleteText(e.target.value)}
+                  placeholder={DELETE_PHRASE}
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-label={`Type "${DELETE_PHRASE}" to confirm account deletion`}
+                />
+              </div>
+              <div style={{ marginTop: 'var(--s3)', display: 'flex', gap: 'var(--s2)' }}>
+                <button className="btn bad" onClick={deleteAccount} disabled={!deleteArmed || deleting}>
+                  {deleting ? 'Erasing…' : 'Permanently delete my account'}
+                </button>
+                <button className="btn ghost" onClick={() => { setDeleteOpen(false); setDeleteText(''); setDeleteErr(null); }} disabled={deleting}>Cancel</button>
+              </div>
+              {deleteErr && <div style={{ marginTop: 'var(--s2)' }}><span className="hemi2 dashed" /> {deleteErr}</div>}
+            </div>
+          )}
           {exportUrl && (
             <div className="ac-note mono" style={{ marginTop: 'var(--s3)' }}>
               <span className="hemi2 lit" /> Your export is ready — <a className="accent" href={exportUrl} target="_blank" rel="noreferrer" download>download it ▸</a> (link expires shortly).
@@ -121,7 +194,7 @@ export function AccountSettings() {
             </div>
           )}
           <div className="ac-note mono" style={{ marginTop: 'var(--s3)' }}>
-            <span className="hemi2 dashed" /> Data export &amp; account deletion are your legal rights — export is live; account deletion is in progress and will be wired here when ready.
+            <span className="hemi2 dashed" /> Data export &amp; account deletion are your legal rights — both are here. Deletion erases your identity &amp; content; financial records are retained in anonymized form for legal reasons.
           </div>
 
           {/* section cards — the honesty bar: rows with a real backend (credits via meStatus,

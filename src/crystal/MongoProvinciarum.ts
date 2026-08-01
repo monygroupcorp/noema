@@ -53,4 +53,14 @@ export class MongoProvinciarum implements Provinciarum {
     const docs = await this.col.find({ animaId }).sort({ natum: 1 }).toArray()
     return docs.map(fromDoc)
   }
+
+  /**
+   * GDPR erasure (noema-025) — hard-delete every project (Provincia) owned by this soul. The
+   * filed assets themselves are separate nouns (untouched — a project is just a folder ref);
+   * this removes the owner's project rows. Idempotent — a re-run returns 0.
+   */
+  async deleteByOwner(animaId: string): Promise<number> {
+    const r = await this.col.deleteMany({ animaId })
+    return r.deletedCount ?? 0
+  }
 }

@@ -104,6 +104,15 @@ import { startCensus } from './crystal/Census.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
 import { MeExporter } from './crystal/MeExporter.js'
+import { MeEraser } from './crystal/MeEraser.js'
+import { MongoErasedDenylist } from './crystal/MongoErasedDenylist.js'
+import { MongoAnima } from './crystal/MongoAnima.js'
+import { MongoPersona } from './crystal/MongoPersona.js'
+import { MongoMemoria } from './crystal/MongoMemoria.js'
+import { MongoProvinciarum } from './crystal/MongoProvinciarum.js'
+import { MongoPetitio } from './crystal/MongoPetitio.js'
+import { MongoColloquium } from './crystal/MongoColloquium.js'
+import { MongoDictum } from './crystal/MongoDictum.js'
 import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { makeTrainingFinalizer, urlLoraReader, makeTrainingExitusResolver } from './crystal/trainingFinalizer.js'
 import { MongoConsuetudinum } from './crystal/MongoConsuetudinum.js'
@@ -883,8 +892,29 @@ async function main(): Promise<void> {
   // writes through.
   const wideStore = new WideEventStore(mongo.db(DB_NAME))
 
+  // GDPR Art. 17 right-to-erasure (noema-025) — build the erased-account denylist (session
+  // revocation, shared with the auth acceptors below so an erase is visible to verifyJwt at once)
+  // and the MeEraser. The eraser takes narrow concrete stores (mirror the MeExporter wiring); the
+  // financial ledger + ZK set are deliberately NOT wired in, so erasure cannot reach them. The
+  // endpoint itself is flag-gated (`ERASURE_ENABLED`, default off, counsel-gated in prod).
+  const erasedDenylist = new MongoErasedDenylist(mongo.db(DB_NAME).collection('erased_denylist'))
+  await erasedDenylist.ensureIndexes().catch((err) => log.warn('erased_denylist index ensure failed', { error: String(err) }))
+  const meEraser = new MeEraser({
+    denylist: erasedDenylist,
+    animae: new MongoAnima(mongo.db(DB_NAME).collection('animae')),
+    personae: new MongoPersona(mongo.db(DB_NAME).collection('personae')),
+    credenta,
+    consuetudinum,
+    memoriae: new MongoMemoria(mongo.db(DB_NAME).collection('memoriae')),
+    provinciae: new MongoProvinciarum(mongo.db(DB_NAME).collection('provinciae')),
+    petitiones: new MongoPetitio(mongo.db(DB_NAME).collection('petitiones')),
+    colloquia: new MongoColloquium(mongo.db(DB_NAME).collection('colloquia')),
+    dicta: new MongoDictum(mongo.db(DB_NAME).collection('dicta')),
+  })
+
   const crystalApi = new CrystalApi({
     pricer,
+    eraser: meEraser,
     depositAddress: CREDIT_VAULT,
     deposita: ring.deposita,
     personae: ring.personae,
@@ -980,6 +1010,8 @@ async function main(): Promise<void> {
     // Federated (JWKS) SSO — trusted-issuer registry + the live prod JWKS override.
     issuers: ring.issuers,
     jwksOverride: parseJwksOverride(process.env.AGENT_JWKS_OVERRIDE),
+    // Session revocation (noema-025) — verifyJwt rejects an erased soul's still-valid JWT.
+    denylist: erasedDenylist,
   }))
   // Vestigia (traces) — GET / + /search + /projection. Mounted here (not at its
   // original spot above) because / and /projection resolve the CALLER's identity
@@ -1112,7 +1144,11 @@ async function main(): Promise<void> {
       })
     : undefined
 
-  app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub, ...(meExporter ? { exporter: meExporter } : {}) }))
+  // ERASURE_ENABLED (noema-025) — default OFF. Gates DELETE /v1/me; works on staging for
+  // verification, stays disabled in production until counsel signs Art.17(3)(b) sufficiency.
+  const erasureEnabled = process.env.ERASURE_ENABLED === 'true'
+  if (erasureEnabled) log.warn('ERASURE_ENABLED=true — DELETE /v1/me (GDPR erasure) is LIVE on this instance')
+  app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub, erasureEnabled, ...(meExporter ? { exporter: meExporter } : {}) }))
 
   // CAMEL agent compat surface (ADR-0011 §8) — the exact `/api/v1/...` paths the
   // deployed camel404 client bakes (on-chain-referenced). No catch-all in front,

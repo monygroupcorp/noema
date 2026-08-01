@@ -70,4 +70,14 @@ export class MongoPersona implements PersonaStore {
     if (!result) throw new Error(`Persona not found or animaId not linked: ${personaId}`)
     return fromDoc(result as Record<string, unknown>)
   }
+
+  /**
+   * GDPR erasure (noema-025) — hard-delete every persona (platform mask) that maps to this
+   * `animaId`. Severing the persona rows drops the login mapping so the erased soul can no
+   * longer be re-resolved on a fresh sign-in. Idempotent — a re-run deletes nothing, returns 0.
+   */
+  async deleteByAnima(animaId: string): Promise<number> {
+    const r = await this.col.deleteMany({ animaIds: animaId })
+    return r.deletedCount ?? 0
+  }
 }

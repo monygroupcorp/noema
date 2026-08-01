@@ -31,6 +31,8 @@ import type { MateriaStore } from '../../types/materia.js'
 import type { Conductor, StudioHandle, ConduceOpts } from '../../crystal/Conductor.js'
 import type { TeePodProvisioner } from '../../crystal/TeePodProvisioner.js'
 import type { AuctorKey } from '../../flow/types.js'
+import type { MeEraser } from '../../crystal/MeEraser.js'
+import type { ErasureReceipt } from '../../types/erasure.js'
 import type { Actum, ComputeStrategy, GpuClass, ModelRef } from '../../types/actum.js'
 import type { Inceptio } from '../../types/cursus.js'
 
@@ -169,6 +171,9 @@ export interface CrystalApiDeps {
   promptGuard?: PromptGuard
   /** Identity store — reads `Anima.publicatio` to default a publish from the caller's prefs. */
   animae?: AnimaStore
+  /** GDPR Art. 17 erasure orchestrator (noema-025) — backs `eraseMe` (DELETE /v1/me). Absent →
+   *  erasure unavailable (the endpoint 503s / the deployment ships the flag off). */
+  eraser?: MeEraser
   /** Model (Intella) registry — resolves + owner-scopes an `Intella` publish and is the
    *  reconciler's write seam (`setAccess`) for §5d. Absent → model publishing unavailable. */
   intellarum?: Intellarum
@@ -382,6 +387,22 @@ export class CrystalApi {
     if (anima?.disputeFrozen) {
       throw Errors.authForbidden('This account is frozen pending review of a payment dispute. Spending is paused until the dispute is resolved.')
     }
+  }
+
+  /**
+   * GDPR Art. 17 right-to-erasure (noema-025) — pseudonymize-and-tombstone the CALLER'S OWN
+   * account. Self-only by construction: erases exactly the authenticated `auctor`'s animaId, so a
+   * caller can never erase another owner (admin-erase is out of scope). Only an IDENTIFIED soul
+   * can be erased — anon (`commitment`/`bursaToken`) callers hold no identified PII, so this is a
+   * 403 for them. Delegates the irreversible act to the dedicated, reviewable `MeEraser`; the
+   * financial ledger + ZK set are untouched (see MeEraser). Wired only when erasure is enabled.
+   */
+  async eraseMe(auctor: AuctorKey): Promise<ErasureReceipt> {
+    if (!this.deps.eraser) throw Errors.internal('account erasure unavailable')
+    if (!('animaId' in auctor)) {
+      throw Errors.authForbidden('Only a signed-in account can be erased.')
+    }
+    return this.deps.eraser.erase(auctor.animaId)
   }
 
   /**
