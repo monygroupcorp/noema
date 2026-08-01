@@ -69,6 +69,10 @@ function makeApi(): { api: CrystalApi; spy: ApiSpy } {
       spy.quoteCalls.push({ target, aditus })
       return { impetus: '100', recipient: '0xrecipient' }
     },
+    // noema-113 pre-GO resolvability check: the concierge normalizes each pinned pick through
+    // this chokepoint before emitting a GO-able proposal. The scripted picks all resolve here.
+    resolvePinnedModels: async (_auctor: unknown, pinned: readonly (string | { id: string })[]) =>
+      pinned.map((p) => ({ role: 'lora', id: typeof p === 'string' ? p : p.id, dest: `models/loras/${typeof p === 'string' ? p : p.id}.safetensors` })),
   }
   return { api: mock as unknown as CrystalApi, spy }
 }

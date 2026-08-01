@@ -66,6 +66,16 @@ export const Errors = {
   notFoundProject: (id: string) => new ApiError('not_found.project', `Project '${id}' not found`, 404),
   notFoundEdition: (id: string) => new ApiError('not_found.edition', `Edition '${id}' not found`, 404),
   notFoundModel: (id: string) => new ApiError('not_found.model', `Model '${id}' not found`, 404),
+  /** A pinned model (id | slug | trigger) could not be resolved to a registered model at the run
+   *  boundary. 422 — the request is well-formed but references a model that does not exist / is not
+   *  accessible; NOT an internal error (this replaces the Compiler's misleading `model 'undefined'`
+   *  500). (noema-113) */
+  modelNotResolved: (token: string) =>
+    new ApiError('input.model_not_resolved', `pinned model "${token}" is not a registered/accessible model`, 422),
+  /** A pinned model resolved to a PRIVATE model the caller does not own — a visibility refusal, not a
+   *  malformed request. 403. A pin must not bypass access control. (noema-113) */
+  modelForbidden: (token: string) =>
+    new ApiError('auth.forbidden', `pinned model "${token}" is not accessible`, 403),
   notFoundTabula: (id: string) => new ApiError('not_found.tabula', `Tabula '${id}' not found`, 404),
   /** A Tabula's graph can't compile to a Modus — a cycle, a mismatched port wire, a node
    *  pointing at an unknown modus, or an empty graph. `details.vinculumId` names the
