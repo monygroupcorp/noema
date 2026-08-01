@@ -274,9 +274,11 @@ export function buildSystemPrompt(ctx: ConciergeContext): string {
 // ---------------------------------------------------------------------------
 // Tool execution — dispatch a named tool call to its read-only handler.
 // The `search_models`/`list_models` executor implements the Q2 spicy seam: it calls
-// `api.listModels({ ...args, includeAdult: ctx.spicyMode })` DIRECTLY, bypassing
-// `listModelsTool`'s wrapper (whose arg type omits `includeAdult`). We do not widen
-// the wrapper; the direct call is the chosen seam.
+// `api.listModels({ ...args, includeAdult: ctx.spicyMode, auctor: ctx.auctor })` DIRECTLY,
+// bypassing `listModelsTool`'s wrapper (whose arg type omits `includeAdult`/`auctor`). We do
+// not widen the wrapper; the direct call is the chosen seam. Passing `ctx.auctor` unions in
+// the caller's own imported models (noema-116) — `listModels` owner-scopes strictly, so a
+// caller only ever sees canonical + THEIR OWN, never another owner's private imports.
 // ---------------------------------------------------------------------------
 function textOf(r: McpResult): string {
   const body = r.content.map((c) => c.text).join('\n')
@@ -304,6 +306,7 @@ async function executeTool(
         q: args.q as string | undefined,
         limit: args.limit as number | undefined,
         includeAdult: ctx.spicyMode, // Q2 seam
+        auctor: ctx.auctor, // noema-116: union in the caller's own imported models
       })
       return JSON.stringify({ models }, null, 2)
     }

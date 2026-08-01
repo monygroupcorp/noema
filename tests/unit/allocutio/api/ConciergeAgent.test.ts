@@ -163,6 +163,27 @@ for (const spicyMode of [false, true]) {
 }
 
 // ---------------------------------------------------------------------------
+// (c2) search_models passes the turn's auctor through so listModels can union in
+// the caller's own imported models (noema-116).
+// ---------------------------------------------------------------------------
+test('search_models passes ctx.auctor through to listModels', async () => {
+  const { api, spy } = makeApi()
+  const client = scriptedClient([
+    chatResult({
+      toolCalls: [{ id: 'm1', name: 'search_models', arguments: JSON.stringify({ trigger: 'valkyriesorder' }) }],
+      finishReason: 'tool_calls',
+    }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'done' }) }),
+  ])
+
+  const ctx = baseCtx({ auctor: { animaId: 'anima-42' } })
+  await runConcierge(baseDeps(client.runToolChat, api), ctx, 'find my lora')
+
+  assert.equal(spy.listModelsCalls.length, 1)
+  assert.deepEqual(spy.listModelsCalls[0].auctor, { animaId: 'anima-42' })
+})
+
+// ---------------------------------------------------------------------------
 // (d) embellishedPrompt does NOT prepend generatio.style.
 // ---------------------------------------------------------------------------
 test('embellishedPrompt does not prepend generatio.style', async () => {
