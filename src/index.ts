@@ -60,7 +60,7 @@ import { ensureWideIndexes }      from './analytics/ensureWideIndexes.js'
 import { startAnalyticsListener } from './analytics/analyticsListener.js'
 import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
 import { PublicationWorker } from './crystal/PublicationWorker.js'
-import { permissiveModerationGate, denyModerationGate, type ModerationGate } from './crystal/ModerationGate.js'
+import { selectModerationGate, type ModerationGate } from './crystal/ModerationGate.js'
 import { permissivePromptGuard, type PromptGuard } from './crystal/PromptGuard.js'
 import { ModelImporter } from './crystal/ModelImporter.js'
 import { MongoVerdictCache } from './crystal/MongoVerdictCache.js'
@@ -807,14 +807,25 @@ async function main(): Promise<void> {
 
   // →public moderation gate (CSAM/NCMEC). Preference order, all fail-closed:
   //   1. the real PRIVATE gate when present AND detection is configured (CSAM_HASHSET_PATH / classifier);
-  //   2. else the permissive no-op ONLY under an explicit MODERATION_ALLOW_UNSCANNED opt-in;
-  //   3. else DENY (the safe default — public publishing off until the scanner is wired).
+  //   2. else the interim MANUAL-REVIEW hold gate ONLY under an explicit MODERATION_MANUAL_REVIEW opt-in
+  //      (holds every public publish for the admin review queue — interim human-review posture);
+  //   3. else the permissive no-op ONLY under an explicit MODERATION_ALLOW_UNSCANNED opt-in;
+  //   4. else `denyModerationGate` (the safe default — public publishing off until the scanner is wired).
+  // Selection is `selectModerationGate` (ModerationGate.ts, unit-tested); we log the chosen mode here.
+  // Default (no private gate, neither MODERATION_MANUAL_REVIEW nor MODERATION_ALLOW_UNSCANNED) = fail-closed deny.
   const privateGate = compliance ? await compliance.configureModerationGate({ fetcher: httpMediaFetcher, log }) : null
-  const moderationGate: ModerationGate = privateGate
-    ? privateGate
-    : process.env.MODERATION_ALLOW_UNSCANNED === '1'
-      ? (log.warn('MODERATION_ALLOW_UNSCANNED=1 — public publishing approves content WITHOUT CSAM/NCMEC scanning. Dev/staging only; NEVER in production.'), permissiveModerationGate)
-      : (log.warn('No CSAM/NCMEC scanner active (private compliance module absent or unconfigured) — public publishing (feed/marketplace) is DENIED (fail-closed). Private/unlisted still work.'), denyModerationGate)
+  const { gate: moderationGate, mode: moderationMode } = selectModerationGate({
+    privateGate,
+    manualReview: process.env.MODERATION_MANUAL_REVIEW === '1',
+    allowUnscanned: process.env.MODERATION_ALLOW_UNSCANNED === '1',
+  })
+  if (moderationMode === 'manual') {
+    log.warn('MODERATION_MANUAL_REVIEW=1 — public publishing is HELD for manual human review (interim posture): every public publish routes to the admin review queue, none auto-publishes. The reviewer approves/rejects; the NCMEC report/preserve is the reviewer\'s explicit confirm-csam action, not this gate. Requires the queue be actively cleared.')
+  } else if (moderationMode === 'permissive') {
+    log.warn('MODERATION_ALLOW_UNSCANNED=1 — public publishing approves content WITHOUT CSAM/NCMEC scanning. Dev/staging only; NEVER in production.')
+  } else if (moderationMode === 'deny') {
+    log.warn('No CSAM/NCMEC scanner active (private compliance module absent or unconfigured) — public publishing (feed/marketplace) is DENIED (fail-closed). Private/unlisted still work.')
+  }
 
   // Input-side CSAM prompt guard (generation boundary, FAIL-OPEN). From the private
   // module; absent (public build) → permissive stub. Refuses only minor∧sexual prompts
