@@ -75,7 +75,7 @@ export function Onboard() {
         </section>
       </div>
 
-      <footer className="auth-foot">your door sets who you are to us — compute custody (local · TEE · remote) is your call on every run</footer>
+      <footer className="auth-foot">your door sets who you are to us — compute custody (local · remote) is your call on every run</footer>
     </div>
   );
 }

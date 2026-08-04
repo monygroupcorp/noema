@@ -41,7 +41,6 @@ const NAV: NavSection[] = [
   { sec: 'Identity', items: [
     { to: '/profile', ico: 'circle-user', label: 'Profile' },
     { to: '/keyring', ico: 'key-round', label: 'Keyring' },
-    { to: '/private', ico: 'eye-off', label: 'Private' },
   ] },
 ];
 
@@ -58,7 +57,6 @@ const MOBILE_PROJECTS: NavLeaf[] = [
 const MOBILE_PROFILE: NavLeaf[] = [
   { to: '/profile', ico: 'circle-user', label: 'Profile' },
   { to: '/keyring', ico: 'key-round', label: 'Keyring' },
-  { to: '/private', ico: 'eye-off', label: 'Private' },
 ];
 const MOBILE_FEED_ADMIN: NavLeaf[] = [
   { to: '/feed', ico: 'rss', label: 'Feed' },
