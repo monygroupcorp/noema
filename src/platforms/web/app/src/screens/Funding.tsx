@@ -70,6 +70,11 @@ export function Funding() {
   const [walletErr, setWalletErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [buyOpen, setBuyOpen] = useState(false);
+  // ANON_PURSE_ENABLED (noema-131): the ZK bearer purse is gated off for v1 (forgeable dev key
+  // until the ceremony runs). null = not yet known; false = show the purse section as coming-soon.
+  // This gates ONLY the purse step — card, wallet, and the shielded-wallet anonymity story stay.
+  const [purseEnabled, setPurseEnabled] = useState<boolean | null>(null);
+  const purseOff = purseEnabled === false;
 
   // Fiat/card rail — Stripe Checkout redirect + post-return credit poll.
   const [checkoutBusy, setCheckoutBusy] = useState<string | null>(null);
@@ -102,6 +107,8 @@ export function Funding() {
   useEffect(() => {
     let live = true;
     api.getDepositConfig().then((c) => { if (live) setCfg(c); }).catch(() => {});
+    // GET /arcanum/config returns `enabled` (ANON_PURSE_ENABLED, noema-131); read it defensively.
+    api.arcanum.config().then((c) => { if (live) setPurseEnabled((c as { enabled?: boolean }).enabled === true); }).catch(() => { if (live) setPurseEnabled(false); });
     api.listPacks().then((p) => {
       if (!live) return;
       setPacks(p);
@@ -163,8 +170,10 @@ export function Funding() {
           <div className="sub">
             Anonymity is a property of <b>how you fund</b>, not a blanket promise. Two ways
             in — an on-chain wallet or a card — and we tell you exactly what each one reveals.
-            Want spends nothing can tie back to you? Fund from a fresh wallet, then mint a
-            ZK purse from your balance.
+            Want spends nothing can tie back to you? Fund from a fresh or shielded wallet — the
+            strong-anonymity path available today. {purseOff
+              ? <>An unlinkable ZK bearer purse on top is <b>coming soon</b>.</>
+              : <>Then mint a ZK purse from your balance.</>}
           </div>
         </div>
 
@@ -337,7 +346,7 @@ export function Funding() {
               <div className="fund-rowmain">
                 <div className="fund-titleline">
                   <h3>Spend unlinkably — mint a ZK purse</h3>
-                  <span className="fund-flag">◌ added layer</span>
+                  <span className="fund-flag">{purseOff ? '◌ coming soon' : '◌ added layer'}</span>
                 </div>
                 <p className="fund-desc">
                   Not another way to pay — a step you take <b>after</b> you have a balance. From
@@ -352,6 +361,16 @@ export function Funding() {
             </div>
 
             <div className="fund-guide">
+              {purseOff && (
+                <div className="warn fund-warn" style={{ marginBottom: 'var(--s3)' }}>
+                  <WarnIc />
+                  <span>
+                    The ZK bearer purse is <b>coming soon</b> — it unlocks after the trusted-setup
+                    ceremony. Funding anonymously from a shielded or fresh wallet (above) works today;
+                    only the on-top unlinkable-spend layer is not live yet.
+                  </span>
+                </div>
+              )}
               <div className="fund-guide-h">
                 <Hemisphere sees="nothing" /> how the purse works
               </div>
@@ -384,9 +403,15 @@ export function Funding() {
                 </p>
               </details>
               <div className="fund-actions" style={{ marginTop: 'var(--s3)' }}>
-                <Link className="btn-ghost" to="/vault">
-                  <Ic name="venetian-mask" /> Mint a purse <Ic name="arrow-right" />
-                </Link>
+                {purseOff ? (
+                  <button className="btn-ghost" disabled aria-disabled="true">
+                    <Ic name="venetian-mask" /> Mint a purse — coming soon
+                  </button>
+                ) : (
+                  <Link className="btn-ghost" to="/vault">
+                    <Ic name="venetian-mask" /> Mint a purse <Ic name="arrow-right" />
+                  </Link>
+                )}
               </div>
             </div>
           </section>

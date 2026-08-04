@@ -28,6 +28,7 @@ import { generateOpenApi } from './docgen.js'
 import type { RunEventHub } from './RunEventHub.js'
 import type { MeExporter } from '../../crystal/MeExporter.js'
 import type { Tabula } from '../../types/tabula.js'
+import type { Bursarum } from '../../types/bursa.js'
 
 const log = makeLogger('api:router')
 
@@ -171,6 +172,12 @@ export function createApiRouter(deps: {
   hub?: RunEventHub
   exporter?: MeExporter
   erasureEnabled?: boolean
+  /** ANON_PURSE_ENABLED (noema-131) — when false (v1 default), an `x-bursa-token` spend is
+   *  accepted ONLY for a SOUND owned purse (`owner` set, identified-funded); an ownerless
+   *  (arcanum/forgeable-dev-key) or unknown bursa is refused 503. Flip true post-ceremony. */
+  anonPurseEnabled?: boolean
+  /** Bursa store — used ONLY to resolve `owner` at the spend chokepoint for the gate above. */
+  bursarium?: Bursarum
   /** Optional per-route rate-limit middleware (index.ts wires express-rate-limit; tests omit). */
   rateLimiters?: {
     /** Guards PUBLIC publishes (feed/marketplace — the moderation gate's surfaces) so the
@@ -203,10 +210,24 @@ export function createApiRouter(deps: {
     }
 
   /** Resolve the caller's identity from the request, or throw an ApiError.
-   *  bursaToken in body or x-bursa-token header short-circuits to anonymous bursa identity. */
-  const auth = (req: Request): Promise<AuctorKey> => {
+   *  bursaToken in body or x-bursa-token header short-circuits to anonymous bursa identity.
+   *
+   *  ANON_PURSE gate (noema-131): the ownerless (arcanum/forgeable-dev-key) bursa spend path is
+   *  a money path that must NOT carry real value in v1. When the flag is off we resolve the bursa
+   *  and inspect `owner`: an OWNED purse (§7, identified funder) spends unchanged; an ownerless or
+   *  unknown/nonexistent bursa is refused 503 (fail-closed — the dev key can forge these). When the
+   *  flag is on, the short-circuit is unchanged (post-ceremony restore is a one-flag flip). */
+  const auth = async (req: Request): Promise<AuctorKey> => {
     const bursaToken = req.body?.bursaToken ?? (req.headers['x-bursa-token'] as string | undefined)
-    if (bursaToken) return Promise.resolve({ bursaToken })
+    if (bursaToken) {
+      if (!deps.anonPurseEnabled) {
+        const bursa = deps.bursarium ? await deps.bursarium.findByToken(bursaToken) : null
+        if (!bursa?.owner) {
+          throw new ApiError('purse.disabled', 'anonymous purse coming soon', 503)
+        }
+      }
+      return { bursaToken }
+    }
     return identity.resolve(
       credentialsFromHeaders(req.headers as Record<string, string | undefined>, req.body),
     )

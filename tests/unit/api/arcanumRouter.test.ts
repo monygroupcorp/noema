@@ -119,3 +119,76 @@ test('GET /circuit/zkey serves the tracked proving key with correct content-leng
     await closeServer(server)
   }
 })
+
+// ── ANON_PURSE gate (noema-131) ──────────────────────────────────────────────
+// The arcanum path verifies against a forgeable SOLO DEV proving key (anonymity holds,
+// soundness fails). For v1 the anonymous purse is OFF: POST /issue (mint a note from
+// balance) and POST /purse (mint a bearer purse) must refuse 503 BEFORE any debit/mint,
+// and GET /config reports enabled:false so the UI hides the purse. Flag on = restore.
+
+function postJson(url: string, body: unknown): Promise<{ status: number; body: any }> {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body)
+    const u = new URL(url)
+    const req = http.request(u, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(payload)) },
+    }, res => {
+      const chunks: Buffer[] = []
+      res.on('data', c => chunks.push(c as Buffer))
+      res.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8')
+        resolve({ status: res.statusCode ?? 0, body: raw ? JSON.parse(raw) : null })
+      })
+    })
+    req.on('error', reject)
+    req.write(payload)
+    req.end()
+  })
+}
+
+test('ANON_PURSE off (default): POST /issue refuses 503 before any debit', async () => {
+  const { server, url } = await makeServer({
+    resolve: async () => ({ animaId: 'a1' }),
+  })
+  try {
+    const { status, body } = await postJson(`${url}/issue`, { valor: '100' })
+    assert.equal(status, 503)
+    assert.match(String(body.error), /coming soon/i)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('ANON_PURSE off (default): POST /purse refuses 503 before any mint', async () => {
+  const { server, url } = await makeServer({})
+  try {
+    const { status } = await postJson(`${url}/purse`, { arcanumProof: { a: 1 } })
+    assert.equal(status, 503)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('ANON_PURSE off (default): GET /config reports enabled:false', async () => {
+  const { server, url } = await makeServer({ serverUrl: 'https://staging.noema.art' })
+  try {
+    const { body } = await getJson(`${url}/config`)
+    assert.equal(body.enabled, false)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('ANON_PURSE on: the gate is bypassed (GET /config enabled:true; /issue passes the gate)', async () => {
+  const { server, url } = await makeServer({ anonPurseEnabled: true })
+  try {
+    const cfg = await getJson(`${url}/config`)
+    assert.equal(cfg.body.enabled, true)
+    // No resolver configured → past the gate the endpoint reports 501, NOT the 503 gate.
+    const issue = await postJson(`${url}/issue`, { valor: '100' })
+    assert.equal(issue.status, 501)
+  } finally {
+    await closeServer(server)
+  }
+})
