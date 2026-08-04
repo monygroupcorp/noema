@@ -20,6 +20,7 @@
 // Backup recovery channels — bound to the soul (docs/spec/fiat-auth.md §recovery):
 //   POST /wallet/challenge    { address }                → { token, statement }  (sign it)
 //   POST /wallet/link         (Bearer) { challengeToken, signature } → { address }
+//   POST /wallet/register     { challengeToken, signature } → { session, animaId }  (wallet-first signup)
 //   POST /wallet/recover      { challengeToken, signature } → { session, animaId }
 //   GET  /wallet              (Bearer)                   → { wallets: address[] }
 //   POST /telegram/challenge  (Bearer)                   → { code, deepLink? }  (open in Telegram)
@@ -30,7 +31,7 @@
 // =============================================================================
 
 import express, { type Router, type Request, type Response } from 'express'
-import type { PersonaStore } from '../../types/persona.js'
+import type { Persona, PersonaStore } from '../../types/persona.js'
 import type { AnimaStore } from '../../types/anima.js'
 import {
   type CredentumStore,
@@ -82,6 +83,14 @@ export interface AuthRouterDeps {
 
 function fail(res: Response, status: number, code: string, message: string): void {
   res.status(status).json({ error: { code, message } })
+}
+
+/** A MongoDB unique-index collision (E11000). The wallet-signup create path treats it as the
+ *  race guard: a concurrent double-signup that loses the insert re-reads the winner's binding
+ *  rather than 500ing (mirrors the Stripe idempotency discipline — the unique index is the
+ *  real single-writer guard, a read-then-write alone is a race). */
+function isDuplicateKeyError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 11000
 }
 
 export function createAuthRouter(deps: AuthRouterDeps): Router {
@@ -178,6 +187,47 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
     }
     log.info('auth: wallet linked', { animaId, moved })
     res.status(200).json({ address, moved })
+  })
+
+  // ── POST /wallet/register ────────────────────────────────────────────────────────────
+  // Public: wallet-FIRST signup — mint an account from a proven wallet, no username/password.
+  // Prove the wallet, then:
+  //   • bound already (a `'web'` persona exists for this address) → log straight into THAT soul
+  //     — never a duplicate, never a 409 (mirrors /wallet/link's "existing persona" branch).
+  //   • absent → MINT a new anima and bind the wallet as its `'web'` persona. That binding IS the
+  //     deposit-attribution seam (crystal/resolveWalletAnima reads `('web', address)`), so it must
+  //     be race-safe: the unique (genus:'web', externusId) index is the guard — a concurrent
+  //     double-signup that loses the insert dup-keys, and we re-read + adopt the WINNER's binding
+  //     (the losing path's freshly-minted anima is orphaned — never bound, never credited).
+  // Returns { session, animaId } like /register (201 on a fresh mint, 200 when it resolved to an
+  // already-bound soul). Does NOT touch deposit crediting/the ledger — it only writes the binding
+  // attribution later READS.
+  router.post('/wallet/register', rl.wallet ?? noop, async (req: Request, res: Response) => {
+    const address = verifyWalletChallenge(req.body?.challengeToken, req.body?.signature, jwtSecret)
+    if (!address) return fail(res, 400, 'auth.token_invalid', 'Wallet verification failed or expired')
+
+    // Already bound → this is a login, not a signup. Issue a session for the bound soul.
+    const bound = await personae.findByExternus('web', address)
+    if (bound) {
+      log.info('auth: wallet signup resolved to existing soul', { animaId: bound.activeAnimaId })
+      return res.status(200).json({ session: mint(bound.activeAnimaId), animaId: bound.activeAnimaId })
+    }
+
+    // Absent → mint a soul and bind the wallet. On a unique-index collision (a concurrent
+    // signup won the insert between our read and our write) re-read and adopt the winner.
+    const anima = await animae.create({ nomen: `web:${address}` })
+    let persona: Persona
+    try {
+      persona = await personae.findOrCreate('web', address, { animaId: anima.id })
+    } catch (err) {
+      if (!isDuplicateKeyError(err)) throw err
+      const winner = await personae.findByExternus('web', address)
+      if (!winner) throw err // dup-key but no visible row → a real fault, don't paper over it
+      persona = winner
+    }
+    const minted = persona.activeAnimaId === anima.id
+    log.info('auth: wallet signup', { animaId: persona.activeAnimaId, minted })
+    res.status(minted ? 201 : 200).json({ session: mint(persona.activeAnimaId), animaId: persona.activeAnimaId })
   })
 
   // ── POST /wallet/recover ─────────────────────────────────────────────────────────────

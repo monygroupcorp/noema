@@ -83,7 +83,7 @@ export function Onboard() {
 // Door A: collapsed (buttons) → username form (sign in / create). On success the session
 // context adopts a live session; here we mark the named profile + onboarded and enter the app.
 function IdentityDoor({ addMode }: { addMode: boolean }) {
-  const { login, register, recoverWithWallet, recoverWithTelegram } = useSession();
+  const { login, register, signUpWithWallet, recoverWithWallet, recoverWithTelegram } = useSession();
   const navigate = useNavigate();
   const [mode, setMode] = useState<'collapsed' | 'signin' | 'register'>('collapsed');
   const [username, setUsername] = useState('');
@@ -93,6 +93,14 @@ function IdentityDoor({ addMode }: { addMode: boolean }) {
   const [busy, setBusy] = useState(false);
   const [tgRecover, setTgRecover] = useState(false);   // reveal the Telegram code input
   const [tgCode, setTgCode] = useState('');
+
+  // Wallet-first SIGNUP (collapsed door): connect + sign, mint-if-absent, land in the app.
+  async function onSignUpWallet() {
+    reset(); setBusy(true);
+    try { await signUpWithWallet(); done(); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
 
   async function onRecoverWallet() {
     reset(); setBusy(true);
@@ -148,8 +156,9 @@ function IdentityDoor({ addMode }: { addMode: boolean }) {
       {mode === 'collapsed' && (
         <>
           <p className="door-d">Sign in or create an account — just a username, no email. Synced across web, Telegram, and the API — pick up anywhere.</p>
+          {err && <div className="warn">{err}</div>}
           <button className="door-cta primary" onClick={() => { reset(); setMode('signin'); }}>Continue with a username</button>
-          <button className="door-opt" disabled title="Coming soon"><Ic name="wallet" /> Wallet <span className="opt-meta">coming soon</span></button>
+          <button className="door-opt" disabled={busy} onClick={onSignUpWallet}><Ic name="wallet" /> {busy ? 'Connecting…' : 'Wallet'}</button>
           <button className="door-opt" disabled title="Coming soon"><Ic name="key-round" /> Passkey <span className="opt-meta">coming soon</span></button>
           <div className="door-knows"><span className="hemi lit sm" aria-hidden="true" /> noema knows: <b>it's you</b></div>
         </>

@@ -242,6 +242,105 @@ test('GET /wallet lists the caller\'s linked wallets', async () => {
   assert.equal((await request(app).get('/v1/auth/wallet')).status, 401)
 })
 
+// ── Wallet-first SIGNUP (create-if-absent) — the deposit-attribution binding ──────
+
+test('wallet signup: unknown wallet → mints exactly one anima, binds it, returns a live session', async () => {
+  const { app, created } = harness()
+  const wallet = Wallet.createRandom()
+  const res = await request(app).post('/v1/auth/wallet/register').send(await proveWallet(app, wallet))
+  assert.equal(res.status, 201, 'a fresh wallet mints a new account')
+  assert.ok(res.body.session?.token, 'a session is minted immediately')
+  assert.equal(res.body.animaId, 'anima-1')
+  assert.deepEqual(created, ['anima-1'], 'exactly ONE anima minted')
+  // The bearer resolves to that SAME anima at /v1/me — the binding is coherent end-to-end.
+  const me = await request(app).get('/v1/me').set('authorization', `Bearer ${res.body.session.token}`)
+  assert.equal(me.status, 200)
+  assert.equal(me.body.animaId, 'anima-1')
+  // And the wallet now recovers into that same soul (the `('web', address)` binding exists).
+  const rec = await request(app).post('/v1/auth/wallet/recover').send(await proveWallet(app, wallet))
+  assert.equal(rec.body.animaId, 'anima-1')
+})
+
+test('wallet signup: the SAME wallet proving again → logs into the same anima (no duplicate, no 409)', async () => {
+  const { app, created } = harness()
+  const wallet = Wallet.createRandom()
+  const first = await request(app).post('/v1/auth/wallet/register').send(await proveWallet(app, wallet))
+  assert.equal(first.status, 201)
+  const second = await request(app).post('/v1/auth/wallet/register').send(await proveWallet(app, wallet))
+  assert.equal(second.status, 200, 'a known wallet resolves to its soul (login, not a second create)')
+  assert.equal(second.body.animaId, first.body.animaId, 'same anima — never a duplicate')
+  assert.deepEqual(created, ['anima-1'], 'no second anima minted on the re-prove')
+  assert.ok(second.body.session?.token)
+})
+
+test('wallet signup: a wallet already linked to a username account → logs into THAT account', async () => {
+  const { app, created } = harness()
+  const { bearer, animaId } = await signUp(app, 'hasaccount')
+  const wallet = Wallet.createRandom()
+  // Bind the wallet to the username soul first (authed link).
+  const link = await request(app).post('/v1/auth/wallet/link')
+    .set('authorization', `Bearer ${bearer}`).send(await proveWallet(app, wallet))
+  assert.equal(link.status, 200)
+  // Wallet-first signup now lands on the pre-existing username soul, minting nothing new.
+  const res = await request(app).post('/v1/auth/wallet/register').send(await proveWallet(app, wallet))
+  assert.equal(res.status, 200)
+  assert.equal(res.body.animaId, animaId, 'signup resolves to the pre-existing username soul')
+  assert.deepEqual(created, ['anima-1'], 'no new anima — the account already existed')
+})
+
+test('wallet signup: concurrent double-signup of one wallet → ONE bound soul (no split account)', async () => {
+  const { app } = harness()
+  const wallet = Wallet.createRandom()
+  // Pre-compute both proofs, then fire both signups at once so they race the binding.
+  const p1 = await proveWallet(app, wallet)
+  const p2 = await proveWallet(app, wallet)
+  const [a, b] = await Promise.all([
+    request(app).post('/v1/auth/wallet/register').send(p1),
+    request(app).post('/v1/auth/wallet/register').send(p2),
+  ])
+  assert.ok(a.status < 300 && b.status < 300, 'both concurrent signups succeed')
+  assert.equal(a.body.animaId, b.body.animaId, 'both resolve to ONE bound anima — no split account')
+  const rec = await request(app).post('/v1/auth/wallet/recover').send(await proveWallet(app, wallet))
+  assert.equal(rec.body.animaId, a.body.animaId, 'recovery lands on that single soul')
+})
+
+test('wallet signup: a unique-index collision on the bind resolves to the WINNER (never the orphan)', async () => {
+  // Simulate the true race: a concurrent signup won the (genus:'web', address) insert between
+  // our read and our write, so findOrCreate throws E11000. The endpoint MUST re-read and issue a
+  // session for the winner's anima — NOT the orphan anima it minted on the losing path.
+  const winner: FakePersona = { id: 'pw', genus: 'web', externusId: '0xwinner', activeAnimaId: 'anima-winner', animaIds: ['anima-winner'] }
+  let reads = 0
+  const created: string[] = []
+  const personae = {
+    async findByExternus() { reads++; return (reads === 1 ? null : winner) as never }, // absent, then the winner
+    async findOrCreate() { throw Object.assign(new Error('E11000 duplicate key'), { code: 11000 }) },
+    async findByAnimaId() { return [] as never },
+    async linkAnima() { return winner as never },
+    async switchAnima() { return winner as never },
+  }
+  const animae = { async create() { created.push('anima-orphan'); return { id: 'anima-orphan' } as never } }
+  const app = express()
+  app.use('/v1/auth', express.json(), createAuthRouter({ credenta: new MemoryCredentum(), personae, animae, jwtSecret: SECRET }))
+  const wallet = Wallet.createRandom()
+  const ch = await request(app).post('/v1/auth/wallet/challenge').send({ address: wallet.address })
+  const signature = await wallet.signMessage(ch.body.statement)
+  const res = await request(app).post('/v1/auth/wallet/register').send({ challengeToken: ch.body.token, signature })
+  assert.equal(res.status, 200, 'the losing racer resolves (not a 500)')
+  assert.equal(res.body.animaId, 'anima-winner', 'adopts the winner, not the orphan it minted')
+  assert.ok(res.body.session?.token)
+})
+
+test('wallet signup: a bad/tampered signature → 400, creates nothing', async () => {
+  const { app, created } = harness()
+  const wallet = Wallet.createRandom()
+  const ch = await request(app).post('/v1/auth/wallet/challenge').send({ address: wallet.address })
+  // Sign a DIFFERENT message than the challenge statement.
+  const signature = await wallet.signMessage('not the challenge')
+  const res = await request(app).post('/v1/auth/wallet/register').send({ challengeToken: ch.body.token, signature })
+  assert.equal(res.status, 400)
+  assert.deepEqual(created, [], 'no anima minted on a bad signature')
+})
+
 // ── Telegram backup recovery channel ─────────────────────────────────────────────
 
 test('telegram challenge → code + deep link (authed); 401 without a bearer', async () => {
