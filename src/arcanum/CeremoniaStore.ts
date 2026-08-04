@@ -54,10 +54,19 @@ export interface CeremoniaStore {
   /**
    * Append a verified contribution to the public chain — the sequencer's atomic
    * step. Optimistic lock: the push only lands if the chain head is still
-   * `expectHeadHash` (the zkey the contributor built on). Returns false when a
-   * concurrent contribution already moved the head — the caller re-syncs and retries.
+   * `expectHeadHash` (the zkey the contributor built on) AND `identityKey` has not
+   * already contributed to this ceremony. Returns false when a concurrent
+   * contribution already moved the head, or `identityKey` already landed one (the
+   * caller distinguishes which by re-checking `hasContributed`).
    */
-  appendContribution(c: Omit<Contributio, 'at'>, expectHeadHash: string): Promise<boolean>
+  appendContribution(c: Omit<Contributio, 'at'>, expectHeadHash: string, identityKey: string): Promise<boolean>
+  /**
+   * Cheap, non-atomic pre-check: has `identityKey` already contributed to the
+   * CURRENT (open) ceremony? For the router's up-front refusal, before the
+   * expensive crypto verify — the atomic check in `appendContribution` is the
+   * source of truth against races.
+   */
+  hasContributed(identityKey: string): Promise<boolean>
   /** Coordinator: seal the ceremony with the beacon'd final proving-key hash. */
   finalize(finalHash: string): Promise<void>
 }
@@ -71,6 +80,13 @@ interface StatusDoc {
   chain: Contributio[]
   finalHash: string | null
   openSlots: number | null
+  /**
+   * Contributor identity-keys (ownerKey/anima or hashed ceremony-session cookie) that
+   * have already landed a contribution to the CURRENT chain — the one-per-session gate
+   * (noema-133). Internal bookkeeping: deliberately NOT part of `CaeremoniaStatus` /
+   * the public GET response (it would otherwise leak anon session identity keys).
+   */
+  contributedKeys?: string[]
 }
 
 export class MongoCeremoniaStore implements CeremoniaStore {
@@ -106,14 +122,24 @@ export class MongoCeremoniaStore implements CeremoniaStore {
   async open(rootHash: string, openSlots: number | null = null): Promise<void> {
     await this.statusCol.updateOne(
       { _id: DOC_ID },
-      { $set: { phase: 'open', rootHash, openSlots }, $setOnInsert: { chain: [], finalHash: null } },
+      {
+        $set: { phase: 'open', rootHash, openSlots },
+        $setOnInsert: { chain: [], finalHash: null, contributedKeys: [] },
+      },
       { upsert: true },
     )
   }
 
-  async appendContribution(c: Omit<Contributio, 'at'>, expectHeadHash: string): Promise<boolean> {
-    // Conditional push: only when the current head still equals expectHeadHash.
-    // Head = last chain.outputHash, or rootHash when the chain is empty.
+  async appendContribution(
+    c: Omit<Contributio, 'at'>,
+    expectHeadHash: string,
+    identityKey: string,
+  ): Promise<boolean> {
+    // Conditional push: only when the current head still equals expectHeadHash AND
+    // identityKey hasn't already landed a contribution (missing field → not-equal to
+    // every element, so pre-migration docs match fine). Head = last chain.outputHash,
+    // or rootHash when the chain is empty. Both the chain push and the identity-key
+    // record land atomically with the same optimistic lock.
     const res = await this.statusCol.updateOne(
       {
         _id: DOC_ID,
@@ -124,10 +150,19 @@ export class MongoCeremoniaStore implements CeremoniaStore {
             expectHeadHash,
           ],
         },
+        contributedKeys: { $ne: identityKey },
       },
-      { $push: { chain: { ...c, at: new Date() } } },
+      { $push: { chain: { ...c, at: new Date() }, contributedKeys: identityKey } },
     )
     return res.modifiedCount === 1
+  }
+
+  async hasContributed(identityKey: string): Promise<boolean> {
+    const doc = await this.statusCol.findOne(
+      { _id: DOC_ID, contributedKeys: identityKey },
+      { projection: { _id: 1 } },
+    )
+    return doc != null
   }
 
   async finalize(finalHash: string): Promise<void> {
@@ -142,6 +177,7 @@ export class MongoCeremoniaStore implements CeremoniaStore {
 export class MemoryCeremoniaStore implements CeremoniaStore {
   private state: CaeremoniaStatus = { ...ANNOUNCED, chain: [] }
   private slots = new Set<string>()
+  private contributedKeys = new Set<string>()
 
   async status(): Promise<CaeremoniaStatus> {
     return { ...this.state, chain: [...this.state.chain] }
@@ -150,14 +186,23 @@ export class MemoryCeremoniaStore implements CeremoniaStore {
   async open(rootHash: string, openSlots: number | null = null): Promise<void> {
     this.state.phase = 'open'; this.state.rootHash = rootHash; this.state.openSlots = openSlots
   }
-  async appendContribution(c: Omit<Contributio, 'at'>, expectHeadHash: string): Promise<boolean> {
+  async appendContribution(
+    c: Omit<Contributio, 'at'>,
+    expectHeadHash: string,
+    identityKey: string,
+  ): Promise<boolean> {
     if (this.state.phase !== 'open') return false
     const head = this.state.chain.length
       ? this.state.chain[this.state.chain.length - 1].outputHash
       : this.state.rootHash
     if (head !== expectHeadHash) return false
+    if (this.contributedKeys.has(identityKey)) return false
     this.state.chain.push({ ...c, at: new Date() })
+    this.contributedKeys.add(identityKey)
     return true
+  }
+  async hasContributed(identityKey: string): Promise<boolean> {
+    return this.contributedKeys.has(identityKey)
   }
   async finalize(finalHash: string): Promise<void> {
     this.state.phase = 'finalized'; this.state.finalHash = finalHash; this.state.openSlots = null
