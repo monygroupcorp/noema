@@ -8,33 +8,31 @@ import { useProject } from '../state/project';
 import { ProposalCard } from '../components/ProposalCard';
 
 // ── Two honest signals (see identity/noema/chat-spec.md) ──────────────────────
-// hemisphere = what NOEMA can SEE (lit remote · ring TEE/your-server · dashed local)
+// hemisphere = what NOEMA can SEE (lit remote · ring TEE/your-server)
 // egress     = whether the request LEFT NOEMA, and to whom (↗, warm --egress)
-// They are kept deliberately distinct: a local run (dashed, we see nothing) and an
-// API run (lit, we see AND it leaves) are different truths — never collapse them.
-type Vis = 'remote' | 'tee' | 'local';
+// They are kept deliberately distinct: a your-server run (ring, we see nothing) and
+// an API run (lit, we see AND it leaves) are different truths — never collapse them.
+type Vis = 'remote' | 'tee';
 type Egress = { left: true; to: string } | { left: false; note: string };
 interface Prov { modality: string; route: string; vis: Vis; egress: Egress; canvas?: boolean }
 interface Msg { who: 'concierge' | 'you'; body: ReactNode; prov?: Prov[]; isExample?: boolean }
 
 
 // The hemisphere glyph — shared grammar with Canvas/Funding/Card:
-// remote = lit (filled half-disc + ring, accent); tee = ring only (slate);
-// local = dashed ring (grey).
+// remote = lit (filled half-disc + ring, accent); tee = ring only (slate).
 function Hemisphere({ vis, className }: { vis: Vis; className?: string }) {
   const lit = vis === 'remote';
-  const stroke = vis === 'remote' ? 'var(--accent)' : vis === 'tee' ? 'var(--slate)' : 'var(--grey)';
+  const stroke = vis === 'remote' ? 'var(--accent)' : 'var(--slate)';
   return (
     <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
       {lit && <path d="M12,2 A10 10 0 0 0 12,22 Z" fill="var(--accent)" />}
-      <circle cx="12" cy="12" r="10" fill="none" stroke={stroke} strokeWidth="1.4"
-        strokeDasharray={vis === 'local' ? '2.4 2.4' : undefined} />
+      <circle cx="12" cy="12" r="10" fill="none" stroke={stroke} strokeWidth="1.4" />
     </svg>
   );
 }
 
-// ── Chat routing — the four routes offered by the composer picker ─────────────
-type RouteId = 'noema' | 'remote' | 'tee' | 'local';
+// ── Chat routing — the routes offered by the composer picker ──────────────────
+type RouteId = 'noema' | 'remote' | 'tee';
 interface Route { id: RouteId; name: string; vis: Vis; tag: string; tagKind: 'egress' | 'wait' | 'safe'; egress: boolean; desc: ReactNode }
 
 const ROUTES: Route[] = [
@@ -44,8 +42,6 @@ const ROUTES: Route[] = [
     desc: <>An endpoint <b>you provision</b>; conversation goes to your infrastructure.</> },
   { id: 'tee', name: 'TEE · in development', vis: 'tee', tag: 'in development', tagKind: 'wait', egress: false,
     desc: <>Hardware-isolated private sessions are <b>in development — not yet available</b>. This route is a placeholder for that tier.</> },
-  { id: 'local', name: 'Local', vis: 'local', tag: 'nothing leaves', tagKind: 'safe', egress: false,
-    desc: <>llama.cpp on <b>your machine</b>. Private by construction; capability bounded by your hardware.</> },
 ];
 
 // Map a chosen route → a provenance meter. TODO(backend): real routing/egress
@@ -55,8 +51,7 @@ function provFor(r: Route, modality: string): Prov {
   switch (r.id) {
     case 'noema':  return { modality, route: 'routed via openrouter', vis: 'remote', egress: { left: true, to: 'openrouter' } };
     case 'remote': return { modality, route: 'your remote endpoint', vis: 'tee', egress: { left: true, to: 'your server' } };
-    case 'tee':    return { modality, route: 'TEE · in development', vis: 'tee', egress: { left: false, note: 'in development — not yet available' } };
-    default:       return { modality, route: 'local · llama-ed', vis: 'local', egress: { left: false, note: 'nothing left your machine' } };
+    default:       return { modality, route: 'TEE · in development', vis: 'tee', egress: { left: false, note: 'in development — not yet available' } };
   }
 }
 
