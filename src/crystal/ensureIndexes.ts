@@ -80,6 +80,17 @@ export async function ensureIndexes(db: Db): Promise<void> {
       { unique: true, partialFilterExpression: { legacyMasterAccountId: { $exists: true } } },
     ),
 
+    // migration_ledger_claims — legacy account migration (noema-130) GLOBAL ledger-row de-dup.
+    // One doc per legacy `credit_ledger` row that has been attributed to a migrated account:
+    // `_id` = the legacy ledger row's `_id` (string), plus the claiming masterAccountId/animaId. The
+    // UNIQUE `_id` is the DURABLE cross-chunk guard that the SAME confirmed deposit is never minted
+    // into two consolidated Signa: legacy does not enforce a 1:1 wallet→account, so a wallet listed on
+    // two accounts would otherwise let both accounts' transforms sum that wallet's deposits. Before
+    // minting, migrate-accounts-chunk.ts claims each attributed row here; a row already owned by a
+    // DIFFERENT account is a collision → that account is NOT committed (routed to the review report).
+    // (`_id` is unique by nature; this explicit no-op index line documents the collection's contract.)
+    db.collection('migration_ledger_claims').createIndex({ masterAccountId: 1 }),
+
     // personae — platform mask (hot path: every inbound message)
     db.collection('personae').createIndex({ genus: 1, externusId: 1 }, { unique: true }),
     db.collection('personae').createIndex({ animaIds: 1 }),

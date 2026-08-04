@@ -133,6 +133,12 @@ export interface AccountMigrationLog {
   legacyPointsSum: number
   /** How many distinct ledger rows contributed to the sum. */
   ledgerRowsCounted: number
+  /** The real `_id`s (string form) of the DISTINCT CONFIRMED ledger rows summed into this account's
+   *  balance. The transform is pure/per-account and cannot see that a *different* account also claims
+   *  one of these rows (legacy does not enforce 1:1 wallet→account), so the chunk script uses these ids
+   *  to de-dup ledger attribution GLOBALLY across accounts and refuse to double-mint a shared deposit.
+   *  Rows with no `_id` are summed but not listed here (nothing global to match on). */
+  attributedRowIds: string[]
   warnings: string[]
   /** Fields intentionally discarded (usdCredit, exp, awards, …). */
   drops: string[]
@@ -185,6 +191,7 @@ export function legacyToCrystalAccount(
   let pointsSum = 0
   let rowsCounted = 0
   const seenRowIds = new Set<string>()
+  const attributedRowIds: string[] = []
 
   for (const row of ledgerRows ?? []) {
     if (!row || row.status !== 'CONFIRMED') continue
@@ -221,6 +228,9 @@ export function legacyToCrystalAccount(
     }
     pointsSum += pts
     rowsCounted++
+    // Record the DISTINCT real ledger `_id` for the script's GLOBAL (cross-account) de-dup.
+    // Anonymous rows (no `_id`) are summed but have nothing another account could match on.
+    if (row._id !== undefined && row._id !== null) attributedRowIds.push(rowKey)
   }
 
   // ─ Ignored legacy fields (explicitly dropped — no crystal target) ───────
@@ -251,7 +261,7 @@ export function legacyToCrystalAccount(
     personae,
     signum,
     ...(quarantine ? { quarantine } : {}),
-    log: { legacyMasterAccountId: masterAccountId, legacyPointsSum: pointsSum, ledgerRowsCounted: rowsCounted, warnings, drops },
+    log: { legacyMasterAccountId: masterAccountId, legacyPointsSum: pointsSum, ledgerRowsCounted: rowsCounted, attributedRowIds, warnings, drops },
   }
 }
 

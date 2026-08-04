@@ -7,13 +7,17 @@
 // Reads legacy `userCore` (+ `userEconomy` + `credit_ledger`) from the SOURCE db,
 // transforms each account via the pure `legacyToCrystalAccount`, and either:
 //
-//   - Default (DRY-RUN): prints a per-account summary + the RECONCILIATION
-//     (Σ legacy CONFIRMED points_remaining  vs  Σ migrated Signum.valor, per-account
-//     AND grand-total) + the quarantine list. NO writes.
-//   - `--commit`: writes Anima → Personae → Signum (in that order) into the crystal
+//   - Default (DRY-RUN): prints a per-account summary + the transform output + the
+//     ledger-row collision report + the quarantine list. NO writes. (Dry-run does NOT
+//     reconcile money — the real reconciliation is a POST-COMMIT re-sum of the actual
+//     target ledger; see below.)
+//   - `--commit`: ensures + hard-asserts the idempotency guard indexes exist on the
+//     target, then writes Anima → Personae → Signum (in that order) into the crystal
 //     target db. Idempotent: anima upserts on `legacyMasterAccountId`; the Signum
 //     `issue()` hits the unique partial index on `testis` (auctor:'migration:legacy')
-//     so a re-run NEVER double-mints — E11000 is caught and skipped.
+//     so a re-run NEVER double-mints — E11000 is caught and skipped. Each attributed
+//     legacy ledger row is claimed in `migration_ledger_claims` (unique row `_id`) so
+//     the SAME deposit is never minted into two accounts, even across chunks.
 //
 // Usage:
 //     npx tsx scripts/migrate-accounts-chunk.ts             # dry-run, 25 accounts
@@ -29,15 +33,19 @@
 // Target DB (crystal — DISTINCT env; NEVER cross-write to the legacy db):
 //     MONGODB_URI / DB_NAME           (REQUIRED for --commit)
 //
-// RECONCILIATION IS THE GATE: the script asserts legacy-sum == migrated-sum for every
-// non-quarantined account AND in aggregate; ANY mismatch is a hard failure (exit 1).
-// The operator, at cutover: backs up legacy db → dry-run → confirm reconciliation →
-// --commit → re-reconcile. Running --commit against real data is the OPERATOR step.
+// THE RECONCILIATION GATE IS POST-COMMIT: after writing, the script re-sums the ACTUAL
+// target Signum.valor per migrated anima against Σ of that account's DISTINCT CONFIRMED
+// legacy points and hard-fails (exit 1) on any mismatch. The in-memory per-account check
+// is only a transform self-consistency tripwire (true by construction — NOT the gate).
+// The operator, at cutover: backs up legacy db → dry-run → --commit → the script's
+// post-commit reconciliation → then a FULL cross-chunk re-sum of every migration Signum.valor
+// vs Σ distinct legacy points. Running --commit against real data is the OPERATOR step.
 // =============================================================================
 
-import { MongoClient, type Collection, type Document } from 'mongodb'
+import { MongoClient, type Collection, type Db, type Document } from 'mongodb'
 import { MongoSignorum } from '../src/crystal/MongoSignorum.js'
 import { MongoPersona } from '../src/crystal/MongoPersona.js'
+import { ensureIndexes } from '../src/crystal/ensureIndexes.js'
 import {
   legacyToCrystalAccount,
   type LegacyUserCore,
@@ -74,6 +82,42 @@ function parseArgs(): Args {
 function redact(uri: string | undefined): string {
   return uri ? uri.replace(/\/\/.*@/, '//<redacted>@') : '(none)'
 }
+
+// ─ Idempotency-guard assertion (the "NEVER double-mints" guarantee) ─────────
+// The whole no-double-mint guarantee rests on the unique partial indexes existing on the TARGET db.
+// ensureIndexes() only runs at crystal app startup, so a fresh/restored/test target (or one whose
+// index sync predates this deploy) could be missing them — issue() would then be a plain insertOne,
+// no E11000 fires, and a re-run would mint a SECOND consolidated Signum for every account. So we
+// ensure them here and then hard-assert their presence before any write.
+const REQUIRED_TARGET_INDEXES: { coll: string; name: string; why: string }[] = [
+  { coll: 'signa', name: 'testis_migration_legacy', why: 'unique testis (auctor:migration:legacy) — the no-double-mint guard' },
+]
+async function assertIdempotencyGuards(tgtDb: Db): Promise<void> {
+  // Create/refresh all crystal indexes on the target (idempotent) so the guards exist even if the
+  // target's index sync predates this deploy.
+  await ensureIndexes(tgtDb)
+  // Then verify the money-critical guards are actually present — hard-fail if any is missing.
+  const missing: string[] = []
+  for (const req of REQUIRED_TARGET_INDEXES) {
+    const idx = await tgtDb.collection(req.coll).listIndexes().toArray()
+    const found = idx.find(i => i.name === req.name)
+    const isUnique = found && found.unique === true
+    if (!found || !isUnique) missing.push(`${req.coll}.${req.name} (${req.why})${found && !isUnique ? ' — present but NOT unique' : ''}`)
+  }
+  // The animae idempotency guard is auto-named (legacyMasterAccountId_1); assert by key+unique.
+  const animaeIdx = await tgtDb.collection('animae').listIndexes().toArray()
+  const animaGuard = animaeIdx.find(i => i.key && i.key.legacyMasterAccountId === 1 && i.unique === true)
+  if (!animaGuard) missing.push('animae.<legacyMasterAccountId unique> — the idempotent anima-upsert guard')
+  if (missing.length) {
+    console.error('[migrate-accounts-chunk] REFUSING to commit — required idempotency indexes missing on target:')
+    for (const m of missing) console.error(`  • ${m}`)
+    console.error('  Run ensureIndexes against the target (crystal startup) and retry.')
+    process.exit(1)
+  }
+}
+
+/** The persistent, cross-chunk ledger-row claim ledger (global de-dup — finding 3). */
+const CLAIMS_COLLECTION = 'migration_ledger_claims'
 
 // ─ Pretty-print one transformed account ────────────────────────────────────
 
@@ -133,6 +177,8 @@ async function main(): Promise<void> {
     // shape the runtime reads — critically the Signum `valorNum` sort-mirror, without which
     // migrated balance would be invisible to `reserve()` (unspendable).
     let animaeColl: Collection<Document> | null = null
+    let signaColl: Collection<Document> | null = null
+    let claimsColl: Collection<Document> | null = null
     let signorum: MongoSignorum | null = null
     let personae: MongoPersona | null = null
     let alreadyMigrated = new Set<string>()
@@ -140,7 +186,12 @@ async function main(): Promise<void> {
       targetClient = new MongoClient(TARGET_URI!)
       await targetClient.connect()
       const tgtDb = targetClient.db(TARGET_DB)
+      // Finding 1: the no-double-mint guarantee rests on the unique guard indexes existing on the
+      // TARGET. Ensure + hard-assert them BEFORE any issue() — never trust the target was synced.
+      await assertIdempotencyGuards(tgtDb)
       animaeColl = tgtDb.collection('animae')
+      signaColl = tgtDb.collection('signa')
+      claimsColl = tgtDb.collection(CLAIMS_COLLECTION)
       signorum = new MongoSignorum(tgtDb.collection('signa'), targetClient)
       personae = new MongoPersona(tgtDb.collection('personae'))
       // Resumability: skip source accounts already migrated (by legacyMasterAccountId).
@@ -197,64 +248,123 @@ async function main(): Promise<void> {
     for (const q of quarantined) console.log(`  ${q.log.legacyMasterAccountId}  reason=${q.quarantine}  balance=${q.log.legacyPointsSum}`)
     console.log('')
 
-    // ─ RECONCILIATION (the gate) ────────────────────────────────────────────
-    // Per non-quarantined account: legacy points == minted valor. Grand total too.
+    // ─ GLOBAL ledger-row de-dup across the processed set (finding 3) ─────────
+    // The transform is PURE + per-account: it cannot see that a *different* account also claims one
+    // of its ledger rows (legacy does not enforce 1:1 wallet→account, so a wallet on two accounts,
+    // or a stray master_account_id, would let the same CONFIRMED deposit be minted into BOTH consolid-
+    // ated Signa). Here we intersect every non-quarantined account's `attributedRowIds`: any real
+    // ledger `_id` claimed by >1 account is a collision — ALL involved accounts are pulled from the
+    // commit set and routed to the review report (never auto-migrated on ambiguous balance).
     const migratable = results.filter(r => !r.quarantine)
-    let legacyGrand = 0n
-    let valorGrand = 0n
-    let mismatches = 0
-    console.log('── reconciliation (Σ legacy points  vs  Σ migrated valor) ─────────────')
+    const rowToAccounts = new Map<string, string[]>()
     for (const r of migratable) {
-      const legacyPts = BigInt(r.log.legacyPointsSum)
-      const valor = r.signum ? r.signum.valor : 0n
-      legacyGrand += legacyPts
-      valorGrand += valor
-      if (legacyPts !== valor) {
-        mismatches++
-        console.log(`  MISMATCH ${r.log.legacyMasterAccountId}: legacy=${legacyPts} valor=${valor}`)
+      for (const rid of r.log.attributedRowIds) {
+        const arr = rowToAccounts.get(rid) ?? []
+        if (!arr.includes(r.log.legacyMasterAccountId)) arr.push(r.log.legacyMasterAccountId)
+        rowToAccounts.set(rid, arr)
       }
     }
-    console.log(`  accounts (non-quarantined): ${migratable.length}   quarantined: ${quarantined.length}`)
-    console.log(`  Σ legacy points = ${legacyGrand}`)
-    console.log(`  Σ migrated valor = ${valorGrand}`)
-    if (mismatches > 0 || legacyGrand !== valorGrand) {
-      console.error(`[migrate-accounts-chunk] RECONCILIATION FAILED — ${mismatches} per-account mismatch(es); grand ${legacyGrand} vs ${valorGrand}`)
-      process.exit(1)
+    const collidingAccounts = new Set<string>()
+    const inSetCollisions: { rowId: string; accounts: string[] }[] = []
+    for (const [rowId, accounts] of rowToAccounts) {
+      if (accounts.length > 1) {
+        inSetCollisions.push({ rowId, accounts })
+        for (const a of accounts) collidingAccounts.add(a)
+      }
     }
-    console.log('  reconciliation OK ✓')
+    console.log('── ledger-row collisions within this batch (shared deposit → NOT migrated) ─────────────')
+    if (inSetCollisions.length === 0) console.log('  (none)')
+    for (const c of inSetCollisions) console.log(`  ledgerRow=${c.rowId} claimed by ${c.accounts.length} accounts: ${c.accounts.join(', ')}`)
     console.log('')
 
-    // ─ Commit (Anima → Personae → Signum) ──────────────────────────────────
-    if (args.commit && animaeColl && signorum && personae) {
+    // Committable = non-quarantined AND not implicated in an in-set row collision.
+    const committable = migratable.filter(r => !collidingAccounts.has(r.log.legacyMasterAccountId))
+
+    // ─ Transform self-consistency tripwire (NOT the reconciliation gate) ─────
+    // Per account, the emitted seed's valor must equal the summed legacy points. This is TRUE BY
+    // CONSTRUCTION (signum.valor = BigInt(legacyPointsSum)); it is only a cheap tripwire for a
+    // transform bug, NOT a reconciliation of the real money. The REAL gate is the POST-COMMIT re-sum
+    // of the actual target Signum.valor against Σ distinct legacy points (below, --commit), plus the
+    // operator's full re-sum across all chunks after cutover.
+    let selfInconsistencies = 0
+    for (const r of committable) {
+      const seedValor = r.signum ? r.signum.valor : 0n
+      if (BigInt(r.log.legacyPointsSum) !== seedValor) {
+        selfInconsistencies++
+        console.error(`  TRANSFORM BUG ${r.log.legacyMasterAccountId}: legacyPointsSum=${r.log.legacyPointsSum} seedValor=${seedValor}`)
+      }
+    }
+    if (selfInconsistencies > 0) {
+      console.error(`[migrate-accounts-chunk] transform self-consistency FAILED (${selfInconsistencies}) — aborting`)
+      process.exit(1)
+    }
+    const seedGrand = committable.reduce((s, r) => s + (r.signum ? r.signum.valor : 0n), 0n)
+    console.log('── commit set (post-dedup) ─────────────')
+    console.log(`  committable accounts: ${committable.length}   quarantined: ${quarantined.length}   row-collision-excluded: ${collidingAccounts.size}`)
+    console.log(`  Σ seed valor (to mint): ${seedGrand}`)
+    console.log('')
+
+    // ─ Commit (Anima → Personae → Signum), with cross-chunk row-claim de-dup ─
+    if (args.commit && animaeColl && signaColl && claimsColl && signorum && personae) {
       let animaeWritten = 0, personaeWritten = 0, signaMinted = 0, signaSkipped = 0
-      for (const r of migratable) {
+      const committed: { r: AccountMigrationResult; animaId: string }[] = []
+      const crossChunkCollisions: { account: string; rowId: string; owner: string }[] = []
+
+      for (const r of committable) {
+        const mid = r.anima.legacyMasterAccountId
+
+        // 0. Cross-chunk row-claim guard (finding 3): a row already claimed by a DIFFERENT account in
+        //    a prior chunk means this account's balance double-counts a deposit — DO NOT migrate it.
+        let claimConflict: { rowId: string; owner: string } | null = null
+        for (const rid of r.log.attributedRowIds) {
+          const existing = await claimsColl.findOne({ _id: rid as unknown as Document['_id'] })
+          const owner = existing ? String((existing as { masterAccountId?: unknown }).masterAccountId) : null
+          if (owner && owner !== mid) { claimConflict = { rowId: rid, owner }; break }
+        }
+        if (claimConflict) {
+          crossChunkCollisions.push({ account: mid, rowId: claimConflict.rowId, owner: claimConflict.owner })
+          console.error(`  ROW-COLLISION (cross-chunk) ${mid}: ledgerRow=${claimConflict.rowId} already claimed by ${claimConflict.owner} — NOT migrating this account`)
+          continue
+        }
+
         // 1. Anima — idempotent upsert on legacyMasterAccountId (unique partial index).
         const now = new Date()
         await animaeColl.updateOne(
-          { legacyMasterAccountId: r.anima.legacyMasterAccountId },
+          { legacyMasterAccountId: mid },
           {
             $setOnInsert: {
               id: uuidv4(),
               nomen: r.anima.nomen,
-              legacyMasterAccountId: r.anima.legacyMasterAccountId,
+              legacyMasterAccountId: mid,
               natum: now,
               mutatum: now,
             },
           },
           { upsert: true },
         )
-        const animaDoc = await animaeColl.findOne({ legacyMasterAccountId: r.anima.legacyMasterAccountId })
+        const animaDoc = await animaeColl.findOne({ legacyMasterAccountId: mid })
         const animaId = (animaDoc as { id?: string } | null)?.id
-        if (!animaId) throw new Error(`anima upsert failed to resolve id for ${r.anima.legacyMasterAccountId}`)
+        if (!animaId) throw new Error(`anima upsert failed to resolve id for ${mid}`)
         animaeWritten++
 
-        // 2. Personae — findOrCreate on (genus, externusId) (unique index).
+        // 2. Persist this account's ledger-row claims (unique `_id` = row id) BEFORE minting, so a
+        //    later chunk that re-attributes the same deposit sees the conflict. $setOnInsert keeps a
+        //    re-run of THIS account (same owner) a no-op instead of a false self-collision.
+        for (const rid of r.log.attributedRowIds) {
+          await claimsColl.updateOne(
+            { _id: rid as unknown as Document['_id'] },
+            { $setOnInsert: { masterAccountId: mid, animaId, natum: now } },
+            { upsert: true },
+          )
+        }
+
+        // 3. Personae — findOrCreate on (genus, externusId) (unique index).
         for (const p of r.personae) {
           await personae.findOrCreate(p.genus, p.externusId, { animaId, nomen: p.nomen })
           personaeWritten++
         }
 
-        // 3. Signum — one consolidated coin; issue() writes valorNum + hits the unique testis
+        // 4. Signum — one consolidated coin; issue() writes valorNum + hits the unique testis
         //    index. A re-run's duplicate throws E11000 → skip (already minted, never doubled).
         if (r.signum) {
           try {
@@ -265,11 +375,51 @@ async function main(): Promise<void> {
             else throw err
           }
         }
+        committed.push({ r, animaId })
       }
-      console.log(`[migrate-accounts-chunk] committed: animae=${animaeWritten} personae=${personaeWritten} signa minted=${signaMinted} skipped(dup)=${signaSkipped}`)
-      console.log('[migrate-accounts-chunk] operator: re-run reconciliation against the target after commit.')
+      console.log(`[migrate-accounts-chunk] committed: animae=${animaeWritten} personae=${personaeWritten} signa minted=${signaMinted} skipped(dup)=${signaSkipped} cross-chunk-collisions=${crossChunkCollisions.length}`)
+      console.log('')
+
+      // ─ POST-COMMIT RECONCILIATION — THE REAL GATE (findings 2 + 3) ─────────
+      // Re-sum the ACTUAL target Signum.valor now on disk per migrated anima and compare it to the
+      // Σ of that account's DISTINCT CONFIRMED legacy points. This reads the truth source (the target
+      // ledger), not the transform's own output, so a partial/aborted commit, a spuriously-skipped
+      // issue(), or a mis-attributed row shows up as a hard mismatch here.
+      console.log('── POST-COMMIT reconciliation (Σ target Signum.valor  vs  Σ distinct legacy points) ─────────────')
+      let tgtGrand = 0n
+      let expectedGrand = 0n
+      let recMismatches = 0
+      for (const { r, animaId } of committed) {
+        const migrationSigna = await signaColl
+          .find({ animaId, auctor: 'migration:legacy', status: 'valid' })
+          .toArray()
+        const tgtValor = migrationSigna.reduce((s, d) => s + BigInt(String((d as { valor?: unknown }).valor ?? '0')), 0n)
+        const expected = BigInt(r.log.legacyPointsSum)
+        tgtGrand += tgtValor
+        expectedGrand += expected
+        if (tgtValor !== expected) {
+          recMismatches++
+          console.error(`  MISMATCH ${r.log.legacyMasterAccountId}: target valor=${tgtValor} expected(distinct legacy points)=${expected}`)
+        }
+      }
+      console.log(`  reconciled animae: ${committed.length}`)
+      console.log(`  Σ target Signum.valor  = ${tgtGrand}`)
+      console.log(`  Σ distinct legacy pts  = ${expectedGrand}`)
+      if (recMismatches > 0 || tgtGrand !== expectedGrand) {
+        console.error(`[migrate-accounts-chunk] POST-COMMIT RECONCILIATION FAILED — ${recMismatches} per-account mismatch(es); grand ${tgtGrand} vs ${expectedGrand}. INVESTIGATE before continuing (money already written).`)
+        process.exit(1)
+      }
+      console.log('  reconciliation OK ✓')
+      if (crossChunkCollisions.length) {
+        console.log('')
+        console.log('── cross-chunk row collisions (NOT migrated — operator review) ─────────────')
+        for (const c of crossChunkCollisions) console.log(`  account=${c.account} ledgerRow=${c.rowId} first-claimed-by=${c.owner}`)
+      }
+      console.log('[migrate-accounts-chunk] operator: after ALL chunks, re-sum every target migration Signum.valor against Σ DISTINCT legacy CONFIRMED points_remaining>0 rows — the full cross-chunk gate.')
     } else {
       console.log('[migrate-accounts-chunk] dry-run complete. Pass --commit to write.')
+      console.log('[migrate-accounts-chunk] NOTE: the real reconciliation runs POST-COMMIT (re-sum of actual target')
+      console.log('  Signum.valor vs Σ distinct legacy points). Dry-run only shows the transform output + collisions.')
     }
   } finally {
     await sourceClient.close().catch(() => {})
