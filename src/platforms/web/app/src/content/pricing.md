@@ -16,7 +16,7 @@
 
 Credits work across every modality — text generation, image generation, video, and audio. You buy once, spend anywhere. Credits don't expire. Bigger packs give you a better rate — roughly 208 to 270 credits per dollar depending on the pack you choose, cheapest pack to biggest.
 
-Anonymity here is a property of how you fund. Pay by card and it's identified; fund from a fresh or shielded on-chain wallet and there's no identity behind the address. For spends nothing can tie back to you, mint a ZK purse from your balance (see below).
+Anonymity here is a property of how you fund. Pay by card and it's identified; fund from a fresh or shielded on-chain wallet and there's no identity behind the address — the strongest privacy available today. An unlinkable ZK bearer purse on top is coming soon (see below).
 
 ---
 
@@ -27,7 +27,7 @@ Anonymity here is a property of how you fund. Pay by card and it's identified; f
 
 - Never expire
 - No subscription, no recurring charge
-- Mint a ZK purse to spend unlinkably
+- Fund anonymously from a shielded wallet (unlinkable ZK purse coming soon)
 - Spend across every modality
 
 **[Buy Starter]**
@@ -39,7 +39,7 @@ Anonymity here is a property of how you fund. Pay by card and it's identified; f
 
 - Never expire
 - No subscription, no recurring charge
-- Mint a ZK purse to spend unlinkably
+- Fund anonymously from a shielded wallet (unlinkable ZK purse coming soon)
 - Spend across every modality
 
 **[Buy Standard]**
@@ -51,7 +51,7 @@ Anonymity here is a property of how you fund. Pay by card and it's identified; f
 
 - Never expire
 - No subscription, no recurring charge
-- Mint a ZK purse to spend unlinkably
+- Fund anonymously from a shielded wallet (unlinkable ZK purse coming soon)
 - Spend across every modality
 
 **[Buy Plus]**
@@ -63,7 +63,7 @@ Anonymity here is a property of how you fund. Pay by card and it's identified; f
 
 - Never expire
 - No subscription, no recurring charge
-- Mint a ZK purse to spend unlinkably
+- Fund anonymously from a shielded wallet (unlinkable ZK purse coming soon)
 - Spend across every modality
 
 **[Buy Studio]**
@@ -72,9 +72,7 @@ Anonymity here is a property of how you fund. Pay by card and it's identified; f
 
 ## Private spending
 
-Anonymity depends on how you fund. Fund from a fresh or shielded on-chain wallet and the address has no identity behind it — the strongest privacy available today. Then mint a ZK purse from your balance: its spends are cryptographically unlinkable to what you funded. Minting a purse needs a signed-in account, so it's an unlinkable spend layer on top of an identified balance — strongest when you fund from a shielded wallet. Direct-to-commitment deposits, where we never see the funding wallet, are on the roadmap.
-
-**[How purse works →]**
+Anonymity depends on how you fund. Fund from a fresh or shielded on-chain wallet and the address has no identity behind it — the strongest privacy available today, and it works right now. On top of that, an unlinkable ZK bearer purse — spends cryptographically unlinkable to what you funded — is coming soon: it unlocks after the trusted-setup ceremony. Direct-to-commitment deposits, where we never see the funding wallet, are also on the roadmap.
 
 ---
 
@@ -87,10 +85,10 @@ No. Credits purchased directly never expire.
 Yes, within limits. Unused credits are refundable within 14 days of purchase. Once credits have been spent, in whole or in part, the spent portion is non-refundable — they're a prepaid compute balance, not a subscription. If you have an issue, contact us and we'll work it out.
 
 **What's the difference between a purse credit and a regular credit?**
-Functionally identical — both buy the same compute, same GPU, same models. The difference is the billing layer: a regular credit is tied to your account, while a purse credit spends from a ZK bearer token whose spends are cryptographically unlinkable to how it was funded. How anonymous the funding itself was still depends on your funding source — a shielded wallet reveals no identity; a card is identified.
+The ZK bearer purse is coming soon (it unlocks after the trusted-setup ceremony), so today every credit is a regular account-tied credit. When the purse ships, a purse credit will spend from a ZK bearer token whose spends are cryptographically unlinkable to how it was funded — functionally identical compute, same GPU, same models, just a different billing layer. Either way, how anonymous the funding itself is depends on your funding source: a shielded wallet reveals no identity; a card is identified.
 
 **Do you offer a free trial?**
 There's no free tier. The Starter pack ($10) is the low-cost way to try it, and the credits never expire, so there's no clock running against you.
 
 **Can I use the API anonymously?**
-Yes. Pass a `x-bursa-token` header instead of a session key. The API docs explain how to generate one.
+You can fund anonymously today by depositing from a shielded or fresh on-chain wallet — no identity sits behind the address. Fully anonymous bearer-token spending (the `x-bursa-token` ZK purse) is coming soon, after the trusted-setup ceremony.
