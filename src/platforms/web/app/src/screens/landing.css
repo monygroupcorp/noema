@@ -43,11 +43,11 @@
 .lsec-sub{text-align:center;color:var(--muted);font-size:clamp(14px,1.4vw,16px);line-height:1.6;max-width:620px;margin:0 auto}
 
 /* the concierge — the differentiator, given its own room and a three-beat flow */
-.concierge .steps{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:38px}
-.concierge .step{flex:1 1 240px;max-width:300px;border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:22px;text-align:left}
-.concierge .step .sn{font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;color:var(--accent-soft);margin-bottom:12px}
-.concierge .step h3{font-size:15.5px;margin:0 0 8px;font-weight:600;letter-spacing:-.01em}
-.concierge .step p{color:var(--muted);font-size:13px;line-height:1.55;margin:0}
+.concierge-explainer .steps{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:38px}
+.concierge-explainer .step{flex:1 1 240px;max-width:300px;border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:22px;text-align:left}
+.concierge-explainer .step .sn{font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;color:var(--accent-soft);margin-bottom:12px}
+.concierge-explainer .step h3{font-size:15.5px;margin:0 0 8px;font-weight:600;letter-spacing:-.01em}
+.concierge-explainer .step p{color:var(--muted);font-size:13px;line-height:1.55;margin:0}
 
 /* model breadth — a 2x2 card grid that holds four cards cleanly */
 .breadth .lfeat{margin:38px auto 0;padding:0}
