@@ -38,7 +38,7 @@ export const MODALITY_TOKEN: Record<Modality, string> = {
 };
 
 const CAPS = (n: number): Captionset[] => ([
-  { id: 'nl', name: 'natural language', method: 'Florence-2', custody: 'sealed', coverage: '12/12' },
+  { id: 'nl', name: 'natural language', method: 'Florence-2', custody: 'remote', coverage: '12/12' },
   { id: 'booru', name: 'booru tags', method: 'WD14', custody: 'local', coverage: '12/12' },
   { id: 'trig', name: 'trigger-only', method: 'manual', custody: 'local', coverage: '12/12' },
 ] as Captionset[]).slice(0, n);
@@ -46,7 +46,7 @@ const CAPS = (n: number): Captionset[] => ([
 export const DATASETS: Dataset[] = [
   {
     id: 'frost-knight', name: 'Frost-knight set', modality: 'image', count: 12, version: 'v3',
-    updated: '2d ago', size: '84 MB', custody: 'sealed', readiness: 'ready', trains: 3,
+    updated: '2d ago', size: '84 MB', custody: 'remote', readiness: 'ready', trains: 3,
     tiles: ['#2b3a5e', '#324063', '#2f5d56', '#33406b'],
     captionsets: CAPS(3),
     versions: [{ v: 'v3', count: 12, when: 'now' }, { v: 'v2', count: 9, when: '5d' }, { v: 'v1', count: 6, when: '2w' }],
@@ -60,14 +60,14 @@ export const DATASETS: Dataset[] = [
   },
   {
     id: 'drake', name: 'Drake refs', modality: 'image', count: 8, version: 'v1',
-    updated: '1w ago', size: '52 MB', custody: 'sealed', readiness: 'thin', trains: 0,
+    updated: '1w ago', size: '52 MB', custody: 'remote', readiness: 'thin', trains: 0,
     tiles: ['#2f5d56', '#33406b', '#2b3a5e', '#324063'],
     captionsets: CAPS(1),
     versions: [{ v: 'v1', count: 8, when: 'now' }],
   },
   {
     id: 'loop', name: 'Loop refs', modality: 'video', count: 24, version: 'v1',
-    updated: '3d ago', size: '1.2 GB', custody: 'sealed', readiness: 'ready', trains: 2,
+    updated: '3d ago', size: '1.2 GB', custody: 'remote', readiness: 'ready', trains: 2,
     tiles: ['#5e3a2b', '#634032', '#5a3a2c', '#4d3a2c'],
     captionsets: CAPS(1),
     versions: [{ v: 'v1', count: 24, when: 'now' }],

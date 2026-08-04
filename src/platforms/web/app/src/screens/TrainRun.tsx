@@ -47,7 +47,7 @@ export function TrainRun() {
   }
   const pct = Math.round((step / TOTAL) * 100);
   const glyph = custodyGlyph(d.custody);
-  const sealed = d.custody !== 'remote';
+  const local = d.custody !== 'remote';
 
   // loss path in a 0..560 x 0..150 viewbox. SVG y is top-down, so HIGH loss maps to the TOP
   // (small y) and the line descends left→right as the model learns.
@@ -105,12 +105,12 @@ export function TrainRun() {
             <div className="tr-mrow"><span className="k mono">step</span><span className="v mono"><b className="accent">{step}</b>/{TOTAL}</span></div>
             <div className="tr-mrow"><span className="k mono">epoch</span><span className="v mono">3 / 5</span></div>
             <div className="tr-mrow"><span className="k mono">throughput · eta</span><span className="v mono">2.1 it/s · ~6m</span></div>
-            <div className="tr-mrow"><span className="k mono">data · model</span><span className="v mono">{sealed ? 'sealed' : 'remote'}</span></div>
+            <div className="tr-mrow"><span className="k mono">data · model</span><span className="v mono">{local ? 'local' : 'remote'}</span></div>
           </div>
         </div>
 
         <div className="tr-foot">
-          <div className="tr-foot-note"><span className={`hemi2 ${glyph}`} /> {sealed ? 'training in TEE — samples render inside your enclave; we see the meter above, never your model or your data.' : 'training on our compute — we can see the work.'} &nbsp;↳ lands on <Link to="/models" className="accent">your model shelf</Link> when it finishes</div>
+          <div className="tr-foot-note"><span className={`hemi2 ${glyph}`} /> {local ? 'training on your machine — the images never leave your device; we see only the meter above, never your model or your data.' : 'training on our compute — we can see the work.'} &nbsp;↳ lands on <Link to="/models" className="accent">your model shelf</Link> when it finishes</div>
           <div className="tr-actions">
             <Link className="btn ghost" to="/models"><Ic name="box" /> View your shelf →</Link>
             <button className="btn ghost" disabled title="Live job controls aren’t wired yet"><Ic name="x" /> pause</button>
