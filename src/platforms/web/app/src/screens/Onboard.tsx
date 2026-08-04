@@ -10,14 +10,14 @@ import type { Execution } from '../lib/idents';
 import './onboard.css';
 
 // Auth / onboarding — the front door (auth-spec.md, render noema-auth.png). Two equal,
-// honest doors: BRING AN IDENTITY (named) vs STAY ANONYMOUS (local off-grid / guided Bursa).
+// honest doors: BRING AN IDENTITY (named) vs STAY ANONYMOUS (bearer purse — funding-side anonymity).
 // The door sets the IDENTITY axis (who we are to you); compute custody (what we see of the
 // work) is a per-run choice — said in the footer, never set here.
 //
 // Door A now carries the REAL fiat session (username/password rail): "Continue with a
 // username" expands inline into a sign-in / create-account form (useSession). No email —
 // registering logs you straight in. Wallet/Passkey remain cosmetic placeholders. Door B
-// (anonymous) stays the local/bearer identity skin.
+// (anonymous) is the bearer identity skin — funding-side anonymity, our compute.
 //
 // ADDITIVE MODE (`/onboard?add=1`, Keyring Decision 3): reached via "Add account" from the
 // Keyring / account menu. The multi-session store APPENDS a login rather than replacing, so
@@ -67,15 +67,15 @@ export function Onboard() {
             <span className="hemi dashed" aria-hidden="true" />
             <h2>Stay anonymous</h2>
           </div>
-          <p className="door-d">No account. Run on your own machine — nothing ever leaves — or fund a bearer purse to use our compute without a name.</p>
-          <button className="door-cta slate" onClick={() => enter('local')}>Enter local · off-grid →</button>
+          <p className="door-d">No account — browse and make anonymously on our compute. Fund a bearer purse from a shielded wallet to spend without a name attached.</p>
+          <button className="door-cta slate" onClick={() => enter('rented')}>Enter anonymously →</button>
           <button className="door-opt" disabled title="Coming soon"><Ic name="venetian-mask" /> Set up a purse <span className="opt-meta">coming soon</span></button>
           <p className="door-warn">* a purse is anonymous only if funded from a shielded wallet. A doxxed source links you to us at funding time — permanently.</p>
           <div className="door-knows"><span className="hemi dashed sm" aria-hidden="true" /> noema knows: <b>nothing*</b></div>
         </section>
       </div>
 
-      <footer className="auth-foot">your door sets who you are to us — compute custody (local · remote) is your call on every run</footer>
+      <footer className="auth-foot">your door sets who you are to us — every run executes on our compute</footer>
     </div>
   );
 }

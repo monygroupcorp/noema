@@ -1,4 +1,6 @@
-import { Router, raw } from 'express'
+import { Router, raw, type Request, type Response } from 'express'
+import { randomUUID, randomBytes, createHmac, timingSafeEqual } from 'node:crypto'
+import { parse as parseCookie, serialize as serializeCookie } from 'cookie'
 import type { CeremoniaStore } from '../../arcanum/CeremoniaStore.js'
 import { headHash } from '../../arcanum/CeremoniaStore.js'
 import {
@@ -7,6 +9,8 @@ import {
   sha256Hex,
   verifyContinuation,
 } from '../../arcanum/CeremoniaCustody.js'
+import { readSession } from '../../crystal/sessionToken.js'
+import { ownerKeyOf } from '../../crystal/ownerKey.js'
 import { makeLogger } from '../../lib/logger.js'
 
 const log = makeLogger('ceremonia:router')
@@ -19,6 +23,72 @@ const log = makeLogger('ceremonia:router')
 const MAX_CONTACT = 256
 const MAX_NAME = 80
 const MAX_ZKEY_BYTES = 64 * 1024 * 1024 // arcanum zkey is ~5MB; cap generously.
+
+// ── One ceremony contribution per session identity (noema-133) ──────────────────────
+// Credibility gate, not security: stop refresh-spam from inflating the transcript, not
+// block a determined attacker (extra HONEST contributions don't weaken the ceremony).
+//
+//   • Signed-in caller (fiat-auth `Authorization: Bearer <session jwt>`) → keyed on
+//     `ownerKeyOf({ animaId })`, reusing the exact session-token verification authRouter
+//     mints (`src/crystal/sessionToken.ts`) — no new identity-resolution plumbing.
+//   • Anonymous caller → a `noema-cer-sid` cookie: minted (httpOnly, sameSite=Lax) on the
+//     FIRST contribution attempt if absent, HMAC-signed so a tampered/forged value can't
+//     be presented as someone else's already-used slot. The identity key is the SHA-256
+//     of the cookie's uuid, not the raw cookie (never store/expose a bearer-ish secret
+//     verbatim — mirrors `ownerKeyOf`'s bursaToken/commitment discriminants).
+const CEREMONY_COOKIE = 'noema-cer-sid'
+
+// Cookie HMAC secret: reuse JWT_SECRET (already the app's session-signing secret) when
+// set; else a per-process random secret. The cookie is a low-stakes anti-spam token
+// (not the fiat-auth session), so a restart invalidating it is acceptable.
+const CEREMONY_COOKIE_SECRET = process.env.JWT_SECRET || randomBytes(32).toString('hex')
+
+function signCookieValue(uuid: string): string {
+  const sig = createHmac('sha256', CEREMONY_COOKIE_SECRET).update(uuid).digest('hex')
+  return `${uuid}.${sig}`
+}
+
+/** Verify a signed `noema-cer-sid` value → its uuid, or null if absent/tampered. */
+function verifyCookieValue(raw: string | undefined): string | null {
+  if (!raw) return null
+  const dot = raw.lastIndexOf('.')
+  if (dot <= 0) return null
+  const uuid = raw.slice(0, dot)
+  const sig = raw.slice(dot + 1)
+  const expected = createHmac('sha256', CEREMONY_COOKIE_SECRET).update(uuid).digest('hex')
+  const sigBuf = Buffer.from(sig, 'hex')
+  const expectedBuf = Buffer.from(expected, 'hex')
+  if (sigBuf.length !== expectedBuf.length) return null
+  if (!timingSafeEqual(sigBuf, expectedBuf)) return null
+  return uuid
+}
+
+/**
+ * Resolve the contributor identity-key for this request, minting + setting a
+ * ceremony-session cookie on the attempt if the caller has neither a session nor an
+ * existing cookie. Signed-in callers key on `ownerKeyOf({ animaId })` (readable, like
+ * ops-visible anima ids elsewhere); anon callers key on a SHA-256 of their cookie uuid.
+ */
+function resolveContributorIdentity(req: Request, res: Response): string {
+  const auth = req.header('authorization')
+  if (auth?.startsWith('Bearer ') && process.env.JWT_SECRET) {
+    const animaId = readSession(auth.slice('Bearer '.length), process.env.JWT_SECRET)
+    if (animaId) return ownerKeyOf({ animaId })
+  }
+
+  const cookies = parseCookie(req.headers.cookie || '')
+  let uuid = verifyCookieValue(cookies[CEREMONY_COOKIE])
+  if (!uuid) {
+    uuid = randomUUID()
+    res.setHeader('Set-Cookie', serializeCookie(CEREMONY_COOKIE, signCookieValue(uuid), {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/v1/ceremony',
+      maxAge: 60 * 60 * 24 * 30, // 30 days — long enough to outlast a contribution session
+    }))
+  }
+  return `cerid:${sha256Hex(Buffer.from(uuid))}`
+}
 
 export interface CeremoniaRouterConfig {
   /** Binary custody for the zkey chain — required for current.zkey + contributions. */
@@ -110,12 +180,23 @@ export function createCeremoniaRouter(
         return res.status(400).json({ error: 'x-based-on header (head hash) is required' })
       }
 
+      // Resolve (and, for a first-seen anon caller, mint) the contributor identity
+      // BEFORE the expensive checks — the cookie is set on the attempt either way.
+      const identityKey = resolveContributorIdentity(req, res)
+
       try {
         const status = await store.status()
         if (status.phase !== 'open') return res.status(409).json({ error: 'ceremony not open' })
         const head = headHash(status)
         if (head !== basedOn) {
           return res.status(409).json({ error: 'stale head — re-fetch current.zkey and contribute again', head })
+        }
+
+        // One-per-session gate: refuse a repeat BEFORE the expensive crypto verify.
+        // Distinct from the stale-head 409 above — this is "you already contributed",
+        // not "the chain moved".
+        if (await store.hasContributed(identityKey)) {
+          return res.status(409).json({ error: "you've already contributed to this ceremony" })
         }
 
         const outputHash = sha256Hex(bytes)
@@ -134,10 +215,14 @@ export function createCeremoniaRouter(
         const appended = await store.appendContribution(
           { index: status.chain.length + 1, name, outputHash },
           head,
+          identityKey,
         )
         if (!appended) {
-          // Someone extended the head between our read and write — the chain is safe,
-          // this contribution just lost the race.
+          // Someone extended the head, or landed this identity's contribution, between
+          // our read and write — re-check which so the caller gets the right message.
+          if (await store.hasContributed(identityKey)) {
+            return res.status(409).json({ error: "you've already contributed to this ceremony" })
+          }
           return res.status(409).json({ error: 'another contribution landed first — re-fetch and retry' })
         }
 
