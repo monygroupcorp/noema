@@ -43,10 +43,10 @@ import { Feed } from './screens/Feed';
 import { Review } from './screens/Review';
 import { AdminWorkspace } from './screens/AdminWorkspace';
 import { Doc } from './screens/Doc';
+import { Pricing } from './screens/Pricing';
 import { Stub } from './screens/Stub';
 import aboutMd from './content/about.md?raw';
 import featuresMd from './content/features.md?raw';
-import pricingMd from './content/pricing.md?raw';
 import blogMd from './content/blog.md?raw';
 import privacyMd from './content/privacy.md?raw';
 import cookiesMd from './content/cookies.md?raw';
@@ -111,7 +111,7 @@ export function App() {
           no verify/reset token pages; recovery is via backup channels bound in the profile. */}
       <Route path="/about" element={<Doc md={aboutMd} />} />
       <Route path="/features" element={<Doc md={featuresMd} />} />
-      <Route path="/pricing" element={<Doc md={pricingMd} />} />
+      <Route path="/pricing" element={<Pricing />} />
       <Route path="/blog" element={<Doc md={blogMd} />} />
       <Route path="/legal/privacy" element={<Doc md={privacyMd} />} />
       <Route path="/legal/cookies" element={<Doc md={cookiesMd} />} />

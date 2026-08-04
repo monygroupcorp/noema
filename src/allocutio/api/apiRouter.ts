@@ -19,6 +19,7 @@ import type { AuctorKey } from '../../flow/types.js'
 import type { FeedFilter } from '../../types/editio.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote, MyDeposit } from './CrystalApi.js'
 import type { RarityReport } from '../../crystal/rarityReport.js'
+import type { PackView } from '../../ledger/stripePacks.js'
 import { ApiError, Errors } from './errors.js'
 import { makeLogger } from '../../lib/logger.js'
 import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
@@ -123,6 +124,8 @@ export interface ApiFacade {
   publishTabula(auctor: AuctorKey, id: string): Promise<{ modusId: string }>
   listMyFlows(auctor: AuctorKey): Promise<unknown[]>
   // --- Fiat funding rail (Stripe) ---
+  /** PUBLIC display catalog (no auth) — the single source the pricing + Funding UIs render from. */
+  listPacks(): PackView[]
   createCheckout(auctor: AuctorKey, opts: { packId: string; successUrl?: string; cancelUrl?: string }): Promise<{ url: string; sessionId: string }>
   handleStripeWebhook(input: { rawBody: string; signature?: string }): Promise<{ status: number; body: { received: boolean; credited?: string; message?: string } }>
 }
@@ -242,6 +245,13 @@ export function createApiRouter(deps: {
       res.status(200).json({ run })
     }),
   )
+
+  // GET /v1/payments/packs — the PUBLIC credit-pack catalog for display (pricing page + Funding).
+  // No auth (pricing is public), read-only, no money mutation. This is the single DISPLAY source of
+  // truth, sourced from `stripePacks.PACKS`; the charged amount stays server-authoritative by packId.
+  router.get('/payments/packs', wrap(async (_req, res) => {
+    res.json({ packs: api.listPacks() })
+  }))
 
   // POST /v1/payments/checkout — an IDENTIFIED caller buys a credit pack (Stripe Checkout).
   // Returns the hosted-checkout URL to redirect to. A fiat pack can only fund an identified

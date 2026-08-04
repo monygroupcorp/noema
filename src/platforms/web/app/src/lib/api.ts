@@ -543,6 +543,12 @@ export const api = {
   // this instead of hoping the balance moves.
   myDeposits: () => fetch('/v1/deposit/mine', { headers: readHeaders() }).then(j<{ deposits: MyDeposit[] }>),
 
+  // ── Credit-pack catalog — public, no auth ────────────────────────────────────
+  // GET /v1/payments/packs — the ratified credit packs for DISPLAY (pricing page + Funding),
+  // sourced from the server's single stripePacks catalog. `credits` is display-only (= impetus/10);
+  // the charged/credited amount stays server-authoritative by packId at checkout time.
+  listPacks: () => fetch('/v1/payments/packs').then(j<{ packs: Pack[] }>).then((r) => r.packs),
+
   // ── Fiat pack checkout (Stripe) — identified accounts only ───────────────────
   // POST /v1/payments/checkout — create a hosted Stripe Checkout session for one of the
   // fixed credit packs (starter_10/standard_25/plus_50/studio_100). Server-authoritative:
@@ -1236,6 +1242,16 @@ export interface DepositConfig {
   defaultFundingRatePct: number;
   chains: Array<{ chainId: number; name: string }>;
 }
+// A displayable credit pack (GET /v1/payments/packs) — mirrors the backend PackView. Display only:
+// `credits` = impetus/10; the charged/credited amount stays server-authoritative by `id` (packId).
+export interface Pack {
+  id: string;
+  usd: number;
+  credits: number;
+  label: string;
+  bestRate?: boolean;
+}
+
 // The hosted Stripe Checkout session (POST /v1/payments/checkout) — mirrors the backend
 // CheckoutResponseSchema. `url` is the hosted-checkout URL to redirect the caller to.
 export interface CheckoutSession {
