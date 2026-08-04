@@ -194,9 +194,23 @@ async function main(): Promise<void> {
       claimsColl = tgtDb.collection(CLAIMS_COLLECTION)
       signorum = new MongoSignorum(tgtDb.collection('signa'), targetClient)
       personae = new MongoPersona(tgtDb.collection('personae'))
-      // Resumability: skip source accounts already migrated (by legacyMasterAccountId).
-      const migratedIds = await animaeColl.distinct('legacyMasterAccountId', { legacyMasterAccountId: { $exists: true } })
-      alreadyMigrated = new Set(migratedIds.map(String))
+      // Resumability: skip source accounts whose BALANCE has already been minted. This MUST gate on
+      // the migration SIGNUM, NOT the anima (gauntlet finding — a money-loss bug otherwise). The
+      // commit writes Anima BEFORE the balance Signum, so a crash between them leaves an account with
+      // an anima but NO balance. An anima-derived skip set (animae.distinct('legacyMasterAccountId'))
+      // would then SKIP that account on re-run and its balance would NEVER be minted (silent credit
+      // loss). Deriving the skip set from the minted migration signa instead — testis =
+      // 'migration:<masterAccountId>', scoped to auctor:'migration:legacy' — REPROCESSES an
+      // anima-without-signum account (anima upsert / row-claim / persona findOrCreate / issue() are
+      // all idempotent, so the second pass simply mints the missing balance and no-ops the rest), and
+      // zero-balance accounts (which have no signum) re-run as harmless no-ops.
+      const migratedTestes = await tgtDb.collection('signa').distinct('testis', { auctor: 'migration:legacy' })
+      alreadyMigrated = new Set(
+        migratedTestes
+          .map(t => String(t))
+          .filter(t => t.startsWith('migration:'))
+          .map(t => t.slice('migration:'.length)),
+      )
     }
 
     // Gather N not-yet-migrated source accounts (stable order by _id).
