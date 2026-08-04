@@ -119,6 +119,19 @@ async function assertIdempotencyGuards(tgtDb: Db): Promise<void> {
 /** The persistent, cross-chunk ledger-row claim ledger (global de-dup — finding 3). */
 const CLAIMS_COLLECTION = 'migration_ledger_claims'
 
+/** The persistent, cross-chunk done-marker ledger — one doc per account whose migration reached a
+ *  TERMINAL disposition this run (migrated, skip-zero, quarantined, or row-collision-excluded), even
+ *  when NO Signum was minted. Building the resume-skip set from minted signa ALONE (finding: major)
+ *  strands every signum-less account (zero-balance skip-zero, quarantined) permanently in the front
+ *  chunk slots: the cursor re-collects them every run, so once ≥N of them accumulate ahead of the
+ *  remaining work (typical for a bot DB dominated by free/zero users) the window saturates and
+ *  un-migrated PAYING accounts beyond that frontier are never reached (silent fleet-level credit
+ *  loss). This marker lets the window advance past them while preserving the no-money-loss guarantee:
+ *  for a paying account the marker is written LAST (after the Signum mint), so a crash before the mint
+ *  leaves no marker and the account is reprocessed. `_id` = masterAccountId string (matches the skip
+ *  set's key derived from `testis`='migration:<mid>' and from `String(userCore._id)`). */
+const DONE_COLLECTION = 'migration_accounts_done'
+
 // ─ Pretty-print one transformed account ────────────────────────────────────
 
 function summarize(r: AccountMigrationResult): string {
@@ -179,6 +192,7 @@ async function main(): Promise<void> {
     let animaeColl: Collection<Document> | null = null
     let signaColl: Collection<Document> | null = null
     let claimsColl: Collection<Document> | null = null
+    let doneColl: Collection<Document> | null = null
     let signorum: MongoSignorum | null = null
     let personae: MongoPersona | null = null
     let alreadyMigrated = new Set<string>()
@@ -192,25 +206,34 @@ async function main(): Promise<void> {
       animaeColl = tgtDb.collection('animae')
       signaColl = tgtDb.collection('signa')
       claimsColl = tgtDb.collection(CLAIMS_COLLECTION)
+      doneColl = tgtDb.collection(DONE_COLLECTION)
       signorum = new MongoSignorum(tgtDb.collection('signa'), targetClient)
       personae = new MongoPersona(tgtDb.collection('personae'))
-      // Resumability: skip source accounts whose BALANCE has already been minted. This MUST gate on
-      // the migration SIGNUM, NOT the anima (gauntlet finding — a money-loss bug otherwise). The
-      // commit writes Anima BEFORE the balance Signum, so a crash between them leaves an account with
-      // an anima but NO balance. An anima-derived skip set (animae.distinct('legacyMasterAccountId'))
-      // would then SKIP that account on re-run and its balance would NEVER be minted (silent credit
-      // loss). Deriving the skip set from the minted migration signa instead — testis =
-      // 'migration:<masterAccountId>', scoped to auctor:'migration:legacy' — REPROCESSES an
-      // anima-without-signum account (anima upsert / row-claim / persona findOrCreate / issue() are
-      // all idempotent, so the second pass simply mints the missing balance and no-ops the rest), and
-      // zero-balance accounts (which have no signum) re-run as harmless no-ops.
-      const migratedTestes = await tgtDb.collection('signa').distinct('testis', { auctor: 'migration:legacy' })
-      alreadyMigrated = new Set(
-        migratedTestes
+      // Resumability: skip source accounts already brought to a TERMINAL disposition. The skip set is
+      // the UNION of two truths:
+      //   (a) minted migration SIGNA — testis='migration:<mid>', auctor:'migration:legacy'. Gating on
+      //       the signum (NOT the anima) is the no-money-loss invariant (gauntlet finding): the commit
+      //       writes Anima BEFORE the balance Signum, so a crash between them leaves an anima with NO
+      //       balance; an anima-derived skip set would strand that balance forever, but a signum-derived
+      //       one REPROCESSES it (anima upsert / row-claim / persona findOrCreate / issue() are all
+      //       idempotent, so the second pass mints only the missing balance and no-ops the rest).
+      //   (b) done-markers (DONE_COLLECTION) — every account that terminated WITHOUT a signum:
+      //       zero-balance skip-zero, quarantined, and row-collision-excluded. Without these, signum-less
+      //       accounts never enter the skip set, re-fill the front chunk slots every run, and once ≥N of
+      //       them stack ahead of the remaining work the window saturates and paying accounts beyond that
+      //       frontier are NEVER reached (finding: major — silent credit loss). The marker is written
+      //       LAST for paying accounts (after the mint), so it never masks an unminted balance.
+      const [migratedTestes, doneMarkers] = await Promise.all([
+        tgtDb.collection('signa').distinct('testis', { auctor: 'migration:legacy' }),
+        tgtDb.collection(DONE_COLLECTION).distinct('_id'),
+      ])
+      alreadyMigrated = new Set<string>([
+        ...migratedTestes
           .map(t => String(t))
           .filter(t => t.startsWith('migration:'))
           .map(t => t.slice('migration:'.length)),
-      )
+        ...doneMarkers.map(d => String(d)),
+      ])
     }
 
     // Gather N not-yet-migrated source accounts (stable order by _id).
@@ -319,10 +342,31 @@ async function main(): Promise<void> {
     console.log('')
 
     // ─ Commit (Anima → Personae → Signum), with cross-chunk row-claim de-dup ─
-    if (args.commit && animaeColl && signaColl && claimsColl && signorum && personae) {
-      let animaeWritten = 0, personaeWritten = 0, signaMinted = 0, signaSkipped = 0
+    if (args.commit && animaeColl && signaColl && claimsColl && doneColl && signorum && personae) {
+      let animaeWritten = 0, personaeWritten = 0, signaMinted = 0, signaSkipped = 0, doneMarked = 0
       const committed: { r: AccountMigrationResult; animaId: string }[] = []
       const crossChunkCollisions: { account: string; rowId: string; owner: string }[] = []
+
+      // Terminal-disposition marker (finding: major). Idempotent upsert keyed by masterAccountId; a
+      // re-run of the same account is a no-op ($setOnInsert). For a PAYING account this is written LAST
+      // (after the Signum mint), so a crash before the mint leaves no marker and the account reprocesses
+      // — the no-money-loss invariant holds. For signum-less accounts (skip-zero / quarantine /
+      // collision) it is the ONLY skip signal, letting the chunk window advance past them.
+      const markDone = async (m: string, disposition: string, animaId?: string): Promise<void> => {
+        await doneColl!.updateOne(
+          { _id: m as unknown as Document['_id'] },
+          { $setOnInsert: { disposition, ...(animaId ? { animaId } : {}), natum: new Date() } },
+          { upsert: true },
+        )
+        doneMarked++
+      }
+
+      // Signum-less terminals decided BEFORE the commit loop: quarantined + in-set row-collision
+      // accounts are never in `committable`, so mark them done here or they re-saturate the front slots
+      // every run (same stall as zero-balance). Deterministic from the static source, so a permanent
+      // skip is correct; the operator reviews them via the printed reports / the done collection.
+      for (const q of quarantined) await markDone(q.log.legacyMasterAccountId, `quarantine:${q.quarantine}`)
+      for (const a of collidingAccounts) await markDone(a, 'row-collision:in-set')
 
       for (const r of committable) {
         const mid = r.anima.legacyMasterAccountId
@@ -338,6 +382,9 @@ async function main(): Promise<void> {
         if (claimConflict) {
           crossChunkCollisions.push({ account: mid, rowId: claimConflict.rowId, owner: claimConflict.owner })
           console.error(`  ROW-COLLISION (cross-chunk) ${mid}: ledgerRow=${claimConflict.rowId} already claimed by ${claimConflict.owner} — NOT migrating this account`)
+          // Mark done so this excluded account stops re-saturating the chunk window (no money to lose —
+          // its balance double-counts a deposit already owned by another account; operator reviews it).
+          await markDone(mid, `row-collision:cross-chunk:${claimConflict.owner}`)
           continue
         }
 
@@ -390,8 +437,13 @@ async function main(): Promise<void> {
           }
         }
         committed.push({ r, animaId })
+
+        // 5. Done-marker — written LAST (after the Signum mint) so the no-money-loss invariant holds: a
+        //    crash before step 4 leaves no marker AND no signum, and the account reprocesses next run.
+        //    Covers skip-zero accounts too (r.signum === null), letting the window advance past them.
+        await markDone(mid, r.signum ? 'migrated' : 'migrated:zero', animaId)
       }
-      console.log(`[migrate-accounts-chunk] committed: animae=${animaeWritten} personae=${personaeWritten} signa minted=${signaMinted} skipped(dup)=${signaSkipped} cross-chunk-collisions=${crossChunkCollisions.length}`)
+      console.log(`[migrate-accounts-chunk] committed: animae=${animaeWritten} personae=${personaeWritten} signa minted=${signaMinted} skipped(dup)=${signaSkipped} cross-chunk-collisions=${crossChunkCollisions.length} done-marked=${doneMarked}`)
       console.log('')
 
       // ─ POST-COMMIT RECONCILIATION — THE REAL GATE (findings 2 + 3) ─────────
