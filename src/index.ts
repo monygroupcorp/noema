@@ -1159,7 +1159,34 @@ async function main(): Promise<void> {
   // verification, stays disabled in production until counsel signs Art.17(3)(b) sufficiency.
   const erasureEnabled = process.env.ERASURE_ENABLED === 'true'
   if (erasureEnabled) log.warn('ERASURE_ENABLED=true — DELETE /v1/me (GDPR erasure) is LIVE on this instance')
-  app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub, erasureEnabled, ...(meExporter ? { exporter: meExporter } : {}) }))
+
+  // Public-publish volume cap (noema-119, manual-review launch posture): the held-review queue
+  // (noema-118) only stays humanly clearable if public inflow (feed/marketplace) is bounded.
+  // Per-OWNER (not IP — anon-capable callers publish under an animaId/commitment, never bare
+  // IP), a real limiter by default (this is a safety cap, unlike quote/wallet's opt-in guards).
+  // Window/count are env-overridable like the app's other rate limiters.
+  const { default: publishRateLimit } = await import('express-rate-limit')
+  const PUBLISH_RATE_LIMIT_MAX = Number(process.env.PUBLISH_RATE_LIMIT_MAX ?? 20)
+  const PUBLISH_RATE_LIMIT_WINDOW_MS = Number(process.env.PUBLISH_RATE_LIMIT_WINDOW_MS ?? 60 * 60 * 1000)
+  const publishLimiter = publishRateLimit({
+    windowMs: PUBLISH_RATE_LIMIT_WINDOW_MS,
+    max: PUBLISH_RATE_LIMIT_MAX,
+    standardHeaders: true,
+    legacyHeaders: false,
+    // Stamped onto the request by apiRouter's /editiones handler BEFORE invoking this
+    // middleware — owner-keyed, never IP (see `publishOwnerKey` in apiRouter.ts).
+    keyGenerator: (req) => (req as { publishOwnerKey?: string }).publishOwnerKey ?? 'unknown',
+    message: { error: { code: 'rate.limited', message: 'public publishing is rate-limited during review — try again shortly' } },
+  })
+
+  app.use('/v1', createApiRouter({
+    api: crystalApi,
+    identity: apiResolver,
+    hub: runHub,
+    erasureEnabled,
+    ...(meExporter ? { exporter: meExporter } : {}),
+    rateLimiters: { publish: publishLimiter },
+  }))
 
   // CAMEL agent compat surface (ADR-0011 §8) — the exact `/api/v1/...` paths the
   // deployed camel404 client bakes (on-chain-referenced). No catch-all in front,
