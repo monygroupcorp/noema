@@ -35,6 +35,7 @@ interface SessionCtx {
   ready: boolean;                     // false until the initial refresh settles
   register: (username: string, password: string) => Promise<void>;   // mints + adds an account (auto-login)
   login: (username: string, password: string) => Promise<void>;      // adds/activates an account
+  signUpWithWallet: () => Promise<void>;        // prove a wallet → mint-if-absent + add + activate that soul
   recoverWithWallet: () => Promise<void>;       // prove a linked wallet → add + activate that soul
   recoverWithTelegram: (code: string) => Promise<void>;   // paste a bot recovery code → add + activate
   switchAccount: (animaId: string) => Promise<void>;      // re-point the active account
@@ -115,6 +116,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     adopt(res, username);
   };
 
+  // Wallet-first signup: prove a wallet with no username/password. An unknown wallet MINTS a new
+  // soul bound to it; a wallet already bound logs into that same soul (no duplicate). Mirrors
+  // recoverWithWallet but hits the create-if-absent endpoint — the only difference is signup vs
+  // login-only, so the connect→challenge→sign dance is identical.
+  const signUpWithWallet = async () => {
+    const wallet = await connectWallet();
+    const { token, statement } = await api.auth.walletChallenge(wallet.address);
+    const signature = await wallet.signMessage(statement);
+    const res = await api.auth.walletRegister(token, signature);
+    adopt(res);
+  };
+
   // Forgot-password recovery: prove control of a linked wallet, adopt that soul. The username
   // isn't known here — the animaId is what matters (the derived readout falls back to 'account').
   const recoverWithWallet = async () => {
@@ -172,7 +185,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{
       session, accounts: store.accounts, activeAnimaId: store.activeAnimaId, ready,
-      register, login, recoverWithWallet, recoverWithTelegram, switchAccount, goAnonymous, signOutActive, signOutAll,
+      register, login, signUpWithWallet, recoverWithWallet, recoverWithTelegram, switchAccount, goAnonymous, signOutActive, signOutAll,
     }}>
       {children}
     </Ctx.Provider>

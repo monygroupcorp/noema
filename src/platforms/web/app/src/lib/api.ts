@@ -854,6 +854,11 @@ export const api = {
     walletRecover: (challengeToken: string, signature: string) =>
       fetch('/v1/auth/wallet/recover', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeToken, signature }) })
         .then(jAuth<AuthResult>),
+    // Wallet-FIRST signup (public): prove a wallet with no username/password. Mints an account
+    // bound to the wallet if it's unknown, or logs into the existing soul if already bound.
+    walletRegister: (challengeToken: string, signature: string) =>
+      fetch('/v1/auth/wallet/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeToken, signature }) })
+        .then(jAuth<AuthResult>),
     listWallets: () =>
       fetch('/v1/auth/wallet', { headers: readHeaders() }).then(jAuth<{ wallets: string[] }>),
 
