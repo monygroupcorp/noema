@@ -161,94 +161,27 @@ export function Funding() {
         <div className="fund-head">
           <h1>Every way to pay — and what each one reveals.</h1>
           <div className="sub">
-            We tell you exactly what we learn about you on each path. Privacy on the
-            funding side is real, but it's <b>yours to keep</b> — so here's how.
+            Anonymity is a property of <b>how you fund</b>, not a blanket promise. Two ways
+            in — an on-chain wallet or a card — and we tell you exactly what each one reveals.
+            Want spends nothing can tie back to you? Fund from a fresh wallet, then mint a
+            ZK purse from your balance.
           </div>
         </div>
 
         <div className="fund-rows">
 
-          {/* Row 1 · Anonymous rail — the differentiator and its caveat, expanded. */}
-          <section className="fund-row">
-            <div className="fund-rowhead">
-              <div className="fund-ic slate"><Ic name="venetian-mask" /></div>
-              <div className="fund-rowmain">
-                <div className="fund-titleline">
-                  <h3>Anonymous rail</h3>
-                  <span className="fund-flag">◌ ours alone</span>
-                </div>
-                <p className="fund-desc">
-                  Mint a bearer purse and spend it down. The purse itself carries no
-                  name, no account, no recovery — and it can't be linked to your runs.
-                </p>
-              </div>
-              <div className="fund-aside">
-                <Meter sees="nothing" label="nothing*" />
-              </div>
-            </div>
-
-            <div className="fund-guide">
-              <div className="fund-guide-h">
-                <Hemisphere sees="nothing" />
-                * keeping it anonymous is on you — fund it right
-              </div>
-              <ol className="fund-guide-pts">
-                <li>
-                  <span className="fg-n">01</span>
-                  <span>
-                    Fund the purse from a <b>shielded or fresh wallet</b> — not a KYC
-                    exchange withdrawal and not your main wallet.
-                  </span>
-                </li>
-                <li>
-                  <span className="fg-n">02</span>
-                  <span>
-                    The purse is a <b>bearer token</b>: once minted it's unlinkable to
-                    your generations, and we can't recover or freeze it.
-                  </span>
-                </li>
-              </ol>
-            </div>
-
-            <div className="warn fund-warn">
-              <WarnIc />
-              <span>
-                Pay from a <b>doxxed wallet</b> and that payment ties your identity to us{' '}
-                <b>at the moment you mint</b> — permanently, even if you never spend a
-                single credit. Anonymity starts upstream of us.
-              </span>
-            </div>
-
-            <div className="fund-actions">
-              <div className="filters">
-                {packs.map((p) => (
-                  <button
-                    key={p.id}
-                    className={`fchip${pack === p.id ? ' on' : ''}`}
-                    onClick={() => setPack(p.id)}
-                  >
-                    <span className="fc-cr">{fmt(p.credits)}</span>
-                    <span className="fc-pr">${p.usd}</span>
-                  </button>
-                ))}
-              </div>
-              <Link className="btn-ghost" to="/vault">
-                <Ic name="venetian-mask" /> Mint a purse <Ic name="arrow-right" />
-              </Link>
-            </div>
-          </section>
-
-          {/* Row 2 · Onchain wallet — a pseudonym, not a person. */}
+          {/* Row 1 · On-chain wallet — an address, not a person. Normal = pseudonymous,
+              shielded/fresh = the strong-anonymity path available today. */}
           <section className="fund-row">
             <div className="fund-rowhead">
               <div className="fund-ic accent"><Ic name="wallet" /></div>
               <div className="fund-rowmain">
                 <div className="fund-titleline">
-                  <h3>Onchain wallet</h3>
+                  <h3>On-chain wallet</h3>
                 </div>
                 <p className="fund-desc">
-                  Connect a wallet. We see an address, not a person. Subscription or
-                  pay-as-you-go.
+                  Connect a wallet and pay with what it holds. We see an <b>address</b>, not
+                  a person. How private that is depends on the wallet you fund from.
                 </p>
               </div>
               <div className="fund-aside">
@@ -258,6 +191,29 @@ export function Funding() {
                 </button>
                 {walletErr && <div className="warn byo-warn" style={{ marginTop: 'var(--s2)' }}>{walletErr}</div>}
               </div>
+            </div>
+
+            <div className="fund-guide">
+              <div className="fund-guide-h">
+                <Hemisphere sees="pseudonym" /> what your address reveals
+              </div>
+              <ol className="fund-guide-pts">
+                <li>
+                  <span className="fg-n">01</span>
+                  <span>
+                    A <b>normal wallet</b> is pseudonymous — an address that can be traced
+                    on-chain. An exchange withdrawal or a prior transfer can tie it back to you.
+                  </span>
+                </li>
+                <li>
+                  <span className="fg-n">02</span>
+                  <span>
+                    A <b>shielded or fresh wallet</b> is the <b>strong-anonymity path
+                    available today</b> — an address with no identity behind it, so funding
+                    reveals no person. Want no on-chain trail to you? Fund from one of these.
+                  </span>
+                </li>
+              </ol>
             </div>
 
             {/* Primary path — build+send the CreditVault deposit tx from the connected wallet
@@ -310,7 +266,7 @@ export function Funding() {
 
           <BuyCreditsModal open={buyOpen} onClose={() => setBuyOpen(false)} />
 
-          {/* Row 3 · Card — the fastest path; it sees you. */}
+          {/* Row 2 · Card — the fastest path; it sees you. Not anonymous — say so plainly. */}
           <section className="fund-row">
             <div className="fund-rowhead">
               <div className="fund-ic gold"><Ic name="credit-card" /></div>
@@ -319,8 +275,8 @@ export function Funding() {
                   <h3>Card</h3>
                 </div>
                 <p className="fund-desc">
-                  Pay by card via Stripe. The fastest path. We see your name and card.
-                  Fixed packs — the price and the credit are locked in.
+                  Pay by card via Stripe. The fastest path — and <b>not anonymous</b>: we see
+                  your name and card. Fixed packs — the price and the credit are locked in.
                 </p>
               </div>
               <div className="fund-aside">
@@ -337,7 +293,7 @@ export function Funding() {
                   {packs.map((p) => (
                     <button
                       key={p.id}
-                      className="fchip"
+                      className={`fchip${pack === p.id ? ' on' : ''}`}
                       disabled={checkoutBusy != null}
                       onClick={() => buyPack(p.id)}
                     >
@@ -368,6 +324,70 @@ export function Funding() {
                   Credited — your balance is updated.
                 </div>
               )}
+            </div>
+          </section>
+
+          {/* Added layer · ZK purse — NOT a peer entry rail. A step you take AFTER you have a
+              balance: fund from your balance → mint a bearer purse whose spends are
+              cryptographically unlinkable to the note. Fund anonymously (shielded wallet)
+              AND spend unlinkably (purse). */}
+          <section className="fund-row">
+            <div className="fund-rowhead">
+              <div className="fund-ic slate"><Ic name="venetian-mask" /></div>
+              <div className="fund-rowmain">
+                <div className="fund-titleline">
+                  <h3>Spend unlinkably — mint a ZK purse</h3>
+                  <span className="fund-flag">◌ added layer</span>
+                </div>
+                <p className="fund-desc">
+                  Not another way to pay — a step you take <b>after</b> you have a balance. From
+                  your balance you mint a <b>ZK bearer purse</b>: spend from it and the spend is
+                  cryptographically unlinkable to what you funded. Fund from a shielded wallet
+                  <b> and</b> spend from a purse for both layers.
+                </p>
+              </div>
+              <div className="fund-aside">
+                <Meter sees="nothing" label="nothing" />
+              </div>
+            </div>
+
+            <div className="fund-guide">
+              <div className="fund-guide-h">
+                <Hemisphere sees="nothing" /> how the purse works
+              </div>
+              <ol className="fund-guide-pts">
+                <li>
+                  <span className="fg-n">01</span>
+                  <span>
+                    Add a balance first (wallet or card), then in your Vault mint a purse from it.
+                    Its spends carry <b>no name and no account</b> — they can't be tied to the note.
+                  </span>
+                </li>
+                <li>
+                  <span className="fg-n">02</span>
+                  <span>
+                    A purse is a <b>bearer token</b>: hold it or hand off the token to spend
+                    elsewhere. Your <b>vault JSON export is the backup</b> — there's no name-based
+                    recovery, so keep it safe.
+                  </span>
+                </li>
+              </ol>
+              <details className="fund-fallback" style={{ marginTop: 'var(--s3)' }}>
+                <summary className="fund-guide-h">how anonymous is the funding step?</summary>
+                <p className="fund-desc" style={{ marginTop: 'var(--s3)' }}>
+                  Minting a purse debits your balance, so with an <b>identified</b> funder (a card
+                  or a doxxable wallet) that step is correlation-resistant, not correlation-proof —
+                  the debit and the mint are close in time. Fund from a <b>shielded or fresh
+                  wallet</b> and that correlation is between anonymous things: no identity leak.
+                  We're building direct-to-commitment deposits so we won't even see the funding
+                  wallet — that's on the roadmap, not shipped yet.
+                </p>
+              </details>
+              <div className="fund-actions" style={{ marginTop: 'var(--s3)' }}>
+                <Link className="btn-ghost" to="/vault">
+                  <Ic name="venetian-mask" /> Mint a purse <Ic name="arrow-right" />
+                </Link>
+              </div>
             </div>
           </section>
 
