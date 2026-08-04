@@ -60,6 +60,7 @@ export interface ApiFacade {
   saveFlow(auctor: AuctorKey, opts: SaveFlowOpts): Promise<{ id: string }>
   bind(auctor: AuctorKey, verb: string, modusId: string): Promise<{ verb: string; modusId: string }>
   getMe(auctor: AuctorKey): Promise<import('./CrystalApi.js').MeView>
+  eraseMe(auctor: AuctorKey): Promise<import('../../types/erasure.js').ErasureReceipt>
   recordAttestation(auctor: AuctorKey): Promise<{ attestedAt: number }>
   putSecret(auctor: AuctorKey, provider: string, token: string, idleDays?: number): Promise<import('./CrystalApi.js').SecretView>
   removeSecret(auctor: AuctorKey, provider: string): Promise<import('./CrystalApi.js').SecretView>
@@ -131,7 +132,51 @@ export interface Identity {
   resolve(creds: Credentials): Promise<AuctorKey>
 }
 
-export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?: RunEventHub; exporter?: MeExporter }): Router {
+/**
+ * Does this publish target a PUBLIC surface — the same feed/marketplace visibilities the
+ * moderation gate keys on (`CrystalApi.publish`'s `isPublicSurface`, `CrystalApi.ts:1104`)?
+ * Mirrors `CrystalApi.publish`'s destination→visibility default table (`CrystalApi.ts:827-839`)
+ * so an omitted `destination`/`visibility` still resolves to its true default ('feed' is the
+ * platform default destination, itself public) rather than silently skipping the cap. The one
+ * approximation: it can't see the caller's stored `Anima.publicatio` prefs (router has no prefs
+ * lookup), so a request that omits both fields AND whose account prefs override away from the
+ * public 'feed' default is over-capped, never under-capped — the safe direction for a rate cap.
+ */
+function isPublicPublishTarget(destination: unknown, visibility: unknown): boolean {
+  const dest = typeof destination === 'string' ? destination : 'feed'
+  const vis = typeof visibility === 'string'
+    ? visibility
+    : dest === 'feed'
+      ? 'feed'
+      : (dest === 'mint' || dest === 'marketplace' || dest === 'gallery' || dest === 'arweave')
+        ? 'marketplace'
+        : 'private'
+  return vis === 'feed' || vis === 'marketplace'
+}
+
+/** Owner key for the publish rate limiter — mirrors `CrystalApi._editionBy` (animaId | commitment;
+ *  `publish` itself rejects a bare `bursaToken` caller, so there is no anon key to key by here). */
+function publishOwnerKey(auctor: AuctorKey): string | undefined {
+  if ('animaId' in auctor) return `anima:${auctor.animaId}`
+  if ('commitment' in auctor) return `commitment:${auctor.commitment}`
+  return undefined
+}
+
+export function createApiRouter(deps: {
+  api: ApiFacade
+  identity: Identity
+  hub?: RunEventHub
+  exporter?: MeExporter
+  erasureEnabled?: boolean
+  /** Optional per-route rate-limit middleware (index.ts wires express-rate-limit; tests omit). */
+  rateLimiters?: {
+    /** Guards PUBLIC publishes (feed/marketplace — the moderation gate's surfaces) so the
+     *  held-review queue can't be flooded faster than a human can clear it. Keyed by owner,
+     *  NOT IP (see `publishOwnerKey` below — the router stamps the key onto the request before
+     *  invoking this). Private/unlisted publishes never hit it. */
+    publish?: express.RequestHandler
+  }
+}): Router {
   const { api, identity } = deps
   const router = express.Router()
 
@@ -401,6 +446,18 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
   router.post('/editiones', wrap(async (req, res) => {
     const auctor = await auth(req)
     const { artifact, destination, visibility, custody, license, teamId, owners } = req.body ?? {}
+    // Public-publish volume cap (noema-119): held-review only stays clearable by a human if
+    // inflow is bounded. Private/unlisted publishes never hit the review queue, so they're
+    // never rate-limited here — only feed/marketplace targets are.
+    const publishLimiter = deps.rateLimiters?.publish
+    const ownerKey = publishLimiter ? publishOwnerKey(auctor) : undefined
+    if (publishLimiter && ownerKey && isPublicPublishTarget(destination, visibility)) {
+      (req as Request & { publishOwnerKey?: string }).publishOwnerKey = ownerKey
+      const passed = await new Promise<boolean>((resolve) => {
+        publishLimiter(req, res, (err?: unknown) => resolve(!err))
+      })
+      if (!passed || res.headersSent) return
+    }
     res.status(200).json({ edition: await api.publish(auctor, { artifact, destination, visibility, custody, license, teamId, owners }) })
   }))
 
@@ -760,6 +817,21 @@ export function createApiRouter(deps: { api: ApiFacade; identity: Identity; hub?
     }
     const auctor = await auth(req)
     res.status(200).json(await deps.exporter.exportForCaller(auctor))
+  }))
+
+  // DELETE /v1/me — GDPR Art. 17 right-to-erasure (noema-025). Pseudonymize-and-tombstones the
+  // CALLER'S OWN account (self-only: auth = the caller's key, so a caller can never erase another
+  // owner). Behind the `ERASURE_ENABLED` flag (default OFF, counsel-gated in production): when the
+  // flag is off the endpoint 404s and does not even reveal itself. Returns a TRUTHFUL receipt — it
+  // reports the retained-anonymized financial ledger, never "everything deleted". Destructive +
+  // irreversible: the frontend fronts it with a typed-confirmation gate.
+  router.delete('/me', wrap(async (req, res) => {
+    if (!deps.erasureEnabled) {
+      res.status(404).json({ error: { code: 'not_found', message: 'account erasure is not enabled' } })
+      return
+    }
+    const auctor = await auth(req)
+    res.status(200).json(await api.eraseMe(auctor))
   }))
 
   // PUT /v1/me/appearance — replace the caller's presentation skin (Profile).

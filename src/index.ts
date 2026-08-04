@@ -60,7 +60,7 @@ import { ensureWideIndexes }      from './analytics/ensureWideIndexes.js'
 import { startAnalyticsListener } from './analytics/analyticsListener.js'
 import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
 import { PublicationWorker } from './crystal/PublicationWorker.js'
-import { permissiveModerationGate, denyModerationGate, type ModerationGate } from './crystal/ModerationGate.js'
+import { selectModerationGate, type ModerationGate } from './crystal/ModerationGate.js'
 import { permissivePromptGuard, type PromptGuard } from './crystal/PromptGuard.js'
 import { ModelImporter } from './crystal/ModelImporter.js'
 import { MongoVerdictCache } from './crystal/MongoVerdictCache.js'
@@ -104,6 +104,15 @@ import { startCensus } from './crystal/Census.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
 import { MeExporter } from './crystal/MeExporter.js'
+import { MeEraser } from './crystal/MeEraser.js'
+import { MongoErasedDenylist } from './crystal/MongoErasedDenylist.js'
+import { MongoAnima } from './crystal/MongoAnima.js'
+import { MongoPersona } from './crystal/MongoPersona.js'
+import { MongoMemoria } from './crystal/MongoMemoria.js'
+import { MongoProvinciarum } from './crystal/MongoProvinciarum.js'
+import { MongoPetitio } from './crystal/MongoPetitio.js'
+import { MongoColloquium } from './crystal/MongoColloquium.js'
+import { MongoDictum } from './crystal/MongoDictum.js'
 import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { makeTrainingFinalizer, urlLoraReader, makeTrainingExitusResolver } from './crystal/trainingFinalizer.js'
 import { MongoConsuetudinum } from './crystal/MongoConsuetudinum.js'
@@ -798,14 +807,25 @@ async function main(): Promise<void> {
 
   // →public moderation gate (CSAM/NCMEC). Preference order, all fail-closed:
   //   1. the real PRIVATE gate when present AND detection is configured (CSAM_HASHSET_PATH / classifier);
-  //   2. else the permissive no-op ONLY under an explicit MODERATION_ALLOW_UNSCANNED opt-in;
-  //   3. else DENY (the safe default — public publishing off until the scanner is wired).
+  //   2. else the interim MANUAL-REVIEW hold gate ONLY under an explicit MODERATION_MANUAL_REVIEW opt-in
+  //      (holds every public publish for the admin review queue — interim human-review posture);
+  //   3. else the permissive no-op ONLY under an explicit MODERATION_ALLOW_UNSCANNED opt-in;
+  //   4. else `denyModerationGate` (the safe default — public publishing off until the scanner is wired).
+  // Selection is `selectModerationGate` (ModerationGate.ts, unit-tested); we log the chosen mode here.
+  // Default (no private gate, neither MODERATION_MANUAL_REVIEW nor MODERATION_ALLOW_UNSCANNED) = fail-closed deny.
   const privateGate = compliance ? await compliance.configureModerationGate({ fetcher: httpMediaFetcher, log }) : null
-  const moderationGate: ModerationGate = privateGate
-    ? privateGate
-    : process.env.MODERATION_ALLOW_UNSCANNED === '1'
-      ? (log.warn('MODERATION_ALLOW_UNSCANNED=1 — public publishing approves content WITHOUT CSAM/NCMEC scanning. Dev/staging only; NEVER in production.'), permissiveModerationGate)
-      : (log.warn('No CSAM/NCMEC scanner active (private compliance module absent or unconfigured) — public publishing (feed/marketplace) is DENIED (fail-closed). Private/unlisted still work.'), denyModerationGate)
+  const { gate: moderationGate, mode: moderationMode } = selectModerationGate({
+    privateGate,
+    manualReview: process.env.MODERATION_MANUAL_REVIEW === '1',
+    allowUnscanned: process.env.MODERATION_ALLOW_UNSCANNED === '1',
+  })
+  if (moderationMode === 'manual') {
+    log.warn('MODERATION_MANUAL_REVIEW=1 — public publishing is HELD for manual human review (interim posture): every public publish routes to the admin review queue, none auto-publishes. The reviewer approves/rejects; the NCMEC report/preserve is the reviewer\'s explicit confirm-csam action, not this gate. Requires the queue be actively cleared.')
+  } else if (moderationMode === 'permissive') {
+    log.warn('MODERATION_ALLOW_UNSCANNED=1 — public publishing approves content WITHOUT CSAM/NCMEC scanning. Dev/staging only; NEVER in production.')
+  } else if (moderationMode === 'deny') {
+    log.warn('No CSAM/NCMEC scanner active (private compliance module absent or unconfigured) — public publishing (feed/marketplace) is DENIED (fail-closed). Private/unlisted still work.')
+  }
 
   // Input-side CSAM prompt guard (generation boundary, FAIL-OPEN). From the private
   // module; absent (public build) → permissive stub. Refuses only minor∧sexual prompts
@@ -883,8 +903,29 @@ async function main(): Promise<void> {
   // writes through.
   const wideStore = new WideEventStore(mongo.db(DB_NAME))
 
+  // GDPR Art. 17 right-to-erasure (noema-025) — build the erased-account denylist (session
+  // revocation, shared with the auth acceptors below so an erase is visible to verifyJwt at once)
+  // and the MeEraser. The eraser takes narrow concrete stores (mirror the MeExporter wiring); the
+  // financial ledger + ZK set are deliberately NOT wired in, so erasure cannot reach them. The
+  // endpoint itself is flag-gated (`ERASURE_ENABLED`, default off, counsel-gated in prod).
+  const erasedDenylist = new MongoErasedDenylist(mongo.db(DB_NAME).collection('erased_denylist'))
+  await erasedDenylist.ensureIndexes().catch((err) => log.warn('erased_denylist index ensure failed', { error: String(err) }))
+  const meEraser = new MeEraser({
+    denylist: erasedDenylist,
+    animae: new MongoAnima(mongo.db(DB_NAME).collection('animae')),
+    personae: new MongoPersona(mongo.db(DB_NAME).collection('personae')),
+    credenta,
+    consuetudinum,
+    memoriae: new MongoMemoria(mongo.db(DB_NAME).collection('memoriae')),
+    provinciae: new MongoProvinciarum(mongo.db(DB_NAME).collection('provinciae')),
+    petitiones: new MongoPetitio(mongo.db(DB_NAME).collection('petitiones')),
+    colloquia: new MongoColloquium(mongo.db(DB_NAME).collection('colloquia')),
+    dicta: new MongoDictum(mongo.db(DB_NAME).collection('dicta')),
+  })
+
   const crystalApi = new CrystalApi({
     pricer,
+    eraser: meEraser,
     depositAddress: CREDIT_VAULT,
     deposita: ring.deposita,
     personae: ring.personae,
@@ -980,6 +1021,8 @@ async function main(): Promise<void> {
     // Federated (JWKS) SSO — trusted-issuer registry + the live prod JWKS override.
     issuers: ring.issuers,
     jwksOverride: parseJwksOverride(process.env.AGENT_JWKS_OVERRIDE),
+    // Session revocation (noema-025) — verifyJwt rejects an erased soul's still-valid JWT.
+    denylist: erasedDenylist,
   }))
   // Vestigia (traces) — GET / + /search + /projection. Mounted here (not at its
   // original spot above) because / and /projection resolve the CALLER's identity
@@ -1112,7 +1155,38 @@ async function main(): Promise<void> {
       })
     : undefined
 
-  app.use('/v1', createApiRouter({ api: crystalApi, identity: apiResolver, hub: runHub, ...(meExporter ? { exporter: meExporter } : {}) }))
+  // ERASURE_ENABLED (noema-025) — default OFF. Gates DELETE /v1/me; works on staging for
+  // verification, stays disabled in production until counsel signs Art.17(3)(b) sufficiency.
+  const erasureEnabled = process.env.ERASURE_ENABLED === 'true'
+  if (erasureEnabled) log.warn('ERASURE_ENABLED=true — DELETE /v1/me (GDPR erasure) is LIVE on this instance')
+
+  // Public-publish volume cap (noema-119, manual-review launch posture): the held-review queue
+  // (noema-118) only stays humanly clearable if public inflow (feed/marketplace) is bounded.
+  // Per-OWNER (not IP — anon-capable callers publish under an animaId/commitment, never bare
+  // IP), a real limiter by default (this is a safety cap, unlike quote/wallet's opt-in guards).
+  // Window/count are env-overridable like the app's other rate limiters.
+  const { default: publishRateLimit } = await import('express-rate-limit')
+  const PUBLISH_RATE_LIMIT_MAX = Number(process.env.PUBLISH_RATE_LIMIT_MAX ?? 20)
+  const PUBLISH_RATE_LIMIT_WINDOW_MS = Number(process.env.PUBLISH_RATE_LIMIT_WINDOW_MS ?? 60 * 60 * 1000)
+  const publishLimiter = publishRateLimit({
+    windowMs: PUBLISH_RATE_LIMIT_WINDOW_MS,
+    max: PUBLISH_RATE_LIMIT_MAX,
+    standardHeaders: true,
+    legacyHeaders: false,
+    // Stamped onto the request by apiRouter's /editiones handler BEFORE invoking this
+    // middleware — owner-keyed, never IP (see `publishOwnerKey` in apiRouter.ts).
+    keyGenerator: (req) => (req as { publishOwnerKey?: string }).publishOwnerKey ?? 'unknown',
+    message: { error: { code: 'rate.limited', message: 'public publishing is rate-limited during review — try again shortly' } },
+  })
+
+  app.use('/v1', createApiRouter({
+    api: crystalApi,
+    identity: apiResolver,
+    hub: runHub,
+    erasureEnabled,
+    ...(meExporter ? { exporter: meExporter } : {}),
+    rateLimiters: { publish: publishLimiter },
+  }))
 
   // CAMEL agent compat surface (ADR-0011 §8) — the exact `/api/v1/...` paths the
   // deployed camel404 client bakes (on-chain-referenced). No catch-all in front,

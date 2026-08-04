@@ -63,4 +63,16 @@ export class MongoDictum implements DictumStore {
     if (!result) throw new Error(`Dictum not found: ${id}`)
     return fromDoc(result as Record<string, unknown>)
   }
+
+  /**
+   * GDPR erasure (noema-025) — hard-delete every message (Dictum) belonging to the given
+   * colloquia. Dicta are keyed by `colloquiumId`, so the eraser gathers the caller's OWN
+   * colloquium ids first and passes them here (never a raw owner query, which Dictum can't do).
+   * Empty list → no-op (returns 0). Idempotent — a re-run deletes nothing.
+   */
+  async deleteByColloquia(colloquiumIds: string[]): Promise<number> {
+    if (colloquiumIds.length === 0) return 0
+    const r = await this.col.deleteMany({ colloquiumId: { $in: colloquiumIds } })
+    return r.deletedCount ?? 0
+  }
 }

@@ -89,6 +89,26 @@ export interface Anima {
    */
   disputeFrozen?: boolean
 
+  /**
+   * GDPR right-to-erasure tombstone (noema-025, Art. 17). When true, this soul has been
+   * erased via `DELETE /v1/me`: its identifying PII (`nomen`/`custos`/wallet) has been
+   * SEVERED and it can no longer authenticate. The opaque `id` is deliberately RETAINED as
+   * a non-identifying anchor so the append-only financial ledger (`Signum`/`deposita`/
+   * `reditus`) and the Stripe dispute/refund resolver keep resolving post-erasure. Tombstoning
+   * IS the pseudonymization act — the ledger is never mutated. Optional, defaults to
+   * un-erased (follows the `?`-optional-flag convention like `custos`/`disputeFrozen`).
+   */
+  erased?: boolean
+  /** When the erasure/tombstone was applied. Set together with `erased`. */
+  erasedAt?: Date
+  /**
+   * Retention horizon = `erasedAt + 7y` (noema-025 operator ruling 2026-08-01). Stamped HERE
+   * on the tombstone anchor — NOT on the untouched financial rows. A later purge job MAY remove
+   * this tombstone anchor after this instant (that purge is OUT OF SCOPE for noema-025 — this
+   * only STAMPS the window).
+   */
+  retentionUntil?: Date
+
   /** "natum" = born — when this soul was created */
   natum: Date
   /** "mutatum" = changed — when this soul was last modified */

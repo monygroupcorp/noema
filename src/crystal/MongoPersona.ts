@@ -1,4 +1,4 @@
-import { Collection } from 'mongodb'
+import { Collection, type Document, type UpdateFilter } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import type { Persona, Personae, PersonaGenus, PersonaStore } from '../types/persona.js'
 
@@ -69,5 +69,36 @@ export class MongoPersona implements PersonaStore {
     )
     if (!result) throw new Error(`Persona not found or animaId not linked: ${personaId}`)
     return fromDoc(result as Record<string, unknown>)
+  }
+
+  /**
+   * GDPR erasure (noema-025) — sever THIS `animaId`'s login mapping without collaterally
+   * orphaning a co-linked, un-erased anima. A single persona (one platform login) can link
+   * MULTIPLE animae (the "create additional Anima and switch between them" feature; credit
+   * lives per-anima). `DELETE /v1/me` erases only the caller's active animaId, so a blanket
+   * `deleteMany({ animaIds })` would wipe the whole persona row — including its link to the
+   * user's OTHER anima — and on next sign-in `resolveOrCreateAnima` would find no persona and
+   * MINT A NEW soul, permanently orphaning the second profile's credit/content.
+   *
+   * Instead: `$pull` the erased animaId from every persona's `animaIds`; repoint any persona
+   * whose `activeAnimaId` was the erased soul to a surviving anima; then delete only the
+   * personas left with no animae at all (this login served the erased soul exclusively).
+   * Idempotent — a re-run matches nothing, deletes nothing, returns 0. Returns the count of
+   * persona login-mappings severed (pulled), the meaningful "how many masks unlinked".
+   */
+  async deleteByAnima(animaId: string): Promise<number> {
+    const pulled = await this.col.updateMany(
+      { animaIds: animaId },
+      { $pull: { animaIds: animaId } } as unknown as UpdateFilter<Document>
+    )
+    // Repoint survivors whose active pointer was the (now-removed) erased anima to a
+    // remaining anima so `activeAnimaId` never dangles at an erased soul.
+    await this.col.updateMany(
+      { activeAnimaId: animaId, animaIds: { $not: { $size: 0 } } },
+      [{ $set: { activeAnimaId: { $arrayElemAt: ['$animaIds', 0] } } }]
+    )
+    // Delete only personas that served the erased soul exclusively (now empty).
+    await this.col.deleteMany({ animaIds: { $size: 0 } })
+    return pulled.modifiedCount ?? 0
   }
 }
