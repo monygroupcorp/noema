@@ -173,3 +173,24 @@ test('reconciliation: legacyPointsSum equals the minted valor', () => {
   assert.equal(BigInt(r.log.legacyPointsSum), r.signum!.valor)
   assert.equal(r.signum!.valor, 2000n)
 })
+
+// ── 12. attributedRowIds: the DISTINCT real ledger _ids the script de-dups on globally ──
+test('log.attributedRowIds lists the distinct counted ledger _ids (for cross-account de-dup)', () => {
+  const wallet = '0xWALLET000000000000000000000000000000aaaa'
+  const userCore: LegacyUserCore = {
+    _id: oid(MID),
+    platformIdentities: { telegram: '1' },
+    wallets: [{ address: wallet }],
+  }
+  const ledger: LegacyLedgerRow[] = [
+    // matches on BOTH keys → counted once → listed once
+    { _id: oid('row-1'), master_account_id: oid(MID), depositor_address: wallet.toLowerCase(), status: 'CONFIRMED', points_remaining: 300 },
+    { _id: oid('row-2'), master_account_id: oid(MID), status: 'CONFIRMED', points_remaining: 25 },
+    { _id: oid('row-3'), master_account_id: oid(MID), status: 'PENDING_CONFIRMATION', points_remaining: 9 }, // excluded → not listed
+    { _id: oid('row-4'), master_account_id: oid(MID), status: 'CONFIRMED', points_remaining: 0 },             // zero → not listed
+  ]
+  const r = legacyToCrystalAccount(userCore, null, ledger)
+  assert.deepEqual(r.log.attributedRowIds.sort(), ['row-1', 'row-2'])
+  // one entry per DISTINCT counted row (no double-listing the both-match row)
+  assert.equal(r.log.attributedRowIds.length, r.log.ledgerRowsCounted)
+})
