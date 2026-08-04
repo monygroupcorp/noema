@@ -16,7 +16,6 @@ import { BuyCreditsModal } from '../screens/BuyCreditsModal';
 // compute label from the session execution mode (custody is per-run; this is the standing posture).
 function computeLabel(exec: string): { glyph: 'lit' | 'ring' | 'dashed'; text: string } {
   if (exec === 'tee') return { glyph: 'ring', text: '1 sealed session' };
-  if (exec === 'local') return { glyph: 'dashed', text: 'local · off-grid' };
   return { glyph: 'lit', text: 'shared' };
 }
 
