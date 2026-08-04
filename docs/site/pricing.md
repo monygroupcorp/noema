@@ -16,7 +16,7 @@
 
 Credits work across every modality — text generation, image generation, video, and audio. You buy once, spend anywhere. Credits don't expire. Bigger packs give you a better rate — roughly 208 to 270 credits per dollar depending on the pack you choose, cheapest pack to biggest.
 
-There is no account required to start, and no email. You can buy and spend credits anonymously (see below).
+Anonymity here is a property of how you fund. Pay by card and it's identified; fund from a fresh or shielded on-chain wallet and there's no identity behind the address. For spends nothing can tie back to you, mint a ZK Bursa from your balance (see below).
 
 ---
 
@@ -27,7 +27,7 @@ There is no account required to start, and no email. You can buy and spend credi
 
 - Never expire
 - No subscription, no recurring charge
-- Anonymous Bursa purchase accepted
+- Mint a ZK Bursa to spend unlinkably
 - Spend across every modality
 
 **[Buy Starter]**
@@ -39,7 +39,7 @@ There is no account required to start, and no email. You can buy and spend credi
 
 - Never expire
 - No subscription, no recurring charge
-- Anonymous Bursa purchase accepted
+- Mint a ZK Bursa to spend unlinkably
 - Spend across every modality
 
 **[Buy Standard]**
@@ -51,7 +51,7 @@ There is no account required to start, and no email. You can buy and spend credi
 
 - Never expire
 - No subscription, no recurring charge
-- Anonymous Bursa purchase accepted
+- Mint a ZK Bursa to spend unlinkably
 - Spend across every modality
 
 **[Buy Plus]**
@@ -63,16 +63,16 @@ There is no account required to start, and no email. You can buy and spend credi
 
 - Never expire
 - No subscription, no recurring charge
-- Anonymous Bursa purchase accepted
+- Mint a ZK Bursa to spend unlinkably
 - Spend across every modality
 
 **[Buy Studio]**
 
 ---
 
-## Anonymous billing (Bursa)
+## Private spending (Bursa)
 
-Don't want an account? Buy credits anonymously with crypto. Your spend is a zero-knowledge proof — we verify the math, dispatch your compute, and cannot link the transaction to you.
+Anonymity depends on how you fund. Fund from a fresh or shielded on-chain wallet and the address has no identity behind it — the strongest privacy available today. Then mint a ZK Bursa from your balance: its spends are cryptographically unlinkable to what you funded. Minting a Bursa needs a signed-in account, so it's an unlinkable spend layer on top of an identified balance — strongest when you fund from a shielded wallet. Direct-to-commitment deposits, where we never see the funding wallet, are on the roadmap.
 
 **[How Bursa works →]**
 
@@ -87,7 +87,7 @@ No. Credits purchased directly never expire.
 Yes, within limits. Unused credits are refundable within 14 days of purchase. Once credits have been spent, in whole or in part, the spent portion is non-refundable — they're a prepaid compute balance, not a subscription. If you have an issue, contact us and we'll work it out.
 
 **What's the difference between a Bursa credit and a regular credit?**
-Functionally identical — both buy the same compute. The difference is the billing layer: a regular credit is tied to your account; a Bursa credit is a ZK proof with no account association. Same GPU, same models — the difference is only whether the transaction links back to you.
+Functionally identical — both buy the same compute, same GPU, same models. The difference is the billing layer: a regular credit is tied to your account, while a Bursa credit spends from a ZK bearer token whose spends are cryptographically unlinkable to how it was funded. How anonymous the funding itself was still depends on your funding source — a shielded wallet reveals no identity; a card is identified.
 
 **Do you offer a free trial?**
 There's no free tier. The Starter pack ($10) is the low-cost way to try it, and the credits never expire, so there's no clock running against you.

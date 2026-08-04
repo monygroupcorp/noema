@@ -54,8 +54,9 @@ export function Pricing() {
           biggest.
         </p>
         <p>
-          There is no account required to start, and no email. You can buy and spend credits
-          anonymously (see below).
+          Anonymity here is a property of how you fund. Pay by card and it's identified; fund
+          from a fresh or shielded on-chain wallet and there's no identity behind the address.
+          For spends nothing can tie back to you, mint a ZK purse from your balance (see below).
         </p>
 
         <h2>Packs</h2>
@@ -96,7 +97,7 @@ export function Pricing() {
               <ul style={{ margin: 0, paddingLeft: '20px' }}>
                 <li>Never expire</li>
                 <li>No subscription, no recurring charge</li>
-                <li>Anonymous purse purchase accepted</li>
+                <li>Mint a ZK purse to spend unlinkably</li>
                 <li>Spend across every modality</li>
               </ul>
               <Link
@@ -110,10 +111,14 @@ export function Pricing() {
           ))}
         </div>
 
-        <h2>Anonymous billing</h2>
+        <h2>Private spending</h2>
         <p>
-          Don't want an account? Buy credits anonymously with crypto. Your spend is a zero-knowledge
-          proof — we verify the math, dispatch your compute, and cannot link the transaction to you.
+          Anonymity depends on how you fund. Fund from a fresh or shielded on-chain wallet and the
+          address has no identity behind it — the strongest privacy available today. Then mint a ZK
+          purse from your balance: its spends are cryptographically unlinkable to what you funded.
+          Minting a purse needs a signed-in account, so it's an unlinkable spend layer on top of an
+          identified balance — strongest when you fund from a shielded wallet. Direct-to-commitment
+          deposits, where we never see the funding wallet, are on the roadmap.
         </p>
         <p>
           <Link to="/funding">How purse works →</Link>
@@ -133,10 +138,11 @@ export function Pricing() {
 
         <h3>What's the difference between a purse credit and a regular credit?</h3>
         <p>
-          Functionally identical — both buy the same compute. The difference is the billing layer: a
-          regular credit is tied to your account; a purse credit is a ZK proof with no account
-          association. Same GPU, same models — the difference is only whether the transaction links
-          back to you.
+          Functionally identical — both buy the same compute, same GPU, same models. The difference
+          is the billing layer: a regular credit is tied to your account, while a purse credit spends
+          from a ZK bearer token whose spends are cryptographically unlinkable to how it was funded.
+          How anonymous the funding itself was still depends on your funding source — a shielded
+          wallet reveals no identity; a card is identified.
         </p>
 
         <h3>Do you offer a free trial?</h3>
