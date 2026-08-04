@@ -7,6 +7,7 @@ import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
 import type { ObjectStore } from '../../../../src/crystal/R2Uploader.js'
 import { Errors } from '../../../../src/allocutio/api/errors.js'
+import type { Bursa, Bursarum } from '../../../../src/types/bursa.js'
 
 // Identity stub: `x-api-key: me` → {animaId:'me'}; `x-commitment` → anon; else
 // throws ApiError like the real IdentityResolver (no creds → 401).
@@ -97,4 +98,60 @@ test('store without presign capability → 503, never throws', async () => {
   const res = await request(app(noPresign)).post('/api/v1/storage/uploads/sign')
     .set('x-api-key', 'me').send({ filename: 'x.png', contentType: 'image/png' })
   assert.equal(res.status, 503)
+})
+
+// ── ANON_PURSE gate (noema-131): the anonymous ZK purse is OFF for v1. An ownerless/arcanum
+// (forgeable-dev-key) bursa spend must be refused at the storage chokepoint; a SOUND owned
+// purse (owner set, identified funder) is accepted unchanged. ──────────────────────────────
+
+const OWNED: Bursa = { id: 'owned-token', credits: 500n, createdAt: new Date(), owner: { animaId: 'me' } }
+const ANON: Bursa = { id: 'anon-token', credits: 500n, createdAt: new Date() }
+
+function bursariumOf(...rows: Bursa[]): Bursarum {
+  const byId = new Map(rows.map((b) => [b.id, b]))
+  return {
+    async findByToken(token) { return byId.get(token) ?? null },
+  } as unknown as Bursarum
+}
+
+function appWithGate(store: ObjectStore, opts: { anonPurseEnabled: boolean; bursarium: Bursarum }) {
+  const server = express()
+  server.use('/api/v1/storage', createStorageRouter({ store, identity, anonPurseEnabled: opts.anonPurseEnabled, bursarium: opts.bursarium }))
+  return server
+}
+
+test('ANON_PURSE off: an ownerless (arcanum) x-bursa-token is refused 503, never presigns', async () => {
+  const store = mockStore()
+  const res = await request(appWithGate(store, { anonPurseEnabled: false, bursarium: bursariumOf(ANON, OWNED) }))
+    .post('/api/v1/storage/uploads/sign')
+    .set('x-bursa-token', 'anon-token').send({ filename: 'x.png', contentType: 'image/png' })
+  assert.equal(res.status, 503)
+  assert.equal(res.body.error.code, 'purse.disabled')
+  assert.equal(store.signed.length, 0)
+})
+
+test('ANON_PURSE off: an unknown x-bursa-token (no such purse) is refused 503 (fail-closed)', async () => {
+  const store = mockStore()
+  const res = await request(appWithGate(store, { anonPurseEnabled: false, bursarium: bursariumOf(OWNED) }))
+    .post('/api/v1/storage/uploads/sign')
+    .set('x-bursa-token', 'ghost-token').send({ filename: 'x.png', contentType: 'image/png' })
+  assert.equal(res.status, 503)
+  assert.equal(store.signed.length, 0)
+})
+
+test('ANON_PURSE off: a SOUND owned purse (owner set) is accepted unchanged → 200 presigns', async () => {
+  const store = mockStore()
+  const res = await request(appWithGate(store, { anonPurseEnabled: false, bursarium: bursariumOf(ANON, OWNED) }))
+    .post('/api/v1/storage/uploads/sign')
+    .set('x-bursa-token', 'owned-token').send({ filename: 'x.png', contentType: 'image/png' })
+  assert.equal(res.status, 200)
+  assert.match(res.body.key, /^uploads\/[0-9a-f]{16}\//)
+})
+
+test('ANON_PURSE on: an ownerless x-bursa-token spends unchanged → 200 (post-ceremony restore)', async () => {
+  const store = mockStore()
+  const res = await request(appWithGate(store, { anonPurseEnabled: true, bursarium: bursariumOf(ANON, OWNED) }))
+    .post('/api/v1/storage/uploads/sign')
+    .set('x-bursa-token', 'anon-token').send({ filename: 'x.png', contentType: 'image/png' })
+  assert.equal(res.status, 200)
 })

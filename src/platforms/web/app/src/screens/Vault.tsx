@@ -122,7 +122,15 @@ export function Vault() {
   }, [pendingCommitments, reload]);
 
   const unspent = useMemo(() => notes.filter((n) => !n.spent), [notes]);
-  const canMint = !!config?.ready;
+  // ANON_PURSE_ENABLED (noema-131): the anonymous ZK purse is gated off for v1 (the arcanum
+  // proving key is a forgeable dev key until the trusted-setup ceremony runs). `purseOff` = the
+  // backend reported the gate closed → hide the fund/mint/paste surfaces and show coming-soon.
+  // The backend refuses issue/mint/ownerless-spend regardless; this is the honest UI mirror.
+  // The backend GET /arcanum/config also returns `enabled` (ANON_PURSE_ENABLED, noema-131);
+  // read it defensively — the shared ArcanumConfig client type isn't widened here.
+  const purseEnabled = (config as { enabled?: boolean } | null)?.enabled === true;
+  const purseOff = !!config && !purseEnabled;
+  const canMint = !!config?.ready && purseEnabled;
   const totalPurseCredits = useMemo(
     () => purses.reduce((sum, p) => { try { return sum + BigInt(p.credits); } catch { return sum; } }, 0n),
     [purses],
@@ -341,8 +349,20 @@ export function Vault() {
         {notice && <div className="csec" style={{ borderColor: 'var(--accent)' }}>{notice}</div>}
         {configErr && <div className="warn">Couldn’t reach the anonymous-credit service — {configErr}</div>}
 
+        {/* ANON_PURSE gate (noema-131): the anonymous purse is off for v1 (ships after the
+            trusted-setup ceremony). Funding, card, wallet, and shielded-wallet anonymity all
+            work now — only the ZK bearer purse waits. Coming-soon takes precedence over the
+            ceremony notice below (same root cause, one clear message). */}
+        {purseOff && (
+          <div className="warn">
+            The anonymous purse is <b>coming soon</b> — it unlocks after the trusted-setup ceremony.
+            Card and on-chain wallet funding work today, and spending from a shielded or fresh wallet
+            is already unlinkable. <Link to="/ceremony">See the ceremony ▸</Link>
+          </div>
+        )}
+
         {/* Honesty gate: the ceremony must be finalized before any note can be minted. */}
-        {config && !config.ready && (
+        {config && !config.ready && !purseOff && (
           <div className="warn">
             The trusted-setup ceremony isn’t finalized, so minting anonymous purses is disabled here.{' '}
             <Link to="/ceremony">See the ceremony ▸</Link>
@@ -352,29 +372,33 @@ export function Vault() {
         {/* ── Purses ─────────────────────────────────────────────────────────── */}
         <div className="sectionhead">Purses</div>
 
-        <div className="csec">
-          <div className="ctitle">Use a purse you were handed</div>
-          <div className="meta-line">
-            <span>Paste a purse token someone shared with you. Anyone holding the token can spend it —
-              it's bearer credit, not tied to an account.</span>
+        {!purseOff && (
+          <div className="csec">
+            <div className="ctitle">Use a purse you were handed</div>
+            <div className="meta-line">
+              <span>Paste a purse token someone shared with you. Anyone holding the token can spend it —
+                it's bearer credit, not tied to an account.</span>
+            </div>
+            <div style={{ display: 'flex', gap: 'var(--s2)', marginTop: 'var(--s2)' }}>
+              <input
+                className="inp mono"
+                type="text"
+                value={handedToken}
+                onChange={(e) => setHandedToken(e.target.value)}
+                placeholder="paste purse token"
+                style={{ flex: 1 }}
+              />
+              <button className="btn" onClick={useHandedPurse} disabled={handedBusy || !handedToken.trim()}>
+                <Ic name="wallet" /> {handedBusy ? 'Checking…' : 'Use it'}
+              </button>
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--s2)', marginTop: 'var(--s2)' }}>
-            <input
-              className="inp mono"
-              type="text"
-              value={handedToken}
-              onChange={(e) => setHandedToken(e.target.value)}
-              placeholder="paste purse token"
-              style={{ flex: 1 }}
-            />
-            <button className="btn" onClick={useHandedPurse} disabled={handedBusy || !handedToken.trim()}>
-              <Ic name="wallet" /> {handedBusy ? 'Checking…' : 'Use it'}
-            </button>
-          </div>
-        </div>
+        )}
 
         {purses.length === 0 ? (
-          <div className="csec">No purses yet. Fund a note, then mint a purse to spend anonymously.</div>
+          purseOff
+            ? null
+            : <div className="csec">No purses yet. Fund a note, then mint a purse to spend anonymously.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)' }}>
             {purses.map((p) => {
@@ -402,6 +426,10 @@ export function Vault() {
         )}
 
         {/* ── Notes ──────────────────────────────────────────────────────────── */}
+        {/* Funding a note and minting a purse are the arcanum money path — hidden while the
+            anonymous purse is gated off (noema-131). The backend refuses /arcanum/issue anyway. */}
+        {!purseOff && (
+        <>
         <div className="sectionhead">Funded notes</div>
         {signedIn ? (
           <div className="csec">
@@ -455,6 +483,8 @@ export function Vault() {
               );
             })}
           </div>
+        )}
+        </>
         )}
 
         {/* ── Secrets (most recent note) ─────────────────────────────────────── */}

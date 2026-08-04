@@ -9,6 +9,7 @@ import type { Run } from '../../../../src/allocutio/api/types.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
 import type { ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, MyDeposit } from '../../../../src/allocutio/api/CrystalApi.js'
+import type { Bursa, Bursarum } from '../../../../src/types/bursa.js'
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -449,6 +450,78 @@ test('GET /v1/deposit/mine returns the authenticated caller\'s own deposits, env
     assert.equal(res.body.deposits.length, 1)
     assert.equal(res.body.deposits[0].id, 'dep-1')
     assert.equal(res.body.deposits[0].status, 'confirmatum')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// ANON_PURSE gate (noema-131) — the anonymous ZK purse is OFF for v1 (the arcanum
+// proving key is a forgeable dev key until the trusted-setup ceremony). A bare
+// x-bursa-token spend is the money chokepoint: when the flag is off we resolve the
+// bursa and refuse the OWNERLESS/arcanum (or unknown) one, while a SOUND owned purse
+// (owner set, identified funder) spends unchanged. Flag on = pre-131 behavior.
+// ---------------------------------------------------------------------------
+
+const OWNED_BURSA: Bursa = { id: 'owned-tok', credits: 500n, createdAt: new Date(), owner: { animaId: 'a1' } }
+const ANON_BURSA: Bursa = { id: 'anon-tok', credits: 500n, createdAt: new Date() }
+
+function gateBursarium(...rows: Bursa[]): Bursarum {
+  const byId = new Map(rows.map((b) => [b.id, b]))
+  return { async findByToken(token: string) { return byId.get(token) ?? null } } as unknown as Bursarum
+}
+
+function createGatedServer(opts: { anonPurseEnabled: boolean; bursarium: Bursarum }): Promise<{ server: http.Server; url: string }> {
+  return new Promise((resolve, reject) => {
+    const app = express()
+    app.use(express.json())
+    app.use('/v1', createApiRouter({ api: fakeApi, identity: fakeIdentity, anonPurseEnabled: opts.anonPurseEnabled, bursarium: opts.bursarium }))
+    const server = app.listen(0, '127.0.0.1', () => {
+      const addr = server.address() as { port: number }
+      resolve({ server, url: `http://127.0.0.1:${addr.port}` })
+    })
+    server.on('error', reject)
+  })
+}
+
+test('ANON_PURSE off: POST /v1/runs with an ownerless x-bursa-token is refused 503 (purse.disabled)', async () => {
+  const { server, url } = await createGatedServer({ anonPurseEnabled: false, bursarium: gateBursarium(ANON_BURSA, OWNED_BURSA) })
+  try {
+    const res = await request(`${url}/v1/runs`, { method: 'POST', headers: { 'x-bursa-token': 'anon-tok' }, body: { modusId: 'flux-schnell', verb: 'run' } })
+    assert.equal(res.status, 503)
+    assert.equal(res.body.error.code, 'purse.disabled')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('ANON_PURSE off: an unknown x-bursa-token (no such purse) is refused 503 (fail-closed)', async () => {
+  const { server, url } = await createGatedServer({ anonPurseEnabled: false, bursarium: gateBursarium(OWNED_BURSA) })
+  try {
+    const res = await request(`${url}/v1/runs`, { method: 'POST', headers: { 'x-bursa-token': 'ghost-tok' }, body: { modusId: 'flux-schnell', verb: 'run' } })
+    assert.equal(res.status, 503)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('ANON_PURSE off: a SOUND owned purse (owner set) spends unchanged → 200', async () => {
+  const { server, url } = await createGatedServer({ anonPurseEnabled: false, bursarium: gateBursarium(ANON_BURSA, OWNED_BURSA) })
+  try {
+    const res = await request(`${url}/v1/runs`, { method: 'POST', headers: { 'x-bursa-token': 'owned-tok' }, body: { modusId: 'flux-schnell', verb: 'run' } })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.run.id, 'r1')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('ANON_PURSE on: an ownerless x-bursa-token spends unchanged → 200 (post-ceremony restore)', async () => {
+  const { server, url } = await createGatedServer({ anonPurseEnabled: true, bursarium: gateBursarium(ANON_BURSA, OWNED_BURSA) })
+  try {
+    const res = await request(`${url}/v1/runs`, { method: 'POST', headers: { 'x-bursa-token': 'anon-tok' }, body: { modusId: 'flux-schnell', verb: 'run' } })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.run.id, 'r1')
   } finally {
     await closeServer(server)
   }
