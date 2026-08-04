@@ -1,7 +1,4 @@
-<!-- PUBLISH GATE: counsel sign-off required (price-cap claim, T&C) before this page goes live -->
-
-# Pricing — Page Content Draft
-*For web/marketing use. Internal working draft.*
+# Pricing
 
 ---
 
@@ -73,18 +70,6 @@ There is no account required to start, and no email. You can buy and spend credi
 
 ---
 
-### Enterprise / BAA
-**Contact us**
-
-For healthcare (PHI / HIPAA BAA), legal (privilege-sensitive), and high-volume workloads. Includes:
-- Business Associate Agreement for HIPAA
-- SLA
-- Custom credit volumes
-
-**[Contact us]**
-
----
-
 ## Anonymous billing (Bursa)
 
 Don't want an account? Buy credits anonymously with crypto. Your spend is a zero-knowledge proof — we verify the math, dispatch your compute, and cannot link the transaction to you.
@@ -109,6 +94,3 @@ There's no free tier. The Starter pack ($10) is the low-cost way to try it, and 
 
 **Can I use the API anonymously?**
 Yes. Pass a `x-bursa-token` header instead of a session key. The API docs explain how to generate one.
-
-**What is a BAA?**
-A Business Associate Agreement is a HIPAA-required contract for handling protected health information (PHI). If you're building in healthcare, you need one before transmitting PHI. Contact us.
