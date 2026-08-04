@@ -12,7 +12,7 @@ We collect as little as we can and we do not track you. Here is what that means 
 - We do not retain your prompts or outputs after a request completes, and we do not use them to train models.
 - We do not run Google Analytics or any third-party tracking.
 - If you use purse anonymous credits, we cannot link your spend to an identity. The billing is a zero-knowledge proof.
-- A hardware-sealed private-compute tier (TEE), in which session content would be technically inaccessible to us, is **in development** and not yet available. We do not currently claim that the compute provider cannot see your session content.
+- We do not claim that the compute provider cannot see your session content. Session content is processed on external GPU compute to run it (see Section 2d).
 
 The long version follows.
 
@@ -67,17 +67,13 @@ To generate your results, your prompts and outputs are processed on external GPU
 - We do not use prompt or output content to train models.
 - We retain session metadata as described in 2c.
 
-We do not claim your session content is unseen by the compute provider. That guarantee requires the hardware-sealed tier described in 2e, which is not yet available.
+We do not claim your session content is unseen by the compute provider.
 
-### 2e. Private compute (TEE) — in development
-
-We are building a hardware-sealed private-compute tier in which a WireGuard tunnel is established directly between your browser and a single-tenant GPU pod, with browser-verified attestation, so that session content would be technically inaccessible to us. **This tier is in development and not yet available.** Until it ships, do not treat any session as sealed from the compute provider. This policy will be updated when the tier launches.
-
-### 2f. Usage and error logs
+### 2e. Usage and error logs
 
 We collect server-side error logs (stack traces, request metadata, error codes) for debugging. These logs do not contain prompt or output content. Retention: 30 days.
 
-### 2g. What we do not collect
+### 2f. What we do not collect
 
 - Browser fingerprints
 - Third-party analytics (no Google Analytics, no Mixpanel, no similar services)
