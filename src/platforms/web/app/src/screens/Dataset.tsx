@@ -14,7 +14,7 @@ import { api, type Dataset as DatasetT } from '../lib/api';
 // 1521), so listFull + find is the real detail lookup (same pattern Datasets.tsx uses for the
 // library grid).
 const CUSTODY_OPTS: { c: Custody; label: string }[] = [
-  { c: 'local', label: 'Local' }, { c: 'sealed', label: 'TEE' }, { c: 'remote', label: 'Remote' },
+  { c: 'local', label: 'Local' }, { c: 'remote', label: 'Remote' },
 ];
 
 export function Dataset() {
@@ -99,8 +99,7 @@ export function Dataset() {
                   </button>
                 ))}
               </div>
-              <p className="ds-panel-note">{c === 'sealed' ? 'private tunnel — a single-tenant pod holds your images; hardware-sealed compute is in development.'
-                : c === 'local' ? 'local — the media never leaves your machine.' : 'remote — we host the media on our compute.'}</p>
+              <p className="ds-panel-note">{c === 'local' ? 'local — the media never leaves your machine.' : 'remote — we host the media on our compute.'}</p>
             </div>
 
             <div className="ds-panel">

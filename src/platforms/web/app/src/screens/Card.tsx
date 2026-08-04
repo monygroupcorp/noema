@@ -145,7 +145,6 @@ type Compute = 'remote' | 'tee' | 'local';
 
 const COMPUTE_OPTS: { id: Compute; label: string }[] = [
   { id: 'remote', label: 'remote · we see' },
-  { id: 'tee', label: 'TEE · in dev' },
   { id: 'local', label: 'local · off' },
 ];
 
@@ -635,11 +634,6 @@ export function Card() {
                 </button>
               ))}
             </div>
-            {compute === 'tee' && (
-              <Link to="/tee" className="mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 'var(--s2)', fontSize: 'var(--fs-xs)', color: 'var(--accent-soft)' }}>
-                <Ic name="eye-off" /> preview the private-session tier (in development) ▸
-              </Link>
-            )}
             {activePurse && (
               <div className="meta-line" style={{ marginTop: 'var(--s2)', fontSize: 'var(--fs-xs)' }}>
                 <span className="mono"><Ic name="wallet" /> paying with purse {activePurse.slice(0, 6)}…{activePurse.slice(-4)}</span>

@@ -13,7 +13,6 @@ import { api, type Dataset } from '../lib/api';
 // same constraint TrainRun.tsx's monitor already labels honestly).
 const CUSTODY: { c: Custody; t: string; s: string }[] = [
   { c: 'local', t: 'Local', s: 'Your GPU. Nothing leaves.' },
-  { c: 'sealed', t: 'Remote · TEE', s: 'Private tunnel to a single-tenant pod. Hardware-sealed compute is in development.' },
   { c: 'remote', t: 'Remote', s: 'Our GPUs. Fastest, we can see it.' },
 ];
 
@@ -27,7 +26,7 @@ export function Derive() {
     return () => { live = false; };
   }, []);
   const d = (datasets ?? []).find((x) => x.id === id);
-  const [custody, setCustody] = useState<Custody>('sealed');
+  const [custody, setCustody] = useState<Custody>('remote');
 
   if (datasets === null) {
     return <AppShell title="Derive"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
@@ -90,7 +89,7 @@ export function Derive() {
 
         {/* footer */}
         <div className="dv-foot">
-          <div className="dv-est mono">1,200 steps · ~22 min in {custody === 'sealed' ? 'TEE' : custody} · <span className="gold">~480 credits</span> · ↳ lands on your model shelf</div>
+          <div className="dv-est mono">1,200 steps · ~22 min in {custody} · <span className="gold">~480 credits</span> · ↳ lands on your model shelf</div>
           <button className="btn accent lg" onClick={() => navigate(`/train/run/${d.id}`)}>Begin training →</button>
         </div>
       </div></div>
