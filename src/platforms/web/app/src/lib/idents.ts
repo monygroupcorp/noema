@@ -3,20 +3,17 @@
 //
 //   Funding   = the PROFILE (a continuous anima). named (doxxed: wallet/email/telegram/
 //               discord/api-key) | bearer (a bursa-funded burner). Both build history + XP.
-//   Execution = a SESSION MODE the same profile enters. rented | tee | local.
+//   Execution = a SESSION MODE the same profile enters. rented | tee.
 //
 // Crucial correction: execution is NOT a property of the identity. A doxxed anima does not
-// need a second account to use TEE — the *same* profile shifts into a sealed (or local)
-// session, and the environment reflects that. Public and private execution are mutually
-// exclusive within a window (a single session value enforces this). So `Ident` carries only
-// the durable profile; everything execution-dependent (redaction, what we can see, the
-// composer hint) is DERIVED from (profile.funding × session.execution).
+// need a second account to use a private session — the *same* profile shifts into it, and
+// the environment reflects that. Public and private execution are mutually exclusive within
+// a window (a single session value enforces this). So `Ident` carries only the durable
+// profile; session state (the execution mode) lives separately in state/identity.
 // Latin stays out of the UI — these strings are already user-facing.
 
 export type Funding = 'named' | 'bearer';
-export type Execution = 'rented' | 'tee' | 'local';
-
-export interface RedactRow { k: string; v: string; block?: boolean }
+export type Execution = 'rented' | 'tee';
 
 // The durable profile. No execution here — that's session state.
 export interface Ident {
@@ -32,66 +29,14 @@ export interface Ident {
 
 // ── Static labels & per-axis privacy indicators ───────────────────────────────
 export const FUNDING_LABEL: Record<Funding, string> = { named: 'identified', bearer: 'anonymous' };
-export const EXECUTION_LABEL: Record<Execution, string> = {
-  rented: 'shared compute', tee: 'private tunnel (in development)', local: 'your machine',
-};
 // privacy mini-indicator: [lucide icon name, label]
-// IDENTITY_PRIV — "can noema see WHO you are?" (funding).  WORK_PRIV — "…WHAT you make?" (execution).
+// IDENTITY_PRIV — "can noema see WHO you are?" (funding).
 export const IDENTITY_PRIV: Record<Funding, [string, string]> = {
   named: ['eye', 'identified'],
   bearer: ['venetian-mask', 'anonymous'],
 };
-export const WORK_PRIV: Record<Execution, [string, string]> = {
-  rented: ['server', 'on our compute'],
-  tee: ['eye-off', 'private tunnel · in development'],
-  local: ['laptop', 'on your machine'],
-};
-// short labels for the execution-mode switcher (the exclusive Shared/Private/Local toggle)
-export const EXECUTION_SHORT: Record<Execution, string> = { rented: 'Shared', tee: 'Private', local: 'Local' };
-export const EXECUTIONS: Execution[] = ['rented', 'tee', 'local'];
-
-export const isPrivateExec = (e: Execution): boolean => e !== 'rented';
 export const chipKind = (d: Pick<Ident, 'funding'>): 'named' | 'masked' =>
   d.funding === 'named' ? 'named' : 'masked';
-
-// ── Derivation from (profile × session execution) ─────────────────────────────
-
-// What noema can / can't see, given who you are and where it runs.
-export function canSee(funding: Funding, execution: Execution): { can: string[]; cant: string[] } {
-  const can: string[] = [];
-  const cant: string[] = [];
-  if (funding === 'named') can.push('identity'); else cant.push('identity');
-  if (execution === 'rented') can.push('prompts', 'outputs');
-  else cant.push('prompts', 'outputs');
-  if (execution === 'tee') can.push('the meter');       // private tier is in development
-  // local: nothing of the work reaches us at all — not even a meter (no charge)
-  return { can, cant };
-}
-
-// The "what actually reaches us" redaction table.
-export function redactionFor(ident: Ident, execution: Execution): RedactRow[] {
-  const priv = isPrivateExec(execution);
-  return [
-    ident.funding === 'named'
-      ? { k: 'who', v: `${ident.name} · ${ident.role}` }
-      : { k: 'who', v: '▮▮▮▮▮▮', block: true },
-    priv ? { k: 'prompt', v: '▮▮▮▮▮▮▮▮▮▮', block: true } : { k: 'prompt', v: '“…neon temple, dusk”' },
-    priv ? { k: 'output', v: '▮▮▮▮▮▮', block: true } : { k: 'output', v: 'flux-schnell.png' },
-    { k: 'cost', v: execution === 'local' ? 'on your GPU · no charge' : '$0.043 · 12 GPU-min' },
-  ];
-}
-
-// Composer destination hint (may contain <b>…</b>).
-export function destFor(ident: Ident, execution: Execution): string {
-  const who = ident.funding === 'named' ? `as <b>${ident.name}</b>` : '<b>anonymously</b>';
-  if (execution === 'rented') {
-    return ident.funding === 'named' ? `posting ${who}` : 'posting <b>anonymously</b> — no identity attached';
-  }
-  const where = execution === 'tee'
-    ? 'in a <b>private tunnel</b> (single-tenant pod) — hardware-sealed compute is in development'
-    : 'running <b>on your machine</b> — nothing leaves the device';
-  return `${who} — ${where}`;
-}
 
 // ── New-profile presets — funding only. Execution is chosen per session, not at creation. ──
 export interface IdentPreset { id: string; ico: string; t: string; s: string; funding: Funding }

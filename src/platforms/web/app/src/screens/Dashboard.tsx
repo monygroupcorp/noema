@@ -13,7 +13,6 @@ import { Ic } from '../lib/icons';
 
 function computeRow(exec: string): { glyph: string; text: string } {
   if (exec === 'tee') return { glyph: 'ring', text: 'TEE · private tunnel — hardware-sealed compute is in development' };
-  if (exec === 'local') return { glyph: 'dashed', text: 'local · off-grid — nothing leaves your machine' };
   return { glyph: 'lit', text: 'shared — running on our compute' };
 }
 

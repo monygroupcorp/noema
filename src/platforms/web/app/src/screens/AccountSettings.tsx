@@ -9,8 +9,8 @@ import { api, getSession, commitment, type MeStatus, type StudioEntry } from '..
 // Account / settings (account-spec.md, renders noema-account.png + noema-account-compute.png).
 // The control panel for the privacy machine — posture + sovereignty up front, then a card per
 // account concern, each opening a sub-nav detail page. Two corrections baked in:
-//  · the account compute default is AVAILABILITY (cost/speed: Economy/Balanced/Fastest), never
-//    a custody default — custody (local/TEE/remote) is a per-run choice in the console.
+//  · the account compute default is AVAILABILITY (cost/speed: Economy/Balanced/Fastest); every
+//    run executes on our compute (there is no on-device or per-run custody choice).
 //  · NOEMA is multi-interface (web · Telegram · API) — the posture names this "reach".
 
 // Preferences is folded in here (UX handoff 2, Decision 2) — it's its own screen, so its sub-nav
@@ -213,7 +213,7 @@ export function AccountSettings() {
             <SectionCard to="/account/compute" ico="server" name="Compute &amp; sessions">
               <Row k="availability" v={<><span className="fillg">{AVAIL.find((a) => a.key === availPref)?.glyph}</span> <b>{availPref}</b> · cost vs speed</>} />
               <Row k="live sessions" v={<><span className="rdot good" /> {liveStudios} live</>} />
-              <div className="ac-note mono">custody (local · remote) is chosen per run, not here.</div>
+              <div className="ac-note mono">every run executes on our compute — we can see the work.</div>
             </SectionCard>
             <SectionCard to="/account/security" ico="eye-off" name="Security &amp; privacy">
               <Row k="devices" v={<span className="muted">coming soon — device management isn’t wired yet</span>} />
@@ -280,7 +280,7 @@ function ComputeDetail({ studios }: { studios: StudioEntry[] | null }) {
             </button>
           ))}
         </div>
-        <div className="ac-note mono">↳ custody (local · remote) is a per-run choice in the console — not a default set here.</div>
+        <div className="ac-note mono">↳ every run executes on our compute — this sets cost vs speed, not custody.</div>
       </div>
 
       <div className="ac-panel">
@@ -296,10 +296,6 @@ function ComputeDetail({ studios }: { studios: StudioEntry[] | null }) {
         )}
       </div>
 
-      <div className="ac-panel">
-        <div className="ac-panel-l">local runner · your machine</div>
-        <div className="ac-note mono"><span className="hemi2 dashed" /> coming soon — connecting your own GPU as an off-grid runner isn’t wired yet.</div>
-      </div>
     </>
   );
 }
