@@ -1,20 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { custodyGlyph, type Custody } from '../lib/datasets';
+import { custodyGlyph } from '../lib/datasets';
 import { api, type Dataset } from '../lib/api';
 
 // Derive a training (train-derive-spec.md, render noema-train-derive.png) — the recipe:
-// pick captionset (the lesson) + version + base + method + training custody → fire. One
-// dataset, many models. Custody here IS a per-run choice (training custody, chosen at derive).
+// pick captionset (the lesson) + version + base + method → fire. One dataset, many models.
 //
-// Source dataset/captionset are real (`GET /v1/data/datasets/full`); base model/method/
-// training-custody remain the pre-launch recipe picker (no training-run backend exists yet —
-// same constraint TrainRun.tsx's monitor already labels honestly).
-const CUSTODY: { c: Custody; t: string; s: string }[] = [
-  { c: 'local', t: 'Local', s: 'Your GPU. Nothing leaves.' },
-  { c: 'remote', t: 'Remote', s: 'Our GPUs. Fastest, we can see it.' },
-];
+// Source dataset/captionset are real (`GET /v1/data/datasets/full`); base model/method remain
+// the pre-launch recipe picker (no training-run backend exists yet — same constraint
+// TrainRun.tsx's monitor already labels honestly). Every training runs on our compute.
 
 export function Derive() {
   const { id } = useParams();
@@ -26,7 +21,6 @@ export function Derive() {
     return () => { live = false; };
   }, []);
   const d = (datasets ?? []).find((x) => x.id === id);
-  const [custody, setCustody] = useState<Custody>('remote');
 
   if (datasets === null) {
     return <AppShell title="Derive"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
@@ -77,19 +71,9 @@ export function Derive() {
           </div>
         </div>
 
-        {/* custody */}
-        <div className="dv-custody">
-          {CUSTODY.map((o) => (
-            <button key={o.c} className={`dv-cust${custody === o.c ? ' on' : ''}`} onClick={() => setCustody(o.c)}>
-              <div className="dv-ct"><span className={`hemi2 ${custodyGlyph(o.c)}`} /> {o.t}</div>
-              <div className="dv-cs">{o.s}</div>
-            </button>
-          ))}
-        </div>
-
         {/* footer */}
         <div className="dv-foot">
-          <div className="dv-est mono">1,200 steps · ~22 min in {custody} · <span className="gold">~480 credits</span> · ↳ lands on your model shelf</div>
+          <div className="dv-est mono">1,200 steps · ~22 min · <span className="gold">~480 credits</span> · ↳ lands on your model shelf</div>
           <button className="btn accent lg" onClick={() => navigate(`/train/run/${d.id}`)}>Begin training →</button>
         </div>
       </div></div>

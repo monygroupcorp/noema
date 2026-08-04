@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { custodyGlyph } from '../lib/datasets';
 import { api, type Dataset } from '../lib/api';
 
 // Caption job (train-caption-job-spec.md, render noema-train-caption-job.png) — captioning is
@@ -70,7 +69,7 @@ export function CaptionJob() {
           <span className="cj-seg"><span className="cj-l">method</span> <b>Natural language</b> · Florence-2</span>
           <span className="cj-seg"><span className="cj-l">trigger</span> <b className="accent">{trigger}</b></span>
           <span className="cj-seg"><span className="cj-l">length</span> <b>medium</b></span>
-          <span className="cj-seg"><span className="cj-l">runs in</span> <span className={`hemi2 ${custodyGlyph(d.custody)}`} /> <b>{d.custody}</b></span>
+          <span className="cj-seg"><span className="cj-l">runs in</span> <span className="hemi2 lit" /> <b>our compute</b></span>
           <button className="lnk cj-adjust">adjust setup ▸</button>
         </div>
 
@@ -82,7 +81,7 @@ export function CaptionJob() {
         </div>
 
         {/* honesty seam */}
-        <div className="cj-seam mono"><span className={`hemi2 ${custodyGlyph(d.custody)}`} /> {d.custody === 'remote' ? 'captioning on our compute — we can see the work.' : 'captioning on your device — the images stay on your machine; nothing leaves.'}</div>
+        <div className="cj-seam mono"><span className="hemi2 lit" /> captioning on our compute — we can see the work.</div>
 
         {/* grid: run + review in one */}
         <div className="cj-grid">

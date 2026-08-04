@@ -138,37 +138,10 @@ function HighlightedPromptField(props: {
   );
 }
 
-// ── The work axis: where this run executes / what we can see of it ──────────────
-// Same three postures as the canvas visibility meter and the Compute dial.
-// (Distinct from funding's identity axis — `noema sees:` is WHO, this is WHAT.)
-type Compute = 'remote' | 'tee' | 'local';
-
-const COMPUTE_OPTS: { id: Compute; label: string }[] = [
-  { id: 'remote', label: 'remote · we see' },
-  { id: 'local', label: 'local · off' },
-];
-
-// Honest subline stating the consequence in words (one per posture).
-const COMPUTE_SUB: Record<Compute, string> = {
-  remote: 'est · remote · we see the work',
-  tee: 'private tunnel · in development',
-  local: 'your GPU · nothing leaves',
-};
-
-// The hemisphere glyph — shared grammar with the canvas/funding meters:
-// remote = lit (filled half-disc + ring, accent); tee = ring only (slate);
-// local = dashed ring (grey).
-function Hemisphere({ vis }: { vis: Compute }) {
-  const remote = vis === 'remote';
-  const stroke = vis === 'remote' ? 'var(--accent)' : vis === 'tee' ? 'var(--slate)' : 'var(--grey)';
-  return (
-    <svg className="seg-hemi" viewBox="0 0 24 24" aria-hidden="true">
-      {remote && <path d="M12,2 A10 10 0 0 0 12,22 Z" fill="var(--accent)" />}
-      <circle cx="12" cy="12" r="10" fill="none" stroke={stroke} strokeWidth="1.4"
-        strokeDasharray={vis === 'local' ? '2.4 2.4' : undefined} />
-    </svg>
-  );
-}
+// ── The work axis ──────────────────────────────────────────────────────────────
+// Every run executes on our compute (remote) — the honest, only posture. The old
+// remote/TEE/local dial is gone: there is no on-device path, and TEE is in development
+// (de-surfaced). `noema sees:` is WHO (funding); the WHAT is always remote now.
 
 export function Card() {
   const { ident } = useIdentity();
@@ -198,9 +171,6 @@ export function Card() {
   const [lightbox, setLightbox] = useState(false);
   // Publish-to-feed state for the current result.
   const [pub, setPub] = useState<{ s: 'idle' | 'busy' | 'done' | 'err'; msg?: string }>({ s: 'idle' });
-  // Selected compute posture — drives the quote, the subline, and the result frost.
-  // Default to remote (the standard, lowest-credit posture).
-  const [compute, setCompute] = useState<Compute>('remote');
   // The active anonymous purse (Vault "use this purse") this run will spend from, if any.
   // createRun() sends it as x-bursa-token; here we only surface it + offer a clear affordance.
   const [activePurse, setActivePurseState] = useState<string | null>(getActivePurse());
@@ -352,9 +322,6 @@ export function Card() {
     setRunId(undefined);
     setDispatching(true);
     try {
-      // TODO(backend): RunRequest has no locality/compute field yet. When the
-      // dispatch API gains one, pass `compute` here so remote/TEE/local actually
-      // route differently. For now the posture is presentational (quote + frost).
       const { run: r } = await api.createRun({ modusId: id, aditus: cleanAditus(aditus), ...(studioId ? { studioId } : {}) });
       // Live status (phases, elapsed, terminal honesty) streams via useRunStream(runId).
       setRunId(r.id);
@@ -366,23 +333,15 @@ export function Card() {
   }
 
   // Credit model (credits only — never a $/hr market rate). The live quote's
-  // impetus is the upper-bound base credit estimate for a remote run.
+  // impetus is the upper-bound base credit estimate for a run on our compute.
   const baseCredits = quote?.impetus ? Math.round(Number(quote.impetus)) : null;
-  // TEE carries a modest enclave premium over remote (~35%); local is genuinely free.
-  const teePremium = baseCredits != null ? Math.ceil(baseCredits * 0.35) : 0;
   const creditText =
-    compute === 'local' ? '0 credits'
-    : quoting ? '…'
+    quoting ? '…'
     : quote?.error ? 'quote failed'
     : baseCredits == null ? '—'
-    : compute === 'tee' ? `~${baseCredits + teePremium} credits`
     : `~${baseCredits} credits`;
-  // Subline: honest consequence; for remote/TEE fall back to a fill-fields hint
-  // when the quote can't be formed yet.
-  const subline =
-    compute === 'local' ? COMPUTE_SUB.local
-    : quote?.error ? 'fill required fields'
-    : COMPUTE_SUB[compute];
+  // Subline: honest consequence, or a fill-fields hint when the quote can't form yet.
+  const subline = quote?.error ? 'fill required fields' : 'est · remote · we see the work';
   const name = (flow?.nomen || id).split('—')[0].trim();
 
   // Live run status, derived (SSE with polling fallback — see useRunStream).
@@ -563,9 +522,7 @@ export function Card() {
               )}
 
               <div className="out">
-                {/* Frost graft: the result answers the posture, reusing the
-                    canvas sealing language (clean / frost / desaturate). */}
-                <div className={`rimg vis-${compute}${runStream.exitus ? ' done' : ''}`}>
+                <div className={`rimg vis-remote${runStream.exitus ? ' done' : ''}`}>
                   {media?.kind === 'image' && (
                     <img
                       src={media.url}
@@ -579,18 +536,11 @@ export function Card() {
                   {!runStream.exitus && (
                     <><div className="ph" /><div className="stage"><span className="dots"><span /><span /><span /></span> {runStatus}{runElapsedLabel}</div></>
                   )}
-                  {compute === 'tee' && (
-                    <div className="seal-mark"><Hemisphere vis="tee" /><span>private · in dev</span></div>
-                  )}
-                  {compute === 'local' && (
-                    <div className="seal-mark"><Hemisphere vis="local" /><span>on your machine</span></div>
-                  )}
                 </div>
                 <div className="exitus">
                   <div className="er"><span>run</span><span className="v">{runId ?? '—'}</span></div>
                   <div className="er"><span>status</span><span className="v">{runStatus}{runElapsedLabel}</span></div>
                   {runId && <div className="er"><span>detail</span><span className="v"><Link to={`/run?id=${runId}`}>open run view →</Link></span></div>}
-                  {compute === 'tee' && <div className="er"><span>private</span><span className="v" style={{ color: 'var(--slate)' }}>hardware-sealed compute is in development</span></div>}
                   {runStream.exitus && Object.entries(runStream.exitus).map(([k, v]) => (
                     <div className="er" key={k}><span>{k}</span><span className="v" style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{String(v)}</span></div>
                   ))}
@@ -618,22 +568,7 @@ export function Card() {
           )}
 
           <div className="runbar"><div className="inner">
-            {/* Console run bar — segmented compute control (work axis) + run row. */}
-            <div className="seg-compute" role="radiogroup" aria-label="compute posture">
-              {COMPUTE_OPTS.map((o) => (
-                <button
-                  key={o.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={compute === o.id}
-                  className={`seg-opt${compute === o.id ? ' on' : ''}`}
-                  onClick={() => setCompute(o.id)}
-                >
-                  <Hemisphere vis={o.id} />
-                  <span className="mono">{o.label}</span>
-                </button>
-              ))}
-            </div>
+            {/* Console run bar — the run row (every run executes on our compute). */}
             {activePurse && (
               <div className="meta-line" style={{ marginTop: 'var(--s2)', fontSize: 'var(--fs-xs)' }}>
                 <span className="mono"><Ic name="wallet" /> paying with purse {activePurse.slice(0, 6)}…{activePurse.slice(-4)}</span>
