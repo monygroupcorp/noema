@@ -44,6 +44,8 @@ const CHECKPOINT_TO_BASE_INTELLA_ID: Record<string, string> = {
   'KONTEXT':      'intella.kontext-base',
   'ILLUSTRIOUS':  'intella.illustrious-base',
   'PONYXL':       'intella.pony-base',     // XL-derived but architecturally diverged; needs its own base intella seed
+  'SDXL 1.0':     'intella.sdxl-base',   // legacy label variant of SDXL
+  'FLUX.1 D':     'intella.flux-base',   // legacy label for Flux.1-dev (flagship base)
 }
 
 // Rough per-architecture LoRA size estimates (GB). Legacy has no size info;
@@ -56,6 +58,8 @@ const DEFAULT_LORA_SIZE_GB_BY_CHECKPOINT: Record<string, number> = {
   'KONTEXT':      0.5,   // similar to FLUX
   'ILLUSTRIOUS':  0.15,  // similar to SDXL
   'PONYXL':       0.15,  // XL-derived, same size class as SDXL
+  'SDXL 1.0':     0.15,  // same class as SDXL
+  'FLUX.1 D':     0.5,   // same as FLUX
 }
 
 const PLATFORM_ANIMA_IDS = new Set<string>(
