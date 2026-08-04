@@ -6,6 +6,7 @@ import request from 'supertest'
 import { createCeremoniaRouter } from '../../../src/api/arcanum/ceremoniaRouter.js'
 import { MemoryCeremoniaStore } from '../../../src/arcanum/CeremoniaStore.js'
 import type { ZkeyCustody } from '../../../src/arcanum/CeremoniaCustody.js'
+import { mintSession } from '../../../src/crystal/sessionToken.js'
 
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex')
 
@@ -112,10 +113,97 @@ test('appendContribution optimistic lock: second writer on the same head loses',
   const store = new MemoryCeremoniaStore()
   const custody = new MemoryCustody()
   const rootHash = await open(store, custody)
-  const ok1 = await store.appendContribution({ index: 1, name: 'a', outputHash: 'h1' }, rootHash)
-  const ok2 = await store.appendContribution({ index: 2, name: 'b', outputHash: 'h2' }, rootHash) // stale head
+  const ok1 = await store.appendContribution({ index: 1, name: 'a', outputHash: 'h1' }, rootHash, 'id-a')
+  const ok2 = await store.appendContribution({ index: 2, name: 'b', outputHash: 'h2' }, rootHash, 'id-b') // stale head
   assert.equal(ok1, true)
   assert.equal(ok2, false)
+})
+
+test('appendContribution refuses a second contribution from the SAME identity key', async () => {
+  const store = new MemoryCeremoniaStore()
+  const custody = new MemoryCustody()
+  const rootHash = await open(store, custody)
+  const ok1 = await store.appendContribution({ index: 1, name: 'a', outputHash: 'h1' }, rootHash, 'same-id')
+  assert.equal(ok1, true)
+  assert.equal(await store.hasContributed('same-id'), true)
+  // even building on the NEW (correct) head, the same identity is refused
+  const ok2 = await store.appendContribution({ index: 2, name: 'a-again', outputHash: 'h2' }, 'h1', 'same-id')
+  assert.equal(ok2, false)
+})
+
+// ── one ceremony contribution per session identity (noema-133) ─────────────────────
+
+test('one-per-session: a first contribution succeeds; a second from the SAME cookie session is refused 409', async () => {
+  const { app, store, custody } = makeApp()
+  const rootHash = await open(store, custody)
+  const agent = request.agent(app) // persists Set-Cookie across requests, like a browser
+
+  const first = await agent.post('/v1/ceremony/contributions')
+    .set('x-based-on', rootHash).set('Content-Type', 'application/octet-stream').send(Buffer.from('C1'))
+  assert.equal(first.status, 201)
+  assert.ok(first.headers['set-cookie']?.some((c: string) => c.startsWith('noema-cer-sid=')))
+
+  const head = first.body.headHash
+  const second = await agent.post('/v1/ceremony/contributions')
+    .set('x-based-on', head).set('Content-Type', 'application/octet-stream').send(Buffer.from('C2'))
+  assert.equal(second.status, 409)
+  assert.match(second.body.error, /already contributed/i)
+  assert.equal(store.slotCount(), 0) // sanity: didn't touch slots
+  assert.equal((await store.status()).chain.length, 1) // refused contribution never landed
+})
+
+test('one-per-session: a DIFFERENT identity (no shared cookie) contributes fine', async () => {
+  const { app, store, custody } = makeApp()
+  const rootHash = await open(store, custody)
+
+  const alice = request.agent(app)
+  const res1 = await alice.post('/v1/ceremony/contributions')
+    .set('x-based-on', rootHash).set('Content-Type', 'application/octet-stream').send(Buffer.from('C1'))
+  assert.equal(res1.status, 201)
+
+  const bob = request.agent(app) // fresh agent → no cookie jar overlap with alice
+  const res2 = await bob.post('/v1/ceremony/contributions')
+    .set('x-based-on', res1.body.headHash).set('Content-Type', 'application/octet-stream').send(Buffer.from('C2'))
+  assert.equal(res2.status, 201)
+  assert.equal((await store.status()).chain.length, 2)
+})
+
+test('one-per-session: a signed-in caller (session JWT) is keyed on animaId, dedup regardless of cookies', async () => {
+  process.env.JWT_SECRET = 'test-secret-noema-133'
+  try {
+    const { app, store, custody } = makeApp()
+    const rootHash = await open(store, custody)
+    const { token } = mintSession('anima-1', process.env.JWT_SECRET)
+
+    const res1 = await request(app).post('/v1/ceremony/contributions')
+      .set('Authorization', `Bearer ${token}`)
+      .set('x-based-on', rootHash).set('Content-Type', 'application/octet-stream').send(Buffer.from('C1'))
+    assert.equal(res1.status, 201)
+
+    // a brand-new agent (no cookies at all) but the SAME bearer token → still refused
+    const res2 = await request(app).post('/v1/ceremony/contributions')
+      .set('Authorization', `Bearer ${token}`)
+      .set('x-based-on', res1.body.headHash).set('Content-Type', 'application/octet-stream').send(Buffer.from('C2'))
+    assert.equal(res2.status, 409)
+    assert.match(res2.body.error, /already contributed/i)
+  } finally {
+    delete process.env.JWT_SECRET
+  }
+})
+
+test('one-per-session gate does not affect read endpoints', async () => {
+  const { app, store, custody } = makeApp()
+  const rootHash = await open(store, custody)
+  const agent = request.agent(app)
+  await agent.post('/v1/ceremony/contributions')
+    .set('x-based-on', rootHash).set('Content-Type', 'application/octet-stream').send(Buffer.from('C1'))
+
+  const status = await agent.get('/v1/ceremony')
+  assert.equal(status.status, 200)
+  const zkey = await agent.get('/v1/ceremony/current.zkey').buffer()
+  assert.equal(zkey.status, 200)
+  // the public status never leaks the internal contributedKeys bookkeeping
+  assert.equal('contributedKeys' in status.body, false)
 })
 
 test('POST /slots still records contributor interest, deduped by contact', async () => {
