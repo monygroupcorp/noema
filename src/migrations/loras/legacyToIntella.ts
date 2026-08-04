@@ -269,7 +269,7 @@ export function legacyToIntella(
   const triggerWords = mergeTriggerWords(doc.triggerWords, doc.cognates, warnings)
   if (doc.replaceWith) drops.push('replaceWith (redundant with cognates)')
 
-  const baseIntellaId = lookups.checkpointToBaseIntellaId[(doc.checkpoint ?? '').toUpperCase()]
+  const baseIntellaId = lookups.checkpointToBaseIntellaId[(doc.checkpoint ?? '').trim().toUpperCase()]
   if (!baseIntellaId) warnings.push(`checkpoint '${doc.checkpoint}' not in lookup table — baseIntellaId will be 'intella.unknown-base'`)
   const params: LoraParamsV2 = {
     triggerWords,
@@ -356,7 +356,7 @@ export function legacyToIntella(
   const dest = defaultDestFor('lora', slug)
 
   // ─ Rough size estimate by architecture (real bytes land in weight migration)
-  const checkpointKey = (doc.checkpoint ?? '').toUpperCase()
+  const checkpointKey = (doc.checkpoint ?? '').trim().toUpperCase()
   const estimatedSizeGb = lookups.defaultLoraSizeGbByCheckpoint?.[checkpointKey] ?? 0.2
 
   // ─ Build the Intella ─────────────────────────────────────────────────
