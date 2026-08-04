@@ -88,6 +88,7 @@ import { band, bindingCapMicroUsd, type ThresholdBand, type TripwireBandStore } 
 import type { Redituum } from '../../types/reditus.js'
 import { handleStripeCheckout, handleStripeWebhook, type StripeGateway, type StripeWebhookResult } from '../../api/webhooks/stripeWebhook.js'
 import { stripeConfigFromEnv, makeStripeGateway } from '../../api/webhooks/stripeGateway.js'
+import { packViews, type PackView } from '../../ledger/stripePacks.js'
 import type { WideEventStore } from '../../analytics/WideEventStore.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 import { provenanceHash } from '../../crystal/provenance.js'
@@ -1880,6 +1881,17 @@ export class CrystalApi {
       defaultFundingRatePct: Number(DEFAULT_FUNDING_BPS) / 100,   // 70
       chains: [{ chainId: 1, name: 'ethereum' }, { chainId: 8453, name: 'base' }],
     }
+  }
+
+  /**
+   * The PUBLIC credit-pack catalog for DISPLAY (pricing page + Funding). Sourced from the single
+   * server-authoritative `stripePacks.PACKS` constant — the one source of truth so a pack-number
+   * change there updates every surface. Read-only, no auth, no money mutation: `credits = impetus/10`
+   * is a display figure; the CHARGED/credited amount stays keyed by `packId` on the server (webhook
+   * credits `PACKS[packId].impetus`), never anything derived from this view.
+   */
+  listPacks(): PackView[] {
+    return packViews()
   }
 
   /**

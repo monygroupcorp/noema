@@ -66,3 +66,48 @@ export function resolvePack(packId: string): CreditPack | undefined {
 
 /** All sellable pack ids (stable order: cheapest → dearest). */
 export const PACK_IDS = ['starter_10', 'standard_25', 'plus_50', 'studio_100'] as const
+
+/** The ordered catalog (cheapest → dearest) — the single source every DISPLAY surface reads. */
+export function packCatalog(): CreditPack[] {
+  return PACK_IDS.map((id) => PACKS[id])
+}
+
+/**
+ * The PUBLIC, display-only projection of a credit pack — the shape the pricing/funding UI needs.
+ * `credits` is the user-facing display unit = `impetus / 10` (pricing-reconciliation); `usd` is the
+ * charge amount. This carries NO authority: the charged/credited amount is ALWAYS the server-side
+ * `PACKS[packId]` constant keyed by `packId` — never any figure derived from this view.
+ */
+export interface PackView {
+  /** Stable pack SKU (`packId`) — the only thing the buy flow sends back to the server. */
+  id: string
+  /** Price in whole USD dollars. */
+  usd: number
+  /** Display credits = `impetus / 10`. Display only — NOT the credited/charged figure. */
+  credits: number
+  /** Tier display name (e.g. "Starter") — derived from the pack label, no jargon/raw impetus. */
+  label: string
+  /** True for the single best credits-per-USD pack (highest `credits / usd`). */
+  bestRate?: boolean
+}
+
+/**
+ * Project the catalog to the PUBLIC display shape. `bestRate` is computed (argmax credits/usd) so a
+ * change to any pack constant re-derives it automatically. Display-only — carries no pricing authority.
+ */
+export function packViews(): PackView[] {
+  const cat = packCatalog()
+  let bestId = cat[0]?.id
+  let bestRatio = -Infinity
+  for (const p of cat) {
+    const ratio = Number(p.impetus) / 10 / p.usd
+    if (ratio > bestRatio) { bestRatio = ratio; bestId = p.id }
+  }
+  return cat.map((p) => ({
+    id: p.id,
+    usd: p.usd,
+    credits: Number(p.impetus) / 10,
+    label: p.label.split('—')[0].trim(),   // "Starter — 20,800 impetus" → "Starter"
+    ...(p.id === bestId ? { bestRate: true } : {}),
+  }))
+}

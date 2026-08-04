@@ -1,25 +1,19 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { api, type DepositConfig } from '../lib/api';
+import { api, type DepositConfig, type Pack } from '../lib/api';
 import { connectWallet } from '../lib/wallet';
 import { useSession } from '../state/session';
 import { Hemisphere, Meter } from './IdentityMeter';
 import { BuyCreditsModal } from './BuyCreditsModal';
 
-// Ratified fixed credit packs (go-live step 3B, Stripe scout 2026-07-08). The shared
-// USD/point anchor across the page: the fiat/card rail's Stripe checkout is priced
-// EXACTLY off this table (server-authoritative — /v1/payments/checkout credits the
-// backend impetus constant, never a client computation); the anon-rail chips reuse the
-// same denominations as an informational preview (that rail's actual crediting is a live
-// crypto-deposit quote, priced at mint time). Display points = backend impetus / 10.
-export const FIAT_PACKS: Array<{ id: string; usd: number; points: number }> = [
-  { id: 'starter_10', usd: 10, points: 2_080 },
-  { id: 'standard_25', usd: 25, points: 5_720 },
-  { id: 'plus_50', usd: 50, points: 12_480 },
-  { id: 'studio_100', usd: 100, points: 27_040 },
-];
+// The credit packs render from ONE server source (GET /v1/payments/packs, `api.listPacks()`),
+// sourced from the backend's single `stripePacks` catalog — no hardcoded numbers here. The shared
+// USD/credit anchor across the page: the fiat/card rail's Stripe checkout is priced EXACTLY off that
+// server table (server-authoritative — /v1/payments/checkout credits the backend impetus constant,
+// never a client computation); the anon-rail chips reuse the same denominations as an informational
+// preview. Change a pack number in stripePacks.ts and every surface here updates automatically.
 
 // Identified-account gate for the fiat rail: a card purchase requires a signed-in anima
 // (client_reference_id = animaId) — an anon/purse-only caller is 401'd server-side, so we
@@ -58,7 +52,12 @@ function WarnIc() {
 
 export function Funding() {
   const { session } = useSession();
-  const [pack, setPack] = useState('plus_50');
+  // Preselect the pack from the pricing-page CTA (?pack=<id>), else the default mid-tier.
+  const [searchParams] = useSearchParams();
+  const preselected = searchParams.get('pack');
+  const [pack, setPack] = useState(preselected ?? 'plus_50');
+  // The credit-pack catalog, loaded from the single server source (no hardcoded numbers).
+  const [packs, setPacks] = useState<Pack[]>([]);
   const [cfg, setCfg] = useState<DepositConfig | null>(null);
   // Live ETH → points quote for the onchain rail.
   const [eth, setEth] = useState('');
@@ -103,6 +102,12 @@ export function Funding() {
   useEffect(() => {
     let live = true;
     api.getDepositConfig().then((c) => { if (live) setCfg(c); }).catch(() => {});
+    api.listPacks().then((p) => {
+      if (!live) return;
+      setPacks(p);
+      // If the CTA's ?pack= wasn't a real SKU, fall back to a valid selection.
+      setPack((cur) => (p.some((x) => x.id === cur) ? cur : (p[0]?.id ?? cur)));
+    }).catch(() => {});
     return () => { live = false; };
   }, []);
 
@@ -216,13 +221,13 @@ export function Funding() {
 
             <div className="fund-actions">
               <div className="filters">
-                {FIAT_PACKS.map((p) => (
+                {packs.map((p) => (
                   <button
                     key={p.id}
                     className={`fchip${pack === p.id ? ' on' : ''}`}
                     onClick={() => setPack(p.id)}
                   >
-                    <span className="fc-cr">{fmt(p.points)}</span>
+                    <span className="fc-cr">{fmt(p.credits)}</span>
                     <span className="fc-pr">${p.usd}</span>
                   </button>
                 ))}
@@ -329,14 +334,14 @@ export function Funding() {
               </div>
               <div className="fund-actions" style={{ marginTop: 'var(--s3)' }}>
                 <div className="filters">
-                  {FIAT_PACKS.map((p) => (
+                  {packs.map((p) => (
                     <button
                       key={p.id}
                       className="fchip"
                       disabled={checkoutBusy != null}
                       onClick={() => buyPack(p.id)}
                     >
-                      <span className="fc-cr">{fmt(p.points)}</span>
+                      <span className="fc-cr">{fmt(p.credits)}</span>
                       <span className="fc-pr">${p.usd}</span>
                     </button>
                   ))}

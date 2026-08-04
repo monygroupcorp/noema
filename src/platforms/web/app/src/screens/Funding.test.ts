@@ -1,19 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { FIAT_PACKS, buildCheckoutRequest, canCheckout } from './Funding';
+import { buildCheckoutRequest, canCheckout } from './Funding';
 
 // No jsdom/@testing-library/react in this app's toolchain (see BuyCreditsModal.test.ts) —
-// so this exercises the fiat-pack rail's pure logic rather than a full DOM render.
-
-describe('FIAT_PACKS — the ratified 4 frozen packs', () => {
-  it('has exactly the 4 ratified SKUs with the correct display point amounts', () => {
-    expect(FIAT_PACKS).toEqual([
-      { id: 'starter_10', usd: 10, points: 2_080 },
-      { id: 'standard_25', usd: 25, points: 5_720 },
-      { id: 'plus_50', usd: 50, points: 12_480 },
-      { id: 'studio_100', usd: 100, points: 27_040 },
-    ]);
-  });
-});
+// so this exercises the fiat-pack rail's pure logic rather than a full DOM render. The pack
+// numbers are no longer a frontend constant: they come from GET /v1/payments/packs (the single
+// server catalog), verified in the backend packCatalog test.
 
 describe('buildCheckoutRequest', () => {
   it('carries the exact pack id — never a client-computed credit figure', () => {
