@@ -90,7 +90,7 @@ export function Landing() {
         </div>
       </div>
 
-      <section className="lsec concierge">
+      <section className="lsec concierge-explainer">
         <h2 className="lsec-h">The concierge does the deciding.</h2>
         <p className="lsec-sub">
           It is the difference between a toolbox and a studio. You bring the intent;
