@@ -24,10 +24,6 @@ import {
   type VaultPurse,
 } from '../lib/vault';
 
-// The recovery-phrase panel stays DISPLAY-ONLY for v1 (decision 2): the real backup is the
-// JSON export below. BIP39 encoding of the store is a follow-up, not a blocker.
-const PHRASE = ['harbor', 'ember', 'quartz', 'meadow', 'cipher', 'lantern', 'tundra', 'violet', 'anchor', 'pollen', 'cobalt', 'marrow'];
-
 type Busy = { kind: 'idle' } | { kind: 'funding' } | { kind: 'minting'; nullifier: string };
 
 function short(hex: string, head = 8, tail = 6) {
@@ -59,7 +55,6 @@ export function Vault() {
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [fundAmt, setFundAmt] = useState('500');
-  const [revealed, setRevealed] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
 
@@ -286,7 +281,7 @@ export function Vault() {
         <div className="ctitle">What you hold vs what we store</div>
         <div className="meta-line"><span>you hold</span><span className="v">nullifier · secret · purse token</span></div>
         <div className="meta-line"><span>we receive</span><span className="v">commitment · nullifier (signed-in funding)</span></div>
-        <div className="meta-line"><span>spend ↔ funder</span><span className="v">linkable until blind issuance</span></div>
+        <div className="meta-line"><span>spend ↔ funder</span><span className="v">linkable only if you funded from an identified source</span></div>
       </div>
       <div className="csec">
         <div className="ctitle">Purse</div>
@@ -302,7 +297,12 @@ export function Vault() {
       <div className="page"><div className="pw">
         <div className="pagehead"><div>
           <h1>Vault</h1>
-          <div className="sub">Anonymous credit. Every secret below exists only in this browser — there is no recovery. Export it before you rely on it.</div>
+          <div className="sub">Your local bearer-credit wallet — hold notes and purses, mint, and back up by export. Everything here lives only in this browser, and the JSON export is the only backup, so export it before you rely on it.</div>
+          <div className="sub" style={{ marginTop: 'var(--s2)' }}>
+            A purse spends unlinkably. Whether the <i>funding</i> stays anonymous depends on how you
+            funded: fund from a shielded or fresh wallet and there's no identity to link; fund from a
+            card or a doxxable wallet and the debit is linkable to that funder until we ship direct-to-commitment (blind) issuance.
+          </div>
         </div></div>
 
         {err && <div className="warn" role="alert">{err}</div>}
@@ -435,18 +435,6 @@ export function Vault() {
               <Ic name="check" /> Restore
             </button>
           </div>
-        )}
-
-        {/* Recovery phrase — display-only in v1 (decision 2). */}
-        <div className="sectionhead">Recovery phrase</div>
-        <div className="warn">A future release will encode your vault as a phrase. For now, use the JSON export above — this is illustrative only.</div>
-        <div className="phrase" style={{ filter: revealed ? 'none' : 'blur(6px)', marginTop: 'var(--s3)' }}>
-          {PHRASE.map((w, i) => <span key={i}><i>{i + 1}</i>{w}</span>)}
-        </div>
-        {!revealed && (
-          <button className="btn-ghost" style={{ marginTop: 'var(--s3)' }} onClick={() => setRevealed(true)}>
-            <Ic name="eye" /> Reveal phrase
-          </button>
         )}
       </div></div>
     </AppShell>

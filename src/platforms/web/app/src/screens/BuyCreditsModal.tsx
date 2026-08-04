@@ -447,7 +447,9 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
           <div className="bcm-connect">
             <p>
               Connect a wallet to pay with what it already holds. We see an address, not a
-              person — an amount and a timestamp, never a name, never what you make.
+              person — an amount and a timestamp, never a name, never what you make. How
+              private that address is depends on the wallet: a fresh or shielded one has no
+              identity behind it; a normal one can be traced on-chain.
             </p>
             <button className="btn" onClick={doConnect}>Connect wallet</button>
             {connectErr && <div className="warn" style={{ marginTop: 'var(--s3)' }}>{connectErr}</div>}
