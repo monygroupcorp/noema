@@ -69,11 +69,11 @@ This isn't a chatbot wrapper. It's a production workspace for people who build w
 
 ---
 
-### 7. Anonymous Credits (Bursa)
+### 7. Anonymous Credits (Bursa) *(coming soon)*
 
 **Headline:** Pay without an identity.
 
-**Body:** Bursa credits are spent via Groth16 zero-knowledge proofs. You prove you have credits; we verify the math and dispatch your compute. We cannot link your spend to your account, your prior sessions, or any identity. The platform receives: a valid proof, a credit amount. Nothing else.
+**Body:** Fund anonymously today from a shielded or fresh on-chain wallet — no identity sits behind the address. On top of that, an unlinkable ZK bearer Bursa is coming soon: Bursa credits will be spent via Groth16 zero-knowledge proofs — you prove you have credits, we verify the math and dispatch your compute, and we cannot link the spend to your account, your prior sessions, or any identity. It unlocks after the trusted-setup ceremony.
 
 No other AI platform has this. Venice's "crypto = private" angle does the opposite — a wallet address is a permanent, publicly traceable identity on-chain.
 
@@ -85,6 +85,6 @@ No other AI platform has this. Venice's "crypto = private" angle does the opposi
 
 **Headline:** One OpenAI-compatible API.
 
-**Body:** Every modality through a single API: text, image, video, audio, embeddings. Swap out your OpenAI base URL and your existing stack works. Add a `x-bursa-token` header for anonymous billing, or use a session key.
+**Body:** Every modality through a single API: text, image, video, audio, embeddings. Swap out your OpenAI base URL and your existing stack works. Use a session key today; anonymous bearer-token billing via an `x-bursa-token` header is coming soon.
 
 **CTA:** API docs →

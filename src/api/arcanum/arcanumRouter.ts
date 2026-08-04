@@ -52,6 +52,16 @@ export interface ArcanumRouterConfig {
    * Called at purse-mint time. Absent or returning 0n = dev mode (1 wei = 1 credit).
    */
   weiToCredits?: (wei: bigint) => Promise<bigint>
+  /**
+   * ANON_PURSE_ENABLED (noema-131) — the anonymous ZK purse master switch. Default OFF.
+   * The arcanum path currently verifies against a committed SOLO DEV proving key: anonymity
+   * holds, but SOUNDNESS does not — the dev-key holder can forge spend proofs and counterfeit
+   * the anonymous pool. Until the trusted-setup ceremony runs, no real value may flow through
+   * this path in prod. When false, POST /issue and POST /purse refuse (503) BEFORE any debit or
+   * mint, and GET /config reports `enabled:false` so the UI hides the purse. Flip to true
+   * post-ceremony to restore the full purse (a one-flag flip).
+   */
+  anonPurseEnabled?: boolean
 }
 
 export function createArcanumRouter(
@@ -82,6 +92,11 @@ export function createArcanumRouter(
   // call GET /tree/proof/:leafIndex.
 
   router.post('/issue', async (req, res) => {
+    // ANON_PURSE gate (noema-131): the arcanum path mints against a forgeable dev key.
+    // Refuse BEFORE any balance debit while the anonymous purse is off (v1 default).
+    if (!config.anonPurseEnabled) {
+      return res.status(503).json({ error: 'anonymous purse coming soon' })
+    }
     if (!config.resolve) {
       return res.status(501).json({ error: 'issue endpoint not configured' })
     }
@@ -158,6 +173,11 @@ export function createArcanumRouter(
   //   credits  string  — initial credit balance (decimal bigint string)
 
   router.post('/purse', async (req, res) => {
+    // ANON_PURSE gate (noema-131): minting a bearer purse redeems a spend proof verified
+    // against the forgeable dev key. Refuse BEFORE any mint while the purse is off (v1 default).
+    if (!config.anonPurseEnabled) {
+      return res.status(503).json({ error: 'anonymous purse coming soon' })
+    }
     if (!config.verifier || !config.bursarium) {
       return res.status(501).json({ error: 'purse endpoint not configured' })
     }
@@ -302,6 +322,9 @@ export function createArcanumRouter(
       zkeyUrl,
       depth: 32,
       ready: WASM_READY && zkeyUrl !== null,
+      // ANON_PURSE_ENABLED (noema-131) — the security boundary is the backend gate; this just
+      // lets the UI hide/coming-soon the purse consistently. false = purse issue/mint refuse.
+      enabled: !!config.anonPurseEnabled,
     })
   })
 

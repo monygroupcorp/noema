@@ -1064,7 +1064,16 @@ async function main(): Promise<void> {
       })
     },
   })
+  // ANON_PURSE_ENABLED (noema-131) — default OFF. The arcanum ZK purse verifies against a
+  // committed SOLO DEV proving key: anonymity holds but SOUNDNESS does not (the dev-key holder
+  // can forge spend proofs). Until the trusted-setup ceremony runs, gate the forgeable money path
+  // off: arcanum issue/mint refuse, and an ownerless bursa spend is refused at the shared
+  // chokepoints (owned/identified-funded purses stay live). Flip true post-ceremony (one-flag flip).
+  const anonPurseEnabled = process.env.ANON_PURSE_ENABLED === 'true'
+  if (anonPurseEnabled) log.warn('ANON_PURSE_ENABLED=true — the anonymous ZK purse (arcanum) is LIVE on this instance')
+  else log.info('ANON_PURSE_ENABLED off — anonymous ZK purse gated (arcanum issue/mint + ownerless bursa spend refused)')
   app.use('/arcanum', createArcanumRouter(ring.arcanumIssuer, ring.arcanumTree, {
+    anonPurseEnabled,
     zkeyUrl: process.env.ARCANUM_ZKEY_URL,
     serverUrl: process.env.WEBHOOK_URL,
     resolve: (req) => apiResolver.resolve(
@@ -1117,7 +1126,7 @@ async function main(): Promise<void> {
   // BEFORE the `/v1` + `/api/v1` catch-alls so the literal paths resolve here. Only
   // wired when R2 is configured (otherwise the upload path is genuinely unavailable).
   if (RUNPOD_R2) {
-    const buildStorageRouter = () => createStorageRouter({ store: new R2Uploader(RUNPOD_R2), identity: apiResolver })
+    const buildStorageRouter = () => createStorageRouter({ store: new R2Uploader(RUNPOD_R2), identity: apiResolver, anonPurseEnabled, bursarium: ring.bursarium })
     app.use('/v1/storage', buildStorageRouter())
     app.use('/api/v1/storage', buildStorageRouter())
     log.info('storage upload front door mounted at /v1/storage + /api/v1/storage')
@@ -1184,6 +1193,8 @@ async function main(): Promise<void> {
     identity: apiResolver,
     hub: runHub,
     erasureEnabled,
+    anonPurseEnabled,
+    bursarium: ring.bursarium,
     ...(meExporter ? { exporter: meExporter } : {}),
     rateLimiters: { publish: publishLimiter },
   }))

@@ -21,6 +21,7 @@ import { ApiError, Errors } from './errors.js'
 import { makeLogger } from '../../lib/logger.js'
 import { credentialsFromHeaders } from './IdentityResolver.js'
 import type { Identity } from './apiRouter.js'
+import type { Bursarum } from '../../types/bursa.js'
 
 const log = makeLogger('storageRouter')
 
@@ -44,7 +45,14 @@ function ownerScope(owner: AuctorKey): string {
  * createStorageRouter — one router, mounted at BOTH `/api/v1/storage` (the compat
  * path the deployed web app bakes) and `/v1/storage` (native, for new callers).
  */
-export function createStorageRouter(deps: { store: ObjectStore; identity: Identity }): Router {
+export function createStorageRouter(deps: {
+  store: ObjectStore
+  identity: Identity
+  /** ANON_PURSE_ENABLED (noema-131) — off (v1 default) refuses ownerless/arcanum bursa spends. */
+  anonPurseEnabled?: boolean
+  /** Bursa store — resolves `owner` at the spend chokepoint for the gate above. */
+  bursarium?: Bursarum
+}): Router {
   const { store, identity } = deps
   const router = express.Router()
   router.use(express.json())
@@ -54,10 +62,20 @@ export function createStorageRouter(deps: { store: ObjectStore; identity: Identi
     log.warn('object store has no getSignedUploadUrl — /storage/uploads/sign will 503')
   }
 
-  /** Resolve the caller (bursaToken header/body short-circuits to anon bursa). */
-  const auth = (req: Request): Promise<AuctorKey> => {
+  /** Resolve the caller (bursaToken header/body short-circuits to anon bursa).
+   *  ANON_PURSE gate (noema-131): when the flag is off, an ownerless/arcanum (forgeable) or
+   *  unknown bursa is refused 503; a SOUND owned purse (`owner` set) is accepted unchanged. */
+  const auth = async (req: Request): Promise<AuctorKey> => {
     const bursaToken = req.body?.bursaToken ?? (req.headers['x-bursa-token'] as string | undefined)
-    if (bursaToken) return Promise.resolve({ bursaToken })
+    if (bursaToken) {
+      if (!deps.anonPurseEnabled) {
+        const bursa = deps.bursarium ? await deps.bursarium.findByToken(bursaToken) : null
+        if (!bursa?.owner) {
+          throw new ApiError('purse.disabled', 'anonymous purse coming soon', 503)
+        }
+      }
+      return { bursaToken }
+    }
     return identity.resolve(
       credentialsFromHeaders(req.headers as Record<string, string | undefined>, req.body),
     )
