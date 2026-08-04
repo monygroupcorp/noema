@@ -54,10 +54,42 @@ export async function ensureIndexes(db: Db): Promise<void> {
       { testis: 1 },
       { name: 'testis_stripe_refund', unique: true, partialFilterExpression: { auctor: 'stripe:refund' } },
     ),
+    // Legacy account migration (noema-130) idempotency: UNIQUE + PARTIAL on `testis` over the
+    // migration's consolidated balance signa ONLY. `testis` = 'migration:<masterAccountId>' — one
+    // per migrated legacy account. This is the DURABLE cross-instance guard that a re-run of
+    // migrate-accounts-chunk.ts NEVER double-mints a user's balance: the second issue() for an
+    // already-migrated account throws a dup-key → the script catches E11000 and skips it. Scoped to
+    // auctor:'migration:legacy' (peer of the stripe-purchase / alchemy-deposit / stripe-refund guards
+    // above). Explicit name: a fourth unique-partial index on the SAME key { testis:1 } would
+    // otherwise auto-name to `testis_1` and collide.
+    db.collection('signa').createIndex(
+      { testis: 1 },
+      { name: 'testis_migration_legacy', unique: true, partialFilterExpression: { auctor: 'migration:legacy' } },
+    ),
 
     // animae — soul / identity
     db.collection('animae').createIndex({ id: 1 }, { unique: true }),
     db.collection('animae').createIndex({ custos: 1 }, { sparse: true }),
+    // Legacy account migration (noema-130): UNIQUE + PARTIAL on `legacyMasterAccountId` over migrated
+    // animae ONLY, so the anima upsert keyed on the legacy masterAccountId is idempotent — a re-run
+    // of migrate-accounts-chunk.ts resolves the existing anima instead of forking a second soul for
+    // the same legacy user. Partial (only rows that carry the provenance field) so native crystal
+    // animae are unconstrained.
+    db.collection('animae').createIndex(
+      { legacyMasterAccountId: 1 },
+      { unique: true, partialFilterExpression: { legacyMasterAccountId: { $exists: true } } },
+    ),
+
+    // migration_ledger_claims — legacy account migration (noema-130) GLOBAL ledger-row de-dup.
+    // One doc per legacy `credit_ledger` row that has been attributed to a migrated account:
+    // `_id` = the legacy ledger row's `_id` (string), plus the claiming masterAccountId/animaId. The
+    // UNIQUE `_id` is the DURABLE cross-chunk guard that the SAME confirmed deposit is never minted
+    // into two consolidated Signa: legacy does not enforce a 1:1 wallet→account, so a wallet listed on
+    // two accounts would otherwise let both accounts' transforms sum that wallet's deposits. Before
+    // minting, migrate-accounts-chunk.ts claims each attributed row here; a row already owned by a
+    // DIFFERENT account is a collision → that account is NOT committed (routed to the review report).
+    // (`_id` is unique by nature; this explicit no-op index line documents the collection's contract.)
+    db.collection('migration_ledger_claims').createIndex({ masterAccountId: 1 }),
 
     // personae — platform mask (hot path: every inbound message)
     db.collection('personae').createIndex({ genus: 1, externusId: 1 }, { unique: true }),
