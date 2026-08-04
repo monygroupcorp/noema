@@ -213,7 +213,7 @@ export function AccountSettings() {
             <SectionCard to="/account/compute" ico="server" name="Compute &amp; sessions">
               <Row k="availability" v={<><span className="fillg">{AVAIL.find((a) => a.key === availPref)?.glyph}</span> <b>{availPref}</b> · cost vs speed</>} />
               <Row k="live sessions" v={<><span className="rdot good" /> {liveStudios} live</>} />
-              <div className="ac-note mono">custody (local · TEE · remote) is chosen per run, not here.</div>
+              <div className="ac-note mono">custody (local · remote) is chosen per run, not here.</div>
             </SectionCard>
             <SectionCard to="/account/security" ico="eye-off" name="Security &amp; privacy">
               <Row k="devices" v={<span className="muted">coming soon — device management isn’t wired yet</span>} />
@@ -280,7 +280,7 @@ function ComputeDetail({ studios }: { studios: StudioEntry[] | null }) {
             </button>
           ))}
         </div>
-        <div className="ac-note mono">↳ custody (local · TEE · remote) is a per-run choice in the console — not a default set here.</div>
+        <div className="ac-note mono">↳ custody (local · remote) is a per-run choice in the console — not a default set here.</div>
       </div>
 
       <div className="ac-panel">
