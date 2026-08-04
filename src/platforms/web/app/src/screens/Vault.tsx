@@ -57,6 +57,8 @@ export function Vault() {
   const [fundAmt, setFundAmt] = useState('500');
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
+  const [handedToken, setHandedToken] = useState('');
+  const [handedBusy, setHandedBusy] = useState(false);
 
   const reload = useCallback(() => {
     const v = readVault();
@@ -241,6 +243,36 @@ export function Vault() {
     }
   }
 
+  // ── Use a purse you were handed: someone else's "Copy token" output pasted here. Bearer
+  // credit has no owner, so this is just GET /arcanum/purse/:token (proves it's live +
+  // its balance) → addPurse (idempotent on token — refreshes the cached balance if it's
+  // already in the vault, no dupe) → setActivePurse (friendly default: immediately spendable).
+  async function useHandedPurse() {
+    const token = handedToken.trim();
+    if (!token) return;
+    setErr(null); setNotice(null);
+    setHandedBusy(true);
+    try {
+      const { credits } = await api.arcanum.getPurse(token);
+      const already = readVault().purses.some((p) => p.token === token);
+      addPurse({ token, credits, createdAt: Date.now() });
+      setActivePurse(token);
+      setActive(token);
+      reload();
+      setHandedToken('');
+      setNotice(
+        already
+          ? `Balance refreshed — ${credits} credits. Runs will now pay from this purse.`
+          : `Purse added — ${credits} credits. Runs will now pay from this purse.`,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setErr(/^404\b/.test(msg) ? "That's not a valid purse token." : msg);
+    } finally {
+      setHandedBusy(false);
+    }
+  }
+
   function usePurse(token: string) {
     setActivePurse(token);
     setActive(token);
@@ -319,6 +351,28 @@ export function Vault() {
 
         {/* ── Purses ─────────────────────────────────────────────────────────── */}
         <div className="sectionhead">Purses</div>
+
+        <div className="csec">
+          <div className="ctitle">Use a purse you were handed</div>
+          <div className="meta-line">
+            <span>Paste a purse token someone shared with you. Anyone holding the token can spend it —
+              it's bearer credit, not tied to an account.</span>
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--s2)', marginTop: 'var(--s2)' }}>
+            <input
+              className="inp mono"
+              type="text"
+              value={handedToken}
+              onChange={(e) => setHandedToken(e.target.value)}
+              placeholder="paste purse token"
+              style={{ flex: 1 }}
+            />
+            <button className="btn" onClick={useHandedPurse} disabled={handedBusy || !handedToken.trim()}>
+              <Ic name="wallet" /> {handedBusy ? 'Checking…' : 'Use it'}
+            </button>
+          </div>
+        </div>
+
         {purses.length === 0 ? (
           <div className="csec">No purses yet. Fund a note, then mint a purse to spend anonymously.</div>
         ) : (
