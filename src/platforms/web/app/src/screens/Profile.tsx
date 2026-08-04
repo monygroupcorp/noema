@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { AppShell } from '../shell/AppShell';
-import { Ic } from '../lib/icons';
 import {
   api, SecretsUnavailableError, SECRET_PROVIDERS, SECRET_PROVIDER_LABEL,
   type Appearance, type SecretProvider, type Purse,
@@ -9,11 +8,6 @@ import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
 import { connectWallet } from '../lib/wallet';
 
-const SWATCHES = ['#5b8cff', '#8b76d6', '#57c8a6', '#d68f6f', '#d66f9a', '#d6c46f'];
-const LOOKS: { key: string; label: string }[] = [
-  { key: 'clean', label: 'Clean' }, { key: 'n64', label: 'N64 / low-poly' },
-  { key: 'vapor', label: 'Vapor' }, { key: 'editorial', label: 'Editorial' },
-];
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 // Upload a file to R2 via the signed-PUT path, return its permanent public URL.
@@ -66,7 +60,7 @@ export function Profile() {
       <div className="page" style={pageStyle}><div className="pw">
         <div className="pagehead"><div>
           <h1>Profile</h1>
-          <div className="sub">Decorate freely — this is how your identity looks across NOEMA. Saved to your account (works anonymously too).</div>
+          <div className="sub">This is how your identity looks across NOEMA. Saved to your account (works anonymously too).</div>
         </div></div>
 
         {err && <div className="warn" style={{ marginBottom: 'var(--s4)' }}>{err}</div>}
@@ -77,30 +71,6 @@ export function Profile() {
         <div style={{ display: 'flex', gap: 'var(--s4)', marginTop: 'var(--s4)', alignItems: 'flex-end' }}>
           <AssetSlot className="pfp" label="PFP" url={appr.avatarUrl} onUploaded={(u) => save({ avatarUrl: u })} onError={setErr} />
           <AssetSlot style={{ flex: 1 }} label="Background" url={appr.backgroundUrl} onUploaded={(u) => save({ backgroundUrl: u })} onError={setErr} />
-        </div>
-
-        <div className="sectionhead">Accent</div>
-        <div className="swatches">
-          {SWATCHES.map((c) => (
-            <span key={c} className={`sw${accent === c ? ' on' : ''}`} style={{ background: c }} onClick={() => save({ accent: c })} />
-          ))}
-        </div>
-        <div className="sub" style={{ marginTop: 'var(--s3)' }}>One signal color — used sparingly.</div>
-
-        <div className="sectionhead">Signature look</div>
-        <div className="filters">
-          {LOOKS.map((l) => (
-            <button key={l.key} className={`fchip${appr.look === l.key ? ' on' : ''}`} onClick={() => save({ look: l.key })}>{l.label}</button>
-          ))}
-        </div>
-        <div className="sub" style={{ marginTop: 'var(--s3)' }}>Heritage: we turn images into video-game-like images.</div>
-
-        <div className="sectionhead">Generate a kit</div>
-        <div className="sidecard">
-          <div className="mono" style={{ color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
-            <span className="hemi2 dashed" /> Kit generation is coming — it needs a dedicated <b>profile-kit</b> flow (compose the PS2/low-poly LoRA + an image model). For now, upload your own assets above.
-          </div>
-          <button className="btn" disabled style={{ marginTop: 'var(--s3)' }}><Ic name="sparkles" /> Generate kit — soon</button>
         </div>
 
         <BackupRecovery signedIn={!!session} />
