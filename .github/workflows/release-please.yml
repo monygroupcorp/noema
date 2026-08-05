@@ -17,10 +17,15 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
       version: ${{ steps.release.outputs.version }}
     steps:
+      # Manifest mode: release-please-config.json + .release-please-manifest.json
+      # (both at repo root, the action's default paths).
+      # Do NOT re-add `release-type:` here — passing it puts the action in
+      # non-manifest mode, where it ignores the pinned last-release version and
+      # bootstraps at 1.0.0. That happened during the 2026-08-05 cutover: the
+      # v4.11.15 release commit sits behind 884 grafted commits, past the
+      # history-walk cap, so release-please concluded the repo had never shipped.
       - uses: googleapis/release-please-action@v4
         id: release
-        with:
-          release-type: node
 
   build-and-push:
     needs: release-please

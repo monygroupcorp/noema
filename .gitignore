@@ -102,8 +102,9 @@ typings/
 .fusebox/
 .dynamodb/
 .tern-port
-.release-please-manifest.json
-release-please-config.json
+# .release-please-manifest.json / release-please-config.json are TRACKED on purpose.
+# Ignoring them forced release-please into non-manifest mode, where it bootstrapped
+# the cutover release at 1.0.0 instead of 5.0.0 (2026-08-05).
 .env.fake
 __pycache__/
 
