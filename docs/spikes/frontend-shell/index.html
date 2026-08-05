@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en" class="tier-identified" data-font="geist">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Noema — chat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="app.css" />
+</head>
+<body>
+<div class="app">
+
+  <aside class="rail" id="rail"></aside>
+
+  <section class="main">
+    <div class="topbar">
+      <div class="me" id="me"></div>
+      <div class="crumb"><span class="sep">/</span> chat</div>
+    </div>
+
+    <div class="thread"><div class="wrap" id="thread">
+      <div class="msg bot"><div class="av"></div><div>
+        <div class="who">concierge</div>
+        <div class="body">What are we making? Describe it however you like — I’ll pick the tools
+          and walk you through. Try <span class="verb">make</span> a scene,
+          <span class="verb">chat</span> through an idea, or just say what you’re after.</div>
+      </div></div>
+      <div class="msg user"><div class="av"></div><div>
+        <div class="who">you</div>
+        <div class="body">a low-poly n64-style dragon perched on a neon temple, dusk</div>
+      </div></div>
+      <div class="msg bot"><div class="av"></div><div>
+        <div class="who">concierge</div>
+        <div class="body">Running <span class="verb">make</span> on <span class="mono">flux-schnell</span>.
+          Quote was <span class="mono">$0.043</span> — here it comes.
+          <div class="gen">
+            <div class="ph"><span class="dots"><span></span><span></span><span></span></span></div>
+            <div class="cap"><span>generating</span><span class="mono">· stage 2/3 · 6s</span></div>
+          </div>
+        </div>
+      </div></div>
+    </div></div>
+
+    <div class="composer">
+      <div class="box">
+        <textarea id="ta" rows="1" placeholder="Describe what you want to make…"></textarea>
+        <button class="send" id="send"><i data-lucide="arrow-up"></i></button>
+      </div>
+      <div class="hint">
+        <span class="dest" id="dest"></span>
+        <span class="keys"><span><span class="mono">⏎</span> send</span><span><span class="mono">⇧⏎</span> newline</span></span>
+      </div>
+    </div>
+  </section>
+
+  <aside class="context">
+    <div class="csec">
+      <div class="ctitle">Session</div>
+      <div class="meta-line"><span>spent</span><span class="v mono">$0.043</span></div>
+      <div class="meta-line"><span>this run</span><span class="v mono">12 GPU-min</span></div>
+      <div class="meta-line"><span>balance</span><span class="v mono" id="bal">214 credits</span></div>
+      <div class="eph" id="eph" style="display:none"><span class="pulse"></span> leaves no trace — nothing is persisted</div>
+    </div>
+  </aside>
+</div>
+
+<script src="app.js"></script>
+<script>
+  const ta = document.querySelector('#ta');
+  ta.addEventListener('input', ()=>{ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,160)+'px'; });
+  function send(){
+    const v = ta.value.trim(); if(!v) return;
+    const th = document.querySelector('#thread');
+    th.insertAdjacentHTML('beforeend', `<div class="msg user"><div class="av"></div><div><div class="who">you</div><div class="body"></div></div></div>`);
+    th.lastElementChild.querySelector('.body').textContent = v;
+    th.insertAdjacentHTML('beforeend', `<div class="msg bot"><div class="av"></div><div><div class="who">concierge</div>
+      <div class="body">Reading that as <span class="verb">make</span> — quoting… <span class="dots"><span></span><span></span><span></span></span></div></div></div>`);
+    ta.value=''; ta.style.height='auto'; th.parentElement.scrollTop = 9e9;
+  }
+  document.querySelector('#send').onclick = send;
+  ta.addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }});
+</script>
+</body>
+</html>

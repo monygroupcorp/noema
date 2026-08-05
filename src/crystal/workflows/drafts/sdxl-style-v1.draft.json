@@ -1,0 +1,47 @@
+{
+  "templateId": "sdxl-style",
+  "version": "1",
+  "status": "DRAFT — not registered, not runnable",
+  "blocked": "BLOCKED: needs i2i image-input primitive (style ref) + pack ComfyUI_IPAdapter_plus; declare IPAdapter-SDXL + CLIPVision weights on promote (IPAdapterUnifiedLoader auto-fetches them)",
+  "categoriaHint": "image — SDXL IPAdapter style transfer → effect (decomposed from the sdxlplus combo)",
+  "provenance": "Decomposed from docs/reference/old-workflows/sdxlplus (the IPAdapter/style-image branch). The combo's rgthree Any-Switch multiplexers are gone — this is the single style flavor as a clean linear graph.",
+  "seedInputKey": "input_seed",
+  "loraCapable": true,
+  "customNodes": [
+    { "url": "https://github.com/skfoo/ComfyUI-Coziness", "name": "ComfyUI-Coziness" },
+    { "url": "https://github.com/cubiq/ComfyUI_IPAdapter_plus", "name": "ComfyUI_IPAdapter_plus" }
+  ],
+  "aditus": {
+    "prompt":     { "type": "text",  "required": true,  "description": "Text prompt" },
+    "image":      { "type": "image", "required": true,  "description": "Style reference image (drives the IPAdapter)" },
+    "width":      { "type": "int",   "default": 1024,   "description": "Output width" },
+    "height":     { "type": "int",   "default": 1024,   "description": "Output height" },
+    "steps":      { "type": "int",   "default": 30,     "description": "Inference steps" },
+    "guidance":   { "type": "float", "default": 7,      "description": "CFG guidance scale" },
+    "input_seed": { "type": "int",                      "description": "Random seed — omit to shuffle" }
+  },
+  "exitus": { "image": { "type": "image", "description": "Generated image, styled toward the reference" } },
+  "slotMap": {
+    "/3/inputs/seed":    "input_seed",
+    "/3/inputs/steps":   "steps",
+    "/3/inputs/cfg":     "guidance",
+    "/97/inputs/width":  "width",
+    "/97/inputs/height": "height",
+    "/47/inputs/text":   "prompt",
+    "/10/inputs/image":  "image"
+  },
+  "inputTemplate": {
+    "4":  { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "sd_xl_base_1.0.safetensors" } },
+    "47": { "class_type": "LoraTextExtractor-b1f83aa2", "inputs": { "text": "PLACEHOLDER" } },
+    "46": { "class_type": "MultiLoraLoader-70bf3d77", "inputs": { "model": ["4", 0], "clip": ["4", 1], "text": ["47", 1] } },
+    "6":  { "class_type": "CLIPTextEncode", "inputs": { "clip": ["46", 1], "text": ["47", 0] } },
+    "7":  { "class_type": "CLIPTextEncode", "inputs": { "clip": ["46", 1], "text": "" } },
+    "10": { "class_type": "LoadImage", "inputs": { "image": "PLACEHOLDER" } },
+    "73": { "class_type": "IPAdapterUnifiedLoader", "inputs": { "model": ["46", 0], "preset": "STANDARD (medium strength)" } },
+    "72": { "class_type": "IPAdapterAdvanced", "inputs": { "model": ["73", 0], "ipadapter": ["73", 1], "image": ["10", 0], "weight": 1, "start_at": 0, "end_at": 1, "weight_type": "strong style transfer", "combine_embeds": "concat", "embeds_scaling": "V only" } },
+    "97": { "class_type": "EmptyLatentImage", "inputs": { "width": 1024, "height": 1024, "batch_size": 1 } },
+    "3":  { "class_type": "KSampler", "inputs": { "seed": 88888888, "steps": 30, "cfg": 7, "sampler_name": "dpmpp_2m", "scheduler": "karras", "denoise": 1, "model": ["72", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["97", 0] } },
+    "8":  { "class_type": "VAEDecode", "inputs": { "samples": ["3", 0], "vae": ["4", 2] } },
+    "9":  { "class_type": "SaveImage", "inputs": { "images": ["8", 0], "filename_prefix": "runmake" } }
+  }
+}

@@ -5,7 +5,6 @@
 #
 # Usage from deploy.sh:
 #   ETHEREUM_SIGNER_PRIVATE_KEY="..." docker compose -f docker-compose.prod.yml up -d bot
-#   docker compose -f docker-compose.prod.yml up -d worker training sweeper
 #   docker compose -f docker-compose.prod.yml up -d staging
 #   docker compose -f docker-compose.prod.yml up -d caddy
 
@@ -21,9 +20,30 @@ x-common: &common
     - no-new-privileges
 
 services:
+  clip:
+    image: ghcr.io/monygroupcorp/noema-clip:${VERSION:-latest}
+    container_name: noema-clip
+    build:
+      context: ./clip_service
+    restart: unless-stopped
+    networks:
+      hyperbot:
+        aliases:
+          - clip
+    mem_limit: 1200m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
   bot:
     <<: *common
     container_name: hyperbotcontained
+    depends_on:
+      clip:
+        condition: service_healthy
     environment:
       - ETHEREUM_SIGNER_PRIVATE_KEY=${ETHEREUM_SIGNER_PRIVATE_KEY:-}
       - MAINTENANCE_MODE_FILE=/var/run/hyperbot/maintenance.flag
@@ -35,39 +55,6 @@ services:
       hyperbot:
         aliases:
           - hyperbot
-
-  worker:
-    <<: *common
-    container_name: hyperbotworker
-    command: ["node", "worker.js"]
-    environment:
-      - COLLECTION_EXPORT_PROCESSING_ENABLED=true
-    networks:
-      hyperbot:
-        aliases:
-          - hyperbot-worker
-
-  training:
-    <<: *common
-    container_name: hyperbottraining
-    command: ["node", "scripts/workers/vastaiTrainingWorker.js"]
-    environment:
-      - VASTAI_SSH_KEY_PATH=${CONTAINER_SSH_KEY_PATH:-/home/node/.ssh/vastai/id_ed25519}
-    volumes:
-      - ${VASTAI_SSH_KEY_DIR:-/dev/null}:/home/node/.ssh/vastai:ro
-    networks:
-      hyperbot:
-        aliases:
-          - hyperbot-training
-
-  sweeper:
-    <<: *common
-    container_name: hyperbotsweeper
-    command: ["/bin/sh", "-c", "while true; do sleep ${SWEEPER_INTERVAL_SECONDS:-900}; node scripts/workers/instanceSweeper.js || true; done"]
-    networks:
-      hyperbot:
-        aliases:
-          - hyperbot-sweeper
 
   staging:
     <<: *common

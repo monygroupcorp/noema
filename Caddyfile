@@ -1,3 +1,5 @@
+# Live copy: /opt/noema/Caddyfile on the staging droplet (ssh host `noema`). Source of truth
+# is on the box, not here. See docs/ops/staging-deploy.md. (/root/hyperbot/Caddyfile is stale.)
 noema.art, www.noema.art {
     reverse_proxy hyperbot:4000
 }

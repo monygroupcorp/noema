@@ -34,6 +34,9 @@ tmp/
 temp/
 storage/
 secrets/
+# Private compliance module (ADR-0012 §49 — abuse surface, not published; injected at deploy).
+# CSAM/NCMEC detection logic + thresholds live here and MUST NOT enter the public repo.
+src/private/
 pids/
 *.pid
 *.seed
@@ -71,6 +74,7 @@ scripts/tool_registry.generated.json
 !deploy.sh
 !deploy-staging.sh
 !release.sh
+!crystallog.sh
 
 # Old cruft
 agent_prompts/
@@ -100,3 +104,29 @@ typings/
 .tern-port
 .release-please-manifest.json
 release-please-config.json
+.env.fake
+__pycache__/
+
+# Arcanum ceremony artifacts (large binary files — host on R2/CDN)
+src/arcanum/circuit/artifacts/*.ptau
+src/arcanum/circuit/artifacts/*.zkey
+!src/arcanum/circuit/artifacts/arcanum_final.zkey
+src/arcanum/circuit/artifacts/arcanum.r1cs
+src/arcanum/circuit/artifacts/arcanum.sym
+src/arcanum/circuit/artifacts/arcanum_js/
+docs/competitive/
+tee/native-test/native-test
+tee/wg-server/wg-server
+
+# ComfyDeploy pre-migration archive output (large; keep off git)
+/comfydeploy-archive/
+
+# Corpus-space pipeline: venv + large intermediate artifacts (regenerable)
+/scripts/corpus-space/.venv/
+/scripts/corpus-space/out/
+/scripts/corpus-space/out-smoke/
+# Generated 3D-space frontend artifact (built by scripts/corpus-space/project.py)
+/src/platforms/web/app/public/space*/
+
+# Compiled Go binary (build artifact)
+tee/wg-server/tee-wg-server
