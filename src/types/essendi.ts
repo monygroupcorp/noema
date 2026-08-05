@@ -1,0 +1,157 @@
+// =============================================================================
+// ESSENDI — modi essendi — modes of being
+// =============================================================================
+//
+// From the 13th-century Modistae philosopher-grammarians who divided language
+// into three modes: essendi (being), intelligendi (understanding), significandi
+// (signifying). Our type system maps directly onto this framework:
+//
+//   essendi      → Essentia    what EXISTS in the platform (atomic operations)
+//   intelligendi → Intella     what UNDERSTANDS / processes (models, compute)
+//   significandi → Signum      what SIGNIFIES value (proofs of credit)
+//
+// An Essentia is an atomicus Modus that lives in the platform's canonical
+// catalog. It is the smallest named unit of expression — what the platform
+// formerly called a "tool." Users never see Essentia directly; they see Mode
+// (the user-facing composed Modus that wraps one or more Essentiae).
+//
+// Examples: runmake (image generation), upscale-x4, caption, ltx-video
+// =============================================================================
+
+import type { Modus } from './modus'
+
+/**
+ * The output category of an essentia — what kind of thing it produces.
+ * Also constrains which Intella (models) are compatible with it.
+ */
+export type EssentiaCategoria =
+  | 'image'   // produces image output (FLUX, SDXL, SD15...)
+  | 'video'   // produces video output (LTX-Video...)
+  | 'audio'   // produces audio output (HeartMuLa music...)
+  | '3d'      // produces a 3D mesh output (Hunyuan3D — .glb/.obj)
+  | 'text'    // produces text output (LLM inference)
+  | 'code'    // produces executable code
+  | 'chain'   // on-chain operation (transaction, contract call)
+
+/**
+ * GenFlags — per-flow defaults for GPU selection + inference behaviour, merged with
+ * per-request `_genFlags` overrides at compile time. The flow's own FORM, not substrate.
+ */
+export interface GenFlags {
+  batchSize?: number
+  /** 'shuffle' = random each run, 'fixed' = always seedPlaceholder, 'increment' = base + pieceIndex */
+  seedStrategy?: 'shuffle' | 'fixed' | 'increment'
+  seedPlaceholder?: number
+  privateMode?: boolean
+  /** Minimum VRAM in GB — used by GPUScheduler for pod selection. (The fundament also declares a
+   *  capacity via `Fundamentum.vramGb`; this stays for the request-time scheduler path.) */
+  vramGb?: number
+  maxPricePerHr?: number
+}
+
+/**
+ * Essentia — an atomic, platform-catalogued modus.
+ *
+ * Extends Modus with:
+ *   - genus is always 'atomicus' (essentiae are leaves, never trees)
+ *   - categoria declares what it produces
+ *   - a version-pinned reference to the `Fundamentum` it runs on (the substrate), plus its own
+ *     execution FORM (workflow template, seed key, generation flags)
+ *
+ * Per ADR-0005, the SUBSTRATE (image + runtime + base/support weights) was lifted out of the old
+ * provider-named `runpodSpec` into `Fundamentum`; the Essentia now REFERENCES it (id + versio, the
+ * same discipline as the template ref) so a family of essentiae share one fundament. The form half
+ * — `workflowTemplate`, `seedInputKey`, `defaultGenFlags` — stays here. The provider name (runpod)
+ * lives only on the `Cursor` / `Materia.genus`. Base weights live on the `Fundamentum`; any
+ * flow-specific extra weights may still ride `Modus.intellae`.
+ *
+ * "essentia" = essence/being in Latin — the thing that simply IS,
+ * the irreducible expression the platform knows how to execute.
+ */
+export interface Essentia extends Modus {
+  /** Essentiae are always atomic — they execute one thing */
+  genus: 'atomicus'
+  categoria: EssentiaCategoria
+
+  /**
+   * The compute substrate this flow runs on — a version-pinned reference into `Fundamentorum`.
+   * Present for pod-hosted flows (ministerium === 'runpod'); absent for API-hosted essentiae
+   * (OpenAI, Replicate, …). Replaces the former provider-named `runpodSpec` envelope (ADR-0005).
+   */
+  fundamentumId?: string
+  fundamentumVersio?: string
+
+  /**
+   * Workflow template identifier — looked up in the template registry (templateId in the workflow
+   * JSON / DB). The flow's own FORM: which graph runs on the fundament. Required for pod flows.
+   *
+   * This is the FORM HALF for `runtime: 'ComfyUI'` flows. Non-ComfyUI runtimes carry a different
+   * form half instead (ADR-0007): `inferentia` for 'vLLM'/'llm', a script form for 'python-modelcard'
+   * (pending). Exactly one form half is meaningful per flow, selected by `Fundamentum.runtime`.
+   */
+  workflowTemplate?: string
+  workflowTemplateVersion?: string
+  /** Which aditus field holds the seed value. Default: 'input_seed'. Passed to the slot map resolver. */
+  seedInputKey?: string
+  /** Default generation flags — merged with per-request `_genFlags` overrides. */
+  defaultGenFlags?: GenFlags
+
+  /**
+   * "inferentia" = inference (Latin). The FORM HALF for LLM/serving runtimes ('vLLM' | 'llm') —
+   * the analogue of `workflowTemplate` for flows that have no ComfyUI graph (ADR-0007 Part B item 4).
+   * The Compiler reads it (instead of a workflow template) when `Fundamentum.runtime` is an LLM
+   * runtime, producing an `InferenceCompiledSpec` rather than a graph spec.
+   */
+  inferentia?: {
+    /** Flow-baked system/instruction prompt, prepended ahead of the user's `aditus.prompt`
+     *  (e.g. ShotVL's "you are a cinematography expert" brief). Absent → no system prompt. */
+    systemPrompt?: string
+    /** Flow-default generation parameters NOT exposed as `aditus` ports (e.g. top_p, repeat_penalty).
+     *  Merged UNDER the user's aditus knobs (max_tokens, temperature…) — user values win. */
+    genParams?: Record<string, unknown>
+  }
+
+  /**
+   * The FORM HALF for runtime 'python-modelcard' (ADR-0007): a cloned modelcard repo run as a
+   * one-shot CLI. The Compiler reads it (instead of workflowTemplate/inferentia) and produces a
+   * `ScriptCompiledSpec`. Idiosyncratic per model — some read inputs from files (HeartMuLa writes
+   * lyrics.txt/tags.txt), all collect an output artifact.
+   */
+  script?: {
+    /** Git repo to clone — the modelcard's inference code (e.g. github.com/HeartMuLa/heartlib). */
+    repo: string
+    /** Post-clone install command run in the repo (default "pip install -e . -q"). HeartMuLa is a
+     *  package (-e .); Hunyuan3D is a plain repo ("pip install -r requirements.txt -q"). */
+    install?: string
+    /** Command to run from the repo root (e.g. "python examples/run_music_generation.py"). */
+    entry: string
+    /** Always-passed flags (e.g. ["--model_path=./ckpt", "--version=3B"]). */
+    fixedArgs?: string[]
+    /** aditus key → CLI flag (e.g. { temperature: "--temperature" }). Value taken from aditus/default. */
+    argMap?: Record<string, string>
+    /** aditus key → file path to WRITE its (affix-woven) value into before the run
+     *  (e.g. { lyrics: "assets/lyrics.txt", tags: "assets/tags.txt" }). */
+    fileInputs?: Record<string, string>
+    /** FIXED files written into the repo before the run — path → literal content. For repos with no
+     *  CLI: drop a thin wrapper script (e.g. Hunyuan3D's shape-gen) that `entry` then runs. */
+    fixedFiles?: Record<string, string>
+    /** Output artifact path (relative to repo root) the executor collects (e.g. "assets/output.mp3"). */
+    output: string
+    /** The `exitus` kind of the output, for delivery (e.g. "audio", "3d"). */
+    outputKind: string
+  }
+}
+
+/** "Essentiae" — nominative plural of essentia */
+export type Essentiae = Essentia[]
+
+/**
+ * Essentiarum — genitive plural "of the essences."
+ * The catalog of all platform-known atomic operations.
+ */
+export interface Essentiarum {
+  find(id: string): Promise<Essentia | null>
+  list(categoria?: EssentiaCategoria): Promise<Essentiae>
+  /** Returns only platform-canonical (canonica: true) essentiae */
+  canonical(): Promise<Essentiae>
+}

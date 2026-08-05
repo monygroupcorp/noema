@@ -5,21 +5,49 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  # Hermetic gate — no live DB, no secrets. The fast feedback loop agents (and humans) must pass.
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-
       - run: npm install --legacy-peer-deps
+      - run: npm run typecheck         # tsc --noEmit (src/) — was unchecked in CI before
+      - run: npm run test:hermetic     # adapter + architecture/boundary + template/install guards (no live DB)
 
-      - run: npm test
+  # DB-layer gate — the crystal suite that needs a real Mongo (MongoIntella, MongoModorum,
+  # executionWebhook, Consuetudinum, the Compiler↔Mongo LoRA repro, …). NOT covered by the
+  # hermetic `verify` job (which uses mock stores that diverge from real Mongo). This is the gate
+  # that would have caught the 3 live bugs from 2026-06-09. See docs/agent-tasks/TASK-012.
+  crystal-db:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      # Single-node replica set (ledger Debt #2 / ruling R3): settle now wraps its two writes in a
+      # Mongo transaction, and transactions require a replica set — the old standalone `mongo:7`
+      # service container could not exercise the transactional path. A GitHub `services:` container
+      # cannot override mongod's command to add `--replSet`, so we run it manually and initiate the
+      # RS. The advertised member host is 127.0.0.1:27017, so the client reaches it as a real RS.
+      - name: Start single-node replica-set Mongo
+        run: |
+          docker run -d --name mongo -p 27017:27017 mongo:7 --replSet rs0 --bind_ip_all
+          until docker exec mongo mongosh --quiet --eval 'db.runCommand({ ping: 1 })' >/dev/null 2>&1; do sleep 1; done
+          docker exec mongo mongosh --quiet --eval 'rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "127.0.0.1:27017" }] })'
+          until [ "$(docker exec mongo mongosh --quiet --eval 'rs.status().myState')" = "1" ]; do sleep 1; done
+      - run: npm install --legacy-peer-deps
+      # run-with-env.sh no-ops the .env load when absent. `?replicaSet=rs0` is REQUIRED — it drives
+      # the driver's topology discovery so transactions are available. DB name is hardcoded
+      # `noemaplane_test`. (Do NOT add directConnection=true — it disables the RS topology txns need.)
+      - run: npm run test:crystal
         env:
-          NODE_ENV: test
+          MONGODB_URI: mongodb://127.0.0.1:27017/?replicaSet=rs0
 
   docker-build:
     runs-on: ubuntu-latest

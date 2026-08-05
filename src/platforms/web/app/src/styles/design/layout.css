@@ -1,0 +1,41 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   LAYOUT primitives — shared containers, grid, and spacing helpers so pages
+   share structure, not just color. Breakpoint literals match the --bp-* tokens.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Centered content column with page gutter. Modifiers narrow/widen it. */
+.ds-container {
+  width: 100%;
+  max-width: var(--container-content);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+.ds-container--prose { max-width: var(--container-prose); }
+.ds-container--wide  { max-width: var(--container-wide); }
+.ds-container--full  { max-width: none; }
+
+/* 12-column grid; collapses to a single column below md (768px = --bp-md). */
+.ds-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--gutter);
+}
+@media (max-width: 768px) {
+  .ds-grid { grid-template-columns: 1fr; }
+}
+
+/* Vertical rhythm: even spacing between stacked children. */
+.ds-stack > * + * { margin-top: var(--space-4); }
+.ds-stack--tight > * + * { margin-top: var(--space-2); }
+.ds-stack--loose > * + * { margin-top: var(--space-6); }
+
+/* Horizontal group that wraps (toolbars, tag rows, button rows). */
+.ds-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+/* Full-bleed section with vertical padding (marketing rhythm). */
+.ds-section { padding-block: var(--space-9); }

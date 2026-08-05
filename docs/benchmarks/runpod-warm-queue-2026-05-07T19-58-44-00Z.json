@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-05-07T19:49:35.533Z",
+  "cloudType": "SECURE",
+  "prompt": "a neon cat in a space station, cinematic",
+  "phases": {
+    "provisionMs": 39492,
+    "setupMs": 37268,
+    "modelsMs": 443323,
+    "comfyReadyMs": 444100
+  },
+  "jobs": [
+    {
+      "label": "cold_inference",
+      "seed": 100,
+      "promptId": "5077f550-932d-498b-8aa0-7e7978db6d96",
+      "inferenceMs": 24092,
+      "images": [
+        {
+          "filename": "runmake_00001_.png",
+          "subfolder": "",
+          "type": "output"
+        }
+      ]
+    },
+    {
+      "label": "warm_inference",
+      "seed": 200,
+      "promptId": "4d4ffe15-ac03-4431-a06f-4346c7ef2934",
+      "inferenceMs": 2763,
+      "images": [
+        {
+          "filename": "runmake_00002_.png",
+          "subfolder": "",
+          "type": "output"
+        }
+      ]
+    }
+  ],
+  "gpuTypeId": null,
+  "hourlyUsd": 0.69,
+  "totalMs": 547728,
+  "totalCostUsd": 0.10498
+}

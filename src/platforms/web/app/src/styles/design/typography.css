@@ -1,0 +1,83 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   TYPE RAMP — named text styles. Sizes/weights/line-heights/tracking bundled so
+   every app types the same. Each brand's TYPEFACE flows in automatically via the
+   font-role tokens (--font-display / --font-body / --font-mono / --font-marquee),
+   so the same class renders Geist for NOEMA, Syne for NOESIS, Cormorant for OCI.
+
+   Apply as classes: <h1 class="ds-h1">. Margins are reset — control rhythm with
+   layout utilities (.ds-stack) or your own spacing. Headings are fluid (clamp)
+   so they scale without breakpoints.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.ds-display {
+  font-family: var(--font-marquee);
+  font-weight: var(--weight-bold);
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  margin: 0;
+}
+.ds-h1 {
+  font-family: var(--font-display);
+  font-weight: var(--weight-semibold);
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  margin: 0;
+}
+.ds-h2 {
+  font-family: var(--font-display);
+  font-weight: var(--weight-semibold);
+  font-size: clamp(1.5rem, 3vw, 2.25rem);
+  line-height: var(--leading-snug);
+  letter-spacing: var(--tracking-tight);
+  margin: 0;
+}
+.ds-h3 {
+  font-family: var(--font-display);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-xl);
+  line-height: var(--leading-snug);
+  margin: 0;
+}
+.ds-h4 {
+  font-family: var(--font-display);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-lg);
+  line-height: var(--leading-snug);
+  margin: 0;
+}
+.ds-lead {
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--text-lg);
+  line-height: var(--leading-normal);
+  color: var(--color-text);
+  margin: 0;
+}
+.ds-body {
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+  margin: 0;
+}
+.ds-small {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  margin: 0;
+}
+.ds-caption {
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--color-text-muted);
+  margin: 0;
+}
+.ds-mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  margin: 0;
+}

@@ -1,0 +1,20 @@
+{
+  "templateId": "lora-test",
+  "version": "1",
+  "displayName": "Test fixture — loraCapable workflow for the trigger resolver path",
+  "seedInputKey": "input_seed",
+  "loraCapable": true,
+  "inputTemplate": {
+    "6":  { "class_type": "EmptyLatentImage",   "inputs": { "width": 512, "height": 512, "batch_size": 1 } },
+    "13": { "class_type": "KSampler",           "inputs": { "seed": 88888888, "steps": 4 } },
+    "22": { "class_type": "CLIPTextEncodeFlux", "inputs": { "clip_l": "PLACEHOLDER", "t5xxl": "PLACEHOLDER" } }
+  },
+  "slotMap": {
+    "/13/inputs/seed":   "input_seed",
+    "/22/inputs/clip_l": "prompt",
+    "/22/inputs/t5xxl":  "prompt"
+  },
+  "requiredModels": [
+    { "role": "unet", "id": "intella.flux-base", "url": "https://example.com/flux.safetensors", "dest": "unet/flux.safetensors" }
+  ]
+}

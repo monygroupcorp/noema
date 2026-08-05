@@ -1,0 +1,270 @@
+{
+  "templateId": "unknownt2v",
+  "version": "1",
+  "status": "DRAFT — not registered, not runnable",
+  "blocked": "BLOCKED: needs video-output exitus + Hunyuan-video weights/substrate (no image input — t2v)",
+  "categoriaHint": "video (Hunyuan t2v → direct)",
+  "loraCapable": false,
+  "customNodes": [],
+  "aditus": {
+    "input_prompt": {
+      "type": "text",
+      "required": true
+    },
+    "input_negative_prompt": {
+      "type": "text",
+      "default": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走，裸露，NSFW"
+    }
+  },
+  "slotMap": {
+    "/89/inputs/text": "input_prompt",
+    "/72/inputs/text": "input_negative_prompt"
+  },
+  "outputs": [
+    "80:SaveVideo"
+  ],
+  "inputTemplate": {
+    "71": {
+      "_meta": {
+        "title": "Load CLIP"
+      },
+      "inputs": {
+        "type": "wan",
+        "device": "default",
+        "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+      },
+      "class_type": "CLIPLoader"
+    },
+    "72": {
+      "_meta": {
+        "title": "CLIP Text Encode (Negative Prompt)"
+      },
+      "inputs": {
+        "clip": [
+          "71",
+          0
+        ],
+        "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走，裸露，NSFW"
+      },
+      "class_type": "CLIPTextEncode"
+    },
+    "73": {
+      "_meta": {
+        "title": "Load VAE"
+      },
+      "inputs": {
+        "vae_name": "wan_2.1_vae.safetensors"
+      },
+      "class_type": "VAELoader"
+    },
+    "74": {
+      "_meta": {
+        "title": "EmptyHunyuanLatentVideo"
+      },
+      "inputs": {
+        "width": 832,
+        "height": 544,
+        "length": 81,
+        "batch_size": 1
+      },
+      "class_type": "EmptyHunyuanLatentVideo"
+    },
+    "75": {
+      "_meta": {
+        "title": "Load Diffusion Model"
+      },
+      "inputs": {
+        "unet_name": "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
+        "weight_dtype": "fp8_e5m2"
+      },
+      "class_type": "UNETLoader"
+    },
+    "76": {
+      "_meta": {
+        "title": "Load Diffusion Model"
+      },
+      "inputs": {
+        "unet_name": "wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors",
+        "weight_dtype": "fp8_e5m2"
+      },
+      "class_type": "UNETLoader"
+    },
+    "78": {
+      "_meta": {
+        "title": "KSampler (Advanced)"
+      },
+      "inputs": {
+        "cfg": 1,
+        "model": [
+          "86",
+          0
+        ],
+        "steps": 7,
+        "negative": [
+          "72",
+          0
+        ],
+        "positive": [
+          "89",
+          0
+        ],
+        "add_noise": "disable",
+        "scheduler": "simple",
+        "noise_seed": 0,
+        "end_at_step": 7,
+        "latent_image": [
+          "81",
+          0
+        ],
+        "sampler_name": "euler",
+        "start_at_step": 3,
+        "return_with_leftover_noise": "disable"
+      },
+      "class_type": "KSamplerAdvanced"
+    },
+    "80": {
+      "_meta": {
+        "title": "Save Video"
+      },
+      "inputs": {
+        "codec": "auto",
+        "video": [
+          "88",
+          0
+        ],
+        "format": "auto",
+        "filename_prefix": "video/ComfyUI"
+      },
+      "class_type": "SaveVideo"
+    },
+    "81": {
+      "_meta": {
+        "title": "KSampler (Advanced)"
+      },
+      "inputs": {
+        "cfg": 1,
+        "model": [
+          "82",
+          0
+        ],
+        "steps": 7,
+        "negative": [
+          "72",
+          0
+        ],
+        "positive": [
+          "89",
+          0
+        ],
+        "add_noise": "enable",
+        "scheduler": "simple",
+        "noise_seed": 782413987760968,
+        "end_at_step": 3,
+        "latent_image": [
+          "74",
+          0
+        ],
+        "sampler_name": "euler",
+        "start_at_step": 0,
+        "return_with_leftover_noise": "enable"
+      },
+      "class_type": "KSamplerAdvanced"
+    },
+    "82": {
+      "_meta": {
+        "title": "ModelSamplingSD3"
+      },
+      "inputs": {
+        "model": [
+          "83",
+          0
+        ],
+        "shift": 5
+      },
+      "class_type": "ModelSamplingSD3"
+    },
+    "83": {
+      "_meta": {
+        "title": "LoraLoaderModelOnly"
+      },
+      "inputs": {
+        "model": [
+          "75",
+          0
+        ],
+        "lora_name": "wan2.2/Wan2.2-Lightning_T2V-v1.1-A14B-4steps-lora_HIGH_fp16.safetensors",
+        "strength_model": 1
+      },
+      "class_type": "LoraLoaderModelOnly"
+    },
+    "85": {
+      "_meta": {
+        "title": "LoraLoaderModelOnly"
+      },
+      "inputs": {
+        "model": [
+          "76",
+          0
+        ],
+        "lora_name": "wan2.2/Wan2.2-Lightning_T2V-v1.1-A14B-4steps-lora_LOW_fp16.safetensors",
+        "strength_model": 1
+      },
+      "class_type": "LoraLoaderModelOnly"
+    },
+    "86": {
+      "_meta": {
+        "title": "ModelSamplingSD3"
+      },
+      "inputs": {
+        "model": [
+          "85",
+          0
+        ],
+        "shift": 5
+      },
+      "class_type": "ModelSamplingSD3"
+    },
+    "87": {
+      "_meta": {
+        "title": "VAE Decode"
+      },
+      "inputs": {
+        "vae": [
+          "73",
+          0
+        ],
+        "samples": [
+          "78",
+          0
+        ]
+      },
+      "class_type": "VAEDecode"
+    },
+    "88": {
+      "_meta": {
+        "title": "Create Video"
+      },
+      "inputs": {
+        "fps": 16,
+        "images": [
+          "87",
+          0
+        ]
+      },
+      "class_type": "CreateVideo"
+    },
+    "89": {
+      "_meta": {
+        "title": "CLIP Text Encode (Positive Prompt)"
+      },
+      "inputs": {
+        "clip": [
+          "71",
+          0
+        ],
+        "text": ""
+      },
+      "class_type": "CLIPTextEncode"
+    }
+  }
+}

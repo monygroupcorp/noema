@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en" class="tier-identified" data-font="geist">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Noema — account</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="app.css" />
+</head>
+<body>
+<div class="app two">
+  <aside class="rail" id="rail"></aside>
+  <section class="main">
+    <div class="topbar">
+      <div class="me" id="me"></div>
+      <div class="crumb"><span class="sep">/</span> account</div>
+      <div class="vis" id="vis"></div>
+    </div>
+    <div class="page"><div class="pw">
+      <div class="pagehead">
+        <div><h1>Account</h1><div class="sub">studio · monyrth</div></div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="l">Balance</div><div class="n">214</div><div class="d">credits · ≈ $0.92</div></div>
+        <div class="stat"><div class="l">Spent this month</div><div class="n">$14.20</div><div class="d">47 runs</div></div>
+        <div class="stat"><div class="l">Runs</div><div class="n">312</div><div class="d">all time</div></div>
+      </div>
+
+      <div class="sectionhead">Ledger</div>
+      <table class="tbl">
+        <thead>
+          <tr><th>When</th><th>Entry</th><th>Detail</th><th>Δ</th><th>Balance</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>today 14:02</td><td>spend</td><td>make · flux-schnell</td><td class="v neg">-43</td><td class="v">214</td></tr>
+          <tr><td>today 11:20</td><td>spend</td><td>animate · ltx-video</td><td class="v neg">-120</td><td class="v">257</td></tr>
+          <tr><td>yesterday</td><td>deposit</td><td>eth → credits</td><td class="v pos">+300</td><td class="v">377</td></tr>
+          <tr><td>yesterday</td><td>reward</td><td>referral</td><td class="v pos">+25</td><td class="v">77</td></tr>
+          <tr><td>2 days ago</td><td>spend</td><td>describe · joycaption</td><td class="v neg">-12</td><td class="v">52</td></tr>
+          <tr><td>2 days ago</td><td>spend</td><td>make · hunyuan3d</td><td class="v neg">-86</td><td class="v">64</td></tr>
+          <tr><td>3 days ago</td><td>spend</td><td>make · flux-schnell</td><td class="v neg">-43</td><td class="v">150</td></tr>
+          <!-- balance = running balance after each entry; top-down each row.balance - row.Δ = next row.balance -->
+        </tbody>
+      </table>
+
+      <div class="sectionhead">Recent quotes</div>
+      <div class="list">
+        <div class="lrow"><div class="li-main"><div class="t">make · flux-schnell</div><div class="s">today 14:02</div></div><div class="li-right">≈ $0.043</div></div>
+        <div class="lrow"><div class="li-main"><div class="t">animate · ltx-video</div><div class="s">today 11:20</div></div><div class="li-right">≈ $0.120</div></div>
+        <div class="lrow"><div class="li-main"><div class="t">make · hunyuan3d</div><div class="s">2 days ago</div></div><div class="li-right">≈ $0.086</div></div>
+      </div>
+    </div></div>
+  </section>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

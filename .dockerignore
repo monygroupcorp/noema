@@ -5,6 +5,8 @@ scripts/local_dev_helpers/node_modules
 scripts/local_dev_helpers/package-lock.json
 src/platforms/web/frontend/node_modules
 src/platforms/web/frontend/dist
+src/platforms/web/app/node_modules
+src/platforms/web/app/dist
 
 # Secrets
 .env
@@ -17,9 +19,13 @@ src/platforms/web/frontend/dist
 .claude
 research
 tests
-*.md
+**/*.md
+!src/platforms/web/app/src/content/*.md
 deploy.sh
 deploy-staging.sh
 docker-compose.yml
 docker-compose.prod.yml
 Caddyfile
+
+# Internal docs — never ship in the image
+docs

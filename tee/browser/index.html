@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TEE Private Compute</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #151c24;
+      --border: #2d3948;
+      --text: #edf3fb;
+      --muted: #7a9bb5;
+      --accent: #4cc9f0;
+      --green: #89fc7a;
+      --red: #ff6b6b;
+      --yellow: #ffd166;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "IBM Plex Mono", "Fira Code", monospace;
+      font-size: 13px;
+      padding: 24px;
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    h1 { font-size: 1.1rem; color: var(--accent); margin-bottom: 4px; }
+    .subtitle { color: var(--muted); font-size: 0.85rem; margin-bottom: 24px; }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 16px;
+      transition: opacity 0.2s;
+    }
+    section.disabled { opacity: 0.4; pointer-events: none; }
+    h2 { font-size: 0.9rem; color: var(--accent); margin-bottom: 14px; letter-spacing: 0.05em; }
+    label { display: block; color: var(--muted); font-size: 0.8rem; margin-bottom: 4px; margin-top: 10px; }
+    label:first-of-type { margin-top: 0; }
+    input, textarea, select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font: inherit;
+      padding: 8px 10px;
+    }
+    textarea { resize: vertical; min-height: 72px; }
+    .row { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+    button {
+      background: var(--accent);
+      color: #041018;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #1e2d3e;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .status {
+      margin-top: 12px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+    }
+    .status.idle    { background: rgba(76,201,240,0.08); color: #b9eafe; }
+    .status.ok      { background: rgba(137,252,122,0.1); color: var(--green); }
+    .status.err     { background: rgba(255,107,107,0.1); color: var(--red); }
+    .status.loading { background: rgba(255,209,102,0.1); color: var(--yellow); }
+    #output {
+      margin-top: 12px;
+      padding: 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      min-height: 120px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.6;
+      font-size: 0.85rem;
+    }
+    #logs {
+      padding: 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      height: 200px;
+      overflow-y: auto;
+      font-size: 0.75rem;
+      color: var(--muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .note { font-size: 0.78rem; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+    .pair { display: flex; gap: 10px; }
+    .pair > * { flex: 1; }
+    details summary { color: var(--muted); font-size: 0.8rem; cursor: pointer; margin-top: 10px; }
+    details > div { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>TEE Private Compute</h1>
+  <p class="subtitle">private GPU session · WireGuard WASM · platform-managed tunnel</p>
+
+  <!-- 0. Local dev mode — test against a local tee-wg-server without provisioning a real pod -->
+  <section>
+    <h2>0. LOCAL DEV (bypass platform)</h2>
+    <p class="note">Point at a local <code>go run ./tee/wg-server</code> instance. No RunPod needed.</p>
+    <div class="pair">
+      <div>
+        <label>Server WG public key (from wg pubkey)</label>
+        <input id="localServerKey" placeholder="base64 public key">
+      </div>
+      <div>
+        <label>WS proxy URL</label>
+        <input id="localProxyUrl" value="socks5+ws://localhost:8080/?gost&insecureudp">
+      </div>
+    </div>
+    <div class="pair">
+      <div>
+        <label>WG peer endpoint (server UDP host:port)</label>
+        <input id="localPeerEndpoint" value="127.0.0.1:51820">
+      </div>
+      <div>
+        <label>Client private key (optional — leave blank to generate)</label>
+        <input id="localClientKey" placeholder="base64 private key — for reproducible tests only">
+      </div>
+    </div>
+    <div class="row">
+      <button id="btnLocalConnect" disabled onclick="localConnect()">Connect (local)</button>
+    </div>
+    <div class="status idle" id="localStatus">WASM loading…</div>
+  </section>
+
+  <!-- 1. Session -->
+  <section id="sectionSession">
+    <h2>1. START SESSION</h2>
+    <p class="note">Generate keys and provision a private GPU session in one step.</p>
+
+    <div class="pair">
+      <div>
+        <label>Platform URL</label>
+        <input id="platformUrl">
+      </div>
+      <div>
+        <label>Auth token (animaId session)</label>
+        <input id="authToken" type="password" placeholder="your session token">
+      </div>
+    </div>
+
+    <label>GPU class</label>
+    <select id="gpuClass">
+      <option value="24gb">24 GB</option>
+      <option value="48gb">48 GB</option>
+      <option value="80gb">80 GB</option>
+    </select>
+
+    <div class="row">
+      <button id="btnStart" disabled onclick="startSession()">Start Private Session</button>
+      <button class="secondary" id="btnDisconnect" disabled onclick="disconnect()">End Session</button>
+    </div>
+    <div class="status idle" id="sessionStatus">WASM loading…</div>
+  </section>
+
+  <!-- 2. Setup model -->
+  <section id="sectionSetup" class="disabled">
+    <h2>2. SETUP MODEL</h2>
+    <p class="note">Essentia definition is pushed through the tunnel — the platform never sees it.</p>
+    <label>Essentia (JSON)</label>
+    <textarea id="essentiaJson" style="min-height:200px">{
+  "fundamentum": {
+    "runtime": "llama.cpp",
+    "install": [
+      "pip install llama-cpp-python[server] --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124 -q"
+    ],
+    "launchTemplate": "python3 -m llama_cpp.server --model {model} --n_gpu_layers -1 --port {port} --host 0.0.0.0",
+    "readyProbe": "GET http://localhost:{port}/v1/models",
+    "intellae": [{ "id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf", "role": "lm" }]
+  }
+}</textarea>
+    <label>Essentia ID</label>
+    <input id="essentiaId" value="qwen2.5-0.5b">
+    <div class="row">
+      <button id="btnSetup" onclick="setupModel()">Setup Model</button>
+    </div>
+    <div class="status idle" id="setupStatus">waiting for tunnel</div>
+  </section>
+
+  <!-- 3. Inference -->
+  <section id="sectionInfer" class="disabled">
+    <h2>3. RUN INFERENCE</h2>
+    <label>Prompt</label>
+    <textarea id="prompt">Hello, what model are you and what can you do?</textarea>
+    <div class="row">
+      <button id="btnRun" onclick="run()">Run</button>
+    </div>
+    <div id="output"></div>
+    <div class="status idle" id="runStatus">idle</div>
+  </section>
+
+  <!-- Logs -->
+  <section>
+    <h2>LOGS</h2>
+    <div class="row" style="margin-bottom:10px">
+      <button class="secondary" onclick="fetchServerLog()">Fetch Server Log</button>
+      <button class="secondary" onclick="document.getElementById('logs').textContent=''">Clear</button>
+    </div>
+    <div id="logs"></div>
+  </section>
+
+  <script src="wasm_exec.js"></script>
+  <script>
+    // WebSocket interceptor — log all WS activity from WASM to the UI log panel.
+    // Must be installed before the WASM runs.
+    (function() {
+      const _WS = window.WebSocket;
+      window.WebSocket = function(url, protos) {
+        const ws = protos ? new _WS(url, protos) : new _WS(url);
+        const short = url.replace(/^wss?:\/\//, '').substring(0, 60);
+        window.teeLog && window.teeLog('[WS] open attempt → ' + short);
+        ws.addEventListener('open',  () => window.teeLog && window.teeLog('[WS] opened  → ' + short));
+        ws.addEventListener('error', () => window.teeLog && window.teeLog('[WS] ERROR   → ' + short));
+        ws.addEventListener('close', e => window.teeLog && window.teeLog('[WS] closed  → ' + short + ' code=' + e.code));
+        return ws;
+      };
+      window.WebSocket.prototype = _WS.prototype;
+      window.WebSocket.CONNECTING = _WS.CONNECTING;
+      window.WebSocket.OPEN       = _WS.OPEN;
+      window.WebSocket.CLOSING    = _WS.CLOSING;
+      window.WebSocket.CLOSED     = _WS.CLOSED;
+    })();
+
+    let wasmReady = false;
+    let connected = false;
+    let sessionId = null;
+    let inferPort = null;
+    let inferEssentiaId = null;
+    let currentProxyUrl = null; // set when session becomes ready; used by fetchServerLog()
+    let tunnelIp = '10.13.0.2';
+    let pollTimer = null;
+
+    // — WASM log receiver (also console.log so headless test runners can capture output)
+    window.teeLog = function(line) {
+      const el = document.getElementById('logs');
+      el.textContent += line + '\n';
+      el.scrollTop = el.scrollHeight;
+      console.log(line);
+    };
+
+    function log(msg) {
+      window.teeLog('[UI] ' + msg);
+    }
+
+    function setStatus(id, cls, msg) {
+      const el = document.getElementById(id);
+      el.className = 'status ' + cls;
+      el.textContent = msg;
+    }
+
+    function enable(sectionId) {
+      document.getElementById(sectionId).classList.remove('disabled');
+    }
+
+    function syncButtons() {
+      document.getElementById('btnStart').disabled        = !wasmReady || connected;
+      document.getElementById('btnDisconnect').disabled   = !sessionId;
+      document.getElementById('btnLocalConnect').disabled = !wasmReady || connected;
+      const localStatus = document.getElementById('localStatus');
+      if (wasmReady && localStatus.textContent === 'WASM loading…') {
+        localStatus.className = 'status idle';
+        localStatus.textContent = 'ready — enter server key and click Connect (local)';
+      }
+    }
+
+    async function localConnect() {
+      const proxyUrl   = document.getElementById('localProxyUrl').value.trim();
+      const serverKey  = document.getElementById('localServerKey').value.trim();
+      if (!serverKey) { setStatus('localStatus', 'err', 'enter the server WG public key'); return; }
+
+      const presetKey = document.getElementById('localClientKey').value.trim();
+      setStatus('localStatus', 'loading', presetKey ? 'using preset keypair…' : 'generating keypair…');
+      let kp;
+      try {
+        if (presetKey) {
+          // derive pubkey via wgGenerateKeys path isn't available; rely on server accepting any peer.
+          // For test mode: if server started with WG_CLIENT_PUBKEY matching this key's pubkey, it works.
+          kp = JSON.parse(await wgGenerateKeys());
+          // override private key — publicKey field will be wrong here but server uses its own config
+          kp.privateKey = presetKey;
+          log('local: using preset private key');
+        } else {
+          kp = JSON.parse(await wgGenerateKeys());
+          log('local: keypair generated — pubkey: ' + kp.publicKey.slice(0, 16) + '…');
+        }
+      } catch (e) { setStatus('localStatus', 'err', 'keygen: ' + e); return; }
+
+      // Probe WS before handing to WASM
+      await new Promise(resolve => {
+        const base = proxyUrl.replace(/^socks5\+ws:\/\//, 'ws://').replace(/\?.*$/, '').replace(/\/$/, '');
+        const wsUrl = base + '/';
+        log('[PROBE] testing WS to ' + wsUrl);
+        const probe = new WebSocket(wsUrl);
+        const done = () => { try { probe.close(); } catch (_) {} resolve(); };
+        probe.onopen  = () => { log('[PROBE] WS reachable ✓'); done(); };
+        probe.onerror = () => { log('[PROBE] WS unreachable — is tee-wg-server running?'); done(); };
+        setTimeout(done, 3000);
+      });
+
+      setStatus('localStatus', 'loading', 'connecting tunnel…');
+      const peerEndpoint = document.getElementById('localPeerEndpoint').value.trim() || '127.0.0.1:51820';
+      const cfg = {
+        proxyUrl,
+        localTunnelAddr: '10.13.0.2',
+        localPrivateKey: kp.privateKey,
+        listenPort: 0,
+        peerPublicKey:  serverKey,
+        peerEndpoint,
+        peerAllowedIPs: '10.13.0.1/32',
+        peerKeepalive:  5,
+      };
+      try {
+        const raw = await wgConnect(JSON.stringify(cfg));
+        const res = JSON.parse(raw);
+        connected = true;
+        tunnelIp = '10.13.0.2';
+        setStatus('localStatus', 'ok', 'tunnel connected — ' + res.message);
+        log('local: tunnel up');
+        enable('sectionSetup');
+      } catch (e) {
+        setStatus('localStatus', 'err', 'connect failed: ' + e);
+      }
+      syncButtons();
+    }
+
+    // — Step 1: generate keys, provision session, poll until ready, connect tunnel
+    async function startSession() {
+      const platformUrl = document.getElementById('platformUrl').value.trim();
+      const authToken   = document.getElementById('authToken').value.trim();
+      const gpuClass    = document.getElementById('gpuClass').value;
+
+      setStatus('sessionStatus', 'loading', 'generating keypair…');
+      syncButtons();
+
+      // 1a. Generate WireGuard keypair in WASM
+      let kp;
+      try {
+        kp = JSON.parse(await wgGenerateKeys());
+        log('keypair generated — pubkey: ' + kp.publicKey.slice(0, 16) + '…');
+      } catch (e) {
+        setStatus('sessionStatus', 'err', 'keygen failed: ' + e);
+        syncButtons();
+        return;
+      }
+
+      // 1b. Provision session on platform
+      setStatus('sessionStatus', 'loading', 'provisioning session…');
+      let session;
+      try {
+        const res = await fetch(platformUrl + '/v1/sessions/tee', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { 'Authorization': 'Bearer ' + authToken } : {}),
+          },
+          body: JSON.stringify({ gpuClass, wgClientPublicKey: kp.publicKey }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        session = (await res.json()).session;
+        sessionId = session.sessionId;
+        log('session created: ' + sessionId);
+      } catch (e) {
+        setStatus('sessionStatus', 'err', 'provision failed: ' + e);
+        syncButtons();
+        return;
+      }
+
+      // 1c. Poll until ready
+      setStatus('sessionStatus', 'loading', 'waiting for pod… (poll every 5s)');
+      try {
+        session = await pollUntilReady(platformUrl, authToken, sessionId);
+        log('pod ready — endpoint: ' + session.endpoint);
+      } catch (e) {
+        setStatus('sessionStatus', 'err', 'pod failed: ' + e);
+        syncButtons();
+        return;
+      }
+
+      // 1d. Probe WS connectivity to the proxy before handing off to WASM.
+      //     This isolates "proxy unreachable" from "WASM code path broken" — both
+      //     produce zero [WS] lines from the interceptor if the probe doesn't fire either.
+      await new Promise(resolve => {
+        const wsBase = session.proxyUrl
+          .replace(/^socks5\+wss:\/\//, 'wss://')
+          .replace(/^socks5\+ws:\/\//, 'ws://')
+          .replace(/\?.*$/, '')
+          .replace(/\/$/, '');
+        const wsUrl = wsBase + '/';
+        log('[PROBE] testing WS to ' + wsUrl.substring(0, 60));
+        const probe = new WebSocket(wsUrl);
+        const done = () => { try { probe.close(); } catch (_) {} resolve(); };
+        probe.onopen  = () => { log('[PROBE] WS reachable ✓'); done(); };
+        probe.onerror = () => { log('[PROBE] WS unreachable — check proxy URL or network'); done(); };
+        setTimeout(done, 4000); // don't block connect on probe timeout
+      });
+
+      // 1e. Connect tunnel
+      currentProxyUrl = session.proxyUrl;
+      // Log the proxy URL so it's visible in the UI and DevTools — needed to fetch /debug/wglog manually.
+      log('proxyUrl: ' + session.proxyUrl);
+      setStatus('sessionStatus', 'loading', 'connecting tunnel…');
+      const cfg = {
+        proxyUrl:        session.proxyUrl,
+        localTunnelAddr: session.tunnelIp || '10.13.0.2',
+        localPrivateKey: kp.privateKey,
+        listenPort:      0,
+        peerPublicKey:   session.serverPublicKey,
+        peerEndpoint:    session.endpoint,
+        peerAllowedIPs:  '10.13.0.1/32',
+        peerKeepalive:   25,
+      };
+      try {
+        const raw = await wgConnect(JSON.stringify(cfg));
+        const res = JSON.parse(raw);
+        connected = true;
+        tunnelIp = cfg.localTunnelAddr;
+        setStatus('sessionStatus', 'ok', 'tunnel connected — ' + res.message);
+        log('tunnel up');
+        enable('sectionSetup');
+      } catch (e) {
+        setStatus('sessionStatus', 'err', 'connect failed: ' + e);
+      }
+      syncButtons();
+    }
+
+    async function pollUntilReady(platformUrl, authToken, sessionId, timeoutMs = 300000) {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        await sleep(5000);
+        const res = await fetch(platformUrl + '/v1/sessions/tee/' + sessionId, {
+          headers: authToken ? { 'Authorization': 'Bearer ' + authToken } : {},
+        });
+        if (!res.ok) throw new Error('poll failed: ' + await res.text());
+        const session = (await res.json()).session;
+        log('poll: status=' + session.status);
+        if (session.status === 'ready') return session;
+        if (session.status === 'ended') throw new Error(session.error ?? 'session ended unexpectedly');
+      }
+      throw new Error('timed out waiting for pod');
+    }
+
+    // — Step 2: push Essentia through tunnel to runner
+    async function setupModel() {
+      let essentia;
+      try {
+        essentia = JSON.parse(document.getElementById('essentiaJson').value);
+      } catch (e) {
+        setStatus('setupStatus', 'err', 'invalid JSON: ' + e);
+        return;
+      }
+      const essentiaId = document.getElementById('essentiaId').value.trim();
+      setStatus('setupStatus', 'loading', 'installing model through tunnel…');
+      try {
+        const res = await wgRequest('http://10.13.0.1:7998/setup', 'POST', JSON.stringify({ essentiaId, essentia }));
+        const body = JSON.parse(res);
+        if (body.status !== 'ready') throw new Error(JSON.stringify(body));
+        inferPort = body.port;
+        inferEssentiaId = essentiaId;
+        setStatus('setupStatus', 'ok', 'model ready on port ' + inferPort);
+        log('setup done — port ' + inferPort);
+        enable('sectionInfer');
+      } catch (e) {
+        setStatus('setupStatus', 'err', 'setup failed: ' + e);
+      }
+    }
+
+    // — Step 3: inference through tunnel
+    function run() {
+      if (!inferEssentiaId) { setStatus('runStatus', 'err', 'no model — run setup first'); return; }
+      // Route through runner.py's /infer proxy — dynamically allocated process ports
+      // (e.g. 8000) are only on the real kernel stack inside the pod and are not
+      // reachable via the vtun (which only bridges port 7998 → runner.py).
+      const url    = 'http://10.13.0.1:7998/infer/' + inferEssentiaId + '/v1/chat/completions';
+      const prompt = document.getElementById('prompt').value.trim();
+      const output = document.getElementById('output');
+
+      const body = JSON.stringify({
+        model: 'local',
+        messages: [{ role: 'user', content: prompt }],
+        stream: true,
+      });
+
+      output.textContent = '';
+      setStatus('runStatus', 'loading', 'streaming…');
+      document.getElementById('btnRun').disabled = true;
+
+      wgStream(
+        url, body,
+        function(dataJSON) {
+          try {
+            const token = JSON.parse(dataJSON)?.choices?.[0]?.delta?.content;
+            if (token) output.textContent += token;
+          } catch (_) {}
+        },
+        function() {
+          setStatus('runStatus', 'ok', 'done');
+          document.getElementById('btnRun').disabled = false;
+        },
+        function(err) {
+          setStatus('runStatus', 'err', 'stream error: ' + err);
+          document.getElementById('btnRun').disabled = false;
+        },
+      );
+    }
+
+    // — Disconnect / end session
+    async function disconnect() {
+      // 1. Tell the platform to terminate the pod — fire and forget.
+      if (sessionId) {
+        const platformUrl = document.getElementById('platformUrl').value.trim();
+        const authToken   = document.getElementById('authToken').value.trim();
+        fetch(platformUrl + '/v1/sessions/tee/' + sessionId, {
+          method: 'DELETE',
+          headers: authToken ? { 'Authorization': 'Bearer ' + authToken } : {},
+        }).then(r => log('session terminated: ' + r.status)).catch(e => log('terminate error: ' + e));
+      }
+      // 2. Close WASM tunnel.
+      await wgDisconnect().catch(() => {});
+      connected = false;
+      sessionId = null;
+      inferPort = null;
+      inferEssentiaId = null;
+      setStatus('sessionStatus', 'idle', 'disconnected');
+      document.getElementById('sectionSetup').classList.add('disabled');
+      document.getElementById('sectionInfer').classList.add('disabled');
+      syncButtons();
+    }
+
+    // — Fetch /debug/wglog via the platform proxy (avoids CORS on the RunPod URL).
+    async function fetchServerLog() {
+      if (!sessionId) { log('[WGLOG] no active session — start a session first'); return; }
+      const platformUrl = document.getElementById('platformUrl').value.trim();
+      const authToken   = document.getElementById('authToken').value.trim();
+      log('[WGLOG] fetching server log…');
+      try {
+        const res = await fetch(platformUrl + '/v1/sessions/tee/' + sessionId + '/wglog?tail=200', {
+          headers: authToken ? { 'Authorization': 'Bearer ' + authToken } : {},
+        });
+        const text = await res.text();
+        if (!res.ok) { log('[WGLOG] error ' + res.status + ': ' + text); return; }
+        log('[WGLOG] ===== SERVER LOG =====\n' + text + '\n[WGLOG] ===== END =====');
+      } catch (e) {
+        log('[WGLOG] fetch failed: ' + e);
+      }
+    }
+
+    // — Helpers
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    // — WASM loader
+    async function loadWasm() {
+      setStatus('sessionStatus', 'loading', 'loading WASM…');
+      try {
+        const go = new Go();
+        const result = await WebAssembly.instantiateStreaming(fetch('app.wasm'), go.importObject);
+        go.run(result.instance);
+        wasmReady = true;
+        setStatus('sessionStatus', 'idle', 'ready — enter auth token and click Start Private Session');
+        syncButtons();
+        log('wasm loaded');
+      } catch (e) {
+        setStatus('sessionStatus', 'err', 'WASM load failed: ' + e);
+        log('wasm load error: ' + e);
+      }
+    }
+
+    document.getElementById('platformUrl').value = window.location.origin;
+    loadWasm();
+  </script>
+</body>
+</html>

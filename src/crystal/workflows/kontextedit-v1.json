@@ -1,0 +1,42 @@
+{
+  "templateId": "kontextedit",
+  "version": "1",
+  "displayName": "FLUX.1 Kontext — instruction edit",
+  "seedInputKey": "input_seed",
+  "loraCapable": true,
+  "customNodes": [
+    { "url": "https://github.com/skfoo/ComfyUI-Coziness", "name": "ComfyUI-Coziness" }
+  ],
+  "inputTemplate": {
+    "170": { "class_type": "LoadImage",            "inputs": { "image": "PLACEHOLDER" } },
+    "37":  { "class_type": "UNETLoader",           "inputs": { "unet_name": "flux1-kontext-dev.safetensors", "weight_dtype": "default" } },
+    "38":  { "class_type": "DualCLIPLoader",       "inputs": { "type": "flux", "clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl_fp16.safetensors" } },
+    "39":  { "class_type": "VAELoader",            "inputs": { "vae_name": "ae.safetensors" } },
+    "180": { "class_type": "LoraTextExtractor-b1f83aa2", "inputs": { "text": "PLACEHOLDER" } },
+    "179": { "class_type": "MultiLoraLoader-70bf3d77",   "inputs": { "clip": ["38", 0], "text": ["180", 1], "model": ["37", 0] } },
+    "89":  { "class_type": "CLIPTextEncode",       "inputs": { "clip": ["179", 1], "text": ["180", 0] } },
+    "33":  { "class_type": "CLIPTextEncode",       "inputs": { "clip": ["179", 1], "text": "" } },
+    "172": { "class_type": "VAEEncode",            "inputs": { "vae": ["39", 0], "pixels": ["170", 0] } },
+    "177": { "class_type": "GetImageSize",         "inputs": { "image": ["170", 0] } },
+    "154": { "class_type": "ReferenceLatent",      "inputs": { "latent": ["172", 0], "conditioning": ["89", 0] } },
+    "91":  { "class_type": "FluxGuidance",         "inputs": { "guidance": 2.5, "conditioning": ["154", 0] } },
+    "95":  { "class_type": "EmptySD3LatentImage",  "inputs": { "width": ["177", 0], "height": ["177", 1], "batch_size": 1 } },
+    "92":  { "class_type": "KSampler",             "inputs": { "cfg": 1, "seed": 88888888, "model": ["179", 0], "steps": 20, "denoise": 1, "negative": ["33", 0], "positive": ["91", 0], "scheduler": "simple", "latent_image": ["95", 0], "sampler_name": "euler" } },
+    "93":  { "class_type": "VAEDecode",            "inputs": { "vae": ["39", 0], "samples": ["92", 0] } },
+    "176": { "class_type": "SaveImage",            "inputs": { "images": ["93", 0], "filename_prefix": "runmake" } }
+  },
+  "slotMap": {
+    "/92/inputs/seed":     "input_seed",
+    "/92/inputs/steps":    "steps",
+    "/91/inputs/guidance": "guidance",
+    "/180/inputs/text":    "prompt",
+    "/170/inputs/image":   "image"
+  },
+  "requiredModels": [
+    { "role": "unet", "id": "intella.flux-kontext-dev", "url": "https://huggingface.co/Comfy-Org/flux1-kontext-dev_ComfyUI/resolve/main/split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors", "dest": "unet/flux1-kontext-dev.safetensors" },
+    { "role": "clip", "id": "intella.clip-l",     "url": "https://models.miladystation2.net/clip/clip_l.safetensors",     "dest": "clip/clip_l.safetensors" },
+    { "role": "clip", "id": "intella.t5xxl-fp16", "url": "https://models.miladystation2.net/clip/t5xxl_fp16.safetensors", "dest": "clip/t5xxl_fp16.safetensors" },
+    { "role": "vae",  "id": "intella.flux-vae",   "url": "https://models.miladystation2.net/vae/ae.safetensors",           "dest": "vae/ae.safetensors" }
+  ],
+  "platformHints": { "vramGb": 24 }
+}

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en" class="tier-identified" data-font="geist">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Noema — welcome</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="app.css" />
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+  /* standalone entry surface — no app shell, so give .center a flex host */
+  body{display:flex;min-height:100vh}
+  .ocard .foot{margin-top:13px;text-align:center;color:var(--faint);
+    font-family:var(--font-mono);font-size:11px;letter-spacing:0}
+  /* mobile: the card becomes the screen (not a floating desktop dialog) */
+  @media (max-width:600px){
+    .center{padding:0}
+    .ocard{width:100%;max-width:none;min-height:100vh;border:0;border-radius:0;box-shadow:none;
+           padding:var(--s8) var(--s5);display:flex;flex-direction:column;justify-content:center}
+  }
+</style>
+</head>
+<body>
+<div class="center">
+  <div class="ocard">
+    <div class="logo"></div>
+    <h1>Welcome to noema</h1>
+    <p>Make anything — images, video, 3D, sound. Start however you like. You can stay anonymous, or go fully private; you choose what we can see.</p>
+
+    <div class="tierpick">
+      <div class="tieropt on" data-tier>
+        <div class="tchip"><i data-lucide="venetian-mask"></i></div>
+        <div class="tmain">
+          <div class="t">Just start</div>
+          <div class="s">Anonymous. A bearer purse, no signup. We see the work, never who you are.</div>
+        </div>
+      </div>
+      <div class="tieropt" data-tier>
+        <div class="tchip"><i data-lucide="user-round"></i></div>
+        <div class="tmain">
+          <div class="t">Sign in</div>
+          <div class="s">Identified. We keep your work and your galaxy across devices.</div>
+        </div>
+      </div>
+      <div class="tieropt" data-tier>
+        <div class="tchip"><i data-lucide="eye-off"></i></div>
+        <div class="tmain">
+          <div class="t">Go private</div>
+          <div class="s">Sealed compute over your own tunnel. We see nothing but the meter.</div>
+        </div>
+      </div>
+    </div>
+
+    <a class="btn block" href="index.html">Continue →</a>
+    <div class="foot">you can add more identities anytime — each its own world</div>
+  </div>
+</div>
+
+<script>
+  var opts = document.querySelectorAll('.tieropt[data-tier]');
+  opts.forEach(function(o){
+    o.addEventListener('click', function(){
+      opts.forEach(function(x){ x.classList.remove('on'); });
+      o.classList.add('on');
+    });
+  });
+</script>
+<script>lucide.createIcons()</script>
+</body>
+</html>
