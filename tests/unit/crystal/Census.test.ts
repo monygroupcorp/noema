@@ -8,6 +8,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { censere, type CensusDeps } from '../../../src/crystal/Census.js'
+// Static, same-specifier import. A dynamic `await import()` of this module resolves to a SECOND
+// module instance under tsx on Node 20 (what CI runs), so a listener registered on it never sees
+// the emit Census.ts fires through its own static import. Node 26 dedupes them, which is why this
+// only surfaced once the crystal globs actually expanded on 20. Prod runs compiled dist/, not tsx.
+import { bus } from '../../../src/lib/bus.js'
 import { Nexus } from '../../../src/ledger/Nexus.js'
 import { studioSpendHook } from '../../../src/ledger/hooks/studioSpend.js'
 import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
@@ -150,7 +155,6 @@ test('balance shortfall: clamps to available + sets Materia.drainOnly + emits bu
   await new Promise(r => setTimeout(r, 0))
 
   let drainEmitted = false
-  const { bus } = await import('../../../src/lib/bus.js')
   bus.once('studio.draining', () => { drainEmitted = true })
 
   const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
@@ -259,7 +263,6 @@ test('budget watchdog: accrued spend crossing the tessera budget engages drain',
   const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
 
   let drainEmitted = false
-  const { bus } = await import('../../../src/lib/bus.js')
   bus.once('studio.draining', () => { drainEmitted = true })
 
   const res = await censere(deps, h, new Date(h.inceptum.getTime() + 60_000))
