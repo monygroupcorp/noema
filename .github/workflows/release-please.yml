@@ -1,8 +1,16 @@
 name: Release Please
 
+# Build is decoupled from the release-please job's own success. release-please cuts the
+# tag/release, then tries to comment on the release PR — if that PR's conversation is
+# locked, the comment step fails, the whole release-please job fails, and its outputs never
+# reach a `needs:`-gated build job. v5.0.0 (2026-08-06) shipped no image for exactly this
+# reason; the manual docker-publish.yml workflow had to be dispatched by hand. build-and-push
+# now triggers directly on the `v*` tag push instead, so it fires regardless of what happens
+# in release-please's own job.
 on:
   push:
     branches: [main]
+    tags: ['v*']
 
 permissions:
   contents: write
@@ -11,6 +19,7 @@ permissions:
 
 jobs:
   release-please:
+    if: startsWith(github.ref, 'refs/heads/main')
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -28,8 +37,7 @@ jobs:
         id: release
 
   build-and-push:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     env:
       REGISTRY: ghcr.io
@@ -37,8 +45,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ github.ref }}
           fetch-depth: 0
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${TAG#v}" >> $GITHUB_OUTPUT
 
       - name: Get build info
         id: build_info
@@ -59,9 +74,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}},value=${{ needs.release-please.outputs.tag_name }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.release-please.outputs.tag_name }}
-            type=semver,pattern={{major}},value=${{ needs.release-please.outputs.tag_name }}
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.tag }}
+            type=semver,pattern={{major}},value=${{ steps.version.outputs.tag }}
             type=raw,value=latest
 
       - uses: docker/build-push-action@v6
@@ -73,6 +88,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            BUILD_VERSION=${{ needs.release-please.outputs.version }}
+            BUILD_VERSION=${{ steps.version.outputs.version }}
             COMMIT_SHA=${{ steps.build_info.outputs.sha }}
             COMMIT_MSG=${{ steps.build_info.outputs.msg }}
