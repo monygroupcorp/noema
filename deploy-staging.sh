@@ -11,7 +11,8 @@ set -euo pipefail
 # container. No workers, no keystore, no maintenance mode.
 #
 # The DEPLOYED copy runs from /opt/noema/ ON THE DROPLET (ssh host `noema`) — that is the
-# source of truth (it holds .env.staging with STAGING_FRONTEND=1). Runbook + full context:
+# source of truth (it holds .env.staging with SERVE_WEB_APP=1, formerly STAGING_FRONTEND=1).
+# Runbook + full context:
 # docs/ops/staging-deploy.md.
 # ------------------------------------------------------------------
 
