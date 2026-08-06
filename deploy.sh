@@ -16,6 +16,13 @@ set -euo pipefail
 # The legacy export/training/sweeper worker containers were removed with
 # the JS nuke; hung-pod recovery is now handled in-app (Census wall-clock
 # billing + idle reaper).
+#
+# Manual recovery if a swap leaves nothing on the ${CONTAINER_ALIAS} alias:
+#   docker network disconnect hyperbot_network hyperbotcontained-new || true
+#   docker network connect --alias hyperbot hyperbot_network hyperbotcontained-new
+#   docker stop --time 35 hyperbotcontained && docker rm hyperbotcontained
+#   docker rename hyperbotcontained-new hyperbotcontained
+# Caddy caches the upstream IP — expect a few seconds of 502 after any alias move; it self-clears.
 # ------------------------------------------------------------------
 
 DEPLOY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -182,6 +189,22 @@ health_check_app() {
   return 1
 }
 
+# Proves ${CONTAINER_ALIAS} resolves to a healthy container. Short retry loop: Caddy/docker DNS
+# takes a moment to settle after an alias move.
+assert_alias_serving() {
+  local retries=6
+  while (( retries > 0 )); do
+    if docker run --rm --network "${NETWORK_NAME}" curlimages/curl:8.5.0 \
+      -sS -f -m 5 "http://${CONTAINER_ALIAS}:4000/api/health" >/dev/null 2>&1; then
+      log "Alias ${CONTAINER_ALIAS} is serving."
+      return 0
+    fi
+    retries=$((retries - 1))
+    sleep 2
+  done
+  return 1
+}
+
 # ==================================================================
 # DEPLOY SEQUENCE
 # ==================================================================
@@ -224,6 +247,8 @@ run_logged "Starting new container (${IMAGE})..." docker run -d \
   --network "${NETWORK_NAME}" \
   --network-alias "${NEW_ALIAS}" \
   --restart unless-stopped \
+  --log-opt max-size=100m \
+  --log-opt max-file=3 \
   -v "${MAINT_DIR}:${MAINT_DIR}" \
   --name "${NEW_CONTAINER}" \
   --cap-drop ALL \
@@ -246,8 +271,30 @@ log "Swapping traffic to new container..."
 if docker ps --format '{{.Names}}' | grep -q "^${APP_CONTAINER}$"; then
   docker network disconnect "${NETWORK_NAME}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1 || true
 fi
-docker network disconnect "${NETWORK_NAME}" "${NEW_CONTAINER}" >> "${LOG_FILE}" 2>&1
-docker network connect --alias "${CONTAINER_ALIAS}" "${NETWORK_NAME}" "${NEW_CONTAINER}" >> "${LOG_FILE}" 2>&1
+docker network disconnect "${NETWORK_NAME}" "${NEW_CONTAINER}" >> "${LOG_FILE}" 2>&1 || true
+docker network connect --alias "${CONTAINER_ALIAS}" "${NETWORK_NAME}" "${NEW_CONTAINER}" >> "${LOG_FILE}" 2>&1 || true
+
+# Nothing above may abort the script: under `set -euo pipefail` a bare failure here left the old
+# container off the network and the new one without the production alias — Caddy proxies to
+# hyperbot:4000, nothing answered, everything 502'd (~4 min, 2026-08-06 cutover).
+if ! assert_alias_serving; then
+  log "ALIAS SWAP FAILED — restoring ${APP_CONTAINER} to ${CONTAINER_ALIAS}."
+  # Only hand the alias back if there IS an old container running (a first deploy has none — then the
+  # new container is the only candidate and stays where it is).
+  if docker ps --format '{{.Names}}' | grep -q "^${APP_CONTAINER}$"; then
+    docker network disconnect "${NETWORK_NAME}" "${NEW_CONTAINER}" >> "${LOG_FILE}" 2>&1 || true
+    docker network connect --alias "${CONTAINER_ALIAS}" "${NETWORK_NAME}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1 || true
+  fi
+  if assert_alias_serving; then
+    log "Old container restored and serving. New container left running for inspection: ${NEW_CONTAINER}"
+  else
+    log "CRITICAL: neither container holds ${CONTAINER_ALIAS}. Manual recovery required (see deploy.sh header)."
+  fi
+  unset PRIVATE_KEY
+  disable_maintenance
+  log "Deploy ABORTED at the swap. Old container was NOT destroyed."
+  exit 1
+fi
 log "Traffic swapped to new container."
 
 # 9. Stop old container (capturing shutdown logs), then rename new
