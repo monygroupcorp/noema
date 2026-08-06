@@ -24,7 +24,8 @@ npm run typecheck
 
 ## Deploy to staging
 
-Served at `staging.noema.art` (gated by `STAGING_FRONTEND=1`). **Full runbook:
+Served at `staging.noema.art` (gated by `SERVE_WEB_APP=1`, which also gates production — not
+just staging). **Full runbook:
 `docs/ops/staging-deploy.md`.** TL;DR: `git push origin HEAD:staging` → wait for the build →
 `ssh noema 'cd /opt/noema && ./deploy-staging.sh'`. Deploy is **manual on purpose** (parallel
 work must not be auto-clobbered).
