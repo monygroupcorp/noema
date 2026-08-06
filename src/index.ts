@@ -1547,8 +1547,15 @@ async function main(): Promise<void> {
     compositusRouter: ring.compositusCursor,
   }))
 
-  // --- Web app (new React frontend) — gated by STAGING_FRONTEND, registered AFTER all API routes ---
-  if (process.env.STAGING_FRONTEND === '1') {
+  // --- Web app (new React frontend) — gated by SERVE_WEB_APP, registered AFTER all API routes ---
+  // Serve the built React SPA from this process. Named SERVE_WEB_APP because it governs PRODUCTION
+  // as much as staging — under its old name (STAGING_FRONTEND) prod shipped a 200 /api/health and a
+  // 404 front page after the 2026-08-06 cutover. STAGING_FRONTEND is a deprecated alias for one release.
+  const serveWebApp = process.env.SERVE_WEB_APP === '1' || process.env.STAGING_FRONTEND === '1'
+  if (process.env.SERVE_WEB_APP !== '1' && process.env.STAGING_FRONTEND === '1') {
+    log.warn('[web] STAGING_FRONTEND is deprecated — rename it to SERVE_WEB_APP=1 in .env')
+  }
+  if (serveWebApp) {
     const appDist = path.join(__dirname, '..', 'src', 'platforms', 'web', 'app', 'dist')
     const appIndex = path.join(appDist, 'index.html')
     if (existsSync(appIndex)) {
@@ -1560,8 +1567,10 @@ async function main(): Promise<void> {
       })
       log.info(`[web] serving React app from ${appDist}`)
     } else {
-      log.warn(`[web] STAGING_FRONTEND=1 but app build missing at ${appIndex}`)
+      log.warn(`[web] SERVE_WEB_APP=1 but app build missing at ${appIndex}`)
     }
+  } else {
+    log.info('[web] SERVE_WEB_APP is not set — API only, no SPA (/ will 404)')
   }
 
   app.listen(PORT, () => log.info(`Listening on :${PORT}`))
