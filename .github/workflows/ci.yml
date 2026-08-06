@@ -1,7 +1,16 @@
 name: CI
 
+# Two triggers on purpose:
+#   pull_request — the gate a change must pass BEFORE it lands.
+#   push:main    — the signal that main is green AFTER it lands. Without it there is no post-merge
+#                  check at all: the crystal suite went unrun from June (every PR targeted
+#                  chainengine-migration, which this trigger did not cover), and the 2026-08-06 P0
+#                  batch had to be re-verified by hand in a local worktree. See
+#                  internal notes §2.
 on:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
 
 jobs:
