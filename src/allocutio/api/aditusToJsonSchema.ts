@@ -26,6 +26,9 @@ export interface JsonSchemaProperty {
   default?: unknown
   description?: string
   title?: string
+  /** Enumerated choices carried through from the Porta, unmodified. Advisory only — the
+   *  UI renders a select from these, but the value is not validated against the list. */
+  optiones?: Array<{ value: string; label: string }>
 }
 
 /**
@@ -60,6 +63,7 @@ function portaToProperty(porta: Porta): JsonSchemaProperty {
   if (porta.default !== undefined) property.default = porta.default
   if (porta.description !== undefined) property.description = porta.description
   if (porta.label !== undefined) property.title = porta.label
+  if (porta.optiones !== undefined) property.optiones = porta.optiones
   return property
 }
 
