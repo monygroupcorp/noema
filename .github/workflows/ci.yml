@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm install --legacy-peer-deps
       - run: npm run typecheck         # tsc --noEmit (src/) — was unchecked in CI before
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       # Single-node replica set (ledger Debt #2 / ruling R3): settle now wraps its two writes in a
       # Mongo transaction, and transactions require a replica set — the old standalone `mongo:7`
