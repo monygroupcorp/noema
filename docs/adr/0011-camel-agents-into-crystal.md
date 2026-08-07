@@ -153,6 +153,14 @@ hung off an otherwise-ordinary Anima, plus its endpoints:
   compensate (delete workspace, suspend `Legatus`) on failure; `suspended` = resumable,
   `revoked` = terminal; idempotency on unique `agentId`.
 
+> **Amendment (2026-08-07):** a per-agent `GET /api/v1/agents/:agentId/card` route was built
+> against `agentCardRouter.ts`, citing this section under the wrong subsection number and
+> without a spec of its own. It has been removed — this section's own text above already
+> assigns per-agent card hosting to the client, not to Noema. The platform card at
+> `GET /.well-known/agent-card.json` is retained; it serves the x402 capability-execution-target
+> role this section assigns Noema, and has its own spec at
+> `docs/agent_usability/03-erc8004-implementation.md:46-90`.
+
 ### 6. Workspace = reuse `Modus`/`deriveSavedModus`/`Consuetudo`. Drop git-style revision sync.
 
 Template clone + `$NFT_*` substitution + typed spell-anchor baking (step-level
