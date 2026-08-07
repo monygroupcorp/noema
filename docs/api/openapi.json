@@ -848,7 +848,7 @@
     },
     "/models": {
       "get": {
-        "summary": "Browse the model weight catalog, optionally filtered by genus, basis, fundamentumId, trigger, or free-text query, and ordered with sort=newest|name|genus.",
+        "summary": "Browse the model weight catalog.",
         "security": [],
         "responses": {
           "200": {
@@ -978,7 +978,72 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "genus",
+            "in": "query",
+            "description": "Filter by model genus.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "basis",
+            "in": "query",
+            "description": "Filter by model basis.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fundamentumId",
+            "in": "query",
+            "description": "Filter by compute substrate id.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "trigger",
+            "in": "query",
+            "description": "Filter by trigger word.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Free-text search query.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of results to return.",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "Sort order for results: `newest | name | genus`. Applied server-side before the `limit` slice.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/deposit/config": {

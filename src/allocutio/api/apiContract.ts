@@ -32,6 +32,15 @@ export interface JsonSchema {
   example?: unknown
 }
 
+/** One query-string parameter on a `RouteSpec`. */
+export interface QueryParamSpec {
+  name: string
+  description: string
+  schema: JsonSchema
+  /** Defaults to false — most query params are optional filters. */
+  required?: boolean
+}
+
 /** One HTTP operation on the `/v1` surface. */
 export interface RouteSpec {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -40,6 +49,8 @@ export interface RouteSpec {
   summary: string
   /** Whether a resolved caller identity (a credential) is required. */
   auth: boolean
+  /** Query-string parameters this operation accepts, in addition to any path params. */
+  query?: QueryParamSpec[]
   /** The request-body schema, when the operation takes one. */
   request?: JsonSchema
   /** The success-response schema. */
@@ -1442,8 +1453,22 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'GET',
       path: '/models',
-      summary: 'Browse the model weight catalog, optionally filtered by genus, basis, fundamentumId, trigger, or free-text query, and ordered with sort=newest|name|genus.',
+      summary: 'Browse the model weight catalog.',
       auth: false,
+      query: [
+        { name: 'genus', description: 'Filter by model genus.', schema: { type: 'string' } },
+        { name: 'basis', description: 'Filter by model basis.', schema: { type: 'string' } },
+        { name: 'fundamentumId', description: 'Filter by compute substrate id.', schema: { type: 'string' } },
+        { name: 'trigger', description: 'Filter by trigger word.', schema: { type: 'string' } },
+        { name: 'q', description: 'Free-text search query.', schema: { type: 'string' } },
+        { name: 'limit', description: 'Maximum number of results to return.', schema: { type: 'integer' } },
+        {
+          name: 'sort',
+          description:
+            'Sort order for results: `newest | name | genus`. Applied server-side before the `limit` slice.',
+          schema: { type: 'string' },
+        },
+      ],
       response: ModelsListSchema,
     },
     {
