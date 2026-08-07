@@ -11,8 +11,8 @@ import {
   MODUS_AITOOLKIT_TRAINING,
 } from '../../../../src/crystal/seeds/modi.js'
 
-test('CANONICAL_MODI contains seven entries', () => {
-  assert.equal(CANONICAL_MODI.length, 7)
+test('CANONICAL_MODI contains eight entries', () => {
+  assert.equal(CANONICAL_MODI.length, 8)
 })
 
 test('no canonical modus is still on the dropped huggingface ministerium', () => {
@@ -82,10 +82,24 @@ test('openrouter chat modus proves the descriptor generalizes (new ministerium, 
   assert.equal(MODUS_OPENROUTER_CHAT.exitus.response?.type, 'text')
 })
 
-test('all modi have canonica true', () => {
+// CANONICAL_MODI is the SEED set, not the canonical set: a modus stays here so its document keeps
+// being written (historical Actum rows reference its contentHash) even once it is de-canonised and
+// therefore no longer surfaced by `modorum.list({ canonica: true })`.
+test('every seeded modus is canonica true except the ones deliberately retired', () => {
+  const retired = new Set([MODUS_CHATGPT.id])
   for (const m of CANONICAL_MODI) {
+    if (retired.has(m.id)) continue
     assert.equal(m.canonica, true, `${m.id} should have canonica true`)
   }
+})
+
+test('modus.chatgpt is retained but de-canonised, and still hashes', () => {
+  assert.equal(MODUS_CHATGPT.canonica, false)
+  assert.ok(
+    CANONICAL_MODI.some(m => m.id === MODUS_CHATGPT.id),
+    'modus.chatgpt must still be seeded — historical actus reference its contentHash',
+  )
+  assert.ok(MODUS_CHATGPT.contentHash.length > 0)
 })
 
 test('all modi have non-empty id, nomen, versio', () => {

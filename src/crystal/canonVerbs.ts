@@ -14,4 +14,4 @@
 // platform's defaults live in exactly one place.
 // =============================================================================
 
-export const CANON_VERBS: Record<string, string> = { make: 'flux-schnell', chat: 'modus.chatgpt' }
+export const CANON_VERBS: Record<string, string> = { make: 'flux-schnell', chat: 'modus.openrouter-chat' }

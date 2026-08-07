@@ -449,6 +449,7 @@ export function Card() {
             const req = required.includes(k);
             const isUri = p.format === 'uri';
             const isNum = p.type === 'integer' || p.type === 'number';
+            const hasOptiones = Array.isArray(p.optiones) && p.optiones.length > 0;
             // Free-text string → eligible for Concierge augmentation. Multi-line ones
             // (prompt/lyrics/story/…) render as a textarea; the rest as a text input.
             const isText = p.type === 'string' && !isUri;
@@ -471,7 +472,11 @@ export function Card() {
                   {p.title || humanizeKey(k)} {req ? <span className="req">required</span> : <span className="opt">optional</span>}
                   <span className="ty">{isUri ? `${p.type} · uri` : p.type}</span>
                 </label>
-                {isUri ? (
+                {hasOptiones ? (
+                  <select className="inp" value={String(aditus[k] ?? p.default ?? '')} onChange={(e) => set(k, e.target.value)}>
+                    {p.optiones!.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                ) : isUri ? (
                   <input className="inp" value={String(aditus[k] ?? '')} placeholder={p.description || 'paste a URL'} onChange={(e) => set(k, e.target.value)} />
                 ) : isNum ? (
                   <input className="inp mono" type="number" value={aditus[k] === '' || aditus[k] === undefined ? '' : Number(aditus[k])} placeholder={p.description} onChange={(e) => set(k, e.target.value === '' ? '' : Number(e.target.value))} />

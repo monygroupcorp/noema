@@ -1548,7 +1548,7 @@ test('/chat does not consume the studio pending loadout', async () => {
   await new Promise(r => setImmediate(r))
   const enterChat = h.router.calls.filter(c => c.method === 'enter').at(-1)!
   const stateChat = (enterChat.args[4] as { state?: { pinnedModels?: unknown; modusId?: string } })?.state
-  assert.equal(stateChat?.modusId, 'modus.chatgpt')
+  assert.equal(stateChat?.modusId, 'modus.openrouter-chat')
   assert.ok(!stateChat?.pinnedModels, '/chat is not a studio gen — pending left intact')
 
   // The loadout is still queued: a subsequent /make picks it up.
