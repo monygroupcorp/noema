@@ -2,43 +2,41 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { api, type Collection, type FlowSummary } from '../lib/api';
+import { api, type Collection } from '../lib/api';
 import { COLL_STATUS_LABEL, collGlyph, collTile } from '../lib/collections';
 import { useProject, useProjectScope } from '../state/project';
 import { ScopeBanner } from '../lib/ScopeBanner';
 import { HoldingToggle } from '../lib/HoldingToggle';
 
 // Collections (editio) — the BUILD-rail surface listing the user's collections. Each is a hub
-// (traits → run → curation → export). A collection is a batch-gen over a Tractus grid; creating
-// one LAUNCHES generation of `total` pieces, so create is a deliberate, confirmed action.
+// (traits → run → curation → export). Creating one is a NAMING act, not a generation launch:
+// it always creates a draft, spends nothing, and the generative config (flow, supply, trait
+// grid) is authored afterwards on the hub / in the garden.
 
-// The create form: name + base flow + supply + one axis of variation (options woven into a port).
-function CreateForm({ onCreated }: { onCreated: (c: Collection) => void }) {
-  const [flows, setFlows] = useState<FlowSummary[]>([]);
+// The create form: name + optional description + which project it lives in. Nothing else —
+// no flow, no supply, no axis of variation, and no spend-now button.
+function CreateForm({ onCreated }: { onCreated: (c: Collection, projectId: string) => void }) {
+  const { project: active, projects } = useProject();
   const [nomen, setNomen] = useState('');
-  const [modusId, setModusId] = useState('');
-  const [total, setTotal] = useState(50);
-  const [porta, setPorta] = useState('prompt');
-  const [options, setOptions] = useState('');
+  const [descriptio, setDescriptio] = useState('');
+  const [projectId, setProjectId] = useState(active.id);
   const [review, setReview] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => { api.listFlows().then((r) => { setFlows(r.flows); if (r.flows[0]) setModusId(r.flows[0].id); }).catch(() => {}); }, []);
+  const ready = nomen.trim().length > 0 && !busy;
 
-  const values = options.split(',').map((s) => s.trim()).filter(Boolean);
-  const ready = !!modusId && total > 0 && values.length >= 2 && !busy;
-
-  async function submit(draft: boolean) {
+  async function submit() {
     if (!ready) return;
-    if (!draft && !confirm(`Start generating ${total} pieces? This runs on real compute and spends credits.`)) return;
     setBusy(true); setErr(null);
     try {
       const { collection } = await api.createCollection({
-        modusId, total, nomen: nomen.trim() || undefined, reviewEnabled: review, draft,
-        tractus: [{ porta: porta.trim() || 'prompt', label: porta.trim() || 'prompt', valores: values.map((v) => ({ value: v, label: v })) }],
+        nomen: nomen.trim(),
+        ...(descriptio.trim() ? { descriptio: descriptio.trim() } : {}),
+        reviewEnabled: review,
+        draft: true,
       });
-      onCreated(collection);
+      onCreated(collection, projectId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e)); setBusy(false);
     }
@@ -49,25 +47,21 @@ function CreateForm({ onCreated }: { onCreated: (c: Collection) => void }) {
       <div className="cc-row">
         <label className="cc-field"><span>Name</span>
           <input className="cer-input" placeholder="untitled collection" value={nomen} onChange={(e) => setNomen(e.target.value)} /></label>
-        <label className="cc-field"><span>Base flow</span>
-          <select className="cer-input" value={modusId} onChange={(e) => setModusId(e.target.value)}>
-            {flows.length === 0 && <option value="">loading…</option>}
-            {flows.map((f) => <option key={f.id} value={f.id}>{f.nomen ?? f.id}</option>)}
+        <label className="cc-field"><span>Project</span>
+          <select className="cer-input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+            {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select></label>
-        <label className="cc-field cc-narrow"><span>Supply</span>
-          <input className="cer-input" type="number" min={1} value={total} onChange={(e) => setTotal(Math.max(1, Number(e.target.value) || 1))} /></label>
       </div>
       <div className="cc-row">
-        <label className="cc-field cc-narrow"><span>Vary this input</span>
-          <input className="cer-input" value={porta} onChange={(e) => setPorta(e.target.value)} /></label>
-        <label className="cc-field"><span>Options <em>(comma-separated — the axis of variation)</em></span>
-          <input className="cer-input" placeholder="a frost knight, an ember mage, an arcane oracle" value={options} onChange={(e) => setOptions(e.target.value)} /></label>
+        <label className="cc-field"><span>Description <em>(optional)</em></span>
+          <input className="cer-input" placeholder="what is this set? (optional)" value={descriptio} onChange={(e) => setDescriptio(e.target.value)} /></label>
       </div>
       <div className="cc-foot">
+        {/* Curation preference, not run config — it reads the same with or without a supply
+            on screen, and it stays editable on the collection until it is fired. */}
         <label className="cc-check"><input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} /> Review each piece before it counts</label>
-        <span className="cc-note">{values.length >= 2 ? `${values.length} variations across ${total} pieces` : 'add at least two options'}</span>
-        <button className="btn ghost" disabled={!ready} onClick={() => submit(true)} title="Author traits + rules before spending">Save as draft</button>
-        <button className="btn" disabled={!ready} onClick={() => submit(false)}>{busy ? 'Starting…' : <>Start collection <Ic name="arrow-right" /></>}</button>
+        <span className="cc-note">nothing is generated yet — you pick the flow and traits next</span>
+        <button className="btn" disabled={!ready} onClick={submit}>{busy ? 'Creating…' : <>Create collection <Ic name="arrow-right" /></>}</button>
       </div>
       {err && <div className="cc-err">{err}</div>}
     </div>
@@ -84,7 +78,8 @@ function Card({ c, projectId }: { c: Collection; projectId: string }) {
       </div>
       <div className="coll-body">
         <div className="coll-title"><b>{c.nomen || 'Untitled collection'}</b></div>
-        <div className="coll-theme mono">{c.modusId}</div>
+        {c.descriptio && <div className="coll-theme" title={c.descriptio} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.descriptio}</div>}
+        <div className="coll-theme mono">{c.modusId || 'no flow yet'}</div>
         <div className="coll-stats mono">{c.completed.toLocaleString()} / {c.total.toLocaleString()} pieces{c.rejected ? ` · ${c.rejected} rejected` : ''}{c.failed ? ` · ${c.failed} failed` : ''}</div>
         <div className="coll-actions">
           <Link className="btn ghost" to={`/collections/${c.id}`}>Open hub</Link>
@@ -133,10 +128,14 @@ export function Collections() {
 
         {scope && <ScopeBanner project={scope} noun="collections" />}
 
-        {creating && <CreateForm onCreated={(c) => {
-          // Creation-time filing (Decision 3): a new collection lands in the active project.
-          fileAsset(active.id, 'collection', c.id);
-          nav(c.status === 'draft' ? `/collections/${c.id}/garden` : `/collections/${c.id}`);
+        {creating && <CreateForm onCreated={(c, projectId) => {
+          // Creation-time filing (Decision 3): a new collection lands in the project the
+          // creator picked (defaulting to the active one). Client-side — Provincia owns the
+          // asset↔project relationship; there is no server-side filing on create.
+          fileAsset(projectId, 'collection', c.id);
+          // Always land on the hub: it is where the next step (flow + traits, with the
+          // concierge offered) lives.
+          nav(`/collections/${c.id}`);
         }} />}
 
         {err && <div className="warn">Couldn’t load collections: {err}</div>}
@@ -148,7 +147,7 @@ export function Collections() {
         {shown !== null && shown.length === 0 && !creating && (
           <div className="empty">
             <div className="t">{scope ? `No collections filed into ${scope.name} yet` : 'No collections yet'}</div>
-            <div className="s">Start one — pick a flow, vary an input across a supply, and generate the set.</div>
+            <div className="s">Name one — it costs nothing. You pick the flow and the traits afterwards.</div>
             <button className="btn" onClick={() => setCreating(true)}><Ic name="plus" /> new collection</button>
           </div>
         )}
