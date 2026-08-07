@@ -16,7 +16,7 @@
 // `src/types/intelligendi.ts` and the migration becomes idempotent + safe to
 // re-run against the production collection.
 
-import { classifyModelLicense, type CommercialVerdict } from '../../crystal/modelLicense.js'
+import { classifyModelLicense, type CommercialVerdict, familiaFromBaseIntellaId, isKnownBaseIntellaId } from '../../crystal/modelLicense.js'
 
 // ─ Types (mirroring docs/spec/intella-schema.md §3) ────────────────────────
 
@@ -55,6 +55,9 @@ export interface IntellaBaseV2 {
   parentRoyaltyShare?: number
   corpusId?: string
   canonica: boolean
+
+  // Compatibility (LoRA base-flow key; absent when the base is unknown or has no base flow)
+  familia?: string
 
   // Provenance
   importedFrom?: {
@@ -175,7 +178,7 @@ export interface LegacyLoraDoc {
 // ─ Lookups the caller supplies ─────────────────────────────────────────────
 
 export interface MigrationLookups {
-  /** legacy `checkpoint` string (e.g. 'FLUX') → crystal base intella id (e.g. 'intella.flux-base'). */
+  /** legacy `checkpoint` string (e.g. 'FLUX') → crystal base intella id (e.g. `intella.flux-base`). */
   checkpointToBaseIntellaId: Record<string, string>
   /** animaIds the platform considers "itself" — used to detect canonica. */
   platformAnimaIds: Set<string>
@@ -271,11 +274,21 @@ export function legacyToIntella(
 
   const baseIntellaId = lookups.checkpointToBaseIntellaId[(doc.checkpoint ?? '').trim().toUpperCase()]
   if (!baseIntellaId) warnings.push(`checkpoint '${doc.checkpoint}' not in lookup table — baseIntellaId will be 'intella.unknown-base'`)
+  const resolvedBaseIntellaId = baseIntellaId ?? 'intella.unknown-base'
+
+  // `familia` mirrors the repair mapping's posture: unmapped bases are reported, never guessed.
+  let familia: string | null = null
+  if (!isKnownBaseIntellaId(resolvedBaseIntellaId)) {
+    warnings.push(`baseIntellaId '${resolvedBaseIntellaId}' not in FAMILIA_BY_BASE_INTELLA_ID — familia left unset`)
+  } else {
+    familia = familiaFromBaseIntellaId(resolvedBaseIntellaId)
+  }
+
   const params: LoraParamsV2 = {
     triggerWords,
     slug,
     defaultWeight: doc.defaultWeight ?? 1.0,
-    baseIntellaId: baseIntellaId ?? 'intella.unknown-base',
+    baseIntellaId: resolvedBaseIntellaId,
   }
 
   if (doc.modelType) drops.push(`modelType=${doc.modelType}`)
@@ -403,6 +416,7 @@ export function legacyToIntella(
 
     legacyMonetization: doc.monetization,
     ...(Object.keys(legacyPreserved).length > 0 ? { legacy: legacyPreserved } : {}),
+    ...(familia !== null ? { familia } : {}),
 
     genus: 'lora',
     params,
