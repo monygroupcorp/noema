@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { api, type Collection, type Tractus, type TractusValor } from '../lib/api';
+import { api, type Collection, type FlowSummary, type Tractus, type TractusValor } from '../lib/api';
 
 // Traits garden (editio-garden-spec.md) — author the axes of variation. Each axis is a
 // Tractus (an input port to vary), each card a TractusValor (value + label + weight). Wired
@@ -21,14 +21,26 @@ export function TraitsGarden() {
   const [active, setActive] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<false | 'save' | 'fire'>(false);
+  // A collection is now created by name alone, so a draft can arrive here with no base flow
+  // and no supply. Both are part of the draft-authoring write and are saved alongside the grid.
+  const [flows, setFlows] = useState<FlowSummary[]>([]);
+  const [modusId, setModusId] = useState('');
+  const [total, setTotal] = useState(0);
 
   useEffect(() => {
     if (!id) return;
     let live = true;
-    api.getCollection(id).then((r) => { if (live) { setC(r.collection); setAxes(r.collection.tractus ?? []); } })
-      .catch((e) => { if (live) setErr(msg(e)); });
+    api.getCollection(id).then((r) => {
+      if (!live) return;
+      setC(r.collection);
+      setAxes(r.collection.tractus ?? []);
+      setModusId(r.collection.modusId);
+      setTotal(r.collection.total);
+    }).catch((e) => { if (live) setErr(msg(e)); });
     return () => { live = false; };
   }, [id]);
+
+  useEffect(() => { api.listFlows().then((r) => setFlows(r.flows)).catch(() => {}); }, []);
 
   if (err) return <AppShell title="Traits"><div className="page"><div className="pw wide"><div className="warn">Couldn’t load: {err}</div></div></div></AppShell>;
   if (!c) return <AppShell title="Traits"><div className="page"><div className="pw wide"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
@@ -50,7 +62,15 @@ export function TraitsGarden() {
     setBusy('save'); setErr(null);
     // Drop empty values; every value needs a non-empty `value`.
     const clean = axes.map((a) => ({ ...a, valores: a.valores.filter((v) => String(v.value).trim() !== '') }));
-    try { const { collection } = await api.patchCollectionTractus(id, clean); setC(collection); setAxes(collection.tractus ?? clean); setDirty(false); }
+    try {
+      const { collection } = await api.patchCollectionDraft(id, {
+        tractus: clean,
+        ...(modusId && modusId !== c!.modusId ? { modusId } : {}),
+        ...(total !== c!.total ? { numerus: total } : {}),
+      });
+      setC(collection); setAxes(collection.tractus ?? clean);
+      setModusId(collection.modusId); setTotal(collection.total); setDirty(false);
+    }
     catch (e) { setErr(msg(e)); }
     finally { setBusy(false); }
   }
@@ -76,6 +96,23 @@ export function TraitsGarden() {
             {!editable && <span className="gn-ai"><span className="hemi2 lit" /> This collection is fired — traits are locked.</span>}
           </div>
         </div>
+
+        {/* Base flow + supply — the two run-config fields the create form no longer asks for.
+            Saved by the same draft-authoring write as the grid; frozen once fired. */}
+        {editable && (
+          <div className="coll-create" style={{ marginBottom: 12 }}>
+            <div className="cc-row">
+              <label className="cc-field"><span>Base flow</span>
+                <select className="cer-input" value={modusId} onChange={(e) => { setModusId(e.target.value); setDirty(true); }}>
+                  <option value="">choose a flow…</option>
+                  {flows.map((f) => <option key={f.id} value={f.id}>{f.nomen ?? f.id}</option>)}
+                </select></label>
+              <label className="cc-field cc-narrow"><span>Supply</span>
+                <input className="cer-input" type="number" min={0} value={total}
+                  onChange={(e) => { setTotal(Math.max(0, Number(e.target.value) || 0)); setDirty(true); }} /></label>
+            </div>
+          </div>
+        )}
 
         {err && <div className="warn" style={{ marginBottom: 12 }}>{err}</div>}
 

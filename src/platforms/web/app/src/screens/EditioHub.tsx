@@ -43,6 +43,10 @@ export function EditioHub() {
 
   const name = c.nomen || 'Untitled collection';
   const done = c.status === 'complete';
+  // A collection is created by naming it, so it arrives here with no flow and no traits, having
+  // spent nothing. Until it has a flow, the hub's job is to point at the next step.
+  const needsSetup = c.status === 'draft' && !c.modusId;
+  const seed = `Help me set up my collection "${name}"${c.descriptio ? `, described as: ${c.descriptio}` : ''}. What flow and traits should it use?`;
   const STEPS = [
     { n: 1, to: `/collections/${c.id}/garden`, ico: 'sparkles', t: 'Traits garden', s: 'axes of variation' },
     { n: 2, to: `/collections/${c.id}/rules`, ico: 'workflow', t: 'Trait rules', s: 'exclusions & cohesion' },
@@ -60,13 +64,31 @@ export function EditioHub() {
           <div>
             <div className="ph-kick">collection · <span className={`hemi2 ${collGlyph()}`} /> {COLL_STATUS_LABEL[c.status]}</div>
             <h1 className="ph-name">{name}</h1>
-            <p className="ph-desc">{c.modusId} · {c.completed.toLocaleString()} / {c.total.toLocaleString()} pieces{c.rejected ? ` · ${c.rejected} rejected` : ''}{c.failed ? ` · ${c.failed} failed` : ''}</p>
+            {c.descriptio && <p className="ph-desc">{c.descriptio}</p>}
+            <p className="ph-desc">{needsSetup
+              ? 'no flow yet · nothing generated · nothing spent'
+              : <>{c.modusId} · {c.completed.toLocaleString()} / {c.total.toLocaleString()} pieces{c.rejected ? ` · ${c.rejected} rejected` : ''}{c.failed ? ` · ${c.failed} failed` : ''}</>}</p>
           </div>
           <div className="ph-people">
             <span className="ph-avatars"><span className="av" style={{ background: collTile(c.id) }} /><span className="av" /></span>
             <button className="btn"><Ic name="circle-user" /> share ▸</button>
           </div>
         </div>
+
+        {/* The next-step hint for a freshly-named collection. Reuses the ph-band/ph-about
+            card idiom rather than introducing a surface of its own. */}
+        {needsSetup && (
+          <div className="ph-band" style={{ margin: 'var(--s4) 0' }}>
+            <div className="ph-about">
+              <div className="ph-l">next step</div>
+              <p><b>{name}</b> needs a <b>base flow</b> and a <b>set of traits</b> before it can generate anything. Nothing has been spent — pick them yourself in the garden, or talk it through with the concierge.</p>
+              <div className="pub-row">
+                <Link className="btn" to={`/chat?seed=${encodeURIComponent(seed)}`}><Ic name="sparkles" /> Ask the concierge</Link>
+                <Link className="btn ghost" to={`/collections/${c.id}/garden`} style={{ marginLeft: 'var(--s3)' }}>Set it up myself</Link>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="ed-flow">
           {STEPS.map((s, i) => (
@@ -100,7 +122,7 @@ export function EditioHub() {
           <div className="ph-about">
             <div className="ph-l">about this collection</div>
             <p>A collection is a <b>hub</b> — pure, persistent, multiplayer. Generation + curation are <b>local and reversible</b>; only export/mint crosses to public &amp; permanent. That asymmetry is the spine.</p>
-            <div className="ph-meta mono">flow {c.modusId} · provenance {c.provenanceHash.slice(0, 18)}… · local until you publish</div>
+            <div className="ph-meta mono">{c.modusId ? <>flow {c.modusId} · provenance {c.provenanceHash.slice(0, 18)}…</> : <>no flow · no provenance yet</>} · local until you publish</div>
           </div>
           <div className="ph-activity">
             <div className="ph-l">activity</div>
