@@ -207,17 +207,17 @@ export const BASE_FAMILIAE: ReadonlySet<string> = new Set(
  *  nothing. This table is the repair mapping.
  *
  *  Values MUST come from BASE_TABLE's vocabulary (see BASE_FAMILIAE — a hermetic test enforces it).
- *  `null` = no base flow exists for that architecture, so NO familia is correct (BASE_TABLE:191
+ *  `null` = no base flow exists for that architecture, so NO familia is correct (BASE_TABLE:193
  *  gives SD2/SD3 `familia: null` — the one entry that still uses it). An id absent from this map
  *  is an OPERATOR decision, never a worker/runtime guess — callers must report and skip it.
  */
 export const FAMILIA_BY_BASE_INTELLA_ID: Record<string, string | null> = {
   'intella.flux-base':        'flux',
   'intella.sdxl-base':        'sdxl',
-  'intella.illustrious-base': 'sdxl',   // BASE_TABLE:181 — illustrious/noobai collapse to sdxl
-  'intella.pony-base':        'sdxl',   // BASE_TABLE:180 — pony is XL-derived, stacks on the sdxl flow
+  'intella.illustrious-base': 'sdxl',   // BASE_TABLE:183 — illustrious/noobai collapse to sdxl
+  'intella.pony-base':        'sdxl',   // BASE_TABLE:182 — pony is XL-derived, stacks on the sdxl flow
   'intella.sd15-base':        'sd15',
-  'intella.kontext-base':     'flux',   // BASE_TABLE:166 — flux.1-family edit model, shares the flux base flow
+  'intella.kontext-base':     'flux',   // BASE_TABLE:168 — flux.1-family edit model, shares the flux base flow
 }
 
 /** True when `id` is a base intella this mapping KNOWS about. Callers must use this to tell "known
