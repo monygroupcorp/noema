@@ -109,6 +109,10 @@ export const WIDGET_SDK_JS = `/* Noema Widget SDK — served by noema-crystal (A
           .then(function (acct) {
             if (!acct) { _postToIframe({ type: 'WALLET_AUTH_ERROR', error: 'No wallet connected' }); return; }
             account = acct;
+            // Deliberately unserved in prod: createWidgetRouter ships none of the /auth/wallet/*
+            // routes by default (widgetRouter.ts:46-49, :207) — no spoofable login can ship.
+            // Only dev-only stubs implement this (scripts/widget-preview.ts:82). Do not add the
+            // route to fix this call; that reintroduces the spoofable login the absence prevents.
             return _fetch('/widget/' + encodeURIComponent(authAgentId) + '/auth/wallet/nonce', { method: 'POST', body: JSON.stringify({ address: account }) })
               .then(function (r) { return r.json(); })
               .then(function (ch) {
@@ -119,6 +123,9 @@ export const WIDGET_SDK_JS = `/* Noema Widget SDK — served by noema-crystal (A
                   primaryType: 'Auth', message: ch.message,
                 });
                 return eth.request({ method: 'eth_signTypedData_v4', params: [account, typedData] })
+                  // Same deliberate absence as /auth/wallet/nonce above (widgetRouter.ts:46-49,
+                  // :207) — prod serves no wallet-auth verify route, only the sandbox stub
+                  // (scripts/widget-preview.ts:89).
                   .then(function (sig) { return _fetch('/widget/' + encodeURIComponent(authAgentId) + '/auth/wallet/verify', { method: 'POST', body: JSON.stringify({ nonce: ch.message.nonce, signature: sig }) }); })
                   .then(function (r) { return r.json(); })
                   .then(function (res) { if (res.error) throw new Error(res.error.message || 'auth failed'); _sessionJwt = res.sessionJwt; _postToIframe({ type: 'SESSION_READY', sessionJwt: _sessionJwt }); onReady(); });
@@ -163,6 +170,8 @@ export const WIDGET_SDK_JS = `/* Noema Widget SDK — served by noema-crystal (A
         setMode: function (m) { mode = m; _postToIframe({ type: 'SET_MODE', mode: m }); },
         castSpell: function (slug, inputs) { _postToIframe({ type: 'CAST_SPELL', spellSlug: slug, inputs: inputs || {} }); },
         redeemCode: function (token) {
+          // Same deliberate absence as the wallet-auth calls above (widgetRouter.ts:46-49,
+          // :207) — prod serves no /auth/redeem route; no sandbox stub exists for it either.
           return _fetch('/widget/' + encodeURIComponent(agentId) + '/auth/redeem', { method: 'POST', body: JSON.stringify({ token: token }) })
             .then(function (r) { return r.json(); })
             .then(function (d) { if (d.sessionJwt) _postToIframe({ type: 'SESSION_READY', sessionJwt: d.sessionJwt }); return d; });

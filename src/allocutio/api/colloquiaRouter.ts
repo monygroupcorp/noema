@@ -2,10 +2,16 @@
 // colloquiaRouter — the concierge's HTTP surface (noema-095, MONEY CODE).
 // =============================================================================
 //
-//   POST /v1/colloquia            — create a conversation thread (owned by the caller's
+// Mounted at /v1/colloquia. Routes below are relative to that mount:
+//
+//   POST /                        — create a conversation thread (owned by the caller's
 //                                    ownerKey; anon-capable via the noema-092 bursaToken /
 //                                    commitment seam — no animaId required)
-//   POST /v1/colloquia/:id/dicta  — run ONE turn: persist the user Dictum, run the
+//   GET /                         — list the caller's own threads, newest-first, with a
+//                                    short preview per thread (noema-111). READ-only.
+//   GET /:id                      — the full thread (colloquium + its dicta), for resume
+//                                    (noema-111). READ-only.
+//   POST /:id/dicta               — run ONE turn: persist the user Dictum, run the
 //                                    read-only ConciergeAgent (noema-094), persist the agent
 //                                    Dictum, and METER the turn.
 //

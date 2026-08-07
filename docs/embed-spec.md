@@ -259,7 +259,7 @@ The `$vectorSearch` replacement in `MongoVestigiorum.search()` is a separate tas
 
 1. `clip_service/` — Python service, Docker image
 2. `src/index.ts` — wire `CLIP_SERVICE_URL` → `embed` / `embedImage`
-3. `src/api/vestigia/searchRouter.ts` — `GET /api/vestigia/search`
+3. `src/api/vestigia/vestigiaRouter.ts` — `GET /search`
 4. Wire search router into `index.ts`
 5. `scripts/migration/backfill-vestigia-embeddings.ts` — phase 1 (promptum + intella)
 6. Phase 2 analysis: rarity scoring script

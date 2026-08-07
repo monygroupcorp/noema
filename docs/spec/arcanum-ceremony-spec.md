@@ -105,11 +105,17 @@ In-browser snarkjs ceremony UI. Route: `/ceremony` or standalone page.
 3. Export `verification_key.json`
 4. Publish transcript (hash chain + attestations)
 
-**Backend needs:**
-- `POST /arcanum/ceremony/upload` — store contribution zkey (R2)
-- `GET /arcanum/ceremony/state` — current contributor queue, hashes
-- `POST /arcanum/ceremony/finalize` — beacon + export vkey (admin-auth)
+**Backend (shipped, `ceremoniaRouter.ts`, mounted `/v1/ceremony` at `mountCeremony.ts:70`):**
+- `GET /v1/ceremony` — status (contributor queue, hashes) — this doc's "state"
+- `POST /v1/ceremony/slots` — reserve a contribution slot
+- `GET /v1/ceremony/current.zkey` — download the current zkey to contribute against
+- `POST /v1/ceremony/contributions` — upload a contribution — this doc's "upload"
 - Transcript page: static or server-rendered, shows hash chain
+
+**Finalize is not a request-triggered endpoint.** The beacon + vkey export is a deploy-time
+toggle, `CEREMONY_FINALIZE=<hash>`, applied at boot (`mountCeremony.ts:56-68`) and only when the
+ceremony is in the `open` phase. A one-shot trusted-setup finalization that cannot be triggered by
+an inbound request is the safer shape — there is no admin-auth surface to compromise.
 
 **This is the launch hype moment.** Announce ceremony → invite community → each person clicks through in-browser → platform goes live with their randomness in it.
 
