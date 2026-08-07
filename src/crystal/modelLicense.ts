@@ -191,6 +191,48 @@ const BASE_TABLE: Array<{ test: (t: string) => boolean; familia: string | null; 
   { test: (t) => t.includes('sd3') || t.includes('sd 3') || t.includes('sd2') || t.includes('sd 2'), familia: null, license: 'stability-community' },
 ]
 
+/** Every `familia` BASE_TABLE can produce (nulls dropped) — the authoritative familia vocabulary the
+ *  resolver keys on. Exported so other tables that must AGREE with it can be checked against it. */
+export const BASE_FAMILIAE: ReadonlySet<string> = new Set(
+  BASE_TABLE.map(r => r.familia).filter((f): f is string => f !== null),
+)
+
+/** Legacy v2 `params.baseIntellaId` → the compat `familia` the resolver keys on.
+ *
+ *  The v1→v2 LoRA migration (`src/migrations/loras/legacyToIntella.ts`) wrote the base into
+ *  `params.baseIntellaId` and never populated `familia`. `MongoIntella.findByTrigger` /
+ *  `triggerMap` key on `familia` with exact top-level equality, so those documents resolve to
+ *  nothing. This table is the repair mapping.
+ *
+ *  Values MUST come from BASE_TABLE's vocabulary (see BASE_FAMILIAE — a hermetic test enforces it).
+ *  `null` = no base flow exists for that architecture, so NO familia is correct (BASE_TABLE:166
+ *  gives kontext `familia: null`). An id absent from this map is an OPERATOR decision, never a
+ *  worker/runtime guess — callers must report and skip it.
+ */
+export const FAMILIA_BY_BASE_INTELLA_ID: Record<string, string | null> = {
+  'intella.flux-base':        'flux',
+  'intella.sdxl-base':        'sdxl',
+  'intella.illustrious-base': 'sdxl',   // BASE_TABLE:181 — illustrious/noobai collapse to sdxl
+  'intella.pony-base':        'sdxl',   // BASE_TABLE:180 — pony is XL-derived, stacks on the sdxl flow
+  'intella.sd15-base':        'sd15',
+  'intella.kontext-base':     null,     // BASE_TABLE:166 — no base flow, deliberately unset
+}
+
+/** True when `id` is a base intella this mapping KNOWS about — including the known-but-null kontext
+ *  case. Callers must use this to tell "known, correctly gets no familia" apart from "unknown base,
+ *  needs an operator decision"; `familiaFromBaseIntellaId` returns `null` for both. */
+export function isKnownBaseIntellaId(id: string | null | undefined): boolean {
+  return typeof id === 'string' && Object.prototype.hasOwnProperty.call(FAMILIA_BY_BASE_INTELLA_ID, id)
+}
+
+/** The compat `familia` for a legacy `params.baseIntellaId`, or `null` when there is none — which
+ *  means EITHER the id is unknown OR it is known to have no base flow. Pair with
+ *  `isKnownBaseIntellaId` to distinguish the two; never write on a `null` without that check. */
+export function familiaFromBaseIntellaId(id: string | null | undefined): string | null {
+  if (!isKnownBaseIntellaId(id)) return null
+  return FAMILIA_BY_BASE_INTELLA_ID[id as string] ?? null
+}
+
 /**
  * Classify an external base-model string into its compat `familia` (null = no base flow) and its
  * license id. Exhaustive + ordered; anything unrecognised is `{ familia: null, license: 'unknown' }`.
