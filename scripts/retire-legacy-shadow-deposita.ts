@@ -229,9 +229,25 @@ export async function retire(
     }
 
     // 3. Only now remove the source, by `_id`, one row. There is no bulk path here.
-    const del = await live.deleteOne({ _id: id } as Filter<Document>)
+    //
+    //    The delete is a COMPARE-AND-SWAP, not a bare `_id` match: it re-asserts the whole
+    //    shadow shape at delete time. Between the `find` above and this line the row is only a
+    //    snapshot — the app is live, and a webhook re-delivery for one of these old tx hashes
+    //    would take the reuse branch and freeze a fresh `token`/`usdFmv` basis onto the row,
+    //    turning it into a genuine, priced, owed deposit. Deleting it then would destroy an
+    //    owed row (the archived copy predates the update, so it is not even a faithful record
+    //    of what was destroyed) and orphan the in-flight credit path, whose own update would
+    //    then fail, retry, mint a NEW depositum id and double-book revenue past the
+    //    `reditus`-per-`depositumId` uniqueness guard. Re-stating the predicate in the filter
+    //    means a row that changed under the run simply is not matched: `deletedCount` is 0 and
+    //    the branch below refuses, leaving the source in place and exiting non-zero.
+    //
+    //    A refused row leaves its (now stale) archived copy behind on purpose — a resumed run
+    //    re-verifies that copy against the changed source, fails the gate, and refuses again.
+    //    Fail-closed: an operator decides, never the script.
+    const del = await live.deleteOne({ _id: id, ...SELECTOR } as Filter<Document>)
     if (del.deletedCount !== 1) {
-      console.error(`  [${index}] REFUSED: source row was not removed (deletedCount=${del.deletedCount}); the archived copy stands`)
+      console.error(`  [${index}] REFUSED: source row was not removed (deletedCount=${del.deletedCount}) — it changed under the run or was already gone; the archived copy stands`)
       res.refused++
       continue
     }
