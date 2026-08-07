@@ -1,6 +1,5 @@
 # NOEMA Individual Contributor License Agreement (ICLA)
 
-> **Status:** v1 draft, 2026-07-02. **Have counsel review before relying on this.**
 > Legal entity: **Mony Group LLC** (confirmed). This document is engineering-provided
 > boilerplate, not legal advice.
 
@@ -71,5 +70,5 @@ implied, except as expressly stated in this Agreement.
 Signing is handled automatically when You open a pull request: a CLA check will ask You to
 confirm agreement to this document (one time, covering all future Contributions). See
 `CONTRIBUTING.md`. If the automated flow is unavailable, state in Your pull request:
-"I have read the CLA and I hereby accept its terms for my present and future Contributions,"
-including Your name and (if applicable) the entity You represent.
+"I have read the CLA Document and I hereby sign the CLA," including Your name and (if
+applicable) the entity You represent.
