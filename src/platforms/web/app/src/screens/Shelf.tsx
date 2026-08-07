@@ -1,16 +1,20 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { api, type ModelCard } from '../lib/api';
+import { api, type ModelCard, type CatalogSort } from '../lib/api';
 import { useProject, useProjectScope } from '../state/project';
 import { ScopeBanner } from '../lib/ScopeBanner';
 import { HoldingToggle } from '../lib/HoldingToggle';
 
-// Model shelf (train-shelf-spec.md) — the caller's own trained + imported models, from
-// GET /v1/me/models. Cards show real provenance (base model, trigger, license, listing
-// state). Royalty/run economics don't exist server-side yet (Tier B #5), so they're not
-// shown — the shelf reflects only what the backend actually knows.
+// The models page, in two surfaces:
+//   1. the SHELF (train-shelf-spec.md) — the caller's own trained + imported models, from
+//      GET /v1/me/models. Cards show real provenance (base model, trigger, license, listing
+//      state). Royalty/run economics don't exist server-side yet (Tier B #5), so they're not
+//      shown — the shelf reflects only what the backend actually knows.
+//   2. the CATALOG — everything the platform publicly carries, from GET /v1/models, browsable
+//      and sortable, collapsed by default and fetched only once expanded (the catalog grows;
+//      an unconditional fetch on every visit is waste). Catalog cards are read-only.
 
 // Deterministic tile gradient from the model id — distinct-looking cards without
 // inventing per-model artwork the backend doesn't have.
@@ -61,6 +65,36 @@ export function resolveUseInFlowTarget(m: Pick<ModelCard, 'basis' | 'trigger' | 
   return qs ? `/card?id=${baseCardId}&${qs}` : `/card?id=${baseCardId}`;
 }
 
+// Sentinel for the "no base family recorded" facet bucket. `basis` is optional on a ModelCard
+// (it is emitted only when the model carries a `familia`), so an explicit bucket keeps those
+// entries reachable instead of vanishing whenever a basis filter is active.
+export const BASIS_UNSPECIFIED = '~unspecified';
+
+// Facet options are derived from the RESULT SET, never hardcoded — coverage of `basis` changes
+// as the catalog does, in both directions, so a fixed family list would go wrong either way.
+export function catalogGenera(models: ModelCard[]): string[] {
+  return Array.from(new Set(models.map((m) => m.genus).filter(Boolean))).sort();
+}
+
+export function catalogBases(models: ModelCard[]): string[] {
+  const named = Array.from(new Set(models.map((m) => m.basis).filter((b): b is string => !!b))).sort();
+  return models.some((m) => !m.basis) ? [...named, BASIS_UNSPECIFIED] : named;
+}
+
+// Client-side facet narrowing over the fetched catalog page. 'all' clears an axis.
+export function applyCatalogFilters(models: ModelCard[], genus: string, basis: string): ModelCard[] {
+  return models.filter(
+    (m) =>
+      (genus === 'all' || m.genus === genus) &&
+      (basis === 'all' || (basis === BASIS_UNSPECIFIED ? !m.basis : m.basis === basis))
+  );
+}
+
+const SORT_LABELS: { key: CatalogSort; label: string }[] = [
+  { key: 'newest', label: 'newest' },
+  { key: 'name', label: 'name' },
+];
+
 export function Shelf() {
   const { project: active, fileAsset } = useProject();
   const [models, setModels] = useState<ModelCard[] | null>(null);
@@ -76,6 +110,14 @@ export function Shelf() {
   const [admin, setAdmin] = useState(false);
   const [licBusy, setLicBusy] = useState<string | null>(null);
 
+  // The global catalog surface (GET /v1/models) — collapsed until asked for.
+  const [catOpen, setCatOpen] = useState(false);
+  const [catalog, setCatalog] = useState<ModelCard[] | null>(null);
+  const [catErr, setCatErr] = useState<string | null>(null);
+  const [catSort, setCatSort] = useState<CatalogSort>('newest');
+  const [catGenus, setCatGenus] = useState('all');
+  const [catBasis, setCatBasis] = useState('all');
+
   useEffect(() => {
     let live = true;
     api.listMyModels()
@@ -84,6 +126,18 @@ export function Shelf() {
     api.getMe().then((me) => { if (live) setAdmin(!!me.admin); }).catch(() => {});
     return () => { live = false; };
   }, []);
+
+  // Lazy catalog load: nothing is fetched until the section is first expanded, then again
+  // whenever the sort changes — the ordering is applied server-side, before any limit slice.
+  useEffect(() => {
+    if (!catOpen) return;
+    let live = true;
+    setCatErr(null);
+    api.listModels({ sort: catSort })
+      .then((r) => { if (live) setCatalog(r.models); })
+      .catch((e) => { if (live) setCatErr(e instanceof Error ? e.message : String(e)); });
+    return () => { live = false; };
+  }, [catOpen, catSort]);
 
   async function reclassify(id: string) {
     setLicBusy(id);
@@ -111,15 +165,32 @@ export function Shelf() {
   const [params] = useSearchParams();
   const scope = useProjectScope(params.get('project'));
   const target = (scope ?? active).id;
-  // When scoped to a project, show only its filed models (Provincia.modelIds).
+  // When scoped to a project, show only its filed models (Provincia.modelIds). The scope is a
+  // property of YOUR shelf — it never narrows the global catalog below.
   const shown = scope && models ? models.filter((m) => scope.modelIds.includes(m.intellaId)) : models;
   const count = shown?.length ?? 0;
+
+  const genusOptions = useMemo(() => catalogGenera(catalog ?? []), [catalog]);
+  const basisOptions = useMemo(() => catalogBases(catalog ?? []), [catalog]);
+  // A selected facet that the current result set no longer offers falls back to 'all' rather
+  // than rendering an empty list. Fewer than two distinct bases = no basis control at all.
+  const genusSel = genusOptions.includes(catGenus) ? catGenus : 'all';
+  const basisSel = basisOptions.includes(catBasis) ? catBasis : 'all';
+  const showBasisFilter = basisOptions.length >= 2;
+  const catShown = useMemo(
+    () => applyCatalogFilters(catalog ?? [], genusSel, showBasisFilter ? basisSel : 'all'),
+    [catalog, genusSel, basisSel, showBasisFilter]
+  );
 
   return (
     <AppShell title="Models">
       <div className="page"><div className="pw wide">
         <div className="pagehead shelf-head">
           <div>
+            <div className="noema-kicker" style={{ marginBottom: 8 }}>
+              {models ? `your models · ${count}` : 'loading…'}
+              {catOpen && catalog && <> · public catalog · {catalog.length}</>}
+            </div>
             <h1>Model shelf</h1>
             <div className="sub">What you’ve taught NOEMA — run them, turn them into collections, and publish them.</div>
           </div>
@@ -152,7 +223,9 @@ export function Shelf() {
           </div>
         )}
 
-        {scope && <ScopeBanner project={scope} noun="models" />}
+        {/* The scope narrows YOUR shelf only — the catalog section below stays unscoped, so the
+            noun says so rather than reading as though the whole page were filtered. */}
+        {scope && <ScopeBanner project={scope} noun="your models" />}
 
         {err && <div className="warn">Couldn’t load your models — {err}</div>}
         {!models && !err && <div className="empty"><div className="t">Loading your models…</div></div>}
@@ -203,6 +276,85 @@ export function Shelf() {
               );
             })}
           </div>
+        )}
+
+        {/* ── The global catalog ─────────────────────────────────────────────────
+            Everything the platform publicly carries — platform-seeded models and models
+            users have published. Read-only here: no reclassify, no filing, no import. */}
+        <div className="pagehead" style={{ marginTop: 'var(--s6)' }}>
+          <div>
+            <div className="noema-kicker" style={{ marginBottom: 8 }}>the whole platform</div>
+            <h2>Browse the catalog</h2>
+            <div className="sub">Every model NOEMA publicly carries — seeded and user-published alike.</div>
+          </div>
+          <button className="btn ghost" onClick={() => setCatOpen((v) => !v)} aria-expanded={catOpen}>
+            <Ic name={catOpen ? 'eye-off' : 'search'} /> {catOpen ? 'hide catalog' : 'browse catalog'}
+          </button>
+        </div>
+
+        {catOpen && (
+          <>
+            <div className="cat-toolbar">
+              <div className="cat-filters">
+                <button className={`cat-chip${genusSel === 'all' ? ' on' : ''}`} onClick={() => setCatGenus('all')}>All</button>
+                {genusOptions.map((g) => (
+                  <button key={g} className={`cat-chip${genusSel === g ? ' on' : ''}`} onClick={() => setCatGenus(g)}>{g}</button>
+                ))}
+              </div>
+              <div className="cat-sort">
+                sort{' '}
+                {SORT_LABELS.map((s) => (
+                  <button key={s.key} className={`cat-chip${catSort === s.key ? ' on' : ''}`} onClick={() => setCatSort(s.key)}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {showBasisFilter && (
+              <div className="cat-toolbar cat-verbs">
+                <div className="cat-filters">
+                  <button className={`cat-chip${basisSel === 'all' ? ' on' : ''}`} onClick={() => setCatBasis('all')}>All bases</button>
+                  {basisOptions.map((b) => (
+                    <button key={b} className={`cat-chip${basisSel === b ? ' on' : ''}`} onClick={() => setCatBasis(b)}>
+                      {b === BASIS_UNSPECIFIED ? 'unspecified' : b}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {catErr && <div className="warn">Couldn’t load the catalog — {catErr}</div>}
+            {!catalog && !catErr && <div className="empty"><div className="t">Loading the catalog…</div></div>}
+            {catalog && catShown.length === 0 && <div className="empty"><div className="t">No models match.</div></div>}
+
+            {catShown.length > 0 && (
+              <div className="shelfgrid">
+                {catShown.map((m) => (
+                  <div key={m.intellaId} className="modelcard">
+                    <div className="mc-sample" style={{ background: tileBg(m.intellaId) }}>
+                      {m.basis && <span className="mc-ver mono">{m.basis}</span>}
+                    </div>
+                    <div className="mc-body">
+                      <div className="mc-title"><b>{m.nomen}</b><span className={`mc-kind ${m.genus}`}>{m.genus}</span></div>
+                      <div className="mc-meta mono">
+                        {m.basis ?? 'model'}
+                        {m.trigger && <> · trigger <span className="accent">{m.trigger}</span></>}
+                      </div>
+                      {m.description && <div className="mc-meta">{m.description}</div>}
+                      <div className="mc-actions">
+                        <Link className="btn ghost" to={resolveUseInFlowTarget(m)}>Use in a flow</Link>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {catalog && catShown.length > 0 && (
+              <div className="foot">showing {catShown.length.toLocaleString()} of {catalog.length.toLocaleString()}</div>
+            )}
+          </>
         )}
       </div></div>
     </AppShell>

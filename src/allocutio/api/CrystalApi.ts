@@ -339,6 +339,38 @@ const NEGATIVE_PORT_KEYS = ['negative_prompt', 'negativePrompt', 'negative']
  *  catalog unless the caller has spicyMode on; {untriaged, sfw} (and unrated) are always visible. */
 const ADULT_CONTENT_RATINGS: ReadonlySet<IntellaContentRating> = new Set<IntellaContentRating>(['suggestive', 'explicit'])
 
+/** Orderings the public model catalog accepts. `newest` is the default and the shape the store
+ *  already returns (`natum` descending); anything unrecognised falls back to it — browse surfaces
+ *  degrade, they do not error. */
+export type CatalogSort = 'newest' | 'name' | 'genus'
+const CATALOG_SORTS: ReadonlySet<string> = new Set<string>(['newest', 'name', 'genus'])
+
+/** Normalise an untrusted `sort` value to a supported ordering. */
+export function normalizeCatalogSort(sort: string | undefined): CatalogSort {
+  return sort !== undefined && CATALOG_SORTS.has(sort) ? (sort as CatalogSort) : 'newest'
+}
+
+/**
+ * The pool the public model catalog reads from: everything publicly visible — platform-canonical
+ * intellae plus models users have published. Stores that implement `publicCatalog` serve it
+ * directly; stores that do not (fakes, read-only registries) fall back to the canonical set, so a
+ * registry never has to grow a method to keep working.
+ */
+async function readPublicCatalog(registry: Intellarum): Promise<Intella[]> {
+  return registry.publicCatalog ? await registry.publicCatalog() : await registry.canonical()
+}
+
+/** Order a catalog page. Applied BEFORE any `limit` slice, so paging returns the intended page.
+ *  `name` compares case-insensitively; `newest` is `natum` descending (undefined `natum` sorts
+ *  last). `Array.prototype.sort` is stable, so equal keys keep their store order. */
+export function sortCatalog(intellae: Intella[], sort: CatalogSort): Intella[] {
+  const natumMs = (i: Intella): number => (i.natum ? new Date(i.natum).getTime() : Number.NEGATIVE_INFINITY)
+  const copy = [...intellae]
+  if (sort === 'name') return copy.sort((a, b) => a.nomen.toLowerCase().localeCompare(b.nomen.toLowerCase()))
+  if (sort === 'genus') return copy.sort((a, b) => String(a.genus).localeCompare(String(b.genus)))
+  return copy.sort((a, b) => natumMs(b) - natumMs(a))
+}
+
 /**
  * Layer the owner's account-level defaults under the cast-time aditus:
  * cast-time input > affines (per-modus) > generatio (cross-cutting) > modus defaults.
@@ -2121,9 +2153,13 @@ export class CrystalApi {
    * (lora/checkpoint/…), `basis` (the base family a weight is for), `fundamentumId`
    * (resolved to the substrate's base family), `trigger` (a LoRA trigger word), and
    * `q` (free text, matched in-memory against nomen/description). Sourced from the
-   * populated `intellarum` registry's `canonical()` set — the public catalog
-   * projection (no `access`/`license`/`commercialUse`). Each result is a card so the
-   * agent can decide, not just enumerate.
+   * populated `intellarum` registry's PUBLIC CATALOG — platform-canonical intellae plus
+   * models users have published (`access: 'public'`) — under the public projection (no
+   * `access`/`license`/`commercialUse`). Registries without a `publicCatalog` read fall
+   * back to `canonical()`. Each result is a card so the agent can decide, not just enumerate.
+   *
+   * `sort` ('newest' | 'name' | 'genus', default 'newest') orders the result BEFORE the
+   * `limit` slice. An unrecognised value falls back to the default rather than erroring.
    *
    * `auctor` (optional): when passed, the search base is the UNION of the public
    * `canonical()` set and that caller's own privately-held models (the same owner
@@ -2132,7 +2168,7 @@ export class CrystalApi {
    * results are matched identically. Omitting `auctor` preserves today's public-only
    * behavior for every existing caller (noema-116).
    */
-  async listModels(filter: { genus?: IntelligensGenus; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number; includeAdult?: boolean; auctor?: AuctorKey } = {}): Promise<ModelCard[]> {
+  async listModels(filter: { genus?: IntelligensGenus; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number; includeAdult?: boolean; sort?: string; auctor?: AuctorKey } = {}): Promise<ModelCard[]> {
     if (!this.deps.intellarum) return []
     const registry = this.deps.intellarum
     let basis = filter.basis
@@ -2145,8 +2181,7 @@ export class CrystalApi {
         }
       }
     }
-    const canonical = await registry.canonical()
-    let pool = canonical
+    let pool = await readPublicCatalog(registry)
     if (filter.auctor) {
       const ownerKey = ownerKeyOf(filter.auctor)
       const owned = registry.listByOwner
@@ -2184,7 +2219,9 @@ export class CrystalApi {
       if (!filter.includeAdult && i.contentRating !== undefined && ADULT_CONTENT_RATINGS.has(i.contentRating)) return false
       return true
     })
-    const limited = filter.limit ? hits.slice(0, filter.limit) : hits
+    // Order BEFORE the slice — sorting a limited page would page the wrong records.
+    const ordered = sortCatalog(hits, normalizeCatalogSort(filter.sort))
+    const limited = filter.limit ? ordered.slice(0, filter.limit) : ordered
     return limited.map((i) => {
       const { access: _access, license: _license, commercialUse: _commercialUse, ...card } = toModelCardFromIntella(i)
       return card

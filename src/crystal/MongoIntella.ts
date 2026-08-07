@@ -134,6 +134,19 @@ export class MongoIntella implements Intellarum {
     return docs.map(projectV2ToV1)
   }
 
+  /** Everything publicly visible — platform-canonical PLUS user-published (`access:'public'`, v1 or
+   *  v2), newest first. Uses the same `buildAccessOrClauses` the trigger resolver uses, with NO
+   *  ownerKey, so the public half of that query is all that can match and a private record is
+   *  unreachable by construction. Superset of `canonical()`, which stays narrow for its own callers. */
+  async publicCatalog(genus?: IntellaGenus): Promise<Intellae> {
+    const query: Record<string, unknown> = {
+      $or: buildAccessOrClauses(undefined),
+      ...(genus !== undefined ? { genus } : {}),
+    }
+    const docs = await this.col.find(query).sort({ natum: -1 }).toArray()
+    return docs.map(projectV2ToV1)
+  }
+
   /** An owner's privately-held models (imports + trained), newest first. Matches the owner on the
    *  new flat `ownerKey` (Bursa-capable) OR legacy `ownerAnimaId` for anima owners (migration-free). */
   async listByOwner(ownerKey: string, genus?: IntellaGenus): Promise<Intellae> {
