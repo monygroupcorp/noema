@@ -54,8 +54,8 @@ test('mapToFamilia: maps to families with a base flow (incl. SDXL finetunes); re
   assert.equal(mapToFamilia('Krea 2'), 'krea2')
   assert.equal(mapToFamilia('Z-Image Turbo'), 'zimage')
   assert.equal(mapToFamilia('Pony Realism'), 'sdxl')         // SDXL-architecture finetune → stacks on sdxl
+  assert.equal(mapToFamilia('Flux.1 Kontext'), 'flux')        // flux1-family edit model — existing flux LoRAs apply
   // No base flow → rejected (null), NOT silently mismapped:
-  assert.equal(mapToFamilia('Flux.1 Kontext'), null)         // must NOT fall through to 'flux'
   assert.equal(mapToFamilia('SD3 Medium'), null)
   assert.equal(mapToFamilia('Stable Cascade'), null)
 })
@@ -75,6 +75,12 @@ test('classifyBaseModel: FLUX schnell vs dev — SAME familia, DIFFERENT license
 
 test('classifyBaseModel: bare FLUX (no variant) is fail-closed, not assumed schnell', () => {
   assert.equal(licenseCommercial(classifyBaseModel('FLUX').license), 'unknown')
+})
+
+test('classifyBaseModel: Kontext is flux1 familia, still Non-Commercial license', () => {
+  const kontext = classifyBaseModel('FLUX.1 Kontext dev')
+  assert.equal(kontext.familia, 'flux')                          // existing flux LoRAs apply
+  assert.equal(licenseCommercial(kontext.license), 'no')         // NC — the license column is unaffected
 })
 
 test('classifyBaseModel: license verdicts across families', () => {
