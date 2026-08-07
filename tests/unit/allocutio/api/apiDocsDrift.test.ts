@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import type { RouteSpec } from '../../../../src/allocutio/api/apiContract.js'
 import { API_CONTRACT } from '../../../../src/allocutio/api/apiContract.js'
 import { generateOpenApi, generateReference } from '../../../../src/allocutio/api/docgen.js'
 
@@ -44,4 +45,38 @@ test('committed reference.md matches the generator (no drift)', () => {
     expected,
     'docs/api/reference.md is stale — run `npm run gen:api-docs`.',
   )
+})
+
+test('generateOpenApi: query params are appended after path params, and a route with neither emits no parameters key', () => {
+  const routes: RouteSpec[] = [
+    {
+      method: 'GET',
+      path: '/widgets/:id',
+      summary: 'A route with a path param and query params.',
+      auth: false,
+      query: [{ name: 'sort', description: 'Sort order.', schema: { type: 'string' } }],
+    },
+    {
+      method: 'GET',
+      path: '/widgets',
+      summary: 'A route with neither path nor query params.',
+      auth: false,
+    },
+  ]
+  const doc = generateOpenApi({ version: 'v1', routes, errorCodes: [] }) as {
+    paths: Record<string, Record<string, { parameters?: unknown[] }>>
+  }
+
+  const withBoth = doc.paths['/widgets/{id}'].get.parameters!
+  assert.equal(withBoth.length, 2, 'path param then query param')
+  assert.deepEqual(withBoth[0], { name: 'id', in: 'path', required: true, schema: { type: 'string' } })
+  assert.deepEqual(withBoth[1], {
+    name: 'sort',
+    in: 'query',
+    description: 'Sort order.',
+    required: false,
+    schema: { type: 'string' },
+  })
+
+  assert.equal('parameters' in doc.paths['/widgets'].get, false, 'no parameters key when there are none')
 })
