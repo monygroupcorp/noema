@@ -583,7 +583,10 @@ export const api = {
   cancelCollection: (id: string) => fetch(`/v1/collectiones/${id}/cancel`, { method: 'POST', headers: authHeaders() }).then(j<{ collection: Collection }>),
   extendCollection: (id: string, count: number) =>
     fetch(`/v1/collectiones/${id}/extend`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ count }) }).then(j<{ collection: Collection }>),
-  // Draft authoring: replace a draft's trait grid (re-derives provenance), then fire it.
+  // Draft authoring: set a draft's trait grid / base flow / supply (re-derives provenance),
+  // then fire it. Omitted fields are left untouched.
+  patchCollectionDraft: (id: string, patch: { tractus?: Tractus[]; modusId?: string; numerus?: number }) =>
+    fetch(`/v1/collectiones/${id}/tractus`, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify(patch) }).then(j<{ collection: Collection }>),
   patchCollectionTractus: (id: string, tractus: Tractus[]) =>
     fetch(`/v1/collectiones/${id}/tractus`, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ tractus }) }).then(j<{ collection: Collection }>),
   fireCollection: (id: string) =>
@@ -1103,7 +1106,10 @@ export type CollectionStatus = 'draft' | 'pending' | 'running' | 'complete' | 'c
 export interface Collection {
   id: string;
   nomen?: string;
+  /** The user's working note on what this collection is. */
+  descriptio?: string;
   status: CollectionStatus;
+  /** `''` on a draft that has not picked its base flow yet (so is `provenanceHash`). */
   modusId: string;
   total: number;
   provenanceHash: string;
@@ -1125,11 +1131,15 @@ export interface Collection {
 export interface TractusValor { value: string; label?: string; rarity?: number; promptFragment?: string; excludes?: string[]; tags?: string[] }
 // One axis of variation — the aditus port to vary and its options.
 export interface Tractus { porta: string; label?: string; valores: TractusValor[] }
+// Creating a collection is a naming act: only the name is really needed. The generative
+// config (`modusId` / `total` / `tractus`) is optional on a `draft` — the draft learns it
+// later via `patchCollectionDraft`. A NON-draft create still requires all three server-side.
 export interface CreateCollectionRequest {
-  modusId: string;
-  total: number;
-  tractus: Tractus[];
+  modusId?: string;
+  total?: number;
+  tractus?: Tractus[];
   nomen?: string;
+  descriptio?: string;
   aditusBase?: Record<string, unknown>;
   reviewEnabled?: boolean;
   draft?: boolean;

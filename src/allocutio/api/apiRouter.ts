@@ -82,6 +82,7 @@ export interface ApiFacade {
   collect(auctor: AuctorKey, opts: CollectOpts): Promise<Collection>
   fireCollection(auctor: AuctorKey, id: string): Promise<Collection>
   patchCollectionTractus(auctor: AuctorKey, id: string, tractus: import('../../types/collectio.js').Tractus[]): Promise<Collection>
+  patchCollectionDraft(auctor: AuctorKey, id: string, patch: { tractus?: import('../../types/collectio.js').Tractus[]; modusId?: string; numerus?: number }): Promise<Collection>
   getCollection(auctor: AuctorKey, id: string): Promise<Collection>
   getCollectionRarity(auctor: AuctorKey, id: string): Promise<RarityReport>
   extendCollection(auctor: AuctorKey, id: string, addCount: number): Promise<Collection>
@@ -405,15 +406,20 @@ export function createApiRouter(deps: {
   // POST /v1/collectiones — create + start a Collection.
   router.post('/collectiones', wrap(async (req, res) => {
     const auctor = await auth(req)
-    const { modusId, total, tractus, aditusBase, concurrentia, nomen, dna, reviewEnabled, draft, teamId } = req.body ?? {}
-    res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen, dna, reviewEnabled, draft, teamId }) })
+    const { modusId, total, tractus, aditusBase, concurrentia, nomen, descriptio, dna, reviewEnabled, draft, teamId } = req.body ?? {}
+    res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen, descriptio, dna, reviewEnabled, draft, teamId }) })
   }))
 
-  // PATCH /v1/collectiones/:id/tractus — edit a DRAFT's trait axes/values/rules
-  // (the garden + rules authoring write). Re-derives provenance; frozen once fired.
+  // PATCH /v1/collectiones/:id/tractus — edit a DRAFT's trait axes/values/rules, and (since a
+  // draft may now be created without them) its base flow + supply. The garden/rules authoring
+  // write. Re-derives provenance; frozen once fired. Omitted fields are left untouched.
   router.patch('/collectiones/:id/tractus', wrap(async (req, res) => {
-    const { tractus } = req.body ?? {}
-    res.json({ collection: await api.patchCollectionTractus(await auth(req), String(req.params.id), tractus) })
+    const { tractus, modusId, numerus } = req.body ?? {}
+    res.json({ collection: await api.patchCollectionDraft(await auth(req), String(req.params.id), {
+      ...(tractus !== undefined ? { tractus } : {}),
+      ...(modusId !== undefined ? { modusId: String(modusId) } : {}),
+      ...(numerus !== undefined ? { numerus: Number(numerus) } : {}),
+    }) })
   }))
 
   // POST /v1/collectiones/:id/fire — freeze a DRAFT's tractus and start the run (funder-only).

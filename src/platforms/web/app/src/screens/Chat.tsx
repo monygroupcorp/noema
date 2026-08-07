@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { isExampleCleared, clearExample } from '../lib/chatExample';
@@ -180,6 +180,20 @@ export function Chat() {
   // landing state; a click resumes, a send starts fresh).
   useEffect(() => { void refreshThreads(); }, []);
 
+  // `?seed=…` — another surface (e.g. a fresh collection's hub) hands the concierge an opening
+  // line. It PREFILLS the composer and nothing more: the user still reads it, edits it, and
+  // presses send. Consumed once — cleared after the first send so it cannot re-seed.
+  const [params] = useSearchParams();
+  const [seed, setSeed] = useState<string | null>(() => params.get('seed'));
+  useEffect(() => {
+    if (!seed || !taRef.current) return;
+    const ta = taRef.current;
+    ta.value = seed;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
+    ta.focus();
+  }, [seed]);
+
   // Resume a past thread: hydrate the message list from its dicta and make it the active
   // colloquium so the next send() continues it (not a new thread).
   async function resume(id: string) {
@@ -240,6 +254,7 @@ export function Chat() {
       return [...base, { who: 'you', body: v }];
     });
     if (taRef.current) { taRef.current.value = ''; taRef.current.style.height = 'auto'; }
+    if (seed) setSeed(null);   // one-shot prefill — never re-seeds after the first send
     const priorRunId = critiqueOf;
     setCritiqueOf(undefined);
 

@@ -37,7 +37,10 @@ export class MongoCollectio implements Collectionum {
     return this.list({ status })
   }
 
-  async update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'numerus' | 'tractus' | 'provenanceHash' | 'pausatum'>>): Promise<Collectio> {
+  // `nomen` / `descriptio` / `modusId` ride the same generic $set path as every other
+  // scalar field — `toDoc` spreads the patch verbatim, so no per-field projection exists
+  // (or is needed) here; the store is a straight document mirror of `Collectio`.
+  async update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'nomen' | 'descriptio' | 'modusId' | 'numerus' | 'tractus' | 'provenanceHash' | 'pausatum'>>): Promise<Collectio> {
     // `pausatum: undefined` means "clear the pause" (resume) — $unset it rather
     // than $set-ing an undefined value (which Mongo would otherwise reject/drop).
     const { pausatum, ...rest } = patch

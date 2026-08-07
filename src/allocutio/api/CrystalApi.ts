@@ -217,20 +217,27 @@ export interface CrystalApiDeps {
   stripe?: StripeGateway
 }
 
-/** Inputs to start a Collection (a Collectio): a base modus expanded over a Tractus[] grid. */
+/** Inputs to start a Collection (a Collectio): a base modus expanded over a Tractus[] grid.
+ *
+ *  `modusId` / `total` / `tractus` are REQUIRED for an immediate (non-draft) collect — that
+ *  path dispatches and spends, and its strictness is unchanged. They may be omitted only when
+ *  `draft` is true: a draft is a naming act, and it learns its flow, supply and grid later via
+ *  `patchCollectionDraft`. `fireCollection` refuses a draft that is still missing any of them. */
 export interface CollectOpts {
-  /** The flow expanded across the grid (atomic or a compositus pipeline). */
-  modusId: string
-  /** Target number of pieces to generate. */
-  total: number
-  /** The axes of variation. Each Tractus is one trait/parameter dimension. */
-  tractus: Tractus[]
+  /** The flow expanded across the grid (atomic or a compositus pipeline). Draft-optional. */
+  modusId?: string
+  /** Target number of pieces to generate. Draft-optional (defaults to 0 on a draft). */
+  total?: number
+  /** The axes of variation. Each Tractus is one trait/parameter dimension. Draft-optional. */
+  tractus?: Tractus[]
   /** Base aditus applied to every piece (e.g. `_basePrompt` with `{{axis}}` tokens). */
   aditusBase?: Record<string, unknown>
   /** Max concurrent pieces in flight. Default 3. */
   concurrentia?: number
   /** Optional human name. */
   nomen?: string
+  /** Optional working note on what this collection is. */
+  descriptio?: string
   /** Opt-in DNA uniqueness — no two pieces share a trait combination (see Collectio.dna). */
   dna?: boolean
   /** Hold every completed piece for review before it counts (see Collectio.reviewEnabled).
@@ -641,26 +648,32 @@ export class CrystalApi {
       owners = team.membra.map((animaId) => ({ animaId, weight: 1 / team.membra.length }))
     }
 
-    // Validate the flow up front — a bogus modusId would otherwise create a
-    // collection whose every piece fails at dispatch. (Mirrors invokeFlow/quote.)
-    const modus = await this.deps.modorum.find(opts.modusId)
-    if (!modus) throw Errors.notFoundFlow(opts.modusId)
-
+    // A DRAFT may not know its flow yet (creating a collection is a naming act — the flow,
+    // supply and grid are authored afterwards). An ABSENT flow on a draft is not a bogus flow,
+    // so validation is skipped and the collection is left flowless (`''`) with no provenance.
+    // Everything else — including a draft that DID name a flow, and every non-draft — keeps the
+    // original strictness: a bogus/missing modusId would otherwise create a collection whose
+    // every piece fails at dispatch. (Mirrors invokeFlow/quote.)
+    const isDraft = !!opts.draft
+    const modusId = opts.modusId ?? ''
+    const tractus = opts.tractus ?? []
     const aditusBase = opts.aditusBase ?? {}
-    // Pin the provenance hash to the resolved flow version.
-    const provenance = provenanceHash({
-      modusId: opts.modusId,
-      modusVersio: modus.versio,
-      tractus: opts.tractus,
-      aditusBase,
-    })
+
+    let provenance = ''
+    if (!isDraft || opts.modusId !== undefined) {
+      const modus = await this.deps.modorum.find(modusId)
+      if (!modus) throw Errors.notFoundFlow(modusId)
+      // Pin the provenance hash to the resolved flow version.
+      provenance = provenanceHash({ modusId, modusVersio: modus.versio, tractus, aditusBase })
+    }
 
     const collectio = await collectiones.create({
       ...(opts.nomen !== undefined ? { nomen: opts.nomen } : {}),
-      modusId: opts.modusId,
+      ...(opts.descriptio !== undefined ? { descriptio: opts.descriptio } : {}),
+      modusId,
       aditusBase,
-      tractus: opts.tractus,
-      numerus: opts.total,
+      tractus,
+      numerus: opts.total ?? 0,
       provenanceHash: provenance,
       by,
       ...(sodalitasId !== undefined ? { sodalitasId } : {}),
@@ -692,6 +705,15 @@ export class CrystalApi {
       throw Errors.authForbidden('only the collection funder can fire it')
     }
     if (c.status !== 'draft') throw Errors.inputMalformed('only a draft collection can be fired')
+
+    // Creating a collection is free and may leave the generative config unset — so firing is
+    // where completeness is enforced. Without these, an unfinished draft would not "fail to
+    // fire", it would dispatch garbage: a flowless run, a zero-piece run, or a grid with no
+    // axis of variation. Each missing piece gets its own message so the UI can say what to fix.
+    if (!c.modusId) throw Errors.notFoundFlow('(none chosen yet)')
+    if (!(c.numerus > 0)) throw Errors.inputMalformed('this collection has no supply yet — set how many pieces to generate before firing')
+    if (c.tractus.length === 0) throw Errors.inputMalformed('this collection has no traits yet — add at least one axis of variation before firing')
+
     // Re-pin provenance to the flow version at fire time (the config that actually runs).
     const modus = await this.deps.modorum.find(c.modusId)
     const provenance = provenanceHash({
@@ -706,23 +728,45 @@ export class CrystalApi {
   }
 
   /**
-   * Replace a DRAFT collection's tractus (the garden/rules authoring write) and
-   * re-derive its provenance hash — the content-address MUST change when the grid,
+   * The DRAFT-authoring write: set a draft's base flow, supply and/or trait grid, and
+   * re-derive its provenance hash — the content-address MUST change when the flow, the grid,
    * a weight, an exclude, or a tag changes. Frozen once fired. Owner-scoped.
+   *
+   * `collect` may now create a draft that knows none of these (create is a naming act), so this
+   * is where a draft learns them. A flowless draft still content-addresses to `''` — there is
+   * nothing to hash until a flow is chosen.
    */
-  async patchCollectionTractus(auctor: AuctorKey, id: string, tractus: Tractus[]): Promise<Collection> {
+  async patchCollectionDraft(
+    auctor: AuctorKey,
+    id: string,
+    patch: { tractus?: Tractus[]; modusId?: string; numerus?: number },
+  ): Promise<Collection> {
     const { collectiones } = this.deps
     if (!collectiones) throw Errors.notFoundCollection('collections')
     const c = await this._ownedCollection(auctor, id)
     if (c.status !== 'draft') throw Errors.inputMalformed('a collection’s tractus is frozen once it is fired')
-    const modus = await this.deps.modorum.find(c.modusId)
-    const provenance = provenanceHash({
-      modusId: c.modusId,
-      modusVersio: modus?.versio,
+
+    const modusId = patch.modusId ?? c.modusId
+    const tractus = patch.tractus ?? c.tractus
+    const modus = modusId ? await this.deps.modorum.find(modusId) : null
+    // Only a NEWLY-named flow is validated — an already-stored one keeps the pre-existing
+    // lenient behaviour (an unresolvable modus simply pins an undefined version).
+    if (patch.modusId !== undefined && !modus) throw Errors.notFoundFlow(patch.modusId)
+    const provenance = modusId
+      ? provenanceHash({ modusId, modusVersio: modus?.versio, tractus, aditusBase: c.aditusBase })
+      : ''
+
+    return toCollection(await collectiones.update(id, {
       tractus,
-      aditusBase: c.aditusBase,
-    })
-    return toCollection(await collectiones.update(id, { tractus, provenanceHash: provenance }))
+      provenanceHash: provenance,
+      ...(patch.modusId !== undefined ? { modusId } : {}),
+      ...(patch.numerus !== undefined ? { numerus: patch.numerus } : {}),
+    }))
+  }
+
+  /** Replace a DRAFT collection's tractus. Thin alias over the draft-authoring write. */
+  async patchCollectionTractus(auctor: AuctorKey, id: string, tractus: Tractus[]): Promise<Collection> {
+    return this.patchCollectionDraft(auctor, id, { tractus })
   }
 
   /** Fetch a Collection, owner-scoped. */

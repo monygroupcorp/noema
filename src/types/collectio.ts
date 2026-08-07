@@ -89,8 +89,15 @@ export interface Collectio {
   id: string
   /** "nomen" = name in Latin — user-given name for this collection */
   nomen?: string
+  /** "descriptio" = description — the user's working note on what this collection is. */
+  descriptio?: string
 
-  /** FK → Modus. The modus that was expanded across the parameter grid */
+  /**
+   * FK → Modus. The modus that was expanded across the parameter grid.
+   * A DRAFT may not have picked its flow yet — it carries `''` until one is set
+   * (and its `provenanceHash` is `''` too, there being nothing to content-address).
+   * Every fired collection has a real modusId; `fireCollection` refuses an empty one.
+   */
   modusId: string
   /** The base aditus applied to every actum (before per-axis overrides) */
   aditusBase: Record<string, unknown>
@@ -194,5 +201,5 @@ export interface Collectionum {
   list(filter?: Partial<Pick<Collectio, 'status'>>): Promise<Collectiones>
   listByStatus(status: CollectioStatus): Promise<Collectiones>
   create(collectio: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal'>): Promise<Collectio>
-  update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'numerus' | 'tractus' | 'provenanceHash' | 'pausatum'>>): Promise<Collectio>
+  update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'nomen' | 'descriptio' | 'modusId' | 'numerus' | 'tractus' | 'provenanceHash' | 'pausatum'>>): Promise<Collectio>
 }
