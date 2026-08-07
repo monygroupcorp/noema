@@ -1329,9 +1329,9 @@ async function main(): Promise<void> {
     log.warn('OPENROUTER_API_KEY unset — concierge endpoints (/v1/colloquia) DISABLED (the read-only tool-use agent cannot run without it).')
   }
 
-  // ERC-8004 agent cards (ADR-0011 §7/§8): the platform card + per-agent capability
-  // cards that advertise an agent's x402-callable Modus — the discoverable "agent link"
-  // an external agent resolves → pays → runs. Mounted at `/` (specific paths only).
+  // ERC-8004 platform agent card (ADR-0011 §5): advertises Noema itself as the x402
+  // capability execution target an external agent resolves → pays → runs against.
+  // Mounted at `/` (specific paths only).
   const cardBase = process.env.PUBLIC_BASE ?? 'https://noema.art'
   app.use(createAgentCardRouter({
     legati: ring.legati,
