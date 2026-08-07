@@ -80,3 +80,35 @@ test('generateOpenApi: query params are appended after path params, and a route 
 
   assert.equal('parameters' in doc.paths['/widgets'].get, false, 'no parameters key when there are none')
 })
+
+test('generateOpenApi: a multi-param route emits every declared query param, in handler order, after its path params', () => {
+  const routes: RouteSpec[] = [
+    {
+      method: 'GET',
+      path: '/gadgets/:id/items',
+      summary: 'A route with a path param and multiple query params.',
+      auth: false,
+      query: [
+        { name: 'status', description: 'Filter by status.', schema: { type: 'string' } },
+        { name: 'cursor', description: 'Opaque page cursor.', schema: { type: 'string' } },
+        { name: 'limit', description: 'Page size.', schema: { type: 'integer' } },
+      ],
+    },
+  ]
+  const doc = generateOpenApi({ version: 'v1', routes, errorCodes: [] }) as {
+    paths: Record<string, Record<string, { parameters?: unknown[] }>>
+  }
+
+  const params = doc.paths['/gadgets/{id}/items'].get.parameters!
+  assert.equal(params.length, 4, 'path param + three query params')
+  assert.deepEqual(params[0], { name: 'id', in: 'path', required: true, schema: { type: 'string' } })
+  assert.deepEqual(
+    params.slice(1).map((p) => (p as { name: string; in: string }).name),
+    ['status', 'cursor', 'limit'],
+    'query params stay in the order declared on the route (handler destructuring order)',
+  )
+  for (const p of params.slice(1) as { in: string; required: boolean }[]) {
+    assert.equal(p.in, 'query')
+    assert.equal(p.required, false)
+  }
+})
