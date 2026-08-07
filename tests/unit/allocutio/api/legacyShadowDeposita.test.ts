@@ -123,7 +123,10 @@ function matches(doc: Doc, sel: Doc): boolean {
 
 /** Minimal stand-in for a Mongo collection: only what `retire` calls, all in memory. */
 class FakeCol {
-  constructor(public docs: Doc[] = [], private opts: { ignoreSelector?: boolean; corruptOnInsert?: boolean } = {}) {}
+  constructor(
+    public docs: Doc[] = [],
+    private opts: { ignoreSelector?: boolean; corruptOnInsert?: boolean; afterInsert?: () => void } = {},
+  ) {}
   async countDocuments(sel: Doc): Promise<number> { return this.docs.filter(d => matches(d, sel)).length }
   find(sel: Doc): { toArray: () => Promise<Doc[]> } {
     const hits = this.opts.ignoreSelector ? this.docs : this.docs.filter(d => matches(d, sel))
@@ -134,6 +137,9 @@ class FakeCol {
     const stored = clone(doc) as Doc
     if (this.opts.corruptOnInsert) delete stored.valor    // a silently lossy copy
     this.docs.push(stored)
+    // Fires inside the archive step, i.e. exactly in the window between the source `find` and
+    // the source delete — where a concurrent writer would land.
+    this.opts.afterInsert?.()
   }
   async deleteOne(sel: Doc): Promise<{ deletedCount: number }> {
     const i = this.docs.findIndex(d => matches(d, sel))
@@ -229,4 +235,37 @@ test('retire: a second run is a no-op, and a resumed run re-verifies before dele
   assert.equal(res.retired, 1)
   assert.equal(resumeArchive.docs.length, 1, 'no duplicate archive row')
   assert.equal(resumeLive.docs.length, 0)
+})
+
+test('retire: a row that gains a receipt basis after the fetch is REFUSED, not deleted', async () => {
+  // The operator runs --apply against a live cluster while the app is up. A webhook re-delivery
+  // for one of these old tx hashes lands mid-loop and freezes `token`/`usdFmv` onto the row: it
+  // is now a genuine, priced, OWED deposit. The in-memory snapshot the loop is holding still
+  // looks like a shadow row, and the archived copy — written before the update — still matches
+  // that snapshot, so the copy-verify gate is happy. Only the compare-and-swap on the delete
+  // sees the change.
+  const live = new FakeCol([shadowRow(1)])
+  const archive = new FakeCol([], {
+    afterInsert: () => {
+      const row = live.docs.find(d => d._id === 1)
+      if (row) { row.token = SAMPLE_TOKEN; row.usdFmv = '3000000' }
+    },
+  })
+
+  const res = await retire(live.as(), archive.as(), { apply: true })
+
+  assert.equal(res.retired, 0, 'a row that changed under the run must never be deleted')
+  assert.equal(res.refused, 1)
+  assert.equal(live.docs.length, 1, 'the now-owed row is still live')
+  assert.equal(live.docs[0]?.token, SAMPLE_TOKEN, 'and still carries the basis the webhook froze on')
+})
+
+test('retire: a row deleted out from under the run is REFUSED, not silently counted', async () => {
+  const live = new FakeCol([shadowRow(1)])
+  const archive = new FakeCol([], { afterInsert: () => { live.docs.length = 0 } })
+
+  const res = await retire(live.as(), archive.as(), { apply: true })
+
+  assert.equal(res.retired, 0)
+  assert.equal(res.refused, 1, 'deletedCount 0 is a refusal, never a success')
 })
