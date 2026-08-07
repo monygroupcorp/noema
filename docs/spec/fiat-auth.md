@@ -1,93 +1,75 @@
 # Spec — Fiat username/password auth rail
 
-**Status:** BUILT 2026-07-02 (hermetic-green; not yet staging-verified). JS-nuke blocker #11.
-**Handoff:** `docs/handoff/2026-07-02-fiat-auth.md`.
+**Status:** BUILT. Mounted at `/v1/auth/*` (+ compat `/api/v1/auth/*`) in `index.ts`.
 
 Fiat (Stripe / no-wallet) users need a persistent, **recoverable** account. Crystal previously
 minted nothing — anon `x-commitment`, web3, API-key, and federated rails all either self-assert or
 verify an externally-issued credential. This rail is the first that **issues** a crystal session,
-from an email + password with email verification and password reset.
+from a username + password.
+
+**Dropped: the email verification rail.** An earlier revision of this spec registered by email
+with a verify/resend/forgot/reset flow gated behind a verified-email flag. That never shipped —
+rth ruled to drop email. Registration is anonymous username+password and logs the caller in
+immediately, no verification step. Account recovery is not email-based: a user binds backup
+channels (wallet / Telegram) to their soul, and proving one of those channels reaches the
+`animaId` and mints a session.
 
 ## Identity model
 
-The identity is still the `Anima`; the mask is a **`'password'` `Persona`** (new genus) whose
-`externusId` is the lowercased email. The credential material lives in its own store — a
-`Credentum` — so `Anima`/`Persona` stay non-sensitive (mirrors `Secretum`/`Secretarium`).
+The identity is still the `Anima`; the mask is a **`'password'` `Persona`** whose `externusId` is
+the normalized username. The credential material lives in its own store — a `Credentum` — so
+`Anima`/`Persona` stay non-sensitive.
 
-```
-Credentum { id, email(unique,lowercased), passwordHash, animaId,
-            emailVerified, verifyTokenHash?, verifyTokenExp?,
-            resetTokenHash?, resetTokenExp?, natum, mutatum }
-```
-
-- `passwordHash` — a **scrypt** envelope (see §decisions).
-- `verifyTokenHash` / `resetTokenHash` — the **SHA-256** of the random token that was emailed. We
-  look the row up by hashing the presented token, so a store dump never yields a usable link.
-  Tokens are single-use + short-TTL (verify 24h, reset 1h).
+- Password hashing — **scrypt** (`node:crypto`), stored as a self-describing
+  `scrypt$N$r$p$salt$hash` envelope, verified with `timingSafeEqual`.
+- Session — a bearer JWT: `jwt.sign({ sub: <animaId>, typ:'session' }, JWT_SECRET, {expiresIn})`.
+  `apiAcceptors.verifyJwt` special-cases `typ:'session'` to return `sub` **directly as an
+  animaId**, skipping the `'web'`-genus re-resolution used for legacy web JWTs — without this the
+  session's `sub` would be treated as a `'web'` externusId and mint a *second* anima, splitting
+  the account from the one the `'password'` persona established at register.
 
 ## Endpoints (`createAuthRouter`, mounted at `/v1/auth/*` + compat `/api/v1/auth/*`)
 
+### Username core
+
 | Route | Body | Result |
 |---|---|---|
-| `POST /register` | `{email,password}` | 202 `verification_sent` (account exists, unverified, no session). Dup email → generic **409** (no enumeration). |
-| `GET\|POST /verify-email` | `{token}` | verify (single-use) → **auto-login**: `{session, animaId}`. |
-| `POST /resend-verification` | `{email}` | always **202** (emails only an existing *unverified* account). |
-| `POST /login` | `{email,password}` | verified → `{session, animaId}`; wrong creds → generic **401**; unverified → **403 `auth.email_unverified`**. |
+| `POST /register` | `{username,password}` | 201 `{session, animaId}`. Anonymous, logs in immediately — no verification step. Dup username → generic **409** (no enumeration). |
+| `POST /login` | `{username,password}` | 200 `{session, animaId}`; wrong creds or missing account → generic **401**. |
 | `POST /session/refresh` | Bearer session | re-mint → `{session, animaId}`. |
-| `POST /forgot-password` | `{email}` | always **202** (no enumeration). |
-| `POST /reset-password` | `{token,newPassword}` | re-hash + clear token; verifies the email if it wasn't. |
 
-`session = { token, tokenType:'Bearer', expiresIn }`.
+### Backup recovery channels — bound to the soul from the profile
 
-## The same-Anima trap (§trap)
+| Route | Auth | Body | Result |
+|---|---|---|---|
+| `POST /wallet/challenge` | none | `{address}` | `{token, statement}` to sign. |
+| `POST /wallet/link` | Bearer | `{challengeToken,signature}` | bind the proven wallet to the caller's soul; moves the binding if it belonged to another soul. |
+| `POST /wallet/register` | none | `{challengeToken,signature}` | wallet-first signup: logs into the bound soul if the wallet is already linked, else mints a soul and binds it. `{session, animaId}`, 201 on a fresh mint / 200 on resolve-to-existing. |
+| `POST /wallet/recover` | none | `{challengeToken,signature}` | prove a bound wallet → `{session, animaId}` (forgot-password path). |
+| `GET /wallet` | Bearer | — | `{wallets: address[]}` linked to the caller. |
+| `POST /telegram/challenge` | Bearer | — | `{code, deepLink?, botUsername?}` — one-time link code; 501 if `linkTokens` isn't configured. |
+| `GET /telegram` | Bearer | — | `{linked: boolean}`. |
+| `POST /telegram/recover` | none | `{code}` | redeem a bot-issued recovery code → `{session, animaId}` (forgot-password path); 501 if `linkTokens` isn't configured. |
 
-The session is `jwt.sign({ sub: <animaId>, typ:'session' }, JWT_SECRET, {expiresIn})`.
-`apiAcceptors.verifyJwt` special-cases `typ:'session'` to return `sub` **directly as an animaId**,
-skipping the `'web'`-genus re-resolution used for legacy web JWTs. Without this, the session's
-`sub` would be treated as a `'web'` externusId and mint a *second* anima — splitting the account
-from the one the `'password'` persona established at register. The hermetic test
-`authRouter.test.ts` ("the same-Anima invariant") proves register → verify → `/v1/me` → login all
-resolve one anima and mint it exactly once.
-
-## Decisions (the handoff asked these be picked + stated)
-
-1. **Hashing — scrypt (`node:crypto`), not argon2id/bcrypt.** Both of those are native modules that
-   complicate the Node-20 staging build; scrypt is a first-class memory-hard KDF already in the
-   runtime, so zero new deps. Stored as a self-describing `scrypt$N$r$p$salt$hash` envelope
-   (cost params can evolve without a migration), verified with `timingSafeEqual`.
-2. **Session = bearer JWT**, not a cookie — the crystal React app sends headers (`anonHeaders`).
-3. **Login blocked until `emailVerified`** — distinct `auth.email_unverified` (403) so the frontend
-   can prompt "resend". Simplest/safest v1 (vs. allow-login-but-gate-spend).
-4. **Mailer seam** (`Mailer.send({to,subject,html})`) with `NoopMailer` (logs link — hermetic/dev
-   default) + `HttpMailer` → **Resend** (`RESEND_API_KEY`, plain `fetch`, no npm dep). Vendor is a
-   one-file swap; `mailerFromEnv` degrades to Noop when unconfigured.
+`session = { token, tokenType:'Bearer', expiresIn }`. All 11 routes above are the full rail.
 
 ## Security
 
-scrypt hashing; hashes never logged/returned; constant-time verify. Verify/reset tokens are
-256-bit random, single-use, short-TTL, **stored hashed**. `register`/`login`/`forgot`/`resend` are
-IP-rate-limited (express-rate-limit, wired in `index.ts`; the router accepts injected limiters so
-tests run unthrottled). Generic messages everywhere (no user enumeration). Email normalized
-(lowercase/trim). `JWT_SECRET` is server-only and gates the whole rail (unset ⇒ rail disabled).
-
-**Deferred:** session revocation on password reset (sessions are stateless short-TTL JWTs — full
-revocation would need a per-credentum session epoch embedded in the token + checked in `verifyJwt`).
-Disposable-email blocking. These are noted, not built.
+scrypt hashing; hashes never logged/returned; constant-time verify. `register`/`login`/wallet
+challenge+recover routes accept injected rate limiters (`index.ts` wires express-rate-limit; tests
+run unthrottled). Generic messages everywhere (no user enumeration). `JWT_SECRET` is server-only
+and gates the whole rail.
 
 ## Wiring / env
 
 - `JWT_SECRET` (required to enable the rail) — signs + verifies sessions.
-- `RESEND_API_KEY` + `MAIL_FROM` (+ `MAILER_PROVIDER=resend`) — real email; else NoopMailer.
-- `MAILER_REVEAL_LINKS=1` — let NoopMailer print links (local dev only).
-- `AUTH_APP_BASE_URL` — base the emailed verify/reset links point at (a frontend page).
 - `SESSION_TTL_SECONDS` — session lifetime (default 7d).
-- Store: `credenta` collection; `MongoCredentum.ensureIndexes()` (unique `email` + sparse token
-  indexes) is called fire-and-forget at boot.
+- Telegram linking requires an injected `linkTokens` store + `botUsername`; absent → the
+  `/telegram/*` routes report 501.
+- Store: `credenta` collection.
 
 ## Files
 
-`src/types/credentum.ts`, `src/crystal/{passwordHash,sessionToken,MongoCredentum,MemoryCredentum}.ts`,
-`src/allocutio/api/{Mailer,authRouter}.ts`, `src/types/persona.ts` (`'password'` genus),
+`src/types/credentum.ts`, `src/crystal/{passwordHash,sessionToken,walletAuth,MongoCredentum,MemoryCredentum}.ts`,
+`src/allocutio/api/authRouter.ts`, `src/types/persona.ts` (`'password'` genus),
 `src/allocutio/api/apiAcceptors.ts` (session branch), `src/index.ts` (wiring).
-Tests: `tests/unit/allocutio/api/authRouter.test.ts`, `tests/unit/crystal/passwordHash.test.ts`,
-`apiAcceptors.test.ts` (session branch).
