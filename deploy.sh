@@ -49,6 +49,16 @@ LOG_FILE="${LOG_DIR}/hyperbot.log"
 MAINT_DIR="/var/run/hyperbot"
 MAINT_FLAG="${MAINT_DIR}/maintenance.flag"
 
+# Private compliance module (host state — deliberately NOT in the image).
+# The app dynamically imports ./private/compliance/index.js at boot; the published image never
+# contains it. This host directory holds the COMPILED module (the built JS emitted under
+# dist/) and is bind-mounted read-only into the app container below. Provisioning is a manual operator
+# step — see docs/phases/compliance-module-injection.md.
+# An EMPTY directory is safe and intentional: the dynamic import fails and the app falls back to
+# its stubs with the existing loud warning, i.e. exactly the pre-mount behaviour. Do NOT "fix"
+# this into a hard failure — dev boxes, staging and fresh droplets legitimately have no module.
+COMPLIANCE_DIR="${COMPLIANCE_DIR:-/opt/noema/private/compliance}"
+
 # Keystore
 KEYSTORE_SCRIPT="${DEPLOY_ROOT}/keystore/loadKeystore.js"
 KEYSTORE_PATH="/etc/account/STATIONTHIS"
@@ -79,6 +89,8 @@ load_env_var() {
 }
 
 mkdir -p "${LOG_DIR}" "${MAINT_DIR}"
+# Created-if-missing so the read-only bind mount below always has a source. Empty == stubs.
+mkdir -p "${COMPLIANCE_DIR}"
 
 log() { echo "[deploy] $1" | tee -a "${LOG_FILE}"; }
 
@@ -250,6 +262,7 @@ run_logged "Starting new container (${IMAGE})..." docker run -d \
   --log-opt max-size=100m \
   --log-opt max-file=3 \
   -v "${MAINT_DIR}:${MAINT_DIR}" \
+  -v "${COMPLIANCE_DIR}:/usr/src/app/dist/private/compliance:ro" \
   --name "${NEW_CONTAINER}" \
   --cap-drop ALL \
   --security-opt no-new-privileges \
@@ -310,6 +323,19 @@ if docker ps -a --format '{{.Names}}' | grep -q "^${APP_CONTAINER}$"; then
 fi
 docker rename "${NEW_CONTAINER}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1
 log "Container renamed to ${APP_CONTAINER}."
+
+# 9b. Report the compliance mount. An empty mount is indistinguishable from a correct one from
+# outside the container, so say which case happened rather than making the next reader exec in.
+if [ -n "$(ls -A "${COMPLIANCE_DIR}" 2>/dev/null || true)" ]; then
+  log "Compliance mount POPULATED (${COMPLIANCE_DIR} -> read-only). Real OFAC/CSAM module available to the runtime."
+  if [ -z "$(load_env_var OFAC_BLOCKLIST_PATH)" ]; then
+    log "  NOTE: OFAC_BLOCKLIST_PATH is not set — the sanctions screen stays a NO-OP even with the module mounted."
+  fi
+else
+  log "Compliance mount EMPTY (${COMPLIANCE_DIR} has no files). Expected on dev/staging/fresh droplets:"
+  log "  the app falls back to its stubs — sanctions screening is a NO-OP and public publishing stays denied."
+  log "  To install it, see docs/phases/compliance-module-injection.md."
+fi
 
 # 10. Clear private key from memory
 unset PRIVATE_KEY
