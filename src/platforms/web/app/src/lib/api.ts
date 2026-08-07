@@ -35,7 +35,7 @@ export type CanonVerb =
 export interface FlowSummary { id: string; nomen?: string; versio?: string; categoria?: unknown; modusGenus?: CanonVerb }
 export interface JsonSchema {
   type: string;
-  properties?: Record<string, { type: string; format?: string; default?: unknown; description?: string; title?: string }>;
+  properties?: Record<string, { type: string; format?: string; default?: unknown; description?: string; title?: string; optiones?: Array<{ value: string; label: string }> }>;
   required?: string[];
 }
 export interface FlowDescription { id: string; nomen: string; versio: string; input: JsonSchema; output?: JsonSchema; familia?: string }

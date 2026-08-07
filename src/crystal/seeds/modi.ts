@@ -16,6 +16,9 @@ function make(def: Omit<Modus, 'contentHash'>): Modus {
   return { ...withPlaceholder, contentHash: hashModus(withPlaceholder) }
 }
 
+// Retained for historical actus only — its contentHash is referenced by past runs.
+// Superseded by modus.openrouter-chat, which reaches the same OpenAI models plus everything
+// else OpenRouter routes to, with an actual model picker (noema-144).
 export const MODUS_CHATGPT: Modus = make({
   id: 'modus.chatgpt',
   nomen: 'ChatGPT — text generation',
@@ -24,7 +27,7 @@ export const MODUS_CHATGPT: Modus = make({
   versio: '1.0.0',
   ministerium: 'openai',
   deliveryMode: 'sync',
-  canonica: true,
+  canonica: false,
   impetusFixum: 10n,
 
   aditus: {
@@ -103,7 +106,7 @@ export const MODUS_GPT_IMAGE_EDIT: Modus = make({
 export const MODUS_OPENROUTER_CHAT: Modus = make({
   id: 'modus.openrouter-chat',
   nomen: 'OpenRouter — text generation',
-  descriptio: 'OpenRouter text generation — one endpoint that routes to many providers/models (provider/model id). Pick it to reach non-OpenAI LLMs; use the ChatGPT flow when you specifically want OpenAI.',
+  descriptio: 'OpenRouter text generation — one endpoint that routes to many providers/models. OpenAI models are reachable through it directly, alongside everything else OpenRouter carries.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'openrouter',
@@ -113,7 +116,15 @@ export const MODUS_OPENROUTER_CHAT: Modus = make({
 
   aditus: {
     prompt:      { type: 'text',  required: true,  description: 'The user message or prompt' },
-    model:       { type: 'text',  required: false, default: 'openai/gpt-4o', description: 'OpenRouter model ID (provider/model)' },
+    model:       {
+      type: 'text', required: false, default: 'openai/gpt-4o', description: 'OpenRouter model ID (provider/model)',
+      optiones: [
+        { value: 'openai/gpt-4o',                       label: 'OpenAI — GPT-4o' },
+        { value: 'anthropic/claude-sonnet-4.5',         label: 'Anthropic — Claude Sonnet 4.5' },
+        { value: 'google/gemini-2.5-flash',             label: 'Google — Gemini 2.5 Flash' },
+        { value: 'meta-llama/llama-3.3-70b-instruct',   label: 'Meta — Llama 3.3 70B (open-weights)' },
+      ],
+    },
     temperature: { type: 'float', required: false, default: 0.7,       description: 'Sampling temperature' },
     __capability: { type: 'text', required: false, default: 'chat',    description: 'ApiCursor capability (internal)' },
   },
@@ -124,6 +135,42 @@ export const MODUS_OPENROUTER_CHAT: Modus = make({
 
   natum:   new Date('2026-07-02'),
   mutatum: new Date('2026-07-02'),
+})
+
+// Venice chat — a second OpenAI-compatible provider seeded to prove the descriptor
+// abstraction holds for a real third-party addition, not just the reference pair (noema-144).
+export const MODUS_VENICE_CHAT: Modus = make({
+  id: 'modus.venice-chat',
+  nomen: 'Venice — text generation',
+  descriptio: 'Venice text generation — an OpenAI-compatible endpoint with its own model roster. Pick it to reach Venice-hosted models directly rather than through OpenRouter.',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  ministerium: 'venice',
+  deliveryMode: 'sync',
+  canonica: true,
+  impetusFixum: 10n,
+
+  aditus: {
+    prompt:      { type: 'text',  required: true,  description: 'The user message or prompt' },
+    model:       {
+      type: 'text', required: false, default: 'llama-3.3-70b', description: 'Venice model ID',
+      optiones: [
+        { value: 'llama-3.3-70b',                 label: 'Llama 3.3 70B' },
+        { value: 'venice-uncensored',              label: 'Venice Uncensored' },
+        { value: 'mistral-31-24b',                 label: 'Mistral 3.1 24B' },
+        { value: 'qwen3-235b-a22b-instruct-2507',  label: 'Qwen3 235B Instruct' },
+      ],
+    },
+    temperature: { type: 'float', required: false, default: 0.7,       description: 'Sampling temperature' },
+    __capability: { type: 'text', required: false, default: 'chat',    description: 'ApiCursor capability (internal)' },
+  },
+
+  exitus: {
+    response: { type: 'text', description: 'Generated text response' },
+  },
+
+  natum:   new Date('2026-08-06'),
+  mutatum: new Date('2026-08-06'),
 })
 
 export const MODUS_LAYER_COMPOSITE: Modus = make({
@@ -256,6 +303,7 @@ export const CANONICAL_MODI: Modus[] = [
   MODUS_DALLE_III,
   MODUS_GPT_IMAGE_EDIT,
   MODUS_OPENROUTER_CHAT,
+  MODUS_VENICE_CHAT,
   MODUS_LAYER_COMPOSITE,
   MODUS_FRAMES_TO_VIDEO,
   MODUS_AITOOLKIT_TRAINING,

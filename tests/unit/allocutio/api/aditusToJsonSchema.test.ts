@@ -41,6 +41,19 @@ test('aditusToJsonSchema maps types, required, default, and uri format', () => {
   assert.equal('default' in schema.properties.guidance, false)
 })
 
+test('aditusToJsonSchema carries optiones through unmodified when present', () => {
+  const schema = aditusToJsonSchema({
+    model: {
+      type: 'text',
+      default: 'a',
+      optiones: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }],
+    },
+    plain: { type: 'text' },
+  })
+  assert.deepEqual(schema.properties.model.optiones, [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }])
+  assert.equal('optiones' in schema.properties.plain, false)
+})
+
 test('aditusToJsonSchema omits required array when nothing is required', () => {
   const schema = aditusToJsonSchema({ x: { type: 'float' } })
   assert.equal('required' in schema, false)

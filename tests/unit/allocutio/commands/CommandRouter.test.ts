@@ -42,7 +42,7 @@ test('/chat and /flows enter execute and ack', async () => {
   const { router, calls } = make()
   await router.dispatch('u1', 456, '/chat', 50)
   await router.dispatch('u1', 456, '/flows', 51)
-  assert.equal((calls.enter[0] as { state: { modusId: string } }).state.modusId, 'modus.chatgpt')
+  assert.equal((calls.enter[0] as { state: { modusId: string } }).state.modusId, 'modus.openrouter-chat')
   assert.equal((calls.enter[1] as { state?: unknown }).state, undefined, '/flows enters with no prefilled state')
   assert.equal(calls.ack.length, 2)
 })
