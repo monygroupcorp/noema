@@ -112,3 +112,15 @@ test('generateOpenApi: a multi-param route emits every declared query param, in 
     assert.equal(p.required, false)
   }
 })
+
+test('generateOpenApi: POST /mcp publishes as transport-public, with per-tool enforcement named in the summary', () => {
+  const doc = generateOpenApi(API_CONTRACT) as {
+    paths: Record<string, Record<string, { summary: string; security: unknown[] }>>
+  }
+  const op = doc.paths['/mcp'].post
+  assert.deepEqual(op.security, [], 'the transport does not require a credential — security renders empty, like other public routes')
+  assert.match(op.summary, /per-tool/i, 'the summary must say identity is enforced per-tool, not at the transport')
+
+  const me = doc.paths['/me'].get
+  assert.notDeepEqual(me.security, [], 'an unrelated authenticated route must keep rendering as authenticated')
+})
