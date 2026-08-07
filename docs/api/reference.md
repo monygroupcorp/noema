@@ -534,9 +534,19 @@ List the canonical compute substrates (fundamenta) available for flows.
 
 ### GET /v1/models
 
-Browse the model weight catalog, optionally filtered by genus, basis, fundamentumId, trigger, or free-text query, and ordered with sort=newest|name|genus.
+Browse the model weight catalog.
 
 - **Auth:** public
+
+**Query parameters:**
+
+- `genus` (string) — Filter by model genus.
+- `basis` (string) — Filter by model basis.
+- `fundamentumId` (string) — Filter by compute substrate id.
+- `trigger` (string) — Filter by trigger word.
+- `q` (string) — Free-text search query.
+- `limit` (integer) — Maximum number of results to return.
+- `sort` (string) — Sort order for results: `newest | name | genus`. Applied server-side before the `limit` slice.
 
 **Response (200):**
 
