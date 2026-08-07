@@ -644,9 +644,9 @@ const CollectRequestSchema: JsonSchema = {
     'Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces. ' +
     'The base modus may be atomic or a compositus pipeline.',
   properties: {
-    modusId: { type: 'string', description: 'The flow expanded across the grid.' },
-    total: { type: 'number', description: 'Target number of pieces to generate.' },
-    tractus: { type: 'array', items: TractusSchema, description: 'The axes of variation (the parameter grid).' },
+    modusId: { type: 'string', description: 'The flow expanded across the grid. Required unless `draft: true` — a draft may be created without it and set it later via PATCH /v1/collectiones/:id/tractus.' },
+    total: { type: 'number', description: 'Target number of pieces to generate. Required unless `draft: true` — a draft may be created without it and set it later via PATCH /v1/collectiones/:id/tractus.' },
+    tractus: { type: 'array', items: TractusSchema, description: 'The axes of variation (the parameter grid). Required unless `draft: true` — a draft may be created without it and set it later via PATCH /v1/collectiones/:id/tractus.' },
     aditusBase: {
       type: 'object',
       additionalProperties: true,
@@ -654,22 +654,23 @@ const CollectRequestSchema: JsonSchema = {
     },
     concurrentia: { type: 'number', description: 'Max concurrent pieces in flight (default 3).' },
     nomen: { type: 'string', description: 'Optional human name for the collection.' },
+    descriptio: { type: 'string', description: 'Optional working note on what this collection is.' },
     dna: { type: 'boolean', description: 'Opt-in DNA uniqueness — no two pieces share a trait combination (across non-bypassDNA axes). Default false.' },
     reviewEnabled: { type: 'boolean', description: 'Hold every completed piece for review before it counts toward the drop (approve/reject in curation). Omit → the platform default applies.' },
     draft: { type: 'boolean', description: 'Create as a DRAFT — author tractus (garden/rules) without firing. Start it later with POST /:id/fire. Omit/false → create + fire in one shot.' },
     teamId: { type: 'string', description: 'Own this collection by a team (Sodalitas) the caller is a member of — snapshots an equal-weight owners split.' },
   },
-  required: ['modusId', 'total', 'tractus'],
 }
 
 /** The request body for `PATCH /v1/collectiones/:id/tractus` (draft authoring). */
 const PatchTractusRequestSchema: JsonSchema = {
   type: 'object',
-  description: 'Replace a draft Collection’s trait axes/values/rules. Re-derives the provenance hash; rejected once the collection is fired.',
+  description: 'Replace a draft Collection’s trait axes/values/rules, and (since a draft may now be created without them) its base flow + supply. Re-derives the provenance hash; rejected once the collection is fired. Omitted fields are left untouched.',
   properties: {
     tractus: { type: 'array', items: TractusSchema, description: 'The full new set of axes of variation (replaces the existing grid).' },
+    modusId: { type: 'string', description: 'The draft’s base flow.' },
+    numerus: { type: 'number', description: 'The draft’s target supply (piece count).' },
   },
-  required: ['tractus'],
 }
 
 /** The rarity-report response for `GET /v1/collectiones/:id/rarity`. */
@@ -1441,7 +1442,7 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'GET',
       path: '/models',
-      summary: 'Browse the model weight catalog, optionally filtered by genus, basis, fundamentumId, trigger, or free-text query.',
+      summary: 'Browse the model weight catalog, optionally filtered by genus, basis, fundamentumId, trigger, or free-text query, and ordered with sort=newest|name|genus.',
       auth: false,
       response: ModelsListSchema,
     },

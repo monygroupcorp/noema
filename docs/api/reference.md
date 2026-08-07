@@ -534,7 +534,7 @@ List the canonical compute substrates (fundamenta) available for flows.
 
 ### GET /v1/models
 
-Browse the model weight catalog, optionally filtered by genus, basis, fundamentumId, trigger, or free-text query.
+Browse the model weight catalog, optionally filtered by genus, basis, fundamentumId, trigger, or free-text query, and ordered with sort=newest|name|genus.
 
 - **Auth:** public
 
@@ -3118,11 +3118,11 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
   "properties": {
     "modusId": {
       "type": "string",
-      "description": "The flow expanded across the grid."
+      "description": "The flow expanded across the grid. Required unless `draft: true` — a draft may be created without it and set it later via PATCH /v1/collectiones/:id/tractus."
     },
     "total": {
       "type": "number",
-      "description": "Target number of pieces to generate."
+      "description": "Target number of pieces to generate. Required unless `draft: true` — a draft may be created without it and set it later via PATCH /v1/collectiones/:id/tractus."
     },
     "tractus": {
       "type": "array",
@@ -3186,7 +3186,7 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
           "valores"
         ]
       },
-      "description": "The axes of variation (the parameter grid)."
+      "description": "The axes of variation (the parameter grid). Required unless `draft: true` — a draft may be created without it and set it later via PATCH /v1/collectiones/:id/tractus."
     },
     "aditusBase": {
       "type": "object",
@@ -3200,6 +3200,10 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
     "nomen": {
       "type": "string",
       "description": "Optional human name for the collection."
+    },
+    "descriptio": {
+      "type": "string",
+      "description": "Optional working note on what this collection is."
     },
     "dna": {
       "type": "boolean",
@@ -3217,12 +3221,7 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
       "type": "string",
       "description": "Own this collection by a team (Sodalitas) the caller is a member of — snapshots an equal-weight owners split."
     }
-  },
-  "required": [
-    "modusId",
-    "total",
-    "tractus"
-  ]
+  }
 }
 ```
 
@@ -3413,7 +3412,7 @@ Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authorin
 ```json
 {
   "type": "object",
-  "description": "Replace a draft Collection’s trait axes/values/rules. Re-derives the provenance hash; rejected once the collection is fired.",
+  "description": "Replace a draft Collection’s trait axes/values/rules, and (since a draft may now be created without them) its base flow + supply. Re-derives the provenance hash; rejected once the collection is fired. Omitted fields are left untouched.",
   "properties": {
     "tractus": {
       "type": "array",
@@ -3478,11 +3477,16 @@ Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authorin
         ]
       },
       "description": "The full new set of axes of variation (replaces the existing grid)."
+    },
+    "modusId": {
+      "type": "string",
+      "description": "The draft’s base flow."
+    },
+    "numerus": {
+      "type": "number",
+      "description": "The draft’s target supply (piece count)."
     }
-  },
-  "required": [
-    "tractus"
-  ]
+  }
 }
 ```
 
