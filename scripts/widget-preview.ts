@@ -206,7 +206,6 @@ app.get('/', (_req, res) => {
   <a href="/widget/camel42" target="_blank">/widget/camel42</a> ·
   <a href="/widget/gallery/0xdemo" target="_blank">/widget/gallery/0xdemo</a> ·
   <a href="/widget/sdk.js" target="_blank">/widget/sdk.js</a> ·
-  <a href="/api/v1/agents/camel42/card" target="_blank">/api/v1/agents/camel42/card</a> ·
   <a href="/.well-known/agent-card.json" target="_blank">agent-card.json</a>
 </div>
 <script>
