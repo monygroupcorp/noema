@@ -11,6 +11,7 @@ import assert from 'node:assert/strict'
 import {
   BASE_FAMILIAE,
   FAMILIA_BY_BASE_INTELLA_ID,
+  classifyBaseModel,
   familiaFromBaseIntellaId,
   isKnownBaseIntellaId,
 } from '../../../src/crystal/modelLicense.js'
@@ -41,15 +42,24 @@ describe('FAMILIA_BY_BASE_INTELLA_ID', () => {
     assert.equal(familiaFromBaseIntellaId('intella.sd15-base'), 'sd15')
   })
 
-  // Both are non-writing, for OPPOSITE reasons: kontext has no base flow so no familia is
-  // correct; an unknown id needs an operator decision. Collapsing them would let the backfill
-  // quietly do nothing about a base nobody has classified.
-  test('an unknown base is distinguishable from the known-but-null kontext base', () => {
-    assert.equal(familiaFromBaseIntellaId('intella.kontext-base'), null)
-    assert.equal(isKnownBaseIntellaId('intella.kontext-base'), true)
-
+  // An unmapped base-intella id needs an operator decision — collapsing it into "known" would
+  // let the backfill quietly do nothing about a base nobody has classified.
+  test('an unmapped base-intella id is unknown, not null', () => {
     assert.equal(familiaFromBaseIntellaId('intella.wan22-base'), null)
     assert.equal(isKnownBaseIntellaId('intella.wan22-base'), false)
+  })
+
+  // The known-but-null distinction this map exists to preserve still has a live case at the
+  // BASE_TABLE level (kontext no longer supplies one): SD2/SD3 is a real, recognized base with
+  // no base flow, vs. a string BASE_TABLE has never heard of.
+  test('a recognized-but-baseless model is distinguishable from an unrecognized one', () => {
+    const sd3 = classifyBaseModel('SD 3.5 Large')
+    assert.equal(sd3.familia, null)
+    assert.equal(sd3.license, 'stability-community')
+
+    const unrecognized = classifyBaseModel('some-model-nobody-has-heard-of')
+    assert.equal(unrecognized.familia, null)
+    assert.equal(unrecognized.license, 'unknown')
   })
 
   test('null/undefined/empty ids are unknown, never silently mapped', () => {
@@ -176,17 +186,21 @@ describe('trigger resolution regression — a migrated LoRA without familia', ()
     assert.equal((await intellarum.triggerMap('sdxl')).size, 0)
   })
 
-  // kontext has no base flow, so it correctly stays without familia — and correctly stays
-  // unresolvable. The backfill must not manufacture a familia to "fix" it.
-  test('a kontext LoRA is left unresolvable, deliberately', async () => {
+  // Kontext is flux1-family, so the repair mapping backfills it like any other base and it
+  // resolves inside flux flows.
+  test('a kontext LoRA resolves once familia is backfilled', async () => {
+    const familia = familiaFromBaseIntellaId('intella.kontext-base')
+    assert.equal(familia, 'flux')
+
     const doc = migratedLoraDoc({
       id: 'intella.kontext-lora',
+      familia,
       params: { triggerWords: ['konty'], baseIntellaId: 'intella.kontext-base' },
     })
-    assert.equal(familiaFromBaseIntellaId('intella.kontext-base'), null)
-    assert.equal(isKnownBaseIntellaId('intella.kontext-base'), true)
 
     const intellarum = new FakeIntellarum([doc])
-    assert.deepEqual(await intellarum.findByTrigger('konty', 'flux'), [])
+    const hits = await intellarum.findByTrigger('konty', 'flux')
+    assert.equal(hits.length, 1)
+    assert.equal(hits[0]?.id, 'intella.kontext-lora')
   })
 })

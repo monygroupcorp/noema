@@ -162,8 +162,10 @@ export function licenseNote(commercialUse: CommercialVerdict | undefined, licens
 // base string, the compat `familia` (null = no base flow, reject), and the license id. Order is
 // load-bearing (variant checks before the bare family; 'kontext'/'flux2' before 'flux').
 const BASE_TABLE: Array<{ test: (t: string) => boolean; familia: string | null; license: string }> = [
-  // FLUX.1 Kontext — a DIFFERENT model, NO base flow. Must precede 'flux' ("Flux.1 Kontext" ⊃ 'flux').
-  { test: (t) => t.includes('kontext'), familia: null, license: 'flux-1-dev-nc' },
+  // FLUX.1 Kontext — a FLUX.1-family edit model on the shared FLUX base stack (existing flux.1
+  // LoRAs apply). Must precede 'flux' ("Flux.1 Kontext" ⊃ 'flux') so it keeps its own NC license
+  // instead of falling through to the bare-flux row.
+  { test: (t) => t.includes('kontext'), familia: 'flux', license: 'flux-1-dev-nc' },
   // FLUX.2 — a new family (before 'flux'). Variant AND SIZE drive the license (confirmed against the
   // FLUX.2 [klein] 4B HF card + bfl.ai): ONLY klein 4B is Apache 2.0 (✅); klein 9B and [dev] are the
   // FLUX Non-Commercial License (❌ — our seed INTELLA_FLUX2_KLEIN_9B is the 9B, so it is NC). A klein
@@ -205,9 +207,9 @@ export const BASE_FAMILIAE: ReadonlySet<string> = new Set(
  *  nothing. This table is the repair mapping.
  *
  *  Values MUST come from BASE_TABLE's vocabulary (see BASE_FAMILIAE — a hermetic test enforces it).
- *  `null` = no base flow exists for that architecture, so NO familia is correct (BASE_TABLE:166
- *  gives kontext `familia: null`). An id absent from this map is an OPERATOR decision, never a
- *  worker/runtime guess — callers must report and skip it.
+ *  `null` = no base flow exists for that architecture, so NO familia is correct (BASE_TABLE:191
+ *  gives SD2/SD3 `familia: null` — the one entry that still uses it). An id absent from this map
+ *  is an OPERATOR decision, never a worker/runtime guess — callers must report and skip it.
  */
 export const FAMILIA_BY_BASE_INTELLA_ID: Record<string, string | null> = {
   'intella.flux-base':        'flux',
@@ -215,12 +217,13 @@ export const FAMILIA_BY_BASE_INTELLA_ID: Record<string, string | null> = {
   'intella.illustrious-base': 'sdxl',   // BASE_TABLE:181 — illustrious/noobai collapse to sdxl
   'intella.pony-base':        'sdxl',   // BASE_TABLE:180 — pony is XL-derived, stacks on the sdxl flow
   'intella.sd15-base':        'sd15',
-  'intella.kontext-base':     null,     // BASE_TABLE:166 — no base flow, deliberately unset
+  'intella.kontext-base':     'flux',   // BASE_TABLE:166 — flux.1-family edit model, shares the flux base flow
 }
 
-/** True when `id` is a base intella this mapping KNOWS about — including the known-but-null kontext
- *  case. Callers must use this to tell "known, correctly gets no familia" apart from "unknown base,
- *  needs an operator decision"; `familiaFromBaseIntellaId` returns `null` for both. */
+/** True when `id` is a base intella this mapping KNOWS about. Callers must use this to tell "known
+ *  base" apart from "unknown base, needs an operator decision"; `familiaFromBaseIntellaId` returns
+ *  `null` for both an unknown id and a known-but-null one (see the SD2/SD3 `BASE_TABLE` row for the
+ *  latter case, once a base-intella id maps to it).*/
 export function isKnownBaseIntellaId(id: string | null | undefined): boolean {
   return typeof id === 'string' && Object.prototype.hasOwnProperty.call(FAMILIA_BY_BASE_INTELLA_ID, id)
 }
