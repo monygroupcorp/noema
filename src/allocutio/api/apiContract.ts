@@ -1418,8 +1418,11 @@ export const API_CONTRACT: ApiContract = {
       summary:
         'MCP (Model Context Protocol) JSON-RPC endpoint — agent tool-use over the same facade. ' +
         'Tools: run_flow / get_run / list_flows / describe_flow / collect / get_collection. Resources: crystal://flows and ' +
-        'crystal://flows/{id}. Stateless streamable-HTTP transport; not a typed REST op.',
-      auth: true,
+        'crystal://flows/{id}. Stateless streamable-HTTP transport; not a typed REST op. The transport ' +
+        'itself accepts unauthenticated requests (a client must be able to connect and enumerate tools ' +
+        'before it has a credential); identity is enforced per-tool — tools that touch owner-scoped data ' +
+        'reject without a credential inside their handler.',
+      auth: false,
     },
     {
       method: 'GET',
