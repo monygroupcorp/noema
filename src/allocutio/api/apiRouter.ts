@@ -50,7 +50,7 @@ export interface ApiFacade {
     aditus: Record<string, unknown>,
   ): Promise<{ impetus: string }>
   listFundamenta(): Promise<Array<{ id: string; nomen?: string; versio: string; runtime?: string; imageId: string; imageVersion: string; vramGb?: number }>>
-  listModels(filter?: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number; includeAdult?: boolean }): Promise<ModelCard[]>
+  listModels(filter?: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number; includeAdult?: boolean; sort?: string }): Promise<ModelCard[]>
   depositConfig(): DepositConfig
   depositQuote(input: { chainId: number | string; token: string; amount: string }): Promise<DepositQuote>
   myDeposits(auctor: AuctorKey): Promise<MyDeposit[]>
@@ -677,14 +677,17 @@ export function createApiRouter(deps: {
   router.get(
     '/models',
     wrap(async (req, res) => {
-      const { genus, basis, fundamentumId, trigger, q, limit } = req.query as Record<string, string | undefined>
-      const filter: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number; includeAdult?: boolean } = {}
+      const { genus, basis, fundamentumId, trigger, q, limit, sort } = req.query as Record<string, string | undefined>
+      const filter: { genus?: string; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number; includeAdult?: boolean; sort?: string } = {}
       if (genus !== undefined) filter.genus = genus
       if (basis !== undefined) filter.basis = basis
       if (fundamentumId !== undefined) filter.fundamentumId = fundamentumId
       if (trigger !== undefined) filter.trigger = trigger
       if (q !== undefined) filter.q = q
       if (limit !== undefined) filter.limit = Number(limit)
+      // `?sort=newest|name|genus` — ordering, applied server-side before the limit slice.
+      // Passed through verbatim; CrystalApi normalises an unrecognised value to the default.
+      if (sort !== undefined) filter.sort = sort
       // Adult-rated ({suggestive, explicit}) models are catalog-hidden unless the caller has spicyMode
       // on (noema-091). Derived from the caller's persisted toggle — NOT a client-supplied query param —
       // so it can't be spoofed; anonymous browse stays SFW.

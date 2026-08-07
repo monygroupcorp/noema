@@ -290,6 +290,14 @@ export interface Intellarum {
   /** Returns only platform-canonical (canonica: true) intellae */
   canonical(): Promise<Intellae>
   /**
+   * Everything publicly visible: platform-canonical intellae PLUS user-published ones
+   * (`access: 'public'`, v1 or v2 shape). A superset of `canonical()` — this is the read
+   * that backs the public catalog, so a model a user published is browsable alongside the
+   * platform-seeded set. Never returns a private record. Optional: fakes/read-only stores
+   * may omit it (the facade falls back to `canonical()`).
+   */
+  publicCatalog?(genus?: IntellaGenus): Promise<Intellae>
+  /**
    * List the models a given owner privately holds (imports + trained LoRAs), newest first.
    * Owner-scoped counterpart to `canonical()` — backs a "my models" listing so an importer can
    * actually see/manage what they brought in (a private import is resolvable by trigger but
