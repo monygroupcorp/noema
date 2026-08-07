@@ -11,6 +11,7 @@ const LOOKUPS: MigrationLookups = {
     'SD1.5':        'intella.sd15-base',
     'KONTEXT':      'intella.kontext-base',
     'ILLUSTRIOUS':  'intella.illustrious-base',
+    'PONY':         'intella.pony-base',
   },
   platformAnimaIds: new Set(['platform']),
 }
@@ -249,4 +250,47 @@ test('license reconcile: SDXL checkpoint → openrail-m / yes; bare FLUX → fai
   assert.equal(f.license, 'unknown')
   assert.equal(f.commercialUse, 'unknown')
   assert.ok(log.warnings.some(w => w.includes('license indeterminable')), 'fail-closed license warning emitted')
+})
+
+// ── familia (write-time, so trigger resolution never needs a repair pass) ─────────────────────
+test('familia: FLUX checkpoint → familia === flux', () => {
+  const doc: LegacyLoraDoc = {
+    _id: 'a1a1a1a1a1a1a1a1a1a1a1a1',
+    slug: 'flux-familia', triggerWords: ['fluxfamilia'],
+    defaultWeight: 1.0, checkpoint: 'FLUX',
+    createdBy: 'anima-x',
+    importedFrom: { source: 'platform-training', importedAt: new Date() },
+    createdAt: new Date(),
+  }
+  const { intella } = legacyToIntella(doc, LOOKUPS)
+  assert.equal(intella.familia, 'flux')
+})
+
+test('familia: PONY checkpoint → familia === sdxl (collapse case)', () => {
+  const doc: LegacyLoraDoc = {
+    _id: 'b2b2b2b2b2b2b2b2b2b2b2b2',
+    slug: 'pony-familia', triggerWords: ['ponyfamilia'],
+    defaultWeight: 1.0, checkpoint: 'PONY',
+    createdBy: 'anima-x',
+    importedFrom: { source: 'platform-training', importedAt: new Date() },
+    createdAt: new Date(),
+  }
+  const { intella } = legacyToIntella(doc, LOOKUPS)
+  assert.equal(intella.familia, 'sdxl')
+})
+
+test('familia: unknown checkpoint → baseIntellaId=intella.unknown-base, no familia key, warning', () => {
+  const doc: LegacyLoraDoc = {
+    _id: 'c3c3c3c3c3c3c3c3c3c3c3c3',
+    slug: 'oddball-familia', triggerWords: ['oddballfamilia'],
+    defaultWeight: 1.0, checkpoint: 'EXOTIC-V42',
+    createdBy: 'anima-x',
+    importedFrom: { source: 'platform-training', importedAt: new Date() },
+    createdAt: new Date(),
+  }
+  const { intella, log } = legacyToIntella(doc, LOOKUPS)
+  if (intella.genus !== 'lora') throw new Error('expected lora')
+  assert.equal(intella.params.baseIntellaId, 'intella.unknown-base')
+  assert.equal('familia' in intella, false, 'unknown base must not write a familia key at all')
+  assert.ok(log.warnings.some(w => w.includes('FAMILIA_BY_BASE_INTELLA_ID')), 'unmapped-base warning emitted')
 })
