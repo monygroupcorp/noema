@@ -32,12 +32,21 @@ function pathParamNames(openApiPath: string): string[] {
 /** Build the OpenAPI Operation object for one route. */
 function operationFor(route: RouteSpec): Record<string, unknown> {
   const openApiPath = toOpenApiPath(route.path)
-  const parameters = pathParamNames(openApiPath).map((name) => ({
+  const parameters: Record<string, unknown>[] = pathParamNames(openApiPath).map((name) => ({
     name,
     in: 'path',
     required: true,
     schema: { type: 'string' },
   }))
+  for (const q of route.query ?? []) {
+    parameters.push({
+      name: q.name,
+      in: 'query',
+      description: q.description,
+      required: q.required ?? false,
+      schema: q.schema,
+    })
+  }
 
   const responses: Record<string, unknown> = {
     '200': {
@@ -143,6 +152,15 @@ export function generateReference(contract: ApiContract): string {
     lines.push('')
     lines.push(`- **Auth:** ${route.auth ? 'required' : 'public'}`)
     lines.push('')
+    if (route.query && route.query.length > 0) {
+      lines.push('**Query parameters:**')
+      lines.push('')
+      for (const q of route.query) {
+        const req = q.required ? ', required' : ''
+        lines.push(`- \`${q.name}\` (${q.schema.type ?? 'string'}${req}) — ${q.description}`)
+      }
+      lines.push('')
+    }
     if (route.request) {
       lines.push('**Request body:**')
       lines.push('')
