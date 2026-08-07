@@ -1,5 +1,14 @@
 # Changelog
 
+## [5.0.1](https://github.com/monygroupcorp/noema/compare/v5.0.0...v5.0.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* **deploy:** fail-safe alias swap + cap container log growth ([54d1dac](https://github.com/monygroupcorp/noema/commit/54d1dace65cd3caa776192e3514e730bbddaf6e8))
+* **test:** expand test globs in the shell so the suites run on Node 20 ([dee567b](https://github.com/monygroupcorp/noema/commit/dee567bcc5736f8d5e580eccf89107b2fb7fc182))
+* **web:** SERVE_WEB_APP replaces STAGING_FRONTEND ([bee00c2](https://github.com/monygroupcorp/noema/commit/bee00c29b19c60879fc2b38334f03d5099ac7131))
+
 ## [5.0.0](https://github.com/monygroupcorp/noema/compare/v4.11.15...v5.0.0) (2026-08-05)
 
 
