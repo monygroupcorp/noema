@@ -2180,7 +2180,7 @@
     },
     "/me/runs": {
       "get": {
-        "summary": "The caller's SETTLED spend history — per-run impetus cost (+ derived USD), settledAt, and a lifetime running total. Owner-scoped (identified or anon-commitment), cursor-paginated, newest first. Only completus runs (a refunded failed run is not spend). Query: status=settled (only supported filter), cursor, limit (1..100, default 20).",
+        "summary": "The caller's SETTLED spend history — per-run impetus cost (+ derived USD), settledAt, and a lifetime running total. Owner-scoped (identified or anon-commitment), cursor-paginated, newest first. Only completus runs (a refunded failed run is not spend).",
         "security": [
           {
             "ApiKeyAuth": []
@@ -2294,12 +2294,32 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped to 1..100; defaults to 20.",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
       }
     },
     "/data/datasets": {
       "get": {
-        "summary": "The caller's datasets as the thin summary projection (the training-run picker's contract). Owner-scoped, cursor-paginated (?cursor=, ?limit=, 1..100 default 20), newest first.",
+        "summary": "The caller's datasets as the thin summary projection (the training-run picker's contract). Owner-scoped, newest first.",
         "security": [
           {
             "ApiKeyAuth": []
@@ -2363,7 +2383,27 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped to 1..100; defaults to 20.",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
       },
       "post": {
         "summary": "Create a Dataset from either v1 ingestion path: 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media seeded from the caller's own completed Acta). Rejects a body matching neither shape with 400.",
@@ -2605,7 +2645,7 @@
     },
     "/data/datasets/full": {
       "get": {
-        "summary": "The caller's datasets as the full rich shape (custody, modality, captionsets, versions) — Datasets.tsx's live listing. Owner-scoped, cursor-paginated identically to the summary route.",
+        "summary": "The caller's datasets as the full rich shape (custody, modality, captionsets, versions) — Datasets.tsx's live listing. Owner-scoped, newest first, paginated identically to the summary route.",
         "security": [
           {
             "ApiKeyAuth": []
@@ -2786,7 +2826,27 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped to 1..100; defaults to 20.",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
       }
     },
     "/me": {
@@ -5434,7 +5494,7 @@
     },
     "/collectiones/{id}/pieces": {
       "get": {
-        "summary": "The curation queue — a Collection's generated pieces (media + stamped attributes + review state), filtered by ?review=pending|approved|rejected|all (default pending). Owner-scoped.",
+        "summary": "The curation queue — a Collection's generated pieces (media + stamped attributes + review state). Owner-scoped.",
         "security": [
           {
             "ApiKeyAuth": []
@@ -5526,6 +5586,15 @@
             "name": "id",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "review",
+            "in": "query",
+            "description": "Filter by review state: `pending | approved | rejected | all`. Defaults to `pending`. An unrecognised value also falls back to `pending`.",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -7603,7 +7672,7 @@
     },
     "/feed": {
       "get": {
-        "summary": "The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact's produced output. Query: visibility, destination, limit.",
+        "summary": "The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact's produced output.",
         "security": [],
         "responses": {
           "200": {
@@ -7681,7 +7750,45 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "visibility",
+            "in": "query",
+            "description": "Filter by visibility: `feed | marketplace`. This is a public surface — any other value (including a private/unlisted visibility) collapses to `feed`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "destination",
+            "in": "query",
+            "description": "Filter to one destination/adapter key.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of results to return. A non-numeric value is ignored.",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "author",
+            "in": "query",
+            "description": "Filter to one creator/agent by their animaId. Still subject to the public visibility clamp.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/teams": {

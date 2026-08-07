@@ -1564,22 +1564,58 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'GET',
       path: '/me/runs',
-      summary: "The caller's SETTLED spend history — per-run impetus cost (+ derived USD), settledAt, and a lifetime running total. Owner-scoped (identified or anon-commitment), cursor-paginated, newest first. Only completus runs (a refunded failed run is not spend). Query: status=settled (only supported filter), cursor, limit (1..100, default 20).",
+      summary: "The caller's SETTLED spend history — per-run impetus cost (+ derived USD), settledAt, and a lifetime running total. Owner-scoped (identified or anon-commitment), cursor-paginated, newest first. Only completus runs (a refunded failed run is not spend).",
       auth: true,
+      query: [
+        {
+          name: 'cursor',
+          description: 'Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.',
+          schema: { type: 'string' },
+        },
+        {
+          name: 'limit',
+          description: 'Page size. Clamped to 1..100; defaults to 20.',
+          schema: { type: 'integer' },
+        },
+      ],
       response: RunsPageSchema,
     },
     {
       method: 'GET',
       path: '/data/datasets',
-      summary: "The caller's datasets as the thin summary projection (the training-run picker's contract). Owner-scoped, cursor-paginated (?cursor=, ?limit=, 1..100 default 20), newest first.",
+      summary: "The caller's datasets as the thin summary projection (the training-run picker's contract). Owner-scoped, newest first.",
       auth: true,
+      query: [
+        {
+          name: 'cursor',
+          description: 'Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.',
+          schema: { type: 'string' },
+        },
+        {
+          name: 'limit',
+          description: 'Page size. Clamped to 1..100; defaults to 20.',
+          schema: { type: 'integer' },
+        },
+      ],
       response: DatasetSummariesListSchema,
     },
     {
       method: 'GET',
       path: '/data/datasets/full',
-      summary: "The caller's datasets as the full rich shape (custody, modality, captionsets, versions) — Datasets.tsx's live listing. Owner-scoped, cursor-paginated identically to the summary route.",
+      summary: "The caller's datasets as the full rich shape (custody, modality, captionsets, versions) — Datasets.tsx's live listing. Owner-scoped, newest first, paginated identically to the summary route.",
       auth: true,
+      query: [
+        {
+          name: 'cursor',
+          description: 'Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.',
+          schema: { type: 'string' },
+        },
+        {
+          name: 'limit',
+          description: 'Page size. Clamped to 1..100; defaults to 20.',
+          schema: { type: 'integer' },
+        },
+      ],
       response: DatasetsListSchema,
     },
     {
@@ -1741,8 +1777,16 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'GET',
       path: '/collectiones/:id/pieces',
-      summary: 'The curation queue — a Collection\'s generated pieces (media + stamped attributes + review state), filtered by ?review=pending|approved|rejected|all (default pending). Owner-scoped.',
+      summary: 'The curation queue — a Collection\'s generated pieces (media + stamped attributes + review state). Owner-scoped.',
       auth: true,
+      query: [
+        {
+          name: 'review',
+          description:
+            'Filter by review state: `pending | approved | rejected | all`. Defaults to `pending`. An unrecognised value also falls back to `pending`.',
+          schema: { type: 'string' },
+        },
+      ],
       response: CollectionPiecesSchema,
     },
     {
@@ -1839,8 +1883,27 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'GET',
       path: '/feed',
-      summary: "The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact's produced output. Query: visibility, destination, limit.",
+      summary: "The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact's produced output.",
       auth: false,
+      query: [
+        {
+          name: 'visibility',
+          description:
+            'Filter by visibility: `feed | marketplace`. This is a public surface — any other value (including a private/unlisted visibility) collapses to `feed`.',
+          schema: { type: 'string' },
+        },
+        { name: 'destination', description: 'Filter to one destination/adapter key.', schema: { type: 'string' } },
+        {
+          name: 'limit',
+          description: 'Maximum number of results to return. A non-numeric value is ignored.',
+          schema: { type: 'integer' },
+        },
+        {
+          name: 'author',
+          description: "Filter to one creator/agent by their animaId. Still subject to the public visibility clamp.",
+          schema: { type: 'string' },
+        },
+      ],
       response: FeedListSchema,
     },
     {

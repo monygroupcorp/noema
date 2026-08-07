@@ -1640,9 +1640,14 @@ Return the authenticated caller's account snapshot — balance, in-flight gens, 
 
 ### GET /v1/me/runs
 
-The caller's SETTLED spend history — per-run impetus cost (+ derived USD), settledAt, and a lifetime running total. Owner-scoped (identified or anon-commitment), cursor-paginated, newest first. Only completus runs (a refunded failed run is not spend). Query: status=settled (only supported filter), cursor, limit (1..100, default 20).
+The caller's SETTLED spend history — per-run impetus cost (+ derived USD), settledAt, and a lifetime running total. Owner-scoped (identified or anon-commitment), cursor-paginated, newest first. Only completus runs (a refunded failed run is not spend).
 
 - **Auth:** required
+
+**Query parameters:**
+
+- `cursor` (string) — Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.
+- `limit` (integer) — Page size. Clamped to 1..100; defaults to 20.
 
 **Response (200):**
 
@@ -1738,9 +1743,14 @@ The caller's SETTLED spend history — per-run impetus cost (+ derived USD), set
 
 ### GET /v1/data/datasets
 
-The caller's datasets as the thin summary projection (the training-run picker's contract). Owner-scoped, cursor-paginated (?cursor=, ?limit=, 1..100 default 20), newest first.
+The caller's datasets as the thin summary projection (the training-run picker's contract). Owner-scoped, newest first.
 
 - **Auth:** required
+
+**Query parameters:**
+
+- `cursor` (string) — Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.
+- `limit` (integer) — Page size. Clamped to 1..100; defaults to 20.
 
 **Response (200):**
 
@@ -1786,9 +1796,14 @@ The caller's datasets as the thin summary projection (the training-run picker's 
 
 ### GET /v1/data/datasets/full
 
-The caller's datasets as the full rich shape (custody, modality, captionsets, versions) — Datasets.tsx's live listing. Owner-scoped, cursor-paginated identically to the summary route.
+The caller's datasets as the full rich shape (custody, modality, captionsets, versions) — Datasets.tsx's live listing. Owner-scoped, newest first, paginated identically to the summary route.
 
 - **Auth:** required
+
+**Query parameters:**
+
+- `cursor` (string) — Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.
+- `limit` (integer) — Page size. Clamped to 1..100; defaults to 20.
 
 **Response (200):**
 
@@ -4307,9 +4322,13 @@ Imagined-vs-realized rarity table for a Collection — target shares (from trait
 
 ### GET /v1/collectiones/:id/pieces
 
-The curation queue — a Collection's generated pieces (media + stamped attributes + review state), filtered by ?review=pending|approved|rejected|all (default pending). Owner-scoped.
+The curation queue — a Collection's generated pieces (media + stamped attributes + review state). Owner-scoped.
 
 - **Auth:** required
+
+**Query parameters:**
+
+- `review` (string) — Filter by review state: `pending | approved | rejected | all`. Defaults to `pending`. An unrecognised value also falls back to `pending`.
 
 **Response (200):**
 
@@ -6073,9 +6092,16 @@ Decline a held publication → terminal `rejected` (spec §4). Restricted to the
 
 ### GET /v1/feed
 
-The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact's produced output. Query: visibility, destination, limit.
+The public feed — published, public-surface editions newest first (NOT auth-scoped). Each item carries the referenced artifact's produced output.
 
 - **Auth:** public
+
+**Query parameters:**
+
+- `visibility` (string) — Filter by visibility: `feed | marketplace`. This is a public surface — any other value (including a private/unlisted visibility) collapses to `feed`.
+- `destination` (string) — Filter to one destination/adapter key.
+- `limit` (integer) — Maximum number of results to return. A non-numeric value is ignored.
+- `author` (string) — Filter to one creator/agent by their animaId. Still subject to the public visibility clamp.
 
 **Response (200):**
 
