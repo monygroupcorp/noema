@@ -1,7 +1,6 @@
 # NOEMA Individual Contributor License Agreement (ICLA)
 
-> Legal entity: **Mony Group LLC** (confirmed). This document is engineering-provided
-> boilerplate, not legal advice.
+> Legal entity: **Mony Group LLC** (confirmed).
 
 Thank you for contributing to NOEMA. This Contributor License Agreement ("Agreement")
 clarifies the intellectual-property license granted with Contributions from any person or
