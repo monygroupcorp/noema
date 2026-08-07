@@ -1,12 +1,12 @@
 name: Release Please
 
-# Build is decoupled from the release-please job's own success. release-please cuts the
-# tag/release, then tries to comment on the release PR — if that PR's conversation is
-# locked, the comment step fails, the whole release-please job fails, and its outputs never
-# reach a `needs:`-gated build job. v5.0.0 (2026-08-06) shipped no image for exactly this
-# reason; the manual docker-publish.yml workflow had to be dispatched by hand. build-and-push
-# now triggers directly on the `v*` tag push instead, so it fires regardless of what happens
-# in release-please's own job.
+# build-and-push runs in the same workflow run that cuts the release, gated on the
+# release-please job's aggregate `releases_created` output. `always()` means a failure or
+# skip of release-please does not skip this job — a later step in release-please (e.g.
+# commenting on the release PR) can fail after the tag/release is already cut, and this must
+# not strand the build. The tag-push route is retained as a manual/backup path for a
+# hand-pushed tag; both entry paths resolve the version without relying on a tag push event
+# reaching this workflow, since GITHUB_TOKEN-authored pushes don't trigger new runs.
 on:
   push:
     branches: [main]
@@ -22,9 +22,7 @@ jobs:
     if: startsWith(github.ref, 'refs/heads/main')
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
+      releases_created: ${{ steps.release.outputs.releases_created }}
     steps:
       # Manifest mode: release-please-config.json + .release-please-manifest.json
       # (both at repo root, the action's default paths).
@@ -37,7 +35,12 @@ jobs:
         id: release
 
   build-and-push:
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release-please
+    if: >-
+      always() && (
+        startsWith(github.ref, 'refs/tags/v') ||
+        needs.release-please.outputs.releases_created == 'true'
+      )
     runs-on: ubuntu-latest
     env:
       REGISTRY: ghcr.io
@@ -51,7 +54,15 @@ jobs:
       - name: Resolve version from tag
         id: version
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v$(jq -r '.["."]' .release-please-manifest.json)"
+          fi
+          case "$TAG" in
+            v[0-9]*) ;;
+            *) echo "could not resolve a version tag (got '$TAG')" >&2; exit 1 ;;
+          esac
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "version=${TAG#v}" >> $GITHUB_OUTPUT
 
