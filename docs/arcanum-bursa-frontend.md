@@ -54,8 +54,10 @@ the amount is up to the user (minimum: enough to cover at least one run).
 - Show a "Send ETH" panel with:
   - The CreditVault address (with copy button + ENS if resolvable).
   - The commitment pre-filled as the calldata argument.
-  - An amount field with a live credit estimate (call `GET /arcanum/purse` price
-    feed, or compute from ETH price: `ETH × $USD × 2703 credits/USD`).
+  - An amount field with a live credit estimate, computed client-side from ETH
+    price (`ETH × $USD × 2703 credits/USD`) — there is no server price-feed
+    endpoint; `GET /arcanum/purse/:token` looks up a minted purse's balance by
+    its token, not a price quote.
 - Two paths:
   - **Wallet connected (wagmi/viem):** show a "Send transaction" button. Encode
     the `payETHAnonymous(bytes32)` calldata and send. Show the tx hash on submit.
