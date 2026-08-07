@@ -81,8 +81,21 @@ export const OPENROUTER_PROVIDER: ApiProvider = {
   },
 }
 
+// ── Venice — OpenAI-compatible, chat only (noema-144) ───────────────────────
+export const VENICE_PROVIDER: ApiProvider = {
+  id: 'venice',
+  baseUrl: 'https://api.venice.ai/api/v1',
+  authEnv: 'VENICE_API_KEY',
+  capabilities: {
+    chat: { path: '/chat/completions', defaultModel: 'llama-3.3-70b' },
+  },
+  pricing: {
+    chatImpetusPer1kTokens: 3n,
+  },
+}
+
 /** All known provider descriptors. The container registers those whose key is set. */
-export const API_PROVIDERS: ApiProvider[] = [OPENAI_PROVIDER, OPENROUTER_PROVIDER]
+export const API_PROVIDERS: ApiProvider[] = [OPENAI_PROVIDER, OPENROUTER_PROVIDER, VENICE_PROVIDER]
 
 /**
  * The exact chat-token → impetus metering formula: `ceil(tokens × per1k / 1000)`.

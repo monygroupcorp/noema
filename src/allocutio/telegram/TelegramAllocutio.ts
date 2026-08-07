@@ -48,6 +48,7 @@ import { SaveAsMenu, type SaveAsSeed } from './SaveAsMenu.js'
 import { ReactionController } from './reactions/ReactionController.js'
 import type { UiKeyboard } from '../lexicon/ui/Keyboard.js'
 import { inlineKeyboard, btn, renderPrimitive, decodeCallbackData, type InlineKeyboard } from './telegramRender.js'
+import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { CommandRouter } from './commands/CommandRouter.js'
 import { REACTION } from '../lexicon/symbols.js'
 import { COPY } from '../lexicon/copy.js'
@@ -362,7 +363,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // Cleared at dispatch (queued once, not re-applied). Skipped for the chat modus — the
     // pending loadout belongs to the image studio in this chat, not a /chat turn.
     const chatId = this.chatIds.get(userKey)
-    if (chatId !== undefined && (state?.modusId as string | undefined) !== 'modus.chatgpt') {
+    if (chatId !== undefined && (state?.modusId as string | undefined) !== CANON_VERBS.chat) {
       const queued = this.bulletins.pendingModelsFor(chatId)
       if (queued.length > 0) {
         const pinnedModels = queued.map(m => m.genus === 'lora'
@@ -727,7 +728,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         return
       }
       if (event.selectedId === 'chat') {
-        await this._enterExecute(userId, { modusId: 'modus.chatgpt', aditus: {}, browsePageIndex: 0 })
+        await this._enterExecute(userId, { modusId: CANON_VERBS.chat, aditus: {}, browsePageIndex: 0 })
         return
       }
     }

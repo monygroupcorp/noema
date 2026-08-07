@@ -50,6 +50,10 @@ export interface Porta {
    */
   praefixum?: string    // "praefixum" = prefixed — text woven before the value
   suffixum?: string     // "suffixum" = suffixed — text woven after the value
+  /** Enumerated choices for this port. When present the UI renders a select rather than a free-text
+   *  input; the value is still whatever the caller sends (the list is a convenience, not a validator —
+   *  a caller may pass an id not in the list, e.g. a brand-new upstream model). */
+  optiones?: Array<{ value: string; label: string }>
 }
 
 /**
