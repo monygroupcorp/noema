@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
 import { api } from '../lib/api';
@@ -7,6 +7,7 @@ import { clearOnboarded } from '../lib/entry';
 import { Ic } from '../lib/icons';
 import { Chip } from './Chip';
 import { BuyCreditsModal } from '../screens/BuyCreditsModal';
+import { guardedClick, guardedNavigate } from '../lib/dirtyGuard';
 
 // The top-bar POSTURE CLUSTER + account dropdown (dashboard-spec.md, render
 // noema-account-dropdown.png). The always-on honest readout that rides every surface:
@@ -23,6 +24,7 @@ export function Account() {
   const { ident, idents, execution, setIdentity } = useIdentity();
   const { session, signOutActive, signOutAll, accounts } = useSession();
   const navigate = useNavigate();
+  const location = useLocation();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<CSSProperties>({});
   const [liveCredits, setLiveCredits] = useState<string | null>(null);
@@ -48,6 +50,8 @@ export function Account() {
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [open]);
+  // Close the dropdown on navigation (including a guarded link that was allowed through).
+  useEffect(() => { setOpen(false); }, [location.pathname]);
 
   const signedIn = !!session;
   const anon = ident.funding === 'bearer';
@@ -63,15 +67,22 @@ export function Account() {
     if (r) setPos({ right: Math.max(12, window.innerWidth - r.right), top: r.bottom + 8 });
     setOpen((o) => !o);
   }
+  // Composes the leave guard with the menu's own "close on click" behaviour for the four
+  // am-links Links below.
+  function guardedClickClose(e: React.MouseEvent) {
+    guardedClick(e);
+    setOpen(false);
+  }
   // Switch among held logins (or the anon slot) — a real act via the account list below.
   const switchTo = (id: string) => { setIdentity(id); setOpen(false); };
   // Additive sign-in: bring another account without dropping the current one.
-  const addAccount = () => { setOpen(false); navigate('/onboard?add=1'); };
+  const addAccount = () => guardedNavigate(navigate, '/onboard?add=1');
   // Sign out of the ACTIVE account — drops to the next held login, or the anon path.
   const signOut = () => { signOutActive(); setOpen(false); };
-  // Drop every held login, clear the local onboarded flag, and return to the front door.
-  const signOutEverything = () => { signOutAll(); clearOnboarded(); setOpen(false); navigate('/'); };
-  const signIn = () => { setOpen(false); navigate('/onboard'); };
+  // Drop every held login, clear the local onboarded flag, and return to the front door. The
+  // sharpest exit: it discards unsaved work AND signs the user out, so the guard runs first.
+  const signOutEverything = () => guardedNavigate((to) => { signOutAll(); clearOnboarded(); navigate(to); }, '/');
+  const signIn = () => guardedNavigate(navigate, '/onboard');
 
   return (
     <div className="posture">
@@ -87,7 +98,7 @@ export function Account() {
       <button className="pc-pill id-chip" ref={btnRef} onClick={toggle}>
         <Chip d={ident} /><span className="nm">{anon ? 'anonymous' : 'you'}</span><span className="cv"><Ic name="chevron-down" /></span>
       </button>
-      <Link to="/chat" className="pc-start"><Ic name="plus" /> start</Link>
+      <Link to="/chat" className="pc-start" onClick={guardedClick}><Ic name="plus" /> start</Link>
 
       {open && (
         <div id="acctpop" className="acctmenu" style={pos}>
@@ -118,9 +129,9 @@ export function Account() {
               the Rail (UX handoff 2, Decision 1) — this menu keeps only what's identity-scoped and
               the collaboration surfaces that have no Rail home yet. */}
           <div className="am-links">
-            <Link to="/teams" onClick={() => setOpen(false)}><Ic name="users" /> Teams <span className="meta">co-own work</span></Link>
-            <Link to="/sponsorships" onClick={() => setOpen(false)}><Ic name="hand-coins" /> Sponsorships <span className="meta">top up others</span></Link>
-            {admin && <Link to="/admin" onClick={() => setOpen(false)}><Ic name="layout-grid" /> Admin workspace <span className="meta">review · revenue · COGS</span></Link>}
+            <Link to="/teams" onClick={guardedClickClose}><Ic name="users" /> Teams <span className="meta">co-own work</span></Link>
+            <Link to="/sponsorships" onClick={guardedClickClose}><Ic name="hand-coins" /> Sponsorships <span className="meta">top up others</span></Link>
+            {admin && <Link to="/admin" onClick={guardedClickClose}><Ic name="layout-grid" /> Admin workspace <span className="meta">review · revenue · COGS</span></Link>}
           </div>
           {signedIn ? (
             <>
