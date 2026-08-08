@@ -7,6 +7,7 @@ import type { Actum } from '../../../src/types/actum.js'
 import type { Actorum } from '../../../src/types/cursus.js'
 import type { Materia, MateriaStore } from '../../../src/types/materia.js'
 import type { DeploymentumStore } from '../../../src/types/deploymentum.js'
+import type { Hospitium, HospitiumStore, HostKey } from '../../../src/types/hospitium.js'
 import { Praefectus } from '../../../src/crystal/Praefectus.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -274,6 +275,43 @@ test('run() falls back to cold client when Praefectus returns null', async () =>
   assert.equal((result as { kind: 'async'; externusJobId: string }).externusJobId, 'cold-job-2')
   assert.equal(coldClient.calls.length, 1, 'cold client should be called on cold start')
   assert.equal(warmCalls.length, 0, 'warm client must not be called on cold start')
+})
+
+// ── run() — dispatch-time pricing stamp ──────────────────────────────────────
+// Dispatch knows the TIER (who is running on whose pod). It does not know the
+// cost — the run has not happened yet — so no impetus amount is stamped here.
+// `ActumCompletor` derives base/final from the cursor's measured cost at settle.
+
+function makeHospitia(hostKey: HostKey): HospitiumStore {
+  const h: Hospitium = { id: 'hosp-1', materiaId: 'mat-warm-1', hostKey, inceptum: new Date() }
+  return {
+    async create(input) { return { id: 'hosp-new', ...input } },
+    async findByMateriaId(materiaId) { return materiaId === h.materiaId ? h : null },
+    async findActive() { return [h] },
+    async update(_materiaId, patch) { return { ...h, ...patch } },
+  }
+}
+
+test('run() stamps pricingTier at dispatch and no impetus amount', async () => {
+  const actorum = makeActorum()
+  const cursor = new RunPodCursor(makeClient('cold'), makeCompile(), makeModorum(), actorum, {
+    ...BASE_CONFIG,
+    praefectus: makePraefectus(makeMateria()),
+    warmFactory: () => ({ async submit() { return { id: 'warm-job-2' } } }),
+    imageRefOf: () => 'stationthis/flux-comfyui:v1',
+    hospitia: makeHospitia({ animaId: 'anima-host' }),
+  })
+
+  await cursor.run(makeActum({ impetus: 1800n }))
+
+  const stamp = actorum.updates
+    .map(u => u.patch as { materiamId?: string; executio?: Record<string, unknown> })
+    .find(p => p.executio !== undefined)
+  assert.ok(stamp, 'dispatch stamp written')
+  assert.equal(stamp!.materiamId, 'mat-warm-1')
+  assert.equal(stamp!.executio!.pricingTier, 'guest')
+  assert.equal(stamp!.executio!.finalImpetus, undefined, 'no dispatch-time final amount')
+  assert.equal(stamp!.executio!.baseImpetus, undefined, 'no dispatch-time base amount')
 })
 
 // ── run() — studio pinning (studioId-targeted) ────────────────────────────────
