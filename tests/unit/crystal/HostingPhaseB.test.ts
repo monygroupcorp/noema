@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { handleExecutionWebhook, type ExecutionWebhookDeps, type WebhookRequest } from '../../../src/api/webhooks/executionWebhook.js'
 import { Nexus } from '../../../src/ledger/Nexus.js'
 import { hostCutHook } from '../../../src/ledger/hooks/hostCut.js'
+import { WARM_SURCHARGE_IMPETUS } from '../../../src/ledger/rates.js'
 import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
 import { MemoryActorum } from '../../../src/execution/MemoryActorum.js'
 import { ActumCompletor } from '../../../src/execution/ActumCompletor.js'
@@ -44,10 +45,14 @@ const GUEST_ANIMA = 'anima-guest'
 const ADMIN_ANIMA = 'anima-admin'
 const HOST_COMMITMENT = '0xabc123commitment'
 
+// Reported cost for every scenario: the webhook derives it from executionTime,
+// so 200_000 ms of pod wall-clock is a measured cost of 200 impetus.
+const REPORTED_MS = 200_000
+const MEASURED = 200n
+
 interface ScenarioOpts {
   tier: 'owner' | 'admin' | 'guest' | undefined  // undefined = no executio stamp
-  finalImpetus?: bigint
-  baseImpetus?: bigint                            // actum reservation cap
+  reservation?: bigint                            // actum reservation cap
   materiamId?: string
   hostKey?: HostKey | null                        // null = no Hospitium seeded
 }
@@ -59,12 +64,12 @@ async function runScenario(opts: ScenarioOpts) {
   const nexus = new Nexus()
   nexus.on('execution_spend', hostCutHook)
 
-  const base = opts.baseImpetus ?? 1000n
+  const reservation = opts.reservation ?? 1000n
   const actum: Actum = {
     id: 'actum-b-1',
     modusId: 'flux-schnell',
     modusVersiono: '1.0.0',
-    impetus: base,                  // reservation cap
+    impetus: reservation,           // reservation cap
     signaConsumed: [],
     aditus: { prompt: 'a cat' },
     status: 'nascens',
@@ -72,9 +77,9 @@ async function runScenario(opts: ScenarioOpts) {
     expirat: new Date(Date.now() + 60_000),
     externusJobId: 'job-phase-b-1',
     materiamId: opts.materiamId,
-    executio: opts.tier
-      ? { pricingTier: opts.tier, ...(opts.finalImpetus !== undefined ? { finalImpetus: opts.finalImpetus } : {}) }
-      : undefined,
+    // Dispatch stamps the TIER only — the amounts are derived from the measured
+    // cost at completion.
+    executio: opts.tier ? { pricingTier: opts.tier } : undefined,
   }
   await actorum.create({ ...actum })
 
@@ -86,7 +91,7 @@ async function runScenario(opts: ScenarioOpts) {
 
   const deps: ExecutionWebhookDeps = { actorum, completor, nexus, signorum, hospitia }
   const req: WebhookRequest = {
-    body: { id: 'job-phase-b-1', status: 'COMPLETED', output: [], executionTime: 200_000 },
+    body: { id: 'job-phase-b-1', status: 'COMPLETED', output: [], executionTime: REPORTED_MS },
     rawBody: '',
   }
   const res = await handleExecutionWebhook(req, deps)
@@ -97,53 +102,51 @@ async function runScenario(opts: ScenarioOpts) {
 }
 
 // ── Scenario 1: Owner runs on their own pod ───────────────────────────────────
-// Dispatch stamped tier=owner, finalImpetus = base. Host cut MUST NOT fire even
-// though Hospitium identifies the same anima — modoHostAnimaId is only resolved
-// for guest tier.
-test('owner tier — no host-cut signum; impetus = base', async () => {
+// Dispatch stamped tier=owner. Host cut MUST NOT fire even though Hospitium
+// identifies the same anima — modoHostAnimaId is only resolved for guest tier.
+// The owner settles at the measured cost, with no surcharge.
+test('owner tier — no host-cut signum; impetus = the measured cost', async () => {
   const { stored, signorum } = await runScenario({
     tier: 'owner',
-    finalImpetus: 200n,
     materiamId: MATERIA_ID,
     hostKey: { animaId: HOST_ANIMA },
   })
   assert.equal(stored.executio?.pricingTier, 'owner')
-  assert.equal(stored.impetus, 200n)
+  assert.equal(stored.impetus, MEASURED)
   const hostSigna = await signorum.history({ animaId: HOST_ANIMA })
   assert.equal(hostSigna.length, 0, 'owner runs must not pay themselves')
 })
 
 // ── Scenario 2: Admin runs on host's pod (group-chat at-cost) ─────────────────
-test('admin tier — no host-cut signum; impetus = base', async () => {
+test('admin tier — no host-cut signum; impetus = the measured cost', async () => {
   const { stored, signorum } = await runScenario({
     tier: 'admin',
-    finalImpetus: 200n,
     materiamId: MATERIA_ID,
     hostKey: { animaId: HOST_ANIMA },
   })
   assert.equal(stored.executio?.pricingTier, 'admin')
-  assert.equal(stored.impetus, 200n)
+  assert.equal(stored.impetus, MEASURED)
   const hostSigna = await signorum.history({ animaId: HOST_ANIMA })
   assert.equal(hostSigna.length, 0, 'admin at-cost runs must not pay host')
 })
 
 // ── Scenario 3: Guest runs on identified host's pod ───────────────────────────
-// finalImpetus = base + bootShare (240 = 200 + 40). hostCutHook fires; reward
-// signum lands on the host anima with valor = 20% × 240 = 48.
-test('guest, identified host — reward signum to host, valor = 20% × finalImpetus', async () => {
+// Settles at the measured cost + the flat warm surcharge. hostCutHook fires on
+// the measured base (not the surcharge, which hospitiumHook compensates
+// separately): reward signum on the host anima with valor = 20% × 200 = 40.
+test('guest, identified host — reward signum to host, valor = 20% × measured base', async () => {
   const { stored, signorum } = await runScenario({
     tier: 'guest',
-    finalImpetus: 240n,                  // 200 base + 40 boot share
     materiamId: MATERIA_ID,
     hostKey: { animaId: HOST_ANIMA },
   })
   assert.equal(stored.executio?.pricingTier, 'guest')
-  assert.equal(stored.impetus, 240n, 'finalImpetus drives settled spend')
+  assert.equal(stored.impetus, MEASURED + WARM_SURCHARGE_IMPETUS, 'measured cost + surcharge')
 
   const hostSigna = await signorum.history({ animaId: HOST_ANIMA })
   assert.equal(hostSigna.length, 1)
   assert.equal(hostSigna[0].forma, 'reward')
-  assert.equal(hostSigna[0].valor, 48n, '20% × 240 = 48')
+  assert.equal(hostSigna[0].valor, (MEASURED * 20n) / 100n, '20% × 200 = 40')
   assert.equal(hostSigna[0].auctor, 'nexus:hostCut')
 
   // Guest anima never receives a host-cut (sanity)
@@ -152,19 +155,19 @@ test('guest, identified host — reward signum to host, valor = 20% × finalImpe
 })
 
 // ── Scenario 4: Guest runs on anonymous (arcanum-commitment) host's pod ───────
-// finalImpetus surcharged identically. hostCutHook MUST NOT emit a signum at
+// Surcharged identically. hostCutHook MUST NOT emit a signum at
 // this layer: Phase B execution_spend only carries animaId. (Phase C will widen
 // the payload to a full HostKey so commitment-hosts also earn.) The actum still
-// settles at 240 — the boot recovery flows back via a separate Phase C hook.
-test('guest, anonymous host — finalImpetus surcharged; no host-cut signum yet', async () => {
+// settles surcharged — the boot recovery flows back via a separate Phase C hook.
+test('guest, anonymous host — spend surcharged; no host-cut signum yet', async () => {
   const { stored, signorum } = await runScenario({
     tier: 'guest',
-    finalImpetus: 240n,
     materiamId: MATERIA_ID,
     hostKey: { commitment: HOST_COMMITMENT },
   })
   assert.equal(stored.executio?.pricingTier, 'guest')
-  assert.equal(stored.impetus, 240n, 'commitment-host still collects surcharge in the spend')
+  assert.equal(stored.impetus, MEASURED + WARM_SURCHARGE_IMPETUS,
+    'commitment-host still collects surcharge in the spend')
 
   // No animaId on the host → nothing on the host anima rail
   const hostSigna = await signorum.history({ animaId: HOST_ANIMA })
@@ -173,26 +176,24 @@ test('guest, anonymous host — finalImpetus surcharged; no host-cut signum yet'
 
 // ── Scenario 5: No Hospitium (legacy pod, predates the hosting layer) ─────────
 // Webhook lookup returns null. hostCutHook receives undefined modoHostAnimaId.
-test('no Hospitium — no host-cut signum; settle proceeds at finalImpetus or report', async () => {
+test('no Hospitium — no host-cut signum; settle proceeds on the measured cost', async () => {
   const { stored, signorum } = await runScenario({
     tier: 'guest',
-    finalImpetus: 200n,
     materiamId: MATERIA_ID,
     hostKey: null,                 // no Hospitium seeded
   })
-  assert.equal(stored.impetus, 200n)
+  assert.equal(stored.impetus, MEASURED + WARM_SURCHARGE_IMPETUS)
   const hostSigna = await signorum.history({ animaId: HOST_ANIMA })
   assert.equal(hostSigna.length, 0)
 })
 
-// ── Sanity: dispatched finalImpetus is capped at the reservation ──────────────
-// Guard against an arithmetic regression where a too-large bootShare would let
-// a guest run settle above the locked reservation. Completor must clamp.
-test('finalImpetus cap — settles at reservation when dispatched exceeds it', async () => {
+// ── Sanity: the settled total is capped at the reservation ───────────────────
+// Guard against an arithmetic regression where the surcharge would let a guest
+// run settle above the locked reservation. Completor must clamp.
+test('reservation cap — settles at the reservation when measured + surcharge exceeds it', async () => {
   const { stored } = await runScenario({
     tier: 'guest',
-    baseImpetus: 220n,             // reservation
-    finalImpetus: 500n,            // dispatch decision (bug or extreme bootShare)
+    reservation: 220n,             // measured 200 + surcharge 80 = 280 > 220
     materiamId: MATERIA_ID,
     hostKey: { animaId: HOST_ANIMA },
   })

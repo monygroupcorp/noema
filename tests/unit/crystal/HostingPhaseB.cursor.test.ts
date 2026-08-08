@@ -3,10 +3,13 @@
 // The five-scenario HostingPhaseB.test.ts seeds the actum with a pre-stamped
 // executio. This test fills the gap: it drives RunPodCursor.run through a warm
 // client whose onMetrics fires mid-run with pod-telemetry — proving the
-// dispatch-stamped {pricingTier, finalImpetus} are NOT clobbered by the merge
-// in the cursor's onMetrics callback. Without the merge, the guest surcharge
-// silently disappears on every warm reuse — exactly the path Phase B exists to
-// price.
+// dispatch-stamped {pricingTier} is NOT clobbered by the merge in the cursor's
+// onMetrics callback. Without the merge, the tier disappears on every warm reuse
+// and the guest surcharge is never applied at settle — exactly the path the
+// hosting layer exists to price.
+//
+// Note the stamp is the TIER only: dispatch cannot know what the run will cost,
+// so the impetus amounts are derived from the measured cost in ActumCompletor.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -176,8 +179,8 @@ test('warm-path guest: dispatch stamp survives onMetrics merges', async () => {
 
   // Dispatch stamp survives both onMetrics reports.
   assert.equal(stored.executio?.pricingTier, 'guest')
-  assert.equal(stored.executio?.baseImpetus, 1000n, 'base stashed alongside final')
-  assert.equal(stored.executio?.finalImpetus, 1000n + 80n, 'base + WARM_SURCHARGE_IMPETUS')
+  assert.equal(stored.executio?.baseImpetus, undefined, 'no dispatch-time base amount')
+  assert.equal(stored.executio?.finalImpetus, undefined, 'no dispatch-time final amount')
 
   // Pod-telemetry merged in too — proof the merge actually merges, not just
   // preserves. The latest onMetrics snapshot wins on the keys it sets.
@@ -186,12 +189,12 @@ test('warm-path guest: dispatch stamp survives onMetrics merges', async () => {
   assert.equal(stored.executio?.executionMs, 4_200)
 })
 
-test('warm-path owner: dispatch stamps owner; finalImpetus = base (no surcharge)', async () => {
+test('warm-path owner: dispatch stamps the owner tier and no impetus amount', async () => {
   const { stored } = await runCursor({
     runnerAnimaId: 'anima-host',
     hostAnimaId:   'anima-host',          // same identity → owner tier
   })
   assert.equal(stored.executio?.pricingTier, 'owner')
-  assert.equal(stored.executio?.finalImpetus, 1000n, 'owner pays base only')
+  assert.equal(stored.executio?.finalImpetus, undefined, 'no dispatch-time final amount')
   assert.equal(stored.executio?.executionMs, 4_200, 'telemetry still merged in')
 })
