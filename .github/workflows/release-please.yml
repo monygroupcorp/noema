@@ -1,12 +1,15 @@
 name: Release Please
 
-# build-and-push runs in the same workflow run that cuts the release, gated on the
-# release-please job's aggregate `releases_created` output. `always()` means a failure or
-# skip of release-please does not skip this job — a later step in release-please (e.g.
-# commenting on the release PR) can fail after the tag/release is already cut, and this must
-# not strand the build. The tag-push route is retained as a manual/backup path for a
-# hand-pushed tag; both entry paths resolve the version without relying on a tag push event
-# reaching this workflow, since GITHUB_TOKEN-authored pushes don't trigger new runs.
+# build-and-push must run whenever a release tag exists for the commit this run is building,
+# regardless of whether the release-please job itself succeeded. `always()` on that job alone
+# is not enough: release-please can cut the tag and GitHub release and then fail on a later
+# step (e.g. commenting on the release PR), which leaves its `releases_created` output empty
+# even though the release already exists. Trusting that output as the sole gate means a tag
+# can exist with no image built for it. So build-and-push checks the tag directly — does
+# refs/tags/<version> exist and does it point at this commit — and only falls back to the
+# `releases_created` output and the tag-push trigger as secondary signals. The tag-push route
+# is the manual/backup path for a hand-pushed tag; it also covers pushes that don't originate
+# from this workflow, since GITHUB_TOKEN-authored pushes don't trigger new runs.
 on:
   push:
     branches: [main]
@@ -36,11 +39,9 @@ jobs:
 
   build-and-push:
     needs: release-please
-    if: >-
-      always() && (
-        startsWith(github.ref, 'refs/tags/v') ||
-        needs.release-please.outputs.releases_created == 'true'
-      )
+    # Run regardless of the release-please job's outcome — the tag-existence check below
+    # decides whether there is actually anything to build.
+    if: always()
     runs-on: ubuntu-latest
     env:
       REGISTRY: ghcr.io
@@ -66,21 +67,42 @@ jobs:
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "version=${TAG#v}" >> $GITHUB_OUTPUT
 
+      # The real gate. A tag existing and pointing at this commit means a release was cut for
+      # this push, whether or not release-please's own job reported success — its
+      # `releases_created` output and the tag-push trigger are kept only as a fallback for
+      # when the tag lookup itself can't run (e.g. fetch failure).
+      - name: Check whether a release tag points at this commit
+        id: tagcheck
+        run: |
+          git fetch --tags origin
+          TAG_SHA=$(git rev-parse -q --verify "refs/tags/${{ steps.version.outputs.tag }}^{commit}" || true)
+          if [[ -n "$TAG_SHA" && "$TAG_SHA" == "$(git rev-parse HEAD)" ]]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ needs.release-please.outputs.releases_created }}" == "true" || "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Get build info
+        if: steps.tagcheck.outputs.should_build == 'true'
         id: build_info
         run: |
           echo "sha=$(git log --first-parent --skip=1 -1 --pretty=format:%h)" >> $GITHUB_OUTPUT
           echo "msg=$(git log --first-parent --skip=1 -1 --pretty=format:%s)" >> $GITHUB_OUTPUT
 
       - uses: docker/setup-buildx-action@v3
+        if: steps.tagcheck.outputs.should_build == 'true'
 
       - uses: docker/login-action@v3
+        if: steps.tagcheck.outputs.should_build == 'true'
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/metadata-action@v5
+        if: steps.tagcheck.outputs.should_build == 'true'
         id: meta
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -91,6 +113,7 @@ jobs:
             type=raw,value=latest
 
       - uses: docker/build-push-action@v6
+        if: steps.tagcheck.outputs.should_build == 'true'
         with:
           context: .
           push: true
