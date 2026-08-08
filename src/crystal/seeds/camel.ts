@@ -45,7 +45,11 @@ export const CAMEL_TEMPLATE_MODUS: Modus = {
   genus: 'compositus',
   versio: '1.0.0',
   contentHash: '', // set on registration via hashModus()
-  canonica: true,
+  // Per-agent starter template, not a platform flow — must stay out of the public
+  // catalog. `CrystalApi.listFlows()` filters on `canonica: true`; provisioning
+  // clones by id via `Modorum.find`, which does not filter on `canonica`, so this
+  // is invisible to the clone contract.
+  canonica: false,
 
   aditus: {
     // Open — the caster's edit instruction.
@@ -69,6 +73,13 @@ export interface SeedCamelDeps {
   /** Raw Db to upsert the treasury Anima with a fixed id (AnimaStore.create assigns a uuid). */
   db: Db
   animaeCollection?: string
+  /**
+   * Collection backing `Modorum` (default 'modi', see `container.ts`). Used only to
+   * reconcile `canonica` on an existing row in place — `Modorum.update`'s patch type
+   * doesn't cover definitional fields like `canonica`, so this goes through the raw
+   * handle rather than widening that contract.
+   */
+  modiCollection?: string
 }
 
 /** Idempotently seed the CAMEL issuer, treasury Anima, and starter template. */
@@ -88,5 +99,12 @@ export async function seedCamel(deps: SeedCamelDeps): Promise<void> {
   if (!existing) {
     const sealed = { ...CAMEL_TEMPLATE_MODUS, contentHash: hashModus(CAMEL_TEMPLATE_MODUS) }
     await deps.modorum.register(sealed)
+  } else if (existing.canonica !== CAMEL_TEMPLATE_MODUS.canonica) {
+    // Reconcile only `canonica` on a previously-registered row — never re-register
+    // or touch `contentHash`, `gradus`, or `aditus`.
+    await deps.db.collection(deps.modiCollection ?? 'modi').updateOne(
+      { id: CAMEL_TEMPLATE_MODUS.id },
+      { $set: { canonica: CAMEL_TEMPLATE_MODUS.canonica, mutatum: new Date() } },
+    )
   }
 }
