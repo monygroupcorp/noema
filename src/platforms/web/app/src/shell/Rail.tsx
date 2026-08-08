@@ -6,6 +6,7 @@ import { api } from '../lib/api';
 import { useIdentity } from '../state/identity';
 import { IDENTITY_PRIV } from '../lib/idents';
 import { Chip } from './Chip';
+import { guardedClick } from '../lib/dirtyGuard';
 
 // The single global nav — the production pillars that cover the whole product (UX handoff 2,
 // Decision 1): Create · Memory · Build · Publish · Identity · Account (pinned footer). "Create"
@@ -126,7 +127,7 @@ export function Rail() {
           <Fragment key={s.sec ?? `g${i}`}>
             {s.sec && <div className="lbl">{s.sec}</div>}
             {s.items.map((it) => (
-              <NavLink key={it.to} to={it.to} end className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+              <NavLink key={it.to} to={it.to} end onClick={guardedClick} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
                 <span className="ico"><Ic name={it.ico} /></span> {it.label}
               </NavLink>
             ))}
@@ -135,10 +136,10 @@ export function Rail() {
         {admin && (
           <Fragment key="admin">
             <div className="lbl">Admin</div>
-            <NavLink to="/admin" end className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+            <NavLink to="/admin" end onClick={guardedClick} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
               <span className="ico"><Ic name="layout-grid" /></span> Workspace
             </NavLink>
-            <NavLink to="/admin/review" className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+            <NavLink to="/admin/review" onClick={guardedClick} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
               <span className="ico"><Ic name="eye" /></span> Feed review
             </NavLink>
           </Fragment>
@@ -148,7 +149,7 @@ export function Rail() {
       {/* Mobile-only (<=760px) grouped bottom bar — 7 tiles; CSS does the breakpoint swap with .nav above. */}
       <nav className="mobilenav">
         {mobileTiles.map((t) => 'to' in t ? (
-          <NavLink key={t.to} to={t.to} end className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+          <NavLink key={t.to} to={t.to} end onClick={guardedClick} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
             <span className="ico"><Ic name={t.ico} /></span> {t.label}
           </NavLink>
         ) : (
@@ -167,7 +168,7 @@ export function Rail() {
                 <div className="railgroup-backdrop" onClick={() => setOpenGroup(null)} />
                 <div className="railgroup-pop" style={{ left: anchor.left, bottom: anchor.bottom }}>
                   {t.items.map((it) => (
-                    <NavLink key={it.to} to={it.to} end className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+                    <NavLink key={it.to} to={it.to} end onClick={guardedClick} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
                       <span className="ico"><Ic name={it.ico} /></span> {it.label}
                     </NavLink>
                   ))}
@@ -181,16 +182,16 @@ export function Rail() {
 
       {/* pinned bottom — the Account pillar: funding · activity · settings · the identity avatar */}
       <div className="railfoot">
-        <NavLink to="/funding" className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+        <NavLink to="/funding" onClick={guardedClick} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
           <span className="ico"><Ic name="wallet" /></span> Funding
         </NavLink>
-        <NavLink to="/status" className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+        <NavLink to="/status" onClick={guardedClick} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
           <span className="ico"><Ic name="receipt-text" /></span> Activity
         </NavLink>
-        <NavLink to="/account" className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+        <NavLink to="/account" onClick={guardedClick} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
           <span className="ico"><Ic name="settings-2" /></span> Settings
         </NavLink>
-        <Link to="/profile" className="railavatar" title={`${ident.funding === 'bearer' ? 'anonymous' : ident.name} · identity`}>
+        <Link to="/profile" onClick={guardedClick} className="railavatar" title={`${ident.funding === 'bearer' ? 'anonymous' : ident.name} · identity`}>
           <Chip d={ident} />
           <span className="ra-main">
             <span className="nm">{ident.funding === 'bearer' ? 'anonymous' : ident.name}</span>
