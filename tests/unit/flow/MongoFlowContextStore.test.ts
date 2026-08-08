@@ -172,9 +172,14 @@ test('hydrate skips docs without pendingActumId in actumIndex', async () => {
 test('set fires upsert errors are caught and logged (not thrown)', async () => {
   const { MongoFlowContextStore } = require('../../../src/flow/MongoFlowContextStore.js')
 
-  const errors: unknown[] = []
-  const origError = console.error.bind(console)
-  console.error = (...args: unknown[]) => { errors.push(args) }
+  const captured: string[] = []
+  const orig = process.stdout.write.bind(process.stdout)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(process.stdout as any).write = (chunk: string | Uint8Array, ...rest: unknown[]) => {
+    if (typeof chunk === 'string') captured.push(chunk)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (orig as any)(chunk, ...rest)
+  }
 
   try {
     const col = {
@@ -189,14 +194,60 @@ test('set fires upsert errors are caught and logged (not thrown)', async () => {
     // Wait for the async error
     await new Promise(resolve => setImmediate(resolve))
 
-    assert.ok(errors.length > 0, 'expected console.error to be called')
-    const errorArgs = errors[0] as unknown[]
+    assert.ok(captured.length > 0, 'expected an error log line on stdout')
+    const entry = JSON.parse(captured[captured.length - 1]) as Record<string, unknown>
+    assert.equal(entry.level, 'error')
+    assert.equal(entry.component, 'flow:context-store')
     assert.ok(
-      typeof errorArgs[0] === 'string' && errorArgs[0].includes('MongoFlowContextStore'),
-      `expected error message to mention MongoFlowContextStore, got: ${errorArgs[0]}`
+      typeof entry.error === 'string' && entry.error.includes('Mongo down'),
+      `expected error field to mention the failure, got: ${entry.error}`
     )
   } finally {
-    console.error = origError
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(process.stdout as any).write = orig
+  }
+})
+
+test('delete fires deleteOne errors are caught and logged (not thrown)', async () => {
+  const { MongoFlowContextStore } = require('../../../src/flow/MongoFlowContextStore.js')
+
+  const captured: string[] = []
+  const orig = process.stdout.write.bind(process.stdout)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(process.stdout as any).write = (chunk: string | Uint8Array, ...rest: unknown[]) => {
+    if (typeof chunk === 'string') captured.push(chunk)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (orig as any)(chunk, ...rest)
+  }
+
+  try {
+    const col = {
+      ...makeMockCollection(),
+      deleteOne: async () => { throw new Error('Mongo down') },
+    }
+    const store = new MongoFlowContextStore(col as unknown, 'flowContexts')
+
+    store.set('telegram', 'user1', makeCtx())
+    await new Promise(resolve => setImmediate(resolve))
+    captured.length = 0
+
+    // Should not throw
+    assert.doesNotThrow(() => store.delete('telegram', 'user1'))
+
+    // Wait for the async error
+    await new Promise(resolve => setImmediate(resolve))
+
+    assert.ok(captured.length > 0, 'expected an error log line on stdout')
+    const entry = JSON.parse(captured[captured.length - 1]) as Record<string, unknown>
+    assert.equal(entry.level, 'error')
+    assert.equal(entry.component, 'flow:context-store')
+    assert.ok(
+      typeof entry.error === 'string' && entry.error.includes('Mongo down'),
+      `expected error field to mention the failure, got: ${entry.error}`
+    )
+  } finally {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(process.stdout as any).write = orig
   }
 })
 
