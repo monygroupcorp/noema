@@ -110,9 +110,13 @@ export class FlowRouter {
     const result = await flow.handle(ctx, event)
 
     if ('primitives' in result) {
-      // Step — update stored context and notify
+      // Step — update stored context (state may have legitimately advanced)
+      // and notify only when there's something to emit. An empty-primitives
+      // step means "state preserved, emit nothing."
       store.set(platform, userId, ctx)
-      onStep(ctx, result)
+      if (result.primitives.length > 0) {
+        onStep(ctx, result)
+      }
     } else {
       // Resolution
       if (result.kind === 'handoff') {

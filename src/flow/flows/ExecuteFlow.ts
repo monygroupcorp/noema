@@ -201,7 +201,12 @@ export class ExecuteFlow implements Flow {
       case 'SELECT_CATEGORY':  return this._handleSelectCategory(ctx, state, event)
       case 'BROWSE_TOOLS':     return this._handleBrowseTools(ctx, state, event)
       case 'CONFIGURE':        return this._handleConfigure(ctx, state, event)
-      case 'AWAITING_COMPLETION': return this._buildWaitingStep()
+      case 'AWAITING_COMPLETION':
+        // Free text sent while a run is in flight isn't addressed to this
+        // flow — stay silent, the result posts on its own when it lands. A
+        // deliberate tap/submit on this flow's own controls still gets the
+        // waiting acknowledgement.
+        return event.kind === 'prompt' ? { primitives: [] } : this._buildWaitingStep()
       case 'RESULT':           return this._handleResult(ctx, state, event)
       default:
         return { kind: 'complete' }
