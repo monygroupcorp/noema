@@ -1466,6 +1466,19 @@ async function main(): Promise<void> {
   const baseSigningKey    = process.env.ALCHEMY_SIGNING_KEY_BASE    ?? process.env.ALCHEMY_SIGNING_KEY_8453 ?? process.env.ALCHEMY_SIGNING_KEY
   if (mainnetSigningKey) ALCHEMY_SIGNING_KEYS['1']    = mainnetSigningKey
   if (baseSigningKey)    ALCHEMY_SIGNING_KEYS['8453'] = baseSigningKey
+  // The chains this deployment serves. Built unconditionally from the CreditVault constant, so its
+  // KEYS are the served set — the webhook refuses any other `:chainId` at the door (a caller-supplied
+  // chain resolves neither a signing key nor a vault address, so no guard downstream is keyed to it).
+  // Declared here rather than inline in `alchemyDeps` so the key check below reads the same set.
+  const ALCHEMY_VAULT_ADDRESSES: Record<string, string> = { '1': CREDIT_VAULT, '8453': CREDIT_VAULT }
+  // A served chain whose signing key is absent takes the dev-mode path — HMAC validation is skipped
+  // for its deliveries. Say so at boot, the way absent OFAC screening does fifteen lines below:
+  // otherwise a key that stops resolving on a future deploy changes the security posture silently.
+  for (const chainId of Object.keys(ALCHEMY_VAULT_ADDRESSES)) {
+    if (!ALCHEMY_SIGNING_KEYS[chainId]) {
+      log.warn(`Alchemy webhook signing key absent for chain ${chainId} (ALCHEMY_SIGNING_KEY_${chainId} / ALCHEMY_SIGNING_KEY unset) — HMAC validation is SKIPPED for that chain's deliveries, so its deposit webhook is unauthenticated. Configure before real deposits — go-live blocker.`)
+    }
+  }
   // CREDIT_VAULT + `pricer` are constructed once above (shared with the /v1 deposit-quote endpoint).
   // OFAC sanctions screen for deposit boundaries. The real Set-backed screen + SDN
   // loader are PRIVATE (ADR-0012 §49) — from the `compliance` module loaded above.
@@ -1490,7 +1503,7 @@ async function main(): Promise<void> {
     arcanumTree:  ring.arcanumTree,
     sanctions,
     signingKeys:  ALCHEMY_SIGNING_KEYS,
-    vaultAddresses: { '1': CREDIT_VAULT, '8453': CREDIT_VAULT },
+    vaultAddresses: ALCHEMY_VAULT_ADDRESSES,
     pricer,
   }
   app.post('/webhooks/alchemy/:chainId', async (req, res) => {
