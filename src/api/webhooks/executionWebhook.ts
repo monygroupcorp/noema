@@ -221,8 +221,9 @@ export async function handleExecutionWebhook(
         modoHostKey = modoHostFor(completed.executio.pricingTier, hospitium)
       }
 
-      // baseImpetus is stamped at dispatch on executio. Owner/admin paths that
-      // never went through cursor stamping fall back to the spend amount itself.
+      // baseImpetus is written by ActumCompletor at completion, derived from the
+      // measured pod cost (post-167). The `?? completed.impetus` fallback covers
+      // rails that complete without a completor-written executio stamp.
       const baseImpetus = completed.executio?.baseImpetus ?? completed.impetus
 
       // Model royalty routing (roadmap Tier 1 #1): the models this gen actually used
