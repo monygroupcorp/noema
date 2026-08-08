@@ -3,10 +3,13 @@
 // =============================================================================
 //
 // Reads a prompt, finds trigger words that match LoRAs the caller can access,
-// and rewrites them in-place into `<lora:slug:weight>` tokens so the downstream
-// ComfyUI multi-LoRA extraction node can stack them. Returns the modified
-// prompt + a list of the LoRAs that were applied (so the caller can add them
-// to the required-models download list).
+// and rewrites them in-place into `<lora:name:weight>` tokens so the downstream
+// ComfyUI multi-LoRA extraction node can stack them. The `name` written is the
+// Intella's `dest` basename (extension stripped), NOT its `slug` — `dest` is what
+// the Compiler actually downloads the weight to, so it's the only name the pod's
+// loader can resolve; `slug` is registry provenance that can diverge from it.
+// Returns the modified prompt + a list of the LoRAs that were applied (so the
+// caller can add them to the required-models download list).
 //
 // Pure: no DB, no Intellarum calls — caller supplies the trigger map. The
 // resolver is invoked by the Compiler when the workflow template carries
@@ -18,8 +21,9 @@
 //   trigger:0.0         → SILENCES: LoRA is NOT applied; original word kept
 //   trigger!!           → defaultWeight + (0.2 × number of !)
 //   trigger..           → defaultWeight − (0.2 × number of .)
-//   <lora:slug:weight>  → explicit-form tag; passes through if the slug is
-//                         known to the caller, otherwise stripped with a warning
+//   <lora:slug:weight>  → explicit-form tag; if the slug is known to the caller it is
+//                         translated to the authoritative name (see below), otherwise
+//                         stripped with a warning
 //
 // Conflict resolution when one trigger maps to multiple Intellae:
 //   private (owned by animaId)  >  shared private (someone else's, accessible)
@@ -27,10 +31,18 @@
 //   ties broken by `mutatum` descending (most recent wins). A multi-public
 //   match emits a warning naming the winner.
 
+import path from 'node:path'
 import type { Intella, Intellae } from '../types/intelligendi.js'
 
 export interface ResolvedLora {
   slug: string
+  /**
+   * The authoritative name: `dest`'s basename with the extension stripped. This is what
+   * gets written into the `<lora:...>` tag — `dest` is what actually reaches the pod's
+   * filesystem, so it's the name that can't lie. `slug` (above) is registry provenance
+   * only; it must NOT be used to build the tag or the download path.
+   */
+  basename: string
   weight: number
   /** What the user typed (trigger word, weighted form, or original tag). */
   originalWord: string
@@ -40,6 +52,16 @@ export interface ResolvedLora {
   intellaId: string
   /** Forwarded for permission/audit trails downstream. */
   ownerAnimaId?: string
+}
+
+/**
+ * The name that actually reaches the pod's filesystem: `dest`'s basename with the
+ * extension stripped. `dest` is authoritative for the `<lora:...>` tag, not `slug` —
+ * a registry record's `slug` and `dest` can diverge (an import can rename one without
+ * the other), and only `dest` determines what the weight downloads as.
+ */
+function resolvedBasename(intella: Intella): string {
+  return path.basename(intella.dest, path.extname(intella.dest))
 }
 
 export interface LoraResolveResult {
@@ -181,9 +203,11 @@ function _substringScan(
       const finalWeight = m.userWeight !== null
         ? m.userWeight
         : Math.round((baseWeight + m.dotExclOffset) * 100) / 100
-      const loraTag = `<lora:${chosen.slug}:${finalWeight}>`
+      const basename = resolvedBasename(chosen)
+      const loraTag = `<lora:${basename}:${finalWeight}>`
       state.applied.push({
         slug: chosen.slug,
+        basename,
         weight: finalWeight,
         originalWord: prompt.substring(m.start, m.end),
         replacedWord: loraTag,
@@ -239,25 +263,30 @@ export function resolveLoraTriggers(
     if (Number.isNaN(weight)) {
       warnings.push(`Invalid weight in inline tag ${fullTag}. Tag preserved as text.`)
       finalPromptParts.push(fullTag)
-    } else if (lorasAppliedThisRun.has(slug)) {
-      finalPromptParts.push(fullTag)
-    } else if (knownSlugs.has(slug)) {
-      // Look up the actual Intella behind the slug for the lineage entry.
+    } else if (!knownSlugs.has(slug)) {
+      warnings.push(`Inline tag ${fullTag} refers to an unknown or inaccessible LoRA. Stripped.`)
+      // Don't push — strips the tag.
+    } else {
+      // A hand-typed <lora:slug:weight> tag must resolve through the same slug → dest-basename
+      // translation as the trigger-word paths below, or it reintroduces the name mismatch
+      // through the front door: the slug the user typed may not be the name the weight
+      // downloads to.
       let inlineIntella: Intella | undefined
       for (const list of triggerMap.values()) {
         const m = list.find(i => i.slug === slug)
         if (m) { inlineIntella = m; break }
       }
-      appliedLoras.push({
-        slug, weight, originalWord: fullTag, replacedWord: fullTag,
-        intellaId: inlineIntella?.id ?? 'INLINE_TAG',
-        ...(inlineIntella?.ownerAnimaId ? { ownerAnimaId: inlineIntella.ownerAnimaId } : {}),
-      })
-      lorasAppliedThisRun.add(slug)
-      finalPromptParts.push(fullTag)
-    } else {
-      warnings.push(`Inline tag ${fullTag} refers to an unknown or inaccessible LoRA. Stripped.`)
-      // Don't push — strips the tag.
+      const basename = inlineIntella ? resolvedBasename(inlineIntella) : slug
+      const translatedTag = `<lora:${basename}:${weight}>`
+      if (!lorasAppliedThisRun.has(slug)) {
+        appliedLoras.push({
+          slug, basename, weight, originalWord: fullTag, replacedWord: translatedTag,
+          intellaId: inlineIntella?.id ?? 'INLINE_TAG',
+          ...(inlineIntella?.ownerAnimaId ? { ownerAnimaId: inlineIntella.ownerAnimaId } : {}),
+        })
+        lorasAppliedThisRun.add(slug)
+      }
+      finalPromptParts.push(translatedTag)
     }
     lastIndex = LORA_TAG_REGEX.lastIndex
   }
@@ -352,10 +381,12 @@ export function resolveLoraTriggers(
     const finalWeight = userWeight !== null
       ? userWeight
       : Math.round((baseWeight + dotExclOffset) * 100) / 100
-    const loraTag = `<lora:${chosen.slug}:${finalWeight}>`
+    const basename = resolvedBasename(chosen)
+    const loraTag = `<lora:${basename}:${finalWeight}>`
 
     appliedLoras.push({
       slug: chosen.slug,
+      basename,
       weight: finalWeight,
       originalWord: segment,
       replacedWord: loraTag,

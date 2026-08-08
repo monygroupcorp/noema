@@ -13,7 +13,9 @@ function makeIntella(over: Partial<Intella>): Intella {
     architectura: 'lora',
     parametri: 0,
     sources: [],
-    dest: 'models/loras/x.safetensors',
+    // Defaults to a basename matching `slug` so existing fixtures exercise the common case
+    // (dest/slug agree). Override `dest` explicitly to build a mismatch fixture.
+    dest: `models/loras/${over.slug ?? over.trigger ?? 'x'}.safetensors`,
     sizeGb: 0.1,
     versio: '1.0.0',
     canonica: false,
@@ -260,4 +262,33 @@ test('substring scan: private colon-trigger requires owner animaId', () => {
   })
   assert.equal(r1.appliedLoras.length, 1)
   assert.equal(r1.appliedLoras[0].slug, 'priv-moriimee')
+})
+
+// ── dest/slug mismatch: the tag must follow dest, not slug ─────────────────
+//
+// A registry record's `slug` and `dest` basename can diverge (e.g. an import that
+// renamed one but not the other). The `<lora:...>` tag must use the dest basename —
+// that's the name the weight actually downloads to and the only one ComfyUI's
+// MultiLoraLoader can resolve.
+
+const MISMATCH = makeIntella({
+  id: 'intella.lawb-klein', slug: 'lawb-flux2', trigger: 'lawb',
+  dest: 'models/loras/impresstation-klein.safetensors',
+  access: 'public', defaultWeight: 1.0,
+})
+
+test('trigger word, dest/slug mismatch: tag uses the dest basename, not the slug', () => {
+  const r = resolveLoraTriggers('a portrait, lawb style', { triggerMap: mapOf(MISMATCH) })
+  assert.match(r.modifiedPrompt, /<lora:impresstation-klein:1>/)
+  assert.ok(!r.modifiedPrompt.includes('lawb-flux2'), 'the registry slug must not appear in the tag')
+  assert.equal(r.appliedLoras[0].basename, 'impresstation-klein')
+  assert.equal(r.appliedLoras[0].slug, 'lawb-flux2', 'slug is still carried for provenance')
+})
+
+test('explicit <lora:slug:weight> pass-through, dest/slug mismatch: translated to the dest basename', () => {
+  const r = resolveLoraTriggers('a portrait <lora:lawb-flux2:0.8> style', { triggerMap: mapOf(MISMATCH) })
+  assert.match(r.modifiedPrompt, /<lora:impresstation-klein:0.8>/)
+  assert.ok(!r.modifiedPrompt.includes('lawb-flux2'), 'a hand-typed slug must be translated, not passed through verbatim')
+  assert.equal(r.appliedLoras.length, 1)
+  assert.equal(r.appliedLoras[0].basename, 'impresstation-klein')
 })
