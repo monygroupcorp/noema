@@ -4,6 +4,10 @@ import type { Modus, Modi, Modorum } from '../types/modus.js'
 // bigint impetusFixum stored as decimal string, absent when undefined
 type ModusDoc = Omit<Modus, 'impetusFixum'> & { impetusFixum?: string }
 
+// `pretium` (the per-flow cost model) rides the `...rest` passthrough below in BOTH
+// directions, deliberately: it is a plain nested object of numbers, which BSON stores and
+// returns unchanged. Only bigint fields need the explicit string coercion. Do not add a
+// per-field branch for it.
 function toDoc(m: Modus): Omit<ModusDoc, never> {
   const { impetusFixum, ...rest } = m
   const doc: Record<string, unknown> = { ...rest }
