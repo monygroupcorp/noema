@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.1.0](https://github.com/monygroupcorp/noema/compare/v5.0.1...v5.1.0) (2026-08-08)
+
+
+### Features
+
+* **web:** guard unsaved trait edits against navigation ([804318d](https://github.com/monygroupcorp/noema/commit/804318da43fa0b29b4d9e31daf122031a6b49d9e))
+
 ## [5.0.1](https://github.com/monygroupcorp/noema/compare/v5.0.0...v5.0.1) (2026-08-07)
 
 
