@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { api, type Collection, type Tractus, type TractusValor } from '../lib/api';
+import { guardedClick, useDirtyGuard } from '../lib/dirtyGuard';
 
 // Product of per-axis value counts — how many pieces the canonic run would generate.
 const combos = (axes: Tractus[]) => axes.reduce((n, a) => n * Math.max(1, a.valores.length), 1);
@@ -24,6 +25,8 @@ export function TraitRules() {
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [firing, setFiring] = useState(false);
+
+  useDirtyGuard(dirty);
 
   useEffect(() => {
     if (!id) return;
@@ -66,7 +69,7 @@ export function TraitRules() {
   }
 
   const empty = axes.every((a) => a.valores.length === 0);
-  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`}>{c.nomen || 'collection'}</Link> <span className="sep">/</span> <b>rules</b></span>;
+  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`} onClick={guardedClick}>{c.nomen || 'collection'}</Link> <span className="sep">/</span> <b>rules</b></span>;
 
   return (
     <AppShell title={crumb}>
@@ -80,7 +83,7 @@ export function TraitRules() {
         <div className="rl-sec"><span className="rl-hint mono"><b>excludes</b> = labels in other axes this value can’t appear with · <b>tags</b> = motif groups that repel each other</span></div>
 
         {empty ? (
-          <div className="empty"><div className="t">No trait values yet</div><div className="s">Add values in the <Link to={`/collections/${id}/garden`}>traits garden</Link> first, then set their rules here.</div></div>
+          <div className="empty"><div className="t">No trait values yet</div><div className="s">Add values in the <Link to={`/collections/${id}/garden`} onClick={guardedClick}>traits garden</Link> first, then set their rules here.</div></div>
         ) : axes.map((a, i) => (
           <div key={i} className="rr-axis">
             <div className="rr-axis-h"><b>{a.label || a.porta}</b> <span className="mono rl-hint">{a.valores.length} values</span></div>
@@ -103,10 +106,10 @@ export function TraitRules() {
         ))}
 
         <div className="garden-foot">
-          <Link className="btn ghost" to={`/collections/${id}/garden`}>← garden</Link>
+          <Link className="btn ghost" to={`/collections/${id}/garden`} onClick={guardedClick}>← garden</Link>
           {editable
             ? <button className="btn accent" disabled={firing || empty} onClick={fire}>{firing ? 'Firing…' : 'Fire collection →'}</button>
-            : <Link className="btn accent" to={`/collections/${id}/run`}>Canonic run →</Link>}
+            : <Link className="btn accent" to={`/collections/${id}/run`} onClick={guardedClick}>Canonic run →</Link>}
         </div>
       </div></div>
     </AppShell>

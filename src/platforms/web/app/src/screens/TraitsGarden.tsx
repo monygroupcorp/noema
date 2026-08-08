@@ -3,6 +3,7 @@ import { Link, useParams, useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type Collection, type FlowSummary, type Tractus, type TractusValor } from '../lib/api';
+import { guardedClick, useDirtyGuard } from '../lib/dirtyGuard';
 
 // Traits garden (editio-garden-spec.md) — author the axes of variation. Each axis is a
 // Tractus (an input port to vary), each card a TractusValor (value + label + weight). Wired
@@ -26,6 +27,8 @@ export function TraitsGarden() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [modusId, setModusId] = useState('');
   const [total, setTotal] = useState(0);
+
+  useDirtyGuard(dirty);
 
   useEffect(() => {
     if (!id) return;
@@ -84,7 +87,7 @@ export function TraitsGarden() {
     catch (e) { setErr(msg(e)); setBusy(false); }
   }
 
-  const crumb = <span className="ph-crumb"><Link to="/collections">collections</Link> <span className="sep">/</span> <Link to={`/collections/${id}`}>{c.nomen || 'collection'}</Link> <span className="sep">/</span> <b>traits</b></span>;
+  const crumb = <span className="ph-crumb"><Link to="/collections" onClick={guardedClick}>collections</Link> <span className="sep">/</span> <Link to={`/collections/${id}`} onClick={guardedClick}>{c.nomen || 'collection'}</Link> <span className="sep">/</span> <b>traits</b></span>;
 
   return (
     <AppShell title={crumb}>
@@ -178,10 +181,10 @@ export function TraitsGarden() {
         </div>
 
         <div className="garden-foot">
-          <Link className="btn ghost" to={`/collections/${id}`}>← hub</Link>
+          <Link className="btn ghost" to={`/collections/${id}`} onClick={guardedClick}>← hub</Link>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             {editable && <button className="btn" disabled={!dirty || busy !== false} onClick={save}>{busy === 'save' ? 'Saving…' : dirty ? 'Save traits' : 'Saved'}</button>}
-            <Link className="btn ghost" to={`/collections/${id}/rules`}>Rules →</Link>
+            <Link className="btn ghost" to={`/collections/${id}/rules`} onClick={guardedClick}>Rules →</Link>
             {editable && <button className="btn accent" disabled={busy !== false || combos(axes) === 0} onClick={fire}>{busy === 'fire' ? 'Firing…' : 'Fire collection →'}</button>}
           </div>
         </div>
