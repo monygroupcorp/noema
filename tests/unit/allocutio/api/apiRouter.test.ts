@@ -8,7 +8,7 @@ import { Errors } from '../../../../src/allocutio/api/errors.js'
 import type { Run } from '../../../../src/allocutio/api/types.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
-import type { ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, MyDeposit } from '../../../../src/allocutio/api/CrystalApi.js'
+import type { ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, MyDeposit, MeView } from '../../../../src/allocutio/api/CrystalApi.js'
 import type { Bursa, Bursarum } from '../../../../src/types/bursa.js'
 
 // ---------------------------------------------------------------------------
@@ -81,6 +81,16 @@ const fakeApi: ApiFacade = {
     if (!('animaId' in auctor) || auctor.animaId !== 'a1') return []
     return [{ id: 'dep-1', chainId: 1, txHash: '0xhash1', valor: '1000000000000000', status: 'confirmatum', natum: '2026-07-01T00:00:00.000Z' }]
   },
+  async getMe(auctor: AuctorKey): Promise<MeView> {
+    // Balance mirrors fakeApi.status() for the same auctor (they must never disagree).
+    const balanceImpetus = '100'
+    const balanceUsd = 0.01
+    const base = { bindings: [], secrets: { civitai: 'absent', huggingface: 'absent' } as const, secretsAvailable: true, admin: false, balanceImpetus, balanceUsd }
+    if (!('animaId' in auctor)) return base
+    // 'a1' has a password persona (username present); 'a2' has an anima but no password persona.
+    if (auctor.animaId === 'a1') return { ...base, animaId: 'a1', username: 'alice' }
+    return { ...base, animaId: auctor.animaId }
+  },
 }
 
 // Records the opts the router forwarded to provisionStudio.
@@ -88,7 +98,9 @@ let lastProvisionOpts: ProvisionStudioOpts | undefined
 
 const fakeIdentity: Identity = {
   async resolve(creds: Credentials): Promise<AuctorKey> {
+    if (creds.apiKey === 'k2') return { animaId: 'a2' }
     if (creds.apiKey) return { animaId: 'a1' }
+    if (creds.commitment) return { commitment: creds.commitment }
     throw Errors.authMissing()
   },
 }
@@ -345,6 +357,62 @@ test('GET /v1/me/status without auth returns 401', async () => {
     const res = await request(`${url}/v1/me/status`)
     assert.equal(res.status, 401)
     assert.equal(res.body.error.code, 'auth.missing')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /v1/me for a password-identified caller returns animaId, username, and balance', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/me`, {
+      headers: { 'x-api-key': 'k' },
+    })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.animaId, 'a1')
+    assert.equal(res.body.username, 'alice')
+    assert.equal(res.body.balanceImpetus, '100')
+    assert.equal(res.body.balanceUsd, 0.01)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /v1/me for a purse/anonymous caller returns 200 with animaId and username absent', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/me`, {
+      headers: { 'x-commitment': 'c1' },
+    })
+    assert.equal(res.status, 200)
+    assert.equal('animaId' in res.body, false)
+    assert.equal('username' in res.body, false)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /v1/me for an anima with no password persona returns animaId with username absent', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/me`, {
+      headers: { 'x-api-key': 'k2' },
+    })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.animaId, 'a2')
+    assert.equal('username' in res.body, false)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /v1/me and GET /v1/me/status report the same balance for the same caller', async () => {
+  const { server, url } = await createServer()
+  try {
+    const me = await request(`${url}/v1/me`, { headers: { 'x-api-key': 'k' } })
+    const status = await request(`${url}/v1/me/status`, { headers: { 'x-api-key': 'k' } })
+    assert.equal(me.body.balanceImpetus, status.body.balanceImpetus)
+    assert.equal(me.body.balanceUsd, status.body.balanceUsd)
   } finally {
     await closeServer(server)
   }

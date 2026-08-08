@@ -2191,8 +2191,16 @@ The caller's owner-keyed account settings — presentation skin (Profile), cross
 ```json
 {
   "type": "object",
-  "description": "The caller's owner-keyed account settings — appearance + generation defaults + verb bindings.",
+  "description": "The caller's identity + balance + owner-keyed account settings — appearance + generation defaults + verb bindings.",
   "properties": {
+    "animaId": {
+      "type": "string",
+      "description": "The caller's anima id, when identified. Absent for an anonymous/purse caller."
+    },
+    "username": {
+      "type": "string",
+      "description": "The caller's fiat username, when they authenticated with a password persona. Absent for wallet-only, telegram-only, or anonymous/purse callers."
+    },
     "appearance": {
       "type": "object",
       "description": "The owner's presentation skin — all fields optional.",
@@ -2328,13 +2336,23 @@ The caller's owner-keyed account settings — presentation skin (Profile), cross
     "admin": {
       "type": "boolean",
       "description": "Whether this caller is the platform administrator (the moderation reviewer). Gates the feed-review surface + approve/reject/confirm-csam controls. true only on the platform session."
+    },
+    "balanceImpetus": {
+      "type": "string",
+      "description": "Spendable impetus balance, serialised as a string. Same source GET /v1/me/status reports."
+    },
+    "balanceUsd": {
+      "type": "number",
+      "description": "USD-equivalent balance (informational). Same source as GET /v1/me/status."
     }
   },
   "required": [
     "bindings",
     "secrets",
     "secretsAvailable",
-    "admin"
+    "admin",
+    "balanceImpetus",
+    "balanceUsd"
   ]
 }
 ```
