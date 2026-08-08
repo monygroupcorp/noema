@@ -61,6 +61,19 @@ test('handle routes to active flow and invokes onStep with next step', async () 
   assert.equal(steps[0].step.primitives[0].label, 'next')
 })
 
+test('handle with empty-primitives step does not invoke onStep but preserves context', async () => {
+  const { router, store, steps } = makeRouter()
+  router.register(makeStubFlow('execute', makeStep('enter'), { primitives: [] }))
+
+  await router.enter('execute', 'telegram', 'user-1', { animaId: 'anima-1' })
+  steps.length = 0  // clear enter step
+
+  await router.handle('telegram', 'user-1', { kind: 'prompt', text: 'unrelated' })
+
+  assert.equal(steps.length, 0)
+  assert.ok(store.get('telegram', 'user-1') !== undefined, 'context should be preserved')
+})
+
 test('handle with Resolution invokes onResolution and clears context', async () => {
   const resolution: Resolution = { kind: 'complete' }
   const { router, store, resolutions } = makeRouter()

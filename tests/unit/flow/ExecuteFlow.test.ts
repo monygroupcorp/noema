@@ -319,6 +319,43 @@ test('CONFIGURE + form, balance insufficient returns Detail step with top-up act
   }
 })
 
+test('AWAITING_COMPLETION + prompt event returns empty step (no waiting banner)', async () => {
+  const flow = new ExecuteFlow(makeDeps())
+  const ctx = makeCtx({
+    state: {
+      step: 'AWAITING_COMPLETION',
+      modusId: 'mod-1',
+      aditus: { prompt: 'a cat' },
+      actumId: 'actum-1',
+      browsePageIndex: 0,
+    },
+    pendingActumId: 'actum-1',
+  })
+
+  const result = await flow.handle(ctx, { kind: 'prompt', text: 'unrelated' })
+  assertStep(result)
+  assert.deepEqual(result.primitives, [])
+})
+
+test('AWAITING_COMPLETION + action event still returns the Working… prompt', async () => {
+  const flow = new ExecuteFlow(makeDeps())
+  const ctx = makeCtx({
+    state: {
+      step: 'AWAITING_COMPLETION',
+      modusId: 'mod-1',
+      aditus: { prompt: 'a cat' },
+      actumId: 'actum-1',
+      browsePageIndex: 0,
+    },
+    pendingActumId: 'actum-1',
+  })
+
+  const result = await flow.handle(ctx, { kind: 'action', actionId: 'whatever' })
+  assertStep(result)
+  assert.equal(result.primitives.length, 1)
+  assert.equal(result.primitives[0].kind, 'Prompt')
+})
+
 test('handleCompletion with complete result returns RESULT Result primitive', async () => {
   const flow = new ExecuteFlow(makeDeps())
   const ctx = makeCtx({
