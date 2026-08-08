@@ -14,6 +14,7 @@
 
 import { test, before, after, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
+import crypto from 'node:crypto'
 import { MongoClient, Db } from 'mongodb'
 import { AbiCoder } from 'ethers'
 
@@ -46,6 +47,12 @@ const EXPECTED_IMPETUS = 6231n
 const coder = AbiCoder.defaultAbiCoder()
 const encodeTopic = (a: string) => '0x' + a.toLowerCase().replace('0x', '').padStart(64, '0')
 
+// The handler admits a request on a served chain only when it carries a valid HMAC over the raw
+// body, so `deps` configures this key for `CHAIN_ID` and every request built here is signed with
+// it. Signing is what puts the race under test on the authenticated path; the race itself, and
+// what it asserts, are unchanged.
+const SIGNING_KEY = 'alchemy-test-signing-key'
+
 function req(): AlchemyWebhookRequest {
   const body = {
     type: 'GRAPHQL',
@@ -56,7 +63,9 @@ function req(): AlchemyWebhookRequest {
       transaction: { hash: TX_HASH },
     }] } } },
   }
-  return { body, rawBody: JSON.stringify(body), chainId: CHAIN_ID }
+  const rawBody = JSON.stringify(body)
+  const signature = crypto.createHmac('sha256', SIGNING_KEY).update(rawBody).digest('hex')
+  return { body, rawBody, chainId: CHAIN_ID, signature }
 }
 
 // petitiones / testimonia / arcanumTree are not under test here — inert stubs.
@@ -86,7 +95,7 @@ before(async () => {
     resolveWalletAnima: makeResolveWalletAnima({ personae, animae: { async findByCustos() { return null } } }),
     arcanumTree: arcanumTree as unknown as AlchemyWebhookDeps['arcanumTree'],
     sanctions: permissiveSanctionsScreen,
-    signingKeys: {},
+    signingKeys: { [CHAIN_ID]: SIGNING_KEY },
     vaultAddresses: { [CHAIN_ID]: VAULT },
     pricer: fixedPricer(3000, 18),
   }

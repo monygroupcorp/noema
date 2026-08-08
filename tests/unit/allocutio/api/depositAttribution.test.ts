@@ -18,6 +18,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import crypto from 'node:crypto'
 import { AbiCoder } from 'ethers'
 
 import { handleAlchemyWebhook, sweepConfirmatumDeposita } from '../../../../src/api/webhooks/alchemyWebhook.js'
@@ -66,9 +67,17 @@ function nftLog(over: { from?: string; token?: string; tokenId?: bigint } = {}) 
     transaction: { hash: TX_HASH },
   }
 }
+// The handler admits a request on a served chain only when it carries a valid HMAC over the raw
+// body, so `makeDeps` configures this key for `CHAIN_ID` and every request built here is signed
+// with it. Signing is what puts these cases on the authenticated path the attribution seam sits
+// behind; the cases themselves — inputs and expected outcomes — are unchanged.
+const SIGNING_KEY = 'alchemy-test-signing-key'
+
 function req(logs: unknown[]): AlchemyWebhookRequest {
   const body = { type: 'GRAPHQL', event: { data: { block: { number: 1, logs } } } }
-  return { body, rawBody: JSON.stringify(body), chainId: CHAIN_ID }
+  const rawBody = JSON.stringify(body)
+  const signature = crypto.createHmac('sha256', SIGNING_KEY).update(rawBody).digest('hex')
+  return { body, rawBody, chainId: CHAIN_ID, signature }
 }
 
 // ── Fake on-chain stores ─────────────────────────────────────────────────────
@@ -131,7 +140,7 @@ function makeDeps(personae: Pick<PersonaStore, 'findByExternus'>, over: Partial<
     resolveWalletAnima: makeResolveWalletAnima({ personae, animae: noCustos }),
     arcanumTree: arcanumTree as unknown as AlchemyWebhookDeps['arcanumTree'],
     sanctions: permissiveSanctionsScreen,
-    signingKeys: {},
+    signingKeys: { [CHAIN_ID]: SIGNING_KEY },
     vaultAddresses: { [CHAIN_ID]: VAULT },
     pricer: (over.pricer as AlchemyWebhookDeps['pricer']) ?? fixedPricer(3000, 18),
   }
