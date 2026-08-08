@@ -3,11 +3,13 @@
  *
  * `:chainId` is a caller-controlled path parameter and every guard in the handler is keyed on it:
  * the HMAC signing key is looked up per chain, and so is the vault address the log filter compares
- * against. A chainId the deployment does not serve resolves neither. These cases pin the two
+ * against. A chainId the deployment does not serve resolves neither. These cases pin the three
  * guards that close that:
  *
  *   1. the served-chain gate — an unserved chainId is refused 403 before any log is inspected;
- *   2. the vault filter — a log is skipped unless BOTH its address and the chain's vault address
+ *   2. the signing-key gate — a served chain with no signing key configured is refused 403; a
+ *      chain the deployment is wired for must authenticate, and an absent key is not an exemption;
+ *   3. the vault filter — a log is skipped unless BOTH its address and the chain's vault address
  *      are present and equal (absence on either side is never a match).
  *
  * Every case asserts on the STORE SPIES, not only the status code: a 403 that still wrote a
@@ -373,6 +375,42 @@ test('served chainId with a bad signature: 401, and nothing is written', async (
 
   assert.equal(result.status, 401)
   assert.equal(result.body.success, false)
+  assertNothingWritten(deps)
+})
+
+// ── The signing-key gate: a served chain with no key configured ───────────────
+//
+// `signingKeys` is env-conditional — an entry exists only when the chain's signing-key variable
+// resolves — while `vaultAddresses` is built unconditionally, so a chain can be served with no
+// key present. The handler must refuse that request rather than process it as trusted: every
+// payload reaching this endpoint credits balances, books revenue and inserts arcanum leaves
+// purely on what the body claims.
+
+test('served chainId with no signing key configured: refused 403, and nothing is written', async () => {
+  const deps = makeDeps({ signingKeys: {} })
+  const result = await handleAlchemyWebhook(
+    req(webhookBody([paymentLog(), nftLog(), anonDepositLog()]), SERVED_CHAIN),
+    deps,
+  )
+
+  assert.equal(result.status, 403)
+  assert.equal(result.body.success, false)
+  assert.equal(result.body.processed, 0)
+  assertNothingWritten(deps)
+})
+
+test('served chainId with no signing key configured: a validly-signed request is refused too', async () => {
+  // The refusal is on the deployment's own configuration, not on what the caller presents — a
+  // caller who signs with a key we do not hold gets the same 403.
+  const deps = makeDeps({ signingKeys: {} })
+  const body = webhookBody([paymentLog()])
+  const rawBody = JSON.stringify(body)
+  const result = await handleAlchemyWebhook(
+    { body, rawBody, chainId: SERVED_CHAIN, signature: sign('alchemy-secret-42', rawBody) },
+    deps,
+  )
+
+  assert.equal(result.status, 403)
   assertNothingWritten(deps)
 })
 
