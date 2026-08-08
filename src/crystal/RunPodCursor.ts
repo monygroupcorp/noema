@@ -9,7 +9,7 @@ import type { Praefectus } from './Praefectus.js'
 import { getTrace } from '../lib/trace.js'
 import type { AuctorKey } from '../flow/types.js'
 import { ownerKeyOf } from './ownerKey.js'
-import { tierOf } from '../ledger/rates.js'
+import { tierOf, reservationImpetus, GENERIC_RESERVE_IMPETUS } from '../ledger/rates.js'
 import { isCompiledSpec } from './comfyrunnerClient.js'
 import { makeLogger } from '../lib/logger.js'
 
@@ -115,9 +115,35 @@ export class RunPodCursor implements Cursor {
     private readonly config: Config,
   ) {}
 
-  async reserve(modus: Modus, _aditus: Record<string, unknown>): Promise<bigint> {
-    if (modus.impetusFixum !== undefined) return modus.impetusFixum
-    return BigInt(this.config.maxJobSeconds ?? 1800)
+  /**
+   * The up-front hold for a pod run, in impetus. A COST BOUND, not a price: settlement
+   * charges the measured pod-time and refunds the remainder, so this only has to be an
+   * upper bound (an under-reservation throws `Cursor overcharge` at completion).
+   *
+   * Precedence:
+   *   1. `modus.impetusFixum` — a declared fixed price, honoured as-is.
+   *   2. `modus.pretium` — the flow's own fitted cost curve, evaluated against this run's
+   *      inputs (falling back to the flow's schema defaults per term).
+   *   3. `GENERIC_RESERVE_IMPETUS` — the evidence-based fallback for a flow with no curve,
+   *      and for a curve whose inputs cannot be resolved.
+   *
+   * The result is then clamped to the `maxJobSeconds` ceiling, so a reservation can never
+   * exceed the pod-time the job timeout actually permits. Pure — no I/O — because this is
+   * reached from `quote()` on a public route.
+   */
+  async reserve(modus: Modus, aditus: Record<string, unknown>): Promise<bigint> {
+    const ceiling = BigInt(this.config.maxJobSeconds ?? 1800)
+
+    const estimate = modus.pretium
+      ? reservationImpetus({ pretium: modus.pretium, forma: modus.aditus, aditus })
+      : null
+
+    const base =
+      modus.impetusFixum !== undefined ? modus.impetusFixum :
+      estimate !== null ? estimate :
+      GENERIC_RESERVE_IMPETUS
+
+    return base < ceiling ? base : ceiling
   }
 
   async run(actum: Actum, _modo?: Modo): Promise<CursorResult> {

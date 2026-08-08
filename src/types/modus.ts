@@ -112,6 +112,20 @@ export interface GradusFons {
 }
 
 /**
+ * Pretium — a flow's fitted cost curve, in wall-clock SECONDS of execution.
+ * See `Modus.pretium` for what each term means and `reservationImpetus`
+ * (ledger/rates.ts) for how they combine into a reservation.
+ */
+export interface Pretium {
+  /** This flow's own fixed overhead: provision + weight download + model load. */
+  baseSeconds: number
+  /** The per-inference-step part, multiplied by `aditus.steps`. */
+  perStepSeconds?: number
+  /** The resolution-dependent part, multiplied by `width × height / 1e6`. */
+  perMegapixelSeconds?: number
+}
+
+/**
  * Modus — the fractal tool primitive.
  *
  * Atomic modus (genus: 'atomicus'):
@@ -200,6 +214,31 @@ export interface Modus {
    * on runtime duration: impetus = Materia.impetusPerSecond × Actum.duratio.
    */
   impetusFixum?: bigint
+
+  /**
+   * "pretium" = price/cost in Latin — this flow's own COST MODEL, used to size the
+   * up-front reservation for pod-based flows (which have no `impetusFixum`).
+   *
+   * All fields are wall-clock SECONDS of execution:
+   *   baseSeconds          this flow's own fixed overhead — provision + weight
+   *                        download + model load, i.e. its cold-start wall-clock
+   *                        minus its execution time. Always the cold case:
+   *                        `reserve()` runs before pod routing, so it cannot know
+   *                        whether the job will land on a warm pod.
+   *   perStepSeconds       the per-inference-step part, multiplied by `aditus.steps`.
+   *   perMegapixelSeconds  the resolution-dependent part, multiplied by
+   *                        `width × height / 1e6`.
+   *
+   * Optional and per-flow: declare it only for a flow with enough observed runs to
+   * fit a curve. A flow without `pretium` falls back to `GENERIC_RESERVE_IMPETUS`
+   * (see `ledger/rates.ts`), so leaving it undefined is always safe.
+   *
+   * Definitional (it prices the flow), so it IS part of the contentHash. It rides the
+   * `...rest` passthrough in `hashModus`, and the same passthrough in `MongoModorum`'s
+   * toDoc/fromDoc persists it as a plain nested object. That is deliberate — only
+   * bigint fields (`impetusFixum`) need per-field serialisation; do not add any here.
+   */
+  pretium?: Pretium
 
   /**
    * How results are delivered to the caller.

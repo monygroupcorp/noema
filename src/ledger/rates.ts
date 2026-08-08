@@ -15,6 +15,15 @@
 export const IMPETUS_USD_RATE = 0.000337
 
 /**
+ * The platform REFERENCE pod rate, USD/hour — the rate at which one impetus point is
+ * exactly one second of pod-time (3600 s × $1.2132/hr ÷ $0.000337 = 3600 pts). It had
+ * been stated only in `IMPETUS_USD_RATE`'s prose above; exported here so seconds→impetus
+ * conversions read it from code rather than restating it, and so a change to the reference
+ * rate cannot silently desync a caller that was relying on the 1 s ≡ 1 impetus identity.
+ */
+export const REFERENCE_COST_PER_HR = 1.2132
+
+/**
  * Micro-USD per impetus point — the integer form of IMPETUS_USD_RATE for exact bigint conversion
  * of USD revenue → credits at the deposit boundary. 1 impetus = $0.000337 = 337 micro-USD. This
  * is the CANONICAL buy/spend rate (== the published ratesApi rate, 2967 pts/USD); do NOT use the
@@ -65,11 +74,18 @@ export const BOOT_AMORTIZE_OVER = 5n
  * pods. The single canonical pod-time→impetus function; `Census` (warm-time meter)
  * and boot-cost both bill through it. Ceil so the platform/host is never
  * under-credited by a rounding step. Zero/negative inputs → 0n.
+ *
+ * The ceil absorbs a relative 1e-9 of binary floating-point noise first. Windows that
+ * are an exact whole number of points in decimal — e.g. 172 s at the reference rate,
+ * which is exactly 172 — land a few ulps above the integer once divided, and a bare
+ * `Math.ceil` would bill the next whole point for that artifact alone. The tolerance is
+ * many orders of magnitude below one point, so it cannot mask real fractional usage.
  */
 export function impetusForPodMs(ms: number, costPerHrUsd: number): bigint {
   if (ms <= 0 || costPerHrUsd <= 0) return 0n
   const usd = (ms / 3_600_000) * costPerHrUsd
-  return BigInt(Math.ceil(usd / IMPETUS_USD_RATE))
+  const points = usd / IMPETUS_USD_RATE
+  return BigInt(Math.ceil(points - Math.abs(points) * 1e-9))
 }
 
 /**
@@ -91,6 +107,94 @@ export function impetusPerSecondFromHourly(costPerHrUsd: number): bigint {
  */
 export function computeBootCostImpetus(billedMs: number, costPerHrUsd: number): bigint {
   return impetusForPodMs(billedMs, costPerHrUsd)
+}
+
+// ── Reservation sizing (pod flows) ──────────────────────────────────────────
+// What a pod flow holds up-front, before it runs. A reservation must be an UPPER
+// BOUND on the real cost: settlement charges the measured cost and refunds the rest,
+// but an under-reservation throws `Cursor overcharge` at completion. It is not a
+// price — the user is charged what the run actually costs.
+
+/**
+ * Safety factor applied to a modelled reservation estimate. The estimate is fitted from
+ * observed p95 wall-clock, so a 2× headroom covers a run slower than the fitted sample
+ * without pushing a modelled flow anywhere near the generic bound below.
+ */
+export const RESERVE_SAFETY_FACTOR = 2
+
+/**
+ * The reservation for a pod flow that carries no `Modus.pretium` curve — the fallback
+ * every un-modelled flow uses.
+ *
+ * Derivation: 2 × the observed cold-start p95 of 402 s, rounded up. Cold start is the
+ * worst realistic case (it includes provisioning plus a full weight download), the 2×
+ * factor covers a flow slower than any yet measured, and 900 sits above the highest cold
+ * wall-clock on record (511 s) while staying well under the 1800 s job-timeout ceiling.
+ *
+ * PLACEHOLDER pending per-flow calibration. Most flows have too few completed runs to fit
+ * a curve; as `acta` accumulates, flows should graduate to their own `pretium` and this
+ * number should be re-derived from the then-current cold-start distribution.
+ */
+export const GENERIC_RESERVE_IMPETUS = 900n
+
+/**
+ * The reservation implied by a flow's own cost curve, in impetus:
+ *
+ *   ceil( SAFETY × ( baseSeconds
+ *                  + perStepSeconds      × steps
+ *                  + perMegapixelSeconds × (width × height / 1e6) ) )
+ *
+ * Always the COLD case — `reserve()` is called before pod routing, so it cannot know
+ * whether the job will land on a warm pod; `baseSeconds` therefore carries the flow's own
+ * provision + download + load overhead. There is no separate global provision/download
+ * allowance: those stages are flow-specific and already inside `baseSeconds`.
+ *
+ * Input resolution, per term: the run's own `aditus` value when it is a finite number,
+ * else the flow's schema default (`Forma[key].default`) when that is a finite number. If
+ * a term the curve needs has NEITHER, this returns `null` and the caller falls back to
+ * `GENERIC_RESERVE_IMPETUS` — a missing term is never treated as 0, which would
+ * under-reserve and trip `Cursor overcharge`.
+ *
+ * Seconds convert to impetus through `impetusForPodMs` at `REFERENCE_COST_PER_HR` rather
+ * than relying on the 1 s ≡ 1 impetus identity, so the two cannot desync. Pure, no I/O —
+ * it is reached from the public quote route.
+ */
+export function reservationImpetus(params: {
+  pretium: Pretium
+  /** The flow's declared input schema, for per-term defaults. */
+  forma?: Forma
+  /** The run's supplied inputs. */
+  aditus?: Record<string, unknown>
+}): bigint | null {
+  const { pretium, forma, aditus } = params
+
+  const resolve = (key: string): number | null => {
+    const supplied = aditus?.[key]
+    if (typeof supplied === 'number' && Number.isFinite(supplied)) return supplied
+    const fallback = forma?.[key]?.default
+    if (typeof fallback === 'number' && Number.isFinite(fallback)) return fallback
+    return null
+  }
+
+  if (!Number.isFinite(pretium.baseSeconds)) return null
+  let seconds = pretium.baseSeconds
+
+  if (pretium.perStepSeconds !== undefined) {
+    const steps = resolve('steps')
+    if (steps === null) return null
+    seconds += pretium.perStepSeconds * steps
+  }
+
+  if (pretium.perMegapixelSeconds !== undefined) {
+    const width = resolve('width')
+    const height = resolve('height')
+    if (width === null || height === null) return null
+    seconds += pretium.perMegapixelSeconds * ((width * height) / 1_000_000)
+  }
+
+  if (!Number.isFinite(seconds) || seconds <= 0) return null
+  const estimate = impetusForPodMs(RESERVE_SAFETY_FACTOR * seconds * 1000, REFERENCE_COST_PER_HR)
+  return estimate > 0n ? estimate : null
 }
 
 /**
@@ -123,6 +227,7 @@ export function bootShare(bootCostImpetus = 0n, bootRecovered = 0n): bigint {
 // ── The hosting tier decision (Phase B + Phase C reframe) ───────────────────
 
 import type { Hospitium, HostKey } from '../types/hospitium.js'
+import type { Forma, Pretium } from '../types/modus.js'
 
 export type PricingTier = 'owner' | 'admin' | 'guest'
 

@@ -4,6 +4,7 @@ import {
   IMPETUS_USD_RATE, BOOT_AMORTIZE_OVER, WARM_SURCHARGE_IMPETUS, HOST_BONUS_RATE,
   impetusPerSecondFromHourly, impetusForPodMs, computeBootCostImpetus, bootShare,
   tierOf, impetusFor, modoHostFor,
+  REFERENCE_COST_PER_HR, RESERVE_SAFETY_FACTOR, GENERIC_RESERVE_IMPETUS, reservationImpetus,
 } from '../../../src/ledger/rates.js'
 import type { Hospitium } from '../../../src/types/hospitium.js'
 
@@ -112,4 +113,74 @@ test('modoHostFor: only set for guest tier; passes through both HostKey shapes',
   assert.equal(modoHostFor('owner', hosp({ animaId: 'a' })), undefined)
   assert.equal(modoHostFor('admin', hosp({ animaId: 'a' })), undefined)
   assert.equal(modoHostFor('guest', null), undefined)
+})
+
+// ── reservationImpetus ────────────────────────────────────────────────────────
+
+test('REFERENCE_COST_PER_HR is the rate at which 1 impetus === 1 second of pod-time', () => {
+  assert.equal(REFERENCE_COST_PER_HR, 1.2132)
+  assert.equal(impetusForPodMs(3_600_000, REFERENCE_COST_PER_HR), 3600n)
+})
+
+test('reservationImpetus: base + per-step + per-megapixel, times the safety factor', () => {
+  const got = reservationImpetus({
+    pretium: { baseSeconds: 66, perStepSeconds: 1, perMegapixelSeconds: 4 },
+    aditus: { steps: 20, width: 1024, height: 1024 },
+  })
+  // 66 + 1×20 + 4×(1024×1024/1e6 = 1.048576) ≈ 90.194 s → ×2 → ceil = 181
+  assert.equal(got, 181n)
+})
+
+test('reservationImpetus: a term absent from the run inputs takes the schema default', () => {
+  const pretium = { baseSeconds: 66, perStepSeconds: 1 }
+  const forma = { steps: { type: 'int', default: 20 } }
+  // Supplied value wins; absent falls back to the default; both are 2 × (66 + steps).
+  assert.equal(reservationImpetus({ pretium, forma, aditus: { steps: 20 } }), 172n)
+  assert.equal(reservationImpetus({ pretium, forma, aditus: {} }), 172n)
+  assert.equal(reservationImpetus({ pretium, forma }), 172n)
+  assert.equal(reservationImpetus({ pretium, forma, aditus: { steps: 40 } }), 212n)
+})
+
+test('reservationImpetus: a non-numeric supplied value takes the schema default', () => {
+  const got = reservationImpetus({
+    pretium: { baseSeconds: 66, perStepSeconds: 1 },
+    forma: { steps: { type: 'int', default: 20 } },
+    aditus: { steps: 'twenty' },
+  })
+  assert.equal(got, 172n)
+})
+
+test('reservationImpetus: returns null when a needed term has neither a value nor a default', () => {
+  // A missing term is never treated as 0 — the caller falls back to the generic bound.
+  assert.equal(reservationImpetus({ pretium: { baseSeconds: 66, perStepSeconds: 1 }, aditus: {} }), null)
+  assert.equal(
+    reservationImpetus({
+      pretium: { baseSeconds: 66, perMegapixelSeconds: 4 },
+      forma: { width: { type: 'int', default: 512 } },   // height has neither
+      aditus: {},
+    }),
+    null,
+  )
+})
+
+test('reservationImpetus: a curve with only a base term needs no inputs', () => {
+  assert.equal(reservationImpetus({ pretium: { baseSeconds: 100 } }), 200n)
+})
+
+test('reservationImpetus: returns null on a degenerate curve rather than reserving nothing', () => {
+  assert.equal(reservationImpetus({ pretium: { baseSeconds: 0 } }), null)
+  assert.equal(reservationImpetus({ pretium: { baseSeconds: -5 } }), null)
+  assert.equal(reservationImpetus({ pretium: { baseSeconds: Number.NaN } }), null)
+})
+
+test('the safety factor is what keeps a fitted curve an upper bound', () => {
+  assert.equal(RESERVE_SAFETY_FACTOR, 2)
+  const unsafe = reservationImpetus({ pretium: { baseSeconds: 86 / RESERVE_SAFETY_FACTOR } })
+  assert.equal(unsafe, 86n)
+})
+
+test('GENERIC_RESERVE_IMPETUS sits above the observed cold-start maximum and under the job-timeout ceiling', () => {
+  assert.equal(GENERIC_RESERVE_IMPETUS, 900n)
+  assert.ok(GENERIC_RESERVE_IMPETUS > 511n)    // highest cold wall-clock observed, in seconds
+  assert.ok(GENERIC_RESERVE_IMPETUS < 1800n)   // the default maxJobSeconds ceiling
 })
