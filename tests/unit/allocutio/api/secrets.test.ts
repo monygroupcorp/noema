@@ -7,8 +7,20 @@ import { MemorySecretarium } from '../../../../src/crystal/MemorySecretarium.js'
 import { makeSecretBox } from '../../../../src/crystal/secretBox.js'
 
 const boxOf = () => makeSecretBox([randomBytes(32)])
+
+// Minimal ledger/session deps so `getMe`'s balance lookup (`status()`) resolves instead of
+// throwing — these tests exercise the secrets surface, not the ledger, so an empty-balance
+// aggregate is all `getMe` needs here.
+const emptyLedgerDeps = {
+  signorum: { balance: async () => 0n, history: async () => [] },
+  hospitia: { findActive: async () => [] },
+  materiae: { findById: async () => null },
+  actorum: { findById: async () => null },
+  modorum: { find: async () => null },
+}
+
 const apiWith = (s?: MemorySecretarium) =>
-  new CrystalApi(({ ...(s ? { secretWriter: s, secretPresence: s } : {}) }) as any)
+  new CrystalApi(({ ...emptyLedgerDeps, ...(s ? { secretWriter: s, secretPresence: s } : {}) }) as any)
 
 test('putSecret connects, never echoes the token, and getMe reflects it', async () => {
   const store = new MemorySecretarium(boxOf())
@@ -70,6 +82,11 @@ test('feature-gated: no store → secrets 501-style error on write, all absent o
   assert.deepEqual(me.secrets, { civitai: 'absent', huggingface: 'absent' })
   // Distinguishable from "wired but empty": the panel hides/disables proactively (F3).
   assert.equal(me.secretsAvailable, false, 'no store wired → panel unavailable before any attempt')
+})
+
+test('getMe rejects when the ledger deps are absent, instead of reporting a zero balance', async () => {
+  const api = new CrystalApi({} as any)
+  await assert.rejects(() => api.getMe({ animaId: 'a1' }))
 })
 
 test('ASYMMETRY: the facade never receives a resolve-capable secret handle', () => {

@@ -2472,13 +2472,11 @@ export class CrystalApi {
     return passwordPersona ? { animaId, username: passwordPersona.externusId } : { animaId }
   }
 
-  /** `balanceImpetus`/`balanceUsd` for `getMe`, via the same aggregator `status()` uses. `status()`
-   *  requires the full ledger/session dep set (signorum/hospitia/materiae/actorum/modorum) — always
-   *  wired in production — so this only falls back to the zero-state if one is absent (a narrower
-   *  deps set, e.g. a facade constructed for a single owner-keyed surface). */
+  /** `balanceImpetus`/`balanceUsd` for `getMe`, via the same aggregator `status()` uses — the two
+   *  endpoints read the same numbers and cannot disagree. `status()` requires the full ledger/session
+   *  dep set (signorum/hospitia/materiae/actorum/modorum); a facade missing any of them propagates
+   *  that failure rather than reporting a fabricated zero balance. */
   private async meBalance(auctor: AuctorKey): Promise<Pick<MeView, 'balanceImpetus' | 'balanceUsd'>> {
-    const { signorum, hospitia, materiae, actorum, modorum } = this.deps
-    if (!signorum || !hospitia || !materiae || !actorum || !modorum) return { balanceImpetus: '0', balanceUsd: 0 }
     const { balanceImpetus, balanceUsd } = await this.status(auctor)
     return { balanceImpetus, balanceUsd }
   }
