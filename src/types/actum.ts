@@ -274,27 +274,29 @@ export interface ActumExecutio {
   billedMs?: number
 
   // ── Hosting / pricing decision (Phase B + Phase C reframe) ──────────────────
-  // Stamped at dispatch by RunPodCursor when the actum lands on a warm Materia
-  // with a paired Hospitium. The completor reads these to emit execution_spend
-  // with the right impetus + host destination. All three fields are NON-IDENTITY
-  // by construction — `pricingTier` is one of three labels; `baseImpetus` and
-  // `finalImpetus` are numbers; the host's identity is re-derived from Hospitium
-  // at emit time.
+  // `pricingTier` is stamped at dispatch by RunPodCursor when the actum lands on a
+  // warm Materia with a paired Hospitium; the two amounts are written at completion
+  // by ActumCompletor, which is where the measured cost is known. The spend hooks
+  // read them to emit execution_spend with the right impetus + host destination.
+  // All three fields are NON-IDENTITY by construction — `pricingTier` is one of
+  // three labels; `baseImpetus` and `finalImpetus` are numbers; the host's identity
+  // is re-derived from Hospitium at emit time.
 
   /** Which pricing tier this run was assigned at dispatch — drives the spend math. */
   pricingTier?: 'owner' | 'admin' | 'guest'
 
   /**
-   * Base impetus before any hosting surcharge — equals `actum.impetus` reservation.
-   * Carried separately so hostCutHook can tax base only (not the warm surcharge,
-   * which is independently compensated via hospitiumHook).
+   * The measured cost basis, before any hosting surcharge: the cursor's metered pod
+   * wall-clock for this run (NOT the `actum.impetus` reservation). Written at
+   * completion and carried separately so hostCutHook can tax base only (not the warm
+   * surcharge, which is independently compensated via hospitiumHook).
    */
   baseImpetus?: bigint
 
   /**
-   * Total impetus actually spent on this run. Guest = baseImpetus + WARM_SURCHARGE_IMPETUS;
-   * owner/admin = baseImpetus. Distinct from `actum.impetus`, which is the
-   * reservation upper bound; the completor caps at that.
+   * Total impetus actually spent on this run — what was settled. Guest =
+   * baseImpetus + WARM_SURCHARGE_IMPETUS; owner/admin = baseImpetus; capped at
+   * `actum.impetus`, which is the reservation upper bound, not a cost.
    */
   finalImpetus?: bigint
 }
