@@ -12,6 +12,8 @@
 // Paths here are RELATIVE — the caller mounts this router at `/v1`.
 // =============================================================================
 
+import { createHmac, randomUUID } from 'node:crypto'
+
 import express, { type Request, type Response, type Router } from 'express'
 
 import type { Run, Collection, Team, Edition, FeedItem, Project, RunsPage } from './types.js'
@@ -31,6 +33,60 @@ import type { Tabula } from '../../types/tabula.js'
 import type { Bursarum } from '../../types/bursa.js'
 
 const log = makeLogger('api:router')
+
+// -----------------------------------------------------------------------------
+// Error-seam observability (noema-163)
+// -----------------------------------------------------------------------------
+// Failures on this surface are logged; successes are not. The field set is
+// deliberately minimal — "only as much as we need to log":
+//
+//   method · route TEMPLATE · status · error code · durationMs · requestId · callerHash?
+//
+// and, on 5xx only, the error message. Never emitted here: the populated path,
+// request/response bodies, query-string values, `err.opts.details` (caller-shaped,
+// can echo input), tokens of any kind, or a raw `animaId`.
+//
+// This is failure-only by design: there is no request log and no always-on line
+// for a successful request, so the seam does not create a standing store.
+
+/** Request-local state stamped by `auth()` and read by `wrap()`. */
+interface SeamRequest extends Request {
+  /** Keyed, truncated digest of the caller's `animaId`. Absent for anonymous/purse callers. */
+  __callerHash?: string
+  /** How the caller authenticated. Request-local only — not emitted on a log line. */
+  __callerKind?: 'purse'
+}
+
+/**
+ * HMAC-SHA256 (hex, truncated to 12 chars) of an `animaId`, keyed by `INTERNAL_SECRET`,
+ * so a stdout log line cannot be reversed to an id by anyone who merely knows the id space.
+ * Twelve chars is enough to correlate "the same caller hit this five times" and not enough
+ * to serve as a durable identifier.
+ *
+ * Rotating `INTERNAL_SECRET` breaks correlation across the rotation. That is intended.
+ *
+ * Key absent (dev/test) -> `undefined`, and the field is omitted from the log line. There is
+ * deliberately no fallback to a raw id or to an unkeyed digest.
+ */
+function hashCaller(animaId: string): string | undefined {
+  const key = process.env.INTERNAL_SECRET
+  if (!key) return undefined
+  return createHmac('sha256', key).update(animaId).digest('hex').slice(0, 12)
+}
+
+/**
+ * The mounted ROUTE TEMPLATE for the layer being dispatched — `/v1/runs/:id`, never
+ * `/v1/runs/<a real run id>`. `req.baseUrl` is the mount point (`/v1`, and `/api/v1` for the
+ * compat surface), so this stays correct without hardcoding either prefix.
+ *
+ * When Express has not set `req.route` (no matched route layer) the literal `'unknown'` is
+ * emitted. It never falls back to `req.path`/`req.originalUrl`: those carry the populated
+ * path, which is user data.
+ */
+function routeTemplate(req: Request): string {
+  const path = (req.route as { path?: string } | undefined)?.path ?? ''
+  return `${req.baseUrl}${typeof path === 'string' ? path : ''}` || 'unknown'
+}
 
 /** The slice of CrystalApi this router needs. Mirrors its method signatures. */
 export interface ApiFacade {
@@ -194,17 +250,59 @@ export function createApiRouter(deps: {
   /**
    * Async route wrapper: a thrown `ApiError` → its `httpStatus` + `{ error }`
    * body; anything else → 500 `internal.error`.
+   *
+   * Both branches emit exactly one structured log line (noema-163). A request that
+   * succeeds emits nothing. Status codes and response bodies are unchanged by the
+   * logging — the wire contract is set solely by `ApiError.httpStatus`/`toBody()`.
+   *
+   * Every wrapped response carries an `x-request-id` header matching the `requestId`
+   * on the log line. Because the populated path is deliberately not logged, that header
+   * is how a user-reported failure is matched to its line.
    */
   const wrap = (fn: (req: Request, res: Response) => Promise<void>) =>
     async (req: Request, res: Response): Promise<void> => {
+      const startedAt = Date.now()
+      const requestId = randomUUID()
+      // Set before `fn` runs so it survives a thrown error and reaches the error response.
+      if (!res.headersSent) res.setHeader('x-request-id', requestId)
       try {
         await fn(req, res)
       } catch (err) {
+        const durationMs = Date.now() - startedAt
+        const route = routeTemplate(req)
+        const callerHash = (req as SeamRequest).__callerHash
+        const caller = callerHash ? { callerHash } : {}
         if (err instanceof ApiError) {
+          const base = {
+            method: req.method,
+            route,
+            status: err.httpStatus,
+            code: err.code,
+            durationMs,
+            requestId,
+            ...caller,
+          }
+          if (err.httpStatus >= 500) {
+            // A deliberate 5xx (fail-closed gates included) is an operator-facing condition,
+            // so the message is carried. `opts.details` is not: it is caller-shaped.
+            log.error('api error', { ...base, message: err.message })
+          } else {
+            // 4xx carries the code and nothing else from the error — the message can quote
+            // caller input. `warn`, not `error`: 401s on public routes are ordinary traffic.
+            log.warn('api error', base)
+          }
           res.status(err.httpStatus).json({ error: err.toBody() })
         } else {
           // Unexpected — log it (otherwise the masked `internal.error` is invisible in the logs).
-          log.error('unhandled API error', { method: req.method, path: req.path, error: String((err as Error)?.stack ?? err) })
+          // The stack is ours, not user content, so it is kept.
+          log.error('unhandled API error', {
+            method: req.method,
+            route,
+            durationMs,
+            requestId,
+            ...caller,
+            error: String((err as Error)?.stack ?? err),
+          })
           res.status(500).json({ error: Errors.internal().toBody() })
         }
       }
@@ -219,6 +317,7 @@ export function createApiRouter(deps: {
    *  unknown/nonexistent bursa is refused 503 (fail-closed — the dev key can forge these). When the
    *  flag is on, the short-circuit is unchanged (post-ceremony restore is a one-flag flip). */
   const auth = async (req: Request): Promise<AuctorKey> => {
+    const seam = req as SeamRequest
     const bursaToken = req.body?.bursaToken ?? (req.headers['x-bursa-token'] as string | undefined)
     if (bursaToken) {
       if (!deps.anonPurseEnabled) {
@@ -227,11 +326,19 @@ export function createApiRouter(deps: {
           throw new ApiError('purse.disabled', 'anonymous purse coming soon', 503)
         }
       }
+      // A `bursaToken` is a bearer credential. No log field is ever derived from it —
+      // not hashed, not truncated. The caller stays unattributed on the log line.
+      seam.__callerHash = undefined
+      seam.__callerKind = 'purse'
       return { bursaToken }
     }
-    return identity.resolve(
+    const auctor = await identity.resolve(
       credentialsFromHeaders(req.headers as Record<string, string | undefined>, req.body),
     )
+    // The single place identity is resolved — stamp the keyed digest here so the error
+    // seam can attribute a failure without ever seeing the raw id.
+    seam.__callerHash = 'animaId' in auctor ? hashCaller(auctor.animaId) : undefined
+    return auctor
   }
 
   /** Best-effort spicyMode read for the PUBLIC catalog (noema-091): an authenticated caller with
