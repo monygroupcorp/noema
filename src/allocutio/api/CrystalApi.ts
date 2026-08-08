@@ -2425,8 +2425,9 @@ export class CrystalApi {
 
   // ── Account settings (Consuetudinum, owner-keyed / anon-capable) ─────────────
 
-  /** The caller's owner-keyed account settings — appearance (Profile) + generation
-   *  defaults (Preferences) + verb→flow bindings. All optional (unset → undefined). */
+  /** The caller's owner-keyed account settings — identity (animaId/username) + balance +
+   *  appearance (Profile) + generation defaults (Preferences) + verb→flow bindings. Settings
+   *  fields stay optional (unset → undefined); identity is optional too (anon/purse callers). */
   async getMe(auctor: AuctorKey): Promise<MeView> {
     const c = this.deps.consuetudinum
     const secrets = await this.secretPresenceView(auctor)
@@ -2437,18 +2438,49 @@ export class CrystalApi {
     // (`_assertPlatformAdmin`). Surfaced so the web app can reveal the feed-review surface + its
     // approve/reject controls only to the reviewer; it is `true` only on the platform's own session.
     const admin = 'animaId' in auctor && auctor.animaId === PLATFORM_ANIMA_ID
-    if (!c) return { bindings: [], secrets, secretsAvailable, admin }
+    const identity = await this.meIdentity(auctor)
+    // Same aggregator `/v1/me/status` calls — the two endpoints are structurally unable to disagree.
+    const { balanceImpetus, balanceUsd } = await this.meBalance(auctor)
+    if (!c) return { ...identity, bindings: [], secrets, secretsAvailable, admin, balanceImpetus, balanceUsd }
     const [appearance, generatio, bindings] = await Promise.all([
       c.resolveAppearance(auctor), c.resolveGeneratio(auctor), c.listBindings(auctor),
     ])
     return {
+      ...identity,
       ...(appearance !== undefined ? { appearance } : {}),
       ...(generatio !== undefined ? { generatio } : {}),
       bindings,
       secrets,
       secretsAvailable,
       admin,
+      balanceImpetus,
+      balanceUsd,
     }
+  }
+
+  /** `animaId` + `username` for `getMe`. `username` resolves through the same `'password'`
+   *  persona lookup `POST /v1/auth/register` writes it to (`resolveOrCreateAnima`'s `personae`
+   *  store) — never a second path that could disagree. Anonymous/purse callers (no `animaId`)
+   *  and identified callers with no password persona (wallet-only, telegram-only) both resolve
+   *  to `{}`/`{ animaId }` respectively; neither is an error. */
+  private async meIdentity(auctor: AuctorKey): Promise<Pick<MeView, 'animaId' | 'username'>> {
+    if (!('animaId' in auctor)) return {}
+    const animaId = auctor.animaId
+    if (!this.deps.personae) return { animaId }
+    const personae = await this.deps.personae.findByAnimaId(animaId)
+    const passwordPersona = personae.find(p => p.genus === 'password' && p.activeAnimaId === animaId)
+    return passwordPersona ? { animaId, username: passwordPersona.externusId } : { animaId }
+  }
+
+  /** `balanceImpetus`/`balanceUsd` for `getMe`, via the same aggregator `status()` uses. `status()`
+   *  requires the full ledger/session dep set (signorum/hospitia/materiae/actorum/modorum) — always
+   *  wired in production — so this only falls back to the zero-state if one is absent (a narrower
+   *  deps set, e.g. a facade constructed for a single owner-keyed surface). */
+  private async meBalance(auctor: AuctorKey): Promise<Pick<MeView, 'balanceImpetus' | 'balanceUsd'>> {
+    const { signorum, hospitia, materiae, actorum, modorum } = this.deps
+    if (!signorum || !hospitia || !materiae || !actorum || !modorum) return { balanceImpetus: '0', balanceUsd: 0 }
+    const { balanceImpetus, balanceUsd } = await this.status(auctor)
+    return { balanceImpetus, balanceUsd }
   }
 
   /** Public appearance-by-owner projection — the visual branding (avatar/banner/accent/
@@ -3156,6 +3188,14 @@ export interface CogsReport {
 }
 
 export interface MeView {
+  /** The caller's anima id — present for any identified caller (password, wallet, telegram,
+   *  federated). Absent for an anonymous/purse caller (`{ commitment }` or `{ bursaToken }`). */
+  animaId?: string
+  /** The caller's fiat username, when they authenticated with a `'password'` persona. Resolved
+   *  through the same persona lookup `POST /v1/auth/register` writes it to — never a second path
+   *  that could disagree. Absent for a wallet-only, telegram-only, or anonymous/purse caller; a
+   *  missing username is not an error. */
+  username?: string
   appearance?: Appearance
   generatio?: Generatio
   bindings: Array<{ verb: string; modusId: string }>
@@ -3171,6 +3211,11 @@ export interface MeView {
    *  — the same check `_assertPlatformAdmin` enforces, so the UI never diverges from what the API
    *  will permit. `true` only on the platform's own session; every normal account sees `false`. */
   admin: boolean
+  /** Spendable impetus balance, serialised as a string — read from the same source
+   *  `GET /v1/me/status` reports, so the two endpoints can never disagree. */
+  balanceImpetus: string
+  /** USD-equivalent balance (informational). Same source as `GET /v1/me/status`. */
+  balanceUsd: number
 }
 
 /** Result of connecting/disconnecting a BYO secret (`PUT/DELETE /v1/me/secrets/:provider`).
