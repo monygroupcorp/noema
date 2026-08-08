@@ -15,6 +15,10 @@ export function hashModus(modus: Modus): string {
   // pick this" line) — excluded so a copy edit never re-hashes a modus and breaks
   // deployment identity/caching. Same "not part of the workflow definition" reasoning as
   // the computeStrategy/gpuClass/podPolicy execution preferences (modus.ts).
+  // `pretium` (the per-flow cost model) is definitional — it prices the flow — so it is
+  // hashed, and it does so by riding the `...rest` passthrough deliberately: it is a plain
+  // nested object of numbers that `sortedReplacer` already orders deterministically. Only
+  // bigint fields need the explicit prefix below; do not add a branch for it.
   const { contentHash: _ch, natum: _n, mutatum: _m, impetusFixum, descriptio: _d, ...rest } = modus
 
   const payload: Record<string, unknown> = { ...rest }
