@@ -441,7 +441,11 @@ export class Compiler {
    * Convert resolver output into model refs that `_resolveModels` can consume.
    * Each Intella's full record is already in the trigger map, but `_resolveModels`
    * also queries Intellarum to resolve URL + dest, so we only need to pass `id`
-   * here. Role is the LoRA's slug to keep download paths human-readable.
+   * here. `dest` uses the resolver's authoritative basename — the same name already
+   * written into the `<lora:...>` tag in the prompt — as a FALLBACK only: this value
+   * is always overwritten by `_resolveModelsWithRecords` below when the intella
+   * resolves from the registry (the normal case). It's used only when it doesn't
+   * (an unresolvable intella / the `INLINE_TAG`-adjacent no-record path).
    */
   private async _loraIntellaeToRefs(
     applied: ResolvedLora[],
@@ -449,7 +453,7 @@ export class Compiler {
     if (applied.length === 0) return []
     // Skip placeholder IDs (inline tags resolved against the cached map alone).
     const real = applied.filter(a => a.intellaId !== 'INLINE_TAG')
-    return real.map(a => ({ role: 'lora', id: a.intellaId, dest: `models/loras/${a.slug}.safetensors` }))
+    return real.map(a => ({ role: 'lora', id: a.intellaId, dest: `models/loras/${a.basename}.safetensors` }))
   }
 
   private async _resolveModels(
