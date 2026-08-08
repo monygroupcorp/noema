@@ -8,6 +8,7 @@ import type { Vestigiorum } from '../../../src/types/vestigium.js'
 import type { DeploymentumStore } from '../../../src/types/deploymentum.js'
 import type { Intella, Intellarum } from '../../../src/types/intelligendi.js'
 import { ActumCompletor } from '../../../src/execution/ActumCompletor.js'
+import { WARM_SURCHARGE_IMPETUS } from '../../../src/ledger/rates.js'
 import { MemoryVestigiorum } from '../../../src/rag/MemoryVestigiorum.js'
 
 // ---------------------------------------------------------------------------
@@ -158,6 +159,123 @@ test('nexus emission includes the completed actum and actual impetus', async () 
   const payload = nexus._emitted[0].payload as { actum: Actum; impetus: bigint }
   assert.equal(payload.actum.id, 'act-xyz')
   assert.equal(payload.impetus, 55n)
+})
+
+// ── Settlement: measured cost, not the reservation ──────────────────────────
+// A warm-pod run carries a dispatch-time `pricingTier` stamp. Settlement must be
+// driven by the cursor's measured cost (`Exitus.impetus`), with the guest warm
+// surcharge added on top — never by the reservation the run happened to lock.
+
+test('warm run settles at the measured cost, not the reservation (owner tier)', async () => {
+  const actum = makeActum({ impetus: 1800n, executio: { pricingTier: 'owner' } })
+  const acta = makeActa(actum)
+  const signorum = makeSignorum()
+  const completor = new ActumCompletor({ acta, signorum, nexus: makeNexus() })
+
+  await completor.complete(actum, makeRunResult({ impetus: 12n, duratio: 12_000 }))
+
+  assert.equal(acta.latest.impetus, 12n, 'settles at measured pod wall-clock')
+  assert.equal(signorum._settled[0].actualImpetus, 12n)
+})
+
+test('warm run settles at measured cost + WARM_SURCHARGE_IMPETUS on guest tier', async () => {
+  const actum = makeActum({ impetus: 1800n, executio: { pricingTier: 'guest' } })
+  const acta = makeActa(actum)
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum(), nexus: makeNexus() })
+
+  await completor.complete(actum, makeRunResult({ impetus: 12n, duratio: 12_000 }))
+
+  assert.equal(acta.latest.impetus, 12n + WARM_SURCHARGE_IMPETUS)
+})
+
+test('admin tier pays the measured cost with no surcharge', async () => {
+  const actum = makeActum({ impetus: 1800n, executio: { pricingTier: 'admin' } })
+  const acta = makeActa(actum)
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum(), nexus: makeNexus() })
+
+  await completor.complete(actum, makeRunResult({ impetus: 30n }))
+
+  assert.equal(acta.latest.impetus, 30n)
+})
+
+test('no tier stamp (cold start) settles at the measured cost, unsurcharged', async () => {
+  const actum = makeActum({ impetus: 1800n })
+  const acta = makeActa(actum)
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum(), nexus: makeNexus() })
+
+  await completor.complete(actum, makeRunResult({ impetus: 12n }))
+
+  assert.equal(acta.latest.impetus, 12n)
+})
+
+test('stamps executio.baseImpetus with the measured base and finalImpetus with the settled total', async () => {
+  const actum = makeActum({ impetus: 1800n, executio: { pricingTier: 'guest' } })
+  const acta = makeActa(actum)
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum(), nexus: makeNexus() })
+
+  await completor.complete(actum, makeRunResult({ impetus: 12n }))
+
+  assert.equal(acta.latest.executio?.baseImpetus, 12n, 'base is the measured cost')
+  assert.equal(acta.latest.executio?.finalImpetus, 12n + WARM_SURCHARGE_IMPETUS)
+  assert.equal(acta.latest.executio?.pricingTier, 'guest', 'dispatch stamp preserved')
+})
+
+test('nexus payload carries the measured base, not the reservation', async () => {
+  const actum = makeActum({ impetus: 1800n, executio: { pricingTier: 'guest' } })
+  const acta = makeActa(actum)
+  const nexus = makeNexus()
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum(), nexus })
+
+  await completor.complete(actum, makeRunResult({ impetus: 12n }))
+
+  const payload = nexus._emitted[0].payload as { impetus: bigint; baseImpetus: bigint }
+  assert.equal(payload.baseImpetus, 12n)
+  assert.equal(payload.impetus, 12n + WARM_SURCHARGE_IMPETUS)
+})
+
+test('a dispatch-time impetus stamp does not drive settlement', async () => {
+  // An actum stamped before this change carries amounts derived from the
+  // reservation. Settlement ignores them and uses the measured cost.
+  const actum = makeActum({
+    impetus: 1800n,
+    executio: { pricingTier: 'owner', baseImpetus: 1800n, finalImpetus: 1800n },
+  })
+  const acta = makeActa(actum)
+  const signorum = makeSignorum()
+  const completor = new ActumCompletor({ acta, signorum, nexus: makeNexus() })
+
+  await completor.complete(actum, makeRunResult({ impetus: 12n }))
+
+  assert.equal(acta.latest.impetus, 12n)
+  assert.equal(signorum._settled[0].actualImpetus, 12n)
+  assert.equal(acta.latest.executio?.baseImpetus, 12n, 'base rewritten to the measured cost')
+})
+
+// ── Guards that must keep holding ───────────────────────────────────────────
+
+test('a cursor reporting more than the reservation still throws Cursor overcharge', async () => {
+  const actum = makeActum({ impetus: 100n, executio: { pricingTier: 'guest' } })
+  const acta = makeActa(actum)
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum(), nexus: makeNexus() })
+
+  await assert.rejects(
+    () => completor.complete(actum, makeRunResult({ impetus: 101n })),
+    /Cursor overcharge/,
+  )
+})
+
+test('a surcharged total above the reservation settles at the reservation', async () => {
+  // Measured cost sits just under the reservation; adding the guest surcharge
+  // would exceed it. The cap holds — we never settle more than was locked.
+  const actum = makeActum({ impetus: 100n, executio: { pricingTier: 'guest' } })
+  const acta = makeActa(actum)
+  const signorum = makeSignorum()
+  const completor = new ActumCompletor({ acta, signorum, nexus: makeNexus() })
+
+  await completor.complete(actum, makeRunResult({ impetus: 90n }))
+
+  assert.equal(acta.latest.impetus, 100n, 'capped at the reservation')
+  assert.equal(signorum._settled[0].actualImpetus, 100n)
 })
 
 test('terminates a one-shot pod on successful completion', async () => {

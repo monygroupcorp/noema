@@ -5,6 +5,7 @@ import type { Nexus } from '../types/nexus.js'
 import type { Vestigiorum } from '../types/vestigium.js'
 import type { DeploymentumStore } from '../types/deploymentum.js'
 import type { Intellarum } from '../types/intelligendi.js'
+import { impetusFor } from '../ledger/rates.js'
 import { makeLogger } from '../lib/logger.js'
 import { getTrace } from '../lib/trace.js'
 import { buildWideEvent, emitWideEvent } from '../lib/wide.js'
@@ -97,12 +98,24 @@ export class ActumCompletor {
       )
     }
 
-    // Honor the dispatch-time pricing decision when present (Phase B): a guest
-    // run's finalImpetus = base + bootShare is the right spend amount. Cap at the
-    // reservation so we never settle more than was locked.
-    const dispatched = actum.executio?.finalImpetus
-    const rawImpetus = dispatched !== undefined ? dispatched : reportedImpetus
-    const impetus = rawImpetus > actum.impetus ? actum.impetus : rawImpetus
+    // Settle on the MEASURED cost. `reportedImpetus` is the cursor's metered pod
+    // wall-clock, and it is the only cost basis known at this point that reflects
+    // what the run actually consumed. The dispatch stamp carries the pricing TIER
+    // (a dispatch-time fact); the AMOUNT is decided here, where the measurement
+    // exists — a dispatch-time amount can only be the reservation.
+    //
+    //   base   = reportedImpetus                            (measured pod wall-clock)
+    //   final  = base + WARM_SURCHARGE when tier is 'guest'  (rates.impetusFor)
+    //   settle = min(final, actum.impetus)                   (reservation cap)
+    //
+    // No tier stamp (cold start, or no hospitia store) → no surcharge, so the
+    // settled amount is exactly `reportedImpetus` — identical to the cold-start
+    // path before this change.
+    const tier = actum.executio?.pricingTier
+    const baseImpetus = reportedImpetus
+    const finalImpetus = tier ? impetusFor(tier, baseImpetus) : baseImpetus
+    // Cap at the reservation so we never settle more than was locked.
+    const impetus = finalImpetus > actum.impetus ? actum.impetus : finalImpetus
 
     // Settle signa: spend all locked at `impetus`, refund the delta to the original
     // identity (signorum.settle handles the refund of unused lock).
@@ -110,13 +123,23 @@ export class ActumCompletor {
       await signorum.settle(actum.signaConsumed, impetus, actum.id)
     }
 
-    // Update the actum record with final values
+    // Update the actum record with final values. `executio.baseImpetus` /
+    // `finalImpetus` are written here (not at dispatch) because both are derived
+    // from the measured cost; the spend hooks downstream tax `baseImpetus`, so it
+    // must be the real cost basis. Merge onto the freshest executio so the dispatch
+    // stamp and the pod telemetry survive.
+    const executio = {
+      ...(current?.executio ?? actum.executio ?? {}),
+      baseImpetus,
+      finalImpetus: impetus,
+    }
     const completed = await acta.update(actum.id, {
       status: 'completus',
       exitus,
       impetus,
       duratio,
       completum: now,
+      executio,
       ...(materiamId ? { materiamId } : {}),
     })
 
@@ -172,11 +195,9 @@ export class ActumCompletor {
       // Phase C widened the payload: baseImpetus is mandatory + modoHostKey is
       // optional. The completor only fires this when its caller (cursors that
       // don't go through the webhook path) emits directly. The webhook path is
-      // what production uses — it builds the full payload (baseImpetus pulled
-      // from executio, modoHostKey resolved from Hospitium). Here we approximate
-      // baseImpetus from the dispatch stamp when present, else from the settled
-      // impetus (owner/admin paths where final === base).
-      const baseImpetus = completed.executio?.baseImpetus ?? impetus
+      // what production uses — it builds the full payload (baseImpetus read back
+      // off executio, modoHostKey resolved from Hospitium). Here we use the
+      // measured base computed above.
       await nexus.emit({
         type: 'execution_spend',
         payload: {

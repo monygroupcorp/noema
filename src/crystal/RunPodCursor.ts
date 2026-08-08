@@ -9,7 +9,7 @@ import type { Praefectus } from './Praefectus.js'
 import { getTrace } from '../lib/trace.js'
 import type { AuctorKey } from '../flow/types.js'
 import { ownerKeyOf } from './ownerKey.js'
-import { tierOf, impetusFor } from '../ledger/rates.js'
+import { tierOf } from '../ledger/rates.js'
 import { isCompiledSpec } from './comfyrunnerClient.js'
 import { makeLogger } from '../lib/logger.js'
 
@@ -167,24 +167,22 @@ export class RunPodCursor implements Cursor {
       ? { ...(hostKey ? { hostKey } : {}), ...(trace?.groupChatId ? { groupChatId: trace.groupChatId } : {}) }
       : undefined
 
-    // Phase B dispatch decision: when we know the pod (warm match) AND have a
-    // hospitia store, compute the pricing tier + finalImpetus and stamp them on
-    // the actum so the completor emits execution_spend with the right numbers.
+    // Dispatch decision: when we know the pod (warm match) AND have a hospitia
+    // store, resolve the pricing tier and stamp it on the actum so the completor
+    // and the spend hooks know which economics apply. The tier is a dispatch-time
+    // fact (who runs on whose pod); the AMOUNTS are not — the run has not finished
+    // here, so the measured cost is unknown. `ActumCompletor` derives baseImpetus
+    // (the cursor's measured pod wall-clock) and the settled total at completion.
     // We stash ONLY non-identity values on the actum — host identity is re-derived
     // from Hospitium at emit time (see ActumCompletor).
     if (materia && this.config.hospitia) {
       const hospitium = await this.config.hospitia.findByMateriaId(materia.id).catch(() => null)
       const tier = tierOf(hostKey, hospitium)
-      const finalImpetus = impetusFor(tier, actum.impetus)
-      // Stash baseImpetus (= actum.impetus reservation) alongside finalImpetus so
-      // the spend hooks can tax base without reverse-engineering the surcharge.
       await this.actorum.update(actum.id, {
         materiamId: materia.id,
         executio: {
           ...(actum.executio ?? {}),
           pricingTier: tier,
-          baseImpetus: actum.impetus,
-          finalImpetus,
         },
       }).catch(() => {})
     } else if (materia) {
@@ -211,7 +209,7 @@ export class RunPodCursor implements Cursor {
         await this.actorum.update(actum.id, { externusJobId: newPodId }).catch(() => {})
       },
       onMetrics: async (executio) => {
-        // MERGE, never replace — the dispatch stamp ({pricingTier, finalImpetus})
+        // MERGE, never replace — the dispatch stamp ({pricingTier})
         // lives in the same executio object and would be wiped by a naïve overwrite
         // from the client's pod-telemetry view. The client always sends the full
         // accumulated snapshot of *its* fields; we preserve the dispatch fields.
