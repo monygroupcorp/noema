@@ -283,8 +283,27 @@ export interface AlchemyWebhookRequest {
 }
 
 export interface AlchemyWebhookResult {
-  status: 200 | 400 | 401 | 500
+  status: 200 | 400 | 401 | 403 | 500
   body: { success: boolean; processed: number; skipped: number; message?: string }
+}
+
+/**
+ * Is `chainId` a chain this deployment serves?
+ *
+ * Authoritative source is `vaultAddresses`, not `signingKeys`: `vaultAddresses` is built
+ * unconditionally from the CreditVault constant, so its keys are exactly the chains the
+ * deployment is wired for, whatever the environment carries. `signingKeys` is env-conditional —
+ * an entry exists only when the chain's `ALCHEMY_SIGNING_KEY_*` resolves — so deriving the
+ * served set from it would make a chain we serve stop being served the moment its key went
+ * missing, which is a different condition with a different answer.
+ *
+ * Own-property + non-empty-string, so an inherited key (`constructor`, `toString`) cannot be
+ * passed off as a served chain by a caller who controls the `:chainId` path parameter.
+ */
+function servesChain(vaultAddresses: Record<string, string>, chainId: string): boolean {
+  if (!Object.prototype.hasOwnProperty.call(vaultAddresses, chainId)) return false
+  const vault = vaultAddresses[chainId]
+  return typeof vault === 'string' && vault.trim() !== ''
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +344,17 @@ export async function handleAlchemyWebhook(
   deps: AlchemyWebhookDeps,
 ): Promise<AlchemyWebhookResult> {
   try {
+    // 0. Served-chain gate. `:chainId` is a caller-controlled path parameter, and every guard
+    // below is keyed on it: the signing key is looked up per chain, and so is the vault address
+    // the log filter compares against. A chainId this deployment does not serve resolves neither,
+    // so it must be refused here — before any log is inspected — rather than falling through to
+    // handlers with no key to check against and no vault to match. Non-specific body: the caller
+    // learns the request was refused, not which chains are configured.
+    if (!servesChain(deps.vaultAddresses, req.chainId)) {
+      log.warn('alchemy webhook refused: unserved chainId', { chainId: req.chainId })
+      return { status: 403, body: { success: false, processed: 0, skipped: 0, message: 'Forbidden' } }
+    }
+
     // 1. HMAC signature validation — skip if no key configured for this chain (dev mode)
     const signingKey = deps.signingKeys[req.chainId]
     if (signingKey) {
@@ -370,8 +400,12 @@ export async function handleAlchemyWebhook(
 
       log.info('alchemy log', { logAddress, vaultAddress, topic0: entry.topics?.[0] })
 
-      // Skip logs not targeting our vault
-      if (logAddress !== vaultAddress) {
+      // Skip logs not targeting our vault. Absence on EITHER side is a skip, never a match:
+      // a log with no `account.address` and a chain with no vault address are both `undefined`,
+      // and `undefined !== undefined` is false — so an equality test alone treats "we know
+      // neither address" as "the addresses agree" and admits the log. Require both to be
+      // present, then require them to be equal.
+      if (!vaultAddress || !logAddress || logAddress !== vaultAddress) {
         skipped++
         continue
       }
