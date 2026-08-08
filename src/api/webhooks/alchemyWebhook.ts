@@ -355,7 +355,13 @@ export async function handleAlchemyWebhook(
       return { status: 403, body: { success: false, processed: 0, skipped: 0, message: 'Forbidden' } }
     }
 
-    // 1. HMAC signature validation — skip if no key configured for this chain (dev mode)
+    // 1. HMAC signature validation. The served-chain gate above has already established that this
+    // deployment is wired for `req.chainId`; a chain we serve must therefore carry a signing key,
+    // and its absence is refused rather than treated as an exemption. Every payload reaching this
+    // endpoint credits balances, books revenue and inserts arcanum leaves purely on what the body
+    // claims, so an unauthenticated request must never reach the processing paths — including when
+    // `ALCHEMY_SIGNING_KEY_<chain>` is missing from the environment. Non-specific body, matching
+    // the served-chain refusal: the caller learns the request was refused, not why.
     const signingKey = deps.signingKeys[req.chainId]
     if (signingKey) {
       const expected = crypto
@@ -374,6 +380,9 @@ export async function handleAlchemyWebhook(
       if (!match) {
         return { status: 401, body: { success: false, processed: 0, skipped: 0, message: 'Invalid signature' } }
       }
+    } else {
+      log.warn('alchemy webhook refused: no signing key configured for served chain', { chainId: req.chainId })
+      return { status: 403, body: { success: false, processed: 0, skipped: 0, message: 'Forbidden' } }
     }
 
     // 2. Payload validation
