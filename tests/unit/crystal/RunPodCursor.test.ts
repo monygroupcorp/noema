@@ -9,6 +9,8 @@ import type { Materia, MateriaStore } from '../../../src/types/materia.js'
 import type { DeploymentumStore } from '../../../src/types/deploymentum.js'
 import type { Hospitium, HospitiumStore, HostKey } from '../../../src/types/hospitium.js'
 import { Praefectus } from '../../../src/crystal/Praefectus.js'
+import { GENERIC_RESERVE_IMPETUS } from '../../../src/ledger/rates.js'
+import { ESSENTIA_RUNMAKE_SD15, CANONICAL_ESSENTIAE } from '../../../src/crystal/seeds/essentiae.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -101,20 +103,65 @@ test('reserve returns impetusFixum when set on modus', async () => {
   assert.equal(result, 500n)
 })
 
-test('reserve returns default ceiling when impetusFixum absent', async () => {
+test('reserve falls back to the generic bound — not the job timeout — when a modus carries neither impetusFixum nor pretium', async () => {
   const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
   const result = await cursor.reserve(makeModus(), {})
-  assert.equal(typeof result, 'bigint')
-  assert.ok(result > 0n)
+  assert.equal(result, GENERIC_RESERVE_IMPETUS)
+  assert.notEqual(result, 1800n)   // the default maxJobSeconds ceiling is not a cost estimate
 })
 
-test('reserve uses configured maxJobSeconds when set', async () => {
+test('reserve uses the pretium curve and scales with steps', async () => {
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
+  const modus = makeModus({
+    pretium: { baseSeconds: 10, perStepSeconds: 2 },
+    aditus: { prompt: { type: 'text', required: true }, steps: { type: 'int', default: 4 } },
+  })
+  // 2 × (10 + 2×4) = 36 ; 2 × (10 + 2×20) = 100
+  assert.equal(await cursor.reserve(modus, { steps: 4 }), 36n)
+  assert.equal(await cursor.reserve(modus, { steps: 20 }), 100n)
+  // Absent from the run inputs → the schema default (4) is used.
+  assert.equal(await cursor.reserve(modus, {}), 36n)
+})
+
+test("reserve prices sd1-5's declared curve at its schema defaults", async () => {
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
+  // baseSeconds 66 + perStepSeconds 1.0 × 20 default steps, doubled for safety.
+  assert.equal(await cursor.reserve(ESSENTIA_RUNMAKE_SD15, {}), 172n)
+})
+
+test('a flow declaring pretium never reserves more than the generic bound', async () => {
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
+  const modelled = CANONICAL_ESSENTIAE.filter((e) => e.pretium !== undefined)
+  assert.ok(modelled.length > 0, 'expected at least one canonical flow to declare a pretium curve')
+  for (const essentia of modelled) {
+    const reserved = await cursor.reserve(essentia, {})
+    assert.ok(
+      reserved <= GENERIC_RESERVE_IMPETUS,
+      `${essentia.id} reserves ${reserved}, above the generic bound ${GENERIC_RESERVE_IMPETUS} — the curve is mis-fitted or the estimator double-counts`,
+    )
+  }
+})
+
+test('reserve falls through to the generic bound when a pretium term has neither a value nor a schema default', async () => {
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
+  const modus = makeModus({
+    pretium: { baseSeconds: 10, perStepSeconds: 2 },
+    aditus: { prompt: { type: 'text', required: true }, steps: { type: 'int' } },
+  })
+  // A missing term is never treated as 0 — that would under-reserve and trip `Cursor overcharge`.
+  assert.equal(await cursor.reserve(modus, {}), GENERIC_RESERVE_IMPETUS)
+})
+
+test('reserve never exceeds the maxJobSeconds ceiling', async () => {
   const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), {
     webhookUrl: 'https://api.noema.io/webhooks/runpod',
-    maxJobSeconds: 600,
+    maxJobSeconds: 60,
   })
-  const result = await cursor.reserve(makeModus(), {})
-  assert.equal(result, 600n)
+  // Generic fallback (900) clamps to the ceiling…
+  assert.equal(await cursor.reserve(makeModus(), {}), 60n)
+  // …and so does a curve that estimates above it.
+  const expensive = makeModus({ pretium: { baseSeconds: 5000 } })
+  assert.equal(await cursor.reserve(expensive, {}), 60n)
 })
 
 // ── run() — async submission ──────────────────────────────────────────────────

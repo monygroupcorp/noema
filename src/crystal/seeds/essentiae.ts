@@ -98,6 +98,20 @@ export const ESSENTIA_RUNMAKE_SD15: Essentia = {
     vramGb: 8,
   },
 
+  // Cost curve, fitted from this flow's own completed runs (n=21). Warm p95 is 20 s at the
+  // default 20 steps — execution alone, since a warm pod has already provisioned and
+  // downloaded — giving perStepSeconds = 1.0. Cold p95 is 86 s, i.e. that same execution
+  // plus this flow's own provision + download + load, giving baseSeconds = 86 − 20 = 66.
+  // perMegapixelSeconds is deliberately absent: every run in the sample is 512², so there
+  // is no resolution variance to fit and a coefficient would be invented rather than
+  // measured. At the declared defaults this reserves 172 impetus (≈$0.058).
+  // The only flow with a large enough sample to fit — every other flow reserves the
+  // generic bound until its own runs accumulate.
+  pretium: {
+    baseSeconds: 66,
+    perStepSeconds: 1.0,
+  },
+
   natum: new Date('2025-01-01'),
   mutatum: new Date('2025-01-01'),
 }
