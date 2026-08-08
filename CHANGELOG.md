@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.1.1](https://github.com/monygroupcorp/noema/compare/v5.1.0...v5.1.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **release:** stop CLA lock from starving the container build ([1a265f6](https://github.com/monygroupcorp/noema/commit/1a265f6d0687cf700a858a19a74d91783bb76355))
+
 ## [5.1.0](https://github.com/monygroupcorp/noema/compare/v5.0.1...v5.1.0) (2026-08-08)
 
 
