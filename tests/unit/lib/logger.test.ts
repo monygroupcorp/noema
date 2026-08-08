@@ -51,9 +51,10 @@ test('makeLogger emits JSON to stdout at info level', () => {
   const captured: string[] = []
   const orig = process.stdout.write.bind(process.stdout)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(process.stdout as any).write = (chunk: string | Uint8Array, ..._rest: unknown[]) => {
+  ;(process.stdout as any).write = (chunk: string | Uint8Array, ...rest: unknown[]) => {
     if (typeof chunk === 'string') captured.push(chunk)
-    return true
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (orig as any)(chunk, ...rest)
   }
 
   try {
