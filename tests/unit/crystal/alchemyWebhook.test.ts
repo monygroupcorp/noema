@@ -31,6 +31,17 @@ const TOPIC_ANON_DEPOSIT = '0x879aadcc0b21da25bde4bcf799cb142a02d0135f66a1328fef
 const VAULT = '0x00000001152d633eb2ac3cf91eac9994aeefC021'.toLowerCase()
 const CHAIN_ID = '1'
 
+/**
+ * The signing key the default deps configure for `CHAIN_ID`, and the key `makeReq` signs with.
+ *
+ * The handler admits a request to a served chain only when it carries a valid HMAC over the raw
+ * body, so every behavioural case below describes the AUTHENTICATED path: `makeDeps` configures
+ * this key and `makeReq` signs with it. A case that wants a different outcome out of the auth
+ * block overrides one side or the other — a different key, an explicit bad signature, or no key
+ * configured at all.
+ */
+const SIGNING_KEY = 'alchemy-test-signing-key'
+
 // ── Mock factories ─────────────────────────────────────────────────────────────
 
 let idSeq = 0
@@ -315,9 +326,15 @@ function makeWebhookBody(logs: unknown[]) {
   }
 }
 
+/**
+ * Build a request that is SIGNED by default with `SIGNING_KEY` — the key the default deps
+ * configure — so a case exercises the processing paths behind the auth block rather than a
+ * skipped check. Pass `signature` explicitly to describe a specific auth outcome; a case that
+ * needs an unsigned request builds the object literally, so its intent is visible at the call.
+ */
 function makeReq(body: unknown, chainId = CHAIN_ID, signature?: string): AlchemyWebhookRequest {
   const rawBody = JSON.stringify(body)
-  return { body, rawBody, chainId, signature }
+  return { body, rawBody, chainId, signature: signature ?? sign(SIGNING_KEY, rawBody) }
 }
 
 function sign(secret: string, rawBody: string): string {
@@ -350,7 +367,7 @@ function makeDeps(overrides: Partial<AlchemyWebhookDeps> & { animae?: AnimaStore
     resolveWalletAnima,
     arcanumTree: overrides.arcanumTree ?? makeArcanumTree(),
     sanctions: overrides.sanctions ?? permissiveSanctionsScreen,
-    signingKeys: overrides.signingKeys ?? {},
+    signingKeys: overrides.signingKeys ?? { [CHAIN_ID]: SIGNING_KEY },
     vaultAddresses: overrides.vaultAddresses ?? { [CHAIN_ID]: VAULT },
     // Default pricer: $3000/ETH at 18 decimals → 0.001 ETH = $3 gross.
     pricer: overrides.pricer ?? fixedPricer(3000, 18),
@@ -453,14 +470,28 @@ test('invalid HMAC signature returns 401', async () => {
   assert.match(result.body.message ?? '', /invalid signature/i)
 })
 
-// 5. No signing key configured → skips validation (dev mode)
-test('no signing key configured: skips validation, processes normally', async () => {
-  const deps = makeDeps({ signingKeys: {} })
-  const body = makeWebhookBody([makePaymentLog()])
-  const result = await handleAlchemyWebhook(makeReq(body, CHAIN_ID, undefined), deps)
+// 5. Served chain with no signing key configured → fail closed (403), nothing written.
+// The served-chain gate has already admitted this chainId, so the request is one the deployment
+// is wired for; the absent key is a refusal, not an exemption. The payload carries a well-formed
+// payment log AND an anonymous-deposit log, both addressed to the vault, so the assertions below
+// see anything the processing paths would have written had the request been admitted.
+test('no signing key configured for a served chain: refused 403, nothing written', async () => {
+  const anima = makeAnima(PAYER)
+  const animae = makeAnimae(new Map([[PAYER.toLowerCase(), anima]]))
+  const arcanumTree = makeArcanumTree()
+  const deps = makeDeps({ animae, arcanumTree, signingKeys: {} })
 
-  assert.equal(result.status, 200)
-  assert.equal(result.body.success, true)
+  const body = makeWebhookBody([makePaymentLog(), makeAnonDepositLog({ from: PAYER })])
+  const rawBody = JSON.stringify(body)
+  const result = await handleAlchemyWebhook({ body, rawBody, chainId: CHAIN_ID }, deps)
+
+  assert.equal(result.status, 403)
+  assert.equal(result.body.success, false)
+  assert.equal(result.body.processed, 0)
+  assert.equal([...deps.deposita.store.values()].length, 0, 'no Depositum may be written')
+  assert.equal(deps.signorum.issued.length, 0, 'no Signum may be issued')
+  assert.equal(deps.redituum.rows.length, 0, 'no revenue may be booked')
+  assert.equal(arcanumTree.leaves.size, 0, 'no arcanum leaf may be inserted')
 })
 
 // 6. Malformed payload (missing logs) → returns 400
