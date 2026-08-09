@@ -107,5 +107,8 @@ export const Errors = {
   /** The fiat (Stripe) funding rail is not configured on this deployment (missing keys / stores). */
   paymentsUnavailable: () => new ApiError('internal.unavailable', 'Fiat payments are not available on this deployment (Stripe is not configured)', 503, { retryable: true }),
   priceUnavailable: (message = 'Could not price this asset — it is not supported or has no available price') => new ApiError('deposit.price_unavailable', message, 422),
+  /** Account erasure is globally disabled on this deployment (feature flag off). Only reachable
+   *  by an authenticated caller — the flag state is never revealed to an anonymous caller. */
+  erasureNotImplemented: () => new ApiError('feature.not_implemented', 'Account erasure is not enabled on this deployment', 501),
   internal: (message = 'Internal error') => new ApiError('internal.error', message, 500, { retryable: true }),
 } as const
