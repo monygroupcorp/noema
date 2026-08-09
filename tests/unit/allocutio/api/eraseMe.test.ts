@@ -12,7 +12,8 @@
 //   • the Anima is tombstoned with `retentionUntil = erasedAt + 7y`;
 //   • idempotent re-run completes cleanly (never double-deletes / errors);
 //   • a previously-valid session JWT for the erased animaId is REJECTED by verifyJwt;
-//   • DELETE /v1/me is self-only + gated OFF (404) when ERASURE_ENABLED is unset;
+//   • DELETE /v1/me resolves auth FIRST (401, no feature-state disclosure) then, once
+//     authenticated, gates OFF (501) when ERASURE_ENABLED is unset;
 //   • an anon caller cannot be erased (403); the receipt copy is truthful (retained, not "all gone").
 // =============================================================================
 
@@ -27,6 +28,7 @@ import { makeCredentialAcceptors } from '../../../../src/allocutio/api/apiAccept
 import { createApiRouter, type ApiFacade, type Identity } from '../../../../src/allocutio/api/apiRouter.js'
 import { CrystalApi } from '../../../../src/allocutio/api/CrystalApi.js'
 import { ownerKeyOf } from '../../../../src/crystal/ownerKey.js'
+import { Errors } from '../../../../src/allocutio/api/errors.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 
 // ---------------------------------------------------------------------------
@@ -221,15 +223,31 @@ function del(base: string): Promise<{ status: number; body: string }> {
 }
 
 const fakeIdentity: Identity = { async resolve(): Promise<AuctorKey> { return { animaId: 'anima-1' } } }
+// An unauthenticating stub — mirrors a real resolver rejecting a caller with no credentials, so
+// the auth-first ordering is actually exercised (noema-178).
+const unauthIdentity: Identity = { async resolve(): Promise<AuctorKey> { throw Errors.authMissing() } }
 
-test('DELETE /v1/me: gated OFF (404) when erasureEnabled is unset — does not even reveal itself', async () => {
+test('DELETE /v1/me: unauthenticated caller gets 401 and never learns the feature-state', async () => {
+  let called = false
+  const api = { async eraseMe() { called = true; return {} } } as unknown as ApiFacade
+  const router = createApiRouter({ api, identity: unauthIdentity /* erasureEnabled omitted → off */ })
+  const s = await serve(router)
+  try {
+    const res = await del(s.base)
+    assert.equal(res.status, 401, 'no credential → 401, auth runs before the feature-state check')
+    assert.doesNotMatch(res.body, /erasure/i, 'the response must not reveal the erasure feature-state')
+    assert.equal(called, false, 'eraseMe must NOT run when the caller is unauthenticated')
+  } finally { s.close() }
+})
+
+test('DELETE /v1/me: authenticated + gated OFF → 501 (does not run eraseMe)', async () => {
   let called = false
   const api = { async eraseMe() { called = true; return {} } } as unknown as ApiFacade
   const router = createApiRouter({ api, identity: fakeIdentity /* erasureEnabled omitted → off */ })
   const s = await serve(router)
   try {
     const res = await del(s.base)
-    assert.equal(res.status, 404, 'flag off → 404')
+    assert.equal(res.status, 501, 'authenticated + flag off → 501 Not Implemented')
     assert.equal(called, false, 'eraseMe must NOT run when the flag is off')
   } finally { s.close() }
 })
