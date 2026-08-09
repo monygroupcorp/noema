@@ -44,12 +44,18 @@ function makeCompletor(): CompletorMock {
   return mock
 }
 
-function makeActorum(actum: Actum | null) {
+/**
+ * `actum` is what the reported job id resolves to (as before). `others` are additional acta the
+ * store knows about, so a nonce can be made to resolve to a DIFFERENT actum than the job id does.
+ */
+function makeActorum(actum: Actum | null, others: Actum[] = []) {
+  const all = [...(actum ? [actum] : []), ...others]
   return {
     async create(a: Omit<Actum, 'inceptum'>) { return { ...a, inceptum: new Date() } as Actum },
     async update(_id: string, _patch: Partial<Actum>) { return actum! },
     async findById(_id: string) { return actum },
     async findByExternusJobId(_jobId: string) { return actum },
+    async findByCallbackNonce(nonce: string) { return all.find(a => a.callbackNonce === nonce) ?? null },
     async findExpired() { return [] as Actum[] },
   }
 }
@@ -90,15 +96,17 @@ import type { WebhookRouterDeps } from '../../../src/api/webhooks/webhookRouter.
 async function callRunpodRoute(
   deps: WebhookRouterDeps,
   body: unknown,
-  options: { rawBody?: string; signature?: string } = {},
+  options: { rawBody?: string; signature?: string; nonce?: string } = {},
 ): Promise<FakeRes> {
   const router = createWebhookRouter(deps)
 
-  // Find the POST /runpod route handler by peeking at router.stack
+  // Find the route handler by peeking at router.stack. With a nonce we exercise the
+  // nonce-bearing route (and hand it the path param Express would have parsed).
+  const path = options.nonce === undefined ? '/runpod' : '/runpod/:nonce'
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const stack = (router as any).stack as Array<{ route?: { path: string; stack: Array<{ handle: Function }> } }>
-  const routeLayer = stack.find(l => l.route?.path === '/runpod')
-  assert.ok(routeLayer, 'POST /runpod route not found on router')
+  const routeLayer = stack.find(l => l.route?.path === path)
+  assert.ok(routeLayer, `POST ${path} route not found on router`)
 
   const handler = routeLayer.route!.stack[0].handle
 
@@ -106,6 +114,7 @@ async function callRunpodRoute(
   const req = {
     body,
     rawBody,
+    params: options.nonce === undefined ? {} : { nonce: options.nonce },
     headers: {
       'x-webhook-secret': options.signature,
     } as Record<string, string | undefined>,
@@ -183,4 +192,91 @@ test('POST /runpod with unknown externusJobId returns 404', async () => {
 
   assert.equal(res.statusCode, 404)
   assert.equal((res.responseBody as { success: boolean }).success, false)
+})
+
+// ── Callback admission: the nonce binds a callback to the job it reports ───────
+
+// 5. Matching nonce → completes exactly as the nonce-less route did.
+test('POST /runpod/:nonce with the actum\'s own nonce completes the run', async () => {
+  const actum = makeActum({ callbackNonce: 'nonce-A' })
+  const completor = makeCompletor()
+  const deps: WebhookRouterDeps = { actorum: makeActorum(actum), completor }
+
+  const body = { id: 'job-router-abc', status: 'COMPLETED', output: [{ url: 'https://example.com/out.png' }], executionTime: 3000 }
+  const res = await callRunpodRoute(deps, body, { nonce: 'nonce-A' })
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(completor.completed.length, 1)
+  assert.equal(completor.completed[0].actumId, 'actum-router-1')
+})
+
+// 6. Unknown nonce → refused, and nothing is completed or failed.
+test('POST /runpod/:nonce with an unknown nonce is refused and completes nothing', async () => {
+  const actum = makeActum({ callbackNonce: 'nonce-A' })
+  const completor = makeCompletor()
+  const deps: WebhookRouterDeps = { actorum: makeActorum(actum), completor }
+
+  const body = { id: 'job-router-abc', status: 'COMPLETED', output: [{ url: 'https://example.com/out.png' }], executionTime: 3000 }
+  const res = await callRunpodRoute(deps, body, { nonce: 'not-a-real-nonce' })
+
+  assert.equal(res.statusCode, 404)
+  assert.equal((res.responseBody as { success: boolean }).success, false)
+  assert.equal(completor.completed.length, 0)
+  assert.equal(completor.failed.length, 0)
+})
+
+// 7. A nonce belonging to one run, presented with another run's job id → refused.
+test('POST /runpod/:nonce refuses a nonce that resolves to a different actum than the job id', async () => {
+  const reported = makeActum({ id: 'actum-A', callbackNonce: 'nonce-A' })
+  const other = makeActum({ id: 'actum-B', externusJobId: 'job-router-B', callbackNonce: 'nonce-B' })
+  const completor = makeCompletor()
+  const deps: WebhookRouterDeps = { actorum: makeActorum(reported, [other]), completor }
+
+  // Job id resolves to actum-A; the presented nonce belongs to actum-B.
+  const body = { id: 'job-router-abc', status: 'COMPLETED', output: [{ url: 'https://example.com/out.png' }], executionTime: 3000 }
+  const res = await callRunpodRoute(deps, body, { nonce: 'nonce-B' })
+
+  assert.equal(res.statusCode, 404)
+  assert.equal(completor.completed.length, 0)
+  assert.equal(completor.failed.length, 0)
+})
+
+// 8. Migration: a run dispatched before the nonce existed still completes on the nonce-less route.
+test('POST /runpod still completes a run that carries no nonce', async () => {
+  const actum = makeActum()   // no callbackNonce — dispatched before the nonce existed
+  const completor = makeCompletor()
+  const deps: WebhookRouterDeps = { actorum: makeActorum(actum), completor }
+
+  const body = { id: 'job-router-abc', status: 'COMPLETED', output: [{ url: 'https://example.com/out.png' }], executionTime: 3000 }
+  const res = await callRunpodRoute(deps, body)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(completor.completed.length, 1)
+})
+
+// 9. …but a run that HAS a nonce cannot be completed over the nonce-less route.
+test('POST /runpod refuses a run that carries a nonce', async () => {
+  const actum = makeActum({ callbackNonce: 'nonce-A' })
+  const completor = makeCompletor()
+  const deps: WebhookRouterDeps = { actorum: makeActorum(actum), completor }
+
+  const body = { id: 'job-router-abc', status: 'COMPLETED', output: [{ url: 'https://example.com/out.png' }], executionTime: 3000 }
+  const res = await callRunpodRoute(deps, body)
+
+  assert.equal(res.statusCode, 404)
+  assert.equal((res.responseBody as { success: boolean }).success, false)
+  assert.equal(completor.completed.length, 0)
+  assert.equal(completor.failed.length, 0)
+})
+
+// 10. A FAILED payload cannot be forged onto a run either — refusal precedes `fail`.
+test('POST /runpod/:nonce with a wrong nonce cannot fail a run', async () => {
+  const actum = makeActum({ callbackNonce: 'nonce-A' })
+  const completor = makeCompletor()
+  const deps: WebhookRouterDeps = { actorum: makeActorum(actum), completor }
+
+  const res = await callRunpodRoute(deps, { id: 'job-router-abc', status: 'FAILED', error: 'GPU OOM' }, { nonce: 'wrong' })
+
+  assert.equal(res.statusCode, 404)
+  assert.equal(completor.failed.length, 0)
 })
