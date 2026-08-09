@@ -101,7 +101,10 @@ export class MemoryVestigiorum implements Vestigiorum {
       minSimilaritas = 0.7,
     } = query
 
-    const allowedVisibility: string[] = visibilitas ?? (auctorKey ? ['privata', 'communis', 'publica'] : ['publica'])
+    // Defense-in-depth (CRIT-1, 2026-08-08): without an auctorKey the only safe result set
+    // is publica — an unscoped caller cannot widen scope to privata/communis via visibilitas.
+    const requestedVisibility: string[] = visibilitas ?? (auctorKey ? ['privata', 'communis', 'publica'] : ['publica'])
+    const allowedVisibility: string[] = auctorKey ? requestedVisibility : requestedVisibility.filter(v => v === 'publica')
     const queryEmbedding = await this.embed(quaerendum)
 
     const embeddingKey = per === 'imago' ? 'embeddingImago'
