@@ -81,6 +81,12 @@ export interface WebhookRequest {
   body: unknown        // parsed JSON body
   rawBody: string      // raw string for signature validation
   signature?: string   // X-Webhook-Secret header value
+  /**
+   * The per-job callback nonce carried in the callback URL's last path segment, when the request
+   * arrived on the nonce-bearing route. Absent for a callback on the nonce-less route, which is
+   * admitted only for an actum that carries no nonce (dispatched before the nonce existed).
+   */
+  nonce?: string
 }
 
 export interface WebhookResult {
@@ -136,6 +142,23 @@ export async function handleExecutionWebhook(
     // Look up the actum by external job ID
     const actum = await deps.actorum.findByExternusJobId(payload.id)
     if (!actum) {
+      return { status: 404, body: { success: false, message: `No actum found for externusJobId: ${payload.id}` } }
+    }
+
+    // Admission: bind this callback to the job it reports. The nonce is minted per job at dispatch
+    // and travels only in the callback URL we hand the pod, so possession of it is what authorises
+    // the write. Two ways in, and nothing else:
+    //   - nonce presented → it must resolve to THIS actum (the one the reported job id resolves to);
+    //   - no nonce → admitted only for an actum that carries none, i.e. one dispatched before the
+    //     nonce existed and still in flight. Self-retiring: once every in-flight run carries a
+    //     nonce this branch is unreachable and the nonce-less route can be removed.
+    // A callback that satisfies neither is refused with the same 404 as an unknown job, so the
+    // response does not distinguish which half failed. Refusal is BEFORE any completion, ledger
+    // write, or impetus accrual.
+    const nonceOk = req.nonce
+      ? (await deps.actorum.findByCallbackNonce(req.nonce))?.id === actum.id
+      : !actum.callbackNonce
+    if (!nonceOk) {
       return { status: 404, body: { success: false, message: `No actum found for externusJobId: ${payload.id}` } }
     }
 
