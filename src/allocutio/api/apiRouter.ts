@@ -968,16 +968,17 @@ export function createApiRouter(deps: {
 
   // DELETE /v1/me — GDPR Art. 17 right-to-erasure (noema-025). Pseudonymize-and-tombstones the
   // CALLER'S OWN account (self-only: auth = the caller's key, so a caller can never erase another
-  // owner). Behind the `ERASURE_ENABLED` flag (default OFF, counsel-gated in production): when the
-  // flag is off the endpoint 404s and does not even reveal itself. Returns a TRUTHFUL receipt — it
-  // reports the retained-anonymized financial ledger, never "everything deleted". Destructive +
-  // irreversible: the frontend fronts it with a typed-confirmation gate.
+  // owner). Auth resolves FIRST (noema-178): an unauthenticated caller gets the standard `401`
+  // and never learns the feature-state. Only once authenticated is the `ERASURE_ENABLED` flag
+  // checked (default OFF, counsel-gated in production): flag off → `501 Not Implemented`. Returns
+  // a TRUTHFUL receipt when enabled — it reports the retained-anonymized financial ledger, never
+  // "everything deleted". Destructive + irreversible: the frontend fronts it with a
+  // typed-confirmation gate.
   router.delete('/me', wrap(async (req, res) => {
-    if (!deps.erasureEnabled) {
-      res.status(404).json({ error: { code: 'not_found', message: 'account erasure is not enabled' } })
-      return
-    }
     const auctor = await auth(req)
+    if (!deps.erasureEnabled) {
+      throw Errors.erasureNotImplemented()
+    }
     res.status(200).json(await api.eraseMe(auctor))
   }))
 
