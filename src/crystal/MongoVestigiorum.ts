@@ -142,7 +142,13 @@ export class MongoVestigiorum implements Vestigiorum {
       : per === 'intella' ? 'embeddingIntella'
       : 'embeddingPromptum'
 
-    const allowedVis: string[] = visibilitas ?? (auctorKey ? ['privata', 'communis', 'publica'] : ['publica'])
+    // Defense-in-depth (CRIT-1, 2026-08-08): privata/communis are owner-scoped and must
+    // never be returned by an unscoped query. Without an auctorKey the only safe result
+    // set is publica, regardless of what visibilitas asks for — the caller cannot widen
+    // scope. The router derives auctorKey from the resolved caller; this clamp guarantees
+    // the invariant holds even if a future caller forgets.
+    const requestedVis: string[] = visibilitas ?? (auctorKey ? ['privata', 'communis', 'publica'] : ['publica'])
+    const allowedVis: string[] = auctorKey ? requestedVis : requestedVis.filter(v => v === 'publica')
 
     const filter: Record<string, unknown> = {
       visibilitas: { $in: allowedVis },

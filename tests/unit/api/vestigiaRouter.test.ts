@@ -2,7 +2,9 @@
 // stranger sees nothing of another account's vestigia) + the projection endpoint's
 // shape/caching, plus DELETE /:id (remove-from-space) and POST /:id/impressio
 // (feedback) — both owner-scoped, 404 for foreign/absent (noema-046, product ruling
-// 2026-07-13). GET /search is unchanged and not re-tested here.
+// 2026-07-13), plus GET /search visibility scoping (CRIT-1, 2026-08-08: the search
+// endpoint derives owner scope + allowed visibility from the resolved caller, never
+// from query params — an anonymous or foreign caller can never read privata).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
@@ -392,6 +394,79 @@ test('GET /api/vestigia/:id: a publica vestigium is readable by anyone (no crede
     const res = await get(`${url}/api/vestigia/${v.id}`)
     assert.equal(res.status, 200)
     assert.equal(res.body.vestigium.promptum, 'a public gallery trace')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── GET /search visibility scoping (CRIT-1) ──────────────────────────────────
+
+async function seedVis(
+  vestigiorum: MemoryVestigiorum,
+  animaId: string,
+  promptum: string,
+  visibilitas: 'privata' | 'communis' | 'publica',
+) {
+  const v = await vestigiorum.create({
+    modusId: 'modus.test',
+    auctorKey: { animaId },
+    promptum,
+    summarium: promptum,
+    genus: 'image',
+    visibilitas,
+  })
+  await vestigiorum.indexPromptum(v.id)
+  return v
+}
+
+test('GET /search anonymous returns publica only — visibilitas=privata cannot widen scope (CRIT-1)', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  await seedVis(vestigiorum, 'anima-victim', 'a private secret trace', 'privata')
+  await seedVis(vestigiorum, 'anima-victim', 'a public gallery trace', 'publica')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    // Anonymous caller explicitly asking for privata must still get only publica.
+    const res = await get(`${url}/api/vestigia/search?q=trace&minSim=-1&visibilitas=privata,communis,publica`)
+    assert.equal(res.status, 200)
+    const vis = res.body.results.map((r: any) => r.vestigium.visibilitas)
+    assert.ok(vis.every((v: string) => v === 'publica'), `expected only publica, got ${vis.join(',')}`)
+    assert.ok(!res.body.results.some((r: any) => r.vestigium.promptum === 'a private secret trace'))
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /search with a foreign/anonymous animaId -> 403 (CRIT-1)', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  await seedVis(vestigiorum, 'anima-victim', 'a private secret trace', 'privata')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    // Anonymous caller supplying a victim animaId.
+    const anon = await get(`${url}/api/vestigia/search?q=trace&minSim=-1&animaId=anima-victim`)
+    assert.equal(anon.status, 403)
+    // Authenticated caller supplying a DIFFERENT identity's animaId.
+    const foreign = await get(`${url}/api/vestigia/search?q=trace&minSim=-1&animaId=anima-victim`, {
+      authorization: 'Bearer anima-attacker',
+    })
+    assert.equal(foreign.status, 403)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /search with your OWN animaId returns your privata (CRIT-1 preserves self-search)', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  await seedVis(vestigiorum, 'anima-owner', 'my own private trace', 'privata')
+  await seedVis(vestigiorum, 'anima-other', 'someone elses private trace', 'privata')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await get(`${url}/api/vestigia/search?q=trace&minSim=-1&animaId=anima-owner`, {
+      authorization: 'Bearer anima-owner',
+    })
+    assert.equal(res.status, 200)
+    const prompts = res.body.results.map((r: any) => r.vestigium.promptum)
+    assert.ok(prompts.includes('my own private trace'))
+    assert.ok(!prompts.includes('someone elses private trace'), 'must not leak another identity')
   } finally {
     await closeServer(server)
   }
