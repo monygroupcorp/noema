@@ -59,13 +59,21 @@ export function createVestigiaRouter(deps: VestigiaRouterDeps): Router {
   //   per         string   optional  — promptum | imago | intella  (default: promptum)
   //   limit       number   optional  — max results  (default: 20, max: 100)
   //   minSim      number   optional  — min cosine similarity  (default: 0.7)
-  //   animaId     string   optional  — scope to one identity's vestigia
+  //   animaId     string   optional  — scope to your OWN identity's vestigia (must match the
+  //                                     authenticated caller; foreign/anonymous animaId → 403)
   //   modusId     string   optional  — filter by modus
   //   genus       string   optional  — image | video | text | audio
   //   visibilitas string   optional  — comma-separated: privata,communis,publica
   //
-  // Without animaId: returns publica only.
-  // With animaId: returns privata + communis + publica for that identity.
+  // VISIBILITY SCOPING IS DERIVED FROM THE RESOLVED CALLER, NEVER FROM QUERY PARAMS.
+  //   - No animaId (public gallery search): returns `publica` only. A `visibilitas` param
+  //     cannot widen this — privata/communis are unreachable without an owning caller.
+  //   - animaId == authenticated caller's own animaId: returns that caller's own vestigia
+  //     (privata + communis + publica, or the requested subset).
+  //   - animaId present but caller is anonymous or a different identity: 403. This is the
+  //     CRIT-1 fix (2026-08-08) — previously animaId + visibilitas came straight from the
+  //     query with no ownership check, so an anonymous caller could read every identity's
+  //     private vestigia.
   //
   // 503 when CLIP service not configured (embed function absent).
 
@@ -80,12 +88,41 @@ export function createVestigiaRouter(deps: VestigiaRouterDeps): Router {
     const limit     = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 20
     const rawMinSim = parseFloat(req.query.minSim as string ?? '0.7')
     const minSimilaritas = Number.isFinite(rawMinSim) ? rawMinSim : 0.7
-    const animaId   = (req.query.animaId as string | undefined)?.trim() || undefined
+    const requestedAnimaId = (req.query.animaId as string | undefined)?.trim() || undefined
     const modusId   = (req.query.modusId as string | undefined)?.trim() || undefined
     const genus     = (req.query.genus as VestigiumGenus | undefined) || undefined
 
     const rawVis = (req.query.visibilitas as string | undefined)?.split(',').map(s => s.trim()).filter(Boolean)
-    const visibilitas = rawVis?.length ? rawVis as VestigiumVisibility[] : undefined
+    const requestedVis = rawVis?.length ? rawVis as VestigiumVisibility[] : undefined
+
+    // Resolve the caller if credentials are present; anonymous is allowed (public search).
+    let caller: VestigiaAuctorKey | undefined
+    try {
+      caller = await resolveCaller(req)
+    } catch {
+      caller = undefined
+    }
+
+    // Derive owner scope + allowed visibility from the CALLER, never the raw query.
+    let auctorKey: VestigiaAuctorKey | undefined
+    let visibilitas: VestigiumVisibility[] | undefined
+    if (requestedAnimaId) {
+      // Personal-space search: only ever your own animaId.
+      if (!caller || !('animaId' in caller) || caller.animaId !== requestedAnimaId) {
+        return res.status(403).json({
+          error: { code: 'auth.forbidden', message: 'animaId scope requires an authenticated matching caller' },
+        })
+      }
+      auctorKey = { animaId: requestedAnimaId }
+      const allowed: VestigiumVisibility[] = ['privata', 'communis', 'publica']
+      visibilitas = requestedVis?.length
+        ? requestedVis.filter(v => allowed.includes(v))
+        : allowed
+    } else {
+      // Public gallery search: publica only. A visibilitas param cannot widen scope.
+      auctorKey = undefined
+      visibilitas = ['publica']
+    }
 
     try {
       const results = await vestigiorum.search({
@@ -93,7 +130,7 @@ export function createVestigiaRouter(deps: VestigiaRouterDeps): Router {
         per,
         limit,
         minSimilaritas,
-        auctorKey: animaId ? { animaId } : undefined,
+        auctorKey,
         modusId,
         genus,
         visibilitas,
