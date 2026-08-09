@@ -1,5 +1,15 @@
 # Changelog
 
+## [5.1.2](https://github.com/monygroupcorp/noema/compare/v5.1.1...v5.1.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **crystal-api:** getMe propagates ledger-dep failure instead of a zero balance ([648a7f7](https://github.com/monygroupcorp/noema/commit/648a7f7e905c9c4125ea4eba7a5746267a12f3dd))
+* **crystal:** webhook rail's baseImpetus comment and test mock reflect post-167 settlement ([8747f0f](https://github.com/monygroupcorp/noema/commit/8747f0f3bdc178fa193bcf53d8cc9a43c0d08a51))
+* **tests:** forward captured stdout to the original write in lib tests ([9d446ac](https://github.com/monygroupcorp/noema/commit/9d446acd4c155491f21760228ad874cbe8d1850f))
+* **vestigia:** scope search visibility to the resolved caller (CRIT-1) ([32f13aa](https://github.com/monygroupcorp/noema/commit/32f13aae85160355137cb6201a0be295168ab4b5))
+
 ## [5.1.1](https://github.com/monygroupcorp/noema/compare/v5.1.0...v5.1.1) (2026-08-08)
 
 
