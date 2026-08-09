@@ -336,8 +336,27 @@ test('invokeFlow by explicit modusId uses it directly', async () => {
   assert.equal(run.modusId, 'sd1-5')
 })
 
-test('invokeFlow with a studioId targets that studio (Inceptio.modoId)', async () => {
-  const { deps, dispatched } = makeDeps()
+// A cursorum whose `reserve` is counted — lets a test prove a refusal locked no signa.
+function countingCursorum(counter: { reserves: number }): CrystalApiDeps['cursorum'] {
+  return ({
+    register: () => {},
+    resolve: () => ({
+      reserve: async () => { counter.reserves += 1; return 5n },
+      run: async () => ({ kind: 'sync', exitus: { exitus: { image: 'x' }, impetus: 5n } }),
+    }),
+  } as unknown) as CrystalApiDeps['cursorum']
+}
+
+// A conductor that hosts exactly one studio for the caller — everything else is "not yours",
+// which is what `Conductor.getStudio` returns on a hostKey mismatch.
+function conductorHosting(studioId: string): CrystalApiDeps['conductor'] {
+  return makeConductor({
+    getStudio: async (id: string) => (id === studioId ? makeHandle({ studioId: id }) : null),
+  }).conductor
+}
+
+test('invokeFlow with a studioId the caller hosts targets that studio (Inceptio.modoId)', async () => {
+  const { deps, dispatched } = makeDeps({ conductor: conductorHosting('modo-123') })
   const api = new CrystalApi(deps)
 
   await api.invokeFlow(auctor, { modusId: 'sd1-5' }, { prompt: 'hi' }, { studioId: 'modo-123' })
@@ -347,6 +366,48 @@ test('invokeFlow with a studioId targets that studio (Inceptio.modoId)', async (
   // No studioId → a cold (modoId-less) run.
   await api.invokeFlow(auctor, { modusId: 'sd1-5' }, { prompt: 'hi' })
   assert.equal(dispatched.modoId, undefined)
+})
+
+test('invokeFlow refuses a studioId the caller does not host — before any signa or actum', async () => {
+  const counter = { reserves: 0 }
+  const { deps, dispatched } = makeDeps({
+    conductor: conductorHosting('modo-mine'),
+    cursorum: countingCursorum(counter),
+  })
+  const api = new CrystalApi(deps)
+
+  await assert.rejects(
+    () => api.invokeFlow(auctor, { modusId: 'sd1-5' }, { prompt: 'hi' }, { studioId: 'modo-theirs' }),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.studio',
+    'a studio the caller does not host is not_found, never bound',
+  )
+
+  assert.equal(dispatched.modusId, undefined, 'no actum was initiated')
+  assert.equal(dispatched.modoId, undefined, 'no foreign Modo was bound')
+  assert.equal(counter.reserves, 0, 'no signa were reserved')
+})
+
+test('invokeFlow with no studioId is unaffected by the ownership gate', async () => {
+  const { deps, dispatched } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  const run = await api.invokeFlow(auctor, { modusId: 'sd1-5' }, { prompt: 'hi' })
+
+  assert.equal(run.status, 'complete', 'an ordinary cold run still dispatches with no conductor wired')
+  assert.equal(dispatched.modusId, 'sd1-5')
+  assert.equal(dispatched.modoId, undefined)
+})
+
+test('invokeFlow fails CLOSED on a studioId when no conductor is wired', async () => {
+  const { deps, dispatched } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  await assert.rejects(
+    () => api.invokeFlow(auctor, { modusId: 'sd1-5' }, { prompt: 'hi' }, { studioId: 'modo-123' }),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.studio',
+    'nothing can affirm ownership, so the studio is refused rather than bound',
+  )
+  assert.equal(dispatched.modusId, undefined, 'no actum was initiated')
 })
 
 test('invokeFlow with an unresolvable verb throws not_found.flow', async () => {
