@@ -565,6 +565,13 @@ export class CrystalApi {
       ? await this.resolvePinnedModels(auctor, opts.pinnedModels)
       : undefined
 
+    // Studio scope comes from the CALLER, not from the request body. A run may bind to a Modo
+    // session only when the resolved caller is that session's host, so a caller-supplied
+    // `studioId` cannot charge a run against another tenant's session budget (which would push
+    // that tenant's studio toward drain and reaping). Refused HERE — above the `Inceptio` literal
+    // and therefore above `dispatchInceptio` — so a refusal reserves no signa and creates no actum.
+    if (opts.studioId) await this._ownedStudio(auctor, opts.studioId)
+
     const inceptio: Inceptio = {
       modusId,
       aditus: effectiveAditus,
@@ -1850,6 +1857,21 @@ export class CrystalApi {
     const project = await this._projectStore().find(id)
     if (!project || project.animaId !== animaId) throw Errors.notFoundProject(id)
     return project
+  }
+
+  /**
+   * Resolve a studio session the caller hosts, or 404 (a stranger gets `not_found.studio`, not
+   * `forbidden`, so session ids stay non-enumerable — the same convention `getStudio`/`releaseStudio`
+   * follow). The Conductor owns the comparison (`hostKeyMatches` covers both `animaId` and anon
+   * `commitment` auctors); this is a single reuse of that seam, not a second implementation.
+   * Fail-closed: with no conductor wired there is nothing that can affirm ownership, so a requested
+   * studio is refused rather than allowed through.
+   */
+  private async _ownedStudio(auctor: AuctorKey, studioId: string): Promise<StudioHandle> {
+    if (!this.deps.conductor) throw Errors.notFoundStudio(studioId)
+    const handle = await this.deps.conductor.getStudio(studioId, auctor)
+    if (!handle) throw Errors.notFoundStudio(studioId)
+    return handle
   }
 
   /** A Collectio owns by `{animaId}|{commitment}` only — bursaToken/proof have no persistent owner record. */
