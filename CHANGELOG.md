@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.1.3](https://github.com/monygroupcorp/noema/compare/v5.1.2...v5.1.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* **allocutio:** resolve auth before erasure feature-state on DELETE /v1/me ([1b4b36d](https://github.com/monygroupcorp/noema/commit/1b4b36db978f2a2db9a4b5b34047373a2f7ab54b))
+* **api:** scope a run's studio binding to the resolved caller ([a51b06f](https://github.com/monygroupcorp/noema/commit/a51b06fc9f5eaa0516cf1ab1ea1f56e8a38a3d0f))
+
 ## [5.1.2](https://github.com/monygroupcorp/noema/compare/v5.1.1...v5.1.2) (2026-08-09)
 
 
