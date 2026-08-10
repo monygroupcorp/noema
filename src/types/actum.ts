@@ -161,6 +161,21 @@ export interface Actum {
   externusJobId?: string
 
   /**
+   * Per-job callback credential, minted when the run is dispatched and carried as the last path
+   * segment of the callback URL handed to the pod (`…/webhooks/runpod/<nonce>`). The inbound
+   * webhook resolves the actum by this value and requires it to be the same actum the reported
+   * job id resolves to, so a callback is admitted only for the job it reports.
+   *
+   * Same lifecycle as `externusJobId` — written in the same patch at dispatch — but STABLE across
+   * a pod retry (which rotates `externusJobId`), so the lookup is keyed on the nonce, never on the
+   * job id.
+   *
+   * Absent on acta dispatched before this field existed; those complete over the nonce-less
+   * callback route (see `webhookRouter`).
+   */
+  callbackNonce?: string
+
+  /**
    * True when `externusJobId` is a DEDICATED one-shot pod (e.g. a training pod) that
    * must be terminated when the run ends — on success as well as failure. Warm/pooled
    * pods (the `make` path) leave this unset: `complete()` keeps them alive for reuse and

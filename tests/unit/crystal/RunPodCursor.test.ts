@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { RunPodCursor } from '../../../src/crystal/RunPodCursor.js'
+import { RunPodCursor, withCallbackNonce } from '../../../src/crystal/RunPodCursor.js'
 import type { RunPodClient } from '../../../src/crystal/RunPodCursor.js'
 import type { Modus } from '../../../src/types/modus.js'
 import type { Actum } from '../../../src/types/actum.js'
@@ -65,6 +65,7 @@ function makeActorum(): Actorum & { updates: Array<{ id: string; patch: unknown 
     },
     findById: async (_id) => null,
     findByExternusJobId: async (_id) => null,
+    findByCallbackNonce: async (_nonce) => null,
     findExpired: async () => [],
   }
 }
@@ -174,13 +175,65 @@ test('run returns async result with externusJobId from client', async () => {
   assert.equal((result as { kind: 'async'; externusJobId: string }).externusJobId, 'job-xyz')
 })
 
-test('run passes webhookUrl from config to client', async () => {
+test('run submits the configured webhook base with this job\'s callback nonce appended', async () => {
   const client = makeClient()
-  const cursor = new RunPodCursor(client, makeCompile(), makeModorum(), makeActorum(), {
+  const actorum = makeActorum()
+  const cursor = new RunPodCursor(client, makeCompile(), makeModorum(), actorum, {
     webhookUrl: 'https://tee-pod.internal/webhooks/runpod',
   })
-  await cursor.run(makeActum())
-  assert.equal((client.calls[0] as { webhook: string }).webhook, 'https://tee-pod.internal/webhooks/runpod')
+  await cursor.run(makeActum({ id: 'my-actum' }))
+
+  const nonce = (actorum.updates.find(u => u.id === 'my-actum')!.patch as { callbackNonce: string }).callbackNonce
+  assert.ok(nonce, 'a callback nonce is minted for the job')
+  assert.equal(
+    (client.calls[0] as { webhook: string }).webhook,
+    `https://tee-pod.internal/webhooks/runpod/${nonce}`,
+  )
+})
+
+// The base URL is deployment-set and not normalized anywhere, so the join rule has to hold for a
+// base that carries a trailing slash too — a double slash would 404 the callback and strand the run.
+test('run joins the nonce onto a webhook base that carries a trailing slash', async () => {
+  const client = makeClient()
+  const actorum = makeActorum()
+  const cursor = new RunPodCursor(client, makeCompile(), makeModorum(), actorum, {
+    webhookUrl: 'https://api.noema.io/webhooks/runpod/',
+  })
+  await cursor.run(makeActum({ id: 'my-actum' }))
+
+  const nonce = (actorum.updates.find(u => u.id === 'my-actum')!.patch as { callbackNonce: string }).callbackNonce
+  const webhook = (client.calls[0] as { webhook: string }).webhook
+  assert.equal(webhook, `https://api.noema.io/webhooks/runpod/${nonce}`)
+  assert.ok(!webhook.includes('//webhooks') && !webhook.includes(`runpod//`), 'no doubled slash in the callback URL')
+})
+
+test('withCallbackNonce is the single join rule for every callback base', () => {
+  assert.equal(withCallbackNonce('https://h/webhooks/runpod', 'n'), 'https://h/webhooks/runpod/n')
+  assert.equal(withCallbackNonce('https://h/webhooks/runpod/', 'n'), 'https://h/webhooks/runpod/n')
+  assert.equal(withCallbackNonce('https://h/webhooks/runpod///', 'n'), 'https://h/webhooks/runpod/n')
+})
+
+// The nonce and the job id are one patch: a job is never in flight carrying one and not the other.
+test('run persists the callback nonce in the same patch as externusJobId', async () => {
+  const actorum = makeActorum()
+  const cursor = new RunPodCursor(makeClient('job-555'), makeCompile(), makeModorum(), actorum, BASE_CONFIG)
+  await cursor.run(makeActum({ id: 'my-actum' }))
+
+  const patch = actorum.updates.find(u => u.id === 'my-actum')!.patch as { externusJobId: string; callbackNonce: string }
+  assert.equal(patch.externusJobId, 'job-555')
+  assert.ok(patch.callbackNonce, 'the nonce rides the same write as the job id')
+})
+
+// Each dispatch mints its own — a nonce shared across jobs would bind a callback to nothing.
+test('run mints a distinct callback nonce per job', async () => {
+  const actorum = makeActorum()
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), actorum, BASE_CONFIG)
+  await cursor.run(makeActum({ id: 'actum-1' }))
+  await cursor.run(makeActum({ id: 'actum-2' }))
+
+  const nonces = ['actum-1', 'actum-2'].map(
+    id => (actorum.updates.find(u => u.id === id)!.patch as { callbackNonce: string }).callbackNonce)
+  assert.notEqual(nonces[0], nonces[1])
 })
 
 test('run passes compiled input to client', async () => {

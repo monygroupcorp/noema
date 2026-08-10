@@ -29,15 +29,22 @@ test('run: launches the pod job with high-level inputs, stamps externusJobId + a
   assert.deepEqual(result, { kind: 'async', externusJobId: 'pod-42' })
   assert.equal(h.launched.length, 1)
   // the cursor passes the high-level training inputs — NOT a configPath (the launcher owns the yaml).
-  assert.deepEqual(h.launched[0], { actumId: 'act-remote', jobId: 'job-9', dataset: 'corpus-1', baseModel: 'klein-4b', triggerWord: 'koh', steps: 600, autocaption: true, gpuId: '0', jobConfig: '{"x":1}' })
-  assert.deepEqual(h.updates, [{ id: 'act-remote', patch: { externusJobId: 'pod-42', oneshotPod: true, status: 'agens' } }])
+  assert.deepEqual(h.launched[0], { actumId: 'act-remote', jobId: 'job-9', dataset: 'corpus-1', baseModel: 'klein-4b', triggerWord: 'koh', steps: 600, autocaption: true, callbackNonce: h.launched[0].callbackNonce, gpuId: '0', jobConfig: '{"x":1}' })
+  // The per-job callback nonce is minted here and rides the spec to the pod. It is random, so it
+  // is captured rather than literal — but the invariant the completion rail depends on IS pinned:
+  // the nonce handed to the pod is the same one stamped on the actum, in the SAME patch as
+  // externusJobId. If those ever diverge the pod's callback resolves to no actum and the training
+  // run is stranded (and, per the migration rule, a nonce-less actum is treated as pre-migration).
+  const nonce = h.launched[0].callbackNonce
+  assert.match(String(nonce), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, 'a per-job callback nonce is minted')
+  assert.deepEqual(h.updates, [{ id: 'act-remote', patch: { externusJobId: 'pod-42', callbackNonce: nonce, oneshotPod: true, status: 'agens' } }])
 })
 
 test('run: jobId defaults to the actum id; optional fields omitted from the spec', async () => {
   const h = harness()
   const cursor = new RemoteAitoolkitTrainingCursor({ launcher: h.launcher, actorum: h.actorum })
   await cursor.run(actum(HIGH_LEVEL))
-  assert.deepEqual(h.launched[0], { actumId: 'act-remote', jobId: 'act-remote', dataset: 'corpus-1', baseModel: 'klein-4b', triggerWord: 'koh', steps: 600, autocaption: true })
+  assert.deepEqual(h.launched[0], { actumId: 'act-remote', jobId: 'act-remote', dataset: 'corpus-1', baseModel: 'klein-4b', triggerWord: 'koh', steps: 600, autocaption: true, callbackNonce: h.launched[0].callbackNonce })
 })
 
 test('run: autocaption defaults on, and aditus.autocaption:false threads through as opt-out', async () => {

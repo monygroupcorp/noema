@@ -22,6 +22,7 @@ import type { R2Config } from './comfyrunnerClient.js'
 import type { DatasetResolver } from './datasetManifest.js'
 import type { RemoteAitkLauncher as RemoteAitkLauncherPort, RemoteAitkLaunchSpec } from './RemoteAitoolkitTrainingCursor.js'
 import { buildAitkConfig, buildAitkCaptionConfig } from './aitkConfig.js'
+import { withCallbackNonce } from './RunPodCursor.js'
 
 /** Where the ai-toolkit clone lives on the pod (cloned at bootstrap; `aitktrainer.py`'s AITK_DIR). */
 export const POD_AITK_DIR = '/aitk'
@@ -97,7 +98,12 @@ export class RemoteAitkLauncher implements RemoteAitkLauncherPort {
       AITK_GPU_IDS: spec.gpuId ?? '0',
       NOEMA_ACTUM_ID: spec.actumId,
       NOEMA_STATUS_URL: this.deps.statusUrl,
-      NOEMA_WEBHOOK_URL: this.deps.webhookUrl,
+      // Completion sink. When the cursor minted a per-job callback nonce it rides as the last path
+      // segment, so the webhook can bind this pod's callback to this run; with no nonce on the
+      // spec the URL is the bare base, exactly as before.
+      NOEMA_WEBHOOK_URL: spec.callbackNonce
+        ? withCallbackNonce(this.deps.webhookUrl, spec.callbackNonce)
+        : this.deps.webhookUrl,
       R2_ENDPOINT: r2.endpoint,
       R2_ACCESS_KEY_ID: r2.accessKeyId,
       R2_SECRET_ACCESS_KEY: r2.secretAccessKey,

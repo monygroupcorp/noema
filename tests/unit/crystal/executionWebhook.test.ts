@@ -880,3 +880,119 @@ test('flowRouter identity takes precedence over actumIndex fallback', async () =
   assert.deepEqual(completor.completed[0].auctor, { animaId: 'anima-from-flow' })
   assert.equal(actumIndex.calls.length, 0)
 })
+
+// ── Callback admission (per-job nonce) ────────────────────────────────────────
+//
+// The nonce travels only in the callback URL handed to the pod at dispatch, so presenting it is
+// what admits the write. These pin that a refusal happens BEFORE any effect: no completion, no
+// ledger signa, no session impetus accrual.
+
+// 42. A callback presenting no nonce for a run that HAS one is refused with no side effects.
+test('nonce-less callback for a run that carries a nonce writes nothing', async () => {
+  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  await modorum.register({ ...TEST_MODUS })
+  const modos = new MemoryModo()
+  const modo = await modos.create({ status: 'active', impetusAccrued: 100n, acta: [], idleWarmthSec: 300 })
+  await seedActum(actorum, makeActum({ callbackNonce: 'nonce-A', modoId: modo.id }))
+
+  const completor = makeCompletor()
+  const deps: ExecutionWebhookDeps = { actorum, completor, nexus, signorum, modorum, modos }
+
+  const result = await handleExecutionWebhook(
+    makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }),
+    deps,
+  )
+
+  assert.equal(result.status, 404)
+  assert.equal(completor.completed.length, 0)
+  assert.equal((await signorum.history({ animaId: 'anima-flux-author' })).length, 0, 'no ledger signa on a refused callback')
+  assert.equal((await modos.findById(modo.id))?.impetusAccrued, 100n, 'no impetus accrual on a refused callback')
+  assert.equal((await actorum.findById('actum-test-1'))?.status, 'nascens')
+})
+
+// 43. A nonce belonging to another run, presented with this run's job id, is refused likewise.
+test('a nonce from a different run writes nothing', async () => {
+  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  await modorum.register({ ...TEST_MODUS })
+  const modos = new MemoryModo()
+  const modo = await modos.create({ status: 'active', impetusAccrued: 100n, acta: [], idleWarmthSec: 300 })
+  await seedActum(actorum, makeActum({ callbackNonce: 'nonce-A', modoId: modo.id }))
+  await seedActum(actorum, makeActum({ id: 'actum-test-2', externusJobId: 'job-other', callbackNonce: 'nonce-B' }))
+
+  const completor = makeCompletor()
+  const deps: ExecutionWebhookDeps = { actorum, completor, nexus, signorum, modorum, modos }
+
+  const result = await handleExecutionWebhook(
+    makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }, { nonce: 'nonce-B' }),
+    deps,
+  )
+
+  assert.equal(result.status, 404)
+  assert.equal(completor.completed.length, 0)
+  assert.equal((await signorum.history({ animaId: 'anima-flux-author' })).length, 0)
+  assert.equal((await modos.findById(modo.id))?.impetusAccrued, 100n)
+})
+
+// 44. The matching nonce completes the run exactly as before — the check adds admission only.
+test('the run\'s own nonce completes it and settles the ledger as before', async () => {
+  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  await modorum.register({ ...TEST_MODUS })
+  await seedActum(actorum, makeActum({ callbackNonce: 'nonce-A' }))
+
+  const completor = makeCompletor()
+  const deps: ExecutionWebhookDeps = { actorum, completor, nexus, signorum, modorum }
+
+  const result = await handleExecutionWebhook(
+    makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }, { nonce: 'nonce-A' }),
+    deps,
+  )
+
+  assert.equal(result.status, 200)
+  assert.equal(completor.completed.length, 1)
+  assert.equal(completor.completed[0].exitus.impetus, 200n)
+  assert.equal((await signorum.history({ animaId: 'anima-flux-author' })).length, 1, 'a valid completion still writes its royalty signum')
+})
+
+// 45. A nonce nobody holds resolves to nothing → refused.
+test('an unknown nonce is refused', async () => {
+  const { actorum } = makeLedgerDeps()
+  await seedActum(actorum, makeActum({ callbackNonce: 'nonce-A' }))
+  const completor = makeCompletor()
+
+  const result = await handleExecutionWebhook(
+    makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 1000 }, { nonce: 'guessed' }),
+    { actorum, completor },
+  )
+
+  assert.equal(result.status, 404)
+  assert.equal(completor.completed.length, 0)
+})
+
+// 46. Migration: a run dispatched before the nonce existed still completes on the nonce-less route.
+test('a run carrying no nonce still completes without one', async () => {
+  const { actorum } = makeLedgerDeps()
+  await seedActum(actorum, makeActum())   // no callbackNonce
+  const completor = makeCompletor()
+
+  const result = await handleExecutionWebhook(
+    makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 1000 }),
+    { actorum, completor },
+  )
+
+  assert.equal(result.status, 200)
+  assert.equal(completor.completed.length, 1)
+})
+
+// 47. Store round-trip: the nonce persists and is findable by it. Without this, a store whose
+//     patch pick-list omits the field would silently drop it — and a nonce-less actum is treated
+//     as pre-migration, so the loss would fail OPEN and be invisible.
+test('callbackNonce survives a round-trip through the actum store', async () => {
+  const actorum = new MemoryActorum()
+  await seedActum(actorum, makeActum({ callbackNonce: undefined }))
+
+  await actorum.update('actum-test-1', { externusJobId: 'job-abc-123', callbackNonce: 'nonce-A', status: 'agens' })
+
+  assert.equal((await actorum.findById('actum-test-1'))?.callbackNonce, 'nonce-A')
+  assert.equal((await actorum.findByCallbackNonce('nonce-A'))?.id, 'actum-test-1')
+  assert.equal(await actorum.findByCallbackNonce('nonce-B'), null)
+})
