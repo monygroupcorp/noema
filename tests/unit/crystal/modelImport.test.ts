@@ -6,8 +6,7 @@ import assert from 'node:assert/strict'
 import { resolveImport, mapToFamilia, ModelImportError, SecretRequiredError } from '../../../src/crystal/modelImportResolver.js'
 import { classifyBaseModel, licenseCommercial, civitaiCommercial, hfLicenseToId, combineCommercial, classifyModelLicense } from '../../../src/crystal/modelLicense.js'
 import type { JsonFetcher } from '../../../src/crystal/modelImportResolver.js'
-import { ModelImporter } from '../../../src/crystal/ModelImporter.js'
-import type { IntellaWriter } from '../../../src/crystal/trainingFinalizer.js'
+import { ModelImporter, deriveImportContentRating } from '../../../src/crystal/ModelImporter.js'
 import type { ModerationGate } from '../../../src/crystal/ModerationGate.js'
 import type { Intella } from '../../../src/types/intelligendi.js'
 
@@ -32,6 +31,14 @@ const CIVITAI_LORA = {
     { id: 999, name: 'v1.0', baseModel: 'SD 1.5', files: [{ name: 'old.safetensors', downloadUrl: 'https://civitai.com/api/download/models/999' }] },
   ],
 }
+
+// Same shape as CIVITAI_LORA but flagged adult by the origin itself. The numeric level is present
+// too (the resolver captures it raw) — the derivation must ignore it and read only the boolean.
+const CIVITAI_NSFW_LORA = { ...CIVITAI_LORA, id: 92655, name: 'Spicy Style', nsfw: true, nsfwLevel: 28 }
+
+// Flagged safe by the origin, with a high numeric level — the shape that proves the level is not
+// thresholded: mainstream checkpoints carry a high level purely from their community galleries.
+const CIVITAI_SFW_LORA = { ...CIVITAI_LORA, id: 92656, name: 'Mainstream Style', nsfw: false, nsfwLevel: 31 }
 
 const HF_LORA = {
   modelId: 'someuser/my-flux-lora',
@@ -267,17 +274,23 @@ test('unsupported URL is rejected', async () => {
 
 // ── Importer: private Intella, dedup, preview re-host ─────────────────────────
 
-function harness(opts: { gate?: ModerationGate; store?: boolean } = {}) {
+function harness(opts: { gate?: ModerationGate; store?: boolean; payload?: unknown } = {}) {
   const gate = opts.gate ?? { async scan() { return { ok: true } } }
   const upserts: Intella[] = []
   const puts: Array<{ key: string; bytes: Buffer }> = []
-  const intellae: IntellaWriter = { async upsert(i) { upserts.push(i) } }
-  const deps: ConstructorParameters<typeof ModelImporter>[0] = { json: jsonOf(CIVITAI_LORA), intellae, moderationGate: gate, now: () => new Date(0) }
+  // Records survive between imports so a re-import sees what the previous one wrote — the shape
+  // the store has in production (a full replace on the deterministic id, readable by `find`).
+  const records = new Map<string, Intella>()
+  const intellae = {
+    async upsert(i: Intella) { upserts.push(i); records.set(i.id, i) },
+    async find(id: string) { return records.get(id) ?? null },
+  }
+  const deps: ConstructorParameters<typeof ModelImporter>[0] = { json: jsonOf(opts.payload ?? CIVITAI_LORA), intellae, moderationGate: gate, now: () => new Date(0) }
   if (opts.store) {
     deps.fetcher = { async fetch() { return Buffer.from('IMG') } }
     deps.store = { async put(key, bytes) { puts.push({ key, bytes }); return `https://models.miladystation2.net/${key}` } }
   }
-  return { upserts, puts, importer: new ModelImporter(deps) }
+  return { upserts, puts, records, importer: new ModelImporter(deps) }
 }
 
 test('import: registers a private, owner-scoped, ORIGIN-ONLY Intella (no R2 weight copy)', async () => {
@@ -357,6 +370,94 @@ test('import: a Bursa purse (no animaId) can own an import — ownerKey set, own
   // A different purse → distinct record.
   const other = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerKey: 'bursa:cafe' })
   assert.notEqual(intella.id, other.id)
+})
+
+// ── Content rating: derived from the origin's own flag ────────────────────────
+
+test('deriveImportContentRating: the origin boolean is the whole table (both boolean and string form)', () => {
+  assert.equal(deriveImportContentRating({ originNsfw: true }), 'explicit')
+  assert.equal(deriveImportContentRating({ originNsfw: 'true' }), 'explicit')
+  assert.equal(deriveImportContentRating({ originNsfw: false }), 'sfw')
+  assert.equal(deriveImportContentRating({ originNsfw: 'false' }), 'sfw')
+})
+
+test('deriveImportContentRating: no signal → untriaged (absent key, absent meta, and wrong types)', () => {
+  assert.equal(deriveImportContentRating(undefined), 'untriaged')
+  assert.equal(deriveImportContentRating({}), 'untriaged')
+  assert.equal(deriveImportContentRating({ modelId: '92654', author: 'someartist' }), 'untriaged')
+  // Wrong types must fall through, never throw — origin.meta is loosely typed.
+  for (const value of [1, 0, null, 'yes', 'TRUE', {}, [], NaN]) {
+    assert.equal(deriveImportContentRating({ originNsfw: value }), 'untriaged', `value: ${String(value)}`)
+  }
+})
+
+test('deriveImportContentRating: the numeric level is never consulted — a high level with a false flag stays sfw', () => {
+  // The level aggregates a model's community gallery, so mainstream checkpoints read high while
+  // the origin's own flag says safe. Reading the level would hide them from the catalog.
+  assert.equal(deriveImportContentRating({ originNsfw: false, originNsfwLevel: 31 }), 'sfw')
+  assert.equal(deriveImportContentRating({ originNsfwLevel: 31 }), 'untriaged')
+  assert.equal(deriveImportContentRating({ originNsfw: true, originNsfwLevel: 0 }), 'explicit')
+})
+
+test('import: an origin-flagged adult model lands rated, and the raw signal survives the mapping', async () => {
+  const h = harness({ payload: CIVITAI_NSFW_LORA })
+  const intella = await h.importer.import({ url: 'https://civitai.com/models/92655', ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' })
+
+  assert.equal(intella.contentRating, 'explicit')
+  // The capture contract is untouched: the origin's fields stay raw and unmapped on the source.
+  assert.equal(intella.sources[0].meta?.originNsfw, true)
+  assert.equal(intella.sources[0].meta?.originNsfwLevel, 28)
+})
+
+test('import: an origin-flagged safe model lands sfw even with a high numeric level', async () => {
+  const h = harness({ payload: CIVITAI_SFW_LORA })
+  const intella = await h.importer.import({ url: 'https://civitai.com/models/92656', ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' })
+  assert.equal(intella.contentRating, 'sfw')
+})
+
+test('import: an origin with no nsfw signal at all stays untriaged', async () => {
+  const h = harness({ payload: HF_LORA })
+  const intella = await h.importer.import({ url: 'https://huggingface.co/someuser/my-flux-lora', ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' })
+  assert.equal(intella.contentRating, 'untriaged')
+  assert.equal(intella.sources[0].meta?.originNsfw, undefined)
+})
+
+test('import: the derivation is a DEFAULT — a re-import never overwrites a decided rating', async () => {
+  const h = harness({ payload: CIVITAI_NSFW_LORA })
+  const url = 'https://civitai.com/models/92655'
+  const first = await h.importer.import({ url, ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' })
+  assert.equal(first.contentRating, 'explicit')
+
+  // A human decides otherwise on the record (the triage outcome the derivation must not undo).
+  h.records.set(first.id, { ...h.records.get(first.id)!, contentRating: 'sfw' })
+  const again = await h.importer.import({ url, ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' })
+  assert.equal(again.id, first.id)               // full replace on the same deterministic id…
+  assert.equal(again.contentRating, 'sfw')       // …but the decided rating is carried over
+
+  // An 'untriaged' record is NOT a decision — a re-import re-derives it.
+  h.records.set(first.id, { ...h.records.get(first.id)!, contentRating: 'untriaged' })
+  const third = await h.importer.import({ url, ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' })
+  assert.equal(third.contentRating, 'explicit')
+})
+
+test('import: a writer with no read seam still derives (no read → no carry-over, never a throw)', async () => {
+  const importer = new ModelImporter({
+    json: jsonOf(CIVITAI_NSFW_LORA),
+    intellae: { async upsert() {} },
+    moderationGate: { async scan() { return { ok: true } } },
+  })
+  const intella = await importer.import({ url: 'https://civitai.com/models/92655', ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' })
+  assert.equal(intella.contentRating, 'explicit')
+})
+
+test('import: a failing read does not sink the import — the rating falls back to the derived value', async () => {
+  const importer = new ModelImporter({
+    json: jsonOf(CIVITAI_NSFW_LORA),
+    intellae: { async upsert() {}, async find() { throw new Error('store unavailable') } },
+    moderationGate: { async scan() { return { ok: true } } },
+  })
+  const intella = await importer.import({ url: 'https://civitai.com/models/92655', ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' })
+  assert.equal(intella.contentRating, 'explicit')
 })
 
 // ── CrystalApi facade: import auth/delegation + owner-scoped listing ──────────

@@ -30,6 +30,10 @@
 2. **Public/active catalogue → gated by review.** Appearing on the shared catalogue is a
    *separate, user-invoked* promotion that must pass moderation before it lists publicly. This is
    where "the public top-page isn't NSFW" is enforced — it governs **listing, not personal use**.
+   *Known divergence:* the adult filter in `CrystalApi.listModels` also applies to the owner's own
+   models when a caller passes `auctor` (today only `ConciergeAgent`), so an adult-rated model its
+   owner imported for private use drops out of concierge model selection unless spicy mode is on.
+   Listing-only is the intended rule; aligning that caller is a follow-up.
 
 ## Two gates, kept distinct
 
@@ -58,8 +62,36 @@ access: 'private',                  // owner-scoped
 ownerAnimaId: <importer animaId>,   // MongoIntella.buildAccessOrClauses resolves ONLY for owner
 familia, trigger, slug,             // compat key + usability (/make picks it up instantly)
 nomen, description?, samples?, provenance?: { repo, base }, tags?,
+contentRating,                      // DERIVED from the origin's own adult flag — see below
 natum: now(),
 ```
+
+### Content rating at import (derived, not constant)
+
+`contentRating` is derived by `deriveImportContentRating` (`src/crystal/ModelImporter.ts`) from the
+adult-content flag the origin publishes about itself, which the resolver captures raw and unmapped
+onto `sources[0].meta` as `originNsfw`:
+
+| origin signal on `origin.meta` | `contentRating` |
+|---|---|
+| `originNsfw` true (boolean, or the string `'true'`) | `explicit` |
+| `originNsfw` false (boolean, or the string `'false'`) | `sfw` |
+| absent, or any other value | `untriaged` |
+
+- **Only the boolean is read.** Civitai also publishes a numeric `nsfwLevel`; that number aggregates
+  the community images posted to a model's gallery rather than describing the model, so mainstream
+  checkpoints read high on it while their own flag says safe. It stays captured raw in `origin.meta`
+  and is never consulted — `tests/unit/architecture/importContentRating.test.ts` enforces that.
+- **HuggingFace and direct-file imports carry no such flag** and therefore stay `untriaged`. Titles
+  are not keyword-scanned: `untriaged` is the honest value for "no signal".
+- **`suggestive` is unreachable from an import** by design — the origin publishes a binary, so a
+  binary is all that can honestly be derived. It remains a human-triage value.
+- **The derived value is a DEFAULT, never a downgrade.** `MongoIntella.upsert` is a full document
+  replace on the deterministic `(owner, origin)` id, so the importer reads the existing record first
+  and keeps any rating already decided (`sfw`/`suggestive`/`explicit`); only an absent or
+  `untriaged` rating is (re-)derived. A re-import cannot reset a reviewed record.
+- **The rating does not gate the import itself.** It is a stamp: private use stays ungated (Tier 1),
+  and it exists to give the Tier 2 promotion reviewer a machine-derived signal instead of a constant.
 
 - **Owner-scoping is free:** `MongoIntella.buildAccessOrClauses(animaId)` already makes
   `access:'private' + ownerAnimaId` resolve only for the owner in `findByTrigger`/`triggerMap`;

@@ -30,7 +30,7 @@
 // =============================================================================
 
 import { createHash } from 'node:crypto'
-import type { Intella } from '../types/intelligendi.js'
+import type { Intella, IntellaContentRating } from '../types/intelligendi.js'
 import type { Uploader } from './R2Uploader.js'
 import type { MediaFetcher } from './MediaFetcher.js'
 import type { ModerationGate } from './ModerationGate.js'
@@ -60,8 +60,11 @@ export interface ModelImporterDeps {
    *  absent → gated origins fall back to the auth-free `json` (public metadata only). A legitimate
    *  `resolve` consumer per the Secretarium ASYMMETRY — never exposed to CrystalApi/router. */
   gatedFetcherFor?: (ownerKey: string) => JsonFetcher
-  /** The Intella write seam — `MongoIntella.upsert` satisfies it. */
-  intellae: IntellaWriter
+  /** The Intella write seam — `MongoIntella.upsert` satisfies it. `find` is an OPTIONAL read the
+   *  same store already exposes: when present (as on `MongoIntella`), a re-import reads the
+   *  existing record so a rating a human already decided is never rewritten by the derivation
+   *  below. A writer without `find` (read-less fakes) simply derives on every import. */
+  intellae: IntellaWriter & { find?(id: string): Promise<Intella | null> }
   /** Trust-boundary CSAM/NCMEC scan for preview media (fail-closed). */
   moderationGate: ModerationGate
   /** OUR R2 bucket — re-hosts PREVIEW media only (never weights). Absent → previews
@@ -72,6 +75,38 @@ export interface ModelImporterDeps {
   /** R2 key prefix for re-hosted previews — default 'model-previews'. */
   previewPrefix?: string
   now?: () => Date
+}
+
+/**
+ * Derive an imported model's adult-content rating from the origin's own flag.
+ *
+ * Pure — takes the raw `origin.meta` the resolver captured (the origin's fields are stored
+ * unmapped there) and returns a rating. No I/O, no clock, no deps, and it never throws:
+ * `origin.meta` is a loosely-typed record and a malformed value must not sink an import.
+ *
+ *   `originNsfw` true  (or the string `'true'`)  → 'explicit'
+ *   `originNsfw` false (or the string `'false'`) → 'sfw'
+ *   absent, or any other value                   → 'untriaged'
+ *
+ * ONLY that boolean is read. Civitai publishes a numeric `nsfwLevel` alongside it, and that
+ * number is an AGGREGATE BITMASK OVER THE COMMUNITY IMAGES POSTED TO A MODEL'S GALLERY — not a
+ * statement about the model. Probed against the live API on 2026-08-10: DreamShaper reads 15,
+ * Juggernaut XL 31, Pony Diffusion V6 XL 7 and a hands-fixing LoRA 31, every one of them with the
+ * boolean `false`, because somebody posted a spicy image to the gallery. Thresholding that number
+ * would rate the most mainstream checkpoints in existence as adult and hide them from the catalog.
+ * Do not "improve" this function by reading the level — the guard test
+ * `tests/unit/architecture/importContentRating.test.ts` enforces its absence.
+ *
+ * 'suggestive' is unreachable from here BY DESIGN: the origin publishes a binary, so a binary is
+ * all that can honestly be derived. It stays a human-triage-only value.
+ */
+export function deriveImportContentRating(
+  meta: Record<string, unknown> | undefined,
+): IntellaContentRating {
+  const flag = meta?.['originNsfw']
+  if (flag === true || flag === 'true') return 'explicit'
+  if (flag === false || flag === 'false') return 'sfw'
+  return 'untriaged'
 }
 
 export class ModelImporter {
@@ -120,6 +155,19 @@ export class ModelImporter {
       samples = await this.rehostPreviews(id, samples)
     }
 
+    // Rating: DERIVED as a default, never a downgrade. `upsert` is a full replace on the
+    // deterministic id, so a re-import would otherwise reset a rating a human already decided.
+    // Read the existing record first (through the read the store already exposes) and keep any
+    // decided rating; only an absent or 'untriaged' one is (re-)derived. A read failure is
+    // non-fatal — fall back to the derived value rather than sink the import.
+    let decided: IntellaContentRating | undefined
+    try {
+      decided = (await this.deps.intellae.find?.(id))?.contentRating
+    } catch (err) {
+      log.warn('could not read the existing record; deriving the rating', { id, error: String(err) })
+    }
+    const rating = decided && decided !== 'untriaged' ? decided : deriveImportContentRating(resolved.origin.meta)
+
     const intella: Intella = {
       id,
       nomen: resolved.nomen,
@@ -133,7 +181,7 @@ export class ModelImporter {
       sizeGb: (resolved.sizeBytes ?? 0) / 1e9,
       versio: '1.0.0',
       canonica: false,            // NOT on the public catalogue
-      contentRating: 'untriaged', // every import starts unreviewed (spec §9)
+      contentRating: rating,      // derived from the origin's own flag (spec §9)
       access: 'private',          // owner-scoped resolution (buildAccessOrClauses)
       ownerKey: input.ownerKey,   // generic owner (Bursa-capable) — the resolution gate
       // Legacy display/resolution field — only when the owner is an anima.
