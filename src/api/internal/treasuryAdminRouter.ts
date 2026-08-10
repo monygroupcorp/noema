@@ -22,7 +22,7 @@ export interface TreasuryAdminDeps {
   signorum: Pick<Signorum, 'issue' | 'transfer' | 'balance'>
   legati: Pick<LegatusStore, 'findByAgentId'>
   treasury: (treasuryId: string) => TreasuryConfig | null
-  /** `x-internal-secret` gate. Absent → open (dev only). */
+  /** `x-internal-secret` gate. Absent → every request is refused (401). */
   secret?: string
 }
 
@@ -35,13 +35,13 @@ function parsePoints(raw: unknown): bigint | null {
 export function createTreasuryAdminRouter(deps: TreasuryAdminDeps): Router {
   const router = express.Router()
 
+  // The gate is unconditional: an unconfigured secret refuses every request rather than
+  // admitting it. Configuration is asserted at boot (see `src/index.ts`).
   router.use((req: Request, res: Response, next): void => {
-    if (deps.secret) {
-      const provided = req.headers['x-internal-secret'] ?? req.query.token
-      if (provided !== deps.secret) {
-        res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'invalid internal secret' } })
-        return
-      }
+    const provided = req.headers['x-internal-secret'] ?? req.query.token
+    if (!deps.secret || provided !== deps.secret) {
+      res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'invalid internal secret' } })
+      return
     }
     next()
   })

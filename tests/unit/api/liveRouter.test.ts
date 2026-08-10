@@ -107,9 +107,9 @@ test('GET /internal/live returns 200 with Content-Type text/event-stream when se
 // ---------------------------------------------------------------------------
 
 test('bus log event is forwarded as SSE event: log line', async () => {
-  const { server, url } = await createServer()  // no secret — dev mode
+  const { server, url } = await createServer('supersecret')
   try {
-    const res = await httpGet(`${url}/internal/live`)
+    const res = await httpGet(`${url}/internal/live`, { 'x-internal-secret': 'supersecret' })
     assert.equal(res.statusCode, 200)
 
     const entry: LogEntry = {
@@ -137,9 +137,9 @@ test('bus log event is forwarded as SSE event: log line', async () => {
 // ---------------------------------------------------------------------------
 
 test('bus actum.complete event is forwarded as SSE event: actum.complete line', async () => {
-  const { server, url } = await createServer()
+  const { server, url } = await createServer('supersecret')
   try {
-    const res = await httpGet(`${url}/internal/live`)
+    const res = await httpGet(`${url}/internal/live`, { 'x-internal-secret': 'supersecret' })
     assert.equal(res.statusCode, 200)
 
     const wide: WideEvent = {
@@ -174,9 +174,9 @@ test('bus actum.complete event is forwarded as SSE event: actum.complete line', 
 // ---------------------------------------------------------------------------
 
 test('bus listeners are removed when client disconnects', async () => {
-  const { server, url } = await createServer()
+  const { server, url } = await createServer('supersecret')
   try {
-    const res = await httpGet(`${url}/internal/live`)
+    const res = await httpGet(`${url}/internal/live`, { 'x-internal-secret': 'supersecret' })
     assert.equal(res.statusCode, 200)
 
     // Wait for subscription to register
@@ -199,19 +199,43 @@ test('bus listeners are removed when client disconnects', async () => {
 })
 
 // ---------------------------------------------------------------------------
-// Test 6 — auth skipped when no secret configured
+// Test 6 — fail-closed: no secret configured ⇒ every request refused
 // ---------------------------------------------------------------------------
 
-test('auth is skipped when INTERNAL_SECRET is not configured', async () => {
+test('requests are refused when INTERNAL_SECRET is not configured', async () => {
   const { server, url } = await createServer(undefined)  // no secret
   try {
-    // Request with no auth header at all — should get 200
+    // No credential in the request either — an unconfigured gate must refuse, not admit.
     const res = await httpGet(`${url}/internal/live`)
-    assert.equal(res.statusCode, 200)
+    const { statusCode, headers } = res
+    res.destroy()   // release the socket first: a regression would hold an SSE stream open
+    assert.equal(statusCode, 401)
     assert.ok(
-      res.headers['content-type']?.includes('text/event-stream'),
-      `expected text/event-stream, got: ${res.headers['content-type']}`,
+      !headers['content-type']?.includes('text/event-stream'),
+      `expected no event-stream, got: ${headers['content-type']}`,
     )
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a supplied credential does not open an unconfigured gate', async () => {
+  const { server, url } = await createServer(undefined)  // no secret
+  try {
+    const res = await httpGet(`${url}/internal/live`, { 'x-internal-secret': 'anything' })
+    const { statusCode } = res
+    res.destroy()
+    assert.equal(statusCode, 401)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('?token= query credential is still accepted when configured', async () => {
+  const { server, url } = await createServer('supersecret')
+  try {
+    const res = await httpGet(`${url}/internal/live?token=supersecret`)
+    assert.equal(res.statusCode, 200)
     res.destroy()
   } finally {
     await closeServer(server)

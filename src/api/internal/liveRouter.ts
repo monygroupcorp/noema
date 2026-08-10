@@ -5,13 +5,12 @@ export function createLiveRouter(secret?: string): Router {
   const router = Router()
 
   router.get('/live', (req, res) => {
-    // Auth — skip if INTERNAL_SECRET not configured (dev mode)
-    if (secret) {
-      const provided = req.headers['x-internal-secret'] ?? req.query.token
-      if (provided !== secret) {
-        res.status(401).json({ error: 'unauthorized' })
-        return
-      }
+    // Auth — unconditional. An unconfigured INTERNAL_SECRET refuses every request rather
+    // than admitting it; configuration is asserted at boot (see `src/index.ts`).
+    const provided = req.headers['x-internal-secret'] ?? req.query.token
+    if (!secret || provided !== secret) {
+      res.status(401).json({ error: 'unauthorized' })
+      return
     }
 
     res.setHeader('Content-Type', 'text/event-stream')

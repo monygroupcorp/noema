@@ -142,6 +142,27 @@ test('active manifest surfaces status + USDC billing; wrong revoke token → 403
   assert.equal(badRevoke.status, 403)
 })
 
+test('a record carrying no revokeToken is not revocable through this route → 403', async () => {
+  const { server, kit, legati } = await app()
+  const prov = await request(server).post('/api/v1/treasury/camelcabal-1/agents').set('authorization', `Bearer ${signES256(kit, camelClaims())}`).send({})
+  const id = prov.body.agentAccountId
+
+  // Every crystal-created Legatus has a revokeToken; simulate one that does not (the shape a
+  // record from another creation path could take). The gate must refuse, not admit.
+  const stored = await legati.findById(id)
+  assert.ok(stored)
+  delete (stored as { revokeToken?: string }).revokeToken
+
+  const noToken = await request(server).post(`/api/v1/sessions/${id}/revoke`).send({})
+  assert.equal(noToken.status, 403)
+
+  const anyToken = await request(server).post(`/api/v1/sessions/${id}/revoke`).query({ token: 'anything' }).send({})
+  assert.equal(anyToken.status, 403)
+
+  const after = await legati.findById(id)
+  assert.equal(after!.status, 'active')
+})
+
 test('unknown manifest → 404', async () => {
   const { server } = await app()
   const res = await request(server).get('/api/v1/agents/ghost/manifest')

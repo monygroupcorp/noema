@@ -4,11 +4,11 @@ import type { WideEventStore } from '../../analytics/WideEventStore.js'
 export function createAnalyticsRouter(store: WideEventStore, secret?: string): Router {
   const router = Router()
 
+  // The gate is unconditional: an unconfigured secret refuses every request rather than
+  // admitting it. Configuration is asserted at boot (see `src/index.ts`).
   function auth(req: import('express').Request, res: import('express').Response, next: import('express').NextFunction): void {
-    if (secret) {
-      const provided = req.headers['x-internal-secret'] ?? req.query.token
-      if (provided !== secret) { res.status(401).json({ error: 'unauthorized' }); return }
-    }
+    const provided = req.headers['x-internal-secret'] ?? req.query.token
+    if (!secret || provided !== secret) { res.status(401).json({ error: 'unauthorized' }); return }
     next()
   }
 
