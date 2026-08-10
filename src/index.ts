@@ -1374,6 +1374,13 @@ async function main(): Promise<void> {
   app.use('/v1/mcp', createMcpRouter({ api: crystalApi, identity: apiResolver }))
 
   const INTERNAL_SECRET = process.env.INTERNAL_SECRET
+  // The `/internal` routers below check `INTERNAL_SECRET` unconditionally, so an unset value
+  // leaves them refusing every request. In production that is a misconfiguration rather than a
+  // posture — fail the boot so it surfaces immediately instead of as a silent dead surface.
+  // Outside production the routers stay fail-closed; only the assertion is skipped.
+  if (process.env.NODE_ENV === 'production' && !INTERNAL_SECRET) {
+    throw new Error('INTERNAL_SECRET must be set in production: the /internal routers refuse all requests without it')
+  }
   startAnalyticsListener(wideStore)
 
   // Idle-pod reaper — terminate warm pods that sat idle past their warmUntil
