@@ -2185,10 +2185,12 @@ export class CrystalApi {
    *
    * `auctor` (optional): when passed, the search base is the UNION of the public
    * `canonical()` set and that caller's own privately-held models (the same owner
-   * scoping `listMyModels` uses), deduped by intella id, then filtered by the exact
-   * same q/genus/basis/trigger/includeAdult predicate below — so canonical and owned
-   * results are matched identically. Omitting `auctor` preserves today's public-only
-   * behavior for every existing caller (noema-116).
+   * scoping `listMyModels` uses), deduped by intella id, then filtered by the
+   * q/genus/basis/trigger predicate below — so canonical and owned results are matched
+   * identically on every search axis. The one exception is the adult-content gate, which
+   * governs listing rather than personal use and so does not apply to records the caller
+   * owns; it applies unchanged to everything else. Omitting `auctor` preserves today's
+   * public-only behavior for every existing caller (noema-116).
    */
   async listModels(filter: { genus?: IntelligensGenus; basis?: string; fundamentumId?: string; trigger?: string; q?: string; limit?: number; includeAdult?: boolean; sort?: string; auctor?: AuctorKey } = {}): Promise<ModelCard[]> {
     if (!this.deps.intellarum) return []
@@ -2204,11 +2206,15 @@ export class CrystalApi {
       }
     }
     let pool = await readPublicCatalog(registry)
+    // Ids the caller owns, captured where the union happens. Empty without `auctor`, so every
+    // existing caller's result set is unchanged.
+    const ownedIds = new Set<string>()
     if (filter.auctor) {
       const ownerKey = ownerKeyOf(filter.auctor)
       const owned = registry.listByOwner
         ? await registry.listByOwner(ownerKey)
         : (await registry.list()).filter((i) => i.ownerKey === ownerKey || `anima:${i.ownerAnimaId}` === ownerKey)
+      for (const i of owned) ownedIds.add(i.id)
       const seen = new Set(pool.map((i) => i.id))
       pool = [...pool, ...owned.filter((i) => !seen.has(i.id))]
     }
@@ -2237,8 +2243,20 @@ export class CrystalApi {
       // caller has spicyMode on (`includeAdult`, which itself required a recorded 18+ attestation).
       // {untriaged, sfw} (and unrated) are ALWAYS visible, to everyone incl. anon. OFF (the default,
       // `includeAdult` falsy) EXCLUDES the adult set everywhere `listModels` feeds selection — the safe
-      // default. Harmless today (0 seeds rated adult); the correct gate for when models get rated.
-      if (!filter.includeAdult && i.contentRating !== undefined && ADULT_CONTENT_RATINGS.has(i.contentRating)) return false
+      // default.
+      //
+      // The gate governs LISTING, not personal use (spec/model-import.md §"Two tiers"): a record the
+      // caller owns is on their own shelf and is exempt — an owner reaches their own privately-held
+      // models with spicy mode off. The exemption is owner-scoped by construction: `ownedIds` is
+      // populated only from the `auctor` union above, so it is empty on the public/anon path and the
+      // gate keeps applying, unchanged, to every record the caller does not own. Every other clause
+      // (genus/basis/trigger/q) still applies to owned records exactly as before.
+      if (
+        !filter.includeAdult &&
+        !ownedIds.has(i.id) &&
+        i.contentRating !== undefined &&
+        ADULT_CONTENT_RATINGS.has(i.contentRating)
+      ) return false
       return true
     })
     // Order BEFORE the slice — sorting a limited page would page the wrong records.
