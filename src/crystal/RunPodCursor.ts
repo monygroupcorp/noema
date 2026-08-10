@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { Modus, Modorum } from '../types/modus.js'
 import type { Actum, ActumExecutio, ModelRef } from '../types/actum.js'
 import type { Modo } from '../types/modo.js'
@@ -14,6 +15,16 @@ import { isCompiledSpec } from './comfyrunnerClient.js'
 import { makeLogger } from '../lib/logger.js'
 
 const log = makeLogger('cursor:runpod')
+
+/**
+ * The single join rule for callback URLs: the deployment-set base (which may or may not carry a
+ * trailing slash) plus the per-job nonce as one more path segment. Every rail that registers an
+ * inbound callback uses this, so the URL the pod receives always matches the route the server
+ * mounts — a double slash or a dropped segment would 404 the callback and strand the run.
+ */
+export function withCallbackNonce(baseUrl: string, nonce: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/${nonce}`
+}
 
 /**
  * RunPodClient — the injectable seam between the cursor and any GPU pod substrate.
@@ -225,9 +236,16 @@ export class RunPodCursor implements Cursor {
         log.warn('warm admission install failed; job preflight will retry the download', { materiaId: materia.id, error: String(err) }))
     }
 
+    // Per-job callback credential. The pod POSTs its completion to whatever URL we hand it at
+    // submit time, so the credential rides in that URL's last path segment; the webhook admits a
+    // callback only for the actum the nonce resolves to. Minted here so it lands on the actum in
+    // the SAME patch as `externusJobId` (below) — a job is never in flight with one and not the
+    // other. Stable across a retry pod, which rotates only `externusJobId`.
+    const callbackNonce = randomUUID()
+
     const { id: externusJobId } = await client.submit({
       input,
-      webhook: this.config.webhookUrl,
+      webhook: withCallbackNonce(this.config.webhookUrl, callbackNonce),
       ...(jobToken ? { jobToken } : {}),
       provisioningContext: provCtx,
       onPodActive: async (newPodId) => {
@@ -245,7 +263,7 @@ export class RunPodCursor implements Cursor {
       },
     })
 
-    await this.actorum.update(actum.id, { externusJobId, deploymentHash: hash, status: 'agens' })
+    await this.actorum.update(actum.id, { externusJobId, callbackNonce, deploymentHash: hash, status: 'agens' })
 
     return { kind: 'async', externusJobId }
   }

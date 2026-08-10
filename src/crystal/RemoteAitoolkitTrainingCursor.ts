@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { Cursor, CursorResult, Actorum } from '../types/cursus.js'
 import type { Actum } from '../types/actum.js'
 import type { Modus } from '../types/modus.js'
@@ -54,6 +55,13 @@ export interface RemoteAitkLaunchSpec {
   gpuId?: string
   /** Optional JSON stored on the Job row. */
   jobConfig?: string
+  /**
+   * Per-job callback credential. When present the launcher appends it to the completion webhook
+   * URL it injects into the pod, so the callback is admitted only for this run. Minted by the
+   * CURSOR (not the launcher) because the cursor is what persists it on the actum — a
+   * launcher-side mint would leave a pod live with a nonce the actum does not yet carry.
+   */
+  callbackNonce?: string
 }
 
 /** Provision a pod + launch the ai-toolkit run; resolves with the external run handle. */
@@ -94,8 +102,13 @@ export class RemoteAitoolkitTrainingCursor implements Cursor {
     const resumeFrom = typeof aditus.resumeFrom === 'string' && aditus.resumeFrom.trim() ? aditus.resumeFrom.trim() : undefined
     const samplePrompts = parseSamplePrompts(aditus.samplePrompts)
 
+    // Per-job callback credential — minted before launch so the pod's webhook URL carries it, and
+    // persisted below in the SAME patch as `externusJobId`, so a training pod is never in flight
+    // with a nonce the actum does not carry.
+    const callbackNonce = randomUUID()
+
     const { externusJobId } = await this.deps.launcher.launch({
-      actumId: actum.id, jobId, dataset, baseModel, triggerWord, steps, autocaption,
+      actumId: actum.id, jobId, dataset, baseModel, triggerWord, steps, autocaption, callbackNonce,
       ...(gpuId ? { gpuId } : {}),
       ...(jobConfig ? { jobConfig } : {}),
       ...(resumeFrom ? { resumeFrom } : {}),
@@ -105,7 +118,7 @@ export class RemoteAitoolkitTrainingCursor implements Cursor {
     // The training pod is dedicated + one-shot — flag it so the completor terminates it
     // when the run ends (success or failure), not just on failure. Without this the pod
     // leaks: complete() keeps warm pods alive, and the idle reaper only sweeps pooled pods.
-    await this.deps.actorum.update(actum.id, { externusJobId, oneshotPod: true, status: 'agens' })
+    await this.deps.actorum.update(actum.id, { externusJobId, callbackNonce, oneshotPod: true, status: 'agens' })
     return { kind: 'async', externusJobId }
   }
 }

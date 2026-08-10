@@ -59,7 +59,7 @@ export class MongoActorum implements Actorum {
 
   async update(
     id: string,
-    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'deploymentHash' | 'executio' | 'progressus' | 'phaseDurations'>>
+    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'callbackNonce' | 'oneshotPod' | 'resumeCheckpoint' | 'deploymentHash' | 'executio' | 'progressus' | 'phaseDurations'>>
   ): Promise<Actum> {
     const { impetus, executio, ...rest } = patch
     const $set: Record<string, unknown> = { ...rest }
@@ -82,6 +82,11 @@ export class MongoActorum implements Actorum {
 
   async findByExternusJobId(externusJobId: string): Promise<Actum | null> {
     const doc = await this.col.findOne({ externusJobId })
+    return doc ? fromDoc(doc) : null
+  }
+
+  async findByCallbackNonce(callbackNonce: string): Promise<Actum | null> {
+    const doc = await this.col.findOne({ callbackNonce })
     return doc ? fromDoc(doc) : null
   }
 

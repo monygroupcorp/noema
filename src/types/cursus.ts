@@ -168,11 +168,17 @@ export interface Actorum {
    */
   update(
     id: string,
-    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'oneshotPod' | 'resumeCheckpoint' | 'deploymentHash' | 'executio' | 'progressus' | 'phaseDurations'>>
+    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'callbackNonce' | 'oneshotPod' | 'resumeCheckpoint' | 'deploymentHash' | 'executio' | 'progressus' | 'phaseDurations'>>
   ): Promise<Actum>
   findById(id: string): Promise<Actum | null>
   /** Find an actum by the external job ID assigned at submission time. */
   findByExternusJobId(externusJobId: string): Promise<Actum | null>
+  /**
+   * Find an actum by the per-job callback nonce minted at dispatch. The inbound execution
+   * webhook admits a callback only when this resolves to the same actum the reported job id
+   * resolves to. Stable across a pod retry (which rotates `externusJobId`).
+   */
+  findByCallbackNonce(callbackNonce: string): Promise<Actum | null>
   /**
    * Find a LIVE actum by its nullifier — the spend proof stamped when an arcanum signum was
    * consumed. Used to reject double-spend attempts. Excludes FAILED (`fractus`) acta: a failed run

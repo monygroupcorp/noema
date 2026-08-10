@@ -10,7 +10,7 @@ export class MemoryActorum implements Actorum {
     return record
   }
 
-  async update(id: string, patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'deploymentHash' | 'executio' | 'progressus' | 'phaseDurations'>>): Promise<Actum> {
+  async update(id: string, patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'callbackNonce' | 'oneshotPod' | 'resumeCheckpoint' | 'deploymentHash' | 'executio' | 'progressus' | 'phaseDurations'>>): Promise<Actum> {
     const existing = this.store.get(id)
     if (!existing) throw new Error(`Actum '${id}' not found`)
     const updated = { ...existing, ...patch }
@@ -25,6 +25,13 @@ export class MemoryActorum implements Actorum {
   async findByExternusJobId(externusJobId: string): Promise<Actum | null> {
     for (const actum of this.store.values()) {
       if (actum.externusJobId === externusJobId) return actum
+    }
+    return null
+  }
+
+  async findByCallbackNonce(callbackNonce: string): Promise<Actum | null> {
+    for (const actum of this.store.values()) {
+      if (actum.callbackNonce === callbackNonce) return actum
     }
     return null
   }
