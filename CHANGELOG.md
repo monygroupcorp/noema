@@ -16,6 +16,8 @@
 
 * align Dockerfile Node base image with CI's Node 22 ([7832e91](https://github.com/monygroupcorp/noema/commit/7832e9172f2c43b4a5a7596a2f25999f63074eb3))
 * align Dockerfile Node base image with CI's Node 22 ([d9d8fe7](https://github.com/monygroupcorp/noema/commit/d9d8fe75fcaedc58434de703865a5a919b325d26))
+* **catalog:** exempt a caller's own models from the adult filter in listModels ([e7192c8](https://github.com/monygroupcorp/noema/commit/e7192c8a05ee21e16867a3f832e9f14411e61d7d))
+* **catalog:** exempt a caller's own models from the adult filter in listModels ([eb87c53](https://github.com/monygroupcorp/noema/commit/eb87c530a0779e25377ded8e9b6e47a802ea5f93))
 * **crystal:** repair dead HuggingFace intella download URIs after the org rename ([bc737f7](https://github.com/monygroupcorp/noema/commit/bc737f75f74e5133b2891114d5511d8d447be501))
 * **crystal:** repair dead HuggingFace intella download URIs after the org rename ([14ec714](https://github.com/monygroupcorp/noema/commit/14ec7145b75e7186ac89bc493172140460ca2f3e))
 * **internal-api:** make credential checks unconditional and assert configuration at boot ([d063a5a](https://github.com/monygroupcorp/noema/commit/d063a5a4bd45415ae7ab8e0386a0a56193aa6ae3))
