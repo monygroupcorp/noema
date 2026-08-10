@@ -30,10 +30,12 @@
 2. **Public/active catalogue → gated by review.** Appearing on the shared catalogue is a
    *separate, user-invoked* promotion that must pass moderation before it lists publicly. This is
    where "the public top-page isn't NSFW" is enforced — it governs **listing, not personal use**.
-   *Known divergence:* the adult filter in `CrystalApi.listModels` also applies to the owner's own
-   models when a caller passes `auctor` (today only `ConciergeAgent`), so an adult-rated model its
-   owner imported for private use drops out of concierge model selection unless spicy mode is on.
-   Listing-only is the intended rule; aligning that caller is a follow-up.
+   Listing-only is what `CrystalApi.listModels` implements: when a caller passes `auctor` (today only
+   `ConciergeAgent`), the records that caller owns are exempt from the adult filter, so an
+   adult-rated model its owner imported for private use stays selectable with spicy mode off. The
+   exemption is owner-scoped through the same `auctor` union — it is unreachable without an `auctor`,
+   and the filter applies unchanged to every record the caller does not own, including the whole
+   public/anon catalogue.
 
 ## Two gates, kept distinct
 
