@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.2
 
 # Stage 1: Build the new React app (served when STAGING_FRONTEND=1)
-FROM node:20-slim AS app-builder
+FROM node:22-slim AS app-builder
 WORKDIR /webapp
 COPY src/platforms/web/app/package*.json ./
 RUN npm ci
@@ -9,7 +9,7 @@ COPY src/platforms/web/app/ ./
 RUN npm run build
 
 # Stage 2: Compile TypeScript
-FROM node:20-slim AS ts-builder
+FROM node:22-slim AS ts-builder
 WORKDIR /build
 COPY package*.json ./
 RUN npm ci --legacy-peer-deps
@@ -26,7 +26,7 @@ RUN find src \( -name '*.json' -o -name '*.js' -o -name '*.wasm' -o -name '*.zke
 done
 
 # Stage 3: Production
-FROM node:20-slim
+FROM node:22-slim
 WORKDIR /usr/src/app
 
 # Install system dependencies (slim needs them explicitly)
