@@ -507,7 +507,16 @@ Source `'auto'` is dropped from `tags[].source` until we have a specific produce
 - `contentRating` — required. Enum: `'untriaged' | 'sfw' | 'suggestive' | 'explicit'`.
   - User uploads default to `'untriaged'`.
   - Canonical models default to `'sfw'`.
-  - Admin promotes to `'sfw'/'suggestive'/'explicit'` during review.
+  - **URL imports arrive pre-derived**, not `'untriaged'`: `deriveImportContentRating`
+    (`src/crystal/ModelImporter.ts`) maps the adult flag the origin publishes about itself to
+    `'explicit'` (flagged) or `'sfw'` (flagged safe); an origin that publishes no such flag still
+    yields `'untriaged'`. See `docs/spec/model-import.md` for the table and the numeric-level
+    caveat. The derivation is a default only — a re-import never overwrites a rating already
+    decided.
+  - `'suggestive'` is not producible by any automated path today; it is a human-review value.
+  - **No admin write surface exists yet.** `Intellarum` has no `setContentRating`, so a rating set
+    at creation (or by a one-shot migration) cannot currently be corrected through the API. A
+    triage seam mirroring `setLicense` → `CrystalApi.setModelLicense` is a known follow-up.
 - `blocked` — required. Defaults to `false`. `true` is the admin kill switch.
 - `reviewState` — `'pending' | 'approved' | 'rejected'`. User uploads enter `'pending'`. Functionally a usage narrowing: pending Intellae are usable by their owner only (resolver excludes them for everyone else) until approved.
 - `moderationNotes` — admin-facing only. NEVER serialized to public callers (see `publicProjection` in §12).
