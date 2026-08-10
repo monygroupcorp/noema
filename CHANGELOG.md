@@ -1,5 +1,26 @@
 # Changelog
 
+## [5.2.0](https://github.com/monygroupcorp/noema/compare/v5.1.3...v5.2.0) (2026-08-10)
+
+
+### Features
+
+* **import:** derive an imported model's content rating from the origin signal ([40ff751](https://github.com/monygroupcorp/noema/commit/40ff7510391e70c53bdfbfa6c83de9cd7f57f980))
+* **import:** derive an imported model's content rating from the origin signal ([23e8a59](https://github.com/monygroupcorp/noema/commit/23e8a597d810f9f50a751db93752521e8c274595))
+* **migrations:** backfill contentRating on already-imported models from the captured origin nsfw flag ([95eb004](https://github.com/monygroupcorp/noema/commit/95eb0049b84be73695fe25f160c449b6abec9ca7))
+* **migrations:** backfill contentRating on already-imported models from the captured origin nsfw flag ([7631fe9](https://github.com/monygroupcorp/noema/commit/7631fe9d67d0b3f137f26600969156203e678459))
+* **migrations:** backfill contentRating on reviewed legacy LoRAs ([7e9784f](https://github.com/monygroupcorp/noema/commit/7e9784f2a17c4af699b3758ea5fe6f54217707c8))
+
+
+### Bug Fixes
+
+* align Dockerfile Node base image with CI's Node 22 ([7832e91](https://github.com/monygroupcorp/noema/commit/7832e9172f2c43b4a5a7596a2f25999f63074eb3))
+* align Dockerfile Node base image with CI's Node 22 ([d9d8fe7](https://github.com/monygroupcorp/noema/commit/d9d8fe75fcaedc58434de703865a5a919b325d26))
+* **crystal:** repair dead HuggingFace intella download URIs after the org rename ([bc737f7](https://github.com/monygroupcorp/noema/commit/bc737f75f74e5133b2891114d5511d8d447be501))
+* **crystal:** repair dead HuggingFace intella download URIs after the org rename ([14ec714](https://github.com/monygroupcorp/noema/commit/14ec7145b75e7186ac89bc493172140460ca2f3e))
+* **internal-api:** make credential checks unconditional and assert configuration at boot ([d063a5a](https://github.com/monygroupcorp/noema/commit/d063a5a4bd45415ae7ab8e0386a0a56193aa6ae3))
+* **webhooks:** bind each execution callback to the job it reports ([6ebe580](https://github.com/monygroupcorp/noema/commit/6ebe5802d1a665029ae6bc9339f2ccc17289326b))
+
 ## [5.1.3](https://github.com/monygroupcorp/noema/compare/v5.1.2...v5.1.3) (2026-08-09)
 
 
