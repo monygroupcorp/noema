@@ -183,12 +183,14 @@ export function createAgentCompatRouter(deps: AgentCompatDeps): Router {
       const legatus = await deps.legati.findById(id)
       if (!legatus) return fail(res, 404, 'NOT_FOUND', 'Agent account not found')
 
-      // revokeToken gate (query `?token=`). Every crystal-created Legatus has one.
-      if (legatus.revokeToken) {
-        const provided = req.query.token
-        if (!provided || provided !== legatus.revokeToken) {
-          return fail(res, 403, 'FORBIDDEN', 'Invalid or missing revoke token')
-        }
+      // revokeToken gate (query `?token=`). Every crystal-created Legatus has one; a record
+      // without one is not revocable through this route rather than revocable by anyone.
+      if (!legatus.revokeToken) {
+        return fail(res, 403, 'FORBIDDEN', 'Invalid or missing revoke token')
+      }
+      const provided = req.query.token
+      if (!provided || provided !== legatus.revokeToken) {
+        return fail(res, 403, 'FORBIDDEN', 'Invalid or missing revoke token')
       }
 
       if (legatus.status === 'revoked') {
