@@ -26,36 +26,23 @@
 //
 // SAFETY: the target DB MUST be named via `--db <name>` (there is NO default —
 // `.env` MONGODB_URI points at the live cluster). Dev/staging use `noemaplane`;
-// the live app DB `noema` is refused unless you also pass `--prod`.
+// `noemaplane` IS the live app db and is refused unless you also pass `--prod`.
+// `noema` is the pre-cutover legacy db and is always refused — see `_dbTarget.ts`.
 //
 // Run (dev):  ./scripts/run-with-env.sh npx tsx scripts/migrations/2026_07_backfill_valorNum.ts --db noemaplane --dry-run
 //   drop --dry-run to write; add --force to re-derive already-stamped docs.
-// Run (prod): …same… --db noema --prod        (only when intentionally migrating production)
+// Run (prod): …same… --db noemaplane --prod        (only when intentionally migrating production)
 
 import { MongoClient } from 'mongodb'
 import { backfillValorNum } from '../../src/crystal/backfillValorNum.js'
+import { resolveDbTarget } from './_dbTarget.js'
 
-const DRY_RUN = process.argv.includes('--dry-run')
+const TAG = '[backfill-valorNum]'
 const FORCE = process.argv.includes('--force')
-
-/** Read `--db <name>`; no default — an unset target is an error, not a guess at production. */
-function targetDb(): string {
-  const i = process.argv.indexOf('--db')
-  const name = i >= 0 ? process.argv[i + 1] : undefined
-  if (!name) {
-    console.error('[backfill-valorNum] refusing to run: pass --db <name> (e.g. --db noemaplane). No default — .env points at the live cluster.')
-    process.exit(1)
-  }
-  if (name === 'noema' && !process.argv.includes('--prod')) {
-    console.error('[backfill-valorNum] refusing to target the PRODUCTION db "noema" without --prod. Use --db noemaplane for dev/staging.')
-    process.exit(1)
-  }
-  return name
-}
 
 async function main(): Promise<void> {
   const uri = process.env.MONGO_PASS ?? process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
-  const dbName = targetDb()
+  const { db: dbName, dryRun: DRY_RUN } = resolveDbTarget(process.argv, TAG)
   const client = await MongoClient.connect(uri)
   try {
     const col = client.db(dbName).collection('signa')

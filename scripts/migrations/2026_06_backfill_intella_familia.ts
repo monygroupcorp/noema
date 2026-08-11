@@ -17,36 +17,23 @@
 // SAFETY: the target DB MUST be named explicitly via `--db <name>` (there is NO
 // default — `.env` points `MONGODB_URI` at the live Atlas cluster, so a silent
 // default would risk writing to PRODUCTION). Dev/test work uses `noemaplane`;
-// `noema` is the live app DB. The script refuses to run against `noema` unless
-// you also pass `--prod` (a deliberate, eyes-open production migration).
+// `noemaplane` IS the live app DB and is refused unless you also pass `--prod`
+// (a deliberate, eyes-open production migration). `noema` is the pre-cutover
+// legacy db and is always refused — see `_dbTarget.ts`.
 //
-// Run (dev):   ./scripts/run-with-env.sh npx tsx scripts/migrations/2026_06_backfill_intella_familia.ts --db noemaplane
-//   add  --dry-run  to report without writing.
-// Run (prod):  …same… --db noema --prod        (only when intentionally migrating production)
+// Run (dev):   ./scripts/run-with-env.sh npx tsx scripts/migrations/2026_06_backfill_intella_familia.ts --db noemaplane --dry-run
+//   drop --dry-run to write.
+// Run (prod):  …same… --db noemaplane --prod        (only when intentionally migrating production)
 
 import { MongoClient } from 'mongodb'
 import { inferFamilia } from '../../src/crystal/inferFamilia.js'
+import { resolveDbTarget } from './_dbTarget.js'
 
-const DRY_RUN = process.argv.includes('--dry-run')
-
-/** Read `--db <name>`; no default — an unset target is an error, not a guess at production. */
-function targetDb(): string {
-  const i = process.argv.indexOf('--db')
-  const name = i >= 0 ? process.argv[i + 1] : undefined
-  if (!name) {
-    console.error('[backfill-familia] refusing to run: pass --db <name> (e.g. --db noemaplane). No default — .env points at the live cluster.')
-    process.exit(1)
-  }
-  if (name === 'noema' && !process.argv.includes('--prod')) {
-    console.error('[backfill-familia] refusing to target the PRODUCTION db "noema" without --prod. Use --db noemaplane for dev/test.')
-    process.exit(1)
-  }
-  return name
-}
+const TAG = '[backfill-familia]'
 
 async function main(): Promise<void> {
   const uri = process.env.MONGO_PASS ?? process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
-  const dbName = targetDb()
+  const { db: dbName, dryRun: DRY_RUN } = resolveDbTarget(process.argv, TAG)
   const client = await MongoClient.connect(uri)
   try {
     const col = client.db(dbName).collection('intellae')

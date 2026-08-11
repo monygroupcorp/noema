@@ -21,29 +21,18 @@
 // Idempotent: only docs WITH runpodSpec and WITHOUT fundamentumId are touched.
 //
 // SAFETY: requires explicit `--db <name>` (no default — .env points at the live
-// cluster). Refuses `--db noema` (production) without `--prod`. `--dry-run` reports.
+// cluster). `noemaplane` IS the live app db and requires `--prod`; the pre-cutover
+// legacy db `noema` is always refused — see `_dbTarget.ts`. `--dry-run` reports.
 //
-// Run:  ./scripts/run-with-env.sh npx tsx scripts/migrations/2026_06_decompose_runpodspec_to_fundamentum.ts --db noemaplane [--dry-run]
+// Run:  ./scripts/run-with-env.sh npx tsx scripts/migrations/2026_06_decompose_runpodspec_to_fundamentum.ts --db noemaplane --dry-run
+//   drop --dry-run to write.
 
 import { MongoClient } from 'mongodb'
 import { CANONICAL_FUNDAMENTA, FUNDAMENTUM_FLUX_COMFYUI, FUNDAMENTUM_SD15_COMFYUI } from '../../src/crystal/seeds/fundamenta.js'
 import type { Fundamentum } from '../../src/types/fundamentum.js'
+import { resolveDbTarget } from './_dbTarget.js'
 
-const DRY_RUN = process.argv.includes('--dry-run')
-
-function targetDb(): string {
-  const i = process.argv.indexOf('--db')
-  const name = i >= 0 ? process.argv[i + 1] : undefined
-  if (!name) {
-    console.error('[decompose-runpodspec] refusing to run: pass --db <name> (e.g. --db noemaplane). No default — .env points at the live cluster.')
-    process.exit(1)
-  }
-  if (name === 'noema' && !process.argv.includes('--prod')) {
-    console.error('[decompose-runpodspec] refusing to target the PRODUCTION db "noema" without --prod. Use --db noemaplane for dev/test.')
-    process.exit(1)
-  }
-  return name
-}
+const TAG = '[decompose-runpodspec]'
 
 /** Map a flow's workflow template → the canonical Fundamentum it should reference. */
 function fundamentFor(workflowTemplate: string | undefined): Fundamentum | undefined {
@@ -62,7 +51,7 @@ interface RunpodSpecDoc {
 
 async function main(): Promise<void> {
   const uri = process.env.MONGO_PASS ?? process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
-  const dbName = targetDb()
+  const { db: dbName, dryRun: DRY_RUN } = resolveDbTarget(process.argv, TAG)
   const client = await MongoClient.connect(uri)
   try {
     const db = client.db(dbName)
