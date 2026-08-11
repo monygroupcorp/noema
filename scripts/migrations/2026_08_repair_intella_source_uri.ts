@@ -42,12 +42,13 @@
 //
 // SAFETY: the target DB MUST be named explicitly via `--db <name>` (there is NO
 // default — `.env` points `MONGODB_URI` at the live cluster). Dev/test work uses
-// `noemaplane`; `noema` is the live app DB and is refused unless you also pass
-// `--prod` (a deliberate, eyes-open production migration).
+// `noemaplane`; `noemaplane` IS the live app DB and is refused unless you also
+// pass `--prod` (a deliberate, eyes-open production migration). `noema` is the
+// pre-cutover legacy db and is always refused — see `_dbTarget.ts`.
 //
 // Run (dev):  ./scripts/run-with-env.sh npx tsx scripts/migrations/2026_08_repair_intella_source_uri.ts --db noemaplane --dry-run
 //   drop --dry-run to write.
-// Run (prod): …same… --db noema --prod        (only when intentionally migrating production)
+// Run (prod): …same… --db noemaplane --prod        (only when intentionally migrating production)
 
 import { MongoClient } from 'mongodb'
 import {
@@ -58,25 +59,10 @@ import {
   isStaleOrg,
   parseHfResolveUri,
 } from '../../src/crystal/intellaSourceRepair.js'
+import { resolveDbTarget } from './_dbTarget.js'
 
 const TAG = '[repair-intella-source-uri]'
-const DRY_RUN = process.argv.includes('--dry-run')
 const HF_API = 'https://huggingface.co/api/models'
-
-/** Read `--db <name>`; no default — an unset target is an error, not a guess at production. */
-function targetDb(): string {
-  const i = process.argv.indexOf('--db')
-  const name = i >= 0 ? process.argv[i + 1] : undefined
-  if (!name) {
-    console.error(`${TAG} refusing to run: pass --db <name> (e.g. --db noemaplane). No default — .env points at the live cluster.`)
-    process.exit(1)
-  }
-  if (name === 'noema' && !process.argv.includes('--prod')) {
-    console.error(`${TAG} refusing to target the PRODUCTION db "noema" without --prod. Use --db noemaplane for dev/test.`)
-    process.exit(1)
-  }
-  return name
-}
 
 interface Repaired { id: string; index: number; oldUri: string; newUri: string; hasSha256: boolean }
 interface Skipped { id: string; index: number; oldUri: string; reason: string }
@@ -109,7 +95,7 @@ async function uriServes(uri: string): Promise<boolean> {
 
 async function main(): Promise<void> {
   const uri = process.env.MONGO_PASS ?? process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
-  const dbName = targetDb()
+  const { db: dbName, dryRun: DRY_RUN } = resolveDbTarget(process.argv, TAG)
   const client = await MongoClient.connect(uri)
   try {
     const col = client.db(dbName).collection('intellae')

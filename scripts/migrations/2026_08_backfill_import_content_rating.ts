@@ -40,12 +40,13 @@
 //
 // SAFETY: the target DB MUST be named explicitly via `--db <name>` (there is NO
 // default — `.env` points `MONGODB_URI` at the live cluster). Dev/test work uses
-// `noemaplane`; `noema` is the live app DB and is refused unless you also pass
-// `--prod` (a deliberate, eyes-open production migration).
+// `noemaplane`; `noemaplane` IS the live app DB and is refused unless you also pass
+// `--prod` (a deliberate, eyes-open production migration). `noema` is the
+// pre-cutover legacy db and is always refused — see `_dbTarget.ts`.
 //
 // Run (dev):  ./scripts/run-with-env.sh npx tsx scripts/migrations/2026_08_backfill_import_content_rating.ts --db noemaplane --dry-run
 //   drop --dry-run to write.
-// Run (prod): …same… --db noema --prod        (only when intentionally migrating production)
+// Run (prod): …same… --db noemaplane --prod        (only when intentionally migrating production)
 //
 // Ships the script; does not run it. The prod run is an operator action, tracked in
 // projects/noema/PENDING-PROD.md alongside noema-185 and noema-186.
@@ -53,6 +54,7 @@
 import { MongoClient } from 'mongodb'
 import { deriveImportContentRating } from '../../src/crystal/ModelImporter.js'
 import type { IntellaContentRating } from '../../src/types/intelligendi.js'
+import { resolveDbTarget } from './_dbTarget.js'
 
 const TAG = '[backfill-import-content-rating]'
 
@@ -87,25 +89,9 @@ export function decideBackfill(record: {
   return { action: 'update', rating: derived }
 }
 
-/** Read `--db <name>`; no default — an unset target is an error, not a guess at production. */
-function targetDb(): string {
-  const i = process.argv.indexOf('--db')
-  const name = i >= 0 ? process.argv[i + 1] : undefined
-  if (!name) {
-    console.error(`${TAG} refusing to run: pass --db <name> (e.g. --db noemaplane). No default — .env points at the live cluster.`)
-    process.exit(1)
-  }
-  if (name === 'noema' && !process.argv.includes('--prod')) {
-    console.error(`${TAG} refusing to target the PRODUCTION db "noema" without --prod. Use --db noemaplane for dev/test.`)
-    process.exit(1)
-  }
-  return name
-}
-
 async function main(): Promise<void> {
-  const DRY_RUN = process.argv.includes('--dry-run')
   const uri = process.env.MONGO_PASS ?? process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
-  const dbName = targetDb()
+  const { db: dbName, dryRun: DRY_RUN } = resolveDbTarget(process.argv, TAG)
   const client = await MongoClient.connect(uri)
   try {
     const col = client.db(dbName).collection('intellae')
