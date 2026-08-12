@@ -67,7 +67,11 @@ export class MongoMateria implements MateriaStore {
   }
 
   async findWarm(spec: { imageRef?: string; podPolicy?: PodPolicy; shareToken?: string; materiaId?: string }): Promise<Materia | null> {
-    const filter: Record<string, unknown> = { status: 'idle' }
+    const now = new Date()
+    const filter: Record<string, unknown> = {
+      status: 'idle',
+      $or: [{ warmUntil: { $exists: false } }, { warmUntil: { $gt: now } }],
+    }
     if (spec.materiaId) filter.id = spec.materiaId
     if (spec.imageRef) filter.imageRef = spec.imageRef
     if (spec.podPolicy) filter.podPolicy = spec.podPolicy
