@@ -1,5 +1,24 @@
 # Changelog
 
+## [5.3.0](https://github.com/monygroupcorp/noema/compare/v5.2.0...v5.3.0) (2026-08-12)
+
+
+### Features
+
+* **migrations:** backfill Intella.samples from previewUris ([92b6365](https://github.com/monygroupcorp/noema/commit/92b63657c60ab48b2d0b84b6f68ae5b45465b0f8))
+* **migrations:** backfill Intella.samples from previewUris ([79b9122](https://github.com/monygroupcorp/noema/commit/79b9122e5242fecf0535290373095c0824f2db7c))
+
+
+### Bug Fixes
+
+* **crystal:** exclude expired warmUntil pods from findWarm's claim filter ([c755402](https://github.com/monygroupcorp/noema/commit/c75540290daa1b128dccad39e5fd8db7b043a6fd))
+* **crystal:** exclude expired warmUntil pods from findWarm's claim filter ([5945cd8](https://github.com/monygroupcorp/noema/commit/5945cd8c2af323071f9a6b9237a06ad7210c9a04))
+* **crystal:** repoint dangling LoRA baseIntellaId pointers to real catalog ids ([c60876d](https://github.com/monygroupcorp/noema/commit/c60876d5ac9748db753cb378984ee145421c1187))
+* **import:** keep origin previews when the preview scan does not pass ([33b90e5](https://github.com/monygroupcorp/noema/commit/33b90e527108ce9843b895fb7b03694d4d4cb435))
+* **migrations:** correct inverted --db production guard ([70b87b3](https://github.com/monygroupcorp/noema/commit/70b87b3b917cc51933fc909b25f2b393244f24bc))
+* **migrations:** correct inverted --db production guard ([5369938](https://github.com/monygroupcorp/noema/commit/53699381075ce736be16d9ffe42670ed44d3e28a))
+* **telegram:** scope flow context to the originating chat ([87bb0bf](https://github.com/monygroupcorp/noema/commit/87bb0bfcbd3123db6a258d2611079139af81168d))
+
 ## [5.2.0](https://github.com/monygroupcorp/noema/compare/v5.1.3...v5.2.0) (2026-08-10)
 
 
