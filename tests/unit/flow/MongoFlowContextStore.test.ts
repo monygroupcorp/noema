@@ -13,7 +13,8 @@ function makeMockCollection(docs: Array<Record<string, unknown>> = []) {
     find: () => ({ toArray: async () => docs }),
     replaceOne: async (...args: unknown[]) => { calls.push({ method: 'replaceOne', args }); return {} },
     deleteOne: async (...args: unknown[]) => { calls.push({ method: 'deleteOne', args }); return {} },
-    createIndexes: async () => {},
+    createIndexes: async (...args: unknown[]) => { calls.push({ method: 'createIndexes', args }) },
+    dropIndex: async (...args: unknown[]) => { calls.push({ method: 'dropIndex', args }) },
   }
 }
 
@@ -28,6 +29,7 @@ function makeCtx(overrides: Partial<FlowContext> = {}): FlowContext {
     identity: { animaId: 'anima-1' },
     platform: 'telegram',
     platformUserId: 'user-1',
+    platformChatId: 'chat-1',
     ...overrides,
   }
 }
@@ -45,30 +47,30 @@ function makeStore(docs: Array<Record<string, unknown>> = []) {
 
 test('get returns undefined for unknown key', () => {
   const { store } = makeStore()
-  assert.equal(store.get('telegram', 'user1'), undefined)
+  assert.equal(store.get('telegram', 'user1', 'chat1'), undefined)
 })
 
 test('set stores in cache and get returns it', () => {
   const { store } = makeStore()
   const ctx = makeCtx()
-  store.set('telegram', 'user1', ctx)
-  assert.deepEqual(store.get('telegram', 'user1'), ctx)
+  store.set('telegram', 'user1', 'chat1', ctx)
+  assert.deepEqual(store.get('telegram', 'user1', 'chat1'), ctx)
 })
 
 test('set with pendingActumId updates actumIndex', () => {
   const { store } = makeStore()
   const ctx = makeCtx({ pendingActumId: 'actum-42' })
-  store.set('telegram', 'user1', ctx)
+  store.set('telegram', 'user1', 'chat1', ctx)
   assert.deepEqual(store.findByPendingActumId('actum-42'), ctx)
 })
 
 test('set overwrites old pendingActumId in actumIndex', () => {
   const { store } = makeStore()
   const ctxA = makeCtx({ pendingActumId: 'actum-A' })
-  store.set('telegram', 'user1', ctxA)
+  store.set('telegram', 'user1', 'chat1', ctxA)
 
   const ctxB = makeCtx({ pendingActumId: 'actum-B' })
-  store.set('telegram', 'user1', ctxB)
+  store.set('telegram', 'user1', 'chat1', ctxB)
 
   assert.equal(store.findByPendingActumId('actum-A'), undefined)
   assert.deepEqual(store.findByPendingActumId('actum-B'), ctxB)
@@ -76,22 +78,32 @@ test('set overwrites old pendingActumId in actumIndex', () => {
 
 test('delete removes from cache', () => {
   const { store } = makeStore()
-  store.set('telegram', 'user1', makeCtx())
-  store.delete('telegram', 'user1')
-  assert.equal(store.get('telegram', 'user1'), undefined)
+  store.set('telegram', 'user1', 'chat1', makeCtx())
+  store.delete('telegram', 'user1', 'chat1')
+  assert.equal(store.get('telegram', 'user1', 'chat1'), undefined)
 })
 
 test('delete removes from actumIndex', () => {
   const { store } = makeStore()
-  store.set('telegram', 'user1', makeCtx({ pendingActumId: 'actum-42' }))
-  store.delete('telegram', 'user1')
+  store.set('telegram', 'user1', 'chat1', makeCtx({ pendingActumId: 'actum-42' }))
+  store.delete('telegram', 'user1', 'chat1')
   assert.equal(store.findByPendingActumId('actum-42'), undefined)
+})
+
+test('different chats with same platform+userId are independent', () => {
+  const { store } = makeStore()
+  const ctxA = makeCtx({ platformChatId: 'chat-A', intent: 'execute' })
+  const ctxB = makeCtx({ platformChatId: 'chat-B', intent: 'train' })
+  store.set('telegram', 'user1', 'chat-A', ctxA)
+  store.set('telegram', 'user1', 'chat-B', ctxB)
+  assert.equal(store.get('telegram', 'user1', 'chat-A')?.intent, 'execute')
+  assert.equal(store.get('telegram', 'user1', 'chat-B')?.intent, 'train')
 })
 
 test('set fires upsert to collection', async () => {
   const { store, col } = makeStore()
   const ctx = makeCtx({ pendingActumId: 'actum-99' })
-  store.set('telegram', 'user1', ctx)
+  store.set('telegram', 'user1', 'chat1', ctx)
 
   // Fire-and-forget — yield to microtask queue
   await new Promise(resolve => setImmediate(resolve))
@@ -101,8 +113,8 @@ test('set fires upsert to collection', async () => {
   assert.equal(call.method, 'replaceOne')
 
   const [filter, doc] = call.args as [Record<string, unknown>, Record<string, unknown>]
-  assert.deepEqual(filter, { _id: 'telegram:user1' })
-  assert.equal(doc._id, 'telegram:user1')
+  assert.deepEqual(filter, { _id: 'telegram:user1:chat1' })
+  assert.equal(doc._id, 'telegram:user1:chat1')
   assert.deepEqual(doc.ctx, ctx)
   assert.equal(doc.pendingActumId, 'actum-99')
   assert.ok(doc.updatedAt instanceof Date)
@@ -110,13 +122,13 @@ test('set fires upsert to collection', async () => {
 
 test('delete fires deleteOne to collection', async () => {
   const { store, col } = makeStore()
-  store.set('telegram', 'user1', makeCtx())
+  store.set('telegram', 'user1', 'chat1', makeCtx())
 
   // Clear the replaceOne call from set
   await new Promise(resolve => setImmediate(resolve))
   col.calls.length = 0
 
-  store.delete('telegram', 'user1')
+  store.delete('telegram', 'user1', 'chat1')
   await new Promise(resolve => setImmediate(resolve))
 
   assert.equal(col.calls.length, 1)
@@ -124,29 +136,29 @@ test('delete fires deleteOne to collection', async () => {
   assert.equal(call.method, 'deleteOne')
 
   const [filter] = call.args as [Record<string, unknown>]
-  assert.deepEqual(filter, { _id: 'telegram:user1' })
+  assert.deepEqual(filter, { _id: 'telegram:user1:chat1' })
 })
 
 test('hydrate loads docs into cache', async () => {
-  const ctx1 = makeCtx({ platformUserId: 'user-1' })
-  const ctx2 = makeCtx({ platform: 'discord', platformUserId: 'user-2' })
+  const ctx1 = makeCtx({ platformUserId: 'user-1', platformChatId: 'chat-1' })
+  const ctx2 = makeCtx({ platform: 'discord', platformUserId: 'user-2', platformChatId: 'chat-2' })
 
   const { store } = makeStore([
-    { _id: 'telegram:user-1', ctx: ctx1, pendingActumId: null, updatedAt: new Date() },
-    { _id: 'discord:user-2', ctx: ctx2, pendingActumId: null, updatedAt: new Date() },
+    { _id: 'telegram:user-1:chat-1', ctx: ctx1, pendingActumId: null, updatedAt: new Date() },
+    { _id: 'discord:user-2:chat-2', ctx: ctx2, pendingActumId: null, updatedAt: new Date() },
   ])
 
   await store.hydrate()
 
-  assert.deepEqual(store.get('telegram', 'user-1'), ctx1)
-  assert.deepEqual(store.get('discord', 'user-2'), ctx2)
+  assert.deepEqual(store.get('telegram', 'user-1', 'chat-1'), ctx1)
+  assert.deepEqual(store.get('discord', 'user-2', 'chat-2'), ctx2)
 })
 
 test('hydrate populates actumIndex from pendingActumId', async () => {
   const ctx = makeCtx({ pendingActumId: 'actum-77' })
 
   const { store } = makeStore([
-    { _id: 'telegram:user-1', ctx, pendingActumId: 'actum-77', updatedAt: new Date() },
+    { _id: 'telegram:user-1:chat-1', ctx, pendingActumId: 'actum-77', updatedAt: new Date() },
   ])
 
   await store.hydrate()
@@ -158,15 +170,59 @@ test('hydrate skips docs without pendingActumId in actumIndex', async () => {
   const ctx = makeCtx()
 
   const { store } = makeStore([
-    { _id: 'telegram:user-1', ctx, pendingActumId: null, updatedAt: new Date() },
+    { _id: 'telegram:user-1:chat-1', ctx, pendingActumId: null, updatedAt: new Date() },
   ])
 
   await store.hydrate()
 
   // The doc is in cache but not indexed by actumId
-  assert.deepEqual(store.get('telegram', 'user-1'), ctx)
+  assert.deepEqual(store.get('telegram', 'user-1', 'chat-1'), ctx)
   // No actumId to look up — just verify the doc is not causing issues
   assert.equal(store.findByPendingActumId(''), undefined)
+})
+
+test('hydrate drops the prior 30-day TTL index before creating the 24h one', async () => {
+  const { store, col } = makeStore()
+
+  await store.hydrate()
+
+  const dropCall = col.calls.find((c: { method: string }) => c.method === 'dropIndex')
+  assert.ok(dropCall, 'expected a dropIndex call')
+  assert.deepEqual(dropCall!.args, ['ttl_30d'])
+
+  const createCall = col.calls.find((c: { method: string }) => c.method === 'createIndexes')
+  assert.ok(createCall, 'expected a createIndexes call')
+  const indexes = createCall!.args[0] as Array<Record<string, unknown>>
+  const ttlIndex = indexes.find(i => i.name === 'ttl_24h')
+  assert.ok(ttlIndex, 'expected a ttl_24h index')
+  assert.equal(ttlIndex!.expireAfterSeconds, 24 * 60 * 60)
+
+  // Order matters — the drop must precede the create in the call log.
+  const dropIdx = col.calls.indexOf(dropCall!)
+  const createIdx = col.calls.indexOf(createCall!)
+  assert.ok(dropIdx < createIdx, 'dropIndex must run before createIndexes')
+})
+
+test('hydrate swallows an index-not-found dropIndex error (fresh database)', async () => {
+  const col = {
+    ...makeMockCollection(),
+    dropIndex: async () => { throw new Error('index not found with name [ttl_30d]') },
+  }
+  const { MongoFlowContextStore } = require('../../../src/flow/MongoFlowContextStore.js')
+  const store = new MongoFlowContextStore(col as unknown, 'flowContexts')
+
+  await assert.doesNotReject(() => store.hydrate())
+})
+
+test('hydrate rethrows a non-index-not-found dropIndex error', async () => {
+  const col = {
+    ...makeMockCollection(),
+    dropIndex: async () => { throw new Error('Mongo down') },
+  }
+  const { MongoFlowContextStore } = require('../../../src/flow/MongoFlowContextStore.js')
+  const store = new MongoFlowContextStore(col as unknown, 'flowContexts')
+
+  await assert.rejects(() => store.hydrate(), /Mongo down/)
 })
 
 test('set fires upsert errors are caught and logged (not thrown)', async () => {
@@ -189,7 +245,7 @@ test('set fires upsert errors are caught and logged (not thrown)', async () => {
     const store = new MongoFlowContextStore(col as unknown, 'flowContexts')
 
     // Should not throw
-    assert.doesNotThrow(() => store.set('telegram', 'user1', makeCtx()))
+    assert.doesNotThrow(() => store.set('telegram', 'user1', 'chat1', makeCtx()))
 
     // Wait for the async error
     await new Promise(resolve => setImmediate(resolve))
@@ -227,12 +283,12 @@ test('delete fires deleteOne errors are caught and logged (not thrown)', async (
     }
     const store = new MongoFlowContextStore(col as unknown, 'flowContexts')
 
-    store.set('telegram', 'user1', makeCtx())
+    store.set('telegram', 'user1', 'chat1', makeCtx())
     await new Promise(resolve => setImmediate(resolve))
     captured.length = 0
 
     // Should not throw
-    assert.doesNotThrow(() => store.delete('telegram', 'user1'))
+    assert.doesNotThrow(() => store.delete('telegram', 'user1', 'chat1'))
 
     // Wait for the async error
     await new Promise(resolve => setImmediate(resolve))
@@ -251,8 +307,8 @@ test('delete fires deleteOne errors are caught and logged (not thrown)', async (
   }
 })
 
-test('key returns platform:userId format', () => {
+test('key returns platform:userId:chatId format', () => {
   const { store } = makeStore()
-  assert.equal(store.key('telegram', 'abc'), 'telegram:abc')
-  assert.equal(store.key('discord', '123'), 'discord:123')
+  assert.equal(store.key('telegram', 'abc', 'chat1'), 'telegram:abc:chat1')
+  assert.equal(store.key('discord', '123', 'chat2'), 'discord:123:chat2')
 })

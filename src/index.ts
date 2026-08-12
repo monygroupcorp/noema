@@ -654,12 +654,12 @@ async function main(): Promise<void> {
 
   // RouterDeps adapter
   const routerDeps: RouterDeps = {
-    enter: (intent, platform, userId, identity, ctx) =>
-      router.enter(intent, platform, userId, identity, ctx),
-    handle: (platform, userId, event) => router.handle(platform, userId, event),
-    clear: (platform, userId) => router.clear(platform, userId),
-    hasContext: (platform, userId) => store.get(platform, userId) !== null,
-    peek: (platform, userId) => store.get(platform, userId) ?? null,
+    enter: (intent, platform, userId, chatId, identity, ctx) =>
+      router.enter(intent, platform, userId, chatId, identity, ctx),
+    handle: (platform, userId, chatId, event) => router.handle(platform, userId, chatId, event),
+    clear: (platform, userId, chatId) => router.clear(platform, userId, chatId),
+    hasContext: (platform, userId, chatId) => store.get(platform, userId, chatId) !== undefined,
+    peek: (platform, userId, chatId) => store.get(platform, userId, chatId) ?? null,
     onStep: (cb) => { stepCb = cb },
     onResolution: (cb) => { resCb = cb },
   }

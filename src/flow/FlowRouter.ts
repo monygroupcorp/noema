@@ -58,15 +58,17 @@ export class FlowRouter {
     intent: Intent,
     platform: Platform,
     userId: string,
+    chatId: string,
     identity: AuctorKey,
     initialCtx?: Partial<Pick<FlowContext, 'modoId' | 'messageId'>> & { state?: unknown }
   ): Promise<void> {
     const { store, onStep, onResolution } = this.deps
 
-    // Abandon any existing context
-    const existing = store.get(platform, userId)
+    // Abandon any existing context (in THIS chat only — other chats' contexts for the
+    // same user are untouched)
+    const existing = store.get(platform, userId, chatId)
     if (existing) {
-      store.delete(platform, userId)
+      store.delete(platform, userId, chatId)
       const abandonResolution: Resolution = { kind: 'abandon' }
       onResolution(existing, abandonResolution)
     }
@@ -81,27 +83,29 @@ export class FlowRouter {
       identity,
       platform,
       platformUserId: userId,
+      platformChatId: chatId,
       ...restCtx,
     }
 
     const step = await flow.enter(ctx)
     // Store after enter (ctx.state may have been mutated by flow.enter)
-    store.set(platform, userId, ctx)
+    store.set(platform, userId, chatId, ctx)
     onStep(ctx, step)
   }
 
   /**
-   * Route a user event to the active flow for this user.
-   * If no active flow, ignores the event.
+   * Route a user event to the active flow for this user, in this chat.
+   * If no active flow in this chat, ignores the event.
    */
   async handle(
     platform: Platform,
     userId: string,
+    chatId: string,
     event: PrimitiveEvent
   ): Promise<void> {
     const { store, onStep, onResolution } = this.deps
 
-    const ctx = store.get(platform, userId)
+    const ctx = store.get(platform, userId, chatId)
     if (!ctx) return
 
     const flow = this.flows.get(ctx.intent)
@@ -113,7 +117,7 @@ export class FlowRouter {
       // Step — update stored context (state may have legitimately advanced)
       // and notify only when there's something to emit. An empty-primitives
       // step means "state preserved, emit nothing."
-      store.set(platform, userId, ctx)
+      store.set(platform, userId, chatId, ctx)
       if (result.primitives.length > 0) {
         onStep(ctx, result)
       }
@@ -121,11 +125,11 @@ export class FlowRouter {
       // Resolution
       if (result.kind === 'handoff') {
         // Re-enter with the target flow. Delete the old context first.
-        store.delete(platform, userId)
+        store.delete(platform, userId, chatId)
         await this._enterWithContext(result.toIntent, ctx, result.withContext)
       } else {
         // complete or abandon
-        store.delete(platform, userId)
+        store.delete(platform, userId, chatId)
         onResolution(ctx, result)
       }
     }
@@ -161,19 +165,19 @@ export class FlowRouter {
 
     if ('primitives' in outcome) {
       // Update store — ctx.pendingActumId was cleared by handleCompletion
-      store.set(ctx.platform, ctx.platformUserId, ctx)
+      store.set(ctx.platform, ctx.platformUserId, ctx.platformChatId, ctx)
       onStep(ctx, outcome)
     } else {
-      store.delete(ctx.platform, ctx.platformUserId)
+      store.delete(ctx.platform, ctx.platformUserId, ctx.platformChatId)
       onResolution(ctx, outcome)
     }
 
     return identity
   }
 
-  /** Clear the active flow for a user (abandon). */
-  clear(platform: Platform, userId: string): void {
-    this.deps.store.delete(platform, userId)
+  /** Clear the active flow for a user in a specific chat (abandon). */
+  clear(platform: Platform, userId: string, chatId: string): void {
+    this.deps.store.delete(platform, userId, chatId)
   }
 
   // ---------------------------------------------------------------------------
@@ -196,12 +200,13 @@ export class FlowRouter {
       identity: fromCtx.identity,
       platform: fromCtx.platform,
       platformUserId: fromCtx.platformUserId,
+      platformChatId: fromCtx.platformChatId,
       modoId: fromCtx.modoId,
       messageId: fromCtx.messageId,
     }
 
     const step = await flow.enter(ctx)
-    store.set(ctx.platform, ctx.platformUserId, ctx)
+    store.set(ctx.platform, ctx.platformUserId, ctx.platformChatId, ctx)
     onStep(ctx, step)
   }
 }
