@@ -126,6 +126,8 @@ export interface FlowContext {
   platform: Platform
   /** Platform-native user identifier (Telegram user_id, Discord user_id, etc.) */
   platformUserId: string
+  /** Platform-native chat/room identifier — the chat this flow was opened in and the only chat it consumes from or renders into. */
+  platformChatId: string
   /** Platform-native message/interaction ID — used for message editing on Telegram/Discord */
   messageId?: string
   /**

@@ -19,7 +19,12 @@ export interface TelegramUpdate {
     caption?: string
     date: number
     photo?: Array<{ file_id: string; width: number; height: number }>
-    reply_to_message?: { message_id: number; photo?: Array<{ file_id: string; width: number; height: number }> }
+    reply_to_message?: {
+      message_id: number
+      /** Who sent the message being replied to — used to detect a reply to the bot itself. */
+      from?: { id: number; username?: string }
+      photo?: Array<{ file_id: string; width: number; height: number }>
+    }
   }
   callback_query?: {
     id: string
@@ -68,14 +73,15 @@ export interface RouterDeps {
     intent: Intent,
     platform: Platform,
     userId: string,
+    chatId: string,
     identity: AuctorKey,
     initialCtx?: Partial<{ modoId: string; messageId: string }> & { state?: unknown }
   ): Promise<void>
-  handle(platform: Platform, userId: string, event: PrimitiveEvent): Promise<void>
-  clear(platform: Platform, userId: string): void
-  hasContext(platform: Platform, userId: string): boolean
+  handle(platform: Platform, userId: string, chatId: string, event: PrimitiveEvent): Promise<void>
+  clear(platform: Platform, userId: string, chatId: string): void
+  hasContext(platform: Platform, userId: string, chatId: string): boolean
   /** Read the active flow's context without mutating it (e.g. to seed Save-as from the card state). */
-  peek(platform: Platform, userId: string): FlowContext | null
+  peek(platform: Platform, userId: string, chatId: string): FlowContext | null
   onStep(cb: (ctx: FlowContext, step: Step) => void): void
   onResolution(cb: (ctx: FlowContext, res: Resolution) => void): void
 }

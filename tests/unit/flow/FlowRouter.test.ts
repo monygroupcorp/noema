@@ -41,7 +41,7 @@ test('enter calls flow.enter and invokes onStep callback', async () => {
   const { router, steps } = makeRouter()
   router.register(makeStubFlow('execute', makeStep('hello')))
 
-  await router.enter('execute', 'telegram', 'user-1', { animaId: 'anima-1' })
+  await router.enter('execute', 'telegram', 'user-1', 'chat-1', { animaId: 'anima-1' })
 
   assert.equal(steps.length, 1)
   assert.equal(steps[0].step.primitives[0].label, 'hello')
@@ -51,11 +51,11 @@ test('handle routes to active flow and invokes onStep with next step', async () 
   const { router, steps } = makeRouter()
   router.register(makeStubFlow('execute', makeStep('enter'), makeStep('next')))
 
-  await router.enter('execute', 'telegram', 'user-1', { animaId: 'anima-1' })
+  await router.enter('execute', 'telegram', 'user-1', 'chat-1', { animaId: 'anima-1' })
   steps.length = 0  // clear enter step
 
   const event: PrimitiveEvent = { kind: 'prompt', text: 'hello' }
-  await router.handle('telegram', 'user-1', event)
+  await router.handle('telegram', 'user-1', 'chat-1', event)
 
   assert.equal(steps.length, 1)
   assert.equal(steps[0].step.primitives[0].label, 'next')
@@ -65,13 +65,13 @@ test('handle with empty-primitives step does not invoke onStep but preserves con
   const { router, store, steps } = makeRouter()
   router.register(makeStubFlow('execute', makeStep('enter'), { primitives: [] }))
 
-  await router.enter('execute', 'telegram', 'user-1', { animaId: 'anima-1' })
+  await router.enter('execute', 'telegram', 'user-1', 'chat-1', { animaId: 'anima-1' })
   steps.length = 0  // clear enter step
 
-  await router.handle('telegram', 'user-1', { kind: 'prompt', text: 'unrelated' })
+  await router.handle('telegram', 'user-1', 'chat-1', { kind: 'prompt', text: 'unrelated' })
 
   assert.equal(steps.length, 0)
-  assert.ok(store.get('telegram', 'user-1') !== undefined, 'context should be preserved')
+  assert.ok(store.get('telegram', 'user-1', 'chat-1') !== undefined, 'context should be preserved')
 })
 
 test('handle with Resolution invokes onResolution and clears context', async () => {
@@ -79,12 +79,12 @@ test('handle with Resolution invokes onResolution and clears context', async () 
   const { router, store, resolutions } = makeRouter()
   router.register(makeStubFlow('execute', makeStep(), resolution))
 
-  await router.enter('execute', 'telegram', 'user-1', { animaId: 'anima-1' })
-  await router.handle('telegram', 'user-1', { kind: 'prompt', text: 'done' })
+  await router.enter('execute', 'telegram', 'user-1', 'chat-1', { animaId: 'anima-1' })
+  await router.handle('telegram', 'user-1', 'chat-1', { kind: 'prompt', text: 'done' })
 
   assert.equal(resolutions.length, 1)
   assert.equal(resolutions[0].res.kind, 'complete')
-  assert.equal(store.get('telegram', 'user-1'), undefined)
+  assert.equal(store.get('telegram', 'user-1', 'chat-1'), undefined)
 })
 
 test('handle with abandon Resolution clears context', async () => {
@@ -92,12 +92,12 @@ test('handle with abandon Resolution clears context', async () => {
   const { router, store, resolutions } = makeRouter()
   router.register(makeStubFlow('execute', makeStep(), resolution))
 
-  await router.enter('execute', 'telegram', 'user-1', { animaId: 'anima-1' })
-  await router.handle('telegram', 'user-1', { kind: 'action', actionId: 'cancel' })
+  await router.enter('execute', 'telegram', 'user-1', 'chat-1', { animaId: 'anima-1' })
+  await router.handle('telegram', 'user-1', 'chat-1', { kind: 'action', actionId: 'cancel' })
 
   assert.equal(resolutions.length, 1)
   assert.equal(resolutions[0].res.kind, 'abandon')
-  assert.equal(store.get('telegram', 'user-1'), undefined)
+  assert.equal(store.get('telegram', 'user-1', 'chat-1'), undefined)
 })
 
 test('handle with handoff Resolution re-enters target flow', async () => {
@@ -107,10 +107,10 @@ test('handle with handoff Resolution re-enters target flow', async () => {
   router.register(makeStubFlow('execute', makeStep('execute-enter'), handoffResult))
   router.register(makeStubFlow('manage', makeStep('manage-enter')))
 
-  await router.enter('execute', 'telegram', 'user-1', { animaId: 'anima-1' })
+  await router.enter('execute', 'telegram', 'user-1', 'chat-1', { animaId: 'anima-1' })
   steps.length = 0
 
-  await router.handle('telegram', 'user-1', { kind: 'prompt', text: 'go' })
+  await router.handle('telegram', 'user-1', 'chat-1', { kind: 'prompt', text: 'go' })
 
   // Should have a new step from the manage flow
   assert.ok(steps.some(s => s.step.primitives[0].label === 'manage-enter'))
@@ -121,7 +121,7 @@ test('handle when no active flow does nothing (no error, no callback)', async ()
   router.register(makeStubFlow('execute'))
 
   // No enter() called
-  await router.handle('telegram', 'user-1', { kind: 'prompt', text: 'hello' })
+  await router.handle('telegram', 'user-1', 'chat-1', { kind: 'prompt', text: 'hello' })
 
   assert.equal(steps.length, 0)
   assert.equal(resolutions.length, 0)
@@ -152,7 +152,7 @@ test('handleActumComplete resumes a context that has pendingActumId set', async 
   })
   router.register(flow)
 
-  await router.enter('execute', 'telegram', 'user-1', { animaId: 'anima-1' })
+  await router.enter('execute', 'telegram', 'user-1', 'chat-1', { animaId: 'anima-1' })
   steps.length = 0  // clear enter step
 
   await router.handleActumComplete('actum-42', { kind: 'complete', exitus: { url: 'https://example.com' } })
@@ -175,11 +175,11 @@ test('clear removes context', async () => {
   const { router, store } = makeRouter()
   router.register(makeStubFlow('execute'))
 
-  await router.enter('execute', 'telegram', 'user-1', { animaId: 'anima-1' })
-  assert.ok(store.get('telegram', 'user-1') !== undefined)
+  await router.enter('execute', 'telegram', 'user-1', 'chat-1', { animaId: 'anima-1' })
+  assert.ok(store.get('telegram', 'user-1', 'chat-1') !== undefined)
 
-  router.clear('telegram', 'user-1')
-  assert.equal(store.get('telegram', 'user-1'), undefined)
+  router.clear('telegram', 'user-1', 'chat-1')
+  assert.equal(store.get('telegram', 'user-1', 'chat-1'), undefined)
 })
 
 test('enter with state initialCtx passes state to flow', async () => {
@@ -201,7 +201,7 @@ test('enter with state initialCtx passes state to flow', async () => {
   }
   router.register(flow)
 
-  await router.enter('execute', 'telegram', 'user-1', { animaId: 'anima-1' }, {
+  await router.enter('execute', 'telegram', 'user-1', 'chat-1', { animaId: 'anima-1' }, {
     state: { myField: 42, messages: [{ role: 'user', content: 'hi' }] }
   })
 
@@ -211,7 +211,7 @@ test('enter with state initialCtx passes state to flow', async () => {
   assert.equal(s.messages.length, 1)
 })
 
-test('entering a new flow when one is active abandons the existing one', async () => {
+test('entering a new flow when one is active abandons the existing one, in the same chat', async () => {
   const resolutions: Array<Resolution> = []
   const store = new MemoryFlowContextStore()
   const router = new FlowRouter({
@@ -223,11 +223,48 @@ test('entering a new flow when one is active abandons the existing one', async (
   router.register(makeStubFlow('execute'))
   router.register(makeStubFlow('train'))
 
-  await router.enter('execute', 'telegram', 'user-1', { animaId: 'anima-1' })
-  await router.enter('train', 'telegram', 'user-1', { animaId: 'anima-1' })
+  await router.enter('execute', 'telegram', 'user-1', 'chat-1', { animaId: 'anima-1' })
+  await router.enter('train', 'telegram', 'user-1', 'chat-1', { animaId: 'anima-1' })
 
   // The abandoned context should have triggered an abandon resolution
   assert.ok(resolutions.some(r => r.kind === 'abandon'))
   // New flow should be active
-  assert.equal(store.get('telegram', 'user-1')?.intent, 'train')
+  assert.equal(store.get('telegram', 'user-1', 'chat-1')?.intent, 'train')
+})
+
+test('entering a flow in a different chat does NOT abandon another chat\'s context for the same user (chat isolation)', async () => {
+  const resolutions: Array<Resolution> = []
+  const store = new MemoryFlowContextStore()
+  const router = new FlowRouter({
+    store,
+    onStep: () => {},
+    onResolution: (_ctx, res) => resolutions.push(res),
+  })
+
+  router.register(makeStubFlow('execute'))
+  router.register(makeStubFlow('train'))
+
+  // Same user, two different chats — chat A's context must survive chat B's entry.
+  await router.enter('execute', 'telegram', 'user-1', 'chat-A', { animaId: 'anima-1' })
+  await router.enter('train', 'telegram', 'user-1', 'chat-B', { animaId: 'anima-1' })
+
+  // No abandon fired — the two chats never collided.
+  assert.ok(!resolutions.some(r => r.kind === 'abandon'))
+  // Both contexts remain, independently keyed.
+  assert.equal(store.get('telegram', 'user-1', 'chat-A')?.intent, 'execute')
+  assert.equal(store.get('telegram', 'user-1', 'chat-B')?.intent, 'train')
+})
+
+test('handle in chat B does not see (or advance) a context opened in chat A for the same user', async () => {
+  const { router, store, steps } = makeRouter()
+  router.register(makeStubFlow('execute', makeStep('enter'), makeStep('next')))
+
+  await router.enter('execute', 'telegram', 'user-1', 'chat-A', { animaId: 'anima-1' })
+  steps.length = 0  // clear enter step
+
+  // Same platform + user, but a message arriving from a different chat.
+  await router.handle('telegram', 'user-1', 'chat-B', { kind: 'prompt', text: 'hello' })
+
+  assert.equal(steps.length, 0, 'chat B has no active flow, so handle is a no-op')
+  assert.ok(store.get('telegram', 'user-1', 'chat-A') !== undefined, 'chat A context is untouched')
 })
