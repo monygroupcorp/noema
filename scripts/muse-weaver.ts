@@ -23,7 +23,7 @@ import OpenAI from 'openai'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
-const OUT = '/tmp/claude-1000/-home-rth-projects-main-noema-crystal/38827f87-a425-4ba0-862e-1e8bdd2311b6/scratchpad/muse'
+const OUT = process.env.MUSE_OUT_DIR || '/tmp/muse'   // scratch output; override to keep it somewhere durable
 const MODEL = 'gpt-4o'
 
 // --- The moodboard: four anime-girl-centric sets, distinct styles ------------

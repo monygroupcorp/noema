@@ -49,7 +49,7 @@ export function buildFallbackItems(vestigia: ApiVestigium[]): FallbackItem[] {
 // A projected cloud's raw extent tracks dataset variance: a 4-vestigium caller space's
 // PCA output lands orders of magnitude smaller than the 163k-gen demo corpus's, so a
 // scene/camera tuned for the big corpus makes a small real space collapse to a few
-// sub-pixel dots (captain live-check 2026-07-13). Normalize every cloud — real AND
+// sub-pixel dots (live check, 2026-07-13). Normalize every cloud — real AND
 // static demo, same code path, no exemption — to a fixed unit bounding volume before it
 // reaches Cloud/camera framing: center on the centroid, uniform-scale (never per-axis;
 // that would distort the PCA layout's relative distances) so the overall max extent
@@ -109,7 +109,7 @@ export function frameCameraToBounds(): { position: [number, number, number]; fov
 }
 
 // ---- Reference grid/axes (noema-051) ------------------------------------------------
-// Captain live-check of #137 (2026-07-13): unit scale fixed the collapse-to-dots problem,
+// Live check (2026-07-13): unit scale fixed the collapse-to-dots problem,
 // but the space still reads as disorienting with no fixed reference frame ("where did my
 // axis go!"). Restores the wireframe-cube + labeled-axis reference (dropped in the
 // noema-033 real-data rewrite) sized off the CURRENT SCENE_EXTENT envelope, not the old

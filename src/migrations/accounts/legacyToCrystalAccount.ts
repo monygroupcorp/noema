@@ -14,7 +14,7 @@
 // script (`scripts/migrate-accounts-chunk.ts`) assigns the fresh anima uuid at
 // commit time and wires the Persona.animaIds / Signum.animaId foreign keys.
 //
-// OPERATOR RULINGS (2026-08-04, locked — see plans/noema-130.md):
+// OPERATOR RULINGS (2026-08-04, locked — these are decided, not open to re-derivation):
 //   • Units: 1 legacy point = 1 crystal impetus, 1:1 (both $0.000337). NO ×10.
 //   • Authoritative balance = SUM of `credit_ledger.points_remaining` over CONFIRMED
 //     entries (>0). This mirrors the legacy spend path exactly

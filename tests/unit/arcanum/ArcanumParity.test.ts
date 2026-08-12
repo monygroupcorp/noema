@@ -6,7 +6,7 @@
  * verify `false` and burns the user's note. This test direct-imports BOTH implementations
  * and asserts identical outputs on FIXED constant vectors — deterministic, no circuit
  * artifacts, no network. (groth16.fullProve itself needs the wasm/zkey artifacts and is
- * NOT hermetically testable; it is covered by the Captain's live staging pass.)
+ * NOT hermetically testable; it is covered by a live staging pass.)
  *
  * The two implementations that must agree:
  *   poseidon / computeCommitment / computeNullifierHash / computeLeaf — both wrap the same

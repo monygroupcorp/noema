@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// The anonymity-critical guard on the purse spend path (noema-034, gauntlet v3 finding):
+// The anonymity-critical guard on the purse spend path (review finding):
 // when a Vault purse is the active payer, `createRun` must send ONLY the bursa token —
 // `{ content-type, x-bursa-token }` — and NEVER an identity header. A leaked
 // `authorization` (session) or `x-commitment` (stable anon pseudonym) lets logs/proxies

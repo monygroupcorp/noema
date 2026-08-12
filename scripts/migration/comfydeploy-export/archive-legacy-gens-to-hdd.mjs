@@ -13,7 +13,7 @@
  *
  * Usage:
  *   node scripts/migration/comfydeploy-export/archive-legacy-gens-to-hdd.mjs \
- *       --out "/run/media/rth/Big Disk/stationthis-corpus/legacy" [--limit N] [--concurrency 10]
+ *       --out "$CORPUS_ROOT/legacy" [--limit N] [--concurrency 10]
  */
 import fs from 'fs';
 import path from 'path';

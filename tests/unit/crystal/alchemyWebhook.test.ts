@@ -870,7 +870,7 @@ test('quote == credit: depositQuote.pointsQuoted equals the webhook-credited imp
   assert.equal(q.pointsQuoted, '6231')
 })
 
-// 30. VALUE CONSERVATION (gauntlet v4, webhook retry path): the create-succeeded-but-book-failed
+// 30. VALUE CONSERVATION (review finding, webhook retry path): the create-succeeded-but-book-failed
 // row must, on Alchemy re-delivery at a DRIFTED spot price, book revenue from the SAME persisted
 // receipt basis the credit uses — never re-priced at spot. AssetPricer prices at SPOT, so if the
 // webhook booked from the fresh price it would recognize revenue at the retry-window spot (X2) while

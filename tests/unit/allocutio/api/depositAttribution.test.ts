@@ -198,7 +198,7 @@ test('re-delivery after linking: credits EXACTLY once (no double signum, no doub
 })
 
 test('re-delivery at a CHANGED price credits at the receipt-time (booked) FMV, not the re-delivery FMV', async () => {
-  // Value-conservation guard (Captain amendment B): revenue is booked once, at receipt-time FMV, and
+  // Value-conservation guard (review amendment): revenue is booked once, at receipt-time FMV, and
   // bookRevenue is idempotent on depositumId — so the credit must use the PERSISTED receipt basis. If
   // the webhook re-priced on re-delivery, a price move would mint impetus that diverges from the
   // already-booked revenue (excess/unbacked mint when the price rose).
@@ -243,7 +243,7 @@ test('sweep heals a parked deposit after linking, EXACTLY once', async () => {
 })
 
 test('sweep RE-BOOKS a create-succeeded-but-book-failed row, then credits EXACTLY once', async () => {
-  // v4 gauntlet finding: a Depositum's usdFmv is persisted at `create` BEFORE bookRevenue runs (two
+  // Review finding: a Depositum's usdFmv is persisted at `create` BEFORE bookRevenue runs (two
   // writes, no transaction). If record() threw transiently and the process restarted, the sweep would
   // see a PRICED row with NO revenue booked. Crediting it without re-booking leaves revenue permanently
   // zero (re-delivery short-circuits on processatum). The sweep must re-book idempotently first.
@@ -270,13 +270,13 @@ test('sweep RE-BOOKS a create-succeeded-but-book-failed row, then credits EXACTL
 })
 
 test('webhook re-delivery of a book-failed row books from the receipt basis, not the drifted spot', async () => {
-  // v4 gauntlet finding (webhook retry path, sibling of the sweep case above): AssetPricer prices at
+  // Review finding (webhook retry path, sibling of the sweep case above): AssetPricer prices at
   // SPOT, so re-pricing on a re-delivery yields the retry-window price, not the receipt price. For the
   // create-succeeded-but-book-failed row (Depositum persisted at receipt FMV, no Reditus — the book
   // write threw transiently), the Alchemy retry reuses the row and re-prices at the drifted spot. If
   // the webhook booked from that fresh price it would recognize revenue at the DRIFTED figure while
   // crediting impetus from the PERSISTED receipt basis — recognized USD diverging from the credit
-  // basis by the spot drift (value-conservation break; Captain amendment B). The webhook must book
+  // basis by the spot drift (value-conservation break; review amendment). The webhook must book
   // from the same persisted basis the credit uses, mirroring the sweep's re-book.
   const { personae, link } = makePersonae()
   link(PAYER, ANIMA)
@@ -311,7 +311,7 @@ test('webhook re-delivery of a book-failed row books from the receipt basis, not
 })
 
 test('unpriceable-at-receipt row: freezes the FIRST-priced basis; a later credit-throw retry credits from THAT, not fresh spot', async () => {
-  // v5 gauntlet finding. A row first parked UNpriceable (created with `token`, no `usdFmv`) prices on a
+  // Review finding. A row first parked UNpriceable (created with `token`, no `usdFmv`) prices on a
   // later re-delivery. That delivery books revenue (locked on depositumId) but its credit then throws.
   // The NEXT retry — at a DRIFTED spot — must credit from the FIRST-priced (now persisted) basis, equal
   // to the booked revenue, never the drifted spot. Old code left the reuse row's usdFmv undefined, so

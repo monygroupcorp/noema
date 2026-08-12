@@ -4,7 +4,7 @@ import { Ic } from '../lib/icons';
 import { api, type QuerelaKind } from '../lib/api';
 import './report-modal.css';
 
-// ReportModal — the global "report an issue" affordance (plans/noema-101.md). Mounted once
+// ReportModal — the global "report an issue" affordance. Mounted once
 // in AppShell so it's reachable from every app screen, including Chat/Run. Low-friction and
 // functional-not-polished by design (Decision record) — the visual de-AI-tell pass is a
 // separately-backlogged item.

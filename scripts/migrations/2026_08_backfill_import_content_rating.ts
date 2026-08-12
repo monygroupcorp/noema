@@ -48,8 +48,8 @@
 //   drop --dry-run to write.
 // Run (prod): …same… --db noemaplane --prod        (only when intentionally migrating production)
 //
-// Ships the script; does not run it. The prod run is an operator action, tracked in
-// projects/noema/PENDING-PROD.md alongside noema-185 and noema-186.
+// Ships the script; does not run it. The prod run is a deliberate operator action, queued
+// with the other migrations waiting on a production window.
 
 import { MongoClient } from 'mongodb'
 import { deriveImportContentRating } from '../../src/crystal/ModelImporter.js'

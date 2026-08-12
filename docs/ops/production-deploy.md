@@ -74,7 +74,7 @@ new feature flag.
   released, `deploy.sh` ships it as *the* production app, because it is now what `main`
   contains. This item makes no `src/index.ts` or `.env-example` change, by design.
 - This item does **not** perform the merge, does not tag a release, and does not run
-  `deploy.sh`. Cutover execution is a Captain-attended event.
+  `deploy.sh`. Cutover execution is an operator-attended event.
 
 ## Droplet takeover and legacy decommission
 
@@ -154,7 +154,7 @@ stand it up.
 
 Only items backed by facts established above:
 
-- [ ] `chainengine-migration` merged into `main` (Go-live section) — Captain-attended,
+- [ ] `chainengine-migration` merged into `main` (Go-live section) — operator-attended,
       not performed by this item.
 - [ ] `release-please` PR created off that merge, reviewed, and merged (`./release.sh
       --merge` or manually) — triggers the image build.

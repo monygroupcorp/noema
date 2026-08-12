@@ -6,7 +6,7 @@
 :root{
   /* Brand palette now comes from the shared design system. These are name-bridges
      so the rest of this file is unchanged; trust-state classes below still set
-     --accent directly and keep working. Change colors in ~/projects/design — not
+     --accent directly and keep working. Change colors at the design system — not
      here. See styles/design/VENDORED.md. */
   --bg:var(--color-bg); --panel:var(--color-surface); --raised:var(--color-surface-2);
   --hair:var(--color-border); --hair-soft:#15181b;

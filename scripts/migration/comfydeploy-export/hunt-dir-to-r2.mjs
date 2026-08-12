@@ -10,8 +10,8 @@
  * Idempotent (skips keys already on R2). Run --dry first to preview matches.
  *
  * Usage:
- *   node scripts/migration/comfydeploy-export/hunt-dir-to-r2.mjs "/run/media/rth/SOME DRIVE" --dry
- *   node scripts/migration/comfydeploy-export/hunt-dir-to-r2.mjs "/run/media/rth/SOME DRIVE"
+ *   node scripts/migration/comfydeploy-export/hunt-dir-to-r2.mjs "/path/to/mounted/drive" --dry
+ *   node scripts/migration/comfydeploy-export/hunt-dir-to-r2.mjs "/path/to/mounted/drive"
  */
 import fs from 'fs';
 import path from 'path';
