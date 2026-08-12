@@ -15,12 +15,20 @@
 // (auth-free origins work immediately; gated origins await the BYO-secrets seam).
 // The R2 weight mirror happens ONLY on PUBLIC PROMOTION (BucketAdapter._hostModel).
 //
-// PREVIEW MEDIA is the exception: the small preview image(s) ARE re-hosted into our
-// bucket (when a store is wired). Two reasons: (1) the CSAM/NCMEC scan must be
-// meaningful — we host the exact bytes we display, not a URL an uploader can swap
-// after the scan (no TOCTOU); (2) we control what renders in our UI/feed rather
-// than hot-linking a third-party host. Ordering is fail-closed: SCAN the origin
-// URL first (never write unscanned bytes to our bucket), then re-host on pass.
+// PREVIEW MEDIA: the small preview image(s) are CSAM/NCMEC-scanned at their ORIGIN
+// url, always, before anything is registered or re-hosted. On a PASS they are
+// re-hosted into our bucket (when a store is wired) for two reasons: (1) the scan
+// stays meaningful — we host the exact bytes we display, not a URL an uploader can
+// swap after the scan (no TOCTOU); (2) we control what renders in our UI/feed
+// rather than hot-linking a third-party host.
+//
+// On a NON-PASS the import PROCEEDS and the previews stay origin-referenced —
+// hot-linked, never copied (ruling 2026-08-11, noema-192). A private import is
+// owner-only and is not a moderation boundary; PUBLIC PROMOTION is, and it re-scans
+// independently (CrystalApi `isModelPromotion`). Relaxing (1) and (2) is deliberate
+// and scoped to the private case: the owner is the only viewer and chose the URL
+// themselves. noema-193 restores both at promotion. The invariant that does NOT
+// relax: unscanned bytes are never written to our bucket.
 //
 // Idempotent: the Intella id is DERIVED from (ownerAnimaId, origin uri), so
 // re-importing the same URL upserts the same record instead of minting duplicates.
@@ -151,8 +159,17 @@ export class ModelImporter {
         // Attribute to the anima when there is one; a purse/commitment import scans unattributed.
         ...(input.ownerAnimaId ? { by: { animaId: input.ownerAnimaId } } : {}),
       })
-      if (!verdict.ok) throw new ModelImportError(`preview media rejected by the safety scan: ${verdict.reason}`)
-      samples = await this.rehostPreviews(id, samples)
+      // Non-fatal (noema-192): a non-pass keeps the previews origin-referenced instead of sinking
+      // the import. Skipping rehostPreviews is what holds the real invariant — no unscanned bytes
+      // reach our bucket. The scan itself stays unconditional so the verdict is still billed/cached.
+      if (verdict.ok) {
+        samples = await this.rehostPreviews(id, samples)
+      } else {
+        log.warn('preview scan did not pass; previews stay origin-referenced (not re-hosted)', {
+          id,
+          reason: verdict.reason,
+        })
+      }
     }
 
     // Rating: DERIVED as a default, never a downgrade. `upsert` is a full replace on the
