@@ -7,7 +7,7 @@ frontend (the app that `docs/ops/staging-deploy.md` documents on staging).
 
 ## The facts (so nobody has to re-discover them)
 
-- **Host:** `noema` in `~/.ssh/config` → `64.227.15.104` (hostname `hyperbot`). Same
+- **Host:** `noema` in `~/.ssh/config` (hostname `hyperbot`). Same
   DigitalOcean droplet that hosts staging. `noema.art`, `www.noema.art`, and
   `app.noema.art` resolve here.
 - **Container:** `hyperbotcontained` (network alias `hyperbot`) on docker network
