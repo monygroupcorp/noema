@@ -342,14 +342,12 @@ test('import: WEIGHTS are never re-hosted (only the preview is)', async () => {
   assert.ok(h.puts[0].key.startsWith('model-previews/'))
 })
 
-test('import: preview scan refusal fails closed (no re-host, no Intella)', async () => {
+test('import: preview scan refusal keeps origin previews, still imports (no re-host)', async () => {
   const h = harness({ gate: { async scan() { return { ok: false, reason: 'no scanner configured' } } }, store: true })
-  await assert.rejects(
-    () => h.importer.import({ url: 'https://civitai.com/models/92654', ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' }),
-    /safety scan/,
-  )
-  assert.equal(h.puts.length, 0)     // scanned the origin url — never wrote to our bucket
-  assert.equal(h.upserts.length, 0)  // fail-closed: no Intella
+  const intella = await h.importer.import({ url: 'https://civitai.com/models/92654', ownerKey: 'anima:anima-9', ownerAnimaId: 'anima-9' })
+  assert.equal(h.puts.length, 0)     // LOAD-BEARING: unscanned bytes never reach our bucket
+  assert.equal(h.upserts.length, 1)  // the import lands — a private import is not a moderation boundary
+  assert.equal(intella.samples?.[0]?.url, 'https://civitai.com/preview/1.png')  // origin url, not re-hosted
 })
 
 test('import: requires an owner', async () => {
@@ -482,7 +480,12 @@ test('CrystalApi.importModel: identified AND anon (Bursa) callers → ModelCard;
 
   // a resolver/import refusal surfaces as a 400 input.malformed (not a raw ModelImportError)
   const denied = new CrystalApi({
-    modelImporter: new ModelImporter({ json: jsonOf(CIVITAI_LORA), intellae: { async upsert() {} }, moderationGate: { async scan() { return { ok: false, reason: 'x' } } } }),
+    modelImporter: new ModelImporter({
+      // A non-401 resolver refusal — 401 would route to the `secret.required` 422 branch below.
+      json: { async fetchJson(url: string) { throw new ModelImportError(`fetch failed: ${url} → 500`, 500) } },
+      intellae: { async upsert() {} },
+      moderationGate: { async scan() { return { ok: true } } },
+    }),
   } as unknown as import('../../../src/allocutio/api/CrystalApi.js').CrystalApiDeps)
   await assert.rejects(
     () => denied.importModel({ animaId: 'a' } as never, { url: 'https://civitai.com/models/92654' }),
