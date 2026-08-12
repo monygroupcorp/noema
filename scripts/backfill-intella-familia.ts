@@ -31,7 +31,8 @@
 //     npx tsx scripts/backfill-intella-familia.ts --db <dbname>              # dry-run (default)
 //     npx tsx scripts/backfill-intella-familia.ts --db <dbname> --apply      # writes
 //
-//   See docs/phases/familia-backfill.md for the runbook and the post-run verification query.
+//   Run dry first and diff the counts; verify after applying that every intella doc has a
+//   familia field and that the pre/post totals match.
 
 import { MongoClient, type Document } from 'mongodb'
 import {

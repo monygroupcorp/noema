@@ -214,7 +214,7 @@ SDK with a themed, chrome-less view — **no new data type**, composed from exis
 > on-chain `agentURI` data, so we do NOT require a camel404 redeploy. New/native callers use
 > `/v1/...`; the compat router maps the baked paths onto the same handlers.
 
-The `camel404` client (`/home/rth/projects/main/camel404`, its `wrangler.toml` +
+The `camel404` client (a separate repo, its `wrangler.toml` +
 `src/agent-issuer/`) is **already deployed with Noema URLs and the JWT shape baked in**.
 Crystal owns `noema.art` after the JS nuke, so it must honor these *exactly* or we coordinate
 a client redeploy:

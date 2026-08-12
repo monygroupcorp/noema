@@ -17,6 +17,7 @@
 // Pre-req: GPU free (nvidia-smi). It ties up the 4090 for ~10–25 min.
 // =============================================================================
 
+import { homedir } from 'node:os'
 import { MongoClient } from 'mongodb'
 import { AitoolkitTrainingCursor } from '../src/crystal/AitoolkitTrainingCursor.js'
 import { SqliteAitkJobStore } from '../src/crystal/AitkJobStore.js'
@@ -29,9 +30,9 @@ import { registerProgressusRecorder } from '../src/execution/progressusSink.js'
 import { withTrace, makeTraceContext } from '../src/lib/trace.js'
 import type { Actum } from '../src/types/actum.js'
 
-const AITK = '/home/rth/projects/ai/training/ai-toolkit-klein'
+const AITK = process.env.AITK_DIR ?? `${homedir()}/projects/ai/training/ai-toolkit-klein`
 const DATASET = '/mnt/data/datasets/koh'
-const HF_CACHE = '/home/rth/.cache/huggingface'
+const HF_CACHE = process.env.HF_HOME ?? `${homedir()}/.cache/huggingface`
 const IMAGE = 'stationthis-klein:1'
 const JOB = 'koh2'                      // fresh job id → fresh output dir (no reuse of the prior run)
 const STEPS = 250

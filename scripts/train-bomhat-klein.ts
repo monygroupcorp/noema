@@ -8,6 +8,7 @@
  * The only thing bypassed is the dispatch ceremony (Modus/signa/inceptor) — orthogonal to the
  * runner. Run:  npx tsx scripts/train-bomhat-klein.ts
  */
+import { homedir } from 'node:os'
 import { AitoolkitTrainingCursor } from '../src/crystal/AitoolkitTrainingCursor.js'
 import { SqliteAitkJobStore } from '../src/crystal/AitkJobStore.js'
 import { DockerAitkSpawner } from '../src/crystal/AitkSpawner.js'
@@ -17,9 +18,9 @@ import { registerProgressusRecorder } from '../src/execution/progressusSink.js'
 import { withTrace, makeTraceContext } from '../src/lib/trace.js'
 import { bus } from '../src/lib/bus.js'
 
-const AITK_DIR = '/home/rth/projects/ai/training/ai-toolkit-klein'
+const AITK_DIR = process.env.AITK_DIR ?? `${homedir()}/projects/ai/training/ai-toolkit-klein`
 const DATASET  = '/mnt/data/datasets/bomhat'
-const HF_CACHE = '/home/rth/.cache/huggingface'
+const HF_CACHE = process.env.HF_HOME ?? `${homedir()}/.cache/huggingface`
 const JOB_ID   = 'bomhat_klein4b'
 const STEPS    = 4000
 

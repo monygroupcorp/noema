@@ -27,7 +27,7 @@ purse (a card payment de-anonymizes by construction). The UI must enforce + expl
   compute on this platform**. Credits are **not withdrawable, not transferable, not
   refundable for cash** (modulo consumer-law refund windows on unused balances — see §6).
 - This keeps us a **closed-loop prepaid system**, not a money transmitter / stored-value
-  issuer (see `[[project_compliance_posture]]`). Credits are a license to compute, not a
+  issuer (see the compliance posture notes). Credits are a license to compute, not a
   financial instrument. **Counsel must confirm** the closed-loop framing per jurisdiction.
 - Ledger: a fiat purchase creates a `Signum` credit entry on the `anima` (`forma: 'integer'`,
   `auctor: 'stripe:purchase'`, `testis: <stripe_payment_intent_id>`), mirrored by a platform

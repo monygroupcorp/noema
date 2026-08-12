@@ -53,7 +53,7 @@ MAINT_FLAG="${MAINT_DIR}/maintenance.flag"
 # The app dynamically imports ./private/compliance/index.js at boot; the published image never
 # contains it. This host directory holds the COMPILED module (the built JS emitted under
 # dist/) and is bind-mounted read-only into the app container below. Provisioning is a manual operator
-# step — see docs/phases/compliance-module-injection.md.
+# step, documented separately for operators.
 # An EMPTY directory is safe and intentional: the dynamic import fails and the app falls back to
 # its stubs with the existing loud warning, i.e. exactly the pre-mount behaviour. Do NOT "fix"
 # this into a hard failure — dev boxes, staging and fresh droplets legitimately have no module.
@@ -334,7 +334,7 @@ if [ -n "$(ls -A "${COMPLIANCE_DIR}" 2>/dev/null || true)" ]; then
 else
   log "Compliance mount EMPTY (${COMPLIANCE_DIR} has no files). Expected on dev/staging/fresh droplets:"
   log "  the app falls back to its stubs — sanctions screening is a NO-OP and public publishing stays denied."
-  log "  To install it, see docs/phases/compliance-module-injection.md."
+  log "  To install it, follow the operator provisioning notes for the compliance module."
 fi
 
 # 10. Clear private key from memory

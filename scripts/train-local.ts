@@ -15,6 +15,7 @@
 // Env: R2_*, MONGODB_URI (→ DB, default noemaplane), HF_TOKEN, HF_ORG (default ms2stationthis).
 // =============================================================================
 
+import { homedir } from 'node:os'
 import { MongoClient } from 'mongodb'
 import { AitoolkitTrainingCursor } from '../src/crystal/AitoolkitTrainingCursor.js'
 import { SqliteAitkJobStore } from '../src/crystal/AitkJobStore.js'
@@ -34,15 +35,18 @@ import { bus } from '../src/lib/bus.js'
 
 const ORG = process.env.HF_ORG ?? 'ms2stationthis'
 const DB = process.env.DB ?? 'noemaplane'
-const HF_CACHE = '/home/rth/.cache/huggingface'
+const HF_CACHE = process.env.HF_HOME ?? `${homedir()}/.cache/huggingface`
 const IMAGE = process.env.AITK_IMAGE ?? 'stationthis-klein:1'
+
+// Where the ai-toolkit clones live. Override with AITK_ROOT on a host that keeps them elsewhere.
+const AITK_ROOT = process.env.AITK_ROOT ?? `${homedir()}/projects/ai/training`
 
 // base model → the ai-toolkit clone that supports its arch.
 const AITK_DIR_BY_BASE: Record<string, string> = {
-  'krea2-raw': '/home/rth/projects/ai/training/ai-toolkit-krea',
-  'krea2': '/home/rth/projects/ai/training/ai-toolkit-krea',
-  'zimage': '/home/rth/projects/ai/training/ai-toolkit-krea',   // latest clone carries both krea2 + zimage archs
-  'klein-4b': '/home/rth/projects/ai/training/ai-toolkit-klein',
+  'krea2-raw': `${AITK_ROOT}/ai-toolkit-krea`,
+  'krea2': `${AITK_ROOT}/ai-toolkit-krea`,
+  'zimage': `${AITK_ROOT}/ai-toolkit-krea`,   // latest clone carries both krea2 + zimage archs
+  'klein-4b': `${AITK_ROOT}/ai-toolkit-klein`,
 }
 
 const ts = (): string => new Date().toISOString().slice(11, 19)
