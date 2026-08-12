@@ -322,7 +322,7 @@ test('setModelLicense(): reclassify re-derives the verdict from the recorded bas
 })
 
 test('publish(): a public model promotion is gated — a denied scan rejects it, access stays private', async () => {
-  // The curation gate (spec/model-import.md §"Curation review"): promoting a private import to
+  // The curation gate (`docs/spec/model-import.md` §"Curation review"): promoting a private import to
   // the public catalogue runs the ModerationGate over its preview samples, fail-closed. A denial
   // rejects the Editio and never flips the model to resolvable-public.
   const gate: ModerationGate = { async scan() { return { ok: false, reason: 'nsfw on the front page' } } }

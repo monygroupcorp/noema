@@ -9,11 +9,11 @@ import { Meter } from './IdentityMeter';
 import './buy-credits-modal.css';
 
 // BuyCreditsModal — the onchain buy-credits ledger (design handoff
-// docs/handoff/2026-07-06-buy-credits-modal-handoff.md, spec buy-credits-spec.md, ADR-024).
+// ADR-024).
 // Four numbered mono lines always on screen: 01 ASSET · 02 AMOUNT · 03 SIGN · 04 SETTLE.
 // v1: mainnet-only, ETH-only (no asset picker; ERC-20/NFT out of scope — see handoff gap #1/#3).
 //
-// Wallet-link guardrail (spec docs/handoff/2026-07-10-deposit-attribution-seam.md §Fix 4):
+// Wallet-link guardrail (the deposit-attribution fix):
 // crediting resolves the payer wallet through the caller's LINKED `'web'` personae — a deposit
 // from an unlinked wallet parks unattributed instead of crediting. So before/while offering the
 // deposit address we gate on the connected wallet's link state (see `walletGateState`).

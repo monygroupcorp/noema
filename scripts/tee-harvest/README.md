@@ -1,6 +1,6 @@
 # tee-harvest — record real external evidence into fixtures
 
-The fixture rule (`docs/tee-hardware-path.md` §2): **fakes may only replay recorded reality.**
+The fixture rule: **fakes may only replay recorded reality.**
 No hand-written mock encodes a belief about an external surface. These scripts run once against
 the real surface and snapshot the actual responses into fixtures the conformance suite consumes.
 

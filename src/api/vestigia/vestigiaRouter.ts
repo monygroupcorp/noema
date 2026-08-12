@@ -26,7 +26,7 @@ function auctorToken(auctor: VestigiaAuctorKey): string {
   return 'animaId' in auctor ? `animaId:${auctor.animaId}` : `commitment:${auctor.commitment}`
 }
 
-// Per-caller projection cache (docs/handoff/2026-07-10-space-real-data.md §1): the
+// Per-caller projection cache: the
 // projection is a VIEW — nothing is stored on the Vestigium record. Recompute when
 // the vestigia count changes (a new gen landed) or the cached artifact ages past
 // CACHE_MAX_AGE_MS, whichever comes first.
@@ -178,7 +178,7 @@ export function createVestigiaRouter(deps: VestigiaRouterDeps): Router {
   // ── GET /projection ──────────────────────────────────────────────────────────
   //
   // PCA-to-3D + k-means projection of the CALLER's own vestigia — feeds Space.tsx's
-  // real-data mode (docs/handoff/2026-07-10-space-real-data.md). Auth: bearer
+  // real-data mode. Auth: bearer
   // session or x-commitment, same resolution as GET /.
   //
   // Query params:

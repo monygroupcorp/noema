@@ -122,7 +122,7 @@ unlimited new graphs against it with no further review. This is what makes "ephe
 - **T2** — a new node pack or base model. *Admin-gated; then it becomes a palette entry for everyone's T1.*
 
 **Follow-ups:**
-- A spec (`docs/spec/ephemeral-templates.md`) detailing the palette schema, the `class_type` allow/ban lists, the
+- A spec detailing the palette schema, the `class_type` allow/ban lists, the
   `validateTemplate` rule table, and the `saveTemplate` API/MCP surface.
 - The pod egress allowlist (the model-host set) as a config artifact.
 - A migration note: the on-disk `*-v*.json` canonical templates and the new DB `workflowTemplates` collection

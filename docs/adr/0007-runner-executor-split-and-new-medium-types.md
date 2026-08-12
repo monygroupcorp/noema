@@ -4,7 +4,7 @@
 - **Date:** 2026-06-11
 - **Relates to:** ADR-0005 (`Fundamentum` — `runtime` is the per-substrate selector this ADR dispatches on),
   ADR-0001 (speak the crystal / no new nouns — the executor is **not** a new ring noun), the second-runtime
-  config-ring sprint (`docs/plans/2026-06-04-second-runtime-config-ring-sprint.md:71`, which first flagged
+  config-ring sprint (which first flagged
   "comfyrunner must branch on `CompiledSpec.runtime`").
 - **Grounded by:** `docs/spec/essentiae-triage.md` — the triage of 5 new models that forced this.
 

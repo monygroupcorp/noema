@@ -272,7 +272,7 @@ const RUNPOD_R2: R2Config | undefined =
     ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_OUTPUTS_BUCKET!, publicUrl: R2_PUBLIC_URL }
     : undefined
 
-// Dedicated PRIVATE bucket for GDPR self-exports (spec/publishing.md §3). This bundle is the
+// Dedicated PRIVATE bucket for GDPR self-exports (`docs/spec/publishing.md` §3). This bundle is the
 // caller's whole PII (credit ledger, deposits, personae, chat messages, …) — it MUST NOT land
 // in R2_OUTPUTS_BUCKET, which is the PUBLIC bucket (bound to R2_PUBLIC_URL) that serves the
 // unauthenticated feed/editions. Deliberately NO `publicUrl`: the object is never publicly
@@ -834,7 +834,7 @@ async function main(): Promise<void> {
   const promptGuard: PromptGuard = compliance?.configurePromptGuard({ log })
     ?? (log.warn('Input CSAM prompt guard inactive (private compliance module absent) — generation prompts are NOT screened. The publish-time gate still applies.'), permissivePromptGuard)
 
-  // Import-by-URL (spec/model-import.md Tier 1): register a Civitai/HF/direct model as a
+  // Import-by-URL (`docs/spec/model-import.md` Tier 1): register a Civitai/HF/direct model as a
   // private, owner-scoped Intella — WEIGHTS origin-only (no R2 copy; we don't custody third-party
   // BYO weights for personal use — the R2 weight mirror happens only on a public promotion,
   // BucketAdapter). The store/fetcher here re-host only the small PREVIEW image(s), so the CSAM
@@ -881,7 +881,7 @@ async function main(): Promise<void> {
     ? new AlchemyPricer(ALCHEMY_API_KEY)
     : (log.warn('Alchemy price key unset (ALCHEMY_API_KEY / ALCHEMY_KEY) — deposits will NOT be priced (no revenue booked, no credits issued, quote unavailable). Configure before real deposits.'), nullPricer)
 
-  // Publish-safety cost forwarding (spec/moderation-classifier.md §7): a content-addressed
+  // Publish-safety cost forwarding (`docs/spec/moderation-classifier.md` §7): a content-addressed
   // verdict cache so an identical re-publish reuses the gate verdict (no re-scan, no re-fee),
   // and a per-scan fee charger that forwards the paid-classifier cost to the publisher — only
   // on a BILLABLE scan (a real Thorn call). PUBLISH_SCAN_FEE (impetus points) is the config
@@ -1412,7 +1412,7 @@ async function main(): Promise<void> {
   // Every 60s walks active Hospitia and debits the host secondsSinceLastTick ×
   // impetusPerSecond. Without this, hosts pay nothing for studios sitting warm — the
   // platform absorbs the underlying compute cost. See
-  // docs/plans/2026-05-24-studio-billing-tick-sprint.md.
+  // the studio billing tick.
   startCensus({
     hospitia: ring.hospitia,
     materiae,

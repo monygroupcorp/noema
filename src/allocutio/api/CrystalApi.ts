@@ -1004,7 +1004,7 @@ export class CrystalApi {
     // `isCatalogEligible` is the policy: 'yes' + 'conditional' pass (we track revenue against the
     // conditional caps); 'no'/'unknown' are refused pending an ADMIN license clearance (setModelLicense
     // backfill). A model with NO recorded verdict (undefined) is not gated here (legacy). Private/
-    // personal use is never blocked — this is listing, not use (spec/model-import.md).
+    // personal use is never blocked — this is listing, not use (`docs/spec/model-import.md`).
     if (ref.kind === 'intella' && visibility !== 'private' && owned.intella?.commercialUse && !isCatalogEligible(owned.intella.commercialUse)) {
       throw Errors.licenseRestricted(
         `this model cannot be promoted to the public catalog under its license (${owned.intella.license ?? 'unknown'}, commercial use: ${owned.intella.commercialUse}). It remains usable privately; an admin can clear it after license review.`,
@@ -1244,7 +1244,7 @@ export class CrystalApi {
     // (feed/marketplace) and (b) a PUBLIC MODEL PROMOTION — an intella becoming resolvable on
     // the shared catalogue (visibility !== 'private'). A model has no media surface, so its
     // "public" is catalogue resolvability; listing it publicly passes the same ModerationGate
-    // over its preview samples (spec/model-import.md §"Curation review"). Private model
+    // over its preview samples (`docs/spec/model-import.md` §"Curation review"). Private model
     // publishing (a private R2 mirror, visibility 'private') is unaffected — personal use is
     // never gated here (its import-time CSAM scan already ran).
     const isPublicSurface = e.visibility === 'feed' || e.visibility === 'marketplace'
@@ -2030,7 +2030,7 @@ export class CrystalApi {
    * The caller's OWN on-chain deposits — scoped to their linked (`'web'`-genus, active) wallet
    * addresses. Powers the settle-watch UI (real depositum status instead of hoping the balance
    * moves). Owner-scoped by construction: a stranger's `animaId` resolves a disjoint wallet set,
-   * so this NEVER returns another account's rows (spec `docs/handoff/2026-07-10-deposit-attribution-seam.md`
+   * so this NEVER returns another account's rows (the deposit-attribution fix
    * §Fix 4). An anon/purse `AuctorKey` ({commitment}/{bursaToken}) has no personae → always [].
    *
    * `Depositorum.list()` has no payer/wallet filter (its interface is out of this item's scope) —
@@ -2245,7 +2245,7 @@ export class CrystalApi {
       // `includeAdult` falsy) EXCLUDES the adult set everywhere `listModels` feeds selection — the safe
       // default.
       //
-      // The gate governs LISTING, not personal use (spec/model-import.md §"Two tiers"): a record the
+      // The gate governs LISTING, not personal use (`docs/spec/model-import.md` §"Two tiers"): a record the
       // caller owns is on their own shelf and is exempt — an owner reaches their own privately-held
       // models with spicy mode off. The exemption is owner-scoped by construction: `ownedIds` is
       // populated only from the `auctor` union above, so it is empty on the public/anon path and the
@@ -2271,7 +2271,7 @@ export class CrystalApi {
   /**
    * Import a model/LoRA by URL (Civitai page/`?modelVersionId`, HuggingFace repo, or a
    * direct `.safetensors`/`.ckpt` link) as a PRIVATE, owner-scoped Intella — usable in
-   * the importer's flows at once (spec/model-import.md Tier 1). The importer scrapes the
+   * the importer's flows at once (`docs/spec/model-import.md` Tier 1). The importer scrapes the
    * origin metadata, CSAM-scans any preview media (fail-closed), mirrors the weights into
    * OUR R2 bucket (auth-free `sources[0]`), and registers `access:'private'`,
    * `canonica:false`, `ownerAnimaId` — so `buildAccessOrClauses` resolves it ONLY for the

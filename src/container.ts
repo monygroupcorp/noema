@@ -390,7 +390,7 @@ export interface ContainerConfig {
   /** TEE runner pod provisioner config — if present, POST /v1/sessions/tee boots real pods. */
   teeProvisioner?: TeeProvisionerConfig
   /** Confidential-CVM backend (Azure NCC H100) — the hardware-sealed tier. Takes
-   *  precedence over teeProvisioner (docs/plans/2026-07-02-tee-hardware-path.md §3). */
+   *  precedence over teeProvisioner. */
   confidentialPod?: ConfidentialPodClientConfig
 }
 

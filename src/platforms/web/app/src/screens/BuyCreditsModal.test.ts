@@ -68,7 +68,7 @@ describe('lineMode — 4-line ledger grammar', () => {
   });
 });
 
-// Wallet-link guardrail (spec docs/handoff/2026-07-10-deposit-attribution-seam.md §Fix 4,
+// Wallet-link guardrail (the deposit-attribution fix,
 // Groom decisions #2) — the three gate states a connected wallet can land in.
 describe('walletGateState — the three wallet-link gate states', () => {
   const wallet = '0xAbCd000000000000000000000000000000dead';

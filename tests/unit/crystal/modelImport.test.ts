@@ -1,4 +1,4 @@
-// Model import by URL (spec/model-import.md) — hermetic. The resolver is driven with a fake
+// Model import by URL (`docs/spec/model-import.md`) — hermetic. The resolver is driven with a fake
 // JSON fetcher over fixture Civitai/HF payloads; the importer with a fake fetcher/store/writer/
 // gate. No network, no R2, no Mongo.
 import { test } from 'node:test'

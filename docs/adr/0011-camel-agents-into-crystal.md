@@ -2,8 +2,8 @@
 
 - **Status:** proposed
 - **Date:** 2026-07-01
-- **Supersedes runtime of:** `main:docs/camel/agent-auth-client-spec.md` (the legacy JS contract)
-- **Handoff:** `docs/handoff/2026-07-01-camel-to-crystal-migration.md`
+- **Supersedes runtime of:** the legacy JS agent-auth client contract
+- **Handoff:** the camel-to-crystal migration notes
 
 ## Context
 
@@ -159,7 +159,7 @@ hung off an otherwise-ordinary Anima, plus its endpoints:
 > assigns per-agent card hosting to the client, not to Noema. The platform card at
 > `GET /.well-known/agent-card.json` is retained; it serves the x402 capability-execution-target
 > role this section assigns Noema, and has its own spec at
-> `docs/agent_usability/03-erc8004-implementation.md:46-90`.
+> the ERC-8004 implementation notes.
 
 ### 6. Workspace = reuse `Modus`/`deriveSavedModus`/`Consuetudo`. Drop git-style revision sync.
 

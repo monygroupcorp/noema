@@ -14,7 +14,7 @@
 
 The domain model ("the crystal") is a small set of Latin-declined nouns (`Intella`, `Modus`/`Essentia`
 in `Modorum`, `Materia`, `Cursor`, `Actum`, `Aditus`/`Exitus`, …) documented in
-`docs/crystal-master-plan.md` + `src/types/index.ts`. A 2026-06-05 audit found the adapter layer had
+the crystal type definitions in `src/types/index.ts`. A 2026-06-05 audit found the adapter layer had
 begun inventing a **parallel vocabulary** — most notably an `ArmPreset` "flow" (a base-family + image +
 runtime derived from `Intellarum`) that collides with the crystal's "flow" (`Essentia`/`Modus`). Two
 things called "flow"; `runtime` defined in five places. This obscures the fundament.

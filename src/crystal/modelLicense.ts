@@ -12,7 +12,7 @@
 // plus the per-seed license notes in seeds/intellae.ts. Commercial-catalog use
 // requires a ✅ (`commercial:'yes'`); everything else is fail-closed.
 //
-// ENFORCEMENT SPLIT (spec/model-import.md): a PRIVATE import is always allowed —
+// ENFORCEMENT SPLIT (`docs/spec/model-import.md`): a PRIVATE import is always allowed —
 // personal, non-commercial use of a non-commercially-licensed model is fine. The
 // license is enforced only at PUBLIC PROMOTION (the shared catalog is a commercial
 // surface): only `commercial:'yes'` auto-promotes; 'no'/'conditional'/'unknown' are

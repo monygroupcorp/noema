@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // READ-ONLY. Counts one user's legacy generations to size the Vestigium self-migration
-// (see docs/plans/2026-06-17-vestigium-self-migration.md §5). Performs ZERO writes — only
+// Performs ZERO writes — only
 // findOne / countDocuments / aggregate. Reads the LIVE `noema` prod DB, so it is deliberately
 // query-only and never mutates anything.
 //

@@ -2,7 +2,7 @@
 // VestigiaProjection — PCA-to-3D + k-means over a caller's vestigia embeddings.
 // =============================================================================
 //
-// Serves Space.tsx's real-data mode (docs/handoff/2026-07-10-space-real-data.md).
+// Serves Space.tsx's real-data mode.
 // No Python, no UMAP, no new heavy deps — plain TS linear algebra, cheap enough
 // for a few thousand 512-dim vectors computed on demand. Ports the shape of
 // scripts/corpus-space/project.py (normalize to a ~[-2.5,2.5] cube, c-TF-IDF-ish

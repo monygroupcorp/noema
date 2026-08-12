@@ -40,7 +40,7 @@ Two license mechanics drive every decision below:
 ### Part A — Platform source: open by default, copyleft the core, hide only abuse logic
 
 Three buckets, per-directory `LICENSE` files, SPDX headers on core files, and a root
-`LICENSING.md` map so the boundary is unambiguous and machine-checkable.
+licence map in `LICENSE` so the boundary is unambiguous and machine-checkable.
 
 | Bucket | What's in it | License | Rationale |
 |---|---|---|---|
@@ -129,7 +129,7 @@ such ceiling.
      `git clone git@github.com:monygroupcorp/noema-compliance.git src/private`. The detection
      DATA (known-CSAM hash sets, OFAC snapshots) is provisioned out-of-band, never committed
      even to the private repo.
-  5. Draft the CLA and the per-bucket `LICENSE` files + root `LICENSING.md`.
+  5. Draft the CLA and the per-bucket `LICENSE` files + a root licence map.
   6. Decide (founder call, deferred): does `Editio` stay AGPL-core, or move to the Apache
      edge to seed a publishing/royalty ecosystem?
 - **Legal note:** crossing a model's commercial cap or shipping the ToS that encodes the

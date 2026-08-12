@@ -118,7 +118,7 @@ while the old CLIP zero-shot tagging correlated with neither (≈ noise) — do 
   human layer. This is why *nudity* detection and *CSAM* detection are different problems.
 - The corpus numbers, the score distributions, the ensemble thresholds, and the folder taxonomy
   are **PRIVATE** (§49 — cascade routing logic + tuning): see the private compliance module's
-  `corpus-read-findings.md`.
+  the corpus read-through findings.
 
 ### 3c. Execution (host-side, in-process, synchronous)
 Mirror the existing host-side runtimes (`JimpLayerCompositeEngine`, ffmpeg cursors):
