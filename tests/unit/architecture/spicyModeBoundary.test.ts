@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
 // =============================================================================
-// HARD SAFETY INVARIANT (noema-091, load-bearing gauntlet deliverable)
+// HARD SAFETY INVARIANT (load-bearing, and deliberately not softenable)
 // =============================================================================
 //
 // `spicyMode` must NEVER be read by, entangle with, or weaken the CSAM/moderation

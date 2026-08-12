@@ -7,7 +7,7 @@ import { api, newTurnKey, type ConciergeProposal, type ColloquiumSummary } from 
 import { useProject } from '../state/project';
 import { ProposalCard } from '../components/ProposalCard';
 
-// ── Two honest signals (see identity/noema/chat-spec.md) ──────────────────────
+// ── Two honest signals ────────────────────────────────────────────────────────
 // hemisphere = what NOEMA can SEE (lit remote · ring TEE/your-server)
 // egress     = whether the request LEFT NOEMA, and to whom (↗, warm --egress)
 // They are kept deliberately distinct: a your-server run (ring, we see nothing) and

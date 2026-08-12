@@ -20,7 +20,7 @@
 // DIRECTLY, per-turn, at the EXACT OpenRouter chat cost (`chatImpetus(sumTokens, 3n/1k)`),
 // independent of `createRun`/GO. No Actum/run record is created per turn.
 //
-// TWO RAILS (Gauntlet #1 ruling Q3 — anon metering split):
+// TWO RAILS (locked ruling — anon metering split):
 //   • animaId / commitment (Signorum-backed) → EXACT cost: reserve a per-turn cap, run,
 //     settle the ACTUAL summed-token cost, refund the unused delta, and stamp the resulting
 //     signaIds onto the agent Dictum. The mainline (the real ZK-soul anon path included).
@@ -28,7 +28,7 @@
 //     NO refund, `Dictum.signaIds` stays EMPTY (a bursa turn yields no signum by design). The
 //     Bursa rail is deliberately NOT extended with refund machinery.
 //
-// INVARIANTS the gauntlet reviews (value conservation is the whole risk surface):
+// INVARIANTS under review here (value conservation is the whole risk surface):
 //   (1) A turn is charged AT MOST ONCE. Idempotency keys on the caller-supplied `turnKey`, enforced
 //       ATOMICALLY at the store: a UNIQUE PARTIAL index on (colloquiumId, turnKey) over AGENT dicta
 //       (src/crystal/ensureIndexes.ts) makes the agent-Dictum insert the per-turn CHARGE GATE. A
@@ -69,12 +69,12 @@ import type { Run } from './types.js'
 
 const log = makeLogger('api:colloquia')
 
-/** Per-turn reserve cap in impetus (Gauntlet #1 ruling (2)): default 200, env-overridable
+/** Per-turn reserve cap in impetus (locked ruling): default 200, env-overridable
  *  at the construction site (`CONCIERGE_TURN_CAP_IMPETUS`). The cap bounds one turn's spend
  *  and — with the ~10-turn history bound below — keeps token cost predictable and coverable. */
 export const DEFAULT_CONCIERGE_TURN_CAP_IMPETUS = 200n
 
-/** How many prior Dicta are fed to the agent as history (Gauntlet #1 ruling (2)) — bounding
+/** How many prior Dicta are fed to the agent as history (locked ruling) — bounding
  *  the context keeps per-turn token cost (and thus the settled charge) under the cap. */
 export const HISTORY_TURN_LIMIT = 10
 

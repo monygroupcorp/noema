@@ -12,8 +12,11 @@ on the 4090. Read-only over the HDD corpus; no DB, no network at run time
 
 ## Inputs
 
-`/run/media/rth/Big Disk/stationthis-corpus/index.jsonl`        (noema-era, ~17.6k)
-`/run/media/rth/Big Disk/stationthis-corpus/legacy/index.jsonl` (legacy 2024, ~145k)
+Set `CORPUS_ROOT` to the corpus directory — it lives on external storage, not in
+this repo, and every script here refuses to run without it.
+
+`$CORPUS_ROOT/index.jsonl`        (noema-era, ~17.6k)
+`$CORPUS_ROOT/legacy/index.jsonl` (legacy 2024, ~145k)
 
 Each line: `{ prompt, loras[], seed, checkpoint, width, height, date, user, service/type, ratings, srcUrl, file }`.
 

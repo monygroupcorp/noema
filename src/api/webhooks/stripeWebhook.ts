@@ -16,7 +16,7 @@
 //     §2/§4). IDEMPOTENT on the payment key: Stripe redelivers, and one purchase emits two
 //     events sharing a payment_intent — both collapse to a SINGLE credit.
 //
-// SECURITY INVARIANTS (the gauntlet's focus):
+// SECURITY INVARIANTS (the security review's focus):
 //   · No credit without a signature-verified event — a bad/unsigned webhook is rejected (400).
 //   · No credit from a non-completed payment — the event must actually be paid.
 //   · The credited amount is the SERVER-SIDE pack constant keyed by the server-set packId,

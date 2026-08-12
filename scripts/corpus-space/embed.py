@@ -14,13 +14,17 @@ Prompt text only (per product decision): this is the "prompt space".
 LoRA tags (<lora:name:weight>) are stripped from the embedded text and lifted
 into a structured `loras` field so they inform analytics, not the geometry.
 """
-import argparse, json, re, sys, time
+import argparse, json, os, re, sys, time
 from pathlib import Path
 import numpy as np
 
+_BASE = os.environ.get("CORPUS_ROOT")
+if not _BASE:
+    raise SystemExit("set CORPUS_ROOT to the corpus directory (it lives on external storage, not in this repo)")
+
 CORPORA = {
-    "noema":  "/run/media/rth/Big Disk/stationthis-corpus/index.jsonl",
-    "legacy": "/run/media/rth/Big Disk/stationthis-corpus/legacy/index.jsonl",
+    "noema":  os.path.join(_BASE, "index.jsonl"),
+    "legacy": os.path.join(_BASE, "legacy/index.jsonl"),
 }
 
 LORA_RE = re.compile(r"<lora:([^:>]+)(?::[\d.]+)?>", re.IGNORECASE)

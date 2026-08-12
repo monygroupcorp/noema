@@ -1,10 +1,10 @@
 // =============================================================================
-// GDPR Art. 17 right-to-erasure (noema-025) — the gauntlet invariants.
+// GDPR Art. 17 right-to-erasure — the invariants that must hold.
 // =============================================================================
 //
 // Pseudonymize-and-tombstone: sever the PERSON, RETAIN the anonymized financial rows. These
 // hermetic tests (pure fakes, no Mongo) assert every load-bearing invariant the two-reviewer
-// gauntlet stresses:
+// the review stresses:
 //   • denylist FIRST, then tombstone, then hard-deletes (ordering/safety);
 //   • the identity/content collections are hard-deleted; dicta are cascaded before their colloquia;
 //   • the financial ledger + ZK anonymity set are UNTOUCHED (no such store is even wired into the

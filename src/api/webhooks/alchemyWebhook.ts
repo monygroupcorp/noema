@@ -231,7 +231,7 @@ export type DepositSweepDeps = Pick<AlchemyWebhookDeps, 'deposita' | 'signorum' 
  * NOT a backfill migration). A still-unlinked payer is left parked silently: the loud "unattributed"
  * warn already fired once at receipt, so the sweep must not spam it every tick.
  *
- * RE-BOOK BEFORE CREDIT (v4 gauntlet finding): the Depositum's usdFmv is persisted at `create` BEFORE
+ * RE-BOOK BEFORE CREDIT (review finding): the Depositum's usdFmv is persisted at `create` BEFORE
  * bookRevenue runs (separate write, no transaction). If record() threw transiently and the process
  * restarted, this sweep would see a priced row with NO revenue booked — crediting it then would leave
  * revenue permanently zero (re-delivery short-circuits on `processatum`). So the sweep re-books
@@ -534,13 +534,13 @@ async function handlePaymentLog(
   // Unpriceable → parked confirmatum (no revenue, no credit — already warned in priceDeposit).
   if (usdFmv === null) return true
 
-  // FREEZE-ON-FIRST-PRICE (noema-027 v5 gauntlet finding). A row first parked UNpriceable (created with
+  // FREEZE-ON-FIRST-PRICE (review finding). A row first parked UNpriceable (created with
   // `token` but no `usdFmv`) that prices on THIS re-delivery must PERSIST that basis now — exactly as
   // the create path freezes it — so book, credit, and every later delivery share ONE basis. Without it
   // the reuse branch re-prices at fresh spot on each delivery: if this delivery books revenue (locked
   // permanently on depositumId) but its credit then throws, a later re-delivery would credit at a
   // DIFFERENT spot than the booked revenue — minted impetus diverging from recognized revenue
-  // (value-conservation break; Captain amendment B). It also lets the sweep heal the row (it skips
+  // (value-conservation break; review amendment). It also lets the sweep heal the row (it skips
   // usdFmv===undefined rows as legacy). Only a reused, never-priced-at-receipt row reaches here with
   // usdFmv undefined: a fresh create was priced (usdFmv set on the row) or returned above (unpriceable).
   if (depositum.usdFmv === undefined) {
@@ -557,7 +557,7 @@ async function handlePaymentLog(
   // create-succeeded-but-book-failed row (Depositum exists at X1 but no Reditus — record() threw
   // transiently), re-pricing here would insert a fresh Reditus at the drifted spot X2 while the
   // credit mints impetus from the persisted X1 — recognized revenue diverging from the credit basis
-  // by the spot drift over the retry window (value-conservation break; Captain amendment B). Booking
+  // by the spot drift over the retry window (value-conservation break; review amendment). Booking
   // from the persisted basis is a no-op for fresh rows (depositum.usdFmv was just set to usdFmv) and
   // for already-booked rows (dup-key on depositumId), and heals the book-failed row at X1 to match
   // the credit — mirroring the sweep's re-book (which books from depositum.usdFmv).
@@ -576,7 +576,7 @@ async function handlePaymentLog(
   // Credit from the PERSISTED receipt-time basis, never the fresh price: revenue was booked at that
   // basis and bookRevenue is idempotent on depositumId, so re-pricing here would mint impetus against a
   // basis that diverges from the booked revenue whenever ETH moved since receipt (value-conservation
-  // break; Captain amendment B). `depositum.usdFmv` is ALWAYS set by now — a fresh create priced it, a
+  // break; review amendment). `depositum.usdFmv` is ALWAYS set by now — a fresh create priced it, a
   // reused priced-at-receipt row carries it, and a reused unpriceable-at-receipt row was just frozen
   // above (FREEZE-ON-FIRST-PRICE) before this same delivery's book — so `?? usdFmv` is an unreachable
   // type-level fallback, never the live basis. (Same for `depositum.token ?? token`.)

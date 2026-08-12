@@ -22,7 +22,9 @@ import numpy as np
 
 HERE = Path(__file__).parent
 OUT = HERE / "out"
-_BASE = os.environ.get("CORPUS_ROOT", "/run/media/rth/Big Disk/stationthis-corpus")
+_BASE = os.environ.get("CORPUS_ROOT")
+if not _BASE:
+    raise SystemExit("set CORPUS_ROOT to the corpus directory (it lives on external storage, not in this repo)")
 ROOTS = {
     "noema":  _BASE + "/media",
     "legacy": _BASE + "/legacy/media",

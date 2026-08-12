@@ -11,7 +11,7 @@ so the frontend can toggle prompt-space <-> image-space and even compare them.
   python embed_clip.py --mode text     # -> out/clip_text.f32.npy   (fast, GPU only)
   python embed_clip.py --mode image    # -> out/clip_image.f32.npy  (slow, HDD decode)
 """
-import argparse, json, warnings, time
+import argparse, json, os, warnings, time
 from pathlib import Path
 import numpy as np
 import torch
@@ -22,9 +22,13 @@ from PIL import Image
 warnings.filterwarnings("ignore")
 HERE = Path(__file__).parent
 OUT = HERE / "out"
+_BASE = os.environ.get("CORPUS_ROOT")
+if not _BASE:
+    raise SystemExit("set CORPUS_ROOT to the corpus directory (it lives on external storage, not in this repo)")
+
 ROOTS = {
-    "noema":  "/run/media/rth/Big Disk/stationthis-corpus/media",
-    "legacy": "/run/media/rth/Big Disk/stationthis-corpus/legacy/media",
+    "noema":  os.path.join(_BASE, "media"),
+    "legacy": os.path.join(_BASE, "legacy/media"),
 }
 # match clip_service.py exactly
 MODEL_NAME, PRETRAINED = "ViT-B-32", "openai"

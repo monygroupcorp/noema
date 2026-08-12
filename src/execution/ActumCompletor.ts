@@ -18,7 +18,7 @@ const log = makeLogger('execution:completor')
 // dispatchInceptio sync path). Deliberately narrower than Inceptio.by/AuctorKey elsewhere —
 // bursaToken/arcanumProof (anonymous rails) never reach here; callers filter those out
 // before threading (vestigia are identity-linked records; the anonymous half stays
-// unlinkable — gauntlet-locked invariant).
+// unlinkable — a locked invariant).
 type Auctor = { animaId: string } | { commitment: string }
 
 interface Deps {

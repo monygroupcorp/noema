@@ -8,7 +8,7 @@
 //   4. reject-before-run on insufficient balance (no Dictum, no provider call, no debit)
 //   5. Dictum.signaIds stamped with the settle's produced signa id(s)
 //   6. security: the agent can never be induced to emit a spend tool through this path
-// plus the bursaToken FLAT-CAP rail (Gauntlet #1 ruling Q3).
+// plus the bursaToken FLAT-CAP rail (locked ruling).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
@@ -326,7 +326,7 @@ test('retrying a dicta POST with the same turnKey is a no-op — no re-run, no d
   assert.equal(h.captured.tools.length, toolCallsAfterFirst)
 })
 
-// ── 3b. CONCURRENCY — the TOCTOU charge gate (gauntlet blocker) ───────────────
+// ── 3b. CONCURRENCY — the TOCTOU charge gate (review blocker) ─────────────────
 // Two concurrent POSTs with the SAME turnKey (a client-timeout retry racing the still-in-flight
 // original — a normal operating condition for a multi-second agent turn) must charge the caller
 // EXACTLY ONCE. The unique partial index on (colloquiumId, turnKey) over AGENT dicta is the atomic
@@ -443,7 +443,7 @@ test('security: only read-only tools reach the model, and no spend method is eve
   }
 })
 
-// ── Gauntlet #1 ruling Q3 — bursaToken FLAT-CAP rail ──────────────────────────
+// ── Locked ruling — bursaToken FLAT-CAP rail ──────────────────────────────────
 
 test('bursaToken turn debits the FLAT CAP (no refund) and leaves signaIds empty', async () => {
   const h = harness({ auctor: { bursaToken: 'bt-1' }, bursaCredits: 100_000n, script: [reply(2000)] })

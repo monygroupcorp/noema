@@ -505,7 +505,7 @@ test("a frozen anima is BLOCKED (auth.forbidden) at every Collections chokepoint
 })
 
 test("a frozen anima is BLOCKED (auth.forbidden) at provisionStudio / provisionTeeSession / publish — compute-budget + scanFee outflow chokepoints (freeze-boundary v2)", async () => {
-  // Gauntlet finding: provisionStudio and provisionTeeSession are user-initiated, read the anima's
+  // Review finding: provisionStudio and provisionTeeSession are user-initiated, read the anima's
   // balance and commit it as a compute budget, then boot a pod that debits it over time
   // (studioSpendHook mints `nexus:studioSpend`; the TEE path spends `tee:spend`). Left ungated, a
   // disputing fraudster drains the disputed balance on GPU compute before the chargeback resolves.

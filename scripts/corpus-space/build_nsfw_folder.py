@@ -21,7 +21,9 @@ import numpy as np
 
 HERE = Path(__file__).parent
 OUT = HERE / "out"
-_BASE = os.environ.get("CORPUS_ROOT", "/run/media/rth/Big Disk/stationthis-corpus")
+_BASE = os.environ.get("CORPUS_ROOT")
+if not _BASE:
+    raise SystemExit("set CORPUS_ROOT to the corpus directory (it lives on external storage, not in this repo)")
 ROOTS = {
     "noema":  _BASE + "/media",
     "legacy": _BASE + "/legacy/media",
@@ -46,7 +48,7 @@ def main():
     ap.add_argument("--threshold", type=float, default=0.03)
     ap.add_argument("--near_lo", type=float, default=0.015, help="borderline band lower bound")
     ap.add_argument("--near_cap", type=int, default=1500, help="max borderline symlinks")
-    ap.add_argument("--out", default="/run/media/rth/Big Disk/stationthis-corpus/nsfw-review")
+    ap.add_argument("--out", default=os.path.join(_BASE, "nsfw-review"))
     args = ap.parse_args()
 
     score = np.load(OUT / "nsfw_score.npy")

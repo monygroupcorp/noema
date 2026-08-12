@@ -1028,7 +1028,7 @@ async function main(): Promise<void> {
   // original spot above) because / and /projection resolve the CALLER's identity
   // via apiResolver, mirroring createSponsioRouter below.
   app.use('/api/vestigia', createVestigiaRouter({ vestigiorum: ring.vestigiorum, identity: apiResolver }))
-  // Querela reports (bug/feature/feedback, plans/noema-100.md) — anon-capable (animaId,
+  // Querela reports (bug/feature/feedback) — anon-capable (animaId,
   // commitment, AND bursaToken), so mounted here (not via apiResolver-only vestigia-style
   // resolveCaller) with its own bursa-permitting auth seam, mirroring createSponsioRouter below.
   app.use('/v1/reports', express.json(), createQuerelaRouter({ querelae: ring.querelae, identity: apiResolver }))
@@ -1305,7 +1305,7 @@ async function main(): Promise<void> {
   // thread) + POST /v1/colloquia/:id/dicta (run one metered turn). A turn persists the user +
   // agent Dicta, runs the read-only ConciergeAgent (noema-094), and settles DIRECTLY at the
   // exact OpenRouter chat cost per turn (Decision Q1) — Signorum exact-cost for animaId/commitment
-  // callers, Bursa flat-cap for bursaToken (Gauntlet #1 ruling Q3). Only wired when an OpenRouter
+  // callers, Bursa flat-cap for bursaToken (locked ruling). Only wired when an OpenRouter
   // key is configured — without it the tool-use agent cannot run, so the endpoints stay unmounted
   // (404) rather than 401-ing every turn.
   const openRouterKey = process.env.OPENROUTER_API_KEY

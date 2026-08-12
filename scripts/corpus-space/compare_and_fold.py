@@ -24,7 +24,9 @@ import numpy as np
 
 HERE = Path(__file__).parent
 OUT = HERE / "out"
-_BASE = os.environ.get("CORPUS_ROOT", "/run/media/rth/Big Disk/stationthis-corpus")
+_BASE = os.environ.get("CORPUS_ROOT")
+if not _BASE:
+    raise SystemExit("set CORPUS_ROOT to the corpus directory (it lives on external storage, not in this repo)")
 ROOTS = {"noema": _BASE + "/media", "legacy": _BASE + "/legacy/media"}
 T_FAL, T_CLIP, T_NUD = 0.5, 0.03, 0.5
 EX = re.compile(r"\b(nsfw|explicit|nude|nudity|naked|topless|nipple|areola|pussy|vagina|vulva|clit|penis|cock|dick|dildo|anal|blowjob|handjob|cumshot|creampie|hentai|porn|sex|orgasm|fellatio|masturbat|erotic|lewd)\b")
@@ -41,7 +43,7 @@ def link(src, folder: Path, name):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=os.environ.get("CORPUS_ROOT", "/run/media/rth/Big Disk/stationthis-corpus") + "/nsfw-review")
+    ap.add_argument("--out", default=_BASE + "/nsfw-review")
     ap.add_argument("--no-fold", action="store_true")
     args = ap.parse_args()
 

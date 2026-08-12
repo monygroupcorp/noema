@@ -212,7 +212,7 @@ async function main(): Promise<void> {
       // Resumability: skip source accounts already brought to a TERMINAL disposition. The skip set is
       // the UNION of two truths:
       //   (a) minted migration SIGNA — testis='migration:<mid>', auctor:'migration:legacy'. Gating on
-      //       the signum (NOT the anima) is the no-money-loss invariant (gauntlet finding): the commit
+      //       the signum (NOT the anima) is the no-money-loss invariant (review finding): the commit
       //       writes Anima BEFORE the balance Signum, so a crash between them leaves an anima with NO
       //       balance; an anima-derived skip set would strand that balance forever, but a signum-derived
       //       one REPROCESSES it (anima upsert / row-claim / persona findOrCreate / issue() are all

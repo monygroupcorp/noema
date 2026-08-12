@@ -12,7 +12,7 @@
 // or a bursaToken purse) can file reports too, not just identified animae.
 //
 // PRIVATE STORE — v1 ships no GitHub egress and no sanitizer; nothing here
-// leaves the database. See plans/noema-100.md Decision record (Q1).
+// leaves the database. That is a decision, not a gap awaiting an integration.
 // =============================================================================
 
 /** Captured client state for a `bug` report — best-effort, all optional. */
