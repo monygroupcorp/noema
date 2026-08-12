@@ -262,7 +262,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
           expiresAt: Date.now() + TelegramAllocutio.PENDING_SHARE_TOKEN_TTL_MS,
         })
       },
-      cancel: (userId) => this.router.clear('telegram', userId),
+      cancel: (userId) => this.router.clear('telegram', userId, String(this.chatIds.get(`telegram:${userId}`) ?? userId)),
       sendMessage: (chatId, text, extra) => this.sender.sendMessage(chatId, text, extra),
       sendStart: (chatId) => this._sendStart(chatId),
       ack: (chatId, messageId) => { void this._react(chatId, messageId, REACTION.ok) },
@@ -374,7 +374,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       }
     }
 
-    await this.router.enter('execute', 'telegram', userId, identity, state ? { state } : undefined)
+    // Scoped to the chat this entry came from — the caller (a command or start-screen
+    // button) always runs downstream of a message/callback that already stamped chatIds.
+    await this.router.enter('execute', 'telegram', userId, String(chatId ?? userId), identity, state ? { state } : undefined)
   }
 
   /** Re-run an actum under the presser (presser pays), prefilled with its modus + params. */
@@ -384,7 +386,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     if (!actum) return
     const identity = await this.identity.resolve(presserUserId)
     // Lands in CONFIGURE prefilled with the original params; the presser submits → they pay.
-    await this.router.enter('execute', 'telegram', presserUserId, identity, {
+    // Scoped to the callback's own chat (the presser's interaction), not the flow-owner's.
+    await this.router.enter('execute', 'telegram', presserUserId, String(chatId), identity, {
       state: { modusId: actum.modusId, aditus: actum.aditus, browsePageIndex: 0 },
     })
   }
@@ -406,7 +409,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   /** Flow-card entry: open Save-as seeded from the active flow's card state. */
   private async _saveAsFromCard(userId: string, chatId: number): Promise<void> {
     if (!this.saveAs) return
-    const ctx = this.router.peek('telegram', userId)
+    const ctx = this.router.peek('telegram', userId, String(chatId))
     const state = ctx?.state as { modusId?: string; aditus?: Record<string, unknown>; pinnedModels?: Array<{ id: string }> } | undefined
     if (!state?.modusId) return
     const seed: SaveAsSeed = {
@@ -566,7 +569,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // `/effect …` typed under an attached image would otherwise be silently dropped.
     const text = message.text ?? message.caption ?? ''
 
-    // Store chatId for later use (rendering)
+    // Store chatId — used by non-render lookups (bulletins.pendingModelsFor, the /cancel
+    // and force-reply reply paths). Render target no longer reads from this map; it
+    // resolves from the chat-scoped FlowContext (ruling 3).
     this.chatIds.set(`telegram:${userId}`, chatId)
 
     // Mod • → Add: a reply to a force-reply prompt carries either a search term or trigger word(s).
@@ -617,22 +622,39 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     } else {
       // Photo message while flow active → resolve file URL → prompt event
       if (message.photo && message.photo.length > 0) {
-        if (this.router.hasContext('telegram', userId)) {
+        if (this.router.hasContext('telegram', userId, String(chatId))) {
           const largest = message.photo[message.photo.length - 1]  // highest res
           const fileUrl = await this._resolveFileUrl(largest.file_id)
           if (fileUrl) {
-            await this.router.handle('telegram', userId, { kind: 'prompt', text: fileUrl })
+            await this.router.handle('telegram', userId, String(chatId), { kind: 'prompt', text: fileUrl })
           }
         }
         return
       }
 
-      // Plain text message — only route if there's an active flow
-      if (this.router.hasContext('telegram', userId)) {
-        await this.router.handle('telegram', userId, { kind: 'prompt', text })
+      // Plain text message — only route if there's an active flow in this chat. In a
+      // group/supergroup, unaddressed plain text advances nothing at all: the bot must
+      // be @-mentioned or the message must reply to one of the bot's own messages.
+      if (message.chat.type !== 'private' && !this._isAddressedToBot(message)) {
+        return
+      }
+      if (this.router.hasContext('telegram', userId, String(chatId))) {
+        await this.router.handle('telegram', userId, String(chatId), { kind: 'prompt', text })
       }
       // No active flow → no-op
     }
+  }
+
+  /** Group gate (ruling 2): was this message @-mentioning the bot, or replying to one
+   *  of the bot's own messages? Absent a configured botUsername, both signals are
+   *  unavailable and this conservatively returns false (fail closed, not open). */
+  private _isAddressedToBot(message: NonNullable<TelegramUpdate['message']>): boolean {
+    const botUsername = this.deps.botUsername
+    if (!botUsername) return false
+    const text = message.text ?? message.caption ?? ''
+    if (text.toLowerCase().includes(`@${botUsername.toLowerCase()}`)) return true
+    const repliedFrom = message.reply_to_message?.from
+    return repliedFrom?.username?.toLowerCase() === botUsername.toLowerCase()
   }
 
   // -------------------------------------------------------------------------
@@ -733,8 +755,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       }
     }
 
-    if (this.router.hasContext('telegram', userId)) {
-      await this.router.handle('telegram', userId, event)
+    if (chatId && this.router.hasContext('telegram', userId, String(chatId))) {
+      await this.router.handle('telegram', userId, String(chatId), event)
     }
   }
 
@@ -1051,8 +1073,11 @@ Generate AI art, chat with models, explore creative tools.`
   // -------------------------------------------------------------------------
 
   private _getChatId(ctx: FlowContext): number | null {
-    const key = `${ctx.platform}:${ctx.platformUserId}`
-    return this.chatIds.get(key) ?? null
+    // Render target resolves from the (now chat-scoped) FlowContext itself — not from
+    // the last-write-wins chatIds map, which can point at whichever chat the user most
+    // recently typed in (ruling 3).
+    const chatId = Number(ctx.platformChatId)
+    return Number.isFinite(chatId) ? chatId : null
   }
 
   // -------------------------------------------------------------------------

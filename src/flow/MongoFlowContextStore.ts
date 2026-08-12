@@ -16,16 +16,16 @@ export class MongoFlowContextStore implements FlowContextStore {
       : db  // accept a pre-built collection directly (used in tests)
   }
 
-  key(platform: Platform, userId: string): string {
-    return `${platform}:${userId}`
+  key(platform: Platform, userId: string, chatId: string): string {
+    return `${platform}:${userId}:${chatId}`
   }
 
-  get(platform: Platform, userId: string): FlowContext | undefined {
-    return this.primary.get(this.key(platform, userId))
+  get(platform: Platform, userId: string, chatId: string): FlowContext | undefined {
+    return this.primary.get(this.key(platform, userId, chatId))
   }
 
-  set(platform: Platform, userId: string, ctx: FlowContext): void {
-    const k = this.key(platform, userId)
+  set(platform: Platform, userId: string, chatId: string, ctx: FlowContext): void {
+    const k = this.key(platform, userId, chatId)
 
     // Maintain actumIndex
     const existing = this.primary.get(k)
@@ -38,8 +38,8 @@ export class MongoFlowContextStore implements FlowContextStore {
     this._upsert(k, ctx).catch((err: unknown) => log.error('upsert error', { error: String(err) }))
   }
 
-  delete(platform: Platform, userId: string): void {
-    const k = this.key(platform, userId)
+  delete(platform: Platform, userId: string, chatId: string): void {
+    const k = this.key(platform, userId, chatId)
     const existing = this.primary.get(k)
     if (existing?.pendingActumId) this.actumIndex.delete(existing.pendingActumId)
     this.primary.delete(k)
@@ -54,12 +54,23 @@ export class MongoFlowContextStore implements FlowContextStore {
   async hydrate(): Promise<void> {
     const col = this.collection as {
       createIndexes: (indexes: unknown[]) => Promise<void>
+      dropIndex: (name: string) => Promise<unknown>
       find: (filter?: unknown) => { toArray: () => Promise<Array<Record<string, unknown>>> }
     }
 
+    // Mongo refuses a second index on the same key pattern under a different name, and
+    // refuses to recreate an existing name with different options — drop the prior TTL
+    // index first. A fresh database has no such index; swallow only that case.
+    await col.dropIndex('ttl_30d').catch((err: unknown) => {
+      const msg = String((err as { message?: string })?.message ?? err)
+      // "index not found" — no prior index to drop. "ns not found" — collection doesn't
+      // exist yet (fresh database, nothing has hydrated/written before). Both expected.
+      if (!/index not found|ns not found/i.test(msg)) throw err
+    })
+
     await col.createIndexes([
       { key: { pendingActumId: 1 }, sparse: true, name: 'pendingActumId_sparse' },
-      { key: { updatedAt: 1 }, expireAfterSeconds: 30 * 24 * 60 * 60, name: 'ttl_30d' },
+      { key: { updatedAt: 1 }, expireAfterSeconds: 24 * 60 * 60, name: 'ttl_24h' },
     ])
 
     const docs = await col.find({}).toArray()
