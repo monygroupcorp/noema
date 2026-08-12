@@ -20,7 +20,7 @@ interface TelegramUpdate {
     text?: string
     date: number
     photo?: Array<{ file_id: string; width: number; height: number }>
-    reply_to_message?: { message_id: number }
+    reply_to_message?: { message_id: number; from?: { id: number; username?: string } }
   }
   callback_query?: {
     id: string
@@ -117,8 +117,9 @@ function makeRouter() {
   let stepCb: ((ctx: FlowContext, step: Step) => void) | null = null
   let resCb: ((ctx: FlowContext, res: Resolution) => void) | null = null
 
-  // Active context state: present means a flow is running for this user
+  // Active context state: present means a flow is running for this user, in this chat.
   const activeContexts = new Map<string, FlowContext>()
+  const key = (platform: Platform, userId: string, chatId: string) => `${platform}:${userId}:${chatId}`
 
   const router = {
     // --- recorded calls ---
@@ -133,45 +134,47 @@ function makeRouter() {
       intent: Intent,
       platform: Platform,
       userId: string,
+      chatId: string,
       identity: AuctorKey,
       initialCtx?: unknown
     ) => {
-      calls.push({ method: 'enter', args: [intent, platform, userId, identity, initialCtx] })
+      calls.push({ method: 'enter', args: [intent, platform, userId, chatId, identity, initialCtx] })
       const ctx: FlowContext = {
         intent,
         state: {},
         identity,
         platform,
         platformUserId: userId,
+        platformChatId: chatId,
       }
-      activeContexts.set(`${platform}:${userId}`, ctx)
+      activeContexts.set(key(platform, userId, chatId), ctx)
       // Simulate router immediately emitting a step (empty primitives)
       stepCb?.(ctx, { primitives: [] })
     },
 
-    handle: async (platform: Platform, userId: string, event: PrimitiveEvent) => {
-      calls.push({ method: 'handle', args: [platform, userId, event] })
-      const ctx = activeContexts.get(`${platform}:${userId}`)
+    handle: async (platform: Platform, userId: string, chatId: string, event: PrimitiveEvent) => {
+      calls.push({ method: 'handle', args: [platform, userId, chatId, event] })
+      const ctx = activeContexts.get(key(platform, userId, chatId))
       if (ctx) {
         stepCb?.(ctx, { primitives: [] })
       }
     },
 
-    clear: (platform: Platform, userId: string) => {
-      calls.push({ method: 'clear', args: [platform, userId] })
-      activeContexts.delete(`${platform}:${userId}`)
+    clear: (platform: Platform, userId: string, chatId: string) => {
+      calls.push({ method: 'clear', args: [platform, userId, chatId] })
+      activeContexts.delete(key(platform, userId, chatId))
     },
 
-    hasContext: (platform: Platform, userId: string) =>
-      activeContexts.has(`${platform}:${userId}`),
+    hasContext: (platform: Platform, userId: string, chatId: string) =>
+      activeContexts.has(key(platform, userId, chatId)),
 
-    peek: (platform: Platform, userId: string) =>
-      activeContexts.get(`${platform}:${userId}`) ?? null,
+    peek: (platform: Platform, userId: string, chatId: string) =>
+      activeContexts.get(key(platform, userId, chatId)) ?? null,
 
     // Test helper: seed a card-state context for the Save-as-from-card path.
-    seedContext(platform: Platform, userId: string, state: unknown) {
-      activeContexts.set(`${platform}:${userId}`, {
-        intent: 'execute' as Intent, state, identity: { animaId: 'a' }, platform, platformUserId: userId,
+    seedContext(platform: Platform, userId: string, state: unknown, chatId = '456') {
+      activeContexts.set(key(platform, userId, chatId), {
+        intent: 'execute' as Intent, state, identity: { animaId: 'a' }, platform, platformUserId: userId, platformChatId: chatId,
       })
     },
 
@@ -228,6 +231,29 @@ function photoMsgUpdate(
   }
 }
 
+/** A group/supergroup text message, optionally @-mentioning the bot or replying to
+ *  one of the bot's own messages — used to exercise the group gate (ruling 2). */
+function groupMsgUpdate(
+  userId: number,
+  chatId: number,
+  text: string,
+  opts: { messageId?: number; replyToBot?: boolean; botUsername?: string } = {}
+): TelegramUpdate {
+  return {
+    update_id: 5,
+    message: {
+      message_id: opts.messageId ?? 1,
+      from: { id: userId, username: 'tester' },
+      chat: { id: chatId, type: 'supergroup' },
+      text,
+      date: Math.floor(Date.now() / 1000),
+      ...(opts.replyToBot
+        ? { reply_to_message: { message_id: 900, from: { id: 1, username: opts.botUsername ?? 'stationbot' } } }
+        : {}),
+    },
+  }
+}
+
 function staleMsgUpdate(userId: number, chatId: number, text: string, pastSeconds = 300): TelegramUpdate {
   return {
     update_id: 4,
@@ -244,7 +270,7 @@ function staleMsgUpdate(userId: number, chatId: number, text: string, pastSecond
 // =============================================================================
 // Helper: build TelegramAllocutio wired with router callbacks
 // =============================================================================
-function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown } = {}) {
+function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown; botUsername?: string } = {}) {
   const sender = makeSender()
   const identity = makeIdentity()
   const router = makeRouter()
@@ -269,6 +295,7 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
     sender,
     identity,
     botStartupTime: opts.botStartupTime,
+    ...(opts.botUsername ? { botUsername: opts.botUsername } : {}),
     ...(opts.autoSettleMs !== undefined ? { autoSettleMs: opts.autoSettleMs } : {}),
     acta,
     ...(opts.intellarum ? { intellarum: opts.intellarum as unknown as import('../../../src/types/intelligendi.js').Intellarum } : {}),
@@ -341,7 +368,7 @@ test('text message while flow active fires prompt event to router', async () => 
 
   const handleCall = router.calls.find(c => c.method === 'handle')
   assert.ok(handleCall, 'router.handle should have been called')
-  const event = handleCall!.args[2] as PrimitiveEvent
+  const event = handleCall!.args[3] as PrimitiveEvent
   assert.equal(event.kind, 'prompt')
   assert.equal((event as { kind: 'prompt'; text: string }).text, 'hello world')
 })
@@ -370,6 +397,7 @@ test('Select primitive sends inline keyboard with s:id callback_data', async () 
     identity: { animaId: 'test-anima' },
     platform: 'telegram',
     platformUserId: '123',
+    platformChatId: '456',
   }
 
   const step: Step = {
@@ -412,6 +440,7 @@ test('Confirm primitive sends Yes/No buttons with cy and cn callback_data', asyn
     identity: { animaId: 'test-anima' },
     platform: 'telegram',
     platformUserId: '123',
+    platformChatId: '456',
   }
 
   const step: Step = {
@@ -449,6 +478,7 @@ test('Paginate primitive sends Prev/Next buttons with pp and pn callback_data', 
     identity: { animaId: 'test-anima' },
     platform: 'telegram',
     platformUserId: '123',
+    platformChatId: '456',
   }
 
   const step: Step = {
@@ -491,7 +521,7 @@ test('callback_query s:someId fires select event to router', async () => {
 
   const handleCall = router.calls.find(c => c.method === 'handle')
   assert.ok(handleCall, 'router.handle should have been called')
-  const event = handleCall!.args[2] as PrimitiveEvent
+  const event = handleCall!.args[3] as PrimitiveEvent
   assert.equal(event.kind, 'select')
   assert.equal((event as { kind: 'select'; selectedId: string }).selectedId, 'opt-42')
 })
@@ -507,7 +537,7 @@ test('callback_query cy fires confirm true event to router', async () => {
 
   const handleCall = router.calls.find(c => c.method === 'handle')
   assert.ok(handleCall, 'router.handle should have been called')
-  const event = handleCall!.args[2] as PrimitiveEvent
+  const event = handleCall!.args[3] as PrimitiveEvent
   assert.equal(event.kind, 'confirm')
   assert.equal((event as { kind: 'confirm'; confirmed: boolean }).confirmed, true)
 })
@@ -523,7 +553,7 @@ test('callback_query pn fires paginate next event to router', async () => {
 
   const handleCall = router.calls.find(c => c.method === 'handle')
   assert.ok(handleCall, 'router.handle should have been called')
-  const event = handleCall!.args[2] as PrimitiveEvent
+  const event = handleCall!.args[3] as PrimitiveEvent
   assert.equal(event.kind, 'paginate')
   assert.equal((event as { kind: 'paginate'; action: string }).action, 'next')
 })
@@ -541,6 +571,7 @@ test('Stream primitive with running status reacts 👌 on command message when c
     identity: { animaId: 'test-anima' },
     platform: 'telegram',
     platformUserId: '123',
+    platformChatId: '456',
   }
 
   const step: Step = {
@@ -577,6 +608,7 @@ test('Stream primitive with complete status sends completion text', async () => 
     identity: { animaId: 'test-anima' },
     platform: 'telegram',
     platformUserId: '123',
+    platformChatId: '456',
   }
 
   const step: Step = {
@@ -612,6 +644,7 @@ test('Detail primitive sends message with action buttons', async () => {
     identity: { animaId: 'test-anima' },
     platform: 'telegram',
     platformUserId: '123',
+    platformChatId: '456',
   }
 
   const step: Step = {
@@ -653,6 +686,7 @@ test('Resolution complete sends completion message', async () => {
     identity: { animaId: 'test-anima' },
     platform: 'telegram',
     platformUserId: '123',
+    platformChatId: '456',
   }
 
   sender.sent.length = 0
@@ -681,6 +715,7 @@ test('Resolution abandon is silent (implicit context replacement)', async () => 
     identity: { animaId: 'test-anima' },
     platform: 'telegram',
     platformUserId: '123',
+    platformChatId: '456',
   }
 
   sender.sent.length = 0
@@ -731,7 +766,7 @@ test('photo message while flow active fires prompt with file url', async () => {
 
   const handleCall = router.calls.find(c => c.method === 'handle')
   assert.ok(handleCall, 'router.handle should be called for photo with active flow')
-  const event = handleCall!.args[2] as { kind: string; text: string }
+  const event = handleCall!.args[3] as { kind: string; text: string }
   assert.equal(event.kind, 'prompt')
   // The URL should contain the largest file_id (last in array)
   assert.ok(event.text.includes('file-id-large'), 'should resolve URL from largest (last) photo')
@@ -760,6 +795,7 @@ test('Result primitive with textContent sends text via sendMessage', async () =>
     identity: { animaId: 'test-anima' },
     platform: 'telegram',
     platformUserId: '123',
+    platformChatId: '456',
   }
 
   const step: import('../../../src/flow/types.js').Step = {
@@ -801,6 +837,7 @@ test('Result primitive with single image calls sendPhoto', async () => {
     identity: { animaId: 'test-anima' },
     platform: 'telegram',
     platformUserId: '123',
+    platformChatId: '456',
   }
 
   const step: import('../../../src/flow/types.js').Step = {
@@ -845,6 +882,7 @@ test('Result primitive with single image falls back to sendMessage when sendPhot
     identity: { animaId: 'test-anima' },
     platform: 'telegram',
     platformUserId: '123',
+    platformChatId: '456',
   }
 
   const step: import('../../../src/flow/types.js').Step = {
@@ -882,6 +920,7 @@ test('Result primitive with multiple images calls sendMediaGroup and follow-up s
     identity: { animaId: 'test-anima' },
     platform: 'telegram',
     platformUserId: '123',
+    platformChatId: '456',
   }
 
   const step: import('../../../src/flow/types.js').Step = {
@@ -947,7 +986,7 @@ test('plain text while flow in RESULT state routes to router.handle as prompt', 
 
   const handleCall = router.calls.find(c => c.method === 'handle')
   assert.ok(handleCall, 'router.handle should be called with prompt event')
-  const event = handleCall!.args[2] as { kind: string; text: string }
+  const event = handleCall!.args[3] as { kind: string; text: string }
   assert.equal(event.kind, 'prompt', 'event kind should be prompt')
   assert.equal(event.text, 'follow up question', 'event text should match message text')
 })
@@ -972,7 +1011,7 @@ test('_react called with 🤔 emoji on command receipt', async () => {
 test('actum.complete applies the warm window but sends NO concierge message', async () => {
   const { allocutio, router, sender, materiaUpdates } = makeAllocutio({ withPodControls: true })
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
-  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
+  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123', platformChatId: '456' }
   router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-c', status: 'running' }] })
   await new Promise(r => setImmediate(r))
   emitStage('actum-c', 'pod-locked', { podId: 'pod-1' })
@@ -989,7 +1028,7 @@ test('actum.complete applies the warm window but sends NO concierge message', as
 test('warm-pod-found stage reacts 🔥 on the command message', async () => {
   const { allocutio, router, sender } = makeAllocutio()
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
-  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
+  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123', platformChatId: '456' }
   router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-w', status: 'running' }] })
   await new Promise(r => setImmediate(r))
   emitStage('actum-w', 'warm-pod-found')
@@ -1003,7 +1042,7 @@ test('warm-pod-found stage reacts 🔥 on the command message', async () => {
 test('progress:N/M stage does not create a standalone generating message', async () => {
   const { allocutio, router, sender } = makeAllocutio()
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
-  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
+  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123', platformChatId: '456' }
   router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-p', status: 'running' }] })
   await new Promise(r => setImmediate(r))
   sender.sent.length = 0
@@ -1025,7 +1064,7 @@ function resultStep(actumId: string): Step {
     ],
   }] } as unknown as Step
 }
-const flowCtx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
+const flowCtx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123', platformChatId: '456' }
 function cbTo(msgId: number, data: string): Parameters<TelegramAllocutio['receive']>[0] {
   return { update_id: 9, callback_query: { id: 'cb', from: { id: 123 }, message: { message_id: msgId, chat: { id: 456 } }, data } } as unknown as Parameters<TelegramAllocutio['receive']>[0]
 }
@@ -1086,7 +1125,7 @@ test('dm:tweak runs under the presser (presser pays) prefilled with the modus', 
   const enter = router.calls.find(c => c.method === 'enter')
   assert.ok(enter, 'should enter execute for the presser')
   assert.equal((enter!.args[2]), '123', 'under the presser userId')
-  assert.equal(((enter!.args[4] as { state: { modusId: string } }).state.modusId), 'flux-schnell')
+  assert.equal(((enter!.args[5] as { state: { modusId: string } }).state.modusId), 'flux-schnell')
 })
 
 // =============================================================================
@@ -1103,7 +1142,7 @@ test('warm signal arriving before registration still reacts 🔥 (not 👌)', as
   // Then the flow yields the Stream primitive → registration. Because the warm
   // signal already arrived (pendingWarm), registration goes straight to 🔥 and
   // never schedules the deferred 👌.
-  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
+  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123', platformChatId: '456' }
   router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'actum-warm', status: 'running' }] })
   await new Promise(r => setTimeout(r, 900))
 
@@ -1120,7 +1159,7 @@ function bulCb(fromId: number, data: string): Parameters<TelegramAllocutio['rece
   return { update_id: 9, callback_query: { id: 'cb', from: { id: fromId }, message: { message_id: 777, chat: { id: 456 } }, data } } as unknown as Parameters<TelegramAllocutio['receive']>[0]
 }
 function lockPod(allocutio: TelegramAllocutio, router: ReturnType<typeof makeRouter>, actumId: string) {
-  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' }
+  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123', platformChatId: '456' }
   router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId, status: 'running' }] })
 }
 
@@ -1179,7 +1218,7 @@ test('a new pod after a receipt starts a FRESH bulletin (does not reanimate the 
 
   // A new generation on a new pod must post a NEW bulletin, not edit the receipt.
   router.triggerStep(
-    { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' } as FlowContext,
+    { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123', platformChatId: '456' } as FlowContext,
     { primitives: [{ kind: 'Stream', label: 'g', actumId: 'a2', status: 'running' }] },
   )
   await new Promise(r => setImmediate(r))
@@ -1227,7 +1266,7 @@ test('cold-start journal: silent hunt, committed Found/Prepared lines, live line
   const { allocutio, router, sender } = makeAllocutio({ withPodControls: true })
   await allocutio.receive(msgUpdate(123, 456, '/make', 50))
   router.triggerStep(
-    { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123' } as FlowContext,
+    { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123', platformChatId: '456' } as FlowContext,
     { primitives: [{ kind: 'Stream', label: 'g', actumId: 'a1', status: 'running' }] },
   )
   await new Promise(r => setImmediate(r))
@@ -1522,7 +1561,7 @@ test('a queued model is stamped onto the flow as pinnedModels at /make, then cle
   await h.allocutio.receive(msgUpdate(123, 456, '/make a cat', 60))
   await new Promise(r => setImmediate(r))
   const enter1 = h.router.calls.filter(c => c.method === 'enter').at(-1)!
-  const state1 = (enter1.args[4] as { state?: { pinnedModels?: Array<{ id: string; role: string }> } })?.state
+  const state1 = (enter1.args[5] as { state?: { pinnedModels?: Array<{ id: string; role: string }> } })?.state
   const pin = state1?.pinnedModels?.find(p => p.id === 'intella.sdxl')
   assert.ok(pin, 'queued base model stamped as pinnedModels')
   assert.equal(pin!.role, 'checkpoint', 'a base model maps to role checkpoint')
@@ -1531,7 +1570,7 @@ test('a queued model is stamped onto the flow as pinnedModels at /make, then cle
   await h.allocutio.receive(msgUpdate(123, 456, '/make another', 61))
   await new Promise(r => setImmediate(r))
   const enter2 = h.router.calls.filter(c => c.method === 'enter').at(-1)!
-  const state2 = (enter2.args[4] as { state?: { pinnedModels?: unknown } })?.state
+  const state2 = (enter2.args[5] as { state?: { pinnedModels?: unknown } })?.state
   assert.ok(!state2?.pinnedModels, 'pending cleared — not re-applied on the next gen')
 })
 
@@ -1547,7 +1586,7 @@ test('/chat does not consume the studio pending loadout', async () => {
   await h.allocutio.receive(msgUpdate(123, 456, '/chat', 62))
   await new Promise(r => setImmediate(r))
   const enterChat = h.router.calls.filter(c => c.method === 'enter').at(-1)!
-  const stateChat = (enterChat.args[4] as { state?: { pinnedModels?: unknown; modusId?: string } })?.state
+  const stateChat = (enterChat.args[5] as { state?: { pinnedModels?: unknown; modusId?: string } })?.state
   assert.equal(stateChat?.modusId, 'modus.openrouter-chat')
   assert.ok(!stateChat?.pinnedModels, '/chat is not a studio gen — pending left intact')
 
@@ -1555,7 +1594,7 @@ test('/chat does not consume the studio pending loadout', async () => {
   await h.allocutio.receive(msgUpdate(123, 456, '/make a cat', 63))
   await new Promise(r => setImmediate(r))
   const enterMake = h.router.calls.filter(c => c.method === 'enter').at(-1)!
-  const stateMake = (enterMake.args[4] as { state?: { pinnedModels?: Array<{ id: string }> } })?.state
+  const stateMake = (enterMake.args[5] as { state?: { pinnedModels?: Array<{ id: string }> } })?.state
   assert.ok(stateMake?.pinnedModels?.some(p => p.id === 'intella.sdxl'), '/make still gets the queued model')
 })
 
@@ -1599,7 +1638,7 @@ test('caption command: a photo whose caption is /run … dispatches the command'
 
   const enterCall = router.calls.find(c => c.method === 'enter')
   assert.ok(enterCall, 'caption-borne /run should dispatch + enter execute')
-  const state = (enterCall!.args[4] as { state?: { modusId?: string; aditus?: Record<string, unknown> } })?.state
+  const state = (enterCall!.args[5] as { state?: { modusId?: string; aditus?: Record<string, unknown> } })?.state
   assert.equal(state?.modusId, 'sd1-5')
   assert.equal(state?.aditus?.prompt, 'a cat')
 })
@@ -1609,7 +1648,7 @@ test('attached image fills entryImageUrl on the flow state', async () => {
   await allocutio.receive(captionCmdUpdate(123, 456, '/run sd1-5', ['photo-lo', 'photo-hi']))
 
   const enterCall = router.calls.find(c => c.method === 'enter')
-  const state = (enterCall!.args[4] as { state?: { entryImageUrl?: string } })?.state
+  const state = (enterCall!.args[5] as { state?: { entryImageUrl?: string } })?.state
   assert.ok(state?.entryImageUrl?.endsWith('photo-hi'), 'highest-res attached photo becomes entryImageUrl')
 })
 
@@ -1618,7 +1657,7 @@ test('reply-to image: a text command replying to a photo sources the image', asy
   await allocutio.receive(replyToPhotoCmdUpdate(123, 456, '/run sd1-5', ['rep-1']))
 
   const enterCall = router.calls.find(c => c.method === 'enter')
-  const state = (enterCall!.args[4] as { state?: { entryImageUrl?: string } })?.state
+  const state = (enterCall!.args[5] as { state?: { entryImageUrl?: string } })?.state
   assert.ok(state?.entryImageUrl?.endsWith('rep-1'), 'replied-to photo becomes entryImageUrl')
 })
 
@@ -1638,7 +1677,7 @@ test('attached photo takes precedence over a replied-to photo', async () => {
     },
   })
   const enterCall = router.calls.find(c => c.method === 'enter')
-  const state = (enterCall!.args[4] as { state?: { entryImageUrl?: string } })?.state
+  const state = (enterCall!.args[5] as { state?: { entryImageUrl?: string } })?.state
   assert.ok(state?.entryImageUrl?.endsWith('attached-hi'), 'attached photo wins over replied-to')
 })
 
@@ -1688,4 +1727,65 @@ test('a:saveas opens the Save-as menu seeded from the active flow card state', a
   assert.deepEqual((prompt.extra as { reply_markup?: unknown }).reply_markup, { force_reply: true })
   // No flow-router handle for saveas — the menu is force-reply driven, not a flow step.
   assert.ok(!router.calls.some(c => c.method === 'handle'), 'a:saveas must not route to the flow')
+})
+
+// =============================================================================
+// Regression coverage for the 2026-08-12 rulings (item noema-195)
+// =============================================================================
+
+// Ruling 2: unaddressed plain text in a group advances nothing at all.
+test('unaddressed plain text in a group with an active flow does not advance it', async () => {
+  const { allocutio, router } = makeAllocutio({ botUsername: 'stationbot' })
+
+  // Flow entered from a DM first (private chats are unaffected by the gate).
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
+  router.calls.length = 0
+
+  // Same user, now in a group, plain text with no @-mention and no reply-to-bot.
+  await allocutio.receive(groupMsgUpdate(123, 789, 'what should I do next'))
+
+  const handleCall = router.calls.find(c => c.method === 'handle')
+  assert.equal(handleCall, undefined, 'unaddressed group text must not reach the flow router')
+})
+
+// Ruling 2: an @-mention or a reply to the bot's own message is a valid address in a group.
+test('a group message @-mentioning the bot is routed if a flow is active for that chat', async () => {
+  const { allocutio, router } = makeAllocutio({ botUsername: 'stationbot' })
+
+  // Enter the flow IN the group chat itself (789), so a correctly-addressed message there has
+  // something to route to.
+  await allocutio.receive(groupMsgUpdate(123, 789, '/make @stationbot'))
+  router.calls.length = 0
+
+  await allocutio.receive(groupMsgUpdate(123, 789, 'hey @stationbot keep going'))
+  assert.ok(router.calls.some(c => c.method === 'handle'), 'an @-mentioned group message should reach the flow router')
+
+  router.calls.length = 0
+  await allocutio.receive(groupMsgUpdate(123, 789, 'thanks', { replyToBot: true, botUsername: 'stationbot' }))
+  assert.ok(router.calls.some(c => c.method === 'handle'), 'a reply to the bot should reach the flow router')
+})
+
+// Ruling 1 + 3: a context opened in chat A is invisible to hasContext/handle from chat B for
+// the same user, and the render target follows the FlowContext, not the most recently active chat.
+test('render target follows the flow\'s own chat, even after the user types elsewhere', async () => {
+  const { allocutio, router, sender } = makeAllocutio()
+
+  // Flow entered in chat A.
+  await allocutio.receive(msgUpdate(123, 111, '/make', 50))
+
+  // Same user types, unrelated, in chat B — no active flow there, so it's a no-op for
+  // routing, but (per the still-live chatIds map) it IS the most recently typed-in chat.
+  await allocutio.receive(msgUpdate(123, 222, 'unrelated chatter in another chat'))
+  const handleCallFromChatB = router.calls.find(c => c.method === 'handle')
+  assert.equal(handleCallFromChatB, undefined, 'chat B has no active flow for this user')
+
+  const ctxChatA: FlowContext = {
+    intent: 'execute', state: {}, identity: { animaId: 'a' },
+    platform: 'telegram', platformUserId: '123', platformChatId: '111',
+  }
+  router.triggerStep(ctxChatA, resultStep('actum-1'))
+  await new Promise(r => setImmediate(r))
+
+  assert.equal(sender.photos.length, 1)
+  assert.equal(sender.photos[0].chatId, 111, 'renders into the chat the flow was opened in, not chat B')
 })
