@@ -172,7 +172,7 @@ gen uses that model (the ChainEngine royalty surface). So:
 
 ## 6. Net-new work + proposed build order
 
-> **Forward roadmap (living, ticked as we go):** `docs/plans/2026-06-22-publishing-vertical-roadmap.md` —
+> **Forward roadmap (living, ticked as we go):**
 > the leverage-ranked sequence for what remains (execution-time royalty payees → weight streaming →
 > external upload → `custody:'both'`/auto-trigger → moderation gate → deferred mint/marketplace/living-NFT).
 

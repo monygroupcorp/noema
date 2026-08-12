@@ -6,7 +6,7 @@
  * Crystal exposes them via a `slotMap` (JSON-pointer → aditus key) + typed `aditus` Portae. This
  * scrubs the deploy-specific nodes and emits: { inputTemplate (clean graph), slotMap, aditus,
  * customNodes, loraCapable, outputs }. It is a PORT AID, not a one-click — review the draft aditus
- * + pin model defaults by hand (see docs/reference/old-workflows/README.md).
+ * + pin model defaults by hand.
  *
  *   npx tsx scripts/port-workflow.ts docs/reference/old-workflows/sdxl
  */

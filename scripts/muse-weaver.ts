@@ -3,7 +3,7 @@
 // =============================================================================
 //
 // Validates the make-or-break stage of the Muse feature
-// (docs/ideas/2026-06-30-muse-moodboard-to-masterpiece.md): can we take real
+// The question: can we take real
 // dataset captions, decompose them into categorized prompt fragments, then
 // recombine ONE fragment per category across a moodboard into a single coherent
 // prompt — without firing a single gen?

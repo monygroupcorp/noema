@@ -3,7 +3,7 @@
 // =============================================================================
 //
 // noema-122: the pack numbers were triplicated (stripePacks.PACKS, Funding's FIAT_PACKS,
-// content/pricing.md). They now flow from ONE server source — stripePacks → CrystalApi.listPacks →
+// the app's content/pricing copy). They now flow from ONE server source — stripePacks → CrystalApi.listPacks →
 // GET /v1/payments/packs — so a pack-number change updates every surface. These tests pin:
 //   • the ratified catalog projection (credits = impetus/10, order, bestRate),
 //   • that CrystalApi.listPacks maps it faithfully,

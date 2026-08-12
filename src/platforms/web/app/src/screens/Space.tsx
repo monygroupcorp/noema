@@ -12,7 +12,7 @@ import type { Vestigium as ApiVestigium } from '../lib/api';
 
 // The 3D Vestigium space. Two data sources:
 //   real    — a signed-in/commitment caller's OWN vestigia, PCA-projected on demand
-//             by GET /api/vestigia/projection (docs/handoff/2026-07-10-space-real-data.md).
+//             by GET /api/vestigia/projection.
 //   static  — the precomputed 163k-gen ComfyDeploy corpus under /public/space* (the
 //             "public exhibit"), shown to anon/no-history callers.
 // Both share one set of layers — text ("what people asked for") / image ("what it
@@ -406,7 +406,7 @@ function CorpusSpace() {
   const glOk = useMemo(webglAvailable, []);
   const [layer, setLayer] = useState<Layer>('text');
   const [imageLayerOk, setImageLayerOk] = useState(true);
-  // Data source switch (docs/handoff/2026-07-10-space-real-data.md §3): null while the
+  // Data source switch: null while the
   // caller's own history is being checked; true = real vestigia (their own space), false
   // = fall back to the static "public exhibit" corpus (anon or no history yet).
   const [hasReal, setHasReal] = useState<boolean | null>(null);

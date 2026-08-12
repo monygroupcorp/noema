@@ -34,7 +34,7 @@ work must not be auto-clobbered).
 
 Single stylesheet `src/styles/app.css` — fully **tokenized**: spacing `--s1..--s10`, type
 `--fs-*`, radii `--r-*`, motion `--dur/--ease`, color tokens, breakpoints sm680/md760/lg1080.
-**A magic number is a bug — compose from tokens.** Full rules: `docs/plans/2026-06-16-design-system.md`
+**A magic number is a bug — compose from tokens.** The tokens are the rules; see `src/styles/design/`
 (local scratch) + `AGENTS.md`.
 
 **Taste, decided (don't re-litigate):**

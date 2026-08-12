@@ -1,5 +1,5 @@
 // ConfidentialPodClient — the Azure confidential-CVM backend behind /v1/sessions/tee
-// (docs/plans/2026-07-02-tee-hardware-path.md §3). All ARM traffic goes through an
+// All ARM traffic goes through an
 // injected fetch stub — pool claim, tag-then-start, idempotent retried deallocate.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

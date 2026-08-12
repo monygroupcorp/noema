@@ -26,7 +26,7 @@
 // ATLAS VECTOR SEARCH:
 //   Three separate Atlas Search indexes are required on noemaplane.vestigia,
 //   one per embedding field. Each has filter paths for visibilitas and
-//   auctorKey.animaId. See docs/atlas-indexes.md (or Atlas UI) for definitions.
+//   auctorKey.animaId. See the Atlas UI for the index definitions.
 // =============================================================================
 
 export type VestigiumVisibility = 'privata' | 'communis' | 'publica'

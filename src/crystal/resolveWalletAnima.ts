@@ -2,7 +2,7 @@
 // resolveWalletAnima — the ONE wallet↔account seam for deposit attribution
 // =============================================================================
 //
-// P0 root cause (noema-027, docs/handoff/2026-07-10-deposit-attribution-seam.md): the Alchemy
+// P0 root cause: the Alchemy
 // deposit path resolved "which account owns wallet X" through `animae.custos`, but the auth rail
 // binds a proven wallet as a `web` PERSONA (`personae`, genus:'web', externusId:<lowercased
 // address>) — nothing writes `animae.custos` for users anymore. So every deposit from a linked

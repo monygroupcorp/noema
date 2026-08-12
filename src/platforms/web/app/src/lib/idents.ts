@@ -1,5 +1,5 @@
 // Identity + trust on TWO orthogonal axes — but they live at different LAYERS
-// (see docs/plans/2026-06-19-frontend-pathways-braindump.md §5):
+//
 //
 //   Funding   = the PROFILE (a continuous anima). named (doxxed: wallet/email/telegram/
 //               discord/api-key) | bearer (a bursa-funded burner). Both build history + XP.

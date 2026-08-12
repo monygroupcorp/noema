@@ -3,7 +3,7 @@
 // =============================================================================
 //
 // Targets Azure NCCads_H100_v5 confidential VMs (AMD SEV-SNP CPU + H100 NVL in
-// CC-On mode) — the substrate decided in docs/plans/2026-07-02-tee-hardware-path.md.
+// CC-On mode) — the decided substrate.
 //
 // Pure on-demand (plan decision 3): the pool is a small set of PRE-CREATED CVMs
 // that sit deallocated (disk-only billing). provision() picks a free one, stamps

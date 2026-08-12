@@ -1,6 +1,6 @@
 # Fixture provenance
 
-Every fixture here is **recorded reality** (fixture rule, `docs/tee-hardware-path.md` §2/§5).
+Every fixture here is **recorded reality** — the fixture rule: fakes may only replay what was recorded.
 Nothing in this directory is hand-authored to look like external evidence.
 
 ## SEV-SNP CPU attestation (rung 0 — vendor-published sample)

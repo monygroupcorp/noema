@@ -1208,7 +1208,7 @@ test('releaseStudio without a conductor throws not_found.studio', async () => {
   )
 })
 
-// ── myDeposits (GET /v1/deposit/mine — spec docs/handoff/2026-07-10-deposit-attribution-seam.md §Fix 4) ──
+// ── myDeposits (GET /v1/deposit/mine — the deposit-attribution fix) ──────────────
 
 function makePersona(over: Partial<Persona> = {}): Persona {
   return {

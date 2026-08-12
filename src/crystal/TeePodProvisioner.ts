@@ -2,7 +2,7 @@
 // TeePodProvisioner — the provisioner contract behind /v1/sessions/tee.
 // =============================================================================
 //
-// Two backends implement it (docs/plans/2026-07-02-tee-hardware-path.md §3):
+// Two backends implement it:
 //
 //   TeeProvisioner        RunPod SECURE pod, RTX 4090 — cheap, fast cold start,
 //                         single-tenant but NOT confidential compute.
