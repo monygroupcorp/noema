@@ -3,7 +3,7 @@
 // Dataset records (`GET /v1/data/datasets/full`, `types/dataset.ts`) — the whole Datasets library
 // (`Datasets.tsx`, `Dataset.tsx`, `CaptionJob.tsx`, `Derive.tsx`, `TrainRun.tsx`) fetches live
 // data and no longer imports `DATASETS` below. It remains exported for `ProjectHub.tsx`'s
-// dataset-name lookup (a separate, not-yet-migrated consumer — out of this item's scope_dirs)
+// dataset-name lookup (a separate, not-yet-migrated consumer, deliberately left alone here)
 // and for Storybook/tests; not live data for the library screens above.
 
 export type Modality = 'image' | 'video' | 'audio' | '3d';

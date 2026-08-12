@@ -2,7 +2,8 @@
    TYPE RAMP — named text styles. Sizes/weights/line-heights/tracking bundled so
    every app types the same. Each brand's TYPEFACE flows in automatically via the
    font-role tokens (--font-display / --font-body / --font-mono / --font-marquee),
-   so the same class renders Geist for NOEMA, Syne for NOESIS, Cormorant for OCI.
+   so the same class renders Geist for NOEMA, Syne for NOESIS, and whatever
+   display/body pair the next brand declares.
 
    Apply as classes: <h1 class="ds-h1">. Margins are reset — control rhythm with
    layout utilities (.ds-stack) or your own spacing. Headings are fluid (clamp)

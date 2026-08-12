@@ -75,7 +75,7 @@ TL;DR:
    `hyperbot-staging` container, health-checks.
 3. Verify: `curl -s -o /dev/null -w '%{http_code}\n' -H 'Accept: text/html' https://staging.noema.art/` → `200`.
 
-**Source of truth is `/opt/noema/` ON THE DROPLET** (ssh host `noema` = 64.227.15.104), NOT
+**Source of truth is `/opt/noema/` ON THE DROPLET** (ssh host `noema` in `~/.ssh/config`), NOT
 the repo and NOT `/root`. Container `hyperbot-staging` on net `hyperbot_network`. The React
 frontend (`src/platforms/web/app`) is served by the crystal server (`src/index.ts`, before
 `app.listen`) only when **`STAGING_FRONTEND=1`** (already in `/opt/noema/.env.staging`).

@@ -6,7 +6,7 @@ One container, one process.
 
 ## The facts (so nobody has to re-discover them)
 
-- **Host:** `noema` in `~/.ssh/config` → `64.227.15.104` (hostname `hyperbot`). It's a
+- **Host:** `noema` in `~/.ssh/config` (hostname `hyperbot`). It's a
   DigitalOcean droplet. `staging.noema.art` resolves here.
 - **Source of truth for ops lives on the droplet at `/opt/noema/`** — NOT in the repo,
   NOT in `/root`. The repo copies and `/root/hyperbot/*` are stale.
