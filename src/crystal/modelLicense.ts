@@ -210,6 +210,11 @@ export const BASE_FAMILIAE: ReadonlySet<string> = new Set(
  *  `null` = no base flow exists for that architecture, so NO familia is correct (BASE_TABLE:193
  *  gives SD2/SD3 `familia: null` — the one entry that still uses it). An id absent from this map
  *  is an OPERATOR decision, never a worker/runtime guess — callers must report and skip it.
+ *
+ *  The migration's `baseIntellaId` values were never seeded as real catalog ids (see
+ *  `scripts/migrations/2026_08_repair_lora_base_intella_id.ts`), so this table also carries the
+ *  real catalog id each stale id was meant to name, mapped to the SAME `familia` — grouping gets
+ *  fixed by repointing the pointer to a real id without moving what `familia` compat resolves to.
  */
 export const FAMILIA_BY_BASE_INTELLA_ID: Record<string, string | null> = {
   'intella.flux-base':        'flux',
@@ -218,6 +223,13 @@ export const FAMILIA_BY_BASE_INTELLA_ID: Record<string, string | null> = {
   'intella.pony-base':        'sdxl',   // BASE_TABLE:182 — pony is XL-derived, stacks on the sdxl flow
   'intella.sd15-base':        'sd15',
   'intella.kontext-base':     'flux',   // BASE_TABLE:168 — flux.1-family edit model, shares the flux base flow
+
+  // Real catalog ids the four resolvable stale ids above repoint to. Same familia as their stale
+  // counterpart — the repoint must not change what a record's compat familia resolves to.
+  'intella.flux-schnell-fp8-scaled': 'flux',
+  'intella.sdxl-base-1-0':           'sdxl',
+  'intella.sd15-v1-5':               'sd15',
+  'intella.flux-kontext-dev':        'flux',
 }
 
 /** True when `id` is a base intella this mapping KNOWS about. Callers must use this to tell "known
