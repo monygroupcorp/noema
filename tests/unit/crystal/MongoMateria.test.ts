@@ -184,6 +184,13 @@ test('findWarm with shareToken returns pod matching token', async () => {
   assert.equal(found.id, m.id)
 })
 
+test('findWarm does NOT claim an idle materia whose warmUntil has already elapsed', async () => {
+  const past = new Date(Date.now() - 60_000)
+  await store.create(makeInput({ status: 'idle', imageRef: 'img:v1', warmUntil: past }))
+  const result = await store.findWarm({ imageRef: 'img:v1' })
+  assert.equal(result, null)
+})
+
 test('findWarm with shareToken returns null for wrong token', async () => {
   await store.create(makeInput({ status: 'idle', podPolicy: 'link', shareToken: 'tok-xyz' }))
   const result = await store.findWarm({ shareToken: 'tok-wrong' })
