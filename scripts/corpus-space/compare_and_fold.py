@@ -16,7 +16,7 @@ Builds a review tree of SYMLINKS (fast to browse, delete anytime):
   nudenet_exposed/           NudeNet found exposed nudity (where scanned)
   _priority-minor/           any-model flag AND a minor-term prompt
 
-  CORPUS_ROOT=/home/rth/corpus-ssd python compare_and_fold.py [--out DIR] [--no-fold]
+  CORPUS_ROOT=/path/to/corpus python compare_and_fold.py [--out DIR] [--no-fold]
 """
 import argparse, json, os, re
 from pathlib import Path

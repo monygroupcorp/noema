@@ -49,7 +49,7 @@ traits → [AI gen] → [layer composite] → [ffmpeg post] → piece
 ```
 A Collectio expands *that compositus* over the trait grid. So NFT generation is one instance of
 **content-pipeline-at-scale**. Pure layer-comp collections skip the AI step; AI collections skip
-compositing; most do both. (See [[project_compositus_spells]].)
+compositing; most do both.
 
 ### 2c. A Project is NOT a Collectio — keep them separate
 - **Project** = the *workspace* — the iterative, messy home where you experiment toward a working

@@ -9,8 +9,7 @@ name: CI
 #   push:main    — the signal that main is green AFTER it lands. Without it there is no post-merge
 #                  check at all: the crystal suite went unrun from June (every PR targeted
 #                  chainengine-migration, which this trigger did not cover), and the 2026-08-06 P0
-#                  batch had to be re-verified by hand in a local worktree. See
-#                  internal notes §2.
+#                  batch had to be re-verified by hand in a local worktree.
 on:
   pull_request:
   push:
@@ -33,7 +32,7 @@ jobs:
   # DB-layer gate — the crystal suite that needs a real Mongo (MongoIntella, MongoModorum,
   # executionWebhook, Consuetudinum, the Compiler↔Mongo LoRA repro, …). NOT covered by the
   # hermetic `verify` job (which uses mock stores that diverge from real Mongo). This is the gate
-  # that would have caught the 3 live bugs from 2026-06-09. See docs/agent-tasks/TASK-012.
+  # that would have caught the 3 live bugs from 2026-06-09.
   crystal-db:
     runs-on: ubuntu-latest
     steps:

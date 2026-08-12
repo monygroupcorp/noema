@@ -22,7 +22,7 @@ RUN git clone https://github.com/comfyanonymous/ComfyUI.git /workspace/ComfyUI &
 # Layer 3 — ComfyUI Python deps (stable when ComfyUI ref is pinned)
 RUN pip install --no-cache-dir -r /workspace/ComfyUI/requirements.txt
 
-# Layer 3b — custom nodes the LoRA system depends on (see docs/agent-tasks/TASK-008).
+# Layer 3b — custom nodes the LoRA system depends on.
 # Production installs these PER-JOB via comfyrunner._ensure_custom_nodes (idempotent), so this
 # layer is OPTIONAL — uncomment when this baked image is revived to skip the per-cold-pod clone of
 # the cozyness LoRA nodes (LoraTextExtractor / MultiLoraLoader):

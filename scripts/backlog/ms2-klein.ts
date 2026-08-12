@@ -29,6 +29,7 @@
 // Env knobs: STEPS (4000), DB (noemaplane), OWNER_ANIMA (optional), HF_ORG (ms2stationthis).
 // =============================================================================
 
+import { homedir } from 'node:os'
 import { MongoClient } from 'mongodb'
 import { AitoolkitTrainingCursor } from '../../src/crystal/AitoolkitTrainingCursor.js'
 import { SqliteAitkJobStore } from '../../src/crystal/AitkJobStore.js'
@@ -51,9 +52,9 @@ const HF = 'https://huggingface.co'
 const ORG = process.env.HF_ORG ?? 'noema-art'        // org renamed from ms2stationthis (HF redirects old URLs)
 const STEPS = Number(process.env.STEPS ?? 4000)
 const DB = process.env.DB ?? 'noemaplane'                    // staging-prod; never 'noema'
-const AITK_DIR = '/home/rth/projects/ai/training/ai-toolkit-klein'
+const AITK_DIR = process.env.AITK_DIR ?? `${homedir()}/projects/ai/training/ai-toolkit-klein`
 const DS_ROOT = '/mnt/data/datasets/ms2-klein'
-const HF_CACHE = '/home/rth/.cache/huggingface'
+const HF_CACHE = process.env.HF_HOME ?? `${homedir()}/.cache/huggingface`
 const IMAGE = 'stationthis-klein:1'
 const LORAS_DIR = process.env.LORAS_DIR ?? '/mnt/data/models/loras'   // shared ComfyUI lora dir
 // Repos to never train (dead clients / unwanted variants). Extend via SKIP env (comma-separated).

@@ -49,8 +49,8 @@ function pack(id: string, usd: number, impetus: bigint, label: string): CreditPa
 
 /**
  * The ratified pack → impetus constant map (LOCKED 2026-07-21 — R-1 ruling, supersedes the
- * 2026-07-08 map; see `internal notes`). Credit the FULL amount; fiat is USD with NO
- * funding haircut. Keyed by packId.
+ * 2026-07-08 map). Credit the FULL amount; fiat is USD with NO funding haircut.
+ * Keyed by packId.
  */
 export const PACKS: Record<string, CreditPack> = {
   starter_10:  pack('starter_10',  10,  20800n,  'Starter — 20,800 impetus'),

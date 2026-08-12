@@ -2,13 +2,14 @@
 // Run JUST Slice B against it — host in R2 + register the Intella + read it back.
 // (Used after the training spike to verify finality without retraining.)
 //   node --env-file=.env --import tsx scripts/spike-koh-finality.ts
+import { homedir } from 'node:os'
 import { MongoClient } from 'mongodb'
 import { R2Uploader } from '../src/crystal/R2Uploader.js'
 import { MongoIntella } from '../src/crystal/MongoIntella.js'
 import { makeTrainingFinalizer, fsLoraReader } from '../src/crystal/trainingFinalizer.js'
 import type { Actum } from '../src/types/actum.js'
 
-const AITK = '/home/rth/projects/ai/training/ai-toolkit-klein'
+const AITK = process.env.AITK_DIR ?? `${homedir()}/projects/ai/training/ai-toolkit-klein`
 const FAMILIA = 'flux2-klein'
 const TRIGGER = 'koh'
 const OWNER = 'spike-anima'

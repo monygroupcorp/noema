@@ -2,7 +2,7 @@
 
 A Docker image with ComfyUI, PyTorch, and the FLUX.1-schnell model bundle pre-installed. Used as a drop-in replacement for `pytorch/pytorch:2.x-cuda12.1` in the VastAI cold-start benchmark to test whether eliminating in-job model downloads reduces effective cold-start time.
 
-**Context:** [`docs/benchmarks/2026-05-04-vastai-rebaseline.md`](../../docs/benchmarks/2026-05-04-vastai-rebaseline.md) showed VastAI cold start averages 11 min, dominated by 6 min of in-job model downloads. This image bakes those downloads into the image itself.
+**Context:** benchmarking put VastAI cold start at ~11 min on average, of which ~6 min was in-job model downloads. This image bakes those downloads into the image itself.
 
 ---
 

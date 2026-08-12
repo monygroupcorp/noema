@@ -46,9 +46,36 @@ pids/
 roadmap/
 research/
 archive/
-docs/plans/
-docs/_archived/
 ROADMAP_EXPLORATION.md
+
+# docs/ is private by default — publish a path by naming it below.
+# Keep the leading glob shallow (docs/*, never docs/**): git cannot re-include a path
+# whose parent directory is excluded, so a `**` here would silently kill every rule below.
+docs/*
+!docs/README.md
+!docs/north-star.md
+!docs/PROTOCOL_CHARTER.md
+!docs/capability-map.md
+!docs/TEST_SPEC.md
+!docs/embed-spec.md
+!docs/arcanum-blind-issuance.md
+!docs/arcanum-bursa-frontend.md
+!docs/arcanum-ceremony.md
+!docs/adr/
+!docs/spec/
+!docs/api/
+!docs/x402/
+!docs/legal/
+!docs/site/
+!docs/reference/
+docs/reference/old-workflows/
+!docs/ops/
+docs/ops/*
+!docs/ops/production-deploy.md
+!docs/ops/staging-deploy.md
+!docs/benchmarks/
+docs/benchmarks/*
+!docs/benchmarks/2026-05-06-runpod-vs-vastai-shootout.md
 
 # Generated
 tool_registry.generated.json

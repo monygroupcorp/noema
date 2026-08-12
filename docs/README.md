@@ -1,24 +1,60 @@
-# StationThis — Key Documents
+# Documentation
 
-## Vision & Strategy
+This directory explains the project: what it is, how it is designed, how to run it, and what the
+rules are. If you are new here, start with `north-star.md` and then `adr/`.
 
-| Document | Description |
+`docs/` is published deliberately. A file belongs here when it helps someone reading the repo
+understand the system as it stands today — the architecture, an interface, a decision and its
+reasoning, a procedure they need to follow. Working notes that track how we got somewhere live
+outside the repo, so that what remains stays short enough to be worth reading.
+
+New paths under `docs/` are private by default; `.gitignore` names the published ones explicitly.
+To publish something new, add it to that list in the same change.
+
+## Orientation
+
+| Document | What it covers |
 |---|---|
-| [ChainEngine](plans/2026-03-04-gpu-compute-platform-design.md) | Core compute strategy: provider-agnostic GPU pool, provenance hashing, concierge UX, warming incentives, on-chain finality, roadmap |
+| [north-star.md](north-star.md) | The principles. Build for the full case; the simple case is a config. |
+| [capability-map.md](capability-map.md) | The signature matrix and canon verbs — the command surface. |
+| [PROTOCOL_CHARTER.md](PROTOCOL_CHARTER.md) | The protocol's scope and commitments. |
+| [TEST_SPEC.md](TEST_SPEC.md) | What the test suites cover and which gate runs where. |
 
-## Implementation Plans
+## Design and decisions
 
-| Document | Description |
+| Path | What it covers |
 |---|---|
-| [Referral Vault CreditVault Migration](plans/2026-03-16-referral-vault-creditvault-migration.md) | Migration from Foundation.sol vaults to CreditVault-native referral system |
-| [Referral Vault Implementation](plans/2026-03-16-referral-vault-implementation.md) | API endpoints, event handling, and dashboard for referral codes |
-| [VastAI Service Harness](plans/2026-02-02-vastai-service-harness-design.md) | Original vastai inference harness design (superseded by GPU Compute Platform above) |
-| [VastAI Implementation Plan](plans/2026-02-02-vastai-service-harness-implementation.md) | Phase-by-phase implementation details for the vastai harness |
+| [adr/](adr/) | Architecture decision records — the durable decisions, with their reasoning. Honor these. |
+| [spec/](spec/) | Component specifications: schemas, triage, publishing, moderation, ledger, licensing. |
+| [embed-spec.md](embed-spec.md) | The embed surface. |
 
-## Research & Exploration
+## Interfaces
 
-| Document | Description |
+| Path | What it covers |
 |---|---|
-| [VastAI Notes](../src/core/services/vastai/notes/outline.md) | Architecture outline and milestone tracking |
-| [VastAI Progress](../src/core/services/vastai/notes/progress.md) | Implementation status and learnings from real GPU operations |
-| [VastAI Research](../src/core/services/vastai/notes/research.md) | Initial API research and findings |
+| [api/](api/) | HTTP API reference and the OpenAPI document. |
+| [x402/](x402/) | The x402 payment protocol integration: architecture, data models, configuration, testing. |
+
+## Arcanum
+
+| Document | What it covers |
+|---|---|
+| [arcanum-ceremony.md](arcanum-ceremony.md) | The multi-party trusted-setup ceremony guide, for contributors. |
+| [arcanum-blind-issuance.md](arcanum-blind-issuance.md) | Blind issuance design. |
+| [arcanum-bursa-frontend.md](arcanum-bursa-frontend.md) | The bursa frontend. |
+
+## Operating it
+
+| Path | What it covers |
+|---|---|
+| [ops/production-deploy.md](ops/production-deploy.md) | Deploying to production. |
+| [ops/staging-deploy.md](ops/staging-deploy.md) | Deploying to staging. Read it before you deploy. |
+
+## Reference
+
+| Path | What it covers |
+|---|---|
+| [legal/](legal/) | Privacy policy, terms, cookie policy, and the compliance landscape. |
+| [site/](site/) | Marketing site copy. |
+| [reference/discord-parity.md](reference/discord-parity.md) | Feature parity notes for the Discord surface. |
+| [benchmarks/](benchmarks/) | GPU provider cold-start benchmarking and its conclusion. |

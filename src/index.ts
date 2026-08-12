@@ -891,7 +891,7 @@ async function main(): Promise<void> {
   const PUBLISH_SCAN_FEE = BigInt(process.env.PUBLISH_SCAN_FEE ?? '0')
   const scanFeeCharger = ledgerScanFeeCharger({ signorum: ring.signorum, amount: PUBLISH_SCAN_FEE })
 
-  // Crystal Agent API (/v1) — ApiAllocutio (docs/agent-tasks/EPIC-api-allocutio.md).
+  // Crystal Agent API (/v1) — ApiAllocutio.
   // The agent-shaped facade over the ring + the credential→AuctorKey resolver.
   // Reviewer-confirmed-CSAM NCMEC report seam (human-review path, spec §4). From the
   // private module; absent (public build) → the confirm action rejects but logs that no

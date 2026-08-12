@@ -5,8 +5,7 @@
 
 ## Context
 
-Settling the canon-verb taste map (the curated commands over an infinity of flows — see
-[[command-flow-strategy]] and ADR-0003). A verb is an *intent*, not a flow. The risk surfaced while
+Settling the canon-verb taste map (the curated commands over an infinity of flows — see ADR-0003). A verb is an *intent*, not a flow. The risk surfaced while
 mapping: verbs were proliferating into **conditioning flavors** — `make`/`effect`/`direct`/`compose`
 were being spent on ControlNet, reference-image, inpaint, instruction-edit — which are all the *same
 capability signature* (still image-from-image+text). That wastes the good verbs and pollutes the
@@ -56,6 +55,6 @@ conditioning variant.**
   planned verbs are added one-by-one as their flow ships — no dead entries pointing at missing modi.
 - Higher-order verbs are unaffected: `/cook` (→ `Collectio`) and `/spell` (→ `compositus Modus`) are
   orthogonal to this signature map (ADR-0003 §"two execution shapes").
-- This is the [[feedback_crystal_first_buildout]] discipline applied: the conditioning explosion
+- This is the crystal-first buildout discipline applied: the conditioning explosion
   collapsed into the existing flow/preference layer instead of new verbs; the only crystal addition is
   one modality's two enum values.

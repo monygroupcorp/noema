@@ -7,14 +7,12 @@ This repo (`noema-crystal`) is built on a small, deliberate domain model called 
 ## Start here (read in order)
 
 1. `docs/north-star.md` — the principles ("build for the full case; the simple case is a config").
-2. `docs/crystal-master-plan.md` — the canonical primitives + ring architecture.
-3. `src/types/index.ts` — the Latin declension rules (store names = genitive plural).
-4. `docs/adr/` — the durable decisions (naming, boundaries) you must honor.
-5. `docs/capability-map.md` — the signature matrix + canon verbs (command surface + gen-flow backlog).
-6. `docs/agent-tasks/INDEX.md` — the task board; pick a task, follow its spec.
+2. `src/types/index.ts` — the Latin declension rules (store names = genitive plural).
+3. `docs/adr/` — the durable decisions (naming, boundaries) you must honor.
+4. `docs/capability-map.md` — the signature matrix + canon verbs (command surface + gen-flow backlog).
 
-> Note: `docs/plans/` is **local scratch (gitignored)** — not authoritative. Durable decisions live
-> in `docs/adr/`; executable work lives in `docs/agent-tasks/`.
+> Note: durable decisions live in `docs/adr/` — those are the ones you must honor. A task spec is
+> supplied with the assignment; it is not authoritative over an ADR.
 
 ## The crystal dictionary (use these words, only these)
 
@@ -60,9 +58,9 @@ autonomously. Fake-mode bot (manual E2E): `./scripts/run-fake.sh` (needs `.env.f
 
 ## How to pick up a task
 
-Tasks live in `docs/agent-tasks/` and follow `TEMPLATE.md`: **Read-these-files → Deliverables →
-Acceptance (hermetic) → Verify (commands) → Out-of-scope/gated.** A task is done when its hermetic
-acceptance passes — anything needing a real GPU/pod is explicitly out of scope (staging).
+A task spec follows a fixed shape: **Read-these-files → Deliverables → Acceptance (hermetic) →
+Verify (commands) → Out-of-scope/gated.** A task is done when its hermetic acceptance passes —
+anything needing a real GPU/pod is explicitly out of scope (staging).
 
 ## Deploying to staging (staging.noema.art)
 
