@@ -24,8 +24,9 @@
 // cluster). `noemaplane` IS the live app db and requires `--prod`; the pre-cutover
 // legacy db `noema` is always refused — see `_dbTarget.ts`. `--dry-run` reports.
 //
-// Run:  ./scripts/run-with-env.sh npx tsx scripts/migrations/2026_06_decompose_runpodspec_to_fundamentum.ts --db noemaplane --dry-run
-//   drop --dry-run to write.
+// Run (READ, prod):  ./scripts/run-with-env.sh npx tsx scripts/migrations/2026_06_decompose_runpodspec_to_fundamentum.ts --db noemaplane --prod --dry-run
+//   --prod clears the live-db gate; --dry-run suppresses every write. BOTH are required to read prod.
+// Run (WRITE, prod): …same, minus --dry-run…   (only when intentionally migrating production)
 
 import { MongoClient } from 'mongodb'
 import { CANONICAL_FUNDAMENTA, FUNDAMENTUM_FLUX_COMFYUI, FUNDAMENTUM_SD15_COMFYUI } from '../../src/crystal/seeds/fundamenta.js'
