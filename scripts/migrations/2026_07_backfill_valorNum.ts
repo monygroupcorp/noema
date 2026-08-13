@@ -29,9 +29,10 @@
 // `noemaplane` IS the live app db and is refused unless you also pass `--prod`.
 // `noema` is the pre-cutover legacy db and is always refused — see `_dbTarget.ts`.
 //
-// Run (dev):  ./scripts/run-with-env.sh npx tsx scripts/migrations/2026_07_backfill_valorNum.ts --db noemaplane --dry-run
-//   drop --dry-run to write; add --force to re-derive already-stamped docs.
-// Run (prod): …same… --db noemaplane --prod        (only when intentionally migrating production)
+// Run (READ, prod):  ./scripts/run-with-env.sh npx tsx scripts/migrations/2026_07_backfill_valorNum.ts --db noemaplane --prod --dry-run
+//   --prod clears the live-db gate; --dry-run suppresses every write. BOTH are required to read prod.
+//   Add --force to re-derive already-stamped docs.
+// Run (WRITE, prod): …same, minus --dry-run…   (only when intentionally migrating production)
 
 import { MongoClient } from 'mongodb'
 import { backfillValorNum } from '../../src/crystal/backfillValorNum.js'
