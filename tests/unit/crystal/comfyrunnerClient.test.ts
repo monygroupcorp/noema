@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { submitToRunner, awaitViaStream, isCompiledSpec, isComfyUISpec, isInferenceSpec } from '../../../src/crystal/comfyrunnerClient.js'
+import { submitToRunner, awaitViaStream, isCompiledSpec, isComfyUISpec, isInferenceSpec, RunnerJobLost } from '../../../src/crystal/comfyrunnerClient.js'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -165,6 +165,57 @@ test('awaitViaStream: sends Last-Event-ID on reconnect', async () => {
 
   await awaitViaStream(fetchFn, 'https://pod-8080.proxy.runpod.net', 'job-1', 5000)
   assert.equal(headers[1]?.['Last-Event-ID'], '0')
+})
+
+// ── liveness is asked, never inferred ─────────────────────────────────────────
+
+/** An SSE stream that stays silent for `quietMs`, then delivers `events`. */
+function makeSlowSseStream(quietMs: number, events: Array<Record<string, unknown>>): Response {
+  const encoder = new TextEncoder()
+  let i = 0
+  const stream = new ReadableStream({
+    async pull(controller) {
+      if (i === 0) await new Promise(r => setTimeout(r, quietMs))
+      if (i >= events.length) { controller.close(); return }
+      const ev = events[i++]
+      controller.enqueue(encoder.encode(`id: ${i - 1}\ndata: ${JSON.stringify(ev)}\n\n`))
+    },
+  })
+  return new Response(stream, { status: 200 })
+}
+
+/** An SSE stream that never emits and never closes. */
+function makeSilentSseStream(): Response {
+  const stream = new ReadableStream({ pull() { return new Promise<void>(() => {}) } })
+  return new Response(stream, { status: 200 })
+}
+
+test('awaitViaStream: a silent stream is not killed by a clock while the runner reports the job alive', { timeout: 5000 }, async () => {
+  let polls = 0
+  const fetchFn = (async (url: string) => {
+    if (url.endsWith('/stream')) return makeSlowSseStream(200, [{ type: 'complete' }])
+    polls++
+    return new Response(JSON.stringify({ status: 'running' }), { status: 200 })
+  }) as unknown as typeof fetch
+
+  // 200ms of silence against a 30ms silence budget: the run survives it only because each
+  // expiry ASKS the runner and is told the job is running.
+  await awaitViaStream(fetchFn, 'https://pod-8080.proxy.runpod.net', 'job-live', 5000, undefined, 30)
+  assert.ok(polls >= 2, `expected repeated liveness polls during the silence, got ${polls}`)
+})
+
+test('awaitViaStream: silence plus a 404 from the runner rejects with RunnerJobLost, not at the ceiling', { timeout: 5000 }, async () => {
+  const fetchFn = (async (url: string) => {
+    if (url.endsWith('/stream')) return makeSilentSseStream()
+    return new Response(JSON.stringify({ error: 'job not found' }), { status: 404 })
+  }) as unknown as typeof fetch
+
+  const started = Date.now()
+  await assert.rejects(
+    () => awaitViaStream(fetchFn, 'https://pod-8080.proxy.runpod.net', 'job-gone', 30_000, undefined, 30),
+    (err: unknown) => err instanceof RunnerJobLost,
+  )
+  assert.ok(Date.now() - started < 2000, 'must fail on the runner\'s answer, not at the cost ceiling')
 })
 
 // ── throttle detection ────────────────────────────────────────────────────────
