@@ -3,7 +3,7 @@ import type { Materia, MateriaStore } from '../types/materia.js'
 import type { ActumExecutio } from '../types/actum.js'
 import type { R2Config } from './SecurePodClient.js'
 import { SecurePodClient } from './SecurePodClient.js'
-import { submitToRunner, awaitViaStream, installViaRunner, type InstallResult } from './comfyrunnerClient.js'
+import { submitToRunner, awaitViaStream, installViaRunner, RunnerJobLost, type InstallResult } from './comfyrunnerClient.js'
 import type { ModelRef } from '../types/actum.js'
 import type { ModelInstallClient, InstallProgress } from './ModelInstaller.js'
 import { makeLogger } from '../lib/logger.js'
@@ -16,7 +16,15 @@ const log = makeLogger('cursor:runpod:warm')
 interface WarmPodConfig {
   runnerReadyTimeoutMs?: number
   runnerPollIntervalMs?: number
+  /** Absolute COST ceiling for one job (ms). Protects against a job the runner still calls
+   *  `running` (e.g. ComfyUI deadlocked inside a node) holding a paid GPU indefinitely — it is
+   *  not what catches a dead job, so it stays generous enough to cover model downloads.
+   *  Default 45 min. */
   jobTimeoutMs?: number
+  /** How long the job's stream may go silent before we ask the runner whether the job is still
+   *  alive (ms). Protects against a runner that lost the job (restart, crash): silence plus a
+   *  `404` fails the run in about this long instead of at the cost ceiling. Default 60_000. */
+  jobSilenceMs?: number
   r2?: R2Config
   /** How long the pod stays warm/idle after this job before the reaper kills it (ms). Default 60_000. */
   warmTtlMs?: number
@@ -113,14 +121,18 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
   ): Promise<void> {
     const { id, externusId } = this.materia
     const runnerBase = this._runnerBase()
-    let podReachable = false
+    // Whether the runner ever answered for this job. Not a liveness verdict — the verdict is
+    // asked for on the failure path below.
+    let reachedRunner = false
+    let jobFailed = false
+    let failure: unknown
     // Warm reuse: no provisioning cost, so coldStart is false. Download metrics
     // (if the warm pod was missing models) and execution time stream from comfyrunner.
     const executio: ActumExecutio = { podId: externusId, coldStart: false }
 
     try {
       await this._waitForRunner(runnerBase)
-      podReachable = true
+      reachedRunner = true
 
       await submitToRunner(this.fetchFn, runnerBase, jobId, input, webhook, this.config.r2, jobToken)
       onRunnerAccepted(true)
@@ -132,15 +144,40 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
         jobId,
         this.config.jobTimeoutMs ?? 45 * 60 * 1000,
         (m) => { Object.assign(executio, m); void onMetrics?.({ ...executio }) },
+        this.config.jobSilenceMs ?? 60_000,
       )
     } catch (err) {
-      const msg = (err as Error).message ?? ''
-      if (msg.includes('503') || msg.includes('ECONNREFUSED') || msg.includes('not reachable')) {
-        podReachable = false
-      }
+      jobFailed = true
+      failure = err
       throw err
     } finally {
-      const nextStatus = (!podReachable || this.materia.podPolicy === 'private') ? 'terminated' : 'idle'
+      // A pod's fate is ASKED, never read out of an error message. On the happy path the job just
+      // delivered through this pod, so it is alive by construction and the happy path pays for no
+      // extra network call. On the failure path we probe /health once: a failed JOB on a healthy
+      // pod must leave the pod reusable, and a pod that cannot answer must not be re-armed warm.
+      let podAlive = !jobFailed
+      let probeAnswer: string | null = null
+      if (jobFailed && reachedRunner) {
+        probeAnswer = await this._probeRunnerOnce(runnerBase, 5_000)
+        podAlive = probeAnswer === 'ready' || probeAnswer === 'busy' || probeAnswer === 'starting'
+      }
+      if (jobFailed) {
+        const err = failure as Error | undefined
+        const lostTheJob = failure instanceof RunnerJobLost
+        const fields = {
+          materiaId: id,
+          externusId,
+          jobId,
+          errorName: err?.name ?? typeof failure,
+          errorMessage: err?.message ?? String(failure),
+          liveness: lostTheJob ? 'gone' : 'unclassified',
+          probe: probeAnswer ?? 'no-answer',
+        }
+        // Taxonomy capture (stable message strings — these are meant to be grepped in pod logs).
+        if (!lostTheJob) log.warn('warm job failed with an unclassified error', fields)
+        else if (podAlive) log.warn('warm job liveness disagreement: runner lost the job but /health answers', fields)
+      }
+      const nextStatus = (!podAlive || this.materia.podPolicy === 'private') ? 'terminated' : 'idle'
       const patch: { status: 'terminated' | 'idle'; warmUntil?: Date } = { status: nextStatus }
       // Re-arm the idle deadline so the reaper gives this pod a fresh warm window
       // past *this* job's delivery (a follow-up within the window reuses it).
@@ -154,17 +191,26 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
     const pollMs    = this.config.runnerPollIntervalMs ?? 2000
     const deadline  = Date.now() + timeoutMs
     while (Date.now() < deadline) {
-      try {
-        const res = await this.fetchFn(`${runnerBase}/health`, { signal: AbortSignal.timeout(5000) })
-        if (res.ok) {
-          const body = await res.json() as { status?: string }
-          if (body.status === 'ready' || body.status === 'busy') return
-        }
-      } catch (_) {
-        // not ready yet
-      }
+      const status = await this._probeRunnerOnce(runnerBase, 5000)
+      if (status === 'ready' || status === 'busy') return
       await sleep(pollMs)
     }
     throw new Error(`comfyrunner not reachable on warm pod ${this.materia.externusId}`)
+  }
+
+  /**
+   * One `GET /health` against the runner. Returns the reported status (`starting`/`busy`/`ready`),
+   * or null if the runner did not answer at all. The single health-check implementation: the
+   * readiness poll loop and the post-failure fate probe both go through this.
+   */
+  private async _probeRunnerOnce(runnerBase: string, timeoutMs: number): Promise<string | null> {
+    try {
+      const res = await this.fetchFn(`${runnerBase}/health`, { signal: AbortSignal.timeout(timeoutMs) })
+      if (!res.ok) return null
+      const body = await res.json() as { status?: string }
+      return typeof body.status === 'string' ? body.status : null
+    } catch (_) {
+      return null
+    }
   }
 }
