@@ -46,9 +46,9 @@
 // pass `--prod` (a deliberate, eyes-open production migration). `noema` is the
 // pre-cutover legacy db and is always refused — see `_dbTarget.ts`.
 //
-// Run (dev):  ./scripts/run-with-env.sh npx tsx scripts/migrations/2026_08_repair_intella_source_uri.ts --db noemaplane --dry-run
-//   drop --dry-run to write.
-// Run (prod): …same… --db noemaplane --prod        (only when intentionally migrating production)
+// Run (READ, prod):  ./scripts/run-with-env.sh npx tsx scripts/migrations/2026_08_repair_intella_source_uri.ts --db noemaplane --prod --dry-run
+//   --prod clears the live-db gate; --dry-run suppresses every write. BOTH are required to read prod.
+// Run (WRITE, prod): …same, minus --dry-run…   (only when intentionally migrating production)
 
 import { MongoClient } from 'mongodb'
 import {

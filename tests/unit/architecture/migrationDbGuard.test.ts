@@ -105,3 +105,49 @@ test('resolveDbTarget: --db <unknown> --allow-unknown-db -> accepted', () => {
   const target = resolveDbTarget(['--db', 'definitely-not-a-db', '--allow-unknown-db'], 'tag')
   assert.deepEqual(target, { db: 'definitely-not-a-db', dryRun: false })
 })
+
+test(`resolveDbTarget: --db ${LIVE_DB} --prod --dry-run -> accepted AS A DRY RUN`, () => {
+  assert.deepEqual(
+    resolveDbTarget(['--db', LIVE_DB, '--prod', '--dry-run'], 'tag'),
+    { db: LIVE_DB, dryRun: true },
+  )
+})
+
+// The documented read form must be the form that actually runs. A migration header
+// carrying `--db noemaplane --dry-run` with no `--prod` in front documents an invocation
+// that resolveDbTarget refuses outright — the exact defect this test file exists to catch.
+test('no migration documents the impossible read form (--dry-run without --prod)', () => {
+  const files = migrationFiles()
+
+  const offenders = files.filter(f => {
+    const src = readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8')
+    // Strip every safe `--prod --dry-run` pair first, so a legitimately-guarded dry run
+    // never trips this: what remains must contain no `--db noemaplane --dry-run`.
+    const withoutSafePair = src.split('--prod --dry-run').join('')
+    return withoutSafePair.includes(`--db ${LIVE_DB} --dry-run`)
+  })
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `migration(s) documenting the impossible read form "--db ${LIVE_DB} --dry-run" without --prod: ` +
+      `${offenders.join(', ')} — resolveDbTarget refuses the live db without --prod even for a dry run ` +
+      `(rth's ruling 2026-08-12); the documented read form must be --db ${LIVE_DB} --prod --dry-run`,
+  )
+})
+
+test('the live-db refusal message names the working read form', () => {
+  let message = ''
+  try {
+    resolveDbTarget(['--db', LIVE_DB], 'tag')
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err)
+  }
+
+  assert.match(
+    message,
+    /--prod --dry-run/,
+    'the PRODUCTION-db refusal message must name the working read form (--prod --dry-run), ' +
+      'not recommend an invocation it just rejected',
+  )
+})
