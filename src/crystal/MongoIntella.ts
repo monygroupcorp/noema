@@ -115,6 +115,16 @@ function buildAccessOrClauses(ownerKey: string | undefined): Record<string, unkn
   return clauses
 }
 
+/**
+ * Build the `familia` half of a compat query. One family → exact equality (identical to the
+ * single-key form, so every scalar caller queries exactly what it queried before). A SET of
+ * accepted families → `$in` membership, deduped. Both forms are served by the existing
+ * `{genus:1, familia:1}` index.
+ */
+function familiaClause(familia: string | string[]): unknown {
+  return Array.isArray(familia) ? { $in: Array.from(new Set(familia)) } : familia
+}
+
 export class MongoIntella implements Intellarum {
   constructor(private readonly col: Collection) {}
 
@@ -158,15 +168,16 @@ export class MongoIntella implements Intellarum {
     return docs.map(projectV2ToV1)
   }
 
-  async findByTrigger(trigger: string, familia: string, ownerKey?: string): Promise<Intellae> {
+  async findByTrigger(trigger: string, familia: string | string[], ownerKey?: string): Promise<Intellae> {
     const triggerLower = trigger.toLowerCase()
-    // Compat keys on the model FAMILY (`familia`, exact equality), not the old
-    // baseIntellaId join. Trigger still substring-matches either v1's flat
-    // `trigger` string or v2's `params.triggerWords[]` array (Mongo's $regex on
-    // an array matches when any element matches).
+    // Compat keys on the model FAMILY (`familia`), not the old baseIntellaId join. A single
+    // family matches by exact equality; a SET of accepted families matches by `$in` membership
+    // (see `familiaClause`). Trigger still substring-matches either v1's flat `trigger` string
+    // or v2's `params.triggerWords[]` array (Mongo's $regex on an array matches when any
+    // element matches).
     const query: Record<string, unknown> = {
       genus: 'lora',
-      familia,
+      familia: familiaClause(familia),
       $and: [
         {
           $or: [
@@ -181,11 +192,12 @@ export class MongoIntella implements Intellarum {
     return docs.map(projectV2ToV1)
   }
 
-  async triggerMap(familia: string, ownerKey?: string): Promise<Map<string, Intellae>> {
-    // Compat keys on the model FAMILY (`familia`, exact equality).
+  async triggerMap(familia: string | string[], ownerKey?: string): Promise<Map<string, Intellae>> {
+    // Compat keys on the model FAMILY (`familia`): a single family by exact equality, a SET of
+    // accepted families by `$in` membership (see `familiaClause`).
     const query: Record<string, unknown> = {
       genus: 'lora',
-      familia,
+      familia: familiaClause(familia),
       $and: [
         {
           $or: [
