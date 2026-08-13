@@ -29,6 +29,11 @@ export class DbTargetRefusedError extends Error {}
  *   - `db === LEGACY_DB` -> refuse regardless of `--prod` (dead cutover source; a write
  *     here is always a mistake or a stale copy-paste of an old header).
  *   - `db === LIVE_DB` and no `--prod` -> refuse (this IS the live db; run it deliberately).
+ *     This holds even for a read: `--prod` is required to READ production too
+ *     (`--db LIVE_DB --prod --dry-run`), deliberately — rth's ruling 2026-08-12 keeps
+ *     `--prod` as the ONE gate on the live db rather than letting `--dry-run` clear it,
+ *     since the resolver cannot itself enforce that every migration honours `DRY_RUN`
+ *     on every write path. Do not "fix" this by letting `--dry-run` bypass `--prod`.
  *   - any other name, no `--allow-unknown-db` -> refuse. A plausible-looking wrong name
  *     (e.g. a typo of the live db) must not be silently accepted — accepting it lets a
  *     migration report `updated=0` against an empty scratch db and be read as "nothing
@@ -52,7 +57,9 @@ export function resolveDbTarget(argv: string[], tag: string): DbTarget {
   }
   if (db === LIVE_DB && !prod) {
     throw new DbTargetRefusedError(
-      `${tag} refusing to target the PRODUCTION db "${LIVE_DB}" without --prod. Use --db ${LIVE_DB} --dry-run to read, or --db <scratch-name> --allow-unknown-db for dev/test.`,
+      `${tag} refusing to target the PRODUCTION db "${LIVE_DB}" without --prod. To READ production without ` +
+        `writing, use --db ${LIVE_DB} --prod --dry-run (--prod clears this gate; --dry-run suppresses every ` +
+        `write). For dev/test use --db <scratch-name> --allow-unknown-db.`,
     )
   }
   if (db !== LIVE_DB && !argv.includes('--allow-unknown-db')) {
