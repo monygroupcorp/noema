@@ -173,6 +173,34 @@ test('Materia status: sets to terminated for private pod', async () => {
   assert.equal(idleUpdate, undefined, 'should NOT mark idle for private pods')
 })
 
+test('Materia status: a job failure the pod cannot answer for leaves the Materia terminated, never re-armed warm', async () => {
+  const materia = makeMateria({ podPolicy: 'economy' })
+  const store = makeMateriaStore(materia)
+  const runnerBase = 'https://pod-xyz-8080.proxy.runpod.net'
+  let healthCalls = 0
+  // The pod answers the readiness probe, the job then fails with an error whose text carries no
+  // transport marker at all, and the pod stops answering. Its fate must come from the /health
+  // probe, not from reading the error.
+  const fetch = (async (url: string, init?: RequestInit): Promise<Response> => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'GET' && url === `${runnerBase}/health`) {
+      healthCalls++
+      if (healthCalls === 1) return new Response(JSON.stringify({ status: 'ready' }), { status: 200 })
+      throw new Error('connect ETIMEDOUT')
+    }
+    if (method === 'POST' && url === `${runnerBase}/job`) return new Response('{}', { status: 200 })
+    if (method === 'GET' && url.startsWith(`${runnerBase}/job/`)) return makeSseStream([{ type: 'error', error: 'kaboom' }])
+    return new Response('{}', { status: 200 })
+  }) as unknown as typeof fetch
+
+  const client = new WarmPodClient(materia, store, fetch)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 200))
+
+  assert.ok(healthCalls >= 2, 'the pod fate must be asked, not inferred from the error text')
+  assert.deepEqual(store.updates, [{ id: 'mat-warm-1', patch: { status: 'terminated' } }])
+})
+
 test('Materia status: sets to terminated for private pod even on failure', async () => {
   const materia = makeMateria({ podPolicy: 'private' })
   const store = makeMateriaStore(materia)
