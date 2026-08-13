@@ -339,18 +339,22 @@ export class Compiler {
     // The resolved LoRAs are then appended to the weight set so any missing
     // weights download on this dispatch.
     //
-    // COMPOSITE NOTE: an atomic flow has exactly one family, so we call
-    // `triggerMap(families[0])`. Composite compilation (`_compileComposed`,
-    // future) calls this PER PROMPT-INPUT with that input's step family — the
-    // map is already family-keyed and the resolver is already per-prompt, so it
-    // plugs in here with no rework.
+    // COMPOSITE NOTE: an atomic flow has exactly one family, so we call `triggerMap` once with
+    // that flow's accepted set. Composite compilation (`_compileComposed`, future) calls this PER
+    // PROMPT-INPUT with that input's step family — the map is already family-keyed and the
+    // resolver is already per-prompt, so it plugs in here with no rework.
+    //
+    // ACCEPTED SET: the families the flow's own weights derive, UNIONED with the fundament's
+    // declared `acceptsFamiliae` (compat is directed — see `Fundamentum.acceptsFamiliae`). The
+    // flow's own families are always in the set, so a declaration can only widen what resolves.
     let appliedLoras: ResolvedLora[] = []
     let loraWarnings: string[] = []
     let promptForSlots: Record<string, unknown> = wovenAditus
     if (template.loraCapable && this.intellarum && families.length > 0 && typeof wovenAditus.prompt === 'string') {
+      const accepted = Array.from(new Set([...families, ...(fundamentum.acceptsFamiliae ?? [])]))
       // Owner-scope the trigger map so the runner's OWN private imports resolve by trigger word
       // (and no one else's). `ownerKey` is threaded from the run identity (RunPodCursor → compile).
-      const map = await this.intellarum.triggerMap(families[0], ownerKey)
+      const map = await this.intellarum.triggerMap(accepted, ownerKey)
       const r = resolveLoraTriggers(wovenAditus.prompt, { triggerMap: map, ...(opts.animaId ? { animaId: opts.animaId } : {}) })
       appliedLoras = r.appliedLoras
       loraWarnings = r.warnings

@@ -69,6 +69,20 @@ export interface Fundamentum {
    */
   intellae?: Array<{ id: string; role: string }>
 
+  /**
+   * The familiae whose LoRAs this substrate's flows will CONSUME — the compat axis, declared.
+   *
+   * `Intella.familia` says what a model IS; `acceptsFamiliae` says what a flow will TAKE. They are
+   * separate fields because acceptance is DIRECTED: a substrate can accept LoRAs trained for a
+   * neighbouring family without that family accepting its own in return, and one symmetric string
+   * compared by equality cannot express a directed relation.
+   *
+   * Absent → `[the fundament's own derived familia]`, i.e. the existing behaviour. When present,
+   * the fundament's own derived familia is ALWAYS implicitly included on top of the declaration,
+   * so a declaration can only ADD acceptance and can never exclude a flow's native LoRAs.
+   */
+  acceptsFamiliae?: string[]
+
   /** Minimum VRAM in GB the substrate needs — drives GPU/pod selection (capacity hint). */
   vramGb?: number
 
