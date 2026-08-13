@@ -104,6 +104,12 @@ export const FUNDAMENTUM_CHROMA_COMFYUI: Fundamentum = {
  * the SHARED FLUX support weights (T5-XXL + CLIP-L + FLUX VAE), so it reuses those intellae; only the
  * unet differs from `flux-comfyui`. Family ('flux') derives from the unet's `familia` (so old flux LoRAs
  * apply — the user's note that Kontext works with our existing LoRAs).
+ *
+ * Acceptance is DIRECTED, so it is declared rather than derived from `familia`: this stack consumes LoRAs
+ * trained for `flux` AND ones trained for `kontext`, while a plain `flux` stack consumes only `flux`. The
+ * declaration sits on the EXISTING `versio` deliberately — `MongoFundamentorum.register` upserts on
+ * `{id, versio}`, and `ESSENTIA_KONTEXTEDIT` pins this exact versio with no fallback to latest, so a bump
+ * would add a second canonical document for one fundament id and leave the declaration unreachable.
  */
 export const FUNDAMENTUM_FLUX_KONTEXT_COMFYUI: Fundamentum = {
   id: 'flux-kontext-comfyui',
@@ -120,6 +126,7 @@ export const FUNDAMENTUM_FLUX_KONTEXT_COMFYUI: Fundamentum = {
     { id: 'intella.clip-l',           role: 'clip' },
     { id: 'intella.flux-vae',         role: 'vae' },
   ],
+  acceptsFamiliae: ['flux', 'kontext'],
   vramGb: 24,
   canonica: true,
   natum: new Date('2025-01-01'),

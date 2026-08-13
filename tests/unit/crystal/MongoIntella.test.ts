@@ -275,3 +275,68 @@ test('shim: findByTrigger() matches against v2 triggerWords array', async () => 
   assert.equal(results.length, 1)
   assert.equal(results[0].slug, 'milady-v3')
 })
+
+// ── directed compat: a SET of accepted familiae ──────────────────────────────
+//
+// A flow declares the familiae it CONSUMES (`Fundamentum.acceptsFamiliae`); the compat reads accept
+// that set as well as a single familia. The relation is DIRECTED, so the asymmetry is the assertion:
+// a caller passing the wider set sees both, and a caller passing one familia still sees only that
+// one. Synthetic fixtures throughout — nothing here depends on any existing record.
+
+/** A LoRA in `familia`, resolvable by `trigger`. Public and non-canonical, like an import. */
+async function insertLora(id: string, familia: string, trigger: string) {
+  await col.insertOne({
+    ...makeIntella({ id, genus: 'lora', canonica: false }),
+    familia,
+    trigger,
+    slug: id.replace('intella.', ''),
+    defaultWeight: 1.0,
+    access: 'public',
+  })
+}
+
+test('triggerMap(set) resolves LoRAs from every accepted familia', async () => {
+  await insertLora('intella.lora.base-fam', 'base-fam', 'basetrigger')
+  await insertLora('intella.lora.edit-fam', 'edit-fam', 'edittrigger')
+
+  const map = await intellae.triggerMap(['base-fam', 'edit-fam'])
+  assert.ok(map.has('basetrigger'), 'a LoRA in the first accepted familia resolves')
+  assert.ok(map.has('edittrigger'), 'a LoRA in the second accepted familia resolves')
+  assert.equal(map.get('edittrigger')![0].id, 'intella.lora.edit-fam')
+})
+
+test('triggerMap(single familia) stays narrow — acceptance is directed, not symmetric', async () => {
+  await insertLora('intella.lora.base-fam', 'base-fam', 'basetrigger')
+  await insertLora('intella.lora.edit-fam', 'edit-fam', 'edittrigger')
+
+  const map = await intellae.triggerMap('base-fam')
+  assert.ok(map.has('basetrigger'), 'the flow\'s own familia still resolves')
+  assert.equal(
+    map.has('edittrigger'),
+    false,
+    'a familia the caller did not ask for must NOT resolve — this is the directed half of the relation',
+  )
+})
+
+test('triggerMap(set) with one entry equals the scalar form (backward compatibility)', async () => {
+  await insertLora('intella.lora.base-fam', 'base-fam', 'basetrigger')
+  await insertLora('intella.lora.edit-fam', 'edit-fam', 'edittrigger')
+
+  const scalar = await intellae.triggerMap('base-fam')
+  const asSet = await intellae.triggerMap(['base-fam'])
+  assert.deepEqual([...asSet.keys()].sort(), [...scalar.keys()].sort())
+})
+
+test('findByTrigger() accepts a set and stays narrow for a single familia', async () => {
+  await insertLora('intella.lora.base-fam', 'base-fam', 'sharedtrigger')
+  await insertLora('intella.lora.edit-fam', 'edit-fam', 'sharedtrigger')
+
+  const both = await intellae.findByTrigger('sharedtrigger', ['base-fam', 'edit-fam'])
+  assert.deepEqual(
+    both.map(i => i.id).sort(),
+    ['intella.lora.base-fam', 'intella.lora.edit-fam'],
+  )
+
+  const one = await intellae.findByTrigger('sharedtrigger', 'base-fam')
+  assert.deepEqual(one.map(i => i.id), ['intella.lora.base-fam'])
+})

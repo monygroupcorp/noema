@@ -307,11 +307,16 @@ export interface Intellarum {
   listByOwner?(ownerKey: string, genus?: IntellaGenus): Promise<Intellae>
   /**
    * Resolve all LoRA intellae that match a trigger word and are compatible
-   * with the given model FAMILY (via `familia` — exact string equality).
+   * with the given model FAMILY (via `familia`).
+   *
+   * `familia` accepts either one family (matched exactly) or a SET of accepted families
+   * (matched as membership) — a flow declaring `acceptsFamiliae` resolves LoRAs from every
+   * family it accepts, while a scalar caller keeps single-family behaviour unchanged.
+   *
    * ownerKey (`ownerKeyOf(auctor)` — anima OR Bursa purse) scopes results to public +
    * private LoRAs that owner can access. Absent ownerKey returns public LoRAs only.
    */
-  findByTrigger(trigger: string, familia: string, ownerKey?: string): Promise<Intellae>
+  findByTrigger(trigger: string, familia: string | string[], ownerKey?: string): Promise<Intellae>
   /**
    * Bulk-load the trigger map for a model FAMILY: every LoRA the caller can
    * access (public + their own private) whose `familia` matches, keyed by
@@ -324,8 +329,12 @@ export interface Intellarum {
    * it per prompt-input with that input's step family — flux-path triggers
    * resolve only flux LoRAs. (Composite compilation is a future task; the
    * signature is family-keyed now so it plugs in with no rework.)
+   *
+   * `familia` accepts either one family (matched exactly) or a SET of accepted families
+   * (matched as membership), so a flow declaring `Fundamentum.acceptsFamiliae` gets one map
+   * spanning everything it accepts. A scalar argument keeps single-family behaviour unchanged.
    */
-  triggerMap(familia: string, ownerKey?: string): Promise<Map<string, Intellae>>
+  triggerMap(familia: string | string[], ownerKey?: string): Promise<Map<string, Intellae>>
   /**
    * Set a model's resolvability (`access`). The publishing reconciler (§5d) calls
    * this so `Intella.access` DERIVES from its `Editio` — a model becomes resolvable
