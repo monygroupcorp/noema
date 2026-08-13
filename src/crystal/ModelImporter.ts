@@ -128,10 +128,14 @@ export class ModelImporter {
 
   /**
    * Import the URL as a private Intella owned by `ownerAnimaId`. Resolves + scrapes
-   * origin metadata, CSAM-scans any preview media (fail-closed) then re-hosts it, and
-   * registers the Intella ORIGIN-ONLY for weights (`sources[0]` = origin,
-   * `access:'private'`, `canonica:false`). Idempotent per (owner, url). Throws
-   * `ModelImportError` on a refused import.
+   * origin metadata, CSAM-scans any preview media, and registers the Intella
+   * ORIGIN-ONLY for weights (`sources[0]` = origin, `access:'private'`,
+   * `canonica:false`). The scan is unconditional; its VERDICT decides only whether
+   * the previews are re-hosted into our bucket (pass) or left origin-referenced
+   * (non-pass) — a non-pass does not refuse the import (noema-192; public promotion
+   * re-scans independently and IS the moderation boundary). Idempotent per
+   * (owner, url). Throws `ModelImportError` when the owner identity is missing or
+   * the URL cannot be resolved to a supported origin.
    */
   async import(input: ImportModelInput): Promise<Intella> {
     if (!input.ownerKey) throw new ModelImportError('an owner identity is required to import a model')
