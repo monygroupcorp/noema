@@ -166,8 +166,88 @@ export async function installViaRunner(
 }
 
 /**
+ * What the runner says about a job when we ask it directly.
+ *
+ * `unknown` is IGNORANCE, not evidence: a transport error, a non-JSON body or an unrecognized
+ * shape tells us nothing about whether the job is running, so it must never on its own be
+ * treated as death. Liveness is asked, never inferred.
+ */
+export type JobLiveness =
+  | { kind: 'alive'; status: 'queued' | 'running' }
+  | { kind: 'terminal'; status: 'completed' | 'failed'; body: unknown }
+  | { kind: 'gone' }
+  | { kind: 'unknown' }
+
+/**
+ * The runner does not know this job any more — `GET /job/<id>` answered 404, meaning the job is
+ * neither recorded nor in flight (a comfyrunner restart clears its in-process job table).
+ * Callers decide a pod's fate off `instanceof RunnerJobLost`, never off a message substring.
+ */
+export class RunnerJobLost extends Error {
+  readonly isJobLost = true
+  constructor(jobId: string) {
+    super(`comfyrunner no longer has job ${jobId}`)
+    this.name = 'RunnerJobLost'
+  }
+}
+
+/** Ask the runner whether a job is still alive. `GET /job/<id>` (comfyrunner `job-poll`). */
+export async function pollJobStatus(
+  fetchFn: typeof fetch,
+  runnerBase: string,
+  jobId: string,
+  timeoutMs = 10_000,
+): Promise<JobLiveness> {
+  try {
+    const res = await fetchFn(`${runnerBase}/job/${jobId}`, { signal: AbortSignal.timeout(timeoutMs) })
+    if (res.status === 404) return { kind: 'gone' }
+    if (!res.ok) return { kind: 'unknown' }
+    const body = await res.json() as unknown
+    const status = (body && typeof body === 'object') ? (body as { status?: unknown }).status : undefined
+    if (status === 'completed' || status === 'failed') return { kind: 'terminal', status, body }
+    if (status === 'queued' || status === 'running') return { kind: 'alive', status }
+    // A finished job answers with its raw result object, which carries no `status` field. An
+    // unrecognized 200 means the runner is answering about our job, so treat it as alive and let
+    // the stream deliver the truth — never as death.
+    return { kind: 'alive', status: 'running' }
+  } catch (_) {
+    return { kind: 'unknown' }
+  }
+}
+
+/** Pull a human-readable reason out of a terminal `failed` poll body. */
+function runnerFailureMessage(body: unknown): string {
+  if (body && typeof body === 'object') {
+    const o = body as { error?: unknown; message?: unknown }
+    if (typeof o.error === 'string' && o.error) return o.error
+    if (typeof o.message === 'string' && o.message) return o.message
+  }
+  return 'comfyrunner reports the job failed'
+}
+
+/** Consecutive unclassifiable liveness answers before we stop giving the job the benefit of the doubt. */
+const MAX_CONSECUTIVE_UNKNOWN = 3
+
+const SILENT = Symbol('silent')
+
+/** Resolve with `p`'s value, or with SILENT if `ms` elapses first. `p` stays pending and reusable. */
+function raceSilence<T>(p: Promise<T>, ms: number): Promise<T | typeof SILENT> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([
+    p,
+    new Promise<typeof SILENT>(resolve => { timer = setTimeout(() => resolve(SILENT), Math.max(0, ms)) }),
+  ]).finally(() => { if (timer !== undefined) clearTimeout(timer) })
+}
+
+/**
  * Subscribe to the comfyrunner SSE stream for a job. Resolves when the job
- * completes (terminal `complete` event), throws on `error` or timeout.
+ * completes (terminal `complete` event), throws on `error`.
+ *
+ * Liveness is ASKED, never inferred from a clock. When the stream goes quiet for `silenceMs`
+ * we call `GET /job/<id>`: `running`/`queued` buys another silence window (a long download or a
+ * slow graph is not a dead job), `completed` resolves, `failed` throws, and `404` throws
+ * `RunnerJobLost`. `costCeilingMs` is an absolute backstop only — it stops a job the runner still
+ * calls `running` (e.g. ComfyUI deadlocked inside a node) from holding a paid GPU indefinitely.
  *
  * Emits bus events for progress and optional stage callbacks for Telegram UX.
  * Reconnects up to 3 times on dropped connections, replaying from last seq.
@@ -184,8 +264,11 @@ export async function awaitViaStream(
   fetchFn: typeof fetch,
   runnerBase: string,
   jobId: string,
-  timeoutMs: number,
+  /** Absolute cost backstop, NOT the liveness mechanism (see the doc comment above). */
+  costCeilingMs: number,
   onMetrics?: (m: RunMetrics) => void,
+  /** How long the stream may go quiet before we ask the runner whether the job is alive. */
+  silenceMs = 60_000,
 ): Promise<void> {
   let lastSeq = -1
   let inferringEmitted = false
@@ -200,7 +283,10 @@ export async function awaitViaStream(
   let lastProgBytes = -1
   let lastProgMs = 0
   let slowSinceMs = 0
-  const deadline = Date.now() + timeoutMs
+  const ceiling = Date.now() + costCeilingMs
+  // Rolling inactivity budget — reset on every parsed event and on every successful reconnect.
+  let silenceDeadline = Date.now() + silenceMs
+  let unknownStreak = 0
 
   // Status (Progressus, spec §6a): the OWNED, single status channel (#6e retired the parallel
   // `emitStage`/`actum.stage` strings). Persist a typed timeline onto the Actum via the in-process
@@ -220,8 +306,8 @@ export async function awaitViaStream(
     }
 
     try {
-      const remaining = deadline - Date.now()
-      if (remaining <= 0) throw new Error('job timeout exceeded')
+      const remaining = ceiling - Date.now()
+      if (remaining <= 0) throw new Error('job cost ceiling exceeded')
 
       const headers: Record<string, string> = {}
       if (lastSeq >= 0) headers['Last-Event-ID'] = String(lastSeq)
@@ -239,8 +325,60 @@ export async function awaitViaStream(
       let dataLine = ''
       let idLine = ''
 
+      // A fresh connection is a fresh silence budget.
+      silenceDeadline = Date.now() + silenceMs
+      let pendingRead: Promise<ReadableStreamReadResult<Uint8Array>> | null = null
+
       outer: while (true) {
-        const { done, value } = await reader.read()
+        if (!pendingRead) pendingRead = reader.read()
+        const raced = await raceSilence(pendingRead, silenceDeadline - Date.now())
+
+        if (raced === SILENT) {
+          // The stream has gone quiet. Ask the runner rather than inferring anything from the clock.
+          const liveness = await pollJobStatus(fetchFn, runnerBase, jobId)
+
+          if (liveness.kind === 'alive') {
+            unknownStreak = 0
+            silenceDeadline = Date.now() + silenceMs
+            log.info('stream quiet, runner reports job alive', { jobId, status: liveness.status })
+            continue
+          }
+
+          if (liveness.kind === 'terminal') {
+            if (liveness.status === 'completed') {
+              // The job finished while the stream was broken — deliver it instead of waiting.
+              log.info('stream quiet, runner reports job complete', { jobId })
+              void reader.cancel().catch(() => {})
+              await record({ phase: 'done' })
+              return
+            }
+            const errMsg = runnerFailureMessage(liveness.body)
+            log.warn('stream quiet, runner reports job failed', { jobId, error: errMsg })
+            void reader.cancel().catch(() => {})
+            await record({ phase: 'failed', message: errMsg })
+            throw new JobError(errMsg)
+          }
+
+          if (liveness.kind === 'unknown') {
+            unknownStreak++
+            // Taxonomy capture: an unclassifiable liveness answer is the thing we cannot yet name.
+            log.warn('runner liveness poll unclassified', { jobId, livenessKind: 'unknown', unknownStreak, maxUnknown: MAX_CONSECUTIVE_UNKNOWN })
+            if (unknownStreak < MAX_CONSECUTIVE_UNKNOWN) {
+              silenceDeadline = Date.now() + silenceMs
+              continue
+            }
+          }
+
+          // 404, or nothing classifiable MAX_CONSECUTIVE_UNKNOWN polls running: the job is lost.
+          const lost = new RunnerJobLost(jobId)
+          log.warn('runner no longer has this job', { jobId, livenessKind: liveness.kind, unknownStreak })
+          void reader.cancel().catch(() => {})
+          await record({ phase: 'failed', message: lost.message })
+          throw lost
+        }
+
+        pendingRead = null
+        const { done, value } = raced
         if (done) break
 
         buf += decoder.decode(value, { stream: true })
@@ -259,6 +397,9 @@ export async function awaitViaStream(
             const event = JSON.parse(dataLine) as { type: string; [k: string]: unknown }
             idLine = ''
             dataLine = ''
+            // The job is demonstrably talking to us — refresh the inactivity budget.
+            silenceDeadline = Date.now() + silenceMs
+            unknownStreak = 0
 
             switch (event.type) {
               case 'preflight-models': {
@@ -386,8 +527,9 @@ export async function awaitViaStream(
       // Stream closed without terminal event — retry
       log.warn('SSE stream closed without terminal event', { jobId, attempt })
     } catch (err) {
-      const e = err as { isJobError?: boolean; isThrottleError?: boolean }
-      if (e.isJobError || e.isThrottleError || attempt >= 3 || Date.now() >= deadline) throw err
+      const e = err as { isJobError?: boolean; isThrottleError?: boolean; isJobLost?: boolean }
+      // isJobLost: the runner was asked and does not have this job — reconnecting cannot help.
+      if (e.isJobError || e.isThrottleError || e.isJobLost || attempt >= 3 || Date.now() >= ceiling) throw err
     }
   }
 
