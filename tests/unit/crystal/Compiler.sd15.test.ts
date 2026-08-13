@@ -59,10 +59,13 @@ function makeSd15Intellarum(
     async list() { return records },
     async canonical() { return records },
     async findByTrigger() { return [] },
-    async triggerMap(familia: string): Promise<Map<string, Intellae>> {
+    async triggerMap(familia: string | string[]): Promise<Map<string, Intellae>> {
+      // The Compiler passes the flow's ACCEPTED SET (`Fundamentum.acceptsFamiliae` unioned with the
+      // flow's own derived families); a scalar is still legal. Mirror both, as MongoIntella does.
+      const accepted = Array.isArray(familia) ? familia : [familia]
       const m = new Map<string, Intellae>()
       for (const r of records) {
-        if (r.familia !== familia) continue
+        if (!r.familia || !accepted.includes(r.familia)) continue
         for (const raw of (r.trigger ?? '').split(',')) {
           const k = raw.trim().toLowerCase(); if (!k) continue
           const b = m.get(k); if (b) b.push(r); else m.set(k, [r])
