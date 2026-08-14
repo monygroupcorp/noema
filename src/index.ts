@@ -115,6 +115,7 @@ import { MongoColloquium } from './crystal/MongoColloquium.js'
 import { MongoDictum } from './crystal/MongoDictum.js'
 import { httpMediaFetcher } from './crystal/MediaFetcher.js'
 import { makeTrainingFinalizer, urlLoraReader, makeTrainingExitusResolver } from './crystal/trainingFinalizer.js'
+import { makeCaptionFinalizer, urlCaptionHarvestReader, makeCaptionExitusResolver, composeExitusResolvers } from './crystal/captionFinalizer.js'
 import { MongoConsuetudinum } from './crystal/MongoConsuetudinum.js'
 import { MongoFundamentorum } from './crystal/MongoFundamentorum.js'
 import { Compiler } from './crystal/Compiler.js'
@@ -1547,6 +1548,23 @@ async function main(): Promise<void> {
       }))
     : undefined
 
+  // Caption finality at the same webhook: a completed batch caption run reads the pod-uploaded
+  // {mediaId: caption} map and persists it as a captionset on the dataset. Gated on the same R2
+  // presence the training resolver uses (it needs R2 to read the harvest back).
+  const captionExitusResolver = RUNPOD_R2
+    ? makeCaptionExitusResolver(makeCaptionFinalizer({
+        reader: urlCaptionHarvestReader(httpMediaFetcher),
+        datasets: ring.datasets,
+      }))
+    : undefined
+
+  // COMPOSE, never replace: the router has ONE `resolveExitus` slot. Each resolver declines
+  // (returns null) for a ministerium that is not its own, so both stay reachable through one
+  // slot; passing either alone would leave the other's completions to the generic projection —
+  // a finished training run would stop hosting its LoRA and registering its Intella while still
+  // reporting success. Absent both (no R2), the spread below stays empty exactly as before.
+  const exitusResolver = composeExitusResolvers(captionExitusResolver, trainingExitusResolver)
+
   app.use('/webhooks', createWebhookRouter({
     actorum: ring.actorum,
     completor: ring.completor,
@@ -1555,7 +1573,7 @@ async function main(): Promise<void> {
     nexus,
     signorum: ring.signorum,
     modorum: ring.modorum,
-    ...(trainingExitusResolver ? { resolveExitus: trainingExitusResolver } : {}),
+    ...(exitusResolver ? { resolveExitus: exitusResolver } : {}),
     modos: ring.modos,
     hospitia: ring.hospitia,
     deployments: ring.deployments,
