@@ -73,6 +73,8 @@ import { SpawnFfmpegEngine } from './crystal/FfmpegEngine.js'
 import { AitoolkitTrainingCursor, type AitoolkitTrainingCursorDeps } from './crystal/AitoolkitTrainingCursor.js'
 import { RemoteAitoolkitTrainingCursor } from './crystal/RemoteAitoolkitTrainingCursor.js'
 import { RemoteAitkLauncher, securePodTrainingProvisioner } from './crystal/RemoteAitkLauncher.js'
+import { DatasetCaptionCursor } from './crystal/DatasetCaptionCursor.js'
+import { CaptionPodLauncher } from './crystal/CaptionPodLauncher.js'
 import { makeDatasetResolver } from './crystal/datasetManifest.js'
 import { SqliteAitkJobStore } from './crystal/AitkJobStore.js'
 import { DockerAitkSpawner } from './crystal/AitkSpawner.js'
@@ -265,6 +267,9 @@ export interface ContainerConfig {
     statusUrl: string
     /** Reservation cap in pod-seconds (settled to actual at completion) — default 7200 (2h). */
     maxTrainingSeconds?: number
+    /** Reservation cap in pod-seconds for a batch CAPTION pass (settled to actual at completion)
+     *  — default `DEFAULT_MAX_CAPTION_SECONDS` (30m), far below the training cap. */
+    maxCaptionSeconds?: number
   }
   /** Warm-window TTL (ms) passed to warm-pod jobs — default 60_000. */
   runpodWarmTtlMs?: number
@@ -674,6 +679,27 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
       launcher,
       actorum,
       ...(config.aitoolkitRemote.maxTrainingSeconds !== undefined ? { maxTrainingSeconds: config.aitoolkitRemote.maxTrainingSeconds } : {}),
+    }))
+
+    // Batch dataset captioning — the same pod rail, its OWN ministerium. `Cursorum` is a flat
+    // Map<ministerium, Cursor> whose `register` is a bare set, so this must never be registered
+    // under 'aitoolkit': that key belongs to training and a second registration there would take
+    // over every training dispatch. It reuses the `datasets` store constructed above rather than
+    // opening a second one, and rides the same provisioner, image, R2, status and webhook config.
+    cursorum.register('aitkcaption', new DatasetCaptionCursor({
+      launcher: new CaptionPodLauncher({
+        provisioner: securePodTrainingProvisioner(
+          config.runpodClient as unknown as { launchTrainingPod(opts: { image: string; env: Record<string, string> }): Promise<{ podId: string }> },
+        ),
+        datasets,
+        ...(config.aitoolkitRemote.image ? { image: config.aitoolkitRemote.image } : {}),
+        ...(config.aitoolkitRemote.aitkRef ? { aitkRef: config.aitoolkitRemote.aitkRef } : {}),
+        r2: config.runpodR2,
+        statusUrl: config.aitoolkitRemote.statusUrl,
+        webhookUrl: config.runpodWebhookUrl,
+      }),
+      actorum,
+      ...(config.aitoolkitRemote.maxCaptionSeconds !== undefined ? { maxCaptionSeconds: config.aitoolkitRemote.maxCaptionSeconds } : {}),
     }))
   }
 

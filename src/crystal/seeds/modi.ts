@@ -298,6 +298,53 @@ export const MODUS_AITOOLKIT_TRAINING: Modus = make({
   mutatum: new Date('2026-06-23'),
 })
 
+export const MODUS_DATASET_CAPTION: Modus = make({
+  id: 'modus.dataset-caption',
+  nomen: 'Dataset Captioning — batch',
+  descriptio: 'Dataset Captioning (batch) — captions every image in a dataset in one pod pass and stores the result as a captionset on that dataset. Pick it to prepare a dataset for LoRA training; use the single-image caption spell for one-off captions.',
+  genus: 'atomicus',
+  versio: '1.0.0',
+
+  // A ministerium of its OWN, distinct from the training modus'. `Cursorum` is a flat
+  // Map<ministerium, Cursor> and `register` is a bare set, so a second cursor registered under
+  // 'aitoolkit' would take over every training dispatch. The caption cursor gets its own key and
+  // the training registration is left exactly as it is.
+  ministerium: 'aitkcaption',
+
+  // The pod runs the captioner and reports at the completion webhook, like the remote training
+  // arm — the run is dispatched, not awaited.
+  deliveryMode: 'async',
+  canonica: true,
+  // No impetusFixum: this is a pod tool billed on runtime duration, like the training modus. The
+  // cursor reserves a pod-seconds cap and the completion webhook settles it down to the real
+  // duration, so a caption job is metered exactly like any other run — no separate lifecycle.
+
+  // Explicit override (the convention noema-087 established, and the same call
+  // COMPOSITUS_IMAGE_CAPTION makes): every port here is 'text'/'int' — the images are reached
+  // through a dataset id, not a media port — so the cascade's text rule fires and lands on a
+  // chat-ish verb. This is image→text captioning: `describe`.
+  verbum: 'describe',
+
+  // The user-facing contract: a DATASET id plus optional captioner knobs. The modus synthesises
+  // the ai-toolkit caption yaml (buildAitkCaptionConfig) — users never author a config.
+  aditus: {
+    dataset:        { type: 'text', required: true,  description: 'Id of the dataset to caption — every image in it is captioned' },
+    name:           { type: 'text', required: false, description: 'Display name for the resulting captionset (defaults to a generated one)' },
+    captionPrompt:  { type: 'text', required: false, description: 'Instruction handed to the captioner (defaults to the training-caption prompt)' },
+    maxNewTokens:   { type: 'int',  required: false, description: 'Caption length cap in tokens (captioner default when absent)' },
+  },
+
+  // Matches the finalizer's return: the captionset it wrote, and what that pass actually covered.
+  exitus: {
+    captionsetId: { type: 'text', description: 'Id of the captionset written onto the dataset' },
+    captioned:    { type: 'int',  description: 'How many media items this pass captioned' },
+    coverage:     { type: 'text', description: 'Coverage of the dataset this pass reached, e.g. "12/12"' },
+  },
+
+  natum:   new Date('2026-08-14'),
+  mutatum: new Date('2026-08-14'),
+})
+
 export const CANONICAL_MODI: Modus[] = [
   MODUS_CHATGPT,
   MODUS_DALLE_III,
@@ -307,4 +354,5 @@ export const CANONICAL_MODI: Modus[] = [
   MODUS_LAYER_COMPOSITE,
   MODUS_FRAMES_TO_VIDEO,
   MODUS_AITOOLKIT_TRAINING,
+  MODUS_DATASET_CAPTION,
 ]

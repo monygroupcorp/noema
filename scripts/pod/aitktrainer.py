@@ -16,6 +16,13 @@ script, and hands it everything via env. On boot it:
   5. on completion uploads <output>/<job>/<job>.safetensors to R2 → fires the completion
      webhook {id, status:'COMPLETED', output:[{url}], executionTime}; on error → FAILED.
 
+A second MODE runs on the same rails. With NOEMA_JOB_MODE=caption the script stops after
+step 2b: it stages the manifest, runs the captioner over it, harvests each `NNN.txt` sidecar
+into a {media id: caption} map (keyed by the id the manifest carried, never by position),
+uploads that map as one JSON object and fires the SAME completion webhook with its URL. No
+training config, no Job row, no run.py, no polling. An ABSENT NOEMA_JOB_MODE is 'train' and
+behaves exactly as it always has.
+
 The rich `aitkJobToProgressus` projection stays host-side (TS); this posts only the few
 fields the bulletin needs. The webhook payload matches RunPodPayload (executionWebhook.ts)
 byte-for-byte so the SAME async completion rail + training finalizer the local path proves
@@ -132,6 +139,12 @@ def parse_manifest(raw: str) -> list:
         caption = item.get("caption")
         if isinstance(caption, str) and caption.strip():
             entry["caption"] = caption.strip()
+        # Optional source identity (a dataset media id). Staged files are named by manifest
+        # INDEX, so the id is the only handle a harvested caption can carry back to the exact
+        # item it describes. Absent on the training path, which has no ids to supply.
+        media_id = item.get("id")
+        if isinstance(media_id, str) and media_id:
+            entry["id"] = media_id
         out.append(entry)
     return out
 
@@ -174,6 +187,42 @@ def count_uncaptioned(dataset_dir: str) -> int:
     return n
 
 
+def harvest_captions(manifest: list, dataset_dir: str):
+    """Collect the captioner's output as a {media id: caption} MAP — the wire shape the host
+    finalizer consumes.
+
+    The captioner writes `<stem>.txt` beside each image, and `stage_dataset` names every stem by
+    manifest INDEX. An index is not an identity: the host's dataset media list is append-only and
+    can grow while this pod runs, so an index resolved back to a media item after the fact can
+    land on a different item than the one that was staged. The manifest carries each item's `id`
+    out, so the harvest carries it back and the host never computes a position.
+
+    An item with no `id`, or with no readable caption sidecar, is OMITTED from the map and
+    COUNTED — the host then sees honest coverage instead of a silently short map. No id is ever
+    invented for one. Returns (captions, missing).
+    """
+    captions = {}
+    missing = 0
+    for i, item in enumerate(manifest):
+        media_id = item.get("id")
+        path = os.path.join(dataset_dir, f"{i:04d}.{CAPTION_EXT}")
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read().strip()
+        except OSError:
+            text = ""
+        if not isinstance(media_id, str) or not media_id or not text:
+            missing += 1
+            continue
+        captions[media_id] = text
+    return captions, missing
+
+
+def caption_key(job_id: str) -> str:
+    """R2 key the harvested caption map lands under — mirrors `training/<job>/...`'s shape."""
+    return f"captions/{job_id}/captions.json"
+
+
 def build_status_signal(actum_id: str, row: dict, cfg_steps=None) -> dict:
     """Project a Job row → the minimal Progressus signal POSTed to /runner/status. Maps to the
     SAME Phasis taxonomy aitkJobToProgressus uses (terminal done/failed; executing on steps)."""
@@ -200,7 +249,10 @@ def build_webhook_payload(pod_id: str, status: str, lora_url=None, execution_tim
     """The completion webhook body — matches RunPodPayload (executionWebhook.ts). COMPLETED
     carries the LoRA URL in output[0]; preview samples ride the SAME output[] tagged
     kind:'sample' (the host finalizer splits LoRA vs samples). The host re-hosts the LoRA,
-    registers the Intella, and persists the samples as first-class previews."""
+    registers the Intella, and persists the samples as first-class previews.
+
+    A caption job reports on this same shape — `lora_url` carries the harvested caption map's
+    URL — so both modes ride one webhook contract and the host's resolvers pick by ministerium."""
     if status == "COMPLETED":
         output = [{"url": lora_url}] if lora_url else []
         output += [{"url": u, "kind": "sample"} for u in (sample_urls or [])]
@@ -317,6 +369,13 @@ def main() -> int:
     steps = int(_env("AITK_STEPS", "0") or 0)
     poll_s = max(1.0, int(_env("AITK_POLL_MS", "2000")) / 1000.0)
 
+    # Job mode. 'train' (the default, and what an ABSENT value means) is the full pipeline below,
+    # unchanged. 'caption' is a caption-only pass: stage the dataset, run the captioner, harvest
+    # the sidecars into a {media id: caption} map, upload it and report — no training config, no
+    # Job row, no run.py, no polling loop.
+    job_mode = (_env("NOEMA_JOB_MODE", "train") or "train").strip().lower()
+    is_caption = job_mode == "caption"
+
     actum_id = _env("NOEMA_ACTUM_ID", "")
     status_url = _env("NOEMA_STATUS_URL", "")
     webhook_url = _env("NOEMA_WEBHOOK_URL", required=True)
@@ -332,20 +391,23 @@ def main() -> int:
 
     t0 = time.time()
     try:
-        # 1. write the handed config.
         config_dir = os.path.join(aitk_dir, "config")
         os.makedirs(config_dir, exist_ok=True)
         config_path = os.path.join(config_dir, f"{job_id}.yaml")
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(base64.b64decode(_env("AITK_CONFIG_B64", required=True)).decode("utf-8"))
 
-        # 1b. resume/continue (weights-only): download the prior LoRA the config's
-        #     network.pretrained_lora_path points at — ai-toolkit inits the network from it.
-        resume_url = _env("AITK_RESUME_URL", "")
-        if resume_url:
-            resume_path = _env("AITK_RESUME_PATH", f"{aitk_dir}/resume.safetensors")
-            log.info(f"resume: downloading prior weights → {resume_path}")
-            _download(resume_url, resume_path)
+        if not is_caption:
+            # 1. write the handed training config. A caption job has no training config — its
+            #    launcher deliberately sends none — so this is skipped entirely in caption mode.
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write(base64.b64decode(_env("AITK_CONFIG_B64", required=True)).decode("utf-8"))
+
+            # 1b. resume/continue (weights-only): download the prior LoRA the config's
+            #     network.pretrained_lora_path points at — ai-toolkit inits the network from it.
+            resume_url = _env("AITK_RESUME_URL", "")
+            if resume_url:
+                resume_path = _env("AITK_RESUME_PATH", f"{aitk_dir}/resume.safetensors")
+                log.info(f"resume: downloading prior weights → {resume_path}")
+                _download(resume_url, resume_path)
 
         # 2. pull the dataset manifest → images + caption sidecars.
         _post_status(status_url, {"actumId": actum_id,
@@ -354,9 +416,41 @@ def main() -> int:
         n = stage_dataset(manifest, dataset_dir)
         log.info(f"staged {n} images → {dataset_dir}")
 
-        # 2b. auto-caption: fill captions for images that arrived without one (ai-toolkit's Qwen3-VL
-        #     captioner, in-process transformers). recaption:false in the config → dataset captions win.
+        # 2b. captioning. In TRAIN mode this fills captions for images that arrived without one and
+        #     is skipped when there is nothing missing. In CAPTION mode it is the job: run it
+        #     directly rather than leaning on the gap count, which the manifest happens to make
+        #     total. recaption:false in the config → any caption already on disk wins.
         caption_b64 = _env("AITK_CAPTION_CONFIG_B64", "")
+        if is_caption:
+            if not caption_b64:
+                raise RuntimeError("caption mode: missing required env AITK_CAPTION_CONFIG_B64")
+            _post_status(status_url, {"actumId": actum_id,
+                                      "progressus": {"phase": "executing",
+                                                     "progress": {"done": 0, "total": n, "unit": "images"}}})
+            caption_path = os.path.join(config_dir, "caption.yaml")
+            with open(caption_path, "w", encoding="utf-8") as f:
+                f.write(base64.b64decode(caption_b64).decode("utf-8"))
+            log.info(f"captioning {n} images via {caption_path}")
+            run_caption(aitk_dir, caption_path)
+            log.info("captioning done")
+
+            # Harvest the sidecars into a {media id: caption} map, upload it as one JSON object,
+            # and report it on the SAME completion webhook shape a training run uses — the host
+            # reads the url off output[0] and runs caption finality against it.
+            captions, uncollected = harvest_captions(manifest, dataset_dir)
+            log.info(f"harvested {len(captions)} captions ({uncollected} not collected)")
+            harvest_path = os.path.join(aitk_dir, "captions.json")
+            with open(harvest_path, "w", encoding="utf-8") as f:
+                json.dump(captions, f, ensure_ascii=False)
+            url = _upload_to_r2(r2, harvest_path, caption_key(job_id))
+            log.info(f"uploaded captions → {url}")
+
+            _send_webhook(webhook_url, build_webhook_payload(
+                pod_id, "COMPLETED", lora_url=url, execution_time=int((time.time() - t0) * 1000)))
+            _post_status(status_url, {"actumId": actum_id, "progressus": {"phase": "done"}})
+            log.info("done.")
+            return 0
+
         missing = count_uncaptioned(dataset_dir)
         if caption_b64 and missing > 0:
             _post_status(status_url, {"actumId": actum_id,

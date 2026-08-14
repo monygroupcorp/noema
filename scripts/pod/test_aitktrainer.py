@@ -182,5 +182,109 @@ class JobRowTests(unittest.TestCase):
             self.assertEqual(t.read_job_row(db, "nope"), {})
 
 
+class ManifestIdTests(unittest.TestCase):
+    def test_id_passes_through_when_present(self):
+        m = t.parse_manifest('[{"url":"https://r2/a.png","id":"media-1"},{"url":"https://r2/b.jpg"}]')
+        self.assertEqual(m, [{"url": "https://r2/a.png", "id": "media-1"}, {"url": "https://r2/b.jpg"}])
+
+    def test_non_string_or_absent_id_is_simply_absent(self):
+        # An id-less manifest is the TRAINING path and must stay valid input, not an error.
+        m = t.parse_manifest('[{"url":"https://r2/a.png","id":7}]')
+        self.assertEqual(m, [{"url": "https://r2/a.png"}])
+
+
+class HarvestTests(unittest.TestCase):
+    """The caption harvest is keyed by the id the manifest carried, never by position.
+
+    Staged files are named by manifest INDEX, and the host's media list is append-only, so an
+    index resolved back to a media item after the run can land on a different item. These pin
+    that the map the host receives is keyed by identity and that nothing is invented for an
+    item that has no id or no caption.
+    """
+
+    def _dir(self, files):
+        d = tempfile.mkdtemp()
+        for name, body in files.items():
+            with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+                f.write(body)
+        return d
+
+    def test_harvest_keys_captions_by_media_id(self):
+        d = self._dir({"0000.txt": "the first image\n", "0001.txt": "the second image"})
+        manifest = [{"url": "https://r2/a.png", "id": "media-1"}, {"url": "https://r2/b.png", "id": "media-2"}]
+        captions, missing = t.harvest_captions(manifest, d)
+        self.assertEqual(captions, {"media-1": "the first image", "media-2": "the second image"})
+        self.assertEqual(missing, 0)
+
+    def test_a_reordered_manifest_moves_the_caption_with_the_id(self):
+        # Same sidecars on disk; the manifest order is swapped. A positional harvest would bind
+        # 0000.txt to media-1 either way — an id-keyed one follows the id.
+        d = self._dir({"0000.txt": "the first image", "0001.txt": "the second image"})
+        manifest = [{"url": "https://r2/b.png", "id": "media-2"}, {"url": "https://r2/a.png", "id": "media-1"}]
+        captions, _ = t.harvest_captions(manifest, d)
+        self.assertEqual(captions, {"media-2": "the first image", "media-1": "the second image"})
+
+    def test_missing_sidecar_is_omitted_and_counted(self):
+        d = self._dir({"0000.txt": "only the first"})
+        manifest = [{"url": "https://r2/a.png", "id": "media-1"}, {"url": "https://r2/b.png", "id": "media-2"}]
+        captions, missing = t.harvest_captions(manifest, d)
+        self.assertEqual(captions, {"media-1": "only the first"})
+        self.assertEqual(missing, 1)
+
+    def test_missing_id_is_omitted_and_counted_never_invented(self):
+        d = self._dir({"0000.txt": "text with no owner"})
+        captions, missing = t.harvest_captions([{"url": "https://r2/a.png"}], d)
+        self.assertEqual(captions, {})
+        self.assertEqual(missing, 1)
+
+    def test_blank_sidecar_is_omitted_and_counted(self):
+        d = self._dir({"0000.txt": "   \n"})
+        captions, missing = t.harvest_captions([{"url": "https://r2/a.png", "id": "media-1"}], d)
+        self.assertEqual(captions, {})
+        self.assertEqual(missing, 1)
+
+    def test_caption_key_mirrors_the_training_key_shape(self):
+        self.assertEqual(t.caption_key("job-1"), "captions/job-1/captions.json")
+
+
+class JobModeTests(unittest.TestCase):
+    """Mode dispatch reads one env var, and an ABSENT value is today's behaviour."""
+
+    def _mode(self, value=None):
+        # Mirrors main()'s single read of NOEMA_JOB_MODE.
+        prev = os.environ.pop("NOEMA_JOB_MODE", None)
+        try:
+            if value is not None:
+                os.environ["NOEMA_JOB_MODE"] = value
+            return (t._env("NOEMA_JOB_MODE", "train") or "train").strip().lower()
+        finally:
+            os.environ.pop("NOEMA_JOB_MODE", None)
+            if prev is not None:
+                os.environ["NOEMA_JOB_MODE"] = prev
+
+    def test_absent_mode_is_train(self):
+        self.assertEqual(self._mode(), "train")
+
+    def test_empty_mode_is_train(self):
+        self.assertEqual(self._mode(""), "train")
+
+    def test_caption_mode_is_recognised_case_and_space_insensitively(self):
+        self.assertEqual(self._mode("caption"), "caption")
+        self.assertEqual(self._mode(" Caption "), "caption")
+
+    def test_an_unknown_mode_is_not_caption(self):
+        self.assertNotEqual(self._mode("something-else"), "caption")
+
+
+class CaptionWebhookTests(unittest.TestCase):
+    def test_caption_completion_rides_the_same_payload_shape(self):
+        p = t.build_webhook_payload("pod-1", "COMPLETED",
+                                    lora_url="https://r2.example/captions/job-1/captions.json",
+                                    execution_time=1234)
+        self.assertEqual(p, {"id": "pod-1", "status": "COMPLETED",
+                             "output": [{"url": "https://r2.example/captions/job-1/captions.json"}],
+                             "executionTime": 1234})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

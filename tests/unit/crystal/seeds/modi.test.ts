@@ -9,10 +9,11 @@ import {
   MODUS_LAYER_COMPOSITE,
   MODUS_FRAMES_TO_VIDEO,
   MODUS_AITOOLKIT_TRAINING,
+  MODUS_DATASET_CAPTION,
 } from '../../../../src/crystal/seeds/modi.js'
 
-test('CANONICAL_MODI contains eight entries', () => {
-  assert.equal(CANONICAL_MODI.length, 8)
+test('CANONICAL_MODI contains nine entries', () => {
+  assert.equal(CANONICAL_MODI.length, 9)
 })
 
 test('no canonical modus is still on the dropped huggingface ministerium', () => {
@@ -36,6 +37,29 @@ test('aitoolkit-training modus is a canon training flow (ministerium aitoolkit, 
   // Exitus matches the finalizer's return (Slice B): { trained, steps, loraId, loraUrl }.
   assert.deepEqual(Object.keys(MODUS_AITOOLKIT_TRAINING.exitus).sort(), ['loraId', 'loraUrl', 'steps', 'trained'])
   assert.ok(MODUS_AITOOLKIT_TRAINING.contentHash.length > 0)
+})
+
+test('dataset-caption modus is a canon caption job on its OWN ministerium (async, duration-billed)', () => {
+  // The ministerium assertion is the point of this block, and it sits beside the training modus'
+  // on purpose. `Cursorum` is a flat Map<ministerium, Cursor> whose `register` is a bare set, so
+  // if these two shared a key the second registration would replace the first and every training
+  // dispatch would land in the caption cursor — with a green typecheck and a green suite.
+  assert.equal(MODUS_DATASET_CAPTION.ministerium, 'aitkcaption')
+  assert.notEqual(MODUS_DATASET_CAPTION.ministerium, MODUS_AITOOLKIT_TRAINING.ministerium)
+  assert.equal(MODUS_DATASET_CAPTION.genus, 'atomicus')
+  // The pod reports at the completion webhook — the run is dispatched, not awaited.
+  assert.equal(MODUS_DATASET_CAPTION.deliveryMode, 'async')
+  assert.equal(MODUS_DATASET_CAPTION.canonica, true)
+  // Image → text: an explicit override, the same call COMPOSITUS_IMAGE_CAPTION makes, because
+  // every port here is text/int and the cascade would otherwise land on a chat-ish verb.
+  assert.equal(MODUS_DATASET_CAPTION.verbum, 'describe')
+  // No fixed cost: a pod tool billed on runtime duration. The cursor reserves a pod-seconds cap
+  // and the completion webhook settles it to the real duration — metered like any other run.
+  assert.equal(MODUS_DATASET_CAPTION.impetusFixum, undefined)
+  assert.equal(MODUS_DATASET_CAPTION.aditus.dataset?.required, true)
+  // Exitus matches the caption finalizer's return.
+  assert.deepEqual(Object.keys(MODUS_DATASET_CAPTION.exitus).sort(), ['captioned', 'captionsetId', 'coverage'])
+  assert.ok(MODUS_DATASET_CAPTION.contentHash.length > 0)
 })
 
 test('frames-to-video modus is host-side (ministerium ffmpeg, sync, video out)', () => {
