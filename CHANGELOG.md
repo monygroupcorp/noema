@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.4.1](https://github.com/monygroupcorp/noema/compare/v5.4.0...v5.4.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **telegram:** one /arm card per fundament, named by itself, paginated ([4215bd8](https://github.com/monygroupcorp/noema/commit/4215bd8ec010757edd570f5ed62d1ea84ca029eb))
+* **telegram:** one /arm card per fundament, named by itself, paginated ([0cfae5d](https://github.com/monygroupcorp/noema/commit/0cfae5de1a051b924e607363575fb3b4a18823b8))
+
 ## [5.4.0](https://github.com/monygroupcorp/noema/compare/v5.3.0...v5.4.0) (2026-08-14)
 
 
