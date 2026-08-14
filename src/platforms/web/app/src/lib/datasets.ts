@@ -10,7 +10,9 @@ export type Modality = 'image' | 'video' | 'audio' | '3d';
 export type Custody = 'sealed' | 'local' | 'remote';   // hemisphere: ring · dashed · lit
 export type Readiness = 'ready' | 'needs-captioning' | 'thin';
 
-export interface Captionset { id: string; name: string; method: string; custody: Custody; coverage: string }
+// `captions` mirrors the server's `types/dataset.ts#Captionset` — caption text keyed by
+// media id, sparse, optional.
+export interface Captionset { id: string; name: string; method: string; custody: Custody; coverage: string; captions?: Record<string, string> }
 export interface DatasetVersion { v: string; count: number; when: string }
 
 export interface Dataset {
