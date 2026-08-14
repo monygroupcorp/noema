@@ -52,9 +52,10 @@ export interface BulletinDeps {
   listCategories?: () => Promise<string[]>
   listMount?: (mount: string, opts: { baseFilter?: string }) => Promise<{ items: PendingModel[]; baseFamilies?: Array<{ id: string; label: string }>; baseFilter?: string }>
   searchModels?: (query: string) => Promise<PendingModel[]>
-  /** Resolve trigger word(s) → LoRAs (the way the gen does), scoped to the studio's base family.
+  /** Resolve trigger word(s) → LoRAs (the way the gen does), scoped to the families the studio
+   *  accepts (a set, or a single family for a studio armed without one).
    *  `matched` are added to the standby loadout; `unmatched` tokens are surfaced for feedback. */
-  resolveTriggers?: (text: string, opts: { family?: string }) => Promise<{ matched: PendingModel[]; unmatched: string[] }>
+  resolveTriggers?: (text: string, opts: { family?: string | string[] }) => Promise<{ matched: PendingModel[]; unmatched: string[] }>
   /** Resolve a model's detail card (Mod • → tap a model name). */
   fetchDetail?: (intellaId: string) => Promise<ModelDetail | undefined>
   /** `/arm` Start: provision a warm studio (no gen) with the chosen loadout, owned by
@@ -187,8 +188,10 @@ export class BulletinManager {
    *  (one pod = one runtime) — leave the loadout untouched and surface a notice on the chooser. */
   private _addFlowOrNote(s: PodSession, preset: StudioBase): void {
     const have = s.loadout?.runtime
-    // armBase scopes the LoRA picker — it's the model FAMILY, not the fundament id (ADR-0005).
-    const added = s.addFlow(preset.familia ?? preset.id, this._loadoutFromPreset(preset))
+    // armBase scopes the LoRA picker — it's the model FAMILY, not the fundament id (ADR-0005). The
+    // fundament's accepted-familiae set rides ALONGSIDE it (never in place of it): acceptance is
+    // directed, and two fundamenta can share one family while accepting different sets.
+    const added = s.addFlow(preset.familia ?? preset.id, this._loadoutFromPreset(preset), preset.acceptsFamiliae)
     if (!added && have && preset.config) s.setArmNote(COPY.bulletin.arm.runtimeConflict(have, preset.config))
   }
 
@@ -574,7 +577,10 @@ export class BulletinManager {
     const cb = this.chats.get(chatId)
     const s = cb?.session
     if (!s?.picker || !this.deps.resolveTriggers) return
-    const { matched, unmatched } = await this.deps.resolveTriggers(text, s.armBase ? { family: s.armBase } : {}).catch(() => ({ matched: [], unmatched: [] }))
+    // Scope: the armed studio's accepted set when it carries one, else the single armed family
+    // (a studio armed without a resolved set — e.g. Custom — keeps the previous behaviour).
+    const scope = s.armAccepts?.length ? { family: s.armAccepts } : s.armBase ? { family: s.armBase } : {}
+    const { matched, unmatched } = await this.deps.resolveTriggers(text, scope).catch(() => ({ matched: [], unmatched: [] }))
     for (const m of matched) this._addModel(chatId, m)
     s.setPickerNote(COPY.bulletin.mod.triggerResult(matched.map(m => m.nomen), unmatched))
     await this._render(chatId)

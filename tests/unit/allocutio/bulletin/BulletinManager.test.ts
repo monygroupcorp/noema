@@ -899,3 +899,38 @@ test('gen-path race: progressus that arrives BEFORE register is buffered + repla
   assert.match(s.lastText(), /Initializing/, 'prep — NOT a warm "generating"')
   assert.doesNotMatch(s.lastText(), /keep cooking/i)
 })
+
+test('/arm carries the preset\'s accepted-familiae set into trigger resolution', async () => {
+  // Two presets deriving the SAME family ('flux'): a plain stack and one whose fundament declares
+  // acceptance of a neighbouring family. armBase is identical for both, so the accepted set is what
+  // has to travel for the picker to tell the studios apart.
+  const scopes: Array<string | string[] | undefined> = []
+  const deps = () => ({
+    ...catalogDeps(),
+    listImages: async () => ['img-a'],
+    listConfigs: async () => ['ComfyUI'],
+    listPresets: async () => [
+      { id: 'flux-comfyui', label: 'FLUX', familia: 'flux', acceptsFamiliae: ['flux'], models: ['FLUX.1 Schnell'], config: 'ComfyUI', image: 'PyTorch 2.4' },
+      { id: 'flux-kontext-comfyui', label: 'FLUX', familia: 'flux', acceptsFamiliae: ['flux', 'kontext'], models: ['FLUX.1 Kontext'], config: 'ComfyUI', image: 'PyTorch 2.4' },
+      { id: 'custom', label: 'Custom' },
+    ],
+    promptTrigger: async () => {},
+    resolveTriggers: async (_text: string, opts: { family?: string | string[] }) => {
+      scopes.push(opts.family)
+      return { matched: [], unmatched: [] }
+    },
+  })
+  const armAndResolve = async (preset: string) => {
+    const m = new BulletinManager({ sink: makeSink().sink, ...deps() })
+    await m.arm(456, '123')
+    await m.handleControl(456, '123', `arm.preset:${preset}`)
+    await m.handleControl(456, '123', 'arm.proceed')
+    await m.handleControl(456, '123', 'mod.add')
+    await m.handleControl(456, '123', 'mod.cat:loras')
+    await m.applyPickerTriggers(456, 'sometrigger')
+  }
+
+  await armAndResolve('1')   // the substrate declaring the wider acceptance
+  await armAndResolve('0')   // the plain one
+  assert.deepEqual(scopes, [['flux', 'kontext'], ['flux']], 'each studio resolves against its OWN accepted set')
+})
