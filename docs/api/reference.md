@@ -1896,7 +1896,14 @@ The caller's datasets as the full rich shape (custody, modality, captionsets, ve
                 },
                 "coverage": {
                   "type": "string",
-                  "description": "How much of the media this pass covers, e.g. \"12/12\"."
+                  "description": "How much of the media this pass covers, e.g. \"12/12\". Derived server-side from the captions present over the media count; a coverage supplied by the caller is ignored."
+                },
+                "captions": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "Caption text per media item, keyed by media id (never by position — media is append-only). Sparse: a media item with no caption in this pass has no key. Absent on captionsets written before this field existed."
                 }
               },
               "required": [
@@ -2117,7 +2124,396 @@ Create a Dataset from either v1 ingestion path: 'upload' (media already dropped 
               },
               "coverage": {
                 "type": "string",
-                "description": "How much of the media this pass covers, e.g. \"12/12\"."
+                "description": "How much of the media this pass covers, e.g. \"12/12\". Derived server-side from the captions present over the media count; a coverage supplied by the caller is ignored."
+              },
+              "captions": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Caption text per media item, keyed by media id (never by position — media is append-only). Sparse: a media item with no caption in this pass has no key. Absent on captionsets written before this field existed."
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "method",
+              "coverage"
+            ]
+          }
+        },
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "v": {
+                "type": "string"
+              },
+              "count": {
+                "type": "number"
+              },
+              "when": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "v",
+              "count",
+              "when"
+            ]
+          }
+        },
+        "natum": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "mutatum": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "name",
+        "modality",
+        "custody",
+        "media",
+        "captionsets",
+        "versions",
+        "natum",
+        "mutatum"
+      ]
+    }
+  },
+  "required": [
+    "dataset"
+  ]
+}
+```
+
+### POST /v1/data/datasets/:id/captionsets
+
+Attach a caption pass (caption text keyed by media id) to a dataset the caller owns; a captionset already carrying the same id is replaced. Coverage is derived server-side. A dataset the caller does not own is reported as not found.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Attach a caption pass to a dataset. A captionset already carrying this id is replaced rather than duplicated, so re-running a caption pass converges instead of accumulating. `coverage` is derived server-side and is not read from this body.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Caption-pass id. Re-using an existing id replaces that captionset."
+    },
+    "name": {
+      "type": "string"
+    },
+    "method": {
+      "type": "string",
+      "description": "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'."
+    },
+    "captions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Caption text keyed by media id. Every key must be a media item on this dataset; every value must be non-empty."
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "method"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "dataset": {
+      "type": "object",
+      "description": "A training dataset: media + captionsets + versions. The training-data primitive.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "FK -> Anima, the owning identity."
+        },
+        "name": {
+          "type": "string"
+        },
+        "modality": {
+          "type": "string",
+          "enum": [
+            "image",
+            "video",
+            "audio",
+            "3d"
+          ]
+        },
+        "custody": {
+          "type": "string",
+          "enum": [
+            "sealed",
+            "local",
+            "remote"
+          ]
+        },
+        "media": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "upload",
+                  "generation"
+                ]
+              },
+              "actumId": {
+                "type": "string",
+                "description": "FK -> Actum. Present iff source === 'generation'."
+              },
+              "addedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "url",
+              "source",
+              "addedAt"
+            ]
+          }
+        },
+        "captionsets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string",
+                "description": "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'."
+              },
+              "coverage": {
+                "type": "string",
+                "description": "How much of the media this pass covers, e.g. \"12/12\". Derived server-side from the captions present over the media count; a coverage supplied by the caller is ignored."
+              },
+              "captions": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Caption text per media item, keyed by media id (never by position — media is append-only). Sparse: a media item with no caption in this pass has no key. Absent on captionsets written before this field existed."
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "method",
+              "coverage"
+            ]
+          }
+        },
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "v": {
+                "type": "string"
+              },
+              "count": {
+                "type": "number"
+              },
+              "when": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "v",
+              "count",
+              "when"
+            ]
+          }
+        },
+        "natum": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "mutatum": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "name",
+        "modality",
+        "custody",
+        "media",
+        "captionsets",
+        "versions",
+        "natum",
+        "mutatum"
+      ]
+    }
+  },
+  "required": [
+    "dataset"
+  ]
+}
+```
+
+### PATCH /v1/data/datasets/:id/captionsets/:captionsetId/captions/:mediaId
+
+Edit one caption within one caption pass on a dataset the caller owns — captionsets are editable after generation. The media id must be a media item on the dataset; the captionset's coverage is recomputed from the captions present. A dataset the caller does not own is reported as not found.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Replace the caption text for one media item within one caption pass.",
+  "properties": {
+    "caption": {
+      "type": "string",
+      "description": "The new caption text. Non-empty."
+    }
+  },
+  "required": [
+    "caption"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "dataset": {
+      "type": "object",
+      "description": "A training dataset: media + captionsets + versions. The training-data primitive.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "FK -> Anima, the owning identity."
+        },
+        "name": {
+          "type": "string"
+        },
+        "modality": {
+          "type": "string",
+          "enum": [
+            "image",
+            "video",
+            "audio",
+            "3d"
+          ]
+        },
+        "custody": {
+          "type": "string",
+          "enum": [
+            "sealed",
+            "local",
+            "remote"
+          ]
+        },
+        "media": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "upload",
+                  "generation"
+                ]
+              },
+              "actumId": {
+                "type": "string",
+                "description": "FK -> Actum. Present iff source === 'generation'."
+              },
+              "addedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "url",
+              "source",
+              "addedAt"
+            ]
+          }
+        },
+        "captionsets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string",
+                "description": "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'."
+              },
+              "coverage": {
+                "type": "string",
+                "description": "How much of the media this pass covers, e.g. \"12/12\". Derived server-side from the captions present over the media count; a coverage supplied by the caller is ignored."
+              },
+              "captions": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Caption text per media item, keyed by media id (never by position — media is append-only). Sparse: a media item with no caption in this pass has no key. Absent on captionsets written before this field existed."
               }
             },
             "required": [

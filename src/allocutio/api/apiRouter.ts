@@ -153,6 +153,8 @@ export interface ApiFacade {
   listDatasetSummaries(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ datasets: import('../../types/dataset.js').DatasetSummary[]; nextCursor?: string }>
   getDataset(auctor: AuctorKey, id: string): Promise<import('../../types/dataset.js').Dataset>
   createDataset(auctor: AuctorKey, input: import('../../types/dataset.js').CreateDatasetInput): Promise<import('../../types/dataset.js').Dataset>
+  addCaptionset(auctor: AuctorKey, datasetId: string, input: unknown): Promise<import('../../types/dataset.js').Dataset>
+  setCaption(auctor: AuctorKey, datasetId: string, captionsetId: string, mediaId: string, caption: unknown): Promise<import('../../types/dataset.js').Dataset>
   publish(auctor: AuctorKey, opts: PublishOpts): Promise<Edition>
   getEdition(auctor: AuctorKey, id: string): Promise<Edition>
   feed(filter?: FeedFilter): Promise<FeedItem[]>
@@ -947,6 +949,25 @@ export function createApiRouter(deps: {
   router.post('/data/datasets', wrap(async (req, res) => {
     const auctor = await auth(req)
     res.status(201).json({ dataset: await api.createDataset(auctor, req.body ?? {}) })
+  }))
+
+  // POST /v1/data/datasets/:id/captionsets — attach a captionset (its caption text keyed by
+  // media id) to a dataset the caller owns. A captionset already carrying the same id is
+  // replaced, so re-running a caption pass does not accumulate duplicates. The owner comes
+  // from `auth(req)` and nowhere else; a stranger's dataset id 404s.
+  router.post('/data/datasets/:id/captionsets', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    res.status(201).json({ dataset: await api.addCaptionset(auctor, String(req.params.id), req.body ?? {}) })
+  }))
+
+  // PATCH /v1/data/datasets/:id/captionsets/:captionsetId/captions/:mediaId — edit one caption
+  // of one captionset on a dataset the caller owns (captionsets are editable after generation).
+  // Coverage is recomputed server-side from the captions actually present. Owner from `auth(req)`.
+  router.patch('/data/datasets/:id/captionsets/:captionsetId/captions/:mediaId', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const body = (req.body ?? {}) as { caption?: unknown }
+    const dataset = await api.setCaption(auctor, String(req.params.id), String(req.params.captionsetId), String(req.params.mediaId), body.caption)
+    res.status(200).json({ dataset })
   }))
 
   // GET /v1/me — the caller's account settings: appearance + generation defaults + bindings.

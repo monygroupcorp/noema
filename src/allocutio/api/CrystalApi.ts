@@ -61,7 +61,8 @@ export interface ListRunsOpts {
   limit?: number
 }
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
-import type { CreateDatasetInput, Dataset, DatasetSummary, Datasets } from '../../types/dataset.js'
+import { captionCoverage } from '../../types/dataset.js'
+import type { Captionset, CreateDatasetInput, Dataset, DatasetSummary, Datasets } from '../../types/dataset.js'
 import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
 import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
 import type { Provincia, ProvinciaResKind, Provinciarum } from '../../types/provincia.js'
@@ -1817,6 +1818,73 @@ export class CrystalApi {
       captionsets: [],
       versions: [{ v: '1.0.0', count: media.length, when: now }],
     })
+  }
+
+  /** Attach (or replace) a captionset on a Dataset the caller owns. The captionset id
+   *  comes from the caller so a re-run of the same caption pass replaces its previous
+   *  result instead of accumulating duplicates.
+   *
+   *  Ownership resolves through `getDataset` — one place decides what "the caller owns
+   *  this" means, and a stranger gets `not_found`, never `forbidden`. Caption keys must
+   *  be media ids actually on the dataset: a key bound to nothing would still count
+   *  toward coverage. `coverage` is derived here, never taken from the body. */
+  async addCaptionset(auctor: AuctorKey, datasetId: string, input: unknown): Promise<Dataset> {
+    const d = await this.getDataset(auctor, datasetId)
+    const body = (input ?? {}) as Partial<Captionset>
+
+    const id = typeof body.id === 'string' ? body.id.trim() : ''
+    if (!id) throw Errors.inputMalformed('id is required')
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    if (!name) throw Errors.inputMalformed('name is required')
+    const method = typeof body.method === 'string' ? body.method.trim() : ''
+    if (!method) throw Errors.inputMalformed('method is required')
+
+    const captions = this._validCaptions(d, body.captions)
+    const captionset: Captionset = {
+      id,
+      name,
+      method,
+      coverage: captionCoverage(captions, d.media.length),
+      ...(captions ? { captions } : {}),
+    }
+
+    const updated = await this._datasetsStore().addCaptionset(d.id, captionset)
+    if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
+    return updated
+  }
+
+  /** Edit one caption of one captionset on a Dataset the caller owns (a captionset is
+   *  editable after generation). Same ownership resolution as `addCaptionset`; the
+   *  captionset must already exist and the media id must be on the dataset. */
+  async setCaption(auctor: AuctorKey, datasetId: string, captionsetId: string, mediaId: string, caption: unknown): Promise<Dataset> {
+    const d = await this.getDataset(auctor, datasetId)
+
+    if (typeof caption !== 'string' || !caption.trim()) throw Errors.inputMalformed('caption must be a non-empty string')
+    if (!d.media.some((m) => m.id === mediaId)) {
+      throw Errors.inputMalformed(`mediaId '${mediaId}' is not a media item on this dataset`)
+    }
+    if (!d.captionsets.some((c) => c.id === captionsetId)) {
+      throw new ApiError('not_found.dataset', `Captionset '${captionsetId}' not found`, 404)
+    }
+
+    const updated = await this._datasetsStore().setCaption(d.id, captionsetId, mediaId, caption)
+    if (!updated) throw new ApiError('not_found.dataset', `Captionset '${captionsetId}' not found`, 404)
+    return updated
+  }
+
+  /** Validate a caption map against the dataset's own media, or throw. Every key must be
+   *  a media id on this dataset and every value a non-empty string. */
+  private _validCaptions(d: Dataset, raw: unknown): Record<string, string> | undefined {
+    if (raw === undefined || raw === null) return undefined
+    if (typeof raw !== 'object' || Array.isArray(raw)) throw Errors.inputMalformed('captions must be an object keyed by media id')
+    const mediaIds = new Set(d.media.map((m) => m.id))
+    const out: Record<string, string> = {}
+    for (const [mediaId, caption] of Object.entries(raw as Record<string, unknown>)) {
+      if (!mediaIds.has(mediaId)) throw Errors.inputMalformed(`mediaId '${mediaId}' is not a media item on this dataset`)
+      if (typeof caption !== 'string' || !caption.trim()) throw Errors.inputMalformed(`caption for '${mediaId}' must be a non-empty string`)
+      out[mediaId] = caption
+    }
+    return out
   }
 
   private _tabulaeStore(): Tabularum {
