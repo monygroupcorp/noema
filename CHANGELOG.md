@@ -1,5 +1,22 @@
 # Changelog
 
+## [5.4.0](https://github.com/monygroupcorp/noema/compare/v5.3.0...v5.4.0) (2026-08-14)
+
+
+### Features
+
+* **crystal:** declare directed LoRA compatibility per substrate ([337f239](https://github.com/monygroupcorp/noema/commit/337f2395a0b62818fbf840adbeb2bfa826c62a45))
+* **crystal:** declare directed LoRA compatibility per substrate ([5e8b7fe](https://github.com/monygroupcorp/noema/commit/5e8b7fe983a99c0acc0a115479c3d836306b4121))
+
+
+### Bug Fixes
+
+* **crystal:** ask the runner whether a job is alive instead of inferring it ([a4db7c7](https://github.com/monygroupcorp/noema/commit/a4db7c7a20ba6133b6a139b562e90e10167636ad))
+* **migrations:** correct the impossible read-form docs on the live-db guard ([9a2820d](https://github.com/monygroupcorp/noema/commit/9a2820db8761e9aef96eb4cf4adbc41d80b6d3bb))
+* repair klein-4b familia and publish the klein LoRA collection ([30a601b](https://github.com/monygroupcorp/noema/commit/30a601b79491d9a650c4ac6b135007568eb55029))
+* **telegram:** scope the studio LoRA picker to the substrate's accepted families ([63211ce](https://github.com/monygroupcorp/noema/commit/63211ce636b93907d706ce8cd655f251325e3d82))
+* **telegram:** scope the studio LoRA picker to the substrate's accepted families ([0cfe717](https://github.com/monygroupcorp/noema/commit/0cfe717164a71e6e90b2c060fb9106c8930ea8e1))
+
 ## [5.3.0](https://github.com/monygroupcorp/noema/compare/v5.2.0...v5.3.0) (2026-08-12)
 
 
