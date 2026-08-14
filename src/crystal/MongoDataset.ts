@@ -1,6 +1,8 @@
 import { Collection, Filter, Document } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
+import { captionCoverage } from '../types/dataset.js'
 import type {
+  Captionset,
   Dataset,
   DatasetListOpts,
   DatasetListPage,
@@ -97,6 +99,45 @@ export class MongoDataset implements Datasets {
 
   async list(opts: DatasetListOpts): Promise<DatasetListPage> {
     return this._page(opts)
+  }
+
+  /** Attach a captionset, replacing one already carrying the same id rather than
+   *  duplicating it. `coverage` is derived from the captions supplied, never echoed.
+   *  Bumps `mutatum` — it is the pagination sort key (`_page` sorts `{mutatum:-1, id:-1}`),
+   *  so a write that skipped it would leave the dataset in its old list position. */
+  async addCaptionset(datasetId: string, captionset: Captionset): Promise<Dataset | null> {
+    const current = await this.find(datasetId)
+    if (!current) return null
+
+    const next: Captionset = {
+      ...captionset,
+      coverage: captionCoverage(captionset.captions, current.media.length),
+    }
+    const captionsets = current.captionsets.some((c) => c.id === next.id)
+      ? current.captionsets.map((c) => (c.id === next.id ? next : c))
+      : [...current.captionsets, next]
+
+    const mutatum = new Date()
+    await this.col.updateOne({ id: datasetId }, { $set: { captionsets, mutatum } })
+    return { ...current, captionsets, mutatum }
+  }
+
+  /** Set exactly one caption inside exactly one captionset and recompute that
+   *  captionset's coverage from the captions actually present. Returns null when the
+   *  dataset or the captionset is unknown — an unknown captionset is never created here. */
+  async setCaption(datasetId: string, captionsetId: string, mediaId: string, caption: string): Promise<Dataset | null> {
+    const current = await this.find(datasetId)
+    if (!current) return null
+    const target = current.captionsets.find((c) => c.id === captionsetId)
+    if (!target) return null
+
+    const captions = { ...(target.captions ?? {}), [mediaId]: caption }
+    const updated: Captionset = { ...target, captions, coverage: captionCoverage(captions, current.media.length) }
+    const captionsets = current.captionsets.map((c) => (c.id === captionsetId ? updated : c))
+
+    const mutatum = new Date()
+    await this.col.updateOne({ id: datasetId }, { $set: { captionsets, mutatum } })
+    return { ...current, captionsets, mutatum }
   }
 
   // The rich/thin split projects down from the SAME document — no separate

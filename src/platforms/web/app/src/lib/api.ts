@@ -1038,7 +1038,10 @@ export interface DatasetSummary { id: string; name: string; images?: number; upd
 // Full dataset shape (GET /v1/data/datasets/full) — mirrors backend `types/dataset.ts#Dataset`.
 export type DatasetModality = 'image' | 'video' | 'audio' | '3d';
 export type DatasetCustody = 'sealed' | 'local' | 'remote';
-export interface DatasetCaptionset { id: string; name: string; method: string; coverage: string }
+// `captions` mirrors the server's `types/dataset.ts#Captionset`: caption text keyed by
+// media id (never by position — media is append-only), sparse, and absent on captionsets
+// written before the field existed.
+export interface DatasetCaptionset { id: string; name: string; method: string; coverage: string; captions?: Record<string, string> }
 export interface DatasetMediaItem { id: string; url: string; source: 'upload' | 'generation'; actumId?: string; addedAt: string }
 export interface DatasetVersionView { v: string; count: number; when: string }
 export interface Dataset {

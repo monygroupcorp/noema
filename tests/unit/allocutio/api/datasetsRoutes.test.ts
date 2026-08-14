@@ -16,7 +16,8 @@ import express from 'express'
 import { CrystalApi, type CrystalApiDeps } from '../../../../src/allocutio/api/CrystalApi.js'
 import { createApiRouter, type Identity } from '../../../../src/allocutio/api/apiRouter.js'
 import { Errors } from '../../../../src/allocutio/api/errors.js'
-import type { Dataset, DatasetListOpts, DatasetListPage, DatasetSummaryListPage, Datasets } from '../../../../src/types/dataset.js'
+import { captionCoverage } from '../../../../src/types/dataset.js'
+import type { Captionset, Dataset, DatasetListOpts, DatasetListPage, DatasetSummaryListPage, Datasets } from '../../../../src/types/dataset.js'
 import type { Actum, Actorum } from '../../../../src/types/cursus.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
@@ -39,6 +40,39 @@ class MemoryDatasets implements Datasets {
   async listSummaries(opts: DatasetListOpts): Promise<DatasetSummaryListPage> {
     const { entries } = await this.list(opts)
     return { entries: entries.map((d) => ({ id: d.id, name: d.name, images: d.media.length, updatedAt: d.mutatum.toISOString() })) }
+  }
+  // Same semantics as MongoDataset.addCaptionset: replace-by-id, coverage derived, mutatum bumped.
+  async addCaptionset(datasetId: string, captionset: Captionset): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    const next: Captionset = { ...captionset, coverage: captionCoverage(captionset.captions, d.media.length) }
+    const captionsets = d.captionsets.some((c) => c.id === next.id)
+      ? d.captionsets.map((c) => (c.id === next.id ? next : c))
+      : [...d.captionsets, next]
+    const updated: Dataset = { ...d, captionsets, mutatum: new Date() }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+  // Same semantics as MongoDataset.setCaption: one key, coverage recounted, unknown captionset -> null.
+  async setCaption(datasetId: string, captionsetId: string, mediaId: string, caption: string): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    const target = d.captionsets.find((c) => c.id === captionsetId)
+    if (!target) return null
+    const captions = { ...(target.captions ?? {}), [mediaId]: caption }
+    const next: Captionset = { ...target, captions, coverage: captionCoverage(captions, d.media.length) }
+    const updated: Dataset = { ...d, captionsets: d.captionsets.map((c) => (c.id === captionsetId ? next : c)), mutatum: new Date() }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+  // Test-only: append a media item straight into the store. There is no media-append route
+  // yet, and the caption↔image binding test needs the media set to grow under a captionset.
+  appendMedia(datasetId: string, url: string): string {
+    const d = this.store.get(datasetId)
+    if (!d) throw new Error('unknown dataset')
+    const id = `m-${++this.seq}`
+    this.store.set(datasetId, { ...d, media: [...d.media, { id, url, source: 'upload', addedAt: new Date() }] })
+    return id
   }
 }
 
@@ -206,6 +240,207 @@ test('a stranger never sees another owner\'s datasets on either list route or ge
     const ownerFull = await request(`${url}/v1/data/datasets/full`, { headers: owner })
     assert.equal(ownerFull.body.datasets.length, 1)
     assert.equal(ownerFull.body.datasets[0].id, id)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+
+// ── Captionset write + edit seam ─────────────────────────────────────────────
+//
+// One test per non-vacuity claim: media-id keying (not positional), owner scoping on both
+// new routes, and a coverage that is recounted rather than echoed.
+
+async function seedDataset(url: string, headers: Record<string, string>, mediaUrls: string[]): Promise<Dataset> {
+  const created = await request(`${url}/v1/data/datasets`, {
+    method: 'POST',
+    headers,
+    body: { source: 'upload', name: 'Captioned set', modality: 'image', mediaUrls },
+  })
+  assert.equal(created.status, 201)
+  return created.body.dataset as Dataset
+}
+
+test('a caption stays bound to its image after new media is appended', async () => {
+  const datasets = new MemoryDatasets()
+  const { server, url } = await createServer(datasets, makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const ds = await seedDataset(url, headers, ['https://r2.example/a.png', 'https://r2.example/b.png'])
+    const [first, second] = ds.media
+
+    const attached = await request(`${url}/v1/data/datasets/${ds.id}/captionsets`, {
+      method: 'POST',
+      headers,
+      body: {
+        id: 'pass-1',
+        name: 'natural language',
+        method: 'manual',
+        captions: { [first.id]: 'a knight in frost', [second.id]: 'a knight at dusk' },
+      },
+    })
+    assert.equal(attached.status, 201)
+    assert.equal(attached.body.dataset.captionsets.length, 1)
+    assert.equal(attached.body.dataset.captionsets[0].captions[first.id], 'a knight in frost')
+
+    // Media is append-only; a positionally-keyed caption would re-bind here.
+    const appendedId = datasets.appendMedia(ds.id, 'https://r2.example/c.png')
+
+    const after = await request(`${url}/v1/data/datasets/full`, { headers })
+    const set = after.body.datasets[0].captionsets[0]
+    assert.equal(set.captions[first.id], 'a knight in frost')
+    assert.equal(set.captions[second.id], 'a knight at dusk')
+    assert.equal(set.captions[appendedId], undefined)
+    // And the images those keys name are still the images they were written against.
+    const media = after.body.datasets[0].media as Array<{ id: string; url: string }>
+    assert.equal(media.find((m) => m.id === first.id)?.url, 'https://r2.example/a.png')
+    assert.equal(media.find((m) => m.id === second.id)?.url, 'https://r2.example/b.png')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a stranger cannot write or edit another owner\'s captionset', async () => {
+  const datasets = new MemoryDatasets()
+  const { server, url } = await createServer(datasets, makeFakeActorum([]))
+  try {
+    const owner = { 'x-api-key': 'owner-1' }
+    const stranger = { 'x-api-key': 'stranger-1' }
+    const ds = await seedDataset(url, owner, ['https://r2.example/a.png'])
+    const mediaId = ds.media[0].id
+
+    const attached = await request(`${url}/v1/data/datasets/${ds.id}/captionsets`, {
+      method: 'POST',
+      headers: owner,
+      body: { id: 'pass-1', name: 'natural language', method: 'manual', captions: { [mediaId]: 'mine' } },
+    })
+    assert.equal(attached.status, 201)
+
+    const strangerWrite = await request(`${url}/v1/data/datasets/${ds.id}/captionsets`, {
+      method: 'POST',
+      headers: stranger,
+      body: { id: 'pass-2', name: 'theirs', method: 'manual', captions: { [mediaId]: 'not mine' } },
+    })
+    assert.equal(strangerWrite.status, 404)
+
+    const strangerEdit = await request(`${url}/v1/data/datasets/${ds.id}/captionsets/pass-1/captions/${mediaId}`, {
+      method: 'PATCH',
+      headers: stranger,
+      body: { caption: 'overwritten' },
+    })
+    assert.equal(strangerEdit.status, 404)
+
+    // A 404 can be returned AFTER a write — assert the dataset itself is untouched.
+    const after = await request(`${url}/v1/data/datasets/full`, { headers: owner })
+    const sets = after.body.datasets[0].captionsets
+    assert.equal(sets.length, 1)
+    assert.equal(sets[0].id, 'pass-1')
+    assert.equal(sets[0].captions[mediaId], 'mine')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('coverage recounts from the captions actually present', async () => {
+  const datasets = new MemoryDatasets()
+  const { server, url } = await createServer(datasets, makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const ds = await seedDataset(url, headers, ['https://r2.example/a.png', 'https://r2.example/b.png', 'https://r2.example/c.png'])
+    const [a, b] = ds.media
+
+    const attached = await request(`${url}/v1/data/datasets/${ds.id}/captionsets`, {
+      method: 'POST',
+      headers,
+      body: { id: 'pass-1', name: 'natural language', method: 'manual', coverage: '3/3' },
+    })
+    assert.equal(attached.status, 201)
+    // An echoed coverage from the body would read '3/3' over zero captions.
+    assert.equal(attached.body.dataset.captionsets[0].coverage, '0/3')
+
+    const one = await request(`${url}/v1/data/datasets/${ds.id}/captionsets/pass-1/captions/${a.id}`, {
+      method: 'PATCH',
+      headers,
+      body: { caption: 'first', coverage: '3/3' },
+    })
+    assert.equal(one.status, 200)
+    assert.equal(one.body.dataset.captionsets[0].coverage, '1/3')
+
+    const two = await request(`${url}/v1/data/datasets/${ds.id}/captionsets/pass-1/captions/${b.id}`, {
+      method: 'PATCH',
+      headers,
+      body: { caption: 'second' },
+    })
+    assert.equal(two.status, 200)
+    assert.equal(two.body.dataset.captionsets[0].coverage, '2/3')
+
+    // Re-editing an existing key moves the text, not the count.
+    const again = await request(`${url}/v1/data/datasets/${ds.id}/captionsets/pass-1/captions/${b.id}`, {
+      method: 'PATCH',
+      headers,
+      body: { caption: 'second, revised' },
+    })
+    assert.equal(again.body.dataset.captionsets[0].coverage, '2/3')
+    assert.equal(again.body.dataset.captionsets[0].captions[b.id], 'second, revised')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a caption cannot be written against a media item that is not on the dataset', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const ds = await seedDataset(url, headers, ['https://r2.example/a.png'])
+
+    const bogusOnAttach = await request(`${url}/v1/data/datasets/${ds.id}/captionsets`, {
+      method: 'POST',
+      headers,
+      body: { id: 'pass-1', name: 'nl', method: 'manual', captions: { 'not-a-media-id': 'nowhere' } },
+    })
+    assert.equal(bogusOnAttach.status, 400)
+
+    await request(`${url}/v1/data/datasets/${ds.id}/captionsets`, {
+      method: 'POST',
+      headers,
+      body: { id: 'pass-1', name: 'nl', method: 'manual' },
+    })
+    const bogusOnEdit = await request(`${url}/v1/data/datasets/${ds.id}/captionsets/pass-1/captions/not-a-media-id`, {
+      method: 'PATCH',
+      headers,
+      body: { caption: 'nowhere' },
+    })
+    assert.equal(bogusOnEdit.status, 400)
+
+    const unknownSet = await request(`${url}/v1/data/datasets/${ds.id}/captionsets/pass-9/captions/${ds.media[0].id}`, {
+      method: 'PATCH',
+      headers,
+      body: { caption: 'nowhere' },
+    })
+    assert.equal(unknownSet.status, 404)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('re-attaching a captionset with the same id replaces it rather than duplicating', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const ds = await seedDataset(url, headers, ['https://r2.example/a.png', 'https://r2.example/b.png'])
+    const [a, b] = ds.media
+
+    await request(`${url}/v1/data/datasets/${ds.id}/captionsets`, {
+      method: 'POST', headers,
+      body: { id: 'pass-1', name: 'nl', method: 'manual', captions: { [a.id]: 'one' } },
+    })
+    const second = await request(`${url}/v1/data/datasets/${ds.id}/captionsets`, {
+      method: 'POST', headers,
+      body: { id: 'pass-1', name: 'nl', method: 'manual', captions: { [a.id]: 'one', [b.id]: 'two' } },
+    })
+    assert.equal(second.status, 201)
+    assert.equal(second.body.dataset.captionsets.length, 1)
+    assert.equal(second.body.dataset.captionsets[0].coverage, '2/2')
   } finally {
     await closeServer(server)
   }

@@ -1266,9 +1266,44 @@ const CaptionsetSchema: JsonSchema = {
     id: { type: 'string' },
     name: { type: 'string' },
     method: { type: 'string', description: "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'." },
-    coverage: { type: 'string', description: 'How much of the media this pass covers, e.g. "12/12".' },
+    coverage: { type: 'string', description: 'How much of the media this pass covers, e.g. "12/12". Derived server-side from the captions present over the media count; a coverage supplied by the caller is ignored.' },
+    captions: {
+      type: 'object',
+      additionalProperties: { type: 'string' },
+      description: 'Caption text per media item, keyed by media id (never by position — media is append-only). Sparse: a media item with no caption in this pass has no key. Absent on captionsets written before this field existed.',
+    },
   },
   required: ['id', 'name', 'method', 'coverage'],
+}
+
+/** The request body for `POST /v1/data/datasets/:id/captionsets`. */
+const AddCaptionsetRequestSchema: JsonSchema = {
+  type: 'object',
+  description:
+    'Attach a caption pass to a dataset. A captionset already carrying this id is replaced rather ' +
+    'than duplicated, so re-running a caption pass converges instead of accumulating. `coverage` is ' +
+    'derived server-side and is not read from this body.',
+  properties: {
+    id: { type: 'string', description: 'Caption-pass id. Re-using an existing id replaces that captionset.' },
+    name: { type: 'string' },
+    method: { type: 'string', description: "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'." },
+    captions: {
+      type: 'object',
+      additionalProperties: { type: 'string' },
+      description: 'Caption text keyed by media id. Every key must be a media item on this dataset; every value must be non-empty.',
+    },
+  },
+  required: ['id', 'name', 'method'],
+}
+
+/** The request body for `PATCH /v1/data/datasets/:id/captionsets/:captionsetId/captions/:mediaId`. */
+const SetCaptionRequestSchema: JsonSchema = {
+  type: 'object',
+  description: 'Replace the caption text for one media item within one caption pass.',
+  properties: {
+    caption: { type: 'string', description: 'The new caption text. Non-empty.' },
+  },
+  required: ['caption'],
 }
 
 /** One media item in a dataset (mirrors `types/dataset.ts#DatasetMediaItem`). */
@@ -1631,6 +1666,22 @@ export const API_CONTRACT: ApiContract = {
       summary: "Create a Dataset from either v1 ingestion path: 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media seeded from the caller's own completed Acta). Rejects a body matching neither shape with 400.",
       auth: true,
       request: CreateDatasetRequestSchema,
+      response: DatasetEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/data/datasets/:id/captionsets',
+      summary: 'Attach a caption pass (caption text keyed by media id) to a dataset the caller owns; a captionset already carrying the same id is replaced. Coverage is derived server-side. A dataset the caller does not own is reported as not found.',
+      auth: true,
+      request: AddCaptionsetRequestSchema,
+      response: DatasetEnvelopeSchema,
+    },
+    {
+      method: 'PATCH',
+      path: '/data/datasets/:id/captionsets/:captionsetId/captions/:mediaId',
+      summary: "Edit one caption within one caption pass on a dataset the caller owns — captionsets are editable after generation. The media id must be a media item on the dataset; the captionset's coverage is recomputed from the captions present. A dataset the caller does not own is reported as not found.",
+      auth: true,
+      request: SetCaptionRequestSchema,
       response: DatasetEnvelopeSchema,
     },
     {

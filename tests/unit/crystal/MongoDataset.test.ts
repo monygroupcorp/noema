@@ -82,3 +82,82 @@ test('list paginates with cursor, newest first', async () => {
   assert.equal(page2.entries.length, 1)
   assert.equal(page2.entries[0].id, a.id)
 })
+
+// ── Captionset write + edit seam ─────────────────────────────────────────────
+//
+// NOT hermetic: this file opens a MongoClient in `before`, so it is not in the
+// `test:hermetic` glob and must not be added to it. The hermetic proof of this
+// behaviour lives in tests/unit/allocutio/api/datasetsRoutes.test.ts.
+
+const twoMedia = {
+  ...base,
+  media: [
+    { id: 'm1', url: 'https://r2.example/m1.png', source: 'upload' as const, addedAt: new Date() },
+    { id: 'm2', url: 'https://r2.example/m2.png', source: 'upload' as const, addedAt: new Date() },
+  ],
+  captionsets: [],
+}
+
+test('addCaptionset attaches a captionset, derives coverage, and bumps mutatum', async () => {
+  const d = await store.create(twoMedia)
+  await new Promise((r) => setTimeout(r, 5))
+  const updated = await store.addCaptionset(d.id, {
+    id: 'c1', name: 'natural language', method: 'manual', coverage: '2/2', captions: { m1: 'one' },
+  })
+  assert.equal(updated?.captionsets.length, 1)
+  assert.equal(updated?.captionsets[0].captions?.m1, 'one')
+  // Coverage is derived from the captions present, not echoed from the argument.
+  assert.equal(updated?.captionsets[0].coverage, '1/2')
+  assert.ok(new Date(updated!.mutatum).getTime() > new Date(d.mutatum).getTime())
+
+  const reread = await store.find(d.id)
+  assert.equal(reread?.captionsets[0].captions?.m1, 'one')
+})
+
+test('addCaptionset replaces a captionset carrying the same id rather than duplicating it', async () => {
+  const d = await store.create(twoMedia)
+  await store.addCaptionset(d.id, { id: 'c1', name: 'nl', method: 'manual', coverage: '', captions: { m1: 'one' } })
+  const updated = await store.addCaptionset(d.id, { id: 'c1', name: 'nl', method: 'manual', coverage: '', captions: { m1: 'one', m2: 'two' } })
+  assert.equal(updated?.captionsets.length, 1)
+  assert.equal(updated?.captionsets[0].coverage, '2/2')
+})
+
+test('addCaptionset returns null for an unknown dataset', async () => {
+  assert.equal(await store.addCaptionset('nope', { id: 'c1', name: 'nl', method: 'manual', coverage: '' }), null)
+})
+
+test('setCaption sets one key, recounts coverage, and bumps mutatum', async () => {
+  const d = await store.create(twoMedia)
+  await store.addCaptionset(d.id, { id: 'c1', name: 'nl', method: 'manual', coverage: '' })
+  await new Promise((r) => setTimeout(r, 5))
+
+  const one = await store.setCaption(d.id, 'c1', 'm1', 'first')
+  assert.equal(one?.captionsets[0].captions?.m1, 'first')
+  assert.equal(one?.captionsets[0].coverage, '1/2')
+
+  const two = await store.setCaption(d.id, 'c1', 'm2', 'second')
+  assert.equal(two?.captionsets[0].coverage, '2/2')
+  assert.ok(new Date(two!.mutatum).getTime() > new Date(d.mutatum).getTime())
+
+  // Re-editing an existing key moves the text, not the count.
+  const again = await store.setCaption(d.id, 'c1', 'm2', 'second, revised')
+  assert.equal(again?.captionsets[0].coverage, '2/2')
+  const reread = await store.find(d.id)
+  assert.equal(reread?.captionsets[0].captions?.m2, 'second, revised')
+})
+
+test('setCaption leaves sibling captionsets untouched', async () => {
+  const d = await store.create(twoMedia)
+  await store.addCaptionset(d.id, { id: 'c1', name: 'nl', method: 'manual', coverage: '' })
+  await store.addCaptionset(d.id, { id: 'c2', name: 'tags', method: 'manual', coverage: '' })
+  const updated = await store.setCaption(d.id, 'c1', 'm1', 'first')
+  const c2 = updated?.captionsets.find((c) => c.id === 'c2')
+  assert.equal(c2?.captions, undefined)
+  assert.equal(c2?.coverage, '0/2')
+})
+
+test('setCaption returns null for an unknown dataset or an unknown captionset', async () => {
+  const d = await store.create(twoMedia)
+  assert.equal(await store.setCaption('nope', 'c1', 'm1', 'x'), null)
+  assert.equal(await store.setCaption(d.id, 'no-such-set', 'm1', 'x'), null)
+})
