@@ -106,9 +106,14 @@ export function Dataset() {
               ))}
             </div>
 
-            <button className="btn accent block ds-train" disabled={d.captionsets.length === 0}
-              onClick={() => navigate(`/datasets/${d.id}/derive`)}>Train a model from this →</button>
-            {d.captionsets.length === 0 && <div className="ds-panel-note" style={{ textAlign: 'center' }}>caption it first</div>}
+            {/* The door is always open — with no captionset yet it opens onto the caption job,
+                which is how a dataset gets one. Training without a caption layer is the thing
+                this path exists to replace, so it is a redirect, not a dead button. */}
+            <button className="btn accent block ds-train"
+              onClick={() => navigate(d.captionsets.length === 0 ? `/datasets/${d.id}/caption` : `/datasets/${d.id}/derive`)}>
+              {d.captionsets.length === 0 ? 'Caption it, then train →' : 'Train a model from this →'}
+            </button>
+            {d.captionsets.length === 0 && <div className="ds-panel-note" style={{ textAlign: 'center' }}>a model learns from the caption layer — make one first</div>}
           </aside>
         </div>
       </div></div>

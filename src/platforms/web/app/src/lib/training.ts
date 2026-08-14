@@ -48,6 +48,35 @@ export function buildDatasetManifest(images: DatasetImage[], autocaption?: boole
   );
 }
 
+/** A batch caption pass over one dataset (modus.dataset-caption). */
+export interface CaptionJobConfig {
+  datasetId: string;
+  /** Display name for the captionset the pass writes (the modus generates one when absent). */
+  name?: string;
+  /** Instruction handed to the captioner (the training-caption prompt when absent). */
+  captionPrompt?: string;
+}
+
+/**
+ * Launch a batch caption job over a whole dataset. Same shape as a training launch — a normal
+ * run of a canon modus, metered like any other run, so there is no bespoke caption route. The
+ * pass writes its result back onto the dataset as a captionset, so the caller re-reads the
+ * dataset once the run reaches a terminal state.
+ */
+export async function launchCaptionJob(cfg: CaptionJobConfig): Promise<Run> {
+  const name = cfg.name?.trim();
+  const captionPrompt = cfg.captionPrompt?.trim();
+  const { run } = await api.createRun({
+    modusId: 'modus.dataset-caption',
+    aditus: {
+      dataset: cfg.datasetId,
+      ...(name ? { name } : {}),
+      ...(captionPrompt ? { captionPrompt } : {}),
+    },
+  });
+  return run;
+}
+
 /** Launch a LoRA training run. Throws on a failed dispatch (caller surfaces the error). */
 export async function launchTraining(cfg: TrainingConfig): Promise<Run> {
   const trigger = cfg.triggerWord.trim();
