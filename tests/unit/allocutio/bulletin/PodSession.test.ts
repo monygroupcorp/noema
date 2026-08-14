@@ -248,3 +248,44 @@ test('unqueueModel on an unknown id is a harmless no-op', () => {
   s.unqueueModel('intella.nope')
   assert.deepEqual(s.pendingModels.map(p => p.intellaId), ['intella.a'])
 })
+
+// ── /arm chooser pagination (intent only — the rows are rendered by armAffordances) ──
+
+const studios = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `fund-${i}`, label: `Studio ${i}` }))
+
+test('setArmPage clamps to the available pages, so a stale page callback cannot scroll past an end', () => {
+  const s = new PodSession('host-1')
+  s.beginArm([...studios(19), { id: 'custom', label: 'Custom' }], ['img-a'])
+  s.setArmPage(1)
+  assert.equal(s.arm?.page, 1)
+  s.setArmPage(99)
+  assert.equal(s.arm?.page, 2, 'clamped to the last page (19 flows, 8 per page)')
+  s.setArmPage(-4)
+  assert.equal(s.arm?.page, 0, 'clamped to the first page')
+})
+
+test('a single-page chooser pins the page at 0', () => {
+  const s = new PodSession('host-1')
+  s.beginArm([...studios(3), { id: 'custom', label: 'Custom' }], ['img-a'])
+  s.setArmPage(2)
+  assert.equal(s.arm?.page, 0, 'nowhere to page to')
+})
+
+test('re-entering the chooser resets to the first page', () => {
+  const s = new PodSession('host-1')
+  const presets = [...studios(19), { id: 'custom', label: 'Custom' }]
+  s.beginArm(presets, ['img-a'])
+  s.setArmPage(2)
+  assert.equal(s.arm?.page, 2)
+  s.beginArm(presets, ['img-a'])
+  assert.equal(s.arm?.page, 0, 'a re-/arm never lands on a stale page')
+})
+
+test('paging never mutates the preset set — indices stay valid across a page turn', () => {
+  const s = new PodSession('host-1')
+  const presets = [...studios(19), { id: 'custom', label: 'Custom' }]
+  s.beginArm(presets, ['img-a'])
+  s.setArmPage(2)
+  assert.equal(s.arm?.presets.length, 20)
+  assert.equal(s.arm?.presets[8].id, 'fund-8')
+})

@@ -294,6 +294,14 @@ export class BulletinManager {
       await this._render(chatId)
       return
     }
+    // /arm wizard: turn a page of the flow chooser. Display-only — the presets already live on the
+    // session, so there is nothing to refetch and every row index stays absolute.
+    if (action === 'arm.page:prev' || action === 'arm.page:next') {
+      if (!isHost || s.arm?.step !== 'preset') return
+      s.setArmPage((s.arm.page ?? 0) + (action.endsWith('next') ? 1 : -1))
+      await this._render(chatId)
+      return
+    }
     // /arm wizard: a flow's name tapped → open its detail card (what it bundles before committing).
     if (action.startsWith('arm.flow:')) {
       if (!isHost || s.arm?.step !== 'preset') return
