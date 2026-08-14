@@ -1,5 +1,15 @@
 # Changelog
 
+## [5.5.0](https://github.com/monygroupcorp/noema/compare/v5.4.1...v5.5.0) (2026-08-14)
+
+
+### Features
+
+* **crystal:** batch caption a whole dataset in one metered run ([17e5b50](https://github.com/monygroupcorp/noema/commit/17e5b5032f32a47ebaee74b8f3ad0ca41105a088))
+* **datasets:** caption a dataset, choose its captionset, and train from it ([9d58e40](https://github.com/monygroupcorp/noema/commit/9d58e40b996bc615372d3e5a9c6575a83ff38fb8))
+* **datasets:** captionset caption text, a write+edit seam, and two owner-scoped routes ([08298fc](https://github.com/monygroupcorp/noema/commit/08298fc5902ac5029196b991bf03df6ffa07b6d2))
+* **datasets:** captionset caption text, a write+edit seam, and two owner-scoped routes ([190e532](https://github.com/monygroupcorp/noema/commit/190e532d9b864781625b038bee0d01383c138793))
+
 ## [5.4.1](https://github.com/monygroupcorp/noema/compare/v5.4.0...v5.4.1) (2026-08-14)
 
 
