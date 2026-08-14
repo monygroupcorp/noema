@@ -934,3 +934,73 @@ test('/arm carries the preset\'s accepted-familiae set into trigger resolution',
   await armAndResolve('0')   // the plain one
   assert.deepEqual(scopes, [['flux', 'kontext'], ['flux']], 'each studio resolves against its OWN accepted set')
 })
+
+// ── /arm chooser pagination: a tap past the first page arms what the row NAMES ──
+
+/** 19 distinct studios + Custom — more than one page of the chooser. */
+const manyPresetDeps = () => ({
+  ...catalogDeps(),
+  listPresets: async () => [
+    ...Array.from({ length: 19 }, (_, i) => ({
+      id: `fund-${i}`, label: `Studio ${i}`, models: [`Weights ${i}`], config: 'ComfyUI', image: 'PyTorch 2.4',
+    })),
+    { id: 'custom', label: 'Custom' },
+  ],
+  listImages: async () => ['PyTorch 2.4'],
+  listConfigs: async () => ['ComfyUI'],
+})
+/** The ＋ action sitting in the same row as the flow named `label` — i.e. what a host taps. */
+const addActionFor = (kb: BulletinKeyboard, label: string): string => {
+  const row = kb.find(r => r[0]?.label === label)!
+  return row[1].data.slice(4)
+}
+
+test('/arm chooser paginates: 8 flows a page, Custom on every page, arrows only when there is a page to turn to', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, autoSettleMs: 999_999, ...manyPresetDeps() })
+  await m.arm(456, '123')
+  const first = cb(s.lastKb())
+  assert.equal(first.filter(d => d.startsWith('bul:arm.flow:')).length, 8, 'one page of flows')
+  assert.ok(first.includes('bul:arm.page:next') && !first.includes('bul:arm.page:prev'), 'forward only on page 0')
+  assert.ok(first.includes('bul:arm.preset:19'), 'Custom pinned')
+
+  await m.handleControl(456, '123', 'arm.page:next')
+  const second = cb(s.lastKb())
+  assert.ok(second.includes('bul:arm.flow:8'), 'page 1 starts at the 9th studio')
+  assert.ok(second.includes('bul:arm.page:prev') && second.includes('bul:arm.page:next'), 'both arrows mid-list')
+  assert.ok(second.includes('bul:arm.preset:19'), 'Custom is still reachable from page 1')
+})
+
+test('tapping a flow on page 1 arms the studio its label names (not the same-position one on page 0)', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, autoSettleMs: 999_999, ...manyPresetDeps() })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.page:next')
+  const kb = s.lastKb()
+  assert.ok(kb.some(r => r[0]?.label === 'Studio 8'), 'page 1 leads with Studio 8')
+
+  await m.handleControl(456, '123', addActionFor(kb, 'Studio 8'))
+  assert.match(s.lastText(), /Added: Studio 8/, 'the armed studio is the one the row named')
+  await m.handleControl(456, '123', 'arm.proceed')
+  assert.match(s.lastText(), /Weights 8/, 'and its weights are what the loadout carries')
+  assert.doesNotMatch(s.lastText(), /Weights 0\b/, 'not the studio that sat at the same position on page 0')
+})
+
+test('a page turn past either end is a no-op, and the chooser stays on a real page', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, autoSettleMs: 999_999, ...manyPresetDeps() })
+  await m.arm(456, '123')
+  await m.handleControl(456, '123', 'arm.page:prev')          // already on the first page
+  assert.ok(cb(s.lastKb()).includes('bul:arm.flow:0'), 'still page 0')
+  for (let i = 0; i < 5; i++) await m.handleControl(456, '123', 'arm.page:next')
+  const last = cb(s.lastKb())
+  assert.ok(last.includes('bul:arm.flow:16') && !last.includes('bul:arm.page:next'), 'parked on the last page')
+})
+
+test('a guest cannot turn the host’s chooser page', async () => {
+  const s = makeSink()
+  const m = new BulletinManager({ sink: s.sink, autoSettleMs: 999_999, ...manyPresetDeps() })
+  await m.arm(456, '123')
+  await m.handleControl(456, '999', 'arm.page:next')
+  assert.ok(cb(s.lastKb()).includes('bul:arm.flow:0'), 'unchanged — host-only, like its neighbours')
+})

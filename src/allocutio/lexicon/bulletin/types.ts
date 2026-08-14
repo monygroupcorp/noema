@@ -136,6 +136,12 @@ export interface ArmState {
    * later, composing multiple flows/configs on one studio).
    */
   presets: StudioBase[]
+  /**
+   * 0-based page of the flow chooser (step 'preset'). Pagination is a VIEW concern: `presets`
+   * always holds the full set and a row's index is an index into that full array, never into a
+   * page. Absent = page 0.
+   */
+  page?: number
   /** The preset whose detail card is open (step 'flowdetail'). */
   flow?: StudioBase
   /** A transient notice on the chooser (e.g. a runtime-conflict rejection), cleared on next add/nav. */
