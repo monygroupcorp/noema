@@ -103,6 +103,11 @@ export class BulletinModelCatalog {
       // weights' `Intella.familia` (single source — same as the Compiler).
       const weights = (f.intellae ?? []).map(w => byId.get(w.id)).filter((w): w is Intella => !!w)
       const familia = weights.map(w => familyOf(w)).find((x): x is string => !!x)
+      // The ACCEPTED set travels with the card: the fundament's own derived family unioned with its
+      // declared `acceptsFamiliae` (same rule as the Compiler — a declaration can only widen, never
+      // exclude a flow's native LoRAs). Resolved HERE because the `Fundamentum` is in hand; carrying
+      // it forward is what keeps two same-family fundamenta distinguishable at the picker.
+      const acceptsFamiliae = [...new Set([...(familia ? [familia] : []), ...(f.acceptsFamiliae ?? [])])]
       const models = weights.length ? weights.map(w => w.nomen || w.slug || w.id) : (f.intellae ?? []).map(w => w.id)
       const runtime = f.runtime ?? 'ComfyUI'
       const label = baseFamilyName(familia ?? f.id)
@@ -113,6 +118,7 @@ export class BulletinModelCatalog {
       return {
         id: f.id,
         ...(familia ? { familia } : {}),
+        ...(acceptsFamiliae.length ? { acceptsFamiliae } : {}),
         label,
         blurb,
         models,
@@ -208,17 +214,23 @@ export class BulletinModelCatalog {
   /** Mod • → Add → By trigger: resolve trigger word(s) to LoRAs the way the gen does. With a base
    *  `family` (an armed studio), defer to the crystal `Intellarum.triggerMap(familia)` — the SAME
    *  familia-keyed, access-scoped resolution the Compiler uses, so the picker and the gen agree.
+   *  `family` takes a SET as well as a single string: acceptance is directed, so an armed studio
+   *  passes the fundament's resolved accepted set (`StudioBase.acceptsFamiliae`) and the studios
+   *  that share a derived family stay distinguishable here.
    *  Without one (a Custom studio, no preset family chosen yet) fall back to a flat alias scan over
    *  every LoRA in the catalog. Returns matches (deduped, first hit per alias) + tokens that hit nothing. */
-  async resolveTriggers(text: string, opts: { family?: string } = {}): Promise<{ matched: PendingModel[]; unmatched: string[] }> {
+  async resolveTriggers(text: string, opts: { family?: string | string[] } = {}): Promise<{ matched: PendingModel[]; unmatched: string[] }> {
     if (!this.deps.intellarum) return { matched: [], unmatched: [] }
     const tokens = [...new Set(text.toLowerCase().split(/[\s,]+/).map(t => t.trim()).filter(Boolean))]
     if (!tokens.length) return { matched: [], unmatched: [] }
 
+    // An EMPTY set is not a scope — it would query `$in: []` and match nothing. Treat it as absent
+    // (Custom studio) so the flat scan still serves the host.
+    const family = Array.isArray(opts.family) ? (opts.family.length ? opts.family : undefined) : opts.family
     const index = new Map<string, Intella>()   // alias → first LoRA carrying it
-    if (opts.family) {
+    if (family) {
       // Crystal's trigger map is already alias-keyed (comma-split, lowercased) and familia-scoped.
-      const map = await this.deps.intellarum.triggerMap(opts.family).catch(() => new Map<string, Intella[]>())
+      const map = await this.deps.intellarum.triggerMap(family).catch(() => new Map<string, Intella[]>())
       for (const [alias, bucket] of map) if (bucket[0] && !index.has(alias)) index.set(alias, bucket[0])
     } else {
       const all = await this.deps.intellarum.list().catch(() => [])

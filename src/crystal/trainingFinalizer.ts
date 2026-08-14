@@ -87,12 +87,14 @@ export function makeTrainingFinalizer(
     // `333flux-klein` whose /make trigger stays `333`).
     const slugSource = (typeof a.slug === 'string' && a.slug.trim()) || trigger || jobId
     const slug = slugify(slugSource)
-    // familia = the LoRA-compat key /make resolves on. An explicit `familia` wins as-is; otherwise
-    // canonicalise the `baseModel` so aliases collapse to the base flow's exact key (e.g. 'krea-turbo'
-    // → 'krea2', 'z-image-turbo' → 'zimage'), so the trained LoRA actually stacks via triggerMap.
-    const familia = typeof a.familia === 'string' && a.familia.trim()
-      ? a.familia.trim().toLowerCase()
-      : canonicalFamilia(String(a.baseModel ?? ''))
+    // familia = the LoRA-compat key /make resolves on. `triggerMap` matches it by EXACT equality, so
+    // every route into this field is canonicalised: an explicit `familia` selects the value, the
+    // `baseModel` supplies it otherwise, and both then collapse aliases to the base flow's exact key
+    // (e.g. 'krea-turbo' → 'krea2', 'z-image-turbo' → 'zimage'). Canonicalising the explicit branch
+    // too closes the one path that could write an alias straight through; `canonicalFamilia` is
+    // idempotent for already-canonical values, so a caller passing the exact key is unaffected.
+    const explicitFamilia = typeof a.familia === 'string' && a.familia.trim() ? a.familia : ''
+    const familia = canonicalFamilia(explicitFamilia || String(a.baseModel ?? ''))
     const nomen = (typeof a.name === 'string' && a.name.trim()) || trigger || jobId
 
     // License (SEPARATE axis from familia) — a trained LoRA inherits its BASE's license, so it's
