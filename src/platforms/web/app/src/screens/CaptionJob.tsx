@@ -1,114 +1,228 @@
-import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { api, type Dataset } from '../lib/api';
+import { api, type Dataset, type RunStatus } from '../lib/api';
+import { launchCaptionJob } from '../lib/training';
 
 // Caption job (train-caption-job-spec.md, render noema-train-caption-job.png) — captioning is
-// a compute offering you fire and watch fill: a grid captions itself live under an honest seam,
-// and you review each caption IN PLACE as it lands (drafts ~, confirm to ✓). Custody (the
-// hemisphere) governs THIS job — the captioner reads your images, so where it runs is honest.
-// Shares the canonic-run grammar (count hero · progress · done/running/pending cells).
+// a compute offering you fire and watch fill: the pass runs on our compute, and every caption it
+// lands is editable in place. Custody (the hemisphere) governs THIS job — the captioner reads
+// your images, so where it runs is honest.
 //
-// The dataset itself is real (`GET /v1/data/datasets/full`); noema-079 didn't ship a captioning
-// backend, so the run/review grid below stays a presentational simulation (unchanged) — only the
-// dataset lookup, custody hemisphere, and tile imagery now come from the caller's real record.
+// The screen is live end to end: the dataset comes from `GET /v1/data/datasets/full`, the job is
+// a normal metered run of `modus.dataset-caption` started through `launchCaptionJob`, and each
+// edit is a `PATCH …/captionsets/:captionsetId/captions/:mediaId`. A caption pass writes its
+// captionset back onto the dataset, so the dataset is re-read when the run goes terminal.
 
-const TILE_FALLBACK = ['#2b3a5e', '#324063', '#2f5d56', '#33406b'];
-type Cell = { caption: string; state: 'reviewed' | 'draft' | 'running' | 'pending' };
-const BASE_CAPS = [
-  'full plate armor, snow field, front view', 'helmet off, blue cloak, three-quarter left',
-  'raising a glowing frost sword, profile, snow falling', 'from behind, cape detail, mountains',
-  'seated by a campfire at dusk', 'frosted visor closeup, ice crystals',
-  'running through a snowstorm, motion', 'kneeling, oath, banner behind',
-  'shield raised, blizzard', 'on a frozen ridge, dawn', 'sparring stance, courtyard', 'portrait, calm',
-];
+const POLL_MS = 3000;
 
 export function CaptionJob() {
   const { id } = useParams();
-  const [datasets, setDatasets] = useState<Dataset[] | null>(null);
+  const navigate = useNavigate();
+  const [dataset, setDataset] = useState<Dataset | null | undefined>(undefined);   // undefined = loading
+  const [name, setName] = useState('');
+  const [runId, setRunId] = useState<string | null>(null);
+  const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [activeSet, setActiveSet] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ mediaId: string; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const seeded = useRef(false);
+
+  const load = useCallback(async () => {
+    if (!id) return null;
+    const d = await api.getDatasetFull(id).catch(() => null);
+    setDataset(d);
+    return d;
+  }, [id]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  // Seed the shown captionset from the record the first time it resolves (newest last).
   useEffect(() => {
+    if (dataset && !seeded.current && dataset.captionsets.length > 0) {
+      seeded.current = true;
+      setActiveSet(dataset.captionsets[dataset.captionsets.length - 1].id);
+    }
+  }, [dataset]);
+
+  // Poll our caption run until it is terminal, then re-read the dataset — the pass writes its
+  // captionset onto the record, so the result arrives through the dataset, not through the run.
+  useEffect(() => {
+    if (!runId || runStatus === 'complete' || runStatus === 'failed') return;
     let live = true;
-    api.listDatasetsFull().then(({ datasets: ds }) => { if (live) setDatasets(ds); }).catch(() => { if (live) setDatasets([]); });
-    return () => { live = false; };
-  }, []);
-  const d = (datasets ?? []).find((x) => x.id === id);
-  const trigger = 'frostknight';
-  const [cells, setCells] = useState<Cell[]>(() =>
-    BASE_CAPS.map((c, i): Cell => ({ caption: c, state: i < 6 ? 'reviewed' : i < 10 ? 'draft' : i === 10 ? 'running' : 'pending' })));
-  const [editing, setEditing] = useState<number | null>(2);
-  const done = cells.filter((c) => c.state === 'reviewed' || c.state === 'draft').length;
-  const drafts = cells.filter((c) => c.state === 'draft').length;
-  const reviewed = cells.filter((c) => c.state === 'reviewed').length;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      api.getRun(runId).then(async ({ run }) => {
+        if (!live) return;
+        setRunStatus(run.status);
+        if (run.status === 'complete') {
+          const d = await load();
+          if (!live) return;
+          const written = typeof run.exitus?.captionsetId === 'string' ? (run.exitus.captionsetId as string) : null;
+          if (written) setActiveSet(written);
+          else if (d && d.captionsets.length > 0) setActiveSet(d.captionsets[d.captionsets.length - 1].id);
+          setMsg({ ok: true, text: 'caption pass finished — review and edit below' });
+        } else if (run.status === 'failed') {
+          setMsg({ ok: false, text: `caption job failed: ${run.failure?.message ?? 'no reason reported'}` });
+        } else {
+          timer = setTimeout(tick, POLL_MS);
+        }
+      }).catch(() => { if (live) timer = setTimeout(tick, POLL_MS); });
+    };
+    timer = setTimeout(tick, POLL_MS);
+    return () => { live = false; clearTimeout(timer); };
+  }, [runId, runStatus, load]);
 
-  const confirm = (i: number) => setCells((cs) => cs.map((c, j) => (j === i ? { ...c, state: 'reviewed' } : c)));
+  const start = async () => {
+    if (!dataset || starting) return;
+    const n = dataset.media.length;
+    if (n === 0) { setMsg({ ok: false, text: 'this dataset has no media to caption yet' }); return; }
+    if (!window.confirm(`Caption all ${n} ${n === 1 ? 'image' : 'images'} in this dataset?\n\nThis launches real GPU compute.`)) return;
+    setStarting(true); setMsg(null);
+    try {
+      const run = await launchCaptionJob({ datasetId: dataset.id, name });
+      setRunId(run.id);
+      setRunStatus(run.status);
+      setMsg({ ok: true, text: `caption job started · run ${run.id.slice(0, 8)}` });
+    } catch (e) {
+      setMsg({ ok: false, text: `couldn't start: ${String((e as Error).message).slice(0, 160)}` });
+    } finally { setStarting(false); }
+  };
 
-  if (datasets === null) {
+  const saveCaption = async () => {
+    if (!dataset || !editing || !activeSet || saving) return;
+    const text = editing.text.trim();
+    if (text === '') { setMsg({ ok: false, text: 'a caption cannot be empty' }); return; }
+    setSaving(true);
+    try {
+      const { dataset: updated } = await api.setCaption(dataset.id, activeSet, editing.mediaId, text);
+      setDataset(updated);
+      setEditing(null);
+    } catch (e) {
+      setMsg({ ok: false, text: `couldn't save: ${String((e as Error).message).slice(0, 160)}` });
+    } finally { setSaving(false); }
+  };
+
+  if (dataset === undefined) {
     return <AppShell title="Caption job"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
   }
-  if (!d) {
+  if (!dataset) {
     return (
       <AppShell title="Caption job">
         <div className="page"><div className="pw wide"><div className="sub mono">dataset not found. <Link to="/datasets">back to datasets</Link></div></div></div>
       </AppShell>
     );
   }
-  const tiles = d.media.length > 0 ? d.media.map((m) => m.url) : TILE_FALLBACK;
-  const hasMedia = d.media.length > 0;
 
-  const crumb = <span className="ph-crumb"><Link to="/datasets">datasets</Link> <span className="sep">/</span> <Link to={`/datasets/${d.id}`}>{d.name}</Link> <span className="sep">/</span> <b>new captionset</b></span>;
+  const d = dataset;
+  const running = runId !== null && runStatus !== 'complete' && runStatus !== 'failed';
+  const set = d.captionsets.find((cs) => cs.id === activeSet) ?? null;
+  const captions = set?.captions ?? {};
+  const captioned = d.media.filter((m) => typeof captions[m.id] === 'string' && captions[m.id].trim() !== '').length;
+
+  const crumb = <span className="ph-crumb"><Link to="/datasets">datasets</Link> <span className="sep">/</span> <Link to={`/datasets/${d.id}`}>{d.name}</Link> <span className="sep">/</span> <b>captions</b></span>;
 
   return (
     <AppShell title={crumb}>
       <div className="page"><div className="pw wide">
         <div className="pagehead">
-          <div><h1>Captioning · natural language · v3</h1></div>
+          <div><h1>Captioning · {d.media.length} {d.modality === 'video' ? 'clips' : 'images'}</h1></div>
         </div>
 
-        {/* setup bar (docked) */}
+        {/* setup bar */}
         <div className="cj-setup">
-          <span className="cj-seg"><span className="cj-l">method</span> <b>Natural language</b> · Florence-2</span>
-          <span className="cj-seg"><span className="cj-l">trigger</span> <b className="accent">{trigger}</b></span>
-          <span className="cj-seg"><span className="cj-l">length</span> <b>medium</b></span>
+          <span className="cj-seg"><span className="cj-l">method</span> <b>Natural language</b> · every image is read by the captioner</span>
+          <span className="cj-seg">
+            <span className="cj-l">name</span>
+            <input className="inp" value={name} onChange={(e) => setName(e.target.value)} placeholder="captionset name (optional)" disabled={running} />
+          </span>
           <span className="cj-seg"><span className="cj-l">runs in</span> <span className="hemi2 lit" /> <b>our compute</b></span>
-          <button className="lnk cj-adjust">adjust setup ▸</button>
+          <button className="btn accent cj-adjust" onClick={() => void start()} disabled={running || starting}>
+            {running ? 'captioning…' : starting ? 'starting…' : d.captionsets.length > 0 ? '↻ caption again' : 'Start caption job →'}
+          </button>
         </div>
 
-        {/* run panel */}
-        <div className="cj-run">
-          <div className="cj-count"><b>{done}</b> / {cells.length} captioned</div>
-          <div className="cj-bar"><span style={{ width: `${(done / cells.length) * 100}%` }} /></div>
-          <div className="cj-flight mono">1 in flight · ~5s left</div>
-        </div>
+        {/* run panel — present only while a job started from this screen is in flight */}
+        {runId && (
+          <div className="cj-run">
+            <div className="cj-count"><b>{runStatus ?? 'pending'}</b></div>
+            <div className="cj-bar"><span style={{ width: running ? '50%' : '100%' }} /></div>
+            <div className="cj-flight mono">run {runId.slice(0, 8)}</div>
+          </div>
+        )}
+
+        {msg && (
+          <div className="cj-seam mono" style={{ color: msg.ok ? 'var(--accent-soft)' : 'var(--red-500, #e5746a)' }}>{msg.text}</div>
+        )}
 
         {/* honesty seam */}
-        <div className="cj-seam mono"><span className="hemi2 lit" /> captioning on our compute — we can see the work.</div>
-
-        {/* grid: run + review in one */}
-        <div className="cj-grid">
-          {cells.map((c, i) => (
-            <figure key={i} className={`cj-cell ${c.state}${editing === i ? ' editing' : ''}`}>
-              <span className="cj-tile" style={hasMedia ? { backgroundImage: `url(${tiles[i % tiles.length]})`, backgroundSize: 'cover' } : { background: tiles[i % tiles.length] }} />
-              {c.state !== 'pending' && c.state !== 'running' && (
-                <button className={`cj-pip ${c.state}`} onClick={() => confirm(i)} title={c.state === 'reviewed' ? 'reviewed' : 'confirm draft'}>{c.state === 'reviewed' ? '✓' : '~'}</button>
-              )}
-              <figcaption className="mono" onClick={() => c.state !== 'running' && c.state !== 'pending' && setEditing(i)}>
-                {c.state === 'running' ? <span className="cj-running">captioning…</span>
-                  : c.state === 'pending' ? <span className="cj-pending">pending</span>
-                  : <><span className="accent">{trigger}</span>, {c.caption}{editing === i && <span className="cj-cursor" />}</>}
-                {editing === i && <span className="cj-edithint">↵ accept · esc cancel</span>}
-              </figcaption>
-            </figure>
-          ))}
+        <div className="cj-seam mono">
+          <span className="hemi2 lit" /> captioning on our compute — we can see the work. A caption pass is metered like any other run.
         </div>
 
-        {/* footer */}
-        <div className="cj-foot">
-          <div className="cj-tally mono">{reviewed} reviewed, {drafts} drafts to confirm · click any caption to edit</div>
-          <div className="cj-actions">
-            <button className="btn ghost">↻ re-caption selected</button>
-            <Link className="btn accent" to={`/datasets/${d.id}`}>Save captionset</Link>
+        {/* captionset picker — one dataset can carry several passes */}
+        {d.captionsets.length > 0 && (
+          <div className="cj-setup">
+            {d.captionsets.map((cs) => (
+              <button key={cs.id} className={`cj-seg${cs.id === activeSet ? ' on' : ''}`}
+                onClick={() => { setActiveSet(cs.id); setEditing(null); }}>
+                <span className="cj-l">{cs.method}</span> <b>{cs.name}</b> · {cs.coverage}
+              </button>
+            ))}
           </div>
-        </div>
+        )}
+
+        {/* the captions themselves, or an honest empty state */}
+        {!set ? (
+          <p className="ds-panel-note">
+            {running
+              ? 'the caption pass is running — captions land here when it finishes.'
+              : 'no captionset on this dataset yet. Run a caption job to make one — a model learns from the caption layer, not from the images alone.'}
+          </p>
+        ) : (
+          <>
+            <div className="cj-grid">
+              {d.media.map((m) => {
+                const caption = captions[m.id];
+                const has = typeof caption === 'string' && caption.trim() !== '';
+                const isEditing = editing?.mediaId === m.id;
+                return (
+                  <figure key={m.id} className={`cj-cell${has ? '' : ' pending'}${isEditing ? ' editing' : ''}`}>
+                    <span className="cj-tile" style={{ backgroundImage: `url(${m.url})`, backgroundSize: 'cover' }} />
+                    <figcaption className="mono">
+                      {isEditing ? (
+                        <>
+                          <input
+                            className="inp" autoFocus value={editing.text}
+                            onChange={(e) => setEditing({ mediaId: m.id, text: e.target.value })}
+                            onKeyDown={(e) => { if (e.key === 'Enter') void saveCaption(); if (e.key === 'Escape') setEditing(null); }}
+                          />
+                          <span className="cj-edithint">{saving ? 'saving…' : '↵ save · esc cancel'}</span>
+                        </>
+                      ) : has ? (
+                        <span onClick={() => setEditing({ mediaId: m.id, text: caption })}>{caption}</span>
+                      ) : (
+                        <span className="cj-pending" onClick={() => setEditing({ mediaId: m.id, text: '' })}>
+                          no caption in this set — click to write one
+                        </span>
+                      )}
+                    </figcaption>
+                  </figure>
+                );
+              })}
+            </div>
+
+            <div className="cj-foot">
+              <div className="cj-tally mono">{captioned} of {d.media.length} captioned in “{set.name}” · click any caption to edit it</div>
+              <div className="cj-actions">
+                <Link className="btn ghost" to={`/datasets/${d.id}`}>Back to dataset</Link>
+                <button className="btn accent" onClick={() => navigate(`/datasets/${d.id}/derive`)} disabled={captioned === 0}>Train from this →</button>
+              </div>
+            </div>
+          </>
+        )}
       </div></div>
     </AppShell>
   );

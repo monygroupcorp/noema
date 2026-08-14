@@ -665,6 +665,21 @@ export const api = {
   createDataset: (body: CreateDatasetRequest) =>
     fetch('/v1/data/datasets', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ dataset: Dataset }>),
+  // One dataset by id. There is no per-id detail route — listFull + find IS the detail read
+  // (the pattern Datasets.tsx/Dataset.tsx already use); wrapped here so the caption/derive
+  // screens can re-read a dataset after a job writes to it without repeating the find.
+  getDatasetFull: (id: string) =>
+    fetch('/v1/data/datasets/full', { headers: readHeaders() })
+      .then(j<{ datasets: Dataset[] }>)
+      .then(({ datasets }) => datasets.find((d) => d.id === id) ?? null),
+  // PATCH one caption inside one captionset. Captionsets are editable after generation; the
+  // server recomputes that captionset's coverage from the captions present and returns the
+  // whole dataset back.
+  setCaption: (datasetId: string, captionsetId: string, mediaId: string, caption: string) =>
+    fetch(
+      `/v1/data/datasets/${encodeURIComponent(datasetId)}/captionsets/${encodeURIComponent(captionsetId)}/captions/${encodeURIComponent(mediaId)}`,
+      { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ caption }) },
+    ).then(j<{ dataset: Dataset }>),
   trainingCost: (body: { steps: number; baseModel?: string; images?: number }) =>
     fetch('/v1/data/trainings/calculate-cost', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ impetus?: string; usd?: number }>),
