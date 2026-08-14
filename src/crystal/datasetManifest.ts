@@ -18,13 +18,31 @@
 //   • an inline manifest  → a JSON `[{url,caption?}]` string, passed through
 // The inline form lets a one-off stager (e.g. the koh spike) hand a manifest
 // directly before the dataset lives in a Corpus; production resolves by id.
+//
+// A Dataset projects here too (`datasetToManifest`), for the batch caption job: same wire
+// shape, each entry additionally carrying the media item's `id` so the pod can echo it back
+// on the harvest instead of the host re-deriving identity from a position.
 
 import type { Corpus, Corporum } from '../types/corpus.js'
+import type { Dataset } from '../types/dataset.js'
 
 /** One training image: where to fetch it, and its caption if we have one. */
 export interface ManifestItem {
   url: string
   caption?: string
+  /**
+   * Stable identity of the source item (a `DatasetMediaItem.id`) — OPTIONAL and additive.
+   *
+   * The pod names every staged file by MANIFEST INDEX (`stage_dataset` writes `0000.png`), so an
+   * index is the only handle a pod-side artifact carries on its own. A dataset's `media` array is
+   * append-only, so an index mapped back to a media item AFTER the job ran can land on a different
+   * item than the one that was staged. Echoing the id out through the manifest and back in through
+   * the harvest takes the index out of the round trip entirely.
+   *
+   * Optional because `corpusToManifest` / `parseManifest` are shared with the training launch,
+   * which has no dataset media ids to supply — a manifest without ids is valid input, not an error.
+   */
+  id?: string
 }
 
 /** The wire shape handed to the pod — one entry per image. */
@@ -50,9 +68,24 @@ export function corpusToManifest(corpus: Corpus): DatasetManifest {
 }
 
 /**
- * Parse an inline manifest — a JSON array of `{url, caption?}`. Returns `null`
+ * Project a Dataset to a manifest — its media in array order, each carrying the media item's
+ * `id` so a pod-side artifact can be bound back to the exact item that was staged (see
+ * `ManifestItem.id`). Pure + deterministic.
+ *
+ * Emits NO `caption` field, even when the dataset already has captionsets. The pod's captioner
+ * runs with `recaption: false` and skips any image that already has a `.txt` sidecar, so shipping
+ * existing captions would make a caption job hand back a copy of the captionset it started from.
+ * A caption job captions everything.
+ */
+export function datasetToManifest(dataset: Dataset): DatasetManifest {
+  return dataset.media.map(m => ({ url: m.url, id: m.id }))
+}
+
+/**
+ * Parse an inline manifest — a JSON array of `{url, caption?, id?}`. Returns `null`
  * (not throws) when `raw` isn't a manifest, so the resolver can fall through to
- * a corpus lookup. Entries missing a string `url` are rejected (returns null).
+ * a corpus lookup. Entries missing a string `url` are rejected (returns null); an
+ * absent `id` is valid input (the training path never supplies one).
  */
 export function parseManifest(raw: string): DatasetManifest | null {
   const trimmed = raw.trim()
@@ -69,8 +102,13 @@ export function parseManifest(raw: string): DatasetManifest | null {
     if (!item || typeof item !== 'object') return null
     const url = (item as Record<string, unknown>).url
     const caption = (item as Record<string, unknown>).caption
+    const id = (item as Record<string, unknown>).id
     if (typeof url !== 'string' || !url) return null
-    out.push(typeof caption === 'string' && caption.trim() ? { url, caption: caption.trim() } : { url })
+    out.push({
+      url,
+      ...(typeof caption === 'string' && caption.trim() ? { caption: caption.trim() } : {}),
+      ...(typeof id === 'string' && id ? { id } : {}),
+    })
   }
   return out
 }
