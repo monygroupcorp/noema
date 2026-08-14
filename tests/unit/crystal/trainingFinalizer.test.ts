@@ -277,3 +277,27 @@ test('urlLoraReader throws when the remote outcome carries no outputUrl', async 
   const fetcher: MediaFetcher = { async fetch() { return Buffer.from('x') } }
   await assert.rejects(() => urlLoraReader(fetcher)('job', { status: 'completed', lastStep: 1 }), /no outputUrl/)
 })
+
+test('a kontext base stamps familia "kontext" — its own compat key, not the flux stack it sits on', async () => {
+  const h = harness()
+  const finalize = makeTrainingFinalizer({ ...h, newId: () => 'l-kontext', now: () => new Date(0) })
+  await finalize(actum({ triggerWord: 'edit', baseModel: 'flux-kontext-dev', ownerAnimaId: 'a' }), completed())
+  // `Intella.familia` says what the LoRA IS; which studios TAKE it is the substrate's directed
+  // `acceptsFamiliae` declaration. Stamping 'flux' here would offer it in every flux studio.
+  assert.equal(h.upserts[0].familia, 'kontext')
+})
+
+test('an explicitly-supplied familia is canonicalised, not written through as an alias', async () => {
+  const h = harness()
+  const finalize = makeTrainingFinalizer({ ...h, newId: () => 'l-alias', now: () => new Date(0) })
+  await finalize(actum({ triggerWord: 'x', familia: ' Krea-Turbo ', baseModel: 'krea2-raw', ownerAnimaId: 'a' }), completed())
+  // triggerMap matches familia by EXACT equality, so an alias reaching the field is unresolvable.
+  assert.equal(h.upserts[0].familia, 'krea2')
+})
+
+test('an explicit familia still WINS over the baseModel, and an already-canonical one is unchanged', async () => {
+  const h = harness()
+  const finalize = makeTrainingFinalizer({ ...h, newId: () => 'l-explicit', now: () => new Date(0) })
+  await finalize(actum({ triggerWord: 'x', familia: 'kontext', baseModel: 'klein-4b', ownerAnimaId: 'a' }), completed())
+  assert.equal(h.upserts[0].familia, 'kontext', 'canonicalisation is idempotent and does not override the choice')
+})

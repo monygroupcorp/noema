@@ -106,6 +106,15 @@ export interface StudioBase {
   label: string
   /** The model family this fundament serves — scopes the LoRA picker (`armBase`). Absent on Custom. */
   familia?: string
+  /**
+   * The families whose LoRAs this fundament's flows will CONSUME — its own derived `familia`
+   * unioned with the substrate's declared `Fundamentum.acceptsFamiliae`. Acceptance is DIRECTED,
+   * so it cannot be recovered from `familia` downstream: two fundamenta can derive the SAME family
+   * while accepting different sets, and a lookup keyed on the family string would union them and
+   * offer each one's LoRAs in the other's studio. The resolved set is therefore CARRIED from the
+   * fundament (where it is already in hand). Absent → the picker falls back to `familia` alone.
+   */
+  acceptsFamiliae?: string[]
   /** One-line summary shown on the detail card. */
   blurb?: string
   /** The base/support weights this fundament provisions. */

@@ -141,3 +141,94 @@ test('vramGb falls back to summing the resolved weight sizes when the fundament 
   const flows = await new BulletinModelCatalog({ intellarum, fundamentorum: fr, sender }).listFlows()
   assert.equal(flows.find(f => f.label === 'FLUX')?.vramGb, 24.3, 'sum of resolved weight sizes (24 + 0.3)')
 })
+
+// ── Directed compatibility: two substrates, one derived family ────────────────
+// The Kontext edit stack and the schnell stack both derive `familia: 'flux'` (the Kontext unet is a
+// flux-stack model), so the family string alone cannot tell the two studios apart. The Kontext
+// substrate DECLARES `acceptsFamiliae: ['flux','kontext']`; the schnell one declares nothing. The
+// accepted set is therefore carried on the card and handed to the trigger map — which is what keeps
+// a Kontext-trained LoRA out of a schnell studio while still offering it in a Kontext one.
+
+const DIRECTED_CATALOG = [
+  { id: 'intella.flux-schnell', nomen: 'FLUX.1 Schnell', genus: 'model', familia: 'flux', dest: 'unet/flux.safetensors', sizeGb: 24 },
+  { id: 'intella.flux-kontext', nomen: 'FLUX.1 Kontext', genus: 'model', familia: 'flux', dest: 'unet/kontext.safetensors', sizeGb: 24 },
+  { id: 'lora.flux', nomen: 'flux-lora', genus: 'lora', familia: 'flux', dest: 'loras/flux-lora.safetensors', trigger: 'fluxtrig' },
+  { id: 'lora.kontext', nomen: 'kontext-lora', genus: 'lora', familia: 'kontext', dest: 'loras/kontext-lora.safetensors', trigger: 'kontexttrig' },
+]
+
+const DIRECTED_FUNDS: Fundamentum[] = [
+  {
+    id: 'flux-comfyui', versio: '1.0.0', imageId: 'runpod/pytorch', imageVersion: '2.4', runtime: 'ComfyUI',
+    intellae: [{ id: 'intella.flux-schnell', role: 'unet' }],
+    canonica: true, natum: new Date('2025-01-01'), mutatum: new Date('2025-01-01'),
+  },
+  {
+    id: 'flux-kontext-comfyui', versio: '1.0.0', imageId: 'runpod/pytorch', imageVersion: '2.4', runtime: 'ComfyUI',
+    intellae: [{ id: 'intella.flux-kontext', role: 'unet' }],
+    acceptsFamiliae: ['flux', 'kontext'],
+    canonica: true, natum: new Date('2025-01-01'), mutatum: new Date('2025-01-01'),
+  },
+]
+
+/** Family-keyed like `MongoIntella.triggerMap`: a single family matches by equality, a SET by
+ *  membership — so a LoRA is only reachable when its familia is in the requested set. */
+function directedCatalog() {
+  const ir = {
+    async list() { return DIRECTED_CATALOG as never },
+    async find(id: string) { return (DIRECTED_CATALOG.find(c => c.id === id) ?? null) as never },
+    async triggerMap(familia: string | string[]) {
+      const accepted = new Set(Array.isArray(familia) ? familia : [familia])
+      const map = new Map<string, unknown[]>()
+      for (const i of DIRECTED_CATALOG) {
+        if (i.genus !== 'lora' || !accepted.has(i.familia)) continue
+        map.set(i.trigger!, [i])
+      }
+      return map as never
+    },
+  } as unknown as Intellarum
+  const fr = {
+    async list() { return DIRECTED_FUNDS as never },
+    async find(id: string) { return (DIRECTED_FUNDS.find(f => f.id === id) ?? null) as never },
+    async register() {},
+  } as unknown as Fundamentorum
+  return new BulletinModelCatalog({ intellarum: ir, fundamentorum: fr, sender })
+}
+
+/** Arm a studio from its card the way the bulletin does, then resolve trigger words in it. */
+async function offeredIn(fundamentumId: string, text: string): Promise<string[]> {
+  const c = directedCatalog()
+  const card = (await c.listFlows()).find(f => f.id === fundamentumId)!
+  const scope = card.acceptsFamiliae?.length ? { family: card.acceptsFamiliae } : { family: card.familia! }
+  const { matched } = await c.resolveTriggers(text, scope)
+  return matched.map(m => m.nomen)
+}
+
+test('the card carries the accepted-familiae SET, not just the derived family', async () => {
+  const flows = await directedCatalog().listFlows()
+  const schnell = flows.find(f => f.id === 'flux-comfyui')!
+  const kontext = flows.find(f => f.id === 'flux-kontext-comfyui')!
+  assert.equal(schnell.familia, 'flux')
+  assert.equal(kontext.familia, 'flux', 'both substrates derive the same family — the string cannot separate them')
+  assert.deepEqual(schnell.acceptsFamiliae, ['flux'], 'undeclared → its own family, i.e. the existing behaviour')
+  assert.deepEqual(kontext.acceptsFamiliae, ['flux', 'kontext'], 'own family unioned with the declaration')
+})
+
+test('a kontext studio offers a kontext LoRA AND a flux LoRA', async () => {
+  assert.deepEqual(
+    (await offeredIn('flux-kontext-comfyui', 'kontexttrig fluxtrig')).sort(),
+    ['flux-lora', 'kontext-lora'],
+    'acceptance is directed: the kontext substrate consumes both',
+  )
+})
+
+test('a schnell studio offers the flux LoRA and NOT the kontext one', async () => {
+  const offered = await offeredIn('flux-comfyui', 'kontexttrig fluxtrig')
+  assert.deepEqual(offered, ['flux-lora'], 'a plain flux substrate consumes only flux LoRAs')
+  assert.ok(!offered.includes('kontext-lora'), 'the kontext LoRA is not on offer here')
+})
+
+test('an empty accepted set is treated as no scope, not as a scope matching nothing', async () => {
+  const c = directedCatalog()
+  const { matched } = await c.resolveTriggers('fluxtrig kontexttrig', { family: [] })
+  assert.deepEqual(matched.map(m => m.nomen).sort(), ['flux-lora', 'kontext-lora'], 'falls back to the flat scan')
+})
