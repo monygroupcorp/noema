@@ -144,10 +144,24 @@ function trunc(s: string, max = 30): string {
   return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s
 }
 
+/** Flow rows per page of the `/arm` chooser — the picker's page size, same keyboard budget. */
+export const ARM_PAGE_SIZE = 8
+
+/** Pages the flow chooser needs. Custom is pinned to every page, so it is not part of the paged
+ *  set; never below 1 so page 0 is always a legal page. */
+export function armPageCount(a: ArmState): number {
+  const paged = a.presets.filter(p => p.id !== 'custom').length
+  return Math.max(1, Math.ceil(paged / ARM_PAGE_SIZE))
+}
+
 /**
- * The `/arm` wizard rows — image step or config step. Icon-only back on top (cancels at the
- * image step, steps back at the config step), then one option per row. Index-encoded ids
+ * The `/arm` wizard rows — flow chooser, image step or config step. Icon-only back on top (cancels
+ * at the image step, steps back at the config step), then one option per row. Index-encoded ids
  * (`arm.image:<i>` / `arm.config:<i>`) keep callback_data short.
+ *
+ * The chooser paginates the RENDERED ROWS only. Every id keeps the preset's ABSOLUTE index into
+ * `a.presets` — the manager resolves a tap as `s.arm.presets[i]`, so a page-relative index would
+ * resolve a tap past the first page to a different substrate than the row names.
  */
 export function armAffordances(a: ArmState, hasFlow = false): Affordance[][] {
   // The first layer (preset) dismisses the wizard → a Cancel (⊗); deeper layers step back → (←).
@@ -163,17 +177,32 @@ export function armAffordances(a: ArmState, hasFlow = false): Affordance[][] {
   if (a.step === 'preset') {
     // The flow chooser is laid out like the model list: the name opens a detail card, the ＋
     // commits the flow. Custom is the exception (the manual builder, no detail to show) — a
-    // single full-width button that drops into the image→config path.
-    a.presets.forEach((p, i) => {
-      if (p.id === 'custom') {
-        rows.push([{ id: `arm.preset:${i}`, label: trunc(p.label), kind: 'action', scope: 'host' }])
-      } else {
-        rows.push([
-          { id: `arm.flow:${i}`,   label: trunc(p.label, 26), kind: 'action', scope: 'host' },
-          { id: `arm.preset:${i}`, label: GLYPH.add,          kind: 'action', scope: 'host' },
-        ])
-      }
-    })
+    // single full-width button that drops into the image→config path, pinned below the nav on
+    // EVERY page (it is the manual builder and the escape hatch — paging it away buries it).
+    const indexed = a.presets.map((p, i) => ({ p, i }))
+    const paged = indexed.filter(e => e.p.id !== 'custom')
+    const pinned = indexed.filter(e => e.p.id === 'custom')
+    const pageCount = armPageCount(a)
+    const page = Math.min(Math.max(0, a.page ?? 0), pageCount - 1)
+
+    for (const { p, i } of paged.slice(page * ARM_PAGE_SIZE, (page + 1) * ARM_PAGE_SIZE)) {
+      rows.push([
+        { id: `arm.flow:${i}`,   label: trunc(p.label, 26), kind: 'action', scope: 'host' },
+        { id: `arm.preset:${i}`, label: GLYPH.add,          kind: 'action', scope: 'host' },
+      ])
+    }
+
+    // Arrow-only nav row — only when there is more than one page, and only the arrows in bounds.
+    if (pageCount > 1) {
+      const nav: Affordance[] = []
+      if (page > 0) nav.push({ id: 'arm.page:prev', label: GLYPH.prev, kind: 'action', scope: 'host' })
+      if (page < pageCount - 1) nav.push({ id: 'arm.page:next', label: GLYPH.next, kind: 'action', scope: 'host' })
+      if (nav.length) rows.push(nav)
+    }
+
+    for (const { p, i } of pinned) {
+      rows.push([{ id: `arm.preset:${i}`, label: trunc(p.label), kind: 'action', scope: 'host' }])
+    }
     return rows
   }
 

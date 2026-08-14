@@ -12,7 +12,7 @@
 // =============================================================================
 
 import type { Intellarum, Intella } from '../../types/intelligendi.js'
-import type { Fundamentorum } from '../../types/fundamentum.js'
+import type { Fundamentorum, Fundamentum } from '../../types/fundamentum.js'
 import type { PendingModel, ModelDetail, StudioBase } from '../lexicon/bulletin/types.js'
 import { familiaOf } from '../../crystal/inferFamilia.js'
 import { COPY } from '../lexicon/copy.js'
@@ -64,6 +64,65 @@ function baseFamilyName(id: string): string {
   return known[stem] ?? (stem.charAt(0).toUpperCase() + stem.slice(1))
 }
 
+/** A `versio` as comparable numeric segments, or null when it is absent/non-numeric. Numeric
+ *  segments — NOT a string compare, which orders '1.10.0' before '1.9.0'. */
+function versioSegments(versio?: string): number[] | null {
+  const parts = (versio ?? '').trim().split('.')
+  if (!versio || parts.length === 0 || !parts.every(p => /^\d+$/.test(p))) return null
+  return parts.map(Number)
+}
+/** Segment-wise compare, shorter versions zero-padded ('1.2' === '1.2.0'). */
+function compareSegments(a: number[], b: number[]): number {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+/** Milliseconds of a date-ish field, or null when it is absent/unparseable. */
+function timeOf(d?: Date): number | null {
+  if (d === undefined || d === null) return null
+  const t = new Date(d as Date).getTime()
+  return Number.isFinite(t) ? t : null
+}
+/**
+ * Is `cand` the version of a fundament id that should be shown, given the one already held?
+ * Ordering is by `versio` (numeric segments), NOT by `natum`/`mutatum`: two canonical versions of
+ * one id can share a birth date, which makes a date sort a tie broken by document order. A
+ * non-numeric or absent `versio` sorts LAST; a versio tie falls back to `mutatum`, then to
+ * first-seen — so the comparison is total and never throws on unexpected data.
+ */
+function prefersOver(cand: Fundamentum, held: Fundamentum): boolean {
+  const a = versioSegments(cand.versio)
+  const b = versioSegments(held.versio)
+  if (a && b) {
+    const d = compareSegments(a, b)
+    if (d !== 0) return d > 0
+  } else if (a || b) {
+    return !!a                      // a parseable versio beats an unparseable/absent one
+  }
+  const ta = timeOf(cand.mutatum)
+  const tb = timeOf(held.mutatum)
+  if (ta !== null && tb !== null && ta !== tb) return ta > tb
+  if ((ta === null) !== (tb === null)) return ta !== null
+  return false                      // fully tied → keep the one seen first
+}
+
+/**
+ * The card label from the fundament's own `nomen`, with a trailing ` · <runtime>` segment removed
+ * when that segment names the fundament's OWN runtime — the runtime already appears in the card's
+ * blurb. Conditioning the strip on the runtime (rather than "chop after the last ·") leaves a nomen
+ * whose tail is meaningful intact, and leaves a nomen with no separator alone. Empty result → the
+ * caller's fallback.
+ */
+function stripRuntime(nomen: string | undefined, runtime: string): string {
+  const name = (nomen ?? '').trim()
+  const cut = name.lastIndexOf('·')
+  if (cut < 0) return name
+  const tail = name.slice(cut + 1).trim().toLowerCase()
+  return tail && tail === runtime.trim().toLowerCase() ? name.slice(0, cut).trim() : name
+}
+
 export class BulletinModelCatalog {
   /** A live force-reply prompt's message_id → the chat + host awaiting a reply, and which KIND of
    *  reply (a free-text search vs. trigger word(s)). Single-shot + TTL'd so a stale prompt can't
@@ -91,7 +150,18 @@ export class BulletinModelCatalog {
   async listFlows(): Promise<StudioBase[]> {
     const custom: StudioBase = { id: 'custom', label: 'Custom' }
     if (!this.deps.fundamentorum) return [custom]
-    const funds = await this.deps.fundamentorum.list({ canonica: true }).catch(() => [])
+    const listed = await this.deps.fundamentorum.list({ canonica: true }).catch(() => [])
+    // ONE card per fundament id. The registry is versioned on purpose and keeps every canonical
+    // version of an id, so the raw list carries an id once per version; a chooser that renders each
+    // document shows the same substrate several times under one name, and the version a tap resolves
+    // to is then whichever document came back first. Collapse here, at the read seam (the registry
+    // itself is left as-is — other callers pin versions deliberately). Insertion order is preserved.
+    const newestById = new Map<string, Fundamentum>()
+    for (const f of listed) {
+      const held = newestById.get(f.id)
+      if (!held || prefersOver(f, held)) newestById.set(f.id, f)
+    }
+    const funds = [...newestById.values()]
     const all = this.deps.intellarum ? await this.deps.intellarum.list().catch(() => []) : []
     const byId = new Map(all.map(i => [i.id, i]))
     // LoRA availability per family — surfaced on the card so a host sees what they can layer.
@@ -110,7 +180,11 @@ export class BulletinModelCatalog {
       const acceptsFamiliae = [...new Set([...(familia ? [familia] : []), ...(f.acceptsFamiliae ?? [])])]
       const models = weights.length ? weights.map(w => w.nomen || w.slug || w.id) : (f.intellae ?? []).map(w => w.id)
       const runtime = f.runtime ?? 'ComfyUI'
-      const label = baseFamilyName(familia ?? f.id)
+      // The fundament's OWN name identifies the card. Deriving the label from the family instead
+      // collapses distinct substrates of one family onto a single name, so the chooser cannot say
+      // which one a row arms. `baseFamilyName` stays as the fallback for a nomen-less fundament
+      // (and is still what `listCategories` prettifies base-family ids with).
+      const label = stripRuntime(f.nomen, runtime) || baseFamilyName(familia ?? f.id)
       const loras = familia ? (loraCount.get(familia) ?? 0) : 0
       const vramGb = f.vramGb ?? Math.round(weights.reduce((n, w) => n + (w.sizeGb ?? 0), 0) * 10) / 10
       const loraTail = loras ? `, ${loras} LoRAs available.` : '.'
