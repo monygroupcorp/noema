@@ -37,7 +37,8 @@ export class PodSession {
   private _picker: PickerState | null = null
   private _arm: ArmState | null = null
   private _armBase?: string   // base family chosen via an arm preset — scopes the model menu's loras
-  private _armed = false      // true for an /arm-originated session — gates the `[▶ Start]` affordance
+  private _armAccepts?: string[]  // the accepted-familiae SET carried from that preset's fundament
+  private _armed = false    // true for an /arm-originated session — gates the `[▶ Start]` affordance
   private _starting = false   // `▶ Start` pressed, provisioning in flight (cold start can take minutes)
   private _pickerEpoch = 0   // monotonic across the session — never reused, so stale pick tokens can't collide
 
@@ -53,6 +54,10 @@ export class PodSession {
   get picker(): PickerState | null { return this._picker }
   get arm(): ArmState | null { return this._arm }
   get armBase(): string | undefined { return this._armBase }
+  /** The families whose LoRAs the armed studio accepts, carried from the chosen fundament. Absent on
+   *  a Custom studio and on a session armed before this was threaded — the picker then falls back to
+   *  `armBase` (one family), which is the previous behaviour. */
+  get armAccepts(): string[] | undefined { return this._armAccepts }
   get loadout(): Loadout | undefined { return this._loadout }
 
   /**
@@ -168,7 +173,7 @@ export class PodSession {
   beginStarting(): void { this._starting = true }
   endStarting(): void { this._starting = false }
   get starting(): boolean { return this._starting }
-  end(): void { this._ended = true; this.live = null; this._activeSubmenu = null; this._picker = null; this._arm = null; this._armBase = undefined }
+  end(): void { this._ended = true; this.live = null; this._activeSubmenu = null; this._picker = null; this._arm = null; this._armBase = undefined; this._armAccepts = undefined }
   clearLive(): void { this.live = null }
 
   /** Open a submenu (Mod / Share / Destroy) or close one (null). The Add picker only
@@ -233,13 +238,16 @@ export class PodSession {
     this._activeSubmenu = null
     this._picker = null
     this._armBase = undefined
+    this._armAccepts = undefined
     this._arm = { step: 'preset', presets, images, configs: [] }
   }
   /** Add a flow's resolved spec onto the studio loadout, then stay on the chooser so more flows
    *  can be layered (FLUX + Z-Image …). Image/runtime are set from the first flow; each flow's
    *  base models append as their own architectura (deduped). Returns to the chooser if called
-   *  from a flow's detail card. The host advances explicitly via `proceedArm`. */
-  addFlow(baseFamily: string, frag: Loadout): boolean {
+   *  from a flow's detail card. The host advances explicitly via `proceedArm`.
+   *  `accepts` is that flow's fundament-resolved accepted-familiae set; like `baseFamily` it reflects
+   *  the most recently added flow, and is left untouched when the flow is rejected. */
+  addFlow(baseFamily: string, frag: Loadout, accepts?: string[]): boolean {
     const cur = this._loadout
     // A studio is ONE container/runtime — reject a flow whose runtime differs from what's already
     // armed (the caller surfaces a notice). Same-runtime flows (e.g. FLUX + SDXL) still stack.
@@ -248,6 +256,7 @@ export class PodSession {
       return false
     }
     this._armBase = baseFamily
+    this._armAccepts = accepts?.length ? [...accepts] : undefined
     const image = cur?.image ?? frag.image
     const runtime = cur?.runtime ?? frag.runtime
     const have = new Set((cur?.categories ?? []).map(c => c.architectura))

@@ -96,11 +96,23 @@ const PRESET_ALIASES: Record<string, string> = {
  * familia by exact equality, so 'krea2'/'krea-turbo'/'krea2-turbo' must all collapse to one key ('krea2')
  * — the base flow's family. Unknown bases fall through to the lowercased baseModel (today's behaviour for
  * flux/sd15/sdxl, where the short baseModel already IS the familia). Used by the training finalizer.
+ *
+ * FLUX.1 Kontext is its OWN familia ('kontext'), not 'flux', even though the Kontext unet itself is a
+ * flux-stack model carrying `familia: 'flux'`. The two fields answer different questions: `Intella.familia`
+ * says what a model IS, and a LoRA trained ON Kontext is a Kontext LoRA. Which studios will TAKE it is a
+ * separate, DIRECTED statement made by `Fundamentum.acceptsFamiliae` — the Kontext substrate declares
+ * `['flux','kontext']`, so it consumes both, while a plain flux substrate consumes only 'flux'. Stamping a
+ * Kontext-trained LoRA 'flux' would offer it in every flux studio, which is the acceptance direction that
+ * was never declared. The entries below are compat CLASSIFICATION only; there is no ai-toolkit base preset
+ * for Kontext (`AITK_BASE_PRESETS`), so an in-house Kontext training run is not configured by this module.
  */
 const FAMILIA_BY_BASE: Record<string, string> = {
   'krea2-raw': 'krea2', 'krea2': 'krea2', 'krea2-turbo': 'krea2', 'krea-turbo': 'krea2', 'krea': 'krea2',
   'zimage': 'zimage', 'z-image': 'zimage', 'zimage-turbo': 'zimage', 'z-image-turbo': 'zimage',
   'flux2-klein-4b': 'flux2', 'klein-4b': 'flux2', 'klein': 'flux2', 'flux2-klein': 'flux2',
+  'kontext': 'kontext', 'kontext-dev': 'kontext', 'flux-kontext': 'kontext', 'flux-kontext-dev': 'kontext',
+  'flux1-kontext': 'kontext', 'flux1-kontext-dev': 'kontext', 'flux.1-kontext': 'kontext',
+  'flux.1-kontext-dev': 'kontext', 'intella.flux-kontext-dev': 'kontext',
 }
 
 export function canonicalFamilia(baseModel: string): string {
