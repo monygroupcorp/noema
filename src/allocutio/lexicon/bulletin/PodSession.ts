@@ -1,7 +1,7 @@
 import type { Progressus } from '../../../types/progressus.js'
 import { Ledger } from './Ledger.js'
 import type { BulletinSnapshot } from './BulletinView.js'
-import type { ActiveSubmenu } from './affordances.js'
+import { armPageCount, type ActiveSubmenu } from './affordances.js'
 import {
   WARM_LADDER_MS, WARM_DEFAULT_MS, DL_SLOW_MS,
   type Audience, type JournalEntry, type LiveState, type PendingModel, type PickerState, type Loadout, type ModelDetail, type ArmState, type StudioBase,
@@ -239,7 +239,16 @@ export class PodSession {
     this._picker = null
     this._armBase = undefined
     this._armAccepts = undefined
-    this._arm = { step: 'preset', presets, images, configs: [] }
+    // Entering the chooser always starts at the first page — a re-`/arm` never lands on a page
+    // left over from a previous pass through it.
+    this._arm = { step: 'preset', presets, images, configs: [], page: 0 }
+  }
+  /** Record the flow chooser's page. Clamped to [0, pageCount-1] so a stale or replayed callback
+   *  cannot scroll past either end. Pagination is display-only — `presets` is untouched. */
+  setArmPage(page: number): void {
+    if (!this._arm) return
+    const top = armPageCount(this._arm) - 1
+    this._arm = { ...this._arm, page: Math.min(Math.max(0, page), top) }
   }
   /** Add a flow's resolved spec onto the studio loadout, then stay on the chooser so more flows
    *  can be layered (FLUX + Z-Image …). Image/runtime are set from the first flow; each flow's

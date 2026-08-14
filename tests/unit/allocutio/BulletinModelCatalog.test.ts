@@ -232,3 +232,83 @@ test('an empty accepted set is treated as no scope, not as a scope matching noth
   const { matched } = await c.resolveTriggers('fluxtrig kontexttrig', { family: [] })
   assert.deepEqual(matched.map(m => m.nomen).sort(), ['flux-lora', 'kontext-lora'], 'falls back to the flat scan')
 })
+
+// ── one card per fundament id, newest versio, its own name ───────────────────
+
+/** Two canonical versions of ONE id, plus a second fundament of the SAME derived family.
+ *  `acceptsFamiliae` differs between the versions — the field whose loss is user-visible, so the
+ *  assertion says WHICH version resolved rather than just how many cards came back. */
+const VERSIONED: Fundamentum[] = [
+  {
+    id: 'flux-comfyui', versio: '1.0.0', nomen: 'FLUX · ComfyUI', imageId: 'runpod/pytorch', imageVersion: '2.4', runtime: 'ComfyUI',
+    intellae: [{ id: 'intella.flux-schnell', role: 'unet' }, { id: 'intella.flux-vae', role: 'vae' }],
+    canonica: true, natum: new Date('2025-01-01'), mutatum: new Date('2025-01-01'),
+  },
+  {
+    id: 'flux-comfyui', versio: '1.1.0', nomen: 'FLUX · ComfyUI', imageId: 'runpod/pytorch', imageVersion: '2.4', runtime: 'ComfyUI',
+    intellae: [{ id: 'intella.flux-schnell', role: 'unet' }, { id: 'intella.flux-vae', role: 'vae' }],
+    acceptsFamiliae: ['flux', 'edit'], canonica: true, natum: new Date('2025-01-01'), mutatum: new Date('2025-01-01'),
+  },
+  {
+    id: 'flux-edit-comfyui', versio: '1.1.0', nomen: 'FLUX Edit · ComfyUI', imageId: 'runpod/pytorch', imageVersion: '2.4', runtime: 'ComfyUI',
+    intellae: [{ id: 'intella.flux-schnell', role: 'unet' }],
+    acceptsFamiliae: ['flux', 'edit'], canonica: true, natum: new Date('2025-01-01'), mutatum: new Date('2025-01-01'),
+  },
+]
+const catOf = (funds: Fundamentum[]) => new BulletinModelCatalog({
+  intellarum,
+  fundamentorum: { async list() { return funds as never }, async find() { return funds[0] as never }, async register() {} } as unknown as Fundamentorum,
+  sender,
+})
+
+test('two canonical versions of one fundament id produce ONE card, resolved to the newest versio', async () => {
+  const flows = await catOf(VERSIONED).listFlows()
+  const cards = flows.filter(f => f.id === 'flux-comfyui')
+  assert.equal(cards.length, 1, 'one card per fundament id, not one per stored version')
+  assert.deepEqual(cards[0].acceptsFamiliae, ['flux', 'edit'], 'the card carries the NEWEST version’s declared set')
+})
+
+test('versio ordering is by numeric segment, so 1.10.0 beats 1.9.0 (a string compare gets this backwards)', async () => {
+  const two: Fundamentum[] = [
+    { ...VERSIONED[1], versio: '1.10.0', acceptsFamiliae: ['flux', 'edit'] },
+    { ...VERSIONED[1], versio: '1.9.0', acceptsFamiliae: ['flux'] },
+  ]
+  const flows = await catOf(two).listFlows()
+  const card = flows.find(f => f.id === 'flux-comfyui')!
+  assert.deepEqual(card.acceptsFamiliae, ['flux', 'edit'], '1.10.0 is newer than 1.9.0')
+  // …and the same holds when the newer document is listed second.
+  const reversed = await catOf([two[1], two[0]]).listFlows()
+  assert.deepEqual(reversed.find(f => f.id === 'flux-comfyui')!.acceptsFamiliae, ['flux', 'edit'], 'order-independent')
+})
+
+test('a fundament with no parseable versio never displaces one that has it', async () => {
+  const flows = await catOf([
+    { ...VERSIONED[1], versio: 'latest', acceptsFamiliae: ['flux'] },
+    { ...VERSIONED[1], versio: '1.1.0', acceptsFamiliae: ['flux', 'edit'] },
+  ]).listFlows()
+  assert.deepEqual(flows.find(f => f.id === 'flux-comfyui')!.acceptsFamiliae, ['flux', 'edit'], 'unparseable versio sorts last')
+})
+
+test('two fundamenta of the SAME family get DIFFERENT labels — each its own nomen, runtime suffix stripped', async () => {
+  const flows = await catOf(VERSIONED).listFlows()
+  const labels = flows.filter(f => f.id !== 'custom').map(f => f.label)
+  assert.deepEqual(labels, ['FLUX', 'FLUX Edit'], 'labelled by nomen, not by the family both derive')
+  assert.equal(new Set(labels).size, labels.length, 'same-family substrates stay distinguishable')
+})
+
+test('the runtime suffix is stripped only when it names the fundament’s own runtime', async () => {
+  const flows = await catOf([
+    { ...VERSIONED[0], id: 'a', nomen: 'Base image (weightless)' },                       // no separator at all
+    { ...VERSIONED[0], id: 'b', nomen: 'Sampler · experimental', runtime: 'ComfyUI' }, // tail is not the runtime
+    { ...VERSIONED[0], id: 'c', nomen: 'Text · llama.cpp', runtime: 'llama.cpp' },     // tail IS the runtime
+  ]).listFlows()
+  const byId = Object.fromEntries(flows.map(f => [f.id, f.label]))
+  assert.equal(byId['a'], 'Base image (weightless)', 'no separator → untouched')
+  assert.equal(byId['b'], 'Sampler · experimental', 'a meaningful tail survives')
+  assert.equal(byId['c'], 'Text', 'the runtime suffix goes — the blurb already names it')
+})
+
+test('a nomen-less fundament still falls back to its base-family name', async () => {
+  const flows = await catOf([{ ...VERSIONED[0], nomen: undefined }]).listFlows()
+  assert.equal(flows.find(f => f.id === 'flux-comfyui')!.label, 'FLUX', 'baseFamilyName remains the fallback')
+})

@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { affordancesFor, pickerAffordances } from '../../../../src/allocutio/lexicon/bulletin/affordances.js'
+import { affordancesFor, pickerAffordances, armAffordances, armPageCount, ARM_PAGE_SIZE } from '../../../../src/allocutio/lexicon/bulletin/affordances.js'
 import type { BulletinSnapshot } from '../../../../src/allocutio/lexicon/bulletin/BulletinView.js'
-import { WARM_DEFAULT_MS, type PickerState, type PendingModel } from '../../../../src/allocutio/lexicon/bulletin/types.js'
+import { WARM_DEFAULT_MS, type PickerState, type PendingModel, type ArmState, type StudioBase } from '../../../../src/allocutio/lexicon/bulletin/types.js'
 
 const base: BulletinSnapshot = {
   journal: [], live: null,
@@ -94,4 +94,58 @@ test('nav row is arrow-only and gates Prev/Next on page bounds; Search + Back st
 test('single-page list shows no nav row at all', () => {
   const rows = pickerAffordances(list({ mount: 'unet', items: items(2), page: 0, pageCount: 1 }))
   assert.ok(!ids(rows).some(id => id.startsWith('mod.page:')), 'no Prev/Next when one page')
+})
+
+// ── /arm flow chooser: pagination with ABSOLUTE indices ─────────────────────
+
+const flows = (n: number): StudioBase[] =>
+  Array.from({ length: n }, (_, i) => ({ id: `fund-${i}`, label: `Studio ${i}` }))
+/** The chooser as the manager builds it: the flow cards, then Custom last. */
+const arm = (n: number, page?: number): ArmState =>
+  ({ step: 'preset', presets: [...flows(n), { id: 'custom', label: 'Custom' }], images: [], configs: [], ...(page === undefined ? {} : { page }) })
+
+test('the flow chooser renders 8 flows to a page, with Custom pinned below', () => {
+  const rows = armAffordances(arm(19))
+  const flowRows = rows.filter(r => r.some(a => a.id.startsWith('arm.flow:')))
+  assert.equal(flowRows.length, ARM_PAGE_SIZE, 'one page of flows, not the whole list')
+  assert.ok(ids(rows).includes('arm.preset:19'), 'Custom is on the page (absolute index, last preset)')
+})
+
+test('a chooser that fits on one page has no nav row', () => {
+  const rows = armAffordances(arm(ARM_PAGE_SIZE))
+  assert.ok(!ids(rows).some(id => id.startsWith('arm.page:')), 'no Prev/Next when one page')
+  assert.equal(rows.filter(r => r.some(a => a.id.startsWith('arm.flow:'))).length, ARM_PAGE_SIZE)
+})
+
+test('page 1 rows carry ABSOLUTE indices into presets — the first row is 8, not 0', () => {
+  const rows = armAffordances(arm(19, 1))
+  const flowIds = ids(rows).filter(id => id.startsWith('arm.flow:'))
+  assert.deepEqual(flowIds, Array.from({ length: 8 }, (_, k) => `arm.flow:${8 + k}`),
+    'a page-relative index would resolve a tap to a different substrate than the row names')
+  assert.ok(ids(rows).includes('arm.preset:8') && !ids(rows).includes('arm.preset:0'), 'the ＋ index matches the name')
+})
+
+test('nav arrows are arrow-only and gate on page bounds; Custom stays reachable on every page', () => {
+  const first = ids(armAffordances(arm(19, 0)))
+  assert.ok(!first.includes('arm.page:prev') && first.includes('arm.page:next'), 'no Prev on the first page')
+  const mid = ids(armAffordances(arm(19, 1)))
+  assert.ok(mid.includes('arm.page:prev') && mid.includes('arm.page:next'), 'both on a middle page')
+  const last = armAffordances(arm(19, 2))
+  const lastIds = ids(last)
+  assert.ok(lastIds.includes('arm.page:prev') && !lastIds.includes('arm.page:next'), 'no Next on the last page')
+  assert.equal(lastIds.filter(id => id.startsWith('arm.flow:')).length, 3, 'the remainder page')
+  assert.ok(lastIds.includes('arm.preset:19'), 'Custom is pinned to every page')
+  const nav = last.flat().find(a => a.id === 'arm.page:prev')!
+  assert.ok(!/prev/i.test(nav.label) && nav.label.length <= 2, 'arrow only')
+})
+
+test('an out-of-range page renders the last page rather than an empty keyboard', () => {
+  const rows = armAffordances(arm(19, 99))
+  assert.ok(rows.some(r => r.some(a => a.id.startsWith('arm.flow:'))), 'still renders flows')
+})
+
+test('armPageCount counts only the paged flows — Custom is pinned, never a page of its own', () => {
+  assert.equal(armPageCount(arm(0)), 1, 'never below one page')
+  assert.equal(armPageCount(arm(8)), 1, 'Custom does not spill onto a second page')
+  assert.equal(armPageCount(arm(19)), 3)
 })
