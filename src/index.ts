@@ -1459,6 +1459,7 @@ async function main(): Promise<void> {
   app.use('/internal/v1', express.json(), createTreasuryAdminRouter({
     signorum: ring.signorum,
     legati: ring.legati,
+    animae: ring.animae,
     treasury: camelTreasury,
     ...(INTERNAL_SECRET ? { secret: INTERNAL_SECRET } : {}),
   }))
