@@ -60,6 +60,19 @@ jobs:
         env:
           MONGODB_URI: mongodb://127.0.0.1:27017/?replicaSet=rs0
 
+  # Pod contract gate — pins the wire contract between the host and the RunPod pod scripts
+  # (progress signal, completion webhook payload, manifest/caption sidecar pairing, job-row
+  # round-trip). Hermetic: no GPU, no network, no ai-toolkit. Runs in its own job so a Python
+  # failure is legible as a Python failure and doesn't lengthen the Node critical path.
+  pod-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'   # matches scripts/pod/aitk-trainer/Dockerfile
+      - run: python3 -m unittest discover -s scripts/pod -p 'test_*.py' -v
+
   docker-build:
     runs-on: ubuntu-latest
     steps:
