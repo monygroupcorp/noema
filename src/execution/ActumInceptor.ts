@@ -179,12 +179,12 @@ export class ActumInceptor {
     // Verify the Groth16 proof — throws on any failure
     const { nullifierHash, valor } = await this.deps.arcanumVerifier.verify(arcanumProof)
 
-    // Check note valor covers the reservation.
-    // Follow-on: this is the same "payer is short" condition as the identified path's
-    // balance check and would carry the same typed error, together with the bursa
-    // rail's own shortfall signal. Typing the anonymous rails is a separate change.
+    // Check note valor covers the reservation. This is the same "payer is short"
+    // condition as the identified path's balance check and carries the same typed
+    // error: a note's valor is denominated in impetus points, exactly like a signum
+    // balance, so `InsufficientFundsError` applies without any unit translation.
     if (valor < reservation) {
-      throw new Error(`Arcanum note valor ${valor} < required ${reservation}`)
+      throw new InsufficientFundsError(valor, reservation)
     }
 
     // Create the actum — nullifier is the nullifierHash from the proof

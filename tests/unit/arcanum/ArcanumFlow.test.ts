@@ -15,7 +15,9 @@ import { ArcanumIssuer } from '../../../src/ledger/ArcanumIssuer.js'
 import { ArcanumVerifier } from '../../../src/arcanum/ArcanumVerifier.js'
 import { MemoryArcanumTree } from '../../../src/arcanum/ArcanumTree.js'
 import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
-import { ActumInceptor } from '../../../src/execution/ActumInceptor.js'
+import { ActumInceptor, InsufficientFundsError } from '../../../src/execution/ActumInceptor.js'
+import { MongoBursarium } from '../../../src/arcanum/MongoBursarium.js'
+import { InsufficientBursaCreditsError } from '../../../src/types/bursa.js'
 import { computeCommitment, computeNullifierHash } from '../../../src/arcanum/poseidon.js'
 import { computeRecipient } from '../../../src/arcanum/prover.js'
 import type { Modus } from '../../../src/types/modus.js'
@@ -298,8 +300,52 @@ test('spend is rejected when note valor < modus reservation', async () => {
     },
   }
 
-  await assert.rejects(
-    () => inceptor.initiate({ modusId: modus.id, aditus: {}, by: { arcanumProof: spend } }),
-    /valor .* < required/i,
-  )
+  // Asserted by TYPE and FIELDS, not by message shape: the fields are the contract the
+  // API boundary reads to render a 402, and a message-shape assertion would pin prose
+  // rather than behaviour.
+  const err = await inceptor
+    .initiate({ modusId: modus.id, aditus: {}, by: { arcanumProof: spend } })
+    .then(() => { throw new Error('expected the spend to be rejected') }, (e: unknown) => e)
+
+  assert.ok(err instanceof InsufficientFundsError, `expected InsufficientFundsError, got ${String(err)}`)
+  assert.equal(err.balance, 50n)   // the note's valor
+  assert.equal(err.required, 100n) // the modus reservation
+})
+
+// ── Test 9: bursa purse short of the debit ────────────────────────────────────
+//
+// The bursa rail's shortfall signal, asserted at its source (`Bursarum.debit`) by TYPE
+// and FIELDS. A purse-backed run debits before it creates an actum, so this throw is the
+// one an underfunded anonymous run surfaces. `credits` is in PURSE CREDITS — a distinct
+// class from the impetus-denominated `InsufficientFundsError` above, so the two units are
+// never compared. Hermetic: the collection is a stub, no Mongo.
+
+function stubBursaCollection(doc: Record<string, unknown> | null) {
+  return ({
+    findOne: async () => doc,
+    findOneAndUpdate: async () => doc,
+  } as unknown) as ConstructorParameters<typeof MongoBursarium>[0]
+}
+
+test('a debit larger than the purse is rejected with the typed bursa shortfall error', async () => {
+  const store = new MongoBursarium(stubBursaCollection({ token: 'purse-1', credits: '50', createdAt: new Date() }))
+
+  const err = await store.debit('purse-1', 100n)
+    .then(() => { throw new Error('expected the debit to be rejected') }, (e: unknown) => e)
+
+  assert.ok(err instanceof InsufficientBursaCreditsError, `expected InsufficientBursaCreditsError, got ${String(err)}`)
+  assert.equal(err.credits, 50n)
+  assert.equal(err.required, 100n)
+})
+
+test('an unknown purse is a different condition, not a shortfall', async () => {
+  const store = new MongoBursarium(stubBursaCollection(null))
+
+  const err = await store.debit('purse-missing', 1n)
+    .then(() => { throw new Error('expected the debit to be rejected') }, (e: unknown) => e)
+
+  // A bad token is not an empty purse: it must keep its own handling rather than being
+  // absorbed into the shortfall type (and therefore into the 402).
+  assert.ok(err instanceof Error)
+  assert.ok(!(err instanceof InsufficientBursaCreditsError), 'an unknown purse must not read as a shortfall')
 })
