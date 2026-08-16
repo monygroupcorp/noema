@@ -22,6 +22,7 @@ import type { Modorum, Modus } from '../../types/modus.js'
 import type { Cursorum, ActumCompletor, Actorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
 import { InsufficientFundsError } from '../../execution/ActumInceptor.js'
+import { InsufficientBursaCreditsError } from '../../types/bursa.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
 import type { Consuetudinum, Appearance, Generatio } from '../../types/consuetudo.js'
 import type { Signorum } from '../../types/significandi.js'
@@ -585,11 +586,19 @@ export class CrystalApi {
     }
 
     // A payer who cannot cover the reservation is a request outcome, not a server
-    // fault: translate the core's typed `InsufficientFundsError` into the existing
+    // fault: translate the core's typed shortfall errors into the existing
     // `402 economy.insufficient_signa` here, at the API boundary (the core carries no
     // API error vocabulary). NOT retryable — the call cannot succeed until the balance
     // changes, so advertising a retry would send clients into a loop that never clears.
-    // The mapping is deliberately narrow: every other error keeps the handling it had.
+    //
+    // Two typed errors reach this seam, one per denomination: `InsufficientFundsError`
+    // carries impetus points (the identified signum balance and the arcanum note valor
+    // alike), `InsufficientBursaCreditsError` carries purse credits. They stay distinct
+    // classes so the units are never compared; both render into the same `details`
+    // strings, which are per-request figures in whatever unit the caller paid in.
+    //
+    // The mapping is deliberately narrow: every other error keeps the handling it had —
+    // a bursa failure that is not a shortfall (e.g. an unknown token) is untouched here.
     let actum: Actum
     try {
       ({ actum } = await dispatchInceptio(
@@ -600,6 +609,12 @@ export class CrystalApi {
       if (err instanceof InsufficientFundsError) {
         throw Errors.insufficientSigna({
           available: err.balance.toString(),
+          required: err.required.toString(),
+        })
+      }
+      if (err instanceof InsufficientBursaCreditsError) {
+        throw Errors.insufficientSigna({
+          available: err.credits.toString(),
           required: err.required.toString(),
         })
       }
