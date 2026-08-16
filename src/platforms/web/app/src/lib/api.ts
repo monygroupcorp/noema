@@ -680,9 +680,7 @@ export const api = {
       `/v1/data/datasets/${encodeURIComponent(datasetId)}/captionsets/${encodeURIComponent(captionsetId)}/captions/${encodeURIComponent(mediaId)}`,
       { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ caption }) },
     ).then(j<{ dataset: Dataset }>),
-  trainingCost: (body: { steps: number; baseModel?: string; images?: number }) =>
-    fetch('/v1/data/trainings/calculate-cost', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
-      .then(j<{ impetus?: string; usd?: number }>),
+  // For a cost estimate before dispatching, use `quote` above (`POST /v1/runs/quote`).
   // Signed upload (R2). Returns a presigned PUT url + the permanent public url.
   signUpload: (body: { filename: string; contentType: string; bucketName?: string }) =>
     fetch('/api/v1/storage/uploads/sign', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
