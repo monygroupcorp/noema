@@ -4,7 +4,7 @@ import type { Modus } from '../../../src/types/modus.js'
 import type { Actum } from '../../../src/types/actum.js'
 import type { Signum, Signa } from '../../../src/types/significandi.js'
 import type { Cursor, Actorum, Cursorum, Inceptio } from '../../../src/types/cursus.js'
-import { ActumInceptor } from '../../../src/execution/ActumInceptor.js'
+import { ActumInceptor, InsufficientFundsError } from '../../../src/execution/ActumInceptor.js'
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -189,7 +189,7 @@ test('actum.signaConsumed lists the locked signa ids', async () => {
   assert.deepEqual(actum.signaConsumed, signorum._locked)
 })
 
-test('throws InsufficientFundsError when balance is below reservation', async () => {
+test('an underfunded run throws a typed InsufficientFundsError', async () => {
   const modus = makeModus()
   const inceptor = new ActumInceptor({
     modorum: makeModorum(modus),
@@ -198,10 +198,29 @@ test('throws InsufficientFundsError when balance is below reservation', async ()
     acta: makeActa(),
   })
 
-  await assert.rejects(
-    () => inceptor.initiate(makeParams()),
-    /insufficient/i,
+  // The TYPE is the contract the API layer maps on, and `balance`/`required` must be
+  // readable as fields — a plain Error carrying the same words satisfies neither.
+  const err = await inceptor.initiate(makeParams()).then(
+    () => { throw new Error('expected initiate to reject') },
+    (e: unknown) => e,
   )
+  assert.ok(err instanceof InsufficientFundsError, `expected InsufficientFundsError, got ${String(err)}`)
+  assert.equal(err.balance, 50n)
+  assert.equal(err.required, 1000n)
+})
+
+test('a funded run does not throw', async () => {
+  const modus = makeModus()
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(makeRunner(100n)),
+    signorum: makeSignorum([makeSignum(500n)]),
+    acta: makeActa(),
+  })
+
+  const actum = await inceptor.initiate(makeParams())
+
+  assert.equal(actum.status, 'nascens')
 })
 
 test('throws when modus is not found', async () => {

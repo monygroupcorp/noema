@@ -14,6 +14,24 @@ const log = makeLogger('execution:inceptor')
 
 const DEFAULT_EXPIRAT_MS = 15 * 60 * 1000  // 15 minutes
 
+/**
+ * Thrown when the payer cannot cover a run's upper-bound reservation.
+ *
+ * A typed domain error so a caller can tell "the payer is short" apart from "the
+ * server failed": the API layer maps this to `402 economy.insufficient_signa`
+ * instead of the generic 500. `balance` and `required` are carried as FIELDS —
+ * the mapper reads them as data rather than parsing them back out of the message.
+ *
+ * Layering: this lives in the core and carries no API error vocabulary;
+ * translation to an `ApiError` happens at the allocutio boundary.
+ */
+export class InsufficientFundsError extends Error {
+  constructor(readonly balance: bigint, readonly required: bigint) {
+    super(`Insufficient funds: balance ${balance} < required ${required}`)
+    this.name = 'InsufficientFundsError'
+  }
+}
+
 interface Deps {
   modorum: Modorum
   cursorum: Cursorum
@@ -56,7 +74,7 @@ export class ActumInceptor {
     const balance = await signorum.balance(by)
     if (balance < reservation && !process.env.DEV_FREE_EXECUTION) {
       log.warn('insufficient funds', { balance: balance.toString(), required: reservation.toString() })
-      throw new Error(`Insufficient funds: balance ${balance} < required ${reservation}`)
+      throw new InsufficientFundsError(balance, reservation)
     }
 
     // 4. Select valid signa to cover the reservation (greedy, smallest first)
@@ -161,7 +179,10 @@ export class ActumInceptor {
     // Verify the Groth16 proof — throws on any failure
     const { nullifierHash, valor } = await this.deps.arcanumVerifier.verify(arcanumProof)
 
-    // Check note valor covers the reservation
+    // Check note valor covers the reservation.
+    // Follow-on: this is the same "payer is short" condition as the identified path's
+    // balance check and would carry the same typed error, together with the bursa
+    // rail's own shortfall signal. Typing the anonymous rails is a separate change.
     if (valor < reservation) {
       throw new Error(`Arcanum note valor ${valor} < required ${reservation}`)
     }
