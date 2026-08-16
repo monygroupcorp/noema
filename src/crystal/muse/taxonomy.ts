@@ -1,0 +1,93 @@
+// =============================================================================
+// muse/taxonomy — the two-tier prompt-fragment category split
+// =============================================================================
+//
+// A moodboard is decomposed into short, reusable prompt fragments, each tagged
+// with exactly one category. Cohesion when those fragments are recombined comes
+// almost entirely from WHICH categories exist and how they are tiered — not from
+// how cleverly the final sentence is written.
+//
+// Two tiers, and the distinction is load-bearing:
+//   EXCLUSIVE — these define the world. Exactly one of each may be present in a
+//               composed prompt; two settings or two styles describe two images.
+//   ATTRIBUTE — these describe the single figure. One of each, and they STACK:
+//               hair from one source, outfit from another, pose from a third,
+//               all landing on one figure. The stacking is the point.
+//
+// Pure data and pure functions: no I/O, no platform imports. `src/crystal` is
+// the platform-neutral ring.
+
+/** One categorized, reusable prompt fragment lifted from a caption. */
+export type Fragment = {
+  /** Which slot this fragment fills. */
+  category: Category
+  /** The fragment itself — a short noun/adjective phrase, prompt-ready. */
+  text: string
+  /** The moodboard entry it came from. */
+  source: string
+  /** The model binding for that source (e.g. a LoRA trigger word). */
+  trigger: string
+}
+
+/** World-defining categories: at most one of each may appear in a prompt. */
+export const EXCLUSIVE = ['setting', 'style', 'palette', 'lighting', 'mood'] as const
+
+/** Figure-describing categories: one of each, and they stack onto one figure. */
+export const ATTRIBUTE = ['subject', 'hair', 'outfit', 'pose', 'expression', 'props'] as const
+
+export type ExclusiveCategory = (typeof EXCLUSIVE)[number]
+export type AttributeCategory = (typeof ATTRIBUTE)[number]
+export type Category = ExclusiveCategory | AttributeCategory
+
+/** Every category, attribute tier first. Sampling order. */
+export const CATEGORIES: readonly Category[] = [...ATTRIBUTE, ...EXCLUSIVE]
+
+/** Which tier a category belongs to. */
+export type Tier = 'exclusive' | 'attribute'
+
+const EXCLUSIVE_SET: ReadonlySet<string> = new Set(EXCLUSIVE)
+const ATTRIBUTE_SET: ReadonlySet<string> = new Set(ATTRIBUTE)
+
+/** True for a world-defining category. Narrows, so callers can branch on the tier. */
+export function isExclusive(category: string): category is ExclusiveCategory {
+  return EXCLUSIVE_SET.has(category)
+}
+
+/** True for a figure-describing category. Narrows, so callers can branch on the tier. */
+export function isAttribute(category: string): category is AttributeCategory {
+  return ATTRIBUTE_SET.has(category)
+}
+
+/** True for any known category. */
+export function isCategory(category: string): category is Category {
+  return isExclusive(category) || isAttribute(category)
+}
+
+/** The tier of a known category; `undefined` for anything outside the taxonomy. */
+export function tierOf(category: string): Tier | undefined {
+  if (isExclusive(category)) return 'exclusive'
+  if (isAttribute(category)) return 'attribute'
+  return undefined
+}
+
+/**
+ * Slot order for the composed prompt, chosen for image-model readability.
+ * Distinct from CATEGORIES (sampling order) on purpose — a category may be
+ * sampled early and rendered late.
+ */
+export const TEMPLATE_ORDER: readonly Category[] = [
+  'style',
+  'subject',
+  'hair',
+  'outfit',
+  'pose',
+  'expression',
+  'props',
+  'setting',
+  'lighting',
+  'palette',
+  'mood',
+]
+
+/** A garden is the pool of fragments available per category. */
+export type Garden = Partial<Record<Category, Fragment[]>>
