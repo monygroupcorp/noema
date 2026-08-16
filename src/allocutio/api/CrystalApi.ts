@@ -21,6 +21,7 @@ import type { Progressus, Phasis } from '../../types/progressus.js'
 import type { Modorum, Modus } from '../../types/modus.js'
 import type { Cursorum, ActumCompletor, Actorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
+import { InsufficientFundsError } from '../../execution/ActumInceptor.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
 import type { Consuetudinum, Appearance, Generatio } from '../../types/consuetudo.js'
 import type { Signorum } from '../../types/significandi.js'
@@ -583,10 +584,27 @@ export class CrystalApi {
       ...(opts.gpuClass ? { gpuClass: opts.gpuClass } : {}),
     }
 
-    const { actum } = await dispatchInceptio(
-      { inceptor, modorum, cursorum, completor, actumIndex, compositusCursor },
-      inceptio,
-    )
+    // A payer who cannot cover the reservation is a request outcome, not a server
+    // fault: translate the core's typed `InsufficientFundsError` into the existing
+    // `402 economy.insufficient_signa` here, at the API boundary (the core carries no
+    // API error vocabulary). NOT retryable — the call cannot succeed until the balance
+    // changes, so advertising a retry would send clients into a loop that never clears.
+    // The mapping is deliberately narrow: every other error keeps the handling it had.
+    let actum: Actum
+    try {
+      ({ actum } = await dispatchInceptio(
+        { inceptor, modorum, cursorum, completor, actumIndex, compositusCursor },
+        inceptio,
+      ))
+    } catch (err) {
+      if (err instanceof InsufficientFundsError) {
+        throw Errors.insufficientSigna({
+          available: err.balance.toString(),
+          required: err.required.toString(),
+        })
+      }
+      throw err
+    }
     return toRunDetail(actum)
   }
 
