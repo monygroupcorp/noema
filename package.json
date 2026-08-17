@@ -8,6 +8,7 @@
     "test:crystal": "./scripts/run-with-env.sh ./scripts/run-tests.sh 'tests/unit/crystal/*.test.ts' 'tests/unit/crystal/**/*.test.ts' 'tests/unit/lib/**/*.test.ts' 'tests/unit/api/**/*.test.ts' 'tests/unit/analytics/**/*.test.ts' 'tests/unit/flow/MongoFlowContextStore.test.ts'",
     "dashboard": "node scripts/dashboard.js",
     "gen:api-docs": "npx tsx scripts/gen-api-docs.ts",
+    "muse:roll": "npx tsx scripts/muse-roll.ts",
     "refresh:ofac": "npx tsx scripts/refresh-ofac-blocklist.ts data/ofac-blocklist.json",
     "ceremony:finalize": "npx tsx scripts/ceremony-finalize.ts",
     "typecheck": "tsc --noEmit",
