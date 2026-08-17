@@ -176,6 +176,16 @@ export function Card() {
   const [activePurse, setActivePurseState] = useState<string | null>(getActivePurse());
   useEffect(() => { setPinned(isPinned(id)); }, [id]);
 
+  // Whether the caller owns this flow — reuses the "is this mine" membership check
+  // the palette build already relies on (FlowSummary carries no owner field over the
+  // wire; see Canvas.tsx's dedupeFlows). Gates the "Edit in Canvas" link below.
+  const [mine, setMine] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api.listMyFlows().then((r) => { if (live) setMine((r.flows ?? []).some((f) => f.id === id)); }).catch(() => { if (live) setMine(false); });
+    return () => { live = false; };
+  }, [id]);
+
   // Whether this flow is the current cross-platform `/make` default (web + Telegram share
   // the same binding, keyed by owner identity — see Preferences.tsx's rebindMake()).
   const [makeDefault, setMakeDefault] = useState(false);
@@ -441,6 +451,11 @@ export function Card() {
             >
               <Ic name="star" />
             </button>
+            {mine && (
+              <Link to={`/canvas?modusId=${id}`} className="btn ghost" title="Edit this flow's steps in Canvas">
+                <Ic name="workflow" /> Edit in Canvas
+              </Link>
+            )}
           </div>
           {bindErr && <div className="pub-err">{bindErr}</div>}
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ReactFlow, Background, BackgroundVariant, Controls, Handle, Position,
   addEdge, useNodesState, useEdgesState,
@@ -122,6 +122,15 @@ export function tabulaToEdges(tabula: Pick<Tabula, 'vincula'>): Edge[] {
     targetHandle: v.scopusPorta,
     ...(v.discordantia ? { data: { discordantia: true } } : {}),
   }));
+}
+
+// Which Tabula to load on open. A direct link from a minted flow's catalog card
+// (?modusId=) should reopen that flow's own draft, not always the most-recently-saved
+// one. Falls back to tabulae[0] (the existing "most recent" behavior) when no modusId
+// is given, or when none of the caller's tabulae carry it.
+export function resolveTabulaForModus<T extends Pick<Tabula, 'modusId'>>(tabulae: T[], modusId?: string): T | undefined {
+  const match = modusId ? tabulae.find((t) => t.modusId === modusId) : undefined;
+  return match ?? tabulae[0];
 }
 
 // ── Publish-error-on-edge (AMENDMENT v2 — the one judgment call in this item) ────
@@ -295,6 +304,11 @@ export function NodeParamPanel({ node, onChange, onClose }: {
 
 export function Canvas() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Set only when opened from a minted flow's catalog card ("Edit in Canvas") — the
+  // caller's own tabula for that flow, not the most-recently-saved one. See
+  // resolveTabulaForModus.
+  const modusId = searchParams.get('modusId') || undefined;
   const [tabula, setTabula] = useState<Tabula | null>(null);
   const [palette, setPalette] = useState<PaletteEntry[]>([]);
   const [nodes, setNodes, onNodesChangeRaw] = useNodesState<Node<FlowData>>([]);
@@ -330,7 +344,7 @@ export function Canvas() {
       setPalette(built);
 
       const { tabulae } = await api.listTabulae();
-      const current = tabulae[0] ?? (await api.createTabula({ nomen: 'Untitled canvas' })).tabula;
+      const current = resolveTabulaForModus(tabulae, modusId) ?? (await api.createTabula({ nomen: 'Untitled canvas' })).tabula;
       if (cancelled) return;
       setTabula(current);
       setNodes(tabulaToNodes(current, built));
