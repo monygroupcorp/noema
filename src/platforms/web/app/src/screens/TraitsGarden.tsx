@@ -8,7 +8,9 @@ import { guardedClick, useDirtyGuard } from '../lib/dirtyGuard';
 // Traits garden (editio-garden-spec.md) — author the axes of variation. Each axis is a
 // Tractus (an input port to vary), each card a TractusValor (value + label + weight). Wired
 // to the live draft: edits are local until Save → PATCH /collectiones/:id/tractus (re-derives
-// provenance). A fired collection is FROZEN — the grid shows read-only. Fire = spend + run.
+// provenance). Once fired, the grid and the supply are read-only, but the BASE FLOW stays
+// editable — a flow change is forward-only, so pieces already generated keep the flow they were
+// made under and the next dispatch expands the new one. Fire = spend + run.
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const combos = (axes: Tractus[]) => axes.reduce((n, a) => n * Math.max(1, a.valores.length), 1);
@@ -62,15 +64,21 @@ export function TraitsGarden() {
 
   async function save() {
     if (!id || busy) return;
-    setBusy('save'); setErr(null);
+    setErr(null);
     // Drop empty values; every value needs a non-empty `value`.
     const clean = axes.map((a) => ({ ...a, valores: a.valores.filter((v) => String(v.value).trim() !== '') }));
+    // Traits and supply are frozen once fired, and the wire cannot say "sent but unchanged" —
+    // so on a fired collection we send the flow alone and omit those fields entirely.
+    const patch = {
+      ...(editable ? { tractus: clean } : {}),
+      ...(editable && total !== c!.total ? { numerus: total } : {}),
+      ...(modusId && modusId !== c!.modusId ? { modusId } : {}),
+    };
+    // Nothing the server would accept — clear the flag rather than send an empty patch.
+    if (Object.keys(patch).length === 0) { setDirty(false); return; }
+    setBusy('save');
     try {
-      const { collection } = await api.patchCollectionDraft(id, {
-        tractus: clean,
-        ...(modusId && modusId !== c!.modusId ? { modusId } : {}),
-        ...(total !== c!.total ? { numerus: total } : {}),
-      });
+      const { collection } = await api.patchCollectionDraft(id, patch);
       setC(collection); setAxes(collection.tractus ?? clean);
       setModusId(collection.modusId); setTotal(collection.total); setDirty(false);
     }
@@ -101,21 +109,26 @@ export function TraitsGarden() {
         </div>
 
         {/* Base flow + supply — the two run-config fields the create form no longer asks for.
-            Saved by the same draft-authoring write as the grid; frozen once fired. */}
-        {editable && (
-          <div className="coll-create" style={{ marginBottom: 12 }}>
-            <div className="cc-row">
-              <label className="cc-field"><span>Base flow</span>
-                <select className="cer-input" value={modusId} onChange={(e) => { setModusId(e.target.value); setDirty(true); }}>
-                  <option value="">choose a flow…</option>
-                  {flows.map((f) => <option key={f.id} value={f.id}>{f.nomen ?? f.id}</option>)}
-                </select></label>
+            Saved by the same write as the grid. Supply freezes on fire; the flow does not. */}
+        <div className="coll-create" style={{ marginBottom: 12 }}>
+          <div className="cc-row">
+            <label className="cc-field"><span>Base flow</span>
+              <select className="cer-input" value={modusId} onChange={(e) => { setModusId(e.target.value); setDirty(true); }}>
+                <option value="">choose a flow…</option>
+                {flows.map((f) => <option key={f.id} value={f.id}>{f.nomen ?? f.id}</option>)}
+              </select></label>
+            {editable && (
               <label className="cc-field cc-narrow"><span>Supply</span>
                 <input className="cer-input" type="number" min={0} value={total}
                   onChange={(e) => { setTotal(Math.max(0, Number(e.target.value) || 0)); setDirty(true); }} /></label>
-            </div>
+            )}
           </div>
-        )}
+          {!editable && (
+            <div className="gt-sub mono" style={{ marginTop: 6 }}>
+              A new flow applies to pieces made after you save — pieces already generated stay as they are.
+            </div>
+          )}
+        </div>
 
         {err && <div className="warn" style={{ marginBottom: 12 }}>{err}</div>}
 
@@ -183,7 +196,10 @@ export function TraitsGarden() {
         <div className="garden-foot">
           <Link className="btn ghost" to={`/collections/${id}`} onClick={guardedClick}>← hub</Link>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            {editable && <button className="btn" disabled={!dirty || busy !== false} onClick={save}>{busy === 'save' ? 'Saving…' : dirty ? 'Save traits' : 'Saved'}</button>}
+            {/* Also the flow-change save on a fired collection — the only field still writable there. */}
+            <button className="btn" disabled={!dirty || busy !== false} onClick={save}>
+              {busy === 'save' ? 'Saving…' : dirty ? (editable ? 'Save traits' : 'Save flow') : 'Saved'}
+            </button>
             <Link className="btn ghost" to={`/collections/${id}/rules`} onClick={guardedClick}>Rules →</Link>
             {editable && <button className="btn accent" disabled={busy !== false || combos(axes) === 0} onClick={fire}>{busy === 'fire' ? 'Firing…' : 'Fire collection →'}</button>}
           </div>
