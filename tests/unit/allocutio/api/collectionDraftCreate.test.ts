@@ -26,14 +26,15 @@ import type { AuctorKey } from '../../../../src/flow/types.js'
 
 const auctor: AuctorKey = { animaId: 'anima-1' }
 const FLOW_ID = 'test-flow'
+const OTHER_FLOW_ID = 'test-flow-b'
 
-function makeModus(): Modus {
+function makeModus(id: string = FLOW_ID, versio = '1.0.0'): Modus {
   return {
-    id: FLOW_ID,
-    nomen: FLOW_ID,
+    id,
+    nomen: id,
     genus: 'atomicus',
-    versio: '1.0.0',
-    contentHash: `sha256:${FLOW_ID}`,
+    versio,
+    contentHash: `sha256:${id}`,
     aditus: { prompt: { type: 'text', required: true } },
     exitus: { image: { type: 'image' } },
     ministerium: 'fake',
@@ -194,12 +195,90 @@ test('patchCollectionDraft: naming a flow re-derives provenance; a fired collect
   const withGrid = await api.patchCollectionDraft(auctor, c.id, { tractus: [{ porta: 'prompt', valores: [{ value: 'a' }] }] })
   assert.notEqual(withGrid.provenanceHash, withFlow.provenanceHash)
 
-  // Fired ⇒ frozen.
+  // Fired ⇒ traits and supply are frozen (the flow is not; see the post-fire suite below).
   await api.fireCollection(auctor, c.id)
   await assert.rejects(
-    () => api.patchCollectionDraft(auctor, c.id, { modusId: FLOW_ID }),
+    () => api.patchCollectionDraft(auctor, c.id, { tractus: [] }),
     (e: unknown) => (e as { code?: string }).code === 'input.malformed',
   )
+})
+
+// =============================================================================
+// Post-fire flow change: a fired collection's BASE FLOW is still writable; its traits and
+// supply are not. Forward-only — already-dispatched work keeps what it was made with.
+// =============================================================================
+
+/** A fired collection with one recorded actum, ready for post-fire patching. */
+async function firedCollection() {
+  const { api, collectiones } = makeApi({ flows: [makeModus(), makeModus(OTHER_FLOW_ID, '2.0.0')] })
+  const axis = [{ porta: 'prompt', valores: [{ value: 'a' }, { value: 'b' }] }]
+
+  const c = await api.collect(auctor, { draft: true, nomen: 'a set' })
+  await api.patchCollectionDraft(auctor, c.id, { modusId: FLOW_ID, numerus: 2, tractus: axis })
+  const fired = await api.fireCollection(auctor, c.id)
+  assert.notEqual(collectiones.store.get(c.id)?.status, 'draft', 'the fixture must actually be fired')
+
+  // Stand in for a piece already produced under the old flow.
+  await collectiones.update(c.id, { acta: ['actum-1'] })
+  return { api, collectiones, id: c.id, axis, fired }
+}
+
+test('patchCollectionDraft: a modusId-only patch succeeds on a fired collection, and re-derives provenance', async () => {
+  const { api, collectiones, id, axis, fired } = await firedCollection()
+
+  const patched = await api.patchCollectionDraft(auctor, id, { modusId: OTHER_FLOW_ID })
+
+  assert.equal(patched.modusId, OTHER_FLOW_ID, 'the flow moved')
+  assert.match(patched.provenanceHash, /^sha256:[0-9a-f]+$/)
+  assert.notEqual(patched.provenanceHash, fired.provenanceHash, 'the content-address follows the new flow')
+
+  // Nothing else moved: supply, grid, status and the already-recorded work are untouched.
+  const stored = collectiones.store.get(id)!
+  assert.equal(patched.total, 2)
+  assert.deepEqual(stored.tractus, axis)
+  assert.notEqual(stored.status, 'draft')
+  assert.deepEqual(stored.acta, ['actum-1'], 'a flow change must not reach back into produced pieces')
+})
+
+test('patchCollectionDraft: a tractus or numerus patch is still refused on a fired collection', async () => {
+  const { api, collectiones, id, axis } = await firedCollection()
+  const isMalformed = (e: unknown) => (e as { code?: string }).code === 'input.malformed'
+
+  await assert.rejects(() => api.patchCollectionDraft(auctor, id, { tractus: [] }), isMalformed)
+  await assert.rejects(() => api.patchCollectionDraft(auctor, id, { numerus: 99 }), isMalformed)
+  // …including alongside a legal flow change: the whole patch is refused, not partially applied.
+  await assert.rejects(() => api.patchCollectionDraft(auctor, id, { modusId: OTHER_FLOW_ID, numerus: 99 }), isMalformed)
+  await assert.rejects(() => api.patchCollectionDraft(auctor, id, { modusId: OTHER_FLOW_ID, tractus: axis }), isMalformed)
+
+  const stored = collectiones.store.get(id)!
+  assert.equal(stored.modusId, FLOW_ID, 'a refused patch changed nothing at all')
+  assert.equal(stored.numerus, 2)
+  assert.deepEqual(stored.tractus, axis)
+})
+
+test('patchCollectionDraft: on a fired collection the client must send the flow alone — an echoed grid is refused', async () => {
+  const { api, id, axis } = await firedCollection()
+  const isMalformed = (e: unknown) => (e as { code?: string }).code === 'input.malformed'
+
+  // The wire cannot express "sent but identical", so a payload echoing the stored grid unchanged
+  // is refused exactly like a real edit. The garden therefore omits tractus/numerus once fired…
+  await assert.rejects(() => api.patchCollectionDraft(auctor, id, { modusId: OTHER_FLOW_ID, tractus: axis }), isMalformed)
+  // …and that omission is what makes the flow change land.
+  const patched = await api.patchCollectionDraft(auctor, id, { modusId: OTHER_FLOW_ID })
+  assert.equal(patched.modusId, OTHER_FLOW_ID)
+
+  // A patch with nothing to change keeps being refused, as before.
+  await assert.rejects(() => api.patchCollectionDraft(auctor, id, {}), isMalformed)
+})
+
+test('patchCollectionDraft: an unresolvable flow is still refused post-fire', async () => {
+  const { api, collectiones, id } = await firedCollection()
+
+  await assert.rejects(
+    () => api.patchCollectionDraft(auctor, id, { modusId: 'no-such-flow' }),
+    (e: unknown) => (e as { code?: string }).code === 'not_found.flow',
+  )
+  assert.equal(collectiones.store.get(id)?.modusId, FLOW_ID)
 })
 
 test('collect: the dispute-freeze gate still fires first — draft or not', async () => {

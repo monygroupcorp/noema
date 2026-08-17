@@ -801,13 +801,22 @@ export class CrystalApi {
   }
 
   /**
-   * The DRAFT-authoring write: set a draft's base flow, supply and/or trait grid, and
+   * The collection-config write: set a collection's base flow, supply and/or trait grid, and
    * re-derive its provenance hash — the content-address MUST change when the flow, the grid,
-   * a weight, an exclude, or a tag changes. Frozen once fired. Owner-scoped.
+   * a weight, an exclude, or a tag changes. Owner-scoped.
    *
    * `collect` may now create a draft that knows none of these (create is a naming act), so this
    * is where a draft learns them. A flowless draft still content-addresses to `''` — there is
    * nothing to hash until a flow is chosen.
+   *
+   * The freeze is PER FIELD, not per method:
+   *  - while `status === 'draft'`, every field is writable;
+   *  - once fired, `tractus` and `numerus` are frozen — a patch carrying either is refused, even
+   *    if the sent value happens to equal the stored one (the wire cannot express "unchanged");
+   *  - once fired, `modusId` is still writable. Changing it is forward-only: `CollectioCursor`
+   *    re-reads the collection on every dispatch tick, so a later dispatch expands the new flow,
+   *    while already-dispatched `acta` keep the `aditus` they were created with. Provenance is
+   *    re-derived so the content-address matches whatever the collection now points at.
    */
   async patchCollectionDraft(
     auctor: AuctorKey,
@@ -817,7 +826,15 @@ export class CrystalApi {
     const { collectiones } = this.deps
     if (!collectiones) throw Errors.notFoundCollection('collections')
     const c = await this._ownedCollection(auctor, id)
-    if (c.status !== 'draft') throw Errors.inputMalformed('a collection’s tractus is frozen once it is fired')
+    if (c.status !== 'draft') {
+      const changingFlow = patch.modusId !== undefined
+      const changingTraitsOrSupply = patch.tractus !== undefined || patch.numerus !== undefined
+      // A fired collection accepts a flow change and nothing else. A patch that also carries
+      // traits/supply, or that carries nothing to change at all, is refused.
+      if (changingTraitsOrSupply || !changingFlow) {
+        throw Errors.inputMalformed('a collection’s traits and supply are frozen once it is fired')
+      }
+    }
 
     const modusId = patch.modusId ?? c.modusId
     const tractus = patch.tractus ?? c.tractus
