@@ -12,8 +12,18 @@ import {
 } from '../../../src/crystal/muse/taxonomy.js'
 import { rollFragments } from '../../../src/crystal/muse/sampler.js'
 import { composeTemplate, detectConflicts } from '../../../src/crystal/muse/weaver.js'
+import {
+  buildGarden,
+  gardenCounts,
+  growGarden,
+  type CaptionSource,
+  type FragmentExtractor,
+} from '../../../src/crystal/muse/garden.js'
+import { rollReport } from '../../../src/crystal/muse/roll.js'
 
 // Hermetic: no network, no clock, no filesystem. Pure string logic only.
+// Every garden test drives the extraction seam through an INJECTED FAKE — a test
+// that reached a provider would be measuring the provider, not this code.
 
 function frag(category: Fragment['category'], text: string, source = 'boardA'): Fragment {
   return { category, text, source, trigger: `${source}-trigger` }
@@ -218,4 +228,224 @@ test('a coherent fragment set reports no reasons at all', () => {
     frag('mood', 'serene'),
   ])
   assert.deepEqual(reasons, [])
+})
+
+// --- Garden: caption -> validated, deduped, attributed fragments -------------
+
+/** An extractor that returns exactly what it was handed, stamped with the source and trigger. */
+function fakeExtractor(rows: Array<{ category: string; text: string }>): FragmentExtractor {
+  return async (_captions, source, trigger) =>
+    rows.map((r) => ({ category: r.category as Fragment['category'], text: r.text, source, trigger }))
+}
+
+function source(captions: string[], name = 'boardA', trigger = 'boardA-trigger'): CaptionSource {
+  return { name, trigger, captions }
+}
+
+test('an unknown category is rejected, not silently kept', async () => {
+  // The sampler iterates CATEGORIES, so a pool under an unknown key is a pool
+  // nothing ever reads — an invented category must be dropped AND counted, never
+  // carried into the garden where it looks like coverage.
+  const built = await growGarden(
+    [source(['a caption'])],
+    fakeExtractor([
+      { category: 'subject', text: 'a young woman' },
+      { category: 'bicycle', text: 'a rusted touring bike' },
+      { category: 'vibe', text: 'crunchy' },
+      { category: 'mood', text: 'nostalgic' },
+    ]),
+  )
+
+  assert.equal(built.kept, 2, 'only the two in-taxonomy fragments are pooled')
+  assert.equal(built.drops.unknownCategory, 2, 'both out-of-taxonomy fragments are counted')
+  assert.deepEqual(built.drops.unknownCategories, ['bicycle', 'vibe'], 'the caller can report what was dropped')
+
+  const pooled = Object.keys(built.garden)
+  assert.deepEqual(pooled.sort(), ['mood', 'subject'], 'no pool exists for a category outside the taxonomy')
+  for (const key of pooled) {
+    assert.ok(isCategory(key), `'${key}' reached the garden but is not a category`)
+  }
+})
+
+test('identical text is deduped within a category and kept across categories', () => {
+  const built = buildGarden([
+    frag('props', 'a paper parasol'),
+    frag('props', 'a paper parasol'),   // exact repeat — one caption set says it twice
+    frag('props', 'A Paper Parasol'),   // same fragment, different casing
+    frag('outfit', 'a paper parasol'),  // same words, different MEANING — kept
+    frag('props', 'a small crown'),
+  ])
+
+  assert.equal(built.garden.props?.length, 2, 'the repeated props fragment collapses to one')
+  assert.deepEqual(
+    built.garden.props?.map((f) => f.text),
+    ['a paper parasol', 'a small crown'],
+    'the first occurrence is the one kept, so pool order stays a function of the input',
+  )
+  assert.equal(built.garden.outfit?.length, 1, 'the same text under another category is a different fragment')
+  assert.equal(built.drops.duplicate, 2, 'both repeats are counted')
+})
+
+test('every fragment carries the source it came from', async () => {
+  // The source/trigger pair is the model binding. A roll that has lost it cannot
+  // be turned back into a LoRA attach, and the loss is invisible in the prompt.
+  const built = await growGarden(
+    [
+      source(['c1'], 'boardA', 'alpha'),
+      source(['c2'], 'boardB', 'beta'),
+    ],
+    async (_captions, name, trigger) => [
+      { category: 'subject', text: `${name}-subject`, source: name, trigger },
+      { category: 'setting', text: `${name}-setting`, source: name, trigger },
+      { category: 'mood', text: `${name}-mood`, source: name, trigger },
+    ],
+  )
+
+  for (const { category } of gardenCounts(built.garden)) {
+    for (const f of built.garden[category] ?? []) {
+      assert.ok(f.source, `[${category}] "${f.text}" lost its source`)
+      assert.ok(f.trigger, `[${category}] "${f.text}" lost its trigger`)
+      assert.equal(f.trigger, f.source === 'boardA' ? 'alpha' : 'beta', 'the trigger stays bound to its own source')
+    }
+  }
+
+  // …and it survives the roll, which is where it is actually consumed.
+  const report = rollReport(built.garden, 4)
+  for (const roll of report.rolls) {
+    assert.ok(roll.fragments.length > 0, `roll ${roll.index} drew nothing`)
+    for (const f of roll.fragments) {
+      assert.ok(f.source && f.trigger, `roll ${roll.index} carried a fragment with no attribution`)
+    }
+    assert.ok(roll.triggers.length > 0, `roll ${roll.index} reports no model binding`)
+    assert.deepEqual(
+      [...roll.triggers].sort(),
+      [...new Set(roll.fragments.map((f) => f.trigger))].sort(),
+      'the reported bindings are exactly the distinct triggers of the chosen fragments',
+    )
+  }
+})
+
+test('an empty captions list produces an empty garden and no throw', async () => {
+  const reached: string[] = []
+  const extractor: FragmentExtractor = async (_c, name) => {
+    reached.push(name)
+    return [frag('subject', 'a young woman')]
+  }
+
+  const built = await growGarden([source([], 'emptyBoard'), source(['   ', ''], 'blankBoard')], extractor)
+
+  assert.deepEqual(reached, [], 'a source with no usable captions never reaches the extractor')
+  assert.equal(built.kept, 0)
+  assert.deepEqual(built.garden, {}, 'no category pool is created at all')
+  assert.deepEqual(gardenCounts(built.garden).filter((c) => c.count > 0), [])
+
+  const report = rollReport(built.garden, 3)
+  assert.equal(report.rolls.length, 3, 'rolling an empty garden still reports the rolls asked for')
+  assert.deepEqual(report.rolls.map((r) => r.prompt), ['', '', ''])
+  assert.equal(report.paid, 0)
+})
+
+test('a blank fragment is dropped and counted rather than pooled', () => {
+  const built = buildGarden([
+    frag('subject', 'a young woman'),
+    frag('hair', '   '),
+    frag('mood', ''),
+  ])
+  assert.equal(built.kept, 1)
+  assert.equal(built.drops.blank, 2)
+  assert.equal(built.garden.hair, undefined, 'no pool is created for a category whose only fragment was blank')
+})
+
+// --- Roll report -------------------------------------------------------------
+
+test('the paid/free tally matches the detector', async () => {
+  // The tally is the cost shape of the whole front half, so it must be the
+  // detector's verdict and nothing else — never a second opinion formed while
+  // counting. Rebuild it independently and require exact agreement, roll by roll.
+  const built = await growGarden(
+    [source(['c1'])],
+    fakeExtractor([
+      { category: 'setting', text: 'a dim abandoned chapel' },
+      { category: 'setting', text: 'a sunlit meadow' },
+      { category: 'palette', text: 'vibrant saturated pinks' },
+      { category: 'palette', text: 'muted earthy browns' },
+      { category: 'props', text: 'a cracked stone wall behind her' },
+      { category: 'props', text: 'a paper parasol' },
+      { category: 'subject', text: 'a young woman' },
+      { category: 'mood', text: 'nostalgic' },
+    ]),
+  )
+
+  const report = rollReport(built.garden, 24)
+  assert.equal(report.rolls.length, 24)
+
+  let expectedPaid = 0
+  for (const roll of report.rolls) {
+    const reasons = detectConflicts(rollFragments(built.garden, roll.index))
+    assert.deepEqual(roll.reasons, reasons, `roll ${roll.index} reports reasons the detector did not give`)
+    assert.equal(roll.paid, reasons.length > 0, `roll ${roll.index} is tallied against its own reasons`)
+    if (reasons.length > 0) expectedPaid++
+  }
+
+  assert.equal(report.paid, expectedPaid, 'the paid count is exactly the rolls the detector flagged')
+  assert.equal(report.free, report.rolls.length - expectedPaid, 'free is exactly the remainder')
+  assert.equal(report.paidShare, expectedPaid / report.rolls.length)
+
+  // The fixture is built to exercise both verdicts; a tally that can only ever
+  // report one of them would pass any arithmetic and measure nothing.
+  assert.ok(report.paid > 0, 'the fixture produces at least one conflicted roll')
+  assert.ok(report.free > 0, 'the fixture produces at least one clean roll')
+})
+
+test('a roll with no reasons is free and a roll with reasons is paid', () => {
+  const clean = rollReport({ subject: [frag('subject', 'a young woman')], mood: [frag('mood', 'serene')] }, 1)
+  assert.deepEqual(clean.rolls[0].reasons, [])
+  assert.equal(clean.rolls[0].paid, false)
+  assert.equal(clean.free, 1)
+  assert.equal(clean.paid, 0)
+
+  const clashing = rollReport(
+    {
+      setting: [frag('setting', 'a sunlit meadow')],
+      props: [frag('props', 'a cracked stone wall behind her')],
+    },
+    1,
+  )
+  assert.ok(clashing.rolls[0].reasons.length > 0)
+  assert.equal(clashing.rolls[0].paid, true)
+  assert.equal(clashing.paid, 1)
+  assert.equal(clashing.free, 0)
+  assert.equal(clashing.paidShare, 1)
+})
+
+test('zero rolls reports an empty tally rather than dividing by zero', () => {
+  const report = rollReport({ subject: [frag('subject', 'a young woman')] }, 0)
+  assert.deepEqual(report.rolls, [])
+  assert.equal(report.free, 0)
+  assert.equal(report.paid, 0)
+  assert.equal(report.paidShare, 0)
+})
+
+test('determinism survives the garden layer', async () => {
+  // The new layer sits between the captions and the sampler; it must not become
+  // a source of variation. Same fake extractor, same sources -> same rolls.
+  const rows = [
+    { category: 'subject', text: 'a young woman' },
+    { category: 'hair', text: 'long silver wavy hair' },
+    { category: 'setting', text: 'a quiet library' },
+    { category: 'setting', text: 'a sunlit meadow' },
+    { category: 'mood', text: 'serene and dreamlike' },
+    { category: 'style', text: 'digital painting' },
+  ]
+  const sources = [source(['c1', 'c2'], 'boardA', 'alpha')]
+
+  const first = await growGarden(sources, fakeExtractor(rows))
+  const second = await growGarden(sources, fakeExtractor(rows))
+  assert.deepEqual(second.garden, first.garden, 'the garden itself is a function of its inputs')
+
+  for (const i of [0, 1, 7, 42]) {
+    const a = rollReport(first.garden, i + 1).rolls[i]
+    const b = rollReport(second.garden, i + 1).rolls[i]
+    assert.deepEqual(b, a, `roll ${i} is stable across independently built gardens`)
+  }
 })
