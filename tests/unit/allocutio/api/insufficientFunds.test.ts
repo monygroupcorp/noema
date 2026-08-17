@@ -16,6 +16,7 @@ import assert from 'node:assert/strict'
 import { CrystalApi, type CrystalApiDeps } from '../../../../src/allocutio/api/CrystalApi.js'
 import { ApiError } from '../../../../src/allocutio/api/errors.js'
 import { InsufficientFundsError } from '../../../../src/execution/ActumInceptor.js'
+import { InsufficientBursaCreditsError } from '../../../../src/types/bursa.js'
 import type { Modus } from '../../../../src/types/modus.js'
 import type { Cursor } from '../../../../src/types/cursus.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
@@ -94,4 +95,36 @@ test('an unrelated core error is not swallowed by the mapping', async () => {
   // Untouched: it escapes as-is, so the router's generic 500 handling still owns it.
   assert.equal(err, unrelated)
   assert.ok(!(err instanceof ApiError), 'an unrelated failure must not become a 402')
+})
+
+// ── Bursa rail ────────────────────────────────────────────────────────────────
+//
+// The purse rail carries its own shortfall type (purse credits, a sibling of the
+// impetus-denominated one) and must reach the client through the same 402 — while a
+// bursa failure that is NOT a shortfall keeps its own handling, so the mapping is
+// narrow rather than a catch-all for the rail.
+
+test('a bursa shortfall surfaces as 402, not 500', async () => {
+  const err = await rejection(makeDeps(new InsufficientBursaCreditsError(50n, 1000n)))
+
+  assert.ok(err instanceof ApiError, `expected an ApiError, got ${String(err)}`)
+  assert.equal(err.code, 'economy.insufficient_signa')
+  assert.equal(err.httpStatus, 402)
+  assert.deepEqual(err.toBody().details, { available: '50', required: '1000' })
+})
+
+test('a bursa shortfall is NOT advertised as retryable', async () => {
+  const err = await rejection(makeDeps(new InsufficientBursaCreditsError(50n, 1000n)))
+
+  assert.ok(err instanceof ApiError)
+  assert.notEqual(err.toBody().retryable, true)
+})
+
+test('an unrelated bursa failure does not become a 402', async () => {
+  // A bad token is a different condition from an empty purse and wants its own status.
+  const unknownPurse = new Error('Bursa not found')
+  const err = await rejection(makeDeps(unknownPurse))
+
+  assert.equal(err, unknownPurse)
+  assert.ok(!(err instanceof ApiError), 'a non-shortfall bursa failure must not become a 402')
 })

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Collection } from 'mongodb'
 import type { Bursa, Bursarum, BursaCreateOpts } from '../types/bursa.js'
+import { InsufficientBursaCreditsError } from '../types/bursa.js'
 
 function fromDoc(doc: Record<string, unknown>): Bursa {
   return {
@@ -53,7 +54,7 @@ export class MongoBursarium implements Bursarum {
       if (!doc) throw new Error('Bursa not found')
 
       const current = BigInt(doc.credits as string)
-      if (current < amount) throw new Error(`Insufficient bursa balance: ${current} credits, need ${amount}`)
+      if (current < amount) throw new InsufficientBursaCreditsError(current, amount)
 
       const updated = await this.col.findOneAndUpdate(
         { token, credits: current.toString() },

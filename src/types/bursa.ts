@@ -29,10 +29,33 @@ export interface BursaCreateOpts {
   label?: string
 }
 
+/**
+ * Thrown by `Bursarum.debit` when a purse cannot cover the amount asked of it.
+ *
+ * A typed domain error so a caller can tell "the purse is short" apart from "the
+ * server failed": the API layer maps this to `402 economy.insufficient_signa`
+ * instead of the generic 500. `credits` and `required` are carried as FIELDS — the
+ * mapper reads them as data rather than parsing them back out of the message.
+ *
+ * UNITS: purse credits. This is a SIBLING of the identified path's
+ * `InsufficientFundsError` (impetus points), deliberately a distinct class so the
+ * two denominations are never conflated in a numeric comparison. Both surface the
+ * same API code; only the API layer, which emits strings, sees them together.
+ *
+ * Layering: lives with the `Bursarum` contract it belongs to and carries no API
+ * error vocabulary; translation to an `ApiError` happens at the allocutio boundary.
+ */
+export class InsufficientBursaCreditsError extends Error {
+  constructor(readonly credits: bigint, readonly required: bigint) {
+    super(`Insufficient bursa credits: ${credits} credits, need ${required}`)
+    this.name = 'InsufficientBursaCreditsError'
+  }
+}
+
 export interface Bursarum {
   create(credits: bigint, opts?: BursaCreateOpts): Promise<Bursa>
   findByToken(token: string): Promise<Bursa | null>
-  /** Atomically debit `amount` credits. Throws if balance insufficient. */
+  /** Atomically debit `amount` credits. Throws `InsufficientBursaCreditsError` if the purse is short. */
   debit(token: string, amount: bigint): Promise<Bursa>
   /** Restore `amount` credits — used to compensate a debit when actum creation fails. */
   credit(token: string, amount: bigint): Promise<void>
