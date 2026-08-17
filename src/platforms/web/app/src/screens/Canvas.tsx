@@ -397,7 +397,7 @@ export function Canvas() {
             {nodes.length} tools{saveState !== 'idle' ? ` · ${saveState === 'saving' ? 'saving…' : 'saved'}` : ''} · drag a handle to wire · trash icon deletes a node · select + Backspace removes nodes or edges
           </span>
           <button className="btn" onClick={publish} disabled={publishing || nodes.length === 0}>
-            <Ic name="sparkles" /> {publishing ? 'Compiling…' : 'Compile to spell'}
+            <Ic name="sparkles" /> {publishing ? 'Publishing…' : 'Publish'}
           </button>
         </div>
       </div>
