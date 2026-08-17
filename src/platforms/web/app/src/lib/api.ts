@@ -1055,7 +1055,25 @@ export type DatasetCustody = 'sealed' | 'local' | 'remote';
 // media id (never by position — media is append-only), sparse, and absent on captionsets
 // written before the field existed.
 export interface DatasetCaptionset { id: string; name: string; method: string; coverage: string; captions?: Record<string, string> }
-export interface DatasetMediaItem { id: string; url: string; source: 'upload' | 'generation'; actumId?: string; addedAt: string }
+// Mirrors the backend `types/dataset.ts#Fragment` (re-exported from `src/crystal/muse/taxonomy.ts`,
+// which this app cannot import — `src/crystal` sits outside its `tsconfig.json`'s `include`). Kept
+// as a flat union rather than importing the taxonomy's EXCLUSIVE/ATTRIBUTE tier split; the web app
+// only needs to color-key a chip by category, not branch on tier.
+export type FragmentCategory =
+  | 'subject' | 'hair' | 'outfit' | 'pose' | 'expression' | 'props'
+  | 'setting' | 'style' | 'palette' | 'lighting' | 'mood';
+export interface Fragment { category: FragmentCategory; text: string; source: string; trigger: string }
+export interface DatasetMediaItem {
+  id: string; url: string; source: 'upload' | 'generation'; actumId?: string; addedAt: string;
+  /** Freeform operator labels. Optional: items written before this field existed carry none. */
+  tags?: string[];
+  /** Freeform operator notes on this item. Optional for the same reason as `tags`. */
+  notes?: string;
+  /** The item's decomposed prompt fragments (Muse P0), filled out-of-band. Optional and commonly
+   *  empty — an item nothing has decomposed yet is a valid, expected state, rendered as an empty
+   *  garden, not an error. No live decompose happens from this field. */
+  fragments?: Fragment[];
+}
 export interface DatasetVersionView { v: string; count: number; when: string }
 export interface Dataset {
   id: string;
