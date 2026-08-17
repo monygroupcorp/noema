@@ -3,8 +3,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   aditusFor, applyPublishError, buildPalette, clearPublishError, connectedEdges, dedupeFlows, edgesToTabula,
-  FlowNode, hasEditablePorts, nodesToTabula, portType, publishErrorState, restoreEdges, restoreNode,
-  schemaToPorts, setNodeAditus, tabulaToEdges, tabulaToNodes,
+  FlowNode, hasEditablePorts, nodesToTabula, portType, publishErrorState, resolveTabulaForModus, restoreEdges,
+  restoreNode, schemaToPorts, setNodeAditus, tabulaToEdges, tabulaToNodes,
 } from './Canvas';
 import type { ApiRequestError, JsonSchema } from '../lib/api';
 import type { Node, Edge } from '@xyflow/react';
@@ -72,6 +72,22 @@ describe('dedupeFlows', () => {
       [{ id: 'b' }, { id: 'c' }],
     );
     expect(out.map((f) => f.id).sort()).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('resolveTabulaForModus — which tabula ?modusId= reopens (noema-224)', () => {
+  const tabulae = [
+    { id: 't1', modusId: 'm-old' },
+    { id: 't2', modusId: 'm-target' },
+  ];
+
+  it('resolves to the tabula whose modusId matches, not just the first', () => {
+    expect(resolveTabulaForModus(tabulae, 'm-target')).toEqual(tabulae[1]);
+  });
+
+  it('falls back to the most-recent tabula only when no match exists', () => {
+    expect(resolveTabulaForModus(tabulae, 'm-nonexistent')).toEqual(tabulae[0]);
+    expect(resolveTabulaForModus(tabulae, undefined)).toEqual(tabulae[0]);
   });
 });
 
