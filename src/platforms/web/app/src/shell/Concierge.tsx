@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { useAssistTarget, usePromptAssist } from '../state/promptAssist';
 import { buildPrompt } from '../lib/promptExamples';
@@ -40,6 +41,7 @@ function agentDictumToResult(corpus: string): ConciergeResult {
 // a copyable example, and a "write it for me" draft from the user's brief.
 export function Concierge({ hasContext }: { hasContext: boolean }) {
   const target = useAssistTarget();
+  const location = useLocation();
   const { clear } = usePromptAssist();
   const [open, setOpen] = useState(false);
   const [brief, setBrief] = useState('');
@@ -97,6 +99,18 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
     const mq = window.matchMedia('(max-width:760px)');
     if (!mq.matches) setOpen(true);
   }, [target]);
+
+  // First-visit activation (noema-226, IA ruling #5): the first time this browser lands on a given
+  // route, the panel announces itself the same way the assist-target focus effect already does —
+  // same `open` state, same mobile guard (auto-open collides with the OS keyboard there). Tracked
+  // per-pathname in localStorage so it survives reload/close and never re-fires on a repeat visit.
+  useEffect(() => {
+    const key = `concierge-seen:${location.pathname}`;
+    if (window.localStorage.getItem(key)) return;
+    window.localStorage.setItem(key, '1');
+    const mq = window.matchMedia('(max-width:760px)');
+    if (!mq.matches) setOpen(true);
+  }, [location.pathname]);
 
   function gen() {
     if (!target) return;
