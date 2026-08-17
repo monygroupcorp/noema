@@ -5,7 +5,9 @@ import {
   CATEGORIES,
   EXCLUSIVE,
   TEMPLATE_ORDER,
+  isAttribute,
   isCategory,
+  isExclusive,
   tierOf,
   type Fragment,
   type Garden,
@@ -65,6 +67,43 @@ test('the two tiers are non-empty, disjoint, and cover every category', () => {
     [...TEMPLATE_ORDER].sort(),
     [...CATEGORIES].sort(),
     'every category has a slot in the render order and no slot is unknown',
+  )
+})
+
+test('EXCLUSIVE and ATTRIBUTE share no category', () => {
+  const exclusive = new Set<string>(EXCLUSIVE)
+  for (const cat of ATTRIBUTE) assert.ok(!exclusive.has(cat), `'${cat}' is in both tiers`)
+})
+
+test('CATEGORIES is exactly ATTRIBUTE then EXCLUSIVE, 11 long, no duplicates', () => {
+  assert.deepEqual(
+    [...CATEGORIES],
+    [...ATTRIBUTE, ...EXCLUSIVE],
+    'CATEGORIES is the concatenation of ATTRIBUTE followed by EXCLUSIVE, in that order',
+  )
+  assert.equal(CATEGORIES.length, 11)
+  assert.equal(new Set(CATEGORIES).size, CATEGORIES.length, 'no category repeats in CATEGORIES')
+})
+
+test('isExclusive/isAttribute/tierOf agree with the tier arrays for every category', () => {
+  for (const cat of CATEGORIES) {
+    const inExclusive = (EXCLUSIVE as readonly string[]).includes(cat)
+    const inAttribute = (ATTRIBUTE as readonly string[]).includes(cat)
+    assert.equal(isExclusive(cat), inExclusive, `isExclusive('${cat}')`)
+    assert.equal(isAttribute(cat), inAttribute, `isAttribute('${cat}')`)
+    assert.equal(tierOf(cat), inExclusive ? 'exclusive' : 'attribute', `tierOf('${cat}')`)
+  }
+
+  assert.equal(tierOf('bicycle'), undefined, 'an out-of-taxonomy string has no tier')
+  assert.equal(isCategory('bicycle'), false, 'an out-of-taxonomy string is not a category')
+})
+
+test('TEMPLATE_ORDER is a permutation of CATEGORIES, not a subset or superset', () => {
+  assert.equal(TEMPLATE_ORDER.length, CATEGORIES.length)
+  assert.deepEqual(
+    [...TEMPLATE_ORDER].sort(),
+    [...CATEGORIES].sort(),
+    'TEMPLATE_ORDER contains exactly the same categories as CATEGORIES, reordered',
   )
 })
 
