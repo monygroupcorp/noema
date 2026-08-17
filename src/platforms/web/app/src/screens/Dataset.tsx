@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { custodyGlyph } from '../lib/datasets';
-import { api, type Dataset as DatasetT } from '../lib/api';
+import { api, type Dataset as DatasetT, type Fragment, type FragmentCategory } from '../lib/api';
 
 // Dataset detail (train-dataset-spec.md, render noema-train-dataset.png) — the core asset:
 // media (king) + versions + captionsets. Captionsets are a separate versioned layer (the
@@ -13,6 +13,34 @@ import { api, type Dataset as DatasetT } from '../lib/api';
 // landed contract has no per-id detail route, only list/listFull/create (apiContract.ts:1503-
 // 1521), so listFull + find is the real detail lookup (same pattern Datasets.tsx uses for the
 // library grid).
+//
+// noema-221 (Muse P1) — the chip garden. `fragments` on a media item is data the Muse P0 engine
+// (`src/crystal/muse/garden.ts`/`sampler.ts`/`weaver.ts`, merged noema-215/216) already knows how
+// to produce; nothing here computes a fragment. An item's `fragments` is filled out-of-band (an
+// operator run of `scripts/muse-roll.ts` against the item's caption) and rendered as chips here.
+// An empty/absent `fragments` is a valid, expected "nothing has decomposed this item yet" state —
+// rendered as an empty garden, never as an error. Curation (check/uncheck a chip) is local UI
+// state only: it decides which fragments a future garden-build would draw from, it does not write
+// anything back. No LLM call and no credit rail are touched by any of this.
+
+/** Fixed, deterministic per-category color so a category reads the same everywhere it appears —
+ *  not a hash, so the palette stays legible (no two adjacent categories landing on similar hues). */
+const CATEGORY_COLOR: Record<FragmentCategory, string> = {
+  subject: '#5b8cff', hair: '#8a7cff', outfit: '#c26bd9', pose: '#e0668f', expression: '#e08a55', props: '#c9a13a',
+  setting: '#3fae7a', style: '#39a6a0', palette: '#3f8fbf', lighting: '#e0c34a', mood: '#7a8fae',
+};
+
+export function categoryColor(category: FragmentCategory): string {
+  return CATEGORY_COLOR[category] ?? 'var(--muted)';
+}
+
+/** The fragment subset a garden build would actually draw from: everything except the chips the
+ *  operator has unchecked (indexed into `fragments` — stable within one loaded snapshot). Pulled
+ *  out as its own function so the exclusion is provably load-bearing rather than a cosmetic toggle
+ *  (noema-221 non-vacuity: reverting this to a no-op must fail the "excludes unchecked chips" test). */
+export function curatedFragments(fragments: Fragment[], excluded: ReadonlySet<number>): Fragment[] {
+  return fragments.filter((_, i) => !excluded.has(i));
+}
 
 export function Dataset() {
   const { id } = useParams();
@@ -33,6 +61,17 @@ export function Dataset() {
   useEffect(() => {
     if (d && activeSet === null) setActiveSet(d.captionsets[0]?.id ?? '');
   }, [d, activeSet]);
+
+  // Which chips are unchecked, per media item id. Local curation state only — see the file
+  // header note; nothing here is persisted or fed to a decompose call.
+  const [excludedByItem, setExcludedByItem] = useState<Record<string, Set<number>>>({});
+  const toggleFragment = (itemId: string, fragIndex: number) => {
+    setExcludedByItem((prev) => {
+      const next = new Set(prev[itemId] ?? []);
+      if (next.has(fragIndex)) next.delete(fragIndex); else next.add(fragIndex);
+      return { ...prev, [itemId]: next };
+    });
+  };
 
   if (datasets === null) {
     return <AppShell title="Dataset"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
@@ -72,12 +111,36 @@ export function Dataset() {
               <p className="ds-panel-note">no media in this dataset yet.</p>
             ) : (
               <div className="ds-imgrid">
-                {d.media.map((m) => (
-                  <figure key={m.id} className="ds-img">
-                    <span className="ds-img-tile" style={{ backgroundImage: `url(${m.url})`, backgroundSize: 'cover' }} />
-                    <figcaption className="mono">{m.source === 'upload' ? 'uploaded' : 'from a generation'}</figcaption>
-                  </figure>
-                ))}
+                {d.media.map((m) => {
+                  const fragments = m.fragments ?? [];
+                  const excluded = excludedByItem[m.id] ?? new Set<number>();
+                  return (
+                    <figure key={m.id} className="ds-img">
+                      <span className="ds-img-tile" style={{ backgroundImage: `url(${m.url})`, backgroundSize: 'cover' }} />
+                      <figcaption className="mono">{m.source === 'upload' ? 'uploaded' : 'from a generation'}</figcaption>
+                      {fragments.length > 0 && (
+                        <div className="pref-chips ds-garden">
+                          {fragments.map((f, i) => {
+                            const on = !excluded.has(i);
+                            const color = categoryColor(f.category);
+                            return (
+                              <button
+                                key={`${f.category}-${i}`}
+                                type="button"
+                                className={`fchip${on ? ' on' : ''}`}
+                                title={`${f.category} · ${f.source}`}
+                                onClick={() => toggleFragment(m.id, i)}
+                              >
+                                <span style={{ background: color, width: 8, height: 8, borderRadius: 2, display: 'inline-block', marginRight: 6 }} />
+                                {f.text}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </figure>
+                  );
+                })}
               </div>
             )}
           </div>

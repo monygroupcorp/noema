@@ -14,6 +14,8 @@
 // builder) consumes. Both read off the same underlying Mongo document.
 // =============================================================================
 
+import type { Fragment } from '../crystal/muse/taxonomy'
+
 export type DatasetModality = 'image' | 'video' | 'audio' | '3d'
 export type DatasetCustody = 'sealed' | 'local' | 'remote'
 
@@ -50,6 +52,16 @@ export interface DatasetMediaItem {
   /** FK -> Actum. Present iff source === 'generation' — the run this media came from. */
   actumId?: string
   addedAt: Date
+  /** Freeform operator labels. Optional: documents written before this field existed carry none. */
+  tags?: string[]
+  /** Freeform operator notes on this item. Optional for the same reason as `tags`. */
+  notes?: string
+  /** The item's decomposed prompt fragments (Muse P0 — `src/crystal/muse/garden.ts`), filled
+   *  out-of-band (an operator run of `scripts/muse-roll.ts` or the `noema-216` CLI against this
+   *  item's caption). Optional and commonly empty: an item nothing has decomposed yet is a valid,
+   *  expected state, not an error — render it as an empty garden. No live decompose runs from this
+   *  field; that is a separate, credit-metered item (see noema-221's plan). */
+  fragments?: Fragment[]
 }
 
 /** One snapshot of the dataset's media set — grows as media is added. */
