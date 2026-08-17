@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   ReactFlow, Background, BackgroundVariant, Controls, Handle, Position,
   addEdge, useNodesState, useEdgesState,
-  type Node, type Edge, type Connection, type NodeProps, type ReactFlowInstance,
+  type Node, type Edge, type Connection, type NodeProps, type NodeMouseHandler, type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { AppShell } from '../shell/AppShell';
@@ -35,10 +35,12 @@ export function schemaToPorts(schema?: JsonSchema): Port[] {
 }
 
 // One placeable node kind on the canvas — a flow's real ports, not the hardcoded demo.
-export interface PaletteEntry { modusId: string; nomen: string; versio: string; inputs: Port[]; outputs: Port[] }
+// `inputSchema` carries the flow's full live input JSON-Schema (titles/descriptions/optiones) —
+// `inputs` (Port[]) alone is only id/label/type, not enough to build the node parameter panel's form.
+export interface PaletteEntry { modusId: string; nomen: string; versio: string; inputs: Port[]; outputs: Port[]; inputSchema: JsonSchema }
 
 export function buildPalette(flows: FlowDescription[]): PaletteEntry[] {
-  return flows.map((f) => ({ modusId: f.id, nomen: f.nomen, versio: f.versio, inputs: schemaToPorts(f.input), outputs: schemaToPorts(f.output) }));
+  return flows.map((f) => ({ modusId: f.id, nomen: f.nomen, versio: f.versio, inputs: schemaToPorts(f.input), outputs: schemaToPorts(f.output), inputSchema: f.input }));
 }
 
 // The canonical catalog (GET /v1/flows) plus the caller's own (GET /v1/me/flows,
@@ -67,6 +69,9 @@ export function colorFor(modusId: string): string {
 interface FlowData {
   modusId: string; name: string; badge: string; color: string;
   inputs: Port[]; outputs: Port[]; aditus: Record<string, unknown>;
+  // The flow's live input schema, carried per-node so the parameter panel can build its
+  // form the same way Card.tsx does — see buildPalette's PaletteEntry.inputSchema.
+  inputSchema?: JsonSchema;
   [k: string]: unknown;
 }
 
@@ -102,6 +107,7 @@ export function tabulaToNodes(tabula: Pick<Tabula, 'nodi'>, palette: PaletteEntr
         inputs: entry?.inputs ?? [],
         outputs: entry?.outputs ?? [],
         aditus: n.aditus ?? {},
+        inputSchema: entry?.inputSchema,
       },
     };
   });
@@ -167,6 +173,31 @@ export function restoreEdges(edges: Edge[], toRestore: Edge[]): Edge[] {
   return [...edges, ...toRestore.filter((e) => !existing.has(e.id))];
 }
 
+// ── Node parameter panel (pure — selection/edit state transitions) ──────────────
+// A flow's steps had no authoring surface: TabulaNodus.aditus round-tripped through
+// nodesToTabula/tabulaToNodes and autosaved already, but nothing client-side let a user
+// set it. This is the missing write path — click a node, edit its aditus, same autosave.
+// Covered here as pure state transitions (see the delete/undo note above — no DOM
+// event simulation available either way in this app's test toolchain).
+
+// A node with no text/media input port has nothing to author — no panel trigger for it.
+export function hasEditablePorts(inputs: Port[]): boolean {
+  return inputs.some((p) => p.type !== 'number');
+}
+
+// The aditus values to show in the panel for a given node — scoped to that node only,
+// so selecting a different node never bleeds another node's values into the form.
+export function aditusFor(nodes: Node<FlowData>[], nodeId: string): Record<string, unknown> {
+  return nodes.find((n) => n.id === nodeId)?.data.aditus ?? {};
+}
+
+// Write one field's edited value into that node's data.aditus. The existing autosave
+// effect (keyed on `nodes`) picks up the change and persists it via nodesToTabula —
+// no new save mechanism.
+export function setNodeAditus(nodes: Node<FlowData>[], nodeId: string, key: string, value: unknown): Node<FlowData>[] {
+  return nodes.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, aditus: { ...n.data.aditus, [key]: value } } } : n));
+}
+
 const ROW = 26, HEAD = 41, PAD = 8;
 const handleTop = (i: number) => HEAD + PAD + i * ROW + 13;
 
@@ -208,6 +239,60 @@ export function FlowNode({ id, data, onDelete }: NodeProps<Node<FlowData>> & { o
   );
 }
 
+// The per-node parameter panel — a node's own input schema turned into a form, reusing
+// the exact field-generation pattern Card.tsx already proves out (flow.input.properties
+// -> field, prompt-shaped strings get a textarea). Card.tsx is out of scope_dirs for this
+// item, so the pattern is reapplied here rather than extracted into a shared import — no
+// second schema-to-form *mechanism*, same generation rules. No Concierge assist / LoRA
+// trigger highlight (Card.tsx-only, explicit non-goal here): a plain field is enough to
+// unblock authoring.
+export function NodeParamPanel({ node, onChange, onClose }: {
+  node: Node<FlowData>;
+  onChange: (key: string, value: unknown) => void;
+  onClose: () => void;
+}) {
+  const properties = node.data.inputSchema?.properties ?? {};
+  const aditus = node.data.aditus ?? {};
+  return (
+    <div className="canvas-node-panel">
+      <div className="cnp-head">
+        <b>{node.data.name}</b>
+        <button type="button" className="btn ghost sm" onClick={onClose} aria-label="Close panel">
+          <Ic name="x" />
+        </button>
+      </div>
+      <div className="cnp-body">
+        {Object.entries(properties).map(([k, p]) => {
+          const isUri = p.format === 'uri';
+          const isNum = p.type === 'integer' || p.type === 'number';
+          const isText = p.type === 'string' && !isUri;
+          const isLong = isText && /prompt|lyric|story|description|caption|text|message|content/i.test(k);
+          const hasOptiones = Array.isArray(p.optiones) && p.optiones.length > 0;
+          return (
+            <div className="field" key={k}>
+              <label>{p.title || k}</label>
+              {hasOptiones ? (
+                <select className="inp" value={String(aditus[k] ?? p.default ?? '')} onChange={(e) => onChange(k, e.target.value)}>
+                  {p.optiones!.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              ) : isUri ? (
+                <input className="inp" value={String(aditus[k] ?? '')} placeholder={p.description || 'paste a URL'} onChange={(e) => onChange(k, e.target.value)} />
+              ) : isNum ? (
+                <input className="inp mono" type="number" value={aditus[k] === '' || aditus[k] === undefined ? '' : Number(aditus[k])} placeholder={p.description} onChange={(e) => onChange(k, e.target.value === '' ? '' : Number(e.target.value))} />
+              ) : isLong ? (
+                <textarea className="ta2" value={String(aditus[k] ?? '')} placeholder={p.description} onChange={(e) => onChange(k, e.target.value)} />
+              ) : (
+                <input className="inp" value={String(aditus[k] ?? '')} placeholder={p.description} onChange={(e) => onChange(k, e.target.value)} />
+              )}
+            </div>
+          );
+        })}
+        {Object.keys(properties).length === 0 && <div className="cnp-empty">No parameters.</div>}
+      </div>
+    </div>
+  );
+}
+
 export function Canvas() {
   const navigate = useNavigate();
   const [tabula, setTabula] = useState<Tabula | null>(null);
@@ -219,6 +304,9 @@ export function Canvas() {
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<PublishErrorState | null>(null);
   const [undoToast, setUndoToast] = useState<{ nodeName: string } | null>(null);
+  // The node whose parameter panel is open — id only, so it self-heals off `nodes` (a
+  // delete/undo cycle, or an autosave-triggered node replacement, never shows stale data).
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextSave = useRef(true);
   const rfInstance = useRef<ReactFlowInstance<Node<FlowData>, Edge> | null>(null);
@@ -295,7 +383,7 @@ export function Canvas() {
       id,
       type: 'flow',
       position: { x: 80 + (count % 4) * 260, y: 80 + Math.floor(count / 4) * 180 },
-      data: { modusId: entry.modusId, name: entry.nomen, badge: entry.versio, color: colorFor(entry.modusId), inputs: entry.inputs, outputs: entry.outputs, aditus: {} },
+      data: { modusId: entry.modusId, name: entry.nomen, badge: entry.versio, color: colorFor(entry.modusId), inputs: entry.inputs, outputs: entry.outputs, aditus: {}, inputSchema: entry.inputSchema },
     };
     setNodes((ns) => [...ns, node]);
   }, [nodes.length, setNodes]);
@@ -309,9 +397,25 @@ export function Canvas() {
     pendingUndo.current = { node: target, edges: connectedEdges(edgesRef.current, nodeId) };
     rfInstance.current?.deleteElements({ nodes: [{ id: nodeId }] });
     setUndoToast({ nodeName: target.data.name });
+    setSelectedNodeId((sel) => (sel === nodeId ? null : sel));
     if (undoTimer.current) clearTimeout(undoTimer.current);
     undoTimer.current = setTimeout(() => { setUndoToast(null); pendingUndo.current = null; }, 5000);
   }, []);
+
+  // Clicking a placed node opens its parameter panel — but not a click on the delete
+  // button or a port handle (both live inside the node's DOM and would otherwise bubble
+  // into this), and not a node with nothing to author (see hasEditablePorts).
+  const onNodeClick: NodeMouseHandler<Node<FlowData>> = useCallback((event, node) => {
+    const target = event.target as HTMLElement;
+    if (target.closest('.cn-delete') || target.closest('.cn-handle')) return;
+    if (!hasEditablePorts(node.data.inputs)) return;
+    setSelectedNodeId(node.id);
+  }, []);
+
+  const updateNodeAditus = useCallback((key: string, value: unknown) => {
+    if (!selectedNodeId) return;
+    setNodes((ns) => setNodeAditus(ns, selectedNodeId, key, value));
+  }, [selectedNodeId, setNodes]);
 
   const undoDelete = useCallback(() => {
     const pending = pendingUndo.current;
@@ -347,6 +451,10 @@ export function Canvas() {
     }
   }, [tabula, navigate, setEdges]);
 
+  // Derived, not stored: self-heals if the selected node is deleted/undone/replaced by
+  // an in-flight load, instead of holding a copy that can go stale.
+  const selectedNode = selectedNodeId ? nodes.find((n) => n.id === selectedNodeId) ?? null : null;
+
   if (loading) {
     return (
       <AppShell crumb="canvas">
@@ -375,6 +483,7 @@ export function Canvas() {
         <ReactFlow
           nodes={nodes} edges={edges}
           onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
+          onNodeClick={onNodeClick}
           onInit={(instance) => { rfInstance.current = instance; }}
           nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.3 }}
           proOptions={{ hideAttribution: true }}
@@ -383,6 +492,9 @@ export function Canvas() {
           <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#1c2024" />
           <Controls showInteractive={false} />
         </ReactFlow>
+        {selectedNode && (
+          <NodeParamPanel node={selectedNode} onChange={updateNodeAditus} onClose={() => setSelectedNodeId(null)} />
+        )}
         <div className="canvas-palette">
           <div className="cp-title">Tools</div>
           {palette.map((entry) => (

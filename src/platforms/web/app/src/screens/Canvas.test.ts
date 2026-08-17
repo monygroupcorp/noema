@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  applyPublishError, buildPalette, clearPublishError, connectedEdges, dedupeFlows, edgesToTabula,
-  FlowNode, nodesToTabula, portType, publishErrorState, restoreEdges, restoreNode,
-  schemaToPorts, tabulaToEdges, tabulaToNodes,
+  aditusFor, applyPublishError, buildPalette, clearPublishError, connectedEdges, dedupeFlows, edgesToTabula,
+  FlowNode, hasEditablePorts, nodesToTabula, portType, publishErrorState, restoreEdges, restoreNode,
+  schemaToPorts, setNodeAditus, tabulaToEdges, tabulaToNodes,
 } from './Canvas';
-import type { ApiRequestError } from '../lib/api';
+import type { ApiRequestError, JsonSchema } from '../lib/api';
 import type { Node, Edge } from '@xyflow/react';
 
 // No jsdom/@testing-library/react in this app's toolchain (see BuyCreditsModal.test.ts) —
@@ -48,10 +48,11 @@ describe('schemaToPorts', () => {
 
 describe('buildPalette — node palette from real flow schemas (no hardcoded demo graph)', () => {
   it('derives inputs/outputs from each flow\'s live input/output schema', () => {
+    const inputSchema: JsonSchema = { type: 'object', properties: { prompt: { type: 'string' } } };
     const palette = buildPalette([
       {
         id: 'make-upscale', nomen: 'FLUX Schnell', versio: '1.0.0',
-        input: { type: 'object', properties: { prompt: { type: 'string' } } },
+        input: inputSchema,
         output: { type: 'object', properties: { image: { type: 'string', format: 'uri' } } },
       },
     ]);
@@ -59,6 +60,7 @@ describe('buildPalette — node palette from real flow schemas (no hardcoded dem
       modusId: 'make-upscale', nomen: 'FLUX Schnell', versio: '1.0.0',
       inputs: [{ id: 'prompt', label: 'prompt', type: 'text' }],
       outputs: [{ id: 'image', label: 'image', type: 'media' }],
+      inputSchema,
     }]);
   });
 });
@@ -74,7 +76,8 @@ describe('dedupeFlows', () => {
 });
 
 describe('Tabula <-> React Flow round trip (save/load)', () => {
-  const palette = [{ modusId: 'make-upscale', nomen: 'FLUX Schnell', versio: '1.0.0', inputs: [], outputs: [{ id: 'image', label: 'image', type: 'media' as const }] }];
+  const paletteInputSchema: JsonSchema = { type: 'object', properties: { prompt: { type: 'string', title: 'Prompt' } } };
+  const palette = [{ modusId: 'make-upscale', nomen: 'FLUX Schnell', versio: '1.0.0', inputs: [], outputs: [{ id: 'image', label: 'image', type: 'media' as const }], inputSchema: paletteInputSchema }];
   const tabula = {
     nodi: [{ id: 'n1', modusId: 'make-upscale', x: 40, y: 60, aditus: { prompt: 'a dragon' } }],
     vincula: [{ id: 'e1', fonteNodusId: 'n1', fontePorta: 'image', scopusNodusId: 'n2', scopusPorta: 'in', discordantia: false }],
@@ -84,7 +87,7 @@ describe('Tabula <-> React Flow round trip (save/load)', () => {
     const nodes = tabulaToNodes(tabula, palette);
     expect(nodes).toEqual([{
       id: 'n1', type: 'flow', position: { x: 40, y: 60 },
-      data: { modusId: 'make-upscale', name: 'FLUX Schnell', badge: '1.0.0', color: expect.any(String), inputs: [], outputs: palette[0].outputs, aditus: { prompt: 'a dragon' } },
+      data: { modusId: 'make-upscale', name: 'FLUX Schnell', badge: '1.0.0', color: expect.any(String), inputs: [], outputs: palette[0].outputs, aditus: { prompt: 'a dragon' }, inputSchema: paletteInputSchema },
     }]);
     const edges = tabulaToEdges(tabula);
     expect(edges).toEqual([{ id: 'e1', source: 'n1', sourceHandle: 'image', target: 'n2', targetHandle: 'in' }]);
@@ -187,5 +190,41 @@ describe('delete cascade + undo restore — pure state transitions', () => {
     const restoredEdges = restoreEdges(edgesAfterDelete, connectedEdges(edgesBefore, 'n1'));
     expect(restoredNodes).toEqual(nodesBefore);
     expect(restoredEdges).toEqual(edgesBefore);
+  });
+});
+
+describe('node parameter panel — per-node aditus editing (noema-217)', () => {
+  // No jsdom/@testing-library/react in this app's toolchain (see the file-top note) — so
+  // the panel's click-to-open/edit-writes-aditus behavior is covered as pure state
+  // transitions on the same functions Canvas() wires into onNodeClick/onChange, mirroring
+  // the delete/undo tests above.
+  const promptSchema: JsonSchema = { type: 'object', properties: { prompt: { type: 'string', title: 'Prompt' } } };
+  const flowDataWith = (aditus: Record<string, unknown>) => ({
+    modusId: 'make-upscale', name: 'FLUX Schnell', badge: '1.0.0', color: '#000',
+    inputs: [{ id: 'prompt', label: 'Prompt', type: 'text' as const }], outputs: [],
+    aditus, inputSchema: promptSchema,
+  });
+  const nodeA: Node<ReturnType<typeof flowDataWith>> = { id: 'n1', type: 'flow', position: { x: 0, y: 0 }, data: flowDataWith({ prompt: 'a dragon' }) };
+  const nodeB: Node<ReturnType<typeof flowDataWith>> = { id: 'n2', type: 'flow', position: { x: 0, y: 0 }, data: flowDataWith({ prompt: 'a phoenix' }) };
+
+  it('hasEditablePorts is true for a node with a text or media input port', () => {
+    expect(hasEditablePorts([{ id: 'prompt', label: 'Prompt', type: 'text' }])).toBe(true);
+    expect(hasEditablePorts([{ id: 'image', label: 'Image', type: 'media' }])).toBe(true);
+  });
+
+  it('hasEditablePorts is false for a node with no text/media input ports — no panel trigger', () => {
+    expect(hasEditablePorts([{ id: 'steps', label: 'Steps', type: 'number' }])).toBe(false);
+    expect(hasEditablePorts([])).toBe(false);
+  });
+
+  it('editing a node\'s prompt writes into that node\'s aditus, which nodesToTabula persists', () => {
+    const updated = setNodeAditus([nodeA, nodeB], 'n1', 'prompt', 'a new dragon');
+    expect(aditusFor(updated, 'n1')).toEqual({ prompt: 'a new dragon' });
+    expect(nodesToTabula(updated).find((n) => n.id === 'n1')?.aditus).toEqual({ prompt: 'a new dragon' });
+  });
+
+  it('editing node A leaves node B\'s values untouched — clicking node B does not show node A\'s values', () => {
+    const updated = setNodeAditus([nodeA, nodeB], 'n1', 'prompt', 'a new dragon');
+    expect(aditusFor(updated, 'n2')).toEqual({ prompt: 'a phoenix' });
   });
 });
