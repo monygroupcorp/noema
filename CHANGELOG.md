@@ -1,5 +1,30 @@
 # Changelog
 
+## [5.6.0](https://github.com/monygroupcorp/noema/compare/v5.5.0...v5.6.0) (2026-08-17)
+
+
+### Features
+
+* **api:** add an internal grant route for crediting a plain account ([2bb6c30](https://github.com/monygroupcorp/noema/commit/2bb6c30e4a0237ea067fc279b2a01d351ac05fc2))
+* **canvas:** node parameter panel — edit a node's aditus before minting ([6627d34](https://github.com/monygroupcorp/noema/commit/6627d34fcd551f0f9039fcc5573bb9bf301d2eef))
+* **canvas:** open a minted flow from its catalog card back into Canvas ([660f87a](https://github.com/monygroupcorp/noema/commit/660f87a3b43563d6eba52bbd78400436f8db79f2))
+* **canvas:** open a minted flow from its catalog card back into Canvas ([d95e54a](https://github.com/monygroupcorp/noema/commit/d95e54a5e4f31cf224fcf8e93712911d858dc822))
+* **crystal:** a fired collection's base flow can be changed ([a1a9f6c](https://github.com/monygroupcorp/noema/commit/a1a9f6cb5cebfbfad8c276b7c4b70cd6ac84266d))
+* **crystal:** muse prompt-fragment taxonomy, sampler and template weaver ([98a8c03](https://github.com/monygroupcorp/noema/commit/98a8c03ada27b395748f89f61e8ff0053822fd76))
+* **muse:** build a fragment garden from captions and roll readable prompts ([de3de6c](https://github.com/monygroupcorp/noema/commit/de3de6ce8d01e8fdda30546ed5a11fe325a9f436))
+* **muse:** render dataset item fragments as a curatable chip garden ([4ce4871](https://github.com/monygroupcorp/noema/commit/4ce4871bac581c36fa539999f9491e28a530b922))
+
+
+### Bug Fixes
+
+* **api:** surface an underfunded run as 402 instead of a generic 500 ([c26914e](https://github.com/monygroupcorp/noema/commit/c26914e7ef1bb129f9cfc56e853fcc932aeacacf))
+* drop retracted privacy claim from index.html meta tags ([9bde7dd](https://github.com/monygroupcorp/noema/commit/9bde7dd6df51b13034a7c04e60215bc35571c2bc))
+* **economy:** return 402 for shortfalls on the arcanum and bursa spend paths ([ae5bfc0](https://github.com/monygroupcorp/noema/commit/ae5bfc06c68cb7d7dc935a070f3160c401a14a78))
+* prompt-axis value no longer clobbered + new collections seed a working example ([9905ee6](https://github.com/monygroupcorp/noema/commit/9905ee690767890cadeaedb9962a22c3a8bd38ab))
+* remove client method for a training-cost route that does not exist ([8181460](https://github.com/monygroupcorp/noema/commit/8181460f871c065497553c36148428ecddddca9a))
+* update canvas publish button copy to match publish terminology ([38781c5](https://github.com/monygroupcorp/noema/commit/38781c576db8a2bcbc06f394e78970ee71bd0357))
+* update canvas publish button copy to match publish terminology ([1ca28bd](https://github.com/monygroupcorp/noema/commit/1ca28bddf6857851ef6256968aaaf0f31893c530))
+
 ## [5.5.0](https://github.com/monygroupcorp/noema/compare/v5.4.1...v5.5.0) (2026-08-14)
 
 
