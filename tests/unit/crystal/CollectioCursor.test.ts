@@ -629,6 +629,56 @@ test('TraitMixer integration: dispatched aditus.prompt matches selectForPiece ou
   assert.equal(inceptor.calls[0].aditus.prompt, expected.prompt)
 })
 
+// ── Test 17b: an axis that varies the `prompt` port keeps its value ───────────
+// An axis declared with `porta: 'prompt'` writes the winning `valor.value` onto
+// `selection.aditus.prompt`. The assembled prompt (basePrompt + promptFragments) is the
+// value for collections whose axes vary other ports; it stands in only when the axes left
+// `prompt` unset, so an axis that does set it reaches the dispatched piece intact.
+
+test("a porta:'prompt' axis's winning valor.value reaches the dispatched piece's aditus.prompt unclobbered", async () => {
+  const tractus: Tractus[] = [
+    {
+      porta: 'prompt',
+      label: 'Prompt',
+      valores: [
+        { value: 'a lone lighthouse at dusk, cinematic lighting', label: 'Lighthouse', rarity: 1 },
+        { value: 'a neon city street in rain, reflections', label: 'Neon street', rarity: 1 },
+        { value: 'a quiet forest clearing, morning mist', label: 'Forest clearing', rarity: 1 },
+      ],
+    },
+  ]
+  const collectio = makeCollectio({
+    numerus: 3,
+    concurrentia: 3,
+    tractus,
+    // No `_basePrompt`: nothing to assemble, so the earlier merge produced an empty prompt.
+    aditusBase: {},
+  })
+  const collectiones = makeCollectionum(collectio)
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(
+    inceptor.dispatch,
+    collectiones,
+    inceptor.actorum,
+    {},
+  )
+
+  await cursor.start(collectio)
+
+  assert.equal(inceptor.calls.length, 3)
+  const values = new Set(tractus[0].valores.map((v) => v.value))
+  for (const call of inceptor.calls) {
+    const prompt = call.aditus.prompt
+    assert.equal(typeof prompt, 'string')
+    assert.notEqual(prompt, '', 'the axis value must not be replaced by the empty assembled prompt')
+    assert.ok(values.has(prompt as string), `dispatched prompt should be one of the axis values, got ${String(prompt)}`)
+  }
+
+  // The point of the seeded config: several pieces, several distinct prompts.
+  const distinct = new Set(inceptor.calls.map((c) => c.aditus.prompt as string))
+  assert.ok(distinct.size > 1, 'equal-rarity values across 3 pieces should produce more than one prompt')
+})
+
 // ── Test 18: aditus merges aditusBase with selection ─────────────────────────
 
 test('aditus merges aditusBase fields into each dispatched inceptio', async () => {
