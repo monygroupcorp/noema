@@ -307,10 +307,15 @@ export class CollectioCursor {
       // Record this piece's DNA so subsequent pieces avoid it (when deduping).
       if (collectio.dna) state.usedDna.add(selection.dna)
 
+      // An axis may vary the `prompt` port directly (`porta: 'prompt'`), in which case the mixer
+      // has already placed the winning value on `selection.aditus.prompt`. The assembled prompt
+      // (basePrompt + promptFragments, in join or token mode) is the value for the common case
+      // where no axis targets that port, so it stands in only when the axes left it unset.
+      const selectedAditus = selection.aditus as Record<string, unknown>
       const aditus: Record<string, unknown> = {
         ...collectio.aditusBase,
         ...selection.aditus,
-        prompt: selection.prompt,
+        prompt: selectedAditus.prompt ?? selection.prompt,
         _pieceIndex: pieceIndex,
         _attributes: selection.attributes,
         _dna: selection.dna,

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { api, type Collection } from '../lib/api';
+import { api, type Collection, type CreateCollectionRequest, type Tractus } from '../lib/api';
 import { COLL_STATUS_LABEL, collGlyph, collTile } from '../lib/collections';
 import { useProject, useProjectScope } from '../state/project';
 import { ScopeBanner } from '../lib/ScopeBanner';
@@ -10,11 +10,62 @@ import { HoldingToggle } from '../lib/HoldingToggle';
 
 // Collections (editio) — the BUILD-rail surface listing the user's collections. Each is a hub
 // (traits → run → curation → export). Creating one is a NAMING act, not a generation launch:
-// it always creates a draft, spends nothing, and the generative config (flow, supply, trait
-// grid) is authored afterwards on the hub / in the garden.
+// it always creates a draft and spends nothing. The generative config (flow, supply, trait
+// grid) starts from a working example and is authored onward on the hub / in the garden.
 
-// The create form: name + optional description + which project it lives in. Nothing else —
-// no flow, no supply, no axis of variation, and no spend-now button.
+// ── The starting configuration a new collection is created with ───────────────────────────
+// A collection created with no flow, no supply and no axis reads as unfinished rather than as
+// something to author. So the create form seeds a MINIMAL WORKING configuration instead: one
+// flow, one axis varying the `prompt` port over several complete prompts, and a supply of one
+// piece per value. Fire it untouched and it produces pieces that differ.
+//
+// This is a starting point, never a rail. The seed is ordinary collection config on an ordinary
+// draft — the same shape the traits garden writes via `patchCollectionDraft` — so every part of
+// it (the flow, the axis, each value, the supply) is renamed, edited or deleted exactly like
+// something the author added themselves. Nothing marks a collection, axis or value as seeded,
+// and no client state keys off it.
+
+// The canonical atomic text-to-image flow (hosted API, fixed cost, no pod dependency), which
+// makes it the one seed that runs for any account without further setup.
+export const SEED_MODUS_ID = 'modus.dalle-iii';
+
+// Complete, self-contained prompts — each stands alone as the whole `prompt` input, because the
+// axis varies that port directly rather than contributing a fragment to an assembled prompt.
+export const SEED_TRACTUS: Tractus[] = [
+  {
+    porta: 'prompt',
+    label: 'Prompt',
+    valores: [
+      { value: 'a lone lighthouse at dusk, cinematic lighting', label: 'Lighthouse' },
+      { value: 'a neon city street in the rain, long reflections', label: 'Neon street' },
+      { value: 'a quiet forest clearing in morning mist', label: 'Forest clearing' },
+      { value: 'an abstract geometric composition, bold flat colour', label: 'Abstract' },
+      { value: 'a still life of fruit on a windowsill, warm afternoon light', label: 'Still life' },
+    ],
+  },
+];
+
+/** The create payload: the author's naming act plus the starting configuration above. */
+export function buildCreateRequest(input: {
+  nomen: string;
+  descriptio?: string;
+  reviewEnabled: boolean;
+}): CreateCollectionRequest {
+  const tractus = SEED_TRACTUS.map((a) => ({ ...a, valores: a.valores.map((v) => ({ ...v })) }));
+  return {
+    nomen: input.nomen,
+    ...(input.descriptio ? { descriptio: input.descriptio } : {}),
+    reviewEnabled: input.reviewEnabled,
+    draft: true,
+    modusId: SEED_MODUS_ID,
+    tractus,
+    // One piece per value on the smallest useful run.
+    total: tractus[0].valores.length,
+  };
+}
+
+// The create form: name + optional description + which project it lives in. Nothing else on the
+// form — the flow, supply and trait grid arrive seeded and are authored afterwards in the garden.
 function CreateForm({ onCreated }: { onCreated: (c: Collection, projectId: string) => void }) {
   const { project: active, projects } = useProject();
   const [nomen, setNomen] = useState('');
@@ -30,12 +81,11 @@ function CreateForm({ onCreated }: { onCreated: (c: Collection, projectId: strin
     if (!ready) return;
     setBusy(true); setErr(null);
     try {
-      const { collection } = await api.createCollection({
+      const { collection } = await api.createCollection(buildCreateRequest({
         nomen: nomen.trim(),
-        ...(descriptio.trim() ? { descriptio: descriptio.trim() } : {}),
+        descriptio: descriptio.trim(),
         reviewEnabled: review,
-        draft: true,
-      });
+      }));
       onCreated(collection, projectId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e)); setBusy(false);
@@ -60,7 +110,7 @@ function CreateForm({ onCreated }: { onCreated: (c: Collection, projectId: strin
         {/* Curation preference, not run config — it reads the same with or without a supply
             on screen, and it stays editable on the collection until it is fired. */}
         <label className="cc-check"><input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} /> Review each piece before it counts</label>
-        <span className="cc-note">nothing is generated yet — you pick the flow and traits next</span>
+        <span className="cc-note">nothing is generated yet — it starts with an example flow and prompt axis, all editable</span>
         <button className="btn" disabled={!ready} onClick={submit}>{busy ? 'Creating…' : <>Create collection <Ic name="arrow-right" /></>}</button>
       </div>
       {err && <div className="cc-err">{err}</div>}
