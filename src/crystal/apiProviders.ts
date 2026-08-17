@@ -74,7 +74,7 @@ export const OPENROUTER_PROVIDER: ApiProvider = {
   baseUrl: 'https://openrouter.ai/api/v1',
   authEnv: 'OPENROUTER_API_KEY',
   capabilities: {
-    chat: { path: '/chat/completions', defaultModel: 'openai/gpt-4o' },
+    chat: { path: '/chat/completions', defaultModel: 'qwen/qwen3.8-27b' },
   },
   pricing: {
     chatImpetusPer1kTokens: 3n,
