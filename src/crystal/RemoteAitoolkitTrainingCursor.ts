@@ -3,6 +3,10 @@ import type { Cursor, CursorResult, Actorum } from '../types/cursus.js'
 import type { Actum } from '../types/actum.js'
 import type { Modus } from '../types/modus.js'
 import { parseSamplePrompts } from './aitkConfig.js'
+import { PROVISION_BUDGET_MS } from './SecurePodClient.js'
+
+/** Default pod-seconds cap for a training run — 2h. */
+export const DEFAULT_MAX_TRAINING_SECONDS = 7200
 
 // =============================================================================
 // RemoteAitoolkitTrainingCursor — training on a provisioned, billed pod (Slice E)
@@ -82,7 +86,24 @@ export class RemoteAitoolkitTrainingCursor implements Cursor {
 
   async reserve(modus: Modus, _aditus: Record<string, unknown>): Promise<bigint> {
     if (modus.impetusFixum !== undefined) return modus.impetusFixum   // honour a fixed price if one is declared
-    return BigInt(this.deps.maxTrainingSeconds ?? 7200)               // else a pod-seconds upper bound
+    return BigInt(this.deps.maxTrainingSeconds ?? DEFAULT_MAX_TRAINING_SECONDS)   // else a pod-seconds upper bound
+  }
+
+  /**
+   * Wall-clock budget for a training run: the pod provisioning budget PLUS the training window the
+   * reservation pays for. Added, not maxed — provisioning rents a machine and builds an environment
+   * on it (clone + a large dependency install), and only then can the first optimizer step run.
+   *
+   * Not derived from `reserve()`, which returns impetus and short-circuits to a declared fixed
+   * price when the modus has one. A duration read out of a price is how a deadline ends up shorter
+   * than a single step of the work it is supposed to cover.
+   *
+   * The cost of the number: `expirat` is what releases the locked reserve, so a training run that
+   * dies silently holds the payer's credits locked this long before the reaper frees them (clamped
+   * by MAX_TERMINUS_MS). Nothing is charged — a reaped run is failed, not settled.
+   */
+  async terminus(_modus: Modus, _aditus: Record<string, unknown>): Promise<number> {
+    return PROVISION_BUDGET_MS + (this.deps.maxTrainingSeconds ?? DEFAULT_MAX_TRAINING_SECONDS) * 1000
   }
 
   async run(actum: Actum): Promise<CursorResult> {

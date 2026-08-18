@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Actum } from '../types/actum.js'
 import type { Modus, Modorum } from '../types/modus.js'
 import type { Actorum, Inceptio } from '../types/cursus.js'
+import { MAX_TERMINUS_MS } from '../execution/ActumInceptor.js'
 
 // =============================================================================
 // CompositusCursor — sequential chain orchestrator (ADR-0008)
@@ -58,7 +59,6 @@ interface RunState {
   runningChildId?: string
 }
 
-const DEFAULT_EXPIRAT_MS = 60 * 60 * 1000 // 1h — the whole chain, generously
 
 export class CompositusCursor {
   private readonly states = new Map<string, RunState>()
@@ -68,6 +68,16 @@ export class CompositusCursor {
     private readonly dispatch: (inceptio: Inceptio) => Promise<{ actum: Actum; exitus?: Record<string, unknown> }>,
     private readonly modorum: Modorum,
     private readonly actorum: Actorum,
+    /**
+     * Wall-clock budget for ONE step, in ms —
+     * `(m, a) => cursorum.resolve(m).terminus?.(m, a) ?? DEFAULT_EXPIRAT_MS`.
+     *
+     * Injected as a function for the same reason `dispatch` is: CompositusCursor must not depend
+     * on Cursorum. REQUIRED rather than optional-with-a-default on purpose — a default would let
+     * the parent's deadline be correct in tests while production kept a flat one, which is exactly
+     * the shape of defect the derived deadline exists to remove.
+     */
+    private readonly terminusOf: (modus: Modus, aditus: Record<string, unknown>) => Promise<number>,
   ) {}
 
   /**
@@ -99,6 +109,21 @@ export class CompositusCursor {
       childModi.push(child)
     }
 
+    // The parent must OUTLIVE its steps. It locks no signa of its own, but it is swept by the same
+    // expiry reaper as any other actum, and a reaped parent fails the whole chain through
+    // `onStepComplete(..., false)` — while a child is still legitimately running. So its deadline
+    // is derived from its contents: the sum of the steps' own wall-clock budgets, since v1 chains
+    // are strictly sequential. Clamped to the same ceiling every terminus is clamped to.
+    //
+    // A flat ceiling would also outlive any chain, but it would make the parent's deadline
+    // unrelated to what it contains — every chain, however short, would then sit in `agens` for
+    // the full ceiling before anything noticed it was stuck.
+    let stepBudgetMs = 0
+    for (const child of childModi) {
+      stepBudgetMs += await this.terminusOf(child, inceptio.aditus)
+    }
+    const parentTerminusMs = Math.min(stepBudgetMs, MAX_TERMINUS_MS)
+
     const parentId = randomUUID()
     const parent = await this.actorum.create({
       id: parentId,
@@ -109,7 +134,7 @@ export class CompositusCursor {
       signaConsumed: [],     // no signa locked at the parent
       aditus: inceptio.aditus,
       status: 'nascens',
-      expirat: new Date(Date.now() + DEFAULT_EXPIRAT_MS),
+      expirat: new Date(Date.now() + parentTerminusMs),
     })
 
     this.states.set(parentId, {

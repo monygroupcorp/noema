@@ -3,10 +3,12 @@
 // Driven with a fake launcher + fake actorum — no pod, no SSH, no GPU.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { RemoteAitoolkitTrainingCursor } from '../../../src/crystal/RemoteAitoolkitTrainingCursor.js'
+import { RemoteAitoolkitTrainingCursor, DEFAULT_MAX_TRAINING_SECONDS } from '../../../src/crystal/RemoteAitoolkitTrainingCursor.js'
 import type { RemoteAitkLaunchSpec, RemoteAitkLauncher } from '../../../src/crystal/RemoteAitoolkitTrainingCursor.js'
 import type { Actum } from '../../../src/types/actum.js'
 import type { Modus } from '../../../src/types/modus.js'
+import { PROVISION_BUDGET_MS } from '../../../src/crystal/SecurePodClient.js'
+import { DEFAULT_EXPIRAT_MS, MAX_TERMINUS_MS } from '../../../src/execution/ActumInceptor.js'
 
 const actum = (aditus: Record<string, unknown>): Actum => ({ id: 'act-remote', aditus } as unknown as Actum)
 
@@ -70,4 +72,23 @@ test('reserve: pod-seconds cap by default, the configured max when set, a fixed 
   assert.equal(await new RemoteAitoolkitTrainingCursor({ launcher: h.launcher, actorum: h.actorum }).reserve({} as Modus, {}), 7200n)
   assert.equal(await new RemoteAitoolkitTrainingCursor({ launcher: h.launcher, actorum: h.actorum, maxTrainingSeconds: 3600 }).reserve({} as Modus, {}), 3600n)
   assert.equal(await new RemoteAitoolkitTrainingCursor({ launcher: h.launcher, actorum: h.actorum }).reserve({ impetusFixum: 5n } as Modus, {}), 5n)
+})
+
+// ---------------------------------------------------------------------------
+// terminus — provisioning budget + the training window, added
+// ---------------------------------------------------------------------------
+
+test("a training actum's expirat outlives the training window it reserved", async () => {
+  const h = harness()
+  const cursor = new RemoteAitoolkitTrainingCursor({ launcher: h.launcher, actorum: h.actorum })
+  const m = { id: 'mod-train' } as unknown as Modus
+
+  const reservedSeconds = Number(await cursor.reserve(m, {}))
+  const terminusMs = await cursor.terminus(m, {})
+
+  assert.equal(reservedSeconds, DEFAULT_MAX_TRAINING_SECONDS)
+  assert.ok(terminusMs > reservedSeconds * 1000, 'the deadline must cover provisioning as well as the run')
+  assert.ok(terminusMs > DEFAULT_EXPIRAT_MS)
+  assert.equal(terminusMs, PROVISION_BUDGET_MS + DEFAULT_MAX_TRAINING_SECONDS * 1000)
+  assert.ok(terminusMs <= MAX_TERMINUS_MS, 'the training deadline must sit inside the ceiling')
 })

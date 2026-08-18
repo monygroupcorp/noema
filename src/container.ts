@@ -97,7 +97,7 @@ import { HuggingFaceUploader, HfHttpTransport } from './crystal/HfUploader.js'
 import type { PublicationAdapter } from './crystal/PublicationAdapter.js'
 import { SimpleCursorum } from './crystal/SimpleCursorum.js'
 import { ActumCompletor } from './execution/ActumCompletor.js'
-import { ActumInceptor } from './execution/ActumInceptor.js'
+import { ActumInceptor, DEFAULT_EXPIRAT_MS } from './execution/ActumInceptor.js'
 import { dispatchInceptio } from './execution/dispatchInceptio.js'
 import { MongoMandatum } from './crystal/MongoMandatum.js'
 import { MongoCorpus } from './crystal/MongoCorpus.js'
@@ -753,7 +753,13 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   let compositusCursor: CompositusCursor
   const sharedDispatch = (inc: Inceptio) =>
     dispatchInceptio({ inceptor, modorum, cursorum, completor, actumIndex, compositusCursor }, inc)
-  compositusCursor = new CompositusCursor(sharedDispatch, modorum, actorum)
+  // The parent actum's deadline is derived from its steps' own wall-clock budgets, so a step
+  // cursor that declares a long terminus cannot be outlived by the umbrella that owns it.
+  // Injected as a function so CompositusCursor stays independent of Cursorum, exactly as
+  // `dispatch` is.
+  const terminusOf = async (m: Modus, a: Record<string, unknown>): Promise<number> =>
+    await cursorum.resolve(m).terminus?.(m, a) ?? DEFAULT_EXPIRAT_MS
+  compositusCursor = new CompositusCursor(sharedDispatch, modorum, actorum, terminusOf)
   // Review ON by default: every completed piece waits for the creator's approve/reject
   // (curation) before it counts toward the collection and the next piece fires. This is
   // a GLOBAL flag today (not per-collection) — a per-collection review toggle is net-new.
