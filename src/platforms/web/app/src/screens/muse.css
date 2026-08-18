@@ -1,0 +1,26 @@
+/* Muse (noema-229) — layout on top of the shared .garden/.gt-* grid from app.css
+   (TraitsGarden's pattern). Only what is genuinely new to this screen lives here. */
+
+.muse-cats { gap: 0; }
+.muse-cat-row { display: flex; align-items: center; gap: 9px; padding: 7px 10px; font-size: 13px; color: var(--muted); }
+.muse-cat-row .gc-n { margin-left: auto; }
+
+.muse-garden { margin-bottom: 16px; }
+
+.muse-roll-controls { display: flex; align-items: flex-end; gap: 12px; margin: 14px 0; }
+
+.muse-rolls { display: flex; flex-direction: column; gap: 14px; margin-top: 10px; }
+.muse-roll { border: 1px solid var(--hair); border-radius: 12px; background: var(--panel); padding: 12px; }
+.muse-roll-head { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+.muse-roll-text { width: 100%; min-height: 54px; resize: vertical; }
+.muse-roll-frags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.muse-roll-frag { border: 1px solid var(--hair); border-radius: 999px; padding: 3px 9px; font-size: 11px; color: var(--muted); }
+.muse-roll-foot { display: flex; justify-content: flex-end; }
+
+.muse-badge { font-family: var(--font-mono); font-size: 11px; border-radius: 5px; padding: 2px 7px; }
+.muse-badge.free { color: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--hair)); }
+.muse-badge.paid { color: var(--muted); border: 1px solid var(--hair); }
+.muse-badge.sm { padding: 1px 6px; }
+
+.muse-kept { margin-top: 18px; border-top: 1px solid var(--hair-soft); padding-top: 12px; }
+.muse-kept-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 12.5px; }

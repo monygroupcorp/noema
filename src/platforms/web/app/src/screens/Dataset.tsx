@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { custodyGlyph } from '../lib/datasets';
-import { api, type Dataset as DatasetT, type Fragment, type FragmentCategory } from '../lib/api';
+import { api, type Dataset as DatasetT } from '../lib/api';
+import { categoryColor, curatedFragments } from '../lib/muse';
 
 // Dataset detail (train-dataset-spec.md, render noema-train-dataset.png) — the core asset:
 // media (king) + versions + captionsets. Captionsets are a separate versioned layer (the
@@ -22,25 +23,12 @@ import { api, type Dataset as DatasetT, type Fragment, type FragmentCategory } f
 // rendered as an empty garden, never as an error. Curation (check/uncheck a chip) is local UI
 // state only: it decides which fragments a future garden-build would draw from, it does not write
 // anything back. No LLM call and no credit rail are touched by any of this.
+//
+// noema-229 (Muse P3) — `categoryColor` and `curatedFragments` now live in `lib/muse.ts`, shared
+// with the dataset-wide Muse screen (`/datasets/:id/muse`), and are re-exported here so this
+// screen's own call sites and its existing test keep working unchanged.
 
-/** Fixed, deterministic per-category color so a category reads the same everywhere it appears —
- *  not a hash, so the palette stays legible (no two adjacent categories landing on similar hues). */
-const CATEGORY_COLOR: Record<FragmentCategory, string> = {
-  subject: '#5b8cff', hair: '#8a7cff', outfit: '#c26bd9', pose: '#e0668f', expression: '#e08a55', props: '#c9a13a',
-  setting: '#3fae7a', style: '#39a6a0', palette: '#3f8fbf', lighting: '#e0c34a', mood: '#7a8fae',
-};
-
-export function categoryColor(category: FragmentCategory): string {
-  return CATEGORY_COLOR[category] ?? 'var(--muted)';
-}
-
-/** The fragment subset a garden build would actually draw from: everything except the chips the
- *  operator has unchecked (indexed into `fragments` — stable within one loaded snapshot). Pulled
- *  out as its own function so the exclusion is provably load-bearing rather than a cosmetic toggle
- *  (noema-221 non-vacuity: reverting this to a no-op must fail the "excludes unchecked chips" test). */
-export function curatedFragments(fragments: Fragment[], excluded: ReadonlySet<number>): Fragment[] {
-  return fragments.filter((_, i) => !excluded.has(i));
-}
+export { categoryColor, curatedFragments };
 
 export function Dataset() {
   const { id } = useParams();
@@ -157,7 +145,7 @@ export function Dataset() {
                   <span className="cs-main"><span className="nm">{cs.name}</span><span className="cs-sub mono"><span className={`hemi2 ${custodyGlyph(d.custody)}`} /> {cs.method} · {cs.coverage}</span></span>
                 </button>
               ))}
-              <div className="capset-actions"><Link className="lnk" to={`/datasets/${d.id}/caption`}>+ new captionset</Link> · <Link className="lnk" to={`/datasets/${d.id}/caption`}>run a caption job</Link></div>
+              <div className="capset-actions"><Link className="lnk" to={`/datasets/${d.id}/caption`}>+ new captionset</Link> · <Link className="lnk" to={`/datasets/${d.id}/caption`}>run a caption job</Link> · <Link className="lnk" to={`/datasets/${d.id}/muse`}>muse →</Link></div>
             </div>
 
             <div className="ds-panel">
