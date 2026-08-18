@@ -10,10 +10,11 @@ import {
   MODUS_FRAMES_TO_VIDEO,
   MODUS_AITOOLKIT_TRAINING,
   MODUS_DATASET_CAPTION,
+  MODUS_DATASET_DECOMPOSE,
 } from '../../../../src/crystal/seeds/modi.js'
 
-test('CANONICAL_MODI contains nine entries', () => {
-  assert.equal(CANONICAL_MODI.length, 9)
+test('CANONICAL_MODI contains ten entries', () => {
+  assert.equal(CANONICAL_MODI.length, 10)
 })
 
 test('no canonical modus is still on the dropped huggingface ministerium', () => {
@@ -124,6 +125,32 @@ test('modus.chatgpt is retained but de-canonised, and still hashes', () => {
     'modus.chatgpt must still be seeded — historical actus reference its contentHash',
   )
   assert.ok(MODUS_CHATGPT.contentHash.length > 0)
+})
+
+test('dataset-decompose modus is a canon decompose job on its OWN ministerium (sync, usage-billed)', () => {
+  // Same assertion the caption modus carries, and for the same reason: `Cursorum` is a flat
+  // Map<ministerium, Cursor> whose `register` is a bare set, so sharing a key with a hosted-API
+  // provider would replace that provider's ApiCursor and send every chat/image dispatch into the
+  // decomposer — with a green typecheck and a green suite.
+  assert.equal(MODUS_DATASET_DECOMPOSE.ministerium, 'musegarden')
+  for (const other of [MODUS_CHATGPT, MODUS_OPENROUTER_CHAT, MODUS_DALLE_III, MODUS_GPT_IMAGE_EDIT]) {
+    assert.notEqual(MODUS_DATASET_DECOMPOSE.ministerium, other.ministerium)
+  }
+  assert.equal(MODUS_DATASET_DECOMPOSE.genus, 'atomicus')
+  // The cursor loops the chat rail in-process and returns when the last caption is written.
+  assert.equal(MODUS_DATASET_DECOMPOSE.deliveryMode, 'sync')
+  assert.equal(MODUS_DATASET_DECOMPOSE.canonica, true)
+  // No fixed cost: the cursor reserves a ceiling from the caption count and settles the summed
+  // real token cost — metered like any other run, with no free lane.
+  assert.equal(MODUS_DATASET_DECOMPOSE.impetusFixum, undefined)
+  // Text in, text out would cascade to `chat`, which this is not — an explicit override, the
+  // same call the caption modus makes.
+  assert.equal(MODUS_DATASET_DECOMPOSE.verbum, 'describe')
+  // A decompose is scoped to ONE captionset on ONE dataset; both ids are required.
+  assert.equal(MODUS_DATASET_DECOMPOSE.aditus.dataset?.required, true)
+  assert.equal(MODUS_DATASET_DECOMPOSE.aditus.captionset?.required, true)
+  assert.deepEqual(Object.keys(MODUS_DATASET_DECOMPOSE.exitus).sort(), ['decomposed', 'fragments'])
+  assert.ok(MODUS_DATASET_DECOMPOSE.contentHash.length > 0)
 })
 
 test('all modi have non-empty id, nomen, versio', () => {

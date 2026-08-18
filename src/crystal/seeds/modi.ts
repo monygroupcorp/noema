@@ -345,6 +345,49 @@ export const MODUS_DATASET_CAPTION: Modus = make({
   mutatum: new Date('2026-08-14'),
 })
 
+export const MODUS_DATASET_DECOMPOSE: Modus = make({
+  id: 'modus.dataset-decompose',
+  nomen: 'Dataset Decompose — captions into prompt fragments',
+  descriptio: 'Dataset Decompose — runs every caption in one captionset through the Muse decomposer and stores the resulting prompt fragments on the media items they came from. Pick it to fill a dataset\'s chip garden after captioning; caption the dataset first if it has no captionset yet.',
+  genus: 'atomicus',
+  versio: '1.0.0',
+
+  // A ministerium of its OWN. `Cursorum` is a flat Map<ministerium, Cursor> whose `register` is a
+  // bare set, so registering this on 'openai' (or any provider id) would replace the ApiCursor
+  // bound to that key and send every hosted-API chat/image/image-edit dispatch into the
+  // decomposer. The provider registrations stay exactly as they are; this arm owns its own key.
+  ministerium: 'musegarden',
+
+  // The cursor loops the chat rail in-process and returns when the last caption is written —
+  // no pod, no completion webhook.
+  deliveryMode: 'sync',
+  canonica: true,
+  // No impetusFixum: cost is the summed real token cost of one chat call per caption. The cursor
+  // reserves a ceiling from the caption count and settles down to actual usage, so a decompose is
+  // metered exactly like any other run — no separate lifecycle and no free lane.
+
+  // Explicit override (the convention noema-087 established): every port here is text, so the
+  // cascade's text rule fires and lands on `chat`, which this is not. Caption text in, categorized
+  // fragments out is an extraction over existing content: `describe`.
+  verbum: 'describe',
+
+  aditus: {
+    dataset:    { type: 'text', required: true,  description: 'Id of the dataset whose media items the fragments land on' },
+    captionset: { type: 'text', required: true,  description: 'Id of the captionset on that dataset to decompose' },
+    trigger:    { type: 'text', required: false, description: 'Trigger word to strip from fragments, so they stay reusable rather than branded to one model' },
+    model:      { type: 'text', required: false, description: 'Chat model id for the decomposer (the provider default when absent)' },
+    provider:   { type: 'text', required: false, description: 'Hosted-API provider id to decompose on (the deployment default when absent)' },
+  },
+
+  exitus: {
+    decomposed: { type: 'int', description: 'How many media items this pass wrote fragments onto' },
+    fragments:  { type: 'int', description: 'How many fragments were written in total' },
+  },
+
+  natum:   new Date('2026-08-18'),
+  mutatum: new Date('2026-08-18'),
+})
+
 export const CANONICAL_MODI: Modus[] = [
   MODUS_CHATGPT,
   MODUS_DALLE_III,
@@ -355,4 +398,5 @@ export const CANONICAL_MODI: Modus[] = [
   MODUS_FRAMES_TO_VIDEO,
   MODUS_AITOOLKIT_TRAINING,
   MODUS_DATASET_CAPTION,
+  MODUS_DATASET_DECOMPOSE,
 ]

@@ -74,6 +74,7 @@ import { AitoolkitTrainingCursor, type AitoolkitTrainingCursorDeps } from './cry
 import { RemoteAitoolkitTrainingCursor } from './crystal/RemoteAitoolkitTrainingCursor.js'
 import { RemoteAitkLauncher, securePodTrainingProvisioner } from './crystal/RemoteAitkLauncher.js'
 import { DatasetCaptionCursor } from './crystal/DatasetCaptionCursor.js'
+import { MuseDecomposeCursor, MUSE_DECOMPOSE_MINISTERIUM } from './crystal/MuseDecomposeCursor.js'
 import { CaptionPodLauncher } from './crystal/CaptionPodLauncher.js'
 import { makeDatasetResolver } from './crystal/datasetManifest.js'
 import { SqliteAitkJobStore } from './crystal/AitkJobStore.js'
@@ -561,6 +562,18 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
       mediaFetcher: httpMediaFetcher,
     }))
   }
+
+  // Muse decompose (`modus.dataset-decompose`) — the same hosted-API chat rail, its OWN
+  // ministerium. `Cursorum` is a flat Map<ministerium, Cursor> whose `register` is a bare set,
+  // so this must never be registered under a provider id: that key belongs to the ApiCursor
+  // above and a second registration there would take over every chat, image and image-edit
+  // dispatch. Registered unconditionally so a deployment with no chat key refuses a decompose
+  // with the cursor's own named error instead of an unresolvable ministerium; it reuses the
+  // `datasets` store constructed above rather than opening a second one.
+  cursorum.register(MUSE_DECOMPOSE_MINISTERIUM, new MuseDecomposeCursor({
+    datasets,
+    providers: (config.apiProviders ?? []).map(({ provider, apiKey }) => ({ provider, apiKey })),
+  }))
 
   // Publication adapters (spec §5b): feed + model registries need nothing; the
   // bucket adapter needs R2 (custody=ours hosting) so it is gated on config below.
