@@ -20,6 +20,7 @@ import { Datasets } from './screens/Datasets';
 import { Dataset } from './screens/Dataset';
 import { CaptionJob } from './screens/CaptionJob';
 import { Derive } from './screens/Derive';
+import { Muse } from './screens/Muse';
 import { TrainRun } from './screens/TrainRun';
 import { Shelf } from './screens/Shelf';
 import { Teams } from './screens/Teams';
@@ -62,6 +63,7 @@ export function App() {
       <Route path="/datasets/:id" element={<Dataset />} />
       <Route path="/datasets/:id/caption" element={<CaptionJob />} />
       <Route path="/datasets/:id/derive" element={<Derive />} />
+      <Route path="/datasets/:id/muse" element={<Muse />} />
       <Route path="/train/run/:id" element={<TrainRun />} />
       <Route path="/models" element={<Shelf />} />
       <Route path="/teams" element={<Teams />} />
