@@ -271,6 +271,60 @@ test('pod lifecycle: terminates pod even when SSH never becomes ready', async ()
   assert.ok(terminateSpy.calls.length > 0, 'expected terminatePod call')
 })
 
+test('pod lifecycle: the SSH timeout error names the last-seen desiredStatus / publicIp / port-22 mapping', async () => {
+  // sshReadyAfterCalls: 9999 means every status poll returns the mock's default
+  // `{ desiredStatus: 'STARTING' }` body — a successful read, but never ready. The
+  // give-up message must carry that last reading, not the bare "SSH not ready" line.
+  const webhookPayloads: unknown[] = []
+  const { fetch } = makeFetchMock('pod-ssh-timeout', { sshReadyAfterCalls: 9999, webhookPayloads })
+  const client = makeClient(
+    makeConfig({ sshReadyTimeoutMs: 50, sshPollIntervalMs: 10 }),
+    () => makeSshTransport(),
+    fetch,
+  )
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+  const failed = (webhookPayloads as Array<{ status?: string; error?: string }>).find(p => p.status === 'FAILED')
+  assert.ok(failed, 'expected a FAILED webhook')
+  assert.match(failed!.error ?? '', /desiredStatus=STARTING/)
+  assert.match(failed!.error ?? '', /publicIp=<absent>/)
+  assert.match(failed!.error ?? '', /port22=<absent>/)
+})
+
+test('pod lifecycle: a pod whose every status fetch failed reports that it was never observed, not a false "not RUNNING"', async () => {
+  // Every GET to /pods/:id 500s — _getSshInfo never gets a successful read, so there is
+  // no observation to name. An absent reading must not render as desiredStatus=<absent>,
+  // which would read as "the API answered and said nothing" rather than "never answered".
+  const webhookPayloads: unknown[] = []
+  const podId = 'pod-ssh-unreachable'
+  const fetchFn = (async (url: string, init?: RequestInit): Promise<Response> => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'POST' && url.includes('rest.runpod.io') && url.includes('/pods') && !url.includes(podId)) {
+      return new Response(JSON.stringify({ id: podId }), { status: 200 })
+    }
+    if (method === 'GET' && url.includes(`/pods/${podId}`)) {
+      return new Response('{"error":"internal"}', { status: 500 })
+    }
+    if (method === 'POST') {
+      webhookPayloads.push(JSON.parse((init?.body as string) ?? '{}'))
+      return new Response('{}', { status: 200 })
+    }
+    return new Response('Not found', { status: 404 })
+  }) as unknown as typeof fetch
+
+  const client = makeClient(
+    makeConfig({ sshReadyTimeoutMs: 50, sshPollIntervalMs: 10 }),
+    () => makeSshTransport(),
+    fetchFn,
+  )
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+  const failed = (webhookPayloads as Array<{ status?: string; error?: string }>).find(p => p.status === 'FAILED')
+  assert.ok(failed, 'expected a FAILED webhook')
+  assert.match(failed!.error ?? '', /no successful status read/)
+  assert.doesNotMatch(failed!.error ?? '', /desiredStatus=/)
+})
+
 test('pod lifecycle: terminates pod when comfyrunner never becomes ready', async () => {
   const { fetch } = makeFetchMock('pod-norunner', { runnerHealthStatus: 'starting' })
   const client = makeClient(
