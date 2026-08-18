@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { api, type Dataset as DatasetT } from '../lib/api';
+import { api, type Dataset as DatasetT, type FlowSummary } from '../lib/api';
 import {
   buildGarden,
+  canFire,
   categoryColor,
   flattenGarden,
   gardenCounts,
+  ignitionBlockReason,
+  ignitionRequest,
   poolDatasetFragments,
   rollCurated,
+  t2iFlows,
+  type IgnitionQuote,
   type RollReport,
 } from '../lib/muse';
 import './muse.css';
@@ -26,8 +31,16 @@ import './muse.css';
 // the cheap conflict detector in `muse/weaver.ts`) as a badge only; the paid smoother is
 // never called here — that is a later item's rail (noema-228).
 //
-// Curation (check/uncheck a chip) and kept rolls are local UI state only. This screen
-// writes nothing server-side: no server route, no store write, no credit contact.
+// Curation (check/uncheck a chip) and kept rolls are local UI state only.
+//
+// Ignition (Muse P4, noema-230) is the one thing on this screen that spends: a mined
+// prompt can be fired at a t2i flow. The rules — which flows are offered, whether a
+// flow can run on a prompt alone, what the request carries, and when the fire button
+// arms — all live in `lib/muse.ts` and are gated there; this screen renders them.
+// Two properties worth reading for: the cost is quoted and shown BEFORE any run is
+// created, and the request carries no `pinnedModels` — a trigger word rides the prompt
+// text and `src/crystal/loraResolver.ts` resolves it server-side, exactly as it does
+// for `Card.tsx` and every other run in the product.
 
 export function Muse() {
   const { id } = useParams();
@@ -61,6 +74,76 @@ export function Muse() {
   // Kept rolls: the roll's prompt text (possibly edited) plus its free/paid verdict.
   const [kept, setKept] = useState<Array<{ prompt: string; paid: boolean }>>([]);
 
+  // ── Ignition ──────────────────────────────────────────────────────────────
+  // The workflow catalog, narrowed to t2i. `effect` (i2i) needs an input image and
+  // `enhance` takes no text, so neither can be driven by a mined prompt alone.
+  const [flows, setFlows] = useState<FlowSummary[] | null>(null);
+  const [modusId, setModusId] = useState<string | null>(null);
+  // Read once per SELECTION (not per render): a flow needing more than a prompt is
+  // refused here rather than at the server's expense.
+  const [blockReason, setBlockReason] = useState<string | null>(null);
+  const [flowLoading, setFlowLoading] = useState(false);
+  // Per-roll quote / fire state, keyed by roll index within the current report.
+  const [quotes, setQuotes] = useState<Record<number, IgnitionQuote>>({});
+  const [busy, setBusy] = useState<number | null>(null);
+  const [fired, setFired] = useState<Record<number, { runId?: string; error?: string }>>({});
+
+  useEffect(() => {
+    let live = true;
+    api.listFlows()
+      .then(({ flows: fs }) => { if (live) setFlows(t2iFlows(fs ?? [])); })
+      .catch(() => { if (live) setFlows([]); });
+    return () => { live = false; };
+  }, []);
+
+  function selectFlow(next: string) {
+    const id_ = next || null;
+    setModusId(id_);
+    setBlockReason(null);
+    setQuotes({});
+    setFired({});
+    if (!id_) return;
+    setFlowLoading(true);
+    api.getFlow(id_)
+      .then((f) => setBlockReason(ignitionBlockReason(f)))
+      .catch((e) => setBlockReason(`could not read this workflow's inputs (${e instanceof Error ? e.message : String(e)})`))
+      .finally(() => setFlowLoading(false));
+  }
+
+  // The prompt that fires is the prompt on screen — the edited text when there is one,
+  // never the pre-edit roll, and never a fresh roll (rolling again at fire time would
+  // generate a different prompt than the one that was quoted and approved).
+  const promptOf = (index: number, rolled: string) => edits[index] ?? rolled;
+
+  async function doQuote(index: number, prompt: string) {
+    if (!modusId) return;
+    setBusy(index);
+    setFired((prev) => ({ ...prev, [index]: {} }));
+    try {
+      const r = await api.quote(ignitionRequest(modusId, prompt));
+      setQuotes((prev) => ({ ...prev, [index]: { modusId, prompt, impetus: r.impetus } }));
+    } catch (e) {
+      setQuotes((prev) => { const next = { ...prev }; delete next[index]; return next; });
+      setFired((prev) => ({ ...prev, [index]: { error: `quote failed: ${e instanceof Error ? e.message : String(e)}` } }));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function doFire(index: number, prompt: string) {
+    if (!modusId) return;
+    if (!canFire(quotes[index] ?? null, modusId, prompt, blockReason)) return;
+    setBusy(index);
+    try {
+      const { run } = await api.createRun(ignitionRequest(modusId, prompt));
+      setFired((prev) => ({ ...prev, [index]: { runId: run.id } }));
+    } catch (e) {
+      setFired((prev) => ({ ...prev, [index]: { error: e instanceof Error ? e.message : String(e) } }));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   // The dataset-wide garden. Pools every media item's fragments (not one item's — that is
   // Dataset.tsx's job) and builds it in one pass. Recomputed only when the dataset's media
   // actually changes, not on every curation toggle.
@@ -72,6 +155,10 @@ export function Muse() {
     if (flat.length === 0) return;
     setReport(rollCurated(flat, excluded, count));
     setEdits({});
+    // A new roll's prompts have never been quoted; carrying a stale quote across would
+    // arm the fire button against a number that priced a different prompt.
+    setQuotes({});
+    setFired({});
   }
 
   const crumb = (
@@ -173,6 +260,23 @@ export function Muse() {
               </button>
             </div>
 
+            {/* ignition target: every t2i workflow the catalog offers, in a dropdown */}
+            <div className="muse-roll-controls">
+              <label className="cc-field"><span>Fire at</span>
+                <select className="cer-input" value={modusId ?? ''} onChange={(e) => selectFlow(e.target.value)}>
+                  <option value="">choose a workflow…</option>
+                  {(flows ?? []).map((f) => (
+                    <option key={f.id} value={f.id}>{f.nomen ?? f.id}{f.versio ? ` · ${f.versio}` : ''}</option>
+                  ))}
+                </select>
+              </label>
+              {flows !== null && flows.length === 0 && (
+                <span className="gt-sub mono">no text-to-image workflow is available.</span>
+              )}
+              {flowLoading && <span className="gt-sub mono">reading inputs…</span>}
+              {blockReason && <span className="gt-sub mono">{blockReason}</span>}
+            </div>
+
             {report && (
               <div className="muse-rolls">
                 {report.rolls.length === 0 ? (
@@ -195,9 +299,47 @@ export function Muse() {
                       ))}
                     </div>
                     <div className="muse-roll-foot">
-                      <button className="btn ghost sm" onClick={() => setKept((prev) => [...prev, { prompt: edits[r.index] ?? r.prompt, paid: r.paid }])}>
+                      <button className="btn ghost sm" onClick={() => setKept((prev) => [...prev, { prompt: promptOf(r.index, r.prompt), paid: r.paid }])}>
                         Keep
                       </button>
+                      {/* Quote first, always: the cost is on screen before a run exists.
+                          Editing the prompt invalidates the quote (canFire compares the
+                          quoted text to the text on screen), so the button re-arms only
+                          after the edited prompt has been priced. */}
+                      <button
+                        className="btn ghost sm"
+                        disabled={!modusId || !!blockReason || busy === r.index || promptOf(r.index, r.prompt).trim() === ''}
+                        onClick={() => doQuote(r.index, promptOf(r.index, r.prompt))}
+                      >
+                        {busy === r.index ? 'working…' : 'Quote'}
+                      </button>
+                      {(() => {
+                        const prompt = promptOf(r.index, r.prompt);
+                        const q = quotes[r.index] ?? null;
+                        const armed = canFire(q, modusId, prompt, blockReason);
+                        return (
+                          <>
+                            {q && (
+                              <span className="gt-sub mono">
+                                {armed ? `${q.impetus} credits` : 'edited — quote again'}
+                              </span>
+                            )}
+                            <button
+                              className="btn accent sm"
+                              disabled={!armed || busy === r.index}
+                              onClick={() => doFire(r.index, prompt)}
+                            >
+                              Generate →
+                            </button>
+                          </>
+                        );
+                      })()}
+                      {fired[r.index]?.runId && (
+                        <Link className="mono" to={`/run?id=${fired[r.index]!.runId}`}>open run view →</Link>
+                      )}
+                      {fired[r.index]?.error && (
+                        <span className="gt-sub mono">{fired[r.index]!.error}</span>
+                      )}
                     </div>
                   </div>
                 ))}
