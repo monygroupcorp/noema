@@ -1,5 +1,17 @@
 # Changelog
 
+## [5.8.0](https://github.com/monygroupcorp/noema/compare/v5.7.1...v5.8.0) (2026-08-18)
+
+
+### Features
+
+* **datasets:** fire a decompose from Muse and the captionset panel ([9daf391](https://github.com/monygroupcorp/noema/commit/9daf39123d67510ccaae81cc1aa70326534d453e))
+
+
+### Bug Fixes
+
+* **crystal:** return the pod-rail launch at provisioning, finish the bootstrap in the background ([b395039](https://github.com/monygroupcorp/noema/commit/b3950393c9459973a4a0212335ef25511d39892d))
+
 ## [5.7.1](https://github.com/monygroupcorp/noema/compare/v5.7.0...v5.7.1) (2026-08-18)
 
 
