@@ -12,6 +12,8 @@ import { MODUS_DATASET_CAPTION, MODUS_AITOOLKIT_TRAINING } from '../../../src/cr
 import type { Actum } from '../../../src/types/actum.js'
 import type { Cursor, CursorResult } from '../../../src/types/cursus.js'
 import type { Modus } from '../../../src/types/modus.js'
+import { PROVISION_BUDGET_MS } from '../../../src/crystal/SecurePodClient.js'
+import { DEFAULT_EXPIRAT_MS, MAX_TERMINUS_MS } from '../../../src/execution/ActumInceptor.js'
 
 class FakeLauncher implements CaptionLauncher {
   launched: CaptionLaunchSpec[] = []
@@ -110,4 +112,34 @@ test('the caption modus resolves to the caption cursor, not the training cursor'
 
   assert.equal(cursorum.resolve(MODUS_DATASET_CAPTION), captionCursor)
   assert.equal(cursorum.resolve(MODUS_AITOOLKIT_TRAINING), trainingCursor)
+})
+
+// ---------------------------------------------------------------------------
+// terminus — the wall-clock deadline, which is NOT the reservation
+//
+// A caption pod is rented, then an environment is built on it, and only then does the first
+// image get captioned. The deadline has to cover both halves or the run is failed while it is
+// still legitimately working. `expirat` is also what releases the locked reserve, so this number
+// is the ceiling on how long a payer's credits stay locked against a run that has died.
+// ---------------------------------------------------------------------------
+
+test("a caption actum's expirat outlives the caption cursor's own reservation window", async () => {
+  const cursor = new DatasetCaptionCursor({ launcher: new FakeLauncher(), actorum: new FakeActorum() })
+
+  const reservedSeconds = Number(await cursor.reserve(modus(), {}))
+  const terminusMs = await cursor.terminus(modus(), {})
+
+  assert.ok(terminusMs > reservedSeconds * 1000,
+    `terminus ${terminusMs}ms must outlive the ${reservedSeconds}s window it reserved`)
+  assert.ok(terminusMs > DEFAULT_EXPIRAT_MS,
+    'a flat default deadline is shorter than a single bootstrap command')
+  assert.equal(terminusMs, PROVISION_BUDGET_MS + DEFAULT_MAX_CAPTION_SECONDS * 1000)
+  assert.ok(terminusMs <= MAX_TERMINUS_MS, 'the caption deadline must sit inside the ceiling')
+})
+
+test('terminus tracks the configured caption window, not a hardcoded one', async () => {
+  const capped = new DatasetCaptionCursor({
+    launcher: new FakeLauncher(), actorum: new FakeActorum(), maxCaptionSeconds: 900,
+  })
+  assert.equal(await capped.terminus(modus(), {}), PROVISION_BUDGET_MS + 900 * 1000)
 })

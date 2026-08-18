@@ -33,6 +33,27 @@ const log = makeLogger('cursor:runpod:secure')
 // and every Fundamentum.comfyRef together; never let the clone go unpinned again.
 const DEFAULT_COMFYUI_REF = 'v0.26.0'
 
+/**
+ * The wall-clock budget for PROVISIONING a pod — renting the machine and building the
+ * environment on it, before any of the work the run actually pays for begins.
+ *
+ * This file's own numbers are what define it: waiting for SSH is bounded by
+ * `sshReadyTimeoutMs` (10 min), and the bootstrap that follows clones a repository and
+ * installs a large dependency tree over several commands. This constant is the single place
+ * that answer lives — `_bootstrapDetached` enforces it as a PHASE deadline, and the pod-rail
+ * cursors import it as the first half of their `terminus`, so the provisioning code and the
+ * actum's deadline are derived from one number instead of two constants kept in step by hand.
+ *
+ * It is a DURATION and nothing else. It never reaches `reserve()`, so it does not enter a
+ * quote, a balance check, or the size of a ledger lock.
+ */
+export const PROVISION_BUDGET_MS = 45 * 60 * 1000  // 45 minutes
+
+/** Per-command ceiling inside the bootstrap phase. The effective cap for any one command is
+ *  min(this, time left in the phase) — the slowest legitimate step keeps its headroom, while
+ *  the commands together can no longer outlast the budget. */
+const BOOTSTRAP_CMD_TIMEOUT_MS = 20 * 60 * 1000  // 20 minutes
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -460,12 +481,15 @@ export class SecurePodClient implements RunPodClient, Procurator {
     if (!podId) throw lastErr ?? new Error('training pod provision failed')
 
     let ssh: SshTransportLike | null = null
+    // The provisioning phase clock starts here, before the SSH wait — the bootstrap deadline
+    // below is the remainder of PROVISION_BUDGET_MS after that wait has taken its share.
+    const provisionDeadline = Date.now() + PROVISION_BUDGET_MS
     try {
       const sshInfo = await this._waitForSsh(podId)
       log.info('training pod locked', { podId, gpuType: sshInfo.gpuType, costPerHr: sshInfo.costPerHr })
       ssh = await this._waitForSshd(sshInfo)
       await this._bootstrapDetached(ssh, podId, AITKTRAINER_SCRIPT_PATH, 'aitktrainer.py',
-        { ...opts.env, RUNPOD_POD_ID: podId }, opts.setup)
+        { ...opts.env, RUNPOD_POD_ID: podId }, opts.setup, provisionDeadline)
       await ssh.close()
       ssh = null
       return { podId }
@@ -479,16 +503,31 @@ export class SecurePodClient implements RunPodClient, Procurator {
   /**
    * Run the `setup` bootstrap commands over SSH (clone ai-toolkit + pip install its deps onto the
    * stock base), then upload a pod script and launch it DETACHED with `env` (nohup) — the pod owns
-   * its own status + completion webhook from here. Setup gets a generous timeout (the pip install is
-   * the slow step). Env values are shell-quoted (base64 blobs + URLs).
+   * its own status + completion webhook from here. Env values are shell-quoted (base64 blobs + URLs).
+   *
+   * The whole setup phase runs against `deadline` — the caller's PROVISION_BUDGET_MS clock, already
+   * debited by the SSH wait. Each command keeps a generous individual ceiling, because the
+   * dependency install is legitimately slow, but is additionally capped at the time left in the
+   * phase, so a sequence of individually-permissible commands cannot outlast the budget the actum's
+   * deadline is derived from. On expiry this throws naming the command that was next and the budget
+   * it ran out of, so the failure reads as "provisioning ran out of budget here" instead of
+   * surfacing later as a run that never reported back.
    */
   private async _bootstrapDetached(
     ssh: SshTransportLike, podId: string, scriptPath: string, scriptName: string,
-    env: Record<string, string>, setup: string[] = [],
+    env: Record<string, string>, setup: string[] = [], deadline?: number,
   ): Promise<void> {
     log.info('bootstrapping training pod', { podId, script: scriptName, setupSteps: setup.length })
+    const timeLeft = (): number => (deadline === undefined ? BOOTSTRAP_CMD_TIMEOUT_MS : deadline - Date.now())
     for (const cmd of setup) {
-      await ssh.exec(cmd, { timeout: 1_200_000 })   // pip install of the ai-toolkit dep tree is slow
+      const left = timeLeft()
+      if (left <= 0) {
+        throw new Error(
+          `Pod ${podId} provisioning budget of ${PROVISION_BUDGET_MS}ms exhausted — ` +
+          `bootstrap stopped before command: ${cmd}`,
+        )
+      }
+      await ssh.exec(cmd, { timeout: Math.min(BOOTSTRAP_CMD_TIMEOUT_MS, left) })
     }
     const script = fs.readFileSync(scriptPath, 'utf8')
     const b64 = Buffer.from(script).toString('base64').replace(/\n/g, '')

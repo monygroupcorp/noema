@@ -167,3 +167,43 @@ test('startExpiryReaper sweeps on an interval and stops cleanly', async () => {
   const after = await actorum.findById('tick-1')
   assert.equal(after?.status, 'fractus') // reaper tick failed it
 })
+
+// ---------------------------------------------------------------------------
+// The release half of the deadline
+//
+// Raising `expirat` raises how long a payer's credits stay locked against a dead run. That trade
+// is only acceptable while a reaped run costs the payer nothing — fail() must RELEASE the locked
+// signa, never settle them. This pins that, so the release path cannot quietly become a charge.
+// ---------------------------------------------------------------------------
+
+test('a reaped actum charges the payer nothing and returns every locked signum', async () => {
+  const signorum = new MemorySignorum()
+  const s1 = await signorum.issue({ animaId: 'u9', forma: 'eth', valor: 1200n, auctor: 'test' })
+  const s2 = await signorum.issue({ animaId: 'u9', forma: 'eth', valor: 600n, auctor: 'test' })
+  const balanceBefore = await signorum.balance({ animaId: 'u9' })
+  await signorum.lock([s1.id, s2.id], 'reaped-1')
+
+  const expired = makeActum({
+    id: 'reaped-1',
+    status: 'agens',
+    expirat: new Date(Date.now() - 1000),
+    signaConsumed: [s1.id, s2.id],
+    impetus: 1800n,
+  })
+  const actorum = new FakeActorum([expired])
+  const completor = new ActumCompletor({ acta: actorum as unknown as Actorum, signorum })
+
+  await recoverExpiredActa({
+    actorum: actorum as unknown as Actorum, completor, compositusCursor: recordingCompositus(),
+  })
+
+  // Nothing charged: the spendable balance is exactly what it was before the run was initiated.
+  assert.equal(await signorum.balance({ animaId: 'u9' }), balanceBefore, 'a reaped run must cost the payer nothing')
+  // Every locked signum came back — released to `valid`, not spent, and unbound from the actum.
+  const hist = await signorum.history({ animaId: 'u9' })
+  for (const id of [s1.id, s2.id]) {
+    const sig = hist.find(s => s.id === id)!
+    assert.equal(sig.status, 'valid', `signum ${id} must be released, not settled`)
+    assert.equal(sig.actumId, undefined)
+  }
+})

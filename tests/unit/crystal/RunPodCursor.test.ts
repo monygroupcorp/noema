@@ -11,6 +11,9 @@ import type { Hospitium, HospitiumStore, HostKey } from '../../../src/types/hosp
 import { Praefectus } from '../../../src/crystal/Praefectus.js'
 import { GENERIC_RESERVE_IMPETUS } from '../../../src/ledger/rates.js'
 import { ESSENTIA_RUNMAKE_SD15, CANONICAL_ESSENTIAE } from '../../../src/crystal/seeds/essentiae.js'
+import { PROVISION_BUDGET_MS } from '../../../src/crystal/SecurePodClient.js'
+import { DatasetCaptionCursor, DEFAULT_MAX_CAPTION_SECONDS } from '../../../src/crystal/DatasetCaptionCursor.js'
+import { RemoteAitoolkitTrainingCursor, DEFAULT_MAX_TRAINING_SECONDS } from '../../../src/crystal/RemoteAitoolkitTrainingCursor.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -618,4 +621,50 @@ test('run threads actum.pinnedModels into compile (Mod • → Add)', async () =
   const pinned = [{ role: 'checkpoint', id: 'intella.sdxl', dest: 'models/checkpoints/sdxl.safetensors' }]
   await cursor.run(makeActum({ pinnedModels: pinned }))
   assert.deepEqual(seen[0], pinned, 'actum.pinnedModels passed to compile')
+})
+
+// ── terminus() vs reserve() — a duration is not a price ───────────────────────
+//
+// The provisioning budget is a DURATION. It reaches `expirat` and nothing else: not a quote, not
+// the balance check, not the size of the ledger lock. Those are `reserve()`'s job alone, and
+// `reserve()` is not a function of the budget on any cursor. The test below is what keeps that
+// true — raising PROVISION_BUDGET_MS must be able to move a deadline without moving an estimate.
+
+test('terminus covers the provisioning budget plus the job window the ceiling permits', async () => {
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
+  assert.equal(await cursor.terminus(makeModus(), {}), PROVISION_BUDGET_MS + 1800 * 1000)
+
+  const tighter = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(),
+    { ...BASE_CONFIG, maxJobSeconds: 600 })
+  assert.equal(await tighter.terminus(makeModus(), {}), PROVISION_BUDGET_MS + 600 * 1000)
+})
+
+test('raising PROVISION_BUDGET_MS does not change what any cursor reserves', async () => {
+  const noopLauncher = { async launch() { return { externusJobId: 'pod-x' } } }
+  const noopActorum = { async update() { return {} as Actum } }
+
+  const pod = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
+  const caption = new DatasetCaptionCursor({ launcher: noopLauncher, actorum: noopActorum })
+  const training = new RemoteAitoolkitTrainingCursor({ launcher: noopLauncher, actorum: noopActorum })
+
+  // Each cursor's reservation is stated in its own terms — a declared price, a fitted cost curve,
+  // or its own pod-seconds cap. None of them is a function of the provisioning budget, so the
+  // budget cannot inflate an estimate.
+  const priced = makeModus({ impetusFixum: 500n })
+  assert.equal(await pod.reserve(priced, {}), 500n)
+  assert.equal(await pod.reserve(makeModus(), {}), GENERIC_RESERVE_IMPETUS)
+  assert.equal(await caption.reserve(makeModus(), {}), BigInt(DEFAULT_MAX_CAPTION_SECONDS))
+  assert.equal(await training.reserve(makeModus(), {}), BigInt(DEFAULT_MAX_TRAINING_SECONDS))
+
+  // And the converse: a fixed PRICE does not shrink the DEADLINE. If terminus were read out of
+  // reserve(), a modus priced at a flat 500 points would be given a 500-unit deadline — the exact
+  // substitution of a price for a duration this separation exists to prevent.
+  for (const [label, ms] of [
+    ['runpod',   await pod.terminus(priced, {})],
+    ['caption',  await caption.terminus(priced, {})],
+    ['training', await training.terminus(priced, {})],
+  ] as const) {
+    assert.ok(ms >= PROVISION_BUDGET_MS, `${label}: a declared price must not become the deadline`)
+    assert.notEqual(BigInt(ms / 1000), 500n, `${label}: deadline tracked the price`)
+  }
 })
