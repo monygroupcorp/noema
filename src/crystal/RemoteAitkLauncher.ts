@@ -46,9 +46,22 @@ export const DEFAULT_AITK_IMAGE = 'runpod/pytorch:1.0.7-cu1281-torch291-ubuntu24
  * Provision a pod, run `setup` over SSH (bootstrap ai-toolkit onto the stock base), then launch a
  * detached pod script with `env`. `RUNPOD_POD_ID` is injected by the implementation (it knows the
  * pod id), so callers leave it out. Faked in tests; SecurePodClient-backed in prod.
+ *
+ * `provision` resolves once the pod id exists; the SSH + bootstrap phase that follows runs in the
+ * background. Two optional hooks carry what that split needs:
+ *   - `onPodId` is awaited after provisioning and BEFORE any pod-side work starts — it is where the
+ *     caller records the handle, so nothing pod-side can call back before the run carries it.
+ *   - `onLaunchFailed` receives a failure from the background phase (the pod is already terminated
+ *     by then), so the run can be failed at once instead of waiting out its deadline.
  */
 export interface TrainingPodProvisioner {
-  provision(opts: { image: string; env: Record<string, string>; setup: string[] }): Promise<{ podId: string }>
+  provision(opts: {
+    image: string
+    env: Record<string, string>
+    setup: string[]
+    onPodId?: (podId: string) => Promise<void>
+    onLaunchFailed?: (err: unknown) => Promise<void>
+  }): Promise<{ podId: string }>
 }
 
 export interface RemoteAitkLauncherDeps {
@@ -65,6 +78,13 @@ export interface RemoteAitkLauncherDeps {
   statusUrl: string
   /** Our completion webhook — the pod POSTs `{id,status,output,executionTime}` here. */
   webhookUrl: string
+  /**
+   * Fail the run when the background SSH/bootstrap phase fails. The launcher holds the actum id
+   * (the pod's own status posts are keyed by it); the wiring points this at the same failure path
+   * the deadline reaper uses. Absent, a failed launch is only observed when the run's deadline
+   * expires.
+   */
+  onLaunchFailed?: (actumId: string, err: unknown) => Promise<void>
 }
 
 export class RemoteAitkLauncher implements RemoteAitkLauncherPort {
@@ -140,9 +160,15 @@ export class RemoteAitkLauncher implements RemoteAitkLauncherPort {
         'torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128',
     ]
 
-    // 5. provision + launch detached; the pod id IS the external run handle.
+    // 5. provision + launch detached; the pod id IS the external run handle. `provision` resolves
+    //    at the pod id and finishes SSH + bootstrap in the background, so the two hooks below are
+    //    how the run stays correlated: the cursor's stamp runs before any pod-side work starts,
+    //    and a background failure fails the run rather than waiting out its deadline.
+    const onLaunchFailed = this.deps.onLaunchFailed
     const { podId } = await this.deps.provisioner.provision({
       image: this.deps.image ?? DEFAULT_AITK_IMAGE, env, setup,
+      ...(spec.onPodId ? { onPodId: spec.onPodId } : {}),
+      ...(onLaunchFailed ? { onLaunchFailed: (err: unknown) => onLaunchFailed(spec.actumId, err) } : {}),
     })
     return { externusJobId: podId }
   }
@@ -151,7 +177,15 @@ export class RemoteAitkLauncher implements RemoteAitkLauncherPort {
 /** Adapt a SecurePodClient (its `launchTrainingPod`) to the `TrainingPodProvisioner` port.
  *  Typed structurally so the launcher carries no SecurePodClient import. */
 export function securePodTrainingProvisioner(
-  client: { launchTrainingPod(opts: { image: string; env: Record<string, string>; setup: string[] }): Promise<{ podId: string }> },
+  client: {
+    launchTrainingPod(opts: {
+      image: string
+      env: Record<string, string>
+      setup: string[]
+      onPodId?: (podId: string) => Promise<void>
+      onLaunchFailed?: (err: unknown) => Promise<void>
+    }): Promise<{ podId: string }>
+  },
 ): TrainingPodProvisioner {
   return { provision: (opts) => client.launchTrainingPod(opts) }
 }

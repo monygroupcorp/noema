@@ -50,6 +50,13 @@ export interface CaptionPodLauncherDeps {
   statusUrl: string
   /** Our completion webhook — the pod POSTs `{id,status,output,executionTime}` here. */
   webhookUrl: string
+  /**
+   * Fail the run when the background SSH/bootstrap phase fails. The launcher holds the actum id
+   * (the pod's own status posts are keyed by it); the wiring points this at the same failure path
+   * the deadline reaper uses. Absent, a failed launch is only observed when the run's deadline
+   * expires.
+   */
+  onLaunchFailed?: (actumId: string, err: unknown) => Promise<void>
 }
 
 export class CaptionPodLauncher implements CaptionLauncher {
@@ -111,9 +118,15 @@ export class CaptionPodLauncher implements CaptionLauncher {
         'torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128',
     ]
 
-    // 5. provision + launch detached; the pod id IS the external run handle.
+    // 5. provision + launch detached; the pod id IS the external run handle. `provision` resolves
+    //    at the pod id and finishes SSH + bootstrap in the background, so the two hooks below are
+    //    how the run stays correlated: the cursor's stamp runs before any pod-side work starts,
+    //    and a background failure fails the run rather than waiting out its deadline.
+    const onLaunchFailed = this.deps.onLaunchFailed
     const { podId } = await this.deps.provisioner.provision({
       image: this.deps.image ?? DEFAULT_AITK_IMAGE, env, setup,
+      ...(spec.onPodId ? { onPodId: spec.onPodId } : {}),
+      ...(onLaunchFailed ? { onLaunchFailed: (err: unknown) => onLaunchFailed(spec.actumId, err) } : {}),
     })
     return { externusJobId: podId }
   }
