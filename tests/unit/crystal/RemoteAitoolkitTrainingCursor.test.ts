@@ -31,7 +31,10 @@ test('run: launches the pod job with high-level inputs, stamps externusJobId + a
   assert.deepEqual(result, { kind: 'async', externusJobId: 'pod-42' })
   assert.equal(h.launched.length, 1)
   // the cursor passes the high-level training inputs — NOT a configPath (the launcher owns the yaml).
-  assert.deepEqual(h.launched[0], { actumId: 'act-remote', jobId: 'job-9', dataset: 'corpus-1', baseModel: 'klein-4b', triggerWord: 'koh', steps: 600, autocaption: true, callbackNonce: h.launched[0].callbackNonce, gpuId: '0', jobConfig: '{"x":1}' })
+  // `onPodId` is the stamp hook and is asserted on its own below; the rest of the spec is pinned here.
+  const { onPodId, ...spec } = h.launched[0]
+  assert.equal(typeof onPodId, 'function', 'the cursor hands the launcher its stamp hook')
+  assert.deepEqual(spec, { actumId: 'act-remote', jobId: 'job-9', dataset: 'corpus-1', baseModel: 'klein-4b', triggerWord: 'koh', steps: 600, autocaption: true, callbackNonce: h.launched[0].callbackNonce, gpuId: '0', jobConfig: '{"x":1}' })
   // The per-job callback nonce is minted here and rides the spec to the pod. It is random, so it
   // is captured rather than literal — but the invariant the completion rail depends on IS pinned:
   // the nonce handed to the pod is the same one stamped on the actum, in the SAME patch as
@@ -46,7 +49,33 @@ test('run: jobId defaults to the actum id; optional fields omitted from the spec
   const h = harness()
   const cursor = new RemoteAitoolkitTrainingCursor({ launcher: h.launcher, actorum: h.actorum })
   await cursor.run(actum(HIGH_LEVEL))
-  assert.deepEqual(h.launched[0], { actumId: 'act-remote', jobId: 'act-remote', dataset: 'corpus-1', baseModel: 'klein-4b', triggerWord: 'koh', steps: 600, autocaption: true, callbackNonce: h.launched[0].callbackNonce })
+  const { onPodId: _stamp, ...spec } = h.launched[0]
+  assert.deepEqual(spec, { actumId: 'act-remote', jobId: 'act-remote', dataset: 'corpus-1', baseModel: 'klein-4b', triggerWord: 'koh', steps: 600, autocaption: true, callbackNonce: h.launched[0].callbackNonce })
+})
+
+// NON-VACUITY: have the cursor stamp the actum after the launcher returns instead of through the
+// `onPodId` hook and this fails — the launch resolves at the pod id and bootstraps the pod
+// afterwards, so a stamp that waits for the launcher to return can leave a pod live carrying a
+// callback credential the actum does not yet have.
+test('run: the actum carries externusJobId + callbackNonce before any pod-side work can call back', async () => {
+  const h = harness()
+  let updatesWhenPodIdKnown = -1
+  const launcher: RemoteAitkLauncher = {
+    async launch(spec) {
+      await spec.onPodId!('pod-42')          // provisioning returned; nothing pod-side has run yet
+      updatesWhenPodIdKnown = h.updates.length
+      return { externusJobId: 'pod-42' }
+    },
+  }
+
+  const result = await new RemoteAitoolkitTrainingCursor({ launcher, actorum: h.actorum }).run(actum(HIGH_LEVEL))
+
+  assert.equal(updatesWhenPodIdKnown, 1, 'the stamp lands inside the launch, before the pod is bootstrapped')
+  assert.equal(h.updates.length, 1, 'and it is not written a second time when the launch returns')
+  assert.equal(h.updates[0].patch.externusJobId, 'pod-42')
+  assert.equal(h.updates[0].patch.status, 'agens')
+  assert.ok(h.updates[0].patch.callbackNonce, 'the nonce rides the same patch as the handle')
+  assert.deepEqual(result, { kind: 'async', externusJobId: 'pod-42' })
 })
 
 test('run: autocaption defaults on, and aditus.autocaption:false threads through as opt-out', async () => {
