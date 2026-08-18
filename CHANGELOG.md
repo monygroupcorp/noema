@@ -1,5 +1,26 @@
 # Changelog
 
+## [5.7.0](https://github.com/monygroupcorp/noema/compare/v5.6.0...v5.7.0) (2026-08-18)
+
+
+### Features
+
+* **concierge:** auto-open panel on first visit to a route ([df70675](https://github.com/monygroupcorp/noema/commit/df70675adf8ed72d8d1d672cb56b8b844f026a3d))
+* **crystal:** decompose a dataset's captionset into prompt fragments ([b8ea20a](https://github.com/monygroupcorp/noema/commit/b8ea20a5595a0e990cdacec4448eb9110219200f))
+* **crystal:** decompose a dataset's captionset into prompt fragments ([7ec8933](https://github.com/monygroupcorp/noema/commit/7ec89334527ef90941baee44940510f6307ef11c))
+* **muse:** fire a mined prompt at a text-to-image workflow ([ba68bfd](https://github.com/monygroupcorp/noema/commit/ba68bfd0e3ed094f6e802b8bcd27ecc56983be96))
+* **web:** Muse P3 — the dataset-wide garden screen ([16253c4](https://github.com/monygroupcorp/noema/commit/16253c4c29ef14ace9c4e9603306767a97d9123c))
+* **web:** Muse P3 — the dataset-wide garden screen ([3078745](https://github.com/monygroupcorp/noema/commit/3078745806f18e20ce27713352ea0409d6769fc7))
+
+
+### Bug Fixes
+
+* **build:** mirror the repo layout in the web app's docker stage ([b056a66](https://github.com/monygroupcorp/noema/commit/b056a66a8d2f7746ff1c2177c09e3de47a60dfe8))
+* **crystal:** match muse conflict place words on word boundary ([229bd42](https://github.com/monygroupcorp/noema/commit/229bd42b603c2a94fd5ed9e8cea068290176816c))
+* **crystal:** match muse conflict place words on word boundary ([7795505](https://github.com/monygroupcorp/noema/commit/779550589b665aa8c188758687aeb3f631b0efec))
+* **crystal:** pin concierge default chat model to qwen3.8-27b ([63c1af4](https://github.com/monygroupcorp/noema/commit/63c1af4f660562fb63ce6d0667525b94e60647cc))
+* **crystal:** pin concierge default chat model to qwen3.8-27b ([3f1f3c8](https://github.com/monygroupcorp/noema/commit/3f1f3c8a635822878abaedc68646d7ef4681eeb4))
+
 ## [5.6.0](https://github.com/monygroupcorp/noema/compare/v5.5.0...v5.6.0) (2026-08-17)
 
 
