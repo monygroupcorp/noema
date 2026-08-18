@@ -5,6 +5,7 @@ import {
   DEFAULT_GPU_TYPE_IDS,
   ACCEPTED_GPU_TYPE_IDS,
   assertGpuTypeIdsAccepted,
+  PROVISION_BUDGET_MS,
 } from '../../../src/crystal/SecurePodClient.js'
 import type { SecurePodConfig, SshTransportLike } from '../../../src/crystal/SecurePodClient.js'
 import { impetusPerSecondFromHourly } from '../../../src/ledger/rates.js'
@@ -582,4 +583,47 @@ test('assertGpuTypeIdsAccepted: names every offending SKU when multiple have dri
       return true
     },
   )
+})
+
+// ── bootstrap phase deadline ──────────────────────────────────────────────────
+//
+// Each setup command keeps a generous individual ceiling — the dependency install is legitimately
+// slow — but individually-permissible commands can add up past the provisioning budget the actum's
+// deadline is derived from. The phase deadline is what stops that, and it names the command it
+// stopped at so the failure is legible instead of resurfacing later as a run that never reported
+// back. Time is driven by the mocked clock; each command "takes" 20 minutes.
+
+test('a bootstrap whose commands outlast the provisioning budget is stopped at the budget, naming the command that was running', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'] })
+
+  const CMD_MS = 20 * 60 * 1000
+  const setup = ['apt-get install', 'git clone', 'git checkout', 'pip install -r', 'pip install --force-reinstall']
+  const attempted: string[] = []
+  const ssh = makeSshTransport({
+    async exec(cmd: string) {
+      if (cmd === 'true') return ''            // the sshd readiness probe, not a setup command
+      attempted.push(cmd)
+      t.mock.timers.tick(CMD_MS)
+      return ''
+    },
+  })
+  const { fetch } = makeFetchMock()
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+
+  await assert.rejects(
+    () => client.launchTrainingPod({ image: 'runpod/pytorch:2.4.0', env: {}, setup }),
+    (err: Error) => {
+      assert.match(err.message, /provisioning budget/i)
+      assert.ok(err.message.includes(setup[attempted.length]),
+        `the error must name the command it stopped before, got: ${err.message}`)
+      return true
+    },
+  )
+
+  // Per-command ceilings ALONE would have permitted every command to run: 5 × 20 min = 100 min,
+  // inside a 45-min budget. The phase deadline is what refuses the ones past the budget.
+  assert.ok(attempted.length < setup.length, 'the phase deadline must stop the run short of the full setup')
+  assert.ok(setup.length * CMD_MS > PROVISION_BUDGET_MS, 'per-command ceilings alone do not bound the phase')
+  // The pod is not leaked when provisioning gives up.
+  assert.equal(terminateSpy.calls.length, 1)
 })

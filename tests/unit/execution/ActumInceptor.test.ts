@@ -4,7 +4,7 @@ import type { Modus } from '../../../src/types/modus.js'
 import type { Actum } from '../../../src/types/actum.js'
 import type { Signum, Signa } from '../../../src/types/significandi.js'
 import type { Cursor, Actorum, Cursorum, Inceptio } from '../../../src/types/cursus.js'
-import { ActumInceptor, InsufficientFundsError } from '../../../src/execution/ActumInceptor.js'
+import { ActumInceptor, InsufficientFundsError, DEFAULT_EXPIRAT_MS, MAX_TERMINUS_MS } from '../../../src/execution/ActumInceptor.js'
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -313,4 +313,93 @@ test('initiate() rejects when nullifier is already recorded on an existing actum
     () => inceptor.initiate(makeParams({ by: { commitment } })),
     /already spent/i,
   )
+})
+
+// ---------------------------------------------------------------------------
+// terminus → expirat
+//
+// `expirat` is the only thing that releases a locked reserve: the reaper fails any actum still
+// in {nascens,agens} past it, and failing releases every locked signum. So the deadline a cursor
+// declares is a statement about how long a payer's credits can stay locked against a run that is
+// already dead — which is why it is clamped here rather than trusted.
+// ---------------------------------------------------------------------------
+
+function runnerWithTerminus(ms: number, reserve: bigint = 100n): Cursor {
+  return { ...makeRunner(reserve), terminus: async () => ms }
+}
+
+test('a cursor declaring an absurd terminus is clamped to MAX_TERMINUS_MS, not honoured', async () => {
+  const modus = makeModus()
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(runnerWithTerminus(999 * 60 * 60 * 1000)),   // 999h
+    signorum: makeSignorum(),
+    acta: makeActa(),
+  })
+
+  const before = Date.now()
+  const actum = await inceptor.initiate(makeParams())
+  const budgetMs = actum.expirat!.getTime() - before
+
+  assert.ok(budgetMs <= MAX_TERMINUS_MS, `expected clamp to ${MAX_TERMINUS_MS}ms, got ${budgetMs}ms`)
+  assert.ok(budgetMs > MAX_TERMINUS_MS - 60_000, 'expected the clamped ceiling, not the default')
+})
+
+test('a cursor that declares no terminus keeps the default expiry', async () => {
+  const modus = makeModus()
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(makeRunner()),   // no terminus — the API-shaped cursors
+    signorum: makeSignorum(),
+    acta: makeActa(),
+  })
+
+  const before = Date.now()
+  const actum = await inceptor.initiate(makeParams())
+  const budgetMs = actum.expirat!.getTime() - before
+
+  assert.ok(budgetMs <= DEFAULT_EXPIRAT_MS && budgetMs > DEFAULT_EXPIRAT_MS - 60_000,
+    `expected ~${DEFAULT_EXPIRAT_MS}ms, got ${budgetMs}ms`)
+})
+
+test('a cursor-declared terminus is honoured below the ceiling', async () => {
+  const modus = makeModus()
+  const declared = 75 * 60 * 1000
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(runnerWithTerminus(declared)),
+    signorum: makeSignorum(),
+    acta: makeActa(),
+  })
+
+  const before = Date.now()
+  const actum = await inceptor.initiate(makeParams())
+  const budgetMs = actum.expirat!.getTime() - before
+
+  assert.ok(budgetMs <= declared && budgetMs > declared - 60_000, `expected ~${declared}ms, got ${budgetMs}ms`)
+  assert.ok(budgetMs > DEFAULT_EXPIRAT_MS, 'a declared terminus must not collapse to the default')
+})
+
+test('the bursa payment path stamps the same resolved deadline as the identified path', async () => {
+  const modus = makeModus()
+  const declared = 75 * 60 * 1000
+  const bursarium = {
+    debit: async () => {}, credit: async () => {},
+  } as unknown as NonNullable<ConstructorParameters<typeof ActumInceptor>[0]['bursarium']>
+  const deps = {
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(runnerWithTerminus(declared)),
+    signorum: makeSignorum(),
+    acta: makeActa(),
+    bursarium,
+  }
+
+  const before = Date.now()
+  const identified = await new ActumInceptor(deps).initiate(makeParams())
+  const viaBursa = await new ActumInceptor(deps).initiate(makeParams({ by: { bursaToken: 'tok' } }))
+
+  for (const [label, a] of [['identified', identified], ['bursa', viaBursa]] as const) {
+    const budgetMs = a.expirat!.getTime() - before
+    assert.ok(budgetMs <= declared && budgetMs > declared - 60_000, `${label} path: expected ~${declared}ms, got ${budgetMs}ms`)
+  }
 })

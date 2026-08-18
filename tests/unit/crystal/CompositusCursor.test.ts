@@ -9,6 +9,7 @@ import { CompositusCursor } from '../../../src/crystal/CompositusCursor.js'
 import { dispatchInceptio, type DispatchDeps } from '../../../src/execution/dispatchInceptio.js'
 import type { Cursor, CursorResult, ActumCompletor, Inceptio, Exitus } from '../../../src/types/cursus.js'
 import type { Modus, Forma } from '../../../src/types/modus.js'
+import { DEFAULT_EXPIRAT_MS, MAX_TERMINUS_MS } from '../../../src/execution/ActumInceptor.js'
 import type { Actum } from '../../../src/types/actum.js'
 
 // =============================================================================
@@ -86,7 +87,11 @@ test('compositus run threads step exitus → next step aditus, completes parent,
 
   let compositusCursor!: CompositusCursor
   const deps: DispatchDeps = { inceptor, modorum, cursorum, completor, get compositusCursor() { return compositusCursor } }
-  compositusCursor = new CompositusCursor((inc: Inceptio) => dispatchInceptio(deps, inc), modorum, actorum)
+  // The parent's deadline is derived from its steps' — resolve each step's cursor and ask it,
+  // exactly as the container wires it. Injected as a function so the cursor never holds Cursorum.
+  const terminusOf = async (m: Modus, a: Record<string, unknown>): Promise<number> =>
+    await cursorum.resolve(m).terminus?.(m, a) ?? DEFAULT_EXPIRAT_MS
+  compositusCursor = new CompositusCursor((inc: Inceptio) => dispatchInceptio(deps, inc), modorum, actorum, terminusOf)
 
   const { actum: parent } = await dispatchInceptio(deps, {
     modusId: 'spell-make-upscale',
@@ -133,7 +138,11 @@ function makeRail() {
   }
   let compositusCursor!: CompositusCursor
   const deps: DispatchDeps = { inceptor, modorum, cursorum, completor, get compositusCursor() { return compositusCursor } }
-  compositusCursor = new CompositusCursor((inc: Inceptio) => dispatchInceptio(deps, inc), modorum, actorum)
+  // The parent's deadline is derived from its steps' — resolve each step's cursor and ask it,
+  // exactly as the container wires it. Injected as a function so the cursor never holds Cursorum.
+  const terminusOf = async (m: Modus, a: Record<string, unknown>): Promise<number> =>
+    await cursorum.resolve(m).terminus?.(m, a) ?? DEFAULT_EXPIRAT_MS
+  compositusCursor = new CompositusCursor((inc: Inceptio) => dispatchInceptio(deps, inc), modorum, actorum, terminusOf)
   return { modorum, actorum, signorum, cursorum, deps, compositusCursor }
 }
 
@@ -204,4 +213,73 @@ test('compositus: a failing step fails the parent and frees run state', async ()
   assert.equal(finalParent?.status, 'fractus', 'parent fails when a step fails')
   assert.match(finalParent?.error ?? '', /pod exploded/, 'parent error surfaces the step failure')
   assert.equal(compositusCursor.isTracking(parent.id), false, 'run state freed on failure')
+})
+
+// ---------------------------------------------------------------------------
+// The parent umbrella's deadline
+//
+// The parent locks no signa of its own, but it is swept by the same expiry reaper as any other
+// actum, and a reaped parent fails the whole chain through `onStepComplete(..., false)`. So a
+// parent whose deadline is shorter than its steps' would kill a child that is still legitimately
+// running. Its deadline is therefore derived from what it contains.
+// ---------------------------------------------------------------------------
+
+/** A cursor that declares a long wall-clock budget — the shape of a pod-rail step. */
+class SlowCursor extends FakeCursor {
+  constructor(out: Record<string, unknown>, cost: bigint, private readonly budgetMs: number) { super(out, cost) }
+  async terminus(): Promise<number> { return this.budgetMs }
+}
+
+test("a parent outlives the sum of its steps' termini", async () => {
+  const { modorum, cursorum, actorum, deps } = makeRail()
+  const stepBudgetMs = 70 * 60 * 1000   // 70 min per step — longer than any flat parent default
+  cursorum.register('slow-a', new SlowCursor({ image: 'IMG_A' }, 1n, stepBudgetMs))
+  cursorum.register('slow-b', new SlowCursor({ image: 'IMG_B' }, 1n, stepBudgetMs))
+  await modorum.register(atomic('slow-mod-a', 'slow-a', { prompt: { type: 'text' } }, { image: { type: 'image' } }))
+  await modorum.register(atomic('slow-mod-b', 'slow-b', { image: { type: 'image' } }, { image: { type: 'image' } }))
+  await modorum.register({
+    id: 'slow-chain', nomen: 'slow chain', genus: 'compositus', versio: '1.0.0', contentHash: '',
+    aditus: { prompt: { type: 'text', required: true } }, exitus: { image: { type: 'image' } },
+    canonica: true, natum: new Date(), mutatum: new Date(),
+    gradus: [
+      { ordine: 0, modusId: 'slow-mod-a' },
+      { ordine: 1, modusId: 'slow-mod-b', ligamina: [{ ex: 0, exitus: 'image', in: 'image' }] },
+    ],
+  } as unknown as Modus)
+
+  const before = Date.now()
+  const { actum: parent } = await dispatchInceptio(deps, {
+    modusId: 'slow-chain', aditus: { prompt: 'a cat' }, by: { animaId: 'anima-1' },
+  })
+
+  // The parent actum is completed by the time this resolves (sync steps), so read the deadline it
+  // was created with from the record the reaper would have seen.
+  const created = await actorum.findById(parent.id)
+  const parentBudgetMs = created!.expirat!.getTime() - before
+
+  assert.ok(parentBudgetMs >= 2 * stepBudgetMs - 60_000,
+    `parent budget ${parentBudgetMs}ms must cover both steps (${2 * stepBudgetMs}ms)`)
+  assert.ok(parentBudgetMs <= MAX_TERMINUS_MS, 'the parent is clamped to the same ceiling as any terminus')
+})
+
+test('a parent over steps that declare no terminus falls back to the default per step', async () => {
+  const { modorum, cursorum, actorum, deps } = makeRail()
+  cursorum.register('plain', new FakeCursor({ image: 'X' }, 1n))
+  await modorum.register(atomic('plain-mod', 'plain', { prompt: { type: 'text' } }, { image: { type: 'image' } }))
+  await modorum.register({
+    id: 'plain-chain', nomen: 'plain chain', genus: 'compositus', versio: '1.0.0', contentHash: '',
+    aditus: { prompt: { type: 'text', required: true } }, exitus: { image: { type: 'image' } },
+    canonica: true, natum: new Date(), mutatum: new Date(),
+    gradus: [{ ordine: 0, modusId: 'plain-mod' }, { ordine: 1, modusId: 'plain-mod' }],
+  } as unknown as Modus)
+
+  const before = Date.now()
+  const { actum: parent } = await dispatchInceptio(deps, {
+    modusId: 'plain-chain', aditus: { prompt: 'a cat' }, by: { animaId: 'anima-1' },
+  })
+  const created = await actorum.findById(parent.id)
+  const parentBudgetMs = created!.expirat!.getTime() - before
+
+  assert.ok(parentBudgetMs >= 2 * DEFAULT_EXPIRAT_MS - 60_000,
+    `parent budget ${parentBudgetMs}ms must cover both default-budget steps`)
 })

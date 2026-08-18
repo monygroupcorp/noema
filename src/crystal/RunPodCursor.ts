@@ -13,6 +13,7 @@ import { ownerKeyOf } from './ownerKey.js'
 import { tierOf, reservationImpetus, GENERIC_RESERVE_IMPETUS } from '../ledger/rates.js'
 import { isCompiledSpec } from './comfyrunnerClient.js'
 import { makeLogger } from '../lib/logger.js'
+import { PROVISION_BUDGET_MS } from './SecurePodClient.js'
 
 const log = makeLogger('cursor:runpod')
 
@@ -155,6 +156,24 @@ export class RunPodCursor implements Cursor {
       GENERIC_RESERVE_IMPETUS
 
     return base < ceiling ? base : ceiling
+  }
+
+  /**
+   * Wall-clock budget for a pod run: the pod provisioning budget PLUS the job window the
+   * `maxJobSeconds` ceiling permits. The two are different clocks and are added — provisioning
+   * rents the machine and builds the environment; the job window is what runs on it afterward.
+   *
+   * Explicitly NOT derived from `reserve()`. `reserve()` here evaluates `modus.pretium`, a fitted
+   * COST CURVE, or honours a declared fixed price — an impetus figure with no duration meaning at
+   * all. `terminus` lands on the actum's `expirat` and nowhere else: it is not quoted, does not
+   * enter the balance check, and does not size the ledger lock.
+   *
+   * The cost of the number: `expirat` is what releases the locked reserve, so a pod run that dies
+   * silently holds the payer's credits locked this long before the reaper frees them (clamped by
+   * MAX_TERMINUS_MS). Nothing is charged — a reaped run is failed, not settled.
+   */
+  async terminus(_modus: Modus, _aditus: Record<string, unknown>): Promise<number> {
+    return PROVISION_BUDGET_MS + (this.config.maxJobSeconds ?? 1800) * 1000
   }
 
   async run(actum: Actum, _modo?: Modo): Promise<CursorResult> {
