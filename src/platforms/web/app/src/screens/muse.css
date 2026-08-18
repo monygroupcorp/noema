@@ -24,3 +24,9 @@
 
 .muse-kept { margin-top: 18px; border-top: 1px solid var(--hair-soft); padding-top: 12px; }
 .muse-kept-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 12.5px; }
+
+/* the decompose rung (noema-235) — offered from the empty state, because a dataset with
+   captions and no fragments is exactly one pass away from a garden. */
+.muse-decompose { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: center; gap: 12px; margin: 14px 0 8px; }
+.muse-decompose .cc-field { text-align: left; }
+.muse-decompose-note { font-size: 11.5px; color: var(--muted); margin-bottom: 10px; }
