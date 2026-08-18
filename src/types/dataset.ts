@@ -56,11 +56,17 @@ export interface DatasetMediaItem {
   tags?: string[]
   /** Freeform operator notes on this item. Optional for the same reason as `tags`. */
   notes?: string
-  /** The item's decomposed prompt fragments (Muse P0 — `src/crystal/muse/garden.ts`), filled
-   *  out-of-band (an operator run of `scripts/muse-roll.ts` or the `noema-216` CLI against this
-   *  item's caption). Optional and commonly empty: an item nothing has decomposed yet is a valid,
-   *  expected state, not an error — render it as an empty garden. No live decompose runs from this
-   *  field; that is a separate, credit-metered item (see noema-221's plan). */
+  /** The item's decomposed prompt fragments (Muse — `src/crystal/muse/garden.ts`).
+   *
+   *  Written by the decompose job (`modus.dataset-decompose`,
+   *  `src/crystal/MuseDecomposeCursor.ts`): a metered run over one captionset that decomposes
+   *  each caption and writes the fragments back onto the media item that caption belongs to.
+   *  That job is the only writer — `scripts/muse-roll.ts` prints a garden to the terminal and
+   *  persists nothing.
+   *
+   *  Optional and commonly empty: an item nothing has decomposed yet is a valid, expected state,
+   *  not an error — render it as an empty garden. Nothing decomposes live from this field; a
+   *  decompose is always a run. */
   fragments?: Fragment[]
 }
 
@@ -167,4 +173,10 @@ export interface Datasets {
    *  the dataset or the captionset does not exist — an unknown captionset is never created
    *  implicitly. Owner scoping lives at the API layer, as above. */
   setCaption(datasetId: string, captionsetId: string, mediaId: string, caption: string): Promise<Dataset | null>
+  /** Replace exactly one media item's decomposed fragments and bump `mutatum`. Returns null
+   *  when the dataset does not exist or the media id does not name an item on it — a media id
+   *  is never created implicitly, and fragments are never written positionally, because `media`
+   *  is append-only and a positional write re-binds to a different item as soon as media is
+   *  added. Owner scoping lives at the API layer, as above. */
+  setFragments(datasetId: string, mediaId: string, fragments: Fragment[]): Promise<Dataset | null>
 }

@@ -1,6 +1,7 @@
 import { Collection, Filter, Document } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import { captionCoverage } from '../types/dataset.js'
+import type { Fragment } from './muse/taxonomy.js'
 import type {
   Captionset,
   Dataset,
@@ -138,6 +139,23 @@ export class MongoDataset implements Datasets {
     const mutatum = new Date()
     await this.col.updateOne({ id: datasetId }, { $set: { captionsets, mutatum } })
     return { ...current, captionsets, mutatum }
+  }
+
+  /** Replace one media item's decomposed fragments (the Muse decompose job's write).
+   *  Keyed by media id, never by position: `media` is append-only, so a positional write
+   *  re-binds every fragment to a different item the first time media is appended — and it
+   *  does so invisibly, because every item still has fragments. An unknown dataset or media
+   *  id returns null rather than creating one. Bumps `mutatum` for the same reason
+   *  `addCaptionset` does — it is the pagination sort key. */
+  async setFragments(datasetId: string, mediaId: string, fragments: Fragment[]): Promise<Dataset | null> {
+    const current = await this.find(datasetId)
+    if (!current) return null
+    if (!current.media.some((m) => m.id === mediaId)) return null
+
+    const media = current.media.map((m) => (m.id === mediaId ? { ...m, fragments } : m))
+    const mutatum = new Date()
+    await this.col.updateOne({ id: datasetId }, { $set: { media, mutatum } })
+    return { ...current, media, mutatum }
   }
 
   // The rich/thin split projects down from the SAME document — no separate
