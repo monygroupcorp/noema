@@ -2,10 +2,19 @@
 
 # Stage 1: Build the new React app (served when STAGING_FRONTEND=1)
 FROM node:22-slim AS app-builder
-WORKDIR /webapp
+# The workdir MIRRORS the repo layout rather than flattening the app to /webapp. The
+# app's Muse screen imports the pure muse engine from `src/crystal/muse` by relative
+# path — there is exactly one copy of that logic in the tree and it is deliberately not
+# vendored into the app. A flattened workdir made that import unresolvable in this stage
+# only (the app's own tsc/vite and the `verify`/`web-tests` jobs all run against the full
+# tree, so they resolved it fine and only `docker-build` ever saw the break).
+WORKDIR /build/src/platforms/web/app
 COPY src/platforms/web/app/package*.json ./
 RUN npm ci
 COPY src/platforms/web/app/ ./
+# Self-contained: every import inside src/crystal/muse resolves within that directory
+# (checked, not assumed), so this is the whole dependency, not the head of a chain.
+COPY src/crystal/muse/ /build/src/crystal/muse/
 RUN npm run build
 
 # Stage 2: Compile TypeScript
@@ -49,7 +58,7 @@ COPY . .
 COPY --from=ts-builder /build/dist ./dist
 
 # Copy the new React app build (served when STAGING_FRONTEND=1)
-COPY --from=app-builder /webapp/dist ./src/platforms/web/app/dist
+COPY --from=app-builder /build/src/platforms/web/app/dist ./src/platforms/web/app/dist
 
 # Create necessary directories and set permissions before switching user
 RUN mkdir -p tmp output storage/media logs \
