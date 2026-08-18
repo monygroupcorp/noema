@@ -12,6 +12,12 @@ import {
   t2iFlows,
   type IgnitionQuote,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
+import {
+  canFireDecompose,
+  canOfferDecompose,
+  decomposeCaptionsetId,
+  decomposeRunRequest,
+} from '../../../src/platforms/web/app/src/lib/training.js'
 import type { Fragment, DatasetMediaItem, FlowSummary } from '../../../src/platforms/web/app/src/lib/api.js'
 
 // ---------------------------------------------------------------------------
@@ -176,4 +182,62 @@ test('ignitionBlockReason: a flow requiring more than a prompt is refused before
 
   const reason = ignitionBlockReason({ input: { type: 'object', required: ['prompt', 'image'] } })
   assert.ok(reason && reason.includes('image'), 'the refusal names the input that is missing')
+})
+
+// ---------------------------------------------------------------------------
+// The decompose rung (noema-235) — the step that fills the garden the tests
+// above roll from. The screens (Muse's empty state, Dataset's captionset panel)
+// are thin over these; the rules are here.
+//
+// Fixtures are invented throughout (`ds-…`, `cs-…`).
+// ---------------------------------------------------------------------------
+
+function sets(...ids: string[]): { captionsets: Array<{ id: string }> } {
+  return { captionsets: ids.map((id) => ({ id })) }
+}
+
+// Non-vacuity 1 — the run carries both required ports of the modus
+
+test('decomposeRunRequest: a decompose fires modus.dataset-decompose carrying both dataset and captionset', () => {
+  const req = decomposeRunRequest({ datasetId: 'ds-1', captionsetId: 'cs-2' })
+
+  assert.equal(req.modusId, 'modus.dataset-decompose')
+  assert.equal(req.aditus.dataset, 'ds-1', 'the dataset port is populated')
+  assert.equal(req.aditus.captionset, 'cs-2', 'the captionset port is populated')
+  // Both are required on the modus, so a request missing either is refused server-side
+  // before any work happens — a rejection the user cannot act on.
+  assert.ok(!('trigger' in req.aditus), 'an absent trigger is omitted rather than sent empty')
+
+  const withTrigger = decomposeRunRequest({ datasetId: 'ds-1', captionsetId: 'cs-2', trigger: '  sks  ' })
+  assert.equal(withTrigger.aditus.trigger, 'sks', 'a trigger is trimmed and carried')
+})
+
+// Non-vacuity 2 — the pass runs over the captionset the user selected
+
+test('decomposeCaptionsetId: a decompose carries the captionset the user actually selected', () => {
+  const d = sets('cs-1', 'cs-2', 'cs-3')
+
+  // Neither the first nor the newest — the selected one.
+  assert.equal(decomposeCaptionsetId(d, 'cs-2'), 'cs-2')
+  assert.equal(decomposeRunRequest({ datasetId: 'ds-1', captionsetId: decomposeCaptionsetId(d, 'cs-2')! }).aditus.captionset, 'cs-2')
+
+  // A selection this dataset does not carry is not fired blind.
+  assert.equal(decomposeCaptionsetId(d, 'cs-elsewhere'), 'cs-3', 'an unknown selection falls back to the newest set')
+  assert.equal(decomposeCaptionsetId(d, null), 'cs-3', 'with nothing selected the newest set is offered')
+})
+
+// Non-vacuity 3 — the action is not offered when there is nothing to decompose
+
+test('canOfferDecompose: the decompose action is not offered on a dataset with zero captionsets', () => {
+  assert.equal(canOfferDecompose(sets()), false)
+  assert.equal(canOfferDecompose(sets('cs-1')), true)
+  assert.equal(decomposeCaptionsetId(sets(), 'cs-1'), null, 'and there is no captionset to fire at')
+})
+
+// Non-vacuity 4 — a second pass cannot start while one is in flight (every fire spends)
+
+test('canFireDecompose: a second decompose cannot be fired while one is in flight', () => {
+  assert.equal(canFireDecompose({ captionsetId: 'cs-1', inFlight: false }), true)
+  assert.equal(canFireDecompose({ captionsetId: 'cs-1', inFlight: true }), false)
+  assert.equal(canFireDecompose({ captionsetId: null, inFlight: false }), false)
 })
