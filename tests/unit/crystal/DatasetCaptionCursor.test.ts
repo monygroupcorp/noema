@@ -86,6 +86,31 @@ test('run: the CURSOR mints the callback nonce, and the same one lands on the ac
   assert.equal(actorum.patches[0].callbackNonce, minted)
 })
 
+// NON-VACUITY: have the cursor stamp the actum after the launcher returns instead of through the
+// `onPodId` hook and this fails — the launch resolves at the pod id and bootstraps the pod
+// afterwards, so a stamp that waits for the launcher to return can leave a pod live carrying a
+// callback credential the actum does not yet have.
+test('run: the actum carries externusJobId + callbackNonce before any pod-side work can call back', async () => {
+  const actorum = new FakeActorum()
+  let patchesWhenPodIdKnown = -1
+  const launcher: CaptionLauncher = {
+    async launch(spec: CaptionLaunchSpec) {
+      await spec.onPodId!('pod-1')            // provisioning returned; nothing pod-side has run yet
+      patchesWhenPodIdKnown = actorum.patches.length
+      return { externusJobId: 'pod-1' }
+    },
+  }
+
+  const result = await new DatasetCaptionCursor({ launcher, actorum }).run(actum({ dataset: 'ds-1' }))
+
+  assert.equal(patchesWhenPodIdKnown, 1, 'the stamp lands inside the launch, before the pod is bootstrapped')
+  assert.equal(actorum.patches.length, 1, 'and it is not written a second time when the launch returns')
+  assert.equal(actorum.patches[0].externusJobId, 'pod-1')
+  assert.equal(actorum.patches[0].status, 'agens')
+  assert.ok(actorum.patches[0].callbackNonce, 'the nonce rides the same patch as the handle')
+  assert.deepEqual(result, { kind: 'async', externusJobId: 'pod-1' })
+})
+
 test('run: a missing dataset id fails before anything is provisioned', async () => {
   const launcher = new FakeLauncher()
   await assert.rejects(

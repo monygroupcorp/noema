@@ -153,3 +153,58 @@ test('securePodTrainingProvisioner: adapts a client.launchTrainingPod to the pro
   assert.deepEqual(await prov.provision({ image: 'i', env: { A: '1' }, setup: ['x'] }), { podId: 'p1' })
   assert.deepEqual(seen, [{ image: 'i', env: { A: '1' }, setup: ['x'] }])
 })
+
+// The provisioner resolves at the pod id and finishes SSH + bootstrap in the background, so the
+// launcher carries two hooks across that seam: the cursor's stamp (which must run before any
+// pod-side work) and the failure sink (which is what fails the run when the background phase
+// fails, instead of leaving it to time out). The launcher is the only place that holds the actum
+// id, which is why the sink is bound here rather than passed down.
+test('launch: threads the stamp hook through, and binds the failure sink to this run', async () => {
+  const seen: Array<{
+    onPodId?: (podId: string) => Promise<void>
+    onLaunchFailed?: (err: unknown) => Promise<void>
+  }> = []
+  const failures: Array<{ actumId: string; err: unknown }> = []
+  const launcher = new RemoteAitkLauncher({
+    provisioner: { async provision(o) { seen.push(o); return { podId: 'pod-9' } } },
+    resolver: makeDatasetResolver({ corpora: {} as Corporum }), r2: R2, statusUrl: 's', webhookUrl: 'w',
+    onLaunchFailed: async (actumId, err) => { failures.push({ actumId, err }) },
+  })
+
+  const stamped: string[] = []
+  await launcher.launch({
+    actumId: 'act-7', jobId: 'j', dataset: MANIFEST, baseModel: 'klein-4b', triggerWord: 'koh', steps: 10,
+    onPodId: async (podId: string) => { stamped.push(podId) },
+  })
+
+  await seen[0].onPodId!('pod-9')
+  assert.deepEqual(stamped, ['pod-9'], 'the caller’s stamp hook reaches the provisioner unchanged')
+
+  await seen[0].onLaunchFailed!(new Error('ssh never came up'))
+  assert.equal(failures.length, 1)
+  assert.equal(failures[0].actumId, 'act-7', 'the sink is bound to the actum this launch belongs to')
+  assert.match(String((failures[0].err as Error).message), /ssh never came up/)
+})
+
+test('launch: with no failure sink configured, provisioning is still called (the hook is optional)', async () => {
+  const h = harness()
+  await h.launcher.launch({ actumId: 'a', jobId: 'j', dataset: MANIFEST, baseModel: 'klein-4b', triggerWord: 'koh', steps: 10 })
+  assert.equal(h.calls.length, 1)
+  assert.equal((h.calls[0] as { onLaunchFailed?: unknown }).onLaunchFailed, undefined)
+})
+
+test('securePodTrainingProvisioner: passes the stamp and failure hooks through to the client', async () => {
+  const seen: Array<Record<string, unknown>> = []
+  const client = {
+    async launchTrainingPod(opts: {
+      image: string; env: Record<string, string>; setup: string[]
+      onPodId?: (podId: string) => Promise<void>
+      onLaunchFailed?: (err: unknown) => Promise<void>
+    }) { seen.push(opts); return { podId: 'p1' } },
+  }
+  const onPodId = async (): Promise<void> => {}
+  const onLaunchFailed = async (): Promise<void> => {}
+  await securePodTrainingProvisioner(client).provision({ image: 'i', env: {}, setup: [], onPodId, onLaunchFailed })
+  assert.equal(seen[0].onPodId, onPodId)
+  assert.equal(seen[0].onLaunchFailed, onLaunchFailed)
+})

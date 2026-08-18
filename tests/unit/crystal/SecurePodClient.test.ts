@@ -48,6 +48,24 @@ function makeSseStream(events: Array<Record<string, unknown>>): Response {
   return new Response(stream, { status: 200 })
 }
 
+// A promise a test can settle from inside a callback — how the background launch phase is
+// observed now that it no longer resolves to the caller.
+function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(r => { resolve = r })
+  return { promise, resolve }
+}
+
+/** Bound a wait on the background phase, so a regression that never reports fails the test
+ *  quickly and legibly instead of hanging it. */
+async function within<T>(p: Promise<T>, what: string, ms = 1000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const bound = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out waiting for ${what}`)), ms)
+  })
+  try { return await Promise.race([p, bound]) } finally { clearTimeout(timer) }
+}
+
 function makeSshTransport(overrides: Partial<SshTransportLike> = {}): SshTransportLike & { execCalls: string[]; get closeCalled(): boolean } {
   const execCalls: string[] = []
   let _closeCalled = false
@@ -610,15 +628,18 @@ test('a bootstrap whose commands outlast the provisioning budget is stopped at t
   const { fetch } = makeFetchMock()
   const client = makeClient(makeConfig(), () => ssh, fetch)
 
-  await assert.rejects(
-    () => client.launchTrainingPod({ image: 'runpod/pytorch:2.4.0', env: {}, setup }),
-    (err: Error) => {
-      assert.match(err.message, /provisioning budget/i)
-      assert.ok(err.message.includes(setup[attempted.length]),
-        `the error must name the command it stopped before, got: ${err.message}`)
-      return true
-    },
-  )
+  // The bootstrap is the background phase now, so the budget failure arrives at the failure sink
+  // rather than at the caller — the caller already has its pod id.
+  const failure = deferred<unknown>()
+  await client.launchTrainingPod({
+    image: 'runpod/pytorch:2.4.0', env: {}, setup,
+    onLaunchFailed: async (err) => { failure.resolve(err) },
+  })
+  const err = await within(failure.promise, 'the provisioning-budget failure') as Error
+
+  assert.match(err.message, /provisioning budget/i)
+  assert.ok(err.message.includes(setup[attempted.length]),
+    `the error must name the command it stopped before, got: ${err.message}`)
 
   // Per-command ceilings ALONE would have permitted every command to run: 5 × 20 min = 100 min,
   // inside a 45-min budget. The phase deadline is what refuses the ones past the budget.
@@ -626,4 +647,139 @@ test('a bootstrap whose commands outlast the provisioning budget is stopped at t
   assert.ok(setup.length * CMD_MS > PROVISION_BUDGET_MS, 'per-command ceilings alone do not bound the phase')
   // The pod is not leaked when provisioning gives up.
   assert.equal(terminateSpy.calls.length, 1)
+})
+
+// ── asynchronous launch ───────────────────────────────────────────────────────
+//
+// `launchTrainingPod` resolves at the pod id and finishes SSH + bootstrap in the background. The
+// four tests below pin the properties that split depends on: the early resolve, the background
+// failure path (terminate + report), the terminal catch that keeps a background rejection from
+// escaping, and the ordering that puts the caller's stamp ahead of any pod-side work.
+
+/** A pod-status gate: the SSH wait blocks on `gate` so the caller's resolve can be observed while
+ *  the background phase is provably still waiting. */
+function makeGatedFetch(gate: Promise<void>, onPodStatus?: () => void): typeof fetch {
+  const base = makeFetchMock()
+  return (async (url: string, init?: RequestInit): Promise<Response> => {
+    if ((init?.method ?? 'GET').toUpperCase() === 'GET' && url.includes('/pods/pod-xyz')) {
+      onPodStatus?.()
+      await gate
+    }
+    return (base.fetch as unknown as (u: string, i?: RequestInit) => Promise<Response>)(url, init)
+  }) as unknown as typeof fetch
+}
+
+test('launchTrainingPod resolves with a pod id while the SSH wait is still pending, and finishes the bootstrap in the background', async () => {
+  // The SSH wait is held for a beat, long enough for a launch that (wrongly) waited on it to be
+  // visibly still working when the assertions below run.
+  const gate = deferred<void>()
+  const gateTimer = setTimeout(() => gate.resolve(), 50)
+  const detached = deferred<void>()
+  const execs: string[] = []
+  let sshSessions = 0
+  const ssh = makeSshTransport({
+    async exec(cmd: string) {
+      execs.push(cmd)
+      if (cmd.includes('nohup')) detached.resolve()
+      return ''
+    },
+  })
+  const client = makeClient(makeConfig(), () => { sshSessions++; return ssh }, makeGatedFetch(gate.promise))
+
+  const { podId } = await client.launchTrainingPod({ image: 'runpod/pytorch:2.4.0', env: {}, setup: ['pip install -r'] })
+
+  // The pod id is the external run handle and it exists the moment provisioning returns. The SSH
+  // wait is still blocked at this point, so nothing has been bootstrapped.
+  assert.equal(podId, 'pod-xyz')
+  assert.equal(sshSessions, 0, 'the launch must resolve before SSH is even reachable')
+  assert.deepEqual(execs, [], 'no pod-side command can have run yet')
+
+  await within(detached.promise, 'the detached launch command')
+  clearTimeout(gateTimer)
+
+  // ...and the work still happens, in full, after the caller has been answered.
+  assert.ok(execs.includes('pip install -r'), 'the setup recipe runs in the background phase')
+  assert.equal(terminateSpy.calls.length, 0, 'a launch that bootstrapped is not terminated')
+})
+
+test('a bootstrap that throws after launch resolved still terminates the pod AND fails the actum', async () => {
+  const failure = deferred<unknown>()
+  const ssh = makeSshTransport({
+    async exec(cmd: string) {
+      if (cmd === 'true') return ''                       // the sshd readiness probe
+      throw new Error('setup command failed on the pod')
+    },
+  })
+  const { fetch } = makeFetchMock()
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+
+  const { podId } = await client.launchTrainingPod({
+    image: 'runpod/pytorch:2.4.0', env: {}, setup: ['pip install -r'],
+    onLaunchFailed: async (err) => { failure.resolve(err) },
+  })
+
+  const err = await within(failure.promise, 'the background launch failure') as Error
+  // Both halves matter: the pod must not leak (nothing else terminates it once the caller is gone),
+  // and the run must learn the real error now rather than at its deadline.
+  assert.match(err.message, /setup command failed on the pod/)
+  assert.deepEqual(terminateSpy.calls.map(c => c.podId), [podId])
+})
+
+test('a background bootstrap rejection never escapes as an unhandled rejection', async () => {
+  const escaped: unknown[] = []
+  const onUnhandled = (reason: unknown): void => { escaped.push(reason) }
+  process.on('unhandledRejection', onUnhandled)
+  try {
+    const sank = deferred<void>()
+    const ssh = makeSshTransport({
+      async exec(cmd: string) {
+        if (cmd === 'true') return ''
+        throw new Error('setup command failed on the pod')
+      },
+    })
+    const { fetch } = makeFetchMock()
+    const client = makeClient(makeConfig(), () => ssh, fetch)
+
+    // The sink itself throws — the harshest case, and the one that reaches the continuation's own
+    // terminal catch rather than the inner failure handling.
+    await client.launchTrainingPod({
+      image: 'runpod/pytorch:2.4.0', env: {}, setup: ['pip install -r'],
+      onLaunchFailed: async () => { sank.resolve(); throw new Error('the failure sink threw') },
+    })
+
+    await within(sank.promise, 'the background launch failure')
+    await new Promise(resolve => setTimeout(resolve, 20))   // let the rejection settle, if it can
+    assert.deepEqual(escaped, [], 'the unawaited continuation must own a terminal catch')
+  } finally {
+    process.off('unhandledRejection', onUnhandled)
+  }
+})
+
+test('the actum carries externusJobId + callbackNonce before any pod-side work can call back', async () => {
+  const order: string[] = []
+  const detached = deferred<void>()
+  const gate = deferred<void>()
+  gate.resolve()
+  const ssh = makeSshTransport({
+    async exec(cmd: string) {
+      order.push(`exec:${cmd}`)
+      if (cmd.includes('nohup')) detached.resolve()
+      return ''
+    },
+  })
+  const fetch = makeGatedFetch(gate.promise, () => { order.push('ssh-wait') })
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+
+  await client.launchTrainingPod({
+    image: 'runpod/pytorch:2.4.0', env: {}, setup: ['pip install -r'],
+    onPodId: async (podId) => { order.push(`stamp:${podId}`) },
+  })
+  await within(detached.promise, 'the detached launch command')
+
+  // The stamp is what lets the run answer for the pod — the handle and the per-job callback
+  // credential land on it. It is awaited before the background phase is scheduled, so a pod cannot
+  // be live carrying a credential the run does not yet have.
+  assert.equal(order[0], 'stamp:pod-xyz', 'the stamp must precede every pod-side step')
+  assert.ok(order.includes('ssh-wait'), 'the background phase did run')
+  assert.ok(order.indexOf('stamp:pod-xyz') < order.indexOf('ssh-wait'))
 })
