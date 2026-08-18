@@ -339,10 +339,12 @@ test('a cursor declaring an absurd terminus is clamped to MAX_TERMINUS_MS, not h
 
   const before = Date.now()
   const actum = await inceptor.initiate(makeParams())
-  const budgetMs = actum.expirat!.getTime() - before
+  const after = Date.now()
+  const upperMs = actum.expirat!.getTime() - after
+  const lowerMs = actum.expirat!.getTime() - before
 
-  assert.ok(budgetMs <= MAX_TERMINUS_MS, `expected clamp to ${MAX_TERMINUS_MS}ms, got ${budgetMs}ms`)
-  assert.ok(budgetMs > MAX_TERMINUS_MS - 60_000, 'expected the clamped ceiling, not the default')
+  assert.ok(upperMs <= MAX_TERMINUS_MS, `expected clamp to ${MAX_TERMINUS_MS}ms, got ${upperMs}ms`)
+  assert.ok(lowerMs > MAX_TERMINUS_MS - 60_000, 'expected the clamped ceiling, not the default')
 })
 
 test('a cursor that declares no terminus keeps the default expiry', async () => {
@@ -356,10 +358,12 @@ test('a cursor that declares no terminus keeps the default expiry', async () => 
 
   const before = Date.now()
   const actum = await inceptor.initiate(makeParams())
-  const budgetMs = actum.expirat!.getTime() - before
+  const after = Date.now()
+  const upperMs = actum.expirat!.getTime() - after
+  const lowerMs = actum.expirat!.getTime() - before
 
-  assert.ok(budgetMs <= DEFAULT_EXPIRAT_MS && budgetMs > DEFAULT_EXPIRAT_MS - 60_000,
-    `expected ~${DEFAULT_EXPIRAT_MS}ms, got ${budgetMs}ms`)
+  assert.ok(upperMs <= DEFAULT_EXPIRAT_MS && lowerMs > DEFAULT_EXPIRAT_MS - 60_000,
+    `expected ~${DEFAULT_EXPIRAT_MS}ms, got ${upperMs}ms`)
 })
 
 test('a cursor-declared terminus is honoured below the ceiling', async () => {
@@ -374,10 +378,12 @@ test('a cursor-declared terminus is honoured below the ceiling', async () => {
 
   const before = Date.now()
   const actum = await inceptor.initiate(makeParams())
-  const budgetMs = actum.expirat!.getTime() - before
+  const after = Date.now()
+  const upperMs = actum.expirat!.getTime() - after
+  const lowerMs = actum.expirat!.getTime() - before
 
-  assert.ok(budgetMs <= declared && budgetMs > declared - 60_000, `expected ~${declared}ms, got ${budgetMs}ms`)
-  assert.ok(budgetMs > DEFAULT_EXPIRAT_MS, 'a declared terminus must not collapse to the default')
+  assert.ok(upperMs <= declared && lowerMs > declared - 60_000, `expected ~${declared}ms, got ${upperMs}ms`)
+  assert.ok(lowerMs > DEFAULT_EXPIRAT_MS, 'a declared terminus must not collapse to the default')
 })
 
 test('the bursa payment path stamps the same resolved deadline as the identified path', async () => {
@@ -396,10 +402,16 @@ test('the bursa payment path stamps the same resolved deadline as the identified
 
   const before = Date.now()
   const identified = await new ActumInceptor(deps).initiate(makeParams())
+  const afterIdentified = Date.now()
   const viaBursa = await new ActumInceptor(deps).initiate(makeParams({ by: { bursaToken: 'tok' } }))
+  const afterBursa = Date.now()
 
-  for (const [label, a] of [['identified', identified], ['bursa', viaBursa]] as const) {
-    const budgetMs = a.expirat!.getTime() - before
-    assert.ok(budgetMs <= declared && budgetMs > declared - 60_000, `${label} path: expected ~${declared}ms, got ${budgetMs}ms`)
+  for (const [label, a, after] of [
+    ['identified', identified, afterIdentified],
+    ['bursa', viaBursa, afterBursa],
+  ] as const) {
+    const upperMs = a.expirat!.getTime() - after
+    const lowerMs = a.expirat!.getTime() - before
+    assert.ok(upperMs <= declared && lowerMs > declared - 60_000, `${label} path: expected ~${declared}ms, got ${upperMs}ms`)
   }
 })
