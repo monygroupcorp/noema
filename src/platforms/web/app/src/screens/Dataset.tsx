@@ -4,6 +4,7 @@ import { AppShell } from '../shell/AppShell';
 import { custodyGlyph } from '../lib/datasets';
 import { api, type Dataset as DatasetT } from '../lib/api';
 import { categoryColor, curatedFragments } from '../lib/muse';
+import { canFireDecompose, canOfferDecompose, decomposeCaptionsetId, launchDecomposeJob } from '../lib/training';
 
 // Dataset detail (train-dataset-spec.md, render noema-train-dataset.png) — the core asset:
 // media (king) + versions + captionsets. Captionsets are a separate versioned layer (the
@@ -60,6 +61,34 @@ export function Dataset() {
       return { ...prev, [itemId]: next };
     });
   };
+
+  // Decomposing the SELECTED captionset — the rung between a caption pass and the garden
+  // above. The pass is synchronous and metered (one chat call per caption), so the action
+  // locks while it runs and the dataset is re-read when it returns, which is what fills the
+  // chips. The rules — offered at all, which captionset, when armed — live in `lib/training.ts`.
+  const [decomposing, setDecomposing] = useState(false);
+  const [decomposeMsg, setDecomposeMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function doDecompose(dataset: DatasetT, selectedId: string | null) {
+    const captionsetId = decomposeCaptionsetId(dataset, selectedId);
+    if (!canFireDecompose({ captionsetId, inFlight: decomposing })) return;
+    setDecomposing(true);
+    setDecomposeMsg(null);
+    try {
+      const run = await launchDecomposeJob({ datasetId: dataset.id, captionsetId: captionsetId! });
+      if (run.status === 'failed') {
+        setDecomposeMsg({ ok: false, text: `decompose failed: ${run.failure?.message ?? 'no reason reported'}` });
+        return;
+      }
+      const { datasets: ds } = await api.listDatasetsFull();
+      setDatasets(ds);
+      setDecomposeMsg({ ok: true, text: 'decompose finished — the chips below come from it' });
+    } catch (e) {
+      setDecomposeMsg({ ok: false, text: `couldn't decompose: ${String((e as Error).message).slice(0, 160)}` });
+    } finally {
+      setDecomposing(false);
+    }
+  }
 
   if (datasets === null) {
     return <AppShell title="Dataset"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
@@ -145,7 +174,18 @@ export function Dataset() {
                   <span className="cs-main"><span className="nm">{cs.name}</span><span className="cs-sub mono"><span className={`hemi2 ${custodyGlyph(d.custody)}`} /> {cs.method} · {cs.coverage}</span></span>
                 </button>
               ))}
-              <div className="capset-actions"><Link className="lnk" to={`/datasets/${d.id}/caption`}>+ new captionset</Link> · <Link className="lnk" to={`/datasets/${d.id}/caption`}>run a caption job</Link> · <Link className="lnk" to={`/datasets/${d.id}/muse`}>muse →</Link></div>
+              <div className="capset-actions">
+                <Link className="lnk" to={`/datasets/${d.id}/caption`}>+ new captionset</Link> · <Link className="lnk" to={`/datasets/${d.id}/caption`}>run a caption job</Link>
+                {canOfferDecompose(d) && (
+                  <> · <button className="lnk" type="button"
+                    disabled={!canFireDecompose({ captionsetId: decomposeCaptionsetId(d, active), inFlight: decomposing })}
+                    onClick={() => void doDecompose(d, active)}>
+                    {decomposing ? 'decomposing…' : 'decompose →'}
+                  </button></>
+                )} · <Link className="lnk" to={`/datasets/${d.id}/muse`}>muse →</Link>
+              </div>
+              {decomposing && <p className="ds-panel-note">reading every caption in this set — one pass per caption, this stays open until the last one is written.</p>}
+              {decomposeMsg && <p className="ds-panel-note">{decomposeMsg.text}</p>}
             </div>
 
             <div className="ds-panel">

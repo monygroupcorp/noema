@@ -3,6 +3,12 @@ import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { api, type Dataset as DatasetT, type FlowSummary } from '../lib/api';
 import {
+  canFireDecompose,
+  canOfferDecompose,
+  decomposeCaptionsetId,
+  launchDecomposeJob,
+} from '../lib/training';
+import {
   buildGarden,
   canFire,
   categoryColor,
@@ -88,6 +94,16 @@ export function Muse() {
   const [busy, setBusy] = useState<number | null>(null);
   const [fired, setFired] = useState<Record<number, { runId?: string; error?: string }>>({});
 
+  // ── Decompose ─────────────────────────────────────────────────────────────
+  // The rung between a caption job and this screen: it reads one captionset and writes the
+  // fragments this garden is built from. Offered from the empty state because that is where
+  // a user who has just captioned arrives. Which captionset runs, whether the action can be
+  // offered at all, and when the button is armed are all decided in `lib/training.ts`.
+  const [decomposeSet, setDecomposeSet] = useState<string | null>(null);
+  const [trigger, setTrigger] = useState('');
+  const [decomposing, setDecomposing] = useState(false);
+  const [decomposeMsg, setDecomposeMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
   useEffect(() => {
     let live = true;
     api.listFlows()
@@ -144,6 +160,31 @@ export function Muse() {
     }
   }
 
+  // A decompose is synchronous and metered: the request stays open until the last caption is
+  // written, and every caption is one chat call. So the button locks for the whole pass, the
+  // state on screen says what is actually happening rather than spinning, and a failure keeps
+  // its text. When it returns, the dataset is re-read so the garden fills without a refresh.
+  async function doDecompose(dataset: DatasetT) {
+    const captionsetId = decomposeCaptionsetId(dataset, decomposeSet);
+    if (!canFireDecompose({ captionsetId, inFlight: decomposing })) return;
+    setDecomposing(true);
+    setDecomposeMsg(null);
+    try {
+      const run = await launchDecomposeJob({ datasetId: dataset.id, captionsetId: captionsetId!, trigger });
+      if (run.status === 'failed') {
+        setDecomposeMsg({ ok: false, text: `decompose failed: ${run.failure?.message ?? 'no reason reported'}` });
+        return;
+      }
+      const { datasets: ds } = await api.listDatasetsFull();
+      setDatasets(ds);
+      setDecomposeMsg({ ok: true, text: 'decompose finished — the garden is built from it' });
+    } catch (e) {
+      setDecomposeMsg({ ok: false, text: `couldn't decompose: ${String((e as Error).message).slice(0, 160)}` });
+    } finally {
+      setDecomposing(false);
+    }
+  }
+
   // The dataset-wide garden. Pools every media item's fragments (not one item's — that is
   // Dataset.tsx's job) and builds it in one pass. Recomputed only when the dataset's media
   // actually changes, not on every curation toggle.
@@ -189,11 +230,47 @@ export function Muse() {
         <div className="page"><div className="pw wide">
           <div className="empty">
             <div className="t">Nothing has been decomposed yet</div>
-            <div className="s">
-              Muse rolls prompts from decomposed captions — this dataset has none yet. Caption it, then
-              decompose those captions to grow the garden.
-            </div>
-            <Link className="btn accent" to={`/datasets/${d.id}`}>← back to {d.name}</Link>
+            {canOfferDecompose(d) ? (
+              <>
+                <div className="s">
+                  Muse rolls prompts from decomposed captions. This dataset has captions — decompose a
+                  captionset to grow the garden.
+                </div>
+                <div className="muse-decompose">
+                  <label className="cc-field"><span>Captionset</span>
+                    <select className="cer-input" value={decomposeCaptionsetId(d, decomposeSet) ?? ''}
+                      disabled={decomposing}
+                      onChange={(e) => setDecomposeSet(e.target.value)}>
+                      {d.captionsets.map((cs) => (
+                        <option key={cs.id} value={cs.id}>{cs.name} · {cs.coverage}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="cc-field"><span>Trigger word to strip (optional)</span>
+                    <input className="cer-input" value={trigger} disabled={decomposing}
+                      onChange={(e) => setTrigger(e.target.value)}
+                      placeholder="keeps fragments reusable" />
+                  </label>
+                  <button className="btn accent"
+                    disabled={!canFireDecompose({ captionsetId: decomposeCaptionsetId(d, decomposeSet), inFlight: decomposing })}
+                    onClick={() => void doDecompose(d)}>
+                    {decomposing ? 'Decomposing…' : 'Decompose these captions →'}
+                  </button>
+                </div>
+                <div className="muse-decompose-note mono">
+                  {decomposing
+                    ? 'reading every caption in this set — one pass per caption, this stays open until the last one is written'
+                    : 'reads every caption in this set and stores the fragments on the images they came from · billed like any other run'}
+                </div>
+                {decomposeMsg && <div className="muse-decompose-note mono">{decomposeMsg.text}</div>}
+              </>
+            ) : (
+              <div className="s">
+                Muse rolls prompts from decomposed captions — this dataset has none yet. Caption it, then
+                decompose those captions to grow the garden.
+              </div>
+            )}
+            <Link className={canOfferDecompose(d) ? 'btn ghost' : 'btn accent'} to={`/datasets/${d.id}`}>← back to {d.name}</Link>
           </div>
         </div></div>
       </AppShell>
