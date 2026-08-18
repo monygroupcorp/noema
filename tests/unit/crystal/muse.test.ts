@@ -269,6 +269,24 @@ test('a coherent fragment set reports no reasons at all', () => {
   assert.deepEqual(reasons, [])
 })
 
+test('a place word appearing as a substring inside an unrelated word is not a conflict', () => {
+  // "broom" contains "room" as a substring, but does not name a place.
+  const reasons = detectConflicts([
+    frag('setting', 'a moonlit graveyard'),
+    frag('props', 'a wooden broom'),
+  ])
+  assert.deepEqual(reasons, [], 'a place word matched inside another word is not a real place mention')
+})
+
+test('a whole place word alongside a setting is still reported (the substring fix does not disable detection)', () => {
+  const reasons = detectConflicts([
+    frag('setting', 'a moonlit graveyard'),
+    frag('props', 'a sunlit room'),
+  ])
+  assert.equal(reasons.length, 1)
+  assert.match(reasons[0], /two places/)
+})
+
 // --- Garden: caption -> validated, deduped, attributed fragments -------------
 
 /** An extractor that returns exactly what it was handed, stamped with the source and trigger. */
