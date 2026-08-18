@@ -198,6 +198,21 @@ interface RunPodPodStatus {
   machine?: { gpuDisplayName?: string; dataCenterId?: string; location?: string }
 }
 
+/** A status poll that returned successfully but the pod is not SSH-ready yet — the fields
+ *  that distinguish "wrong values" from "never got a reading" (see SshPollResult). */
+interface SshPollObservation {
+  desiredStatus?: string
+  publicIp?: string
+  port22?: number
+}
+
+/** _getSshInfo's result: ready with `info`, not-ready with a successful `observation`,
+ *  or not-ready with no reading at all (`error`) — the fetch itself failed or returned non-2xx. */
+type SshPollResult =
+  | { info: SshInfo; observation?: undefined; error?: undefined }
+  | { info: null; observation: SshPollObservation; error?: undefined }
+  | { info: null; observation?: undefined; error: string }
+
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
 }
@@ -614,9 +629,15 @@ export class SecurePodClient implements RunPodClient, Procurator {
     const timeoutMs = this.config.sshReadyTimeoutMs ?? 10 * 60 * 1000
     const pollMs = this.config.sshPollIntervalMs ?? 8000
     const deadline = Date.now() + timeoutMs
+    let pollCount = 0
+    // Last-seen observation carried out of the loop so a give-up can name what it saw,
+    // instead of discarding everything the polling learned.
+    let lastObservation: SshPollObservation | undefined
+    let lastError: string | undefined
     while (Date.now() < deadline) {
-      const info = await this._getSshInfo(podId)
-      if (info) {
+      pollCount++
+      const result = await this._getSshInfo(podId)
+      if (result.info) {
         const sshCtx = getTrace()
         log.info('pod SSH ready', {
           podId,
@@ -627,25 +648,42 @@ export class SecurePodClient implements RunPodClient, Procurator {
           sshCtx.sshReadyMs = Date.now() - sshCtx.startTs
           sshCtx.wideFields.cursorType = 'runpod:secure'
         }
-        return info
+        return result.info
+      }
+      if (result.observation) {
+        lastObservation = result.observation
+        lastError = undefined
+      } else {
+        lastError = result.error
       }
       await sleep(pollMs)
     }
-    throw new Error(`Pod ${podId} SSH not ready within ${timeoutMs}ms`)
+    if (lastObservation) {
+      throw new Error(
+        `Pod ${podId} SSH not ready within ${timeoutMs}ms — last seen after ${pollCount} polls:\n` +
+        `desiredStatus=${lastObservation.desiredStatus ?? '<absent>'} ` +
+        `publicIp=${lastObservation.publicIp ?? '<absent>'} ` +
+        `port22=${lastObservation.port22 ?? '<absent>'}`,
+      )
+    }
+    throw new Error(
+      `Pod ${podId} SSH not ready within ${timeoutMs}ms — no successful status read in ${pollCount} polls ` +
+      `(last error: ${lastError ?? 'none'})`,
+    )
   }
 
-  private async _getSshInfo(podId: string): Promise<SshInfo | null> {
+  private async _getSshInfo(podId: string): Promise<SshPollResult> {
     let res: Response
     try {
       res = await this._fetchWithTimeout(`https://rest.runpod.io/v1/pods/${podId}`, {
         headers: { 'Authorization': `Bearer ${this.config.apiKey}` },
       }, this.config.sshInfoTimeoutMs ?? 10_000)
-    } catch {
+    } catch (err) {
       // Timeout or network error on a single poll — treat as not-ready.
       // _waitForSsh deadline governs the overall give-up point.
-      return null
+      return { info: null, error: err instanceof Error ? err.message : String(err) }
     }
-    if (!res.ok) return null
+    if (!res.ok) return { info: null, error: `HTTP ${res.status}` }
 
     const data = await res.json() as RunPodPodStatus
     log.debug('pod status poll', {
@@ -654,15 +692,22 @@ export class SecurePodClient implements RunPodClient, Procurator {
       publicIp: data.publicIp,
       portMappings: data.portMappings,
     })
-    if (data.desiredStatus !== 'RUNNING') return null
-    if (!data.publicIp) return null
+    // An observation is a status read that succeeded, whether or not the pod is ready yet —
+    // this is what a give-up message names, kept distinct from never getting a read at all.
+    const observation: SshPollObservation = {
+      desiredStatus: data.desiredStatus,
+      publicIp: data.publicIp,
+      port22: data.portMappings?.['22'],
+    }
+    if (data.desiredStatus !== 'RUNNING') return { info: null, observation }
+    if (!data.publicIp) return { info: null, observation }
 
     const sshPort = data.portMappings?.['22']
-    if (!sshPort) return null
+    if (!sshPort) return { info: null, observation }
 
     const gpuType = data.machine?.gpuDisplayName ?? data.gpuTypeIds?.[0]
     const region  = data.machine?.dataCenterId ?? data.machine?.location
-    return { host: data.publicIp, port: sshPort, user: 'root', costPerHr: data.costPerHr, gpuType, region }
+    return { info: { host: data.publicIp, port: sshPort, user: 'root', costPerHr: data.costPerHr, gpuType, region } }
   }
 
   private async _terminatePod(podId: string): Promise<void> {
