@@ -55,7 +55,7 @@ const DIM_WORDS = ['dim', 'dark', 'muted', 'shadowy', 'gloomy', 'overcast', 'nig
 
 function hasAny(text: string, words: string[]): boolean {
   const t = text.toLowerCase()
-  return words.some((w) => t.includes(w))
+  return words.some((w) => new RegExp(`\\b${w}\\b`).test(t))
 }
 
 /**
