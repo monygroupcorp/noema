@@ -124,6 +124,22 @@ import { ArcanumVerifier, MongoNullifierStore, type VerifyFn } from './arcanum/A
 import { MongoBursarium } from './arcanum/MongoBursarium.js'
 import { MongoCeremoniaStore } from './arcanum/CeremoniaStore.js'
 
+/**
+ * The pod-rail slice of the RunPod client, restated structurally because `config.runpodClient` is
+ * typed as the narrower inference client. It must stay in step with `SecurePodClient.
+ * launchTrainingPod` — the hooks are how the run gets its handle stamped before any pod-side work
+ * starts, and how a background launch failure reaches the run.
+ */
+type TrainingPodClient = {
+  launchTrainingPod(opts: {
+    image: string
+    env: Record<string, string>
+    setup: string[]
+    onPodId?: (podId: string) => Promise<void>
+    onLaunchFailed?: (err: unknown) => Promise<void>
+  }): Promise<{ podId: string }>
+}
+
 export interface Ring {
   actorum: Actorum
   modorum: Modorum
@@ -677,10 +693,23 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   ) {
     // Remote ai-toolkit training (Slice E) — the prod path. Reuses the SAME finalizer at the
     // completion webhook (resolveExitus, index.ts); here we just dispatch onto a billed pod.
+
+    // Failure sink for the pod rail. A launch resolves at the pod id and finishes SSH + bootstrap
+    // in the background, so a failure there has no caller to reach — this is how it reaches the
+    // run. Deliberately a lazy closure: `completor` is constructed below (this call happens minutes
+    // into a run, long after), and `fail` takes the record rather than an id, so the lookup here is
+    // required rather than incidental. `fail` re-reads the actum and no-ops on one already
+    // finished, so this racing the deadline reaper cannot double-release — no second guard.
+    const onLaunchFailed = async (actumId: string, err: unknown): Promise<void> => {
+      const a = await actorum.findById(actumId)
+      if (a) await completor.fail(a, String(err))
+    }
+
     const launcher = new RemoteAitkLauncher({
       provisioner: securePodTrainingProvisioner(
-        config.runpodClient as unknown as { launchTrainingPod(opts: { image: string; env: Record<string, string> }): Promise<{ podId: string }> },
+        config.runpodClient as unknown as TrainingPodClient,
       ),
+      onLaunchFailed,
       resolver: makeDatasetResolver({ corpora }),
       ...(config.aitoolkitRemote.image ? { image: config.aitoolkitRemote.image } : {}),
       ...(config.aitoolkitRemote.aitkRef ? { aitkRef: config.aitoolkitRemote.aitkRef } : {}),
@@ -702,8 +731,9 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     cursorum.register('aitkcaption', new DatasetCaptionCursor({
       launcher: new CaptionPodLauncher({
         provisioner: securePodTrainingProvisioner(
-          config.runpodClient as unknown as { launchTrainingPod(opts: { image: string; env: Record<string, string> }): Promise<{ podId: string }> },
+          config.runpodClient as unknown as TrainingPodClient,
         ),
+        onLaunchFailed,
         datasets,
         ...(config.aitoolkitRemote.image ? { image: config.aitoolkitRemote.image } : {}),
         ...(config.aitoolkitRemote.aitkRef ? { aitkRef: config.aitoolkitRemote.aitkRef } : {}),

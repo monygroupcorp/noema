@@ -460,11 +460,35 @@ export class SecurePodClient implements RunPodClient, Procurator {
    * single-shot job: provision (SECURE for attempts 1-2, COMMUNITY/any-GPU on the last), wait SSH,
    * run `setup` (bootstrap ai-toolkit onto the stock torch≥2.9 base — clone + pip install its
    * deps), upload `aitktrainer.py`, nohup-launch it with `env` (+ injected RUNPOD_POD_ID = the pod
-   * id), close SSH, return the pod id. Fire-and-forget — the pod posts its own `/runner/status` +
-   * completion webhook. `image` is a stock RunPod base (SSH-ready). GPU-gated: live-verified, not
-   * CI-covered (the launcher's logic + the setup recipe are tested hermetically).
+   * id), close SSH. Fire-and-forget — the pod posts its own `/runner/status` + completion webhook.
+   * `image` is a stock RunPod base (SSH-ready). GPU-gated: live-verified, not CI-covered (the
+   * launcher's logic + the setup recipe are tested hermetically).
+   *
+   * RESOLVES AS SOON AS THE POD ID EXISTS. Provisioning (retries included) takes seconds and
+   * produces the only value the caller needs — the pod id IS the external run handle. Everything
+   * after it — the SSH wait (bounded by `sshReadyTimeoutMs`) and the bootstrap (a clone plus a
+   * large dependency install, bounded by the provisioning budget) — is tens of minutes of work no
+   * caller has a reason to hold a request open for, so it runs as a background continuation.
+   *
+   * Ordering holds by construction rather than by being fast: provision → `await onPodId(podId)` →
+   * resolve → background SSH/bootstrap. `onPodId` is where the caller records the handle (and any
+   * per-job callback credential) against the run; it is awaited BEFORE the continuation is
+   * scheduled, so nothing pod-side can call back before the run can answer for it.
+   *
+   * `onLaunchFailed` is the background failure sink. Once this method has resolved there is no
+   * caller left to throw to, so a failure in the SSH/bootstrap phase terminates the pod (this is
+   * now the only thing that does) and reports through the sink; without it the run would stay in
+   * progress until its deadline expired, waiting out an outcome already known.
    */
-  async launchTrainingPod(opts: { image: string; env: Record<string, string>; setup: string[] }): Promise<{ podId: string }> {
+  async launchTrainingPod(opts: {
+    image: string
+    env: Record<string, string>
+    setup: string[]
+    /** Awaited after provisioning and BEFORE any pod-side work is started. */
+    onPodId?: (podId: string) => Promise<void>
+    /** Called when the background SSH/bootstrap phase fails, after the pod has been terminated. */
+    onLaunchFailed?: (err: unknown) => Promise<void>
+  }): Promise<{ podId: string }> {
     const maxAttempts = this.config.podRetries ?? 3
     let podId: string | undefined
     let lastErr: Error | undefined
@@ -480,10 +504,38 @@ export class SecurePodClient implements RunPodClient, Procurator {
     }
     if (!podId) throw lastErr ?? new Error('training pod provision failed')
 
-    let ssh: SshTransportLike | null = null
-    // The provisioning phase clock starts here, before the SSH wait — the bootstrap deadline
-    // below is the remainder of PROVISION_BUDGET_MS after that wait has taken its share.
+    // The provisioning phase clock starts HERE, before the SSH wait, and is carried into the
+    // background continuation — the bootstrap deadline is the remainder of PROVISION_BUDGET_MS
+    // after that wait has taken its share. Restarting it when the continuation is scheduled would
+    // widen the phase past the budget the run's own deadline is derived from.
     const provisionDeadline = Date.now() + PROVISION_BUDGET_MS
+
+    // Record the handle before anything pod-side exists that could use it.
+    await opts.onPodId?.(podId)
+
+    // Deliberately unawaited, and therefore given its own terminal `.catch`: a background
+    // rejection must never escape as an unhandled rejection.
+    void this._finishTrainingPodLaunch(podId, opts, provisionDeadline)
+      .catch(err => log.error('training pod launch continuation failed', { podId, error: String(err) }))
+
+    return { podId }
+  }
+
+  /**
+   * The background half of `launchTrainingPod`: wait for SSH, bootstrap, launch detached, close.
+   *
+   * On failure there is no caller left to rethrow to, so this closes SSH, terminates the pod
+   * (nothing else will — this is the only exit for a pod whose job never started) and hands the
+   * real error to `onLaunchFailed`. The wiring points that sink at the same failure path the
+   * deadline reaper uses, which re-reads the run and no-ops on one already finished; that is why
+   * a second guard against a reaper race is deliberately not added here.
+   */
+  private async _finishTrainingPodLaunch(
+    podId: string,
+    opts: { env: Record<string, string>; setup: string[]; onLaunchFailed?: (err: unknown) => Promise<void> },
+    provisionDeadline: number,
+  ): Promise<void> {
+    let ssh: SshTransportLike | null = null
     try {
       const sshInfo = await this._waitForSsh(podId)
       log.info('training pod locked', { podId, gpuType: sshInfo.gpuType, costPerHr: sshInfo.costPerHr })
@@ -492,11 +544,11 @@ export class SecurePodClient implements RunPodClient, Procurator {
         { ...opts.env, RUNPOD_POD_ID: podId }, opts.setup, provisionDeadline)
       await ssh.close()
       ssh = null
-      return { podId }
     } catch (err) {
       await ssh?.close().catch(() => {})
       await this._terminatePod(podId).catch(() => {})   // don't leak a pod whose job never started
-      throw err
+      log.warn('training pod launch failed after provisioning', { podId, error: (err as Error).message })
+      await opts.onLaunchFailed?.(err)
     }
   }
 

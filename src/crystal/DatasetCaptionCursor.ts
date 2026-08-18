@@ -47,6 +47,12 @@ export interface CaptionLaunchSpec {
    * launcher-side mint would leave a pod live with a nonce the actum does not yet carry.
    */
   callbackNonce?: string
+  /**
+   * Called with the pod id the moment provisioning yields one, and awaited before the launcher
+   * starts any pod-side work. The cursor stamps the actum here so the run carries the handle and
+   * the nonce before a pod exists that could call back with them.
+   */
+  onPodId?: (podId: string) => Promise<void>
 }
 
 /** Provision a pod + launch the caption pass; resolves with the external run handle. */
@@ -115,17 +121,29 @@ export class DatasetCaptionCursor implements Cursor {
     // with a nonce the actum does not carry.
     const callbackNonce = randomUUID()
 
+    // The stamp: the external handle, the nonce, and `oneshotPod` — the caption pod is dedicated,
+    // so the flag is what has the completor terminate it when the run ends (success or failure).
+    // Without it the pod leaks: complete() keeps warm pods alive and the idle reaper only sweeps
+    // pooled pods.
+    //
+    // Handed to the launcher as `onPodId` so it lands the moment the pod id exists and BEFORE the
+    // pod is bootstrapped — the launch resolves at provisioning and does the rest in the
+    // background, so "after launch resolves" is no longer early enough on its own. A launcher that
+    // does not call the hook still gets the stamp, below, exactly as before.
+    let stamped = false
+    const stamp = async (externusJobId: string): Promise<void> => {
+      stamped = true
+      await this.deps.actorum.update(actum.id, { externusJobId, callbackNonce, oneshotPod: true, status: 'agens' })
+    }
+
     const { externusJobId } = await this.deps.launcher.launch({
-      actumId: actum.id, jobId, datasetId, callbackNonce,
+      actumId: actum.id, jobId, datasetId, callbackNonce, onPodId: stamp,
       ...(captionPrompt ? { captionPrompt } : {}),
       ...(maxNewTokens !== undefined ? { maxNewTokens } : {}),
       ...(gpuId ? { gpuId } : {}),
     })
 
-    // The caption pod is dedicated + one-shot — flag it so the completor terminates it when the
-    // run ends (success or failure). Without this the pod leaks: complete() keeps warm pods alive
-    // and the idle reaper only sweeps pooled pods.
-    await this.deps.actorum.update(actum.id, { externusJobId, callbackNonce, oneshotPod: true, status: 'agens' })
+    if (!stamped) await stamp(externusJobId)
     return { kind: 'async', externusJobId }
   }
 }

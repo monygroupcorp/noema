@@ -97,3 +97,40 @@ test('an empty dataset fails at resolve time, before a pod is provisioned', asyn
   await assert.rejects(() => launcher(dataset([]), provisioner).launch(spec), /no media to caption/)
   assert.equal(provisioner.calls.length, 0)
 })
+
+// The provisioner resolves at the pod id and finishes SSH + bootstrap in the background, so the
+// launcher carries two hooks across that seam: the cursor's stamp (which must run before any
+// pod-side work) and the failure sink (which is what fails the run when the background phase
+// fails, instead of leaving it to time out). The launcher is the only place that holds the actum
+// id, which is why the sink is bound here rather than passed down.
+test('launch: threads the stamp hook through, and binds the failure sink to this run', async () => {
+  const seen: Array<{ onPodId?: (podId: string) => Promise<void>; onLaunchFailed?: (err: unknown) => Promise<void> }> = []
+  const provisioner: TrainingPodProvisioner = {
+    async provision(opts) { seen.push(opts); return { podId: 'pod-9' } },
+  }
+  const failures: Array<{ actumId: string; err: unknown }> = []
+  const l = new CaptionPodLauncher({
+    provisioner, datasets: store(dataset([{ id: 'm1', url: 'https://r2/a.png' }])), r2,
+    statusUrl: 'https://host.example/runner/status',
+    webhookUrl: 'https://host.example/webhooks/execution',
+    onLaunchFailed: async (actumId, err) => { failures.push({ actumId, err }) },
+  })
+
+  const stamped: string[] = []
+  await l.launch({ ...spec, onPodId: async (podId: string) => { stamped.push(podId) } })
+
+  await seen[0].onPodId!('pod-9')
+  assert.deepEqual(stamped, ['pod-9'], 'the caller’s stamp hook reaches the provisioner unchanged')
+
+  await seen[0].onLaunchFailed!(new Error('ssh never came up'))
+  assert.equal(failures.length, 1)
+  assert.equal(failures[0].actumId, 'act-1', 'the sink is bound to the actum this launch belongs to')
+  assert.match(String((failures[0].err as Error).message), /ssh never came up/)
+})
+
+test('launch: with no failure sink configured, provisioning is still called (the hook is optional)', async () => {
+  const provisioner = new FakeProvisioner()
+  await launcher(dataset([{ id: 'm1', url: 'https://r2/a.png' }]), provisioner).launch(spec)
+  assert.equal(provisioner.calls.length, 1)
+  assert.equal(provisioner.calls[0].onLaunchFailed, undefined)
+})
