@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.7.1](https://github.com/monygroupcorp/noema/compare/v5.7.0...v5.7.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **execution:** derive an actum's expiry from the work it reserved ([d1a3ab5](https://github.com/monygroupcorp/noema/commit/d1a3ab5bfcbb3fe7e289dbe709e3f174b2755b51))
+* **execution:** derive an actum's expiry from the work it reserved ([142c83c](https://github.com/monygroupcorp/noema/commit/142c83cc37ed81abe9139744a826ed22d3abfc08))
+
 ## [5.7.0](https://github.com/monygroupcorp/noema/compare/v5.6.0...v5.7.0) (2026-08-18)
 
 
