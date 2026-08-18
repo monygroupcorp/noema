@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Cursor, CursorResult, Actorum } from '../types/cursus.js'
 import type { Actum } from '../types/actum.js'
 import type { Modus } from '../types/modus.js'
+import { PROVISION_BUDGET_MS } from './SecurePodClient.js'
 
 // =============================================================================
 // DatasetCaptionCursor — batch dataset captioning on a provisioned, billed pod
@@ -78,6 +79,24 @@ export class DatasetCaptionCursor implements Cursor {
   async reserve(modus: Modus, _aditus: Record<string, unknown>): Promise<bigint> {
     if (modus.impetusFixum !== undefined) return modus.impetusFixum   // honour a fixed price if one is declared
     return BigInt(this.deps.maxCaptionSeconds ?? DEFAULT_MAX_CAPTION_SECONDS)   // else a pod-seconds upper bound
+  }
+
+  /**
+   * Wall-clock budget for a caption run: the pod provisioning budget PLUS the caption window the
+   * reservation pays for. Two different clocks, added rather than maxed — provisioning is renting a
+   * machine and building an environment on it; the caption window is the work itself, which cannot
+   * start until provisioning has finished.
+   *
+   * Deliberately NOT derived from `reserve()`: `reserve()` short-circuits to `modus.impetusFixum`
+   * when the modus declares a fixed price, and a price read as a duration would hand a flat-priced
+   * caption modus a deadline of a few seconds.
+   *
+   * The cost of the number: the actum's `expirat` is what releases its locked reserve, so a caption
+   * run that dies silently holds the payer's credits locked for this long before the reaper frees
+   * them (clamped by MAX_TERMINUS_MS). Nothing is charged — a reaped run is failed, not settled.
+   */
+  async terminus(_modus: Modus, _aditus: Record<string, unknown>): Promise<number> {
+    return PROVISION_BUDGET_MS + (this.deps.maxCaptionSeconds ?? DEFAULT_MAX_CAPTION_SECONDS) * 1000
   }
 
   async run(actum: Actum): Promise<CursorResult> {

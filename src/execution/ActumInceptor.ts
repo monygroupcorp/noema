@@ -12,7 +12,24 @@ import { bus } from '../lib/bus.js'
 
 const log = makeLogger('execution:inceptor')
 
-const DEFAULT_EXPIRAT_MS = 15 * 60 * 1000  // 15 minutes
+/**
+ * Fallback wall-clock budget for an actum whose cursor declares no `terminus` — API-shaped
+ * work that either answers quickly or is already lost.
+ */
+export const DEFAULT_EXPIRAT_MS = 15 * 60 * 1000  // 15 minutes
+
+/**
+ * Ceiling on any cursor-declared `terminus`. A cursor cannot buy an unbounded deadline.
+ *
+ * `expirat` is the ONLY thing that releases a locked reserve: the reaper is what frees the
+ * credits held against a run that never reported back. So this number is, directly, the
+ * longest a payer's credits can stay LOCKED against a job that is already dead. Nothing is
+ * charged — a reaped actum is failed, not settled, and every locked signum is released — but
+ * locked credits are still credits the payer cannot spend elsewhere. Three hours is the trade
+ * accepted so that pod-rail jobs (provision a machine, build an environment on it, then do the
+ * work the reservation pays for) can complete at all.
+ */
+export const MAX_TERMINUS_MS = 3 * 60 * 60 * 1000  // 3 hours
 
 /**
  * Thrown when the payer cannot cover a run's upper-bound reservation.
@@ -58,14 +75,25 @@ export class ActumInceptor {
     const runner = cursorum.resolve(modus)
     const reservation = await runner.reserve(modus, aditus)
 
+    // 2a. Resolve the wall-clock budget ONCE, here, from the same runner/modus/aditus the
+    // reservation came from — so the deadline and the money can never disagree. Every payment
+    // path below stamps this same value; three independent `Date.now() + CONSTANT` sites had
+    // no mechanism keeping them in lockstep. `terminus` is a DURATION and is never read from
+    // `reserve()`, which returns impetus (a price for several cursors).
+    const terminusMs = Math.min(
+      await runner.terminus?.(modus, aditus) ?? DEFAULT_EXPIRAT_MS,
+      MAX_TERMINUS_MS,
+    )
+    const expirat = new Date(Date.now() + terminusMs)
+
     // ── ZK anonymous path ───────────────────────────────────────────────────
     if ('arcanumProof' in by) {
-      return this._initiateWithProof(params, modus, reservation)
+      return this._initiateWithProof(params, modus, reservation, expirat)
     }
 
     // ── Bursa (anonymous credit purse) path ─────────────────────────────────
     if ('bursaToken' in by) {
-      return this._initiateWithBursa(params, modus, reservation)
+      return this._initiateWithBursa(params, modus, reservation, expirat)
     }
 
     // ── Identified + legacy arcanum hash path ───────────────────────────────
@@ -122,7 +150,7 @@ export class ActumInceptor {
         signaConsumed: selected,
         aditus,
         status: 'nascens',
-        expirat: new Date(Date.now() + DEFAULT_EXPIRAT_MS),
+        expirat,
         ...(computeStrategy ? { computeStrategy } : {}),
         ...(gpuClass ? { gpuClass } : {}),
         ...(nullifier ? { nullifier } : {}),
@@ -158,6 +186,7 @@ export class ActumInceptor {
     params: Inceptio,
     modus: Awaited<ReturnType<NonNullable<Deps['modorum']['find']>>>,
     reservation: bigint,
+    expirat: Date,
   ): Promise<Actum> {
     if (!modus) throw new Error('modus is null')
     const { acta } = this.deps
@@ -207,7 +236,7 @@ export class ActumInceptor {
       signaConsumed: [],  // no Signorum signa — the note is the payment
       aditus,
       status: 'nascens',
-      expirat: new Date(Date.now() + DEFAULT_EXPIRAT_MS),
+      expirat,
       nullifier: nullifierHash,
       ...(computeStrategy ? { computeStrategy } : {}),
       ...(gpuClass ? { gpuClass } : {}),
@@ -221,6 +250,7 @@ export class ActumInceptor {
     params: Inceptio,
     modus: Awaited<ReturnType<NonNullable<Deps['modorum']['find']>>>,
     reservation: bigint,
+    expirat: Date,
   ): Promise<Actum> {
     if (!modus) throw new Error('modus is null')
     const { acta } = this.deps
@@ -250,7 +280,7 @@ export class ActumInceptor {
         signaConsumed: [],
         aditus,
         status: 'nascens',
-        expirat: new Date(Date.now() + DEFAULT_EXPIRAT_MS),
+        expirat,
         bursaToken,
         ...(computeStrategy ? { computeStrategy } : {}),
         ...(gpuClass ? { gpuClass } : {}),

@@ -114,6 +114,19 @@ export interface Cursor {
    * For sync cursors: result.exitus.impetus ≤ reserve(). Guaranteed by each cursor.
    */
   run(actum: Actum, modo?: Modo): Promise<CursorResult>
+
+  /**
+   * Wall-clock budget for this run, in ms, measured from initiation — how long the actum may
+   * legitimately sit in {nascens,agens} before the reaper is right to call it dead.
+   *
+   * NOT a price, and NOT derived from reserve(): reserve() returns impetus, which for several
+   * cursors is a declared price (`modus.impetusFixum`, `modus.pretium`) rather than a duration.
+   * Time gets its own declaration so a cost curve can never be read as a deadline.
+   *
+   * Optional. A cursor that omits it gets the inceptor's DEFAULT_EXPIRAT_MS, unchanged. The
+   * resolved value is clamped to MAX_TERMINUS_MS by ActumInceptor.
+   */
+  terminus?(modus: Modus, aditus: Record<string, unknown>): Promise<number>
 }
 
 // ---------------------------------------------------------------------------
