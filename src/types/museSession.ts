@@ -108,6 +108,20 @@ export interface MuseSessions {
   /** The stored session, or null when the id names none. Owner scoping is the API layer's. */
   find(id: string): Promise<StoredMuseSession | null>
   /**
+   * The sessions one owner broke off one dataset, most recently changed first.
+   *
+   * This is how a session is reached again once the page that spawned it is gone.
+   * The pointer lives on the server, keyed by owner and mother, rather than in a
+   * client store that a reload or a second device does not carry.
+   *
+   * Unlike `find`, this DOES take an owner — a list has to be scoped somewhere,
+   * and a list that returned every session for a dataset and left the filtering
+   * to its caller would be a cross-tenant read waiting to be written. The owner
+   * is still resolved by the API layer from the authenticated caller and never
+   * from a request parameter, exactly as it is for `find`.
+   */
+  listByOwner(owner: string, motherDatasetId: string): Promise<StoredMuseSession[]>
+  /**
    * Replace the stored session's pure value and bump `mutatum`. Returns null when
    * the id names no session — one is never created implicitly.
    */

@@ -38,6 +38,7 @@ import { createApiRouter, type Identity } from '../../../src/allocutio/api/apiRo
 import { Errors } from '../../../src/allocutio/api/errors.js'
 import { fragmentKey, type Fragment } from '../../../src/crystal/muse/taxonomy.js'
 import { spawnSession, recordPiece, setFragmentEnabled, setFragmentWeight } from '../../../src/crystal/muse/session.js'
+import type { Piece } from '../../../src/crystal/muse/session.js'
 import type { Dataset } from '../../../src/types/dataset.js'
 import type { AuctorKey } from '../../../src/flow/types.js'
 import type { Credentials } from '../../../src/allocutio/api/IdentityResolver.js'
@@ -416,6 +417,215 @@ test('a weight is clamped to the sampler bounds and a disabled fragment stays on
     assert.equal(disabled.body.session.fragments.length, 3)
     assert.equal(disabled.body.session.floor.length, 3)
     assert.equal(disabled.body.session.floor.find((e: { key: string }) => e.key === key).enabled, false)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── The piece update: one entry per run, reachable after it is recorded ──────
+
+/** Spawn a session over a seeded dataset and return the live server plus its id. */
+async function spawnFor(url: string, owner: Record<string, string>, datasetId: string): Promise<string> {
+  const spawned = await request(`${url}/v1/data/muse/sessions`, { method: 'POST', headers: owner, body: { datasetId } })
+  assert.equal(spawned.status, 201)
+  return spawned.body.session.id
+}
+
+test('recording the same runId twice does not append a second ledger entry', async () => {
+  const { server, url } = await createServer()
+  try {
+    const headers = { 'x-api-key': 'anima-1' }
+    const dataset = await seedDataset('anima-1')
+    const sessionId = await spawnFor(url, headers, dataset.id)
+    const piece = { runId: 'run-1', rollIndex: 0, fragments: [{ category: 'subject', text: 'a lantern-keeper' }] }
+
+    const first = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces`, { method: 'POST', headers, body: piece })
+    assert.equal(first.status, 201)
+    assert.equal(first.body.session.pieces.length, 1)
+
+    // The same run again — a client retry, a double-fire — is rejected, not appended.
+    const second = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces`, {
+      method: 'POST', headers, body: { ...piece, rollIndex: 1 },
+    })
+    assert.equal(second.status, 400)
+
+    const stored = await sessions.find(sessionId)
+    assert.equal(stored?.session.pieces.length, 1, 'the ledger doubled the lineage of one run')
+    assert.equal(stored?.session.pieces[0]!.rollIndex, 0, 'the second record overwrote the first')
+
+    // A different run still records: the guard is about the run, not about recording.
+    const other = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces`, {
+      method: 'POST', headers, body: { ...piece, runId: 'run-2', rollIndex: 1 },
+    })
+    assert.equal(other.status, 201)
+    assert.equal(other.body.session.pieces.length, 2)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a reaction lands on the piece it names', async () => {
+  const { server, url } = await createServer()
+  try {
+    const headers = { 'x-api-key': 'anima-1' }
+    const dataset = await seedDataset('anima-1')
+    const sessionId = await spawnFor(url, headers, dataset.id)
+
+    for (const runId of ['run-1', 'run-2']) {
+      const recorded = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces`, {
+        method: 'POST', headers,
+        body: { runId, rollIndex: runId === 'run-1' ? 0 : 1, fragments: [{ category: 'subject', text: 'a lantern-keeper' }] },
+      })
+      assert.equal(recorded.status, 201)
+    }
+
+    const reacted = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces/run-2`, {
+      method: 'PATCH', headers, body: { reaction: 'up' },
+    })
+    assert.equal(reacted.status, 200)
+
+    // Read it back from the store, not from the response body: the claim is that the
+    // reaction was persisted onto the named piece, not that it was echoed.
+    const stored = await sessions.find(sessionId)
+    const byRun = new Map((stored?.session.pieces ?? []).map((p: Piece) => [p.runId, p]))
+    assert.equal(byRun.get('run-2')?.reaction, 'up')
+    assert.equal(byRun.get('run-1')?.reaction, undefined, 'the reaction landed on a piece it did not name')
+
+    // A dismissal is a second, independent field on the same piece.
+    const dismissed = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces/run-2`, {
+      method: 'PATCH', headers, body: { dismissed: true },
+    })
+    assert.equal(dismissed.status, 200)
+    const after = await sessions.find(sessionId)
+    const updated = after?.session.pieces.find((p: Piece) => p.runId === 'run-2')
+    assert.equal(updated?.dismissed, true)
+    assert.equal(updated?.reaction, 'up', 'the dismissal cleared the reaction')
+
+    // The lineage the piece was recorded with is untouched by either update.
+    assert.equal(updated?.fragments.length, 1)
+    assert.equal(updated?.rollIndex, 1)
+    assert.equal(after?.session.pieces.length, 2, 'an update appended a ledger entry')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a piece update is rejected for a run the ledger does not hold, and for a session the caller does not own', async () => {
+  const { server, url } = await createServer()
+  try {
+    const owner = { 'x-api-key': 'anima-1' }
+    const stranger = { 'x-api-key': 'anima-2' }
+    const dataset = await seedDataset('anima-1')
+    const sessionId = await spawnFor(url, owner, dataset.id)
+    await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces`, {
+      method: 'POST', headers: owner,
+      body: { runId: 'run-1', rollIndex: 0, fragments: [{ category: 'subject', text: 'a lantern-keeper' }] },
+    })
+
+    const unknownRun = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces/run-never-rolled`, {
+      method: 'PATCH', headers: owner, body: { reaction: 'up' },
+    })
+    assert.equal(unknownRun.status, 404)
+
+    // A stranger gets the SESSION not-found — the same answer an id that never existed
+    // gets — so the piece-level answer never confirms a session they cannot see.
+    const theirs = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces/run-1`, {
+      method: 'PATCH', headers: stranger, body: { reaction: 'up' },
+    })
+    const absent = await request(`${url}/v1/data/muse/sessions/id-that-does-not-exist/pieces/run-1`, {
+      method: 'PATCH', headers: stranger, body: { reaction: 'up' },
+    })
+    assert.equal(theirs.status, 404)
+    assert.equal(theirs.body.error.code, absent.body.error.code)
+
+    // Nothing landed on the owner's piece.
+    const stored = await sessions.find(sessionId)
+    assert.equal(stored?.session.pieces[0]!.reaction, undefined)
+
+    // An empty patch names no change and is a malformed request rather than a silent no-op.
+    const empty = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces/run-1`, {
+      method: 'PATCH', headers: owner, body: {},
+    })
+    assert.equal(empty.status, 400)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── The lookup: a session is found again after the page that spawned it is gone ──
+
+test('a lookup returns only the caller\'s own sessions', async () => {
+  const { server, url } = await createServer()
+  try {
+    const owner = { 'x-api-key': 'anima-1' }
+    const stranger = { 'x-api-key': 'anima-2' }
+    const dataset = await seedDataset('anima-1')
+
+    const mine = await spawnFor(url, owner, dataset.id)
+    // A second identity's session off the SAME mother — the row a lookup keyed on the
+    // dataset alone would hand to whoever asked.
+    const theirs = await sessions.create({ owner: 'anima-2', session: spawnSession(dataset.id, FRAGMENTS) })
+
+    const asStranger = await request(`${url}/v1/data/muse/sessions?datasetId=${dataset.id}`, { headers: stranger })
+    assert.equal(asStranger.status, 200)
+    assert.deepEqual(
+      asStranger.body.sessions.map((s: { id: string }) => s.id),
+      [theirs.id],
+      'the lookup returned a session the caller does not own',
+    )
+
+    const asOwner = await request(`${url}/v1/data/muse/sessions?datasetId=${dataset.id}`, { headers: owner })
+    assert.equal(asOwner.status, 200)
+    assert.deepEqual(
+      asOwner.body.sessions.map((s: { id: string }) => s.id),
+      [mine],
+      'the owner does not see their own session',
+    )
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a lookup finds the session a reload lost, most recently changed first', async () => {
+  const { server, url } = await createServer()
+  try {
+    const headers = { 'x-api-key': 'anima-1' }
+    const dataset = await seedDataset('anima-1')
+    const other = await seedDataset('anima-1')
+
+    const first = await spawnFor(url, headers, dataset.id)
+    const second = await spawnFor(url, headers, dataset.id)
+    const elsewhere = await spawnFor(url, headers, other.id)
+
+    // Working in the older session moves it to the front: the answer to "which session
+    // was I in" is the one last worked in, not the one spawned last.
+    const steered = await request(`${url}/v1/data/muse/sessions/${first}/floor/enabled`, {
+      method: 'PATCH', headers, body: { category: 'style', text: 'ink.wash', enabled: false },
+    })
+    assert.equal(steered.status, 200)
+
+    const found = await request(`${url}/v1/data/muse/sessions?datasetId=${dataset.id}`, { headers })
+    assert.equal(found.status, 200)
+    assert.deepEqual(found.body.sessions.map((s: { id: string }) => s.id), [first, second])
+
+    // Scoped to the mother named, not to every session the caller has.
+    assert.ok(!found.body.sessions.some((s: { id: string }) => s.id === elsewhere), 'the lookup crossed datasets')
+
+    // The lookup carries the whole session, so the floor sheet is rehydrated from it
+    // without a second round trip.
+    const head = found.body.sessions[0]
+    assert.equal(head.motherDatasetId, dataset.id)
+    assert.equal(head.floor.length, 3)
+    assert.equal(
+      head.floor.find((e: { key: string }) => e.key === fragmentKey({ category: 'style', text: 'ink.wash' })).enabled,
+      false,
+    )
+
+    // A dataset with no sessions is an empty list, and a request naming no dataset is malformed.
+    const none = await request(`${url}/v1/data/muse/sessions?datasetId=dataset-with-no-sessions`, { headers })
+    assert.equal(none.status, 200)
+    assert.deepEqual(none.body.sessions, [])
+    assert.equal((await request(`${url}/v1/data/muse/sessions`, { headers })).status, 400)
   } finally {
     await closeServer(server)
   }
