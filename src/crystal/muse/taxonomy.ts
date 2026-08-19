@@ -27,6 +27,24 @@ export type Fragment = {
   source: string
   /** The model binding for that source (e.g. a LoRA trigger word). */
   trigger: string
+  /**
+   * Session state: this fragment has been turned OFF on the cutting floor.
+   *
+   * Off is not gone. A disabled fragment stays in the garden and stays in the
+   * session's dataset — it darkens, and it can be turned back on. Keeping it is
+   * what lets the floor remember how wide it was before the user began aiming,
+   * which is the baseline `variance` measures against.
+   *
+   * Steering sets this; `buildGarden` normalizes fragments as it pools them and
+   * produces a floor that is entirely live, so a floor re-grown from captions
+   * starts from full width rather than inheriting an earlier session's cuts.
+   */
+  disabled?: boolean
+}
+
+/** A fragment counts toward the floor's live width unless a steer turned it off. */
+export function isLive(fragment: Fragment): boolean {
+  return fragment.disabled !== true
 }
 
 /** World-defining categories: at most one of each may appear in a prompt. */
