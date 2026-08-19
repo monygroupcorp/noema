@@ -158,9 +158,11 @@ export interface ApiFacade {
   // --- Muse sessions (a dataset break-off with its own floor and piece ledger) ---
   spawnMuseSession(auctor: AuctorKey, datasetId: string): Promise<import('./CrystalApi.js').MuseSessionView>
   getMuseSession(auctor: AuctorKey, id: string): Promise<import('./CrystalApi.js').MuseSessionView>
+  listMuseSessions(auctor: AuctorKey, datasetId: string): Promise<import('./CrystalApi.js').MuseSessionView[]>
   setMuseFragmentEnabled(auctor: AuctorKey, id: string, fragment: unknown, enabled: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   setMuseFragmentWeight(auctor: AuctorKey, id: string, fragment: unknown, weight: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   recordMusePiece(auctor: AuctorKey, id: string, piece: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
+  updateMusePiece(auctor: AuctorKey, id: string, runId: string, patch: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   publish(auctor: AuctorKey, opts: PublishOpts): Promise<Edition>
   getEdition(auctor: AuctorKey, id: string): Promise<Edition>
   feed(filter?: FeedFilter): Promise<FeedItem[]>
@@ -980,8 +982,9 @@ export function createApiRouter(deps: {
   //
   // A session is a break-off of a dataset: it copies the dataset's fragments and
   // works from its own copies, so nothing a session does reaches the mother. The
-  // five operations here are the whole surface — spawn, read, turn a fragment off
-  // or on, weight a fragment, and record a piece with its lineage.
+  // operations here are the whole surface — spawn, list, read, turn a fragment off
+  // or on, weight a fragment, record a piece with its lineage, and change what the
+  // session says about a piece already recorded.
   //
   // Every one of them is owner-scoped from `auth(req)` and from nowhere else. No
   // route takes an owner, an anima id, or any other scope value from the request:
@@ -995,6 +998,17 @@ export function createApiRouter(deps: {
     const body = (req.body ?? {}) as { datasetId?: unknown }
     const datasetId = typeof body.datasetId === 'string' ? body.datasetId : ''
     res.status(201).json({ session: await api.spawnMuseSession(auctor, datasetId) })
+  }))
+
+  // GET /v1/data/muse/sessions?datasetId=… — the caller's own sessions off one dataset,
+  // most recently changed first. This is how a session is found again after a reload:
+  // the route a session is worked in carries the dataset, so without a server-side
+  // lookup a returning client can only spawn a new session and lose the old one. The
+  // owner comes from `auth(req)`; `datasetId` selects the mother and nothing else.
+  router.get('/data/muse/sessions', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const datasetId = typeof req.query.datasetId === 'string' ? req.query.datasetId : ''
+    res.json({ sessions: await api.listMuseSessions(auctor, datasetId) })
   }))
 
   // GET /v1/data/muse/sessions/:id — the caller's own session: its floor and its ledger.
@@ -1029,6 +1043,17 @@ export function createApiRouter(deps: {
   router.post('/data/muse/sessions/:id/pieces', wrap(async (req, res) => {
     const auctor = await auth(req)
     res.status(201).json({ session: await api.recordMusePiece(auctor, String(req.params.id), req.body ?? {}) })
+  }))
+
+  // PATCH /v1/data/muse/sessions/:id/pieces/:runId — change what the session says about a
+  // piece already in its ledger: its reaction, its dismissal, or both. A reaction is given
+  // after the piece exists, so it cannot ride the record call; this is the route that
+  // reaches a recorded piece. Lineage, run and roll index are fixed at record time and are
+  // not patchable here.
+  router.patch('/data/muse/sessions/:id/pieces/:runId', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const session = await api.updateMusePiece(auctor, String(req.params.id), String(req.params.runId), req.body ?? {})
+    res.json({ session })
   }))
 
   // GET /v1/me — the caller's account settings: appearance + generation defaults + bindings.
