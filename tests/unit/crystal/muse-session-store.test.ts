@@ -1,0 +1,422 @@
+// =============================================================================
+// Muse session — store round-trip, mother purity, and owner scoping
+// =============================================================================
+//
+// Runs against a LIVE Mongo (the `test:crystal` job / an ephemeral mongo:7), the
+// same shape as `MongoCollectio.test.ts`. A session store test wants the real
+// driver: the two things most likely to break here — a `SteerState` Map that
+// does not survive BSON, and a fragment identity that is not a legal field name
+// — are both invisible to an in-memory double.
+//
+// Three claims, one per proof the item is gated on:
+//
+//   1. A SESSION CANNOT BE READ BY ANYONE BUT ITS OWNER. Driven through the real
+//      HTTP surface with two identities. This is the class of defect where a
+//      route trusts a caller-supplied scope value; test-green is not authz-safe,
+//      so the check is made against the live router, not against the store.
+//
+//   2. A SESSION WRITE NEVER TOUCHES THE MOTHER DATASET. The dataset is the
+//      starter and stays pure — a session copies what it was spawned from. The
+//      mother's stored document is captured before the session is steered and
+//      compared afterwards.
+//
+//   3. A SESSION SURVIVES A STORE ROUND-TRIP WITH ITS FLOOR AND LEDGER INTACT.
+//      The floor comes back as a Map the sampler can read, keyed by fragment
+//      identity, and the piece ledger keeps its lineage.
+// =============================================================================
+
+import { test, before, after, afterEach } from 'node:test'
+import assert from 'node:assert/strict'
+import http from 'node:http'
+import express from 'express'
+import { MongoClient, Collection } from 'mongodb'
+
+import { MongoMuseSession } from '../../../src/crystal/MongoMuseSession.js'
+import { MongoDataset } from '../../../src/crystal/MongoDataset.js'
+import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/CrystalApi.js'
+import { createApiRouter, type Identity } from '../../../src/allocutio/api/apiRouter.js'
+import { Errors } from '../../../src/allocutio/api/errors.js'
+import { fragmentKey, type Fragment } from '../../../src/crystal/muse/taxonomy.js'
+import { spawnSession, recordPiece, setFragmentEnabled, setFragmentWeight } from '../../../src/crystal/muse/session.js'
+import type { Dataset } from '../../../src/types/dataset.js'
+import type { AuctorKey } from '../../../src/flow/types.js'
+import type { Credentials } from '../../../src/allocutio/api/IdentityResolver.js'
+
+const URI = process.env.MONGO_PASS ?? process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
+const DB = 'noemaplane_test'
+const SESSIONS_COL = 'muse_sessions_unit'
+const DATASETS_COL = 'datasets_unit'
+
+let client: MongoClient
+let sessionsCol: Collection
+let datasetsCol: Collection
+let sessions: MongoMuseSession
+let datasets: MongoDataset
+
+before(async () => {
+  client = new MongoClient(URI)
+  await client.connect()
+  sessionsCol = client.db(DB).collection(SESSIONS_COL)
+  datasetsCol = client.db(DB).collection(DATASETS_COL)
+  await sessionsCol.createIndex({ id: 1 }, { unique: true })
+  await datasetsCol.createIndex({ id: 1 }, { unique: true })
+  sessions = new MongoMuseSession(sessionsCol)
+  datasets = new MongoDataset(datasetsCol)
+})
+afterEach(async () => {
+  await sessionsCol.deleteMany({})
+  await datasetsCol.deleteMany({})
+})
+after(async () => {
+  await client.db(DB).dropCollection(SESSIONS_COL).catch(() => {})
+  await client.db(DB).dropCollection(DATASETS_COL).catch(() => {})
+  await client.close()
+})
+
+// ── Fixtures ─────────────────────────────────────────────────────────────────
+// Neutral, invented content. A fragment identity is `category:text`, so the
+// texts here deliberately include a dot and a leading `$` — the two characters
+// Mongo gives its own meaning inside a field name. That is what makes the
+// entry-array floor load-bearing rather than stylistic.
+
+const FRAGMENTS: Fragment[] = [
+  { category: 'subject', text: 'a lantern-keeper', source: 'board-a', trigger: 'trigword' },
+  { category: 'style', text: 'ink.wash', source: 'board-a', trigger: 'trigword' },
+  { category: 'lighting', text: '$dusk glow', source: 'board-b', trigger: 'trigword' },
+]
+
+async function seedDataset(owner: string, fragments: Fragment[] = FRAGMENTS): Promise<Dataset> {
+  return datasets.create({
+    owner,
+    name: 'sample-set',
+    modality: 'image',
+    custody: 'local',
+    media: [
+      { id: 'media-1', url: 'https://example.invalid/one.png', source: 'upload', addedAt: new Date(), fragments: fragments.slice(0, 2) },
+      { id: 'media-2', url: 'https://example.invalid/two.png', source: 'upload', addedAt: new Date(), fragments: fragments.slice(2) },
+    ],
+    captionsets: [],
+    versions: [{ v: '1.0.0', count: 2, when: new Date() }],
+  })
+}
+
+// ── The live HTTP surface, over the REAL stores ──────────────────────────────
+
+const fakeIdentity: Identity = {
+  async resolve(creds: Credentials): Promise<AuctorKey> {
+    if (creds.apiKey) return { animaId: creds.apiKey }
+    throw Errors.authMissing()
+  },
+}
+
+function createServer(): Promise<{ server: http.Server; url: string }> {
+  const deps = { datasets, museSessions: sessions } as unknown as CrystalApiDeps
+  const api = new CrystalApi(deps)
+  return new Promise((resolveP, reject) => {
+    const app = express()
+    app.use(express.json())
+    app.use('/v1', createApiRouter({
+      api: api as unknown as ConstructorParameters<typeof createApiRouter>[0]['api'],
+      identity: fakeIdentity,
+    }))
+    const server = app.listen(0, '127.0.0.1', () => {
+      const addr = server.address() as { port: number }
+      resolveP({ server, url: `http://127.0.0.1:${addr.port}` })
+    })
+    server.on('error', reject)
+  })
+}
+
+function closeServer(server: http.Server): Promise<void> {
+  return new Promise((resolveP, reject) => server.close((err) => (err ? reject(err) : resolveP())))
+}
+
+interface HttpResult { status: number; body: any }
+
+function request(url: string, opts: { method?: string; headers?: Record<string, string>; body?: unknown } = {}): Promise<HttpResult> {
+  return new Promise((resolveP, reject) => {
+    const payload = opts.body !== undefined ? JSON.stringify(opts.body) : undefined
+    const headers: Record<string, string> = { ...(opts.headers ?? {}) }
+    if (payload !== undefined) {
+      headers['content-type'] = 'application/json'
+      headers['content-length'] = String(Buffer.byteLength(payload))
+    }
+    const req = http.request(url, { method: opts.method ?? 'GET', headers }, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', (c) => chunks.push(c as Buffer))
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8')
+        resolveP({ status: res.statusCode ?? 0, body: text ? JSON.parse(text) : undefined })
+      })
+    })
+    req.on('error', reject)
+    if (payload !== undefined) req.write(payload)
+    req.end()
+  })
+}
+
+// ── PROOF 3: the round-trip ──────────────────────────────────────────────────
+
+test('a session survives a store round-trip with its floor and ledger intact', async () => {
+  const spawned = spawnSession('dataset-1', FRAGMENTS)
+  const steered = setFragmentWeight(
+    setFragmentEnabled(spawned, { category: 'style', text: 'ink.wash' }, false),
+    { category: 'lighting', text: '$dusk glow' },
+    4,
+  )
+  const withPiece = recordPiece(steered, {
+    runId: 'run-1',
+    rollIndex: 0,
+    fragments: [FRAGMENTS[0]!, FRAGMENTS[2]!],
+    reaction: 'up',
+    saved: true,
+  })
+
+  const created = await sessions.create({ owner: 'anima-1', session: withPiece })
+  const read = await sessions.find(created.id)
+  assert.ok(read, 'the session reads back')
+
+  // The envelope.
+  assert.equal(read.owner, 'anima-1')
+  assert.ok(read.natum instanceof Date)
+  assert.ok(read.mutatum instanceof Date)
+
+  // The floor is a Map again — the sampler's own type, not an array — keyed by
+  // fragment identity, with the steer that was applied before the write.
+  assert.equal(read.session.motherDatasetId, 'dataset-1')
+  assert.equal(read.session.fragments.length, 3)
+  assert.equal(read.session.floor.size, 3)
+  assert.equal(read.session.floor.get(fragmentKey({ category: 'style', text: 'ink.wash' }))?.enabled, false)
+  assert.equal(read.session.floor.get(fragmentKey({ category: 'lighting', text: '$dusk glow' }))?.weight, 4)
+  assert.equal(read.session.floor.get(fragmentKey({ category: 'subject', text: 'a lantern-keeper' }))?.enabled, true)
+
+  // The ledger, with the lineage that is not recoverable after the fact.
+  assert.equal(read.session.pieces.length, 1)
+  const piece = read.session.pieces[0]!
+  assert.equal(piece.runId, 'run-1')
+  assert.equal(piece.reaction, 'up')
+  assert.equal(piece.saved, true)
+  assert.equal(piece.dismissed, false)
+  assert.deepEqual(piece.fragments.map((f) => fragmentKey(f)), [
+    fragmentKey(FRAGMENTS[0]!),
+    fragmentKey(FRAGMENTS[2]!),
+  ])
+})
+
+test('a save replaces the stored session and bumps mutatum; an unknown id is never created', async () => {
+  const created = await sessions.create({ owner: 'anima-1', session: spawnSession('dataset-1', FRAGMENTS) })
+  const next = setFragmentEnabled(created.session, { category: 'style', text: 'ink.wash' }, false)
+
+  const saved = await sessions.save(created.id, next)
+  assert.ok(saved)
+  assert.ok(saved.mutatum.getTime() >= created.mutatum.getTime())
+
+  const read = await sessions.find(created.id)
+  assert.equal(read?.session.floor.get(fragmentKey({ category: 'style', text: 'ink.wash' }))?.enabled, false)
+
+  assert.equal(await sessions.save('id-that-does-not-exist', next), null)
+  assert.equal(await sessions.find('id-that-does-not-exist'), null)
+  assert.equal(await sessionsCol.countDocuments({}), 1)
+})
+
+// ── PROOF 2: the mother stays pure ───────────────────────────────────────────
+
+test('a session write never touches the mother dataset', async () => {
+  const { server, url } = await createServer()
+  try {
+    const headers = { 'x-api-key': 'anima-1' }
+    const dataset = await seedDataset('anima-1')
+
+    const spawned = await request(`${url}/v1/data/muse/sessions`, { method: 'POST', headers, body: { datasetId: dataset.id } })
+    assert.equal(spawned.status, 201)
+    const sessionId = spawned.body.session.id
+
+    // The mother's stored document, captured after the spawn and before any steer.
+    const before = await datasetsCol.findOne({ id: dataset.id })
+    assert.ok(before)
+
+    const disabled = await request(`${url}/v1/data/muse/sessions/${sessionId}/floor/enabled`, {
+      method: 'PATCH', headers, body: { category: 'style', text: 'ink.wash', enabled: false },
+    })
+    assert.equal(disabled.status, 200)
+
+    const weighted = await request(`${url}/v1/data/muse/sessions/${sessionId}/floor/weight`, {
+      method: 'PATCH', headers, body: { category: 'lighting', text: '$dusk glow', weight: 6 },
+    })
+    assert.equal(weighted.status, 200)
+
+    const recorded = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces`, {
+      method: 'POST', headers,
+      body: { runId: 'run-1', rollIndex: 0, fragments: [{ category: 'subject', text: 'a lantern-keeper' }], reaction: 'up' },
+    })
+    assert.equal(recorded.status, 201)
+
+    // Three session writes later, the mother's document is byte-for-byte what it was.
+    const after = await datasetsCol.findOne({ id: dataset.id })
+    assert.deepEqual(after, before, 'the mother dataset document changed under a session write')
+
+    // And the session's own collection is the only one that grew.
+    assert.equal(await sessionsCol.countDocuments({}), 1)
+    assert.equal(await datasetsCol.countDocuments({}), 1)
+
+    // The session's fragments are its OWN copies: darkening one leaves the
+    // mother's fragment list untouched.
+    const motherFragments = (after as unknown as Dataset).media.flatMap((m) => m.fragments ?? [])
+    assert.equal(motherFragments.length, 3)
+    assert.deepEqual(motherFragments.map((f) => fragmentKey(f)), FRAGMENTS.map((f) => fragmentKey(f)))
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── PROOF 1: owner scoping ───────────────────────────────────────────────────
+
+test('a session cannot be read by anyone but its owner', async () => {
+  const { server, url } = await createServer()
+  try {
+    const owner = { 'x-api-key': 'anima-1' }
+    const stranger = { 'x-api-key': 'anima-2' }
+    const dataset = await seedDataset('anima-1')
+
+    const spawned = await request(`${url}/v1/data/muse/sessions`, { method: 'POST', headers: owner, body: { datasetId: dataset.id } })
+    assert.equal(spawned.status, 201)
+    const sessionId = spawned.body.session.id
+
+    // The owner reads it.
+    const mine = await request(`${url}/v1/data/muse/sessions/${sessionId}`, { headers: owner })
+    assert.equal(mine.status, 200)
+    assert.equal(mine.body.session.id, sessionId)
+
+    // A stranger passing the same id gets not-found — and the SAME error an id
+    // that never existed gets, so the surface does not confirm it exists.
+    const theirs = await request(`${url}/v1/data/muse/sessions/${sessionId}`, { headers: stranger })
+    const absent = await request(`${url}/v1/data/muse/sessions/id-that-does-not-exist`, { headers: stranger })
+    assert.equal(theirs.status, 404)
+    assert.equal(theirs.status, absent.status)
+    assert.equal(theirs.body.error.code, absent.body.error.code)
+    assert.equal(theirs.body.session, undefined, "a stranger's read returned a session body")
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a session cannot be steered or written by anyone but its owner', async () => {
+  const { server, url } = await createServer()
+  try {
+    const owner = { 'x-api-key': 'anima-1' }
+    const stranger = { 'x-api-key': 'anima-2' }
+    const dataset = await seedDataset('anima-1')
+
+    const spawned = await request(`${url}/v1/data/muse/sessions`, { method: 'POST', headers: owner, body: { datasetId: dataset.id } })
+    const sessionId = spawned.body.session.id
+
+    const attempts = [
+      request(`${url}/v1/data/muse/sessions/${sessionId}/floor/enabled`, {
+        method: 'PATCH', headers: stranger, body: { category: 'style', text: 'ink.wash', enabled: false },
+      }),
+      request(`${url}/v1/data/muse/sessions/${sessionId}/floor/weight`, {
+        method: 'PATCH', headers: stranger, body: { category: 'style', text: 'ink.wash', weight: 8 },
+      }),
+      request(`${url}/v1/data/muse/sessions/${sessionId}/pieces`, {
+        method: 'POST', headers: stranger,
+        body: { runId: 'run-x', rollIndex: 0, fragments: [{ category: 'subject', text: 'a lantern-keeper' }] },
+      }),
+    ]
+    for (const result of await Promise.all(attempts)) assert.equal(result.status, 404)
+
+    // No mutation landed: the owner's session is exactly as it was spawned.
+    const stored = await sessions.find(sessionId)
+    assert.equal(stored?.session.pieces.length, 0)
+    assert.equal(stored?.session.floor.get(fragmentKey({ category: 'style', text: 'ink.wash' }))?.enabled, true)
+    assert.equal(stored?.session.floor.get(fragmentKey({ category: 'style', text: 'ink.wash' }))?.weight, 1)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a session cannot be spawned off a dataset the caller does not own', async () => {
+  const { server, url } = await createServer()
+  try {
+    const dataset = await seedDataset('anima-1')
+    const attempt = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: { 'x-api-key': 'anima-2' }, body: { datasetId: dataset.id },
+    })
+    assert.equal(attempt.status, 404)
+    assert.equal(await sessionsCol.countDocuments({}), 0)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── The rest of the surface ──────────────────────────────────────────────────
+
+test('spawn pools fragments across every media item in the dataset', async () => {
+  const { server, url } = await createServer()
+  try {
+    const headers = { 'x-api-key': 'anima-1' }
+    const dataset = await seedDataset('anima-1')
+    const spawned = await request(`${url}/v1/data/muse/sessions`, { method: 'POST', headers, body: { datasetId: dataset.id } })
+
+    assert.equal(spawned.status, 201)
+    // Two of the three fragments live on the first media item and one on the
+    // second: a spawn that read a single item would carry fewer than three.
+    assert.equal(spawned.body.session.fragments.length, 3)
+    assert.equal(spawned.body.session.floor.length, 3)
+    assert.equal(spawned.body.session.motherDatasetId, dataset.id)
+    for (const entry of spawned.body.session.floor) {
+      assert.equal(entry.enabled, true)
+      assert.equal(entry.weight, 1)
+    }
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a piece citing a fragment the session does not hold is rejected rather than stored', async () => {
+  const { server, url } = await createServer()
+  try {
+    const headers = { 'x-api-key': 'anima-1' }
+    const dataset = await seedDataset('anima-1')
+    const spawned = await request(`${url}/v1/data/muse/sessions`, { method: 'POST', headers, body: { datasetId: dataset.id } })
+    const sessionId = spawned.body.session.id
+
+    const rejected = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces`, {
+      method: 'POST', headers,
+      body: { runId: 'run-1', rollIndex: 0, fragments: [{ category: 'subject', text: 'a fragment nothing decomposed' }] },
+    })
+    assert.equal(rejected.status, 400)
+
+    const stored = await sessions.find(sessionId)
+    assert.equal(stored?.session.pieces.length, 0)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a weight is clamped to the sampler bounds and a disabled fragment stays on the floor', async () => {
+  const { server, url } = await createServer()
+  try {
+    const headers = { 'x-api-key': 'anima-1' }
+    const dataset = await seedDataset('anima-1')
+    const spawned = await request(`${url}/v1/data/muse/sessions`, { method: 'POST', headers, body: { datasetId: dataset.id } })
+    const sessionId = spawned.body.session.id
+
+    const weighted = await request(`${url}/v1/data/muse/sessions/${sessionId}/floor/weight`, {
+      method: 'PATCH', headers, body: { category: 'style', text: 'ink.wash', weight: 9999 },
+    })
+    assert.equal(weighted.status, 200)
+    const key = fragmentKey({ category: 'style', text: 'ink.wash' })
+    assert.equal(weighted.body.session.floor.find((e: { key: string }) => e.key === key).weight, 8)
+
+    const disabled = await request(`${url}/v1/data/muse/sessions/${sessionId}/floor/enabled`, {
+      method: 'PATCH', headers, body: { category: 'style', text: 'ink.wash', enabled: false },
+    })
+    assert.equal(disabled.status, 200)
+    // Darkened, not deleted: still on the floor and still in the fragment list.
+    assert.equal(disabled.body.session.fragments.length, 3)
+    assert.equal(disabled.body.session.floor.length, 3)
+    assert.equal(disabled.body.session.floor.find((e: { key: string }) => e.key === key).enabled, false)
+  } finally {
+    await closeServer(server)
+  }
+})
