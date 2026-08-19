@@ -27,25 +27,14 @@ export type Fragment = {
   source: string
   /** The model binding for that source (e.g. a LoRA trigger word). */
   trigger: string
-  /**
-   * Session state: this fragment has been turned OFF on the cutting floor.
-   *
-   * Off is not gone. A disabled fragment stays in the garden and stays in the
-   * session's dataset — it darkens, and it can be turned back on. Keeping it is
-   * what lets the floor remember how wide it was before the user began aiming,
-   * which is the baseline `variance` measures against.
-   *
-   * Steering sets this; `buildGarden` normalizes fragments as it pools them and
-   * produces a floor that is entirely live, so a floor re-grown from captions
-   * starts from full width rather than inheriting an earlier session's cuts.
-   */
-  disabled?: boolean
 }
 
-/** A fragment counts toward the floor's live width unless a steer turned it off. */
-export function isLive(fragment: Fragment): boolean {
-  return fragment.disabled !== true
-}
+// A fragment carries no session state of its own. Whether it is turned on for a
+// given session lives OUTSIDE the fragment, in that session's `SteerState`
+// (`sampler.ts`), keyed by `fragmentKey`. That separation is what lets one mother
+// dataset back many sessions at once: two sessions decompose to the same
+// fragments and disable different ones, without either seeing the other's cuts
+// and without a per-session deep copy of the pool.
 
 /** World-defining categories: at most one of each may appear in a prompt. */
 export const EXCLUSIVE = ['setting', 'style', 'palette', 'lighting', 'mood'] as const
