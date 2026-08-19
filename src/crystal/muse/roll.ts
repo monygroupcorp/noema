@@ -16,7 +16,7 @@
 //
 // Pure and deterministic: same garden, same count, same report.
 
-import { rollFragments } from './sampler.js'
+import { rollFragments, type SteerState } from './sampler.js'
 import { type Fragment, type Garden } from './taxonomy.js'
 import { composeTemplate, detectConflicts } from './weaver.js'
 
@@ -62,14 +62,17 @@ function triggersOf(fragments: readonly Fragment[]): string[] {
 /**
  * Roll `count` times against a garden and report each roll plus the free/paid tally.
  *
- * Roll indices are `0 .. count-1`, so the report is reproducible from the garden
- * and the count alone. A non-positive count yields an empty report rather than
- * throwing.
+ * Roll indices are `0 .. count-1`, so the report is reproducible from the garden,
+ * the count and the steer state alone. A non-positive count yields an empty report
+ * rather than throwing.
+ *
+ * `steer` is passed straight to the sampler and is the only thing that changes
+ * which fragment a given roll index draws; omitting it reports the unsteered roll.
  */
-export function rollReport(garden: Garden, count: number): RollReport {
+export function rollReport(garden: Garden, count: number, steer?: SteerState): RollReport {
   const rolls: RolledPrompt[] = []
   for (let index = 0; index < Math.max(0, Math.trunc(count)); index++) {
-    const fragments = rollFragments(garden, index)
+    const fragments = rollFragments(garden, index, steer)
     const reasons = detectConflicts(fragments)
     rolls.push({
       index,
