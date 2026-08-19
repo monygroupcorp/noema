@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { api, type Dataset as DatasetT, type FlowSummary } from '../lib/api';
+import { api, type Dataset as DatasetT, type FlowSummary, type Fragment } from '../lib/api';
+import { useRunStream } from '../lib/runStream';
 import {
   canFireDecompose,
   canOfferDecompose,
@@ -9,6 +10,8 @@ import {
   launchDecomposeJob,
 } from '../lib/training';
 import {
+  admitPiece,
+  applyRunResult,
   buildGarden,
   canFire,
   categoryColor,
@@ -16,11 +19,20 @@ import {
   gardenCounts,
   ignitionBlockReason,
   ignitionRequest,
+  lineageOf,
   poolDatasetFragments,
+  releasePending,
   rollCurated,
+  streamColumns,
+  streamPiece,
   t2iFlows,
+  EMPTY_STREAM,
+  EXPANDED_GESTURES,
+  TILE_GESTURES,
   type IgnitionQuote,
   type RollReport,
+  type RunResult,
+  type StreamPiece,
 } from '../lib/muse';
 import './muse.css';
 
@@ -47,6 +59,19 @@ import './muse.css';
 // created, and the request carries no `pinnedModels` — a trigger word rides the prompt
 // text and `src/crystal/loraResolver.ts` resolves it server-side, exactly as it does
 // for `Card.tsx` and every other run in the product.
+//
+// The stream (noema-238) is where a fired piece lands. Ignition used to end at a run id
+// and a link, so seeing what Muse made meant leaving Muse; the pieces now come home to a
+// tile grid on this screen — two columns on a phone, widening with the viewport, each
+// tile tap-to-expand. Every rule the grid follows is a pure function in `lib/muse.ts`
+// (`admitPiece`, `applyRunResult`, `streamColumns`, `lineageOf`) and is gated in
+// `tests/unit/web/muse.test.ts`; this screen renders them. A piece watches its own run
+// over the shared SSE hook (`lib/runStream.ts`), the same subscription `Run.tsx` and
+// `Card.tsx` use, so there is one result path in the app rather than a second one here.
+//
+// The three tile gestures are rendered DISABLED: a reaction writes to the session, which
+// is a later rung, and a control that silently does nothing is worse than one that says
+// it is not ready yet.
 
 export function Muse() {
   const { id } = useParams();
@@ -92,7 +117,46 @@ export function Muse() {
   // Per-roll quote / fire state, keyed by roll index within the current report.
   const [quotes, setQuotes] = useState<Record<number, IgnitionQuote>>({});
   const [busy, setBusy] = useState<number | null>(null);
-  const [fired, setFired] = useState<Record<number, { runId?: string; error?: string }>>({});
+  const [fired, setFired] = useState<Record<number, { error?: string }>>({});
+
+  // ── The stream (noema-238) ────────────────────────────────────────────────
+  // Fired pieces, newest first, plus the ones held back while the grid is frozen.
+  const [stream, setStream] = useState(EMPTY_STREAM);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const [columns, setColumns] = useState(streamColumns(0));
+  // The freeze test, read at fire time rather than at render time: a piece may arrive
+  // from a run that finished while the user was scrolled deep into the grid.
+  const frozenRef = useRef(false);
+  const [frozen, setFrozen] = useState(false);
+
+  // Frozen = the head of the grid has scrolled off the top of the viewport, i.e. the
+  // user is looking at older tiles. Inserting at the top then would move the tile under
+  // their thumb, and every tile gesture here is a steer (V8b).
+  useLayoutEffect(() => {
+    const read = () => {
+      const el = gridRef.current;
+      if (el) setColumns(streamColumns(el.clientWidth));
+      const away = !!el && el.getBoundingClientRect().top < 0;
+      frozenRef.current = away;
+      setFrozen(away);
+    };
+    read();
+    window.addEventListener('scroll', read, { passive: true });
+    window.addEventListener('resize', read);
+    return () => {
+      window.removeEventListener('scroll', read);
+      window.removeEventListener('resize', read);
+    };
+  }, [stream.pieces.length]);
+
+  const onPieceResult = useCallback((runId: string, result: RunResult) => {
+    setStream((s) => applyRunResult(s, runId, result));
+  }, []);
+
+  const expandedPiece = expanded
+    ? stream.pieces.find((p) => p.runId === expanded) ?? stream.pending.find((p) => p.runId === expanded) ?? null
+    : null;
 
   // ── Decompose ─────────────────────────────────────────────────────────────
   // The rung between a caption job and this screen: it reads one captionset and writes the
@@ -146,13 +210,17 @@ export function Muse() {
     }
   }
 
-  async function doFire(index: number, prompt: string) {
+  async function doFire(index: number, prompt: string, lineage: readonly Fragment[]) {
     if (!modusId) return;
     if (!canFire(quotes[index] ?? null, modusId, prompt, blockReason)) return;
     setBusy(index);
     try {
       const { run } = await api.createRun(ignitionRequest(modusId, prompt));
-      setFired((prev) => ({ ...prev, [index]: { runId: run.id } }));
+      // The piece lands in the stream on this screen. It carries the fragments it was
+      // rolled from, because a later roll replaces the report it came out of and the
+      // expanded view still has to name them.
+      setStream((s) => admitPiece(s, streamPiece(run.id, prompt, lineage), frozenRef.current));
+      setFired((prev) => ({ ...prev, [index]: {} }));
     } catch (e) {
       setFired((prev) => ({ ...prev, [index]: { error: e instanceof Error ? e.message : String(e) } }));
     } finally {
@@ -287,6 +355,41 @@ export function Muse() {
           </div>
         </div>
 
+        {/* The stream: what this screen has made, on this screen. Newest first, held
+            back while the user is scrolled away from the head of the grid. */}
+        {(stream.pieces.length > 0 || stream.pending.length > 0) && (
+          <section className="muse-stream">
+            <div className="muse-stream-head">
+              <span className="gc-l">stream</span>
+              <span className="gt-sub mono">
+                {stream.pieces.length} {stream.pieces.length === 1 ? 'piece' : 'pieces'} · tap a tile to expand
+                {frozen && stream.pending.length > 0 ? ' · held while you scroll' : ''}
+              </span>
+              {stream.pending.length > 0 && (
+                <button type="button" className="muse-new-pill" onClick={() => setStream(releasePending)}>
+                  {stream.pending.length} new ↑
+                </button>
+              )}
+            </div>
+            <div
+              className="muse-grid"
+              ref={gridRef}
+              style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+            >
+              {stream.pieces.map((p) => (
+                <PieceTile key={p.runId} piece={p} onExpand={setExpanded} onResult={onPieceResult} />
+              ))}
+            </div>
+            {/* A held piece is still generating on a pod that is already paid for, so it
+                keeps its subscription even though its tile is not on screen yet. */}
+            {stream.pending.map((p) => (
+              p.status === 'running'
+                ? <RunWatcher key={p.runId} runId={p.runId} onResult={onPieceResult} />
+                : null
+            ))}
+          </section>
+        )}
+
         <div className="garden">
           {/* the pooled garden, by category, with counts — a zero-count category renders as
               zero rather than being hidden; an empty category is information. */}
@@ -404,16 +507,13 @@ export function Muse() {
                             <button
                               className="btn accent sm"
                               disabled={!armed || busy === r.index}
-                              onClick={() => doFire(r.index, prompt)}
+                              onClick={() => doFire(r.index, prompt, r.fragments)}
                             >
                               Generate →
                             </button>
                           </>
                         );
                       })()}
-                      {fired[r.index]?.runId && (
-                        <Link className="mono" to={`/run?id=${fired[r.index]!.runId}`}>open run view →</Link>
-                      )}
                       {fired[r.index]?.error && (
                         <span className="gt-sub mono">{fired[r.index]!.error}</span>
                       )}
@@ -440,7 +540,109 @@ export function Muse() {
         <div className="garden-foot">
           <Link className="btn ghost" to={`/datasets/${id}`}>← {d.name}</Link>
         </div>
+
+        {expandedPiece && (
+          <ExpandedPiece piece={expandedPiece} onClose={() => setExpanded(null)} />
+        )}
       </div></div>
     </AppShell>
+  );
+}
+
+/** Headless: one piece's subscription to its own run. Reports terminal upward once,
+ *  where `applyRunResult` folds the produced media into the piece. Split out so a held
+ *  piece — one that has no tile on screen yet — is still watched. */
+function RunWatcher({ runId, onResult }: { runId: string; onResult: (runId: string, r: RunResult) => void }) {
+  const { terminal, exitus, error } = useRunStream(runId);
+  useEffect(() => {
+    if (!terminal) return;
+    onResult(runId, { terminal, exitus, error });
+  }, [runId, terminal, exitus, error, onResult]);
+  return null;
+}
+
+/** One tile in the stream. Roughly 145px on a phone, which fits three targets legibly —
+ *  the two steers and declutter (V8a). They are disabled here: a reaction writes to the
+ *  session, which is a later rung. The rest of the rail lives in the expanded view. */
+function PieceTile({
+  piece, onExpand, onResult,
+}: {
+  piece: StreamPiece;
+  onExpand: (runId: string) => void;
+  onResult: (runId: string, r: RunResult) => void;
+}) {
+  return (
+    <div className={`muse-tile ${piece.status}`}>
+      {piece.status === 'running' && <RunWatcher runId={piece.runId} onResult={onResult} />}
+      <button
+        type="button"
+        className="muse-tile-shot"
+        onClick={() => onExpand(piece.runId)}
+        title={piece.prompt}
+      >
+        {piece.media ? (
+          piece.media.kind === 'video'
+            ? <video className="muse-tile-media" src={piece.media.url} muted loop playsInline />
+            : <img className="muse-tile-media" src={piece.media.url} alt="" loading="lazy" />
+        ) : (
+          <span className="muse-tile-wait mono">
+            {piece.status === 'failed' ? (piece.error ?? 'failed') : 'generating…'}
+          </span>
+        )}
+      </button>
+      <div className="muse-tile-rail">
+        {TILE_GESTURES.map((g) => (
+          <button key={g.key} type="button" className="muse-gesture" disabled title={`${g.label} — arrives with session steering`}>
+            {g.glyph}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The expanded piece: the full action rail and the lineage — the fragments that
+ *  produced it (V8). The rail is inert for the same reason the tile's is. */
+function ExpandedPiece({ piece, onClose }: { piece: StreamPiece; onClose: () => void }) {
+  return (
+    <div className="muse-expanded" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="muse-expanded-card" onClick={(e) => e.stopPropagation()}>
+        <div className="muse-expanded-shot">
+          {piece.media ? (
+            piece.media.kind === 'video'
+              ? <video src={piece.media.url} controls playsInline />
+              : <img src={piece.media.url} alt="" />
+          ) : (
+            <span className="muse-tile-wait mono">
+              {piece.status === 'failed' ? (piece.error ?? 'failed') : 'generating…'}
+            </span>
+          )}
+        </div>
+
+        <div className="muse-expanded-rail">
+          {EXPANDED_GESTURES.map((g) => (
+            <button key={g.key} type="button" className="muse-gesture" disabled title={`${g.label} — arrives with session steering`}>
+              {g.glyph}
+            </button>
+          ))}
+          <button type="button" className="btn ghost sm muse-expanded-close" onClick={onClose}>Close</button>
+        </div>
+
+        <div className="muse-expanded-prompt mono">{piece.prompt}</div>
+
+        <div className="gc-l">lineage</div>
+        <div className="muse-roll-frags mono">
+          {lineageOf(piece).map((f, i) => (
+            <span key={i} className="muse-roll-frag" style={{ borderColor: categoryColor(f.category) }}>
+              [{f.category}] {f.text}{f.trigger ? ` <- ${f.trigger}` : ''}
+            </span>
+          ))}
+        </div>
+
+        <div className="muse-expanded-foot">
+          <Link className="mono" to={`/run?id=${piece.runId}`}>open run view →</Link>
+        </div>
+      </div>
+    </div>
   );
 }
