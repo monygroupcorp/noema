@@ -1407,6 +1407,142 @@ const DatasetEnvelopeSchema: JsonSchema = {
   required: ['dataset'],
 }
 
+// ---------------------------------------------------------------------------
+// Muse sessions — a dataset break-off with its own floor and piece ledger
+// ---------------------------------------------------------------------------
+
+/** One categorized prompt fragment (mirrors `crystal/muse/taxonomy.ts#Fragment`). */
+const MuseFragmentSchema: JsonSchema = {
+  type: 'object',
+  description: 'A categorized, reusable prompt fragment lifted from a caption.',
+  properties: {
+    category: { type: 'string', description: 'Which slot the fragment fills (subject, style, lighting, …).' },
+    text: { type: 'string', description: 'The fragment itself — a short, prompt-ready phrase.' },
+    source: { type: 'string', description: 'The moodboard entry it came from.' },
+    trigger: { type: 'string', description: 'The model binding for that source (e.g. a LoRA trigger word).' },
+  },
+  required: ['category', 'text', 'source', 'trigger'],
+}
+
+/** One fragment's floor state. */
+const MuseFloorEntrySchema: JsonSchema = {
+  type: 'object',
+  description:
+    "A fragment's state on the session floor. The floor is an ARRAY of entries rather than an " +
+    'object keyed by fragment: a fragment identity is `category:text`, which is free text and is ' +
+    'not usable as a field name.',
+  properties: {
+    key: { type: 'string', description: "The fragment's stable identity: its category and its text." },
+    enabled: { type: 'boolean', description: 'False takes the fragment out of the draw while leaving it on the floor.' },
+    weight: { type: 'number', description: 'Draw weight against its pool-mates, clamped server-side to the sampler bounds.' },
+  },
+  required: ['key', 'enabled', 'weight'],
+}
+
+/** One recorded piece and the lineage that produced it. */
+const MusePieceSchema: JsonSchema = {
+  type: 'object',
+  description: 'A piece the session produced, with the fragments that produced it.',
+  properties: {
+    runId: { type: 'string', description: 'The run that produced the piece.' },
+    rollIndex: { type: 'number', description: 'Which roll of the session this was.' },
+    fragments: { type: 'array', items: MuseFragmentSchema, description: 'The lineage — one fragment per category the roll filled.' },
+    reaction: { type: 'string', enum: ['up', 'down', 'note'], description: 'What the user said about the piece, if anything.' },
+    saved: { type: 'boolean' },
+    dismissed: { type: 'boolean' },
+  },
+  required: ['runId', 'rollIndex', 'fragments', 'saved', 'dismissed'],
+}
+
+/** A Muse session as this surface returns it. */
+const MuseSessionSchema: JsonSchema = {
+  type: 'object',
+  description:
+    'A Muse session: a break-off of a dataset with its own copies of that dataset\'s fragments, ' +
+    'its own floor, and its own piece ledger. The mother dataset is the starter and is never ' +
+    'written to by the session.',
+  properties: {
+    id: { type: 'string' },
+    owner: { type: 'string', description: 'FK -> Anima, the owning identity.' },
+    motherDatasetId: { type: 'string', description: 'FK -> Dataset, the dataset the session broke off from.' },
+    fragments: { type: 'array', items: MuseFragmentSchema, description: 'Every fragment on the floor, in display order.' },
+    floor: { type: 'array', items: MuseFloorEntrySchema },
+    pieces: { type: 'array', items: MusePieceSchema },
+    natum: { type: 'string', format: 'date-time' },
+    mutatum: { type: 'string', format: 'date-time' },
+  },
+  required: ['id', 'owner', 'motherDatasetId', 'fragments', 'floor', 'pieces', 'natum', 'mutatum'],
+}
+
+/** The `{ session }` envelope every Muse session operation returns. */
+const MuseSessionEnvelopeSchema: JsonSchema = {
+  type: 'object',
+  properties: { session: MuseSessionSchema },
+  required: ['session'],
+}
+
+/** The request body for `POST /v1/data/muse/sessions`. */
+const SpawnMuseSessionRequestSchema: JsonSchema = {
+  type: 'object',
+  description:
+    'Break a session off a dataset the caller owns. Fragments are pooled dataset-wide across every ' +
+    'media item, in item order — a session is a break-off of the whole dataset, not of one item.',
+  properties: {
+    datasetId: { type: 'string', description: 'FK -> Dataset. Must be a dataset the caller owns.' },
+  },
+  required: ['datasetId'],
+}
+
+/** The request body for `PATCH /v1/data/muse/sessions/:id/floor/enabled`. */
+const SetMuseFragmentEnabledRequestSchema: JsonSchema = {
+  type: 'object',
+  description:
+    'Turn one fragment off or back on. The fragment is named by its identity in the body rather ' +
+    'than in the path because that identity is free text. A disabled fragment stays on the floor ' +
+    'and stays in the fragment list — it is out of the draw, not gone.',
+  properties: {
+    category: { type: 'string', description: "The fragment's category." },
+    text: { type: 'string', description: "The fragment's text." },
+    enabled: { type: 'boolean' },
+  },
+  required: ['category', 'text', 'enabled'],
+}
+
+/** The request body for `PATCH /v1/data/muse/sessions/:id/floor/weight`. */
+const SetMuseFragmentWeightRequestSchema: JsonSchema = {
+  type: 'object',
+  description: "Weight one fragment against its pool-mates. Clamped server-side to the sampler's bounds.",
+  properties: {
+    category: { type: 'string', description: "The fragment's category." },
+    text: { type: 'string', description: "The fragment's text." },
+    weight: { type: 'number', description: 'Relative draw weight. Values outside the sampler bounds are clamped.' },
+  },
+  required: ['category', 'text', 'weight'],
+}
+
+/** The request body for `POST /v1/data/muse/sessions/:id/pieces`. */
+const RecordMusePieceRequestSchema: JsonSchema = {
+  type: 'object',
+  description:
+    'Append a piece to the session ledger with the lineage that produced it. Every cited fragment ' +
+    'must be one this session holds; the lineage is stored from the session\'s own copies. The ' +
+    'lineage is recorded now because it is not recoverable later — the floor moves and the ' +
+    'fragment list is rebuilt.',
+  properties: {
+    runId: { type: 'string', description: 'The run that produced the piece.' },
+    rollIndex: { type: 'number', description: 'Which roll of the session this was. A non-negative integer.' },
+    fragments: {
+      type: 'array',
+      items: { type: 'object', properties: { category: { type: 'string' }, text: { type: 'string' } }, required: ['category', 'text'] },
+      description: 'The lineage, each fragment named by category and text.',
+    },
+    reaction: { type: 'string', enum: ['up', 'down', 'note'] },
+    saved: { type: 'boolean' },
+    dismissed: { type: 'boolean' },
+  },
+  required: ['runId', 'rollIndex', 'fragments'],
+}
+
 const CogsReportSchema: JsonSchema = {
   type: 'object',
   description: 'Admin COGS report: trailing-window rollup of per-job costUsd off wide_events — the read-only pair to the revenue report.',
@@ -1683,6 +1819,45 @@ export const API_CONTRACT: ApiContract = {
       auth: true,
       request: SetCaptionRequestSchema,
       response: DatasetEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/data/muse/sessions',
+      summary: 'Break a Muse session off a dataset the caller owns. The session copies the dataset\'s fragments, pooled dataset-wide across every media item, and works from its own copies — the mother dataset is never written to. A dataset the caller does not own is reported as not found.',
+      auth: true,
+      request: SpawnMuseSessionRequestSchema,
+      response: MuseSessionEnvelopeSchema,
+    },
+    {
+      method: 'GET',
+      path: '/data/muse/sessions/:id',
+      summary: "A Muse session the caller owns — its floor and its piece ledger. Owner-scoped from the resolved caller; a session the caller does not own is reported as not found, identically to an id that does not exist.",
+      auth: true,
+      response: MuseSessionEnvelopeSchema,
+    },
+    {
+      method: 'PATCH',
+      path: '/data/muse/sessions/:id/floor/enabled',
+      summary: 'Turn one fragment off or back on in a session the caller owns. A disabled fragment stays on the floor and in the fragment list; it is out of the draw, not gone. A fragment the session does not hold is rejected with 400.',
+      auth: true,
+      request: SetMuseFragmentEnabledRequestSchema,
+      response: MuseSessionEnvelopeSchema,
+    },
+    {
+      method: 'PATCH',
+      path: '/data/muse/sessions/:id/floor/weight',
+      summary: "Weight one fragment against its pool-mates in a session the caller owns. The weight is clamped server-side to the sampler's bounds. A fragment the session does not hold is rejected with 400.",
+      auth: true,
+      request: SetMuseFragmentWeightRequestSchema,
+      response: MuseSessionEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/data/muse/sessions/:id/pieces',
+      summary: 'Append a piece to the ledger of a session the caller owns, with the fragments that produced it. A piece citing a fragment the session does not hold is rejected rather than stored, because its lineage could not be resolved against this floor afterwards.',
+      auth: true,
+      request: RecordMusePieceRequestSchema,
+      response: MuseSessionEnvelopeSchema,
     },
     {
       method: 'GET',
@@ -2122,6 +2297,7 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.model', httpStatus: 404 },
     { code: 'not_found.adapter', httpStatus: 404 },
     { code: 'not_found.run', httpStatus: 404 },
+    { code: 'not_found.muse_session', httpStatus: 404 },
     { code: 'economy.insufficient_signa', httpStatus: 402 },
     { code: 'economy.cap_too_low', httpStatus: 422 },
     { code: 'conflict.slug_taken', httpStatus: 409 },

@@ -65,6 +65,19 @@ export interface ListRunsOpts {
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
 import { captionCoverage } from '../../types/dataset.js'
 import type { Captionset, CreateDatasetInput, Dataset, DatasetSummary, Datasets } from '../../types/dataset.js'
+import { floorToEntries } from '../../types/museSession.js'
+import type { FloorEntry, FragmentIdentity, MuseSessions, StoredMuseSession } from '../../types/museSession.js'
+import { fragmentKey, isCategory, type Category, type Fragment } from '../../crystal/muse/taxonomy.js'
+import {
+  UnknownFragmentError,
+  recordPiece,
+  setFragmentEnabled,
+  setFragmentWeight,
+  spawnSession,
+  type MuseSession,
+  type Piece,
+  type Reaction,
+} from '../../crystal/muse/session.js'
 import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
 import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
 import type { Provincia, ProvinciaResKind, Provinciarum } from '../../types/provincia.js'
@@ -148,6 +161,9 @@ export interface CrystalApiDeps {
   /** Dataset store — backs `listDatasets`/`listDatasetSummaries`/`getDataset`/`createDataset`.
    *  Absent → dataset ops unavailable. */
   datasets?: Datasets
+  /** Muse session store — backs the session spawn/read/steer/record surface.
+   *  Absent → Muse session ops unavailable. */
+  museSessions?: MuseSessions
   /** Team store — backs the team CRUD + team-owned collections. Absent → team ops unavailable. */
   sodalitatum?: Sodalitatum
   /** Project store (Provincia) — backs the account-scoped project CRUD + holdings. Absent → project ops unavailable. */
@@ -1937,6 +1953,201 @@ export class CrystalApi {
     return out
   }
 
+  // ── Muse sessions (noema-248) ────────────────────────────────────────────
+  //
+  // A session is a break-off of a dataset with its own floor and its own piece
+  // ledger. `src/crystal/muse/session.ts` holds the whole domain and every
+  // mutator there is pure — it takes a session and returns a new one. These
+  // methods are a thin shell over exactly those functions plus the store: read
+  // the stored session, call the pure mutator, write the result back. There is
+  // deliberately no second mutation path, so a floor can only ever change the
+  // way the pure module says it changes.
+  //
+  // Owner scoping is resolved HERE, from the authenticated caller, and never
+  // from a request parameter — the same rule `getDataset` follows. The store
+  // takes an id and nothing else, so there is no owner argument a caller could
+  // reach.
+
+  private _museSessionsStore(): MuseSessions {
+    const store = this.deps.museSessions
+    if (!store) throw new ApiError('not_found.muse_session', 'Muse sessions unavailable', 404)
+    return store
+  }
+
+  /** Muse sessions are animaId-keyed like datasets — an anonymous caller cannot own one. */
+  private _museSessionOwner(auctor: AuctorKey): string {
+    if ('animaId' in auctor) return auctor.animaId
+    throw Errors.authForbidden('Muse sessions require an identified account')
+  }
+
+  /** The wire projection of a stored session — the floor as an entry array, never a Map. */
+  private _museSessionView(stored: StoredMuseSession): MuseSessionView {
+    return {
+      id: stored.id,
+      owner: stored.owner,
+      motherDatasetId: stored.session.motherDatasetId,
+      fragments: [...stored.session.fragments],
+      floor: floorToEntries(stored.session.floor),
+      pieces: [...stored.session.pieces],
+      natum: stored.natum,
+      mutatum: stored.mutatum,
+    }
+  }
+
+  /**
+   * Resolve a session the caller owns, or 404.
+   *
+   * A session belonging to someone else is reported as not found, never as
+   * forbidden — identical to the error for an id that has never existed, so the
+   * surface does not confirm that a stranger's session exists.
+   */
+  private async _museSession(auctor: AuctorKey, id: string): Promise<StoredMuseSession> {
+    const owner = this._museSessionOwner(auctor)
+    const stored = await this._museSessionsStore().find(id)
+    if (!stored || stored.owner !== owner) {
+      throw new ApiError('not_found.muse_session', `Muse session '${id}' not found`, 404)
+    }
+    return stored
+  }
+
+  /** Apply a pure mutator to a session the caller owns and persist the result. */
+  private async _mutateMuseSession(
+    auctor: AuctorKey,
+    id: string,
+    mutate: (session: MuseSession) => MuseSession,
+  ): Promise<MuseSessionView> {
+    const stored = await this._museSession(auctor, id)
+    const next = mutate(stored.session)
+    const saved = await this._museSessionsStore().save(id, next)
+    if (!saved) throw new ApiError('not_found.muse_session', `Muse session '${id}' not found`, 404)
+    return this._museSessionView(saved)
+  }
+
+  /** A `{ category, text }` pair off the wire, validated into a fragment identity. */
+  private _fragmentIdentity(raw: unknown): FragmentIdentity {
+    const body = (raw ?? {}) as { category?: unknown; text?: unknown }
+    const category = typeof body.category === 'string' ? body.category : ''
+    if (!isCategory(category)) throw Errors.inputMalformed('category must be a Muse fragment category')
+    const text = typeof body.text === 'string' ? body.text.trim() : ''
+    if (!text) throw Errors.inputMalformed('text is required')
+    return { category: category as Category, text }
+  }
+
+  /**
+   * Spawn a session off a dataset the caller owns.
+   *
+   * The session is spawned from the dataset's fragments pooled DATASET-WIDE —
+   * every media item's fragments, in item order — not from one item's alone. A
+   * session is a break-off of the whole dataset.
+   */
+  async spawnMuseSession(auctor: AuctorKey, datasetId: string): Promise<MuseSessionView> {
+    const owner = this._museSessionOwner(auctor)
+    const dataset = await this.getDataset(auctor, datasetId)
+
+    const pooled: Fragment[] = []
+    for (const item of dataset.media) pooled.push(...(item.fragments ?? []))
+
+    const stored = await this._museSessionsStore().create({
+      owner,
+      session: spawnSession(dataset.id, pooled),
+    })
+    return this._museSessionView(stored)
+  }
+
+  /** A session the caller owns. A stranger's id is reported as not found. */
+  async getMuseSession(auctor: AuctorKey, id: string): Promise<MuseSessionView> {
+    return this._museSessionView(await this._museSession(auctor, id))
+  }
+
+  /** Take a fragment out of the draw, or put it back. It stays on the floor either way. */
+  async setMuseFragmentEnabled(auctor: AuctorKey, id: string, input: unknown, enabled: unknown): Promise<MuseSessionView> {
+    const fragment = this._fragmentIdentity(input)
+    if (typeof enabled !== 'boolean') throw Errors.inputMalformed('enabled must be a boolean')
+    return this._mutateMuseSession(auctor, id, (session) => {
+      this._assertHeld(session, fragment)
+      return setFragmentEnabled(session, fragment, enabled)
+    })
+  }
+
+  /** Weight a fragment against its pool-mates. The pure module clamps to the sampler's bounds. */
+  async setMuseFragmentWeight(auctor: AuctorKey, id: string, input: unknown, weight: unknown): Promise<MuseSessionView> {
+    const fragment = this._fragmentIdentity(input)
+    if (typeof weight !== 'number' || !Number.isFinite(weight)) {
+      throw Errors.inputMalformed('weight must be a finite number')
+    }
+    return this._mutateMuseSession(auctor, id, (session) => {
+      this._assertHeld(session, fragment)
+      return setFragmentWeight(session, fragment, weight)
+    })
+  }
+
+  /**
+   * Append a piece to the session's ledger with the lineage that produced it.
+   *
+   * The lineage is required and is checked against the floor by the pure module:
+   * a piece citing a fragment this session does not hold is rejected rather than
+   * stored, because its lineage could never be resolved afterwards.
+   */
+  async recordMusePiece(auctor: AuctorKey, id: string, input: unknown): Promise<MuseSessionView> {
+    const body = (input ?? {}) as {
+      runId?: unknown
+      rollIndex?: unknown
+      fragments?: unknown
+      reaction?: unknown
+      saved?: unknown
+      dismissed?: unknown
+    }
+
+    const runId = typeof body.runId === 'string' ? body.runId.trim() : ''
+    if (!runId) throw Errors.inputMalformed('runId is required')
+    if (typeof body.rollIndex !== 'number' || !Number.isInteger(body.rollIndex) || body.rollIndex < 0) {
+      throw Errors.inputMalformed('rollIndex must be a non-negative integer')
+    }
+    if (!Array.isArray(body.fragments) || body.fragments.length === 0) {
+      throw Errors.inputMalformed('fragments is required and must name the lineage of this piece')
+    }
+    if (body.reaction !== undefined && body.reaction !== 'up' && body.reaction !== 'down' && body.reaction !== 'note') {
+      throw Errors.inputMalformed("reaction must be one of 'up' | 'down' | 'note'")
+    }
+    if (body.saved !== undefined && typeof body.saved !== 'boolean') throw Errors.inputMalformed('saved must be a boolean')
+    if (body.dismissed !== undefined && typeof body.dismissed !== 'boolean') throw Errors.inputMalformed('dismissed must be a boolean')
+
+    const cited = body.fragments.map((f) => this._fragmentIdentity(f))
+
+    return this._mutateMuseSession(auctor, id, (session) => {
+      // Resolve each citation to the session's OWN copy of the fragment, so the
+      // stored lineage carries the source/trigger the session holds rather than
+      // whatever a caller attached to the citation.
+      const held = cited.map((f) => this._heldFragment(session, f))
+      try {
+        return recordPiece(session, {
+          runId,
+          rollIndex: body.rollIndex as number,
+          fragments: held,
+          ...(body.reaction !== undefined ? { reaction: body.reaction as Reaction } : {}),
+          ...(body.saved !== undefined ? { saved: body.saved as boolean } : {}),
+          ...(body.dismissed !== undefined ? { dismissed: body.dismissed as boolean } : {}),
+        })
+      } catch (err) {
+        if (err instanceof UnknownFragmentError) throw Errors.inputMalformed(err.message)
+        throw err
+      }
+    })
+  }
+
+  /** The session's own copy of a cited fragment, or 400 when the floor does not hold it. */
+  private _heldFragment(session: MuseSession, identity: FragmentIdentity): Fragment {
+    const key = fragmentKey(identity)
+    const held = session.fragments.find((f) => fragmentKey(f) === key)
+    if (!held) throw Errors.inputMalformed(`this session does not hold the fragment '${key}'`)
+    return held
+  }
+
+  /** Guard a floor operation: an identity the session does not hold is a 400, not a silent no-op. */
+  private _assertHeld(session: MuseSession, identity: FragmentIdentity): void {
+    this._heldFragment(session, identity)
+  }
+
   private _tabulaeStore(): Tabularum {
     const store = this.deps.tabulae
     if (!store) throw Errors.notFoundTabula('tabulae')
@@ -3253,6 +3464,27 @@ export interface SaveFlowOpts {
 }
 
 /** JSON-safe projection of a StatusSnapshot (bigint→string, Date→ISO). */
+/**
+ * The wire projection of a stored Muse session.
+ *
+ * The floor is an ENTRY ARRAY, not the domain `SteerState` Map: a Map serialises
+ * to `{}` through JSON, so the sampler's own type cannot be the wire type.
+ */
+export interface MuseSessionView {
+  id: string
+  owner: string
+  /** The dataset this session broke off from. Never written to by the session. */
+  motherDatasetId: string
+  /** Every fragment on the floor, in display order. Session-owned copies. */
+  fragments: Fragment[]
+  /** Per-fragment floor state, keyed by fragment identity. */
+  floor: FloorEntry[]
+  /** Every piece the session recorded, with the lineage that produced it. */
+  pieces: Piece[]
+  natum: Date
+  mutatum: Date
+}
+
 export interface StatusView {
   balanceImpetus: string
   balanceUsd: number

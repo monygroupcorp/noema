@@ -948,6 +948,7 @@ async function main(): Promise<void> {
     compositusCursor: ring.compositusCursor,
     collectiones: ring.collectiones,
     datasets: ring.datasets,
+    museSessions: ring.museSessions,
     collectioCursor: ring.collectioCursor,
     sodalitatum: ring.sodalitates,
     provinciarum: ring.provinciae,
