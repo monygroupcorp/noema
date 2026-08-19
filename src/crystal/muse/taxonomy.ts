@@ -91,3 +91,16 @@ export const TEMPLATE_ORDER: readonly Category[] = [
 
 /** A garden is the pool of fragments available per category. */
 export type Garden = Partial<Record<Category, Fragment[]>>
+
+/**
+ * The stable identity of a fragment: its category and its text.
+ *
+ * `buildGarden` already dedupes on exactly that pair (case-insensitively, per
+ * category), so no two fragments in one garden can share it — which makes it the
+ * identity any per-fragment state (enabled, weight) is keyed by. An array index
+ * is NOT an identity: rebuilding a garden renumbers it, and state keyed on a
+ * position then lands on a different fragment.
+ */
+export function fragmentKey(fragment: Pick<Fragment, 'category' | 'text'>): string {
+  return `${fragment.category}:${fragment.text.trim().toLowerCase()}`
+}
