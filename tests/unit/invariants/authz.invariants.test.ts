@@ -40,6 +40,13 @@ import type { Sodalitas, Sodalitates, Sodalitatum } from '../../../src/types/sod
 import type { Tabula, Tabulae, Tabularum } from '../../../src/types/tabula.js'
 import type { Collectio, Collectiones, Collectionum, CollectioStatus } from '../../../src/types/collectio.js'
 import type { Vestigium } from '../../../src/types/vestigium.js'
+import type {
+  CreateMuseSessionInput,
+  MuseSessions,
+  StoredMuseSession,
+} from '../../../src/types/museSession.js'
+import { recordPiece, spawnSession, type MuseSession } from '../../../src/crystal/muse/session.js'
+import type { Fragment } from '../../../src/crystal/muse/taxonomy.js'
 
 // The two identities. A owns everything seeded; B owns nothing and may reach nothing.
 const A = { animaId: 'anima-1' } as const
@@ -146,6 +153,29 @@ class MemCollectionum implements Collectionum {
   }
 }
 
+class MemMuseSessions implements MuseSessions {
+  store = new Map<string, StoredMuseSession>()
+  async create(input: CreateMuseSessionInput) {
+    const now = new Date()
+    const full: StoredMuseSession = { id: randomUUID(), owner: input.owner, session: input.session, natum: now, mutatum: now }
+    this.store.set(full.id, full)
+    return full
+  }
+  async find(id: string) { return this.store.get(id) ?? null }
+  async listByOwner(owner: string, motherDatasetId: string) {
+    return [...this.store.values()]
+      .filter((s) => s.owner === owner && s.session.motherDatasetId === motherDatasetId)
+      .sort((a, b) => b.mutatum.getTime() - a.mutatum.getTime())
+  }
+  async save(id: string, session: MuseSession) {
+    const current = this.store.get(id)
+    if (!current) return null
+    const next: StoredMuseSession = { ...current, session, mutatum: new Date() }
+    this.store.set(id, next)
+    return next
+  }
+}
+
 function ownerToken(k: { animaId: string } | { commitment: string }): string {
   return 'animaId' in k ? `animaId:${k.animaId}` : `commitment:${k.commitment}`
 }
@@ -174,12 +204,13 @@ function makeApi() {
   const collectiones = new MemCollectionum()
   const actorum = new MemoryActorum()
   const signorum = new MemorySignorum()
+  const museSessions = new MemMuseSessions()
   const { calls, cursor } = recordingCursor()
   const api = new CrystalApi({
-    provinciarum, sodalitatum, tabulae, collectiones, actorum, signorum,
+    provinciarum, sodalitatum, tabulae, collectiones, actorum, signorum, museSessions,
     collectioCursor: cursor,
   } as unknown as CrystalApiDeps)
-  return { api, provinciarum, sodalitatum, tabulae, collectiones, actorum, signorum, cursorCalls: calls }
+  return { api, provinciarum, sodalitatum, tabulae, collectiones, actorum, signorum, museSessions, cursorCalls: calls }
 }
 
 // ── Assertion helpers ────────────────────────────────────────────────────────
@@ -350,6 +381,95 @@ test('INVARIANT: identity B cannot read identity A\'s Actum by id', async () => 
 
   const own = await api.getRun(A, run.id)
   assert.equal(own.id, run.id, 'A still reads their own run')
+})
+
+// ── BY ID: Muse session (_museSession) ───────────────────────────────────────
+//
+// The Muse surface is owner-scoped inside `CrystalApi` — the store takes an id and
+// nothing else — so it is exactly the shape this suite exists to observe. Every
+// public method that reaches a session by id is listed, the two added by the piece
+// update and the session lookup included.
+
+const MUSE_FRAGMENT: Fragment = {
+  category: 'subject',
+  text: 'a lantern-keeper',
+  source: 'board-a',
+  trigger: 'trigword',
+}
+
+test('INVARIANT: identity B cannot read or mutate identity A\'s Muse session by id', async () => {
+  const { api, museSessions } = makeApi()
+  const mine = await museSessions.create({
+    owner: A.animaId,
+    session: recordPiece(spawnSession('dataset-of-a', [MUSE_FRAGMENT]), {
+      runId: 'run-1',
+      rollIndex: 0,
+      fragments: [MUSE_FRAGMENT],
+    }),
+  })
+  FOREIGN_ID.value = mine.id
+
+  const identity = { category: MUSE_FRAGMENT.category, text: MUSE_FRAGMENT.text }
+  await assertOwnerScoped('muse', [
+    { name: 'getMuseSession', call: (id) => api.getMuseSession(B, id) },
+    { name: 'setMuseFragmentEnabled', call: (id) => api.setMuseFragmentEnabled(B, id, identity, false) },
+    { name: 'setMuseFragmentWeight', call: (id) => api.setMuseFragmentWeight(B, id, identity, 8) },
+    {
+      name: 'recordMusePiece',
+      call: (id) => api.recordMusePiece(B, id, { runId: 'run-b', rollIndex: 1, fragments: [identity] }),
+    },
+    { name: 'updateMusePiece', call: (id) => api.updateMusePiece(B, id, 'run-1', { reaction: 'up' }) },
+  ], () => snapshot(museSessions.store as Map<string, unknown>))
+
+  // A's own read still works, and B's attempted reaction is nowhere in A's ledger —
+  // without this control the assertions above would also pass on a broken surface.
+  const own = await api.getMuseSession(A, mine.id)
+  assert.equal(own.pieces.length, 1)
+  assert.equal(own.pieces[0]!.reaction, undefined, 'B\'s reaction landed on A\'s piece')
+})
+
+test('INVARIANT: a Muse session lookup returns only the caller\'s own sessions', async () => {
+  // The filter axis for the lookup: the dataset id comes off the request, the owner
+  // does not. B naming A's dataset must select nothing.
+  const { api, museSessions } = makeApi()
+  await museSessions.create({ owner: A.animaId, session: spawnSession('dataset-of-a', [MUSE_FRAGMENT]) })
+  await museSessions.create({ owner: A.animaId, session: spawnSession('dataset-of-a', [MUSE_FRAGMENT]) })
+  const ofB = await museSessions.create({ owner: B.animaId, session: spawnSession('dataset-of-b', [MUSE_FRAGMENT]) })
+
+  const bOnAsDataset = await api.listMuseSessions(B, 'dataset-of-a')
+  assert.deepEqual(bOnAsDataset, [], 'the lookup returned sessions the caller does not own')
+
+  // Control: the same call for each identity's own dataset does return their rows,
+  // so the assertion above cannot be passing because the lookup is simply broken.
+  assert.equal((await api.listMuseSessions(A, 'dataset-of-a')).length, 2)
+  assert.deepEqual((await api.listMuseSessions(B, 'dataset-of-b')).map((s) => s.id), [ofB.id])
+})
+
+test('INVARIANT: a piece update names a run within a session the caller already owns', async () => {
+  // `not_found.muse_piece` is the second resource this surface can report absent. The
+  // owner is resolved before the run is looked up, so an unknown run is only ever
+  // reported to a caller who owns the session it was looked for in.
+  const { api, museSessions } = makeApi()
+  const mine = await museSessions.create({
+    owner: A.animaId,
+    session: recordPiece(spawnSession('dataset-of-a', [MUSE_FRAGMENT]), {
+      runId: 'run-1',
+      rollIndex: 0,
+      fragments: [MUSE_FRAGMENT],
+    }),
+  })
+
+  await assert.rejects(
+    () => api.updateMusePiece(A, mine.id, 'run-never-rolled', { reaction: 'up' }),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.muse_piece' && e.httpStatus === 404,
+  )
+
+  // B asking after the same run gets the SESSION not-found, never the piece one: the
+  // piece-level answer would confirm a session B cannot see.
+  await assert.rejects(
+    () => api.updateMusePiece(B, mine.id, 'run-1', { reaction: 'up' }),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.muse_session',
+  )
 })
 
 // ── BY FILTER: vestigia search scope clamp ───────────────────────────────────

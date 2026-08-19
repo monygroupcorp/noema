@@ -69,13 +69,17 @@ import { floorToEntries } from '../../types/museSession.js'
 import type { FloorEntry, FragmentIdentity, MuseSessions, StoredMuseSession } from '../../types/museSession.js'
 import { fragmentKey, isCategory, type Category, type Fragment } from '../../crystal/muse/taxonomy.js'
 import {
+  DuplicatePieceError,
   UnknownFragmentError,
+  UnknownPieceError,
   recordPiece,
   setFragmentEnabled,
   setFragmentWeight,
   spawnSession,
+  updatePiece,
   type MuseSession,
   type Piece,
+  type PiecePatch,
   type Reaction,
 } from '../../crystal/muse/session.js'
 import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
@@ -2059,6 +2063,29 @@ export class CrystalApi {
     return this._museSessionView(await this._museSession(auctor, id))
   }
 
+  /**
+   * The caller's own sessions off one dataset, most recently changed first.
+   *
+   * The route a session is reached from carries the dataset, not the session, so
+   * without this a client returning to a dataset has no way to name the session
+   * it was in and can only spawn another one. Resolving that pointer here — from
+   * the store, keyed by the authenticated owner — keeps it durable across a
+   * reload and across devices, which a client-held id is not.
+   *
+   * The owner comes from the resolved caller and is passed to the store as the
+   * query's own scope, so the list cannot contain a stranger's session at any
+   * point. A dataset the caller does not own resolves to no sessions rather than
+   * to an error: the dataset read that would 404 is not performed, and an empty
+   * list says nothing about whether that dataset exists.
+   */
+  async listMuseSessions(auctor: AuctorKey, datasetId: string): Promise<MuseSessionView[]> {
+    const owner = this._museSessionOwner(auctor)
+    const id = typeof datasetId === 'string' ? datasetId.trim() : ''
+    if (!id) throw Errors.inputMalformed('datasetId is required')
+    const stored = await this._museSessionsStore().listByOwner(owner, id)
+    return stored.map((s) => this._museSessionView(s))
+  }
+
   /** Take a fragment out of the draw, or put it back. It stays on the floor either way. */
   async setMuseFragmentEnabled(auctor: AuctorKey, id: string, input: unknown, enabled: unknown): Promise<MuseSessionView> {
     const fragment = this._fragmentIdentity(input)
@@ -2130,6 +2157,53 @@ export class CrystalApi {
         })
       } catch (err) {
         if (err instanceof UnknownFragmentError) throw Errors.inputMalformed(err.message)
+        if (err instanceof DuplicatePieceError) throw Errors.inputMalformed(err.message)
+        throw err
+      }
+    })
+  }
+
+  /**
+   * Change what a session says about a piece already in its ledger.
+   *
+   * A reaction and a dismissal are both said about a piece that already exists —
+   * the roll is recorded when it lands and the user responds to it afterwards —
+   * so neither can ride the record call. This is the only way to reach a recorded
+   * piece again, and it reaches exactly two fields: the lineage, the run and the
+   * roll index describe what produced the piece and are fixed at record time.
+   *
+   * Owner scoping and the single mutation path are the same as every other write
+   * here: the session is resolved against the authenticated caller, and the
+   * change itself is made by the pure module. A run this session's ledger does
+   * not hold is reported as not found rather than recorded.
+   */
+  async updateMusePiece(auctor: AuctorKey, id: string, runId: string, input: unknown): Promise<MuseSessionView> {
+    const body = (input ?? {}) as { reaction?: unknown; dismissed?: unknown }
+    const run = typeof runId === 'string' ? runId.trim() : ''
+    if (!run) throw Errors.inputMalformed('runId is required')
+
+    if (body.reaction !== undefined && body.reaction !== 'up' && body.reaction !== 'down' && body.reaction !== 'note') {
+      throw Errors.inputMalformed("reaction must be one of 'up' | 'down' | 'note'")
+    }
+    if (body.dismissed !== undefined && typeof body.dismissed !== 'boolean') {
+      throw Errors.inputMalformed('dismissed must be a boolean')
+    }
+    if (body.reaction === undefined && body.dismissed === undefined) {
+      throw Errors.inputMalformed('reaction or dismissed is required')
+    }
+
+    const patch: PiecePatch = {
+      ...(body.reaction !== undefined ? { reaction: body.reaction as Reaction } : {}),
+      ...(body.dismissed !== undefined ? { dismissed: body.dismissed as boolean } : {}),
+    }
+
+    return this._mutateMuseSession(auctor, id, (session) => {
+      try {
+        return updatePiece(session, run, patch)
+      } catch (err) {
+        if (err instanceof UnknownPieceError) {
+          throw new ApiError('not_found.muse_piece', `Muse piece for run '${run}' not found`, 404)
+        }
         throw err
       }
     })

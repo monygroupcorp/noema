@@ -281,6 +281,30 @@ export class UnknownFragmentError extends Error {
   }
 }
 
+/** Thrown when a piece is recorded for a run this session's ledger already holds. */
+export class DuplicatePieceError extends Error {
+  /** The run that already has an entry in this session's ledger. */
+  readonly runId: string
+
+  constructor(runId: string) {
+    super(`this session already recorded a piece for run '${runId}'`)
+    this.name = 'DuplicatePieceError'
+    this.runId = runId
+  }
+}
+
+/** Thrown when an update names a run this session's ledger holds no entry for. */
+export class UnknownPieceError extends Error {
+  /** The run that has no entry in this session's ledger. */
+  readonly runId: string
+
+  constructor(runId: string) {
+    super(`this session has no recorded piece for run '${runId}'`)
+    this.name = 'UnknownPieceError'
+    this.runId = runId
+  }
+}
+
 /**
  * Append a piece to the session's ledger, with its lineage.
  *
@@ -291,8 +315,16 @@ export class UnknownFragmentError extends Error {
  *
  * A disabled fragment is still a fragment the session holds: a piece rolled
  * before a fragment was darkened is a real piece with a real lineage.
+ *
+ * ONE ENTRY PER RUN. The run identifies the piece, so a record for a run the
+ * ledger already holds is rejected rather than appended: two entries for one run
+ * double that piece's lineage in every read of the ledger, and anything naming
+ * the run — a reaction, a dismissal, a save-back — then has two entries to land
+ * on. Changing a piece already in the ledger is `updatePiece`.
  */
 export function recordPiece(session: MuseSession, piece: PieceRecord): MuseSession {
+  if (session.pieces.some((p) => p.runId === piece.runId)) throw new DuplicatePieceError(piece.runId)
+
   for (const fragment of piece.fragments) {
     const key = fragmentKey(fragment)
     if (!session.floor.has(key)) throw new UnknownFragmentError(key)
@@ -310,7 +342,50 @@ export function recordPiece(session: MuseSession, piece: PieceRecord): MuseSessi
   return { ...session, pieces: [...session.pieces, recorded] }
 }
 
+/** What an update may change about a piece already in the ledger. */
+export type PiecePatch = {
+  /** What the user said about the piece. */
+  reaction?: Reaction
+  /** Whether the piece is discarded. */
+  dismissed?: boolean
+}
+
+/**
+ * Change what the session says about a piece already in its ledger.
+ *
+ * A reaction and a dismissal both arrive AFTER the piece exists — the roll is
+ * recorded when it lands, and the user reacts to it later — so they cannot be
+ * carried on the record call and there has to be a way to reach a recorded piece
+ * again. This is that way, and it is the only one: lineage, run and roll index
+ * are fixed at record time and are not patchable, because they describe what
+ * produced the piece rather than what anyone thinks of it.
+ *
+ * Pure like every other mutator here: the named piece is replaced in a new ledger
+ * array, in place, and a new session is returned. A run the ledger does not hold
+ * is rejected rather than created — an update never records a piece.
+ */
+export function updatePiece(session: MuseSession, runId: string, patch: PiecePatch): MuseSession {
+  const index = session.pieces.findIndex((p) => p.runId === runId)
+  if (index < 0) throw new UnknownPieceError(runId)
+
+  const current = session.pieces[index]!
+  const updated: Piece = {
+    ...current,
+    dismissed: patch.dismissed ?? current.dismissed,
+    ...(patch.reaction !== undefined ? { reaction: patch.reaction } : {}),
+  }
+
+  const pieces = [...session.pieces]
+  pieces[index] = updated
+  return { ...session, pieces }
+}
+
 /** The lineage of one recorded piece — the fragments that produced it. */
 export function lineageOf(session: MuseSession, runId: string): readonly Fragment[] | undefined {
   return session.pieces.find((p) => p.runId === runId)?.fragments
+}
+
+/** One recorded piece by the run that produced it, or `undefined` if the ledger has none. */
+export function pieceOf(session: MuseSession, runId: string): Piece | undefined {
+  return session.pieces.find((p) => p.runId === runId)
 }

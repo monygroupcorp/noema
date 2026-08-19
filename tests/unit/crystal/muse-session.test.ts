@@ -5,7 +5,9 @@ import { rollFragments } from '../../../src/crystal/muse/sampler.js'
 import { buildGarden } from '../../../src/crystal/muse/garden.js'
 import {
   DEFAULT_FRAGMENT_STATE,
+  DuplicatePieceError,
   UnknownFragmentError,
+  UnknownPieceError,
   enabledFragments,
   fragmentStateOf,
   holdsFragment,
@@ -15,6 +17,8 @@ import {
   setFragmentEnabled,
   setFragmentWeight,
   spawnSession,
+  updatePiece,
+  pieceOf,
 } from '../../../src/crystal/muse/session.js'
 
 // Hermetic: pure domain only. No I/O, no clock, no randomness — a session is a
@@ -323,4 +327,105 @@ test('a fragment list carrying the same identity twice lands on one floor entry'
 
   assert.equal(session.floor.size, 1)
   assert.equal(session.fragments.length, 1)
+})
+
+// --- One entry per run, and reaching a piece after it is recorded ------------
+
+test('recording the same runId twice does not append a second ledger entry', () => {
+  const mother = motherFragments()
+  const session = recordPiece(spawnSession('mother-dataset', mother), {
+    runId: 'run-1',
+    rollIndex: 0,
+    fragments: [mother[0]!, mother[2]!],
+  })
+
+  assert.throws(
+    () =>
+      recordPiece(session, {
+        runId: 'run-1',
+        rollIndex: 1,
+        fragments: [mother[1]!],
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof DuplicatePieceError)
+      assert.equal(error.runId, 'run-1')
+      return true
+    },
+    'a second record for one run was appended',
+  )
+
+  assert.equal(session.pieces.length, 1, 'the ledger holds one entry per run')
+
+  // The rejection is about the run, not about recording: a different run still lands.
+  const second = recordPiece(session, { runId: 'run-2', rollIndex: 1, fragments: [mother[1]!] })
+  assert.equal(second.pieces.length, 2)
+  assert.deepEqual(second.pieces.map((p) => p.runId), ['run-1', 'run-2'])
+})
+
+test('a reaction lands on the piece it names', () => {
+  const mother = motherFragments()
+  const ledger = recordPiece(
+    recordPiece(spawnSession('mother-dataset', mother), {
+      runId: 'run-1',
+      rollIndex: 0,
+      fragments: [mother[0]!],
+    }),
+    { runId: 'run-2', rollIndex: 1, fragments: [mother[1]!] },
+  )
+
+  const reacted = updatePiece(ledger, 'run-2', { reaction: 'up' })
+
+  assert.equal(pieceOf(reacted, 'run-2')?.reaction, 'up')
+  assert.equal(pieceOf(reacted, 'run-1')?.reaction, undefined, 'the reaction landed on the wrong piece')
+  assert.equal(ledger.pieces[1]!.reaction, undefined, 'the source session was mutated in place')
+
+  // The ledger keeps its order and its lineage — an update is not a re-record.
+  assert.deepEqual(reacted.pieces.map((p) => p.runId), ['run-1', 'run-2'])
+  assert.deepEqual(
+    pieceOf(reacted, 'run-2')!.fragments.map((f) => fragmentKey(f)),
+    [fragmentKey(mother[1]!)],
+  )
+  assert.equal(pieceOf(reacted, 'run-2')?.rollIndex, 1)
+})
+
+test('a dismissal and a reaction are independent, and either alone leaves the other as it was', () => {
+  const mother = motherFragments()
+  const ledger = recordPiece(spawnSession('mother-dataset', mother), {
+    runId: 'run-1',
+    rollIndex: 0,
+    fragments: [mother[0]!],
+    reaction: 'note',
+  })
+
+  const dismissed = updatePiece(ledger, 'run-1', { dismissed: true })
+  assert.equal(pieceOf(dismissed, 'run-1')?.dismissed, true)
+  assert.equal(pieceOf(dismissed, 'run-1')?.reaction, 'note', 'a dismissal cleared the reaction')
+
+  const rereacted = updatePiece(dismissed, 'run-1', { reaction: 'down' })
+  assert.equal(pieceOf(rereacted, 'run-1')?.reaction, 'down')
+  assert.equal(pieceOf(rereacted, 'run-1')?.dismissed, true, 'a reaction cleared the dismissal')
+
+  // An empty patch is a no-op rather than a reset.
+  const untouched = updatePiece(rereacted, 'run-1', {})
+  assert.equal(pieceOf(untouched, 'run-1')?.reaction, 'down')
+  assert.equal(pieceOf(untouched, 'run-1')?.dismissed, true)
+})
+
+test('an update naming a run the ledger does not hold is rejected rather than recording one', () => {
+  const mother = motherFragments()
+  const ledger = recordPiece(spawnSession('mother-dataset', mother), {
+    runId: 'run-1',
+    rollIndex: 0,
+    fragments: [mother[0]!],
+  })
+
+  assert.throws(
+    () => updatePiece(ledger, 'run-never-rolled', { reaction: 'up' }),
+    (error: unknown) => {
+      assert.ok(error instanceof UnknownPieceError)
+      assert.equal(error.runId, 'run-never-rolled')
+      return true
+    },
+  )
+  assert.equal(ledger.pieces.length, 1, 'an update created a ledger entry')
 })
