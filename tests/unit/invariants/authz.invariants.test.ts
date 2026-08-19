@@ -52,7 +52,7 @@ import type {
 import type {
   CreateMuseSessionInput, MuseSessions, StoredMuseSession,
 } from '../../../src/types/museSession.js'
-import type { MuseSession } from '../../../src/crystal/muse/session.js'
+import { recordPiece, spawnSession, type MuseSession } from '../../../src/crystal/muse/session.js'
 import type { Fragment } from '../../../src/crystal/muse/taxonomy.js'
 import { captionCoverage } from '../../../src/types/dataset.js'
 import { API_CONTRACT } from '../../../src/allocutio/api/apiContract.js'
@@ -224,6 +224,11 @@ class MemMuseSessions implements MuseSessions {
     return full
   }
   async find(id: string) { return this.store.get(id) ?? null }
+  async listByOwner(owner: string, motherDatasetId: string): Promise<StoredMuseSession[]> {
+    return [...this.store.values()]
+      .filter((s) => s.owner === owner && s.session.motherDatasetId === motherDatasetId)
+      .sort((a, b) => b.mutatum.getTime() - a.mutatum.getTime())
+  }
   async save(id: string, session: MuseSession): Promise<StoredMuseSession | null> {
     const stored = this.store.get(id)
     if (!stored) return null
@@ -499,25 +504,80 @@ test('INVARIANT: identity B cannot read or mutate identity A\'s Dataset by id', 
 test('INVARIANT: identity B cannot read or steer identity A\'s Muse session by id', async () => {
   const { api, datasets, museSessions } = makeApi()
   const mother = await seedDataset(api, datasets)
-  const session = await api.spawnMuseSession(A, mother.id)
-  assert.equal(session.floor.length, FRAGMENTS.length, 'the session spawned with the mother\'s floor')
-  FOREIGN_ID.value = session.id
+  const spawned = await api.spawnMuseSession(A, mother.id)
+  assert.equal(spawned.floor.length, FRAGMENTS.length, 'the session spawned with the mother\'s floor')
 
   const held = { category: FRAGMENTS[0].category, text: FRAGMENTS[0].text }
+  // A piece of A's own, so the update case below has a run to name: a piece update
+  // that resolved the session without the owner would find this entry and change it.
+  const session = await api.recordMusePiece(A, spawned.id, {
+    runId: 'run-of-a', rollIndex: 0, fragments: [held],
+  })
+  FOREIGN_ID.value = session.id
+
   await assertOwnerScoped('museSession', [
     { name: 'getMuseSession', call: (id) => api.getMuseSession(B, id) },
     { name: 'setMuseFragmentEnabled', call: (id) => api.setMuseFragmentEnabled(B, id, held, false) },
     { name: 'setMuseFragmentWeight', call: (id) => api.setMuseFragmentWeight(B, id, held, 4) },
     {
       name: 'recordMusePiece',
-      call: (id) => api.recordMusePiece(B, id, { runId: 'run-of-b', rollIndex: 0, fragments: [held] }),
+      call: (id) => api.recordMusePiece(B, id, { runId: 'run-of-b', rollIndex: 1, fragments: [held] }),
     },
+    { name: 'updateMusePiece', call: (id) => api.updateMusePiece(B, id, 'run-of-a', { reaction: 'up' }) },
   ], () => snapshot(museSessions.store))
 
   const own = await api.getMuseSession(A, session.id)
-  assert.deepEqual(own.floor, session.floor, 'A\'s floor is exactly as it was spawned')
-  assert.deepEqual(own.pieces, [], 'no piece from B reached A\'s ledger')
+  assert.deepEqual(own.floor, spawned.floor, 'A\'s floor is exactly as it was spawned')
+  assert.equal(own.pieces.length, 1, 'no piece from B reached A\'s ledger')
+  assert.equal(own.pieces[0].runId, 'run-of-a', 'the one entry is A\'s own')
+  assert.equal(own.pieces[0].reaction, undefined, 'B\'s reaction did not land on A\'s piece')
   assert.equal(own.motherDatasetId, mother.id, 'A still reads their own session')
+})
+
+test('INVARIANT: a Muse session lookup returns only the caller\'s own sessions', async () => {
+  // The filter axis for the lookup: the dataset id comes off the request, the owner
+  // does not. B naming A's dataset must select nothing.
+  const { api, museSessions } = makeApi()
+  await museSessions.create({ owner: A.animaId, session: spawnSession('dataset-of-a', FRAGMENTS) })
+  await museSessions.create({ owner: A.animaId, session: spawnSession('dataset-of-a', FRAGMENTS) })
+  const ofB = await museSessions.create({
+    owner: B.animaId, session: spawnSession('dataset-of-b', FRAGMENTS),
+  })
+
+  assert.deepEqual(
+    await api.listMuseSessions(B, 'dataset-of-a'), [],
+    'the lookup returned sessions the caller does not own',
+  )
+
+  // Control: the same call for each identity's own dataset does return their rows,
+  // so the assertion above cannot be passing because the lookup is simply broken.
+  assert.equal((await api.listMuseSessions(A, 'dataset-of-a')).length, 2)
+  assert.deepEqual((await api.listMuseSessions(B, 'dataset-of-b')).map((s) => s.id), [ofB.id])
+})
+
+test('INVARIANT: a piece update names a run within a session the caller already owns', async () => {
+  // `not_found.muse_piece` is the second resource this surface can report absent. The
+  // owner is resolved before the run is looked up, so an unknown run is only ever
+  // reported to a caller who owns the session it was looked for in.
+  const { api, museSessions } = makeApi()
+  const mine = await museSessions.create({
+    owner: A.animaId,
+    session: recordPiece(spawnSession('dataset-of-a', FRAGMENTS), {
+      runId: 'run-of-a', rollIndex: 0, fragments: FRAGMENTS,
+    }),
+  })
+
+  await assert.rejects(
+    () => api.updateMusePiece(A, mine.id, 'run-never-rolled', { reaction: 'up' }),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.muse_piece' && e.httpStatus === 404,
+  )
+
+  // B asking after the same run gets the SESSION not-found, never the piece one: the
+  // piece-level answer would confirm a session B cannot see.
+  await assert.rejects(
+    () => api.updateMusePiece(B, mine.id, 'run-of-a', { reaction: 'up' }),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.muse_session',
+  )
 })
 
 // ── BY FILTER: vestigia search scope clamp ───────────────────────────────────
@@ -654,6 +714,7 @@ function reportedResources(source: string, codes: Map<string, string>): string[]
 const COVERED_RESOURCES: Record<string, string[]> = {
   'not_found.collection': ['_ownedCollection', '_ownsCollection'],
   'not_found.dataset': ['_datasetOwner', 'getDataset'],
+  'not_found.muse_piece': ['updateMusePiece', '_mutateMuseSession'],
   'not_found.muse_session': ['_museSessionOwner', '_museSession'],
   'not_found.project': ['_ownedProject'],
   'not_found.run': ['_owns'],

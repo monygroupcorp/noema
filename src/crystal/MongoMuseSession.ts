@@ -97,6 +97,24 @@ export class MongoMuseSession implements MuseSessions {
   }
 
   /**
+   * One owner's sessions off one mother, most recently changed first.
+   *
+   * Ordered by `mutatum` rather than `natum` because the question this answers is
+   * "which session was I in", and the answer is the one last worked in — a
+   * session spawned later but never touched is not the one to come back to.
+   *
+   * Both the owner and the mother are part of the query, never a post-filter, so
+   * there is no point at which a row belonging to another identity is in hand.
+   */
+  async listByOwner(owner: string, motherDatasetId: string): Promise<StoredMuseSession[]> {
+    const docs = await this.col
+      .find({ owner, 'session.motherDatasetId': motherDatasetId })
+      .sort({ mutatum: -1 })
+      .toArray()
+    return docs.map((doc) => fromRecord(doc as unknown as Record<string, unknown>))
+  }
+
+  /**
    * Replace the stored pure value wholesale and bump `mutatum`.
    *
    * Wholesale rather than field-by-field because the pure module returns a whole

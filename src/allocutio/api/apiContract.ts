@@ -1474,11 +1474,24 @@ const MuseSessionSchema: JsonSchema = {
   required: ['id', 'owner', 'motherDatasetId', 'fragments', 'floor', 'pieces', 'natum', 'mutatum'],
 }
 
-/** The `{ session }` envelope every Muse session operation returns. */
+/** The `{ session }` envelope every single-session operation returns. */
 const MuseSessionEnvelopeSchema: JsonSchema = {
   type: 'object',
   properties: { session: MuseSessionSchema },
   required: ['session'],
+}
+
+/** The `{ sessions }` envelope the session lookup returns. */
+const MuseSessionListEnvelopeSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    sessions: {
+      type: 'array',
+      items: MuseSessionSchema,
+      description: 'The caller\'s own sessions off the named dataset, most recently changed first.',
+    },
+  },
+  required: ['sessions'],
 }
 
 /** The request body for `POST /v1/data/muse/sessions`. */
@@ -1541,6 +1554,21 @@ const RecordMusePieceRequestSchema: JsonSchema = {
     dismissed: { type: 'boolean' },
   },
   required: ['runId', 'rollIndex', 'fragments'],
+}
+
+/** The request body for `PATCH /v1/data/muse/sessions/:id/pieces/:runId`. */
+const UpdateMusePieceRequestSchema: JsonSchema = {
+  type: 'object',
+  description:
+    'Change what the session says about a piece already in its ledger. A reaction and a ' +
+    'dismissal are both given after the piece exists, so neither can ride the record call. ' +
+    'At least one of the two fields must be present; a field left out is left as it was. The ' +
+    "piece's lineage, run and roll index describe what produced it, are fixed when it is " +
+    'recorded, and are not changed here.',
+  properties: {
+    reaction: { type: 'string', enum: ['up', 'down', 'note'], description: 'What the user said about the piece.' },
+    dismissed: { type: 'boolean', description: 'Whether the piece is discarded.' },
+  },
 }
 
 const CogsReportSchema: JsonSchema = {
@@ -1830,6 +1858,21 @@ export const API_CONTRACT: ApiContract = {
     },
     {
       method: 'GET',
+      path: '/data/muse/sessions',
+      summary: "The caller's own Muse sessions off one dataset, most recently changed first. This is how a session is reached again once the page that spawned it is gone: the pointer is held server-side against the resolved caller rather than in the client. Owner-scoped from the resolved caller; a dataset the caller has no sessions off resolves to an empty list.",
+      auth: true,
+      query: [
+        {
+          name: 'datasetId',
+          description: 'FK -> Dataset. The mother dataset whose sessions are being looked up.',
+          schema: { type: 'string' },
+          required: true,
+        },
+      ],
+      response: MuseSessionListEnvelopeSchema,
+    },
+    {
+      method: 'GET',
       path: '/data/muse/sessions/:id',
       summary: "A Muse session the caller owns — its floor and its piece ledger. Owner-scoped from the resolved caller; a session the caller does not own is reported as not found, identically to an id that does not exist.",
       auth: true,
@@ -1854,9 +1897,17 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'POST',
       path: '/data/muse/sessions/:id/pieces',
-      summary: 'Append a piece to the ledger of a session the caller owns, with the fragments that produced it. A piece citing a fragment the session does not hold is rejected rather than stored, because its lineage could not be resolved against this floor afterwards.',
+      summary: 'Append a piece to the ledger of a session the caller owns, with the fragments that produced it. A piece citing a fragment the session does not hold is rejected rather than stored, because its lineage could not be resolved against this floor afterwards. The ledger holds one entry per run: a record for a run already in it is rejected, and changing a recorded piece is the PATCH below.',
       auth: true,
       request: RecordMusePieceRequestSchema,
+      response: MuseSessionEnvelopeSchema,
+    },
+    {
+      method: 'PATCH',
+      path: '/data/muse/sessions/:id/pieces/:runId',
+      summary: "Change what a session the caller owns says about a piece already in its ledger — its reaction, its dismissal, or both. A reaction is given after the piece exists, so this is the route that reaches a recorded piece; the piece's lineage, run and roll index are fixed when it is recorded. A run the ledger holds no entry for is reported as not found.",
+      auth: true,
+      request: UpdateMusePieceRequestSchema,
       response: MuseSessionEnvelopeSchema,
     },
     {
@@ -2298,6 +2349,7 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.adapter', httpStatus: 404 },
     { code: 'not_found.run', httpStatus: 404 },
     { code: 'not_found.muse_session', httpStatus: 404 },
+    { code: 'not_found.muse_piece', httpStatus: 404 },
     { code: 'not_found.dataset', httpStatus: 404 },
     { code: 'economy.insufficient_signa', httpStatus: 402 },
     { code: 'economy.cap_too_low', httpStatus: 422 },
