@@ -20,9 +20,14 @@
 // A failure in this file is a cross-tenant authorization regression, not a style nit.
 // Treat a red here as a production-impacting defect and stop.
 //
-// A coverage guard at the bottom reads `CrystalApi.ts` and fails when a new private
-// ownership helper appears with neither a case here nor an allowlist entry, so adding
-// an owner-scoped resource without a smoke case is a deliberate, visible act.
+// A coverage guard at the bottom reads `CrystalApi.ts` and keys on the RESOURCE rather
+// than on the name of the helper guarding it: every `not_found.<resource>` the facade can
+// report must be either smoked here or allowlisted with a reason, so adding an
+// owner-scoped resource without a smoke case is a deliberate, visible act however its
+// helper is named. The resource token is the honest signal because reporting a stranger's
+// resource as absent is the shape owner scoping takes on this surface — a helper can be
+// called anything, but it cannot skip the 404, and a new code is also a new entry in the
+// published error taxonomy (`apiContract.ts`), which the guard cross-checks.
 // =============================================================================
 
 import { test } from 'node:test'
@@ -41,12 +46,16 @@ import type { Tabula, Tabulae, Tabularum } from '../../../src/types/tabula.js'
 import type { Collectio, Collectiones, Collectionum, CollectioStatus } from '../../../src/types/collectio.js'
 import type { Vestigium } from '../../../src/types/vestigium.js'
 import type {
-  CreateMuseSessionInput,
-  MuseSessions,
-  StoredMuseSession,
+  Captionset, Dataset, DatasetListOpts, DatasetListPage, Datasets,
+  DatasetSummaryListPage,
+} from '../../../src/types/dataset.js'
+import type {
+  CreateMuseSessionInput, MuseSessions, StoredMuseSession,
 } from '../../../src/types/museSession.js'
 import { recordPiece, spawnSession, type MuseSession } from '../../../src/crystal/muse/session.js'
 import type { Fragment } from '../../../src/crystal/muse/taxonomy.js'
+import { captionCoverage } from '../../../src/types/dataset.js'
+import { API_CONTRACT } from '../../../src/allocutio/api/apiContract.js'
 
 // The two identities. A owns everything seeded; B owns nothing and may reach nothing.
 const A = { animaId: 'anima-1' } as const
@@ -153,24 +162,77 @@ class MemCollectionum implements Collectionum {
   }
 }
 
+class MemDatasets implements Datasets {
+  store = new Map<string, Dataset>()
+  async find(id: string) { return this.store.get(id) ?? null }
+  async create(input: Omit<Dataset, 'id' | 'natum' | 'mutatum'>): Promise<Dataset> {
+    const now = new Date()
+    const full: Dataset = { ...input, id: randomUUID(), natum: now, mutatum: now }
+    this.store.set(full.id, full)
+    return full
+  }
+  private _owned(owner: string): Dataset[] {
+    return [...this.store.values()].filter((d) => d.owner === owner)
+  }
+  async list(opts: DatasetListOpts): Promise<DatasetListPage> {
+    return { entries: this._owned(opts.owner) }
+  }
+  async listSummaries(opts: DatasetListOpts): Promise<DatasetSummaryListPage> {
+    return { entries: this._owned(opts.owner).map((d) => ({ id: d.id, name: d.name, images: d.media.length })) }
+  }
+  async addCaptionset(datasetId: string, captionset: Captionset): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    const captionsets = [...d.captionsets.filter((c) => c.id !== captionset.id), captionset]
+    const next: Dataset = { ...d, captionsets, mutatum: new Date() }
+    this.store.set(datasetId, next)
+    return next
+  }
+  async setCaption(datasetId: string, captionsetId: string, mediaId: string, caption: string): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    const target = d?.captionsets.find((c) => c.id === captionsetId)
+    if (!d || !target) return null
+    const captions = { ...(target.captions ?? {}), [mediaId]: caption }
+    const updated: Captionset = { ...target, captions, coverage: captionCoverage(captions, d.media.length) }
+    const next: Dataset = {
+      ...d,
+      captionsets: d.captionsets.map((c) => (c.id === captionsetId ? updated : c)),
+      mutatum: new Date(),
+    }
+    this.store.set(datasetId, next)
+    return next
+  }
+  async setFragments(datasetId: string, mediaId: string, fragments: Fragment[]): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d || !d.media.some((m) => m.id === mediaId)) return null
+    const next: Dataset = {
+      ...d,
+      media: d.media.map((m) => (m.id === mediaId ? { ...m, fragments } : m)),
+      mutatum: new Date(),
+    }
+    this.store.set(datasetId, next)
+    return next
+  }
+}
+
 class MemMuseSessions implements MuseSessions {
   store = new Map<string, StoredMuseSession>()
-  async create(input: CreateMuseSessionInput) {
+  async create(input: CreateMuseSessionInput): Promise<StoredMuseSession> {
     const now = new Date()
     const full: StoredMuseSession = { id: randomUUID(), owner: input.owner, session: input.session, natum: now, mutatum: now }
     this.store.set(full.id, full)
     return full
   }
   async find(id: string) { return this.store.get(id) ?? null }
-  async listByOwner(owner: string, motherDatasetId: string) {
+  async listByOwner(owner: string, motherDatasetId: string): Promise<StoredMuseSession[]> {
     return [...this.store.values()]
       .filter((s) => s.owner === owner && s.session.motherDatasetId === motherDatasetId)
       .sort((a, b) => b.mutatum.getTime() - a.mutatum.getTime())
   }
-  async save(id: string, session: MuseSession) {
-    const current = this.store.get(id)
-    if (!current) return null
-    const next: StoredMuseSession = { ...current, session, mutatum: new Date() }
+  async save(id: string, session: MuseSession): Promise<StoredMuseSession | null> {
+    const stored = this.store.get(id)
+    if (!stored) return null
+    const next: StoredMuseSession = { ...stored, session, mutatum: new Date() }
     this.store.set(id, next)
     return next
   }
@@ -202,23 +264,32 @@ function makeApi() {
   const sodalitatum = new MemSodalitatum()
   const tabulae = new MemTabularum()
   const collectiones = new MemCollectionum()
+  const datasets = new MemDatasets()
+  const museSessions = new MemMuseSessions()
   const actorum = new MemoryActorum()
   const signorum = new MemorySignorum()
-  const museSessions = new MemMuseSessions()
   const { calls, cursor } = recordingCursor()
   const api = new CrystalApi({
-    provinciarum, sodalitatum, tabulae, collectiones, actorum, signorum, museSessions,
+    provinciarum, sodalitatum, tabulae, collectiones, datasets, museSessions, actorum, signorum,
     collectioCursor: cursor,
   } as unknown as CrystalApiDeps)
-  return { api, provinciarum, sodalitatum, tabulae, collectiones, actorum, signorum, museSessions, cursorCalls: calls }
+  return {
+    api, provinciarum, sodalitatum, tabulae, collectiones, datasets, museSessions,
+    actorum, signorum, cursorCalls: calls,
+  }
 }
 
 // ── Assertion helpers ────────────────────────────────────────────────────────
 
-/** bigints and Dates are not JSON-native; normalize both so a store can be snapshotted. */
+/**
+ * bigints, Dates and Maps are not JSON-native; normalize all three so a store can be
+ * snapshotted. A Map matters here rather than being defensive: a Muse session's floor IS
+ * a Map, and `JSON.stringify` renders one as `{}` — a snapshot that skipped it would
+ * compare equal no matter what a steer call did to the weights.
+ */
 function snapshot(store: Map<string, unknown>): string {
   return JSON.stringify([...store.entries()], (_k, v) =>
-    typeof v === 'bigint' ? `${v}n` : v instanceof Date ? v.toISOString() : v)
+    typeof v === 'bigint' ? `${v}n` : v instanceof Date ? v.toISOString() : v instanceof Map ? [...v.entries()] : v)
 }
 
 /**
@@ -383,61 +454,100 @@ test('INVARIANT: identity B cannot read identity A\'s Actum by id', async () => 
   assert.equal(own.id, run.id, 'A still reads their own run')
 })
 
-// ── BY ID: Muse session (_museSession) ───────────────────────────────────────
-//
-// The Muse surface is owner-scoped inside `CrystalApi` — the store takes an id and
-// nothing else — so it is exactly the shape this suite exists to observe. Every
-// public method that reaches a session by id is listed, the two added by the piece
-// update and the session lookup included.
+// ── BY ID: Dataset (owner resolved in getDataset) ────────────────────────────
 
-const MUSE_FRAGMENT: Fragment = {
-  category: 'subject',
-  text: 'a lantern-keeper',
-  source: 'board-a',
-  trigger: 'trigword',
+/** Neutral, invented fragments — the floor a spawned session starts from. */
+const FRAGMENTS: Fragment[] = [
+  { category: 'subject', text: 'a lantern-keeper', source: 'board-a', trigger: 'trigword' },
+  { category: 'lighting', text: 'dusk glow', source: 'board-a', trigger: 'trigword' },
+]
+
+const MEDIA_URL = 'https://example.invalid/media/one.png'
+
+async function seedDataset(api: CrystalApi, datasets: MemDatasets): Promise<Dataset> {
+  const d = await api.createDataset(A, {
+    source: 'upload', name: 'A dataset', modality: 'image', mediaUrls: [MEDIA_URL],
+  })
+  // Fragments are written by the decompose run, which this suite does not drive; seed
+  // them through the store so a session spawned off this dataset has a floor.
+  await datasets.setFragments(d.id, d.media[0].id, FRAGMENTS)
+  return (await api.getDataset(A, d.id))
 }
 
-test('INVARIANT: identity B cannot read or mutate identity A\'s Muse session by id', async () => {
-  const { api, museSessions } = makeApi()
-  const mine = await museSessions.create({
-    owner: A.animaId,
-    session: recordPiece(spawnSession('dataset-of-a', [MUSE_FRAGMENT]), {
-      runId: 'run-1',
-      rollIndex: 0,
-      fragments: [MUSE_FRAGMENT],
-    }),
+test('INVARIANT: identity B cannot read or mutate identity A\'s Dataset by id', async () => {
+  const { api, datasets } = makeApi()
+  const mine = await seedDataset(api, datasets)
+  const mediaId = mine.media[0].id
+  await api.addCaptionset(A, mine.id, {
+    id: 'pass-1', name: 'first pass', method: 'manual', captions: { [mediaId]: 'a caption' },
   })
   FOREIGN_ID.value = mine.id
 
-  const identity = { category: MUSE_FRAGMENT.category, text: MUSE_FRAGMENT.text }
-  await assertOwnerScoped('muse', [
+  await assertOwnerScoped('dataset', [
+    { name: 'getDataset', call: (id) => api.getDataset(B, id) },
+    { name: 'addCaptionset', call: (id) => api.addCaptionset(B, id, { id: 'pass-b', name: 'B pass', method: 'manual' }) },
+    { name: 'setCaption', call: (id) => api.setCaption(B, id, 'pass-1', mediaId, 'rewritten by B') },
+    // The spawn reaches the dataset through the same resolution, so a stranger cannot
+    // break a session off someone else's mother either.
+    { name: 'spawnMuseSession', call: (id) => api.spawnMuseSession(B, id) },
+  ], () => snapshot(datasets.store))
+
+  const stillThere = await api.getDataset(A, mine.id)
+  assert.equal(stillThere.captionsets.length, 1, 'B\'s captionset attempt left no trace')
+  assert.equal(stillThere.captionsets[0].captions?.[mediaId], 'a caption', 'A\'s caption text is unchanged')
+  assert.equal((await api.listDatasets(B)).datasets.length, 0, 'B\'s own list stays empty')
+  assert.equal((await api.listDatasets(A)).datasets.length, 1, 'A still sees their own dataset')
+})
+
+// ── BY ID: Muse session (owner resolved in _museSession) ─────────────────────
+
+test('INVARIANT: identity B cannot read or steer identity A\'s Muse session by id', async () => {
+  const { api, datasets, museSessions } = makeApi()
+  const mother = await seedDataset(api, datasets)
+  const spawned = await api.spawnMuseSession(A, mother.id)
+  assert.equal(spawned.floor.length, FRAGMENTS.length, 'the session spawned with the mother\'s floor')
+
+  const held = { category: FRAGMENTS[0].category, text: FRAGMENTS[0].text }
+  // A piece of A's own, so the update case below has a run to name: a piece update
+  // that resolved the session without the owner would find this entry and change it.
+  const session = await api.recordMusePiece(A, spawned.id, {
+    runId: 'run-of-a', rollIndex: 0, fragments: [held],
+  })
+  FOREIGN_ID.value = session.id
+
+  await assertOwnerScoped('museSession', [
     { name: 'getMuseSession', call: (id) => api.getMuseSession(B, id) },
-    { name: 'setMuseFragmentEnabled', call: (id) => api.setMuseFragmentEnabled(B, id, identity, false) },
-    { name: 'setMuseFragmentWeight', call: (id) => api.setMuseFragmentWeight(B, id, identity, 8) },
+    { name: 'setMuseFragmentEnabled', call: (id) => api.setMuseFragmentEnabled(B, id, held, false) },
+    { name: 'setMuseFragmentWeight', call: (id) => api.setMuseFragmentWeight(B, id, held, 4) },
     {
       name: 'recordMusePiece',
-      call: (id) => api.recordMusePiece(B, id, { runId: 'run-b', rollIndex: 1, fragments: [identity] }),
+      call: (id) => api.recordMusePiece(B, id, { runId: 'run-of-b', rollIndex: 1, fragments: [held] }),
     },
-    { name: 'updateMusePiece', call: (id) => api.updateMusePiece(B, id, 'run-1', { reaction: 'up' }) },
-  ], () => snapshot(museSessions.store as Map<string, unknown>))
+    { name: 'updateMusePiece', call: (id) => api.updateMusePiece(B, id, 'run-of-a', { reaction: 'up' }) },
+  ], () => snapshot(museSessions.store))
 
-  // A's own read still works, and B's attempted reaction is nowhere in A's ledger —
-  // without this control the assertions above would also pass on a broken surface.
-  const own = await api.getMuseSession(A, mine.id)
-  assert.equal(own.pieces.length, 1)
-  assert.equal(own.pieces[0]!.reaction, undefined, 'B\'s reaction landed on A\'s piece')
+  const own = await api.getMuseSession(A, session.id)
+  assert.deepEqual(own.floor, spawned.floor, 'A\'s floor is exactly as it was spawned')
+  assert.equal(own.pieces.length, 1, 'no piece from B reached A\'s ledger')
+  assert.equal(own.pieces[0].runId, 'run-of-a', 'the one entry is A\'s own')
+  assert.equal(own.pieces[0].reaction, undefined, 'B\'s reaction did not land on A\'s piece')
+  assert.equal(own.motherDatasetId, mother.id, 'A still reads their own session')
 })
 
 test('INVARIANT: a Muse session lookup returns only the caller\'s own sessions', async () => {
   // The filter axis for the lookup: the dataset id comes off the request, the owner
   // does not. B naming A's dataset must select nothing.
   const { api, museSessions } = makeApi()
-  await museSessions.create({ owner: A.animaId, session: spawnSession('dataset-of-a', [MUSE_FRAGMENT]) })
-  await museSessions.create({ owner: A.animaId, session: spawnSession('dataset-of-a', [MUSE_FRAGMENT]) })
-  const ofB = await museSessions.create({ owner: B.animaId, session: spawnSession('dataset-of-b', [MUSE_FRAGMENT]) })
+  await museSessions.create({ owner: A.animaId, session: spawnSession('dataset-of-a', FRAGMENTS) })
+  await museSessions.create({ owner: A.animaId, session: spawnSession('dataset-of-a', FRAGMENTS) })
+  const ofB = await museSessions.create({
+    owner: B.animaId, session: spawnSession('dataset-of-b', FRAGMENTS),
+  })
 
-  const bOnAsDataset = await api.listMuseSessions(B, 'dataset-of-a')
-  assert.deepEqual(bOnAsDataset, [], 'the lookup returned sessions the caller does not own')
+  assert.deepEqual(
+    await api.listMuseSessions(B, 'dataset-of-a'), [],
+    'the lookup returned sessions the caller does not own',
+  )
 
   // Control: the same call for each identity's own dataset does return their rows,
   // so the assertion above cannot be passing because the lookup is simply broken.
@@ -452,10 +562,8 @@ test('INVARIANT: a piece update names a run within a session the caller already 
   const { api, museSessions } = makeApi()
   const mine = await museSessions.create({
     owner: A.animaId,
-    session: recordPiece(spawnSession('dataset-of-a', [MUSE_FRAGMENT]), {
-      runId: 'run-1',
-      rollIndex: 0,
-      fragments: [MUSE_FRAGMENT],
+    session: recordPiece(spawnSession('dataset-of-a', FRAGMENTS), {
+      runId: 'run-of-a', rollIndex: 0, fragments: FRAGMENTS,
     }),
   })
 
@@ -467,7 +575,7 @@ test('INVARIANT: a piece update names a run within a session the caller already 
   // B asking after the same run gets the SESSION not-found, never the piece one: the
   // piece-level answer would confirm a session B cannot see.
   await assert.rejects(
-    () => api.updateMusePiece(B, mine.id, 'run-1', { reaction: 'up' }),
+    () => api.updateMusePiece(B, mine.id, 'run-of-a', { reaction: 'up' }),
     (e: unknown) => e instanceof ApiError && e.code === 'not_found.muse_session',
   )
 })
@@ -551,76 +659,178 @@ test('CONTROL: A\'s own scoped search DOES return A\'s privata rows', async () =
 
 // ── Coverage guard ───────────────────────────────────────────────────────────
 //
-// Same trick as tests/unit/architecture/testEnrolment.test.ts, pointed at CrystalApi:
-// scan the source for private ownership helpers and require each to be either covered
-// behaviourally above or allowlisted with a reason.
+// Same trick as tests/unit/architecture/testEnrolment.test.ts, pointed at CrystalApi —
+// but keyed on the RESOURCE a check protects, not on the name of the helper doing the
+// checking. A guard whose trigger is a helper-name prefix is satisfied by choosing a
+// different prefix, which makes its green a statement about the naming convention rather
+// than about coverage.
+//
+// The signal it keys on instead: an owner-scoped resource on this surface reports a
+// stranger's record as ABSENT — `not_found.<resource>`, 404, indistinguishable from an id
+// that never existed. That code is the resource's identity, it is declared once in the
+// published taxonomy (`apiContract.ts`), and it cannot be renamed away without changing
+// the wire contract. So the guard reads every `not_found.*` CrystalApi can report and
+// requires each resource to be either smoked above or allowlisted with a reason.
+//
+// Three assertions, each catching a different way coverage can rot:
+//   1. a resource nobody listed          — a new owner-scoped surface with no smoke case
+//   2. a listed resource nobody reports  — a stale entry, silently shrinking the reach
+//   3. a reported code off the contract  — a 404 the published error taxonomy omits
 
-/** Helpers exercised by the by-id cases above, through their public methods. */
-const COVERED = ['_ownedProject', '_ownedTabula', '_ownedCollection', '_memberTeam', '_owns']
+const API_SOURCE = path.join(process.cwd(), 'src/allocutio/api/CrystalApi.ts')
+const ERRORS_SOURCE = path.join(process.cwd(), 'src/allocutio/api/errors.ts')
+
+/**
+ * The two ways CrystalApi.ts names a not-found code: the shared constructors in
+ * `errors.ts` (`Errors.notFoundTeam(id)`) and a literal passed straight to `ApiError`
+ * (`new ApiError('not_found.dataset', …)`). Both resolve to the same resource token.
+ */
+const ERRORS_DECL = /(notFound[A-Za-z]+):\s*\([^)]*\)\s*=>\s*new ApiError\('(not_found\.[a-z_]+)'/g
+const ERRORS_CALL = /Errors\.(notFound[A-Za-z]+)\(/g
+const CODE_LITERAL = /'(not_found\.[a-z_]+)'/g
+
+/** `notFoundTeam` -> `not_found.team`, read off `errors.ts` rather than restated here. */
+function codeByConstructor(errorsSource: string): Map<string, string> {
+  return new Map([...errorsSource.matchAll(ERRORS_DECL)].map((m) => [m[1], m[2]]))
+}
+
+/** Every resource token the given source can report as not-found, deduped and sorted. */
+function reportedResources(source: string, codes: Map<string, string>): string[] {
+  const found = new Set<string>()
+  for (const m of source.matchAll(CODE_LITERAL)) found.add(m[1])
+  for (const m of source.matchAll(ERRORS_CALL)) {
+    const code = codes.get(m[1])
+    assert.ok(code, `CrystalApi.ts calls Errors.${m[1]}(), which errors.ts does not declare`)
+    found.add(code as string)
+  }
+  return [...found].sort()
+}
+
+/**
+ * Resources with a two-identity case in this file, mapped to the members that enforce the
+ * scoping. The members are named so a rename is caught here rather than quietly detaching
+ * a case from the code it covers — the guard asserts each still exists in the source.
+ */
+const COVERED_RESOURCES: Record<string, string[]> = {
+  'not_found.collection': ['_ownedCollection', '_ownsCollection'],
+  'not_found.dataset': ['_datasetOwner', 'getDataset'],
+  'not_found.muse_piece': ['updateMusePiece', '_mutateMuseSession'],
+  'not_found.muse_session': ['_museSessionOwner', '_museSession'],
+  'not_found.project': ['_ownedProject'],
+  'not_found.run': ['_owns'],
+  'not_found.tabula': ['_ownedTabula'],
+  'not_found.team': ['_memberTeam'],
+}
 
 /**
  * Deliberate exclusions. Each entry is a reason, not a TODO — adding one is the visible
  * act this guard exists to force.
- *
- * `_assertPlatformAdmin` does not match the declaration pattern below (it is not an
- * owner-scope helper at all); it is listed so the decision is recorded rather than implied.
  */
 const UNCOVERED_ALLOWLIST: Record<string, string> = {
-  _ownedStudio:
+  'not_found.studio':
     'covered behaviourally by the studio-binding regression tests in ' +
     'tests/unit/allocutio/api/CrystalApi.test.ts (a studioId the caller does not host, and the ' +
     'fail-closed no-conductor case) — not duplicated here.',
-  _ownedIntella:
-    'no in-memory Intelligens store exists in src/ (only MongoIntella), so a case here needs a ' +
-    'fake that does not yet exist. Wave 3.',
-  _ownsCollection:
-    'internal predicate of _ownedCollection, which the collection cases above cover through the ' +
-    'public surface.',
-  _ownsCollectionWith:
-    'internal predicate of _ownedCollection, which the collection cases above cover through the ' +
-    'public surface.',
-  _assertPlatformAdmin:
-    'a role gate, not owner scope — a two-identity smoke is the wrong shape for it.',
+  'not_found.edition':
+    'author-scoped, and covered behaviourally by the publication tests in ' +
+    'tests/unit/crystal/publish.test.ts (only the publishing author may read or retract, and the ' +
+    'review queue shows an author only their own held items) — not duplicated here.',
+  'not_found.model':
+    'the model registry is owner-scoped through `_ownedIntella`, and no in-memory Intelligens ' +
+    'store exists in src/ (only MongoIntella), so a case here needs a fake that does not yet ' +
+    'exist. The remaining model 404s are registry/admin paths, not owner scope. Wave 3.',
+  'not_found.flow':
+    'the flow catalog is a global registry, not an owner-scoped resource — a two-identity smoke ' +
+    'is the wrong shape for it.',
+  'not_found.fundamentum':
+    'a base-model record in the shared catalog, not an owner-scoped resource.',
+  'not_found.adapter':
+    'a publication destination that is not wired, not a record with an owner.',
 }
 
-const HELPER_DECL = /private (?:async )?(_(?:owned|owns|member)[A-Za-z]*)\(/g
-
-/** Every private ownership helper declared in the given source, deduped and sorted. */
-function declaredHelpers(source: string): string[] {
-  return [...new Set([...source.matchAll(HELPER_DECL)].map((m) => m[1]))].sort()
+/** The resources that are in neither list — i.e. the guard's failure set. */
+function unlistedResources(source: string, codes: Map<string, string>): string[] {
+  return reportedResources(source, codes)
+    .filter((r) => !(r in COVERED_RESOURCES) && !(r in UNCOVERED_ALLOWLIST))
 }
 
-/** The helpers that are in neither list — i.e. the guard's failure set. */
-function unlistedHelpers(source: string): string[] {
-  return declaredHelpers(source).filter((h) => !COVERED.includes(h) && !(h in UNCOVERED_ALLOWLIST))
-}
+test('COVERAGE GUARD: every owner-scoped CrystalApi resource is either smoked here or allowlisted', () => {
+  const source = readFileSync(API_SOURCE, 'utf8')
+  const codes = codeByConstructor(readFileSync(ERRORS_SOURCE, 'utf8'))
+  assert.ok(codes.size > 0, 'the errors.ts scan matched nothing — the constructor pattern has drifted')
 
-test('COVERAGE GUARD: every CrystalApi ownership helper is either smoked here or allowlisted', () => {
-  const source = readFileSync(path.join(process.cwd(), 'src/allocutio/api/CrystalApi.ts'), 'utf8')
-  const declared = declaredHelpers(source)
-  assert.ok(declared.length > 0, 'the helper scan matched nothing — the declaration pattern has drifted')
+  const reported = reportedResources(source, codes)
+  assert.ok(reported.length > 0, 'the not-found scan matched nothing — the code pattern has drifted')
 
   assert.deepEqual(
-    unlistedHelpers(source), [],
-    'A private ownership helper in CrystalApi.ts has no two-identity coverage. Either add a case to ' +
-      'this suite driving the PUBLIC methods that route through it (identity B passing identity A\'s ' +
-      'id, asserting an identical not_found to an absent id and no mutation), or add it to ' +
-      'UNCOVERED_ALLOWLIST in this file with a reason explaining why a two-identity smoke is the wrong ' +
-      'shape for it.',
+    unlistedResources(source, codes), [],
+    'A resource CrystalApi.ts can report as not-found has no two-identity coverage. If it is ' +
+      'owner-scoped, add a case to this suite driving the PUBLIC methods that resolve it (identity ' +
+      'B passing identity A\'s id, asserting an identical not_found to an absent id and no ' +
+      'mutation) and list it in COVERED_RESOURCES. If it is not owner-scoped, add it to ' +
+      'UNCOVERED_ALLOWLIST in this file with a reason. Renaming the helper does not remove the ' +
+      'obligation — the guard keys on the resource.',
   )
+})
 
-  // Every allowlist entry must still name a real helper — a stale entry silently shrinks
-  // the guard's reach.
-  for (const name of Object.keys(UNCOVERED_ALLOWLIST)) {
-    if (name === '_assertPlatformAdmin') continue // documented above: outside the scan pattern by design
-    assert.ok(declared.includes(name), `UNCOVERED_ALLOWLIST names '${name}', which no longer exists — remove it`)
+test('COVERAGE GUARD: no listed resource has gone stale', () => {
+  const source = readFileSync(API_SOURCE, 'utf8')
+  const codes = codeByConstructor(readFileSync(ERRORS_SOURCE, 'utf8'))
+  const reported = new Set(reportedResources(source, codes))
+
+  for (const resource of [...Object.keys(COVERED_RESOURCES), ...Object.keys(UNCOVERED_ALLOWLIST)]) {
+    assert.ok(
+      reported.has(resource),
+      `'${resource}' is listed here but CrystalApi.ts no longer reports it — remove the entry`,
+    )
+  }
+
+  // A covered resource names the members that enforce its scoping; if one is gone, the
+  // case above may no longer be reaching an ownership check at all.
+  for (const [resource, members] of Object.entries(COVERED_RESOURCES)) {
+    for (const member of members) {
+      assert.ok(
+        new RegExp(`\\b${member}\\s*\\(`).test(source),
+        `COVERED_RESOURCES lists '${member}' for ${resource}, which CrystalApi.ts no longer declares ` +
+          '— re-point the entry at the member that enforces the scoping now',
+      )
+    }
   }
 })
 
-test('COVERAGE GUARD self-check: a new, unlisted helper is reported', () => {
-  // The guard is only worth its runtime if it goes red on a helper nobody listed. Prove it
-  // against fabricated source rather than trusting the real file to stay incomplete.
-  const fabricated = '  private async _ownedSomethingNew(auctor: AuctorKey, id: string): Promise<void> {}'
-  assert.deepEqual(unlistedHelpers(fabricated), ['_ownedSomethingNew'])
-  assert.deepEqual(unlistedHelpers('  private async _ownedProject(auctor: AuctorKey, id: string) {}'), [])
+test('COVERAGE GUARD: every reported not-found code is declared in the API contract', () => {
+  const source = readFileSync(API_SOURCE, 'utf8')
+  const codes = codeByConstructor(readFileSync(ERRORS_SOURCE, 'utf8'))
+  const declared = new Set(API_CONTRACT.errorCodes.map((e) => e.code))
+
+  for (const resource of reportedResources(source, codes)) {
+    assert.ok(
+      declared.has(resource),
+      `CrystalApi.ts can report '${resource}' but apiContract.ts's errorCodes does not declare it — ` +
+        'a client reading the published taxonomy would meet a 404 code that does not exist there. ' +
+        'Add it to errorCodes and regenerate the docs (npm run gen:api-docs).',
+    )
+  }
+})
+
+test('COVERAGE GUARD self-check: a new, unlisted resource is reported', () => {
+  // The guard is only worth its runtime if it goes red on a resource nobody listed. Prove
+  // it against fabricated source rather than trusting the real file to stay incomplete.
+  const codes = new Map([['notFoundSomethingNew', 'not_found.something_new']])
+
+  assert.deepEqual(
+    unlistedResources("    throw new ApiError('not_found.something_new', 'nope', 404)", codes),
+    ['not_found.something_new'],
+    'a literal code nobody listed must be reported',
+  )
+  assert.deepEqual(
+    unlistedResources('    throw Errors.notFoundSomethingNew(id)', codes),
+    ['not_found.something_new'],
+    'the same code reached through an errors.ts constructor must be reported too',
+  )
+  // And it must stay quiet on a listed one, however the helper guarding it is named.
+  assert.deepEqual(
+    unlistedResources("    private async _whateverIWantToCallIt() { throw new ApiError('not_found.dataset', '', 404) }", codes),
+    [],
+  )
 })
