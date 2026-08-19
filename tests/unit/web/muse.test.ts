@@ -1,16 +1,28 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  admitPiece,
+  applyRunResult,
   buildGarden,
   canFire,
   curatedFragments,
   flattenGarden,
   ignitionBlockReason,
   ignitionRequest,
+  lineageOf,
   poolDatasetFragments,
+  releasePending,
   rollCurated,
+  streamColumns,
+  streamPiece,
   t2iFlows,
+  EMPTY_STREAM,
+  EXPANDED_GESTURES,
+  STREAM_MAX_COLUMNS,
+  STREAM_MIN_COLUMNS,
+  TILE_GESTURES,
   type IgnitionQuote,
+  type StreamPiece,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
 import {
   canFireDecompose,
@@ -240,4 +252,130 @@ test('canFireDecompose: a second decompose cannot be fired while one is in fligh
   assert.equal(canFireDecompose({ captionsetId: 'cs-1', inFlight: false }), true)
   assert.equal(canFireDecompose({ captionsetId: 'cs-1', inFlight: true }), false)
   assert.equal(canFireDecompose({ captionsetId: null, inFlight: false }), false)
+})
+
+// ---------------------------------------------------------------------------
+// The stream (noema-238) — where a fired piece lands. Before this, ignition ended
+// at a run id and a link to the run view, so seeing the piece meant leaving Muse.
+// The screen itself stays typecheck-only (Trap #3); the rules the grid follows are
+// pure functions and are gated here.
+//
+// Fixtures are invented throughout (`run-…`, `https://r2.example/…`).
+// ---------------------------------------------------------------------------
+
+function piece(runId: string, lineage: Fragment[] = [frag('subject', 'a fox')]): StreamPiece {
+  return streamPiece(runId, 'a fox in a foggy harbor', lineage)
+}
+
+// Non-vacuity 1 — the piece comes home
+
+test('applyRunResult: a fired piece appears in Muse without leaving the screen', () => {
+  const fired = admitPiece(EMPTY_STREAM, piece('run-1'), false)
+  assert.equal(fired.pieces.length, 1, 'firing puts the piece in the stream on this screen')
+  assert.equal(fired.pieces[0]!.status, 'running')
+  assert.equal(fired.pieces[0]!.media, null, 'nothing to show until the run returns')
+
+  // the run finishes: its produced image is folded into the piece already on screen,
+  // which is the whole result path — no navigation, no second surface.
+  const done = applyRunResult(fired, 'run-1', {
+    terminal: 'complete',
+    exitus: { image: 'https://r2.example/piece-1.png' },
+  })
+  assert.equal(done.pieces[0]!.status, 'ready')
+  assert.equal(done.pieces[0]!.media?.url, 'https://r2.example/piece-1.png')
+  assert.equal(done.pieces[0]!.media?.kind, 'image')
+
+  // a run that is not terminal yet changes nothing, and a failure is carried as a
+  // failure rather than as an empty tile that never resolves
+  assert.equal(applyRunResult(fired, 'run-1', { terminal: null }), fired)
+  const failed = applyRunResult(fired, 'run-1', { terminal: 'failed', error: 'the pod went away' })
+  assert.equal(failed.pieces[0]!.status, 'failed')
+  assert.equal(failed.pieces[0]!.error, 'the pod went away')
+
+  // and a result only ever lands on the piece whose run produced it
+  const two = admitPiece(fired, piece('run-2'), false)
+  const one = applyRunResult(two, 'run-2', { terminal: 'complete', exitus: { image: 'https://r2.example/piece-2.png' } })
+  assert.equal(one.pieces.find((p) => p.runId === 'run-1')!.media, null)
+  assert.equal(one.pieces.find((p) => p.runId === 'run-2')!.media?.url, 'https://r2.example/piece-2.png')
+})
+
+// Non-vacuity 2 — the stream is a grid, not a column
+
+test('streamColumns: the stream lays out more than one piece per row', () => {
+  // two columns on a ~322px phone (S14 phone-first, S15 tiles not one piece a page)
+  assert.equal(streamColumns(322), 2)
+  assert.ok(streamColumns(322) >= STREAM_MIN_COLUMNS)
+
+  // the floor holds even when the measured width is nonsense or not yet known —
+  // a stream that renders one tile per row leaves the user scrolling behind the output
+  assert.equal(streamColumns(0), 2)
+  assert.equal(streamColumns(100), 2)
+  assert.equal(streamColumns(Number.NaN), 2)
+
+  // and it widens with the viewport rather than growing the tiles without limit
+  assert.ok(streamColumns(900) > streamColumns(322), 'a wider grid fits more tiles per row')
+  assert.equal(streamColumns(10_000), STREAM_MAX_COLUMNS)
+})
+
+// Non-vacuity 3 — a piece arriving must never move the tile under a thumb
+
+test('admitPiece: a piece arriving while the user is scrolled away does not move the tile under their thumb', () => {
+  const seen = admitPiece(admitPiece(EMPTY_STREAM, piece('run-1'), false), piece('run-2'), false)
+  assert.deepEqual(seen.pieces.map((p) => p.runId), ['run-2', 'run-1'], 'at the head, new pieces insert at the top')
+
+  // scrolled away: the grid on screen is untouched and the new piece waits
+  const held = admitPiece(seen, piece('run-3'), true)
+  assert.deepEqual(held.pieces.map((p) => p.runId), ['run-2', 'run-1'], 'not one tile moved')
+  assert.equal(held.pieces, seen.pieces, 'the rendered list is the same list, so nothing re-orders')
+  assert.deepEqual(held.pending.map((p) => p.runId), ['run-3'])
+
+  const held2 = admitPiece(held, piece('run-4'), true)
+  assert.deepEqual(held2.pieces.map((p) => p.runId), ['run-2', 'run-1'])
+  assert.equal(held2.pending.length, 2, 'the "N new" pill counts what is waiting')
+
+  // the pill lets them through, newest first, and only when the user asks
+  const released = releasePending(held2)
+  assert.deepEqual(released.pieces.map((p) => p.runId), ['run-4', 'run-3', 'run-2', 'run-1'])
+  assert.equal(released.pending.length, 0)
+  assert.equal(releasePending(released), released, 'releasing nothing is a no-op')
+
+  // a held piece still resolves — it is generating on a pod that is already paid for
+  const heldDone = applyRunResult(held2, 'run-3', { terminal: 'complete', exitus: { image: 'https://r2.example/held.png' } })
+  assert.equal(heldDone.pending.find((p) => p.runId === 'run-3')!.media?.url, 'https://r2.example/held.png')
+})
+
+// Non-vacuity 4 — the expanded view explains the piece
+
+test('lineageOf: the expanded view names the fragments that produced the piece', () => {
+  const p = piece('run-1', [
+    frag('style', 'in ink wash', 'm-2', 'inkwash'),
+    frag('subject', 'a fox', 'm-1'),
+    frag('setting', 'a foggy harbor', 'm-1'),
+    frag('subject', 'a fox', 'm-3'), // the same fragment drawn twice reads once
+  ])
+
+  const lineage = lineageOf(p)
+  assert.deepEqual(lineage.map((f) => f.text), ['a fox', 'a foggy harbor', 'in ink wash'],
+    'every producing fragment is named, de-duplicated, in category order')
+  assert.deepEqual(lineage.map((f) => f.category), ['subject', 'setting', 'style'])
+  assert.equal(lineage.find((f) => f.text === 'in ink wash')!.trigger, 'inkwash',
+    'a fragment carrying a trigger word says so')
+
+  // a piece fired from a roll carries that roll's fragments, not a later roll's
+  const rolled = rollCurated([frag('subject', 'a fox'), frag('mood', 'wistful')], new Set(), 1)
+  const fromRoll = streamPiece('run-2', rolled.rolls[0]!.prompt, rolled.rolls[0]!.fragments)
+  assert.deepEqual(
+    lineageOf(fromRoll).map((f) => f.text).sort(),
+    rolled.rolls[0]!.fragments.map((f) => f.text).sort(),
+  )
+})
+
+// The gestures a tile carries: the two steers plus declutter, and nothing more (V8a) —
+// ~145px of tile fits about three targets legibly, and a mis-tap here writes a steer.
+
+test('TILE_GESTURES: the tile carries exactly the three gestures made while scrolling', () => {
+  assert.deepEqual(TILE_GESTURES.map((g) => g.key), ['up', 'down', 'dismiss'])
+  // the considered acts live in the expanded view, on top of the tile's three
+  assert.deepEqual(EXPANDED_GESTURES.map((g) => g.key), ['up', 'down', 'dismiss', 'laugh', 'save'])
+  for (const g of EXPANDED_GESTURES) assert.ok(g.glyph.length > 0 && g.label.length > 0)
 })
