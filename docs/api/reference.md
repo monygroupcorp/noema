@@ -9508,6 +9508,7 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `not_found.adapter` | 404 | no |
 | `not_found.run` | 404 | no |
 | `not_found.muse_session` | 404 | no |
+| `not_found.dataset` | 404 | no |
 | `economy.insufficient_signa` | 402 | no |
 | `economy.cap_too_low` | 422 | no |
 | `conflict.slug_taken` | 409 | no |
