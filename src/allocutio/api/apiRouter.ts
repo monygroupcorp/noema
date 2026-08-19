@@ -155,6 +155,12 @@ export interface ApiFacade {
   createDataset(auctor: AuctorKey, input: import('../../types/dataset.js').CreateDatasetInput): Promise<import('../../types/dataset.js').Dataset>
   addCaptionset(auctor: AuctorKey, datasetId: string, input: unknown): Promise<import('../../types/dataset.js').Dataset>
   setCaption(auctor: AuctorKey, datasetId: string, captionsetId: string, mediaId: string, caption: unknown): Promise<import('../../types/dataset.js').Dataset>
+  // --- Muse sessions (a dataset break-off with its own floor and piece ledger) ---
+  spawnMuseSession(auctor: AuctorKey, datasetId: string): Promise<import('./CrystalApi.js').MuseSessionView>
+  getMuseSession(auctor: AuctorKey, id: string): Promise<import('./CrystalApi.js').MuseSessionView>
+  setMuseFragmentEnabled(auctor: AuctorKey, id: string, fragment: unknown, enabled: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
+  setMuseFragmentWeight(auctor: AuctorKey, id: string, fragment: unknown, weight: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
+  recordMusePiece(auctor: AuctorKey, id: string, piece: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   publish(auctor: AuctorKey, opts: PublishOpts): Promise<Edition>
   getEdition(auctor: AuctorKey, id: string): Promise<Edition>
   feed(filter?: FeedFilter): Promise<FeedItem[]>
@@ -968,6 +974,61 @@ export function createApiRouter(deps: {
     const body = (req.body ?? {}) as { caption?: unknown }
     const dataset = await api.setCaption(auctor, String(req.params.id), String(req.params.captionsetId), String(req.params.mediaId), body.caption)
     res.status(200).json({ dataset })
+  }))
+
+  // ── Muse sessions ─────────────────────────────────────────────────────────
+  //
+  // A session is a break-off of a dataset: it copies the dataset's fragments and
+  // works from its own copies, so nothing a session does reaches the mother. The
+  // five operations here are the whole surface — spawn, read, turn a fragment off
+  // or on, weight a fragment, and record a piece with its lineage.
+  //
+  // Every one of them is owner-scoped from `auth(req)` and from nowhere else. No
+  // route takes an owner, an anima id, or any other scope value from the request:
+  // a session belonging to another account is reported as not found, exactly as an
+  // id that never existed is.
+
+  // POST /v1/data/muse/sessions — break a session off a dataset the caller owns.
+  // Fragments are pooled dataset-wide across every media item, not from one item.
+  router.post('/data/muse/sessions', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const body = (req.body ?? {}) as { datasetId?: unknown }
+    const datasetId = typeof body.datasetId === 'string' ? body.datasetId : ''
+    res.status(201).json({ session: await api.spawnMuseSession(auctor, datasetId) })
+  }))
+
+  // GET /v1/data/muse/sessions/:id — the caller's own session: its floor and its ledger.
+  router.get('/data/muse/sessions/:id', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    res.json({ session: await api.getMuseSession(auctor, String(req.params.id)) })
+  }))
+
+  // PATCH /v1/data/muse/sessions/:id/floor/enabled — take a fragment out of the draw,
+  // or put it back. The fragment is named in the BODY by `{ category, text }`, not in
+  // the path: a fragment's identity is `category:text`, which is free text and is not
+  // safe to carry as a path segment.
+  router.patch('/data/muse/sessions/:id/floor/enabled', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const body = (req.body ?? {}) as { category?: unknown; text?: unknown; enabled?: unknown }
+    const session = await api.setMuseFragmentEnabled(auctor, String(req.params.id), body, body.enabled)
+    res.json({ session })
+  }))
+
+  // PATCH /v1/data/muse/sessions/:id/floor/weight — weight a fragment against its
+  // pool-mates. Clamped server-side to the sampler's bounds.
+  router.patch('/data/muse/sessions/:id/floor/weight', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const body = (req.body ?? {}) as { category?: unknown; text?: unknown; weight?: unknown }
+    const session = await api.setMuseFragmentWeight(auctor, String(req.params.id), body, body.weight)
+    res.json({ session })
+  }))
+
+  // POST /v1/data/muse/sessions/:id/pieces — append a piece to the session's ledger with
+  // the fragments that produced it. The lineage is recorded now because it is not
+  // recoverable later: the floor moves and the fragment list is rebuilt.
+  router.post('/data/muse/sessions/:id/pieces', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    res.status(201).json({ session: await api.recordMusePiece(auctor, String(req.params.id), req.body ?? {}) })
   }))
 
   // GET /v1/me — the caller's account settings: appearance + generation defaults + bindings.

@@ -15,6 +15,7 @@ import type { Mandatorum } from './types/mandatum.js'
 import type { Corporum } from './types/corpus.js'
 import type { Collectionum } from './types/collectio.js'
 import type { Datasets } from './types/dataset.js'
+import type { MuseSessions } from './types/museSession.js'
 import type { Editionum } from './types/editio.js'
 import type { Sodalitatum } from './types/sodalitas.js'
 import type { Provinciarum } from './types/provincia.js'
@@ -103,6 +104,7 @@ import { MongoMandatum } from './crystal/MongoMandatum.js'
 import { MongoCorpus } from './crystal/MongoCorpus.js'
 import { MongoCollectio } from './crystal/MongoCollectio.js'
 import { MongoDataset } from './crystal/MongoDataset.js'
+import { MongoMuseSession } from './crystal/MongoMuseSession.js'
 import { MongoEditionum } from './crystal/MongoEditionum.js'
 import { MongoSodalitatum } from './crystal/MongoSodalitatum.js'
 import { MongoProvinciarum } from './crystal/MongoProvinciarum.js'
@@ -166,6 +168,8 @@ export interface Ring {
   corpora: Corporum
   collectiones: Collectionum
   datasets: Datasets
+  /** Muse session store — a dataset break-off with its own floor and piece ledger. */
+  museSessions: MuseSessions
   /** Publication records (Editio) — backs the publishing spine + feed. */
   editiones: Editionum
   /** Registered publication adapters (FeedAdapter always; BucketAdapter when R2 is configured). */
@@ -333,6 +337,8 @@ export interface ContainerConfig {
   collectionesCollection?: string
   /** Collection name for datasets — default 'datasets' */
   datasetsCollection?: string
+  /** Collection name for Muse sessions — default 'museSessions' */
+  museSessionsCollection?: string
   editionesCollection?: string
   /** Our HuggingFace org for `custody:'ours'` model publishes (default 'ms2stationthis'). */
   huggingFaceOrg?: string
@@ -476,6 +482,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const corpora = new MongoCorpus(db.collection(config.corporaCollection ?? 'corpora'))
   const collectiones = new MongoCollectio(db.collection(config.collectionesCollection ?? 'collectiones'))
   const datasets = new MongoDataset(db.collection(config.datasetsCollection ?? 'datasets'))
+  const museSessions = new MongoMuseSession(db.collection(config.museSessionsCollection ?? 'museSessions'))
   const editiones = new MongoEditionum(db.collection(config.editionesCollection ?? 'editiones'))
   const sodalitates = new MongoSodalitatum(db.collection(config.sodalitatesCollection ?? 'sodalitates'))
   const provinciae = new MongoProvinciarum(db.collection(config.provinciaeCollection ?? 'provinciae'))
@@ -797,7 +804,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
 
   return {
     actorum, modorum, signorum, redituum, mercedum, tripwireBand, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,
-    mandatores, corpora, collectiones, datasets, editiones, publicationAdapters, sodalitates, provinciae, tabulae, testimonia,
+    mandatores, corpora, collectiones, datasets, museSessions, editiones, publicationAdapters, sodalitates, provinciae, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, querelae, memoriae,
     cursorum, completor, inceptor, arcanumIssuer,
