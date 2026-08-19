@@ -9,10 +9,15 @@ import {
   isCategory,
   isExclusive,
   tierOf,
+  fragmentKey,
   type Fragment,
   type Garden,
 } from '../../../src/crystal/muse/taxonomy.js'
-import { rollFragments } from '../../../src/crystal/muse/sampler.js'
+import {
+  rollFragments,
+  WEIGHT_MAX,
+  type SteerState,
+} from '../../../src/crystal/muse/sampler.js'
 import { composeTemplate, detectConflicts } from '../../../src/crystal/muse/weaver.js'
 import {
   buildGarden,
@@ -176,6 +181,194 @@ test('empty and missing categories drop out of a roll without throwing', () => {
     rolled.every((f) => f !== undefined && typeof f.text === 'string'),
     'no undefined entry reaches the caller',
   )
+})
+
+// --- Sampler: steering (disabled fragments and weights) ----------------------
+
+/** A steer built from `[fragment, state]` pairs, keyed the way the sampler keys it. */
+function steerOf(
+  entries: Array<[Fragment, { enabled?: boolean; weight?: number }]>,
+): SteerState {
+  return new Map(entries.map(([f, state]) => [fragmentKey(f), state]))
+}
+
+/** How often each fragment text is drawn for one category across `count` rolls. */
+function drawCounts(garden: Garden, category: Fragment['category'], count: number, steer?: SteerState) {
+  const counts = new Map<string, number>()
+  for (let i = 0; i < count; i++) {
+    for (const f of rollFragments(garden, i, steer)) {
+      if (f.category !== category) continue
+      counts.set(f.text, (counts.get(f.text) ?? 0) + 1)
+    }
+  }
+  return counts
+}
+
+test('a roll with no steer state is the same roll the sampler drew before steering existed', () => {
+  const garden = gardenOf([...CATEGORIES], 5)
+  for (const i of [0, 1, 7, 42]) {
+    const expected = CATEGORIES.map((cat) => {
+      const pool = garden[cat]!
+      // The pre-steer arithmetic, restated: FNV-1a over the category name, offset
+      // by the roll index, modulo the pool length.
+      let h = 0x811c9dc5
+      for (let n = 0; n < cat.length; n++) {
+        h ^= cat.charCodeAt(n)
+        h = Math.imul(h, 0x01000193)
+      }
+      const seed = ((h >>> 0) + Math.imul(i >>> 0, 2654435761)) >>> 0
+      return pool[seed % pool.length]
+    })
+    assert.deepEqual(rollFragments(garden, i), expected, `roll ${i} is the uniform roll`)
+    assert.deepEqual(
+      rollFragments(garden, i, new Map()),
+      expected,
+      `roll ${i} with an empty steer is the uniform roll`,
+    )
+  }
+})
+
+test('the same (garden, weights, rollIndex) always produces the same roll', () => {
+  const garden = gardenOf([...CATEGORIES], 6)
+  const steer = steerOf([
+    [garden.subject![0], { weight: 5 }],
+    [garden.subject![3], { weight: 0.2 }],
+    [garden.hair![1], { enabled: false }],
+    [garden.mood![2], { weight: 3, enabled: false }],
+    [garden.style![4], { weight: 2 }],
+  ])
+
+  for (const i of [0, 1, 7, 42, 1000]) {
+    const first = rollFragments(garden, i, steer)
+    const second = rollFragments(garden, i, steer)
+    assert.deepEqual(second, first, `steered roll ${i} is stable across calls`)
+
+    // A fresh, equal steer must land in the same place: the pick is a function of
+    // (pool, weights, seed) and of nothing else — no state carried between calls.
+    const rebuilt = steerOf([
+      [garden.subject![0], { weight: 5 }],
+      [garden.subject![3], { weight: 0.2 }],
+      [garden.hair![1], { enabled: false }],
+      [garden.mood![2], { weight: 3, enabled: false }],
+      [garden.style![4], { weight: 2 }],
+    ])
+    assert.deepEqual(rollFragments(garden, i, rebuilt), first, `steered roll ${i} replays`)
+  }
+})
+
+test('a disabled fragment never appears in a roll, and stays in the garden', () => {
+  const garden = gardenOf(['subject', 'hair', 'mood'], 4)
+  const off = garden.subject![2]
+  const steer = steerOf([[off, { enabled: false }]])
+
+  for (let i = 0; i < 200; i++) {
+    const rolled = rollFragments(garden, i, steer)
+    assert.ok(
+      !rolled.some((f) => f.category === off.category && f.text === off.text),
+      `roll ${i} drew the disabled fragment`,
+    )
+    assert.ok(
+      rolled.some((f) => f.category === 'subject'),
+      `roll ${i} still draws a subject from the fragments left enabled`,
+    )
+  }
+
+  // Darkened, not deleted: the pool the steer was applied to is untouched.
+  assert.equal(garden.subject!.length, 4, 'the disabled fragment is still in the pool')
+  assert.ok(garden.subject!.includes(off), 'the disabled fragment object is still pooled')
+})
+
+test('a fragment weighted 3x is drawn more often than its pool-mates over N rolls', () => {
+  const garden = gardenOf(['subject'], 4)
+  const heavy = garden.subject![1]
+  const counts = drawCounts(garden, 'subject', 600, steerOf([[heavy, { weight: 3 }]]))
+
+  const heavyDraws = counts.get(heavy.text) ?? 0
+  for (const mate of garden.subject!) {
+    if (mate === heavy) continue
+    const mateDraws = counts.get(mate.text) ?? 0
+    assert.ok(
+      heavyDraws > mateDraws,
+      `the 3x fragment was drawn ${heavyDraws} times, '${mate.text}' ${mateDraws}`,
+    )
+  }
+
+  // Uniform is the baseline it has to beat: 600 rolls over a pool of 4.
+  assert.ok(heavyDraws > 150, `the 3x fragment was drawn ${heavyDraws} times, no more than uniform`)
+
+  // And weighting DOWN is the other half of the channel.
+  const light = garden.subject![2]
+  const downCounts = drawCounts(garden, 'subject', 600, steerOf([[light, { weight: 0.25 }]]))
+  const lightDraws = downCounts.get(light.text) ?? 0
+  for (const mate of garden.subject!) {
+    if (mate === light) continue
+    assert.ok(
+      lightDraws < (downCounts.get(mate.text) ?? 0),
+      `the 0.25x fragment was drawn ${lightDraws} times, at least as often as '${mate.text}'`,
+    )
+  }
+})
+
+test('a category with every fragment disabled drops out of the roll rather than throwing', () => {
+  // Sparse categories are the norm — a real decomposition can leave `lighting`
+  // holding two fragments — so a steer can empty one.
+  const garden = gardenOf(['subject', 'lighting', 'mood'], 2)
+  const steer = steerOf(garden.lighting!.map((f) => [f, { enabled: false }] as [Fragment, { enabled: boolean }]))
+
+  for (let i = 0; i < 50; i++) {
+    const rolled = rollFragments(garden, i, steer)
+    assert.deepEqual(
+      rolled.map((f) => f.category).sort(),
+      ['mood', 'subject'],
+      `roll ${i} keeps only the categories that still have a fragment`,
+    )
+    assert.ok(
+      rolled.every((f) => f !== undefined && typeof f.text === 'string'),
+      `roll ${i} let an undefined entry reach the caller`,
+    )
+  }
+
+  // The same through the report, which is what a caller actually reads.
+  const report = rollReport(garden, 10, steer)
+  assert.equal(report.rolls.length, 10)
+  assert.ok(
+    report.rolls.every((r) => !r.fragments.some((f) => f.category === 'lighting')),
+    'no roll in the report drew from the emptied category',
+  )
+})
+
+test('a weight cannot make a category\'s other fragments unreachable', () => {
+  const garden = gardenOf(['subject'], 4)
+  const heavy = garden.subject![0]
+
+  // An absurd weight is clamped rather than honoured; every pool-mate keeps a
+  // share of the line, so the category never silently collapses to one value.
+  for (const weight of [WEIGHT_MAX * 1000, 1e9, Number.MAX_SAFE_INTEGER]) {
+    const counts = drawCounts(garden, 'subject', 2000, steerOf([[heavy, { weight }]]))
+    for (const mate of garden.subject!) {
+      assert.ok(
+        (counts.get(mate.text) ?? 0) > 0,
+        `weight ${weight} made '${mate.text}' unreachable across 2000 rolls`,
+      )
+    }
+    assert.ok(
+      (counts.get(heavy.text) ?? 0) > (counts.get(garden.subject![1].text) ?? 0),
+      `weight ${weight} did not steer toward the weighted fragment at all`,
+    )
+  }
+
+  // The floor is clamped too: a fragment weighted to nothing is still reachable.
+  const starved = drawCounts(garden, 'subject', 2000, steerOf([[heavy, { weight: 0 }]]))
+  assert.ok((starved.get(heavy.text) ?? 0) > 0, 'a zero weight erased a fragment instead of clamping')
+})
+
+test('a steer entry for a fragment no longer in the garden changes nothing', () => {
+  const garden = gardenOf(['subject'], 3)
+  const stale = frag('subject', 'a fragment that was removed')
+  const steer = steerOf([[stale, { enabled: false, weight: WEIGHT_MAX }]])
+  for (const i of [0, 1, 5, 9]) {
+    assert.deepEqual(rollFragments(garden, i, steer), rollFragments(garden, i), `roll ${i}`)
+  }
 })
 
 // --- Template composition ----------------------------------------------------
