@@ -1,11 +1,21 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  DEFAULT_HEADROOM,
+  DEFAULT_MIN_ROLLS,
+  DEFAULT_REPETITION,
   DEFAULT_VARIANCE_THRESHOLDS,
+  DEFAULT_WINDOW,
   combinationKey,
   readVariance,
 } from '../../../src/crystal/muse/variance.js'
-import { CATEGORIES, type Fragment, type Garden } from '../../../src/crystal/muse/taxonomy.js'
+import {
+  CATEGORIES,
+  fragmentKey,
+  type Fragment,
+  type Garden,
+} from '../../../src/crystal/muse/taxonomy.js'
+import type { SteerState } from '../../../src/crystal/muse/sampler.js'
 
 // Hermetic and pure: no network, no clock, no filesystem, no model. The readout
 // is counted from state already in hand, which is the property that lets it fire
@@ -14,14 +24,13 @@ import { CATEGORIES, type Fragment, type Garden } from '../../../src/crystal/mus
 function frag(
   category: Fragment['category'],
   text: string,
-  opts: { disabled?: boolean; source?: string } = {},
+  opts: { source?: string } = {},
 ): Fragment {
   return {
     category,
     text,
     source: opts.source ?? 'boardA',
     trigger: 'triggerA',
-    ...(opts.disabled ? { disabled: true } : {}),
   }
 }
 
@@ -36,15 +45,24 @@ function floorOf(spec: Partial<Record<Fragment['category'], number>>): Garden {
   return garden
 }
 
-/** Turn off all but the first `keep` fragments of every category. */
-function disableAllBut(garden: Garden, keep: number): Garden {
-  const out: Garden = {}
+/** A steer that turns off the named fragments. Keyed by identity, never by position. */
+function steerOff(fragments: readonly Fragment[]): SteerState {
+  return new Map(fragments.map((f) => [fragmentKey(f), { enabled: false }]))
+}
+
+/**
+ * A steer turning off all but the first `keep` fragments of every category.
+ *
+ * The floor itself is untouched — the cut lives in the returned session state.
+ */
+function disableAllBut(garden: Garden, keep: number): SteerState {
+  const off: Fragment[] = []
   for (const category of CATEGORIES) {
     const pool = garden[category]
     if (!pool) continue
-    out[category] = pool.map((f, i) => (i < keep ? f : { ...f, disabled: true }))
+    off.push(...pool.slice(keep))
   }
-  return out
+  return steerOff(off)
 }
 
 /** One roll: the first fragment of each named category, as the sampler would hand it over. */
@@ -105,15 +123,16 @@ test('the readout is computed without any injected fetch or key', () => {
 
 // ── NON-VACUITY 2 ─────────────────────────────────────────────────────────────
 // Disable is not delete (the fragments stay on the floor), so the count that
-// matters is the LIVE one. Counting disabled fragments as live collapses the
-// live width onto the starting width, headroom becomes 1, and this fails.
+// matters is the LIVE one — and it is the session's steer, not the floor, that
+// says which those are. Ignore the steer map and the live width collapses onto
+// the starting width, headroom becomes 1, and this fails.
 
 test('a floor whose fragments are mostly disabled reports narrow', () => {
   const wide = floorOf({ subject: 6, hair: 6, outfit: 6, setting: 6, style: 6 })
   const cut = disableAllBut(wide, 1)
 
   // No rolls at all, so `exhausted` cannot fire and only the width is under test.
-  const readout = readVariance(cut, [])
+  const readout = readVariance(wide, [], { steer: cut })
 
   assert.equal(readout.narrowed, true)
   assert.deepEqual(readout.reasons, ['aimed'])
@@ -123,7 +142,7 @@ test('a floor whose fragments are mostly disabled reports narrow', () => {
   assert.equal(readout.liveFragments, 5)
   assert.equal(readout.startFragments, 30)
 
-  // The same floor read with nothing turned off says nothing.
+  // The same floor read with no steer says nothing.
   assert.equal(readVariance(wide, []).narrowed, false)
 })
 
@@ -177,7 +196,55 @@ test('a floor that was always thin does not report as newly narrowed', () => {
 
   // The same thin floor DOES speak the moment a steer cuts into it.
   const cut = disableAllBut(thin, 1)
-  assert.deepEqual(readVariance(cut, []).reasons, ['aimed'])
+  assert.deepEqual(readVariance(thin, [], { steer: cut }).reasons, ['aimed'])
+})
+
+// ── NON-VACUITY 5 ─────────────────────────────────────────────────────────────
+// "Disabled" is SESSION state, not a property of the fragment. A fragment is a
+// datum decomposed from the mother dataset and is shared by every session that
+// reads it, so the cut has to live outside it, in a steer keyed by
+// `fragmentKey`. Move it back onto `Fragment` as a field and this fails: the two
+// readouts below are taken from the very same frozen fragment objects, which a
+// field-on-the-fragment representation can only do by mutating the shared pool
+// (throws on a frozen object) or by deep-copying it per session.
+
+test('two sessions can disable different fragments of the same mother dataset independently', () => {
+  const mother = floorOf({ subject: 4, hair: 4 })
+  for (const category of CATEGORIES) {
+    const pool = mother[category]
+    if (!pool) continue
+    for (const f of pool) Object.freeze(f)
+    Object.freeze(pool)
+  }
+  const subjects = mother.subject ?? []
+  const hairs = mother.hair ?? []
+
+  // Two sessions over the SAME fragment objects, cutting different fragments.
+  const sessionA = steerOff([...subjects.slice(1), ...hairs.slice(2)])
+  const sessionB = steerOff([subjects[0], hairs[0]])
+
+  const a = readVariance(mother, [], { steer: sessionA })
+  const b = readVariance(mother, [], { steer: sessionB })
+
+  // A cut to one subject and two hairs; B kept three subjects and three hairs.
+  assert.deepEqual(
+    a.widths.filter((w) => w.start > 0).map((w) => `${w.category}:${w.live}/${w.start}`),
+    ['subject:1/4', 'hair:2/4'],
+  )
+  assert.deepEqual(
+    b.widths.filter((w) => w.start > 0).map((w) => `${w.category}:${w.live}/${w.start}`),
+    ['subject:3/4', 'hair:3/4'],
+  )
+
+  // Neither session's steer reached the other's readout, or the mother's width.
+  assert.notDeepEqual(a.reasons, b.reasons)
+  assert.equal(readVariance(mother, []).liveFragments, 8)
+  assert.equal(readVariance(mother, []).headroom, 1)
+
+  // Identity, not position: the same steer read against a renumbered rebuild of
+  // the same fragments lands on the same fragments and reads the same.
+  const rebuilt: Garden = { subject: [...subjects].reverse(), hair: [...hairs].reverse() }
+  assert.equal(readVariance(rebuilt, [], { steer: sessionA }).liveFragments, a.liveFragments)
 })
 
 // ── The two situations are distinguishable ────────────────────────────────────
@@ -185,9 +252,9 @@ test('a floor that was always thin does not report as newly narrowed', () => {
 test('narrowing reports which of the two situations it is, and reports both when both hold', () => {
   const wide = floorOf({ subject: 6, hair: 6, outfit: 6, setting: 6, style: 6 })
   const cut = disableAllBut(wide, 1)
-  const only = roll(cut, { subject: 0, hair: 0, outfit: 0, setting: 0, style: 0 })
+  const only = roll(wide, { subject: 0, hair: 0, outfit: 0, setting: 0, style: 0 })
 
-  const both = readVariance(cut, Array.from({ length: 8 }, () => only))
+  const both = readVariance(wide, Array.from({ length: 8 }, () => only), { steer: cut })
   assert.deepEqual(both.reasons, ['aimed', 'exhausted'])
   assert.equal(both.narrowed, true)
 })
@@ -227,14 +294,13 @@ test('an explicit session-start snapshot overrides the floor-derived baseline', 
   // The session added fragments as well as cutting them, so the floor no longer
   // carries its own starting width and the snapshot is what the caller passes.
   const now: Garden = {
-    subject: [...(started.subject ?? []), frag('subject', 'added-by-hand')].map((f, i) =>
-      i > 0 && i < 8 ? { ...f, disabled: true } : f,
-    ),
+    subject: [...(started.subject ?? []), frag('subject', 'added-by-hand')],
     hair: started.hair,
   }
+  const steer = steerOff((now.subject ?? []).slice(1, 8))
 
-  const derived = readVariance(now, [])
-  const explicit = readVariance(now, [], { sessionStart: started })
+  const derived = readVariance(now, [], { steer })
+  const explicit = readVariance(now, [], { steer, sessionStart: started })
 
   assert.equal(explicit.startCombinations, 64)
   assert.equal(derived.startCombinations, 72)
@@ -269,8 +335,8 @@ test('an empty floor produces no combinations and no reading', () => {
 })
 
 test('a floor cut to nothing live reports zero headroom', () => {
-  const garden = disableAllBut(floorOf({ subject: 4, hair: 4 }), 0)
-  const readout = readVariance(garden, [])
+  const garden = floorOf({ subject: 4, hair: 4 })
+  const readout = readVariance(garden, [], { steer: disableAllBut(garden, 0) })
 
   assert.equal(readout.liveCombinations, 0)
   assert.equal(readout.headroom, 0)
@@ -298,9 +364,18 @@ test('combination keys are order-independent and category-qualified', () => {
 })
 
 test('thresholds are callable parameters, not baked-in constants', () => {
-  const garden = disableAllBut(floorOf({ subject: 4, hair: 4 }), 2)
+  // The four calibration numbers are named in one place and composed into the default.
+  assert.deepEqual(DEFAULT_VARIANCE_THRESHOLDS, {
+    window: DEFAULT_WINDOW,
+    minRolls: DEFAULT_MIN_ROLLS,
+    headroom: DEFAULT_HEADROOM,
+    repetition: DEFAULT_REPETITION,
+  })
+
+  const garden = floorOf({ subject: 4, hair: 4 })
+  const steer = disableAllBut(garden, 2)
 
   // headroom is 4/16 = 0.25 — at the default, so it reads; tighten it and it does not.
-  assert.deepEqual(readVariance(garden, []).reasons, ['aimed'])
-  assert.deepEqual(readVariance(garden, [], { headroom: 0.1 }).reasons, [])
+  assert.deepEqual(readVariance(garden, [], { steer }).reasons, ['aimed'])
+  assert.deepEqual(readVariance(garden, [], { steer, headroom: 0.1 }).reasons, [])
 })

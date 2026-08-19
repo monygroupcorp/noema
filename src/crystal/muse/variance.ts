@@ -32,11 +32,12 @@
 
 import {
   CATEGORIES,
-  isLive,
+  fragmentKey,
   type Category,
   type Fragment,
   type Garden,
 } from './taxonomy.js'
+import type { SteerState } from './sampler.js'
 
 // --- What the readout says ---------------------------------------------------
 
@@ -101,24 +102,49 @@ export type VarianceThresholds = {
   repetition: number
 }
 
+// v1 calibration. These four numbers decide WHEN the readout speaks, not what any
+// of it means, so they are named here rather than buried in an object literal:
+// retuning the instrument is editing this block and nothing else.
+
+/** Roughly one screenful of recent rolls — long enough to see a cycle, short enough to track a live steer. */
+export const DEFAULT_WINDOW = 12
+
+/** Half a window: below this a repeat is as likely to be an unlucky pair as a repeating floor. */
+export const DEFAULT_MIN_ROLLS = 6
+
+/** A quarter of the starting width — the floor has been cut to a deliberate corner of itself. */
+export const DEFAULT_HEADROOM = 0.25
+
+/** Half the recent window landing on combinations already seen is when repetition starts being felt. */
+export const DEFAULT_REPETITION = 0.5
+
 /**
  * v1 calibration. Deliberately parameters and not constants: the readout is
  * information rather than a gate, so these can be retuned against a real stream
  * without changing what any of the numbers mean.
  */
 export const DEFAULT_VARIANCE_THRESHOLDS: VarianceThresholds = {
-  window: 12,
-  minRolls: 6,
-  headroom: 0.25,
-  repetition: 0.5,
+  window: DEFAULT_WINDOW,
+  minRolls: DEFAULT_MIN_ROLLS,
+  headroom: DEFAULT_HEADROOM,
+  repetition: DEFAULT_REPETITION,
 }
 
 export type VarianceOptions = Partial<VarianceThresholds> & {
   /**
+   * This session's per-fragment steer state, keyed by `fragmentKey`.
+   *
+   * The floor itself says nothing about what is turned off: a fragment is a datum
+   * decomposed from the mother dataset and is shared by every session reading it,
+   * so which fragments are live is state the SESSION holds. Absent, every fragment
+   * on the floor counts as live and the readout is of an unsteered floor.
+   */
+  steer?: SteerState
+  /**
    * The floor as it stood at the session's start, when the caller holds a
    * snapshot of it.
    *
-   * Absent, the baseline is the SAME floor counted with every fragment live —
+   * Absent, the baseline is the SAME floor counted with the steer ignored —
    * which is the session's starting width exactly as long as the session has
    * only ever disabled fragments, because disable never removes anything. A
    * session that also ADDS fragments to its floor should pass its snapshot, or
@@ -143,12 +169,20 @@ export function combinationKey(fragments: readonly Fragment[]): string {
     .join('|')
 }
 
-/** Live fragment count per category, in `CATEGORIES` order. */
-function liveCounts(garden: Garden, countDisabled: boolean): number[] {
+/**
+ * Fragment count per category, in `CATEGORIES` order.
+ *
+ * With a steer supplied the count is of LIVE fragments — those the steer has not
+ * turned off, matched by `fragmentKey` rather than by position, because a garden
+ * rebuild renumbers positions and state keyed on one then lands on a different
+ * fragment. With no steer, every fragment counts.
+ */
+function fragmentCounts(garden: Garden, steer: SteerState | undefined): number[] {
   return CATEGORIES.map((category) => {
     const pool = garden[category]
     if (!pool) return 0
-    return countDisabled ? pool.length : pool.filter(isLive).length
+    if (!steer) return pool.length
+    return pool.filter((f) => steer.get(fragmentKey(f))?.enabled !== false).length
   })
 }
 
@@ -178,9 +212,11 @@ function logWidth(counts: readonly number[]): number {
 /**
  * Read how much variance the cutting floor has left.
  *
- * @param floor        the session's cutting floor, live and disabled fragments alike
+ * @param floor        the session's cutting floor, live and steered-off fragments alike
  * @param recentRolls  rolls in the order they were produced; the most recent
  *                     `window` of them are what repetition is measured over
+ * @param options      thresholds, this session's `steer`, and an optional
+ *                     session-start snapshot
  */
 export function readVariance(
   floor: Garden,
@@ -190,11 +226,11 @@ export function readVariance(
   const thresholds: VarianceThresholds = { ...DEFAULT_VARIANCE_THRESHOLDS, ...options }
   const window = Math.max(1, Math.trunc(thresholds.window))
 
-  const live = liveCounts(floor, false)
+  const live = fragmentCounts(floor, options.steer)
   // The baseline: the caller's snapshot when it has one, otherwise this same
-  // floor with the disabled fragments counted back in. Disable is reversible and
-  // removes nothing, so the floor still carries its own starting width.
-  const start = liveCounts(options.sessionStart ?? floor, true)
+  // floor read with the steer ignored. Disable is reversible and removes nothing
+  // from the floor, so the floor still carries its own starting width.
+  const start = fragmentCounts(options.sessionStart ?? floor, undefined)
 
   const liveCombinations = combinations(live)
   const startCombinations = combinations(start)
