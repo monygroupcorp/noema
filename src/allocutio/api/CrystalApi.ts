@@ -83,6 +83,7 @@ import {
   setFragmentWeight,
   spawnSession,
   updatePiece,
+  withSessionDataset,
   type MuseSession,
   type Piece,
   type PiecePatch,
@@ -2036,6 +2037,7 @@ export class CrystalApi {
       id: stored.id,
       owner: stored.owner,
       motherDatasetId: stored.session.motherDatasetId,
+      ...(stored.session.sessionDatasetId ? { sessionDatasetId: stored.session.sessionDatasetId } : {}),
       fragments: [...stored.session.fragments],
       floor: floorToEntries(stored.session.floor),
       pieces: [...stored.session.pieces],
@@ -2281,6 +2283,97 @@ export class CrystalApi {
     return this._mutateMuseSession(auctor, id, (session) => {
       try {
         return updatePiece(session, run, patch)
+      } catch (err) {
+        if (err instanceof UnknownPieceError) {
+          throw new ApiError('not_found.muse_piece', `Muse piece for run '${run}' not found`, 404)
+        }
+        throw err
+      }
+    })
+  }
+
+  /**
+   * The name a session's own dataset takes.
+   *
+   * SCHEME: the mother's name, a separator, and the session's id shortened to eight
+   * characters — `<mother name> · muse <session-id-prefix>`. Derived rather than asked
+   * for: a save is one tap, and a naming dialogue is a different interaction. The
+   * mother's name is what makes the record recognisable in a dataset list; the session
+   * prefix is what keeps two sessions off one mother apart.
+   */
+  private _sessionDatasetName(motherName: string, sessionId: string): string {
+    return `${motherName} · muse ${sessionId.slice(0, 8)}`
+  }
+
+  /**
+   * Put a piece back into the set: its media joins the session's OWN dataset, carrying
+   * the lineage that produced it as that media item's fragments.
+   *
+   * NO JOB RUNS AND NOTHING IS SPENT. A generated piece does not need decomposing,
+   * because it was composed FROM fragments — the lineage the ledger recorded at fire
+   * time IS the tagging, so a save is a set insertion and not a caption or decompose
+   * pass. That is the product decision this method implements, not an incidental
+   * property: nothing here reaches a model, a pod, or a quote.
+   *
+   * THE MOTHER DATASET IS NEVER WRITTEN (S7, S13). The session is a version of the
+   * mother, and a save lands on the version. The session's dataset is minted LAZILY, by
+   * the first save — a session that never saves leaves no empty record behind — and the
+   * session carries its id from then on, so every later save appends to the same record
+   * through `addDatasetMedia` rather than minting a second one.
+   *
+   * THE URL IS RESOLVED SERVER-SIDE, never supplied by the caller. The piece names the
+   * run that produced it, and the media is minted from that Actum through `_mintMedia`,
+   * the same path dataset creation uses — which is where the Actum is checked to be the
+   * caller's own and `completus`. Nothing from a request body lands on an owner-scoped
+   * record.
+   *
+   * A SAVE REWEIGHTS THE FLOOR AND NEVER WIDENS IT. The lineage is written onto the new
+   * media item, and the session's own fragment list is untouched: a piece is assembled
+   * from fragments already on the floor, so re-entry makes the lane heavier, never
+   * wider. Widening is the manual add, or a fresh decompose.
+   *
+   * The media lands BEFORE the ledger entry is flagged, so a failure never leaves a
+   * session claiming a save that did not happen.
+   */
+  async saveMusePiece(auctor: AuctorKey, id: string, runId: string): Promise<MuseSessionView> {
+    const run = typeof runId === 'string' ? runId.trim() : ''
+    if (!run) throw Errors.inputMalformed('runId is required')
+
+    const stored = await this._museSession(auctor, id)
+    const piece = stored.session.pieces.find((p) => p.runId === run)
+    if (!piece) throw new ApiError('not_found.muse_piece', `Muse piece for run '${run}' not found`, 404)
+
+    const ingest: IngestMediaInput = { source: 'generation', actumIds: [piece.runId] }
+    const existingId = stored.session.sessionDatasetId
+
+    let before: DatasetMediaItem[] = []
+    let target: Dataset
+    if (existingId) {
+      before = (await this.getDataset(auctor, existingId)).media
+      target = await this.addDatasetMedia(auctor, existingId, ingest)
+    } else {
+      const mother = await this.getDataset(auctor, stored.session.motherDatasetId)
+      target = await this.createDataset(auctor, {
+        ...ingest,
+        name: this._sessionDatasetName(mother.name, stored.id),
+        modality: mother.modality,
+        custody: mother.custody,
+      })
+    }
+
+    // The lineage rides the media, item by item. `setFragments` writes one item at a
+    // time and is keyed by media id rather than by position, because `media` is
+    // append-only and a positional write re-binds as soon as anything else lands.
+    const known = new Set(before.map((m) => m.id))
+    const lineage = piece.fragments.map((f) => ({ ...f }))
+    for (const item of target.media) {
+      if (known.has(item.id)) continue
+      await this._datasetsStore().setFragments(target.id, item.id, lineage)
+    }
+
+    return this._mutateMuseSession(auctor, id, (session) => {
+      try {
+        return updatePiece(withSessionDataset(session, target.id), run, { saved: true })
       } catch (err) {
         if (err instanceof UnknownPieceError) {
           throw new ApiError('not_found.muse_piece', `Muse piece for run '${run}' not found`, 404)
@@ -3630,6 +3723,8 @@ export interface MuseSessionView {
   owner: string
   /** The dataset this session broke off from. Never written to by the session. */
   motherDatasetId: string
+  /** The session's own dataset, holding the pieces saved out of it. Absent until the first save. */
+  sessionDatasetId?: string
   /** Every fragment on the floor, in display order. Session-owned copies. */
   fragments: Fragment[]
   /** Per-fragment floor state, keyed by fragment identity. */
