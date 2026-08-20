@@ -93,13 +93,18 @@ class TimeoutError extends Error {
 }
 
 /**
- * Race a promise against a timer. The timer is unref'd so a pending Telegram call can never hold
- * the event loop open, and it is always cleared so a fast call leaves nothing behind.
+ * Race a promise against a timer, and always clear the timer so a fast call leaves nothing behind.
+ *
+ * The timer is deliberately NOT unref'd. An unref'd timer only fires while something ELSE is
+ * holding the event loop open, which makes the timeout a guarantee about the rest of the process
+ * rather than about this call — and a timeout you cannot rely on firing is not a timeout. In the
+ * server this is invisible (the HTTP listener holds the loop either way); with nothing else
+ * pending, an unref'd timer means the wait silently never completes. The bound is short and the
+ * timer is always cleared on settle, so holding the loop costs at most `ms`.
  */
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer: NodeJS.Timeout | number = setTimeout(() => reject(new TimeoutError(label, ms)), ms)
-    ;(timer as NodeJS.Timeout).unref?.()
     p.then(
       v => { clearTimeout(timer as NodeJS.Timeout); resolve(v) },
       e => { clearTimeout(timer as NodeJS.Timeout); reject(e) },
@@ -109,11 +114,12 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 
 const PENDING = Symbol('pending')
 
-/** Resolve to PENDING after `ms`, without holding the event loop open. */
+/** Resolve to PENDING after `ms` — the fast-fail probe for a launch that never settles.
+ *  Not unref'd, for the reason given on `withTimeout`: this timer IS the probe, so it has to
+ *  fire on its own rather than only when something else keeps the loop alive. */
 function pendingAfter(ms: number): Promise<typeof PENDING> {
   return new Promise(resolve => {
-    const timer: NodeJS.Timeout | number = setTimeout(() => resolve(PENDING), ms)
-    ;(timer as NodeJS.Timeout).unref?.()
+    setTimeout(() => resolve(PENDING), ms)
   })
 }
 
