@@ -12,6 +12,7 @@ import { ExecuteFlow } from './flow/flows/ExecuteFlow.js'
 import { TelegramAllocutio } from './allocutio/telegram/TelegramAllocutio.js'
 import type { RouterDeps, IdentityResolver } from './allocutio/telegram/TelegramAllocutio.js'
 import { makeTelegramSender } from './allocutio/telegram/TelegramSenderAdapter.js'
+import { startTelegram } from './allocutio/telegram/startTelegram.js'
 import type { AuctorKey } from './flow/types.js'
 import { createWebhookRouter } from './api/webhooks/webhookRouter.js'
 import { handleAlchemyWebhook, sweepConfirmatumDeposita } from './api/webhooks/alchemyWebhook.js'
@@ -1615,69 +1616,12 @@ async function main(): Promise<void> {
 
   app.listen(PORT, () => log.info(`Listening on :${PORT}`))
 
-  // 9. Register bot commands with Telegram
-  const BOT_COMMANDS = [
-    { command: 'make',   description: 'Generate images and art'        },
-    { command: 'chat',   description: 'Chat with an AI model'          },
-    { command: 'flows',  description: 'Browse all available tools'     },
-    { command: 'status', description: 'View your balance and account'  },
-    { command: 'wallet', description: 'Manage connected wallets'       },
-    { command: 'cancel', description: 'Cancel current action'          },
-    { command: 'help',   description: 'Show available commands'        },
-  ]
-  await tgBot.telegram.setMyCommands(BOT_COMMANDS).catch((e: unknown) =>
-    log.warn('Failed to register bot commands', { error: String(e) })
-  )
-  log.info('Bot commands registered', { count: BOT_COMMANDS.length })
-
-  // 10. Start Telegram
-  if (TELEGRAM_WEBHOOK_URL) {
-    await tgBot.telegram.setWebhook(`${TELEGRAM_WEBHOOK_URL}/telegram`)
-    app.use(tgBot.webhookCallback('/telegram'))
-    log.info(`Telegram webhook set to ${TELEGRAM_WEBHOOK_URL}/telegram`)
-  } else {
-    let pollingRestartInProgress = false
-    let consecutivePollingErrors = 0
-
-    // Launch polling
-    await tgBot.launch({
-      allowedUpdates: ['message', 'callback_query'],
-    })
-    log.info('Telegram polling started')
-
-    tgBot.catch((err: unknown) => {
-      const status = (err as { response?: { error_code?: number } })?.response?.error_code
-
-      if (status === 409) {
-        log.warn('Bot 409 conflict — concurrent instance. Backing off 50s.')
-        if (!pollingRestartInProgress) {
-          pollingRestartInProgress = true
-          consecutivePollingErrors = 0
-          setTimeout(() => {
-            pollingRestartInProgress = false
-            tgBot.launch({ allowedUpdates: ['message', 'callback_query'] })
-              .catch((e: unknown) => log.error('Bot failed restart after 409', { error: String(e) }))
-          }, 50_000)
-        }
-        return
-      }
-
-      consecutivePollingErrors++
-      log.error(`Bot polling error (${consecutivePollingErrors})`, { error: String(err) })
-
-      if (consecutivePollingErrors >= 5 && !pollingRestartInProgress) {
-        pollingRestartInProgress = true
-        consecutivePollingErrors = 0
-        setTimeout(() => {
-          pollingRestartInProgress = false
-          tgBot.launch({ allowedUpdates: ['message', 'callback_query'] })
-            .catch((e: unknown) => log.error('Bot failed restart after errors', { error: String(e) }))
-        }, 5_000)
-      }
-    })
-  }
-
-  // 10. Graceful shutdown
+  // 9. Graceful shutdown — registered BEFORE any optional integration is started.
+  // Everything `shutdown` closes over is constructed far above this point, and a process must be
+  // able to die cleanly before it starts anything that may not return: the Telegram polling start
+  // below does not resolve while the bot is running, so a handler registered after it is never
+  // registered at all, and SIGTERM would then fall through to the default disposition with warm
+  // pods still running and Mongo still open.
   const shutdown = async (signal: string): Promise<void> => {
     log.info(`${signal} received — shutting down`)
     tgBot.stop(signal)
@@ -1716,6 +1660,39 @@ async function main(): Promise<void> {
 
   process.once('SIGINT', () => shutdown('SIGINT'))
   process.once('SIGTERM', () => shutdown('SIGTERM'))
+
+  // 10. Register bot commands and start Telegram.
+  //
+  // Non-fatal by construction: `startTelegram` returns a result rather than throwing, so a Telegram
+  // credential or connectivity failure degrades the chat surface instead of taking down a process
+  // that is already serving HTTP. Every Telegram call inside it is bounded by a timeout, and the
+  // polling start is not awaited to completion. See src/allocutio/telegram/startTelegram.ts.
+  const BOT_COMMANDS = [
+    { command: 'make',   description: 'Generate images and art'        },
+    { command: 'chat',   description: 'Chat with an AI model'          },
+    { command: 'flows',  description: 'Browse all available tools'     },
+    { command: 'status', description: 'View your balance and account'  },
+    { command: 'wallet', description: 'Manage connected wallets'       },
+    { command: 'cancel', description: 'Cancel current action'          },
+    { command: 'help',   description: 'Show available commands'        },
+  ]
+
+  const tgStart = await startTelegram({
+    bot: tgBot,
+    commands: BOT_COMMANDS,
+    log,
+    webhookUrl: TELEGRAM_WEBHOOK_URL,
+    app,
+  })
+
+  if (tgStart.mode === 'degraded') {
+    log.warn(
+      'Telegram DEGRADED — the bot is not receiving updates. HTTP API, web app and background ' +
+      'workers are unaffected and continue to serve. Restore by correcting the bot credential or ' +
+      'connectivity and restarting the process.',
+      { error: tgStart.error, commandsRegistered: tgStart.commandsRegistered }
+    )
+  }
 }
 
 main().catch(err => {
