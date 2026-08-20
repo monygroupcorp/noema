@@ -388,6 +388,52 @@ export const MODUS_DATASET_DECOMPOSE: Modus = make({
   mutatum: new Date('2026-08-18'),
 })
 
+export const MODUS_MUSE_STEER: Modus = make({
+  id: 'modus.muse-steer',
+  nomen: 'Muse Steer — an instruction into a proposal',
+  descriptio: 'Muse Steer — reads a short instruction against a Muse session\'s floor of prompt fragments and PROPOSES which to take off and which to add. It proposes only: the proposal is shown for approval, and the floor moves when the user confirms it and not before.',
+  genus: 'atomicus',
+  versio: '1.0.0',
+
+  // A ministerium of its OWN, for the reason the decompose modus states above: `Cursorum` is a
+  // flat Map<ministerium, Cursor> whose `register` is a bare set, so sharing a key with a
+  // hosted-API provider would replace that provider's ApiCursor, and sharing 'musegarden' would
+  // take over the decomposer. This arm owns its own key.
+  ministerium: 'musesteer',
+
+  // One chat call, in process, returning when the proposal is validated — no pod, no webhook.
+  deliveryMode: 'sync',
+  canonica: true,
+  // No impetusFixum: the cursor reserves a ceiling from the floor size and settles the real token
+  // cost of that one call — metered like any other run, with no free lane.
+
+  // Explicit override (the noema-087 convention: the cascade decides and an override is argued).
+  // The exitus is counts, so the cascade finds no output modality to key a row on and falls
+  // through to its `enhance` catch-all; an instruction in and a proposal out is text in, text
+  // out, and that is `chat`.
+  verbum: 'chat',
+
+  aditus: {
+    instruction: { type: 'text', required: true,  description: 'What the user wants changed, in their own words. Bounded server-side — a steer is a short push, not a prompt.' },
+    // The floor travels INLINE as an array of `{ category, text }` identities, never as a session
+    // id: a cursor cannot resolve an owner (an Actum is identity-blind), so a cursor reading a
+    // resource named in its aditus would be unscoped by construction. The API layer resolves the
+    // session for the authenticated caller and passes the floor it read.
+    floor:       { type: 'text', required: true,  description: 'The fragments to steer, as an array of { category, text } identities passed inline' },
+    model:       { type: 'text', required: false, description: 'Chat model id for the interpreter (the provider default when absent)' },
+    provider:    { type: 'text', required: false, description: 'Hosted-API provider id to steer on (the deployment default when absent)' },
+  },
+
+  exitus: {
+    eliminations: { type: 'int', description: 'How many fragments the proposal offers to take off the floor' },
+    additions:    { type: 'int', description: 'How many fragments the proposal offers to put on the floor' },
+    dropped:      { type: 'int', description: 'How many proposed changes were dropped in validation' },
+  },
+
+  natum:   new Date('2026-08-20'),
+  mutatum: new Date('2026-08-20'),
+})
+
 export const CANONICAL_MODI: Modus[] = [
   MODUS_CHATGPT,
   MODUS_DALLE_III,
@@ -399,4 +445,5 @@ export const CANONICAL_MODI: Modus[] = [
   MODUS_AITOOLKIT_TRAINING,
   MODUS_DATASET_CAPTION,
   MODUS_DATASET_DECOMPOSE,
+  MODUS_MUSE_STEER,
 ]

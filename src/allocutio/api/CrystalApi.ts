@@ -77,6 +77,7 @@ import {
   UnknownFragmentError,
   UnknownPieceError,
   addFragment,
+  enabledFragments,
   manualFragment,
   recordPiece,
   setFragmentEnabled,
@@ -89,6 +90,8 @@ import {
   type PiecePatch,
   type Reaction,
 } from '../../crystal/muse/session.js'
+import { MAX_INSTRUCTION_CHARS, type SteerProposal } from '../../crystal/muse/steer.js'
+import { MODUS_MUSE_STEER } from '../../crystal/seeds/modi.js'
 import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
 import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
 import type { Provincia, ProvinciaResKind, Provinciarum } from '../../types/provincia.js'
@@ -2383,6 +2386,62 @@ export class CrystalApi {
     })
   }
 
+  /**
+   * Interpret a short instruction against a session's floor and return a PROPOSAL.
+   *
+   * NOTHING IS APPLIED HERE, and that is the property this method exists to hold.
+   * A steer proposes: the eliminations and additions it returns are pills the user
+   * accepts or vetoes, and the floor moves only when they confirm and the app calls
+   * the floor routes that already exist (`PATCH …/floor/enabled`,
+   * `POST …/floor/fragments`). This method performs NO SESSION WRITE — it reads the
+   * session, runs the interpreter, and returns. An interpreter that could write
+   * would make the consent sheet a formality, and the failure would be silent: the
+   * pills would render and the floor would already have moved.
+   *
+   * THE FLOOR IS PASSED INLINE AND THE CURSOR NEVER RECEIVES THE SESSION ID. That
+   * is deliberate rather than incidental. An `Actum` carries no `animaId` —
+   * ownership travels identity-blind through `nullifier` → `signum` — so a cursor
+   * cannot resolve an owner, and a cursor that took a resource id out of its aditus
+   * and read it would be unscoped by construction. For a read-only steer that would
+   * put a stranger's floor, which is their private prompt material, into a proposal
+   * returned to the caller. Ownership is resolved HERE, from the authenticated
+   * caller, exactly as it is for every other method on this surface, and what
+   * travels onward is a value rather than a reference.
+   *
+   * Only the fragments currently IN THE DRAW are steered: a darkened fragment is
+   * already out, so a pill offering to eliminate it would change nothing.
+   *
+   * THE PROPOSAL IS NOT PERSISTED, and that is a decision rather than an oversight.
+   * It lives for the length of the sheet — the floor is the durable object and the
+   * confirm is the cut line, so a proposal that dies with the page is behaving
+   * correctly.
+   *
+   * It is a normal metered run: one chat call, reserved before it is made and
+   * settled at its real token cost.
+   */
+  async steerMuseSession(auctor: AuctorKey, id: string, input: unknown): Promise<SteerProposalView> {
+    const body = (input ?? {}) as { instruction?: unknown }
+    const instruction = typeof body.instruction === 'string' ? body.instruction.trim() : ''
+    if (!instruction) throw Errors.inputMalformed('instruction is required')
+    // The instruction is LIMITED, and the limit is the server's. The bound is
+    // enforced again in the cursor's `reserve()`, before anything is spent; this is
+    // the same bound reported as a 400 rather than as a failed run.
+    if (instruction.length > MAX_INSTRUCTION_CHARS) {
+      throw Errors.inputMalformed(`instruction must be at most ${MAX_INSTRUCTION_CHARS} characters`)
+    }
+
+    const stored = await this._museSession(auctor, id)
+    const floor = enabledFragments(stored.session).map((f) => ({ category: f.category, text: f.text }))
+    if (floor.length === 0) throw Errors.inputMalformed('this session has no fragments in the draw to steer')
+
+    const run = await this.invokeFlow(auctor, { modusId: MODUS_MUSE_STEER.id }, { instruction, floor })
+    const proposal = run.exitus?.proposal as SteerProposal | undefined
+    // A sync cursor either throws or returns a proposal, so this is a guard rather
+    // than a path: a run that reached here with no proposal produced nothing usable.
+    if (!proposal) throw Errors.internal(run.failure?.message ?? 'the steer produced no proposal')
+    return { proposal }
+  }
+
   /** The session's own copy of a cited fragment, or 400 when the floor does not hold it. */
   private _heldFragment(session: MuseSession, identity: FragmentIdentity): Fragment {
     const key = fragmentKey(identity)
@@ -3733,6 +3792,18 @@ export interface MuseSessionView {
   pieces: Piece[]
   natum: Date
   mutatum: Date
+}
+
+/**
+ * The wire projection of one steer — a proposal, and only a proposal.
+ *
+ * Nothing on this shape has been applied to anything. It is the consent sheet's
+ * source: each elimination and each addition is a pill the user may veto, and the
+ * floor moves only through the floor routes once they confirm. It is not stored
+ * anywhere — a proposal lives for the length of the sheet.
+ */
+export interface SteerProposalView {
+  proposal: SteerProposal
 }
 
 export interface StatusView {
