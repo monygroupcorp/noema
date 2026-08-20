@@ -74,6 +74,22 @@ export interface CommandDeps {
 /** Deep-link account-link payload: `/start link_<code>` (code is base64url from makeLinkToken). */
 const LINK_PAYLOAD_RE = /^link_([A-Za-z0-9_-]+)$/
 
+/** Every command this router answers. Kept beside the switch it mirrors. */
+const KNOWN_COMMANDS = new Set([
+  '/start', '/make', '/run', '/bind', '/chat', '/flows', '/arm',
+  '/cancel', '/stop', '/status', '/wallet', '/recover', '/help',
+])
+
+/** Parse a message's leading token into a bare command (`/MAKE@bot a cat` → `/make`). */
+export function parseCommand(text: string): string {
+  return text.split(' ')[0].split('@')[0].toLowerCase()
+}
+
+/** Does this router have a case for the message's command? */
+export function isKnownCommand(text: string): boolean {
+  return KNOWN_COMMANDS.has(parseCommand(text))
+}
+
 /**
  * CommandRouter — maps slash commands to flow-router actions. The reaction-prep
  * (🤔 + remembering the command message) stays in the adapter; this owns only the
@@ -82,8 +98,21 @@ const LINK_PAYLOAD_RE = /^link_([A-Za-z0-9_-]+)$/
 export class CommandRouter {
   constructor(private readonly deps: CommandDeps) {}
 
-  async dispatch(userId: string, chatId: number, text: string, messageId?: number, entryImageUrl?: string): Promise<void> {
-    const cmd = text.split(' ')[0].split('@')[0].toLowerCase()
+  /**
+   * @param opts.silentOnUnknown  Swallow the "Unknown command" reply instead of sending it.
+   *   Set for a group message that did not name this bot: `/foo` in a shared chat is far
+   *   more likely to be another bot's command than a typo aimed at us, and answering it
+   *   makes us the bot that talks over every other bot in the room.
+   */
+  async dispatch(
+    userId: string,
+    chatId: number,
+    text: string,
+    messageId?: number,
+    entryImageUrl?: string,
+    opts?: { silentOnUnknown?: boolean },
+  ): Promise<void> {
+    const cmd = parseCommand(text)
     const ack = () => { if (messageId !== undefined) this.deps.ack(chatId, messageId) }
     // An entry image (attached photo / replied-to photo) rides into the flow state on
     // the verbs that accept one; ExecuteFlow maps it onto the first image Porta.
@@ -273,6 +302,8 @@ export class CommandRouter {
         return
 
       default:
+        // Not ours to answer unless we were addressed — see `silentOnUnknown`.
+        if (opts?.silentOnUnknown) return
         await this.deps.sendMessage(chatId, COPY.command.unknown)
         return
     }
