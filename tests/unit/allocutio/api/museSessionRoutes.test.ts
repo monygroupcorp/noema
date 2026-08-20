@@ -1,5 +1,5 @@
 // =============================================================================
-// Muse session HTTP surface — the save-back seam (hermetic route + facade test)
+// Muse session HTTP surface — the save-back and steer seams (hermetic route test)
 // =============================================================================
 //
 // Real `CrystalApi` + real `createApiRouter` over in-memory doubles, no live
@@ -8,8 +8,13 @@
 // SESSION, not the dataset: the dataset is where a save lands, but every call
 // here goes through a session route.
 //
-// The four claims this file is gated on, each one a product decision that would
+// The five claims this file is gated on, each one a product decision that would
 // otherwise be provable only by reading the code:
+//
+//   0. A STEER PROPOSES AND NEVER APPLIES (S9). The steer route reads the session
+//      and returns pills the user may veto; the floor moves only when they confirm
+//      and the app calls the floor routes. Proved against a session store whose
+//      every mutator throws and which records what it was asked to do.
 //
 //   1. SAVING RUNS NO JOB AND SPENDS NOTHING. A generated piece does not need
 //      decomposing: it was composed FROM fragments, so the lineage the ledger
@@ -55,6 +60,10 @@ import type { Fragment } from '../../../../src/crystal/muse/taxonomy.js'
 import type { Actum, Actorum } from '../../../../src/types/cursus.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
+import { MuseSteerCursor } from '../../../../src/crystal/MuseSteerCursor.js'
+import { MAX_INSTRUCTION_CHARS } from '../../../../src/crystal/muse/steer.js'
+import { OPENROUTER_PROVIDER } from '../../../../src/crystal/apiProviders.js'
+import { MODUS_MUSE_STEER } from '../../../../src/crystal/seeds/modi.js'
 
 // ── Doubles ──────────────────────────────────────────────────────────────────
 
@@ -202,8 +211,11 @@ const fakeIdentity: Identity = {
 
 function createServer(
   datasets: Datasets, museSessions: MuseSessions, actorum: Actorum,
+  extra: Record<string, unknown> = {},
 ): Promise<{ server: http.Server; url: string }> {
-  const deps = { datasets, museSessions, actorum, signorum: noSpendSignorum } as unknown as CrystalApiDeps
+  const deps = {
+    datasets, museSessions, actorum, signorum: noSpendSignorum, ...extra,
+  } as unknown as CrystalApiDeps
   const api = new CrystalApi(deps)
   return new Promise((resolveP, reject) => {
     const app = express()
@@ -495,6 +507,206 @@ test('a session belonging to another identity cannot be saved into', async () =>
     assert.equal(stranger.body.error.code, 'not_found.muse_session')
     assert.equal(sessions.store.get(sessionId)!.session.pieces[0].saved, false, 'and nothing was written')
     assert.equal(datasets.store.size, 1)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── The steer seam: a proposal, and nothing else ─────────────────────────────
+//
+// A steer PROPOSES and never applies (S9). The route reads the session, runs the
+// interpreter, and returns pills the user may veto; the floor moves only when they
+// confirm and the app calls the floor routes. The claim is proved the only way it
+// can be — against a session store that RECORDS every call and whose every mutator
+// throws, so a steer that wrote anything cannot reach a 200.
+
+/**
+ * A session store wrapper that records what it was asked to do and refuses to write.
+ *
+ * `create` and `save` throw: they are the whole mutation surface of `MuseSessions`,
+ * so a steer path that touched a session — directly or through the pure module —
+ * fails here rather than passing quietly.
+ */
+function sealedSessions(inner: MuseSessions): MuseSessions & { calls: string[] } {
+  const calls: string[] = []
+  return {
+    calls,
+    async create(): Promise<StoredMuseSession> {
+      calls.push('create')
+      throw new Error('a steer must not write a session')
+    },
+    async save(): Promise<StoredMuseSession | null> {
+      calls.push('save')
+      throw new Error('a steer must not write a session')
+    },
+    async find(id: string) { calls.push('find'); return inner.find(id) },
+    async listByOwner(owner: string, motherDatasetId: string) {
+      calls.push('listByOwner')
+      return inner.listByOwner(owner, motherDatasetId)
+    },
+  }
+}
+
+/** The execution ring `invokeFlow` needs, wired to the real steer cursor over a fake transport. */
+function steerRing(answer: unknown) {
+  const cast: Array<Record<string, unknown>> = []
+  const cursor = new MuseSteerCursor({
+    providers: [{ provider: OPENROUTER_PROVIDER, apiKey: 'test-key' }],
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        choices: [{ message: { content: JSON.stringify(answer) } }],
+        usage: { total_tokens: 100 },
+      }),
+    }),
+  })
+  return {
+    cast,
+    deps: {
+      inceptor: {
+        async initiate(inceptio: { modusId: string; aditus: Record<string, unknown> }) {
+          cast.push(inceptio.aditus)
+          return {
+            id: 'act-steer', modusId: inceptio.modusId, modusVersiono: MODUS_MUSE_STEER.versio,
+            aditus: inceptio.aditus, impetus: 1_000n, status: 'agens',
+          }
+        },
+      },
+      modorum: {
+        async find(id: string) { return id === MODUS_MUSE_STEER.id ? MODUS_MUSE_STEER : null },
+      },
+      cursorum: { resolve: () => cursor },
+      completor: {
+        async complete(a: Record<string, unknown>, exitus: { exitus: Record<string, unknown>; impetus: bigint }) {
+          return { ...a, status: 'completus', exitus: exitus.exitus, impetus: exitus.impetus }
+        },
+      },
+    } as Record<string, unknown>,
+  }
+}
+
+test('a steer run performs no session write — it proposes, and the floor is left exactly as it was', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const sessions = new MemoryMuseSessions()
+
+  // Spawn through an ordinary store, then seal it: from here on any write is a throw.
+  const spawn = await createServer(datasets, sessions, readOnlyActorum([]))
+  let sessionId: string
+  try {
+    const spawned = await request(`${spawn.url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    assert.equal(spawned.status, 201)
+    sessionId = spawned.body.session.id
+  } finally {
+    await closeServer(spawn.server)
+  }
+
+  const before = JSON.stringify(sessions.store.get(sessionId!))
+  const sealed = sealedSessions(sessions)
+  const ring = steerRing({
+    eliminations: [{ category: 'lighting', text: 'dusk glow' }],
+    additions: [{ category: 'mood', text: 'hushed and expectant' }],
+  })
+
+  const { server, url } = await createServer(datasets, sealed, readOnlyActorum([]), ring.deps)
+  try {
+    const steered = await request(`${url}/v1/data/muse/sessions/${sessionId!}/steer`, {
+      method: 'POST', headers: HEADERS, body: { instruction: 'lose the dusk, make it expectant' },
+    })
+    assert.equal(steered.status, 200, `a steer must not write: ${JSON.stringify(steered.body)}`)
+
+    const proposal = steered.body.proposal
+    assert.deepEqual(proposal.eliminations, [{ category: 'lighting', text: 'dusk glow' }])
+    assert.equal(proposal.additions.length, 1)
+    assert.equal(proposal.additions[0].category, 'mood')
+    assert.equal(proposal.dropped, 0)
+
+    // The mutators were never even reached — the only thing a steer asks a store is to read.
+    assert.deepEqual(sealed.calls, ['find'], 'a steer reads the session once and writes nothing')
+    assert.equal(
+      JSON.stringify(sessions.store.get(sessionId!)), before,
+      'the stored session is byte-identical after a steer',
+    )
+
+    // And the run was cast with the floor INLINE: no session id travels to the interpreter,
+    // which could not scope one if it did (an Actum carries no identity).
+    assert.equal(ring.cast.length, 1)
+    const aditus = ring.cast[0]
+    assert.equal(aditus.instruction, 'lose the dusk, make it expectant')
+    assert.ok(Array.isArray(aditus.floor))
+    assert.deepEqual(
+      (aditus.floor as Array<Record<string, string>>).map((f) => `${f.category}:${f.text}`).sort(),
+      FRAGMENTS.map((f) => `${f.category}:${f.text}`).sort(),
+    )
+    for (const value of Object.values(aditus)) {
+      assert.notEqual(value, sessionId!, 'the session id must not travel into the run')
+    }
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a proposal naming a fragment the floor does not hold comes back short, and says how short', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const sessions = new MemoryMuseSessions()
+  const ring = steerRing({
+    eliminations: [
+      { category: 'style', text: 'ink wash' },            // held
+      { category: 'style', text: 'a style nobody has' },  // not held
+    ],
+    additions: [{ category: 'nonsense', text: 'outside the taxonomy' }],
+  })
+
+  const { server, url } = await createServer(datasets, sessions, readOnlyActorum([]), ring.deps)
+  try {
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    const sessionId = spawned.body.session.id
+
+    const steered = await request(`${url}/v1/data/muse/sessions/${sessionId}/steer`, {
+      method: 'POST', headers: HEADERS, body: { instruction: 'lose the ink wash' },
+    })
+    assert.equal(steered.status, 200)
+    assert.deepEqual(steered.body.proposal.eliminations, [{ category: 'style', text: 'ink wash' }])
+    assert.deepEqual(steered.body.proposal.additions, [])
+    assert.equal(steered.body.proposal.dropped, 2, 'the drops are reported rather than swallowed')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('the instruction is limited at the server, and an empty one never reaches a run', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const ring = steerRing({})
+  const { server, url } = await createServer(
+    datasets, new MemoryMuseSessions(), readOnlyActorum([]), ring.deps,
+  )
+  try {
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    const sessionId = spawned.body.session.id
+
+    for (const instruction of ['', '   ', 'x'.repeat(MAX_INSTRUCTION_CHARS + 1)]) {
+      const refused = await request(`${url}/v1/data/muse/sessions/${sessionId}/steer`, {
+        method: 'POST', headers: HEADERS, body: { instruction },
+      })
+      assert.equal(refused.status, 400, `'${instruction.slice(0, 12)}…' must be refused`)
+    }
+    assert.equal(ring.cast.length, 0, 'no refused instruction was ever cast as a run')
+
+    const stranger = await request(`${url}/v1/data/muse/sessions/${sessionId}/steer`, {
+      method: 'POST', headers: { 'x-api-key': 'owner-2' }, body: { instruction: 'lose the ink wash' },
+    })
+    assert.equal(stranger.status, 404)
+    assert.equal(stranger.body.error.code, 'not_found.muse_session')
+    assert.equal(ring.cast.length, 0, "and a stranger's steer never reached a run either")
   } finally {
     await closeServer(server)
   }

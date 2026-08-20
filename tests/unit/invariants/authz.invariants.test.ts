@@ -564,6 +564,13 @@ test('INVARIANT: identity B cannot read or steer identity A\'s Muse session by i
       call: (id) => api.addMuseFragment(B, id, { category: 'mood', text: 'b-was-here' }),
     },
     {
+      // A steer reads a session's floor and hands it back to the caller, transformed. B naming
+      // A's session must be refused AT THE SESSION, before that floor is read: it is A's private
+      // prompt material, and a proposal made about it would carry it into B's response.
+      name: 'steerMuseSession',
+      call: (id) => api.steerMuseSession(B, id, { instruction: 'lose the ink wash' }),
+    },
+    {
       name: 'recordMusePiece',
       call: (id) => api.recordMusePiece(B, id, { runId: 'run-of-b', rollIndex: 1, fragments: [held] }),
     },

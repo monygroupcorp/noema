@@ -163,6 +163,8 @@ export interface ApiFacade {
   setMuseFragmentEnabled(auctor: AuctorKey, id: string, fragment: unknown, enabled: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   setMuseFragmentWeight(auctor: AuctorKey, id: string, fragment: unknown, weight: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   addMuseFragment(auctor: AuctorKey, id: string, fragment: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
+  /** Returns a PROPOSAL and applies nothing — the floor moves through the routes above, on confirm. */
+  steerMuseSession(auctor: AuctorKey, id: string, input: unknown): Promise<import('./CrystalApi.js').SteerProposalView>
   recordMusePiece(auctor: AuctorKey, id: string, piece: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   updateMusePiece(auctor: AuctorKey, id: string, runId: string, patch: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   saveMusePiece(auctor: AuctorKey, id: string, runId: string): Promise<import('./CrystalApi.js').MuseSessionView>
@@ -1062,6 +1064,18 @@ export function createApiRouter(deps: {
     const auctor = await auth(req)
     const body = (req.body ?? {}) as { category?: unknown; text?: unknown }
     res.status(201).json({ session: await api.addMuseFragment(auctor, String(req.params.id), body) })
+  }))
+
+  // POST /v1/data/muse/sessions/:id/steer — interpret a short instruction against the
+  // session's floor and return a PROPOSAL. Nothing is applied here: the response is what the
+  // consent sheet is rendered from, every pill in it is vetoable, and the floor moves only
+  // when the user confirms and the app calls the two floor routes above. The session is
+  // resolved for the authenticated caller and its floor is passed INLINE into the run — the
+  // interpreter never receives a session id and reads no session. Metered: one chat call.
+  router.post('/data/muse/sessions/:id/steer', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const body = (req.body ?? {}) as { instruction?: unknown }
+    res.json(await api.steerMuseSession(auctor, String(req.params.id), body))
   }))
 
   // POST /v1/data/muse/sessions/:id/pieces — append a piece to the session's ledger with
