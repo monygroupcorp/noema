@@ -4008,6 +4008,112 @@ Put a fragment the caller wrote on the floor of a session they own, in the draw 
 }
 ```
 
+### POST /v1/data/muse/sessions/:id/steer
+
+Interpret a short instruction against the floor of a session the caller owns and return a PROPOSAL: fragments to take out of the draw, and fragments to put on the floor. NOTHING IS APPLIED — the response is offered for approval, any part of it may be rejected, and the floor moves only when the accepted parts are sent to the floor routes. Only the fragments currently in the draw are steered. The instruction is limited to 280 characters, enforced server-side. A proposed change that does not survive validation — an elimination naming a fragment the floor does not hold, an addition outside the taxonomy or already on the floor — is dropped and counted rather than silently removed. The proposal is not stored. This is a metered run: one model call, reserved before it is made and settled at its real cost. A session the caller does not own is reported as not found.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "A short instruction to interpret against the session floor. The instruction is LIMITED and the limit is enforced server-side: a steer is a short push against a floor, not a prompt. Only the fragments currently in the draw are steered.",
+  "properties": {
+    "instruction": {
+      "type": "string",
+      "description": "What should change, in the caller's own words. At most 280 characters."
+    }
+  },
+  "required": [
+    "instruction"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "proposal": {
+      "type": "object",
+      "description": "A proposed change to the floor. NOTHING IN IT HAS BEEN APPLIED: each entry is offered for approval and any of them may be rejected. The floor moves only when the accepted parts are sent to the floor routes. The proposal is not stored — it lives for as long as it is being reviewed, and the floor is the durable object.",
+      "properties": {
+        "eliminations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A fragment named by its identity — the same `{ category, text }` pair the floor routes take.",
+            "properties": {
+              "category": {
+                "type": "string",
+                "description": "The fragment's category."
+              },
+              "text": {
+                "type": "string",
+                "description": "The fragment's text."
+              }
+            },
+            "required": [
+              "category",
+              "text"
+            ]
+          },
+          "description": "Fragments proposed for removal from the draw. Every one is on the floor as it stands."
+        },
+        "additions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A categorized, reusable prompt fragment lifted from a caption.",
+            "properties": {
+              "category": {
+                "type": "string",
+                "description": "Which slot the fragment fills (subject, style, lighting, …)."
+              },
+              "text": {
+                "type": "string",
+                "description": "The fragment itself — a short, prompt-ready phrase."
+              },
+              "source": {
+                "type": "string",
+                "description": "The moodboard entry it came from."
+              },
+              "trigger": {
+                "type": "string",
+                "description": "The model binding for that source (e.g. a LoRA trigger word)."
+              }
+            },
+            "required": [
+              "category",
+              "text",
+              "source",
+              "trigger"
+            ]
+          },
+          "description": "Fragments proposed for the floor. Every one is in the taxonomy and new to the floor."
+        },
+        "dropped": {
+          "type": "number",
+          "description": "How many proposed changes did not survive validation — an elimination naming a fragment the floor does not hold, an addition outside the taxonomy or already on the floor, or a blank. Reported rather than swallowed, so a shorter list is not mistaken for the whole answer."
+        }
+      },
+      "required": [
+        "eliminations",
+        "additions",
+        "dropped"
+      ]
+    }
+  },
+  "required": [
+    "proposal"
+  ]
+}
+```
+
 ### POST /v1/data/muse/sessions/:id/pieces
 
 Append a piece to the ledger of a session the caller owns, with the fragments that produced it. A piece citing a fragment the session does not hold is rejected rather than stored, because its lineage could not be resolved against this floor afterwards. The ledger holds one entry per run: a record for a run already in it is rejected, and changing a recorded piece is the PATCH below.
