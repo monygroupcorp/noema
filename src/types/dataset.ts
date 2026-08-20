@@ -78,6 +78,24 @@ export interface DatasetVersion {
 }
 
 /**
+ * The version string a media append records next, derived from the versions already on the
+ * dataset. Derived in ONE place so the store and any double standing in for it cannot diverge.
+ *
+ * Scheme: `createDataset` mints `1.0.0` at creation, and an append takes the MINOR component —
+ * `1.0.0` -> `1.1.0` -> `1.2.0`. Minor rather than patch because an append changes what the
+ * dataset IS (its media set, and with it every captionset's coverage denominator), which is an
+ * additive change to the record rather than a correction to it. A last entry that does not parse
+ * as `x.y.z`, and an empty `versions`, both resolve to `1.1.0` — the first append off an
+ * unreadable or absent history.
+ */
+export function nextDatasetVersion(versions: DatasetVersion[]): string {
+  const last = versions[versions.length - 1]
+  const m = last ? /^(\d+)\.(\d+)\.(\d+)$/.exec(last.v) : null
+  if (!m) return '1.1.0'
+  return `${m[1]}.${Number(m[2]) + 1}.0`
+}
+
+/**
  * Dataset — the training-data primitive.
  *
  * Ownership key `owner: string` (an Anima id), matching `Provincia.owner`'s
@@ -126,26 +144,39 @@ export interface DatasetSummaryListPage {
   nextCursor?: string
 }
 
-/** Input to create a drop-media dataset: media already uploaded via
- *  `POST /storage/uploads/sign` (R2 signed-PUT), referenced by URL. */
-export interface CreateDatasetFromUpload {
+/** Media dropped in directly: already uploaded via `POST /storage/uploads/sign`
+ *  (R2 signed-PUT), referenced by URL. */
+export interface IngestMediaFromUpload {
   source: 'upload'
-  name: string
-  modality: DatasetModality
-  custody?: DatasetCustody
   /** URLs/keys returned by the storage-sign flow. */
   mediaUrls: string[]
 }
 
-/** Input to create a seed-from-generation dataset: media resolved from an
- *  existing Actum's exitus (an already-completed run this caller owns). */
-export interface CreateDatasetFromGeneration {
+/** Media resolved from an existing Actum's exitus (an already-completed run this
+ *  caller owns). */
+export interface IngestMediaFromGeneration {
   source: 'generation'
+  /** FK[] -> Actum. Each must be owned by the caller and completus. */
+  actumIds: string[]
+}
+
+/** How media enters a dataset. ONE discriminated shape, shared by dataset creation and by a
+ *  later append, so both routes take the same body and mint items through the same path —
+ *  a second ingestion shape would be a second place for the two to drift. */
+export type IngestMediaInput = IngestMediaFromUpload | IngestMediaFromGeneration
+
+/** Input to create a drop-media dataset. */
+export interface CreateDatasetFromUpload extends IngestMediaFromUpload {
   name: string
   modality: DatasetModality
   custody?: DatasetCustody
-  /** FK[] -> Actum. Each must be owned by the caller and completus. */
-  actumIds: string[]
+}
+
+/** Input to create a seed-from-generation dataset. */
+export interface CreateDatasetFromGeneration extends IngestMediaFromGeneration {
+  name: string
+  modality: DatasetModality
+  custody?: DatasetCustody
 }
 
 export type CreateDatasetInput = CreateDatasetFromUpload | CreateDatasetFromGeneration
@@ -160,6 +191,22 @@ export interface Datasets {
   find(id: string): Promise<Dataset | null>
   list(opts: DatasetListOpts): Promise<DatasetListPage>
   listSummaries(opts: DatasetListOpts): Promise<DatasetSummaryListPage>
+  /** Append media to a dataset. APPEND-ONLY: the supplied items are added after the media
+   *  already present and nothing existing is replaced, reordered or dropped — every captionset's
+   *  caption map is keyed on `DatasetMediaItem.id`, so a replace would detach every caption on
+   *  the dataset.
+   *
+   *  Three things move together with the append, because all three are derived from the media
+   *  set: `mutatum` is bumped (it is the pagination sort key), a `DatasetVersion` is appended
+   *  whose `count` is the media count AFTER the append (`nextDatasetVersion` picks the string),
+   *  and every existing captionset's `coverage` is recomputed against the new media count — a
+   *  pass that read `7/7` reads `7/9` once two items land, rather than continuing to claim a
+   *  completeness it no longer has.
+   *
+   *  Returns the updated dataset, or null when the dataset does not exist. Owner scoping is
+   *  deliberately NOT a store concern — it is resolved at the API layer from the authenticated
+   *  caller, as it is for `addCaptionset`/`setCaption`. */
+  addMedia(datasetId: string, items: DatasetMediaItem[]): Promise<Dataset | null>
   /** Attach a captionset, replacing any captionset already carrying the same id (a
    *  re-run of a caption pass must not leave two). Bumps `mutatum`. Returns the updated
    *  dataset, or null when the dataset does not exist.
