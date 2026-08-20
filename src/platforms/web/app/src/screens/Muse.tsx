@@ -6,6 +6,7 @@ import {
   type Dataset as DatasetT,
   type FlowSummary,
   type Fragment,
+  type FragmentCategory,
   type MuseReaction,
   type MuseSessionView,
 } from '../lib/api';
@@ -33,6 +34,8 @@ import {
   ignitionRequest,
   latestSession,
   lineageOf,
+  manualAddError,
+  manualAddRequest,
   mergedExclusions,
   pieceRecord,
   poolDatasetFragments,
@@ -46,6 +49,7 @@ import {
   weightWrites,
   EMPTY_STREAM,
   EXPANDED_GESTURES,
+  MANUAL_CATEGORIES,
   TILE_GESTURES,
   type FloorPill,
   type IgnitionQuote,
@@ -105,6 +109,14 @@ import './muse.css';
 // The pull-up floor sheet (V1) is the full-fidelity view of that floor: every fragment,
 // grouped by category, live/total per category, and a DARKENED pill for every fragment a
 // steer turned off — visible and tappable back to live, never removed (S8).
+//
+// The manual add (noema-242) is the sheet's other half: pick a category, write a fragment,
+// and it lands on the floor in the draw. Everything else on this screen REWEIGHTS the
+// floor — a piece is composed from fragments already on it — so short of decomposing more
+// source images this is the only thing that WIDENS a narrow one, and it is free: one call
+// carrying a category and a text, no flow, no model, no quote. The LLM-assisted add is a
+// separate, metered surface. The rules the form follows (`manualAddError`,
+// `manualAddRequest`) are pure functions in `lib/muse.ts` and are gated there.
 
 export function Muse() {
   const { id } = useParams();
@@ -252,6 +264,24 @@ export function Muse() {
       setSessionError(`that fragment didn't move: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setFloorBusy(null);
+    }
+  }
+
+  // Manual add — the free widening. One call, and the sheet re-renders from the session
+  // it returns like every other floor write. Returns whether the fragment landed, so the
+  // form knows whether to clear itself.
+  const [adding, setAdding] = useState(false);
+  async function addToFloor(category: FragmentCategory, text: string): Promise<boolean> {
+    if (!session || adding) return false;
+    setAdding(true);
+    try {
+      setSession((await api.addMuseFragment(session.id, manualAddRequest(category, text))).session);
+      return true;
+    } catch (e) {
+      setSessionError(`that fragment didn't land: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    } finally {
+      setAdding(false);
     }
   }
 
@@ -702,6 +732,8 @@ export function Muse() {
             session={session}
             busyKey={floorBusy}
             onToggle={toggleFloorPill}
+            onAdd={addToFloor}
+            adding={adding}
             onClose={() => setFloorOpen(false)}
           />
         )}
@@ -868,15 +900,30 @@ function ExpandedPiece({
  * shows the same floor after a reload as before it.
  */
 function FloorSheet({
-  session, busyKey, onToggle, onClose,
+  session, busyKey, onToggle, onAdd, adding, onClose,
 }: {
   session: MuseSessionView;
   busyKey: string | null;
   onToggle: (pill: FloorPill) => void;
+  onAdd: (category: FragmentCategory, text: string) => Promise<boolean>;
+  adding: boolean;
   onClose: () => void;
 }) {
   const rows = floorSheet(session);
   const { live, total } = floorCounts(session);
+  const [addCategory, setAddCategory] = useState<FragmentCategory | ''>('');
+  const [addText, setAddText] = useState('');
+  const addError = manualAddError(session, addCategory, addText);
+  // Silent until the user has said something — a form that opens already complaining
+  // reads as broken. Once either field is touched, the reason is on screen rather than
+  // hidden behind a disabled button.
+  const showError = addCategory !== '' || addText.trim() !== '';
+
+  async function submitAdd(e: { preventDefault: () => void }) {
+    e.preventDefault();
+    if (addError || addCategory === '' || adding) return;
+    if (await onAdd(addCategory, addText)) setAddText('');
+  }
   return (
     <div className="muse-sheet" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="muse-sheet-card" onClick={(e) => e.stopPropagation()}>
@@ -885,6 +932,38 @@ function FloorSheet({
           <span className="gt-sub mono">{live}/{total} in the draw · tap a fragment to turn it off or back on</span>
           <button type="button" className="btn ghost sm muse-sheet-close" onClick={onClose}>Close</button>
         </div>
+        {/* The free widening (noema-242): pick a category, write a fragment, and it lands
+            on the floor in the draw. Nothing on this screen composes a phrase that is not
+            already here, so this is the form that answers a floor too narrow to work with —
+            and it costs nothing to use. */}
+        <form className="muse-add" onSubmit={submitAdd}>
+          <div className="muse-add-row">
+            <select
+              className="inp muse-add-cat"
+              aria-label="fragment category"
+              value={addCategory}
+              onChange={(e) => setAddCategory(e.target.value as FragmentCategory | '')}
+            >
+              <option value="">category…</option>
+              {MANUAL_CATEGORIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <input
+              className="inp muse-add-text"
+              aria-label="fragment text"
+              placeholder="write a fragment — e.g. a short, prompt-ready phrase"
+              value={addText}
+              onChange={(e) => setAddText(e.target.value)}
+            />
+            <button type="submit" className="btn sm" disabled={!!addError || adding}>
+              {adding ? 'adding…' : 'add to the floor'}
+            </button>
+          </div>
+          <div className="gt-sub mono muse-add-note">
+            {showError && addError ? addError : 'free — this reaches no model. it lands in the draw at even odds.'}
+          </div>
+        </form>
         {rows.length === 0 ? (
           <div className="gt-sub mono">this session's floor is empty.</div>
         ) : rows.map((row) => (

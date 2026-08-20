@@ -31,7 +31,7 @@
 // no clock, no randomness. Persistence, container wiring and HTTP routes live
 // elsewhere; this module is the platform-neutral core they call.
 
-import { fragmentKey, type Fragment } from './taxonomy.js'
+import { fragmentKey, isCategory, type Category, type Fragment } from './taxonomy.js'
 import { WEIGHT_MAX, WEIGHT_MIN, type FragmentState, type SteerState } from './sampler.js'
 
 // --- Types -------------------------------------------------------------------
@@ -209,6 +209,110 @@ export function rebuildFragments(
 ): MuseSession {
   const owned = dedupeByIdentity(fragments)
   return { ...session, fragments: owned, floor: buildFloor(owned, session.floor) }
+}
+
+// --- Widening the floor ------------------------------------------------------
+//
+// Every other mutator in this module REWEIGHTS a floor: a fragment is turned off,
+// or drawn more often, or recorded in the ledger. None of them WIDEN one — a piece
+// is assembled from fragments already present, so nothing a session does to its own
+// output puts a phrase on the floor that was not there when it spawned. A floor is
+// widened either by decomposing more source images into the mother, or by the user
+// writing a fragment themselves. This is the second one.
+//
+// It is pure like everything else here: it takes a session and returns a new one,
+// makes no request, and reaches nothing outside this module. A manually added
+// fragment costs nothing to add because nothing is called to add it.
+
+/**
+ * The `source` a fragment the user wrote carries.
+ *
+ * Attribution is load-bearing (`garden.ts`): `source` and `trigger` together are
+ * what turns a roll back into model bindings, so a fragment cannot be given a blank
+ * pair and left ambiguous about where it came from. A fragment the user typed came
+ * from no moodboard entry and binds no model, so its attribution is STATED rather
+ * than inferred — the source is this literal, and the trigger is empty because there
+ * is no model behind it. `roll.ts` already reads an empty trigger as "no binding":
+ * `triggersOf` collects only non-empty triggers and `formatRoll` omits the binding
+ * arrow, so a manual fragment composes into a prompt and attaches nothing.
+ *
+ * A literal rather than an absent field, so a manual fragment stays distinguishable
+ * from a lifted one everywhere attribution is read. The two are different
+ * provenance and should not merge into one bucket.
+ */
+export const MANUAL_SOURCE = 'manual'
+
+/** Thrown when a fragment is offered for a category the taxonomy does not define. */
+export class UnknownCategoryError extends Error {
+  /** The category that was offered and is not in the taxonomy. */
+  readonly category: string
+
+  constructor(category: string) {
+    super(`'${category}' is not a Muse fragment category`)
+    this.name = 'UnknownCategoryError'
+    this.category = category
+  }
+}
+
+/** Thrown when a fragment is offered with no text of its own. */
+export class EmptyFragmentTextError extends Error {
+  constructor() {
+    super('a fragment needs text')
+    this.name = 'EmptyFragmentTextError'
+  }
+}
+
+/**
+ * A fragment the user wrote, ready to be put on a floor.
+ *
+ * THE CATEGORY IS CONSTRAINED TO THE TAXONOMY, and that is the whole reason this
+ * function exists rather than a caller assembling the object literal. The sampler
+ * iterates `CATEGORIES` and `buildGarden` groups by category, so a fragment filed
+ * under anything else lands in a pool nothing ever reads: it would sit on the floor,
+ * count towards the floor's totals, and never be drawn. Rejecting it at the door is
+ * the difference between a fragment that widens the floor and one that only looks
+ * like it did.
+ *
+ * The text is trimmed to the identity `fragmentKey` will key it by, so the fragment
+ * as stored reads the same as the fragment as identified.
+ */
+export function manualFragment(category: string, text: string): Fragment {
+  if (!isCategory(category)) throw new UnknownCategoryError(category)
+  const trimmed = text.trim()
+  if (!trimmed) throw new EmptyFragmentTextError()
+  return {
+    category: category as Category,
+    text: trimmed,
+    source: MANUAL_SOURCE,
+    trigger: '',
+  }
+}
+
+/**
+ * Put a fragment on the session's floor, in the draw at even odds.
+ *
+ * ADDING A FRAGMENT THE FLOOR ALREADY HOLDS CHANGES NOTHING. `fragmentKey` is the
+ * identity and `buildGarden` already dedupes on it, so a second copy of one identity
+ * is not a second fragment — it is one fragment counted twice, which silently doubles
+ * that phrase's odds in every roll and leaves two entries for any later steer to land
+ * on. The session is returned unchanged instead, so adding what is already there is a
+ * no-op rather than an error: the fragment the user asked for is on the floor either
+ * way, including when the identity they typed is one a steer had darkened.
+ *
+ * THE MOTHER IS NEVER TOUCHED. The session works from its own copies (`spawnSession`),
+ * and this appends a fresh copy to a NEW list rather than pushing onto the array the
+ * session was spawned from — a manual add reaches the mother dataset's fragments
+ * neither by reference nor by write. A fragment the user wrote belongs to the session
+ * that spawned it and to nothing above it.
+ */
+export function addFragment(session: MuseSession, fragment: Fragment): MuseSession {
+  const key = fragmentKey(fragment)
+  if (session.floor.has(key)) return session
+
+  const owned = copyFragment(fragment)
+  const floor = new Map(session.floor)
+  floor.set(key, { ...DEFAULT_FRAGMENT_STATE })
+  return { ...session, fragments: [...session.fragments, owned], floor }
 }
 
 // --- The floor ---------------------------------------------------------------
