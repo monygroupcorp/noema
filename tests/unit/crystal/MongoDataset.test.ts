@@ -96,6 +96,10 @@ const twoMedia = {
     { id: 'm2', url: 'https://r2.example/m2.png', source: 'upload' as const, addedAt: new Date() },
   ],
   captionsets: [],
+  // Overridden alongside `media`: `base` carries a single 1.0.0 entry counting ONE item, and a
+  // fixture whose version history disagrees with its own media set makes every count assertion
+  // below read against a lie.
+  versions: [{ v: '1.0.0', count: 2, when: new Date() }],
 }
 
 test('addCaptionset attaches a captionset, derives coverage, and bumps mutatum', async () => {
