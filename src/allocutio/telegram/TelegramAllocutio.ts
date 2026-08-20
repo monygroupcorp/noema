@@ -49,7 +49,7 @@ import { ReactionController } from './reactions/ReactionController.js'
 import type { UiKeyboard } from '../lexicon/ui/Keyboard.js'
 import { inlineKeyboard, btn, renderPrimitive, decodeCallbackData, type InlineKeyboard } from './telegramRender.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
-import { CommandRouter } from './commands/CommandRouter.js'
+import { CommandRouter, isKnownCommand } from './commands/CommandRouter.js'
 import { REACTION } from '../lexicon/symbols.js'
 import { COPY } from '../lexicon/copy.js'
 import type { TelegramUpdate, TelegramSender, IdentityResolver, RouterDeps } from './telegramTypes.js'
@@ -618,7 +618,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         const largest = envelopePhoto[envelopePhoto.length - 1]  // highest res
         entryImageUrl = (await this._resolveFileUrl(largest.file_id)) ?? undefined
       }
-      await this._handleCommand(userId, chatId, text, message.message_id, entryImageUrl)
+      // In a group, an unrecognised `/command` is almost always another bot's — answering
+      // it makes us the bot that interrupts every other bot's conversation. Stay silent
+      // unless the message named us (`/foo@thisbot`, an @-mention, or a reply to us).
+      const silentOnUnknown = message.chat.type !== 'private' && !this._isAddressedToBot(message)
+      await this._handleCommand(userId, chatId, text, message.message_id, entryImageUrl, silentOnUnknown)
     } else {
       // Photo message while flow active → resolve file URL → prompt event
       if (message.photo && message.photo.length > 0) {
@@ -661,15 +665,17 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // Command handler
   // -------------------------------------------------------------------------
 
-  private async _handleCommand(userId: string, chatId: number, text: string, messageId?: number, entryImageUrl?: string): Promise<void> {
+  private async _handleCommand(userId: string, chatId: number, text: string, messageId?: number, entryImageUrl?: string, silentOnUnknown = false): Promise<void> {
     // Reaction-prep: 🤔 on receipt + remember the command message so the Stream
     // registration can later land the 👌/🔥 on it. The command surface itself lives
     // in CommandRouter.
-    if (messageId !== undefined) {
+    // Don't react to a command we won't answer — a 🤔 on another bot's command in a
+    // shared group is the same interruption as the reply, just quieter.
+    if (messageId !== undefined && (!silentOnUnknown || isKnownCommand(text))) {
       void this._react(chatId, messageId, REACTION.thinking)
       this.lastCommandMessageIds.set(`telegram:${userId}`, messageId)
     }
-    await this.commands.dispatch(userId, chatId, text, messageId, entryImageUrl)
+    await this.commands.dispatch(userId, chatId, text, messageId, entryImageUrl, { silentOnUnknown })
   }
 
   // -------------------------------------------------------------------------

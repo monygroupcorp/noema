@@ -207,3 +207,22 @@ test('/bind with NO bindVerb dep reports the command unavailable and does not th
   assert.equal(calls.enter.length, 0)
   assert.match((calls.msg.at(-1) as { text: string }).text, /Unknown command/)
 })
+
+test('an unknown command is answered when we were addressed', async () => {
+  const { router, calls } = make()
+  await router.dispatch('u1', 456, '/frobnicate', 50, undefined, { silentOnUnknown: false })
+  assert.match((calls.msg.at(-1) as { text: string }).text, /Unknown command/)
+})
+
+test('an unknown command in an unaddressed group is answered with silence', async () => {
+  const { router, calls } = make()
+  const before = calls.msg.length
+  await router.dispatch('u1', 456, '/gm', 50, undefined, { silentOnUnknown: true })
+  assert.equal(calls.msg.length, before, 'another bot’s command earns no reply from us')
+})
+
+test('silentOnUnknown never suppresses a command we do own', async () => {
+  const { router, calls } = make()
+  await router.dispatch('u1', 456, '/make a red fox', 50, undefined, { silentOnUnknown: true })
+  assert.equal(calls.enter.length, 1, 'a bare /make in a group still works')
+})
