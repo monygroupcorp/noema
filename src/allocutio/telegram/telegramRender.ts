@@ -27,6 +27,24 @@ export interface RenderResult {
   extra?: { reply_markup?: InlineKeyboard }
 }
 
+// ── field value display ──────────────────────────────────────────────────────
+
+/**
+ * How a filled Porta value is shown on a Form card.
+ *
+ * A URL is never printed. A resolved image input is a Telegram file link —
+ * `https://api.telegram.org/file/bot<TOKEN>/…` — so echoing the raw value publishes
+ * the bot token to the chat. Nobody reading a card wants a URL anyway; they want to
+ * know the field is filled. (`redactSecrets` at the sender is the backstop; this is
+ * the surface deciding not to print URLs in the first place.)
+ */
+function displayValue(value: unknown): string {
+  if (value === undefined || value === null) return '—'
+  const str = typeof value === 'object' ? JSON.stringify(value) : String(value)
+  if (/^https?:\/\//i.test(str.trim())) return '(image)'
+  return str
+}
+
 export function renderPrimitive(primitive: Primitive): RenderResult {
   switch (primitive.kind) {
     case 'Select': {
@@ -90,7 +108,7 @@ export function renderPrimitive(primitive: Primitive): RenderResult {
 
         const lines = primitive.fields.map(f => {
           const current = isFilled(f.key) ? values[f.key] : f.default
-          const shown = current === undefined || current === null ? '—' : String(current)
+          const shown = displayValue(current)
           const mark = f.required ? ' [required]' : ''
           return `• ${f.label}: ${shown}${mark}`
         })

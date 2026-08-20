@@ -64,3 +64,21 @@ test('decodeCallbackData maps a:edit_<key> → action and a:execute → action',
   assert.deepEqual(decodeCallbackData('a:edit_steps'), { kind: 'action', actionId: 'edit_steps' })
   assert.deepEqual(decodeCallbackData('a:execute'), { kind: 'action', actionId: 'execute' })
 })
+
+test('a Form card shows a filled image Porta as (image), never as a URL', () => {
+  const out = renderPrimitive({
+    kind: 'Form',
+    label: 'Interrogate',
+    fields: [
+      { key: 'image', label: 'Image', required: true },
+      { key: 'prompt', label: 'Prompt', required: false },
+    ],
+    values: {
+      image: 'https://api.telegram.org/file/bot1234567890:AAFakeTokenForTestsOnly_ffffffffffff/photos/f.jpg',
+      prompt: 'describe this',
+    },
+  } as never)
+  assert.ok(!out.text.includes('api.telegram.org'), 'no Telegram file URL on the card')
+  assert.match(out.text, /Image: \(image\)/)
+  assert.match(out.text, /Prompt: describe this/, 'non-URL values still render')
+})
