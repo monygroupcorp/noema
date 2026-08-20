@@ -30,7 +30,31 @@ import {
   decomposeCaptionsetId,
   decomposeRunRequest,
 } from '../../../src/platforms/web/app/src/lib/training.js'
-import type { Fragment, DatasetMediaItem, FlowSummary } from '../../../src/platforms/web/app/src/lib/api.js'
+import {
+  dismissFromStream,
+  floorCounts,
+  floorDisabledIndices,
+  floorSheet,
+  floorToggle,
+  latestSession,
+  mergedExclusions,
+  pieceLineage,
+  pieceRecord,
+  reactionOf,
+  sessionFromView,
+  steerWeight,
+  weightWrites,
+} from '../../../src/platforms/web/app/src/lib/muse.js'
+import { fragmentKey } from '../../../src/crystal/muse/taxonomy.js'
+import { WEIGHT_MAX, WEIGHT_MIN } from '../../../src/crystal/muse/sampler.js'
+import type {
+  Fragment,
+  DatasetMediaItem,
+  FlowSummary,
+  MuseFloorEntry,
+  MusePiece,
+  MuseSessionView,
+} from '../../../src/platforms/web/app/src/lib/api.js'
 
 // ---------------------------------------------------------------------------
 // Muse P3 (noema-229) — the pure module Muse.tsx calls: dataset-wide pooling,
@@ -378,4 +402,173 @@ test('TILE_GESTURES: the tile carries exactly the three gestures made while scro
   // the considered acts live in the expanded view, on top of the tile's three
   assert.deepEqual(EXPANDED_GESTURES.map((g) => g.key), ['up', 'down', 'dismiss', 'laugh', 'save'])
   for (const g of EXPANDED_GESTURES) assert.ok(g.glyph.length > 0 && g.label.length > 0)
+})
+
+// ---------------------------------------------------------------------------
+// The floor sheet and live reactions (noema-241) — the session the gestures write
+// to. The floor lives on the server: the screen resumes into its most recent
+// session off the dataset, every mutator returns the whole session back, and the
+// sheet renders from that. The screen stays typecheck-only (Trap #3); the rules
+// are pure functions here.
+//
+// Fixtures are invented throughout (`ses-…`, `run-…`, `ds-…`).
+// ---------------------------------------------------------------------------
+
+function entry(f: Fragment, patch: Partial<Omit<MuseFloorEntry, 'key'>> = {}): MuseFloorEntry {
+  return { key: fragmentKey(f), enabled: true, weight: 1, ...patch }
+}
+
+function ledgerPiece(runId: string, fragments: Fragment[], patch: Partial<MusePiece> = {}): MusePiece {
+  return { runId, rollIndex: 0, fragments, saved: false, dismissed: false, ...patch }
+}
+
+function session(
+  fragments: Fragment[],
+  opts: { id?: string; floor?: MuseFloorEntry[]; pieces?: MusePiece[]; mutatum?: string } = {},
+): MuseSessionView {
+  return {
+    id: opts.id ?? 'ses-1',
+    owner: 'anima-1',
+    motherDatasetId: 'ds-1',
+    fragments,
+    floor: opts.floor ?? fragments.map((f) => entry(f)),
+    pieces: opts.pieces ?? [],
+    natum: '2026-01-01T00:00:00.000Z',
+    mutatum: opts.mutatum ?? '2026-01-02T00:00:00.000Z',
+  }
+}
+
+// Non-vacuity 1 — a heart moves the floor, through the piece's RECORDED lineage
+
+test('weightWrites: hearting a piece weights every fragment in its lineage up', () => {
+  const fox = frag('subject', 'a fox')
+  const harbor = frag('setting', 'a foggy harbor')
+  const unrelated = frag('mood', 'wistful')
+  const s = session([fox, harbor, unrelated], { pieces: [ledgerPiece('run-1', [fox, harbor])] })
+
+  const writes = weightWrites(s, 'run-1', 'up')
+  assert.deepEqual(
+    writes.map((w) => w.fragment),
+    [{ category: 'subject', text: 'a fox' }, { category: 'setting', text: 'a foggy harbor' }],
+    'every fragment of the lineage is written, named by identity',
+  )
+  for (const w of writes) assert.ok(w.weight > 1, 'and each one is weighted UP from where the floor had it')
+  assert.ok(
+    !writes.some((w) => w.fragment.text === 'wistful'),
+    'a fragment that did not produce the piece is not touched',
+  )
+
+  // 😢 moves the same fragments the other way
+  const down = weightWrites(s, 'run-1', 'down')
+  assert.deepEqual(down.map((w) => w.fragment.text), ['a fox', 'a foggy harbor'])
+  for (const w of down) assert.ok(w.weight < 1)
+
+  // the lineage read is the SESSION's record: a run the ledger holds no entry for has
+  // no lineage, so it weights nothing rather than guessing one
+  assert.deepEqual(pieceLineage(s, 'run-elsewhere'), [])
+  assert.deepEqual(weightWrites(s, 'run-elsewhere', 'up'), [])
+  assert.deepEqual(weightWrites(session([fox], { pieces: [ledgerPiece('run-2', [])] }), 'run-2', 'up'), [])
+
+  // each step starts from the weight the floor actually holds, and stays inside the
+  // sampler's bounds in both directions
+  const steered = session([fox], { floor: [entry(fox, { weight: WEIGHT_MAX })], pieces: [ledgerPiece('run-3', [fox])] })
+  assert.equal(weightWrites(steered, 'run-3', 'up')[0]!.weight, WEIGHT_MAX, 'a weight already at the ceiling stays there')
+  assert.equal(steerWeight(WEIGHT_MIN, 'down'), WEIGHT_MIN)
+  assert.ok(steerWeight(1, 'up') > 1 && steerWeight(1, 'up') <= WEIGHT_MAX)
+
+  // and the recorded piece carries no reaction at fire time — it is attached afterwards
+  const record = pieceRecord('run-4', 2, [fox, harbor])
+  assert.deepEqual(Object.keys(record).sort(), ['fragments', 'rollIndex', 'runId'])
+  assert.deepEqual(record.fragments, [{ category: 'subject', text: 'a fox' }, { category: 'setting', text: 'a foggy harbor' }])
+})
+
+// Non-vacuity 2 — a disabled fragment is DARKENED, never removed (S8)
+
+test('floorSheet: a disabled fragment is still shown, dark, and can be tapped back to live', () => {
+  const fox = frag('subject', 'a fox')
+  const cat = frag('subject', 'a cat')
+  const harbor = frag('setting', 'a foggy harbor')
+  const s = session([fox, cat, harbor], { floor: [entry(fox), entry(cat, { enabled: false }), entry(harbor, { weight: 4 })] })
+
+  const rows = floorSheet(s)
+  const subject = rows.find((r) => r.category === 'subject')!
+  assert.deepEqual(subject.fragments.map((p) => p.text), ['a fox', 'a cat'],
+    'the fragment a steer turned off is STILL on the sheet — hiding it is the silent destruction the floor view exists to prevent')
+
+  const dark = subject.fragments.find((p) => p.text === 'a cat')!
+  assert.equal(dark.enabled, false, 'and it is shown as off')
+  assert.equal(subject.live, 1)
+  assert.equal(subject.total, 2, 'the count says one of two is in the draw, not that one exists')
+  assert.deepEqual(floorCounts(s), { live: 2, total: 3 })
+
+  // reversibility: the tap on a dark pill is the tap that brings it back, and it is the
+  // same call in both directions
+  assert.deepEqual(floorToggle(dark), { fragment: { category: 'subject', text: 'a cat' }, enabled: true })
+  assert.deepEqual(floorToggle(subject.fragments[0]!), { fragment: { category: 'subject', text: 'a fox' }, enabled: false })
+
+  // a weighted fragment carries its weight so the sheet can show it
+  assert.equal(rows.find((r) => r.category === 'setting')!.fragments[0]!.weight, 4)
+
+  // out of the draw, not gone: a darkened fragment cannot be rolled
+  const flat = [fox, cat, harbor]
+  assert.deepEqual([...floorDisabledIndices(flat, s)], [1])
+  assert.deepEqual([...mergedExclusions(new Set([2]), floorDisabledIndices(flat, s))].sort(), [1, 2])
+  const report = rollCurated(flat, floorDisabledIndices(flat, s), 3)
+  for (const roll of report.rolls) {
+    assert.ok(!roll.fragments.some((f) => f.text === 'a cat'), 'a fragment the steer turned off is not drawn')
+  }
+  assert.deepEqual([...floorDisabledIndices(flat, null)], [], 'with no session nothing is off the floor')
+})
+
+// Non-vacuity 3 — the floor is server-held, so it is still there after a reload
+
+test('latestSession: the floor sheet survives a reload', () => {
+  const fox = frag('subject', 'a fox')
+  const cat = frag('subject', 'a cat')
+
+  // what a reload does: the route carries no session segment, so the screen looks its
+  // sessions up by dataset and resumes into the most recent one rather than spawning a
+  // new one. The steer made before the reload is in that session.
+  const steered = session([fox, cat], {
+    id: 'ses-steered',
+    floor: [entry(fox), entry(cat, { enabled: false })],
+    mutatum: '2026-01-05T00:00:00.000Z',
+  })
+  const older = session([fox, cat], { id: 'ses-older', mutatum: '2026-01-03T00:00:00.000Z' })
+
+  const resumed = latestSession([older, steered])!
+  assert.equal(resumed.id, 'ses-steered', 'the most recently changed session is the one resumed into')
+
+  const subject = floorSheet(resumed).find((r) => r.category === 'subject')!
+  assert.equal(subject.fragments.find((p) => p.text === 'a cat')!.enabled, false,
+    'and the floor it renders is the floor the steer left behind')
+  assert.equal(subject.live, 1)
+
+  // a dataset with no session yet is the only case that spawns one
+  assert.equal(latestSession([]), null)
+
+  // the session read is also what the crystal lineage lookup runs against, floor and all
+  const pure = sessionFromView(resumed)
+  assert.equal(pure.motherDatasetId, 'ds-1')
+  assert.equal(pure.floor.get(fragmentKey(cat))?.enabled, false, 'the floor entries come back as the sampler wants them')
+})
+
+// Non-vacuity 4 — 😂 is informational, and ✕ writes nothing to the floor (S4/V9, S12)
+
+test('weightWrites: 😂 records a note and changes no weight', () => {
+  const fox = frag('subject', 'a fox')
+  const s = session([fox], { pieces: [ledgerPiece('run-1', [fox], { reaction: 'note' })] })
+
+  assert.deepEqual(weightWrites(s, 'run-1', 'note'), [], 'a note never reaches the floor')
+  assert.equal(reactionOf(s, 'run-1'), 'note', 'it is recorded on the piece all the same')
+  // and the steer channel on the same piece and the same floor does write
+  assert.equal(weightWrites(s, 'run-1', 'up').length, 1)
+
+  // ✕ is declutter: the piece leaves the scroll and is counted, and nothing on the floor
+  // moves. The count-to-proposal behaviour rides the consent sheet, which is a later rung.
+  const stream = admitPiece(admitPiece(EMPTY_STREAM, piece('run-1'), false), piece('run-2'), false)
+  const after = dismissFromStream(stream, 'run-2')
+  assert.deepEqual(after.pieces.map((p) => p.runId), ['run-1'], 'the dismissed piece leaves the scroll')
+  const dismissed = session([fox], { pieces: [ledgerPiece('run-1', [fox], { dismissed: true })] })
+  assert.deepEqual(floorSheet(dismissed), floorSheet(session([fox])), 'and the floor is untouched by it')
 })
