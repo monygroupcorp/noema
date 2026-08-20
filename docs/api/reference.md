@@ -3572,6 +3572,212 @@ Weight one fragment against its pool-mates in a session the caller owns. The wei
 }
 ```
 
+### POST /v1/data/muse/sessions/:id/floor/fragments
+
+Put a fragment the caller wrote on the floor of a session they own, in the draw at even odds. This is the un-metered way to widen a floor: a piece is composed from fragments already on the floor, so working with the session reweights it without widening it. Nothing is spent on this call — it reaches no model. A category outside the taxonomy is rejected with 400, and a fragment the floor already holds returns the session unchanged rather than a duplicate.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Put a fragment the caller wrote on the session floor, in the draw at even odds. The category must be one the taxonomy defines: prompts are composed by walking the categories, so a fragment filed outside them would never be drawn. Adding a fragment the floor already holds returns the session unchanged rather than a second copy of one identity. Nothing is spent on this call.",
+  "properties": {
+    "category": {
+      "type": "string",
+      "description": "The fragment's category. Must be a Muse fragment category."
+    },
+    "text": {
+      "type": "string",
+      "description": "The fragment itself — a short, prompt-ready phrase."
+    }
+  },
+  "required": [
+    "category",
+    "text"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "session": {
+      "type": "object",
+      "description": "A Muse session: a break-off of a dataset with its own copies of that dataset's fragments, its own floor, and its own piece ledger. The mother dataset is the starter and is never written to by the session.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "FK -> Anima, the owning identity."
+        },
+        "motherDatasetId": {
+          "type": "string",
+          "description": "FK -> Dataset, the dataset the session broke off from."
+        },
+        "fragments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A categorized, reusable prompt fragment lifted from a caption.",
+            "properties": {
+              "category": {
+                "type": "string",
+                "description": "Which slot the fragment fills (subject, style, lighting, …)."
+              },
+              "text": {
+                "type": "string",
+                "description": "The fragment itself — a short, prompt-ready phrase."
+              },
+              "source": {
+                "type": "string",
+                "description": "The moodboard entry it came from."
+              },
+              "trigger": {
+                "type": "string",
+                "description": "The model binding for that source (e.g. a LoRA trigger word)."
+              }
+            },
+            "required": [
+              "category",
+              "text",
+              "source",
+              "trigger"
+            ]
+          },
+          "description": "Every fragment on the floor, in display order."
+        },
+        "floor": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A fragment's state on the session floor. The floor is an ARRAY of entries rather than an object keyed by fragment: a fragment identity is `category:text`, which is free text and is not usable as a field name.",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "The fragment's stable identity: its category and its text."
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "False takes the fragment out of the draw while leaving it on the floor."
+              },
+              "weight": {
+                "type": "number",
+                "description": "Draw weight against its pool-mates, clamped server-side to the sampler bounds."
+              }
+            },
+            "required": [
+              "key",
+              "enabled",
+              "weight"
+            ]
+          }
+        },
+        "pieces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A piece the session produced, with the fragments that produced it.",
+            "properties": {
+              "runId": {
+                "type": "string",
+                "description": "The run that produced the piece."
+              },
+              "rollIndex": {
+                "type": "number",
+                "description": "Which roll of the session this was."
+              },
+              "fragments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "A categorized, reusable prompt fragment lifted from a caption.",
+                  "properties": {
+                    "category": {
+                      "type": "string",
+                      "description": "Which slot the fragment fills (subject, style, lighting, …)."
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "The fragment itself — a short, prompt-ready phrase."
+                    },
+                    "source": {
+                      "type": "string",
+                      "description": "The moodboard entry it came from."
+                    },
+                    "trigger": {
+                      "type": "string",
+                      "description": "The model binding for that source (e.g. a LoRA trigger word)."
+                    }
+                  },
+                  "required": [
+                    "category",
+                    "text",
+                    "source",
+                    "trigger"
+                  ]
+                },
+                "description": "The lineage — one fragment per category the roll filled."
+              },
+              "reaction": {
+                "type": "string",
+                "enum": [
+                  "up",
+                  "down",
+                  "note"
+                ],
+                "description": "What the user said about the piece, if anything."
+              },
+              "saved": {
+                "type": "boolean"
+              },
+              "dismissed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "runId",
+              "rollIndex",
+              "fragments",
+              "saved",
+              "dismissed"
+            ]
+          }
+        },
+        "natum": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "mutatum": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "motherDatasetId",
+        "fragments",
+        "floor",
+        "pieces",
+        "natum",
+        "mutatum"
+      ]
+    }
+  },
+  "required": [
+    "session"
+  ]
+}
+```
+
 ### POST /v1/data/muse/sessions/:id/pieces
 
 Append a piece to the ledger of a session the caller owns, with the fragments that produced it. A piece citing a fragment the session does not hold is rejected rather than stored, because its lineage could not be resolved against this floor afterwards. The ledger holds one entry per run: a record for a run already in it is rejected, and changing a recorded piece is the PATCH below.

@@ -710,6 +710,14 @@ export const api = {
     fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/floor/weight`, {
       method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ ...fragment, weight }),
     }).then(j<{ session: MuseSessionView }>),
+  // The un-metered way to widen a floor: the fragment the user wrote, put on the floor
+  // in the draw at even odds. One call, carrying the fragment's identity and nothing
+  // else — no flow, no model, no quote — and a fragment the floor already holds comes
+  // back as the session unchanged rather than as a duplicate.
+  addMuseFragment: (id: string, fragment: MuseFragmentIdentity) =>
+    fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/floor/fragments`, {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify(fragment),
+    }).then(j<{ session: MuseSessionView }>),
   // Append-only, one entry per run: a piece is recorded once, at fire time, with the
   // lineage that produced it. A second record for the same run is rejected.
   recordMusePiece: (id: string, piece: MusePieceRecord) =>

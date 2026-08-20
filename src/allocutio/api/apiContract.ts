@@ -1533,6 +1533,22 @@ const SetMuseFragmentWeightRequestSchema: JsonSchema = {
   required: ['category', 'text', 'weight'],
 }
 
+/** The request body for `POST /v1/data/muse/sessions/:id/floor/fragments`. */
+const AddMuseFragmentRequestSchema: JsonSchema = {
+  type: 'object',
+  description:
+    'Put a fragment the caller wrote on the session floor, in the draw at even odds. The ' +
+    'category must be one the taxonomy defines: prompts are composed by walking the ' +
+    'categories, so a fragment filed outside them would never be drawn. Adding a fragment ' +
+    'the floor already holds returns the session unchanged rather than a second copy of one ' +
+    'identity. Nothing is spent on this call.',
+  properties: {
+    category: { type: 'string', description: "The fragment's category. Must be a Muse fragment category." },
+    text: { type: 'string', description: 'The fragment itself — a short, prompt-ready phrase.' },
+  },
+  required: ['category', 'text'],
+}
+
 /** The request body for `POST /v1/data/muse/sessions/:id/pieces`. */
 const RecordMusePieceRequestSchema: JsonSchema = {
   type: 'object',
@@ -1892,6 +1908,14 @@ export const API_CONTRACT: ApiContract = {
       summary: "Weight one fragment against its pool-mates in a session the caller owns. The weight is clamped server-side to the sampler's bounds. A fragment the session does not hold is rejected with 400.",
       auth: true,
       request: SetMuseFragmentWeightRequestSchema,
+      response: MuseSessionEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/data/muse/sessions/:id/floor/fragments',
+      summary: "Put a fragment the caller wrote on the floor of a session they own, in the draw at even odds. This is the un-metered way to widen a floor: a piece is composed from fragments already on the floor, so working with the session reweights it without widening it. Nothing is spent on this call — it reaches no model. A category outside the taxonomy is rejected with 400, and a fragment the floor already holds returns the session unchanged rather than a duplicate.",
+      auth: true,
+      request: AddMuseFragmentRequestSchema,
       response: MuseSessionEnvelopeSchema,
     },
     {

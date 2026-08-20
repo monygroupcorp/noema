@@ -161,6 +161,7 @@ export interface ApiFacade {
   listMuseSessions(auctor: AuctorKey, datasetId: string): Promise<import('./CrystalApi.js').MuseSessionView[]>
   setMuseFragmentEnabled(auctor: AuctorKey, id: string, fragment: unknown, enabled: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   setMuseFragmentWeight(auctor: AuctorKey, id: string, fragment: unknown, weight: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
+  addMuseFragment(auctor: AuctorKey, id: string, fragment: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   recordMusePiece(auctor: AuctorKey, id: string, piece: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   updateMusePiece(auctor: AuctorKey, id: string, runId: string, patch: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   publish(auctor: AuctorKey, opts: PublishOpts): Promise<Edition>
@@ -1035,6 +1036,19 @@ export function createApiRouter(deps: {
     const body = (req.body ?? {}) as { category?: unknown; text?: unknown; weight?: unknown }
     const session = await api.setMuseFragmentWeight(auctor, String(req.params.id), body, body.weight)
     res.json({ session })
+  }))
+
+  // POST /v1/data/muse/sessions/:id/floor/fragments — put a fragment the user wrote on
+  // the floor, in the draw at even odds. The un-metered way to widen a floor: a piece is
+  // assembled from fragments already on the floor, so re-entering one reweights the floor
+  // without widening it, and nothing else short of decomposing more source images puts a
+  // phrase there that was not there before. Nothing is spent — no model, no key, no quote.
+  // The fragment is named in the BODY by `{ category, text }` for the same reason the two
+  // PATCHes above are: that identity is free text.
+  router.post('/data/muse/sessions/:id/floor/fragments', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const body = (req.body ?? {}) as { category?: unknown; text?: unknown }
+    res.status(201).json({ session: await api.addMuseFragment(auctor, String(req.params.id), body) })
   }))
 
   // POST /v1/data/muse/sessions/:id/pieces — append a piece to the session's ledger with

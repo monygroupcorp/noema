@@ -115,3 +115,17 @@
 .muse-floor-weight { color: var(--accent-soft); font-size: 10.5px; }
 /* the reaction the session currently holds for a piece */
 .muse-gesture.on { color: var(--accent-soft); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+
+/* the manual add (noema-242): the free way to widen a narrow floor. It sits at the top
+   of the sheet because a floor too narrow to work with is the reason the sheet was
+   pulled up, and the answer should not be below the thing it answers. */
+.muse-add {
+  margin-bottom: 14px; padding: 10px;
+  border: 1px solid var(--hair-soft); border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+}
+.muse-add-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.muse-add-cat { flex: 0 0 auto; min-width: 118px; }
+/* the phrase itself gets the room: it is the part the user is actually writing */
+.muse-add-text { flex: 1 1 200px; min-width: 0; }
+.muse-add-note { font-size: 11px; color: var(--muted); margin-top: 6px; }

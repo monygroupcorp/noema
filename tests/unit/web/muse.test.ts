@@ -37,6 +37,8 @@ import {
   floorSheet,
   floorToggle,
   latestSession,
+  manualAddError,
+  manualAddRequest,
   mergedExclusions,
   pieceLineage,
   pieceRecord,
@@ -44,8 +46,9 @@ import {
   sessionFromView,
   steerWeight,
   weightWrites,
+  MANUAL_CATEGORIES,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
-import { fragmentKey } from '../../../src/crystal/muse/taxonomy.js'
+import { CATEGORIES, fragmentKey } from '../../../src/crystal/muse/taxonomy.js'
 import { WEIGHT_MAX, WEIGHT_MIN } from '../../../src/crystal/muse/sampler.js'
 import type {
   Fragment,
@@ -571,4 +574,63 @@ test('weightWrites: 😂 records a note and changes no weight', () => {
   assert.deepEqual(after.pieces.map((p) => p.runId), ['run-1'], 'the dismissed piece leaves the scroll')
   const dismissed = session([fox], { pieces: [ledgerPiece('run-1', [fox], { dismissed: true })] })
   assert.deepEqual(floorSheet(dismissed), floorSheet(session([fox])), 'and the floor is untouched by it')
+})
+
+// ---------------------------------------------------------------------------
+// The manual add (noema-242) — the free way to widen a narrow floor
+//
+// A piece is composed from fragments already on the floor, so re-entering one
+// reweights the floor without widening it. This form is the un-metered way a floor
+// gets a phrase that was not already on it, and free-ness is a product rule, not an
+// implementation accident: the metered, LLM-assisted add is a separate surface.
+// ---------------------------------------------------------------------------
+
+test('manualAddRequest: a manual add reaches no model and no key', () => {
+  const request = manualAddRequest('mood', '  a wet street at dawn  ')
+
+  // The whole payload. A flow id, an aditus, a pinned model or a key would each show
+  // up here — compare `ignitionRequest`, which is the metered path and carries a
+  // `modusId`. This assertion is what giving the add path a model call breaks.
+  assert.deepEqual(Object.keys(request).sort(), ['category', 'text'])
+  assert.deepEqual(request, { category: 'mood', text: 'a wet street at dawn' },
+    'the request names the fragment and nothing else, at the identity it will be keyed by')
+
+  // And the form offers exactly the taxonomy — no "let the model pick" option rides it.
+  assert.deepEqual([...MANUAL_CATEGORIES], [...CATEGORIES])
+})
+
+test('manualAddError: a fragment cannot be added outside the taxonomy', () => {
+  const fox = frag('subject', 'a fox')
+  const s = session([fox])
+
+  assert.ok(manualAddError(s, 'vibe', 'something ineffable'), 'an off-taxonomy category was accepted')
+  assert.ok(manualAddError(s, '', 'a fox in a doorway'), 'a fragment with no category was accepted')
+  // A category the taxonomy defines, with text, is the case that must be allowed —
+  // otherwise the two assertions above would pass on a function that refuses everything.
+  assert.equal(manualAddError(s, 'setting', 'a foggy harbor'), null)
+  for (const category of CATEGORIES) assert.equal(manualAddError(s, category, 'a phrase not on this floor'), null)
+
+  // A fragment needs text of its own before it can be added.
+  assert.ok(manualAddError(s, 'setting', '   '), 'an empty fragment was accepted')
+})
+
+test('manualAddError: adding a fragment already on the floor does not duplicate it', () => {
+  const fox = frag('subject', 'a fox')
+  const cat = frag('subject', 'a cat')
+  const s = session([fox, cat], { floor: [entry(fox), entry(cat, { enabled: false })] })
+
+  // `fragmentKey` is the identity, and it trims and folds case: a retype that differs
+  // only in spacing or case is the same fragment, not a second one. Two entries under
+  // one identity would double that phrase's odds in every roll.
+  assert.ok(manualAddError(s, 'subject', 'a fox'), 'a fragment already on the floor was offered as new')
+  assert.ok(manualAddError(s, 'subject', '  A Fox  '), 'a retyped identity was offered as new')
+
+  // The same fragment in a different category IS a different fragment.
+  assert.equal(manualAddError(s, 'mood', 'a fox'), null)
+
+  // A fragment a steer darkened is still one the floor holds — and the reason says so,
+  // because retyping a fragment that was turned off is the case a user lands in most.
+  const darkened = manualAddError(s, 'subject', 'a cat')
+  assert.ok(darkened && /turned off|tap it/.test(darkened),
+    'a darkened fragment was reported as absent rather than as turned off')
 })
